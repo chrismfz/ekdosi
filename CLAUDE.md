@@ -49,8 +49,10 @@ want to change.
   why — short version: the legacy `CMyData.cpp` isn't even in this repo,
   the AADE spec evolves, and the library handles transport/types/errors so
   we only own the mapping from our `Invoice` model to their payload.)
-- **Roles & permissions**: `spatie/laravel-permission` (operator / admin /
-  read-only roles per panel).
+- **Roles & permissions**: `spatie/laravel-permission` +
+  `bezhanSalleh/filament-shield`. Shield auto-generates per-resource
+  permissions and gives us a UI to manage roles. Default roles per
+  tenant: `admin`, `operator`, `accountant_readonly`.
 - **Audit log**: `spatie/laravel-activitylog` on `invoices`, `customers`,
   `mydata_marks` — useful for "who changed this and when" and for the
   parallel-run period.
@@ -78,12 +80,14 @@ into a working app:
 2. **Install the picks above**:
    ```bash
    composer require filament/filament:^5 \
+       bezhansalleh/filament-shield \
        firebed/laravel-aade-mydata \
        spatie/laravel-permission \
        spatie/laravel-activitylog \
        barryvdh/laravel-dompdf \
        spatie/laravel-backup
    php artisan filament:install --panels
+   php artisan shield:install --tenant=Company   # after Company model exists
    ```
 3. **Drop the kit into place**: move
    `ekdosi-migration-kit/database/migrations/*` →
@@ -518,11 +522,9 @@ This is what `MigrateFromFirebird.php` exists for; spelling out the story:
 - `CMyData.cpp`: **lost**. No byte-match of legacy XMLs; semantic
   equivalence only, validated field-by-field during parallel-run.
 - Target stack: **Laravel 13 + Filament 5 + PHP 8.4 + MariaDB 11**.
+- Auth/authz: **`spatie/laravel-permission` + `bezhanSalleh/filament-shield`**.
 
 ### Still open
-- [ ] **Auth/authz package** — spatie/laravel-permission (+ filament-shield)
-      vs. plain Laravel policies vs. something else. (Asked, awaiting
-      pick.)
 - [ ] Estonian PEPPOL submitter: which library? Candidates include
       `nikolajlovenhardt/laravel-peppol`, `digitalcz/peppol-php`, or
       direct integration with Estonia's RIK e-arveldaja. Defer until we
