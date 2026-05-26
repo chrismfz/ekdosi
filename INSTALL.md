@@ -453,9 +453,15 @@ $user = \App\Models\User::create([
 $user->companies()->attach($company->id);
 
 // Grant super_admin within the tenant. Spatie teams mode scopes roles by
-// company_id, so we set the active team before role creation + assignment.
+// company_id, so we (a) set the active team and (b) create the role row
+// with an explicit company_id so Shield's tenant-scoped RoleResource
+// finds it under /admin/{slug}/shield/roles.
 app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($company->id);
-$role = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'super_admin', 'guard_name' => 'web']);
+$role = \App\Models\Role::firstOrCreate([
+    'name'       => 'super_admin',
+    'guard_name' => 'web',
+    'company_id' => $company->id,
+]);
 $role->syncPermissions(\Spatie\Permission\Models\Permission::pluck('name'));
 $user->assignRole($role);
 

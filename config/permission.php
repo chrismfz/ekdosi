@@ -2,7 +2,6 @@
 
 use Spatie\Permission\DefaultTeamResolver;
 use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
 
 return [
 
@@ -28,7 +27,9 @@ return [
          * `Spatie\Permission\Contracts\Role` contract.
          */
 
-        'role' => Role::class,
+        // Custom model adds a company() belongsTo so Filament's tenant
+        // scoping on Shield's RoleResource resolves cleanly.
+        'role' => \App\Models\Role::class,
 
         /*
          * When using the "Teams" feature from this package, we need to know which
