@@ -17,7 +17,8 @@ myDATA submission + audit trail, WHMCS bridge. No customer portal.
 - Single multi-tenant MariaDB (`company_id` on every table), one Laravel codebase,
   one Filament panel with tenant switching.
 - Legacy myDATA logic NOT re-ported by hand — use `firebed/aade-mydata`
-  (+ `firebed/laravel-aade-mydata` wrapper). Per-tenant credentials live on `companies`.
+  (framework-agnostic; wrap it ourselves in `App\Services\MyDataSubmitter`).
+  Per-tenant credentials live on `companies`.
 - WHMCS bridge **stays in scope** (myip relies on it). Re-implement
   PHP-to-PHP via the **WHMCS API** (decision locked — not shared-DB
   read), replacing the legacy `AUTO_INVOICE_LOG` polling + `FMysqlSync`
@@ -44,11 +45,12 @@ want to change.
   Filament panel resolves a Company tenant; no separate multi-tenancy
   package on top. (Reason: Filament tenancy is built for this exact shape
   and saves us a layer.)
-- **myDATA**: `firebed/aade-mydata` + `firebed/laravel-aade-mydata`. Per-tenant
-  credentials on `companies`. (See "myDATA: library vs. custom" below for
-  why — short version: the legacy `CMyData.cpp` isn't even in this repo,
-  the AADE spec evolves, and the library handles transport/types/errors so
-  we only own the mapping from our `Invoice` model to their payload.)
+- **myDATA**: `firebed/aade-mydata` (framework-agnostic; we wrap it in
+  `App\Services\MyDataSubmitter`). Per-tenant credentials on `companies`.
+  (See "myDATA: library vs. custom" below for why — short version: the
+  legacy `CMyData.cpp` isn't even in this repo, the AADE spec evolves,
+  and the library handles transport/types/errors so we only own the
+  mapping from our `Invoice` model to their payload.)
 - **Roles & permissions**: `spatie/laravel-permission` +
   `bezhanSalleh/filament-shield`. Shield auto-generates per-resource
   permissions and gives us a UI to manage roles. Default roles per
@@ -78,20 +80,19 @@ want to change.
 - ✅ Legacy reference tree moved from `/old/` to `/legacy/`.
 - ✅ `php artisan migrate:fresh` runs cleanly: 3 Laravel defaults + 19
   ekdosi tables (= 22 tables total) created against MariaDB 10.11.
+- ✅ Stack installed: Filament 5.6.5, Shield 4.2.0, firebed/aade-mydata
+  5.10, spatie/laravel-permission 7.4, spatie/laravel-activitylog 5.0,
+  barryvdh/laravel-dompdf 3.1, spatie/laravel-backup 10.2. Permission
+  and activity-log migrations applied (24 tables total now).
+- ✅ Admin Panel provider scaffolded at
+  `app/Providers/Filament/AdminPanelProvider.php` (default Filament
+  panel; tenancy/Company model not wired yet).
 
 **Next steps**:
-1. **Install the stack picks**:
-   ```bash
-   composer require filament/filament:^5 \
-       bezhansalleh/filament-shield \
-       firebed/laravel-aade-mydata \
-       spatie/laravel-permission \
-       spatie/laravel-activitylog \
-       barryvdh/laravel-dompdf \
-       spatie/laravel-backup
-   php artisan filament:install --panels
-   php artisan shield:install --tenant=Company   # after Company model exists
-   ```
+1. **Build the Company tenant model + Filament panel tenancy**, then run
+   `php artisan shield:install --tenant=Company` to generate the
+   Resource-level permissions. Default roles: `admin`, `operator`,
+   `accountant_readonly`.
 2. **Sandbox-test the ETL** against the restored `gbak`:
    ```bash
    gbak -r /home/user/ekdosi/legacy/ekdosi-main/db_backup/ekdosi.fbk \
@@ -101,9 +102,9 @@ want to change.
        --fbuser=SYSDBA --fbpass=masterkey
    ```
    Blocked on `pdo_firebird` extension — see the env-prep note below.
-3. **Build the Company tenant model + Filament panel**, then a Customer
-   resource as the smallest end-to-end slice. Verify the tenant scoping
-   actually scopes (CUST_ID=1 must show only the current tenant's row).
+3. **Build the Customer Filament resource** as the smallest end-to-end
+   slice. Verify the tenant scoping actually scopes (CUST_ID=1 must
+   show only the current tenant's row).
 4. Then Products, then Invoices (read-only view first), then the
    issue-invoice flow (which is the first thing that touches the
    `firebed/aade-mydata` library and the VAT/rounding math).
@@ -232,8 +233,9 @@ gbak -r ekdosi.fbk fresh.fdb -user SYSDBA -password masterkey
 ## Notes from inspection (2026-05-26)
 
 ### myDATA: library vs. custom port (decision: use the library)
-**Decision: use `firebed/aade-mydata` + `firebed/laravel-aade-mydata`. Do
-not port the legacy implementation.**
+**Decision: use `firebed/aade-mydata` (framework-agnostic; we wrap it
+ourselves in `App\Services\MyDataSubmitter`). Do not port the legacy
+implementation.**
 
 Reasons:
 1. The legacy myDATA class (`CMyData.cpp`) is **not in this repo** —
