@@ -1,0 +1,61 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * One myDATA submission record. The legal audit trail of every
+ * INSERT / CANCEL the app has sent to AADE for an invoice.
+ *
+ * The full request + response XML is preserved verbatim per row — DO
+ * NOT TRUNCATE OR NORMALISE on read. The legal value of the audit
+ * trail is the byte-exact record of what was transmitted.
+ *
+ * `mark_date` is a DATE, `mark_time` is a TIME (the legacy schema
+ * splits them — see schema-fix migration 2026_05_27_000002).
+ *
+ * Source of truth for myDATA state. The mirror columns on `invoices`
+ * (mydata_sent / state / mark / url) are a denormalised cache of the
+ * LATEST mark — populated by the future MyDataSubmitter service
+ * (PR #7, replacing legacy MARK_AI0 trigger).
+ */
+class MyDataMark extends Model
+{
+    use HasFactory;
+
+    protected $table = 'mydata_marks';
+
+    protected $fillable = [
+        'company_id',
+        'legacy_id',
+        'invoice_id',
+        'mark',
+        'mydata_action',
+        'invoice_url',
+        'request',
+        'response',
+        'mark_date',
+        'mark_time',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'mark_date' => 'date',
+            'mark_time' => 'datetime:H:i:s',
+        ];
+    }
+
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
+    }
+
+    public function invoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class);
+    }
+}
