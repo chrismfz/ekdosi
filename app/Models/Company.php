@@ -17,6 +17,7 @@ class Company extends Model
         'einvoice_provider',
         'afm',
         'tax_office',
+        'kad_primary',
         'address',
         'city',
         'postcode',
@@ -25,6 +26,8 @@ class Company extends Model
         'mydata_aade_id',
         'mydata_subscription_key',
         'mydata_production',
+        'gsis_username',
+        'gsis_password',
     ];
 
     protected function casts(): array
@@ -32,6 +35,7 @@ class Company extends Model
         return [
             'mydata_production' => 'boolean',
             'mydata_subscription_key' => 'encrypted',
+            'gsis_password' => 'encrypted',
         ];
     }
 

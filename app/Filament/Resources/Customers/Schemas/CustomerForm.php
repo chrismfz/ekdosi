@@ -2,13 +2,19 @@
 
 namespace App\Filament\Resources\Customers\Schemas;
 
+use App\Exceptions\Aade\AadeAfmNotFound;
+use App\Exceptions\Aade\AadeCredentialsInvalid;
+use App\Exceptions\Aade\AadeUnreachable;
 use App\Models\Customer;
 use App\Models\PaymentMethod;
+use App\Services\AadeRegistryLookup;
+use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
@@ -52,7 +58,73 @@ class CustomerForm
                             ->schema([
                                 TextInput::make('afm')
                                     ->label('AFM / VAT number')
-                                    ->maxLength(20),
+                                    ->maxLength(20)
+                                    ->suffixAction(
+                                        FormAction::make('fetch_customer_from_aade')
+                                            ->label('Fetch from AADE')
+                                            ->icon('heroicon-o-arrow-down-tray')
+                                            // Only meaningful for Greek tenants — RgWsPublic2
+                                            // looks up Greek AFMs only.
+                                            ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
+                                            ->action(function (callable $get, callable $set) {
+                                                $tenant = Filament::getTenant();
+                                                if (! $tenant) {
+                                                    Notification::make()->title('No tenant context.')->warning()->send();
+                                                    return;
+                                                }
+                                                $afm = trim((string) $get('afm'));
+                                                if ($afm === '') {
+                                                    Notification::make()->title('Enter an AFM first.')->warning()->send();
+                                                    return;
+                                                }
+                                                try {
+                                                    $result = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm);
+                                                } catch (AadeCredentialsInvalid) {
+                                                    Notification::make()
+                                                        ->title('GSIS credentials missing or invalid')
+                                                        ->body('Configure them on the Company → AADE registry (GSIS) tab.')
+                                                        ->danger()->send();
+                                                    return;
+                                                } catch (AadeAfmNotFound) {
+                                                    Notification::make()
+                                                        ->title('AFM not found or inactive in AADE registry')
+                                                        ->body('Double-check the digits, or fill the customer manually if this is a special case.')
+                                                        ->warning()->send();
+                                                    return;
+                                                } catch (AadeUnreachable) {
+                                                    Notification::make()
+                                                        ->title('AADE registry unreachable')
+                                                        ->body('Try again in a moment, or fill the customer manually.')
+                                                        ->warning()->send();
+                                                    return;
+                                                }
+                                                // Fill what AADE returned. Operator can edit any
+                                                // value before saving — the fetch never persists
+                                                // by itself.
+                                                $set('name', $result->name);
+                                                $set('tax_office', $result->doy);
+                                                $set('address1', $result->address);
+                                                $set('city', $result->city);
+                                                $set('postcode', $result->postcode);
+                                                $set('country', 'GR');
+                                                $primary = $result->primaryActivity();
+                                                if ($primary) {
+                                                    $set('kad_primary', $primary['code']);
+                                                    // occupation is the human-readable activity
+                                                    // text that legacy prints on invoices as
+                                                    // "Δραστηριότητα: ...". Only overwrite if
+                                                    // currently empty (don't clobber operator-
+                                                    // typed occupations).
+                                                    if (empty($get('occupation'))) {
+                                                        $set('occupation', $primary['description']);
+                                                    }
+                                                }
+                                                Notification::make()
+                                                    ->title('Loaded from AADE: '.$result->name)
+                                                    ->body($result->doy.($primary ? ' · '.$primary['description'] : ''))
+                                                    ->success()->send();
+                                            }),
+                                    ),
 
                                 TextInput::make('vat_vies')
                                     ->label('VIES VAT (EU intra-community)')
@@ -61,6 +133,11 @@ class CustomerForm
                                 TextInput::make('tax_office')
                                     ->label('Tax office (ΔΟΥ)')
                                     ->maxLength(60),
+
+                                TextInput::make('kad_primary')
+                                    ->label('Primary KAD (Δραστηριότητα)')
+                                    ->maxLength(20)
+                                    ->helperText('Auto-fills from AADE Fetch. Numeric activity code; the human-readable text lives in Occupation on the Identity tab.'),
 
                                 TextInput::make('withhold_tax')
                                     ->label('Withholding tax category')
