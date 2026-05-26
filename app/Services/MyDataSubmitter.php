@@ -74,14 +74,10 @@ class MyDataSubmitter implements EInvoiceSubmitter
         private readonly ?MockHandler $mockHandler = null,
     ) {}
 
-    public function submit(Invoice $invoice, bool $dryRun = false): MyDataMark
+    public function submit(Invoice $invoice): MyDataMark
     {
         $payload = $this->buildAadeInvoice($invoice);
         $xml = $this->payloadToXml($payload);
-
-        if ($dryRun) {
-            return $this->recordDryRun($invoice, $xml);
-        }
 
         $this->initFirebed();
 
@@ -104,29 +100,86 @@ class MyDataSubmitter implements EInvoiceSubmitter
         return $this->persistResponse($invoice, $payload, $xml, $response);
     }
 
+    /**
+     * Build the would-be submission XML and persist a DRY_RUN audit row
+     * WITHOUT contacting AADE. Safe on any mode (off / sandbox /
+     * production). Lets operators inspect what the real submitter
+     * would send.
+     *
+     * Deliberately a SEPARATE PUBLIC METHOD from submit() — the prior
+     * design (`submit($invoice, $dryRun = false)`) was a footgun: any
+     * caller that forgot to pass the named argument would file for
+     * real. Code review correctly flagged this. Now grep-able: every
+     * caller of submit() definitely submits; every caller of
+     * previewXml() definitely doesn't.
+     */
+    public function previewXml(Invoice $invoice): MyDataMark
+    {
+        $payload = $this->buildAadeInvoice($invoice);
+        $xml = $this->payloadToXml($payload);
+        return $this->recordDryRun($invoice, $xml);
+    }
+
     public function cancel(Invoice $invoice, string $reason = ''): MyDataMark
     {
-        if (empty($invoice->mydata_mark)) {
+        // Guard: refuse to double-cancel. Once mydata_state='CANCELLED'
+        // we don't want a second CANCEL call to AADE (which would
+        // either be rejected or produce a duplicate CANCEL audit row).
+        if ($invoice->mydata_state === 'CANCELLED') {
             throw new RuntimeException(
-                "Cannot cancel invoice {$invoice->invcode} — no MARK on file. ".
-                'The invoice was never submitted to myDATA, or its mirror columns are stale.'
+                "Invoice {$invoice->invcode} is already cancelled at myDATA (state=CANCELLED). ".
+                'Refusing to double-cancel.'
             );
         }
+
+        // Read the actual MARK from the audit history — NOT from the
+        // mirror column. Reasoning: if a previous submit succeeded at
+        // AADE but the DB write failed (and was later retried, producing
+        // a second MARK), the mirror reflects only the LATEST mark
+        // while the older one is still active at AADE. We cancel the
+        // most recent INSERT mark (because that's what the AADE-side
+        // dedup logic should have collapsed onto via the UID), but
+        // surface a warning if multiple INSERT marks exist for the
+        // same invoice — that's a hint of an earlier orphan.
+        $inserts = MyDataMark::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('mydata_action', 'INSERT')
+            ->whereNotNull('mark')
+            ->orderByDesc('id')
+            ->get();
+
+        if ($inserts->isEmpty()) {
+            throw new RuntimeException(
+                "Cannot cancel invoice {$invoice->invcode} — no INSERT MARK on file. ".
+                'The invoice was never submitted to myDATA.'
+            );
+        }
+
+        if ($inserts->count() > 1) {
+            Log::warning('myDATA cancel: multiple INSERT MARKs found — cancelling latest only', [
+                'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
+                'marks' => $inserts->pluck('mark')->all(),
+                'note' => 'Earlier MARKs may be orphan filings at AADE. Manual reconciliation required.',
+            ]);
+        }
+
+        $markToCancel = (string) $inserts->first()->mark;
 
         $this->initFirebed();
 
         try {
-            $response = (new CancelInvoice())->handle((int) $invoice->mydata_mark);
+            $response = (new CancelInvoice())->handle((int) $markToCancel);
         } catch (Throwable $e) {
             $this->logFailure($invoice, 'cancel', $e);
             throw new RuntimeException('myDATA cancellation failed: '.$e->getMessage(), 0, $e);
         }
 
-        return DB::transaction(function () use ($invoice, $response, $reason) {
+        return DB::transaction(function () use ($invoice, $response, $reason, $markToCancel) {
             $mark = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
-                'mark' => $invoice->mydata_mark, // refers to the ORIGINAL mark being cancelled
+                'mark' => $markToCancel,
                 'mydata_action' => 'CANCEL',
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
                 'response' => $this->responseToString($response),
