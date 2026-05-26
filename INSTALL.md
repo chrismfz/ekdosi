@@ -595,98 +595,29 @@ Only needed on whatever box is going to run
 `php artisan migrate:firebird ...`. Can be the same host, can be a
 one-off VM next to the legacy server.
 
-### 12a. Install Firebird client + PDO driver + server
+### 12a. Install Firebird (client tools + PDO driver + server)
 
-The PDO driver package name depends on which repo you pull it from
-(both work):
-- Remi (matches the `php:remi-8.4` module stream): `php-firebird`
-- EPEL 10 (SCL-style versioned): `php8.4-pdo-firebird`
-
-The Firebird **server** package is needed for ETLing against a local
-`.fdb` sandbox (`--host=127.0.0.1`). Package name varies by EL
-version:
-- AlmaLinux 9: `firebird-superserver`
-- AlmaLinux 10 / EPEL 10: just `firebird` (no `-server` suffix)
+Package names differ between EL9 and EL10. The `||` falls back to
+whatever's actually in your repos:
 
 ```bash
-# PDO driver — try Remi first, EPEL as fallback
+# PDO driver for PHP (one of these will exist)
 sudo dnf install -y php-firebird || sudo dnf install -y php8.4-pdo-firebird
 
-# tools (gbak / isql-fb / fbsvcmgr) + the server, if you want local sandbox FB
+# Client tools (gbak / isql-fb / fbsvcmgr) + server
 sudo dnf install -y firebird-utils firebird-devel
 sudo dnf install -y firebird-superserver 2>/dev/null || sudo dnf install -y firebird
 
-# verify the PDO driver actually loaded:
-php -m | grep -i firebird       # expect: pdo_firebird
-
-# find the actual service unit name and start it
+# Verify the PHP driver loaded and find the service unit name
+php -m | grep -i firebird                       # expect: pdo_firebird
 sudo systemctl list-unit-files | grep -i firebird
-sudo systemctl enable --now firebird   # adjust if grep showed a different name
-sudo ss -tlnp | grep 3050              # confirm FB is listening
 
-# SYSDBA password handling varies by EL version + Firebird build:
-# - EL9 / Firebird 3 installs may auto-generate /etc/firebird/SYSDBA.password
-# - EL10 / Firebird 4 (current default) ships an EMPTY security DB and
-#   the install does NOT seed SYSDBA. You bootstrap it yourself.
-#
-# Firebird 4's "Install incomplete" message you'll see if you try to
-# connect over the network is a RED HERRING — the network connect is
-# rejected outright (SQLSTATE 28000), it doesn't actually let you
-# stay connected long enough to CREATE USER. The real path is
-# EMBEDDED MODE: stop the daemon, isql-fb the security DB by file
-# path (no host: prefix → embedded → no auth), CREATE USER, restart.
-#
-# Two prerequisites:
-#  (a) Ownership: /var/lib/firebird/ must be firebird:firebird through
-#      and through. If anything got root-owned (e.g. you ran isql-fb
-#      as root by accident), embedded mode hits "Permission denied".
-#  (b) Daemon stopped: embedded mode needs an exclusive file lock.
-
-# Step 1 — repair ownership in case anything got stomped while debugging
-sudo chown -R firebird:firebird /var/lib/firebird/
-
-# Step 2 — locate the security DB (path varies by build)
-sudo find /var/lib/firebird /opt/firebird -name 'security*.fdb' 2>/dev/null
-# Typical:
-#   /var/lib/firebird/secdb/security4.fdb   (EPEL 10 firebird-4)
-#   /var/lib/firebird/system/security4.fdb  (some EL9 builds)
-SECDB=/var/lib/firebird/secdb/security4.fdb   # adjust to what find returned
-
-# Step 3 — stop daemon, bootstrap SYSDBA via embedded mode, restart.
-# Pass -user SYSDBA explicitly even in embedded mode — without it,
-# the session attaches as some non-privileged implicit identity and
-# the first CREATE USER fails with "CREATE TABLE PLG$SRP failed: No
-# permission for CREATE TABLE operation" (Firebird's SRP plugin
-# auto-creates PLG$SRP on the first user write).
-sudo systemctl stop firebird
-sudo -u firebird /usr/bin/isql-fb -user SYSDBA "$SECDB" <<'SQL'
-CREATE USER SYSDBA PASSWORD 'masterkey';
-COMMIT;
-QUIT;
-SQL
-# (If a SYSDBA row already exists with a different password, that
-# CREATE will say "User already exists" — swap to ALTER USER instead.)
-sudo systemctl start firebird
-
-# Step 4 — smoke-test that SYSDBA/masterkey now works over the network
-# We point at any .fdb you actually have (the sample 'employee' DB
-# isn't always shipped — EPEL 10's slim package omits it).
-sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password masterkey \
-    "localhost:$SECDB" <<<'QUIT;'
-# Expect: clean exit, no SQLSTATE.
-# If you see SQLSTATE = 28000 the auth failed (re-do Step 3).
-# If you see SQLSTATE = 08001 with "No such file or directory" the
-# auth SUCCEEDED — only the file path is wrong; SYSDBA is fine.
+# Start FB (use the unit name the grep above printed)
+sudo systemctl enable --now firebird
+sudo ss -tlnp | grep 3050                       # confirm FB is listening
 ```
 
-If you ever need to RESET the SYSDBA password later, use SQL over a
-working network connection (gsec is deprecated on Firebird 4):
-```bash
-sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password <oldpass> \
-    localhost:employee <<<"ALTER USER SYSDBA SET PASSWORD 'newpass'; COMMIT;"
-```
-
-If neither package is available in your repos, fall back to PECL:
+If neither PDO package is in your repos, fall back to PECL:
 
 ```bash
 sudo dnf install -y firebird-devel php-pear php-devel
@@ -695,41 +626,98 @@ echo "extension=pdo_firebird.so" | sudo tee /etc/php.d/30-pdo_firebird.ini
 sudo systemctl restart php-fpm
 ```
 
-### 12b. Restore the legacy gbak + import one tenant
+### 12b. Bootstrap the SYSDBA password (Firebird 4 / EL10)
 
-**Don't copy a `.fdb` directly.** Each major Firebird version uses
-its own on-disk structure (FB3 = ODS 12, FB4 = ODS 13). FB4 can't
-read an FB3-created `.fdb` and you'll get `SQLSTATE[HY000] [335544379]
-unsupported on-disk structure for file ...; found 12.0, support 13.0`.
-The portable format across major versions is `.fbk` (gbak's backup
-format) — always go `.fdb (FB3) → gbak -b → .fbk → gbak -r (FB4) → .fdb (ODS 13)`.
-
-The Firebird server also enforces `DatabaseAccess = Restrict
-/var/lib/firebird/data` by default — meaning it will only open `.fdb`
-files **under that directory**. If you point it at e.g. `/opt/foo.fdb`
-you'll get `SQLSTATE[HY000] [335544831] Use of database at location
-... is not allowed by server configuration`. Two fixes: put the
-`.fdb` under `/var/lib/firebird/data/` (recommended), or edit
-`/etc/firebird/firebird.conf` and add the directory to
-`DatabaseAccess`.
+EPEL 10's `firebird` package ships an empty `security4.fdb` — no
+SYSDBA user exists yet, so every network-auth path is locked out.
+Set the password via **embedded mode** (daemon stopped, security
+DB opened directly by file path, auth layer bypassed). This is the
+only path that works on a virgin install:
 
 ```bash
-# restore the legacy gbak into a path FB allows.
-# gbak -r writes a fresh ODS-13 .fdb regardless of what ODS the .fbk
-# was originally made on — that's how the cross-version upgrade works.
+# (1) Make sure /var/lib/firebird/ is fully owned by the firebird user
+sudo chown -R firebird:firebird /var/lib/firebird/
+
+# (2) Stop the daemon — embedded mode needs an exclusive file lock
+sudo systemctl stop firebird
+
+# (3) Bootstrap SYSDBA via embedded mode. -user SYSDBA is required so
+#     the session has the privilege to create the PLG$SRP backing
+#     table on the first user write.
+sudo -u firebird /usr/bin/isql-fb -user SYSDBA \
+    /var/lib/firebird/secdb/security4.fdb <<'SQL'
+CREATE USER SYSDBA PASSWORD 'masterkey';
+COMMIT;
+QUIT;
+SQL
+
+# (4) Restart the daemon
+sudo systemctl start firebird
+```
+
+If you see no output from step (3) — that's success. Any
+`Statement failed` line means something's wrong; check that the
+chown ran (1) and the daemon really stopped (2).
+
+### 12c. Restore the bundled `.fbk` (sandbox)
+
+The repo ships a `.fbk` backup at
+`legacy/ekdosi-main/db_backup/ekdosi.fbk`. Restore it via `gbak -r`
+— **don't copy a `.fdb` directly**, because each major Firebird
+version uses its own on-disk structure (FB3 = ODS 12, FB4 = ODS 13)
+and a copied file errors with `SQLSTATE 335544379 unsupported on-disk
+structure`. The `.fbk` format is portable across versions; `gbak -r`
+writes a fresh ODS-13 `.fdb`.
+
+The output path **must** live under `/var/lib/firebird/data/` —
+Firebird's default `DatabaseAccess = Restrict /var/lib/firebird/data`
+refuses paths elsewhere (`SQLSTATE 335544831 Use of database at
+location ... is not allowed by server configuration`).
+
+```bash
 sudo -u firebird /usr/bin/gbak -r \
     /var/www/ekdosi/legacy/ekdosi-main/db_backup/ekdosi.fbk \
     /var/lib/firebird/data/ekdosi-sandbox.fdb \
     -user SYSDBA -password masterkey
 sudo chown firebird:firebird /var/lib/firebird/data/ekdosi-sandbox.fdb
+```
 
-# import one tenant — host=127.0.0.1 talks to the local FB server
+### 12d. Run the ETL
+
+```bash
 sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
     --fdb=/var/lib/firebird/data/ekdosi-sandbox.fdb \
     --host=127.0.0.1 --fbuser=SYSDBA --fbpass=masterkey
 ```
 
-### 12c. Production cutover — final ETL from a fresh legacy gbak
+Expected output ends with `Done. Run the golden-test comparison
+next (see README).` Tables that don't exist in the bundled `.fbk`
+(MARK, CONF_PARAMS, AUTO_INVOICE_LOG — all post-myDATA additions)
+are reported as `(skipped: table absent in this .fbk ...)` and
+that's fine.
+
+Verify with a row count + the VAT-rounding golden test:
+
+```bash
+mariadb -uekdosi -p ekdosi -e "
+  SELECT 'customers' t, COUNT(*) n FROM customers WHERE company_id=1
+  UNION ALL SELECT 'products', COUNT(*) FROM products WHERE company_id=1
+  UNION ALL SELECT 'invoices', COUNT(*) FROM invoices WHERE company_id=1
+  UNION ALL SELECT 'invoice_lines', COUNT(*) FROM invoice_lines WHERE company_id=1
+  UNION ALL SELECT 'payments', COUNT(*) FROM payments WHERE company_id=1;
+  SELECT il.id, il.net_price, il.gross_price, il.vat_percent
+  FROM invoice_lines il
+  WHERE company_id=1
+    AND ABS(il.gross_price - ROUND(il.net_price * (1 + il.vat_percent/100), 2)) > 0.01
+  LIMIT 20;
+"
+```
+
+The second query should return an empty set — that's the VAT/discount
+math reproducing the legacy values byte-exact, the gate CLAUDE.md
+calls out before trusting the import.
+
+### 12e. Production cutover — final ETL from a fresh legacy gbak
 
 **This is the recommended path for real data.** Don't directly connect
 the new FB4-client app to the live legacy FB3 server for cutover:
@@ -781,7 +769,7 @@ mariadb -uekdosi -p ekdosi -e "
 # Repeat (1)→(5) per legacy tenant (myip, nixpal, ...).
 ```
 
-### 12d. Direct-remote-connect (escape hatch, NOT for cutover)
+### 12f. Direct-remote-connect (escape hatch, NOT for cutover)
 
 If you really need to ETL while the legacy app is still serving — e.g.
 mid-day sandboxing against live data, no cutover yet — you can point
