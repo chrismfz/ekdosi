@@ -92,6 +92,7 @@ class AadeRegistryLookupTest extends TestCase
         $this->assertSame('ΞΑΝΘΗΣ', $result->doy);
         $this->assertSame('5411', $result->doyCode);
         $this->assertTrue($result->active);
+        $this->assertSame('ΕΝΕΡΓΟΣ ΑΦΜ', $result->statusDescr);
         $this->assertSame('ΚΑΝΑΡΗ 5', $result->address);
         $this->assertSame('ΞΑΝΘΗ', $result->city);
         $this->assertSame('67100', $result->postcode);
@@ -101,6 +102,67 @@ class AadeRegistryLookupTest extends TestCase
         $primary = $result->primaryActivity();
         $this->assertNotNull($primary);
         $this->assertSame('60200000', $primary['code']);
+    }
+
+    public function test_primary_activity_matches_greek_kind_case_insensitively(): void
+    {
+        // Some AADE endpoint variants ship Greek text in firm_act_kind_descr
+        // ("Κύρια" / "Δευτερεύουσα") rather than the Latin transliteration.
+        // primaryActivity() must match either form.
+        $response = $this->canonicalResponse();
+        $response->result->rg_ws_public2_result_rtType->firm_act_tab->item[0]->firm_act_kind_descr = 'Κύρια';
+        $response->result->rg_ws_public2_result_rtType->firm_act_tab->item[1]->firm_act_kind_descr = 'Δευτερεύουσα';
+
+        $result = (new AadeRegistryLookup($this->tenant, $this->mockSoap(returnValue: $response)))
+            ->findByAfm('800561849');
+
+        $primary = $result->primaryActivity();
+        $this->assertNotNull($primary, 'Greek "Κύρια" should resolve as primary');
+        $this->assertSame('60200000', $primary['code']);
+    }
+
+    public function test_deactivated_status_descr_marks_record_inactive(): void
+    {
+        // Branch off the human-readable status text, not the polarity-
+        // ambiguous deactivation_flag code. ΑΝΕΝΕΡΓΟΣ → active=false.
+        $response = $this->canonicalResponse();
+        $response->result->rg_ws_public2_result_rtType->basic_rec->deactivation_flag_descr = 'ΑΝΕΝΕΡΓΟΣ ΑΦΜ';
+
+        $result = (new AadeRegistryLookup($this->tenant, $this->mockSoap(returnValue: $response)))
+            ->findByAfm('800561849');
+
+        $this->assertFalse($result->active);
+        $this->assertSame('ΑΝΕΝΕΡΓΟΣ ΑΦΜ', $result->statusDescr);
+    }
+
+    public function test_malformed_response_maps_to_unreachable_not_500(): void
+    {
+        // AADE returning a shape we don't anticipate (gateway HTML proxied
+        // through SOAP, partial payload during an incident) used to crash
+        // the form with TypeError. Should now translate to AadeUnreachable.
+        $broken = (object) ['result' => 'unexpected scalar where object should be'];
+
+        $svc = new AadeRegistryLookup($this->tenant, $this->mockSoap(returnValue: $broken));
+
+        $this->expectException(AadeUnreachable::class);
+        $svc->findByAfm('800561849');
+    }
+
+    public function test_non_credential_auth_substring_does_not_misclassify(): void
+    {
+        // Older substring-matching on "AUTH" would have flagged this
+        // rate-limit fault as a credential failure. Exact-token list
+        // means only the documented credential codes trigger
+        // AadeCredentialsInvalid; everything else → Unreachable.
+        $client = Mockery::mock(SoapClient::class);
+        $client->shouldReceive('__setSoapHeaders')->andReturnTrue();
+        $client->shouldReceive('rgWsPublic2AfmMethod')
+            ->andThrow(new SoapFault('Client', 'RG_WS_PUBLIC_AUTHORIZATION_QUOTA_EXCEEDED: too many requests'));
+
+        $svc = new AadeRegistryLookup($this->tenant, $client);
+
+        $this->expectException(AadeUnreachable::class);
+        $svc->findByAfm('800561849');
     }
 
     public function test_deactivated_afm_throws_not_found(): void

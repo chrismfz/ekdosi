@@ -8,13 +8,14 @@ use App\Exceptions\Aade\AadeCredentialsInvalid;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Exceptions\Aade\AadeUnreachable;
 use App\Models\Company;
-use Exception;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use SoapClient;
 use SoapFault;
 use SoapHeader;
 use SoapVar;
+use Throwable;
 
 /**
  * Wraps AADE's RgWsPublic2 SOAP service for VAT-number → company
@@ -69,14 +70,26 @@ class AadeRegistryLookup
             throw new AadeAfmNotFound('Empty AFM');
         }
 
+        // Verify credentials BEFORE the cache lookup so a tenant whose
+        // credentials were removed/rotated doesn't continue serving
+        // stale cache hits for up to 24h. Stronger invariant: "this
+        // tenant cannot do GSIS lookups" applies consistently whether
+        // or not we have a cached row.
+        $this->assertCredentialsConfigured();
+
         $cacheKey = "aade.registry.{$this->tenant->getKey()}.{$afm}";
 
-        $cached = Cache::get($cacheKey);
-        if ($cached instanceof AadeRegistryRecord) {
-            return $cached;
+        // Defensive read: if the DTO shape changes across deploys the
+        // file/redis cache can hold incompatible payloads. Treat any
+        // failure as a miss and re-fetch from AADE.
+        try {
+            $cached = Cache::get($cacheKey);
+            if ($cached instanceof AadeRegistryRecord) {
+                return $cached;
+            }
+        } catch (Throwable) {
+            // ignore — fall through to fresh fetch
         }
-
-        $this->assertCredentialsConfigured();
 
         $record = $this->callRegistry($afm);
 
@@ -85,15 +98,53 @@ class AadeRegistryLookup
         return $record;
     }
 
+    /**
+     * Verify both credentials are present AND decryptable. The Eloquent
+     * encrypted cast throws DecryptException if APP_KEY rotated since
+     * the credentials were stored — surface that as a friendly
+     * AadeCredentialsInvalid rather than letting it escape as a 500.
+     */
     private function assertCredentialsConfigured(): void
     {
-        if (empty($this->tenant->gsis_username) || empty($this->tenant->gsis_password)) {
+        try {
+            $username = $this->tenant->gsis_username;
+            $password = $this->tenant->gsis_password;
+        } catch (DecryptException $e) {
+            throw new AadeCredentialsInvalid(
+                'GSIS credentials cannot be decrypted (APP_KEY may have rotated). '
+                . 'Re-enter them on the Company settings page.',
+                0,
+                $e,
+            );
+        }
+
+        if (empty($username) || empty($password)) {
             throw new AadeCredentialsInvalid(
                 'GSIS credentials are not configured for this tenant. '
                 . 'Set gsis_username and gsis_password on the Company.'
             );
         }
     }
+
+    /**
+     * Known AADE/GSIS credential-failure messages. Used to discriminate
+     * a credentials problem from a rate-limit / quota / transient
+     * server fault. Match must be exact-substring on the SOAP fault
+     * message — older broad-pattern matching on "AUTH" misclassified
+     * codes like RG_WS_PUBLIC_AUTHORIZATION_QUOTA_EXCEEDED (rate limit,
+     * NOT a credential problem) and would tell operators to "check
+     * credentials" while the real fix is "wait or contact AADE".
+     *
+     * If AADE adds a new credential-failure code, extend this list —
+     * better to be conservative (over-classify as Unreachable than
+     * over-classify as CredentialsInvalid).
+     */
+    private const AUTH_FAILURE_TOKENS = [
+        'RG_WS_PUBLIC_AUTHENTICATION_FAILED',
+        'RG_WS_PUBLIC_WRONG_AFM',         // wrong issuer AFM in the request envelope
+        'RG_WS_PUBLIC_USER_BLOCKED',       // credentials valid but user disabled
+        'RG_WS_PUBLIC_INVALID_USER',
+    ];
 
     /** @throws AadeRegistryException on any error */
     private function callRegistry(string $afm): AadeRegistryRecord
@@ -111,18 +162,11 @@ class AadeRegistryLookup
                 'INPUT_REC' => ['afm_called_for' => $afm],
             ]);
         } catch (SoapFault $sf) {
-            // GSIS surfaces credential errors as SoapFaults with specific
-            // codes; the message text varies by year so we match on the
-            // faultcode prefix. RG_WS_PUBLIC_AUTHENTICATION_FAILED is the
-            // documented credential-failure code; anything else is a
-            // transport/parsing problem.
             $msg = $sf->getMessage();
-            if (
-                str_contains($msg, 'AUTHENTICATION')
-                || str_contains($msg, 'AUTHORIZATION')
-                || str_contains((string) $sf->faultcode, 'AUTH')
-            ) {
-                throw new AadeCredentialsInvalid('GSIS rejected the credentials.', 0, $sf);
+            foreach (self::AUTH_FAILURE_TOKENS as $token) {
+                if (str_contains($msg, $token)) {
+                    throw new AadeCredentialsInvalid('GSIS rejected the credentials.', 0, $sf);
+                }
             }
 
             Log::warning('AADE registry SOAP fault', [
@@ -133,7 +177,12 @@ class AadeRegistryLookup
             ]);
 
             throw new AadeUnreachable('AADE registry returned a SOAP fault.', 0, $sf);
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
+            // Broad catch — TypeError, Error, network/DNS Exceptions etc.
+            // that aren't SoapFault but are still "lookup couldn't
+            // complete" from the operator POV. Anything credential-
+            // related has already been thrown above; anything else
+            // becomes Unreachable.
             Log::warning('AADE registry transport error', [
                 'company_id' => $this->tenant->getKey(),
                 'afm' => $afm,
@@ -166,7 +215,21 @@ class AadeRegistryLookup
             throw new AadeAfmNotFound("AADE: {$errorCode} — {$errorDescr}");
         }
 
-        return $this->parse($data);
+        // parse() can fail on shapes we didn't anticipate (gateway HTML
+        // proxied through SOAP, AADE incident response, partial payload).
+        // Translate any deref failure to Unreachable rather than letting
+        // a TypeError escape the catch above.
+        try {
+            return $this->parse($data);
+        } catch (Throwable $e) {
+            Log::warning('AADE registry response parse failure', [
+                'company_id' => $this->tenant->getKey(),
+                'afm' => $afm,
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+            ]);
+            throw new AadeUnreachable('AADE registry response could not be parsed.', 0, $e);
+        }
     }
 
     private function parse(object $data): AadeRegistryRecord
@@ -197,14 +260,23 @@ class AadeRegistryLookup
             . ((string) ($basic->postal_address_no ?? '')),
         );
 
+        // The legacy working example branches on deactivation_flag_descr
+        // (the human Greek text "ΕΝΕΡΓΟΣ ΑΦΜ" / "ΑΝΕΝΕΡΓΟΣ ΑΦΜ") rather
+        // than the deactivation_flag numeric code — the code's polarity
+        // (1=active or 1=deactivated) is not documented unambiguously
+        // and varies between drift-audit sources. Use the descr field
+        // for the active check; if it's missing or unrecognised, treat
+        // as active (defensive default — operators correct manually).
+        $statusDescr = trim((string) ($basic->deactivation_flag_descr ?? ''));
+        $active = $statusDescr === '' || $statusDescr === 'ΕΝΕΡΓΟΣ ΑΦΜ';
+
         return new AadeRegistryRecord(
             afm: (string) ($basic->afm ?? ''),
             name: (string) ($basic->onomasia ?? ''),
             doy: (string) ($basic->doy_descr ?? ''),
             doyCode: (string) ($basic->doy ?? ''),
-            // deactivation_flag: "1" = deactivated, "2" = active (per AADE docs).
-            // Defensive: treat anything other than "1" as active.
-            active: ((string) ($basic->deactivation_flag ?? '2')) !== '1',
+            active: $active,
+            statusDescr: $statusDescr,
             address: $address,
             city: (string) ($basic->postal_area_description ?? ''),
             postcode: (string) ($basic->postal_zip_code ?? ''),
@@ -219,13 +291,17 @@ class AadeRegistryLookup
      */
     private function buildSoapClient(): SoapClient
     {
+        // Note: style/use/uri are intentionally absent. When a WSDL is
+        // supplied, ext-soap ignores those options (WSDL dictates the
+        // operation style and target namespace). Including them was a
+        // copy-paste from the legacy non-WSDL example and would only
+        // matter if someone later flipped to non-WSDL mode — at which
+        // point a SOAP_1_2 envelope URI would be wrong for the request
+        // target anyway. Keep this minimal.
         try {
             return new SoapClient(self::WSDL, [
                 'encoding' => 'UTF-8',
                 'exceptions' => true,
-                'uri' => 'http://www.w3.org/2003/05/soap-envelope',
-                'style' => SOAP_RPC,
-                'use' => SOAP_ENCODED,
                 'soap_version' => SOAP_1_2,
                 'cache_wsdl' => WSDL_CACHE_NONE,
                 'connection_timeout' => 30,

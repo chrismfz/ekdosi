@@ -72,6 +72,11 @@ class CompanyForm
                                         'none' => 'None (PDF only)',
                                     ])
                                     ->default('gr-mydata')
+                                    // ->live() so the dependent myDATA-submission tab's
+                                    // ->visible() check re-evaluates on direct edits, not
+                                    // only when country_code's afterStateUpdated indirectly
+                                    // sets the provider.
+                                    ->live()
                                     ->helperText('Which submitter the IssueInvoice action routes through.'),
 
                                 TextInput::make('afm')
@@ -110,14 +115,26 @@ class CompanyForm
                                                     Notification::make()->title('AADE registry unreachable — try again later')->warning()->send();
                                                     return;
                                                 }
-                                                $set('name', $result->name);
-                                                $set('tax_office', $result->doy);
-                                                $set('address', $result->address);
-                                                $set('city', $result->city);
-                                                $set('postcode', $result->postcode);
+                                                // Only overwrite fields the operator hasn't
+                                                // typed into. Without these guards, a typed
+                                                // trade name "MyIP" gets clobbered by the
+                                                // AADE legal name "MYIP NET WORKS Ο.Ε.";
+                                                // similarly for friendly delivery addresses.
+                                                // Operators can clear a field to force AADE
+                                                // to populate it.
+                                                $fillIfEmpty = function (string $field, string $value) use ($get, $set): void {
+                                                    if (empty($get($field)) && $value !== '') {
+                                                        $set($field, $value);
+                                                    }
+                                                };
+                                                $fillIfEmpty('name', $result->name);
+                                                $fillIfEmpty('tax_office', $result->doy);
+                                                $fillIfEmpty('address', $result->address);
+                                                $fillIfEmpty('city', $result->city);
+                                                $fillIfEmpty('postcode', $result->postcode);
                                                 $primary = $result->primaryActivity();
                                                 if ($primary) {
-                                                    $set('kad_primary', $primary['code']);
+                                                    $fillIfEmpty('kad_primary', $primary['code']);
                                                 }
                                                 Notification::make()
                                                     ->title('Loaded from AADE: '.$result->name)
@@ -205,28 +222,44 @@ class CompanyForm
                                         FormAction::make('test_gsis')
                                             ->label('Test registry credentials')
                                             ->icon('heroicon-o-bolt')
-                                            ->action(function (?\App\Models\Company $record) {
-                                                if (! $record || ! $record->afm) {
+                                            ->action(function (callable $get, ?\App\Models\Company $record) {
+                                                if (! $record) {
                                                     Notification::make()
-                                                        ->title('Save the company with an AFM filled in, then test.')
+                                                        ->title('Save the company first, then test.')
                                                         ->warning()->send();
                                                     return;
                                                 }
+                                                // Use the form's current AFM, not the
+                                                // persisted one — operator may have just
+                                                // edited it. Cache::forget so the test
+                                                // ALWAYS hits the wire (otherwise a stale
+                                                // cache entry would falsely report
+                                                // success after credentials changed).
+                                                $afm = trim((string) $get('afm'));
+                                                if ($afm === '') {
+                                                    Notification::make()
+                                                        ->title('Enter an AFM on the Identity tab first.')
+                                                        ->warning()->send();
+                                                    return;
+                                                }
+                                                \Illuminate\Support\Facades\Cache::forget(
+                                                    "aade.registry.{$record->getKey()}.{$afm}"
+                                                );
                                                 try {
-                                                    $result = app(AadeRegistryLookup::class, ['tenant' => $record])->findByAfm($record->afm);
+                                                    $result = app(AadeRegistryLookup::class, ['tenant' => $record])->findByAfm($afm);
                                                     Notification::make()
                                                         ->title('Connected to GSIS')
-                                                        ->body('Looked up your own AFM successfully: '.$result->name.' ('.$result->doy.')')
+                                                        ->body('Looked up AFM '.$afm.' successfully: '.$result->name.' ('.$result->doy.')')
                                                         ->success()->send();
-                                                } catch (AadeCredentialsInvalid) {
+                                                } catch (AadeCredentialsInvalid $e) {
                                                     Notification::make()
                                                         ->title('Credentials rejected')
-                                                        ->body('GSIS refused the username/password.')
+                                                        ->body($e->getMessage())
                                                         ->danger()->send();
                                                 } catch (AadeAfmNotFound) {
                                                     Notification::make()
-                                                        ->title('Credentials OK but your AFM wasn\'t found')
-                                                        ->body('GSIS accepted the login but didn\'t recognise the company\'s own AFM. Check the AFM field on the Identity tab.')
+                                                        ->title('Credentials OK but AFM not found')
+                                                        ->body('GSIS accepted the login but didn\'t recognise '.$afm.'. Check the AFM field on the Identity tab.')
                                                         ->warning()->send();
                                                 } catch (AadeUnreachable) {
                                                     Notification::make()

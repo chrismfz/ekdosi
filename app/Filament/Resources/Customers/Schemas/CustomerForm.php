@@ -98,26 +98,32 @@ class CustomerForm
                                                         ->warning()->send();
                                                     return;
                                                 }
-                                                // Fill what AADE returned. Operator can edit any
-                                                // value before saving — the fetch never persists
-                                                // by itself.
-                                                $set('name', $result->name);
-                                                $set('tax_office', $result->doy);
-                                                $set('address1', $result->address);
-                                                $set('city', $result->city);
-                                                $set('postcode', $result->postcode);
-                                                $set('country', 'GR');
+                                                // Only overwrite fields the operator hasn't
+                                                // typed into. Without this guard a typed
+                                                // trade name "My Customer Ltd" gets
+                                                // clobbered by the AADE legal name
+                                                // "MY CUSTOMER ΕΠΕ", and friendly addresses
+                                                // get replaced with the registry form.
+                                                // Operators can clear a field to force AADE
+                                                // to populate it.
+                                                $fillIfEmpty = function (string $field, string $value) use ($get, $set): void {
+                                                    if (empty($get($field)) && $value !== '') {
+                                                        $set($field, $value);
+                                                    }
+                                                };
+                                                $fillIfEmpty('name', $result->name);
+                                                $fillIfEmpty('tax_office', $result->doy);
+                                                $fillIfEmpty('address1', $result->address);
+                                                $fillIfEmpty('city', $result->city);
+                                                $fillIfEmpty('postcode', $result->postcode);
+                                                $fillIfEmpty('country', 'GR');
                                                 $primary = $result->primaryActivity();
                                                 if ($primary) {
-                                                    $set('kad_primary', $primary['code']);
+                                                    $fillIfEmpty('kad_primary', $primary['code']);
                                                     // occupation is the human-readable activity
                                                     // text that legacy prints on invoices as
-                                                    // "Δραστηριότητα: ...". Only overwrite if
-                                                    // currently empty (don't clobber operator-
-                                                    // typed occupations).
-                                                    if (empty($get('occupation'))) {
-                                                        $set('occupation', $primary['description']);
-                                                    }
+                                                    // "Δραστηριότητα: ...".
+                                                    $fillIfEmpty('occupation', $primary['description']);
                                                 }
                                                 Notification::make()
                                                     ->title('Loaded from AADE: '.$result->name)
