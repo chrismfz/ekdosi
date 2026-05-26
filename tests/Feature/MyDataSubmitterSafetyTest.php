@@ -288,6 +288,109 @@ class MyDataSubmitterSafetyTest extends TestCase
         (new MyDataSubmitter($this->tenant))->previewXml($inv);
     }
 
+    public function test_submit_refuses_already_cancelled_invoice(): void
+    {
+        // Symmetric to the already-VALID guard. Refile of a cancelled
+        // invoice would corrupt the audit trail and the local mirror
+        // would disagree with AADE.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_state' => 'CANCELLED',
+            'mydata_mark' => '400088888888888',
+        ])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/previously filed and CANCELLED/');
+
+        (new MyDataSubmitter($this->tenant))->submit($invoice->fresh());
+    }
+
+    public function test_foreign_counterpart_normalises_country_and_carries_name_address(): void
+    {
+        // Operators have been observed typing full country names.
+        // The submitter must (a) normalise to ISO alpha-2 before
+        // AADE, and (b) include `name` + `address` for non-GR
+        // counterparts (AADE rejects missing fields with opaque errors).
+        $type = InvoiceType::create([
+            'company_id' => $this->tenant->id,
+            'code' => 'TPYEU',
+            'name' => 'EU sale',
+            'invcount' => 1,
+            'mydata_type' => '1.2',
+        ]);
+        $cust = Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'ACME GmbH',
+            'afm' => 'DE123456789',
+            'country' => 'Germany',  // free-text — normalisation must catch
+        ]);
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'TPYEU1',
+            'code' => 1,
+            'invoice_type_id' => $type->id,
+            'customer_id' => $cust->id,
+            'issued_at' => now(),
+            'country' => 'Germany',  // snapshot in same free-text shape
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'net_price' => 100,
+            'gross_price' => 124,
+        ]);
+
+        $mark = (new MyDataSubmitter($this->tenant))->previewXml($inv);
+
+        // Must serialise as DE, not "Germany" — AADE rejects the latter.
+        $this->assertStringContainsString('<country>DE</country>', $mark->request);
+        // Foreign counterpart MUST carry name + address — AADE
+        // rejects missing fields with opaque errors.
+        $this->assertStringContainsString('ACME GmbH', $mark->request);
+        $this->assertStringContainsString('<address>', $mark->request);
+    }
+
+    public function test_buildCounterpart_throws_on_unknown_country_string(): void
+    {
+        $type = InvoiceType::create([
+            'company_id' => $this->tenant->id,
+            'code' => 'TPYWT',
+            'name' => 'Wakanda sale',
+            'invcount' => 1,
+            'mydata_type' => '1.3',
+        ]);
+        $cust = Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Wakanda Corp',
+            'afm' => 'WK000001',
+            'country' => 'Wakanda',
+        ]);
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'TPYWT1',
+            'code' => 1,
+            'invoice_type_id' => $type->id,
+            'customer_id' => $cust->id,
+            'issued_at' => now(),
+            'country' => 'Wakanda',
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'net_price' => 100,
+            'gross_price' => 124,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/normalise country/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv);
+    }
+
     public function test_preview_xml_sets_uid_for_idempotency(): void
     {
         // UID must appear in the payload so AADE dedupes retries.

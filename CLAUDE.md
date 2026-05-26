@@ -1101,6 +1101,22 @@ production data before cutover.
 - **Filament Submit button** (when PR #26's IssueInvoice action lands) should call `->disabled(fn ($record) => $record->mydata_state === 'VALID')` as defense-in-depth on top of the server-side guard the submitter now enforces. Belongs in PR #26 since the Submit button doesn't exist yet.
 - **Per-tenant branch_id for issuer** — currently hardcoded to 0 in `MyDataSubmitter::buildAadeInvoice`. For multi-branch tenants (none currently — myip, nixpal both single-branch) this would need to come from tenant config. **Trigger PR**: first multi-branch tenant.
 
+### Deferred from PR #25 (real MyDataSubmitter) — third-sweep INDEPENDENT review (the consequential one)
+The third blind review found 2 CRITICAL bugs that both prior agent reviews missed (they trusted my code; only the third reviewer actually grepped vendor source to verify firebed method existence). All fixed in the same commit:
+- `ResponseDoc::getResponses()` doesn't exist — must use `->first()` or iterate
+- `(string) $response` fails (no `__toString`) — must use `$action->getResponseXML()` from the HasResponseDom trait on the action instance
+- `RequestTransmittedDocs` dates need `d/m/Y` format, not `Y-m-d`
+- Non-GR Counterpart requires `name` + `address`; country must be ISO-3166-1 alpha-2
+- `(int)` cast on MARK before CancelInvoice would truncate 15+ digit values on 32-bit hosts
+
+**Lesson for future PRs**: when wrapping a third-party library, the agent reviews tend to trust that my method-call names are correct. The blind reviewer is the one who actually verifies API existence against vendor source. Worth running an independent third sweep on every PR that depends on a non-trivial external library.
+
+Items still deferred from this third pass:
+- **Mock-Guzzle integration test for the SendInvoices end-to-end path** — would have caught the `getResponses()` / `__toString` bugs at test time. Setting up firebed's MockHandler for a real-shape AADE success response is non-trivial; defer until the first real submission proves the path works, then capture the payload and write the test from it.
+- **`(invoice_id, mark, mydata_action='INSERT')` unique constraint** — current `persistResponse()` has an in-memory idempotency check (looks for existing row before INSERT) but a DB-level unique would close the race window between two concurrent retries. **Trigger PR**: when activitylog wraps `mydata_marks` and duplicate rows become more user-visible.
+- **`normaliseCountryCode()` country list** — seeded with GR / EE / CY / DE (current tenant scope). Extend the match arms as new tenant/customer countries appear. Operators see a clear error pointing at the helper if an unrecognised country shows up.
+- **vatExemptionCategory mechanism for 0% lines** — still throws (the right safe default). When intra-community customers need filing, add a `vat_exemption_category` column on `vat_categories` + per-line override + heuristic for invoice type ∈ {1.2, 2.2} → auto-suggest the right category. **Trigger PR**: first time an operator hits the 0% throw.
+
 ### Deferred — application-wide patterns
 - **FK-aware delete guards (`GuardedDeleteAction`)** — operators currently hit one of two confusing modes when deleting a row that has dependents: (a) the default soft-delete succeeds silently and the dependent invoice / line / customer ends up referencing a trashed lookup row that's now invisible in the panel; (b) ForceDelete crashes with a cryptic SQL error from `restrictOnDelete`. Proposed shape: a reusable `GuardedDeleteAction` (extends Filament's DeleteAction) that counts referencing rows on `->before()`, blocks with a friendly notification listing exactly what depends on the row, and offers "Deactivate" (set `is_active=false`) where the model supports it. Complementary `BeforeDeleteObserver` enforces the same check from artisan/queue/API paths. **Trigger PR**: after InvoiceResource lands — that's when the full reference graph is real (invoices touch every lookup we have). Applies across Product, ProductCategory, VatCategory, MetricUnit, PaymentMethod, DeliveryMethod, DistributionAim, InvoiceType, Customer.
 

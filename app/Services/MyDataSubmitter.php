@@ -89,14 +89,30 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'Use the Cancel action and re-issue if a correction is needed.'
             );
         }
+        // Symmetric guard: refuse to resubmit a previously-cancelled
+        // invoice. AADE's behaviour for UID-dedup against a cancelled
+        // filing is undocumented — operator should issue a fresh
+        // correction invoice instead.
+        if ($invoice->mydata_state === 'CANCELLED') {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} was previously filed and CANCELLED at myDATA. ".
+                'Issue a correction invoice (new code) instead of resubmitting.'
+            );
+        }
 
         $payload = $this->buildAadeInvoice($invoice);
         $xml = $this->payloadToXml($payload);
 
         $this->initFirebed();
 
+        // Hold the action instance so we can call getResponseXML() on it
+        // afterwards. ResponseDoc itself does NOT support __toString;
+        // the raw XML lives on the action via the HasResponseDom trait
+        // (see vendor/firebed/aade-mydata/src/Http/Traits/HasResponseDom.php).
+        $action = new SendInvoices();
+
         try {
-            $response = (new SendInvoices())->handle($payload);
+            $response = $action->handle($payload);
         } catch (MyDataAuthenticationException $e) {
             $this->logFailure($invoice, 'auth', $e);
             throw new RuntimeException('myDATA rejected credentials. Check Company → myDATA submission tab.', 0, $e);
@@ -111,7 +127,9 @@ class MyDataSubmitter implements EInvoiceSubmitter
             throw new RuntimeException('myDATA submission failed unexpectedly.', 0, $e);
         }
 
-        return $this->persistResponse($invoice, $payload, $xml, $response);
+        $responseXml = $action->getResponseXML() ?? '';
+
+        return $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
     }
 
     /**
@@ -178,25 +196,35 @@ class MyDataSubmitter implements EInvoiceSubmitter
             ]);
         }
 
+        // Stays as string — AADE MARKs are 15+ digit numerics that
+        // overflow 32-bit int. CancelInvoice::handle() signature is
+        // `string $mark` per firebed's docblock — no need to coerce.
         $markToCancel = (string) $inserts->first()->mark;
 
         $this->initFirebed();
 
+        // Hold the action so we can extract its raw response XML for
+        // the audit row (HasResponseDom trait on the action — NOT
+        // (string) on the ResponseDoc, which would crash).
+        $action = new CancelInvoice();
+
         try {
-            $response = (new CancelInvoice())->handle((int) $markToCancel);
+            $action->handle($markToCancel);
         } catch (Throwable $e) {
             $this->logFailure($invoice, 'cancel', $e);
             throw new RuntimeException('myDATA cancellation failed: '.$e->getMessage(), 0, $e);
         }
 
-        return DB::transaction(function () use ($invoice, $response, $reason, $markToCancel) {
+        $responseXml = $action->getResponseXML() ?? '';
+
+        return DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel) {
             $mark = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
                 'mark' => $markToCancel,
                 'mydata_action' => 'CANCEL',
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
-                'response' => $this->responseToString($response),
+                'response' => $responseXml,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
             ]);
@@ -221,12 +249,21 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // query, just verifies creds + reachability. AADE returns
             // an empty doc list if nothing was filed today; we don't
             // care about content, only that the call doesn't fault.
-            // First arg is `string $mark = ''` (NOT nullable) — pass
-            // empty string, not null, to avoid a TypeError that would
-            // be caught by the generic Throwable handler below and
-            // misclassified as a transport failure.
+            //
+            // Format gotchas (per firebed's docblock at
+            // vendor/firebed/aade-mydata/src/Http/MyDataGetRequest.php:43):
+            //   - $mark is a NON-NULLABLE string — pass '', not null,
+            //     else TypeError misclassified as transport failure
+            //   - dateFrom / dateTo are 'dd/MM/yyyy', NOT Y-m-d. AADE
+            //     rejects the wrong format with a 400 that surfaces as
+            //     "myDATA unreachable" to the operator (misleading —
+            //     they'd think creds are wrong).
             $action = new RequestTransmittedDocs();
-            $action->handle('', now()->subDay()->toDateString(), now()->toDateString());
+            $action->handle(
+                '',
+                now()->subDay()->format('d/m/Y'),
+                now()->format('d/m/Y'),
+            );
             return true;
         } catch (MyDataAuthenticationException) {
             return false;
@@ -397,10 +434,66 @@ class MyDataSubmitter implements EInvoiceSubmitter
             );
         }
 
-        return (new Counterpart())
+        // Country: prefer the invoice snapshot (the legally-frozen
+        // value at issue time); fall back to live customer country,
+        // then 'GR'. Normalise to ISO-3166-1 alpha-2 — AADE rejects
+        // anything else, including spelled-out names ("Greece").
+        $country = $this->normaliseCountryCode($invoice->country ?: $customer->country ?: 'GR');
+
+        $counterpart = (new Counterpart())
             ->setVatNumber($customer->afm)
-            ->setCountry($invoice->country ?: 'GR')
+            ->setCountry($country)
             ->setBranch(0);
+
+        // AADE rule (vendor/firebed/aade-mydata/src/Models/Party.php
+        // docblocks): `name` and `address` are FORBIDDEN for GR
+        // counterparts and REQUIRED for non-GR. Missing them on a
+        // foreign Counterpart causes AADE 4xx with an opaque message.
+        if ($country !== 'GR') {
+            $counterpart->setName(
+                $customer->name
+                ?? throw new RuntimeException(
+                    "Foreign counterpart on invoice {$invoice->invcode} requires customer name (AADE rule)."
+                )
+            );
+            $counterpart->setAddress(
+                (new \Firebed\AadeMyData\Models\Address())
+                    ->setStreet($invoice->address1 ?: ($customer->address1 ?: 'Unknown'))
+                    ->setCity($invoice->city ?: ($customer->city ?: 'Unknown'))
+                    ->setPostalCode($invoice->postcode ?: ($customer->postcode ?: '00000'))
+            );
+        }
+
+        return $counterpart;
+    }
+
+    /**
+     * Normalise a free-text country string to ISO-3166-1 alpha-2.
+     * Real-world data is messy: operators type "Greece", "Ελλάδα",
+     * "Hellas", "GR", "GRC" — AADE only accepts the 2-letter code.
+     * Defensive: throw on unrecognised input rather than send
+     * gibberish that AADE rejects opaquely. Keep this list focused on
+     * the countries we actually have tenants/customers in; add cases
+     * as needed.
+     */
+    private function normaliseCountryCode(string $raw): string
+    {
+        $trimmed = trim(mb_strtoupper($raw));
+        // Already in alpha-2 shape
+        if (strlen($trimmed) === 2 && ctype_alpha($trimmed)) {
+            return $trimmed;
+        }
+        return match ($trimmed) {
+            'GREECE', 'HELLAS', 'ΕΛΛΑΔΑ', 'ΕΛΛΆΔΑ', 'GRC' => 'GR',
+            'ESTONIA', 'EESTI', 'EST' => 'EE',
+            'CYPRUS', 'ΚΥΠΡΟΣ', 'CYP' => 'CY',
+            'GERMANY', 'DEUTSCHLAND', 'ΓΕΡΜΑΝΙΑ', 'DEU' => 'DE',
+            default => throw new RuntimeException(
+                "Cannot normalise country '{$raw}' to ISO-3166-1 alpha-2. ".
+                'Update the customer/invoice country to a 2-letter code, '.
+                'or extend MyDataSubmitter::normaliseCountryCode().'
+            ),
+        };
     }
 
     /**
@@ -444,14 +537,6 @@ class MyDataSubmitter implements EInvoiceSubmitter
         );
     }
 
-    private function responseToString(ResponseDoc $response): string
-    {
-        // firebed returns a strongly-typed ResponseDoc; serialize for
-        // the audit row's response column. The full XML is what AADE
-        // legally requires us to retain.
-        return (string) $response;
-    }
-
     private function recordDryRun(Invoice $invoice, string $xml): MyDataMark
     {
         return DB::transaction(fn () => MyDataMark::create([
@@ -471,9 +556,14 @@ class MyDataSubmitter implements EInvoiceSubmitter
         AadeInvoice $payload,
         string $xml,
         ResponseDoc $response,
+        string $responseXml,
     ): MyDataMark {
-        $responseRows = $response->getResponses() ?? [];
-        $firstResponse = $responseRows[0] ?? null;
+        // ResponseDoc extends TypeArray which is iterable and exposes
+        // first(). It does NOT have a getResponses() method (the
+        // earlier code's invocation of that would have crashed every
+        // single successful submit). Iterate properly.
+        /** @var \Firebed\AadeMyData\Models\Response|null $firstResponse */
+        $firstResponse = $response->first();
 
         if ($firstResponse === null || $firstResponse->getStatusCode() !== 'Success') {
             $errors = $firstResponse ? $this->describeResponseErrors($firstResponse) : 'no response';
@@ -483,7 +573,26 @@ class MyDataSubmitter implements EInvoiceSubmitter
         $mark = (string) $firstResponse->getInvoiceMark();
         $qrUrl = $firstResponse->getQrUrl();
 
-        return DB::transaction(function () use ($invoice, $payload, $xml, $response, $mark, $qrUrl) {
+        // Idempotent INSERT: if a mydata_marks row already exists for
+        // this invoice+mark, return it instead of writing a duplicate.
+        // Defends against the rare AADE-success / local-DB-fail retry
+        // scenario where UID dedup at AADE returns the original MARK
+        // on the operator's second attempt — we'd otherwise pile up
+        // duplicate audit rows for the same logical filing.
+        $existing = MyDataMark::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('mark', $mark)
+            ->where('mydata_action', 'INSERT')
+            ->first();
+        if ($existing) {
+            Log::info('myDATA submit: idempotent — MARK already recorded locally', [
+                'invoice_id' => $invoice->id,
+                'mark' => $mark,
+            ]);
+            return $existing;
+        }
+
+        return DB::transaction(function () use ($invoice, $payload, $xml, $responseXml, $mark, $qrUrl) {
             $audit = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
@@ -491,7 +600,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'mydata_action' => 'INSERT',
                 'invoice_url' => $qrUrl,
                 'request' => $xml,
-                'response' => $this->responseToString($response),
+                // Raw response XML from firebed's HasResponseDom trait —
+                // NOT (string) $response (ResponseDoc has no __toString,
+                // would crash). The action's getResponseXML() is the
+                // legally-required verbatim record.
+                'response' => $responseXml,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
             ]);
