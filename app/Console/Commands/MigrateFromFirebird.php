@@ -67,6 +67,11 @@ class MigrateFromFirebird extends Command
         $this->info("Importing into company_id={$this->companyId} ({$this->option('slug')})");
 
         DB::transaction(function () {
+            // Filament-managed columns have no legacy source; preserve any
+            // manual edits across ETL re-runs by snapshotting BEFORE the
+            // wipe and re-applying AFTER the re-insert.
+            $this->snapshotManualEdits();
+
             $this->wipeCompany();        // make the run idempotent
 
             // --- lookups (no inter-dependencies among these) ---
@@ -98,6 +103,11 @@ class MigrateFromFirebird extends Command
 
             // --- customers (FK: payment_method) ---
             $this->copyCustomers();
+
+            // Re-apply Filament-managed columns onto the freshly-imported
+            // customers. Must run AFTER copyCustomers() so the legacy_id →
+            // new_id map is built (referred_by_customer_id remapping).
+            $this->restoreManualEdits();
 
             // --- invoice types (FK: aim/delivery/payment/customer) + carries the counter ---
             $this->copyInvoiceTypes();
@@ -162,6 +172,71 @@ class MigrateFromFirebird extends Command
             'distribution_aims', 'delivery_methods', 'payment_methods',
         ] as $table) {
             DB::table($table)->where('company_id', $this->companyId)->delete();
+        }
+    }
+
+    /**
+     * Filament-managed columns on `customers` (added in PR #16) — these are
+     * NOT sourced from Firebird, so a naive re-run of the ETL would destroy
+     * any manual edits the operator made in the panel between runs (CRM
+     * cleanup, peppol endpoint entry, is_active toggles, γκρινιάρης flags).
+     *
+     * Snapshot the relevant columns by legacy_id BEFORE wipeCompany() blows
+     * them away; restoreManualEdits() re-applies after copyCustomers().
+     *
+     * The referred_by FK is captured as the TARGET's legacy_id (the
+     * surrogate id changes on re-insert; legacy_id is stable). On restore
+     * we remap back through $this->map['customers'].
+     *
+     * Customers created manually in Filament (no legacy_id) are NOT
+     * preserved — wipeCompany() removes them like any other row. If a
+     * legacy-imported customer was set as "referred by" a Filament-only
+     * customer, the referrer becomes null on re-import (the target no
+     * longer exists). That's correct.
+     */
+    private array $manualCustomerEdits = [];
+
+    private function snapshotManualEdits(): void
+    {
+        $this->manualCustomerEdits = DB::table('customers as c1')
+            ->leftJoin('customers as c2', function ($join) {
+                $join->on('c1.referred_by_customer_id', '=', 'c2.id')
+                    ->where('c2.company_id', $this->companyId);
+            })
+            ->where('c1.company_id', $this->companyId)
+            ->whereNotNull('c1.legacy_id')
+            ->select(
+                'c1.legacy_id',
+                'c2.legacy_id as referred_by_legacy_id',
+                'c1.peppol_endpoint',
+                'c1.is_active',
+                'c1.needs_immediate_invoice',
+            )
+            ->get()
+            ->keyBy('legacy_id')
+            ->all();
+    }
+
+    private function restoreManualEdits(): void
+    {
+        foreach ($this->manualCustomerEdits as $legacyId => $edit) {
+            $newId = $this->map['customers'][(int) $legacyId] ?? null;
+            if (! $newId) {
+                continue;
+            }
+
+            $update = [
+                'peppol_endpoint'         => $edit->peppol_endpoint,
+                'is_active'               => (bool) $edit->is_active,
+                'needs_immediate_invoice' => (bool) $edit->needs_immediate_invoice,
+            ];
+
+            if ($edit->referred_by_legacy_id !== null) {
+                $update['referred_by_customer_id'] =
+                    $this->map['customers'][(int) $edit->referred_by_legacy_id] ?? null;
+            }
+
+            DB::table('customers')->where('id', $newId)->update($update);
         }
     }
 
@@ -261,6 +336,10 @@ class MigrateFromFirebird extends Command
                 'sort_order'             => $r['ORDER'] ?? null,
                 'alt_customer_legacy_id' => $r['ALT_CUSTID'] ?? null,
                 'payment_method_id'      => $this->legacyId('payment_methods', $r['PAYMETH_ID'] ?? null),
+                // Defaults for forward-looking columns added in PR #15 —
+                // no legacy source for these:
+                'is_active'              => true,
+                'needs_immediate_invoice' => false,
                 'created_at'             => now(),
                 'updated_at'             => now(),
             ]);
