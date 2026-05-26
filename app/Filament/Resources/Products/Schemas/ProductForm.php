@@ -83,11 +83,14 @@ class ProductForm
                                     ->searchable()
                                     ->preload()
                                     ->live()
-                                    ->afterStateUpdated(function ($state, callable $set, callable $get) {
-                                        // Load this category's markup as the live-compute default.
-                                        // Don't recompute sell_price on initial form load — only
-                                        // on actual operator interaction, which is what live()
-                                        // gives us (afterStateUpdated doesn't fire on mount).
+                                    ->afterStateUpdated(function ($state, callable $set) {
+                                        // Update markup_display to reflect the new category's
+                                        // default — but do NOT cascade to sell_price /
+                                        // price_wvat. Cascading would silently clobber a hand-
+                                        // tuned sell_price when operators reclassify a product
+                                        // on the edit page (a real bug surfaced in PR #20
+                                        // review). Operator who wants to apply the new markup
+                                        // explicitly re-types buy_price or markup_display.
                                         $markup = $state
                                             ? (float) (ProductCategory::query()
                                                 ->where('company_id', Filament::getTenant()?->getKey())
@@ -95,7 +98,6 @@ class ProductForm
                                                 ->value('markup') ?? 0)
                                             : 0;
                                         $set('markup_display', $markup);
-                                        self::recomputeFromBuy($set, $get, markupOverride: $markup);
                                     }),
 
                                 Select::make('metric_unit_id')
@@ -202,7 +204,7 @@ class ProductForm
                                 DatePicker::make('date_inserted')
                                     ->label('Date inserted')
                                     ->helperText('Catalogue entry date. Defaults to today on create.')
-                                    ->default(now()),
+                                    ->default(today()),
                             ])
                             ->columns(2),
 
@@ -235,12 +237,14 @@ class ProductForm
 
     /**
      * sell_price = buy_price × (1 + markup/100); then price_wvat refresh.
-     * Used when buy_price, markup, or category changes.
+     * Used when buy_price or markup is explicitly edited by the operator.
+     * NOT triggered by category-change anymore — see ProductCategory's
+     * afterStateUpdated for why.
      */
-    private static function recomputeFromBuy(callable $set, callable $get, ?float $markupOverride = null): void
+    private static function recomputeFromBuy(callable $set, callable $get): void
     {
         $buy = (float) ($get('buy_price') ?? 0);
-        $markup = $markupOverride ?? (float) ($get('markup_display') ?? 0);
+        $markup = (float) ($get('markup_display') ?? 0);
         $sell = round($buy * (1 + $markup / 100), 2);
         $set('sell_price', $sell);
         self::recomputeWvatFromSell($set, $get, sellOverride: $sell);

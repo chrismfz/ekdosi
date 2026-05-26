@@ -112,6 +112,64 @@ class ProductPricingMathTest extends TestCase
         $this->assertNull($fresh->internal_notes);
     }
 
+    public function test_edit_mount_derives_historical_markup_from_saved_prices(): void
+    {
+        // EditProduct::mutateFormDataBeforeFill computes markup_display
+        // from (buy, sell). Locks in: if buy was 10 and sell was 12.50,
+        // markup_display must be 25 (the historical markup), regardless
+        // of what the category's markup currently is.
+        //
+        // We don't boot the Livewire page here — we just invoke the
+        // method directly with a fixture payload, which is enough to
+        // lock the formula in.
+        $product = \App\Models\Product::create([
+            'company_id' => $this->company->id,
+            'description_short' => 'Historical',
+            'product_category_id' => $this->category->id,
+            'vat_category_id' => $this->vat24->id,
+            'buy_price' => 10.00,
+            'sell_price' => 12.50,
+        ]);
+
+        // Admin nudges the CATEGORY's markup AFTER the product was saved.
+        $this->category->update(['markup' => 80]);
+
+        // Reproduce what EditProduct::mutateFormDataBeforeFill does. The
+        // historical markup is (sell - buy) / buy * 100 = 25, NOT 80.
+        $page = new \App\Filament\Resources\Products\Pages\EditProduct();
+        $reflector = new \ReflectionMethod($page, 'mutateFormDataBeforeFill');
+        $reflector->setAccessible(true);
+        $hydrated = $reflector->invoke($page, $product->fresh()->toArray());
+
+        $this->assertSame(25.0, $hydrated['markup_display']);
+    }
+
+    public function test_price_tier_unique_per_product_qty(): void
+    {
+        $product = \App\Models\Product::create([
+            'company_id' => $this->company->id,
+            'description_short' => 'Tier probe',
+            'product_category_id' => $this->category->id,
+            'vat_category_id' => $this->vat24->id,
+        ]);
+
+        \App\Models\ProductPriceTier::create([
+            'company_id' => $this->company->id,
+            'product_id' => $product->id,
+            'qty' => 10,
+            'value' => 9.00,
+        ]);
+
+        $this->expectException(\Illuminate\Database\UniqueConstraintViolationException::class);
+
+        \App\Models\ProductPriceTier::create([
+            'company_id' => $this->company->id,
+            'product_id' => $product->id,
+            'qty' => 10,
+            'discount_percent' => 15,
+        ]);
+    }
+
     public function test_sku_unique_per_tenant(): void
     {
         Product::create([

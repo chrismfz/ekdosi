@@ -20,21 +20,37 @@ class EditProduct extends EditRecord
     }
 
     /**
-     * On mount, hydrate the live-only `markup_display` field from the
-     * selected product category's stored markup. This is purely cosmetic
-     * — markup isn't persisted on products (matches legacy, which read
-     * markup from a Windows Registry app setting). Without this, the
-     * field would appear empty on edit even though the form depends on
-     * it for the reactive sell-price calc.
+     * On mount, hydrate the live-only `markup_display` field by DERIVING
+     * it from the persisted (buy_price, sell_price) pair. This preserves
+     * the historical relationship — if operator later nudges buy_price,
+     * sell_price recomputes against the markup that was originally
+     * applied, not against whatever the category's markup happens to be
+     * NOW (admins can edit category markups after products are saved).
+     *
+     * Fallback: if buy_price is 0 / null (no price relationship to derive
+     * from), fall back to the category's current markup as a hint. If
+     * neither, leave at 0.
+     *
+     * Markup is purely a UX helper, not persisted (dehydrated:false),
+     * matching the legacy app where markup lived in a Windows Registry
+     * app-wide setting.
      */
     protected function mutateFormDataBeforeFill(array $data): array
     {
-        if (! empty($data['product_category_id'])) {
+        $buy = (float) ($data['buy_price'] ?? 0);
+        $sell = (float) ($data['sell_price'] ?? 0);
+
+        if ($buy > 0) {
+            $data['markup_display'] = round(($sell - $buy) / $buy * 100, 2);
+        } elseif (! empty($data['product_category_id'])) {
             $data['markup_display'] = (float) (ProductCategory::query()
                 ->where('company_id', Filament::getTenant()?->getKey())
                 ->whereKey($data['product_category_id'])
                 ->value('markup') ?? 0);
+        } else {
+            $data['markup_display'] = 0;
         }
+
         return $data;
     }
 }

@@ -51,7 +51,8 @@ class PriceTiersRelationManager extends RelationManager
                     ->step('0.01')
                     ->minValue(0)
                     ->prefix('€')
-                    ->helperText('Either set a flat tier price OR a discount %, not both.'),
+                    ->requiredWithout('discount_percent')
+                    ->helperText('Either a flat tier price OR a discount % (or both — at least one must be set).'),
 
                 TextInput::make('discount_percent')
                     ->label('Discount %')
@@ -59,7 +60,8 @@ class PriceTiersRelationManager extends RelationManager
                     ->step('0.01')
                     ->minValue(0)
                     ->maxValue(100)
-                    ->suffix('%'),
+                    ->suffix('%')
+                    ->requiredWithout('value'),
             ])
             ->columns(3);
     }
