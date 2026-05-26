@@ -65,7 +65,14 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Europe/Athens matches the operator's wall clock + the AADE
+    // MARK timestamps. ETL imports legacy WIN1253 Firebird datetimes
+    // as naïve local strings; reading them back with Athens TZ
+    // displays the same value operators see in the legacy app and in
+    // the AADE portal. Per-tenant override (Estonian tenant) lands
+    // when that tenant goes live — for now Greek is the only active
+    // operator-facing locale.
+    'timezone' => env('APP_TIMEZONE', 'Europe/Athens'),
 
     /*
     |--------------------------------------------------------------------------
@@ -78,7 +85,11 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    // 'el' makes Filament's ->money('EUR') columns render in Greek
+    // format ("1.234,56 €") instead of US format ("€1,234.56") —
+    // which is what operators expect on Greek invoices. Per-tenant
+    // locale override lands with the Estonian tenant.
+    'locale' => env('APP_LOCALE', 'el'),
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 

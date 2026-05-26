@@ -58,9 +58,15 @@ class InvoiceInfolist
                         TextEntry::make('customer.name')
                             ->label('Live customer record')
                             ->placeholder('—')
+                            // Pass the Company model (Laravel uses its
+                            // route key = slug, per Company::getRouteKeyName).
+                            // Passing $record->company_id directly produces
+                            // a URL with an integer in the {tenant} slug
+                            // segment, which Filament's tenant-binding
+                            // middleware then 404s.
                             ->url(fn ($record) => $record->customer_id
                                 ? route('filament.admin.resources.customers.edit', [
-                                    'tenant' => $record->company_id,
+                                    'tenant' => $record->company,
                                     'record' => $record->customer_id,
                                 ])
                                 : null)

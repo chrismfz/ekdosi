@@ -44,8 +44,15 @@ class InvoiceResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
+        // Lift SoftDeletingScope on Invoice itself so TrashedFilter
+        // works. Also include trashed Customer rows in the eager load
+        // so an invoice for a soft-deleted customer still displays the
+        // customer name (instead of a blank column / broken Infolist
+        // link) — matches the CLAUDE.md application-wide pattern for
+        // soft-deleted referenced rows.
         return parent::getEloquentQuery()
-            ->withoutGlobalScopes([SoftDeletingScope::class]);
+            ->withoutGlobalScopes([SoftDeletingScope::class])
+            ->with(['customer' => fn ($q) => $q->withTrashed()]);
     }
 
     public static function infolist(Schema $schema): Schema

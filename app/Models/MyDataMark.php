@@ -45,7 +45,13 @@ class MyDataMark extends Model
     {
         return [
             'mark_date' => 'date',
-            'mark_time' => 'datetime:H:i:s',
+            // mark_time is stored as TIME (HH:MM:SS). Leaving it as a
+            // plain string avoids Carbon synthesising today's date,
+            // which would silently break date-based comparisons
+            // (e.g. 23:00 yesterday's mark would compare as "later
+            // than" 09:00 today's mark when both get a today() date).
+            // The Filament Tables/Infolist time formatters render
+            // the string directly via PHP's strftime-style parsing.
         ];
     }
 

@@ -102,17 +102,27 @@ class InvoicesTable
                 SelectFilter::make('customer_id')
                     ->label('Customer')
                     ->searchable()
+                    // withTrashed() so the filter can resolve labels for
+                    // invoices that reference a soft-deleted customer
+                    // — otherwise historical invoices for departed
+                    // customers become unfilterable.
                     ->getSearchResultsUsing(fn (string $search) => Customer::query()
+                        ->withTrashed()
                         ->where('company_id', Filament::getTenant()?->getKey())
                         ->where('name', 'like', "%{$search}%")
                         ->orderBy('name')
                         ->limit(50)
-                        ->pluck('name', 'id')
+                        ->get()
+                        ->mapWithKeys(fn ($c) => [$c->id => $c->trashed() ? $c->name.' (deleted)' : $c->name])
                         ->toArray())
-                    ->getOptionLabelUsing(fn ($value) => Customer::query()
-                        ->where('company_id', Filament::getTenant()?->getKey())
-                        ->whereKey($value)
-                        ->value('name')),
+                    ->getOptionLabelUsing(fn ($value) => (function () use ($value) {
+                        $c = Customer::query()
+                            ->withTrashed()
+                            ->where('company_id', Filament::getTenant()?->getKey())
+                            ->whereKey($value)
+                            ->first();
+                        return $c ? ($c->trashed() ? $c->name.' (deleted)' : $c->name) : null;
+                    })()),
 
                 SelectFilter::make('mydata_state')
                     ->label('myDATA state')

@@ -34,6 +34,23 @@ class Invoice extends Model
 {
     use HasFactory, SoftDeletes;
 
+    /**
+     * Mass-assignable columns. The myDATA cache columns
+     * (mydata_sent / mydata_state / mydata_mark / mydata_url) are
+     * INTENTIONALLY OMITTED — they're written ONLY by the future
+     * MyDataSubmitter service (PR #7) inside the same DB transaction
+     * as the matching mydata_marks row. Leaving them fillable would
+     * let any Filament edit form (PR #8) accept `mydata_state = 'VALID'`
+     * with an arbitrary MARK from operator input, with no audit row
+     * to back it. The submitter uses `forceFill()` to bypass this guard.
+     *
+     * Same shape as the legacy schema, where MARK_AI0 (an AFTER INSERT
+     * trigger on MARK) was the only writer of those columns.
+     *
+     * ETL note: MigrateFromFirebird::copyInvoices populates these
+     * directly via the DB query builder (not via Model::create), so
+     * the fillable restriction doesn't affect the ETL.
+     */
     protected $fillable = [
         'company_id',
         'legacy_id',
@@ -65,11 +82,6 @@ class Invoice extends Model
         'occupation',
         'notes',
         'email_sent',
-        // myDATA cache (source of truth: mydata_marks)
-        'mydata_sent',
-        'mydata_state',
-        'mydata_mark',
-        'mydata_url',
     ];
 
     protected function casts(): array
@@ -138,11 +150,17 @@ class Invoice extends Model
 
     /**
      * Latest myDATA submission for this invoice — for the read-only
-     * view page. Last write wins (multiple submissions can exist if
-     * the operator cancels + re-submits).
+     * view page. Ordered by the legal action time (mark_date +
+     * mark_time), NOT by autoincrement id. Live submissions get id
+     * order = action order, but ETL-imported MARK rows from legacy
+     * may be inserted in arbitrary order (Firebird SELECT order),
+     * so id-based ordering would return the wrong row when the
+     * legacy operator cancelled and re-submitted out of insertion
+     * sequence. id is included as a final tiebreaker for the
+     * pathological case of two MARKs at exactly the same second.
      */
     public function latestMydataMark(): HasOne
     {
-        return $this->hasOne(MyDataMark::class)->latestOfMany();
+        return $this->hasOne(MyDataMark::class)->latestOfMany(['mark_date', 'mark_time', 'id']);
     }
 }

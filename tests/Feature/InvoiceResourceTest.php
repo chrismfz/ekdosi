@@ -118,24 +118,29 @@ class InvoiceResourceTest extends TestCase
     {
         $invoice = $this->makeInvoice();
 
-        // Two submissions: INSERT then CANCEL (the lifecycle the
-        // future MyDataSubmitter will produce).
-        MyDataMark::create([
-            'company_id' => $this->tenant->id,
-            'invoice_id' => $invoice->id,
-            'mark' => '400001111111111',
-            'mydata_action' => 'INSERT',
-            'created_at' => now()->subHour(),
-            'updated_at' => now()->subHour(),
-        ]);
-
+        // latestOfMany orders by ['mark_date', 'mark_time', 'id'] — NOT
+        // by created_at and NOT by id alone. ETL-imported MARK rows
+        // can be inserted out of action-time order; the relation must
+        // pick the chronologically latest action regardless of
+        // insertion sequence. To prove this, insert CANCEL FIRST
+        // (lower id) but with a later mark_date, then INSERT with
+        // earlier mark_date — the relation must still return CANCEL.
         MyDataMark::create([
             'company_id' => $this->tenant->id,
             'invoice_id' => $invoice->id,
             'mark' => '400002222222222',
             'mydata_action' => 'CANCEL',
-            'created_at' => now(),
-            'updated_at' => now(),
+            'mark_date' => '2026-05-27',
+            'mark_time' => '14:30:00',
+        ]);
+
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400001111111111',
+            'mydata_action' => 'INSERT',
+            'mark_date' => '2026-05-26',
+            'mark_time' => '09:00:00',
         ]);
 
         $latest = $invoice->fresh()->latestMydataMark;
