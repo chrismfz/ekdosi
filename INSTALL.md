@@ -226,9 +226,17 @@ the 8.4 upgrade.
 
 ## 6. Configure `.env`
 
+**This step is mandatory** — skipping it leaves the app on Laravel's
+defaults (`APP_ENV=production`, `DB_CONNECTION=sqlite`), so the very
+next step's `php artisan migrate` will silently create a
+`database/database.sqlite` file and migrate *there* instead of into
+your MariaDB. If you see Laravel prompting "Would you like to create
+the SQLite database?", you skipped this step — quit out, do this
+section, then redo §7.
+
 ```bash
-cp .env.example .env
-php artisan key:generate
+sudo -u ekdosi-app cp .env.example .env
+sudo -u ekdosi-app php artisan key:generate
 ```
 
 Edit `.env` and set at least:
@@ -266,7 +274,20 @@ single-process secrets like `APP_KEY` and DB creds.
 
 ## 7. Run migrations
 
-All artisan commands below run as the app user:
+All artisan commands below run as the app user.
+
+**First, sanity-check that the app is actually pointed at MariaDB** —
+if `.env` wasn't created in §6, Laravel falls back to SQLite by
+default, and `migrate` will silently create `database/database.sqlite`
+and migrate there instead:
+
+```bash
+sudo -u ekdosi-app php artisan db:show 2>&1 | head -3
+# Expected first line: "MariaDB ............................. <version>"
+# If you see "SQLite", go back to §6 — your .env is missing.
+```
+
+Then:
 
 ```bash
 sudo -u ekdosi-app php artisan migrate --force      # --force confirms running in production
@@ -549,22 +570,32 @@ Only needed on whatever box is going to run
 `php artisan migrate:firebird ...`. Can be the same host, can be a
 one-off VM next to the legacy server.
 
+### 12a. Install Firebird client + PDO driver + server
+
+The PDO driver package name depends on which repo you pull it from
+(both work):
+- Remi (matches the `php:remi-8.4` module stream): `php-firebird`
+- EPEL 10 (SCL-style versioned): `php8.4-pdo-firebird`
+
+The Firebird **server** package is also needed if you want to ETL
+against a local `.fdb` sandbox (host=127.0.0.1) instead of hitting the
+legacy server live. On AlmaLinux 10 / EPEL the package is
+`firebird-server`; on EL9 it's commonly just `firebird`.
+
 ```bash
-sudo dnf install -y firebird-utils firebird-devel php-firebird
-# verify the extension loaded:
+# PDO driver — try Remi first, EPEL as fallback
+sudo dnf install -y php-firebird || sudo dnf install -y php8.4-pdo-firebird
+
+# tools (gbak / isql-fb / fbsvcmgr) + the server, if you want local sandbox FB
+sudo dnf install -y firebird-utils firebird-server firebird-devel
+
+# verify the PDO driver actually loaded:
 php -m | grep -i firebird       # expect: pdo_firebird
 
-# restore the legacy gbak into a sandbox .fdb you can iterate against:
-gbak -r /path/to/ekdosi.fbk /var/lib/firebird/data/ekdosi-sandbox.fdb \
-     -user SYSDBA -password masterkey
-
-# import one tenant
-php artisan migrate:firebird --company="MyIP" --slug=myip \
-    --fdb=/var/lib/firebird/data/ekdosi-sandbox.fdb \
-    --host=127.0.0.1 --fbuser=SYSDBA --fbpass=masterkey
+sudo systemctl enable --now firebird   # service name may be firebird-superserver
 ```
 
-If `php-firebird` isn't in your Remi mirror, fall back to PECL:
+If neither package is available in your repos, fall back to PECL:
 
 ```bash
 sudo dnf install -y firebird-devel php-pear php-devel
@@ -572,6 +603,47 @@ sudo pecl install pdo_firebird
 echo "extension=pdo_firebird.so" | sudo tee /etc/php.d/30-pdo_firebird.ini
 sudo systemctl restart php-fpm
 ```
+
+### 12b. Restore the legacy gbak + import one tenant
+
+The Firebird server enforces `DatabaseAccess = Restrict
+/var/lib/firebird/data` by default — meaning it will only open `.fdb`
+files **under that directory**. If you point it at e.g. `/opt/foo.fdb`
+you'll get `SQLSTATE[HY000] [335544831] Use of database at location
+... is not allowed by server configuration`. Two fixes: put the
+`.fdb` under `/var/lib/firebird/data/` (recommended), or edit
+`/etc/firebird/firebird.conf` and add the directory to
+`DatabaseAccess`.
+
+```bash
+# restore the legacy gbak into a path FB allows
+sudo gbak -r /path/to/ekdosi.fbk /var/lib/firebird/data/ekdosi-sandbox.fdb \
+    -user SYSDBA -password masterkey
+sudo chown firebird:firebird /var/lib/firebird/data/ekdosi-sandbox.fdb
+
+# import one tenant — host=127.0.0.1 talks to the local FB server
+sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
+    --fdb=/var/lib/firebird/data/ekdosi-sandbox.fdb \
+    --host=127.0.0.1 --fbuser=SYSDBA --fbpass=masterkey
+```
+
+### 12c. ETL against a remote Firebird (cutover day)
+
+For the actual cutover, the `.fdb` lives on the legacy server, not
+locally. `--fdb` is a path **on the remote server's filesystem**, not
+on this box:
+
+```bash
+sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
+    --fdb="/opt/Data/ekdosi-myip.fdb" \
+    --host=10.23.22.5 \
+    --fbuser=EKDOSI --fbpass=ekdosi1234
+```
+
+If you see `Use of database at location ... is not allowed by server
+configuration`, the **legacy server's** `firebird.conf` doesn't allow
+opening that path — you'll need to either move the `.fdb` to a path
+it does allow, or extend `DatabaseAccess` on the legacy box.
 
 ## 13. Re-deploy / update runbook
 
