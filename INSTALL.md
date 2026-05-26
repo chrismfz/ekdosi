@@ -345,6 +345,11 @@ The app is **multi-tenant**: there's no usable login until at least one
 lives at `https://ekdosi.myip.gr/admin/{tenant-slug}/...` — `/admin`
 alone redirects to the user's first tenant.
 
+**Pick ONE of the three paths below — they're alternatives, not a
+sequence.** The seeder and the production tinker recipe both create a
+`myip` row; running both back-to-back hits a `slug_unique` violation
+on the second.
+
 ### Dev / staging — just seed it
 
 The repo ships a seeder that creates three sample tenants (`myip`,
@@ -365,11 +370,39 @@ from the legacy `.fbk` shipped at
 `legacy/ekdosi-main/db_backup/ekdosi.fbk`. The other two tenants
 stay empty until you ETL them from their own `.fbk` files.
 
-### Production — tinker recipe
+### Dev / staging but with YOUR real tenant values
 
-Create your real tenant and your first operator interactively:
+If you seeded above but want real values on the `myip` tenant (real
+AFM, real tax office, real myDATA creds later) instead of the
+placeholder seed values, **update** the row rather than creating a
+new one:
 
 ```bash
+sudo -u ekdosi php artisan tinker
+```
+```php
+\App\Models\Company::where('slug', 'myip')->update([
+    'name'              => 'MyIP',
+    'afm'               => '800561849',
+    'tax_office'        => 'Xanthi',
+    'country_code'      => 'GR',
+    'einvoice_provider' => 'gr-mydata',
+    'mydata_production' => false,
+]);
+exit
+```
+
+The §12 ETL preserves these values — it doesn't touch `companies`
+rows it didn't create.
+
+### Production — tinker recipe (no seed)
+
+Skip the seeder entirely on a production box (so you don't end up
+with the known-password admin or sample-ee throwaway tenant), then
+create your real tenant and first operator interactively:
+
+```bash
+sudo -u ekdosi php artisan migrate --force        # schema only, no seed
 sudo -u ekdosi php artisan tinker
 ```
 
@@ -379,8 +412,8 @@ $company = \App\Models\Company::create([
     'slug'              => 'myip',
     'country_code'      => 'GR',
     'einvoice_provider' => 'gr-mydata',
-    'afm'               => '999999999',
-    'tax_office'        => 'Athens',
+    'afm'               => '800561849',
+    'tax_office'        => 'Xanthi',
     'mydata_production' => false,             // flip to true once myDATA creds are set
 ]);
 
