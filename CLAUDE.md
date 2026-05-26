@@ -3,32 +3,121 @@
 Context for working in this repo. Read this first.
 
 ## What this project is
-Porting a legacy **Delphi + Firebird** invoicing app ("ekdosi") to a modern
-**Laravel 11 + FilamentPHP + MariaDB** stack. The legacy app is a homegrown
-τιμολογιέρα, updated over the years to support **myDATA**, **QR**, and a **WHMCS
-bridge**. It is operators-only (internal, no customer-facing frontend) and compiles
-only on a fragile Windows 7 VM — escaping that toolchain is the whole point.
+Porting a legacy **C++Builder (VCL) + Firebird** invoicing app ("ekdosi") to a
+modern **Laravel 13 + FilamentPHP + MariaDB** stack. The legacy app is a
+homegrown τιμολογιέρα, updated over the years to support **myDATA**, **QR**,
+and a **WHMCS bridge**. It is operators-only (internal, no customer-facing
+frontend) and compiles only on a fragile Windows 7 VM — escaping that toolchain
+is the whole point.
 
 Scope: customers, stock/products, services, invoices (παραστατικά), payments,
-myDATA submission + audit trail. No customer portal.
+myDATA submission + audit trail, WHMCS bridge. No customer portal.
 
 ## Goal & end state
 - Single multi-tenant MariaDB (`company_id` on every table), one Laravel codebase,
   one Filament panel with tenant switching.
 - Legacy myDATA logic NOT re-ported by hand — use `firebed/aade-mydata`
   (+ `firebed/laravel-aade-mydata` wrapper). Per-tenant credentials live on `companies`.
-- Old Delphi/Firebird app stays read-only/archived for history after cutover.
+- WHMCS bridge **stays in scope** (myip relies on it). Re-implement cleanly as
+  PHP-to-PHP — shared DB read, or WHMCS API — instead of the legacy
+  AUTO_INVOICE_LOG polling design.
+- Old C++Builder/Firebird app stays read-only/archived for history after cutover.
+
+## Stack (proposed — adjust before locking in)
+Pinning the picks so we don't churn on this. These are defaults; flag any you
+want to change.
+
+- **PHP 8.4+** (Laravel 13 requires it).
+- **Laravel 13** (current latest at 2026-05).
+- **MariaDB 11.x** with `utf8mb4` / `utf8mb4_unicode_ci`.
+- **FilamentPHP 4** as the admin panel — and as the **tenancy driver**. Each
+  Filament panel resolves a Company tenant; no separate multi-tenancy
+  package on top. (Reason: Filament tenancy is built for this exact shape
+  and saves us a layer.)
+- **myDATA**: `firebed/aade-mydata` + `firebed/laravel-aade-mydata`. Per-tenant
+  credentials on `companies`. (See "myDATA: library vs. custom" below for
+  why — short version: the legacy `CMyData.cpp` isn't even in this repo,
+  the AADE spec evolves, and the library handles transport/types/errors so
+  we only own the mapping from our `Invoice` model to their payload.)
+- **Roles & permissions**: `spatie/laravel-permission` (operator / admin /
+  read-only roles per panel).
+- **Audit log**: `spatie/laravel-activitylog` on `invoices`, `customers`,
+  `mydata_marks` — useful for "who changed this and when" and for the
+  parallel-run period.
+- **PDF rendering** (replacing the FR3 reports): default to
+  `barryvdh/laravel-dompdf` for invoices; only escalate to
+  `spatie/browsershot` if we need CSS that DomPDF chokes on.
+- **Backups**: `spatie/laravel-backup` against S3-compatible storage.
+- **Queue / scheduler**: Laravel's built-in queue (database driver for now;
+  Redis if the WHMCS pull / myDATA-resend backlog warrants it).
+- **Firebird driver on the ETL host**: `pdo_firebird` PHP extension. Only
+  the artisan host needs it; the main app box doesn't.
+
+## Getting started (concrete first steps)
+The repo today is just reference material + the migration kit. To turn it
+into a working app:
+
+1. **Scaffold the Laravel app at the repo root.** Either:
+   ```bash
+   composer create-project laravel/laravel:^13 ekdosi-app
+   ```
+   then move its contents up and merge with the existing `CLAUDE.md` /
+   `README.md` / `/old/` / `/ekdosi-migration-kit/`. (Or scaffold in a
+   sibling dir and move things across — whichever keeps git history
+   cleanest.)
+2. **Install the picks above**:
+   ```bash
+   composer require filament/filament:^4 \
+       firebed/laravel-aade-mydata \
+       spatie/laravel-permission \
+       spatie/laravel-activitylog \
+       barryvdh/laravel-dompdf \
+       spatie/laravel-backup
+   php artisan filament:install --panels
+   ```
+3. **Drop the kit into place**: move
+   `ekdosi-migration-kit/database/migrations/*` →
+   `database/migrations/` and `ekdosi-migration-kit/app/Console/Commands/*` →
+   `app/Console/Commands/`. Delete the kit subdir and the duplicate
+   `MigrateFromFirebird.php` / `README.md` at the repo root.
+4. **Configure MariaDB**, run `php artisan migrate`, confirm all 19
+   migrations apply cleanly on an empty DB.
+5. **Sandbox-test the ETL** against the restored `gbak`:
+   ```bash
+   gbak -r /home/user/ekdosi/old/ekdosi-main/db_backup/ekdosi.fbk \
+       /tmp/ekdosi-sandbox.fdb -user SYSDBA -password masterkey
+   php artisan migrate:firebird --company="Sandbox" --slug=sandbox \
+       --fdb=/tmp/ekdosi-sandbox.fdb --host=127.0.0.1 \
+       --fbuser=SYSDBA --fbpass=masterkey
+   ```
+6. **Build the Company tenant model + Filament panel**, then a Customer
+   resource as the smallest end-to-end slice. Verify the tenant scoping
+   actually scopes (CUST_ID=1 must show only the current tenant's row).
+7. Then Products, then Invoices (read-only view first), then the
+   issue-invoice flow (which is the first thing that touches the
+   `firebed/aade-mydata` library and the VAT/rounding math).
+8. WHMCS bridge last — once the manual-issue path is proven.
+
+This order keeps the highest-risk pieces (VAT math, myDATA submit) gated
+behind a working tenancy + CRUD foundation, so when they break we know
+it's not infrastructure.
 
 ## Repo layout
 ```
-/legacy/           # original Delphi source + Firebird schema (reference, do not build)
-  schema/ekdosi-schema.sql      # isql -x dump (WIN1253 DB; ASCII DDL is clean)
-  delphi/                       # old Pascal source — the real VAT/rounding logic lives here
-/database/migrations/           # target schema (19 idiomatic Laravel migrations)
-/app/Console/Commands/MigrateFromFirebird.php   # re-runnable ETL, one tenant per run
-/README.md                      # migration-kit decisions (read alongside this file)
+/old/              # legacy reference material (do not build)
+  ekdosi-schema.sql             # isql -x dump (WIN1253 DB; ASCII DDL is clean)
+  ekdosi-main/                  # C++Builder source (.cpp/.h/.dfm) — real VAT/rounding lives here
+  ekdosi-main/db_backup/        # gbak of the Firebird DB; restore for sandboxed ETL dev
+  ekdosi-main/reports/          # FastReport 3 (.fr3) templates — out of scope, rebuild as PDF
+/ekdosi-migration-kit/          # drops into a fresh Laravel app
+  database/migrations/          # target schema (19 idiomatic Laravel migrations)
+  app/Console/Commands/MigrateFromFirebird.php   # re-runnable ETL, one tenant per run
+  README.md                     # migration-kit decisions (read alongside this file)
 CLAUDE.md                       # you are here
 ```
+Note: a Laravel 13 app is not yet scaffolded at the repo root — the kit is
+material to drop in once it is. The `php artisan` commands below assume that
+step has been done.
 
 ## Architectural decisions (do not re-litigate without reason)
 - **Multi-tenant, not per-DB.** Superset: can deploy per-DB later; reverse can't.
@@ -63,8 +152,9 @@ CLAUDE.md                       # you are here
 2. ETL each `.fdb` → one tenant (`php artisan migrate:firebird ...`). Re-runnable.
 3. **Parallel run + golden tests** before trusting it: legacy stores `PRICE`/`PRICEWVAT`
    per line; recompute over imported inputs and assert identical totals. This is where
-   VAT/rounding port bugs (hiding in the Delphi code) surface.
-4. Planned cutover: ETL one last time, Delphi → read-only archive, kill the Win7 VM.
+   VAT/rounding port bugs (hiding in the C++Builder code) surface.
+4. Planned cutover: ETL one last time, C++Builder app → read-only archive, kill the
+   Win7 VM.
 
 ## Commands
 ```bash
@@ -89,67 +179,102 @@ Requires the `pdo_firebird` PHP extension on the artisan host.
       `mydata_marks` → update `invoices.mydata_*` cache (mirror legacy MARK_AI0 trigger).
 - [ ] Re-implement WHMCS bridge cleanly (PHP-to-PHP now: shared DB or API).
 - [ ] Confirm whether the GET_COMB_* "combined invoice" feature is used by myip.
-- [ ] Port + golden-test the line/total/VAT/rounding math from the Delphi source.
+- [ ] Port + golden-test the line/total/VAT/rounding math from the legacy
+      source (`FAddInvoice.cpp:showSums()` and `FAddInvoice2.cpp:calcPrices()`).
 - [ ] Verify `CONF_PARAMS` keys still needed; migrate app config into Laravel config/env.
 
 ## Source of truth note
 The schema is settled; the *behaviour* (VAT, rounding, discounts, myDATA payload shape)
-lives in the legacy source under /old/ekdosi-main and in stored values. When in doubt,
+lives in the legacy source under `/old/ekdosi-main/` and in stored values. When in doubt,
 trust the legacy stored results and reproduce them — don't reinvent the math.
+
+## Reading the legacy source
+- It's **C++Builder (VCL)** — `.cpp` + `.h` + `.dfm` forms, `Ekdosi.cbproj`,
+  uses cxGrid, JVCL, IBX (`TIBQuery`/`TIBTransaction`), `TNetHTTPClient`. Grep
+  for `AsCurrency` / `AsFloat` and IBX dataset events (`*BeforePost`,
+  `*AfterPost`), not Pascal idioms.
+- Source files are saved as **WIN1253**. To read Greek comments and string
+  literals: `iconv -f WINDOWS-1253 -t UTF-8 FAddInvoice.cpp | less`.
+- **Some shared utility headers are NOT in this repo** — `CMyData.h`,
+  `CEditBox.h`, `CMySpecialForm.h`, `RegAccess.h`. They live on an external
+  include path on the legacy dev box. If we ever need byte-exact reproduction
+  of legacy myDATA XML (e.g. to validate old MARK audits) we'll need those;
+  for forward issuing we don't — `firebed/aade-mydata` replaces all of it.
+
+## Sandbox the legacy DB before touching prod
+`/old/ekdosi-main/db_backup/ekdosi.fbk` is a `gbak` of the Firebird DB.
+Restore with:
+```bash
+gbak -r ekdosi.fbk fresh.fdb -user SYSDBA -password masterkey
+```
+…and point the ETL at the restored `.fdb` while iterating.
 
 ---
 
 ## Notes from inspection (2026-05-26)
 
-Read this before trusting the rest of the file — some of the claims above are
-aspirational rather than current state.
+### myDATA: library vs. custom port (decision: use the library)
+**Decision: use `firebed/aade-mydata` + `firebed/laravel-aade-mydata`. Do
+not port the legacy implementation.**
 
-### Repo reality vs. the "Repo layout" block above
-- There is **no `/legacy/`**. Legacy lives at:
-  - `/old/ekdosi-main/`     — the C++Builder source tree
-  - `/old/ekdosi-schema.sql` — the `isql -x` schema dump
-  - `/old/ekdosi-main/db_backup/ekdosi.fbk` — a Firebird gbak; restore with
-    `gbak -r ekdosi.fbk fresh.fdb -user SYSDBA -password masterkey` to get a
-    safe sandbox for ETL dev without touching prod.
-- There is **no `/database/migrations/` or `/app/Console/Commands/` at repo
-  root**. The 19 migrations and `MigrateFromFirebird.php` live inside
-  `/ekdosi-migration-kit/` and are duplicated as loose copies at the repo
-  root. Decide once: either move the kit's contents up to standard Laravel
-  paths (`database/migrations/`, `app/Console/Commands/`) and delete the
-  duplicates, or keep the "kit" framing and delete the root copies. Today
-  both exist and they are byte-identical.
-- **There is no Laravel app here yet** — no `composer.json`, no `artisan`.
-  The `php artisan migrate:firebird ...` command in the README will not run
-  until somebody scaffolds Laravel 11 (and Filament) and drops the kit into
-  it. Calling that out so we don't waste time looking for a missing bug.
+Reasons:
+1. The legacy myDATA class (`CMyData.cpp`) is **not in this repo** —
+   `FAutoInvoice.cpp` `#include`s `CMyData.h`, which lives on an external
+   include path on the legacy dev box. We can't copy-paste even if we
+   wanted to.
+2. The only legacy myDATA artefacts we *do* have are the three XML
+   templates in `mydataConstants.h`, and they have **hardcoded** stub
+   values (`<vatCategory>1</vatCategory>`,
+   `<withheldPercentCategory>3</withheldPercentCategory>`) that are not
+   correct for general use. Carrying them forward verbatim would ship
+   bugs.
+3. The AADE myDATA spec moves — invoice types, expense classifications,
+   error envelopes, sandbox endpoints. An actively-maintained library
+   tracks those; our own implementation would silently rot.
+4. The library covers transport (HTTP + auth headers), XML build, response
+   parsing, MARK extraction, error mapping, type catalogues. None of
+   that is domain-specific to ekdosi.
 
-### It's C++Builder, not Delphi
-The CLAUDE/README repeatedly say "Delphi". The source is **C++Builder (VCL)**
-— `.cpp` + `.h` + `.dfm` forms, project files `Ekdosi.cbproj`, uses cxGrid,
-JVCL, IBX (`TIBQuery`/`TIBTransaction`), `TNetHTTPClient`. The math idioms
-("AsCurrency", "AsFloat") and the IBX dataset events are what to grep for,
-not Pascal. Source files are saved as **WIN1253** (ISO-8859-ish to `file`);
-to read Greek comments/string literals: `iconv -f WINDOWS-1253 -t UTF-8 X.cpp`.
+What we **do** own (and what the library can't):
+- Mapping our `Invoice` + `InvoiceLine` Eloquent models → the library's
+  payload objects, including the correct per-line `vatCategory` from
+  the VAT rate, and `withheldPercentCategory` from the παρακράτηση type.
+- Choosing per-invoice-type `mydata_type` / `income_class` /
+  `income_class_category` (from `invoice_types` config — already in the
+  schema).
+- Persisting the response: full request/response XML into
+  `mydata_marks` (legal audit), then mirroring MARK / URL / state onto
+  `invoices.mydata_*` inside the same DB transaction
+  (replaces the legacy `MARK_AI0` trigger).
+- Cancel flow + resubmit handling.
 
-### The myDATA submit class is NOT in this repo
-`FAutoInvoice.cpp` does `#include "CMyData.h"` and calls
-`MyData::sendInvoice(invoiceId)` (line 648 and 663). That header — together
-with `CEditBox.h`, `CMySpecialForm.h`, `RegAccess`, and the rest of the
-project's shared utility classes — is on an external include path
-(`OLD_INCLUDES/INCLUDES_UNIQUE.txt` lists them). The XML build + HTTPS POST
-+ MARK parsing live in `CMyData.cpp` which we don't have. So:
-- We **cannot** port the legacy submit logic line-by-line. Good news: the
-  plan is already not to — `firebed/aade-mydata` replaces it wholesale.
-- The only XML reference we have is the three string templates in
-  `mydataConstants.h` (APY, INVOICE, INV_LINE). They have **hardcoded**
-  `<vatCategory>1</vatCategory>` and `<withheldPercentCategory>3</...>` —
-  do NOT replicate that hardcode in Laravel; the firebed library expects
-  per-line VAT category derived from the line's VAT rate, and
-  withholding category derived from the παρακράτηση type.
-- `FShowMyData.cpp` uses `https://mydata-dev.azure-api.net/...` (the dev
+Implementation shape: a thin `App\Services\MyDataSubmitter` service
+that takes an `Invoice` and returns a saved `MyDataMark`. All call sites
+(Filament action, WHMCS-triggered job, retry command) go through it.
+That isolates the library so we can swap it later if needed.
+
+How the legacy artefacts stay useful:
+- During parallel-run, the stored legacy request/response XMLs (in
+  `mark.response` from the legacy DB, imported into `mydata_marks`)
+  are reference data: build our payload for the same invoice, diff
+  against the stored legacy XML, investigate every divergence.
+
+### Legacy myDATA — pointers (for archaeology only)
+Concrete file references in case we need to dig:
+- `FAutoInvoice.cpp:648,663` — `MyData::sendInvoice(invoiceId)` call sites.
+- `CMyData.{h,cpp}`, `CEditBox.*`, `CMySpecialForm.*`, `RegAccess.*` — on
+  the legacy dev box's external include path (see
+  `OLD_INCLUDES/INCLUDES_UNIQUE.txt`); not in this repo.
+- `mydataConstants.h` — the three XML templates (APY, INVOICE, INV_LINE).
+  Useful only as a reference for which fields the legacy app populated;
+  do not reuse the hardcoded `vatCategory`/`withheldPercentCategory`
+  stubs (see decision section above).
+- `FShowMyData.cpp:64` — uses
+  `https://mydata-dev.azure-api.net/RequestTransmittedDocs?mark=0` (dev
   sandbox endpoint). Production is `https://mydatapi.aade.gr/myDATA/`.
-  Headers seen: `aade-user-id`, `Ocp-Apim-Subscription-Key`. Per-tenant
-  creds belong on `companies` as already planned.
+  Auth headers seen: `aade-user-id`, `Ocp-Apim-Subscription-Key`. The
+  firebed library handles all of this; we only need to populate per-tenant
+  credentials on `companies`.
 
 ### The VAT / discount / rounding math (the part we DO have to port)
 Lives in `FAddInvoice.cpp` `showSums()` (line ~269) and the symmetric
@@ -210,15 +335,109 @@ end.
 We are dropping FR3 entirely; rebuild as Blade→PDF (e.g. `barryvdh/laravel-dompdf`
 or `spatie/browsershot`) once the Filament action flow is in place.
 
-### Magic constants in `Constants.h` — do NOT carry over
+### Magic constants in `Constants.h` — do NOT carry over verbatim
 - `CipherKey = "e9e65b53fdf7df86940eb6192dce923ef7644e29"` — used for the
-  ekdosi↔CS-Cart customer-portal sync (`FCSConnect.cpp`). Already out of
-  scope; if we ever revive the WHMCS bridge use modern key management.
+  ekdosi↔**CS-Cart** customer-portal sync (`FCSConnect.cpp`). **CS-Cart
+  bridge is dropped entirely** — the code exists in the legacy tree but
+  was never actually needed. Don't carry over the key, the forms, or the
+  staging table.
+- Note: CS-Cart and WHMCS are two different bridges. **WHMCS stays in
+  scope** (see the "Billing-system bridges" section below); CS-Cart does
+  not.
 - `DB_GROUP_ID = 47` — magic number, role unclear; investigate if any
   imported row references it before deleting.
 - `SDAP NO`, `CSCART_SYNC NO`, `PROTIMOLOGIO YES`, `SHOW_PDF_TAB YES` —
   compile-time feature flags. Translate to per-tenant settings on
   `companies` (or `conf_params`) only if the flag is currently `YES`.
+
+### Billing-system bridges — WHMCS now, possibly Blesta later
+**WHMCS is in scope and needed by myip.** Blesta is a likely future addition
+(same niche as WHMCS). Don't over-abstract day one, but leave room: the
+"issue an invoice from an upstream billing system" code path should not be
+WHMCS-named end-to-end — a thin provider interface (`pullPendingInvoices()`,
+`mapToInvoice()`) makes adding Blesta a new implementation, not a refactor.
+
+Schema today vs. tomorrow:
+- Current migrations name things `whmcs_client_id` and `whmcs_invoice_log`
+  (mirroring legacy). If/when Blesta arrives, options are:
+  - **(a) Keep per-provider columns/tables** — add `blesta_client_id`,
+    `blesta_invoice_log`. Simple, no rename, dead-easy ETL. Recommended
+    while only WHMCS is real.
+  - **(b) Generalise to `billing_provider` + `external_client_id` +
+    `external_billing_log`.** Only worth doing once Blesta is committed.
+- **Open decision** — defer until Blesta is real. Don't pre-generalise.
+
+Legacy design (what to replace, not what to reproduce):
+- `AUTO_INVOICE_LOG` — staging table the legacy app polled to pick up
+  WHMCS-originated invoice intents. Mapped to `whmcs_invoice_log` in the new
+  schema.
+- `CUSTOMER_CS_ACCEPTED` — **NOT** WHMCS; it's CS-Cart staging. Dropped
+  entirely (see above).
+- Customer↔WHMCS link: was a join through bridge tables; now flat on
+  `customers.whmcs_client_id`.
+- `FAutoInvoice.cpp` is the legacy job that drained the queue + sent to
+  myDATA + emailed PDFs. The new equivalent should be a Laravel queue
+  worker (or scheduled command) that:
+  1. Pulls WHMCS invoices via the WHMCS API (preferred — decoupled,
+     survives WHMCS schema changes). Shared-DB read is the legacy
+     shortcut; only use it if API rate limits force it.
+  2. Maps to `customers` (by `whmcs_client_id`) and creates an `invoice`
+     + `invoice_lines`.
+  3. Issues through the normal myDATA action (so MARK is recorded the
+     same way as manually-issued invoices — single code path).
+  4. Records the WHMCS↔ekdosi linkage in `whmcs_invoice_log` for audit
+     and idempotency.
+
+### Data migration — how the cutover actually happens
+This is what `MigrateFromFirebird.php` exists for; spelling out the story:
+
+- **One-shot Firebird → MariaDB ETL per legacy DB**, re-runnable. Each
+  `.fdb` becomes one tenant (`companies` row + `company_id` stamped on
+  every imported row). Command:
+  ```bash
+  php artisan migrate:firebird --company="MyIP" --slug=myip \
+      --fdb=/opt/Data/ekdosi-myip.fdb --host=10.23.22.5 \
+      --fbuser=EKDOSI --fbpass=ekdosi1234
+  ```
+- **Re-runnable** because every legacy row keeps its `legacy_id`
+  (unique per company). Re-running upserts on `(company_id, legacy_id)`
+  — so we can do dry runs, fix bugs, re-run, fix more, re-run, then do
+  one final pass at cutover with the legacy app stopped.
+- **Sandbox first**: restore `/old/ekdosi-main/db_backup/ekdosi.fbk`
+  into a throwaway `.fdb` and point the ETL there until it's green.
+- **Charset**: connect with `charset=UTF8` (Firebird transliterates
+  from the WIN1253 source on read). Fallback path documented in this
+  file's Charset section.
+- **What the ETL must touch** (so we don't forget anything mid-cutover):
+  - Reference tables first: `payment_methods`, `delivery_methods`,
+    `distribution_aims`, `metric_units`, `vat_categories`,
+    `product_categories`, `invoice_types` (including `invcount`!).
+  - Then: `customers`, `products`, `product_price_tiers`.
+  - Then: `invoices` (`INVDATE`+`INVTIME` → `issued_at`),
+    `invoice_lines`, `return_invoice_extras`, `payments`.
+  - myDATA audit: `mark` → `mydata_marks` (preserve original request/
+    response XML, MARK, URL, timestamps).
+  - `conf_params`, `whmcs_invoice_log` (legacy `AUTO_INVOICE_LOG`).
+- **What needs migrating from outside Firebird too**:
+  - **WHMCS data**: existing WHMCS↔customer linkages need to land on
+    `customers.whmcs_client_id` during the ETL. If those mappings aren't
+    in the Firebird DB (likely partly in WHMCS, partly in `FMysqlSync`'s
+    mirror), the ETL needs a second source — pulling the WHMCS client
+    list and matching on AFM / email / name.
+  - **Sequence continuation**: `invoice_types.invcount` is the running ΑΑ
+    per type; the ETL copies it as-is so the new app continues from the
+    same number. No fiscal-boundary cutover required.
+- **Golden-test gate** (see README): after each ETL run, recompute
+  line/invoice totals from imported inputs and compare to the
+  imported `PRICE`/`PRICEWVAT`. Any divergence is a port bug in our VAT
+  math, not a data issue.
+- **Cutover sequence** (write this up as a runbook before the actual day):
+  1. Freeze legacy app (read-only / users out).
+  2. Final `gbak` of each `.fdb`.
+  3. Run `migrate:firebird` against the final dumps.
+  4. Run golden tests; fail-stop if anything diverges.
+  5. Snapshot the MariaDB; switch DNS / app pointers.
+  6. Archive the Firebird DBs + the C++Builder source for legal-retention.
 
 ### Schema columns worth re-checking before finalising migrations
 - `INVOICE` has both `INVDATE` (DATE) and `INVTIME` (TIME) — already
@@ -250,8 +469,10 @@ or `spatie/browsershot`) once the Filament action flow is in place.
   (`MYDATA_TYPE`, `MYDATA_INCOME_CLASS`, `MYDATA_INCOME_CLASS_CATEGORY`)
 - `FCSConnect.*` / `FManageCSUsers.*` / `FManageCSInvoices.*` — CS-Cart
   bridge (the customer-portal staging the README dropped)
-- `FMysqlSync.*` — there's also a one-way push to a MySQL mirror; check
-  whether myip still relies on it before we kill it
+- `FMysqlSync.*` — one-way push to a MySQL mirror. Likely the legacy
+  shortcut that fed WHMCS / the customer-portal. Inspect before deciding
+  whether the new WHMCS bridge needs to keep writing into that mirror
+  during the parallel-run window.
 - `FInvoiceReturn.*` — credit notes (returns)
 - `FPrint.*` — FR3 print harness
 - `mydataConstants.h` — the three XML templates (above)
@@ -262,8 +483,11 @@ or `spatie/browsershot`) once the Filament action flow is in place.
   external includes folder.
 
 ### Open questions surfaced by inspection
-- [ ] Does `myip` still use `FMysqlSync` (one-way MySQL mirror)? If yes,
-      it overlaps with WHMCS bridge plans — decide which is canonical.
+- [ ] WHMCS bridge: API vs. shared-DB read for pulling WHMCS invoices?
+      (Recommendation: API. See "WHMCS bridge" section above.)
+- [ ] Inspect `FMysqlSync` — is the MySQL mirror it writes to the same DB
+      that backs WHMCS / the customer-portal? Decide if the new WHMCS bridge
+      keeps that mirror alive during cutover.
 - [ ] Read `GET_INV_CODE` stored procedure body in schema.sql to decide
       whether INVCODE format needs to be carried over or can be regenerated.
 - [ ] Get `CMyData.cpp` from the legacy dev box, OR confirm we'll never
@@ -271,5 +495,5 @@ or `spatie/browsershot`) once the Filament action flow is in place.
 - [ ] Decide: collapse `/ekdosi-migration-kit/` into the repo root (and
       delete the duplicate `README.md` + `MigrateFromFirebird.php` at
       root), or vice versa.
-- [ ] Scaffold a Laravel 11 + Filament app at repo root before any of the
+- [ ] Scaffold a Laravel 13 + Filament app at repo root before any of the
       `php artisan` commands documented above become real.
