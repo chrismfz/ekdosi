@@ -58,12 +58,23 @@ class EditInvoice extends EditRecord
      * loads the page with mydata_state=null) and the user clicking
      * Save, another browser tab / a queue job could have filed this
      * invoice with AADE. Saving would then overwrite header fields on
-     * a legally-frozen invoice. Refresh + re-assert here, inside the
-     * save transaction.
+     * a legally-frozen invoice.
+     *
+     * Uses lockForUpdate() so the row lock is held by Filament's save
+     * transaction until the form UPDATE commits — closing the race
+     * window between this SELECT and the subsequent UPDATE. A bare
+     * fresh() narrows the window but doesn't close it: a concurrent
+     * MyDataSubmitter could still slip a filing in between the read
+     * and the write. The lock blocks any concurrent writer (or other
+     * SELECT FOR UPDATE) until this save commits or rolls back.
      */
     protected function beforeSave(): void
     {
-        $current = $this->record->fresh();
+        $current = Invoice::query()
+            ->whereKey($this->record->getKey())
+            ->lockForUpdate()
+            ->first();
+
         if ($current?->mydata_state !== null) {
             Notification::make()
                 ->title('Invoice was filed in another tab')

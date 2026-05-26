@@ -56,6 +56,37 @@ class InvoiceLine extends Model
                     ?? Invoice::query()->whereKey($line->invoice_id)->value('company_id');
             }
 
+            // Loud-fail validation on inputs the form requires but the
+            // DB/migration allows null/out-of-range — defends every
+            // non-form caller (tests, factories, API, hostile Livewire
+            // payload) from silently producing a wrong-VAT or negative-
+            // value invoice. The ETL bypasses this hook entirely (uses
+            // DB::table()->insertGetId), so legacy import is unaffected.
+            if ($line->vat_percent === null) {
+                throw new \RuntimeException(
+                    'InvoiceLine.vat_percent is required — refusing to save with implicit 0%, '.
+                    'which would silently file a zero-VAT invoice at myDATA. '.
+                    'Set vat_percent explicitly (use VatCategory::rate or copy from the product).'
+                );
+            }
+
+            $qty = (float) ($line->qty ?? 0);
+            $price = (float) ($line->price_per_item ?? 0);
+            $lineDiscount = (float) ($line->discount ?? 0);
+            $vat = (float) $line->vat_percent;
+
+            if ($qty <= 0) {
+                throw new \RuntimeException(
+                    "InvoiceLine.qty must be > 0; got {$qty}. A zero-qty line files a zero-value entry at myDATA."
+                );
+            }
+            if ($lineDiscount < 0 || $lineDiscount > 100) {
+                throw new \RuntimeException(
+                    "InvoiceLine.discount must be in [0, 100]; got {$lineDiscount}. ".
+                    'Negative would inflate the line total; >100 would produce a negative net price.'
+                );
+            }
+
             // Compute line totals from qty + price + discount + VAT.
             // Authoritative computation — overwrites any value the
             // caller may have set, on every save. Match legacy
@@ -63,11 +94,6 @@ class InvoiceLine extends Model
             // intra-formula) for storage. The HEADER discount is
             // applied at the aggregate level by InvoiceVatBreakdown,
             // never here.
-            $qty = (float) ($line->qty ?? 0);
-            $price = (float) ($line->price_per_item ?? 0);
-            $lineDiscount = (float) ($line->discount ?? 0);
-            $vat = (float) ($line->vat_percent ?? 0);
-
             $net = round($qty * $price * (1 - $lineDiscount / 100), 2);
             $gross = round($net * (1 + $vat / 100), 2);
 

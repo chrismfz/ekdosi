@@ -44,7 +44,16 @@ class ViewInvoice extends ViewRecord
                 ->modalSubmitActionLabel('Confirm submission')
                 ->action(function (Invoice $record) {
                     try {
-                        $submitter = app(EInvoiceSubmitterFactory::class)->for(Filament::getTenant());
+                        // Resolve the tenant from the record's own
+                        // company relation, not Filament::getTenant().
+                        // The record always has a company_id (NOT NULL
+                        // FK), but Filament::getTenant() can return
+                        // null if the action is invoked outside a
+                        // tenant-bound page context — passing null to
+                        // ->for(Company $tenant) is a hard TypeError
+                        // operators can't decipher. $record->company
+                        // is the source of truth either way.
+                        $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
                         $mark = $submitter->submit($record);
                         Notification::make()
                             ->title('Filed at myDATA')
@@ -79,7 +88,7 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Cancel this invoice at AADE')
-                ->modalDescription('This sends a CANCEL request to AADE for MARK '.($this->record->mydata_mark ?? '?').'. The MARK is preserved in the audit trail; state becomes CANCELLED. Issue a correction invoice for the actual content fix.')
+                ->modalDescription(fn (Invoice $record) => 'This sends a CANCEL request to AADE for MARK '.($record->mydata_mark ?? '?').'. The MARK is preserved in the audit trail; state becomes CANCELLED. Issue a correction invoice for the actual content fix.')
                 ->modalSubmitActionLabel('Confirm cancellation')
                 ->schema([
                     \Filament\Forms\Components\Textarea::make('reason')
@@ -89,7 +98,9 @@ class ViewInvoice extends ViewRecord
                 ])
                 ->action(function (Invoice $record, array $data) {
                     try {
-                        $submitter = app(EInvoiceSubmitterFactory::class)->for(Filament::getTenant());
+                        // See Submit-action comment above on why
+                        // $record->company beats Filament::getTenant().
+                        $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
                         // Factory returns NullSubmitter for off-mode — but
                         // we guard visibility above so we're guaranteed
                         // a real MyDataSubmitter here.
@@ -128,13 +139,13 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription('Builds the AADE payload and records it as a DRY_RUN row in the audit history. Does NOT contact AADE. Safe on any mode.')
                 ->modalSubmitActionLabel('Generate preview')
                 ->action(function (Invoice $record) {
-                    $tenant = Filament::getTenant();
-                    if (! $tenant) {
-                        Notification::make()->title('No tenant context.')->warning()->send();
-                        return;
-                    }
                     try {
-                        (new MyDataSubmitter($tenant))->previewXml($record);
+                        // Same reasoning as Submit/Cancel: derive the
+                        // tenant from the record's own company FK
+                        // (always present) rather than from
+                        // Filament::getTenant() (nullable in non-panel
+                        // contexts).
+                        (new MyDataSubmitter($record->company))->previewXml($record);
                         Notification::make()
                             ->title('Dry-run recorded')
                             ->body('Open the new DRY_RUN row in the myDATA submission history (below) and click "Request XML".')
