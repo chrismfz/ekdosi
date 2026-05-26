@@ -424,9 +424,14 @@ sudo systemctl enable --now php-fpm
 
 ## 10. Web server — nginx (recommended)
 
-```bash
-sudo mkdir -p /etc/nginx/conf.d
-```
+### 10a. HTTP-only config first
+
+Start with port 80 ONLY. **Don't write an HTTPS server block yet** —
+nginx refuses to start if you reference `ssl_certificate` files that
+don't exist, and certbot can't issue the cert without a running
+nginx serving the `/.well-known/acme-challenge/` HTTP-01 path.
+`certbot --nginx` rewrites this file in §10b to add the HTTPS block
+and cert paths in one step.
 
 Create `/etc/nginx/conf.d/ekdosi.myip.gr.conf`:
 
@@ -435,20 +440,9 @@ server {
     listen 80;
     listen [::]:80;
     server_name ekdosi.myip.gr;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ekdosi.myip.gr;
 
     root /var/www/ekdosi/public;
     index index.php;
-
-    # certbot will fill these in below
-    # ssl_certificate     /etc/letsencrypt/live/ekdosi.myip.gr/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/ekdosi.myip.gr/privkey.pem;
 
     client_max_body_size 32M;        # invoice PDFs / scanned attachments
 
@@ -474,15 +468,37 @@ server {
 }
 ```
 
-Enable, open the firewall, get a cert:
+Start nginx, open the firewall:
 
 ```bash
 sudo nginx -t && sudo systemctl enable --now nginx
 sudo firewall-cmd --permanent --add-service={http,https} && sudo firewall-cmd --reload
-
-# Let's Encrypt — point DNS at this host first
-sudo certbot --nginx -d ekdosi.myip.gr --redirect --agree-tos -m you@example.com
 ```
+
+Verify HTTP works (DNS must point at this host first):
+
+```bash
+curl -sI http://ekdosi.myip.gr/   # expect HTTP/1.1 200 (or 302 to login)
+```
+
+### 10b. Let certbot add HTTPS
+
+`certbot --nginx` automatically:
+- Serves the ACME challenge from the existing port-80 server block.
+- Issues + installs the cert under `/etc/letsencrypt/live/...`.
+- Edits `/etc/nginx/conf.d/ekdosi.myip.gr.conf` to add the `listen 443 ssl;` block, the `ssl_certificate` paths, and an HTTP→HTTPS redirect on port 80.
+- Reloads nginx.
+
+```bash
+sudo certbot --nginx -d ekdosi.myip.gr -n --redirect --agree-tos -m you@example.com
+```
+
+If certbot prints "Some challenges have failed", the most common
+causes are: (1) DNS for `ekdosi.myip.gr` doesn't resolve to this
+host yet — `dig +short ekdosi.myip.gr` should return your public
+IP; (2) port 80 is firewalled off by the cloud provider (open it in
+the security group, not just firewalld); (3) something else is
+already listening on port 80 — `sudo ss -tlnp | grep :80`.
 
 ### Apache alternative
 
