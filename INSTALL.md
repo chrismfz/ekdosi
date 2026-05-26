@@ -608,13 +608,25 @@ sudo systemctl list-unit-files | grep -i firebird
 sudo systemctl enable --now firebird   # adjust if grep showed a different name
 sudo ss -tlnp | grep 3050              # confirm FB is listening
 
-# the SYSDBA password is auto-generated on RHEL-family installs.
-# It is NOT 'masterkey'. Find it:
+# SYSDBA password handling varies by EL version + Firebird build:
+# - EL9 / Firebird 3 installs may auto-generate /etc/firebird/SYSDBA.password
+# - EL10 / Firebird 4 (current default) leaves it unset — you set it manually
 sudo cat /etc/firebird/SYSDBA.password 2>/dev/null \
   || sudo cat /opt/firebird/SYSDBA.password 2>/dev/null \
   || sudo find /etc /opt -name 'SYSDBA.password' 2>/dev/null
-# Use that password for --fbpass below, or reset it with:
-# sudo gsec -user SYSDBA -modify SYSDBA -pw <newpass>
+
+# If no password file exists, set one yourself. gsec uses local trusted
+# auth when run as the firebird OS user, so no current password needed:
+sudo -u firebird /usr/bin/gsec -user SYSDBA -modify SYSDBA -pw masterkey
+
+# If gsec errors with "record not found" / "connection rejected" the
+# security DB has no SYSDBA user at all — bootstrap via isql-fb:
+# sudo -u firebird /usr/bin/isql-fb -user SYSDBA \
+#     /var/lib/firebird/system/security4.fdb <<'SQL'
+# CREATE USER SYSDBA PASSWORD 'masterkey';
+# COMMIT;
+# QUIT;
+# SQL
 ```
 
 If neither package is available in your repos, fall back to PECL:
