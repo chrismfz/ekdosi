@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Observers\VatCategoryObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class PaymentMethod extends Model
+#[ObservedBy(VatCategoryObserver::class)]
+class VatCategory extends Model
 {
     use HasFactory, SoftDeletes;
 
@@ -15,8 +18,18 @@ class PaymentMethod extends Model
         'company_id',
         'legacy_id',
         'description',
-        'due_days',
+        'rate',
+        'long_description',
+        'is_default',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'rate' => 'decimal:2',
+            'is_default' => 'boolean',
+        ];
+    }
 
     public function company(): BelongsTo
     {

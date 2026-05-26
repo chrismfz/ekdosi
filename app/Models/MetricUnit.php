@@ -7,15 +7,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class PaymentMethod extends Model
+class MetricUnit extends Model
 {
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'company_id',
         'legacy_id',
-        'description',
-        'due_days',
+        'name',
+        'notes',
     ];
 
     public function company(): BelongsTo

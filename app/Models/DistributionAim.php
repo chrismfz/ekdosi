@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class PaymentMethod extends Model
+class DistributionAim extends Model
 {
     use HasFactory, SoftDeletes;
 
@@ -15,7 +15,6 @@ class PaymentMethod extends Model
         'company_id',
         'legacy_id',
         'description',
-        'due_days',
     ];
 
     public function company(): BelongsTo

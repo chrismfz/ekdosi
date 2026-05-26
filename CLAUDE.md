@@ -958,6 +958,11 @@ production data before cutover.
   per-type `pdf_template` / `default_print_target` columns (new
   semantics, not 1:1 legacy carryover).
 
+### Deferred from PR #19 (lookup resources) code review
+- **Soft-deleted referenced rows render blank in Filament Selects** — affects InvoiceTypeForm's `payment_method_id` / `delivery_method_id` / `distribution_aim_id` / `default_customer_id` AND CustomerForm's `payment_method_id` / `referred_by_customer_id`. The `pluck()` and `getOptionLabelUsing()` patterns don't include trashed rows, so once a lookup row is soft-deleted the dependent Select displays empty even though the FK still points at the row (the nullOnDelete only triggers on hard delete). On save, an unresolved Select can silently submit null. **Trigger PR**: application-wide form-pattern fix — single PR that updates every Select pulling from a SoftDeletes model to use `withTrashed()` for the label lookup, AND adds a "deleted" badge to the option text. Don't fix piecemeal; do it once for the whole panel.
+- **`Rule::unique(...)->where('company_id', Filament::getTenant()?->getKey())` degrades to `WHERE company_id IS NULL` outside panel context** — affects InvoiceTypeForm (introduced PR #19) and CustomerForm (introduced earlier). If a queue job or artisan command revalidates a model with these rules and the tenant facade isn't bound, duplicates within a real tenant pass validation. Hypothetical for now (no such caller exists), becomes real with WHMCS bridge. **Trigger PR**: WHMCS bridge job. Fix shape: a `TenantScopedUnique` rule helper that throws explicitly when tenant context is missing, instead of silently degrading.
+- **Soft-delete + reuse-same-code on `invoice_types` is technically blocked by the DB unique** — refuted as a real bug in review (soft-deleting an invoice type isn't a realistic workflow given invcount + MARK history), but noted here so the next time this constraint comes up we don't re-litigate.
+
 ### Deferred — tied to specific future PRs
 - **PDF generation on issue + auto-mail with audit-BCC** — legacy
   `FAutoInvoice.cpp:655` generates a PDF on every successful myDATA
