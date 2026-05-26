@@ -56,4 +56,14 @@ class InvoiceType extends Model
     {
         return $this->belongsTo(PaymentMethod::class);
     }
+
+    public function deliveryMethod(): BelongsTo
+    {
+        return $this->belongsTo(DeliveryMethod::class);
+    }
+
+    public function distributionAim(): BelongsTo
+    {
+        return $this->belongsTo(DistributionAim::class);
+    }
 }
