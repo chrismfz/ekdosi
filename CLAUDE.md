@@ -569,6 +569,26 @@ under `ALTER PROCEDURE`. The ones with actual logic:
 - Target stack: **Laravel 13 + Filament 5 + PHP 8.4 + MariaDB 11**.
 - Auth/authz: **`spatie/laravel-permission` + `bezhanSalleh/filament-shield`**.
 
+### Schema-drift check (2026-05-27)
+
+Live production schema pulled from rosso's `/opt/Data/ekdosi-myip.fdb`
+(see INSTALL.md §12e for the `isql -x` recipe) and committed at
+`legacy/ekdosi-myip-schema-2026-05-26.sql`. Diff vs.
+`legacy/ekdosi-schema.sql`:
+
+- ✅ **Zero structural drift.** Identical CREATE TABLE / DOMAIN /
+  GENERATOR / PROCEDURE / TRIGGER statements, identical per-column
+  type/null/default. The snapshot in this repo IS current as of today.
+- Only differences: a handful of `COMMENT ON DOMAIN ... IS 'Greek
+  description'` / `COMMENT ON COLUMN ...` lines added in production
+  (purely cosmetic — isql metadata documentation, no behavioural
+  effect, no impact on ETL).
+
+Implication: every column the production legacy app reads/writes
+maps to a column we already migrate to MariaDB. No silent drops will
+happen at cutover. Re-run this check before the actual cutover day
+just to be safe; the recipe is in INSTALL.md §12e.
+
 ### Still open
 - [ ] Estonian PEPPOL submitter: which library? Candidates include
       `nikolajlovenhardt/laravel-peppol`, `digitalcz/peppol-php`, or
