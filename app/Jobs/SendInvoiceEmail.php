@@ -60,18 +60,6 @@ class SendInvoiceEmail implements ShouldQueue
         public ?int $triggeredByUserId = null,
     ) {}
 
-    /**
-     * The InvoiceMailLog row id created in handle(). Captured so
-     * failed() (called by the queue worker after exhausting retries
-     * OR after a thrown exception) can flip the row to terminal
-     * 'failed' state — without it, a worker killed mid-send leaves
-     * the row stuck on 'sending' forever, and a 3-retry exhausted job
-     * leaves it on whatever state the last try wrote (often 'failed'
-     * with a transient error message instead of "gave up after 3
-     * tries").
-     */
-    public ?int $logId = null;
-
     public function handle(
         InvoicePdfRenderer $renderer,
         TenantMailerFactory $mailerFactory,
@@ -112,7 +100,6 @@ class SendInvoiceEmail implements ShouldQueue
             'queued_at'            => now(),
             'triggered_by_user_id' => $this->triggeredByUserId,
         ]);
-        $this->logId = $log->id;
 
         if ($email === '') {
             $log->update([
@@ -156,40 +143,53 @@ class SendInvoiceEmail implements ShouldQueue
 
     /**
      * Called by the queue worker when this job exhausts $tries OR
-     * when a non-retryable exception escapes handle(). Reconciles
-     * the InvoiceMailLog row created at the top of handle():
+     * a non-retryable exception escapes handle(). Stamps the latest
+     * log row for this invoice with a clear "gave up after N tries"
+     * message so operators can distinguish a transient last-attempt
+     * error from terminal exhaustion.
      *
-     *   - If handle() reached the catch block, the row is already
-     *     'failed' with the last attempt's error — overwrite the
-     *     message to make it clear retries are over.
-     *   - If the worker was kill -9'd mid-send (or DI resolution
-     *     threw before our catch), the row may still be 'queued' or
-     *     'sending' — flip to 'failed' so the audit trail isn't a
-     *     lie ("stuck on queued forever").
+     * Important: failed() runs on a FRESHLY DESERIALIZED job instance
+     * (verified at vendor/laravel/framework/.../CallQueuedHandler.php
+     * → unserialize(...) before invoking failed). Properties mutated
+     * by handle() — like a captured log row id — are GONE by the time
+     * failed() runs. So we look up the row by stable identifiers
+     * available on the deserialized instance: invoice_id +
+     * triggered_by_user_id, taking the most-recent. This is correct
+     * because handle() creates exactly one row per attempt, all rows
+     * for this invoice + trigger share a logical sequence, and we
+     * want to reconcile the most recent regardless of its current
+     * state (the catch block in handle() already wrote 'failed' with
+     * the transient error; we overwrite with "gave up").
      *
-     * No-op if logId is null (handle() never ran far enough to
-     * persist a row — nothing to reconcile).
+     * Does NOT help the kill-9 / DI-threw scenarios — those skip
+     * Laravel's failure pipeline entirely. Orphaned 'queued' or
+     * 'sending' rows from those scenarios need an artisan sweeper;
+     * CLAUDE.md tracks that as a deferred concern.
      */
     public function failed(Throwable $e): void
     {
-        if ($this->logId === null) {
+        $latest = InvoiceMailLog::query()
+            ->where('invoice_id', $this->invoice->getKey())
+            ->where('trigger', $this->trigger)
+            // Match on user attribution too — distinguishes a manual
+            // re-send by operator B from an auto-dispatch attempt
+            // running concurrently for the same invoice.
+            ->where('triggered_by_user_id', $this->triggeredByUserId)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($latest === null) {
             return;
         }
 
-        $log = InvoiceMailLog::find($this->logId);
-        if ($log === null) {
+        // Don't overwrite a clean 'sent' state — defensive; failed()
+        // should never fire after a successful attempt, but the queue
+        // contract permits unusual orderings under race conditions.
+        if ($latest->status === 'sent') {
             return;
         }
 
-        // Don't overwrite a row that already cleanly transitioned to
-        // 'sent' on an earlier successful attempt (defensive — failed()
-        // shouldn't fire on success, but the queue contract permits
-        // unusual call orders).
-        if ($log->status === 'sent') {
-            return;
-        }
-
-        $log->update([
+        $latest->update([
             'status'        => 'failed',
             'error_message' => 'Gave up after '.$this->tries.' tries. Last error: '.$e->getMessage(),
             'failed_at'     => now(),

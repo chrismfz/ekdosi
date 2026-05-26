@@ -206,6 +206,82 @@ class SendInvoiceEmailTest extends TestCase
         );
     }
 
+    /**
+     * The double-review found that the prior failed() implementation
+     * relied on `$this->logId` set in handle() — broken because
+     * Laravel deserializes the job before calling failed() (verified
+     * at vendor/laravel/.../CallQueuedHandler.php). This test
+     * exercises failed() on a freshly-instantiated job (as the queue
+     * worker would) and asserts the lookup-by-(invoice, trigger,
+     * user) reconciliation actually finds + updates the row.
+     */
+    public function test_failed_hook_reconciles_latest_log_row_after_deserialization(): void
+    {
+        $invoice = $this->makeFiledInvoice();
+
+        // Simulate attempt 1: handle() ran, wrote a 'failed' row with
+        // the transient last-attempt error.
+        \App\Models\InvoiceMailLog::create([
+            'company_id'           => $invoice->company_id,
+            'invoice_id'           => $invoice->id,
+            'recipient'            => 'cust@example.com',
+            'trigger'              => 'auto',
+            'status'               => 'failed',
+            'error_message'        => 'SMTP timeout',
+            'queued_at'            => now(),
+            'failed_at'            => now(),
+            'triggered_by_user_id' => null,
+        ]);
+
+        // Simulate the queue worker calling failed() with a FRESHLY
+        // CONSTRUCTED job (the deserialization path doesn't restore
+        // any properties handle() set — only constructor args).
+        $freshJob = new \App\Jobs\SendInvoiceEmail($invoice, trigger: 'auto');
+        $freshJob->failed(new \RuntimeException('SMTP timeout'));
+
+        $log = \App\Models\InvoiceMailLog::where('invoice_id', $invoice->id)
+            ->latest('id')
+            ->first();
+
+        $this->assertSame('failed', $log->status);
+        $this->assertStringContainsString('Gave up after', $log->error_message);
+        $this->assertStringContainsString('SMTP timeout', $log->error_message);
+    }
+
+    public function test_failed_hook_does_not_overwrite_sent_rows(): void
+    {
+        $invoice = $this->makeFiledInvoice();
+
+        \App\Models\InvoiceMailLog::create([
+            'company_id'  => $invoice->company_id,
+            'invoice_id'  => $invoice->id,
+            'recipient'   => 'cust@example.com',
+            'trigger'     => 'auto',
+            'status'      => 'sent',
+            'queued_at'   => now(),
+            'sent_at'     => now(),
+        ]);
+
+        (new \App\Jobs\SendInvoiceEmail($invoice, trigger: 'auto'))
+            ->failed(new \RuntimeException('Late failure'));
+
+        $log = \App\Models\InvoiceMailLog::where('invoice_id', $invoice->id)->first();
+        $this->assertSame('sent', $log->status);
+        $this->assertNull($log->error_message);
+    }
+
+    public function test_failed_hook_no_op_when_no_prior_log_row(): void
+    {
+        $invoice = $this->makeFiledInvoice();
+
+        // Worker died before handle() created any row. failed() must
+        // not throw.
+        (new \App\Jobs\SendInvoiceEmail($invoice, trigger: 'auto'))
+            ->failed(new \RuntimeException('Pre-handle crash'));
+
+        $this->assertSame(0, \App\Models\InvoiceMailLog::where('invoice_id', $invoice->id)->count());
+    }
+
     public function test_malformed_bcc_entries_are_silently_dropped(): void
     {
         // Operator typed "audit@acme.gr, not-an-email, ops@acme.gr"

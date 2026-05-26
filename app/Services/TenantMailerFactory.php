@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Company;
 use Illuminate\Contracts\Mail\Factory as MailFactoryContract;
 use Illuminate\Contracts\Mail\Mailer as MailerContract;
+use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Testing\Fakes\MailFake;
 
@@ -51,15 +52,21 @@ class TenantMailerFactory
             return $this->factory->mailer();
         }
 
-        // Unique mailer name per call so we NEVER collide with
-        // MailManager's per-name cache. forgetMailers() would flush
-        // ALL cached mailers (verified at vendor/laravel/.../MailManager
-        // .php:631 — `$this->mailers = []`), which under a queue
-        // worker processing tenants A → B → A would force every
-        // dispatch to rebuild every other tenant's mailer too. Unique
-        // names cost a fresh resolve per send but leave neighbouring
-        // sends untouched.
-        $mailerName = 'tenant-'.$tenant->getKey().'-'.uniqid('', true);
+        // Fixed per-tenant name + a forgetMailers() flush before each
+        // build. Tradeoffs:
+        //   - The flush wipes the WHOLE mailer cache (verified at
+        //     vendor/laravel/.../MailManager.php — $this->mailers = [];).
+        //     Any neighbouring code that uses Mail::mailer() rebuilds
+        //     once on next access. Cost is milliseconds per send.
+        //   - The ALTERNATIVE (unique name per call) avoids the flush
+        //     but accumulates one config entry + one cached Mailer
+        //     instance per send, with no eviction. Under a long-lived
+        //     queue worker doing 1000 sends, that's 2-10MB held
+        //     indefinitely. A flush per send is the better tradeoff.
+        // Under Octane this still holds: per-tenant fixed names + flush
+        // means cache hits exactly once on the same tenant's next call
+        // and never accumulates.
+        $mailerName = 'tenant-'.$tenant->getKey();
 
         config()->set("mail.mailers.{$mailerName}", [
             'transport'  => 'smtp',
@@ -70,6 +77,10 @@ class TenantMailerFactory
             'password'   => $tenant->mail_smtp_password,
             'timeout'    => 30,
         ]);
+
+        if ($this->factory instanceof MailManager) {
+            $this->factory->forgetMailers();
+        }
 
         try {
             return $this->factory->mailer($mailerName);

@@ -511,14 +511,20 @@ class CompanyForm
                                                         ->body('Sent to '.$data['to'].(count($bcc) ? ' (BCC: '.count($bcc).')' : '').'. Check the inbox.')
                                                         ->success()->send();
                                                 } catch (\Throwable $e) {
-                                                    // Sanitise transport error to first line only —
-                                                    // full SMTP exception bodies sometimes include
-                                                    // server-banner strings or hostnames the
-                                                    // operator shouldn't see in a UI toast.
-                                                    $first = strtok($e->getMessage(), "\n") ?: 'send failed';
+                                                    // Surface the FULL SMTP error: this action is
+                                                    // gated by authorize('update', $record), so
+                                                    // only operators who already typed the SMTP
+                                                    // host see it — there's no info-disclosure to
+                                                    // an external party. Symfony Mailer wraps the
+                                                    // server's reason in lines 2-N of the
+                                                    // exception ("Connection refused", "535
+                                                    // Authentication failed", "Server said: ..."),
+                                                    // and that's exactly what the operator needs
+                                                    // to diagnose their config. First-line-only
+                                                    // sanitisation was hiding signal.
                                                     Notification::make()
                                                         ->title('Test email failed')
-                                                        ->body($first)
+                                                        ->body($e->getMessage())
                                                         ->danger()->persistent()->send();
                                                 }
                                             }),
