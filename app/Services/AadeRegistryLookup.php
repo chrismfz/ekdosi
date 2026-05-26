@@ -81,14 +81,21 @@ class AadeRegistryLookup
 
         // Defensive read: if the DTO shape changes across deploys the
         // file/redis cache can hold incompatible payloads. Treat any
-        // failure as a miss and re-fetch from AADE.
+        // failure as a miss and re-fetch from AADE. Log the failure so
+        // a misbehaving cache driver doesn't silently hammer GSIS
+        // for every call — operators want to know.
         try {
             $cached = Cache::get($cacheKey);
             if ($cached instanceof AadeRegistryRecord) {
                 return $cached;
             }
-        } catch (Throwable) {
-            // ignore — fall through to fresh fetch
+        } catch (Throwable $e) {
+            Log::warning('AADE registry cache read failed — falling through to live fetch', [
+                'company_id' => $this->tenant->getKey(),
+                'afm' => $afm,
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+            ]);
         }
 
         $record = $this->callRegistry($afm);
@@ -141,9 +148,13 @@ class AadeRegistryLookup
      */
     private const AUTH_FAILURE_TOKENS = [
         'RG_WS_PUBLIC_AUTHENTICATION_FAILED',
-        'RG_WS_PUBLIC_WRONG_AFM',         // wrong issuer AFM in the request envelope
         'RG_WS_PUBLIC_USER_BLOCKED',       // credentials valid but user disabled
         'RG_WS_PUBLIC_INVALID_USER',
+        // NOTE: RG_WS_PUBLIC_WRONG_AFM is intentionally NOT here — it
+        // indicates the queried AFM is malformed (bad-request shape),
+        // not that the credentials are wrong. Misclassifying it as a
+        // credentials problem would send the operator to re-enter
+        // working credentials. Lands in AadeUnreachable instead.
     ];
 
     /** @throws AadeRegistryException on any error */
@@ -173,7 +184,7 @@ class AadeRegistryLookup
                 'company_id' => $this->tenant->getKey(),
                 'afm' => $afm,
                 'faultcode' => $sf->faultcode ?? null,
-                'message' => $msg,
+                'message' => self::scrubSecrets($msg),
             ]);
 
             throw new AadeUnreachable('AADE registry returned a SOAP fault.', 0, $sf);
@@ -187,7 +198,7 @@ class AadeRegistryLookup
                 'company_id' => $this->tenant->getKey(),
                 'afm' => $afm,
                 'exception' => get_class($e),
-                'message' => $e->getMessage(),
+                'message' => self::scrubSecrets($e->getMessage()),
             ]);
 
             throw new AadeUnreachable('AADE registry unreachable.', 0, $e);
@@ -226,10 +237,34 @@ class AadeRegistryLookup
                 'company_id' => $this->tenant->getKey(),
                 'afm' => $afm,
                 'exception' => get_class($e),
-                'message' => $e->getMessage(),
+                'message' => self::scrubSecrets($e->getMessage()),
             ]);
             throw new AadeUnreachable('AADE registry response could not be parsed.', 0, $e);
         }
+    }
+
+    /**
+     * Strip anything that looks like a WS-Security password element
+     * before writing to logs. AADE error responses (especially gateway
+     * faults proxied through WAFs) sometimes echo back the request body
+     * that triggered the fault — including the plaintext password we
+     * just attached. Even with ext-soap's `trace` off in production,
+     * SoapFault::getMessage() is not under our control and the next
+     * AADE infrastructure change could re-introduce the leak.
+     *
+     * Match is intentionally generous (case-insensitive, optional
+     * namespace prefix, optional whitespace) — false-positive scrubbing
+     * is preferable to a leak.
+     */
+    private static function scrubSecrets(string $message): string
+    {
+        $patterns = [
+            // <wsse:Password>...</wsse:Password>  and unprefixed variants
+            '~<([a-z0-9_]+:)?Password[^>]*>.*?</([a-z0-9_]+:)?Password>~is',
+            // <Username>...</Username> (less critical but still surface-reducing)
+            '~<([a-z0-9_]+:)?Username[^>]*>.*?</([a-z0-9_]+:)?Username>~is',
+        ];
+        return preg_replace($patterns, '[REDACTED]', $message) ?? '[scrub-failed]';
     }
 
     private function parse(object $data): AadeRegistryRecord
@@ -260,15 +295,17 @@ class AadeRegistryLookup
             . ((string) ($basic->postal_address_no ?? '')),
         );
 
-        // The legacy working example branches on deactivation_flag_descr
-        // (the human Greek text "ΕΝΕΡΓΟΣ ΑΦΜ" / "ΑΝΕΝΕΡΓΟΣ ΑΦΜ") rather
-        // than the deactivation_flag numeric code — the code's polarity
-        // (1=active or 1=deactivated) is not documented unambiguously
-        // and varies between drift-audit sources. Use the descr field
-        // for the active check; if it's missing or unrecognised, treat
-        // as active (defensive default — operators correct manually).
+        // Branch on the human-readable status text rather than the
+        // numeric deactivation_flag (whose polarity is not documented
+        // unambiguously). FAIL CLOSED: anything that isn't EXACTLY
+        // "ΕΝΕΡΓΟΣ ΑΦΜ" — empty, an "ΑΝΑΣΤΟΛΗ" suspension state,
+        // unrecognised text, whitespace-only — counts as not active.
+        // Otherwise an AFM in suspension status (third state, exists)
+        // would import as active and the customer's first invoice
+        // would be rejected by myDATA. Operators see statusDescr in
+        // the form notification and can correct manually if needed.
         $statusDescr = trim((string) ($basic->deactivation_flag_descr ?? ''));
-        $active = $statusDescr === '' || $statusDescr === 'ΕΝΕΡΓΟΣ ΑΦΜ';
+        $active = $statusDescr === 'ΕΝΕΡΓΟΣ ΑΦΜ';
 
         return new AadeRegistryRecord(
             afm: (string) ($basic->afm ?? ''),
@@ -298,6 +335,15 @@ class AadeRegistryLookup
         // matter if someone later flipped to non-WSDL mode — at which
         // point a SOAP_1_2 envelope URI would be wrong for the request
         // target anyway. Keep this minimal.
+        //
+        // `trace` is restricted to local/testing — when on, ext-soap
+        // retains the full last request/response in the SoapClient,
+        // INCLUDING the plaintext WS-Security password we just attached.
+        // Any code path that walks an exception chain (Whoops in dev is
+        // fine; Sentry/Bugsnag/log channels in prod are not) could
+        // surface that buffer. Turning trace off in production makes
+        // those buffers empty, so even if something dumps the client,
+        // there's nothing sensitive to leak.
         try {
             return new SoapClient(self::WSDL, [
                 'encoding' => 'UTF-8',
@@ -305,7 +351,7 @@ class AadeRegistryLookup
                 'soap_version' => SOAP_1_2,
                 'cache_wsdl' => WSDL_CACHE_NONE,
                 'connection_timeout' => 30,
-                'trace' => true,
+                'trace' => app()->environment('local', 'testing'),
             ]);
         } catch (SoapFault $sf) {
             throw new AadeUnreachable('Failed to load AADE RgWsPublic2 WSDL.', 0, $sf);

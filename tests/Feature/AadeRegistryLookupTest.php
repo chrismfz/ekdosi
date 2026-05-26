@@ -135,6 +135,31 @@ class AadeRegistryLookupTest extends TestCase
         $this->assertSame('ΑΝΕΝΕΡΓΟΣ ΑΦΜ', $result->statusDescr);
     }
 
+    public function test_unknown_status_fails_closed_to_inactive(): void
+    {
+        // FAIL CLOSED: anything that isn't EXACTLY "ΕΝΕΡΓΟΣ ΑΦΜ" should
+        // be treated as not active — including empty descrs, suspension
+        // states like "ΑΝΑΣΤΟΛΗ", and unknown future statuses. Lets the
+        // operator see a warning notification rather than silently
+        // importing a problematic AFM that would fail myDATA later.
+        foreach (['', 'ΑΝΑΣΤΟΛΗ', 'UNKNOWN_STATUS'] as $weirdStatus) {
+            // Distinct AFM per iteration so the 24h cache doesn't
+            // serve the previous iteration's record from cache.
+            $afm = '800561'.random_int(100, 999);
+            $response = $this->canonicalResponse();
+            $response->result->rg_ws_public2_result_rtType->basic_rec->afm = $afm;
+            $response->result->rg_ws_public2_result_rtType->basic_rec->deactivation_flag_descr = $weirdStatus;
+
+            $result = (new AadeRegistryLookup($this->tenant, $this->mockSoap(returnValue: $response)))
+                ->findByAfm($afm);
+
+            $this->assertFalse(
+                $result->active,
+                "Status '{$weirdStatus}' should fail closed to inactive",
+            );
+        }
+    }
+
     public function test_malformed_response_maps_to_unreachable_not_500(): void
     {
         // AADE returning a shape we don't anticipate (gateway HTML proxied

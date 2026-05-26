@@ -136,10 +136,20 @@ class CompanyForm
                                                 if ($primary) {
                                                     $fillIfEmpty('kad_primary', $primary['code']);
                                                 }
-                                                Notification::make()
-                                                    ->title('Loaded from AADE: '.$result->name)
-                                                    ->body($result->doy.($primary ? ' · '.$primary['description'] : ''))
-                                                    ->success()->send();
+                                                // Surface the AADE-reported status — a
+                                                // deactivated own-company AFM means everything
+                                                // downstream (myDATA submission) will fail.
+                                                $body = $result->doy.($primary ? ' · '.$primary['description'] : '');
+                                                $notification = Notification::make()
+                                                    ->title('Loaded from AADE: '.$result->name);
+                                                if ($result->active) {
+                                                    $notification->body($body)->success();
+                                                } else {
+                                                    $notification
+                                                        ->body($body.' · ⚠ Status: '.($result->statusDescr ?: 'unknown — verify with AADE'))
+                                                        ->warning();
+                                                }
+                                                $notification->send();
                                             }),
                                     ),
 

@@ -125,10 +125,22 @@ class CustomerForm
                                                     // "Δραστηριότητα: ...".
                                                     $fillIfEmpty('occupation', $primary['description']);
                                                 }
-                                                Notification::make()
-                                                    ->title('Loaded from AADE: '.$result->name)
-                                                    ->body($result->doy.($primary ? ' · '.$primary['description'] : ''))
-                                                    ->success()->send();
+                                                // Surface the AADE-reported status. An AFM in
+                                                // suspension or deactivated state would be
+                                                // imported and then fail myDATA submission on
+                                                // first invoice — operator should see it now,
+                                                // before they commit the row.
+                                                $body = $result->doy.($primary ? ' · '.$primary['description'] : '');
+                                                $notification = Notification::make()
+                                                    ->title('Loaded from AADE: '.$result->name);
+                                                if ($result->active) {
+                                                    $notification->body($body)->success();
+                                                } else {
+                                                    $notification
+                                                        ->body($body.' · ⚠ Status: '.($result->statusDescr ?: 'unknown — verify with AADE before issuing'))
+                                                        ->warning();
+                                                }
+                                                $notification->send();
                                             }),
                                     ),
 
