@@ -232,9 +232,14 @@ sudo -u ekdosi git clone git@github.com:chrismfz/ekdosi.git /var/www/ekdosi
 cd /var/www/ekdosi
 
 sudo -u ekdosi composer install --no-dev --optimize-autoloader --no-interaction
-sudo -u ekdosi npm ci
-sudo -u ekdosi npm run build
 sudo -u ekdosi php artisan filament:assets   # publish Filament's CSS/JS/fonts to public/
+
+# Vite asset build (only needed once we have custom CSS/JS in resources/).
+# Skip on a fresh repo — no committed package-lock.json yet, and the
+# Filament panel uses the pre-built assets that filament:assets just
+# published. Run this block once we start writing custom frontend code:
+#   sudo -u ekdosi npm install        # generates package-lock.json on first run
+#   sudo -u ekdosi npm run build      # vite build -> public/build/
 ```
 
 If `composer` errors with a list of `requires php >=8.4` failures,
@@ -340,6 +345,11 @@ The app is **multi-tenant**: there's no usable login until at least one
 lives at `https://ekdosi.myip.gr/admin/{tenant-slug}/...` — `/admin`
 alone redirects to the user's first tenant.
 
+**Pick ONE of the three paths below — they're alternatives, not a
+sequence.** The seeder and the production tinker recipe both create a
+`myip` row; running both back-to-back hits a `slug_unique` violation
+on the second.
+
 ### Dev / staging — just seed it
 
 The repo ships a seeder that creates three sample tenants (`myip`,
@@ -353,11 +363,68 @@ sudo -u ekdosi php artisan migrate:fresh --seed --force
 Login: `admin@ekdosi.local` / `password`. **Never run this on a
 production box** — the password is hard-coded and known.
 
-### Production — tinker recipe
+After this you have schema + an admin user + three empty tenants. If
+you also want actual ekdosi data to play with (71 customers, 161
+invoices, etc.), continue to §12 — the ETL fills the `myip` tenant
+from the legacy `.fbk` shipped at
+`legacy/ekdosi-main/db_backup/ekdosi.fbk`. The other two tenants
+stay empty until you ETL them from their own `.fbk` files.
 
-Create your real tenant and your first operator interactively:
+### Dev / staging but with YOUR real tenant values
+
+If you seeded above but want real values on the `myip` tenant (real
+AFM, real tax office, real myDATA creds later) instead of the
+placeholder seed values, **update** the row rather than creating a
+new one:
 
 ```bash
+sudo -u ekdosi php artisan tinker
+```
+```php
+\App\Models\Company::where('slug', 'myip')->update([
+    'name'              => 'MyIP',
+    'afm'               => '800561849',
+    'tax_office'        => 'Xanthi',
+    'country_code'      => 'GR',
+    'einvoice_provider' => 'gr-mydata',
+    'mydata_production' => false,
+]);
+exit
+```
+
+The §12 ETL preserves these values — it doesn't touch `companies`
+rows it didn't create.
+
+If you also want a personal login (in addition to the seeded
+`admin@ekdosi.local`), do it in **one tinker session** — variables
+don't persist between exits, so splitting the create+attach across
+two `tinker` invocations leaves the new user with zero tenants
+attached and the panel 404s after login:
+
+```bash
+sudo -u ekdosi php artisan tinker
+```
+```php
+$company = \App\Models\Company::where('slug', 'myip')->first();
+$user    = \App\Models\User::create([
+    'name'              => 'Chris',
+    'email'             => 'chris@myip.gr',
+    'password'          => bcrypt('REPLACE-WITH-STRONG-PASSWORD'),
+    'email_verified_at' => now(),
+]);
+$user->companies()->attach($company->id);
+$user->companies()->pluck('slug');   // sanity: should print ["myip"]
+exit
+```
+
+### Production — tinker recipe (no seed)
+
+Skip the seeder entirely on a production box (so you don't end up
+with the known-password admin or sample-ee throwaway tenant), then
+create your real tenant and first operator interactively:
+
+```bash
+sudo -u ekdosi php artisan migrate --force        # schema only, no seed
 sudo -u ekdosi php artisan tinker
 ```
 
@@ -367,8 +434,8 @@ $company = \App\Models\Company::create([
     'slug'              => 'myip',
     'country_code'      => 'GR',
     'einvoice_provider' => 'gr-mydata',
-    'afm'               => '999999999',
-    'tax_office'        => 'Athens',
+    'afm'               => '800561849',
+    'tax_office'        => 'Xanthi',
     'mydata_production' => false,             // flip to true once myDATA creds are set
 ]);
 
@@ -855,9 +922,11 @@ sudo -u ekdosi git checkout main
 sudo -u ekdosi git pull --ff-only
 
 sudo -u ekdosi composer install --no-dev --optimize-autoloader --no-interaction
-sudo -u ekdosi npm ci
-sudo -u ekdosi npm run build
 sudo -u ekdosi php artisan filament:assets       # republish Filament's CSS/JS/fonts
+
+# Vite — only if a package-lock.json is committed (it isn't, yet).
+# When custom frontend assets land, replace `|| true` with hard fail.
+test -f package-lock.json && sudo -u ekdosi npm ci && sudo -u ekdosi npm run build || true
 
 sudo -u ekdosi php artisan migrate --force
 sudo -u ekdosi php artisan config:cache
