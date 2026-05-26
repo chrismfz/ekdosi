@@ -874,10 +874,15 @@ the new FB4-client app to the live legacy FB3 server for cutover:
    debugging mapping bugs without ever touching production.
 
 ```bash
-# (1) On the LEGACY server (FB3) — stop the app first, then back up:
+# (1) On the LEGACY server (FB3) — stop the app first, then back up.
+#     Upstream Firebird's tools live at /opt/firebird/bin (not in PATH
+#     by default). gbak needs SYSDBA. If you don't remember the SYSDBA
+#     password but know an app-level user (EKDOSI etc.), see the
+#     "if you only have the app user" note below.
 ssh legacy.example.com
-gbak -b /opt/Data/ekdosi-myip.fdb /tmp/ekdosi-myip-$(date +%F).fbk \
-    -user SYSDBA -password masterkey
+/opt/firebird/bin/gbak -b -user SYSDBA -password <legacy-sysdba-pass> \
+    /opt/Data/ekdosi-myip.fdb \
+    /tmp/ekdosi-myip-$(date +%F).fbk
 exit
 
 # (2) Transfer to this box:
@@ -905,6 +910,46 @@ mariadb -uekdosi -p ekdosi -e "
   LIMIT 20;"
 
 # Repeat (1)→(5) per legacy tenant (myip, nixpal, ...).
+```
+
+**Quick schema-drift check** before a full cutover (cheap, ~50KB SQL
+file, no row data leaves the legacy box). Useful in the days BEFORE
+cutover so we know whether any columns/procs/triggers drifted since
+the snapshot in `legacy/ekdosi-schema.sql`:
+
+```bash
+# On the LEGACY server — embedded mode fails because the daemon has
+# the .fdb locked, so go through the network. localhost: only works
+# if Firebird's listener binds to loopback; otherwise use the box's
+# external IP (same one the C++Builder app uses, e.g. 10.23.22.5):
+/opt/firebird/bin/isql -x -u EKDOSI -p ekdosi1234 \
+    10.23.22.5:/opt/Data/ekdosi-myip.fdb \
+    > /tmp/ekdosi-myip-schema-$(date +%F).sql
+
+# Transfer it to /legacy/ in the repo and diff against the snapshot:
+scp legacy.example.com:/tmp/ekdosi-myip-schema-*.sql legacy/
+diff legacy/ekdosi-schema.sql legacy/ekdosi-myip-schema-*.sql | head -50
+```
+
+The 2026-05-26 check found zero structural drift — same tables,
+columns, procs, triggers as the snapshot in `legacy/ekdosi-schema.sql`,
+only some Greek-language `COMMENT ON DOMAIN` cosmetic additions.
+
+**If you only have the app user (EKDOSI), not SYSDBA**: app-level
+users normally can't run `gbak -b`. Two recoveries on the legacy box:
+
+```bash
+# Reset SYSDBA via gsec (needs Firebird daemon running):
+/opt/firebird/bin/gsec -user SYSDBA -password masterkey \
+    -modify SYSDBA -pw <newpass>     # may need bootstrap if no current SYSDBA
+
+# OR — service-manager backup using the app user (works if EKDOSI has
+# the RDB$ADMIN role; check first):
+/opt/firebird/bin/gbak -b \
+    -user EKDOSI -password ekdosi1234 \
+    -se 10.23.22.5:service_mgr \
+    10.23.22.5:/opt/Data/ekdosi-myip.fdb \
+    /tmp/ekdosi-myip-$(date +%F).fbk
 ```
 
 ### 12f. Direct-remote-connect (escape hatch, NOT for cutover)
