@@ -1,0 +1,113 @@
+<?php
+
+namespace App\Filament\Resources\Invoices\RelationManagers;
+
+use Filament\Actions\Action;
+use Filament\Forms\Components\Textarea;
+use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Table;
+
+/**
+ * Full audit trail of every myDATA INSERT / CANCEL submission for
+ * this invoice. Read-only — the rows are written by the future
+ * MyDataSubmitter service (PR #7); operators only view them here.
+ *
+ * Two "View XML" actions surface the raw request and response from
+ * AADE in modals — important for legal audit and for diagnosing
+ * rejections. The XML is stored verbatim per the schema (request
+ * + response mediumText columns).
+ */
+class MyDataMarksRelationManager extends RelationManager
+{
+    protected static string $relationship = 'mydataMarks';
+
+    protected static ?string $title = 'myDATA submission history';
+
+    protected static ?string $recordTitleAttribute = 'mark';
+
+    public function form(Schema $schema): Schema
+    {
+        // Read-only RelationManager; form is required by the contract
+        // but never used.
+        return $schema->components([]);
+    }
+
+    public function table(Table $table): Table
+    {
+        return $table
+            ->columns([
+                TextColumn::make('mydata_action')
+                    ->label('Action')
+                    ->badge()
+                    ->color(fn (?string $state) => match ($state) {
+                        'INSERT' => 'success',
+                        'CANCEL' => 'danger',
+                        default => 'gray',
+                    }),
+
+                TextColumn::make('mark')
+                    ->label('MARK')
+                    ->copyable(),
+
+                TextColumn::make('mark_date')
+                    ->label('Date')
+                    ->date('d/m/Y')
+                    ->placeholder('—'),
+
+                TextColumn::make('mark_time')
+                    ->label('Time')
+                    ->time('H:i:s')
+                    ->placeholder('—'),
+
+                TextColumn::make('invoice_url')
+                    ->label('QR URL')
+                    ->url(fn (?string $state) => $state)
+                    ->openUrlInNewTab()
+                    ->limit(40)
+                    ->placeholder('—'),
+
+                TextColumn::make('created_at')
+                    ->dateTime('d/m/Y H:i')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+            ])
+            ->recordActions([
+                Action::make('view_request_xml')
+                    ->label('Request XML')
+                    ->icon('heroicon-o-arrow-up-tray')
+                    ->color('gray')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Close')
+                    ->schema(fn ($record) => [
+                        Textarea::make('request_xml')
+                            ->label(false)
+                            ->default($record->request)
+                            ->rows(20)
+                            ->columnSpanFull()
+                            ->readOnly(),
+                    ])
+                    ->modalHeading(fn ($record) => 'Request XML — MARK '.$record->mark),
+
+                Action::make('view_response_xml')
+                    ->label('Response XML')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('gray')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Close')
+                    ->schema(fn ($record) => [
+                        Textarea::make('response_xml')
+                            ->label(false)
+                            ->default($record->response)
+                            ->rows(20)
+                            ->columnSpanFull()
+                            ->readOnly(),
+                    ])
+                    ->modalHeading(fn ($record) => 'Response XML — MARK '.$record->mark),
+            ])
+            ->headerActions([])
+            ->toolbarActions([])
+            ->defaultSort('id', 'desc');
+    }
+}
