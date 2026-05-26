@@ -18,9 +18,19 @@ myDATA submission + audit trail, WHMCS bridge. No customer portal.
   one Filament panel with tenant switching.
 - Legacy myDATA logic NOT re-ported by hand — use `firebed/aade-mydata`
   (+ `firebed/laravel-aade-mydata` wrapper). Per-tenant credentials live on `companies`.
-- WHMCS bridge **stays in scope** (myip relies on it). Re-implement cleanly as
-  PHP-to-PHP — shared DB read, or WHMCS API — instead of the legacy
-  AUTO_INVOICE_LOG polling design.
+- WHMCS bridge **stays in scope** (myip relies on it). Re-implement
+  PHP-to-PHP via the **WHMCS API** (decision locked — not shared-DB
+  read), replacing the legacy `AUTO_INVOICE_LOG` polling + `FMysqlSync`
+  push.
+- **Multi-country from day one**: 3 tenants today, 2 Greek (myDATA) + 1
+  Estonian. The Estonian tenant doesn't submit myDATA — but Estonia is
+  moving to mandatory **e-invoicing (RIK / PEPPOL-based)**: B2G is
+  already mandated, broader B2B is on the roadmap. Either way that's a
+  new integration we need. Design `companies` so each tenant has a
+  **country profile / e-invoice provider** (`gr-mydata`, `ee-peppol`,
+  `none`) that selects the right submitter behind a common
+  `IssueInvoice` action. Scaffold the Estonian PEPPOL submitter as a
+  stub now (real implementation when the Estonian deadline forces it).
 - Old C++Builder/Firebird app stays read-only/archived for history after cutover.
 
 ## Stack (proposed — adjust before locking in)
@@ -30,7 +40,7 @@ want to change.
 - **PHP 8.4+** (Laravel 13 requires it).
 - **Laravel 13** (current latest at 2026-05).
 - **MariaDB 11.x** with `utf8mb4` / `utf8mb4_unicode_ci`.
-- **FilamentPHP 4** as the admin panel — and as the **tenancy driver**. Each
+- **FilamentPHP 5** as the admin panel — and as the **tenancy driver**. Each
   Filament panel resolves a Company tenant; no separate multi-tenancy
   package on top. (Reason: Filament tenancy is built for this exact shape
   and saves us a layer.)
@@ -67,7 +77,7 @@ into a working app:
    cleanest.)
 2. **Install the picks above**:
    ```bash
-   composer require filament/filament:^4 \
+   composer require filament/filament:^5 \
        firebed/laravel-aade-mydata \
        spatie/laravel-permission \
        spatie/laravel-activitylog \
@@ -254,10 +264,20 @@ that takes an `Invoice` and returns a saved `MyDataMark`. All call sites
 That isolates the library so we can swap it later if needed.
 
 How the legacy artefacts stay useful:
+- `CMyData.cpp` is **lost** — not in this repo, can't be located on the
+  legacy dev box either. We will **not** byte-match legacy MARK XMLs.
+  Acceptable: the AADE-side MARK is the source of truth for filed
+  invoices, and our new submissions only need to be *semantically*
+  equivalent (same line totals, same VAT category, same income
+  classification, same MARK on the response). Spec compliance, not
+  string compliance.
 - During parallel-run, the stored legacy request/response XMLs (in
   `mark.response` from the legacy DB, imported into `mydata_marks`)
   are reference data: build our payload for the same invoice, diff
-  against the stored legacy XML, investigate every divergence.
+  against the stored legacy XML at the **field level** (totals,
+  categories, classifications), and investigate every semantic
+  divergence. Differences in whitespace / element order / element
+  serialisation are expected and fine.
 
 ### Legacy myDATA — pointers (for archaeology only)
 Concrete file references in case we need to dig:
@@ -376,17 +396,25 @@ Legacy design (what to replace, not what to reproduce):
 - Customer↔WHMCS link: was a join through bridge tables; now flat on
   `customers.whmcs_client_id`.
 - `FAutoInvoice.cpp` is the legacy job that drained the queue + sent to
-  myDATA + emailed PDFs. The new equivalent should be a Laravel queue
-  worker (or scheduled command) that:
-  1. Pulls WHMCS invoices via the WHMCS API (preferred — decoupled,
-     survives WHMCS schema changes). Shared-DB read is the legacy
-     shortcut; only use it if API rate limits force it.
+  myDATA + emailed PDFs. The new equivalent is a Laravel scheduled
+  command (or queue worker) that:
+  1. Pulls WHMCS invoices via the **WHMCS API** (decision locked: API,
+     not shared-DB read). Decoupled from WHMCS's internal schema,
+     survives WHMCS upgrades, and works even when WHMCS lives on a
+     different host.
   2. Maps to `customers` (by `whmcs_client_id`) and creates an `invoice`
      + `invoice_lines`.
   3. Issues through the normal myDATA action (so MARK is recorded the
      same way as manually-issued invoices — single code path).
   4. Records the WHMCS↔ekdosi linkage in `whmcs_invoice_log` for audit
      and idempotency.
+- **Legacy `FMysqlSync` was the "bridge"**: it pushed ekdosi data into the
+  same MySQL that WHMCS reads. The new design replaces that with the API
+  pull above — we **do not** keep writing to that mirror. During the
+  parallel-run window (legacy + new app live at once), keep the legacy
+  push enabled so WHMCS continues to see invoices; at cutover, switch
+  WHMCS to read from / be queried by the new Laravel app and turn the
+  mirror off.
 
 ### Data migration — how the cutover actually happens
 This is what `MigrateFromFirebird.php` exists for; spelling out the story:
@@ -482,18 +510,27 @@ This is what `MigrateFromFirebird.php` exists for; spelling out the story:
   question that lives in one of these, we'll need to ask for the
   external includes folder.
 
-### Open questions surfaced by inspection
-- [ ] WHMCS bridge: API vs. shared-DB read for pulling WHMCS invoices?
-      (Recommendation: API. See "WHMCS bridge" section above.)
-- [ ] Inspect `FMysqlSync` — is the MySQL mirror it writes to the same DB
-      that backs WHMCS / the customer-portal? Decide if the new WHMCS bridge
-      keeps that mirror alive during cutover.
+### Resolved decisions (2026-05-26)
+- WHMCS pull: **API** (not shared-DB).
+- `FMysqlSync` target MySQL = the WHMCS DB ("the bridge"). Legacy push
+  stays on during parallel-run; killed at cutover when WHMCS reads from
+  the new app instead.
+- `CMyData.cpp`: **lost**. No byte-match of legacy XMLs; semantic
+  equivalence only, validated field-by-field during parallel-run.
+- Target stack: **Laravel 13 + Filament 5 + PHP 8.4 + MariaDB 11**.
+
+### Still open
+- [ ] **Auth/authz package** — spatie/laravel-permission (+ filament-shield)
+      vs. plain Laravel policies vs. something else. (Asked, awaiting
+      pick.)
+- [ ] Estonian PEPPOL submitter: which library? Candidates include
+      `nikolajlovenhardt/laravel-peppol`, `digitalcz/peppol-php`, or
+      direct integration with Estonia's RIK e-arveldaja. Defer until we
+      know the actual deadline for the Estonian tenant.
 - [ ] Read `GET_INV_CODE` stored procedure body in schema.sql to decide
       whether INVCODE format needs to be carried over or can be regenerated.
-- [ ] Get `CMyData.cpp` from the legacy dev box, OR confirm we'll never
-      need to reproduce its exact XML byte-for-byte for old MARK audits.
 - [ ] Decide: collapse `/ekdosi-migration-kit/` into the repo root (and
       delete the duplicate `README.md` + `MigrateFromFirebird.php` at
       root), or vice versa.
-- [ ] Scaffold a Laravel 13 + Filament app at repo root before any of the
+- [ ] Scaffold a Laravel 13 + Filament 5 app at repo root before any of the
       `php artisan` commands documented above become real.
