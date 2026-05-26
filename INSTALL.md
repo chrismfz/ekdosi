@@ -395,6 +395,28 @@ exit
 The §12 ETL preserves these values — it doesn't touch `companies`
 rows it didn't create.
 
+If you also want a personal login (in addition to the seeded
+`admin@ekdosi.local`), do it in **one tinker session** — variables
+don't persist between exits, so splitting the create+attach across
+two `tinker` invocations leaves the new user with zero tenants
+attached and the panel 404s after login:
+
+```bash
+sudo -u ekdosi php artisan tinker
+```
+```php
+$company = \App\Models\Company::where('slug', 'myip')->first();
+$user    = \App\Models\User::create([
+    'name'              => 'Chris',
+    'email'             => 'chris@myip.gr',
+    'password'          => bcrypt('REPLACE-WITH-STRONG-PASSWORD'),
+    'email_verified_at' => now(),
+]);
+$user->companies()->attach($company->id);
+$user->companies()->pluck('slug');   // sanity: should print ["myip"]
+exit
+```
+
 ### Production — tinker recipe (no seed)
 
 Skip the seeder entirely on a production box (so you don't end up
