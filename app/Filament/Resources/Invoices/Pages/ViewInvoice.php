@@ -49,8 +49,11 @@ class ViewInvoice extends ViewRecord
                         // would return NullSubmitter for this tenant —
                         // the dry-run is exactly the case where we WANT
                         // to see the real payload regardless of mode.
+                        // previewXml() is the always-dry-run method (split
+                        // from submit() to eliminate the defaulted-arg
+                        // footgun where a missing named arg would file).
                         $submitter = new MyDataSubmitter($tenant);
-                        $submitter->submit($this->record, dryRun: true);
+                        $submitter->previewXml($this->record);
                     } catch (Throwable $e) {
                         Notification::make()
                             ->title('Dry-run failed')

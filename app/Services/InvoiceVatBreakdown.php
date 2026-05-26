@@ -46,7 +46,21 @@ class InvoiceVatBreakdown
     {
         $invoice->loadMissing('lines');
 
-        $discountFactor = 1 - ((float) $invoice->header_discount_percent / 100);
+        // Header discount is a percent 0..100 per CLAUDE.md schema
+        // convention. Refuse pathological values: 100% would zero all
+        // totals (legal as a promo but operationally weird), >100%
+        // produces negative VAT (silently files a credit-like
+        // payload). 100 itself is rejected because realistic 100%
+        // discounts use a credit invoice, not a header discount.
+        $hd = (float) $invoice->header_discount_percent;
+        if ($hd < 0 || $hd >= 100) {
+            throw new \RuntimeException(
+                "Invoice {$invoice->invcode}: header_discount_percent={$hd} is outside the valid range 0..<100. ".
+                'Edit on the InvoiceResource form; if a 100%-discount is genuinely needed, issue a credit invoice instead.'
+            );
+        }
+
+        $discountFactor = 1 - ($hd / 100);
 
         $rows = $invoice->lines
             ->groupBy(fn ($line) => (string) $line->vat_percent)

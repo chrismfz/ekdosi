@@ -133,6 +133,33 @@ class InvoiceVatBreakdownTest extends TestCase
         $this->assertSame(0.0, $b->vatAtRate(13));  // not present
     }
 
+    public function test_header_discount_100_percent_throws(): void
+    {
+        // A 100% discount would zero all line values silently, filing
+        // an all-zero invoice. Legitimate-looking edge case but never
+        // what an operator actually wants — they'd issue a credit
+        // invoice instead. Guard rejects it.
+        $inv = $this->makeInvoice(headerDiscount: 100);
+        $this->addLine($inv, vat: 24, net: 100, gross: 124);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/header_discount_percent=100/');
+
+        InvoiceVatBreakdown::for($inv->fresh(['lines']));
+    }
+
+    public function test_header_discount_above_100_percent_throws(): void
+    {
+        // >100% would produce NEGATIVE net + VAT, effectively filing
+        // a credit payload against the AADE invoice endpoint. Refuses.
+        $inv = $this->makeInvoice(headerDiscount: 150);
+        $this->addLine($inv, vat: 24, net: 100, gross: 124);
+
+        $this->expectException(\RuntimeException::class);
+
+        InvoiceVatBreakdown::for($inv->fresh(['lines']));
+    }
+
     private function makeInvoice(float $headerDiscount): Invoice
     {
         return Invoice::create([

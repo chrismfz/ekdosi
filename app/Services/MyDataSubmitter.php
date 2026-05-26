@@ -76,6 +76,20 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
     public function submit(Invoice $invoice): MyDataMark
     {
+        // Guard against re-submitting an already-filed invoice. Critical
+        // for the ETL cutover path: imported legacy invoices arrive with
+        // mydata_state='VALID' and a real MARK. Without this guard, an
+        // operator clicking Submit on an imported invoice would file it
+        // again at AADE (UID idempotency below mitigates but doesn't
+        // fully prevent — defense in depth).
+        if ($invoice->mydata_state === 'VALID') {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} was already filed at myDATA under MARK ".
+                ($invoice->mydata_mark ?: '?').'. '.
+                'Use the Cancel action and re-issue if a correction is needed.'
+            );
+        }
+
         $payload = $this->buildAadeInvoice($invoice);
         $xml = $this->payloadToXml($payload);
 
@@ -207,8 +221,12 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // query, just verifies creds + reachability. AADE returns
             // an empty doc list if nothing was filed today; we don't
             // care about content, only that the call doesn't fault.
+            // First arg is `string $mark = ''` (NOT nullable) — pass
+            // empty string, not null, to avoid a TypeError that would
+            // be caught by the generic Throwable handler below and
+            // misclassified as a transport failure.
             $action = new RequestTransmittedDocs();
-            $action->handle(null, now()->subDay()->toDateString(), now()->toDateString());
+            $action->handle('', now()->subDay()->toDateString(), now()->toDateString());
             return true;
         } catch (MyDataAuthenticationException) {
             return false;
@@ -242,9 +260,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         MyDataRequest::init($aadeId, $subKey, $env);
 
-        if ($this->mockHandler !== null) {
-            MyDataRequest::setHandler($this->mockHandler);
-        }
+        // Always set the handler — passing null explicitly RESETS
+        // firebed's static $handler. Without this, once any test in
+        // the process sets a MockHandler, every subsequent submitter
+        // in the same process (queue worker, Octane, test suite)
+        // inherits the leftover handler and silently intercepts real
+        // submissions. Always-reset is the safe default.
+        MyDataRequest::setHandler($this->mockHandler);
     }
 
     /**
@@ -257,6 +279,19 @@ class MyDataSubmitter implements EInvoiceSubmitter
     private function buildAadeInvoice(Invoice $invoice): AadeInvoice
     {
         $invoice->loadMissing(['lines', 'invoiceType', 'customer']);
+
+        // Draft guard: code (ΑΑ) is allocated by InvoiceNumberer at
+        // issue-time. A code of 0 means the InvoiceNumberer wasn't run
+        // (draft invoice, test fixture, broken save path). Building an
+        // AADE payload with <aa>0</aa> would either be rejected with
+        // an opaque error OR — worse — accepted as a real filing for a
+        // technically-valid invoice number 0. Fail fast.
+        if (! $invoice->code || (int) $invoice->code < 1) {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} has no ΑΑ number (code=".($invoice->code ?? 'null').'). '.
+                'Allocate via App\\Services\\InvoiceNumberer before submission.'
+            );
+        }
 
         $type = $invoice->invoiceType?->mydata_type
             ?? throw new RuntimeException(
@@ -271,12 +306,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             ->setCountry(CountryCode::GR)
             ->setBranch(0);
 
-        $counterpart = $invoice->customer && $invoice->customer->afm
-            ? (new Counterpart())
-                ->setVatNumber($invoice->customer->afm)
-                ->setCountry($invoice->country ?? 'GR')
-                ->setBranch(0)
-            : null;
+        $counterpart = $this->buildCounterpart($invoice, $type);
 
         $header = (new InvoiceHeader())
             ->setSeries($invoice->invoiceType->code)
@@ -296,15 +326,17 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 ->setQuantity((float) $line->qty);
         }
 
-        $taxesTotals = (new TaxesTotals())
-            ->setTaxes(array_map(
-                fn ($row) => (new TaxTotals())
-                    ->setTaxType(1) // 1 = VAT
-                    ->setTaxCategory($this->vatCategoryFor($row['rate']))
-                    ->setUnderlyingValue($row['net'])
-                    ->setTaxAmount($row['vat']),
-                $vatBreakdown->rows,
-            ));
+        // TaxesTotals takes the TaxTotals[] in its constructor — no
+        // setTaxes() method exists. The trait-provided generic set()
+        // is also unavailable on TypeArray subclasses.
+        $taxesTotals = new TaxesTotals(array_map(
+            fn ($row) => (new TaxTotals())
+                ->setTaxType(1) // 1 = VAT
+                ->setTaxCategory($this->vatCategoryFor($row['rate']))
+                ->setUnderlyingValue($row['net'])
+                ->setTaxAmount($row['vat']),
+            $vatBreakdown->rows,
+        ));
 
         $summary = (new InvoiceSummary())
             ->setTotalNetValue($vatBreakdown->totalNet())
@@ -322,13 +354,66 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $aade->setCounterpart($counterpart);
         }
 
+        // UID idempotency: AADE dedupes resubmissions by UID. Without
+        // it, a transient timeout that the operator retries results in
+        // a duplicate filing with a new MARK — tax-compliance breach.
+        // firebed's guessUid() computes the deterministic UID from
+        // VAT + date + branch + type + series + AA, so the same logical
+        // invoice always produces the same UID and AADE returns the
+        // ORIGINAL MARK on retry. Critical for the ETL cutover scenario
+        // and for any "click Submit twice on a slow network" path.
+        $aade->set('uid', $aade->guessUid());
+
         return $aade;
+    }
+
+    /**
+     * Decide whether to attach a Counterpart and how to construct it,
+     * based on the AADE invoice type.
+     *
+     *   - Retail types (11.x):    Counterpart is FORBIDDEN.
+     *   - B2B / standard types:   Counterpart is REQUIRED.
+     *   - Special types (13.x receiver-side, 17.x adjustments): out of
+     *                             scope for this issuer flow.
+     *
+     * Filing the wrong shape (e.g. attaching Counterpart to an 11.2
+     * ΑΠΥ for an AFM-bearing customer) is a common AADE rejection.
+     */
+    private function buildCounterpart(Invoice $invoice, string $type): ?Counterpart
+    {
+        // Retail (Λιανικής) types forbid Counterpart even if customer
+        // has an AFM (operator booked a B2B-style customer into a
+        // retail receipt — common with WHMCS-originated invoices).
+        if (str_starts_with($type, '11.')) {
+            return null;
+        }
+
+        $customer = $invoice->customer;
+        if (! $customer || empty($customer->afm)) {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} (type $type) requires a customer with AFM, but ".
+                ($customer ? 'AFM is empty' : 'no customer is set').'. '.
+                'Either fill the customer AFM, or change the invoice type to a retail variant (11.x).'
+            );
+        }
+
+        return (new Counterpart())
+            ->setVatNumber($customer->afm)
+            ->setCountry($invoice->country ?: 'GR')
+            ->setBranch(0);
     }
 
     /**
      * Map a numeric VAT rate to AADE's VatCategory enum (1..8).
      * Values from AADE myDATA spec — kept conservative; unknown
      * rates throw so we don't silently file with the wrong category.
+     *
+     * IMPORTANT: 0% is NOT mapped here. Real-world 0% lines need a
+     * separate `vatExemptionCategory` field (intra-community supply
+     * vs domestic exempt vs reverse-charge vs out-of-scope) that we
+     * don't yet capture. Throwing forces operators to wait for the
+     * exemption-category mechanism rather than silently filing wrong
+     * — tracked as a deferred follow-up.
      */
     private function vatCategoryFor(float $rate): int
     {
@@ -339,7 +424,12 @@ class MyDataSubmitter implements EInvoiceSubmitter
             abs($rate - 17) < 0.01 => 4,  // 17% (islands)
             abs($rate - 9) < 0.01 => 5,   // 9% (islands)
             abs($rate - 4) < 0.01 => 6,   // 4% (islands)
-            abs($rate - 0) < 0.01 => 7,   // 0% (exempt with right of deduction)
+            abs($rate - 0) < 0.01 => throw new RuntimeException(
+                'Cannot submit 0% VAT line without an exemption category. '.
+                'AADE distinguishes domestic exempt / intra-community supply / reverse-charge / out-of-scope. '.
+                'Per-line vat_exemption_category support is tracked in CLAUDE.md as a deferred follow-up; '.
+                'for now this submitter refuses 0% lines rather than file with the wrong category.'
+            ),
             default => throw new RuntimeException(
                 "VAT rate {$rate}% has no AADE VatCategory mapping. ".
                 'Configure the VAT category on the lookup resource, or use category 8 (no VAT) manually.'
@@ -416,11 +506,35 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'mydata_state' => 'VALID',
                 'mydata_mark' => $mark,
                 'mydata_url' => $qrUrl,
-                'mydata_type' => $payload->getInvoiceHeader()->getInvoiceType(),
+                // firebed may return getInvoiceType() as either a raw
+                // string ("1.1") OR a BackedEnum case (AadeInvoiceType::TYPE_1_1)
+                // depending on how the header was set (we always pass
+                // a string, but the setter may coerce). varchar(5)
+                // would overflow on an enum case name like 'TYPE_1_1'
+                // AND it's the wrong value semantically. Normalise.
+                'mydata_type' => $this->normalizeInvoiceTypeForStorage(
+                    $payload->getInvoiceHeader()->getInvoiceType()
+                ),
             ])->save();
 
             return $audit;
         });
+    }
+
+    /**
+     * Coerce whatever firebed's getInvoiceType() returns into the
+     * canonical "1.1" / "11.2" / etc. AADE invoice-type string for
+     * storage in the varchar(5) mydata_type column.
+     */
+    private function normalizeInvoiceTypeForStorage(mixed $type): ?string
+    {
+        if ($type === null) {
+            return null;
+        }
+        if ($type instanceof \BackedEnum) {
+            return (string) $type->value;
+        }
+        return (string) $type;
     }
 
     private function describeResponseErrors($response): string

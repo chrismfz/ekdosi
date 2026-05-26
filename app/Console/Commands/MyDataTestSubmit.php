@@ -69,7 +69,7 @@ class MyDataTestSubmit extends Command
                     $this->line('Aborted.');
                     return self::SUCCESS;
                 }
-                $mark = $submitter->submit($invoice, dryRun: false);
+                $mark = $submitter->submit($invoice);
                 $this->info("Submitted. MARK={$mark->mark}");
                 if ($mark->invoice_url) {
                     $this->line("QR URL: {$mark->invoice_url}");
@@ -85,7 +85,7 @@ class MyDataTestSubmit extends Command
                 $payload = $build->invoke($submitter, $invoice);
                 $this->line($toXml->invoke($submitter, $payload));
             } else {
-                $mark = $submitter->submit($invoice, dryRun: true);
+                $mark = $submitter->previewXml($invoice);
                 $this->info("Dry-run recorded (mydata_marks row #{$mark->id}).");
                 $this->line('Inspect the XML via:');
                 $this->line('   SELECT request FROM mydata_marks WHERE id = '.$mark->id);
