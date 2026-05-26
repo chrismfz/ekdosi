@@ -19,21 +19,36 @@ use App\Models\MyDataMark;
  *
  * Contract semantics:
  *
- *   submit(): persists a new MyDataMark row with action='INSERT' (or
- *   action='SKIPPED' for NullSubmitter so the audit trail still
- *   records the decision not to file). Updates the invoice's mirror
- *   columns (mydata_*) in the same DB transaction via forceFill — the
- *   replacement for the legacy MARK_AI0 trigger. Returns the MyDataMark
- *   on submission attempt, null if the submitter is configured to be a
- *   no-op for this tenant.
+ *   submit(): always returns a MyDataMark — implementations never
+ *   return null. The row's `mydata_action` distinguishes outcomes:
+ *     - 'INSERT'  — real AADE filing succeeded; `mark` holds the
+ *                   AADE-issued MARK
+ *     - 'SKIPPED' — NullSubmitter recorded a deliberate non-filing
+ *                   (mode=off / provider=none); `mark` is null
  *
- *   cancel(): symmetric. Persists action='CANCEL', flips invoice's
- *   mydata_state to 'CANCELLED', preserves the original MARK for audit.
+ *   The invoice's `mydata_*` mirror columns (the cache of the latest
+ *   submission state) are updated ONLY by real-submitter
+ *   implementations (MyDataSubmitter etc.) — the replacement for the
+ *   legacy MARK_AI0 trigger. NullSubmitter deliberately LEAVES them
+ *   null so the UI can distinguish "we filed and got VALID" from
+ *   "we chose not to file" by reading the latest MyDataMark's
+ *   action, not by mistaking mirror-column state for filing status.
+ *
+ *   cancel(): symmetric. `action='CANCEL'` for real submitters
+ *   (flips invoice's `mydata_state` to 'CANCELLED', preserves the
+ *   original MARK for audit). `action='SKIPPED_CANCEL'` for
+ *   NullSubmitter (no mirror-column changes — see above).
  *
  *   testConnection(): for the Filament "Test connection" action.
- *   Returns true if credentials and endpoint are reachable; throws or
- *   returns false otherwise. NullSubmitter returns true (nothing to
- *   test).
+ *   Real submitters POST a minimal query to verify credentials +
+ *   endpoint reachability. NullSubmitter returns true (it has
+ *   nothing to connect to).
+ *
+ * Return type note: the `?` on the return types is for forward
+ * compatibility with future submitters that might genuinely have no
+ * audit row to return (e.g. a hypothetical batched submitter that
+ * defers persisting). Current implementations all return a non-null
+ * MyDataMark.
  */
 interface EInvoiceSubmitter
 {

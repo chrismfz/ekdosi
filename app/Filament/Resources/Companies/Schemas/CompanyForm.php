@@ -207,34 +207,26 @@ class CompanyForm
                                             ->default(\App\Enums\MyDataMode::Off->value)
                                             ->required()
                                             ->live()
-                                            ->helperText('Off = no AADE call (PDFs only, safe for testing). Sandbox = AADE test endpoint (synthetic MARKs). Production = LIVE submissions affecting real tax records.')
-                                            // Confirm dialog when switching INTO Production —
-                                            // the riskier transition. Live submissions are
-                                            // legally binding and accidentally enabling them
-                                            // for a non-ready tenant has real consequences.
-                                            ->afterStateUpdated(function ($state, $old) {
-                                                if ($state === \App\Enums\MyDataMode::Production->value
-                                                    && $old !== \App\Enums\MyDataMode::Production->value) {
-                                                    Notification::make()
-                                                        ->title('⚠ Switching to LIVE myDATA submissions')
-                                                        ->body('This tenant will now file invoices with AADE for real. Make sure credentials are verified via "Test connection" before issuing any invoice.')
-                                                        ->warning()
-                                                        ->persistent()
-                                                        ->send();
-                                                }
-                                                // Heads-up when LEAVING Production — operator
-                                                // might be silently disabling legally-required
-                                                // reporting.
-                                                if ($old === \App\Enums\MyDataMode::Production->value
-                                                    && $state !== \App\Enums\MyDataMode::Production->value) {
-                                                    Notification::make()
-                                                        ->title('⚠ Disabling LIVE myDATA submissions')
-                                                        ->body('Invoices issued by this tenant will no longer be filed with AADE until you switch back to Production.')
-                                                        ->warning()
-                                                        ->persistent()
-                                                        ->send();
-                                                }
-                                            }),
+                                            ->helperText(new \Illuminate\Support\HtmlString(
+                                                '<strong>Off</strong> = no AADE call (PDFs only, safe for testing). '
+                                                . '<strong>Sandbox</strong> = AADE test endpoint (synthetic MARKs). '
+                                                . '<strong>Production</strong> = LIVE submissions affecting real tax records. '
+                                                . '<br><strong>⚠ Switching to/from Production:</strong> the change takes effect '
+                                                . 'on save. Verify credentials via "Test connection" before going Live; '
+                                                . 'switching back to Off/Sandbox stops legally-required filings.'
+                                            )),
+                                            // Note: a Notification-on-afterStateUpdated approach
+                                            // was tried and removed — it fired on every form
+                                            // state change (including immediate undos), creating
+                                            // toast spam that trained operators to ignore the
+                                            // warnings. The safer pattern is to surface the
+                                            // mode-change semantic in helperText + a real
+                                            // confirm modal on the EditCompany page's save
+                                            // action when mydata_mode transitions involve
+                                            // Production. That belongs on the page class, not
+                                            // the form schema — tracked in CLAUDE.md as a
+                                            // deferred follow-up since it requires touching
+                                            // EditCompany.php and a custom save action.
                                     ]),
                             ]),
 

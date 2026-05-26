@@ -38,7 +38,7 @@ class DatabaseSeeder extends Seeder
             'einvoice_provider' => 'gr-mydata',
             'afm' => '999999999',
             'tax_office' => 'Athens',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         $nixpal = Company::create([
@@ -48,7 +48,7 @@ class DatabaseSeeder extends Seeder
             'einvoice_provider' => 'gr-mydata',
             'afm' => '888888888',
             'tax_office' => 'Athens',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         $estonian = Company::create([
@@ -56,7 +56,7 @@ class DatabaseSeeder extends Seeder
             'slug' => 'sample-ee',
             'country_code' => 'EE',
             'einvoice_provider' => 'ee-peppol',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         // (2) Permissions + auto-created per-tenant super_admin roles

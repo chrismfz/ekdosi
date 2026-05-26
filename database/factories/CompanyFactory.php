@@ -31,7 +31,7 @@ class CompanyFactory extends Factory
             'email' => $this->faker->safeEmail(),
             'mydata_aade_id' => null,
             'mydata_subscription_key' => null,
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ];
     }
 

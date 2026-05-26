@@ -35,7 +35,7 @@ class NullSubmitter implements EInvoiceSubmitter
             return MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
-                'mark' => '',
+                'mark' => null,
                 'mydata_action' => 'SKIPPED',
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
@@ -49,7 +49,7 @@ class NullSubmitter implements EInvoiceSubmitter
             return MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
-                'mark' => '',
+                'mark' => null,
                 'mydata_action' => 'SKIPPED_CANCEL',
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),

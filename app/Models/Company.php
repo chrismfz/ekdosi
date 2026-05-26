@@ -50,7 +50,13 @@ class Company extends Model
     protected function mydataModeEnum(): Attribute
     {
         return Attribute::make(
-            get: fn () => MyDataMode::tryFrom((string) $this->attributes['mydata_mode'] ?? '') ?? MyDataMode::Off,
+            // Parens around the ?? so the coalesce binds BEFORE the cast.
+            // Without them, `(string) $this->attributes['mydata_mode'] ?? ''`
+            // parses as `((string) $this->attributes['mydata_mode']) ?? ''`
+            // which fires "Undefined array key" if mydata_mode isn't in
+            // the loaded attributes (e.g. a partial Company::select(['id'])
+            // query) before ?? gets a chance to short-circuit.
+            get: fn () => MyDataMode::tryFrom((string) ($this->attributes['mydata_mode'] ?? '')) ?? MyDataMode::Off,
         );
     }
 
