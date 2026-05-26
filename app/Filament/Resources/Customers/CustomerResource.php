@@ -13,6 +13,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class CustomerResource extends Resource
 {
@@ -25,6 +27,18 @@ class CustomerResource extends Resource
     // Default is true — customers are per-tenant (the company_id FK does the
     // scoping). Filament's BelongsToTenant trait uses the `company()` relation
     // defined on the Customer model.
+
+    /**
+     * Lift the SoftDeletingScope at the resource-query level so the
+     * TrashedFilter / Restore / ForceDelete bulk actions in the table
+     * actually have soft-deleted rows to operate on. Without this,
+     * those actions render as dead UI.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()
+            ->withoutGlobalScopes([SoftDeletingScope::class]);
+    }
 
     public static function form(Schema $schema): Schema
     {

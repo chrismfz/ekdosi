@@ -106,9 +106,11 @@ class CustomersTable
                 EditAction::make(),
 
                 Action::make('toggle_active')
+                    ->authorize('update')
                     ->label(fn ($record) => $record->is_active ? 'Deactivate' : 'Activate')
                     ->icon(fn ($record) => $record->is_active ? 'heroicon-o-no-symbol' : 'heroicon-o-check-circle')
                     ->color(fn ($record) => $record->is_active ? 'gray' : 'success')
+                    ->visible(fn ($record) => ! $record->trashed())
                     ->requiresConfirmation()
                     ->action(function ($record): void {
                         $record->update(['is_active' => ! $record->is_active]);

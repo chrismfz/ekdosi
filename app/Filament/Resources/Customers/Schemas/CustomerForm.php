@@ -129,13 +129,23 @@ class CustomerForm
 
                                 Select::make('referred_by_customer_id')
                                     ->label('Referred by')
-                                    ->options(fn ($record) => Customer::query()
-                                        ->where('company_id', Filament::getTenant()?->getKey())
-                                        ->when($record?->id, fn ($q, $id) => $q->whereKeyNot($id))
-                                        ->orderBy('name')
-                                        ->limit(200)
-                                        ->pluck('name', 'id'))
                                     ->searchable()
+                                    // Server-side search — no row-count ceiling.
+                                    ->getSearchResultsUsing(function (string $search, ?Customer $record) {
+                                        return Customer::query()
+                                            ->where('company_id', Filament::getTenant()?->getKey())
+                                            ->when($record?->id, fn ($q, $id) => $q->whereKeyNot($id))
+                                            ->where('name', 'like', "%{$search}%")
+                                            ->orderBy('name')
+                                            ->limit(50)
+                                            ->pluck('name', 'id')
+                                            ->toArray();
+                                    })
+                                    // Resolve the currently-saved id back to a label on edit.
+                                    ->getOptionLabelUsing(fn ($value) => Customer::query()
+                                        ->where('company_id', Filament::getTenant()?->getKey())
+                                        ->whereKey($value)
+                                        ->value('name'))
                                     ->helperText('Optional. Pick another customer if this one was referred. Non-customer sources (Google, trade show…) — tag support comes later.'),
 
                                 TextInput::make('whmcs_client_id')
