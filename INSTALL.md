@@ -56,13 +56,21 @@ PHP, and `composer install` will fail with a long list of
 php -v       # must show "PHP 8.4.x"
 ```
 
-If it shows 8.3 or older, force the upgrade:
+If it shows 8.3 or older, the simplest fix is to wipe every `php-*`
+RPM and re-run §2's install line — `dnf distro-sync` won't always
+bump packages that were pinned to the older module stream:
+
 ```bash
+sudo dnf remove -y 'php-*'                       # nuke any 8.3-stream survivors
 sudo dnf module reset  -y php
 sudo dnf module enable -y php:remi-8.4
-sudo dnf distro-sync   -y
+# now re-run the dnf install -y php php-cli ... line from §2
 php -v       # confirm 8.4
 ```
+
+> Order matters: if you `dnf install php-*` *before* doing the
+> Remi repo + module-reset dance in §1, the stock 8.1/8.3 stream
+> wins and you end up here. Do §1 fully first, then §2.
 
 ## 2. Packages
 
@@ -793,6 +801,16 @@ config or fall back to 12c.
 Save this as `/usr/local/bin/ekdosi-deploy.sh` on the server. All
 artisan / composer / npm commands run as the `ekdosi-app` user;
 only the systemd restarts need root.
+
+> If you ever run `git` against `/var/www/ekdosi` as a different
+> user (root, your own login) you'll hit
+> `fatal: detected dubious ownership in repository at '/var/www/ekdosi'`.
+> Fix that once per box:
+> ```bash
+> sudo git config --global --add safe.directory /var/www/ekdosi
+> ```
+> The deploy script below sidesteps this by `sudo -u ekdosi-app`'ing
+> every git call.
 
 ```bash
 #!/usr/bin/env bash
