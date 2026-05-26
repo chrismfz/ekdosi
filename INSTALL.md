@@ -681,7 +681,14 @@ sudo systemctl restart php-fpm
 
 ### 12b. Restore the legacy gbak + import one tenant
 
-The Firebird server enforces `DatabaseAccess = Restrict
+**Don't copy a `.fdb` directly.** Each major Firebird version uses
+its own on-disk structure (FB3 = ODS 12, FB4 = ODS 13). FB4 can't
+read an FB3-created `.fdb` and you'll get `SQLSTATE[HY000] [335544379]
+unsupported on-disk structure for file ...; found 12.0, support 13.0`.
+The portable format across major versions is `.fbk` (gbak's backup
+format) — always go `.fdb (FB3) → gbak -b → .fbk → gbak -r (FB4) → .fdb (ODS 13)`.
+
+The Firebird server also enforces `DatabaseAccess = Restrict
 /var/lib/firebird/data` by default — meaning it will only open `.fdb`
 files **under that directory**. If you point it at e.g. `/opt/foo.fdb`
 you'll get `SQLSTATE[HY000] [335544831] Use of database at location
@@ -691,8 +698,12 @@ you'll get `SQLSTATE[HY000] [335544831] Use of database at location
 `DatabaseAccess`.
 
 ```bash
-# restore the legacy gbak into a path FB allows
-sudo gbak -r /path/to/ekdosi.fbk /var/lib/firebird/data/ekdosi-sandbox.fdb \
+# restore the legacy gbak into a path FB allows.
+# gbak -r writes a fresh ODS-13 .fdb regardless of what ODS the .fbk
+# was originally made on — that's how the cross-version upgrade works.
+sudo -u firebird /usr/bin/gbak -r \
+    /var/www/ekdosi/legacy/ekdosi-main/db_backup/ekdosi.fbk \
+    /var/lib/firebird/data/ekdosi-sandbox.fdb \
     -user SYSDBA -password masterkey
 sudo chown firebird:firebird /var/lib/firebird/data/ekdosi-sandbox.fdb
 
