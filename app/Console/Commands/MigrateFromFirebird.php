@@ -360,7 +360,7 @@ class MigrateFromFirebird extends Command
                 'delivery_method_id'  => $this->legacyId('delivery_methods', $r['DELMETHOD_ID']),
                 'payment_method_id'   => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
                 'delivery_date'       => $r['DELIVERYDATE'] ?? null,
-                'header_discount'     => $r['DISCOUNT'] ?? 0,
+                'header_discount_percent' => $r['DISCOUNT'] ?? 0,
                 'net_total'           => $r['PRICE'] ?? 0,
                 'gross_total'         => $r['PRICEWVAT'] ?? 0,
                 'withhold_amount'     => $r['WITHHOLD_AMOUNT'] ?? null,
