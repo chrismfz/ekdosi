@@ -66,15 +66,17 @@ php -v       # confirm 8.4
 
 ## 2. Packages
 
-One install for the lot. Skip `firebird-utils` / `firebird-devel` /
-`php-firebird` if this host won't run the ETL (only the box doing
+One install for the lot. **Don't drop any of the `php-*` packages** —
+`composer install` will fail with cryptic "missing extension" errors
+later if you do. Skip `firebird-utils` / `firebird-devel` /
+`php-firebird` only if this host won't run the ETL (only the box doing
 `migrate:firebird` needs them).
 
 ```bash
 sudo dnf install -y \
     php php-cli php-fpm php-common \
     php-mbstring php-xml php-intl php-bcmath php-gd php-zip php-curl \
-    php-mysqlnd php-pdo php-opcache php-soap php-sodium \
+    php-mysqlnd php-pdo php-opcache php-sodium \
     mariadb-server mariadb \
     nginx \
     git curl unzip tar make gcc \
@@ -88,6 +90,9 @@ sudo dnf install -y firebird-utils firebird-devel php-firebird
 
 Notes:
 - `php-bcmath` — wanted by Laravel for big-number / money math.
+- `php-zip` and `php-curl` are required by Filament's exporter
+  (`openspout/openspout` → ext-zip) and Laravel's HTTP client (Guzzle
+  → ext-curl). Composer refuses to install without them.
 - `php-firebird` (Remi) → provides `pdo_firebird`. If your repo
   combination doesn't expose it, the fallback is PECL: `sudo pecl
   install pdo_firebird` after `firebird-devel` is installed.
@@ -95,13 +100,25 @@ Notes:
 - `policycoreutils-python-utils` gives you `semanage` for the SELinux
   steps later.
 
-Confirm versions:
+Confirm versions and required extensions:
 ```bash
 php -v          # expect 8.4.x
 composer --version || true   # may be missing; install next
 mariadbd --version
 nginx -v
+
+# verify every required PHP extension is loaded — anything that prints
+# means it's MISSING. Empty output = good.
+for ext in bcmath ctype curl dom fileinfo filter gd iconv intl json \
+           mbstring openssl pcre pdo pdo_mysql phar session simplexml \
+           sodium tokenizer xml xmlwriter zip; do
+    php -m | grep -qix "$ext" || echo "MISSING: $ext"
+done
 ```
+
+If anything prints `MISSING: foo`, install the matching package
+(`sudo dnf install -y php-foo`) and re-run the loop until it's quiet
+**before** moving on to §3.
 
 ## 3. Composer
 
