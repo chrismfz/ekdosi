@@ -25,11 +25,13 @@ use Illuminate\Support\Facades\Schema;
  *   applies here too; tracked as a single cross-cutting fix.
  *
  * - mail_subject_template / mail_body_template are plain text, NOT
- *   raw Blade. The mailer uses Blade::render() with a curated set of
- *   placeholder variables ({invoice_code}, {customer_name},
- *   {total}, {mark}, {verify_url}, {tenant_name}) — operators can't
- *   inject arbitrary PHP. Treat the column as untrusted markup;
- *   sanitise + escape at render time.
+ *   raw Blade. The mailer uses MailTemplateRenderer with pure strtr()
+ *   substitution of a curated placeholder set ({invoice_code},
+ *   {customer_name}, {total}, {mark}, {verify_url}, {tenant_name},
+ *   etc) — NO Blade::render, NO eval, NO operator code execution.
+ *   The Blade view that wraps the rendered body uses {!! nl2br(e($body)) !!}
+ *   so e() escapes operator-supplied HTML BEFORE nl2br adds <br>s
+ *   — security boundary locked in by MailTemplateRendererTest.
  *
  * - invoice_audit_bcc is a single comma/semicolon-separated string
  *   (not a JSON array). Legacy was a single hardcoded address; tenants
@@ -68,9 +70,11 @@ return new class extends Migration
             // ------- Editable mail templates -------
             // Plain text with curly-brace placeholders ({invoice_code},
             // {customer_name}, {total}, {mark}, {verify_url},
-            // {tenant_name}). Rendered via a controlled Blade-render
-            // wrapper at send time (no operator-supplied raw Blade
-            // gets evaluated — see InvoiceIssuedMail::renderTemplate).
+            // {tenant_name}). Rendered via MailTemplateRenderer using
+            // pure strtr() — no Blade evaluation, no PHP execution
+            // path on operator-supplied content. See the renderer
+            // class docblock + MailTemplateRendererTest for the
+            // security boundary.
             $t->string('mail_subject_template', 191)->nullable()->after('mail_smtp_encryption');
             $t->text('mail_body_template')->nullable()->after('mail_subject_template');
         });

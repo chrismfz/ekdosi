@@ -81,7 +81,7 @@ class SendInvoiceEmailTest extends TestCase
         );
 
         // Mail dispatched to primary recipient
-        Mail::assertQueued(InvoiceIssuedMail::class, function ($mail) {
+        Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
             return $mail->hasTo('cust@example.com')
                 && $mail->hasCc('accountant@example.com')
                 && $mail->hasBcc('audit@acme.gr')
@@ -112,8 +112,8 @@ class SendInvoiceEmailTest extends TestCase
             app(\App\Services\MailTemplateRenderer::class),
         );
 
-        Mail::assertNothingQueued();
         Mail::assertNothingSent();
+        Mail::assertNothingQueued();
 
         // Log row records the skip with a clear reason
         $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
@@ -153,13 +153,57 @@ class SendInvoiceEmailTest extends TestCase
             app(\App\Services\MailTemplateRenderer::class),
         );
 
-        Mail::assertQueued(InvoiceIssuedMail::class, function ($mail) {
+        Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
             // No BCC recipients
             return ! $mail->hasBcc('audit@acme.gr');
         });
 
         $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
         $this->assertNull($log->bcc_list);
+    }
+
+    /**
+     * Round-trip test: dispatch through the queue, NOT directly into
+     * handle(). Locks in two things the prior tests can't:
+     *   1. The queue payload stays tiny — no PDF bytes (~50-500KB)
+     *      leak in. PDF renders at handle() time, NOT at dispatch.
+     *   2. SerializesModels round-trips cleanly: serialize ->
+     *      deserialize without exceptions on the Invoice + its
+     *      relations.
+     *
+     * If a future refactor moves the PDF render to job construct-time
+     * (or makes the Mailable ShouldQueue again), this test catches it.
+     */
+    public function test_dispatched_job_serialised_payload_is_small_and_carries_no_pdf_bytes(): void
+    {
+        \Illuminate\Support\Facades\Bus::fake();
+        $invoice = $this->makeFiledInvoice();
+
+        \App\Jobs\SendInvoiceEmail::dispatch($invoice, trigger: 'auto');
+
+        \Illuminate\Support\Facades\Bus::assertDispatched(
+            \App\Jobs\SendInvoiceEmail::class,
+            function (\App\Jobs\SendInvoiceEmail $job) use ($invoice): bool {
+                $this->assertSame($invoice->id, $job->invoice->id);
+                $this->assertSame('auto', $job->trigger);
+
+                // Serialized payload must NOT contain a PDF byte
+                // signature. PDFs always begin with "%PDF-" — if
+                // a future Mailable constructor decides to render up-
+                // front, that signature would survive into the queue.
+                $serialised = serialize($job);
+                $this->assertStringNotContainsString('%PDF-', $serialised);
+
+                // Sanity ceiling: SerializesModels emits ~1-3KB for
+                // an Invoice + relations. Cap at 10KB to catch a
+                // future addition of large eager-loaded relations
+                // that would bloat queue rows.
+                $this->assertLessThan(10000, strlen($serialised),
+                    'Queue payload >10KB — something is being serialised that should be re-fetched at handle time.');
+
+                return true;
+            }
+        );
     }
 
     public function test_malformed_bcc_entries_are_silently_dropped(): void
@@ -176,7 +220,7 @@ class SendInvoiceEmailTest extends TestCase
 
         // Valid addresses BCC'd; invalid one not present (auditBccList
         // filters with FILTER_VALIDATE_EMAIL)
-        Mail::assertQueued(InvoiceIssuedMail::class, function ($mail) {
+        Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
             return $mail->hasBcc('audit@acme.gr')
                 && $mail->hasBcc('ops@acme.gr')
                 && ! $mail->hasBcc('not-an-email');

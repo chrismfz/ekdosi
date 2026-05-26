@@ -8,13 +8,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * One row per send ATTEMPT for an invoice (see migration docblock for
- * lifecycle). Read-mostly; the only writers are SendInvoiceEmail (job
- * lifecycle hooks) and the Mail event listeners in
- * App\Providers\AppServiceProvider that bridge Mail::MessageSending /
- * MessageSent / MessageFailed to log row updates.
+ * lifecycle). Read-mostly. The ONLY writer is the SendInvoiceEmail
+ * job: handle() creates the row, transitions queued → sending → sent
+ * / failed inline as it works through the send pipeline; failed()
+ * reconciles the row to 'failed' on terminal exhaustion of retries.
+ * No external Mail event listeners feed this table (the Laravel
+ * Mailer events fire AFTER our row is already in its terminal state,
+ * so they'd be redundant — and would be wrong, since they'd write
+ * to the FAILED log row a 'sent' status if the post-send hook fires
+ * before the worker realises the SMTP transport rejected).
  *
- * Surface on ViewInvoice as an infolist section showing the latest
- * few rows (status + recipient + timestamp + error).
+ * Surface on ViewInvoice via MailLogRelationManager showing the
+ * latest rows (status + recipient + timestamp + error).
  */
 class InvoiceMailLog extends Model
 {

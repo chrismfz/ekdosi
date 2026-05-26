@@ -4,14 +4,11 @@ namespace App\Mail;
 
 use App\Models\Invoice;
 use App\Services\MailTemplateRenderer;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
-use Illuminate\Queue\SerializesModels;
 
 /**
  * The "we've issued an invoice for you" customer email — port of the
@@ -40,17 +37,22 @@ use Illuminate\Queue\SerializesModels;
  * keep in sync. The Markdown view receives the already-interpolated
  * subject + body strings; it just wraps them with the standard
  * Laravel mail chrome (header / footer / styling).
+ *
+ * NOT ShouldQueue. The SendInvoiceEmail job IS the queuing layer;
+ * making the Mailable ALSO ShouldQueue would cause Mailer::send() to
+ * re-queue it (Illuminate\Mail\Mailer:349 detects the interface and
+ * routes to ->queue() — verified at vendor source), which puts the
+ * 50-500KB $pdfBytes string into a SECOND queue payload AND flips
+ * the log row to 'sent' before the actual transport runs. Mailable
+ * is plain so Mailer::send() sends synchronously inside the job
+ * handler — single queue hop, accurate audit trail.
  */
-class InvoiceIssuedMail extends Mailable implements ShouldQueue
+class InvoiceIssuedMail extends Mailable
 {
-    use Queueable;
-    use SerializesModels;
-
     /**
      * Bytes of the rendered PDF, passed in by the dispatcher so the
-     * queue payload stays small (the Invoice model is the only thing
-     * in SerializesModels — the renderer runs in the job handler,
-     * not at construct time).
+     * renderer runs once at job-handle time (not on every Mailable
+     * instantiation).
      */
     public string $pdfBytes;
 

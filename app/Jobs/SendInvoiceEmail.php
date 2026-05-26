@@ -60,6 +60,18 @@ class SendInvoiceEmail implements ShouldQueue
         public ?int $triggeredByUserId = null,
     ) {}
 
+    /**
+     * The InvoiceMailLog row id created in handle(). Captured so
+     * failed() (called by the queue worker after exhausting retries
+     * OR after a thrown exception) can flip the row to terminal
+     * 'failed' state — without it, a worker killed mid-send leaves
+     * the row stuck on 'sending' forever, and a 3-retry exhausted job
+     * leaves it on whatever state the last try wrote (often 'failed'
+     * with a transient error message instead of "gave up after 3
+     * tries").
+     */
+    public ?int $logId = null;
+
     public function handle(
         InvoicePdfRenderer $renderer,
         TenantMailerFactory $mailerFactory,
@@ -83,7 +95,8 @@ class SendInvoiceEmail implements ShouldQueue
 
         // Create the log row up-front in 'queued' state. Even the
         // "no email" path writes a row so operators see WHY nothing
-        // was sent.
+        // was sent. We persist the id on $this so failed() can find
+        // it if the worker exhausts retries.
         $log = InvoiceMailLog::create([
             'company_id'           => $invoice->company_id,
             'invoice_id'           => $invoice->id,
@@ -99,6 +112,7 @@ class SendInvoiceEmail implements ShouldQueue
             'queued_at'            => now(),
             'triggered_by_user_id' => $this->triggeredByUserId,
         ]);
+        $this->logId = $log->id;
 
         if ($email === '') {
             $log->update([
@@ -138,5 +152,47 @@ class SendInvoiceEmail implements ShouldQueue
             // ultimately land in failed_jobs after attempt 3.
             throw $e;
         }
+    }
+
+    /**
+     * Called by the queue worker when this job exhausts $tries OR
+     * when a non-retryable exception escapes handle(). Reconciles
+     * the InvoiceMailLog row created at the top of handle():
+     *
+     *   - If handle() reached the catch block, the row is already
+     *     'failed' with the last attempt's error — overwrite the
+     *     message to make it clear retries are over.
+     *   - If the worker was kill -9'd mid-send (or DI resolution
+     *     threw before our catch), the row may still be 'queued' or
+     *     'sending' — flip to 'failed' so the audit trail isn't a
+     *     lie ("stuck on queued forever").
+     *
+     * No-op if logId is null (handle() never ran far enough to
+     * persist a row — nothing to reconcile).
+     */
+    public function failed(Throwable $e): void
+    {
+        if ($this->logId === null) {
+            return;
+        }
+
+        $log = InvoiceMailLog::find($this->logId);
+        if ($log === null) {
+            return;
+        }
+
+        // Don't overwrite a row that already cleanly transitioned to
+        // 'sent' on an earlier successful attempt (defensive — failed()
+        // shouldn't fire on success, but the queue contract permits
+        // unusual call orders).
+        if ($log->status === 'sent') {
+            return;
+        }
+
+        $log->update([
+            'status'        => 'failed',
+            'error_message' => 'Gave up after '.$this->tries.' tries. Last error: '.$e->getMessage(),
+            'failed_at'     => now(),
+        ]);
     }
 }

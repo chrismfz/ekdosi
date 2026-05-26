@@ -130,12 +130,30 @@ class InvoicePdfRenderer
             return null;
         }
 
-        $disk = Storage::disk('public');
-        if (! $disk->exists($tenant->logo_path)) {
+        // Wrap in try/catch because Flysystem's WhitespacePathNormalizer
+        // THROWS PathTraversalDetected on `../` segments (verified at
+        // vendor/league/flysystem/src/WhitespacePathNormalizer.php:36)
+        // — it does NOT return false. The Filament FileUpload field
+        // writes safe paths, but admin-level DB access or an ETL
+        // anomaly could land a hostile value in companies.logo_path,
+        // and we don't want every PDF render to crash. Treat any
+        // filesystem-side rejection as "no logo" and continue.
+        try {
+            $disk = Storage::disk('public');
+            if (! $disk->exists($tenant->logo_path)) {
+                return null;
+            }
+
+            $bytes = $disk->get($tenant->logo_path);
+        } catch (\League\Flysystem\FilesystemException $e) {
+            return null;
+        } catch (\Throwable $e) {
+            // Belt-and-suspenders: any other unexpected exception from
+            // the storage layer also yields "no logo" rather than
+            // breaking the whole PDF.
             return null;
         }
 
-        $bytes = $disk->get($tenant->logo_path);
         if ($bytes === null || $bytes === '') {
             return null;
         }

@@ -455,6 +455,14 @@ class CompanyForm
                                             ->label('Send a test email')
                                             ->icon('heroicon-o-paper-airplane')
                                             ->color('gray')
+                                            // Defense-in-depth: only operators who can update
+                                            // the Company should be able to spray test emails
+                                            // from its SMTP. Without this gate, any user with
+                                            // view-only access to Company who reaches the form
+                                            // could send to arbitrary addresses.
+                                            ->authorize(fn (?Company $record) => $record === null
+                                                ? false
+                                                : (auth()->user()?->can('update', $record) ?? false))
                                             ->requiresConfirmation()
                                             ->modalHeading('Send test email')
                                             ->modalDescription(fn (?Company $record) => 'Sends a one-off plain test mail to verify SMTP config + audit BCC. Uses the CURRENT saved settings (not pending unsaved edits — save first).')
@@ -473,9 +481,17 @@ class CompanyForm
                                                 try {
                                                     $mailer = app(TenantMailerFactory::class)->for($record);
                                                     $bcc = array_map(fn (string $a) => new Address($a), $record->auditBccList());
-                                                    $mailer->html(
-                                                        '<p>This is a test email from ekdosi for tenant <strong>'.e($record->name).'</strong>.</p>'.
-                                                        '<p>If you received this, the tenant\'s SMTP config (or the global fallback) is working.</p>',
+                                                    // Contract-compliant: Mailer::send(array $view, array $data, Closure $callback).
+                                                    // The array form ['html' => '<inline html>']
+                                                    // is supported on the Mailer contract (verified
+                                                    // at vendor/laravel/.../Mailer.php), unlike
+                                                    // ->html() which only exists on the concrete
+                                                    // \Illuminate\Mail\Mailer class.
+                                                    $html = '<p>This is a test email from ekdosi for tenant <strong>'.e($record->name).'</strong>.</p>'.
+                                                        '<p>If you received this, the tenant\'s SMTP config (or the global fallback) is working.</p>';
+                                                    $mailer->send(
+                                                        ['html' => new \Illuminate\Support\HtmlString($html)],
+                                                        [],
                                                         function ($message) use ($data, $record, $bcc) {
                                                             $message->to($data['to'])
                                                                 ->subject('[ekdosi test] '.$record->name);
@@ -495,9 +511,14 @@ class CompanyForm
                                                         ->body('Sent to '.$data['to'].(count($bcc) ? ' (BCC: '.count($bcc).')' : '').'. Check the inbox.')
                                                         ->success()->send();
                                                 } catch (\Throwable $e) {
+                                                    // Sanitise transport error to first line only —
+                                                    // full SMTP exception bodies sometimes include
+                                                    // server-banner strings or hostnames the
+                                                    // operator shouldn't see in a UI toast.
+                                                    $first = strtok($e->getMessage(), "\n") ?: 'send failed';
                                                     Notification::make()
                                                         ->title('Test email failed')
-                                                        ->body($e->getMessage())
+                                                        ->body($first)
                                                         ->danger()->persistent()->send();
                                                 }
                                             }),

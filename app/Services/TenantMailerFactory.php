@@ -5,9 +5,7 @@ namespace App\Services;
 use App\Models\Company;
 use Illuminate\Contracts\Mail\Factory as MailFactoryContract;
 use Illuminate\Contracts\Mail\Mailer as MailerContract;
-use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Testing\Fakes\MailFake;
 
 /**
@@ -53,11 +51,16 @@ class TenantMailerFactory
             return $this->factory->mailer();
         }
 
-        $mailerName = 'tenant-'.$tenant->getKey();
+        // Unique mailer name per call so we NEVER collide with
+        // MailManager's per-name cache. forgetMailers() would flush
+        // ALL cached mailers (verified at vendor/laravel/.../MailManager
+        // .php:631 — `$this->mailers = []`), which under a queue
+        // worker processing tenants A → B → A would force every
+        // dispatch to rebuild every other tenant's mailer too. Unique
+        // names cost a fresh resolve per send but leave neighbouring
+        // sends untouched.
+        $mailerName = 'tenant-'.$tenant->getKey().'-'.uniqid('', true);
 
-        // Register the per-tenant config. setConfig accepts the full
-        // mailer config array — same shape as an entry in
-        // config('mail.mailers.*').
         config()->set("mail.mailers.{$mailerName}", [
             'transport'  => 'smtp',
             'host'       => $tenant->mail_smtp_host,
@@ -67,13 +70,6 @@ class TenantMailerFactory
             'password'   => $tenant->mail_smtp_password,
             'timeout'    => 30,
         ]);
-
-        // Force the MailManager to rebuild this name on next access
-        // (clears any cached instance for this mailer name). Only the
-        // concrete MailManager has forgetMailers(); the contract doesn't.
-        if ($this->factory instanceof MailManager) {
-            $this->factory->forgetMailers();
-        }
 
         try {
             return $this->factory->mailer($mailerName);

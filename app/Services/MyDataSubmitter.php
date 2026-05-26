@@ -154,12 +154,6 @@ class MyDataSubmitter implements EInvoiceSubmitter
         //   - tenant flag is false
         //   - customer has no email (job handler logs + returns)
         //   - this submitter was reached via DRY_RUN (not this path)
-        //
-        // Wrapped in DB::afterCommit because persistResponse opens its
-        // own transaction — if a caller wraps THIS submit() call in an
-        // outer transaction, the dispatch happens only after the
-        // outermost commits. Matches the same orphan-MARK defense as
-        // CreateInvoice::chainSubmit.
         $this->dispatchAutoEmailIfEnabled($invoice);
 
         return $mark;
@@ -171,6 +165,19 @@ class MyDataSubmitter implements EInvoiceSubmitter
      * itself fails — we don't want a queue-connection hiccup to mask
      * a successful AADE filing from the operator. The mail can always
      * be re-sent via the ViewInvoice "Resend email" action.
+     *
+     * NOTE on DB::afterCommit: Laravel's transaction manager fires the
+     * callback IMMEDIATELY when there's no active transaction (verified
+     * at vendor/laravel/framework/.../DatabaseTransactionsManager.php
+     * :205). So in the IssueInvoice (CreateInvoice) path — which wraps
+     * the whole flow in Filament's outer transaction — the dispatch
+     * defers until that outer commit. But in the ViewInvoice "Submit
+     * to myDATA" path, there's no outer transaction, so the dispatch
+     * runs synchronously here. Either way, persistResponse() has
+     * already committed its own inner transaction by this point, so
+     * the invoice + mark row are durable. This is correct behaviour,
+     * not a defense — it's why we use afterCommit defensively even
+     * though it's a no-op in the common case.
      */
     private function dispatchAutoEmailIfEnabled(Invoice $invoice): void
     {
