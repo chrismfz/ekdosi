@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\MyDataMode;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -25,7 +27,7 @@ class Company extends Model
         'email',
         'mydata_aade_id',
         'mydata_subscription_key',
-        'mydata_production',
+        'mydata_mode',
         'gsis_username',
         'gsis_password',
     ];
@@ -33,10 +35,29 @@ class Company extends Model
     protected function casts(): array
     {
         return [
-            'mydata_production' => 'boolean',
             'mydata_subscription_key' => 'encrypted',
             'gsis_password' => 'encrypted',
         ];
+    }
+
+    /**
+     * Typed accessor for mydata_mode. The column stores the raw string
+     * for backward compatibility with ETL / artisan / DB-direct paths
+     * (and so a new value added to MyDataMode doesn't break older rows);
+     * code paths that want to switch on the mode should read this
+     * accessor instead of the raw column.
+     */
+    protected function mydataModeEnum(): Attribute
+    {
+        return Attribute::make(
+            // Parens around the ?? so the coalesce binds BEFORE the cast.
+            // Without them, `(string) $this->attributes['mydata_mode'] ?? ''`
+            // parses as `((string) $this->attributes['mydata_mode']) ?? ''`
+            // which fires "Undefined array key" if mydata_mode isn't in
+            // the loaded attributes (e.g. a partial Company::select(['id'])
+            // query) before ?? gets a chance to short-circuit.
+            get: fn () => MyDataMode::tryFrom((string) ($this->attributes['mydata_mode'] ?? '')) ?? MyDataMode::Off,
+        );
     }
 
     public function getRouteKeyName(): string

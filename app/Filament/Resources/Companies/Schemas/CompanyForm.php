@@ -201,9 +201,32 @@ class CompanyForm
                                             ->dehydrated(fn (?string $state): bool => filled($state))
                                             ->maxLength(255),
 
-                                        Toggle::make('mydata_production')
-                                            ->label('Production endpoint')
-                                            ->helperText('Off → AADE sandbox. On → real submissions.'),
+                                        Select::make('mydata_mode')
+                                            ->label('Submission mode')
+                                            ->options(\App\Enums\MyDataMode::options())
+                                            ->default(\App\Enums\MyDataMode::Off->value)
+                                            ->required()
+                                            ->live()
+                                            ->helperText(new \Illuminate\Support\HtmlString(
+                                                '<strong>Off</strong> = no AADE call (PDFs only, safe for testing). '
+                                                . '<strong>Sandbox</strong> = AADE test endpoint (synthetic MARKs). '
+                                                . '<strong>Production</strong> = LIVE submissions affecting real tax records. '
+                                                . '<br><strong>⚠ Switching to/from Production:</strong> the change takes effect '
+                                                . 'on save. Verify credentials via "Test connection" before going Live; '
+                                                . 'switching back to Off/Sandbox stops legally-required filings.'
+                                            )),
+                                            // Note: a Notification-on-afterStateUpdated approach
+                                            // was tried and removed — it fired on every form
+                                            // state change (including immediate undos), creating
+                                            // toast spam that trained operators to ignore the
+                                            // warnings. The safer pattern is to surface the
+                                            // mode-change semantic in helperText + a real
+                                            // confirm modal on the EditCompany page's save
+                                            // action when mydata_mode transitions involve
+                                            // Production. That belongs on the page class, not
+                                            // the form schema — tracked in CLAUDE.md as a
+                                            // deferred follow-up since it requires touching
+                                            // EditCompany.php and a custom save action.
                                     ]),
                             ]),
 

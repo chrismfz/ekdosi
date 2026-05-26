@@ -51,7 +51,7 @@ class InvoiceResourceTest extends TestCase
             'slug' => 'inv-res-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         $this->invoiceType = InvoiceType::create([
@@ -160,7 +160,7 @@ class InvoiceResourceTest extends TestCase
             'slug' => 'other-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
         $otherType = InvoiceType::create([
             'company_id' => $other->id,

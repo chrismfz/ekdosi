@@ -38,7 +38,7 @@ class InvoiceNumbererTest extends TestCase
             'slug' => 'test-co-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         $this->apyType = InvoiceType::create([
@@ -99,7 +99,7 @@ class InvoiceNumbererTest extends TestCase
             'slug' => 'other-co-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
         InvoiceType::create([
             'company_id' => $other->id,

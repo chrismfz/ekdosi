@@ -426,6 +426,78 @@ Legacy design (what to replace, not what to reproduce):
   WHMCS to read from / be queried by the new Laravel app and turn the
   mirror off.
 
+### WHMCS bridge — preparation notes (what to read when the bridge PR starts)
+
+Inventory of the legacy WHMCS surface so the bridge PR doesn't start
+from a blank page. Captured here before we lose track; the actual
+bridge work lands after PR #25 (MyDataSubmitter).
+
+**Legacy MySQL credentials live in the Windows Registry**, NOT hardcoded:
+- `FDBParams.cpp:80-86` reads `hostname / path / username / password`
+  via the Registry helper class.
+- `FDBParams.cpp:236-239` writes them back to keys named
+  `MySQLHostname / MySQLDbName / MySQLUsername / MySQLPassword`.
+- `FMysqlSync.cpp:38-43` constructs the connection from those keys at
+  runtime.
+- For the new bridge we move to per-tenant credentials on `companies`
+  (mirroring the AADE / GSIS pattern from PR #22) — new columns
+  `whmcs_api_url`, `whmcs_api_identifier`, `whmcs_api_secret`
+  (encrypted), `whmcs_db_*` only if we genuinely need direct DB
+  access (the CLAUDE.md decision was API-only, see line 22-25).
+
+**WHMCS-side plugins** are already in `legacy/whmcs/`:
+- `legacy/whmcs/afm2name/` — AFM → name lookup via SOAP to GSIS (we
+  already have this functionality natively in PR #22's
+  `AadeRegistryLookup`; this plugin is for WHMCS-side use only).
+- `legacy/whmcs/prepare_for_ekdosi/` — WHMCS addon that flips
+  `tblinvoices.invoiced` after ekdosi has filed the invoice. The new
+  bridge does the equivalent via the WHMCS API
+  (`UpdateInvoice` with custom field).
+- `legacy/whmcs/timologia/` — third-party-invoices addon; creates
+  `mod_timologia` + `mod_timologia_servicetypes` tables. Lets a WHMCS
+  client say "issue this invoice to another company" (e.g. employer
+  reimbursement). Bridge needs to consume this data.
+
+**Legacy SQL the bridge replaces**:
+- `FAutoInvoice.dfm:QueryInvoices` runs a 100-line SQL JOIN against
+  `tblinvoices`, `tblclients`, `tblcustomfieldsvalues`,
+  `mod_timologia*`. The "ready to file" condition is
+  `WHERE mi.status='Paid' AND mi.invoiced = 0 AND gkriniaris = 'on'`.
+  See `legacy/ekdosi-main/FAutoInvoice.dfm` for the full query.
+- `FAutoInvoice.cpp:307` updates back via
+  `UPDATE tblinvoices SET invoiced = :mark WHERE id = :id` — the new
+  bridge does this via the WHMCS API instead of direct SQL.
+
+**Hardcoded magic in the legacy bridge** — these will rot if WHMCS
+config drifts; capture them in `companies.whmcs_custom_field_map`
+(JSON column) so each tenant maps their own WHMCS instance:
+- `fieldid = 12` → "toinvoice" (the company name to bill)
+- `fieldid = 13` → "vatno" (customer AFM)
+- `fieldid = 14` → "taxoffice" (ΔΟΥ)
+- `fieldid = 15` → "occupation" (Δραστηριότητα — see legacy PDF
+  example uploaded earlier)
+- `fieldid = 338` → `gkriniaris` flag — the "issue immediately on
+  payment" toggle (already tracked in CLAUDE.md as
+  `customers.needs_immediate_invoice`)
+- "Φυσικό" / "ΗΝ" Greek literals in `FAutoInvoice.cpp:322,464-466`
+  classify individual vs business customer — locale-dependent, must
+  not be hardcoded in the new bridge.
+
+**Decision points for the bridge PR**:
+- WHMCS API auth: identifier + secret (modern) vs username + password
+  (legacy). Modern is the right call; encrypt the secret.
+- Polling vs webhook: legacy polls. WHMCS has hooks (`InvoicePaid`)
+  that can push to us. Hook is cheaper but adds an inbound surface.
+- Custom field ID mapping: per-tenant JSON column vs a `whmcs_field_
+  mappings` table. JSON simpler unless the WHMCS bridge becomes
+  per-tenant complex (which it might given the timologia addon).
+- `mod_timologia_servicetypes` rows — do we mirror them locally or
+  hit WHMCS API per issuance?
+
+**Trigger PR**: after the IssueInvoice action lands (PR #26). The
+bridge needs the EInvoiceSubmitter to exist + a working issue flow
+to call. Until then, document gaps here.
+
 ### Data migration — how the cutover actually happens
 This is what `MigrateFromFirebird.php` exists for; spelling out the story:
 
@@ -787,7 +859,26 @@ Updating the order in light of what we learned:
    object — port `CALCULATE_VAT_FOR_INVOICE` semantics. Wired but
    not callable from UI yet.
 8. **IssueInvoice action** in InvoiceResource — combines #4, #6, #7.
-   First real end-to-end myDATA submission.
+   First real end-to-end myDATA submission. Button shape (locked in
+   after operator discussion):
+     - Form ALWAYS shows a **"Save"** button → invoice persisted as
+       draft, no AADE call, regardless of mode.
+     - Form ALSO shows a **"Save and Submit to myDATA"** button when
+       `mydata_mode != Off` (sandbox or production). One click =
+       persist + submit + receive MARK + mirror columns updated.
+     - For `mydata_mode = Off` tenants, ONLY "Save" is rendered —
+       the submit button would route to NullSubmitter and confuse
+       operators.
+     - On the view page (post-save), drafts get a separate "Submit
+       to myDATA" action button so an operator who chose Save-only
+       can submit later after reviewing the PDF.
+     - VALID invoices get a "Cancel via myDATA" action; CANCELLED
+       are display-only.
+   This shape gives the operator THREE paths:
+     - Save → review PDF → Submit (safe + slow)
+     - Save and Submit (fast + confident)
+     - Off-mode: just Save (PDF only, no AADE at all — bridge
+       testing / training tenant / breakglass)
 9. **WHMCS bridge** — pull job + bridge of WHMCS invoices through the
    same IssueInvoice action.
 10. **PEPPOL submitter** — for the Estonian tenant.
@@ -985,6 +1076,14 @@ production data before cutover.
 - **`text` → `binary` collation on encrypted credential columns** — `companies.gsis_password` and `companies.mydata_subscription_key` are declared `text` and inherit MariaDB's `utf8mb4_unicode_ci` default. Ciphertext is opaque bytes; a UTF-8 collation could in theory normalise something during a dump/restore through a misconfigured tool. Not currently exploited (Laravel's `encrypted` cast round-trips fine through MariaDB native), defensive at best. **Trigger PR**: next time we touch encrypted columns. Fix shape: `$t->binary(...)` or `$t->text(...)->collation('utf8mb4_bin')` migration.
 - **Filament closure-binding fragility on form actions** — The form `Action::action(function (callable $get, callable $set, ?\App\Models\Company $record) { ... })` signatures rely on Filament 5's parameter-name + type resolution. Stable today; if Filament's resolution heuristic changes in a minor (e.g. they introduce a `Record` interface or split create vs edit contexts), the `$record` injection could regress silently. **Trigger PR**: next Filament minor upgrade. Fix shape: switch to `$livewire->getRecord()` resolution; less magic, more explicit.
 - **ext-soap CI gap** — Tests gated on `extension_loaded('soap')` skip cleanly when the sandbox PHP lacks the extension. Production `composer.json` declares `ext-soap: "*"` as a hard requirement so deploys fail without it, but if a future CI image silently omits ext-soap (Alpine variants do this), CI would green-check while production breaks. **Trigger PR**: when CI / Docker image gets formalised. Fix shape: a meta-test that asserts every composer-declared extension is actually loaded.
+
+### Deferred from PR #24 (myDATA submitter foundation) — second-sweep review
+- **Real confirm modal for production-mode transitions on Company save** — currently the form's mode Select has a helperText warning about the safety implications, but there's no Filament confirm modal blocking the save when `mydata_mode` transitions involve Production. The previous attempt (persistent toast on `afterStateUpdated`) was misleading (fired on every form-state change, including immediate undos, training operators to ignore the warnings). Right shape: override the EditCompany page's save action with `requiresConfirmation()` gated on `$record->isDirty('mydata_mode')` and a transition that touches Production. Defer because it requires custom page logic, not just form-schema config. **Trigger PR**: first time a tenant accidentally goes Live (or proactively when a second operator account exists).
+- **NullSubmitter's SKIPPED rows show as "pending" in InvoiceInfolist** — the Infolist reads `$record->mydata_state` (the cache column), which NullSubmitter intentionally leaves null. Operators on Off-mode tenants see "pending" badges on every invoice, indistinguishable from "we haven't tried to file yet". Fix shape: the Infolist's myDATA section reads `$record->latestMydataMark?->mydata_action` and shows "Skipped (not filed)" as a distinct gray badge when the latest mark is SKIPPED. PR #25 reworks this column logic anyway when the real submitter wires up; bundle the fix then.
+- **CompaniesTable badge color for Production = `danger` (red)** — alarming-by-default on an all-Greek tenant dashboard. Reserves `danger` for genuine fault states. Switch to `success` (green) for production, `warning` (yellow) for sandbox, `gray` for off. Cosmetic, defer.
+- **English-only Select labels and badge text** — `MyDataMode::label()` and the badge `formatStateUsing` arms hard-code English. Will need i18n when the Greek locale fully ships. Tracked in CLAUDE.md's broader i18n plan; not blocking.
+- **Test naming hardcodes "_pr24"** — `test_factory_returns_null_submitter_for_sandbox_in_pr24` becomes stale documentation the moment PR #25 lands and flips the expectation. Rename in PR #25 to something stable, OR auto-skip via `markTestSkipped` if `class_exists(MyDataSubmitter::class)`.
+- **EE / none tenants don't see the mode Select** — the myDATA submission tab is hidden when `einvoice_provider != 'gr-mydata'`, so an Estonian or PDF-only tenant has no UI to change its `mydata_mode` (defaulted to 'off' by the migration, which is correct). If they ever DO want sandbox testing without flipping provider, they can't. Edge case — defer until a real workflow needs it.
 
 ### Deferred — application-wide patterns
 - **FK-aware delete guards (`GuardedDeleteAction`)** — operators currently hit one of two confusing modes when deleting a row that has dependents: (a) the default soft-delete succeeds silently and the dependent invoice / line / customer ends up referencing a trashed lookup row that's now invisible in the panel; (b) ForceDelete crashes with a cryptic SQL error from `restrictOnDelete`. Proposed shape: a reusable `GuardedDeleteAction` (extends Filament's DeleteAction) that counts referencing rows on `->before()`, blocks with a friendly notification listing exactly what depends on the row, and offers "Deactivate" (set `is_active=false`) where the model supports it. Complementary `BeforeDeleteObserver` enforces the same check from artisan/queue/API paths. **Trigger PR**: after InvoiceResource lands — that's when the full reference graph is real (invoices touch every lookup we have). Applies across Product, ProductCategory, VatCategory, MetricUnit, PaymentMethod, DeliveryMethod, DistributionAim, InvoiceType, Customer.
