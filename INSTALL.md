@@ -611,29 +611,46 @@ sudo ss -tlnp | grep 3050              # confirm FB is listening
 # SYSDBA password handling varies by EL version + Firebird build:
 # - EL9 / Firebird 3 installs may auto-generate /etc/firebird/SYSDBA.password
 # - EL10 / Firebird 4 (current default) ships an EMPTY security DB and
-#   relies on a one-time "Install incomplete" bootstrap mode the first
-#   time anyone tries to connect.
+#   the install does NOT seed SYSDBA. You bootstrap it yourself.
 #
-# First, fix ownership in case anything under /var/lib/firebird/ got
-# stomped while debugging (the daemon runs as the firebird OS user and
-# can't read root-owned files):
-sudo chown -R firebird:firebird /var/lib/firebird/
-sudo systemctl restart firebird
+# Firebird 4's "Install incomplete" message you'll see if you try to
+# connect over the network is a RED HERRING — the network connect is
+# rejected outright (SQLSTATE 28000), it doesn't actually let you
+# stay connected long enough to CREATE USER. The real path is
+# EMBEDDED MODE: stop the daemon, isql-fb the security DB by file
+# path (no host: prefix → embedded → no auth), CREATE USER, restart.
+#
+# Two prerequisites:
+#  (a) Ownership: /var/lib/firebird/ must be firebird:firebird through
+#      and through. If anything got root-owned (e.g. you ran isql-fb
+#      as root by accident), embedded mode hits "Permission denied".
+#  (b) Daemon stopped: embedded mode needs an exclusive file lock.
 
-# Then bootstrap SYSDBA over the network. Firebird 4's "Install
-# incomplete" mode lets ANY credentials connect long enough to run
-# CREATE USER — that's how the very first SYSDBA row is seeded:
-sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password whatever \
-    localhost:employee <<'SQL'
+# Step 1 — repair ownership in case anything got stomped while debugging
+sudo chown -R firebird:firebird /var/lib/firebird/
+
+# Step 2 — locate the security DB (path varies by build)
+sudo find /var/lib/firebird /opt/firebird -name 'security*.fdb' 2>/dev/null
+# Typical:
+#   /var/lib/firebird/secdb/security4.fdb   (EPEL 10 firebird-4)
+#   /var/lib/firebird/system/security4.fdb  (some EL9 builds)
+SECDB=/var/lib/firebird/secdb/security4.fdb   # adjust to what find returned
+
+# Step 3 — stop daemon, bootstrap SYSDBA via embedded mode, restart
+sudo systemctl stop firebird
+sudo -u firebird /usr/bin/isql-fb "$SECDB" <<'SQL'
 CREATE USER SYSDBA PASSWORD 'masterkey';
 COMMIT;
 QUIT;
 SQL
+# (If a SYSDBA row already exists with a different password, that
+# CREATE will say "User already exists" — swap to ALTER USER instead.)
+sudo systemctl start firebird
 
-# Smoke-test: SYSDBA/masterkey should now log in cleanly with no
-# "Install incomplete" message:
+# Step 4 — smoke-test that SYSDBA/masterkey now works over the network
 sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password masterkey \
     localhost:employee <<<'QUIT;'
+# Expect: clean exit, NO "Install incomplete" message.
 ```
 
 If you ever need to RESET the SYSDBA password later, use SQL over a
