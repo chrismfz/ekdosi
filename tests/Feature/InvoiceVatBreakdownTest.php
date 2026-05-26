@@ -173,15 +173,32 @@ class InvoiceVatBreakdownTest extends TestCase
         ]);
     }
 
+    /**
+     * Build a line by feeding the inputs that the form / ETL provide
+     * (qty × price_per_item × vat_percent). Net + gross are computed
+     * authoritatively by `InvoiceLine::saving` — passing them in here
+     * would be ignored. All test cases use qty=1 so `price_per_item`
+     * == the desired pre-discount net.
+     */
     private function addLine(Invoice $inv, float $vat, float $net, float $gross): InvoiceLine
     {
-        return InvoiceLine::create([
+        $line = InvoiceLine::create([
             'company_id' => $this->tenant->id,
             'invoice_id' => $inv->id,
             'qty' => 1,
+            'price_per_item' => $net,
             'vat_percent' => $vat,
-            'net_price' => $net,
-            'gross_price' => $gross,
         ]);
+
+        // Sanity check: the hook's computation should match the test's
+        // hand-calculated expected gross. If it diverges, the test
+        // setup is wrong — fail loudly here, not silently downstream.
+        if (abs((float) $line->gross_price - $gross) > 0.01) {
+            throw new \RuntimeException(
+                "Test fixture mismatch: expected gross={$gross}, got {$line->gross_price}"
+            );
+        }
+
+        return $line;
     }
 }
