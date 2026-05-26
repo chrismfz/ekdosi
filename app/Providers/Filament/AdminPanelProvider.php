@@ -30,6 +30,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->profile()                       // adds "Edit profile" to the user menu (Filament built-in)
             ->tenant(Company::class, slugAttribute: 'slug')
             ->colors([
                 'primary' => Color::Amber,

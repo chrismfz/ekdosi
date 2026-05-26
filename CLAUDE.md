@@ -766,10 +766,34 @@ Updating the order in light of what we learned:
 
 ### Still-open questions for the operator
 
-- Does myip use the **"assigned invoices" (status=-333)** workflow?
-- Does myip use the **"griniaris"** bulk-issue workflow?
-- Are there any **`VARTEXT`** rows in the production `.fbk`, or is the
-  table dead?
+- ~~Does myip use the **"assigned invoices" (status=-333)** workflow?~~
+  → **Defer**. Operator doesn't recall the rule offhand; not blocking
+  current work. Deep-dive when we reach the invoice workflow PR
+  (roadmap step 4/6/8) and grep `FAutoInvoice.cpp` for `-333` literals.
+- ~~Does myip use the **"griniaris"** bulk-issue workflow?~~
+  → **Resolved**. "Γκρινιάρης" (Greek for "grumpy") is an
+  **immediate-invoicing** flag on the customer, NOT a bulk-issue
+  workflow as the form's wording suggested. It's a checkbox on the
+  WHMCS client profile that means "this customer wants their invoice
+  the moment they pay, don't wait for the weekly batch". Implications:
+  - The new `customers` table needs a boolean column for this
+    (suggested: `needs_immediate_invoice`, default `false`).
+  - The WHMCS bridge job syncs this flag from WHMCS's
+    `clients.<custom-field-for-grumpy>` into `customers.needs_immediate_invoice`.
+  - The IssueInvoice scheduled command (replacement of FAutoInvoice)
+    checks the flag — `true` → issue + send to myDATA on the same
+    tick as the payment row landed; `false` → roll into the next
+    weekly batch.
+  - Schema TODO: add the column in the same migration as the WHMCS
+    bridge work, NOT now (no consumer for it yet).
+- ~~Are there any **`VARTEXT`** rows in the production `.fbk`?~~
+  → **Resolved for ETL**. The ETL doesn't touch VARTEXT at all —
+  it's not referenced in `MigrateFromFirebird.php`. So dropping the
+  table from the new schema is safe regardless of legacy content;
+  re-running migrate:firebird against any `.fbk` (with or without
+  VARTEXT rows) won't fail. If a future workflow turns out to need
+  the data, we'd discover that gap during feature work, not at
+  cutover.
 - What's the per-tenant **AADE user ID + subscription key** for myip
   and nixpal (we need these to actually test myDATA submission once
   the submitter is built)?
