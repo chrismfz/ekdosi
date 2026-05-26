@@ -639,21 +639,27 @@ Sorted by what *blocks cutover* vs. what's a nice-to-have.
 ### Schema fixes worth doing BEFORE more domain resources
 
 These are easier to fix now, while no real data depends on them, than
-mid-cutover:
+mid-cutover.
 
-1. **`invoices.discount` → `invoices.discount_percent`** — the legacy
-   schema declares the column as `CURRENCY (DECIMAL(14,2))` but every
-   code path (FAddInvoice.cpp:277, CALCULATE_VAT_FOR_INVOICE,
-   FAddInvoice2.cpp:249) treats it as a **percent 0-100**. Our migration
-   carries the same misleading name + type. Rename to
-   `discount_percent` and tighten to `decimal(5,2)`. The ETL needs the
-   matching key change.
+1. ✅ **`invoices.header_discount` → `invoices.header_discount_percent`**
+   (decimal(5,2)) — landed in PR for the schema-fixes branch. The
+   legacy column INVOICE.DISCOUNT was declared as `CURRENCY
+   (DECIMAL(14,2))` but every code path treats it as a percent 0-100;
+   the original new-schema migration carried the misleading type
+   forward. Now correctly typed; ETL writes the renamed column.
 
-2. **`return_invoice_extras` synthetic PK** — legacy table has no PK
-   (just `QTY_GIVEN`); our migration also lacks one. Add an
-   auto-increment id so Eloquent + Filament work cleanly.
+2. ~~`return_invoice_extras` synthetic PK~~ — turned out to be
+   already-fixed. The legacy table has no PK (just `QTY_GIVEN`), but
+   our `create_return_invoice_extras_table` migration adds `$t->id();`
+   so we were already ahead of this item. The note was based on the
+   LEGACY DDL dump, not our migration.
 
-3. **AFM default-from-CUST_ID** — legacy trigger sets `CUSTOMER.AFM =
+3. ✅ **`mydata_marks.mark_time` TIMESTAMP → TIME** — landed in the
+   same PR. Legacy MARK.TIME is TIME-only; new column type now
+   matches, so the first production `.fbk` with real MARK rows won't
+   throw "Incorrect datetime value" on STRICT_TRANS_TABLES.
+
+4. **AFM default-from-CUST_ID** — legacy trigger sets `CUSTOMER.AFM =
    CAST(CUST_ID AS VARCHAR)` if null on insert. Our new schema allows
    null AFM with no default. Real customers often have AFM, but cash
    customers don't. **Recommendation**: keep null nullable; let the
@@ -745,9 +751,11 @@ Updating the order in light of what we learned:
 
 1. **UserResource + ProfileResource** — biggest UX gap right now;
    admin can't add operators without tinker. Next PR.
-2. **Schema-fix PR** — rename `invoices.discount` →
-   `invoices.discount_percent`, add `return_invoice_extras.id` PK,
-   change `mydata_marks.mark_time` to `time`. Small, mechanical.
+2. ✅ **Schema-fix PR** — rename
+   `invoices.header_discount` → `invoices.header_discount_percent`
+   (decimal(5,2)) + change `mydata_marks.mark_time` to TIME. Landed
+   on the `claude/schema-fixes` branch. The third item (PK on
+   `return_invoice_extras`) was already in our migration.
 3. **CustomerResource** — smallest end-to-end slice with real data.
 4. **Invoice numbering port** — the `IssueInvoice` action stub with
    `lockForUpdate()` counter increment. Doesn't need a UI yet; just
