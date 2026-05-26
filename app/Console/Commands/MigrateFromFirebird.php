@@ -170,6 +170,21 @@ class MigrateFromFirebird extends Command
         return $this->fb->query($sql)->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * True iff the named table exists in the Firebird source. Older `.fbk`
+     * snapshots predate post-myDATA additions (MARK, AUTO_INVOICE_LOG,
+     * CONF_PARAMS rows on later builds, etc); callers use this to skip
+     * gracefully instead of crashing the whole import.
+     */
+    private function fbTableExists(string $name): bool
+    {
+        $stmt = $this->fb->prepare(
+            'SELECT 1 FROM RDB$RELATIONS WHERE RDB$RELATION_NAME = ? AND RDB$SYSTEM_FLAG = 0'
+        );
+        $stmt->execute([strtoupper($name)]);
+        return (bool) $stmt->fetchColumn();
+    }
+
     /** Drop any byte that is not valid UTF-8 (belt-and-suspenders after FB transliteration). */
     private function clean(?string $v): ?string
     {
@@ -453,6 +468,10 @@ class MigrateFromFirebird extends Command
 
     private function copyMarks(): void
     {
+        if (! $this->fbTableExists('MARK')) {
+            $this->line('  MARK -> mydata_marks  (skipped: table absent in this .fbk — pre-myDATA snapshot)');
+            return;
+        }
         $this->line('  MARK -> mydata_marks  (full audit trail)');
         foreach ($this->fbAll('SELECT * FROM MARK') as $r) {
             DB::table('mydata_marks')->insert([
@@ -474,6 +493,10 @@ class MigrateFromFirebird extends Command
 
     private function copyConfParams(): void
     {
+        if (! $this->fbTableExists('CONF_PARAMS')) {
+            $this->line('  CONF_PARAMS -> conf_params (skipped: table absent in this .fbk)');
+            return;
+        }
         $this->line('  CONF_PARAMS -> conf_params');
         foreach ($this->fbAll('SELECT * FROM CONF_PARAMS') as $r) {
             DB::table('conf_params')->insert([
@@ -492,6 +515,10 @@ class MigrateFromFirebird extends Command
 
     private function copyWhmcsLog(): void
     {
+        if (! $this->fbTableExists('AUTO_INVOICE_LOG')) {
+            $this->line('  AUTO_INVOICE_LOG -> whmcs_invoice_log (skipped: table absent in this .fbk — pre-WHMCS-bridge snapshot)');
+            return;
+        }
         $this->line('  AUTO_INVOICE_LOG -> whmcs_invoice_log');
         foreach ($this->fbAll('SELECT * FROM AUTO_INVOICE_LOG') as $r) {
             DB::table('whmcs_invoice_log')->insert([
