@@ -99,6 +99,21 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'Issue a correction invoice (new code) instead of resubmitting.'
             );
         }
+        // Belt-and-suspenders catch-all. The two specific guards above
+        // cover all values legacy schema ever wrote (legacy/ekdosi-schema.sql:991
+        // sets MYDATA_STATE='VALID', :1000 sets 'CANCELLED'). If a future
+        // code path or a corrupted import introduces ANY other non-null
+        // state, refuse to file blindly rather than treat unknown as
+        // "never filed". Loud-fail beats silent double-file. Per the
+        // fourth-review finding — defense in depth even though the
+        // specific guards are exhaustive for today's data.
+        if ($invoice->mydata_state !== null && $invoice->mydata_state !== '') {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} has an unrecognised mydata_state='{$invoice->mydata_state}'. ".
+                'Refusing to submit — investigate the state value before retrying. '.
+                'Expected null (never filed), VALID (filed), or CANCELLED.'
+            );
+        }
 
         $payload = $this->buildAadeInvoice($invoice);
         $xml = $this->payloadToXml($payload);

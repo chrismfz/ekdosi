@@ -305,6 +305,23 @@ class MyDataSubmitterSafetyTest extends TestCase
         (new MyDataSubmitter($this->tenant))->submit($invoice->fresh());
     }
 
+    public function test_submit_refuses_unknown_mydata_state_value(): void
+    {
+        // Belt-and-suspenders catch-all from the fourth review. The
+        // VALID/CANCELLED guards are exhaustive for legacy data, but
+        // any future or corrupted state value should also refuse
+        // rather than silently treat as "never filed" and double-file.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_state' => 'PENDING',  // not VALID, not CANCELLED, not null
+        ])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/unrecognised mydata_state/');
+
+        (new MyDataSubmitter($this->tenant))->submit($invoice->fresh());
+    }
+
     public function test_foreign_counterpart_normalises_country_and_carries_name_address(): void
     {
         // Operators have been observed typing full country names.
