@@ -3,9 +3,18 @@
 Multi-tenant target schema (one MariaDB, `company_id` on every table) + a re-runnable
 ETL command that imports each legacy Firebird `.fdb` into one tenant.
 
+Source app is a **C++Builder (VCL) + Firebird** invoicing tool; this kit
+drops into a Laravel 13 + Filament app (to be scaffolded at the repo root)
+and ports its data.
+
 ## What's here
 - `database/migrations/` — 19 idiomatic Laravel migrations (MariaDB, utf8mb4).
 - `app/Console/Commands/MigrateFromFirebird.php` — the ETL (`php artisan migrate:firebird`).
+
+Reference material lives at `/old/` (sibling to this kit):
+- `/old/ekdosi-schema.sql` — `isql -x` schema dump.
+- `/old/ekdosi-main/` — C++Builder source (read for VAT/rounding/discount math).
+- `/old/ekdosi-main/db_backup/ekdosi.fbk` — Firebird gbak for sandboxed ETL dev.
 
 ## Key decisions (and why)
 - **Multi-tenant, not per-DB.** Superset: deploys per-DB later if needed; the reverse can't.
@@ -42,9 +51,20 @@ to `charset=NONE` and `iconv('Windows-1253','UTF-8//IGNORE',$v)` per string fiel
 - `GET_COMB_*` procedures — they do cross-DB `EXECUTE STATEMENT` against a hardcoded
   `C:\Users\haris\...\ekdosi-arif-rossidis\ekdosi.fdb` with SYSDBA/masterkey baked in.
   Credential landmine + a two-company "combined invoice" feature unrelated to myip.
-- WHMCS bridge tables collapsed: link now lives on `customers.whmcs_client_id`;
-  `AUTO_INVOICE_LOG` → `whmcs_invoice_log`. `CUSTOMER_CS_ACCEPTED` (incoming-client
-  staging) is intentionally left out — rework as a sync step.
+- **CS-Cart** bridge is dropped entirely — the legacy code exists
+  (`FCSConnect.*`, `FManageCS*`, `CUSTOMER_CS_ACCEPTED`) but was never
+  actually used. Don't carry it over.
+
+The **WHMCS bridge stays in scope** (needed by myip) and is reshaped:
+- Customer↔WHMCS link: flat column `customers.whmcs_client_id` (no bridge table).
+- `AUTO_INVOICE_LOG` → `whmcs_invoice_log` (audit + idempotency).
+- The polling job (legacy `FAutoInvoice.cpp`) becomes a Laravel scheduled
+  command or queue worker that pulls from the WHMCS API and issues invoices
+  through the normal myDATA path — single code path, no special-case.
+
+**Possible future**: Blesta (same niche as WHMCS). Don't pre-abstract today,
+but keep the WHMCS pull logic behind a thin "billing-provider" interface so
+adding Blesta is a new implementation, not a refactor.
 
 ## Run order
 ```bash
