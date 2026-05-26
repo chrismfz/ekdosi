@@ -95,6 +95,16 @@ class MigrateFromFirebird extends Command
                 'long_description' => $this->fld($r, 'LONG_DESCRIPTION'),
                 'is_default'       => (bool) $r['DEFAULT_CAT'],
             ]);
+
+            // Legacy schema enforced single-default VAT via the VAT_CATEGORY_AU0
+            // trigger (Firebird AFTER UPDATE: demoted every other row when one
+            // became default). MariaDB has no equivalent enforcement yet — the
+            // proper VatCategory model observer ships with the Filament lookup
+            // resources (see CLAUDE.md "Audit findings — 2026-05-26"). Until
+            // then, demote duplicate defaults at import time so the freshly-
+            // populated table doesn't violate the invariant on day one.
+            $this->demoteDuplicateVatDefaults();
+
             $this->copyLookup('PRODUCT_CATEGORIES', 'product_categories', 'CAT_ID', fn ($r) => [
                 'description_short' => $this->fld($r, 'DESCRIPTION_SHORT'),
                 'description'       => $this->fld($r, 'DESCRIPTION'),
@@ -288,6 +298,42 @@ class MigrateFromFirebird extends Command
             return null;
         }
         return $this->map[$table][(int) $legacy] ?? null;
+    }
+
+    /**
+     * Replacement for the legacy VAT_CATEGORY_AU0 trigger at import time.
+     * The trigger only fired on UPDATE, so legacy production data can
+     * still contain >1 default per company (e.g. operator marked a second
+     * row default via INSERT path, or two ETL runs from different sources
+     * stacked defaults). Pick the lowest surrogate id as the canonical
+     * default, demote the rest, and tell the operator we did so — silent
+     * fix-ups during import are the kind of thing that surfaces months
+     * later as "why does the form pre-select the wrong VAT rate?".
+     */
+    private function demoteDuplicateVatDefaults(): void
+    {
+        $defaults = DB::table('vat_categories')
+            ->where('company_id', $this->companyId)
+            ->where('is_default', true)
+            ->orderBy('id')
+            ->pluck('id');
+
+        if ($defaults->count() <= 1) {
+            return;
+        }
+
+        DB::table('vat_categories')
+            ->where('company_id', $this->companyId)
+            ->where('is_default', true)
+            ->where('id', '!=', $defaults->first())
+            ->update(['is_default' => false]);
+
+        $this->warn(sprintf(
+            'vat_categories: legacy data had %d rows with is_default=1 for this tenant; '
+            . 'kept id=%d, demoted the rest. (Single-default invariant restored.)',
+            $defaults->count(),
+            $defaults->first(),
+        ));
     }
 
     /** Generic copy for simple lookup tables. */
