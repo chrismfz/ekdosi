@@ -653,9 +653,14 @@ SQL
 sudo systemctl start firebird
 
 # Step 4 — smoke-test that SYSDBA/masterkey now works over the network
+# We point at any .fdb you actually have (the sample 'employee' DB
+# isn't always shipped — EPEL 10's slim package omits it).
 sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password masterkey \
-    localhost:employee <<<'QUIT;'
-# Expect: clean exit, NO "Install incomplete" message.
+    "localhost:$SECDB" <<<'QUIT;'
+# Expect: clean exit, no SQLSTATE.
+# If you see SQLSTATE = 28000 the auth failed (re-do Step 3).
+# If you see SQLSTATE = 08001 with "No such file or directory" the
+# auth SUCCEEDED — only the file path is wrong; SYSDBA is fine.
 ```
 
 If you ever need to RESET the SYSDBA password later, use SQL over a
