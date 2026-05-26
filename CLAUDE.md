@@ -577,3 +577,199 @@ under `ALTER PROCEDURE`. The ones with actual logic:
 - [ ] `pdo_firebird` PHP extension to unblock ETL testing. Either get
       `ondrej/php` PPA allowlisted in the env's network policy, or
       build `pdo_firebird` from source against `firebird-dev` headers.
+
+---
+
+## Second-pass inspection (2026-05-27)
+
+After scaffolding Company + Shield, did a deeper re-scan of
+`/legacy/ekdosi-main/` looking for things the first-pass missed.
+Sorted by what *blocks cutover* vs. what's a nice-to-have.
+
+### Cutover blockers (must port before parallel-run)
+
+1. **INVCODE generation + INVCOUNT increment** — legacy triggers
+   `INVOICE_BI1` (sets `NEW.INVCODE` from `GET_INV_CODE(NEW.INVTYPE)`)
+   and `INVOICE_AI` (bumps `INVTYPE.INVCOUNT` by 1) are NOT yet
+   reproduced in Laravel. The new `IssueInvoice` action will need to:
+   ```php
+   DB::transaction(function () use ($invoice) {
+       $type = InvoiceType::where('company_id', $invoice->company_id)
+           ->where('code', $invoice->invoice_type_code)
+           ->lockForUpdate()
+           ->firstOrFail();
+       $invoice->invcode = $type->code . $type->invcount;   // e.g. "APY423"
+       $invoice->code    = $type->invcount;                  // ΑΑ
+       $invoice->save();
+       $type->increment('invcount');
+   });
+   ```
+   The `lockForUpdate()` is essential — without it, two concurrent
+   issues for the same type would assign the same ΑΑ.
+
+2. **`MARK_AI0` trigger replacement** — legacy mirrors `MARK` rows back
+   onto `INVOICE` (`mydata_sent`, `mydata_state`, `mydata_mark`,
+   `mydata_url`). The new `App\Services\MyDataSubmitter` must do this
+   inside the **same DB transaction** that creates the `mydata_marks`
+   row:
+   ```php
+   DB::transaction(function () use ($invoice, $response) {
+       $mark = MyDataMark::create([...]);
+       $invoice->update([
+           'mydata_sent'  => true,
+           'mydata_state' => 'VALID',
+           'mydata_mark'  => $response->mark,
+           'mydata_url'   => $response->qrUrl,
+       ]);
+   });
+   ```
+
+3. **`CALCULATE_VAT_FOR_INVOICE` port** — myDATA's `taxesTotals` needs
+   per-VAT-rate breakdown (line VAT amounts grouped by rate, with the
+   invoice-level discount applied). The SP at schema.sql:490 is:
+   ```sql
+   SELECT VATPERCENT,
+          SUM((PRICEWVAT - PRICE)
+             - (PRICEWVAT - PRICE) * (INVOICE.DISCOUNT / 100))
+   FROM INVLINES JOIN INVOICE ...
+   GROUP BY VATPERCENT
+   ```
+   Port as an Invoice model method or InvoiceVatBreakdown value-object.
+
+### Schema fixes worth doing BEFORE more domain resources
+
+These are easier to fix now, while no real data depends on them, than
+mid-cutover:
+
+1. **`invoices.discount` → `invoices.discount_percent`** — the legacy
+   schema declares the column as `CURRENCY (DECIMAL(14,2))` but every
+   code path (FAddInvoice.cpp:277, CALCULATE_VAT_FOR_INVOICE,
+   FAddInvoice2.cpp:249) treats it as a **percent 0-100**. Our migration
+   carries the same misleading name + type. Rename to
+   `discount_percent` and tighten to `decimal(5,2)`. The ETL needs the
+   matching key change.
+
+2. **`return_invoice_extras` synthetic PK** — legacy table has no PK
+   (just `QTY_GIVEN`); our migration also lacks one. Add an
+   auto-increment id so Eloquent + Filament work cleanly.
+
+3. **AFM default-from-CUST_ID** — legacy trigger sets `CUSTOMER.AFM =
+   CAST(CUST_ID AS VARCHAR)` if null on insert. Our new schema allows
+   null AFM with no default. Real customers often have AFM, but cash
+   customers don't. **Recommendation**: keep null nullable; let the
+   IssueInvoice action validate `afm IS NOT NULL` per the AADE rule
+   that B2B invoices need it. Don't replicate the AFM=CUST_ID hack
+   (it's nonsense data that AADE rejects anyway).
+
+### Workflows we hadn't planned for
+
+Surfaced by re-reading the forms:
+
+- **`FAutoInvoice` has FOUR sub-workflows**, not one. The form is a
+  scheduler that drains four kinds of pending work:
+  1. **myDATA submission queue** — invoices where `MYDATA_SENT = 0`.
+     Covered by the planned `App\Services\MyDataSubmitter` + queue
+     worker.
+  2. **WHMCS pull** (currently labeled "3rd-invoices") — pulls invoices
+     from upstream billing system, creates ekdosi invoice + sends to
+     myDATA. Covered by the planned WHMCS bridge.
+  3. **"Assigned invoices" (status = -333)** — purpose unclear; appears
+     to be a manual-routing flag set by operators. **Open question**:
+     does myip actually use this? Need to grep `INVOICE` table for
+     `status = -333` rows in the production `.fbk` to know.
+  4. **"Griniaris" workflow** — Greek for "fast/quick"; appears to be a
+     simplified bulk-issue flow. **Open question**: also unclear if
+     myip uses it. Check `.fbk` content.
+
+- **Cumulative invoice ("ΣΔΕΠ") handling in FAddInvoice** — when a
+  ΣΔΕΠ exists for the running date, new invoices get attached to it
+  via `CONV_INVOICE_ID`. This is the "delivery note → invoice"
+  conversion path. We have the column but no code that uses it.
+
+- **Reserve check (FAddInvoice.cpp:298)** — before issuing, the form
+  checks `RegAccess->getAppParameterInt("Reserve")` to decide whether
+  the cumulative invoice's stock-reserve takes precedence over the
+  current invoice's. Translates to a per-tenant `conf_params`
+  setting in the new app.
+
+- **Gross-edit path on invoice lines** — operator can type the gross
+  unit price; form back-computes net via
+  `PRICE_PER_ITEM = PRICE_PER_ITEM_WVAT / (1 + VATPERCENT/100)`.
+  Filament's invoice form needs both inputs with mutual back-fill.
+
+### Tables not migrated (status confirmed)
+
+Cross-checked the legacy tables against migrations:
+
+- ✅ **Mapped + ETL**: all 12 entity tables, MARK, CONF_PARAMS,
+  AUTO_INVOICE_LOG (with table-exists guard for older `.fbk` snapshots)
+- 🚫 **Deliberately dropped**:
+  - `CUSTCS_LINK` (CS-Cart bridge — fully out of scope)
+  - `CUSTOMER_CS_ACCEPTED` (CS-Cart staging)
+  - `REPORTS` + `REPORT_INPUT_DATA` (FastReport 3 templates; rebuild
+    as Blade → PDF)
+  - `EAFDSS_SCRIPT` (pre-myDATA receipt signing)
+- ⚠️ **Unaccounted for**: `VARTEXT` — appears in schema with a generator
+  but no triggers and isn't referenced by any C++Builder source the
+  agent could find. Likely dead. **Action**: confirm zero rows in
+  myip's `.fbk`; if zero, drop without porting.
+
+### ETL hygiene re-check
+
+The current ETL is actually in good shape after the `fld()` refactor.
+Re-confirmed:
+
+- ✅ Every string column read goes through `$this->fld($r, 'COL')`
+  which tolerates missing columns in older `.fbk` snapshots.
+- ✅ FK remapping via `$this->legacyId('table', $legacyId)` consistently.
+- ✅ `fbTableExists()` guards around MARK / CONF_PARAMS /
+  AUTO_INVOICE_LOG so pre-myDATA / pre-WHMCS-bridge `.fbk`s import
+  cleanly.
+
+Remaining concerns from the original code review (still latent):
+
+- WHMCS `CS_INVID` mapped to `legacyId('invoices', ...)` — wrong by
+  definition; CS_INVID is WHMCS's id, not ekdosi's INVOICE_ID. Fixes
+  when WHMCS bridge work begins.
+- `clean()` uses `iconv //IGNORE` on MARK.REQUEST/RESPONSE XML —
+  could silently drop bytes from the legal-audit XML. Fix by routing
+  MARK XML fields around `clean()` (passthrough).
+- `mark_time` schema is `timestamp` but ETL feeds Firebird TIME — fires
+  on the first `.fbk` that actually has MARK rows. Schema-side fix:
+  change `mark_time` to `time` type, or merge mark_date + mark_time
+  into one `datetime`.
+
+### Re-prioritised roadmap (after this scan)
+
+Updating the order in light of what we learned:
+
+1. **UserResource + ProfileResource** — biggest UX gap right now;
+   admin can't add operators without tinker. Next PR.
+2. **Schema-fix PR** — rename `invoices.discount` →
+   `invoices.discount_percent`, add `return_invoice_extras.id` PK,
+   change `mydata_marks.mark_time` to `time`. Small, mechanical.
+3. **CustomerResource** — smallest end-to-end slice with real data.
+4. **Invoice numbering port** — the `IssueInvoice` action stub with
+   `lockForUpdate()` counter increment. Doesn't need a UI yet; just
+   the service class + a unit test that hammers it concurrently.
+5. **ProductResource**.
+6. **InvoiceResource (read-only first)** — list + view. No issue
+   action yet.
+7. **`App\Services\MyDataSubmitter`** + **InvoiceVatBreakdown** value
+   object — port `CALCULATE_VAT_FOR_INVOICE` semantics. Wired but
+   not callable from UI yet.
+8. **IssueInvoice action** in InvoiceResource — combines #4, #6, #7.
+   First real end-to-end myDATA submission.
+9. **WHMCS bridge** — pull job + bridge of WHMCS invoices through the
+   same IssueInvoice action.
+10. **PEPPOL submitter** — for the Estonian tenant.
+
+### Still-open questions for the operator
+
+- Does myip use the **"assigned invoices" (status=-333)** workflow?
+- Does myip use the **"griniaris"** bulk-issue workflow?
+- Are there any **`VARTEXT`** rows in the production `.fbk`, or is the
+  table dead?
+- What's the per-tenant **AADE user ID + subscription key** for myip
+  and nixpal (we need these to actually test myDATA submission once
+  the submitter is built)?
