@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Services\EInvoiceSubmitterFactory;
+use App\Services\MyDataSubmitter;
 use App\Services\NullSubmitter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -20,9 +21,13 @@ use Tests\TestCase;
  *   - NullSubmitter records SKIPPED audit rows on submit/cancel
  *   - mydata_mode enum accessor round-trips
  *
- * PR #24 always returns NullSubmitter. PR #25 will add the
- * MyDataSubmitter branch for gr-mydata + mode != off, and this test
- * will gain cases for that path.
+ * Routing matrix (updated in PR #25 once the real MyDataSubmitter
+ * landed):
+ *   gr-mydata + sandbox    → MyDataSubmitter
+ *   gr-mydata + production → MyDataSubmitter
+ *   gr-mydata + off        → NullSubmitter
+ *   ee-peppol              → NullSubmitter (until PeppolSubmitter lands)
+ *   none                   → NullSubmitter
  */
 class EInvoiceSubmitterFactoryTest extends TestCase
 {
@@ -38,15 +43,18 @@ class EInvoiceSubmitterFactoryTest extends TestCase
         $this->assertInstanceOf(NullSubmitter::class, $submitter);
     }
 
-    public function test_factory_returns_null_submitter_for_sandbox_in_pr24(): void
+    public function test_factory_returns_mydata_submitter_for_gr_sandbox(): void
     {
-        // In PR #24, the real MyDataSubmitter doesn't exist yet —
-        // factory falls through to NullSubmitter for every tenant.
-        // PR #25 will extend this so sandbox + production return the
-        // real submitter; that test is added then.
         $tenant = $this->makeTenant(MyDataMode::Sandbox);
 
-        $this->assertInstanceOf(NullSubmitter::class, app(EInvoiceSubmitterFactory::class)->for($tenant));
+        $this->assertInstanceOf(MyDataSubmitter::class, app(EInvoiceSubmitterFactory::class)->for($tenant));
+    }
+
+    public function test_factory_returns_mydata_submitter_for_gr_production(): void
+    {
+        $tenant = $this->makeTenant(MyDataMode::Production);
+
+        $this->assertInstanceOf(MyDataSubmitter::class, app(EInvoiceSubmitterFactory::class)->for($tenant));
     }
 
     public function test_factory_returns_null_submitter_for_none_provider(): void

@@ -603,7 +603,10 @@ class MigrateFromFirebird extends Command
                 'company_id'    => $this->companyId,
                 'legacy_id'     => $r['ID'],
                 'invoice_id'    => $this->legacyId('invoices', $r['INVOICE_ID']),
-                'mark'          => $this->fld($r, 'MARK') ?? '',
+                // After PR #24 the column is nullable. Legacy rows
+                // with no MARK (rare — pre-myDATA staging) now land
+                // as NULL instead of empty-string sentinels.
+                'mark'          => $this->fld($r, 'MARK'),
                 'mydata_action' => $this->fld($r, 'MYDATA_ACTION'),
                 'invoice_url'   => $this->fld($r, 'INVOICE_URL'),
                 'request'       => $this->fld($r, 'REQUEST'),
