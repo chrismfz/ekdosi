@@ -274,7 +274,16 @@ single-process secrets like `APP_KEY` and DB creds.
 
 ## 7. Run migrations
 
-All artisan commands below run as the app user.
+All artisan commands below run as the app user. **Never run
+`php artisan ...` as root** — every file artisan creates under
+`storage/logs/` and `bootstrap/cache/` is then root-owned, and the
+real app user (which php-fpm and the queue worker run as) can't
+append to those files later. If you accidentally do, repair
+ownership before moving on:
+
+```bash
+sudo chown -R ekdosi-app:ekdosi-app /var/www/ekdosi/storage /var/www/ekdosi/bootstrap/cache
+```
 
 **First, sanity-check that the app is actually pointed at MariaDB** —
 if `.env` wasn't created in §6, Laravel falls back to SQLite by
@@ -577,22 +586,35 @@ The PDO driver package name depends on which repo you pull it from
 - Remi (matches the `php:remi-8.4` module stream): `php-firebird`
 - EPEL 10 (SCL-style versioned): `php8.4-pdo-firebird`
 
-The Firebird **server** package is also needed if you want to ETL
-against a local `.fdb` sandbox (host=127.0.0.1) instead of hitting the
-legacy server live. On AlmaLinux 10 / EPEL the package is
-`firebird-server`; on EL9 it's commonly just `firebird`.
+The Firebird **server** package is needed for ETLing against a local
+`.fdb` sandbox (`--host=127.0.0.1`). Package name varies by EL
+version:
+- AlmaLinux 9: `firebird-superserver`
+- AlmaLinux 10 / EPEL 10: just `firebird` (no `-server` suffix)
 
 ```bash
 # PDO driver — try Remi first, EPEL as fallback
 sudo dnf install -y php-firebird || sudo dnf install -y php8.4-pdo-firebird
 
 # tools (gbak / isql-fb / fbsvcmgr) + the server, if you want local sandbox FB
-sudo dnf install -y firebird-utils firebird-server firebird-devel
+sudo dnf install -y firebird-utils firebird-devel
+sudo dnf install -y firebird-superserver 2>/dev/null || sudo dnf install -y firebird
 
 # verify the PDO driver actually loaded:
 php -m | grep -i firebird       # expect: pdo_firebird
 
-sudo systemctl enable --now firebird   # service name may be firebird-superserver
+# find the actual service unit name and start it
+sudo systemctl list-unit-files | grep -i firebird
+sudo systemctl enable --now firebird   # adjust if grep showed a different name
+sudo ss -tlnp | grep 3050              # confirm FB is listening
+
+# the SYSDBA password is auto-generated on RHEL-family installs.
+# It is NOT 'masterkey'. Find it:
+sudo cat /etc/firebird/SYSDBA.password 2>/dev/null \
+  || sudo cat /opt/firebird/SYSDBA.password 2>/dev/null \
+  || sudo find /etc /opt -name 'SYSDBA.password' 2>/dev/null
+# Use that password for --fbpass below, or reset it with:
+# sudo gsec -user SYSDBA -modify SYSDBA -pw <newpass>
 ```
 
 If neither package is available in your repos, fall back to PECL:
