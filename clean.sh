@@ -1,8 +1,8 @@
-php artisan optimize:clear
-php artisan cache:clear
-php artisan config:clear
-php artisan route:clear
-php artisan view:clear
-php artisan optimize
-php artisan queue:restart
+sudo -u ekdosi php artisan optimize:clear
+sudo -u ekdosi php artisan cache:clear
+sudo -u ekdosi php artisan config:clear
+sudo -u ekdosi php artisan route:clear
+sudo -u ekdosi php artisan view:clear
+sudo -u ekdosi php artisan optimize
+sudo -u ekdosi php artisan queue:restart
 
