@@ -27,6 +27,7 @@ class Customer extends Model
         'fax',
         'occupation',
         'tax_office',
+        'kad_primary',
         'details',
         'discount',
         'email',
