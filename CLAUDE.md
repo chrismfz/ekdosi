@@ -426,6 +426,78 @@ Legacy design (what to replace, not what to reproduce):
   WHMCS to read from / be queried by the new Laravel app and turn the
   mirror off.
 
+### WHMCS bridge — preparation notes (what to read when the bridge PR starts)
+
+Inventory of the legacy WHMCS surface so the bridge PR doesn't start
+from a blank page. Captured here before we lose track; the actual
+bridge work lands after PR #25 (MyDataSubmitter).
+
+**Legacy MySQL credentials live in the Windows Registry**, NOT hardcoded:
+- `FDBParams.cpp:80-86` reads `hostname / path / username / password`
+  via the Registry helper class.
+- `FDBParams.cpp:236-239` writes them back to keys named
+  `MySQLHostname / MySQLDbName / MySQLUsername / MySQLPassword`.
+- `FMysqlSync.cpp:38-43` constructs the connection from those keys at
+  runtime.
+- For the new bridge we move to per-tenant credentials on `companies`
+  (mirroring the AADE / GSIS pattern from PR #22) — new columns
+  `whmcs_api_url`, `whmcs_api_identifier`, `whmcs_api_secret`
+  (encrypted), `whmcs_db_*` only if we genuinely need direct DB
+  access (the CLAUDE.md decision was API-only, see line 22-25).
+
+**WHMCS-side plugins** are already in `legacy/whmcs/`:
+- `legacy/whmcs/afm2name/` — AFM → name lookup via SOAP to GSIS (we
+  already have this functionality natively in PR #22's
+  `AadeRegistryLookup`; this plugin is for WHMCS-side use only).
+- `legacy/whmcs/prepare_for_ekdosi/` — WHMCS addon that flips
+  `tblinvoices.invoiced` after ekdosi has filed the invoice. The new
+  bridge does the equivalent via the WHMCS API
+  (`UpdateInvoice` with custom field).
+- `legacy/whmcs/timologia/` — third-party-invoices addon; creates
+  `mod_timologia` + `mod_timologia_servicetypes` tables. Lets a WHMCS
+  client say "issue this invoice to another company" (e.g. employer
+  reimbursement). Bridge needs to consume this data.
+
+**Legacy SQL the bridge replaces**:
+- `FAutoInvoice.dfm:QueryInvoices` runs a 100-line SQL JOIN against
+  `tblinvoices`, `tblclients`, `tblcustomfieldsvalues`,
+  `mod_timologia*`. The "ready to file" condition is
+  `WHERE mi.status='Paid' AND mi.invoiced = 0 AND gkriniaris = 'on'`.
+  See `legacy/ekdosi-main/FAutoInvoice.dfm` for the full query.
+- `FAutoInvoice.cpp:307` updates back via
+  `UPDATE tblinvoices SET invoiced = :mark WHERE id = :id` — the new
+  bridge does this via the WHMCS API instead of direct SQL.
+
+**Hardcoded magic in the legacy bridge** — these will rot if WHMCS
+config drifts; capture them in `companies.whmcs_custom_field_map`
+(JSON column) so each tenant maps their own WHMCS instance:
+- `fieldid = 12` → "toinvoice" (the company name to bill)
+- `fieldid = 13` → "vatno" (customer AFM)
+- `fieldid = 14` → "taxoffice" (ΔΟΥ)
+- `fieldid = 15` → "occupation" (Δραστηριότητα — see legacy PDF
+  example uploaded earlier)
+- `fieldid = 338` → `gkriniaris` flag — the "issue immediately on
+  payment" toggle (already tracked in CLAUDE.md as
+  `customers.needs_immediate_invoice`)
+- "Φυσικό" / "ΗΝ" Greek literals in `FAutoInvoice.cpp:322,464-466`
+  classify individual vs business customer — locale-dependent, must
+  not be hardcoded in the new bridge.
+
+**Decision points for the bridge PR**:
+- WHMCS API auth: identifier + secret (modern) vs username + password
+  (legacy). Modern is the right call; encrypt the secret.
+- Polling vs webhook: legacy polls. WHMCS has hooks (`InvoicePaid`)
+  that can push to us. Hook is cheaper but adds an inbound surface.
+- Custom field ID mapping: per-tenant JSON column vs a `whmcs_field_
+  mappings` table. JSON simpler unless the WHMCS bridge becomes
+  per-tenant complex (which it might given the timologia addon).
+- `mod_timologia_servicetypes` rows — do we mirror them locally or
+  hit WHMCS API per issuance?
+
+**Trigger PR**: after the IssueInvoice action lands (PR #26). The
+bridge needs the EInvoiceSubmitter to exist + a working issue flow
+to call. Until then, document gaps here.
+
 ### Data migration — how the cutover actually happens
 This is what `MigrateFromFirebird.php` exists for; spelling out the story:
 
@@ -787,7 +859,26 @@ Updating the order in light of what we learned:
    object — port `CALCULATE_VAT_FOR_INVOICE` semantics. Wired but
    not callable from UI yet.
 8. **IssueInvoice action** in InvoiceResource — combines #4, #6, #7.
-   First real end-to-end myDATA submission.
+   First real end-to-end myDATA submission. Button shape (locked in
+   after operator discussion):
+     - Form ALWAYS shows a **"Save"** button → invoice persisted as
+       draft, no AADE call, regardless of mode.
+     - Form ALSO shows a **"Save and Submit to myDATA"** button when
+       `mydata_mode != Off` (sandbox or production). One click =
+       persist + submit + receive MARK + mirror columns updated.
+     - For `mydata_mode = Off` tenants, ONLY "Save" is rendered —
+       the submit button would route to NullSubmitter and confuse
+       operators.
+     - On the view page (post-save), drafts get a separate "Submit
+       to myDATA" action button so an operator who chose Save-only
+       can submit later after reviewing the PDF.
+     - VALID invoices get a "Cancel via myDATA" action; CANCELLED
+       are display-only.
+   This shape gives the operator THREE paths:
+     - Save → review PDF → Submit (safe + slow)
+     - Save and Submit (fast + confident)
+     - Off-mode: just Save (PDF only, no AADE at all — bridge
+       testing / training tenant / breakglass)
 9. **WHMCS bridge** — pull job + bridge of WHMCS invoices through the
    same IssueInvoice action.
 10. **PEPPOL submitter** — for the Estonian tenant.
