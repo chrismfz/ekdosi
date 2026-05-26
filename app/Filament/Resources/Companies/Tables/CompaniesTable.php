@@ -5,7 +5,6 @@ namespace App\Filament\Resources\Companies\Tables;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -40,11 +39,21 @@ class CompaniesTable
                         'none' => 'PDF only',
                         default => $state,
                     }),
-                IconColumn::make('mydata_production')
-                    ->label('Prod')
-                    ->boolean()
-                    ->trueIcon('heroicon-o-globe-alt')
-                    ->falseIcon('heroicon-o-beaker'),
+                TextColumn::make('mydata_mode')
+                    ->label('myDATA')
+                    ->badge()
+                    ->color(fn (?string $state) => match ($state) {
+                        'production' => 'danger',  // 🔴 LIVE — red
+                        'sandbox' => 'warning',    // 🟡 test — yellow
+                        'off' => 'gray',           // ⚪ off — gray
+                        default => 'gray',
+                    })
+                    ->formatStateUsing(fn (?string $state) => match ($state) {
+                        'production' => 'LIVE',
+                        'sandbox' => 'sandbox',
+                        'off' => 'off',
+                        default => '—',
+                    }),
                 TextColumn::make('users_count')
                     ->label('Users')
                     ->counts('users')

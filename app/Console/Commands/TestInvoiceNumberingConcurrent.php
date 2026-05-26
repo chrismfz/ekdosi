@@ -73,7 +73,7 @@ class TestInvoiceNumberingConcurrent extends Command
                 'slug' => $slug,
                 'country_code' => 'GR',
                 'einvoice_provider' => 'gr-mydata',
-                'mydata_production' => false,
+                'mydata_mode' => 'off',
             ]);
 
             $type = InvoiceType::create([

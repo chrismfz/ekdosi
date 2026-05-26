@@ -201,9 +201,40 @@ class CompanyForm
                                             ->dehydrated(fn (?string $state): bool => filled($state))
                                             ->maxLength(255),
 
-                                        Toggle::make('mydata_production')
-                                            ->label('Production endpoint')
-                                            ->helperText('Off → AADE sandbox. On → real submissions.'),
+                                        Select::make('mydata_mode')
+                                            ->label('Submission mode')
+                                            ->options(\App\Enums\MyDataMode::options())
+                                            ->default(\App\Enums\MyDataMode::Off->value)
+                                            ->required()
+                                            ->live()
+                                            ->helperText('Off = no AADE call (PDFs only, safe for testing). Sandbox = AADE test endpoint (synthetic MARKs). Production = LIVE submissions affecting real tax records.')
+                                            // Confirm dialog when switching INTO Production —
+                                            // the riskier transition. Live submissions are
+                                            // legally binding and accidentally enabling them
+                                            // for a non-ready tenant has real consequences.
+                                            ->afterStateUpdated(function ($state, $old) {
+                                                if ($state === \App\Enums\MyDataMode::Production->value
+                                                    && $old !== \App\Enums\MyDataMode::Production->value) {
+                                                    Notification::make()
+                                                        ->title('⚠ Switching to LIVE myDATA submissions')
+                                                        ->body('This tenant will now file invoices with AADE for real. Make sure credentials are verified via "Test connection" before issuing any invoice.')
+                                                        ->warning()
+                                                        ->persistent()
+                                                        ->send();
+                                                }
+                                                // Heads-up when LEAVING Production — operator
+                                                // might be silently disabling legally-required
+                                                // reporting.
+                                                if ($old === \App\Enums\MyDataMode::Production->value
+                                                    && $state !== \App\Enums\MyDataMode::Production->value) {
+                                                    Notification::make()
+                                                        ->title('⚠ Disabling LIVE myDATA submissions')
+                                                        ->body('Invoices issued by this tenant will no longer be filed with AADE until you switch back to Production.')
+                                                        ->warning()
+                                                        ->persistent()
+                                                        ->send();
+                                                }
+                                            }),
                                     ]),
                             ]),
 

@@ -54,7 +54,7 @@ class AadeRegistryLookupTest extends TestCase
             'afm' => '800561849',
             'gsis_username' => 'TESTUSER',
             'gsis_password' => 'TESTPASS',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         Cache::flush();
@@ -67,7 +67,7 @@ class AadeRegistryLookupTest extends TestCase
             'slug' => 'no-creds-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
             // No gsis_username / gsis_password set
         ]);
 
@@ -257,7 +257,7 @@ class AadeRegistryLookupTest extends TestCase
             'einvoice_provider' => 'gr-mydata',
             'gsis_username' => 'OTHER',
             'gsis_password' => 'OTHER',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         // Tenant A fetches first

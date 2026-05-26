@@ -29,7 +29,7 @@ class VatCategoryObserverTest extends TestCase
             'slug' => 'tenant-a-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         $this->tenantB = Company::create([
@@ -37,7 +37,7 @@ class VatCategoryObserverTest extends TestCase
             'slug' => 'tenant-b-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
     }
 

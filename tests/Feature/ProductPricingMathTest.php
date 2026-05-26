@@ -39,7 +39,7 @@ class ProductPricingMathTest extends TestCase
             'slug' => 'pricing-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
 
         $this->category = ProductCategory::create([
@@ -185,7 +185,7 @@ class ProductPricingMathTest extends TestCase
             'slug' => 'other-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
-            'mydata_production' => false,
+            'mydata_mode' => 'off',
         ]);
         $otherCategory = ProductCategory::create([
             'company_id' => $other->id,
