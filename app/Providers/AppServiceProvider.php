@@ -34,13 +34,19 @@ class AppServiceProvider extends ServiceProvider
          * team. Without this, a user's role in tenant A would also satisfy
          * checks in tenant B, defeating the whole point of teams mode.
          *
-         * Hook on the request's tenant resolution: Filament fires this
-         * once per request after the tenant is identified.
+         * IMPORTANT: hook on the TenantSet event, NOT Filament::serving().
+         * serving() fires before the tenant middleware resolves the
+         * current tenant, so Filament::getTenant() returns null there
+         * and the team id never gets set. TenantSet fires AFTER the
+         * tenant is identified, which is exactly when the gate bypass
+         * for super_admin needs the right team scope.
          */
-        \Filament\Facades\Filament::serving(function () {
-            if ($tenant = \Filament\Facades\Filament::getTenant()) {
-                app(PermissionRegistrar::class)->setPermissionsTeamId($tenant->getKey());
-            }
-        });
+        \Illuminate\Support\Facades\Event::listen(
+            \Filament\Events\TenantSet::class,
+            function (\Filament\Events\TenantSet $event) {
+                app(PermissionRegistrar::class)
+                    ->setPermissionsTeamId($event->getTenant()->getKey());
+            },
+        );
     }
 }
