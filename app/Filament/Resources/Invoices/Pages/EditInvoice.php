@@ -52,6 +52,29 @@ class EditInvoice extends EditRecord
     }
 
     /**
+     * Defense-in-depth re-check against TOCTOU: between mount() (which
+     * loads the page with mydata_state=null) and the user clicking
+     * Save, another browser tab / a queue job could have filed this
+     * invoice with AADE. Saving would then overwrite header fields on
+     * a legally-frozen invoice. Refresh + re-assert here, inside the
+     * save transaction.
+     */
+    protected function beforeSave(): void
+    {
+        $current = $this->record->fresh();
+        if ($current?->mydata_state !== null) {
+            Notification::make()
+                ->title('Invoice was filed in another tab')
+                ->body("Invoice {$current->invcode} now has AADE state={$current->mydata_state}. Your edits cannot be saved — refresh the page to see the filed version.")
+                ->danger()
+                ->persistent()
+                ->send();
+
+            $this->halt();
+        }
+    }
+
+    /**
      * Recompute totals after the form save, same as CreateInvoice.
      * Line repeater changes happen during save(); afterSave() runs
      * after the lines have been persisted.

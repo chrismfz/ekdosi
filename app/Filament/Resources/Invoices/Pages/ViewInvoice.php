@@ -35,6 +35,7 @@ class ViewInvoice extends ViewRecord
                 ->icon('heroicon-o-paper-airplane')
                 ->color('success')
                 ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === null)
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('File this invoice with AADE myDATA')
                 ->modalDescription(fn () => Filament::getTenant()?->mydata_mode === 'production'
@@ -49,7 +50,16 @@ class ViewInvoice extends ViewRecord
                             ->title('Filed at myDATA')
                             ->body('MARK: '.($mark->mark ?? 'pending'))
                             ->success()->send();
-                        $this->refreshFormData([]);
+                        // Bounce to a fresh view so mydata_state /
+                        // mydata_mark + the audit-history relation
+                        // manager re-query. refreshFormData([]) is a
+                        // no-op (Filament only(...) of an empty array
+                        // returns []) so it doesn't actually re-pull
+                        // the record.
+                        $this->redirect(static::getResource()::getUrl('view', [
+                            'record' => $record,
+                            'tenant' => $record->company,
+                        ]));
                     } catch (Throwable $e) {
                         Notification::make()
                             ->title('Submission failed')
@@ -66,6 +76,7 @@ class ViewInvoice extends ViewRecord
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
                 ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Cancel this invoice at AADE')
                 ->modalDescription('This sends a CANCEL request to AADE for MARK '.($this->record->mydata_mark ?? '?').'. The MARK is preserved in the audit trail; state becomes CANCELLED. Issue a correction invoice for the actual content fix.')
@@ -90,7 +101,10 @@ class ViewInvoice extends ViewRecord
                             ->title('Cancelled at myDATA')
                             ->body('AADE state is now CANCELLED; the original MARK is preserved in the audit trail.')
                             ->success()->send();
-                        $this->refreshFormData([]);
+                        $this->redirect(static::getResource()::getUrl('view', [
+                            'record' => $record,
+                            'tenant' => $record->company,
+                        ]));
                     } catch (Throwable $e) {
                         Notification::make()
                             ->title('Cancellation failed')
@@ -108,6 +122,7 @@ class ViewInvoice extends ViewRecord
                 ->icon('heroicon-o-eye')
                 ->color('gray')
                 ->visible(fn () => Filament::getTenant()?->einvoice_provider === 'gr-mydata')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Preview the XML this invoice would send to myDATA')
                 ->modalDescription('Builds the AADE payload and records it as a DRY_RUN row in the audit history. Does NOT contact AADE. Safe on any mode.')
@@ -124,7 +139,10 @@ class ViewInvoice extends ViewRecord
                             ->title('Dry-run recorded')
                             ->body('Open the new DRY_RUN row in the myDATA submission history (below) and click "Request XML".')
                             ->success()->send();
-                        $this->refreshFormData([]);
+                        $this->redirect(static::getResource()::getUrl('view', [
+                            'record' => $record,
+                            'tenant' => $record->company,
+                        ]));
                     } catch (Throwable $e) {
                         Notification::make()
                             ->title('Dry-run failed')
@@ -139,9 +157,23 @@ class ViewInvoice extends ViewRecord
                 ->label('Download PDF')
                 ->icon('heroicon-o-document-arrow-down')
                 ->color('gray')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
                 ->action(function (Invoice $record) {
+                    // Render the PDF UP-FRONT so any error surfaces as a
+                    // proper exception (visible Filament notification)
+                    // rather than a half-streamed corrupt download. The
+                    // legacy `fn () => print(...)` shape ran inside
+                    // Symfony's streamDownload callback where exceptions
+                    // are caught and swallowed by the response writer.
+                    // `print` also coerces the PDF byte-string through
+                    // PHP's bool return semantics; safe in practice but
+                    // `echo` is the idiomatic stream emitter.
+                    $pdfBytes = app(InvoicePdfRenderer::class)->render($record);
+
                     return response()->streamDownload(
-                        fn () => print(app(InvoicePdfRenderer::class)->render($record)),
+                        function () use ($pdfBytes): void {
+                            echo $pdfBytes;
+                        },
                         'invoice-'.$record->invcode.'.pdf',
                         ['Content-Type' => 'application/pdf'],
                     );

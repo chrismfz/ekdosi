@@ -74,6 +74,23 @@ class CreateInvoice extends CreateRecord
      * Filament's Repeater creates lines AFTER handleRecordCreation,
      * so we can't compute totals there — afterCreate runs once the
      * line rows exist.
+     *
+     * NOTE on transaction ordering: Filament's CreateRecord wraps the
+     * entire create flow — handleRecordCreation, lines persistence,
+     * AND this afterCreate hook — inside a single DB transaction
+     * (beginDatabaseTransaction → afterCreate → commitDatabaseTransaction
+     * in vendor/filament/.../CreateRecord.php). The myDATA HTTP call
+     * MUST run outside that transaction: an HTTP round-trip while
+     * holding open MariaDB row locks blocks every other writer for
+     * seconds, and if the AADE call succeeds but the outer transaction
+     * later rolls back (e.g. a totals recompute failure), we have a
+     * filed MARK with no local invoice — exactly the orphan-MARK case
+     * the legacy MARK_AI0 trigger replacement was designed to prevent.
+     *
+     * Solution: queue the submission via DB::afterCommit(). The
+     * callback fires only after the outermost transaction commits,
+     * guaranteeing the invoice + lines are durable before we talk to
+     * AADE.
      */
     protected function afterCreate(): void
     {
@@ -81,7 +98,13 @@ class CreateInvoice extends CreateRecord
         $this->recomputeTotals($invoice);
 
         if ($this->shouldSubmitAfterCreate) {
-            $this->chainSubmit($invoice->fresh());
+            $invoiceId = $invoice->getKey();
+            DB::afterCommit(function () use ($invoiceId): void {
+                $fresh = Invoice::query()->whereKey($invoiceId)->with('lines')->first();
+                if ($fresh) {
+                    $this->chainSubmit($fresh);
+                }
+            });
         }
     }
 

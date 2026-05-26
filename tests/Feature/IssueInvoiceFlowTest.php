@@ -152,6 +152,62 @@ class IssueInvoiceFlowTest extends TestCase
         $this->assertStringStartsWith('%PDF-', $pdfBytes);
     }
 
+    /**
+     * Simulates the Filament Repeater save path: `$invoice->lines()->create([...])`
+     * with ONLY the form-supplied fields (no company_id, no net_price,
+     * no gross_price). Locks in the InvoiceLine `saving` hook so a
+     * future refactor that drops it can't silently re-introduce both
+     * critical bugs the PR #26 independent review caught:
+     *   - company_id NOT NULL crash on first form save
+     *   - line totals silently zero because no callsite computed them
+     */
+    public function test_line_saving_hook_stamps_company_id_and_totals_from_form_payload(): void
+    {
+        $invoice = $this->makeInvoice(headerDiscount: 0);
+
+        // Exactly what Filament's Repeater::relationship('lines') hands
+        // to HasMany::create — only the form fields, no derived columns.
+        $line = $invoice->lines()->create([
+            'qty' => 2,
+            'price_per_item' => 50,
+            'discount' => 10,           // 10% line-level discount
+            'vat_percent' => 24,
+            'product_descr' => 'Form path line',
+            'metric_unit' => 'τεμ',
+        ]);
+
+        // company_id auto-stamped from the parent invoice
+        $this->assertSame($this->tenant->id, $line->company_id);
+
+        // net = 2 × 50 × (1 - 10/100) = 90.00
+        // gross = 90 × 1.24 = 111.60
+        $this->assertSame('90.00', (string) $line->net_price);
+        $this->assertSame('111.60', (string) $line->gross_price);
+    }
+
+    /**
+     * Even if a caller (mistakenly) tries to set net_price / gross_price
+     * directly, the saving hook overrides with the authoritative
+     * computation. Prevents the form layer from being tricked by a
+     * crafted Livewire payload.
+     */
+    public function test_line_saving_hook_overrides_caller_supplied_totals(): void
+    {
+        $invoice = $this->makeInvoice(headerDiscount: 0);
+
+        $line = $invoice->lines()->create([
+            'qty' => 1,
+            'price_per_item' => 100,
+            'vat_percent' => 24,
+            // Hostile values — should be overridden by the hook
+            'net_price' => 1,
+            'gross_price' => 1,
+        ]);
+
+        $this->assertSame('100.00', (string) $line->net_price);
+        $this->assertSame('124.00', (string) $line->gross_price);
+    }
+
     private function makeInvoice(float $headerDiscount): Invoice
     {
         $count = Invoice::where('invoice_type_id', $this->invoiceType->id)->count();
