@@ -40,6 +40,8 @@ class EditInvoice extends EditRecord
                 ->send();
 
             $this->redirect(InvoiceResource::getUrl('view', ['record' => $this->record, 'tenant' => $this->record->company]));
+
+            return;
         }
     }
 
