@@ -261,6 +261,10 @@ class MigrateFromFirebird extends Command
                 'sort_order'             => $r['ORDER'] ?? null,
                 'alt_customer_legacy_id' => $r['ALT_CUSTID'] ?? null,
                 'payment_method_id'      => $this->legacyId('payment_methods', $r['PAYMETH_ID'] ?? null),
+                // Defaults for forward-looking columns added in PR #15 —
+                // no legacy source for these:
+                'is_active'              => true,
+                'needs_immediate_invoice' => false,
                 'created_at'             => now(),
                 'updated_at'             => now(),
             ]);
