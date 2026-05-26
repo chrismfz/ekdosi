@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\DistributionAim;
 use App\Models\PaymentMethod;
+use App\Support\MyDataOptions;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -63,20 +64,26 @@ class InvoiceTypeForm
 
                         Tab::make('myDATA')
                             ->schema([
-                                TextInput::make('mydata_type')
+                                Select::make('mydata_type')
                                     ->label('myDATA invoice type')
-                                    ->maxLength(5)
-                                    ->helperText('AADE invoice type code, e.g. "1.1", "2.1", "5.1". See firebed/aade-mydata InvoiceType enum.'),
+                                    ->options(MyDataOptions::invoiceTypes())
+                                    ->searchable()
+                                    ->preload()
+                                    ->helperText('AADE classification code that determines how this series is filed at myDATA. e.g. "1.1" sales invoice, "2.1" service invoice, "11.2" ΑΠΥ.'),
 
-                                TextInput::make('mydata_income_class')
+                                Select::make('mydata_income_class')
                                     ->label('Income classification')
-                                    ->maxLength(30)
-                                    ->helperText('e.g. "E3_561_001" (revenue from goods sales).'),
+                                    ->options(MyDataOptions::incomeClassificationTypes())
+                                    ->searchable()
+                                    ->preload()
+                                    ->helperText('AADE revenue line type. e.g. "E3_561_001" = revenue from goods sales, "E3_561_002" = revenue from services.'),
 
-                                TextInput::make('mydata_income_class_category')
+                                Select::make('mydata_income_class_category')
                                     ->label('Income classification category')
-                                    ->maxLength(30)
-                                    ->helperText('e.g. "category1_1" (sales of goods, 24% VAT).'),
+                                    ->options(MyDataOptions::incomeClassificationCategories())
+                                    ->searchable()
+                                    ->preload()
+                                    ->helperText('AADE per-rate bucket. e.g. "category1_1" = sales of goods at 24% VAT.'),
                             ])
                             ->columns(3),
 
