@@ -1,0 +1,322 @@
+//---------------------------------------------------------------------------
+
+#ifndef FAddInvoice2H
+#define FAddInvoice2H
+//---------------------------------------------------------------------------
+#include <System.Classes.hpp>
+#include <Vcl.Controls.hpp>
+#include <Vcl.StdCtrls.hpp>
+#include <Vcl.Forms.hpp>
+#include "CNewSpecialForm.h"
+#include "cxCalendar.hpp"
+#include "cxContainer.hpp"
+#include "cxControls.hpp"
+#include "cxDBEdit.hpp"
+#include "cxDBLookupComboBox.hpp"
+#include "cxDBLookupEdit.hpp"
+#include "cxDropDownEdit.hpp"
+#include "cxEdit.hpp"
+#include "cxGraphics.hpp"
+#include "cxLookAndFeelPainters.hpp"
+#include "cxLookAndFeels.hpp"
+#include "cxLookupEdit.hpp"
+#include "cxMaskEdit.hpp"
+#include "cxTextEdit.hpp"
+#include "JvExExtCtrls.hpp"
+#include "JvExtComponent.hpp"
+#include "JvPanel.hpp"
+#include <Data.DB.hpp>
+#include <IBX.IBCustomDataSet.hpp>
+#include <Vcl.ExtCtrls.hpp>
+#include "cxMemo.hpp"
+#include "JvDotNetControls.hpp"
+#include "JvEdit.hpp"
+#include "JvExMask.hpp"
+#include "JvExStdCtrls.hpp"
+#include "JvMenus.hpp"
+#include "JvSpin.hpp"
+#include <IBX.IBQuery.hpp>
+#include <Vcl.Mask.hpp>
+#include <Vcl.Menus.hpp>
+#include "cxClasses.hpp"
+#include "cxCustomData.hpp"
+#include "cxData.hpp"
+#include "cxDataStorage.hpp"
+#include "cxDBData.hpp"
+#include "cxFilter.hpp"
+#include "cxGrid.hpp"
+#include "cxGridCustomTableView.hpp"
+#include "cxGridCustomView.hpp"
+#include "cxGridDBTableView.hpp"
+#include "cxGridLevel.hpp"
+#include "cxGridTableView.hpp"
+#include "cxNavigator.hpp"
+#include "cxStyles.hpp"
+#include "cxDataControllerConditionalFormattingRulesManagerDialog.hpp"
+#include "dxSkinBlack.hpp"
+#include "dxSkinBlue.hpp"
+#include "dxSkinBlueprint.hpp"
+#include "dxSkinCaramel.hpp"
+#include "dxSkinCoffee.hpp"
+#include "dxSkinDarkRoom.hpp"
+#include "dxSkinDarkSide.hpp"
+#include "dxSkinDevExpressDarkStyle.hpp"
+#include "dxSkinDevExpressStyle.hpp"
+#include "dxSkinFoggy.hpp"
+#include "dxSkinGlassOceans.hpp"
+#include "dxSkinHighContrast.hpp"
+#include "dxSkiniMaginary.hpp"
+#include "dxSkinLilian.hpp"
+#include "dxSkinLiquidSky.hpp"
+#include "dxSkinLondonLiquidSky.hpp"
+#include "dxSkinMcSkin.hpp"
+#include "dxSkinMetropolis.hpp"
+#include "dxSkinMetropolisDark.hpp"
+#include "dxSkinMoneyTwins.hpp"
+#include "dxSkinOffice2007Black.hpp"
+#include "dxSkinOffice2007Blue.hpp"
+#include "dxSkinOffice2007Green.hpp"
+#include "dxSkinOffice2007Pink.hpp"
+#include "dxSkinOffice2007Silver.hpp"
+#include "dxSkinOffice2010Black.hpp"
+#include "dxSkinOffice2010Blue.hpp"
+#include "dxSkinOffice2010Silver.hpp"
+#include "dxSkinOffice2013DarkGray.hpp"
+#include "dxSkinOffice2013LightGray.hpp"
+#include "dxSkinOffice2013White.hpp"
+#include "dxSkinOffice2016Colorful.hpp"
+#include "dxSkinOffice2016Dark.hpp"
+#include "dxSkinPumpkin.hpp"
+#include "dxSkinsCore.hpp"
+#include "dxSkinsDefaultPainters.hpp"
+#include "dxSkinSeven.hpp"
+#include "dxSkinSevenClassic.hpp"
+#include "dxSkinSharp.hpp"
+#include "dxSkinSharpPlus.hpp"
+#include "dxSkinSilver.hpp"
+#include "dxSkinSpringTime.hpp"
+#include "dxSkinStardust.hpp"
+#include "dxSkinSummer2008.hpp"
+#include "dxSkinTheAsphaltWorld.hpp"
+#include "dxSkinTheBezier.hpp"
+#include "dxSkinValentine.hpp"
+#include "dxSkinVisualStudio2013Blue.hpp"
+#include "dxSkinVisualStudio2013Dark.hpp"
+#include "dxSkinVisualStudio2013Light.hpp"
+#include "dxSkinVS2010.hpp"
+#include "dxSkinWhiteprint.hpp"
+#include "dxSkinXmas2008Blue.hpp"
+
+//---------------------------------------------------------------------------
+class TFrmAddInvoice2 : public NewSpecialForm
+{
+__published:	// IDE-managed Components
+	TIBDataSet *DatasetInvoice;
+	TIBStringField *DatasetInvoiceINVCODE;
+	TIntegerField *DatasetInvoiceCUST_ID;
+	TIBStringField *DatasetInvoiceINVTYPE;
+	TDateField *DatasetInvoiceINVDATE;
+	TIntegerField *DatasetInvoiceINVOICE_ID;
+	TIntegerField *DatasetInvoicePAID;
+	TDateField *DatasetInvoiceDELIVERYDATE;
+	TIntegerField *DatasetInvoiceDISTRAIM_ID;
+	TIntegerField *DatasetInvoiceDELMETHOD_ID;
+	TIntegerField *DatasetInvoicePAYMETH_ID;
+	TIBBCDField *DatasetInvoiceDISCOUNT;
+	TIBBCDField *DatasetInvoicePRICE;
+	TIBBCDField *DatasetInvoicePRICEWVAT;
+	TIntegerField *DatasetInvoiceCONV_INVOICE_ID;
+	TTimeField *DatasetInvoiceINVTIME;
+	TIBStringField *DatasetInvoiceADDRESS1;
+	TIBStringField *DatasetInvoiceADDRESS2;
+	TIBStringField *DatasetInvoiceCITY;
+	TIBStringField *DatasetInvoicePOSTCODE;
+	TIBStringField *DatasetInvoiceCOUNTRY;
+	TIBStringField *DatasetInvoiceNOTES;
+	TDataSource *DSInvoice;
+	TJvPanel *PanelDetails;
+	TLabel *Label1;
+	TLabel *Label2;
+	TLabel *Label3;
+	TLabel *Label5;
+	TLabel *Label4;
+	TLabel *Label6;
+	TLabel *Label7;
+	TLabel *Label8;
+	TLabel *Label9;
+	TLabel *Label10;
+	TLabel *Label19;
+	TLabel *Label20;
+	TLabel *lblSdap;
+	TLabel *Label21;
+	TcxTextEdit *editName;
+	TcxDBTextEdit *cxDBTextEdit2;
+	TcxDBTextEdit *cxDBTextEdit3;
+	TcxDBLookupComboBox *comboInvType;
+	TcxDBLookupComboBox *comboDistAim;
+	TcxDBLookupComboBox *comboDeliveryMethod;
+	TcxDBLookupComboBox *comboPaymeth;
+	TcxDBDateEdit *EditInvoiceDate;
+	TcxDBDateEdit *EditDeliveryDate;
+	TcxDBTextEdit *cxDBTextEdit4;
+	TcxDBTextEdit *cxDBTextEdit5;
+	TcxTextEdit *editVatNo;
+	TcxTextEdit *editOccupation;
+	TJvPanel *PanelInvLines;
+	TLabel *Label18;
+	TJvDotNetButton *cmdNewItem;
+	TJvDotNetButton *cmdDeleteItem;
+	TJvDotNetButton *cmdEditItem;
+	TJvDotNetButton *cmdAccept;
+	TJvDotNetButton *cmdSearch;
+	TJvDotNetButton *cmdCancel;
+	TcxDBTextEdit *cxDBTextEdit1;
+	TJvPanel *PanelButtons;
+	TLabel *Label11;
+	TLabel *lblPrice;
+	TLabel *Label13;
+	TLabel *lblVatValue;
+	TLabel *Label12;
+	TLabel *lblTotal;
+	TLabel *Label16;
+	TLabel *Label14;
+	TLabel *Label15;
+	TLabel *lblEurosign;
+	TLabel *Label17;
+	TJvDotNetButton *JvDotNetButton1;
+	TJvDotNetButton *JvDotNetButton2;
+	TJvDotNetEdit *editDiscPercent;
+	TJvDotNetEdit *editDiscount;
+	TJvTimeEdit *editTime;
+	TcxDBMemo *cxDBMemo1;
+	TIBQuery *QrySelCustomer;
+	TIntegerField *QrySelCustomerCUST_ID;
+	TIBStringField *QrySelCustomerAFM;
+	TIBStringField *QrySelCustomerNAME;
+	TIBStringField *QrySelCustomerADDRESS1;
+	TIBStringField *QrySelCustomerADDRESS2;
+	TIBStringField *QrySelCustomerCITY;
+	TIBStringField *QrySelCustomerPOSTCODE;
+	TIBStringField *QrySelCustomerPHONE1;
+	TIBStringField *QrySelCustomerPHONE2;
+	TIBStringField *QrySelCustomerFAX;
+	TIBStringField *QrySelCustomerOCCUPATION;
+	TIBStringField *QrySelCustomerTAXOFFICE;
+	TMemoField *QrySelCustomerDETAILS;
+	TIBBCDField *QrySelCustomerDISCOUNT;
+	TIBStringField *QrySelCustomerEMAIL;
+	TIntegerField *QrySelCustomerALT_CUSTID;
+	TIntegerField *QrySelCustomerORDER;
+	TIBStringField *QrySelCustomerCOUNTRY;
+	TIntegerField *QrySelCustomerPAYMETH_ID;
+	TIBQuery *QryDistAim;
+	TIntegerField *QryDistAimDISTAIM_ID;
+	TIBStringField *QryDistAimDESCRIPTION;
+	TDataSource *DSDistAim;
+	TIBQuery *QryDeliveryMethod;
+	TIntegerField *QryDeliveryMethodMETHOD_ID;
+	TIBStringField *QryDeliveryMethodDESCRIPTION;
+	TDataSource *DSDeliveryMethod;
+	TIBQuery *QryPaymentMeth;
+	TIntegerField *QryPaymentMethMETHOD_ID;
+	TIBStringField *QryPaymentMethDESCRIPTION;
+	TIntegerField *QryPaymentMethDUE_DAYS;
+	TDataSource *DSPaymentMeth;
+	TIBQuery *QryInvTypes;
+	TIBStringField *QryInvTypesINVTYPE_ID;
+	TIBStringField *QryInvTypesNAME;
+	TIBStringField *QryInvTypesFRM_FILENAME;
+	TIBStringField *QryInvTypesEAFDSS_SCRIPT;
+	TIntegerField *QryInvTypesINVCOUNT;
+	TSmallintField *QryInvTypesSHOW_ON_MENU;
+	TIBStringField *QryInvTypesPRINTER_NAME;
+	TSmallintField *QryInvTypesPRINTER_NO;
+	TIntegerField *QryInvTypesDISTAIM_ID;
+	TIntegerField *QryInvTypesDELIVERYMETHOD_ID;
+	TIntegerField *QryInvTypesPAYMETH_ID;
+	TDataSource *DSInvTypes;
+	TIBDataSet *DatasetInvLines;
+	TIntegerField *DatasetInvLinesINVLINE_ID;
+	TIntegerField *DatasetInvLinesINVOICE_ID;
+	TIntegerField *DatasetInvLinesPRODUCT_ID;
+	TIBBCDField *DatasetInvLinesPRICE_PER_ITEM;
+	TIBBCDField *DatasetInvLinesPRICE;
+	TIBBCDField *DatasetInvLinesPRICEWVAT;
+	TIBStringField *DatasetInvLinesDESCRIPTION_SHORT;
+	TIBStringField *DatasetInvLinesBARCODE;
+	TIBBCDField *DatasetInvLinesQTY;
+	TIBBCDField *DatasetInvLinesVATPERCENT;
+	TIBBCDField *DatasetInvLinesPRICE_PER_ITEM_WVAT;
+	TIBBCDField *DatasetInvLinesDISCOUNT;
+	TIBStringField *DatasetInvLinesMETRIC_UNIT;
+	TIBStringField *DatasetInvLinesNOTES;
+	TIBStringField *DatasetInvLinesPRODUCT_DESCR;
+	TDataSource *DSInvLines;
+	TIBQuery *QrySelProducts;
+	TIntegerField *QrySelProductsPRODUCT_ID;
+	TIBStringField *QrySelProductsBARCODE;
+	TIBStringField *QrySelProductsDESCRIPTION_SHORT;
+	TIntegerField *QrySelProductsCAT_ID;
+	TIntegerField *QrySelProductsVATCAT_ID;
+	TIBBCDField *QrySelProductsBUY_PRICE;
+	TIBBCDField *QrySelProductsSELL_PRICE;
+	TIBBCDField *QrySelProductsPRICE_WVAT;
+	TDateField *QrySelProductsDATE_INSERTED;
+	TMemoField *QrySelProductsDESCRIPTION;
+	TIntegerField *QrySelProductsMETRIC_ID;
+	TIBBCDField *QrySelProductsRESERVE;
+	TIBBCDField *QrySelProductsRESERVE_SECURE;
+	TDateTimeField *QrySelProductsLAST_UPDATE;
+	TIBBCDField *QrySelProductsVAT_VALUE;
+	TIBQuery *QryVatCategory;
+	TIntegerField *QryVatCategoryVATCAT_ID;
+	TIBStringField *QryVatCategoryDESCRIPTION;
+	TIBBCDField *QryVatCategoryVALUE;
+	TMemoField *QryVatCategoryLONG_DESCRIPTION;
+	TSmallintField *QryVatCategoryDEFAULT_CAT;
+	TJvPopupMenu *PopupViewLines;
+	TMenuItem *MenuAddLine;
+	TMenuItem *MenuDeleteLine;
+	TMenuItem *MenuEditLine;
+	TcxStyleRepository *StyleRepo;
+	TcxStyle *StyleMain;
+	TcxStyle *StyleEven;
+	TcxStyle *StyleOdd;
+	TcxStyle *StyleGroupBox;
+	TcxGrid *GridInvoiceLines;
+	TcxGridDBTableView *ViewInvoiceLines;
+	TcxGridLevel *GridInvoiceLinesLevel1;
+	TcxGridDBColumn *ViewInvoiceLinesINVLINE_ID;
+	TcxGridDBColumn *ViewInvoiceLinesPRICE_PER_ITEM;
+	TcxGridDBColumn *ViewInvoiceLinesPRICE;
+	TcxGridDBColumn *ViewInvoiceLinesDESCRIPTION_SHORT;
+	TcxGridDBColumn *ViewInvoiceLinesBARCODE;
+	TcxGridDBColumn *ViewInvoiceLinesQTY;
+	TcxGridDBColumn *ViewInvoiceLinesVATPERCENT;
+	TcxGridDBColumn *ViewInvoiceLinesPRICE_PER_ITEM_WVAT;
+	TcxGridDBColumn *ViewInvoiceLinesDISCOUNT;
+	TcxGridDBColumn *ViewInvoiceLinesMETRIC_UNIT;
+	TcxGridDBColumn *ViewInvoiceLinesPRICEWVAT;
+	void __fastcall comboInvTypePropertiesChange(TObject *Sender);
+	void __fastcall editNameKeyDown(TObject *Sender, WORD &Key, TShiftState Shift);
+	void __fastcall editVatNoKeyPress(TObject *Sender, System::WideChar &Key);
+	void __fastcall ViewInvoiceLinesKeyDown(TObject *Sender, WORD &Key, TShiftState Shift);
+	void __fastcall MenuAddLineClick(TObject *Sender);
+	void __fastcall cmdSearchClick(TObject *Sender);
+	void __fastcall MenuDeleteLineClick(TObject *Sender);
+	void __fastcall MenuEditLineClick(TObject *Sender);
+	void __fastcall DatasetInvoiceINVDATEChange(TField *Sender);
+private:	// User declarations
+	TDate runningDate;
+	void setProductId(int _prId);
+	void setCustomerId(int _id);
+	void showData();
+	void showLineData();
+	void calcPrices();
+public:		// User declarations
+	__fastcall TFrmAddInvoice2(TComponent* Owner);
+};
+//---------------------------------------------------------------------------
+extern PACKAGE TFrmAddInvoice2 *FrmAddInvoice2;
+//---------------------------------------------------------------------------
+#endif

@@ -1,0 +1,29 @@
+@echo off
+del *.~bpr
+del *.~dfm
+del *.~cpp
+del *.obj
+del *.~h
+del *.~ddp
+del *.tds
+del *.ilc
+del *.ild
+del *.ilf
+del *.ils
+del *.csm
+del *.#*
+cd debug
+del *.obj
+del *.#*
+del *.pch
+del *.tds
+del *.exe
+del *.ilc
+del *.ild
+del *.ilf
+del *.ils
+del *.csm
+del *.map
+cd ..
+echo Backing up database
+"c:\Program Files\Firebird\Firebird_2_1\bin\gbak.exe" -T -B c:\data\ekdosi.fdb db_backup\ekdosi.fbk
