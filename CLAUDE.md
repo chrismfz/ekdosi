@@ -471,6 +471,45 @@ This is what `MigrateFromFirebird.php` exists for; spelling out the story:
   5. Snapshot the MariaDB; switch DNS / app pointers.
   6. Archive the Firebird DBs + the C++Builder source for legal-retention.
 
+### Stored procedure inventory (real domain logic we need to port)
+The schema dump uses `isql -x`'s two-pass output: line ~315 has stub
+declarations (`BEGIN SUSPEND; END`), real bodies follow at line ~479
+under `ALTER PROCEDURE`. The ones with actual logic:
+
+- **`GET_INV_CODE(XINVTYPE)`** (schema.sql:668) — INVCODE format is just
+  `INVTYPE || INVCOUNT` (no zero-pad, no fiscal year). e.g. `APY423`.
+  Reproduce as `$invoice->code = $type->code . $type->invcount;` in the
+  issue flow.
+- **`CALCULATE_INVOICE_VALUES(INVOICE_ID)`** (schema.sql:479) —
+  `INVOICE.PRICE = SUM(INVLINES.PRICE)`, `INVOICE.PRICEWVAT = SUM(INVLINES.PRICEWVAT)`.
+  Pure roll-up, no invoice-level discount applied here. The
+  invoice-level discount math lives in the C++ code (see VAT section
+  above), not in this SP.
+- **`CALCULATE_VAT_FOR_INVOICE(INVOICE_ID)`** (schema.sql:490) —
+  returns per-VAT-rate breakdown for the invoice:
+  `vat = SUM(PRICEWVAT - PRICE) - SUM(PRICEWVAT - PRICE) * (INVOICE.DISCOUNT / 100)`
+  GROUP BY VATPERCENT. **Invoice-level discount IS applied here.** This
+  is what we need for myDATA's `taxesTotals` / per-rate VAT amounts —
+  port carefully.
+- **`GET_CUSTOMER_BALANCE(CUST_ID)`** (schema.sql:652) —
+  `balance = SUM(INVOICE.PRICEWVAT WHERE DUE_DAYS > 0) - SUM(PAYMENT.VALUE)`.
+  Cash-term invoices (DUE_DAYS = 0) **don't count** toward balance. One-liner
+  Eloquent scope.
+- **`MYDATA_EXTRACT_URL`** (schema.sql:723) — substring-parses `<qrUrl>`
+  out of the AADE response XML into `MARK.INVOICE_URL`. The firebed
+  library exposes the QR URL directly; we don't port this.
+- **`FILL_PRDESCR_INVLINES`** (schema.sql:517) — one-time backfill that
+  copies `PRODUCT.DESCRIPTION_SHORT` and metric unit name onto invoice
+  lines. Equivalent in the new app: do this denormalisation at line-add
+  time (not via a maintenance proc).
+- **`LZ_PAD`** — generic left-zero-pad; drop, use `str_pad` in PHP.
+- **`GET_COMB_*`** — already dropped (cross-DB credential landmine).
+- **`CREATE_RETURN_INVOICE`** (schema.sql:510) — **empty body in the dump**.
+  Credit-note creation logic lives in `FInvoiceReturn.cpp`, not in SQL.
+- **`SHOW_CUMULATIVE_INVOICE`, `YIELD_RETINV_STATS`, `INSPECT_CUST_ORDER`,
+  `SWAP_CUST_ORDER`, `CHECK_PROD_AVAILABILITY`** — reporting / maintenance
+  helpers. Reimplement as needed; not blocking for the core port.
+
 ### Schema columns worth re-checking before finalising migrations
 - `INVOICE` has both `INVDATE` (DATE) and `INVTIME` (TIME) — already
   merged to `invoices.issued_at` per README; just don't forget to
@@ -529,8 +568,6 @@ This is what `MigrateFromFirebird.php` exists for; spelling out the story:
       `nikolajlovenhardt/laravel-peppol`, `digitalcz/peppol-php`, or
       direct integration with Estonia's RIK e-arveldaja. Defer until we
       know the actual deadline for the Estonian tenant.
-- [ ] Read `GET_INV_CODE` stored procedure body in schema.sql to decide
-      whether INVCODE format needs to be carried over or can be regenerated.
 - [ ] Decide: collapse `/ekdosi-migration-kit/` into the repo root (and
       delete the duplicate `README.md` + `MigrateFromFirebird.php` at
       root), or vice versa.
