@@ -29,9 +29,10 @@ upstream billing host, and any S3-compatible backup target.
 
 ## 1. Base system + repositories
 
-AlmaLinux 9 ships PHP 8.1 in its AppStream and that's too old for
-Laravel 13 (needs 8.3+). Pull modern PHP from **Remi**, modern Firebird
-client from **EPEL**.
+AlmaLinux 9 ships PHP 8.1 in its AppStream and that's too old. Our
+`composer.lock` is pinned to PHP 8.4 (Filament 5 pulls in Symfony 8.x
+which hard-requires 8.4). Pull modern PHP from **Remi**, modern
+Firebird client from **EPEL**.
 
 ```bash
 # core toolchain
@@ -46,17 +47,36 @@ sudo dnf module enable -y php:remi-8.4
 sudo dnf update -y
 ```
 
+**After §2 finishes installing PHP, verify the version is actually
+8.4** — `dnf module reset` doesn't always bump an already-installed
+PHP, and `composer install` will fail with a long list of
+"requires php >=8.4" errors if you end up on 8.3:
+
+```bash
+php -v       # must show "PHP 8.4.x"
+```
+
+If it shows 8.3 or older, force the upgrade:
+```bash
+sudo dnf module reset  -y php
+sudo dnf module enable -y php:remi-8.4
+sudo dnf distro-sync   -y
+php -v       # confirm 8.4
+```
+
 ## 2. Packages
 
-One install for the lot. Skip `firebird-utils` / `firebird-devel` /
-`php-firebird` if this host won't run the ETL (only the box doing
+One install for the lot. **Don't drop any of the `php-*` packages** —
+`composer install` will fail with cryptic "missing extension" errors
+later if you do. Skip `firebird-utils` / `firebird-devel` /
+`php-firebird` only if this host won't run the ETL (only the box doing
 `migrate:firebird` needs them).
 
 ```bash
 sudo dnf install -y \
     php php-cli php-fpm php-common \
     php-mbstring php-xml php-intl php-bcmath php-gd php-zip php-curl \
-    php-mysqlnd php-pdo php-opcache php-soap php-sodium \
+    php-mysqlnd php-pdo php-opcache php-sodium \
     mariadb-server mariadb \
     nginx \
     git curl unzip tar make gcc \
@@ -70,6 +90,9 @@ sudo dnf install -y firebird-utils firebird-devel php-firebird
 
 Notes:
 - `php-bcmath` — wanted by Laravel for big-number / money math.
+- `php-zip` and `php-curl` are required by Filament's exporter
+  (`openspout/openspout` → ext-zip) and Laravel's HTTP client (Guzzle
+  → ext-curl). Composer refuses to install without them.
 - `php-firebird` (Remi) → provides `pdo_firebird`. If your repo
   combination doesn't expose it, the fallback is PECL: `sudo pecl
   install pdo_firebird` after `firebird-devel` is installed.
@@ -77,22 +100,44 @@ Notes:
 - `policycoreutils-python-utils` gives you `semanage` for the SELinux
   steps later.
 
-Confirm versions:
+Confirm versions and required extensions:
 ```bash
 php -v          # expect 8.4.x
 composer --version || true   # may be missing; install next
 mariadbd --version
 nginx -v
+
+# verify every required PHP extension is loaded — anything that prints
+# means it's MISSING. Empty output = good.
+for ext in bcmath ctype curl dom fileinfo filter gd iconv intl json \
+           mbstring openssl pcre pdo pdo_mysql phar session simplexml \
+           sodium tokenizer xml xmlwriter zip; do
+    php -m | grep -qix "$ext" || echo "MISSING: $ext"
+done
 ```
+
+If anything prints `MISSING: foo`, install the matching package
+(`sudo dnf install -y php-foo`) and re-run the loop until it's quiet
+**before** moving on to §3.
 
 ## 3. Composer
 
+Install to `/usr/bin/composer` rather than the conventional
+`/usr/local/bin/composer` — AlmaLinux's sudo `secure_path` doesn't
+include `/usr/local/bin`, so `sudo -u ekdosi-app composer ...`
+(used everywhere below) would fail with "command not found":
+
 ```bash
 curl -sS https://getcomposer.org/installer | php
-sudo mv composer.phar /usr/local/bin/composer
-sudo chmod +x /usr/local/bin/composer
+sudo mv composer.phar /usr/bin/composer
+sudo chmod 755 /usr/bin/composer
 composer --version
 ```
+
+If you prefer keeping composer under `/usr/local/bin`, either symlink
+it (`sudo ln -s /usr/local/bin/composer /usr/bin/composer`) or extend
+`secure_path` in a sudoers drop-in. The `/usr/bin` install is the
+lowest-friction option for an unattended deploy.
 
 ## 4. MariaDB — start, secure, create DB
 
@@ -114,6 +159,8 @@ SQL
 
 ## 5. Pull the code
 
+### 5a. Create the system user
+
 Create the system user the app will run under (referenced by every
 later step that says `ekdosi-app`). Default home (`/home/ekdosi-app`)
 is left in place so composer / npm have somewhere to write their
@@ -123,18 +170,54 @@ caches; the app code itself lives separately under `/var/www/ekdosi`:
 sudo useradd -r -m -s /sbin/nologin ekdosi-app
 ```
 
-Then clone and install dependencies:
+### 5b. Give the system user a GitHub deploy key (private repo)
+
+If the ekdosi repo is private, the HTTPS clone will block on a
+username prompt. Use a per-server SSH deploy key:
+
+```bash
+sudo -u ekdosi-app mkdir -p /home/ekdosi-app/.ssh
+sudo -u ekdosi-app chmod 700 /home/ekdosi-app/.ssh
+
+# generate the deploy key (no passphrase — this key only reads the repo)
+sudo -u ekdosi-app ssh-keygen -t ed25519 -N '' \
+    -f /home/ekdosi-app/.ssh/id_ed25519 \
+    -C "ekdosi-app@$(hostname)"
+
+# trust github.com's host key so the clone doesn't prompt
+sudo -u ekdosi-app sh -c 'ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /home/ekdosi-app/.ssh/known_hosts'
+
+# print the public key — paste this into the repo's
+# Settings → Deploy keys → Add deploy key (read-only is fine)
+sudo cat /home/ekdosi-app/.ssh/id_ed25519.pub
+```
+
+(If the repo is **public**, skip 5b and the clone in 5c can use the
+`https://` URL — but for production deploys we want a key anyway so
+nothing ever pauses for credentials.)
+
+### 5c. Clone and install dependencies
 
 ```bash
 sudo mkdir -p /var/www/ekdosi
 sudo chown ekdosi-app:ekdosi-app /var/www/ekdosi
-sudo -u ekdosi-app git clone https://github.com/chrismfz/ekdosi.git /var/www/ekdosi
+
+# Private repo (SSH, recommended):
+sudo -u ekdosi-app git clone git@github.com:chrismfz/ekdosi.git /var/www/ekdosi
+# OR Public repo (HTTPS):
+# sudo -u ekdosi-app git clone https://github.com/chrismfz/ekdosi.git /var/www/ekdosi
+
 cd /var/www/ekdosi
 
 sudo -u ekdosi-app composer install --no-dev --optimize-autoloader --no-interaction
-sudo -u ekdosi-app npm ci && sudo -u ekdosi-app npm run build
+sudo -u ekdosi-app npm ci
+sudo -u ekdosi-app npm run build
 sudo -u ekdosi-app php artisan filament:assets   # publish Filament's CSS/JS/fonts to public/
 ```
+
+If `composer` errors with a list of `requires php >=8.4` failures,
+your PHP is too old — go back to the §1 verification block and force
+the 8.4 upgrade.
 
 > Filament's published assets (`public/css|js|fonts/filament/`) are
 > git-ignored — they're regenerated by `filament:assets` on every clone
@@ -143,9 +226,17 @@ sudo -u ekdosi-app php artisan filament:assets   # publish Filament's CSS/JS/fon
 
 ## 6. Configure `.env`
 
+**This step is mandatory** — skipping it leaves the app on Laravel's
+defaults (`APP_ENV=production`, `DB_CONNECTION=sqlite`), so the very
+next step's `php artisan migrate` will silently create a
+`database/database.sqlite` file and migrate *there* instead of into
+your MariaDB. If you see Laravel prompting "Would you like to create
+the SQLite database?", you skipped this step — quit out, do this
+section, then redo §7.
+
 ```bash
-cp .env.example .env
-php artisan key:generate
+sudo -u ekdosi-app cp .env.example .env
+sudo -u ekdosi-app php artisan key:generate
 ```
 
 Edit `.env` and set at least:
@@ -183,7 +274,29 @@ single-process secrets like `APP_KEY` and DB creds.
 
 ## 7. Run migrations
 
-All artisan commands below run as the app user:
+All artisan commands below run as the app user. **Never run
+`php artisan ...` as root** — every file artisan creates under
+`storage/logs/` and `bootstrap/cache/` is then root-owned, and the
+real app user (which php-fpm and the queue worker run as) can't
+append to those files later. If you accidentally do, repair
+ownership before moving on:
+
+```bash
+sudo chown -R ekdosi-app:ekdosi-app /var/www/ekdosi/storage /var/www/ekdosi/bootstrap/cache
+```
+
+**First, sanity-check that the app is actually pointed at MariaDB** —
+if `.env` wasn't created in §6, Laravel falls back to SQLite by
+default, and `migrate` will silently create `database/database.sqlite`
+and migrate there instead:
+
+```bash
+sudo -u ekdosi-app php artisan db:show 2>&1 | head -3
+# Expected first line: "MariaDB ............................. <version>"
+# If you see "SQLite", go back to §6 — your .env is missing.
+```
+
+Then:
 
 ```bash
 sudo -u ekdosi-app php artisan migrate --force      # --force confirms running in production
@@ -265,7 +378,13 @@ php-fpm needs to read everything and write to two directories.
 sudo chown -R ekdosi-app:nginx /var/www/ekdosi
 sudo find /var/www/ekdosi -type d -exec chmod 755 {} \;
 sudo find /var/www/ekdosi -type f -exec chmod 644 {} \;
+
+# storage/ and bootstrap/cache/ — Laravel writes here
 sudo chmod -R 775 /var/www/ekdosi/storage /var/www/ekdosi/bootstrap/cache
+
+# restore executable bits stripped by the bulk `chmod 644` above
+sudo chmod 755 /var/www/ekdosi/artisan
+sudo find /var/www/ekdosi/vendor/bin -maxdepth 1 -type f -exec chmod 755 {} \;
 ```
 
 SELinux is **enforcing by default** on AlmaLinux — without these labels
@@ -305,9 +424,14 @@ sudo systemctl enable --now php-fpm
 
 ## 10. Web server — nginx (recommended)
 
-```bash
-sudo mkdir -p /etc/nginx/conf.d
-```
+### 10a. HTTP-only config first
+
+Start with port 80 ONLY. **Don't write an HTTPS server block yet** —
+nginx refuses to start if you reference `ssl_certificate` files that
+don't exist, and certbot can't issue the cert without a running
+nginx serving the `/.well-known/acme-challenge/` HTTP-01 path.
+`certbot --nginx` rewrites this file in §10b to add the HTTPS block
+and cert paths in one step.
 
 Create `/etc/nginx/conf.d/ekdosi.myip.gr.conf`:
 
@@ -316,20 +440,9 @@ server {
     listen 80;
     listen [::]:80;
     server_name ekdosi.myip.gr;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ekdosi.myip.gr;
 
     root /var/www/ekdosi/public;
     index index.php;
-
-    # certbot will fill these in below
-    # ssl_certificate     /etc/letsencrypt/live/ekdosi.myip.gr/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/ekdosi.myip.gr/privkey.pem;
 
     client_max_body_size 32M;        # invoice PDFs / scanned attachments
 
@@ -355,15 +468,37 @@ server {
 }
 ```
 
-Enable, open the firewall, get a cert:
+Start nginx, open the firewall:
 
 ```bash
 sudo nginx -t && sudo systemctl enable --now nginx
 sudo firewall-cmd --permanent --add-service={http,https} && sudo firewall-cmd --reload
-
-# Let's Encrypt — point DNS at this host first
-sudo certbot --nginx -d ekdosi.myip.gr --redirect --agree-tos -m you@example.com
 ```
+
+Verify HTTP works (DNS must point at this host first):
+
+```bash
+curl -sI http://ekdosi.myip.gr/   # expect HTTP/1.1 200 (or 302 to login)
+```
+
+### 10b. Let certbot add HTTPS
+
+`certbot --nginx` automatically:
+- Serves the ACME challenge from the existing port-80 server block.
+- Issues + installs the cert under `/etc/letsencrypt/live/...`.
+- Edits `/etc/nginx/conf.d/ekdosi.myip.gr.conf` to add the `listen 443 ssl;` block, the `ssl_certificate` paths, and an HTTP→HTTPS redirect on port 80.
+- Reloads nginx.
+
+```bash
+sudo certbot --nginx -d ekdosi.myip.gr -n --redirect --agree-tos -m you@example.com
+```
+
+If certbot prints "Some challenges have failed", the most common
+causes are: (1) DNS for `ekdosi.myip.gr` doesn't resolve to this
+host yet — `dig +short ekdosi.myip.gr` should return your public
+IP; (2) port 80 is firewalled off by the cloud provider (open it in
+the security group, not just firewalld); (3) something else is
+already listening on port 80 — `sudo ss -tlnp | grep :80`.
 
 ### Apache alternative
 
@@ -460,22 +595,98 @@ Only needed on whatever box is going to run
 `php artisan migrate:firebird ...`. Can be the same host, can be a
 one-off VM next to the legacy server.
 
+### 12a. Install Firebird client + PDO driver + server
+
+The PDO driver package name depends on which repo you pull it from
+(both work):
+- Remi (matches the `php:remi-8.4` module stream): `php-firebird`
+- EPEL 10 (SCL-style versioned): `php8.4-pdo-firebird`
+
+The Firebird **server** package is needed for ETLing against a local
+`.fdb` sandbox (`--host=127.0.0.1`). Package name varies by EL
+version:
+- AlmaLinux 9: `firebird-superserver`
+- AlmaLinux 10 / EPEL 10: just `firebird` (no `-server` suffix)
+
 ```bash
-sudo dnf install -y firebird-utils firebird-devel php-firebird
-# verify the extension loaded:
+# PDO driver — try Remi first, EPEL as fallback
+sudo dnf install -y php-firebird || sudo dnf install -y php8.4-pdo-firebird
+
+# tools (gbak / isql-fb / fbsvcmgr) + the server, if you want local sandbox FB
+sudo dnf install -y firebird-utils firebird-devel
+sudo dnf install -y firebird-superserver 2>/dev/null || sudo dnf install -y firebird
+
+# verify the PDO driver actually loaded:
 php -m | grep -i firebird       # expect: pdo_firebird
 
-# restore the legacy gbak into a sandbox .fdb you can iterate against:
-gbak -r /path/to/ekdosi.fbk /var/lib/firebird/data/ekdosi-sandbox.fdb \
-     -user SYSDBA -password masterkey
+# find the actual service unit name and start it
+sudo systemctl list-unit-files | grep -i firebird
+sudo systemctl enable --now firebird   # adjust if grep showed a different name
+sudo ss -tlnp | grep 3050              # confirm FB is listening
 
-# import one tenant
-php artisan migrate:firebird --company="MyIP" --slug=myip \
-    --fdb=/var/lib/firebird/data/ekdosi-sandbox.fdb \
-    --host=127.0.0.1 --fbuser=SYSDBA --fbpass=masterkey
+# SYSDBA password handling varies by EL version + Firebird build:
+# - EL9 / Firebird 3 installs may auto-generate /etc/firebird/SYSDBA.password
+# - EL10 / Firebird 4 (current default) ships an EMPTY security DB and
+#   the install does NOT seed SYSDBA. You bootstrap it yourself.
+#
+# Firebird 4's "Install incomplete" message you'll see if you try to
+# connect over the network is a RED HERRING — the network connect is
+# rejected outright (SQLSTATE 28000), it doesn't actually let you
+# stay connected long enough to CREATE USER. The real path is
+# EMBEDDED MODE: stop the daemon, isql-fb the security DB by file
+# path (no host: prefix → embedded → no auth), CREATE USER, restart.
+#
+# Two prerequisites:
+#  (a) Ownership: /var/lib/firebird/ must be firebird:firebird through
+#      and through. If anything got root-owned (e.g. you ran isql-fb
+#      as root by accident), embedded mode hits "Permission denied".
+#  (b) Daemon stopped: embedded mode needs an exclusive file lock.
+
+# Step 1 — repair ownership in case anything got stomped while debugging
+sudo chown -R firebird:firebird /var/lib/firebird/
+
+# Step 2 — locate the security DB (path varies by build)
+sudo find /var/lib/firebird /opt/firebird -name 'security*.fdb' 2>/dev/null
+# Typical:
+#   /var/lib/firebird/secdb/security4.fdb   (EPEL 10 firebird-4)
+#   /var/lib/firebird/system/security4.fdb  (some EL9 builds)
+SECDB=/var/lib/firebird/secdb/security4.fdb   # adjust to what find returned
+
+# Step 3 — stop daemon, bootstrap SYSDBA via embedded mode, restart.
+# Pass -user SYSDBA explicitly even in embedded mode — without it,
+# the session attaches as some non-privileged implicit identity and
+# the first CREATE USER fails with "CREATE TABLE PLG$SRP failed: No
+# permission for CREATE TABLE operation" (Firebird's SRP plugin
+# auto-creates PLG$SRP on the first user write).
+sudo systemctl stop firebird
+sudo -u firebird /usr/bin/isql-fb -user SYSDBA "$SECDB" <<'SQL'
+CREATE USER SYSDBA PASSWORD 'masterkey';
+COMMIT;
+QUIT;
+SQL
+# (If a SYSDBA row already exists with a different password, that
+# CREATE will say "User already exists" — swap to ALTER USER instead.)
+sudo systemctl start firebird
+
+# Step 4 — smoke-test that SYSDBA/masterkey now works over the network
+# We point at any .fdb you actually have (the sample 'employee' DB
+# isn't always shipped — EPEL 10's slim package omits it).
+sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password masterkey \
+    "localhost:$SECDB" <<<'QUIT;'
+# Expect: clean exit, no SQLSTATE.
+# If you see SQLSTATE = 28000 the auth failed (re-do Step 3).
+# If you see SQLSTATE = 08001 with "No such file or directory" the
+# auth SUCCEEDED — only the file path is wrong; SYSDBA is fine.
 ```
 
-If `php-firebird` isn't in your Remi mirror, fall back to PECL:
+If you ever need to RESET the SYSDBA password later, use SQL over a
+working network connection (gsec is deprecated on Firebird 4):
+```bash
+sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password <oldpass> \
+    localhost:employee <<<"ALTER USER SYSDBA SET PASSWORD 'newpass'; COMMIT;"
+```
+
+If neither package is available in your repos, fall back to PECL:
 
 ```bash
 sudo dnf install -y firebird-devel php-pear php-devel
@@ -483,6 +694,58 @@ sudo pecl install pdo_firebird
 echo "extension=pdo_firebird.so" | sudo tee /etc/php.d/30-pdo_firebird.ini
 sudo systemctl restart php-fpm
 ```
+
+### 12b. Restore the legacy gbak + import one tenant
+
+**Don't copy a `.fdb` directly.** Each major Firebird version uses
+its own on-disk structure (FB3 = ODS 12, FB4 = ODS 13). FB4 can't
+read an FB3-created `.fdb` and you'll get `SQLSTATE[HY000] [335544379]
+unsupported on-disk structure for file ...; found 12.0, support 13.0`.
+The portable format across major versions is `.fbk` (gbak's backup
+format) — always go `.fdb (FB3) → gbak -b → .fbk → gbak -r (FB4) → .fdb (ODS 13)`.
+
+The Firebird server also enforces `DatabaseAccess = Restrict
+/var/lib/firebird/data` by default — meaning it will only open `.fdb`
+files **under that directory**. If you point it at e.g. `/opt/foo.fdb`
+you'll get `SQLSTATE[HY000] [335544831] Use of database at location
+... is not allowed by server configuration`. Two fixes: put the
+`.fdb` under `/var/lib/firebird/data/` (recommended), or edit
+`/etc/firebird/firebird.conf` and add the directory to
+`DatabaseAccess`.
+
+```bash
+# restore the legacy gbak into a path FB allows.
+# gbak -r writes a fresh ODS-13 .fdb regardless of what ODS the .fbk
+# was originally made on — that's how the cross-version upgrade works.
+sudo -u firebird /usr/bin/gbak -r \
+    /var/www/ekdosi/legacy/ekdosi-main/db_backup/ekdosi.fbk \
+    /var/lib/firebird/data/ekdosi-sandbox.fdb \
+    -user SYSDBA -password masterkey
+sudo chown firebird:firebird /var/lib/firebird/data/ekdosi-sandbox.fdb
+
+# import one tenant — host=127.0.0.1 talks to the local FB server
+sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
+    --fdb=/var/lib/firebird/data/ekdosi-sandbox.fdb \
+    --host=127.0.0.1 --fbuser=SYSDBA --fbpass=masterkey
+```
+
+### 12c. ETL against a remote Firebird (cutover day)
+
+For the actual cutover, the `.fdb` lives on the legacy server, not
+locally. `--fdb` is a path **on the remote server's filesystem**, not
+on this box:
+
+```bash
+sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
+    --fdb="/opt/Data/ekdosi-myip.fdb" \
+    --host=10.23.22.5 \
+    --fbuser=EKDOSI --fbpass=ekdosi1234
+```
+
+If you see `Use of database at location ... is not allowed by server
+configuration`, the **legacy server's** `firebird.conf` doesn't allow
+opening that path — you'll need to either move the `.fdb` to a path
+it does allow, or extend `DatabaseAccess` on the legacy box.
 
 ## 13. Re-deploy / update runbook
 
