@@ -2,10 +2,13 @@
 
 namespace App\Filament\Resources\Invoices;
 
+use App\Filament\Resources\Invoices\Pages\CreateInvoice;
+use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Pages\ListInvoices;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Filament\Resources\Invoices\RelationManagers\LinesRelationManager;
 use App\Filament\Resources\Invoices\RelationManagers\MyDataMarksRelationManager;
+use App\Filament\Resources\Invoices\Schemas\InvoiceForm;
 use App\Filament\Resources\Invoices\Schemas\InvoiceInfolist;
 use App\Filament\Resources\Invoices\Tables\InvoicesTable;
 use App\Models\Invoice;
@@ -55,6 +58,11 @@ class InvoiceResource extends Resource
             ->with(['customer' => fn ($q) => $q->withTrashed()]);
     }
 
+    public static function form(Schema $schema): Schema
+    {
+        return InvoiceForm::configure($schema);
+    }
+
     public static function infolist(Schema $schema): Schema
     {
         return InvoiceInfolist::configure($schema);
@@ -77,6 +85,8 @@ class InvoiceResource extends Resource
     {
         return [
             'index' => ListInvoices::route('/'),
+            'create' => CreateInvoice::route('/create'),
+            'edit' => EditInvoice::route('/{record}/edit'),
             'view' => ViewInvoice::route('/{record}'),
         ];
     }
