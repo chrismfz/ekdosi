@@ -729,23 +729,76 @@ sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
     --host=127.0.0.1 --fbuser=SYSDBA --fbpass=masterkey
 ```
 
-### 12c. ETL against a remote Firebird (cutover day)
+### 12c. Production cutover — final ETL from a fresh legacy gbak
 
-For the actual cutover, the `.fdb` lives on the legacy server, not
-locally. `--fdb` is a path **on the remote server's filesystem**, not
-on this box:
+**This is the recommended path for real data.** Don't directly connect
+the new FB4-client app to the live legacy FB3 server for cutover:
+
+1. Legacy uses **FB3 (ODS 12)**, new host uses **FB4 (ODS 13)**. The
+   on-disk file formats are not interchangeable — `gbak`'s `.fbk`
+   backup format is.
+2. Direct connect needs the legacy `firebird.conf` to allow the
+   remote IP + the specific `.fdb` path; production configs almost
+   always restrict both.
+3. A `.fbk` is a frozen point-in-time snapshot — no race against live
+   writes mid-ETL. If the ETL crashes you re-run against the same
+   `.fbk` until it's clean.
+4. `migrate:firebird` is re-runnable (wipes this tenant's rows first
+   and re-imports), so you can iterate against the same `.fbk` while
+   debugging mapping bugs without ever touching production.
+
+```bash
+# (1) On the LEGACY server (FB3) — stop the app first, then back up:
+ssh legacy.example.com
+gbak -b /opt/Data/ekdosi-myip.fdb /tmp/ekdosi-myip-$(date +%F).fbk \
+    -user SYSDBA -password masterkey
+exit
+
+# (2) Transfer to this box:
+scp legacy.example.com:/tmp/ekdosi-myip-*.fbk /tmp/
+
+# (3) Restore on FB4 (writes a fresh ODS-13 .fdb from any FB version's .fbk):
+sudo -u firebird /usr/bin/gbak -r \
+    /tmp/ekdosi-myip-2026-XX-XX.fbk \
+    /var/lib/firebird/data/ekdosi-myip.fdb \
+    -user SYSDBA -password masterkey
+sudo chown firebird:firebird /var/lib/firebird/data/ekdosi-myip.fdb
+
+# (4) ETL against the local FB4 server:
+sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
+    --fdb=/var/lib/firebird/data/ekdosi-myip.fdb \
+    --host=127.0.0.1 --fbuser=SYSDBA --fbpass=masterkey
+
+# (5) Golden test — zero divergent rows is the gate for trusting the import.
+#     (See CLAUDE.md's "Golden test" section.)
+mariadb -uekdosi -p ekdosi -e "
+  SELECT il.id, il.net_price, il.gross_price, il.vat_percent
+  FROM invoice_lines il
+  WHERE company_id=1
+    AND ABS(il.gross_price - ROUND(il.net_price * (1 + il.vat_percent/100), 2)) > 0.01
+  LIMIT 20;"
+
+# Repeat (1)→(5) per legacy tenant (myip, nixpal, ...).
+```
+
+### 12d. Direct-remote-connect (escape hatch, NOT for cutover)
+
+If you really need to ETL while the legacy app is still serving — e.g.
+mid-day sandboxing against live data, no cutover yet — you can point
+FB4 client at the FB3 server. The wire protocol is backward
+compatible. `--fdb` is then a path **on the legacy server's filesystem**:
 
 ```bash
 sudo -u ekdosi-app php artisan migrate:firebird --company="MyIP" --slug=myip \
-    --fdb="/opt/Data/ekdosi-myip.fdb" \
+    --fdb="/opt/Data/ekdosi-myip.fdb" \    # path on the LEGACY box
     --host=10.23.22.5 \
     --fbuser=EKDOSI --fbpass=ekdosi1234
 ```
 
 If you see `Use of database at location ... is not allowed by server
-configuration`, the **legacy server's** `firebird.conf` doesn't allow
-opening that path — you'll need to either move the `.fdb` to a path
-it does allow, or extend `DatabaseAccess` on the legacy box.
+configuration`, the legacy box's `firebird.conf` `DatabaseAccess`
+doesn't allow opening that path remotely. Either fix the legacy
+config or fall back to 12c.
 
 ## 13. Re-deploy / update runbook
 
