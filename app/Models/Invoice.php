@@ -82,6 +82,14 @@ class Invoice extends Model
         'occupation',
         'notes',
         'email_sent',
+        // myDATA invoice type snapshot — captured at submit time, NOT
+        // edit-time. Source: $invoice->invoiceType->mydata_type at
+        // the moment MyDataSubmitter ran. Reading via the relation
+        // would shift historical invoices' classification on every
+        // admin edit of invoice_types.mydata_type, breaking the
+        // "filed document is frozen" guarantee. Mass-assignable so
+        // the ETL can backfill from legacy data.
+        'mydata_type',
     ];
 
     protected function casts(): array

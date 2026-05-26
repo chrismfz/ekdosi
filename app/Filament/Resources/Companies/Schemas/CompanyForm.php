@@ -227,6 +227,48 @@ class CompanyForm
                                             // the form schema — tracked in CLAUDE.md as a
                                             // deferred follow-up since it requires touching
                                             // EditCompany.php and a custom save action.
+                                    ])
+                                    ->footerActions([
+                                        FormAction::make('test_mydata_connection')
+                                            ->label('Test myDATA connection')
+                                            ->icon('heroicon-o-bolt')
+                                            // Only meaningful when mode != off. NullSubmitter's
+                                            // testConnection trivially returns true so the
+                                            // button would lie about the credentials being
+                                            // valid (it never tries them).
+                                            ->visible(fn (callable $get) => in_array(
+                                                $get('mydata_mode'),
+                                                ['sandbox', 'production'],
+                                                true,
+                                            ))
+                                            ->action(function (?\App\Models\Company $record) {
+                                                if (! $record) {
+                                                    Notification::make()
+                                                        ->title('Save the company first, then test.')
+                                                        ->warning()->send();
+                                                    return;
+                                                }
+                                                try {
+                                                    $ok = (new \App\Services\MyDataSubmitter($record))->testConnection();
+                                                } catch (\Throwable $e) {
+                                                    Notification::make()
+                                                        ->title('myDATA unreachable')
+                                                        ->body($e->getMessage())
+                                                        ->warning()->send();
+                                                    return;
+                                                }
+                                                if ($ok) {
+                                                    Notification::make()
+                                                        ->title('Connected to myDATA')
+                                                        ->body('Credentials accepted by AADE ('.($record->mydata_mode_enum->value ?? '?').' endpoint).')
+                                                        ->success()->send();
+                                                } else {
+                                                    Notification::make()
+                                                        ->title('myDATA rejected the credentials')
+                                                        ->body('Check the aade-user-id and Ocp-Apim-Subscription-Key fields.')
+                                                        ->danger()->send();
+                                                }
+                                            }),
                                     ]),
                             ]),
 

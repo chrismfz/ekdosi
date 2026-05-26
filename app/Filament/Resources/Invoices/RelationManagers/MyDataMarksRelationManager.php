@@ -42,13 +42,16 @@ class MyDataMarksRelationManager extends RelationManager
                     ->label('Action')
                     ->badge()
                     ->color(fn (?string $state) => match ($state) {
-                        'INSERT' => 'success',
-                        'CANCEL' => 'danger',
+                        'INSERT' => 'success',  // real filing, MARK issued
+                        'CANCEL' => 'danger',   // real cancellation, MARK preserved
+                        'DRY_RUN' => 'info',    // preview from "Preview submission XML"
+                        'SKIPPED', 'SKIPPED_CANCEL' => 'warning',  // NullSubmitter: deliberate non-filing
                         default => 'gray',
                     }),
 
                 TextColumn::make('mark')
                     ->label('MARK')
+                    ->placeholder('—')  // SKIPPED + DRY_RUN rows have null mark
                     ->copyable(),
 
                 TextColumn::make('mark_date')

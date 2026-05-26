@@ -13,8 +13,10 @@ use App\Models\Company;
  *
  *   einvoice_provider = 'gr-mydata':
  *     mydata_mode = Off         → NullSubmitter
- *     mydata_mode = Sandbox     → MyDataSubmitter (sandbox endpoint) [PR #25]
- *     mydata_mode = Production  → MyDataSubmitter (production endpoint) [PR #25]
+ *     mydata_mode = Sandbox     → MyDataSubmitter (sandbox endpoint)
+ *     mydata_mode = Production  → MyDataSubmitter (production endpoint —
+ *                                  decided inside MyDataSubmitter via
+ *                                  tenant->mydata_mode_enum)
  *
  *   einvoice_provider = 'ee-peppol':
  *     → NullSubmitter (PeppolSubmitter lands when Estonian tenant
@@ -23,11 +25,6 @@ use App\Models\Company;
  *
  *   einvoice_provider = 'none':
  *     → NullSubmitter (PDF-only tenant)
- *
- * In this PR (#24), the factory always returns NullSubmitter because
- * MyDataSubmitter doesn't exist yet — but the contract is in place so
- * call sites can already type-hint against EInvoiceSubmitter. PR #25
- * extends this factory with the live submitter branch.
  *
  * Usage:
  *
@@ -38,12 +35,18 @@ class EInvoiceSubmitterFactory
 {
     public function for(Company $tenant): EInvoiceSubmitter
     {
-        // PR #25 will add:
-        // if ($tenant->einvoice_provider === 'gr-mydata'
-        //     && $tenant->mydata_mode_enum !== MyDataMode::Off) {
-        //     return new MyDataSubmitter($tenant);
-        // }
-        unset($tenant); // PR #24 doesn't branch on tenant yet
+        if (
+            $tenant->einvoice_provider === 'gr-mydata'
+            && $tenant->mydata_mode_enum !== MyDataMode::Off
+        ) {
+            return new MyDataSubmitter($tenant);
+        }
+
+        // Everything else routes to the no-op submitter:
+        //   - mydata_mode = Off (Greek tenant deliberately not filing)
+        //   - einvoice_provider = 'none' (PDF-only tenant)
+        //   - einvoice_provider = 'ee-peppol' (Estonian — PeppolSubmitter
+        //     lands later; NullSubmitter is the safe default until then)
         return new NullSubmitter();
     }
 }
