@@ -232,9 +232,14 @@ sudo -u ekdosi git clone git@github.com:chrismfz/ekdosi.git /var/www/ekdosi
 cd /var/www/ekdosi
 
 sudo -u ekdosi composer install --no-dev --optimize-autoloader --no-interaction
-sudo -u ekdosi npm ci
-sudo -u ekdosi npm run build
 sudo -u ekdosi php artisan filament:assets   # publish Filament's CSS/JS/fonts to public/
+
+# Vite asset build (only needed once we have custom CSS/JS in resources/).
+# Skip on a fresh repo — no committed package-lock.json yet, and the
+# Filament panel uses the pre-built assets that filament:assets just
+# published. Run this block once we start writing custom frontend code:
+#   sudo -u ekdosi npm install        # generates package-lock.json on first run
+#   sudo -u ekdosi npm run build      # vite build -> public/build/
 ```
 
 If `composer` errors with a list of `requires php >=8.4` failures,
@@ -352,6 +357,13 @@ sudo -u ekdosi php artisan migrate:fresh --seed --force
 
 Login: `admin@ekdosi.local` / `password`. **Never run this on a
 production box** — the password is hard-coded and known.
+
+After this you have schema + an admin user + three empty tenants. If
+you also want actual ekdosi data to play with (71 customers, 161
+invoices, etc.), continue to §12 — the ETL fills the `myip` tenant
+from the legacy `.fbk` shipped at
+`legacy/ekdosi-main/db_backup/ekdosi.fbk`. The other two tenants
+stay empty until you ETL them from their own `.fbk` files.
 
 ### Production — tinker recipe
 
@@ -855,9 +867,11 @@ sudo -u ekdosi git checkout main
 sudo -u ekdosi git pull --ff-only
 
 sudo -u ekdosi composer install --no-dev --optimize-autoloader --no-interaction
-sudo -u ekdosi npm ci
-sudo -u ekdosi npm run build
 sudo -u ekdosi php artisan filament:assets       # republish Filament's CSS/JS/fonts
+
+# Vite — only if a package-lock.json is committed (it isn't, yet).
+# When custom frontend assets land, replace `|| true` with hard fail.
+test -f package-lock.json && sudo -u ekdosi npm ci && sudo -u ekdosi npm run build || true
 
 sudo -u ekdosi php artisan migrate --force
 sudo -u ekdosi php artisan config:cache
