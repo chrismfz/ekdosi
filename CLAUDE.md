@@ -825,3 +825,58 @@ Updating the order in light of what we learned:
 - What's the per-tenant **AADE user ID + subscription key** for myip
   and nixpal (we need these to actually test myDATA submission once
   the submitter is built)?
+
+### Deferred code-review findings (do not lose track)
+
+Items surfaced by `/ultrareview --effort high` on prior PRs that were
+**deliberately deferred** rather than fixed in their original PR.
+Re-check each one when the listed trigger PR lands.
+
+**From PR #16 (InvoiceType resource + Shield wiring):**
+- **DB-level cross-tenant self-FK guard** — `invoice_types` /
+  `payment_methods` etc. allow self-FK rows (e.g.
+  `invoice_types.payment_method_id`) where the parent is in a different
+  tenant. Eloquent global scopes prevent it at app level, raw SQL or a
+  misbehaving import does not. **Trigger PR**: any future ETL extension
+  or raw-import path. Fix shape: composite FK `(payment_method_id,
+  company_id) → payment_methods(id, company_id)`, requires composite
+  unique on the parent side.
+- **Self-FK + cascade on company delete** — deleting a Company cascades
+  payment_methods, but invoice_types self-references payment_method_id
+  WITHOUT `ON DELETE SET NULL`, so the cascade order can fail. **Trigger
+  PR**: when we add a real "delete tenant" admin flow (not soon — currently
+  unreachable from UI).
+- **PaymentMethod has no global tenant scope** — relies on Filament's
+  `BelongsToTenant`. Code that touches PaymentMethod outside a Filament
+  request (artisan, queue jobs, the WHMCS bridge) sees all tenants.
+  **Trigger PR**: WHMCS bridge / scheduled IssueInvoice command. Fix:
+  add `BelongsToCompany` global scope to the model.
+- **`payment_method_id` Select doesn't preserve current value on edit
+  if FK now points at a soft-deleted row** — operator would silently
+  lose the link. **Trigger PR**: when we add invoice editing UI that
+  also exposes payment_method_id (currently only InvoiceType resource
+  uses it).
+- **`is_active=true` default filter on PaymentMethod table might hide
+  rows from a future invoice picker** — non-issue today (no picker
+  exists), latent. **Trigger PR**: InvoiceResource step in the
+  roadmap.
+- **`recordTitleAttribute = 'name'` ambiguous for duplicates** —
+  Filament global search shows multiple rows with identical labels.
+  Cosmetic. **Trigger PR**: whenever global search starts being used in
+  anger.
+
+**From PR #17 (InvoiceNumberer service):**
+- **PHPUnit suite can't catch a dropped `lockForUpdate()`** — sqlite
+  ignores row locks, so a regression that removes the lock passes the
+  Feature test. The artisan concurrent hammer covers it but only when
+  the operator remembers to run it. **Trigger PR**: when we set up CI
+  against a real MariaDB, add a meta-test that asserts the SQL string
+  for the SELECT contains `FOR UPDATE`, OR run the concurrent command
+  as a CI step.
+- **Concurrent probe doesn't test rollback semantics** — current probe
+  only verifies a successful 1..N allocation. It doesn't verify that
+  a thrown exception INSIDE the transaction rolls back the counter
+  bump (invariant A in the InvoiceNumberer docblock). **Trigger PR**:
+  IssueInvoice action — once we have a failure mode (myDATA reject,
+  VAT calc throw), add a "throw mid-allocate; assert invcount is
+  unchanged" test.

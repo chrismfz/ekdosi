@@ -52,6 +52,17 @@ class TestInvoiceNumberingConcurrent extends Command
             return self::FAILURE;
         }
 
+        // Sweep orphans from prior runs that died between create and the
+        // cleanup in the finally block (SIGKILL, host crash, etc.). The
+        // slug pattern is owned exclusively by this command so the wildcard
+        // is safe — no real tenant will ever match.
+        $orphanCompanies = Company::where('slug', 'like', 'numberer-test-%')->pluck('id');
+        if ($orphanCompanies->isNotEmpty()) {
+            InvoiceType::whereIn('company_id', $orphanCompanies)->forceDelete();
+            Company::whereIn('id', $orphanCompanies)->forceDelete();
+            $this->warn('Swept '.$orphanCompanies->count().' orphan probe tenant(s) from prior runs.');
+        }
+
         // Throwaway tenant + invoice type. Slug uniquified so re-running
         // the command doesn't collide with a previous orphan.
         $slug = 'numberer-test-'.uniqid();
@@ -104,20 +115,32 @@ class TestInvoiceNumberingConcurrent extends Command
                 $pids[] = $pid;
             }
 
-            foreach ($pids as $pid) {
+            // Track which workers exited cleanly. A SIGSEGV / OOM / SIGKILL
+            // before the child writes its .ok/.err file would otherwise be
+            // invisible — the parent would just see "no result file" and
+            // skip silently, under-counting allocations and making a real
+            // lock-skip bug look like a passing run.
+            $crashed = [];
+            foreach ($pids as $idx => $pid) {
                 pcntl_waitpid($pid, $status);
+                if (! pcntl_wifexited($status) || pcntl_wexitstatus($status) !== 0) {
+                    $crashed[$idx] = "child {$idx} (pid {$pid}) exited abnormally: status={$status}";
+                }
             }
 
             DB::purge();
 
             // Collect.
             $allocated = [];
-            $errors = [];
+            $errors = array_values($crashed);
             for ($i = 0; $i < $workers; $i++) {
                 if (file_exists("$resultsDir/$i.ok")) {
                     $allocated[] = (int) file_get_contents("$resultsDir/$i.ok");
                 } elseif (file_exists("$resultsDir/$i.err")) {
                     $errors[] = "child $i: ".file_get_contents("$resultsDir/$i.err");
+                } elseif (! isset($crashed[$i])) {
+                    // Child exited 0 but wrote no file — also a silent failure.
+                    $errors[] = "child $i: no result file (exited cleanly but produced no output)";
                 }
             }
 

@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use Illuminate\Database\ConnectionInterface;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
@@ -30,16 +29,47 @@ use RuntimeException;
  *
  *     $allocation = app(InvoiceNumberer::class)
  *         ->allocate($company, 'APY');
- *     // $allocation->code      = 423
- *     // $allocation->invcode   = "APY423"
- *     // The Invoice row should be written inside the SAME transaction
- *     // that called allocate(), so a failed insert rolls back the
- *     // counter increment.
+ *     // $allocation->code    = 423             (the ΑΑ)
+ *     // $allocation->series  = "APY"           (the type code)
+ *     // $allocation->invcode = "APY423"        (formatted)
  *
  * Re INVCODE format: legacy GET_INV_CODE concatenates with no padding,
  * fiscal year, or separator. We reproduce that exactly so cutover
  * numbering continues from the same counter without a visible format
  * change for customers / AADE / WHMCS.
+ *
+ * ──── DESIGN INVARIANTS (do not break without revisiting concurrency) ────
+ *
+ * (A) Counter bump-then-insert vs legacy bump-after-insert.
+ *     The legacy INVOICE_AI trigger fired AFTER successful insert, so a
+ *     failed INSERT could not leave a bumped counter. We bump BEFORE the
+ *     caller's INSERT — safe ONLY because we require the caller to hold
+ *     a single transaction over the whole sequence (bump + INSERT), so
+ *     a failed INSERT rolls back both. **Never refactor allocate() to
+ *     commit the bump in its own transaction.** A failed downstream
+ *     INSERT then leaves a permanent ΑΑ gap that can't be reconstructed.
+ *
+ * (B) myDATA submission inside the same transaction = serialised issuance.
+ *     The row lock acquired here is held until the caller commits. If
+ *     the IssueInvoice action submits to AADE myDATA inside the same
+ *     transaction (the obvious shape), one slow AADE response blocks
+ *     all other issuance for that (company, invoice-type) — concurrent
+ *     allocate() calls queue on the row lock for up to
+ *     innodb_lock_wait_timeout (50s default) then throw "Lock wait
+ *     timeout". Under bulk-issue load (WHMCS bridge draining a backlog)
+ *     this is the throughput ceiling. If/when that becomes a problem,
+ *     options: (i) submit to myDATA OUTSIDE the transaction and use a
+ *     two-phase mark-as-pending/finalize flow; (ii) shard the lock by a
+ *     "shard" column on invoice_types and round-robin. Both increase
+ *     complexity; defer until measured load justifies it.
+ *
+ * (C) The DTO's $invoiceType is the model that was locked for SELECT,
+ *     with $invoiceType->invcount manually synced to the post-increment
+ *     value. The caller can read mydata_type / income_class fields off
+ *     it for the myDATA payload, but **must not** issue updates against
+ *     it expecting the FOR UPDATE lock to still cover them — the lock
+ *     covers the original SELECT; subsequent UPDATEs need their own
+ *     locking strategy.
  */
 final class InvoiceNumberer
 {
@@ -51,11 +81,8 @@ final class InvoiceNumberer
      * Allocate the next ΑΑ for the given (company, invoice-type-code) pair.
      *
      * MUST be called inside a DB transaction held open by the caller until
-     * the invoice row is persisted. The lockForUpdate() row lock here only
-     * holds for the lifetime of the current transaction; if the caller
-     * commits before writing the invoice and then fails, the counter is
-     * bumped but no invoice exists for that ΑΑ (a numbering gap, which is
-     * worse than a duplicate).
+     * the invoice row is persisted. See invariant (A) on the class for
+     * why this matters.
      */
     public function allocate(Company $company, string $invoiceTypeCode): InvoiceAllocation
     {
@@ -88,15 +115,28 @@ final class InvoiceNumberer
         $allocatedAa = $type->invcount;
         $invcode = $type->code . $allocatedAa;
 
-        // Bump for the next allocation. Use increment() which issues a
-        // bare UPDATE rather than reading-then-writing — keeps the row
-        // lock minimal and avoids touching unrelated columns.
-        $type->increment('invcount');
+        // Bump for the next allocation via a RAW UPDATE — NOT Eloquent's
+        // ->increment(), which fires updating/updated events and touches
+        // updated_at. On a hot allocation path this would spam audit logs
+        // (once spatie/laravel-activitylog is wired up) and create false
+        // signals for any consumer using updated_at to detect "operator
+        // edited this invoice type". The row lock acquired above still
+        // covers this UPDATE.
+        $this->db->table('invoice_types')
+            ->where('id', $type->id)
+            ->update(['invcount' => $this->db->raw('invcount + 1')]);
+
+        // Sync the in-memory model to match the post-update value so the
+        // caller doesn't have to re-query. The original $type was locked
+        // for SELECT; the model still reflects every other column correctly
+        // — we only mutated invcount, mirroring what the DB now has.
+        $type->invcount = $allocatedAa + 1;
 
         return new InvoiceAllocation(
             code: $allocatedAa,
+            series: $type->code,
             invcode: $invcode,
-            invoiceType: $type->refresh(),
+            invoiceType: $type,
         );
     }
 }

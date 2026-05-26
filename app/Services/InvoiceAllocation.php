@@ -19,6 +19,7 @@ final readonly class InvoiceAllocation
 {
     public function __construct(
         public int $code,
+        public string $series,
         public string $invcode,
         public InvoiceType $invoiceType,
     ) {}
