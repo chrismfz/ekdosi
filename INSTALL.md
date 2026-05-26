@@ -610,23 +610,43 @@ sudo ss -tlnp | grep 3050              # confirm FB is listening
 
 # SYSDBA password handling varies by EL version + Firebird build:
 # - EL9 / Firebird 3 installs may auto-generate /etc/firebird/SYSDBA.password
-# - EL10 / Firebird 4 (current default) leaves it unset — you set it manually
+# - EL10 / Firebird 4 (current default) leaves it unset AND the security DB
+#   has no SYSDBA row at all. The package's post-install does not seed it.
+#
+# Bootstrap via EMBEDDED MODE: stop the server, then connect to
+# security4.fdb directly by file path (no host, no auth). Once a SYSDBA
+# row exists with a known password, the network server (Srp) accepts it.
 sudo cat /etc/firebird/SYSDBA.password 2>/dev/null \
   || sudo cat /opt/firebird/SYSDBA.password 2>/dev/null \
-  || sudo find /etc /opt -name 'SYSDBA.password' 2>/dev/null
+  || sudo find /etc /opt /var/lib/firebird -name 'SYSDBA.password' 2>/dev/null
 
-# If no password file exists, set one yourself. gsec uses local trusted
-# auth when run as the firebird OS user, so no current password needed:
-sudo -u firebird /usr/bin/gsec -user SYSDBA -modify SYSDBA -pw masterkey
+# If no password file exists, find the security DB (path varies by build):
+sudo find /var/lib/firebird /opt/firebird -name 'security*.fdb' 2>/dev/null
+# Typical locations:
+#   /var/lib/firebird/secdb/security4.fdb   (EPEL 10 firebird-4)
+#   /var/lib/firebird/system/security4.fdb  (some EL9 builds)
 
-# If gsec errors with "record not found" / "connection rejected" the
-# security DB has no SYSDBA user at all — bootstrap via isql-fb:
-# sudo -u firebird /usr/bin/isql-fb -user SYSDBA \
-#     /var/lib/firebird/system/security4.fdb <<'SQL'
+# Bootstrap (replace the path with what `find` returned):
+SECDB=/var/lib/firebird/secdb/security4.fdb
+sudo systemctl stop firebird
+sudo -u firebird /usr/bin/isql-fb "$SECDB" <<'SQL'
+ALTER USER SYSDBA SET PASSWORD 'masterkey';
+COMMIT;
+QUIT;
+SQL
+# If that errors with "user SYSDBA not found", run CREATE instead:
+# sudo -u firebird /usr/bin/isql-fb "$SECDB" <<'SQL'
 # CREATE USER SYSDBA PASSWORD 'masterkey';
 # COMMIT;
 # QUIT;
 # SQL
+
+sudo chown -R firebird:firebird /var/lib/firebird/
+sudo systemctl start firebird
+
+# Smoke-test that SYSDBA/masterkey works over the network now:
+sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password masterkey \
+    localhost:employee <<<'QUIT;'
 ```
 
 If neither package is available in your repos, fall back to PECL:
