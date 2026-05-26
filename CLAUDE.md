@@ -832,7 +832,8 @@ Items surfaced by `/ultrareview --effort high` on prior PRs that were
 **deliberately deferred** rather than fixed in their original PR.
 Re-check each one when the listed trigger PR lands.
 
-**From PR #16 (InvoiceType resource + Shield wiring):**
+**From PR #16 (Customer resource) — surfaced while reviewing schema FK
+shapes around the resource:**
 - **DB-level cross-tenant self-FK guard** — `invoice_types` /
   `payment_methods` etc. allow self-FK rows (e.g.
   `invoice_types.payment_method_id`) where the parent is in a different
@@ -880,3 +881,110 @@ Re-check each one when the listed trigger PR lands.
   IssueInvoice action — once we have a failure mode (myDATA reject,
   VAT calc throw), add a "throw mid-allocate; assert invcount is
   unchanged" test.
+
+---
+
+## Audit findings — 2026-05-26 re-audit
+
+A multi-agent re-scan of legacy vs. current code (schema gaps,
+business-logic gaps, ETL + Filament resource coverage) surfaced this
+list. Items already covered by earlier sections of this file are not
+repeated. Each item below is either fixed in PR (a) (this PR), tied to
+a future trigger PR, or queued for the operator to confirm against
+production data before cutover.
+
+### Fixed in this PR (claude/etl-hardening)
+- **Multi-default VAT at import time**: `VAT_CATEGORY_AU0` is a Firebird
+  AFTER UPDATE trigger that demotes every other VAT row when one
+  becomes default (legacy schema:1103). The trigger never fired on
+  INSERT, so legacy production data CAN contain >1 default per
+  company. We have `is_default` as a plain boolean with no MariaDB-side
+  enforcement. `MigrateFromFirebird::demoteDuplicateVatDefaults()` now
+  fixes this at import time (keeps lowest surrogate id, warns the
+  operator). The full enforcement — a model observer — ships with the
+  VatCategory model in the lookup-resources PR.
+
+### False alarms from the audit (recorded so we don't re-litigate)
+- **"ETL doesn't seed AUTO_INCREMENT from MAX(legacy_id)"** — not a
+  bug. The ETL uses `insertGetId()` everywhere (never explicit-id
+  inserts) and `wipeCompany()` uses `DELETE` not `TRUNCATE`. MariaDB
+  tracks the high-water mark on its own through both paths (verified
+  experimentally on the dev box). Re-runs and Filament-created rows
+  cannot collide on PK.
+
+### Deferred to the lookup-resources PR (claude/lookup-resources)
+- **`App\Models\VatCategory` + observer enforcing single `is_default`**
+  per company. The ETL guard above is a one-shot import-time fix; the
+  observer covers the steady-state UI path. Same applies to
+  `App\Models\MetricUnit`, `App\Models\ProductCategory`,
+  `App\Models\DeliveryMethod`, `App\Models\DistributionAim` — all
+  needed as models before their respective Filament resources can
+  render.
+- **Filament resources for the seven lookup tables** that are currently
+  unreachable from the panel: `payment_methods`, `delivery_methods`,
+  `distribution_aims`, `metric_units`, `vat_categories`,
+  `product_categories`, `invoice_types`. Without these, the
+  ProductResource (and later InvoiceResource) form pickers point at
+  models the operator has no way to populate. The seven resources are
+  intentionally small (1-3 column tables for most) — one PR can land
+  them all.
+
+### Deferred — needs operator decision before cutover
+- **`INVOICE.NOTES_OLD` (BLOB, legacy schema:159)** — silently dropped
+  on ETL. Distinct from `NOTES`. Confirm against production myip
+  `.fbk` whether any rows have non-null `NOTES_OLD`:
+  ```sql
+  -- in isql against the restored myip .fdb:
+  SELECT COUNT(*) FROM INVOICE WHERE NOTES_OLD IS NOT NULL;
+  ```
+  If non-zero, add `invoices.notes_old TEXT` migration + ETL mapping
+  before the final cutover run. If zero across all tenants, the drop
+  is safe.
+- **`INVTYPE.FRM_FILENAME` / `PRINTER_NAME` / `PRINTER_NO`**
+  (schema:184-189) — silently dropped. FRM_FILENAME points at a
+  FastReport 3 template path (we're replacing FR3 entirely with Blade
+  → PDF, so the value is meaningless going forward), and the two
+  PRINTER_* columns are Windows printer device names from the legacy
+  desktop client. Confirm with operator: does any tenant rely on
+  per-invoice-type printer routing in the new app? Probably not (new
+  flow is "render PDF, email or download"), but check before cutover:
+  ```sql
+  SELECT INVTYPE_ID, FRM_FILENAME, PRINTER_NAME, PRINTER_NO
+    FROM INVTYPE
+   WHERE COALESCE(FRM_FILENAME, PRINTER_NAME) IS NOT NULL
+      OR PRINTER_NO IS NOT NULL;
+  ```
+  If non-empty and the operator wants the routing preserved, add a
+  per-type `pdf_template` / `default_print_target` columns (new
+  semantics, not 1:1 legacy carryover).
+
+### Deferred — tied to specific future PRs
+- **PDF generation on issue + auto-mail with audit-BCC** — legacy
+  `FAutoInvoice.cpp:655` generates a PDF on every successful myDATA
+  submission via the FR3 print harness; `FMailInvoices.cpp:106` then
+  emails the PDF to the customer and BCCs `invoice@myip.gr` for the
+  audit trail. Roadmap step 8 (IssueInvoice action) implicitly needs
+  to call out to a PDF renderer + queue a mail job; the BCC target is
+  a per-tenant setting on `companies` (call it `invoice_audit_bcc`,
+  add when the column is needed). **Trigger PR**: IssueInvoice action.
+- **0-100 range validation on discount fields** — legacy `FaddCustomer.cpp:156`
+  enforces it at the form. Without it, an unbounded value cascades
+  into negative VAT in the totals math. **Trigger PR**: when
+  InvoiceResource lands (and a quick add to the existing CustomerForm
+  if we touch it anyway).
+- **AFM-already-exists soft warning on customer save** — legacy
+  `FaddCustomer.cpp:79` pops a confirmation when the typed AFM matches
+  an existing customer (allows save on confirm). Filament currently
+  silently allows duplicates. **Trigger PR**: next time CustomerForm
+  is open for edits.
+- **VAT_VIES validation against AADE** — legacy shows a grey/red icon
+  next to the AFM input as the operator types, via a real-time VAT-id
+  check. Forward-looking nice-to-have (myDATA-specific). **Trigger
+  PR**: post-IssueInvoice; a Filament rule + queued background check.
+- **Per-tenant role assignment UI in UserResource** — Shield's teams
+  mode handles the role-per-company at the data layer, but the
+  current UserResource doesn't expose role pickers per tenant in the
+  form. The `CompaniesRelationManager` shows tenant membership only.
+  Not blocking until a second human operator exists who needs roles
+  scoped per tenant. **Trigger PR**: when the second real operator
+  account is added.
