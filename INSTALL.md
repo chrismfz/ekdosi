@@ -421,10 +421,14 @@ exit
 
 Skip the seeder entirely on a production box (so you don't end up
 with the known-password admin or sample-ee throwaway tenant), then
-create your real tenant and first operator interactively:
+create your real tenant and first operator interactively. The user
+also needs the `super_admin` role within the tenant — without a role
+they can log in but every resource will be hidden or 403:
 
 ```bash
 sudo -u ekdosi php artisan migrate --force        # schema only, no seed
+# Populate Shield's permissions table (one row per action on each resource):
+sudo -u ekdosi php artisan shield:generate --all --panel=admin --no-interaction
 sudo -u ekdosi php artisan tinker
 ```
 
@@ -447,16 +451,38 @@ $user = \App\Models\User::create([
 ]);
 
 $user->companies()->attach($company->id);
+
+// Grant super_admin within the tenant. Spatie teams mode scopes roles by
+// company_id, so we set the active team before role creation + assignment.
+app(\Spatie\Permission\PermissionRegistrar::class)->setPermissionsTeamId($company->id);
+$role = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'super_admin', 'guard_name' => 'web']);
+$role->syncPermissions(\Spatie\Permission\Models\Permission::pluck('name'));
+$user->assignRole($role);
+
 exit
 ```
 
 Then browse to `https://ekdosi.myip.gr/admin/login`, sign in, and you
-should land on `/admin/myip` (the dashboard scoped to that tenant).
+should land on `/admin/myip` (the dashboard) with the full nav.
 
-Add more operators by creating more `User` rows and attaching them to
-the company. Add more tenants by creating more `Company` rows (each
-tenant gets its own URL prefix from its slug). Per-tenant myDATA
-credentials live on the `Company` row, not in `.env`.
+The tinker recipe above is **first-user only** — bootstrap. Once
+you're in the panel, day-to-day operations happen there:
+
+- **More tenants** — `/admin/{any-slug}/companies` → "New company".
+  Each new tenant gets its own URL prefix from its slug; per-tenant
+  myDATA credentials live on the Company row, not in `.env`.
+- **More users + role assignment** — TODO. A dedicated UserResource
+  with attach-to-tenants + role pickers is the next slice after the
+  domain resources land; until then operators are added with the
+  same tinker pattern (User::create → companies()->attach →
+  assignRole), but with the active team set explicitly via
+  PermissionRegistrar::setPermissionsTeamId before assignRole, OR
+  use the panel's Roles screen to attach a role to a user via the
+  attach action.
+- **Roles + permissions** — `/admin/{slug}/shield/roles` (provided by
+  filament-shield). Create narrower roles like `operator` or
+  `accountant_readonly`, pick which Resources/actions they can use,
+  and attach to users.
 
 ## 8. Filesystem ownership
 
