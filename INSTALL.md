@@ -636,9 +636,14 @@ sudo find /var/lib/firebird /opt/firebird -name 'security*.fdb' 2>/dev/null
 #   /var/lib/firebird/system/security4.fdb  (some EL9 builds)
 SECDB=/var/lib/firebird/secdb/security4.fdb   # adjust to what find returned
 
-# Step 3 — stop daemon, bootstrap SYSDBA via embedded mode, restart
+# Step 3 — stop daemon, bootstrap SYSDBA via embedded mode, restart.
+# Pass -user SYSDBA explicitly even in embedded mode — without it,
+# the session attaches as some non-privileged implicit identity and
+# the first CREATE USER fails with "CREATE TABLE PLG$SRP failed: No
+# permission for CREATE TABLE operation" (Firebird's SRP plugin
+# auto-creates PLG$SRP on the first user write).
 sudo systemctl stop firebird
-sudo -u firebird /usr/bin/isql-fb "$SECDB" <<'SQL'
+sudo -u firebird /usr/bin/isql-fb -user SYSDBA "$SECDB" <<'SQL'
 CREATE USER SYSDBA PASSWORD 'masterkey';
 COMMIT;
 QUIT;
