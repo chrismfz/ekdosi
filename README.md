@@ -1,20 +1,19 @@
-# ekdosi → Laravel/MariaDB migration kit
+# ekdosi — Laravel 13 / Filament 5 / MariaDB
 
-Multi-tenant target schema (one MariaDB, `company_id` on every table) + a re-runnable
-ETL command that imports each legacy Firebird `.fdb` into one tenant.
-
-Source app is a **C++Builder (VCL) + Firebird** invoicing tool; this kit
-drops into a Laravel 13 + Filament app (to be scaffolded at the repo root)
-and ports its data.
+Modern rewrite of a legacy **C++Builder (VCL) + Firebird** invoicing
+app ("ekdosi"). Multi-tenant (one MariaDB, `company_id` on every table),
+operator-only Filament panel, myDATA via `firebed/aade-mydata`, WHMCS
+bridge over the WHMCS API. Estonian tenants get PEPPOL e-invoicing
+later. See `CLAUDE.md` for the full design + status.
 
 ## What's here
-- `database/migrations/` — 19 idiomatic Laravel migrations (MariaDB, utf8mb4).
-- `app/Console/Commands/MigrateFromFirebird.php` — the ETL (`php artisan migrate:firebird`).
-
-Reference material lives at `/old/` (sibling to this kit):
-- `/old/ekdosi-schema.sql` — `isql -x` schema dump.
-- `/old/ekdosi-main/` — C++Builder source (read for VAT/rounding/discount math).
-- `/old/ekdosi-main/db_backup/ekdosi.fbk` — Firebird gbak for sandboxed ETL dev.
+- `app/`, `database/`, `config/`, ... — Laravel 13 application (scaffolded at the repo root).
+- `database/migrations/` — 22 migrations: 3 Laravel defaults + 19 ekdosi tables.
+- `app/Console/Commands/MigrateFromFirebird.php` — re-runnable ETL (`php artisan migrate:firebird`).
+- `/legacy/` — read-only reference material from the old C++Builder app:
+  - `/legacy/ekdosi-schema.sql` — `isql -x` schema dump.
+  - `/legacy/ekdosi-main/` — C++Builder source (read for VAT/rounding/discount math).
+  - `/legacy/ekdosi-main/db_backup/ekdosi.fbk` — Firebird gbak for sandboxed ETL dev.
 
 ## Key decisions (and why)
 - **Multi-tenant, not per-DB.** Superset: deploys per-DB later if needed; the reverse can't.

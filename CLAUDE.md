@@ -17,7 +17,8 @@ myDATA submission + audit trail, WHMCS bridge. No customer portal.
 - Single multi-tenant MariaDB (`company_id` on every table), one Laravel codebase,
   one Filament panel with tenant switching.
 - Legacy myDATA logic NOT re-ported by hand — use `firebed/aade-mydata`
-  (+ `firebed/laravel-aade-mydata` wrapper). Per-tenant credentials live on `companies`.
+  (framework-agnostic; wrap it ourselves in `App\Services\MyDataSubmitter`).
+  Per-tenant credentials live on `companies`.
 - WHMCS bridge **stays in scope** (myip relies on it). Re-implement
   PHP-to-PHP via the **WHMCS API** (decision locked — not shared-DB
   read), replacing the legacy `AUTO_INVOICE_LOG` polling + `FMysqlSync`
@@ -44,11 +45,12 @@ want to change.
   Filament panel resolves a Company tenant; no separate multi-tenancy
   package on top. (Reason: Filament tenancy is built for this exact shape
   and saves us a layer.)
-- **myDATA**: `firebed/aade-mydata` + `firebed/laravel-aade-mydata`. Per-tenant
-  credentials on `companies`. (See "myDATA: library vs. custom" below for
-  why — short version: the legacy `CMyData.cpp` isn't even in this repo,
-  the AADE spec evolves, and the library handles transport/types/errors so
-  we only own the mapping from our `Invoice` model to their payload.)
+- **myDATA**: `firebed/aade-mydata` (framework-agnostic; we wrap it in
+  `App\Services\MyDataSubmitter`). Per-tenant credentials on `companies`.
+  (See "myDATA: library vs. custom" below for why — short version: the
+  legacy `CMyData.cpp` isn't even in this repo, the AADE spec evolves,
+  and the library handles transport/types/errors so we only own the
+  mapping from our `Invoice` model to their payload.)
 - **Roles & permissions**: `spatie/laravel-permission` +
   `bezhanSalleh/filament-shield`. Shield auto-generates per-resource
   permissions and gives us a UI to manage roles. Default roles per
@@ -65,73 +67,76 @@ want to change.
 - **Firebird driver on the ETL host**: `pdo_firebird` PHP extension. Only
   the artisan host needs it; the main app box doesn't.
 
-## Getting started (concrete first steps)
-The repo today is just reference material + the migration kit. To turn it
-into a working app:
+## Getting started (status: scaffold done; build phase next)
 
-1. **Scaffold the Laravel app at the repo root.** Either:
+**Done** (see git log on the scaffold branch):
+- ✅ Laravel 13 scaffolded at the repo root.
+- ✅ `.env` points at the local MariaDB instance (`ekdosi` / `ekdosi` /
+  `ekdosi-dev`, socket `/var/run/mysqld/mysqld.sock`).
+- ✅ Migration kit flattened: `database/migrations/` holds all 19 ekdosi
+  migrations alongside Laravel's defaults; `app/Console/Commands/`
+  holds `MigrateFromFirebird.php`. The `/ekdosi-migration-kit/` subdir
+  is gone.
+- ✅ Legacy reference tree moved from `/old/` to `/legacy/`.
+- ✅ `php artisan migrate:fresh` runs cleanly: 3 Laravel defaults + 19
+  ekdosi tables (= 22 tables total) created against MariaDB 10.11.
+- ✅ Stack installed: Filament 5.6.5, Shield 4.2.0, firebed/aade-mydata
+  5.10, spatie/laravel-permission 7.4, spatie/laravel-activitylog 5.0,
+  barryvdh/laravel-dompdf 3.1, spatie/laravel-backup 10.2. Permission
+  and activity-log migrations applied (24 tables total now).
+- ✅ Admin Panel provider scaffolded at
+  `app/Providers/Filament/AdminPanelProvider.php` (default Filament
+  panel; tenancy/Company model not wired yet).
+
+**Next steps**:
+1. **Build the Company tenant model + Filament panel tenancy**, then run
+   `php artisan shield:install --tenant=Company` to generate the
+   Resource-level permissions. Default roles: `admin`, `operator`,
+   `accountant_readonly`.
+2. **Sandbox-test the ETL** against the restored `gbak`:
    ```bash
-   composer create-project laravel/laravel:^13 ekdosi-app
-   ```
-   then move its contents up and merge with the existing `CLAUDE.md` /
-   `README.md` / `/old/` / `/ekdosi-migration-kit/`. (Or scaffold in a
-   sibling dir and move things across — whichever keeps git history
-   cleanest.)
-2. **Install the picks above**:
-   ```bash
-   composer require filament/filament:^5 \
-       bezhansalleh/filament-shield \
-       firebed/laravel-aade-mydata \
-       spatie/laravel-permission \
-       spatie/laravel-activitylog \
-       barryvdh/laravel-dompdf \
-       spatie/laravel-backup
-   php artisan filament:install --panels
-   php artisan shield:install --tenant=Company   # after Company model exists
-   ```
-3. **Drop the kit into place**: move
-   `ekdosi-migration-kit/database/migrations/*` →
-   `database/migrations/` and `ekdosi-migration-kit/app/Console/Commands/*` →
-   `app/Console/Commands/`. Delete the kit subdir and the duplicate
-   `MigrateFromFirebird.php` / `README.md` at the repo root.
-4. **Configure MariaDB**, run `php artisan migrate`, confirm all 19
-   migrations apply cleanly on an empty DB.
-5. **Sandbox-test the ETL** against the restored `gbak`:
-   ```bash
-   gbak -r /home/user/ekdosi/old/ekdosi-main/db_backup/ekdosi.fbk \
+   gbak -r /home/user/ekdosi/legacy/ekdosi-main/db_backup/ekdosi.fbk \
        /tmp/ekdosi-sandbox.fdb -user SYSDBA -password masterkey
    php artisan migrate:firebird --company="Sandbox" --slug=sandbox \
        --fdb=/tmp/ekdosi-sandbox.fdb --host=127.0.0.1 \
        --fbuser=SYSDBA --fbpass=masterkey
    ```
-6. **Build the Company tenant model + Filament panel**, then a Customer
-   resource as the smallest end-to-end slice. Verify the tenant scoping
-   actually scopes (CUST_ID=1 must show only the current tenant's row).
-7. Then Products, then Invoices (read-only view first), then the
+   Blocked on `pdo_firebird` extension — see the env-prep note below.
+3. **Build the Customer Filament resource** as the smallest end-to-end
+   slice. Verify the tenant scoping actually scopes (CUST_ID=1 must
+   show only the current tenant's row).
+4. Then Products, then Invoices (read-only view first), then the
    issue-invoice flow (which is the first thing that touches the
    `firebed/aade-mydata` library and the VAT/rounding math).
-8. WHMCS bridge last — once the manual-issue path is proven.
+5. WHMCS bridge last — once the manual-issue path is proven.
 
 This order keeps the highest-risk pieces (VAT math, myDATA submit) gated
 behind a working tenancy + CRUD foundation, so when they break we know
 it's not infrastructure.
 
+**Env-prep blocker**: `pdo_firebird` (the PHP extension the ETL needs to
+talk to the legacy `.fdb`) lives only in the `ondrej/php` PPA, which is
+403-blocked in the current Claude Code on the web sandbox. Either
+whitelist that PPA in the environment's network policy, or build the
+extension from source against `firebird-dev`. Not blocking for steps 1
+and 3-5; only step 2 (sandbox-test the ETL).
+
 ## Repo layout
 ```
-/old/              # legacy reference material (do not build)
-  ekdosi-schema.sql             # isql -x dump (WIN1253 DB; ASCII DDL is clean)
-  ekdosi-main/                  # C++Builder source (.cpp/.h/.dfm) — real VAT/rounding lives here
-  ekdosi-main/db_backup/        # gbak of the Firebird DB; restore for sandboxed ETL dev
-  ekdosi-main/reports/          # FastReport 3 (.fr3) templates — out of scope, rebuild as PDF
-/ekdosi-migration-kit/          # drops into a fresh Laravel app
-  database/migrations/          # target schema (19 idiomatic Laravel migrations)
+/                              # Laravel 13 app at repo root
   app/Console/Commands/MigrateFromFirebird.php   # re-runnable ETL, one tenant per run
-  README.md                     # migration-kit decisions (read alongside this file)
-CLAUDE.md                       # you are here
+  app/                                           # Laravel app code (models, panels, services)
+  database/migrations/                           # 22 migrations: 3 Laravel defaults + 19 ekdosi
+  config/                                        # Laravel config
+  ...                                            # standard Laravel layout
+/legacy/                       # legacy reference material (do not build)
+  ekdosi-schema.sql                              # isql -x dump (WIN1253 DB; ASCII DDL is clean)
+  ekdosi-main/                                   # C++Builder source (.cpp/.h/.dfm) — real VAT/rounding lives here
+  ekdosi-main/db_backup/                         # gbak of the Firebird DB; restore for sandboxed ETL dev
+  ekdosi-main/reports/                           # FastReport 3 (.fr3) templates — out of scope, rebuild as PDF
+CLAUDE.md                      # you are here
+README.md                      # top-level overview (also tracks migration-kit history)
 ```
-Note: a Laravel 13 app is not yet scaffolded at the repo root — the kit is
-material to drop in once it is. The `php artisan` commands below assume that
-step has been done.
 
 ## Architectural decisions (do not re-litigate without reason)
 - **Multi-tenant, not per-DB.** Superset: can deploy per-DB later; reverse can't.
@@ -199,7 +204,7 @@ Requires the `pdo_firebird` PHP extension on the artisan host.
 
 ## Source of truth note
 The schema is settled; the *behaviour* (VAT, rounding, discounts, myDATA payload shape)
-lives in the legacy source under `/old/ekdosi-main/` and in stored values. When in doubt,
+lives in the legacy source under `/legacy/ekdosi-main/` and in stored values. When in doubt,
 trust the legacy stored results and reproduce them — don't reinvent the math.
 
 ## Reading the legacy source
@@ -216,7 +221,7 @@ trust the legacy stored results and reproduce them — don't reinvent the math.
   for forward issuing we don't — `firebed/aade-mydata` replaces all of it.
 
 ## Sandbox the legacy DB before touching prod
-`/old/ekdosi-main/db_backup/ekdosi.fbk` is a `gbak` of the Firebird DB.
+`/legacy/ekdosi-main/db_backup/ekdosi.fbk` is a `gbak` of the Firebird DB.
 Restore with:
 ```bash
 gbak -r ekdosi.fbk fresh.fdb -user SYSDBA -password masterkey
@@ -228,8 +233,9 @@ gbak -r ekdosi.fbk fresh.fdb -user SYSDBA -password masterkey
 ## Notes from inspection (2026-05-26)
 
 ### myDATA: library vs. custom port (decision: use the library)
-**Decision: use `firebed/aade-mydata` + `firebed/laravel-aade-mydata`. Do
-not port the legacy implementation.**
+**Decision: use `firebed/aade-mydata` (framework-agnostic; we wrap it
+ourselves in `App\Services\MyDataSubmitter`). Do not port the legacy
+implementation.**
 
 Reasons:
 1. The legacy myDATA class (`CMyData.cpp`) is **not in this repo** —
@@ -353,7 +359,7 @@ end.
   the same DB transaction that creates the `mydata_marks` row.
 
 ### Reports — out of scope but documented
-`/old/ekdosi-main/reports/` ships FastReport 3 templates (`.fr3`):
+`/legacy/ekdosi-main/reports/` ships FastReport 3 templates (`.fr3`):
 `simple_invoice`, `apy` (ΑΠΥ), `tpy` (ΤΠΥ), `sdep` (ΣΔΕΠ), `SDAP`/`SDAP2`
 (ΣΔΑΠ), `first`/`second`. Confirms the invoice types currently in use.
 We are dropping FR3 entirely; rebuild as Blade→PDF (e.g. `barryvdh/laravel-dompdf`
@@ -435,7 +441,7 @@ This is what `MigrateFromFirebird.php` exists for; spelling out the story:
   (unique per company). Re-running upserts on `(company_id, legacy_id)`
   — so we can do dry runs, fix bugs, re-run, fix more, re-run, then do
   one final pass at cutover with the legacy app stopped.
-- **Sandbox first**: restore `/old/ekdosi-main/db_backup/ekdosi.fbk`
+- **Sandbox first**: restore `/legacy/ekdosi-main/db_backup/ekdosi.fbk`
   into a throwaway `.fdb` and point the ETL there until it's green.
 - **Charset**: connect with `charset=UTF8` (Firebird transliterates
   from the WIN1253 source on read). Fallback path documented in this
@@ -568,8 +574,6 @@ under `ALTER PROCEDURE`. The ones with actual logic:
       `nikolajlovenhardt/laravel-peppol`, `digitalcz/peppol-php`, or
       direct integration with Estonia's RIK e-arveldaja. Defer until we
       know the actual deadline for the Estonian tenant.
-- [ ] Decide: collapse `/ekdosi-migration-kit/` into the repo root (and
-      delete the duplicate `README.md` + `MigrateFromFirebird.php` at
-      root), or vice versa.
-- [ ] Scaffold a Laravel 13 + Filament 5 app at repo root before any of the
-      `php artisan` commands documented above become real.
+- [ ] `pdo_firebird` PHP extension to unblock ETL testing. Either get
+      `ondrej/php` PPA allowlisted in the env's network policy, or
+      build `pdo_firebird` from source against `firebird-dev` headers.
