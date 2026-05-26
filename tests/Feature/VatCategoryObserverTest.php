@@ -129,4 +129,36 @@ class VatCategoryObserverTest extends TestCase
 
         $this->assertTrue($a->fresh()->is_default);
     }
+
+    public function test_no_op_save_of_default_row_does_not_issue_demote_query(): void
+    {
+        // Two siblings, one is the current default.
+        $default = VatCategory::create([
+            'company_id' => $this->tenantA->id,
+            'description' => 'A 24%',
+            'rate' => 24,
+            'is_default' => true,
+        ]);
+
+        $other = VatCategory::create([
+            'company_id' => $this->tenantA->id,
+            'description' => 'A 13%',
+            'rate' => 13,
+            'is_default' => false,
+        ]);
+
+        // Forcibly flip $other to default through a raw query so it
+        // bypasses the observer — we're testing that re-saving $default
+        // with no is_default change does NOT re-demote $other.
+        VatCategory::query()
+            ->whereKey($other->id)
+            ->update(['is_default' => true]);
+
+        $default->update(['description' => 'A 24% (renamed)']);
+
+        $this->assertTrue(
+            $other->fresh()->is_default,
+            'Saving the default row with no is_default change should leave sibling rows untouched.',
+        );
+    }
 }

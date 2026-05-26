@@ -2,11 +2,13 @@
 
 namespace App\Filament\Resources\VatCategories\Tables;
 
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
+use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
@@ -54,6 +56,25 @@ class VatCategoriesTable
             ])
             ->recordActions([
                 EditAction::make(),
+
+                // One-click parity with the legacy ToolAssignDefault button
+                // (FManageVatCategories.cpp:136). Saves through the model so
+                // VatCategoryObserver demotes the previous default in the
+                // same transaction.
+                Action::make('set_as_default')
+                    ->authorize('update')
+                    ->label('Set as default')
+                    ->icon('heroicon-o-star')
+                    ->color('warning')
+                    ->visible(fn ($record) => ! $record->is_default && ! $record->trashed())
+                    ->requiresConfirmation()
+                    ->action(function ($record): void {
+                        $record->update(['is_default' => true]);
+                        Notification::make()
+                            ->title('Default VAT: '.$record->description.' ('.$record->rate.'%)')
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

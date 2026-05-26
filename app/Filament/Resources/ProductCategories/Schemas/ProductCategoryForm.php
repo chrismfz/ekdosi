@@ -23,8 +23,9 @@ class ProductCategoryForm
                     ->numeric()
                     ->step('0.01')
                     ->minValue(0)
+                    ->maxValue(999.99)
                     ->suffix('%')
-                    ->helperText('Used as the default sell-price markup for new products in this category.'),
+                    ->helperText('Default sell-price markup % for new products in this category. Applied as sell_price = buy_price × (1 + markup/100).'),
 
                 Textarea::make('description')
                     ->rows(3)
