@@ -122,7 +122,8 @@ git clone https://github.com/chrismfz/ekdosi.git ekdosi
 cd ekdosi
 
 composer install --no-dev --optimize-autoloader --no-interaction
-npm ci && npm run build        # builds Filament's frontend assets
+npm ci && npm run build
+php artisan filament:assets    # publish Filament's CSS/JS/fonts to public/
 ```
 
 ## 6. Configure `.env`
@@ -423,11 +424,13 @@ git pull --ff-only
 
 composer install --no-dev --optimize-autoloader --no-interaction
 npm ci && npm run build
+php artisan filament:assets       # republish Filament's CSS/JS/fonts
 
 php artisan migrate --force
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
+php artisan icons:cache
 php artisan storage:link || true
 sudo systemctl restart php-fpm
 sudo systemctl restart ekdosi-queue
