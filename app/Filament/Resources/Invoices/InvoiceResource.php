@@ -7,6 +7,7 @@ use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Pages\ListInvoices;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Filament\Resources\Invoices\RelationManagers\LinesRelationManager;
+use App\Filament\Resources\Invoices\RelationManagers\MailLogRelationManager;
 use App\Filament\Resources\Invoices\RelationManagers\MyDataMarksRelationManager;
 use App\Filament\Resources\Invoices\Schemas\InvoiceForm;
 use App\Filament\Resources\Invoices\Schemas\InvoiceInfolist;
@@ -78,6 +79,7 @@ class InvoiceResource extends Resource
         return [
             LinesRelationManager::class,
             MyDataMarksRelationManager::class,
+            MailLogRelationManager::class,
         ];
     }
 

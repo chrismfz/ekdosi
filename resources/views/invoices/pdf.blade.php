@@ -3,171 +3,305 @@
 <head>
     <meta charset="UTF-8">
     <title>{{ $invoice->invcode }}</title>
+    {{--
+        Polished single-template invoice PDF (PR #27). One Blade that
+        adapts per invoice type via the AADE classification on
+        $invoice->invoiceType->mydata_type:
+            - 9.x  (Δελτίο Αποστολής)   → no totals, no payment, no QR-payable
+            - 11.x (Λιανική/ΑΠΥ)        → no customer ΑΦΜ block (B2C)
+            - 5.x  (Πιστωτικά)          → ΠΙΣΤΩΤΙΚΟ banner
+            - 1.x/2.x (Standard B2B)    → full layout
+        State banners (ΠΡΟΧΕΙΡΟ / ΑΚΥΡΩΘΕΝ) overlay any of the above.
+
+        DomPDF subset of CSS only — no flexbox, no grid, no calc().
+        Use table layouts and `display:table-cell`. Page-break control
+        via `page-break-inside` on `.lines-wrap`.
+    --}}
     <style>
-        /* DomPDF supports a subset of CSS — keep this simple.
-           PR #27 will replace this with a polished per-tenant template. */
-        @page { margin: 18mm 14mm; }
-        body { font-family: DejaVu Sans, sans-serif; font-size: 10pt; color: #222; }
-        .row { display: table; width: 100%; table-layout: fixed; }
-        .col-left  { display: table-cell; width: 55%; vertical-align: top; }
-        .col-right { display: table-cell; width: 45%; vertical-align: top; text-align: right; }
-        .draft { color: #b00; font-weight: bold; font-size: 18pt; border: 2px dashed #b00; padding: 4mm; text-align: center; margin-bottom: 6mm; }
-        .filed { color: #060; }
-        .h1 { font-size: 16pt; font-weight: bold; margin: 0; }
-        .h2 { font-size: 12pt; font-weight: bold; margin: 0 0 2mm 0; }
-        .muted { color: #666; font-size: 9pt; }
-        .box { border: 1px solid #ccc; padding: 3mm; margin-bottom: 3mm; }
-        table.lines { width: 100%; border-collapse: collapse; margin-top: 3mm; }
-        table.lines th, table.lines td { border: 1px solid #ccc; padding: 2mm; vertical-align: top; font-size: 9pt; }
-        table.lines th { background: #f5f5f5; text-align: left; }
-        table.lines td.num { text-align: right; }
-        table.totals { width: 100%; border-collapse: collapse; margin-top: 4mm; }
-        table.totals td { padding: 1.5mm 3mm; }
-        table.totals .label { color: #555; }
+        @page { margin: 16mm 14mm 22mm 14mm; }
+        body { font-family: DejaVu Sans, sans-serif; font-size: 9.5pt; color: #1f2937; line-height: 1.35; }
+
+        /* Banners */
+        .banner { text-align: center; font-weight: bold; font-size: 14pt; padding: 3mm; margin-bottom: 4mm; border: 2px solid; border-radius: 2mm; }
+        .banner-draft     { color: #9a3412; border-color: #9a3412; background: #fff7ed; }
+        .banner-cancelled { color: #7f1d1d; border-color: #7f1d1d; background: #fef2f2; }
+        .banner-credit    { color: #1e40af; border-color: #1e40af; background: #eff6ff; }
+
+        /* Header — tenant on the left, invoice meta on the right */
+        .hdr { display: table; width: 100%; table-layout: fixed; border-bottom: 1.5pt solid #111827; padding-bottom: 3mm; margin-bottom: 4mm; }
+        .hdr-left  { display: table-cell; width: 60%; vertical-align: top; }
+        .hdr-right { display: table-cell; width: 40%; vertical-align: top; text-align: right; }
+        .hdr-logo  { max-height: 22mm; max-width: 60mm; margin-bottom: 2mm; }
+        .tenant-name { font-size: 13pt; font-weight: bold; margin: 0 0 1mm 0; }
+        .tenant-info { font-size: 8.5pt; color: #4b5563; }
+        .doc-type    { font-size: 14pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; }
+        .doc-code    { font-size: 12pt; color: #111827; margin: 1mm 0; }
+        .doc-date    { font-size: 9pt; color: #4b5563; }
+
+        /* Two-column meta strip (customer / invoice details) */
+        .meta { display: table; width: 100%; table-layout: fixed; margin-bottom: 4mm; }
+        .meta-cell { display: table-cell; width: 50%; vertical-align: top; padding: 3mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
+        .meta-cell + .meta-cell { border-left: none; }
+        .meta-cell h3 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
+        .meta-cell .name { font-weight: bold; font-size: 10.5pt; margin-bottom: 1mm; }
+        .meta-row { font-size: 9pt; color: #1f2937; }
+        .meta-label { color: #6b7280; }
+
+        /* QR block floats over the meta strip on filed invoices */
+        .qr-block { float: right; text-align: center; margin: 0 0 3mm 4mm; padding: 2mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; }
+        .qr-block img { width: 28mm; height: 28mm; display: block; }
+        .qr-block .qr-label { font-size: 7pt; color: #6b7280; margin: 1mm 0 0 0; }
+        .qr-block .qr-mark  { font-size: 7pt; color: #374151; word-break: break-all; max-width: 28mm; }
+
+        /* Lines table */
+        .lines-wrap { page-break-inside: auto; }
+        table.lines { width: 100%; border-collapse: collapse; }
+        table.lines thead th { background: #f3f4f6; border-bottom: 1pt solid #9ca3af; padding: 2mm; font-size: 8.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3pt; color: #374151; text-align: left; }
+        table.lines tbody td { padding: 2mm; border-bottom: 0.5pt solid #e5e7eb; font-size: 9pt; vertical-align: top; }
+        table.lines tbody tr { page-break-inside: avoid; }
+        table.lines td.num, table.lines th.num { text-align: right; }
+        table.lines td.center, table.lines th.center { text-align: center; }
+        .line-desc { font-weight: 500; }
+        .line-notes { font-size: 8pt; color: #6b7280; margin-top: 0.5mm; font-style: italic; }
+
+        /* Totals — right-aligned summary box */
+        .totals-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 4mm; }
+        .totals-spacer { display: table-cell; width: 45%; }
+        .totals-box { display: table-cell; width: 55%; vertical-align: top; }
+        table.totals { width: 100%; border-collapse: collapse; }
+        table.totals td { padding: 1.5mm 3mm; font-size: 9.5pt; }
+        table.totals .vat-row td { color: #4b5563; font-size: 8.5pt; }
+        table.totals .label { color: #374151; }
         table.totals .value { text-align: right; }
-        table.totals .grand { font-weight: bold; font-size: 12pt; border-top: 2px solid #222; padding-top: 2.5mm; }
-        .footer { margin-top: 8mm; font-size: 8pt; color: #777; }
-        .qr-block { float: right; text-align: center; margin: 0 0 4mm 4mm; }
-        .qr-block img { width: 30mm; height: 30mm; }
-        .qr-block .mark { font-size: 8pt; color: #555; margin-top: 1mm; word-break: break-all; }
+        table.totals .subtotal td { border-top: 0.5pt solid #d1d5db; padding-top: 2mm; }
+        table.totals .grand { background: #111827; color: #fff; font-weight: bold; font-size: 11pt; }
+        table.totals .grand td { padding: 2.5mm 3mm; }
+        table.totals .withhold td { color: #9a3412; font-style: italic; }
+        table.totals .discount-note td { color: #6b7280; font-size: 8pt; font-style: italic; padding-top: 0; }
+
+        /* Notes / payment terms */
+        .notes-box { margin-top: 5mm; padding: 3mm; background: #f9fafb; border-left: 3pt solid #6b7280; font-size: 9pt; }
+        .notes-box h3 { margin: 0 0 1mm 0; font-size: 8.5pt; text-transform: uppercase; color: #6b7280; letter-spacing: 0.3pt; }
+
+        /* Footer with verification + tenant text — rendered as a fixed
+           bottom-margin block by DomPDF via the page-bottom margin. */
+        .footer { position: fixed; left: 0; right: 0; bottom: -16mm; text-align: center; font-size: 7.5pt; color: #6b7280; padding: 0 14mm; }
+        .footer .mydata-line { margin-bottom: 1mm; color: #374151; }
+        .footer .mydata-url { word-break: break-all; font-size: 7pt; color: #6b7280; }
+        .footer .tenant-text { margin-top: 1mm; font-style: italic; }
+        .pager:after { content: counter(page); }
+        .pager-total:after { content: counter(pages); }
     </style>
 </head>
 <body>
 
+{{-- ====================== State + classification banners ====================== --}}
+@php
+    $mydataType = $invoice->invoiceType?->mydata_type ?? '';
+    $isDelivery = str_starts_with($mydataType, '9.');
+    $isRetail   = str_starts_with($mydataType, '11.');
+    $isCredit   = str_starts_with($mydataType, '5.') || ($invoice->invoiceType?->is_credit ?? false);
+    $isReturn   = $invoice->invoiceType?->is_return ?? false;
+@endphp
+
 @if($invoice->mydata_state === null)
-    <div class="draft">ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ ΥΠΟΒΛΗΘΕΙ ΣΤΗ ΜΥDATA</div>
+    <div class="banner banner-draft">ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ ΥΠΟΒΛΗΘΕΙ ΣΤΗ myDATA</div>
 @elseif($invoice->mydata_state === 'CANCELLED')
-    <div class="draft">ΑΚΥΡΩΘΕΝ ΠΑΡΑΣΤΑΤΙΚΟ</div>
+    <div class="banner banner-cancelled">ΑΚΥΡΩΘΕΝ ΠΑΡΑΣΤΑΤΙΚΟ — Δεν έχει νόμιμη ισχύ</div>
+@elseif($isCredit)
+    <div class="banner banner-credit">ΠΙΣΤΩΤΙΚΟ ΠΑΡΑΣΤΑΤΙΚΟ</div>
 @endif
 
-<div class="row">
-    <div class="col-left">
-        <p class="h1">{{ $tenant->name ?? '' }}</p>
-        <p class="muted">
-            @if($tenant->address)  {{ $tenant->address }}<br>@endif
+{{-- ====================== Header: logo + tenant info | invoice meta ====================== --}}
+<div class="hdr">
+    <div class="hdr-left">
+        @if(! empty($logoDataUri))
+            <img src="{{ $logoDataUri }}" alt="" class="hdr-logo">
+        @endif
+        <p class="tenant-name">{{ $tenant->name ?? '' }}</p>
+        <p class="tenant-info">
+            @if($tenant->address) {{ $tenant->address }}<br> @endif
             @if($tenant->city || $tenant->postcode){{ $tenant->postcode }} {{ $tenant->city }}<br>@endif
-            @if($tenant->afm)      ΑΦΜ: {{ $tenant->afm }}
-                                   @if($tenant->tax_office)  · ΔΟΥ {{ $tenant->tax_office }} @endif
-                                   <br>
+            @if($tenant->afm)
+                ΑΦΜ: {{ $tenant->afm }}@if($tenant->tax_office) · ΔΟΥ {{ $tenant->tax_office }}@endif
+                <br>
             @endif
-            @if($tenant->phone)    Τηλ: {{ $tenant->phone }} @endif
-            @if($tenant->email)    · {{ $tenant->email }} @endif
+            @if($tenant->phone) Τηλ: {{ $tenant->phone }} @endif
+            @if($tenant->email) · {{ $tenant->email }} @endif
         </p>
     </div>
-    <div class="col-right">
-        <p class="h1">{{ $invoice->invoiceType?->name ?? '' }}</p>
-        <p class="h2">{{ $invoice->invcode }}</p>
-        <p class="muted">{{ optional($invoice->issued_at)->format('d/m/Y H:i') }}</p>
+    <div class="hdr-right">
+        @if($qrDataUri)
+            <div class="qr-block">
+                <img src="{{ $qrDataUri }}" alt="myDATA QR">
+                <p class="qr-label">myDATA</p>
+                @if($invoice->mydata_mark)
+                    <p class="qr-mark">{{ $invoice->mydata_mark }}</p>
+                @endif
+            </div>
+        @endif
+        <p class="doc-type">{{ $invoice->invoiceType?->name ?? 'Παραστατικό' }}</p>
+        <p class="doc-code">{{ $invoice->invcode }}</p>
+        <p class="doc-date">
+            {{ optional($invoice->issued_at)->format('d/m/Y H:i') }}
+            @if($invoice->delivery_date && $isDelivery)
+                <br><span class="meta-label">Παράδοση:</span> {{ $invoice->delivery_date->format('d/m/Y') }}
+            @endif
+        </p>
     </div>
 </div>
 
-@if($qrDataUri)
-    <div class="qr-block">
-        <img src="{{ $qrDataUri }}" alt="myDATA QR">
-        @if($invoice->mydata_mark)
-            <div class="mark">MARK: {{ $invoice->mydata_mark }}</div>
-        @endif
+{{-- ====================== Customer + invoice meta strip ====================== --}}
+{{-- Delivery notes and retail receipts skip the full customer block --}}
+@if(! $isRetail || $invoice->vat_no)
+    <div class="meta">
+        <div class="meta-cell">
+            <h3>Στοιχεία Πελάτη</h3>
+            <div class="name">{{ $invoice->company_name ?: '—' }}</div>
+            <div class="meta-row">
+                @if($invoice->occupation) {{ $invoice->occupation }}<br> @endif
+                @if($invoice->address1) {{ $invoice->address1 }}<br> @endif
+                @if($invoice->address2) {{ $invoice->address2 }}<br> @endif
+                @if($invoice->city || $invoice->postcode){{ $invoice->postcode }} {{ $invoice->city }}@endif
+                @if($invoice->country && $invoice->country !== 'GR') · {{ $invoice->country }} @endif
+                @if($invoice->vat_no)<br>ΑΦΜ: {{ $invoice->vat_no }}@endif
+                @if($invoice->vies_vat)<br>VIES: {{ $invoice->vies_vat }}@endif
+            </div>
+        </div>
+        <div class="meta-cell">
+            <h3>Όροι Παραστατικού</h3>
+            @if($invoice->paymentMethod && ! $isDelivery)
+                <div class="meta-row"><span class="meta-label">Τρόπος πληρωμής:</span> {{ $invoice->paymentMethod->description }}</div>
+            @endif
+            @if($invoice->deliveryMethod ?? null)
+                <div class="meta-row"><span class="meta-label">Τρόπος αποστολής:</span> {{ $invoice->deliveryMethod->description }}</div>
+            @endif
+            @if($invoice->distributionAim ?? null)
+                <div class="meta-row"><span class="meta-label">Σκοπός διακίνησης:</span> {{ $invoice->distributionAim->description }}</div>
+            @endif
+            @if($invoice->invoiceType?->mydata_type)
+                <div class="meta-row"><span class="meta-label">myDATA τύπος:</span> {{ $invoice->invoiceType->mydata_type }}</div>
+            @endif
+            @if($invoice->mydata_url && $invoice->mydata_state === 'VALID')
+                <div class="meta-row"><span class="meta-label">Κατάσταση:</span> <strong style="color:#065f46">Πιστοποιημένο</strong></div>
+            @endif
+        </div>
     </div>
 @endif
 
-<div class="box">
-    <p class="h2">Στοιχεία Πελάτη</p>
-    <strong>{{ $invoice->company_name ?: '—' }}</strong><br>
-    @if($invoice->occupation)   {{ $invoice->occupation }}<br> @endif
-    @if($invoice->address1)     {{ $invoice->address1 }}<br>   @endif
-    @if($invoice->address2)     {{ $invoice->address2 }}<br>   @endif
-    @if($invoice->city || $invoice->postcode)
-        {{ $invoice->postcode }} {{ $invoice->city }}
-        @if($invoice->country && $invoice->country !== 'GR') · {{ $invoice->country }} @endif
-        <br>
-    @endif
-    @if($invoice->vat_no)       ΑΦΜ: {{ $invoice->vat_no }}<br> @endif
-    @if($invoice->vies_vat)     VIES: {{ $invoice->vies_vat }}<br> @endif
-    @if($invoice->paymentMethod)
-        <span class="muted">Τρόπος πληρωμής: {{ $invoice->paymentMethod->description }}</span>
-    @endif
+{{-- ====================== Lines ====================== --}}
+<div class="lines-wrap">
+    <table class="lines">
+        <thead>
+            <tr>
+                <th style="width: 38%">Περιγραφή</th>
+                <th class="center" style="width: 8%">ΜΜ</th>
+                <th class="num" style="width: 10%">Ποσότητα</th>
+                @if(! $isDelivery)
+                    <th class="num" style="width: 12%">Τιμή μον.</th>
+                    @php $anyDiscount = $invoice->lines->contains(fn($l) => (float)$l->discount > 0); @endphp
+                    @if($anyDiscount)
+                        <th class="num" style="width: 7%">Έκπτ.%</th>
+                    @endif
+                    <th class="num" style="width: 7%">ΦΠΑ%</th>
+                    <th class="num" style="width: 11%">Καθαρή</th>
+                    <th class="num" style="width: 12%">Με ΦΠΑ</th>
+                @endif
+            </tr>
+        </thead>
+        <tbody>
+            @forelse($invoice->lines as $line)
+                <tr>
+                    <td>
+                        <div class="line-desc">{{ $line->product_descr ?? '—' }}</div>
+                        @if($line->notes)<div class="line-notes">{{ $line->notes }}</div>@endif
+                    </td>
+                    <td class="center">{{ $line->metric_unit }}</td>
+                    <td class="num">{{ number_format((float)$line->qty, 3, ',', '.') }}</td>
+                    @if(! $isDelivery)
+                        <td class="num">{{ number_format((float)$line->price_per_item, 2, ',', '.') }}</td>
+                        @if($anyDiscount)
+                            <td class="num">{{ (float)$line->discount > 0 ? rtrim(rtrim(number_format((float)$line->discount, 2, ',', '.'), '0'), ',').'%' : '—' }}</td>
+                        @endif
+                        <td class="num">{{ rtrim(rtrim(number_format((float)$line->vat_percent, 2, ',', '.'), '0'), ',') }}%</td>
+                        <td class="num">{{ number_format((float)$line->net_price, 2, ',', '.') }}</td>
+                        <td class="num">{{ number_format((float)$line->gross_price, 2, ',', '.') }}</td>
+                    @endif
+                </tr>
+            @empty
+                <tr><td colspan="8" style="text-align:center; color:#9ca3af; font-style:italic">— Καμία γραμμή —</td></tr>
+            @endforelse
+        </tbody>
+    </table>
 </div>
 
-<table class="lines">
-    <thead>
-        <tr>
-            <th>Περιγραφή</th>
-            <th>ΜΜ</th>
-            <th class="num">Ποσότητα</th>
-            <th class="num">Τιμή μονάδας</th>
-            <th class="num">ΦΠΑ %</th>
-            <th class="num">Αξία (καθαρή)</th>
-            <th class="num">Αξία (με ΦΠΑ)</th>
-        </tr>
-    </thead>
-    <tbody>
-        @foreach($invoice->lines as $line)
-            <tr>
-                <td>
-                    {{ $line->product_descr ?? '—' }}
-                    @if($line->notes)<br><span class="muted">{{ $line->notes }}</span>@endif
-                </td>
-                <td>{{ $line->metric_unit }}</td>
-                <td class="num">{{ number_format((float)$line->qty, 3, ',', '.') }}</td>
-                <td class="num">{{ number_format((float)$line->price_per_item, 2, ',', '.') }}</td>
-                <td class="num">{{ rtrim(rtrim(number_format((float)$line->vat_percent, 2, ',', '.'), '0'), ',') }}%</td>
-                <td class="num">{{ number_format((float)$line->net_price, 2, ',', '.') }}</td>
-                <td class="num">{{ number_format((float)$line->gross_price, 2, ',', '.') }}</td>
-            </tr>
-        @endforeach
-    </tbody>
-</table>
+{{-- ====================== Totals (skipped for delivery notes) ====================== --}}
+@if(! $isDelivery)
+    <div class="totals-wrap">
+        <div class="totals-spacer"></div>
+        <div class="totals-box">
+            <table class="totals">
+                @foreach($totals['rows'] as $row)
+                    <tr class="vat-row">
+                        <td class="label">ΦΠΑ {{ rtrim(rtrim(number_format($row['rate'], 2, ',', '.'), '0'), ',') }}% επί καθ. {{ number_format($row['net'], 2, ',', '.') }}</td>
+                        <td class="value">{{ number_format($row['vat'], 2, ',', '.') }}</td>
+                    </tr>
+                @endforeach
+                <tr class="subtotal">
+                    <td class="label">Καθαρή αξία</td>
+                    <td class="value">{{ number_format($totals['totalNet'], 2, ',', '.') }} €</td>
+                </tr>
+                <tr>
+                    <td class="label">Σύνολο ΦΠΑ</td>
+                    <td class="value">{{ number_format($totals['totalVat'], 2, ',', '.') }} €</td>
+                </tr>
+                @if(((float) $invoice->header_discount_percent) > 0)
+                    <tr class="discount-note">
+                        <td>Έκπτωση παραστατικού {{ number_format((float)$invoice->header_discount_percent, 2, ',', '.') }}% (εφαρμοσμένη)</td>
+                        <td></td>
+                    </tr>
+                @endif
+                <tr class="grand">
+                    <td>Συνολική αξία</td>
+                    <td class="value">{{ number_format($totals['totalGross'], 2, ',', '.') }} €</td>
+                </tr>
+                @if($totals['withhold'] > 0)
+                    <tr class="withhold">
+                        <td class="label">Παρακράτηση φόρου</td>
+                        <td class="value">−{{ number_format($totals['withhold'], 2, ',', '.') }} €</td>
+                    </tr>
+                    <tr class="grand">
+                        <td>Πληρωτέο</td>
+                        <td class="value">{{ number_format($totals['payable'], 2, ',', '.') }} €</td>
+                    </tr>
+                @endif
+            </table>
+        </div>
+    </div>
+@endif
 
-<table class="totals">
-    @foreach($totals['rows'] as $row)
-        <tr>
-            <td class="label">ΦΠΑ {{ rtrim(rtrim(number_format($row['rate'], 2, ',', '.'), '0'), ',') }}% επί καθ. {{ number_format($row['net'], 2, ',', '.') }}</td>
-            <td class="value">{{ number_format($row['vat'], 2, ',', '.') }}</td>
-        </tr>
-    @endforeach
-    <tr>
-        <td class="label">Καθαρή Αξία</td>
-        <td class="value">{{ number_format($totals['totalNet'], 2, ',', '.') }} €</td>
-    </tr>
-    <tr>
-        <td class="label">Σύνολο ΦΠΑ</td>
-        <td class="value">{{ number_format($totals['totalVat'], 2, ',', '.') }} €</td>
-    </tr>
-    @if(((float) $invoice->header_discount_percent) > 0)
-        <tr>
-            <td class="label muted">Έκπτωση παραστατικού: {{ number_format((float)$invoice->header_discount_percent, 2, ',', '.') }}% (εφαρμοσμένη)</td>
-            <td class="value"></td>
-        </tr>
-    @endif
-    <tr>
-        <td class="label">Συνολική Αξία</td>
-        <td class="value">{{ number_format($totals['totalGross'], 2, ',', '.') }} €</td>
-    </tr>
-    @if($totals['withhold'] > 0)
-        <tr>
-            <td class="label">Παρακράτηση</td>
-            <td class="value">−{{ number_format($totals['withhold'], 2, ',', '.') }} €</td>
-        </tr>
-    @endif
-    <tr>
-        <td class="label grand">Πληρωτέο</td>
-        <td class="value grand">{{ number_format($totals['payable'], 2, ',', '.') }} €</td>
-    </tr>
-</table>
-
+{{-- ====================== Notes ====================== --}}
 @if($invoice->notes)
-    <div class="box" style="margin-top:6mm">
-        <p class="h2">Παρατηρήσεις</p>
+    <div class="notes-box">
+        <h3>Παρατηρήσεις</h3>
         {!! nl2br(e($invoice->notes)) !!}
     </div>
 @endif
 
+{{-- ====================== Footer (myDATA verification + per-tenant text + pagination) ====================== --}}
 <div class="footer">
-    Παραστατικό εκδόθηκε ηλεκτρονικά από το σύστημα έκδοσης παραστατικών ekdosi.
     @if($invoice->mydata_url)
-        Πιστοποιημένο στη myDATA — μπορείτε να το επαληθεύσετε σαρώνοντας το QR ή στη διεύθυνση:<br>
-        <span class="muted">{{ $invoice->mydata_url }}</span>
+        <div class="mydata-line">
+            Πιστοποιημένο στη myDATA — επαληθεύστε σαρώνοντας το QR ή στη διεύθυνση:
+        </div>
+        <div class="mydata-url">{{ $invoice->mydata_url }}</div>
     @endif
+    @if(! empty($tenant->pdf_footer_text))
+        <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>
+    @endif
+    <div style="margin-top:1mm">
+        Σελίδα <span class="pager"></span> από <span class="pager-total"></span>
+    </div>
 </div>
 
 </body>

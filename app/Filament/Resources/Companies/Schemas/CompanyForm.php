@@ -5,8 +5,12 @@ namespace App\Filament\Resources\Companies\Schemas;
 use App\Exceptions\Aade\AadeAfmNotFound;
 use App\Exceptions\Aade\AadeCredentialsInvalid;
 use App\Exceptions\Aade\AadeUnreachable;
+use App\Models\Company;
 use App\Services\AadeRegistryLookup;
+use App\Services\MailTemplateRenderer;
+use App\Services\TenantMailerFactory;
 use Filament\Actions\Action as FormAction;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
@@ -16,6 +20,8 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
+use Illuminate\Mail\Mailables\Address;
+use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Support\Str;
 
 class CompanyForm
@@ -344,6 +350,159 @@ class CompanyForm
                                                 }
                                             }),
                                     ]),
+                            ]),
+
+                        // ====== PR #27: PDF & Email tab ======
+                        Tab::make('PDF & Email')
+                            ->schema([
+                                Section::make('Branding')
+                                    ->description('Logo + footer text used on every PDF this tenant emits.')
+                                    ->schema([
+                                        FileUpload::make('logo_path')
+                                            ->label('Logo')
+                                            ->image()
+                                            ->disk('public')
+                                            ->directory('logos')
+                                            ->maxSize(2048)
+                                            ->acceptedFileTypes(['image/png', 'image/jpeg'])
+                                            ->helperText('PNG or JPEG, max 2MB. SVG not supported (DomPDF raster only).')
+                                            ->imagePreviewHeight('80'),
+                                        Textarea::make('pdf_footer_text')
+                                            ->label('PDF footer text')
+                                            ->rows(2)
+                                            ->maxLength(500)
+                                            ->helperText('Appears in the page footer of every PDF. Plain text only.'),
+                                    ])
+                                    ->columns(2),
+
+                                Section::make('Mail templates')
+                                    ->description('Subject and body for the customer-facing invoice mail. Use placeholders: {tenant_name}, {invoice_code}, {invoice_type}, {issued_at}, {customer_name}, {total}, {mark}, {verify_url}, {mark_section}.')
+                                    ->schema([
+                                        TextInput::make('mail_subject_template')
+                                            ->label('Subject template')
+                                            ->maxLength(191)
+                                            ->placeholder(MailTemplateRenderer::DEFAULT_SUBJECT_TEMPLATE)
+                                            ->helperText('Leave blank to use the default. Single line.'),
+                                        Textarea::make('mail_body_template')
+                                            ->label('Body template')
+                                            ->rows(10)
+                                            ->placeholder(MailTemplateRenderer::DEFAULT_BODY_TEMPLATE)
+                                            ->helperText('Plain text with placeholders. HTML is escaped to plain text at send time (security).'),
+                                    ]),
+
+                                Section::make('Outbound mail routing')
+                                    ->description('Where mails come from + who else gets BCC\'d for the audit trail.')
+                                    ->schema([
+                                        Toggle::make('auto_email_on_mydata_accept')
+                                            ->label('Auto-email customer when AADE accepts')
+                                            ->helperText('When a myDATA submission returns VALID, queue an email with the PDF to the customer. Off for sandbox/training tenants.')
+                                            ->columnSpanFull(),
+                                        TextInput::make('mail_from_address')
+                                            ->label('From address')
+                                            ->email()
+                                            ->maxLength(191)
+                                            ->placeholder(config('mail.from.address'))
+                                            ->helperText('Sender shown to recipients. Match the SMTP server\'s SPF/DKIM. Blank = use app-wide default.'),
+                                        TextInput::make('mail_from_name')
+                                            ->label('From name')
+                                            ->maxLength(191)
+                                            ->placeholder(fn (?Company $record) => $record?->name ?: config('mail.from.name')),
+                                        TextInput::make('invoice_audit_bcc')
+                                            ->label('Audit BCC recipients')
+                                            ->maxLength(500)
+                                            ->placeholder('audit@example.com, ops@example.com')
+                                            ->helperText('Comma- or semicolon-separated. Blank = no BCC. Replaces the legacy hardcoded "invoice@myip.gr".')
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->columns(2),
+
+                                Section::make('SMTP server (optional)')
+                                    ->description('Send through this tenant\'s own SMTP server. Blank fields = use the global MAIL_MAILER from .env.')
+                                    ->schema([
+                                        TextInput::make('mail_smtp_host')
+                                            ->label('Host')
+                                            ->maxLength(191)
+                                            ->placeholder('smtp.example.com'),
+                                        TextInput::make('mail_smtp_port')
+                                            ->label('Port')
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->maxValue(65535)
+                                            ->placeholder('587'),
+                                        TextInput::make('mail_smtp_username')
+                                            ->label('Username')
+                                            ->maxLength(191),
+                                        TextInput::make('mail_smtp_password')
+                                            ->label('Password')
+                                            ->password()
+                                            ->revealable()
+                                            ->maxLength(191)
+                                            ->helperText('Encrypted at rest.')
+                                            // Don't replace existing encrypted value on form save
+                                            // if operator leaves it blank — Filament otherwise
+                                            // clears the field. dehydrateStateUsing: if blank,
+                                            // skip update by returning the current value.
+                                            ->dehydrated(fn (?string $state) => filled($state))
+                                            ->dehydrateStateUsing(fn (string $state) => $state),
+                                        Select::make('mail_smtp_encryption')
+                                            ->label('Encryption')
+                                            ->options([
+                                                'tls' => 'TLS (port 587)',
+                                                'ssl' => 'SSL (port 465)',
+                                            ])
+                                            ->placeholder('None'),
+                                        FormAction::make('test_smtp')
+                                            ->label('Send a test email')
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->requiresConfirmation()
+                                            ->modalHeading('Send test email')
+                                            ->modalDescription(fn (?Company $record) => 'Sends a one-off plain test mail to verify SMTP config + audit BCC. Uses the CURRENT saved settings (not pending unsaved edits — save first).')
+                                            ->schema([
+                                                TextInput::make('to')
+                                                    ->label('Send test to')
+                                                    ->email()
+                                                    ->required()
+                                                    ->helperText('Where to deliver the probe. BCC list (if configured) will also receive it.'),
+                                            ])
+                                            ->action(function (array $data, ?Company $record) {
+                                                if (! $record) {
+                                                    Notification::make()->title('Save the company first, then test.')->warning()->send();
+                                                    return;
+                                                }
+                                                try {
+                                                    $mailer = app(TenantMailerFactory::class)->for($record);
+                                                    $bcc = array_map(fn (string $a) => new Address($a), $record->auditBccList());
+                                                    $mailer->html(
+                                                        '<p>This is a test email from ekdosi for tenant <strong>'.e($record->name).'</strong>.</p>'.
+                                                        '<p>If you received this, the tenant\'s SMTP config (or the global fallback) is working.</p>',
+                                                        function ($message) use ($data, $record, $bcc) {
+                                                            $message->to($data['to'])
+                                                                ->subject('[ekdosi test] '.$record->name);
+                                                            if ($record->mail_from_address) {
+                                                                $message->from(
+                                                                    $record->mail_from_address,
+                                                                    $record->mail_from_name ?: $record->name
+                                                                );
+                                                            }
+                                                            foreach ($bcc as $b) {
+                                                                $message->bcc($b->address, $b->name);
+                                                            }
+                                                        }
+                                                    );
+                                                    Notification::make()
+                                                        ->title('Test email dispatched')
+                                                        ->body('Sent to '.$data['to'].(count($bcc) ? ' (BCC: '.count($bcc).')' : '').'. Check the inbox.')
+                                                        ->success()->send();
+                                                } catch (\Throwable $e) {
+                                                    Notification::make()
+                                                        ->title('Test email failed')
+                                                        ->body($e->getMessage())
+                                                        ->danger()->persistent()->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->columns(2),
                             ]),
                     ]),
             ]);

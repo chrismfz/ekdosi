@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Pages;
 
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Jobs\SendInvoiceEmail;
 use App\Models\Invoice;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
@@ -160,6 +161,36 @@ class ViewInvoice extends ViewRecord
                             ->body($e->getMessage())
                             ->danger()->send();
                     }
+                }),
+
+            // Manual "resend email" — for invoices that already filed
+            // but the customer didn't get the mail (typo on email,
+            // bounce, asked for a re-send). Always available on
+            // tenants with mail config set; for tenants without
+            // customer.email the job logs + writes a 'failed' log row
+            // so the operator sees WHY nothing happened. Doesn't
+            // require the auto-email toggle (manual is opt-in by
+            // clicking).
+            Action::make('resend_email')
+                ->label('Email PDF to customer')
+                ->icon('heroicon-o-envelope')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $record->customer?->email !== null && $record->customer?->email !== '')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Send invoice PDF to the customer')
+                ->modalDescription(fn (Invoice $record) => 'Queues a mail with the current PDF attached. To: '.($record->customer?->email ?? '—').'. BCC: tenant audit list (if configured). See the Send history section below for the lifecycle.')
+                ->modalSubmitActionLabel('Queue email')
+                ->action(function (Invoice $record) {
+                    SendInvoiceEmail::dispatch(
+                        $record,
+                        trigger: 'manual',
+                        triggeredByUserId: auth()->id(),
+                    );
+                    Notification::make()
+                        ->title('Email queued')
+                        ->body('The mail is in the queue; check the Send history section in a moment for status.')
+                        ->success()->send();
                 }),
 
             // PDF download. Works for any invoice regardless of state —

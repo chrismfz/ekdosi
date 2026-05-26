@@ -144,7 +144,54 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         $responseXml = $action->getResponseXML() ?? '';
 
-        return $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+        $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+
+        // PR #27: dispatch the customer-mail job after a successful
+        // VALID filing IF the tenant has opted in via
+        // auto_email_on_mydata_accept. The job re-fetches the invoice,
+        // renders a fresh PDF, and routes to customer.email + the
+        // tenant's audit BCC. Skipped silently when:
+        //   - tenant flag is false
+        //   - customer has no email (job handler logs + returns)
+        //   - this submitter was reached via DRY_RUN (not this path)
+        //
+        // Wrapped in DB::afterCommit because persistResponse opens its
+        // own transaction — if a caller wraps THIS submit() call in an
+        // outer transaction, the dispatch happens only after the
+        // outermost commits. Matches the same orphan-MARK defense as
+        // CreateInvoice::chainSubmit.
+        $this->dispatchAutoEmailIfEnabled($invoice);
+
+        return $mark;
+    }
+
+    /**
+     * Best-effort dispatch of the customer-mail job. Silent on every
+     * tenant-opted-out path; logs (doesn't throw) if the dispatcher
+     * itself fails — we don't want a queue-connection hiccup to mask
+     * a successful AADE filing from the operator. The mail can always
+     * be re-sent via the ViewInvoice "Resend email" action.
+     */
+    private function dispatchAutoEmailIfEnabled(Invoice $invoice): void
+    {
+        if (! ($invoice->company?->auto_email_on_mydata_accept ?? false)) {
+            return;
+        }
+
+        $invoiceId = $invoice->getKey();
+        DB::afterCommit(function () use ($invoiceId): void {
+            try {
+                $fresh = Invoice::query()->whereKey($invoiceId)->first();
+                if ($fresh) {
+                    \App\Jobs\SendInvoiceEmail::dispatch($fresh);
+                }
+            } catch (Throwable $e) {
+                Log::warning('SendInvoiceEmail auto-dispatch failed (filing succeeded)', [
+                    'invoice_id' => $invoiceId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
     }
 
     /**

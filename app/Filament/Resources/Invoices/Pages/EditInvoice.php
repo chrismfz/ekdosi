@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Invoices\Pages;
 
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Invoice;
+use App\Services\RecomputeInvoiceTotals;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -88,19 +89,14 @@ class EditInvoice extends EditRecord
     }
 
     /**
-     * Recompute totals after the form save, same as CreateInvoice.
-     * Line repeater changes happen during save(); afterSave() runs
-     * after the lines have been persisted.
+     * Recompute totals after the form save. Line repeater changes
+     * happen during save(); afterSave() runs once the line rows have
+     * been persisted, so the lines() relation now sees the new state.
+     * Shared with CreateInvoice via RecomputeInvoiceTotals — single
+     * source of truth for the formula.
      */
     protected function afterSave(): void
     {
-        $invoice = $this->record->fresh(['lines']);
-        $rawNet = $invoice->lines->sum(fn ($l) => (float) $l->net_price);
-        $rawGross = $invoice->lines->sum(fn ($l) => (float) $l->gross_price);
-        $discount = 1 - ((float) $invoice->header_discount_percent / 100);
-
-        $invoice->net_total = round($rawNet * $discount, 2);
-        $invoice->gross_total = round($rawGross * $discount, 2);
-        $invoice->save();
+        app(RecomputeInvoiceTotals::class)($this->record);
     }
 }
