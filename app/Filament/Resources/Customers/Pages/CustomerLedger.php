@@ -6,6 +6,7 @@ use App\DTOs\AadeRegistryRecord;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
@@ -15,6 +16,7 @@ use App\Services\Whmcs\CustomerWhmcsLedgerResult;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Καρτέλα Πελάτη: full customer financial dashboard.
