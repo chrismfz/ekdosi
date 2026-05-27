@@ -11,6 +11,7 @@ use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -55,6 +56,12 @@ class WhmcsInvoicePaidController
     ): JsonResponse {
         $tenant = Company::query()->where('slug', $slug)->first();
         if ($tenant === null) {
+            // Slug enumeration probe (attacker tries random slugs to
+            // discover which tenants exist). Log so operators can
+            // spot patterns in their monitoring; the 404 itself
+            // still discloses tenant absence by design (the WHMCS-side
+            // plugin needs a clear error when its config drifts).
+            $this->logRejection($request, $slug, 'tenant_not_found');
             return $this->json(['error' => 'tenant_not_found'], Response::HTTP_NOT_FOUND);
         }
 
@@ -64,6 +71,7 @@ class WhmcsInvoicePaidController
         // lookup, no outbound WHMCS call).
         $secret = (string) ($tenant->whmcs_webhook_secret ?? '');
         if ($secret === '') {
+            $this->logRejection($request, $slug, 'webhook_secret_not_configured');
             return $this->json([
                 'error'   => 'webhook_secret_not_configured',
                 'message' => 'Tenant exists but has no whmcs_webhook_secret. '
@@ -72,6 +80,7 @@ class WhmcsInvoicePaidController
         }
 
         if (! $this->verifySignature($request, $secret)) {
+            $this->logRejection($request, $slug, 'invalid_signature');
             return $this->json([
                 'error' => 'invalid_signature',
             ], Response::HTTP_UNAUTHORIZED);
@@ -99,7 +108,10 @@ class WhmcsInvoicePaidController
         }
 
         try {
-            $payload = $client->getInvoice($whmcsInvoiceId);
+            // getInvoiceWithClient enriches the invoice payload with
+            // the linked WHMCS client's customfields - load-bearing
+            // for the ingestor's matcher to resolve AFM matches.
+            $payload = $client->getInvoiceWithClient($whmcsInvoiceId);
         } catch (WhmcsAuthenticationFailed | WhmcsUnreachable $e) {
             // WHMCS-side transient / config failures. 502 Bad Gateway
             // is the right semantic: WE are reachable, the upstream
@@ -168,5 +180,26 @@ class WhmcsInvoicePaidController
     private function json(array $body, int $status): JsonResponse
     {
         return new JsonResponse($body, $status);
+    }
+
+    /**
+     * Structured warning log for rejected webhook attempts. Captures
+     * enough to spot attack patterns (slug enumeration, credential
+     * stuffing, signature-prefix probing) without leaking the
+     * webhook secret or the full request body. Signature prefix is
+     * truncated to 8 chars - enough to distinguish "all-zeros guess"
+     * from "real but mis-signed" without disclosing the full
+     * computed hash for offline cracking attempts.
+     */
+    private function logRejection(Request $request, string $slug, string $reason): void
+    {
+        $sig = (string) $request->header('X-Webhook-Signature', '');
+        Log::warning('whmcs.webhook.rejected', [
+            'reason'     => $reason,
+            'slug'       => $slug,
+            'ip'         => $request->ip(),
+            'user_agent' => substr((string) $request->userAgent(), 0, 200),
+            'sig_prefix' => $sig === '' ? '<missing>' : substr($sig, 0, 15).'...',
+        ]);
     }
 }

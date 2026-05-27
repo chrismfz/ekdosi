@@ -142,7 +142,11 @@ class WhmcsFetchPending extends Command
             }
 
             try {
-                $payload = $client->getInvoice($invoiceId);
+                // getInvoiceWithClient enriches with the client's
+                // customfields so the ingestor's matcher can resolve
+                // AFM matches. Cost: 2 API calls per row (1+2N total
+                // for the batch).
+                $payload = $client->getInvoiceWithClient($invoiceId);
                 if ($payload === null) {
                     $this->warn("WHMCS invoice #{$invoiceId}: not found on GetInvoice (deleted since GetInvoices?).");
                     $failed++;
@@ -175,6 +179,23 @@ class WhmcsFetchPending extends Command
                         $result->row->status,
                     ));
                 }
+            } catch (WhmcsAuthenticationFailed $e) {
+                // Tenant-fatal: WHMCS has rejected our credentials. Every
+                // remaining invoice will fail the same way, possibly
+                // wedging the run for N * 20s timeouts. Abort with the
+                // dedicated auth exit code so cron wrappers route to
+                // the right alert. Subclass catch MUST come before
+                // the WhmcsApiException catch below.
+                $this->error("Aborting batch: WHMCS authentication failed mid-loop - {$e->getMessage()}");
+                $this->line('Check Setup → Staff Management → API Credentials on the WHMCS side, plus the IP allowlist.');
+                $this->line(sprintf('Partial result: %d created, %d refreshed, %d audit-frozen, %d failed before abort.', $created, $updated, $auditPreserved, $failed));
+                return 4;
+            } catch (WhmcsUnreachable $e) {
+                // Tenant-fatal: WHMCS host unreachable. Same reasoning -
+                // the rest of the batch cannot succeed.
+                $this->error("Aborting batch: WHMCS unreachable mid-loop - {$e->getMessage()}");
+                $this->line(sprintf('Partial result: %d created, %d refreshed, %d audit-frozen, %d failed before abort.', $created, $updated, $auditPreserved, $failed));
+                return 5;
             } catch (WhmcsApiException $e) {
                 $this->warn("WHMCS invoice #{$invoiceId}: API error - {$e->getMessage()}");
                 $failed++;

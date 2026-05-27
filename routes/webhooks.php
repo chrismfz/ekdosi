@@ -15,7 +15,12 @@ use Illuminate\Support\Facades\Route;
  * Routes here MUST verify their own auth (HMAC, bearer, mTLS, etc.) -
  * there is no global middleware doing it for them.
  */
+// Throttle 60/min per IP: a healthy WHMCS-side plugin fires one
+// webhook per invoice transition, far below this. A flood (slug
+// enumeration, replay attack, runaway-retry bug in a misbehaving
+// plugin) gets capped. Operator can bump this per-route if a
+// legitimate high-traffic tenant needs more headroom.
 Route::post(
     'whmcs/{slug}/invoice-paid',
     WhmcsInvoicePaidController::class,
-)->name('whmcs.invoice-paid');
+)->middleware('throttle:60,1')->name('whmcs.invoice-paid');

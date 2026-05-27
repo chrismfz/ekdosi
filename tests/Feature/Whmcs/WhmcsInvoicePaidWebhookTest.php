@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\PendingWhmcsInvoice;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 /**
@@ -233,6 +234,85 @@ class WhmcsInvoicePaidWebhookTest extends TestCase
             'audit_preserved' => false,
         ]);
         $this->assertSame(1, PendingWhmcsInvoice::count());
+    }
+
+    // ===================== Fix #4: audit logging for rejections =====================
+
+    public function test_logs_warning_when_signature_invalid(): void
+    {
+        $tenant = $this->configuredTenant();
+        Log::spy();
+
+        $this->postSigned(
+            $tenant->slug,
+            ['whmcs_invoice_id' => 1],
+            'sha256='.str_repeat('f', 64),
+        )->assertStatus(401);
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(function ($message, $context) use ($tenant) {
+                return $message === 'whmcs.webhook.rejected'
+                    && $context['reason'] === 'invalid_signature'
+                    && $context['slug'] === $tenant->slug
+                    && isset($context['ip'])
+                    && str_starts_with($context['sig_prefix'], 'sha256=');
+            });
+    }
+
+    public function test_logs_warning_when_tenant_unknown(): void
+    {
+        Log::spy();
+
+        $this->postSigned('phantom-tenant', ['whmcs_invoice_id' => 1])->assertStatus(404);
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(function ($message, $context) {
+                return $message === 'whmcs.webhook.rejected'
+                    && $context['reason'] === 'tenant_not_found'
+                    && $context['slug'] === 'phantom-tenant';
+            });
+    }
+
+    public function test_logs_warning_when_secret_not_configured(): void
+    {
+        $tenant = Company::create([
+            'name' => 'NoSec',
+            'slug' => 'nosec-'.uniqid(),
+            'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata',
+            'mydata_mode' => 'off',
+            'whmcs_api_url' => 'https://example.gr/includes/api.php',
+            'whmcs_api_identifier' => 'X',
+            'whmcs_api_secret' => 'Y',
+        ]);
+        Log::spy();
+
+        $this->postSigned($tenant->slug, ['whmcs_invoice_id' => 1])->assertStatus(422);
+
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(fn ($m, $c) => $m === 'whmcs.webhook.rejected'
+                && $c['reason'] === 'webhook_secret_not_configured');
+    }
+
+    public function test_does_not_log_on_successful_request(): void
+    {
+        // Successful webhook ingests must not emit the rejection log -
+        // the log is specifically for spotting attack patterns, and
+        // happy-path noise would dilute the signal.
+        $tenant = $this->configuredTenant();
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result' => 'success', 'invoiceid' => 700, 'userid' => 7, 'total' => '5.00',
+            ], 200),
+        ]);
+        Log::spy();
+
+        $this->postSigned($tenant->slug, ['whmcs_invoice_id' => 700])->assertStatus(202);
+
+        Log::shouldNotHaveReceived('warning', ['whmcs.webhook.rejected']);
     }
 
     public function test_returns_200_with_audit_preserved_when_row_already_filed(): void

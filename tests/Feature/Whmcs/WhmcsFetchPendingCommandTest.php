@@ -273,6 +273,11 @@ class WhmcsFetchPendingCommandTest extends TestCase
                 }
                 return Http::response(['result' => 'error', 'message' => 'Invoice ID Not Found'], 200);
             }
+            // GetClientsDetails calls from getInvoiceWithClient
+            // enrichment: tolerate gracefully.
+            if ($action === 'GetClientsDetails') {
+                return Http::response(['result' => 'success', 'id' => (int) ($request->data()['clientid'] ?? 0)], 200);
+            }
             return Http::response(['result' => 'error'], 500);
         });
 
@@ -283,5 +288,137 @@ class WhmcsFetchPendingCommandTest extends TestCase
             ->assertExitCode(7);
 
         $this->assertSame(1, PendingWhmcsInvoice::count());
+    }
+
+    // ===================== Fix #1: tenant-fatal aborts batch =====================
+
+    public function test_default_aborts_with_code_4_on_mid_loop_auth_failure(): void
+    {
+        // Tenant's IP allowlist rotates between GetInvoices (succeeds)
+        // and the first GetInvoice (fails with "Invalid IP"). Every
+        // remaining invoice will fail the same way. Old behaviour:
+        // log per-row "failed", spin through N * 20s timeouts, exit 7.
+        // New behaviour: abort immediately with exit 4 so cron
+        // wrappers route to the auth-failure alert.
+        $tenant = $this->makeConfiguredTenant();
+        $getInvoiceCalls = 0;
+
+        Http::fake(function ($request) use (&$getInvoiceCalls) {
+            $action = $request->data()['action'] ?? null;
+            if ($action === 'GetInvoices') {
+                return Http::response([
+                    'result' => 'success',
+                    'invoices' => ['invoice' => [
+                        ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
+                        ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
+                        ['id' => 5003, 'userid' => 303, 'invoiced' => 0],
+                    ]],
+                ], 200);
+            }
+            if ($action === 'GetInvoice') {
+                $getInvoiceCalls++;
+                return Http::response(['result' => 'error', 'message' => 'Invalid IP'], 200);
+            }
+            return Http::response(['result' => 'error'], 500);
+        });
+
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])
+            ->expectsOutputToContain('Aborting batch: WHMCS authentication failed')
+            ->assertExitCode(4);
+
+        // Confirm we did NOT continue iterating after the first failure
+        // (the bug was: catch (WhmcsApiException) for the parent class
+        // also caught WhmcsAuthenticationFailed/WhmcsUnreachable, and
+        // marked every remaining row as a per-row failure).
+        $this->assertSame(1, $getInvoiceCalls, 'Should abort after first auth failure, not iterate all rows');
+        $this->assertSame(0, PendingWhmcsInvoice::count());
+    }
+
+    public function test_default_aborts_with_code_5_on_mid_loop_unreachable(): void
+    {
+        $tenant = $this->makeConfiguredTenant();
+        $getInvoiceCalls = 0;
+
+        Http::fake(function ($request) use (&$getInvoiceCalls) {
+            $action = $request->data()['action'] ?? null;
+            if ($action === 'GetInvoices') {
+                return Http::response([
+                    'result' => 'success',
+                    'invoices' => ['invoice' => [
+                        ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
+                        ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
+                    ]],
+                ], 200);
+            }
+            if ($action === 'GetInvoice') {
+                $getInvoiceCalls++;
+                // Simulate connection refused / DNS failure via
+                // an HTTP-level transport exception. Laravel's
+                // Http::fake exposes Http::failedConnection() for
+                // this shape.
+                throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
+            }
+            return Http::response(['result' => 'error'], 500);
+        });
+
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])
+            ->expectsOutputToContain('Aborting batch: WHMCS unreachable')
+            ->assertExitCode(5);
+
+        $this->assertSame(1, $getInvoiceCalls, 'Should abort after first unreachable failure');
+    }
+
+    // ===================== Fix #2: getInvoiceWithClient enriches customfields =====================
+
+    public function test_default_passes_customfields_through_so_afm_match_works(): void
+    {
+        // The point: an operator who has linked the WHMCS custom field
+        // for AFM (fieldid=13 in CLAUDE.md's reference legacy install)
+        // expects pending rows to resolve match_reason='afm'. Pre-fix,
+        // the ingestor cherry-picked top-level keys and stripped
+        // customfields, so AFM-match was dead. Fix routes through
+        // WhmcsClient::getInvoiceWithClient which fetches
+        // GetClientsDetails and merges customfields onto the invoice
+        // payload before handing to the matcher.
+        $tenant = $this->makeConfiguredTenant();
+        $tenant->update(['whmcs_custom_field_map' => ['vatno' => 13]]);
+
+        // ekdosi customer with known AFM, NOT linked by whmcs_client_id
+        // (forces matcher to fall through to strategy #2 = AFM match).
+        Customer::create([
+            'company_id' => $tenant->id,
+            'name' => 'AFM Matched',
+            'afm' => '123456789',
+        ]);
+
+        Http::fake(function ($request) {
+            $action = $request->data()['action'] ?? null;
+            return match ($action) {
+                'GetInvoices' => Http::response([
+                    'result' => 'success',
+                    'invoices' => ['invoice' => [
+                        ['id' => 8001, 'userid' => 555, 'invoiced' => 0],
+                    ]],
+                ], 200),
+                'GetInvoice' => Http::response([
+                    'result' => 'success', 'invoiceid' => 8001, 'userid' => 555, 'total' => '50.00',
+                ], 200),
+                'GetClientsDetails' => Http::response([
+                    'result' => 'success',
+                    'id' => 555,
+                    'customfields' => [
+                        ['id' => 13, 'name' => 'AFM', 'value' => '123456789'],
+                    ],
+                ], 200),
+                default => Http::response(['result' => 'error'], 500),
+            };
+        });
+
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])
+            ->assertExitCode(0);
+
+        $staged = PendingWhmcsInvoice::where('whmcs_invoice_id', 8001)->first();
+        $this->assertNotNull($staged);
+        $this->assertSame(PendingWhmcsInvoice::REASON_AFM, $staged->match_reason);
     }
 }

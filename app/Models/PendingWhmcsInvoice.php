@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Observers\PendingWhmcsInvoiceObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -30,7 +32,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * (company_id, whmcs_invoice_id) unique slot. If an operator wants
  * "make this go away" semantics, they reject it (status='rejected') -
  * the row stays for audit. Force-delete is the breakglass.
+ *
+ * Observer: PendingWhmcsInvoiceObserver enforces the legal-audit lock
+ * against mutating status=filed rows from any caller (defense in depth
+ * beyond the ingestor's policy-level isAuditFrozen() check).
  */
+#[ObservedBy(PendingWhmcsInvoiceObserver::class)]
 class PendingWhmcsInvoice extends Model
 {
     use HasFactory;
@@ -96,14 +103,34 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
-     * Once a row is filed, the payload becomes audit-frozen: a later
-     * re-push from WHMCS (operator edited the invoice on the WHMCS
-     * side, plugin re-fires the webhook) must NOT overwrite what we
-     * filed against. The ingestor reads this to decide whether to
-     * refresh the payload column.
+     * Payload-refresh policy for re-ingests. Returns true for any
+     * status EXCEPT pending_review. The rule:
+     *
+     *   pending_review  -> open: refresh payload + re-run matcher on
+     *                     re-ingest (operator wants to see the latest
+     *                     WHMCS-side state in their inbox).
+     *   held            -> frozen: operator paused investigation; the
+     *                     payload they were looking at must stay put
+     *                     so when they lift the hold the data still
+     *                     matches the reason they paused.
+     *   rejected        -> frozen: operator's rejected_reason was
+     *                     captured against the payload at decision
+     *                     time; allowing WHMCS-side edits to mutate
+     *                     it underneath would decouple the reason
+     *                     from its referent.
+     *   filed           -> frozen: legal-audit lock. The MARK at AADE
+     *                     references this exact payload; any later
+     *                     mutation diverges our DB from AADE's
+     *                     authoritative record.
+     *
+     * Note this is the INGESTOR's refresh-or-not policy. The STRICT
+     * legal-audit lock against ANY mutation (including from non-ingestor
+     * callers like the future Stage B-2 inbox actions) is enforced
+     * separately by PendingWhmcsInvoiceObserver on status=filed rows
+     * only.
      */
     public function isAuditFrozen(): bool
     {
-        return $this->status === self::STATUS_FILED;
+        return $this->status !== self::STATUS_PENDING_REVIEW;
     }
 }
