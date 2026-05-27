@@ -114,9 +114,22 @@ class WhmcsInvoiceMapper
                 // Snapshot: frozen at issue time per Greek legal-invoice
                 // requirements (the invoice must record the customer's
                 // identity AS IT WAS when filed, not as it might be later).
+                // Customer-snapshot fields — frozen at issue time per
+                // Greek legal-invoice requirements. Field set must
+                // match InvoiceForm.php's afterStateUpdated('customer_id')
+                // EXACTLY, otherwise WHMCS-bridged invoices systematically
+                // miss fields that manually-issued invoices for the same
+                // customer capture (address2 + vies_vat — relevant for
+                // VIES intra-community filings).
                 'company_name' => (string) $customer->name,
                 'vat_no'       => (string) ($customer->afm ?? ''),
+                // Source column on Customer is vat_vies; snapshot
+                // column on Invoice is vies_vat (legacy naming
+                // mismatch carried through from the Firebird ETL,
+                // documented in CLAUDE.md schema notes).
+                'vies_vat'     => (string) ($customer->vat_vies ?? ''),
                 'address1'     => (string) ($customer->address1 ?? ''),
+                'address2'     => (string) ($customer->address2 ?? ''),
                 'city'         => (string) ($customer->city ?? ''),
                 'postcode'     => (string) ($customer->postcode ?? ''),
                 'country'      => (string) ($customer->country ?? 'GR'),
@@ -183,17 +196,30 @@ class WhmcsInvoiceMapper
             $grossAmount = (float) ($item['amount'] ?? 0.0);
             $taxed = (bool) ((int) ($item['taxed'] ?? 1));   // assume taxable unless explicit 0
 
+            // Mirror InvoiceLine::saving rounding order so the
+            // preview gross MATCHES what gets persisted. Hook order:
+            //   net   = round(qty × price × (1 - disc/100), 2)
+            //   gross = round(net × (1 + vat/100), 2)
+            // Our qty=1, disc=0 ⇒ net = price (rounded), then gross =
+            // round(net × (1+vat/100), 2). The WHMCS amount is GROSS,
+            // so we back-compute net = round(amount / (1+vat/100), 2)
+            // and THEN re-derive gross from net via the same formula
+            // the saving hook uses. For amounts like €10.00 @ 24% the
+            // previous code stored gross=10.00 but the hook overwrote
+            // to round(8.06×1.24,2) = 9.99 — the preview lied to the
+            // operator by €0.01 per line.
             if (! $taxed) {
-                // Untaxed line: gross == net, no VAT. Use a 0% VAT
-                // category if one exists; otherwise default. (For
-                // myDATA a 0% line needs a vat_exemption_category;
-                // tracked deferral in CLAUDE.md.)
-                $lineNet = $grossAmount;
-                $lineGross = $grossAmount;
+                // Untaxed line: gross == net, no VAT. (For myDATA a
+                // 0% line needs a vat_exemption_category; the filer
+                // rejects this case explicitly via
+                // hasUnconfigurableZeroVatLines() to avoid producing
+                // a ghost invoice that crashes mid-submit.)
+                $lineNet = round($grossAmount, 2);
+                $lineGross = $lineNet;
                 $linePercent = 0.0;
             } else {
                 $lineNet = round($grossAmount / (1 + ($vatPercent / 100)), 2);
-                $lineGross = $grossAmount;
+                $lineGross = round($lineNet * (1 + ($vatPercent / 100)), 2);
                 $linePercent = $vatPercent;
             }
 
@@ -222,6 +248,27 @@ class WhmcsInvoiceMapper
     /**
      * @param  array<int, array<string, mixed>>  $lines
      */
+    /**
+     * Descriptions of lines mapped to vat_percent=0.0. These crash
+     * MyDataSubmitter::vatCategoryFor (MyDataSubmitter.php:589) for
+     * sandbox/production tenants — the filer must surface them to
+     * the operator BEFORE persisting the local Invoice, so the ΑΑ
+     * counter isn't consumed on a doomed submission.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, string>
+     */
+    private function zeroVatLineDescriptions(array $lines): array
+    {
+        $out = [];
+        foreach ($lines as $line) {
+            if ((float) $line['vat_percent'] === 0.0) {
+                $out[] = (string) $line['description'];
+            }
+        }
+        return $out;
+    }
+
     private function computeTotals(array $lines): array
     {
         $net = 0.0;
@@ -255,6 +302,15 @@ class WhmcsInvoiceMapper
             'vat_total'     => round($gross - $net, 2),
             'gross_total'   => round($gross, 2),
             'vat_breakdown' => $breakdown,
+            // Fix #2 — does this invoice have any 0%-VAT lines that
+            // MyDataSubmitter::vatCategoryFor would refuse? The filer
+            // reads this BEFORE the transactional persist so an
+            // untaxed WHMCS line item doesn't produce a ghost invoice
+            // (local Invoice + ΑΑ consumed + AADE crashes mid-submit).
+            // The actual list of 0%-VAT line descriptions is also
+            // surfaced so the operator-facing error message can name
+            // the problem lines specifically.
+            'zero_vat_lines' => $this->zeroVatLineDescriptions($lines),
         ];
     }
 }

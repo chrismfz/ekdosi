@@ -141,13 +141,30 @@ class WhmcsInboxTable
             ->form(fn (PendingWhmcsInvoice $r) => [
                 Select::make('customer_id')
                     ->label('Πελάτης')
-                    ->options(fn () => Customer::query()
-                        ->where('company_id', Filament::getTenant()?->getKey())
-                        ->orderBy('name')
-                        ->limit(500)
-                        ->pluck('name', 'id'))
+                    // Mirror InvoiceForm.php's canonical pattern: lazy
+                    // server-side search via getSearchResultsUsing, no
+                    // preload of all customers (the previous
+                    // ->options()->limit(500)->preload()->searchable()
+                    // pattern silently truncated tenants with >500
+                    // customers — customers alphabetically past #500
+                    // were unreachable through the search box because
+                    // Filament's searchable+preload only filters the
+                    // preloaded options client-side).
                     ->searchable()
-                    ->preload()
+                    ->preload(false)
+                    ->getSearchResultsUsing(fn (string $search) => Customer::query()
+                        ->where('company_id', Filament::getTenant()?->getKey())
+                        ->where(fn ($q) => $q
+                            ->where('name', 'like', "%{$search}%")
+                            ->orWhere('afm', 'like', "%{$search}%"))
+                        ->orderBy('name')
+                        ->limit(50)
+                        ->get()
+                        ->mapWithKeys(fn ($c) => [$c->id => $c->name.($c->afm ? ' ('.$c->afm.')' : '')])
+                        ->toArray())
+                    ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
+                        ->where('company_id', Filament::getTenant()?->getKey())
+                        ->find($value))->name)
                     ->required()
                     ->live()     // re-renders the preview Placeholder below
                     ->default($r->customer_id)

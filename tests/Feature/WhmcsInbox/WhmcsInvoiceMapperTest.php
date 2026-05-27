@@ -243,6 +243,82 @@ class WhmcsInvoiceMapperTest extends TestCase
         app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType);
     }
 
+    public function test_snapshot_includes_address2_and_vies_vat(): void
+    {
+        // Fix #7: WHMCS-filed invoices must capture the SAME legal-
+        // snapshot field set as manually-issued invoices via InvoiceForm.
+        // The mapper previously omitted address2 + vies_vat, producing
+        // structurally different snapshots for the same customer
+        // depending on which ingress path filed the invoice.
+        $this->customer->update([
+            'address2' => 'Building C, Floor 3',
+            'vat_vies' => 'EL123456789',   // source col on Customer
+        ]);
+
+        $pending = $this->makePending([
+            'invoiceid' => 1008,
+            'items' => ['item' => [
+                ['description' => 'X', 'amount' => '124.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $header = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['header'];
+
+        $this->assertSame('Building C, Floor 3', $header['address2']);
+        $this->assertSame('EL123456789', $header['vies_vat']);
+    }
+
+    public function test_line_rounding_mirrors_invoice_line_saving_hook(): void
+    {
+        // Fix #8: previously the mapper passed grossAmount through as
+        // line_gross (€10.00) but the InvoiceLine::saving hook
+        // recomputes gross from net (€10/1.24 = 8.06, then 8.06*1.24
+        // = 9.99). Operator saw €10.00 in the preview, persisted
+        // gross was €9.99 — silent €0.01-per-line drift.
+        $pending = $this->makePending([
+            'invoiceid' => 1009,
+            'items' => ['item' => [
+                ['description' => 'Odd amount', 'amount' => '10.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $result = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $line = $result['lines'][0];
+        // Net is back-computed from gross via the same formula the
+        // saving hook will use.
+        $this->assertSame(8.06, $line['net_price']);
+        // Gross is the re-derived value (matches what the saving hook
+        // would persist), NOT the raw WHMCS amount. Preview now
+        // tells the operator the truth even when WHMCS rounds
+        // differently than ekdosi.
+        $this->assertSame(9.99, $line['gross_price']);
+    }
+
+    public function test_zero_vat_lines_are_surfaced_in_totals(): void
+    {
+        // Fix #2 plumbing: the mapper surfaces a list of 0%-VAT line
+        // descriptions so the filer can refuse pre-persist and the
+        // operator-facing message can name the problem lines.
+        $pending = $this->makePending([
+            'invoiceid' => 1010,
+            'items' => ['item' => [
+                ['description' => 'Hosting',       'amount' => '124.00', 'taxed' => '1'],
+                ['description' => 'Refund credit', 'amount' => '-20.00', 'taxed' => '0'],
+                ['description' => 'Goodwill',      'amount' => '0.00',   'taxed' => '0'],
+            ]],
+        ]);
+
+        $totals = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['totals'];
+
+        $this->assertContains('Refund credit', $totals['zero_vat_lines']);
+        $this->assertContains('Goodwill', $totals['zero_vat_lines']);
+        $this->assertNotContains('Hosting', $totals['zero_vat_lines']);
+    }
+
     public function test_carries_whmcs_source_metadata(): void
     {
         $pending = $this->makePending([

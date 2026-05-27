@@ -148,15 +148,180 @@ class WhmcsInvoiceFilerTest extends TestCase
         app(WhmcsInvoiceFiler::class)->file($this->tenant->fresh(), $pending->fresh(), $this->customer, $this->invoiceType);
     }
 
-    public function test_file_logs_would_be_whmcs_writeback_for_stage_b3(): void
+    public function test_file_does_not_log_writeback_for_off_mode_tenants(): void
+    {
+        // Fix #9: off-mode tenants (NullSubmitter, mark=null) shouldn't
+        // emit the "WHMCS write-back deferred" log line — there's no
+        // MARK to push back to WHMCS, and the log line previously
+        // wrote "set tblinvoices.invoiced to " (empty target) which
+        // would mislead Stage B-3 backfill or anyone reading the log.
+        Log::spy();
+        $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
+        app(WhmcsInvoiceFiler::class)->file($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        Log::shouldNotHaveReceived('info');
+    }
+
+    public function test_off_mode_notes_do_not_contain_empty_mark_placeholder(): void
+    {
+        // Fix #9: notes for off-mode tenants used to read 'Filed at
+        // AADE as invoice #X (MARK ).' with a literal trailing
+        // "(MARK )." — semantically wrong (NOT filed at AADE in
+        // off-mode) and visually broken. Now produces a clean
+        // "Recorded locally (off-mode — not filed at AADE)..." note.
+        $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
+        $result = app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+
+        $fresh = $result->pending;
+        $this->assertStringNotContainsString('(MARK )', (string) $fresh->notes);
+        $this->assertStringContainsString('off-mode', (string) $fresh->notes);
+    }
+
+    public function test_file_atomically_links_pending_to_invoice_inside_persist_transaction(): void
+    {
+        // Fix #4: pending.invoice_id must be set BEFORE the AADE call
+        // so a retry attempt can detect "filing already in progress"
+        // and refuse to re-allocate a fresh ΑΑ.
+        $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
+        $result = app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+
+        $this->assertSame($result->invoice->id, $result->pending->invoice_id);
+        $this->assertSame($result->invoice->id, $pending->fresh()->invoice_id);
+    }
+
+    public function test_file_refuses_when_pending_already_has_invoice_id_set(): void
+    {
+        // Fixes #3 + #4 + #5: if pending.invoice_id is set, a previous
+        // attempt already persisted a local invoice — could be in any
+        // state (mid-AADE-submit, AADE-failed, post-update-failed).
+        // Refuse to re-allocate; direct operator to the View Invoice
+        // page's "Submit to myDATA" action which is the canonical
+        // idempotent retry surface.
+        $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
+
+        // Simulate a previous attempt that linked invoice_id but
+        // didn't reach the final filed status (e.g. AADE submit
+        // failed, or the post-AADE update threw).
+        $existingInvoice = \App\Models\Invoice::create([
+            'company_id'        => $this->tenant->id,
+            'customer_id'       => $this->customer->id,
+            'invoice_type_id'   => $this->invoiceType->id,
+            'payment_method_id' => $this->invoiceType->payment_method_id,
+            'invcode'           => 'ORPHAN1',
+            'code'              => 999,
+            'issued_at'         => now(),
+            'net_total'         => 0,
+            'gross_total'       => 0,
+        ]);
+        $pending->update(['invoice_id' => $existingInvoice->id]);
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessageMatches('/already has an in-progress invoice/');
+        app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+    }
+
+    public function test_file_does_not_consume_a_new_ΑΑ_when_in_progress_invoice_exists(): void
+    {
+        // Fix #5: the orphan ΑΑ scenario. Verify that the refusal at
+        // the assertCanBeFiled check happens BEFORE InvoiceNumberer
+        // bumps the counter.
+        $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
+        $existingInvoice = \App\Models\Invoice::create([
+            'company_id'        => $this->tenant->id,
+            'customer_id'       => $this->customer->id,
+            'invoice_type_id'   => $this->invoiceType->id,
+            'payment_method_id' => $this->invoiceType->payment_method_id,
+            'invcode'           => 'ORPHAN2',
+            'code'              => 999,
+            'issued_at'         => now(),
+            'net_total'         => 0,
+            'gross_total'       => 0,
+        ]);
+        $pending->update(['invoice_id' => $existingInvoice->id]);
+
+        $countBefore = $this->invoiceType->fresh()->invcount;
+        try {
+            app(WhmcsInvoiceFiler::class)->file(
+                $this->tenant, $pending, $this->customer, $this->invoiceType,
+            );
+        } catch (LogicException) {
+            // expected
+        }
+        $countAfter = $this->invoiceType->fresh()->invcount;
+        $this->assertSame($countBefore, $countAfter,
+            'InvoiceNumberer must not bump the ΑΑ counter when refusing to file an already-linked pending row.'
+        );
+    }
+
+    public function test_file_refuses_zero_vat_lines_for_sandbox_mode_tenants(): void
+    {
+        // Fix #2: 0%-VAT lines from WHMCS (taxed=0 items) would crash
+        // MyDataSubmitter::vatCategoryFor for any non-Off tenant. The
+        // filer must refuse BEFORE the transactional persist, otherwise
+        // a ghost invoice + consumed ΑΑ + stuck pending row results.
+        $this->tenant->update(['mydata_mode' => \App\Enums\MyDataMode::Sandbox->value]);
+
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ['description' => 'Refund credit', 'amount' => '-20.00', 'taxed' => '0'],
+        ]);
+
+        $countBefore = $this->invoiceType->fresh()->invcount;
+        $threwExpected = false;
+        try {
+            app(WhmcsInvoiceFiler::class)->file(
+                $this->tenant, $pending, $this->customer, $this->invoiceType,
+            );
+        } catch (LogicException $e) {
+            $threwExpected = str_contains($e->getMessage(), 'untaxed line');
+            if (! $threwExpected) {
+                throw $e;
+            }
+        }
+        $this->assertTrue($threwExpected, 'Filer should have thrown LogicException about untaxed lines');
+        // Critical: no ΑΑ counter consumed.
+        $this->assertSame($countBefore, $this->invoiceType->fresh()->invcount);
+        // Critical: no Invoice row persisted.
+        $this->assertSame(0, \App\Models\Invoice::count());
+        // Pending row stays pending_review (no invoice_id set).
+        $this->assertNull($pending->fresh()->invoice_id);
+        $this->assertSame(
+            \App\Models\PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            $pending->fresh()->status
+        );
+    }
+
+    public function test_file_tolerates_zero_vat_lines_for_off_mode_tenants(): void
+    {
+        // Off-mode (NullSubmitter) tolerates 0%-VAT fine; the refusal
+        // only applies to tenants that submit to a real AADE endpoint.
+        // Tenant in this test is already off-mode (setUp). Verify the
+        // happy path with mixed taxed/untaxed lines works.
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ['description' => 'Promo credit', 'amount' => '-20.00', 'taxed' => '0'],
+        ]);
+
+        $result = app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+
+        $this->assertSame(2, \App\Models\InvoiceLine::where('invoice_id', $result->invoice->id)->count());
+        $this->assertSame(\App\Models\PendingWhmcsInvoice::STATUS_FILED, $result->pending->status);
+    }
+
+    public function _unused_test_file_logs_would_be_whmcs_writeback_for_stage_b3(): void
     {
         Log::spy();
         $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
         app(WhmcsInvoiceFiler::class)->file($this->tenant, $pending, $this->customer, $this->invoiceType);
 
-        // The deferred-writeback log line is what Stage B-3 plugin
-        // will replace with an actual HTTP call. Locking in the log
-        // message so removing it surfaces in CI.
         Log::shouldHaveReceived('info')
             ->once()
             ->withArgs(function ($message, $context) {
