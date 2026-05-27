@@ -33,6 +33,20 @@ use App\Models\Customer;
  * is an operator decision — auto-linking via name match would create
  * silent cross-customer mistakes when two businesses share a common
  * name ("Acme Ltd" in Greece vs "Acme Ltd" in Cyprus).
+ *
+ * NOT HANDLED HERE (Stage B / PR #29 scope): the legacy
+ * `mod_timologia` plugin (legacy/whmcs/timologia/) lets a WHMCS
+ * client say "issue service X to a THIRD party, not me". It carries
+ * its own customer-identity rows in `mod_timologia_contacts`
+ * (company_name, gr_vatno, tax_office, description, address fields,
+ * vies_vatno, country) wired to a service via `mod_timologia
+ * (userid, contactid, serviceid)`. When Stage B pulls an invoice,
+ * the lookup is: for each line's serviceid, check mod_timologia →
+ * if found, the customer-snapshot fields come from the linked
+ * mod_timologia_contacts row, NOT from the WHMCS client's standard
+ * custom fields. This matcher only handles the standard path
+ * (WHMCS client = billed party); the third-party-billing layer goes
+ * on top, and we'd extend match() with a $serviceContext parameter.
  */
 class WhmcsCustomerMatcher
 {

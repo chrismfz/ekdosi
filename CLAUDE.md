@@ -1117,6 +1117,30 @@ Items still deferred from this third pass:
 - **`normaliseCountryCode()` country list** — seeded with GR / EE / CY / DE (current tenant scope). Extend the match arms as new tenant/customer countries appear. Operators see a clear error pointing at the helper if an unrecognised country shows up.
 - **vatExemptionCategory mechanism for 0% lines** — still throws (the right safe default). When intra-community customers need filing, add a `vat_exemption_category` column on `vat_categories` + per-line override + heuristic for invoice type ∈ {1.2, 2.2} → auto-suggest the right category. **Trigger PR**: first time an operator hits the 0% throw.
 
+### Deferred from PR #28 (WHMCS bridge — Stage A)
+Stage A is read-only: API client, tenant credentials, customer matcher, dry-run preview command. Findings + Stage B spec captured here so PR #29 starts informed.
+
+**Stage B (PR #29) scope locked in:**
+- **Hook into IssueInvoice** — a `whmcs:issue-pending` artisan command (and a Filament action on tenants with the bridge configured) iterates the same `getPendingInvoices()` list. For each matched invoice → build an ekdosi Invoice → run through the existing IssueInvoice action → call `WhmcsClient::updateInvoice()` to write back `tblinvoices.invoiced = <mark>` (mirrors legacy `FAutoInvoice.cpp:307` `UPDATE tblinvoices SET invoiced = :mark WHERE id = :id`).
+- **`mod_timologia` third-party-invoicing support** — discovered from reading legacy/whmcs/timologia/. The plugin's custom tables are:
+  - `mod_timologia_contacts(id, company_name, gr_vatno, city, address, tax_office, description, vies_vatno, email, country, telephone, postal_code, userid)` — a client's list of alternative billing identities (employer, parent company, etc).
+  - `mod_timologia(id, userid, contactid, serviceid, service_type)` — per-service routing: "service X gets invoiced to contact Y, not to the WHMCS client themselves."
+  Stage B logic: for each pulled invoice → for each line's `serviceid` → check `mod_timologia` → if mapped, use the linked `mod_timologia_contacts` row for customer-snapshot fields instead of the WHMCS client's standard custom fields. Two API options: (a) extend the WHMCS bridge with a custom endpoint that joins both tables and exposes per-service the resolved contact (requires a tenant-side WHMCS module — significant scope), or (b) call WHMCS `GetClientProducts` per pulled invoice to get serviceids, then a custom WHMCS endpoint or admin API to fetch `mod_timologia*` rows (still API-only, no DB credentials). Option (a) is the right call; defer until a real myip filing surfaces a mod_timologia row.
+- **`griniaris` immediate-invoicing flag** — Standard WHMCS custom field (legacy `FAutoInvoice.cpp:322` checks `fieldid=338`). When the pulled invoice's client has griniaris=true, Stage B should route it to a separate "issue immediately" queue (vs the weekly batch the default griniaris=false case takes). The `companies.whmcs_custom_field_map.griniaris` mapping in Stage A's UI already lets the operator say "fieldid 338" — Stage B reads it.
+- **The `prepare_for_ekdosi` plugin's reset capability** — verified at legacy/whmcs/prepare_for_ekdosi/lib/Admin/Controller.php: a manual admin UI for resetting `tblinvoices.invoiced = 0`. Stage B can either (a) keep operators using that WHMCS-side plugin for the rare reset case, or (b) add a Filament action that calls the same UpdateInvoice path with invoiced=0. Option (b) keeps the operator inside ekdosi.
+
+**Stage A items deferred:**
+- **No live WHMCS-against-a-real-server test** — Http::fake covers wire shape; the actual handshake against a real WHMCS install is unverified. First operator click on "Test connection" will reveal any wire-format surprises.
+- **The "search WHMCS" picker on the Customer link action runs one API call per `live(onBlur)` event** — fine for typical use, but a fast-typing operator could trigger 5+ searches in a few seconds. Filament has no per-action throttle baked in. **Trigger PR**: when this surfaces as a perf complaint or WHMCS rate-limits us.
+- **Customer-side `Link to WHMCS` action lives only on EditCustomer** — not on ListCustomers' bulk actions. If a tenant has 500 unlinked customers, manual linking is 500 clicks. **Trigger PR**: bulk-match wizard once Stage B is live + a real backlog exists.
+- **WHMCS API rate-limiting and retry policy** — current client has timeout=20s but no retry on 429/transient. Stage B's scheduled pull will iterate enough rows to hit this eventually. **Trigger PR**: scheduled pull command in Stage B.
+
+**Locked in by PR #28 (don't re-litigate):**
+- `customers.whmcs_client_id` is set ONLY via operator-confirmed action — never auto-written by the matcher. The matcher returns candidates with confidence labels; operator decides.
+- `invoiced=0` is the pending-filing flag (verified at legacy/whmcs/prepare_for_ekdosi/). Stage B writes back the MARK value (non-zero) post-filing.
+- Stage A makes ONE WHMCS API call per dry-run (GetInvoices). It does NOT batch-fetch GetClientsDetails per row — the per-invoice client info comes from the GetInvoices response's embedded fields. Stage B WILL need to batch-fetch when it actually issues (for the full client custom-fields lookup).
+- `afm2name` WHMCS-side GSIS lookup plugin is OUT OF SCOPE — we have native `AadeRegistryLookup` (PR #22) inside ekdosi; no need for the WHMCS-side equivalent.
+
 ### Deferred from PR #27 (PDF polish + per-tenant email + send-log) — post-fix double review
 PR #27 went through 3 review rounds: build, independent blind review (caught 2 CRITICAL bugs — PDF bytes leaking into queue payload because Mailable was ShouldQueue + premature 'sent' status; no failed() hook), then a double review on the fixes that found ANOTHER CRITICAL bug (the failed() hook itself was broken because `$this->logId` doesn't survive Laravel's serialize/deserialize round-trip — verified at vendor/laravel/.../CallQueuedHandler.php). All fixed. Residual items deferred:
 
