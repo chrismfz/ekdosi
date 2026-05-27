@@ -1120,8 +1120,61 @@ Items still deferred from this third pass:
 ### Deferred from PR #28 (WHMCS bridge — Stage A)
 Stage A is read-only: API client, tenant credentials, customer matcher, dry-run preview command. Findings + Stage B spec captured here so PR #29 starts informed.
 
-**Stage B (PR #29) scope locked in:**
-- **Hook into IssueInvoice** — a `whmcs:issue-pending` artisan command (and a Filament action on tenants with the bridge configured) iterates the same `getPendingInvoices()` list. For each matched invoice → build an ekdosi Invoice → run through the existing IssueInvoice action → call `WhmcsClient::updateInvoice()` to write back `tblinvoices.invoiced = <mark>` (mirrors legacy `FAutoInvoice.cpp:307` `UPDATE tblinvoices SET invoiced = :mark WHERE id = :id`).
+**Decision locked in 2026-05-27: WHMCS bridge is OPERATOR-GATED, not auto-issuing.** Invoices are legally significant; auto-firing on payment creates real cleanup pain in two common scenarios: (a) customer pays, then opens a ticket asking to invoice a different entity (employer / parent company) — auto-fire = we filed wrong + need CANCEL + reissue + permanent audit-trail entry; (b) customer pays via PayPal/recurring subscription then immediately disputes/refunds — auto-fire = we filed for money about to be reversed. Both are real operator pain. The corrected design is an **inbox model**: every paid+unfiled WHMCS invoice stages as a `pending_whmcs_invoices` row; nothing reaches AADE without an explicit operator click in the inbox UI.
+
+**Inbox flow:**
+```
+Customer pays in WHMCS
+        ↓
+[Push: WHMCS button "Send to ekdosi for review"]  OR  [Pull: scheduled poll]
+        ↓                            ↓
+        └──────────┬─────────────────┘
+                   ↓
+   pending_whmcs_invoices row staged
+   (idempotent on (company_id, whmcs_invoice_id))
+   status='pending_review', payload=JSON snapshot,
+   customer_id=suggested match, match_reason=<source>
+                   ↓
+       Ekdosi "WHMCS Inbox" UI (Filament resource or custom page)
+       Operator reviews each row:
+       ├─ "File at AADE" → IssueInvoice runs → MARK + write back invoiced=<mark>
+       ├─ "Reject" → status=rejected (won't re-pull); optional reason
+       └─ "Hold" → keeps in inbox; not processed until lifted
+```
+
+**Stage B is split into THREE PRs (operator approved 2026-05-27):**
+
+**PR #29 (Stage B-1: Ingestion)** — table + both ingestion paths, NO UI, NO issuance:
+- New migration: `pending_whmcs_invoices` table. Columns: id, company_id (FK), whmcs_invoice_id (unique with company_id), whmcs_userid, customer_id (FK nullable — suggested match), payload (JSON snapshot of WHMCS GetInvoice response), match_reason (linked/afm/email/name/unmatched), status (pending_review/filed/rejected/held), notes, created_at, updated_at, filed_at, filed_by_user_id, mydata_mark, rejected_reason. Index on (company_id, status, created_at) for the inbox filter.
+- New model: `PendingWhmcsInvoice`.
+- New service: `WhmcsInvoiceIngestor` — takes a WHMCS invoice payload + tenant, runs the matcher, upserts into pending_whmcs_invoices keyed on (company_id, whmcs_invoice_id). Idempotent — a re-push (or re-pull) of the same WHMCS invoice id updates the existing row, never creates duplicates.
+- Re-purposed pull command: `whmcs:fetch-pending --tenant=X` — REPLACES the Stage A dry-run preview. Same iteration over GetInvoices, but instead of printing a table, calls the ingestor to stage rows. Old behaviour available via `--preview` flag (still useful for testing).
+- New webhook endpoint: `POST /webhooks/whmcs/{tenant_slug}/invoice-paid` — HMAC-signed body containing whmcs_invoice_id. Fetches that invoice from WHMCS (one API call), calls the ingestor. Returns 202 Accepted + the new row id, OR 200 + existing row id if it was already staged. NEVER files at AADE in this PR.
+- Tests: ingestor idempotency, webhook signature verification, pull command stages instead of files.
+- NEW companies column: `whmcs_webhook_secret` (text, encrypted) — separate from `whmcs_api_secret` so a webhook secret leak in WHMCS error logs doesn't compromise the API credentials.
+
+**PR #30 (Stage B-2: Inbox UI + Issuance)** — operator-facing:
+- Filament "WHMCS Inbox" resource OR custom page (resource if standard CRUD shape works; custom page if needs an unusual layout). Lists pending_whmcs_invoices rows, filters by status, ordered by created_at desc.
+- Per-row actions:
+  - **File at AADE** — opens a modal: confirm customer (operator can change the suggested match), preview line items (built from WHMCS payload), confirm invoice type (defaults to tenant's standard). On submit: build Invoice + InvoiceLine rows from payload → run IssueInvoice action with chainSubmit=true → on success, update pending row (status=filed, filed_at, filed_by_user_id, mydata_mark) → call WhmcsClient::updateInvoice() to write back tblinvoices.invoiced=<mark> on the WHMCS side. On AADE failure: keep status=pending_review, surface the error in the row's notes.
+  - **Reject** — modal asks for an optional reason. Sets status=rejected, rejected_reason. Won't re-pull.
+  - **Hold** — sets status=held. Stays in inbox but filter hides by default; operator lifts when ready.
+  - **Re-stage** — only on rejected/filed rows: resets to status=pending_review (legacy `prepare_for_ekdosi` reset equivalent).
+- Bulk actions: bulk-reject (with single reason), bulk-hold.
+- Stats on the inbox page: pending count, age of oldest pending row, count by match_reason.
+- Tests: state transitions (pending → filed → resettable; pending → rejected → resettable; held → pending), the File-at-AADE chain through to MyDataSubmitter, WHMCS write-back idempotency.
+
+**PR #31 (Stage B-3: WHMCS-side plugin)** — PHP plugin shipped into the tenant's WHMCS install:
+- Replaces `legacy/whmcs/prepare_for_ekdosi/` entirely. Lives at `legacy/whmcs/ekdosi_bridge/` (and would be deployed to the tenant's `modules/addons/ekdosi_bridge/` on the WHMCS host).
+- Module config form: ekdosi webhook URL, webhook secret. Stored in WHMCS's standard `tbladdonmodules` config.
+- Per-invoice button hook: appears on WHMCS's admin invoice page. Three sub-actions:
+  - **Send to ekdosi for review** — POSTs to the webhook with HMAC sig. Inline feedback: "Staged in ekdosi for operator review (ekdosi row #N)" or error.
+  - **Show ekdosi status** — GET to a status endpoint, returns the pending_whmcs_invoices row state ("Pending review", "Filed with MARK X", "Rejected: <reason>").
+  - **Reset to unfiled** — for the legacy reset use case; sets `tblinvoices.invoiced=0` on the WHMCS side, prompts operator to also re-send to ekdosi if desired.
+- The WHMCS plugin itself doesn't talk to AADE; just to ekdosi via HTTPS. Keeps the WHMCS install dumb.
+- No tests in the ekdosi repo (plugin is shipped to a different stack); a deployment runbook lives in `legacy/whmcs/ekdosi_bridge/README.md`.
+
+**Other Stage B work (across the three PRs):**
 - **`mod_timologia` third-party-invoicing support** — discovered from reading legacy/whmcs/timologia/. The plugin's custom tables are:
   - `mod_timologia_contacts(id, company_name, gr_vatno, city, address, tax_office, description, vies_vatno, email, country, telephone, postal_code, userid)` — a client's list of alternative billing identities (employer, parent company, etc).
   - `mod_timologia(id, userid, contactid, serviceid, service_type)` — per-service routing: "service X gets invoiced to contact Y, not to the WHMCS client themselves."
