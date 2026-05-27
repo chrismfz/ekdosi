@@ -61,7 +61,11 @@
         table.lines tbody tr { page-break-inside: avoid; }
         table.lines td.num, table.lines th.num { text-align: right; }
         table.lines td.center, table.lines th.center { text-align: center; }
-        .line-desc { font-weight: 500; }
+        /* font-weight MUST be 400 or 700 -- DomPDF cant match intermediate
+           weights against DejaVu Sans (which only ships Book + Bold) and
+           silently falls back to a core-14 font like Helvetica, which has
+           no Greek glyphs -- Greek text in this cell then renders as ?. */
+        .line-desc { font-weight: normal; }
         .line-notes { font-size: 8pt; color: #6b7280; margin-top: 0.5mm; font-style: italic; }
 
         /* Totals — right-aligned summary box */

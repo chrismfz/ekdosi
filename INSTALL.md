@@ -100,7 +100,7 @@ later if you do. Skip `firebird-utils` / `firebird-devel` /
 sudo dnf install -y \
     php php-cli php-fpm php-common \
     php-mbstring php-xml php-intl php-bcmath php-gd php-zip php-curl \
-    php-mysqlnd php-pdo php-opcache php-sodium \
+    php-mysqlnd php-pdo php-opcache php-sodium php-soap \
     mariadb-server mariadb \
     nginx \
     git curl unzip tar make gcc \
@@ -121,6 +121,10 @@ Notes:
   combination doesn't expose it, the fallback is PECL: `sudo pecl
   install pdo_firebird` after `firebird-devel` is installed.
 - `php-mysqlnd` — the native MySQL/MariaDB driver, what Laravel uses.
+- `php-soap` — required by `AadeRegistryLookup` for the GSIS AFM → επωνυμία /
+  ΔΟΥ / Δραστηριότητα lookup (the "Fill from AFM" button on the customer form).
+  Composer hard-requires it (`ext-soap: "*"`); `composer install` refuses to
+  proceed without it. Omitting it later forces a deploy-time reinstall.
 
 Confirm versions and required extensions:
 ```bash
@@ -133,7 +137,7 @@ nginx -v
 # means it's MISSING. Empty output = good.
 for ext in bcmath ctype curl dom fileinfo filter gd iconv intl json \
            mbstring openssl pcre pdo pdo_mysql phar session simplexml \
-           sodium tokenizer xml xmlwriter zip; do
+           soap sodium tokenizer xml xmlwriter zip; do
     php -m | grep -qix "$ext" || echo "MISSING: $ext"
 done
 ```
