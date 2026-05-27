@@ -104,66 +104,23 @@ class CustomerLedger extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        $user = auth()->user();
-        if (! $user) {
-            return false;
-        }
-
-        $recordParam = $parameters['record'] ?? null;
-
-        // Filament may call canAccess() in contexts where the page
-        // route params are not hydrated yet. Don't hard-fail those
-        // preflight checks; mount() enforces tenant + policy again.
-        if ($recordParam === null) {
-            return true;
-        }
-
-        $customer = null;
-        if ($recordParam instanceof Customer) {
-            $customer = $recordParam;
-        } elseif (is_scalar($recordParam) && (int) $recordParam > 0) {
-            $customer = Customer::query()->withTrashed()->find((int) $recordParam);
-        }
-
-        if (! $customer) {
-            return false;
-        }
-
-        $tenantId = \Filament\Facades\Filament::getTenant()?->getKey();
-        if ($tenantId !== null && (int) $customer->company_id !== (int) $tenantId) {
-            return false;
-        }
-
-        return $user->can('view', $customer);
+        // Filament v5 custom-page authorization is best kept minimal here.
+        // Full tenant + policy authorization runs in mount() once record and
+        // panel context are available.
+        return auth()->check();
     }
 
     public function mount(int|string $record): void
     {
         $this->record = Customer::query()->withTrashed()->where('id', (int) $record)->firstOrFail();
 
-        // Defense in depth #1: the Customer model has no global
-        // BelongsToCompany scope (tracked in CLAUDE.md), so a raw
-        // ::query() bypasses Filament's panel tenant scope. Check
-        // that the loaded customer's company matches the current
-        // Filament tenant when available.
-        //
-        // Note: Filament::getTenant() can be null at custom-page
-        // mount time in some configs (the URL DOES contain the tenant
-        // slug, but tenant resolution may run after the page's
-        // boot lifecycle for non-standard page types). In that case,
-        // fall through to the policy check below — we don't want to
-        // 404 every legitimate operator because tenant resolution
-        // timing differs from EditRecord pages.
-        $currentTenantId = \Filament\Facades\Filament::getTenant()?->getKey();
-        if ($currentTenantId !== null) {
-            abort_unless(
-                (int) $this->record->company_id === (int) $currentTenantId,
-                404,    // 404 not 403: don't disclose existence of cross-tenant records
-            );
+        $tenant = \Filament\Facades\Filament::getTenant();
+
+        if ($tenant && (int) $this->record->company_id !== (int) $tenant->getKey()) {
+            abort(404);
         }
 
-        // Defense in depth #2: policy gate (per-user permission).
-        abort_unless(auth()->user()?->can('view', $this->record) ?? false, 403);
+        abort_unless(auth()->user()?->can('view', $this->record), 403);
 
         // Read filters from query string.
         $this->filterYear = request()->integer('year') ?: null;
