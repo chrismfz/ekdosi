@@ -2,6 +2,8 @@
 
 namespace App\Services\CustomerLedger;
 
+use Livewire\Wireable;
+
 /**
  * Καρτέλα Πελάτη: complete result of CustomerLedgerBuilder::build().
  *
@@ -19,7 +21,7 @@ namespace App\Services\CustomerLedger;
  * Date filters live on the $appliedFilters echo so the view can
  * render a "Filtered by year X" indicator without holding state.
  */
-final readonly class CustomerLedgerResult
+final readonly class CustomerLedgerResult implements Wireable
 {
     /**
      * @param  array{
@@ -77,5 +79,38 @@ final readonly class CustomerLedgerResult
     public function hasAnyActivity(): bool
     {
         return $this->stats['total_invoices_lifetime'] > 0;
+    }
+
+    /**
+     * Livewire Wireable: snapshot serialization (page → frontend) and
+     * hydration (frontend → page). Required because the Καρτέλα Page
+     * stores this DTO in a public Livewire property; without this,
+     * Livewire throws "Property type not supported" during the
+     * dehydration that runs on every render — surfacing as a 404
+     * page in production because the page never finishes rendering.
+     *
+     * The shape mirrors the constructor 1:1 — all properties are
+     * already simple arrays so no further serialization needed.
+     */
+    public function toLivewire(): array
+    {
+        return [
+            'stats'          => $this->stats,
+            'aging'          => $this->aging,
+            'yearly'         => $this->yearly,
+            'ledger'         => $this->ledger,
+            'appliedFilters' => $this->appliedFilters,
+        ];
+    }
+
+    public static function fromLivewire($value): self
+    {
+        return new self(
+            stats:          $value['stats'],
+            aging:          $value['aging'],
+            yearly:         $value['yearly'],
+            ledger:         $value['ledger'],
+            appliedFilters: $value['appliedFilters'],
+        );
     }
 }

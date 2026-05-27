@@ -2,6 +2,8 @@
 
 namespace App\Services\Whmcs;
 
+use Livewire\Wireable;
+
 /**
  * Result of CustomerWhmcsLedger::fetchFor(). Plain value object so
  * Blade views / Filament modals can render without re-querying.
@@ -35,7 +37,7 @@ namespace App\Services\Whmcs;
  * $error is non-null when the fetch failed (auth, unreachable, etc.).
  * Callers render either the rows OR the error message.
  */
-final readonly class CustomerWhmcsLedgerResult
+final readonly class CustomerWhmcsLedgerResult implements Wireable
 {
     /**
      * @param  array<int, array<string, mixed>>  $rows
@@ -57,5 +59,34 @@ final readonly class CustomerWhmcsLedgerResult
     public function total(): int
     {
         return count($this->rows);
+    }
+
+    /**
+     * Livewire Wireable: required because the Καρτέλα Page stores
+     * this DTO in a public Livewire property. Same reasoning as
+     * CustomerLedgerResult — without this, Livewire's snapshot
+     * serialization throws "Property type not supported" and the
+     * page returns 404 in production.
+     */
+    public function toLivewire(): array
+    {
+        return [
+            'rows'          => $this->rows,
+            'error'         => $this->error,
+            'stagedCount'   => $this->stagedCount,
+            'historicCount' => $this->historicCount,
+            'absentCount'   => $this->absentCount,
+        ];
+    }
+
+    public static function fromLivewire($value): self
+    {
+        return new self(
+            rows:          $value['rows'],
+            error:         $value['error'],
+            stagedCount:   $value['stagedCount'],
+            historicCount: $value['historicCount'],
+            absentCount:   $value['absentCount'],
+        );
     }
 }
