@@ -82,9 +82,14 @@ class WhmcsFetchPending extends Command
         }
 
         try {
+            // Honour the per-tenant cutoff date so a long-running
+            // tenant (myip has invoices from 2007) doesn't drown the
+            // inbox in historical test rows. Null = no cutoff.
+            $minDate = $tenant->whmcs_invoice_min_date?->format('Y-m-d');
             $invoices = $client->getPendingInvoices(
                 limit: (int) $this->option('limit'),
                 offset: (int) $this->option('offset'),
+                minDate: $minDate,
             );
         } catch (WhmcsAuthenticationFailed $e) {
             $this->error("WHMCS authentication failed: {$e->getMessage()}");

@@ -17,6 +17,7 @@ use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use Filament\Actions\Action as FormAction;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -562,6 +563,18 @@ class CompanyForm
                                             ->helperText('Encrypted at rest. Leave blank to keep existing.')
                                             ->dehydrated(fn (?string $state) => filled($state))
                                             ->dehydrateStateUsing(fn (string $state) => $state),
+
+                                        // PR #34 followup: cutover date filter so long-running
+                                        // WHMCS tenants don't pull 19 years of historical test /
+                                        // staff / internal invoices into the inbox. Set this once
+                                        // to the date you started filing via ekdosi (or the day
+                                        // you stopped doing test invoices). Null = no cutoff =
+                                        // pull all history (correct for fresh WHMCS installs).
+                                        DatePicker::make('whmcs_invoice_min_date')
+                                            ->label('Skip WHMCS invoices dated before')
+                                            ->native(false)
+                                            ->displayFormat('Y-m-d')
+                                            ->helperText('IMPORTANT for long-running tenants with historical test data. Set to your ekdosi-cutover date (e.g. when you started filing via this app). Invoices dated before this are silently skipped by Fetch + Preview. Leave blank only if your WHMCS is fresh / has no historical noise.'),
                                         FormAction::make('test_whmcs_connection')
                                             ->label('Test connection')
                                             ->icon('heroicon-o-signal')
@@ -623,7 +636,8 @@ class CompanyForm
                                                 }
                                                 try {
                                                     $client = app(WhmcsClientFactory::class)->for($record);
-                                                    $invoices = $client->getPendingInvoices(limit: 100);
+                                                    $minDate = $record->whmcs_invoice_min_date?->format('Y-m-d');
+                                                    $invoices = $client->getPendingInvoices(limit: 100, minDate: $minDate);
                                                 } catch (WhmcsNotConfigured $e) {
                                                     Notification::make()->title('WHMCS not configured')->body($e->getMessage())->warning()->send();
                                                     return;
@@ -639,10 +653,13 @@ class CompanyForm
                                                 }
 
                                                 $count = count($invoices);
+                                                $cutoffNote = $minDate
+                                                    ? " (skipping invoices dated before {$minDate})"
+                                                    : ' (no cutoff date set — pulling ALL history)';
                                                 if ($count === 0) {
                                                     Notification::make()
                                                         ->title('No paid + unfiled invoices')
-                                                        ->body('WHMCS returned no pending invoices for this tenant.')
+                                                        ->body('WHMCS returned no pending invoices for this tenant'.$cutoffNote.'.')
                                                         ->success()->send();
                                                     return;
                                                 }
@@ -693,7 +710,8 @@ class CompanyForm
                                                 try {
                                                     $client = app(WhmcsClientFactory::class)->for($record);
                                                     $ingestor = app(WhmcsInvoiceIngestor::class);
-                                                    $list = $client->getPendingInvoices(limit: 100);
+                                                    $minDate = $record->whmcs_invoice_min_date?->format('Y-m-d');
+                                                    $list = $client->getPendingInvoices(limit: 100, minDate: $minDate);
                                                 } catch (WhmcsNotConfigured $e) {
                                                     Notification::make()->title('WHMCS not configured')->body($e->getMessage())->warning()->send();
                                                     return;
