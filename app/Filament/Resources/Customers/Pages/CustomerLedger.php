@@ -104,37 +104,35 @@ class CustomerLedger extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        $user = auth()->user();
-        if (! $user) {
+        if (! auth()->check()) {
             return false;
         }
 
+        // Filament/Shield may call canAccess() before tenant context
+        // and permission-team scope are fully hydrated. Keep this as a
+        // lightweight existence/scope preflight and let mount() run the
+        // definitive policy check once the page boots.
         $recordParam = $parameters['record'] ?? null;
-
-        // Filament may call canAccess() in contexts where the page
-        // route params are not hydrated yet. Don't hard-fail those
-        // preflight checks; mount() enforces tenant + policy again.
         if ($recordParam === null) {
             return true;
         }
 
-        $customer = null;
-        if ($recordParam instanceof Customer) {
-            $customer = $recordParam;
-        } elseif (is_scalar($recordParam) && (int) $recordParam > 0) {
-            $customer = Customer::query()->withTrashed()->find((int) $recordParam);
-        }
+        $customer = $recordParam instanceof Customer
+            ? $recordParam
+            : (is_scalar($recordParam) && (int) $recordParam > 0
+                ? Customer::query()->withTrashed()->find((int) $recordParam)
+                : null);
 
         if (! $customer) {
             return false;
         }
 
-        $tenantId = \Filament\Facades\Filament::getTenant()?->getKey();
-        if ($tenantId !== null && (int) $customer->company_id !== (int) $tenantId) {
-            return false;
+        $tenantParam = $parameters['tenant'] ?? null;
+        if (is_object($tenantParam) && method_exists($tenantParam, 'getKey')) {
+            return (int) $customer->company_id === (int) $tenantParam->getKey();
         }
 
-        return $user->can('view', $customer);
+        return true;
     }
 
     public function mount(int|string $record): void
