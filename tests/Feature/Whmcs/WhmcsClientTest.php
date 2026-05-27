@@ -248,6 +248,86 @@ class WhmcsClientTest extends TestCase
         $this->assertSame([], $this->makeClient()->getPendingInvoices());
     }
 
+    public function test_get_pending_invoices_skips_rows_older_than_min_date(): void
+    {
+        // Long-running tenant (myip-style): mixed historical data
+        // marked invoiced=0 from years ago + recent legitimate pending
+        // rows. With minDate set to a cutover date, only the recent
+        // rows pass through.
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result' => 'success',
+                'invoices' => ['invoice' => [
+                    // DESC ordering: newest first
+                    ['id' => 5001, 'date' => '2026-05-15', 'invoiced' => 0, 'total' => 50],
+                    ['id' => 5002, 'date' => '2026-04-20', 'invoiced' => 0, 'total' => 60],
+                    ['id' => 5003, 'date' => '2026-01-10', 'invoiced' => 0, 'total' => 70],
+                    // ↓ historical test rows below the cutover
+                    ['id' => 1042, 'date' => '2008-08-11', 'invoiced' => 0, 'total' => 5],
+                    ['id' => 1041, 'date' => '2008-07-03', 'invoiced' => 0, 'total' => 3],
+                    ['id' => 1040, 'date' => '2007-12-10', 'invoiced' => 0, 'total' => 2],
+                ]],
+            ], 200),
+        ]);
+
+        $rows = $this->makeClient()->getPendingInvoices(minDate: '2025-01-01');
+
+        // Three recent rows passed; historical (pre-2025) skipped.
+        $this->assertCount(3, $rows);
+        $this->assertSame([5001, 5002, 5003], array_column($rows, 'id'));
+    }
+
+    public function test_get_pending_invoices_min_date_uses_early_stop_on_desc_order(): void
+    {
+        // The cost story: a tenant with 16K filed invoices would force
+        // a foreach over every row. DESC + early-stop means once we
+        // see a row older than minDate, we break - no further iteration.
+        // This test asserts the loop break by including a row PAST the
+        // cutover that, if not skipped via break, would be returned.
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result' => 'success',
+                'invoices' => ['invoice' => [
+                    ['id' => 9001, 'date' => '2026-05-15', 'invoiced' => 0],
+                    ['id' => 8000, 'date' => '2020-01-01', 'invoiced' => 0],   // <- triggers break
+                    // The following row WOULD pass minDate=2025-01-01 if
+                    // we kept iterating. Because we break at 8000, it
+                    // never reaches the output array. This is intentional
+                    // - real WHMCS responses are sorted, and any
+                    // out-of-order row at this point indicates either
+                    // a WHMCS bug or operator-tampered DB; either way,
+                    // erring on the side of "skip" is the safer default.
+                    ['id' => 9002, 'date' => '2026-04-20', 'invoiced' => 0],
+                ]],
+            ], 200),
+        ]);
+
+        $rows = $this->makeClient()->getPendingInvoices(minDate: '2025-01-01');
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(9001, $rows[0]['id']);
+    }
+
+    public function test_get_pending_invoices_no_min_date_pulls_everything(): void
+    {
+        // Null minDate (default) = no cutoff. All invoiced=0 rows
+        // returned regardless of age. The historic / fresh-install
+        // path.
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result' => 'success',
+                'invoices' => ['invoice' => [
+                    ['id' => 1, 'date' => '2026-05-15', 'invoiced' => 0],
+                    ['id' => 2, 'date' => '2007-12-10', 'invoiced' => 0],
+                ]],
+            ], 200),
+        ]);
+
+        $rows = $this->makeClient()->getPendingInvoices();
+
+        $this->assertCount(2, $rows);
+    }
+
     public function test_get_client_returns_null_on_not_found(): void
     {
         Http::fake([

@@ -134,21 +134,27 @@ class WhmcsClient
      * @param  int  $limit  Max rows per WHMCS API call. Default 100
      *                      (the WHMCS-side ceiling); the caller paginates
      *                      via $offset if it needs more.
+     * @param  string|null  $minDate  Optional cutoff in YYYY-MM-DD shape.
+     *                                Invoices with `date` older than this
+     *                                are skipped AND we early-stop iteration
+     *                                (the DESC ordering means everything
+     *                                past the first old row is also old).
+     *                                Typically the tenant's ekdosi-cutover
+     *                                date - avoids pulling decades of
+     *                                historical test invoices.
      *
      * @return array<int, array<string, mixed>> Raw invoice rows from
      *                                          WHMCS. Caller maps to
      *                                          our domain.
      */
-    public function getPendingInvoices(int $limit = 100, int $offset = 0): array
+    public function getPendingInvoices(int $limit = 100, int $offset = 0, ?string $minDate = null): array
     {
         // order=desc: unfiled rows in a long-running tenant are
         // overwhelmingly the most RECENT (legacy prepare_for_ekdosi
         // plugin sets invoiced=0 on a new paid invoice; legacy ekdosi
         // bumps it to a MARK once filed). A tenant with 10K+ historical
         // invoices needs the most recent N on page 1, NOT the oldest.
-        // The previous `order=asc` would have made operators page
-        // through hundreds of pages of 2007-era filed rows just to
-        // see anything modern.
+        // DESC also enables early-stop on minDate below.
         $resp = $this->call('GetInvoices', [
             'status'    => 'Paid',
             'limit'     => $limit,
@@ -168,18 +174,34 @@ class WhmcsClient
             $list = [$list];
         }
 
-        // Client-side filter for `invoiced=0`. WHMCS's `invoiced`
-        // field is the custom column the legacy `prepare_for_ekdosi`
-        // plugin manages (legacy/whmcs/prepare_for_ekdosi/); not all
-        // WHMCS installs will have it. Without the column the field
-        // is absent from the response; treat absent as "pending"
-        // (worth surfacing for the operator's preview).
-        return array_values(array_filter($list, function (array $row): bool {
-            if (! array_key_exists('invoiced', $row)) {
-                return true;  // assume pending; preview will surface
+        // Two client-side filters:
+        //   1. invoiced=0 (or absent). WHMCS doesn't accept this as an
+        //      API filter parameter; legacy prepare_for_ekdosi adds the
+        //      column. Treat absent as "pending" so non-plugin WHMCS
+        //      installs still surface rows for the operator to triage.
+        //   2. date >= minDate. Operators set the tenant's cutover date
+        //      here to avoid staging years of historical test/staff/
+        //      internal invoices. DESC ordering means: once we see one
+        //      row older than the cutoff, ALL remaining rows are older -
+        //      break early instead of iterating + filtering each.
+        $out = [];
+        foreach ($list as $row) {
+            // Early-stop on minDate (DESC-ordered, so older rows
+            // dominate the tail). String compare on YYYY-MM-DD shape
+            // is lexicographically correct.
+            if ($minDate !== null) {
+                $rowDate = (string) ($row['date'] ?? '');
+                if ($rowDate !== '' && $rowDate < $minDate) {
+                    break;
+                }
             }
-            return (int) $row['invoiced'] === 0;
-        }));
+            if (array_key_exists('invoiced', $row) && (int) $row['invoiced'] !== 0) {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
     }
 
     /**
