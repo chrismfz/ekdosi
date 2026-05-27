@@ -3,10 +3,8 @@
 namespace App\Filament\Resources\Customers\Pages;
 
 use App\DTOs\AadeRegistryRecord;
-use App\Exceptions\Aade\AadeAfmNotFound;
-use App\Exceptions\Aade\AadeCredentialsInvalid;
 use App\Exceptions\Aade\AadeRegistryException;
-use App\Exceptions\Aade\AadeUnreachable;
+use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
@@ -40,6 +38,8 @@ use Filament\Resources\Pages\Page;
  */
 class CustomerLedger extends Page
 {
+    use HandlesAadeRegistryExceptions;
+
     protected static string $resource = CustomerResource::class;
 
     protected string $view = 'filament.customers.ledger';
@@ -56,7 +56,27 @@ class CustomerLedger extends Page
 
     public ?CustomerLedgerResult $ledger = null;
 
+    /**
+     * Filter-independent sections of the ledger (stats / aging /
+     * yearly). Computed ONCE on mount and reused across filter
+     * changes so the operator clicking a filter doesn't re-run 4
+     * O(N) passes that don't depend on the filter values.
+     *
+     * @var array{stats: array, aging: array, yearly: array}|null
+     */
+    public ?array $cachedStatsBlock = null;
+
     public ?CustomerWhmcsLedgerResult $whmcsLedger = null;
+
+    /**
+     * Memoised AADE crosscheck result, shared across the modalContent
+     * render and the action submit so we don't (a) double-fetch from
+     * AADE on cold cache, or (b) hit a race where the modal preview
+     * and the apply ran against different AADE responses.
+     *
+     * @var array{record: ?\App\DTOs\AadeRegistryRecord, diffs: array, error: ?string}|null
+     */
+    public ?array $aadeCrosscheckMemo = null;
 
     /**
      * @var array<int, array{id: int, code: string}>
@@ -72,7 +92,20 @@ class CustomerLedger extends Page
     {
         $this->record = Customer::query()->where('id', (int) $record)->firstOrFail();
 
-        // Authorisation: piggyback on the resource's view policy.
+        // Defense in depth #1: the Customer model has no global
+        // BelongsToCompany scope (tracked in CLAUDE.md), so a raw
+        // ::query() bypasses Filament's panel tenant scope. If panel
+        // scope is ever bypassed (Octane boot ordering, future
+        // non-panel caller, scope removal) the policy check below
+        // is tenant-blind and would render cross-tenant data. Refuse
+        // explicitly before any expensive work.
+        $currentTenantId = \Filament\Facades\Filament::getTenant()?->getKey();
+        abort_unless(
+            $currentTenantId !== null && (int) $this->record->company_id === (int) $currentTenantId,
+            404,    // 404 not 403: don't disclose that the record exists for a different tenant
+        );
+
+        // Defense in depth #2: policy gate (per-user permission).
         abort_unless(auth()->user()?->can('view', $this->record) ?? false, 403);
 
         // Read filters from query string.
@@ -158,8 +191,10 @@ class CustomerLedger extends Page
                     ]);
                 })
                 ->action(function () {
-                    // The submit button only matters when AADE returned a
-                    // record (no errors). We re-fetch + apply.
+                    // Re-fetch is memoised (see runAadeCrosscheck) so
+                    // this is a cache hit when the modal preview already
+                    // ran; closes the race window where the operator
+                    // approved diffs A but the apply ran against diffs B.
                     $result = $this->runAadeCrosscheck();
                     if ($result['error'] !== null) {
                         Notification::make()->title('Δεν εφαρμόστηκαν αλλαγές')->body($result['error'])->warning()->send();
@@ -169,11 +204,13 @@ class CustomerLedger extends Page
                         Notification::make()->title('Τα στοιχεία είναι ήδη συγχρονισμένα')->success()->send();
                         return;
                     }
-                    $this->applyAadeCrosscheck($result['record']);
+                    $this->applyAadeCrosscheck($result['diffs']);
                     Notification::make()
                         ->title('Στοιχεία πελάτη ενημερώθηκαν')
                         ->body(count($result['diffs']).' πεδίο/α ενημερώθηκαν από την ΑΑΔΕ.')
                         ->success()->send();
+                    // Reset the memo so the next modal open re-fetches.
+                    $this->aadeCrosscheckMemo = null;
                 }),
 
             Action::make('edit')
@@ -207,6 +244,11 @@ class CustomerLedger extends Page
     /**
      * Fetch from AADE + compute the diff against the stored customer.
      *
+     * Memoised on the Livewire instance ($this->aadeCrosscheckMemo)
+     * so the modalContent render and the action submit share ONE
+     * AADE fetch + ONE diff computation. The memo is cleared after a
+     * successful apply (so the next modal open re-fetches).
+     *
      * Returned shape:
      *   [
      *     'record' => ?AadeRegistryRecord,
@@ -219,23 +261,37 @@ class CustomerLedger extends Page
      */
     private function runAadeCrosscheck(): array
     {
+        if ($this->aadeCrosscheckMemo !== null) {
+            return $this->aadeCrosscheckMemo;
+        }
         $tenant = $this->record->company;
         $afm = trim((string) $this->record->afm);
 
         try {
-            $record = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm);
-        } catch (AadeCredentialsInvalid) {
-            return ['record' => null, 'diffs' => [], 'error' => 'GSIS credentials missing or invalid. Configure them on the Company → AADE registry tab.'];
-        } catch (AadeAfmNotFound) {
-            return ['record' => null, 'diffs' => [], 'error' => 'Η ΑΑΔΕ δεν αναγνωρίζει αυτό το ΑΦΜ.'];
-        } catch (AadeUnreachable $e) {
-            return ['record' => null, 'diffs' => [], 'error' => 'Η υπηρεσία ΑΑΔΕ δεν είναι προσβάσιμη: '.$e->getMessage()];
+            // bypassCache: true — the action label "Διασταύρωση με ΑΑΔΕ"
+            // promises a LIVE comparison; if we served the 24h cache
+            // here, drifts that AADE just published would silently not
+            // surface and the operator would think the customer record
+            // is current when it isn't.
+            $record = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm, bypassCache: true);
         } catch (AadeRegistryException $e) {
-            return ['record' => null, 'diffs' => [], 'error' => 'Σφάλμα από ΑΑΔΕ: '.$e->getMessage()];
+            // Single catch via the trait - all four subclasses
+            // (AadeCredentialsInvalid / AadeAfmNotFound / AadeUnreachable
+            // / AadeRegistryException itself) flow through one mapping.
+            $d = $this->aadeExceptionDetails($e);
+            return $this->aadeCrosscheckMemo = [
+                'record' => null,
+                'diffs' => [],
+                'error' => $d['title'].': '.$d['body'],
+            ];
         }
 
+        // primaryActivity() shape: ['code', 'description', 'kind']
+        // (verified in app/DTOs/AadeRegistryRecord.php). Earlier
+        // commit read ['descr'] which never exists, causing every
+        // crosscheck to surface a phantom occupation diff.
         $primaryActivity = $record->primaryActivity();
-        $aadeOccupation = $primaryActivity['descr'] ?? '';
+        $aadeOccupation = (string) ($primaryActivity['description'] ?? '');
 
         // Field-by-field comparison. Trimmed string compare; case-
         // sensitive (Greek names sometimes vary by case but AADE is
@@ -257,63 +313,86 @@ class CustomerLedger extends Page
             }
         }
 
-        return ['record' => $record, 'diffs' => $diffs, 'error' => null];
+        return $this->aadeCrosscheckMemo = ['record' => $record, 'diffs' => $diffs, 'error' => null];
     }
 
-    private function applyAadeCrosscheck(AadeRegistryRecord $record): void
+    /**
+     * Apply ONLY the fields that drifted (per the computed diff).
+     * The previous implementation blindly overwrote all 6 fields,
+     * which destroyed valid operator-entered data whenever AADE
+     * returned blank values for fields the operator had filled in
+     * (common case: inactive AFMs with stripped registry data).
+     *
+     * @param  array<string, array{stored: string, aade: string}>  $diffs
+     */
+    private function applyAadeCrosscheck(array $diffs): void
     {
-        $primaryActivity = $record->primaryActivity();
-        $this->record->update([
-            'name'       => $record->name,
-            'tax_office' => $record->doy,
-            'address1'   => $record->address,
-            'city'       => $record->city,
-            'postcode'   => $record->postcode,
-            'occupation' => $primaryActivity['descr'] ?? $this->record->occupation,
-        ]);
+        if ($diffs === []) {
+            return;
+        }
+        $update = [];
+        foreach ($diffs as $field => $pair) {
+            $update[$field] = $pair['aade'];
+        }
+        $this->record->update($update);
         $this->record->refresh();
     }
 
     private function buildLedger(): void
     {
-        $this->ledger = app(CustomerLedgerBuilder::class)->build(
-            $this->record,
-            [
-                'year'            => $this->filterYear,
-                'invoice_type_id' => $this->filterInvoiceTypeId,
-                'paid_status'     => $this->filterPaidStatus,
-            ],
+        $filters = [
+            'year'            => $this->filterYear,
+            'invoice_type_id' => $this->filterInvoiceTypeId,
+            'paid_status'     => $this->filterPaidStatus,
+        ];
+
+        $builder = app(CustomerLedgerBuilder::class);
+
+        // First load: compute the filter-independent block ONCE and
+        // cache on the Livewire instance. Subsequent filter changes
+        // skip the stats/aging/yearly recomputation (3 O(N) passes
+        // over invoices+payments).
+        if ($this->cachedStatsBlock === null) {
+            $this->cachedStatsBlock = $builder->buildStatsBlock($this->record);
+        }
+
+        $this->ledger = new CustomerLedgerResult(
+            stats:          $this->cachedStatsBlock['stats'],
+            aging:          $this->cachedStatsBlock['aging'],
+            yearly:         $this->cachedStatsBlock['yearly'],
+            ledger:         $builder->buildLedgerOnly($this->record, $filters),
+            appliedFilters: $filters,
         );
     }
 
     private function loadDimensionLookups(): void
     {
+        // Branch on driver BEFORE issuing the query. The previous code
+        // ran the SQLite strftime() query unconditionally then
+        // overrode it on MariaDB - but strftime is not a MariaDB
+        // function, so the first query threw "FUNCTION strftime does
+        // not exist" before the override could execute. Result: 500
+        // on every production page load. Tests passed because phpunit
+        // uses SQLite where strftime IS native.
+        $driver = \DB::connection()->getDriverName();
+        $yearExpr = match ($driver) {
+            'mysql', 'mariadb' => 'YEAR(issued_at)',
+            'sqlite'           => 'CAST(strftime("%Y", issued_at) AS INTEGER)',
+            'pgsql'            => 'EXTRACT(YEAR FROM issued_at)',
+            default            => throw new \RuntimeException("Unsupported DB driver for Καρτέλα year-extract: {$driver}"),
+        };
+
         $this->availableYears = \DB::table('invoices')
             ->where('company_id', $this->record->company_id)
             ->where('customer_id', $this->record->id)
             ->whereNull('deleted_at')
-            ->selectRaw('DISTINCT CAST(strftime("%Y", issued_at) AS INTEGER) AS year')
+            ->selectRaw("DISTINCT {$yearExpr} AS year")
+            ->orderByDesc('year')
             ->pluck('year')
             ->filter()
-            ->sortDesc()
+            ->map(fn ($y) => (int) $y)
             ->values()
             ->all();
-
-        // Note: strftime is SQLite. For MariaDB the same query uses
-        // YEAR(issued_at). Detect engine + branch.
-        $driver = \DB::connection()->getDriverName();
-        if ($driver === 'mysql' || $driver === 'mariadb') {
-            $this->availableYears = \DB::table('invoices')
-                ->where('company_id', $this->record->company_id)
-                ->where('customer_id', $this->record->id)
-                ->whereNull('deleted_at')
-                ->selectRaw('DISTINCT YEAR(issued_at) AS year')
-                ->orderByDesc('year')
-                ->pluck('year')
-                ->filter()
-                ->values()
-                ->all();
-        }
 
         $this->availableInvoiceTypes = \DB::table('invoice_types')
             ->where('company_id', $this->record->company_id)

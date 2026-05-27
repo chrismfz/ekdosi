@@ -1313,6 +1313,21 @@ Locked in by PR #26 (don't re-litigate):
 ### Deferred — application-wide patterns
 - **FK-aware delete guards (`GuardedDeleteAction`)** — operators currently hit one of two confusing modes when deleting a row that has dependents: (a) the default soft-delete succeeds silently and the dependent invoice / line / customer ends up referencing a trashed lookup row that's now invisible in the panel; (b) ForceDelete crashes with a cryptic SQL error from `restrictOnDelete`. Proposed shape: a reusable `GuardedDeleteAction` (extends Filament's DeleteAction) that counts referencing rows on `->before()`, blocks with a friendly notification listing exactly what depends on the row, and offers "Deactivate" (set `is_active=false`) where the model supports it. Complementary `BeforeDeleteObserver` enforces the same check from artisan/queue/API paths. **Trigger PR**: after InvoiceResource lands — that's when the full reference graph is real (invoices touch every lookup we have). Applies across Product, ProductCategory, VatCategory, MetricUnit, PaymentMethod, DeliveryMethod, DistributionAim, InvoiceType, Customer.
 
+### `HandlesAadeRegistryExceptions` trait (PR #35)
+`app/Filament/Concerns/HandlesAadeRegistryExceptions.php` centralises
+the AADE-exception → operator-message mapping that was previously
+duplicated across 4 sites (CustomerForm suffix-action, CompanyForm GSIS
+test, CompanyForm AFM lookup, CustomerLedger crosscheck). Two consumption
+patterns: `notifyAadeException($e)` for Filament Notification call sites,
+`aadeExceptionDetails($e)` for sites that need the title/body pair as
+strings (e.g. Καρτέλα crosscheck returns a structured result). When a
+new AADE exception class lands (e.g. `AadeRateLimited` per the deferred
+items), ONE match arm covers all consumers. CustomerLedger is migrated
+in PR #35; CustomerForm + CompanyForm sites keep their existing
+site-specific UX strings for now (incremental migration in a follow-up
+PR — adopting the trait is opt-in to avoid changing operator-facing
+copy without explicit decision).
+
 ### Καρτέλα Πελάτη (landed PR #35)
 
 Customer financial dashboard at

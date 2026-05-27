@@ -59,11 +59,21 @@ class AadeRegistryLookup
      * the AFM-not-found result was disabled (which we don't do); in
      * practice the not-found case throws AadeAfmNotFound.
      *
+     * @param  bool  $bypassCache  When true, skip the cache read AND
+     *                              clear any existing cached entry for
+     *                              this AFM, then force a live fetch.
+     *                              Used by the Καρτέλα "Διασταύρωση με
+     *                              ΑΑΔΕ" action — the operator-facing
+     *                              label promises a LIVE comparison, so
+     *                              we must not silently serve a 24h-old
+     *                              cached record. The cache is still
+     *                              populated with the fresh result so
+     *                              subsequent reads stay fast.
      * @throws AadeCredentialsInvalid GSIS rejected the username/password
      * @throws AadeAfmNotFound        AFM doesn't exist or is deactivated
      * @throws AadeUnreachable        SOAP/network/parsing failure
      */
-    public function findByAfm(string $afm): AadeRegistryRecord
+    public function findByAfm(string $afm, bool $bypassCache = false): AadeRegistryRecord
     {
         $afm = trim($afm);
         if ($afm === '') {
@@ -79,23 +89,35 @@ class AadeRegistryLookup
 
         $cacheKey = "aade.registry.{$this->tenant->getKey()}.{$afm}";
 
-        // Defensive read: if the DTO shape changes across deploys the
-        // file/redis cache can hold incompatible payloads. Treat any
-        // failure as a miss and re-fetch from AADE. Log the failure so
-        // a misbehaving cache driver doesn't silently hammer GSIS
-        // for every call — operators want to know.
-        try {
-            $cached = Cache::get($cacheKey);
-            if ($cached instanceof AadeRegistryRecord) {
-                return $cached;
+        if ($bypassCache) {
+            try {
+                Cache::forget($cacheKey);
+            } catch (Throwable $e) {
+                Log::warning('AADE registry cache forget failed (bypass) — proceeding to live fetch', [
+                    'company_id' => $this->tenant->getKey(),
+                    'afm' => $afm,
+                    'exception' => get_class($e),
+                ]);
             }
-        } catch (Throwable $e) {
-            Log::warning('AADE registry cache read failed — falling through to live fetch', [
-                'company_id' => $this->tenant->getKey(),
-                'afm' => $afm,
-                'exception' => get_class($e),
-                'message' => $e->getMessage(),
-            ]);
+        } else {
+            // Defensive read: if the DTO shape changes across deploys the
+            // file/redis cache can hold incompatible payloads. Treat any
+            // failure as a miss and re-fetch from AADE. Log the failure so
+            // a misbehaving cache driver doesn't silently hammer GSIS
+            // for every call — operators want to know.
+            try {
+                $cached = Cache::get($cacheKey);
+                if ($cached instanceof AadeRegistryRecord) {
+                    return $cached;
+                }
+            } catch (Throwable $e) {
+                Log::warning('AADE registry cache read failed — falling through to live fetch', [
+                    'company_id' => $this->tenant->getKey(),
+                    'afm' => $afm,
+                    'exception' => get_class($e),
+                    'message' => $e->getMessage(),
+                ]);
+            }
         }
 
         $record = $this->callRegistry($afm);

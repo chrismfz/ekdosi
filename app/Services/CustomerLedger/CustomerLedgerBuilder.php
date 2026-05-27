@@ -79,6 +79,52 @@ class CustomerLedgerBuilder
     }
 
     /**
+     * Build ONLY the filter-independent sections (stats + aging +
+     * yearly). Used by the Filament page to cache these across filter
+     * changes - they don't depend on year/type/paid filters, so
+     * recomputing them every time the operator clicks a filter is
+     * wasted CPU.
+     *
+     * @return array{stats: array, aging: array, yearly: array}
+     */
+    public function buildStatsBlock(Customer $customer): array
+    {
+        $invoices = $this->loadInvoices($customer);
+        $payments = $this->loadPayments($customer);
+
+        return [
+            'stats'  => $this->computeStats($invoices, $payments),
+            'aging'  => $this->computeAging($invoices, $payments),
+            'yearly' => $this->computeYearly($invoices, $payments),
+        ];
+    }
+
+    /**
+     * Build ONLY the chronological ledger array. Re-run on every
+     * filter change. Loads invoices + payments fresh each time so
+     * stat-block staleness across long-lived component sessions
+     * (operator leaves the page open, a new invoice gets issued in
+     * another tab) doesn't compound: the ledger is always current,
+     * the cached stats block is only as fresh as the page mount.
+     *
+     * @param  array{year?: ?int, invoice_type_id?: ?int, paid_status?: ?string}  $filters
+     * @return array<int, array<string, mixed>>
+     */
+    public function buildLedgerOnly(Customer $customer, array $filters = []): array
+    {
+        $invoices = $this->loadInvoices($customer);
+        $payments = $this->loadPayments($customer);
+
+        return $this->computeLedger(
+            $invoices,
+            $payments,
+            $filters['year'] ?? null,
+            $filters['invoice_type_id'] ?? null,
+            $filters['paid_status'] ?? null,
+        );
+    }
+
+    /**
      * Invoice rows with their payment_method.due_days resolved (so we
      * can apply the credit-term-only balance rule). Returns rows as
      * arrays for predictable shape - no Eloquent attribute mutators
@@ -139,7 +185,6 @@ class CustomerLedgerBuilder
         $creditTermGross = 0.0;
 
         $lastActivity = null;
-        $oldestUnpaidIssue = null;
 
         foreach ($invoices as $inv) {
             $issuedAt = Carbon::parse($inv->issued_at);
@@ -152,9 +197,6 @@ class CustomerLedgerBuilder
 
             if ($isCreditTerm) {
                 $creditTermGross += (float) $inv->gross_total;
-                if ($oldestUnpaidIssue === null || $issuedAt->lt($oldestUnpaidIssue)) {
-                    $oldestUnpaidIssue = $issuedAt;
-                }
             }
 
             if ($lastActivity === null || $issuedAt->gt($lastActivity)) {
@@ -177,11 +219,31 @@ class CustomerLedgerBuilder
 
         $balance = round($creditTermGross - $totalPaidLifetime, 2);
 
-        // Oldest unpaid is meaningful only if balance > 0. If fully
-        // settled, return null (UI shows "—").
-        $oldestUnpaidDays = ($balance > 0 && $oldestUnpaidIssue !== null)
-            ? (int) $oldestUnpaidIssue->diffInDays(now())
-            : null;
+        // Oldest unpaid is meaningful only if balance > 0. If settled,
+        // return null (UI shows "—"). Previous implementation picked
+        // MIN(issued_at) of ALL credit-term invoices regardless of
+        // paid state — surfacing decade-old already-paid invoices as
+        // "oldest unpaid" whenever a newer credit-term invoice was
+        // genuinely unpaid. Fix: FIFO walk applying total payments
+        // against credit-term invoices in issue order; the FIRST
+        // invoice with leftover unpaid is the genuine oldest-unpaid.
+        $oldestUnpaidDays = null;
+        if ($balance > 0) {
+            $remainingPaid = $totalPaidLifetime;
+            foreach ($invoices as $inv) {
+                $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
+                if (! $isCreditTerm) {
+                    continue;
+                }
+                $gross = (float) $inv->gross_total;
+                if ($remainingPaid >= $gross) {
+                    $remainingPaid -= $gross;
+                    continue;
+                }
+                $oldestUnpaidDays = (int) Carbon::parse($inv->issued_at)->diffInDays(now());
+                break;
+            }
+        }
 
         return [
             'ytd_net'                 => round($ytdNet, 2),

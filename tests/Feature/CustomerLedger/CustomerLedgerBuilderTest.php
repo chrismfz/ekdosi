@@ -240,6 +240,56 @@ class CustomerLedgerBuilderTest extends TestCase
         $this->assertNull($r->stats['oldest_unpaid_days']);
     }
 
+    public function test_oldest_unpaid_days_skips_already_paid_credit_term_invoices(): void
+    {
+        // Regression: previously the stat returned MIN(issued_at) of
+        // ALL credit-term invoices regardless of whether each was
+        // paid. So a 2018 credit invoice fully paid in 2018 would
+        // win over a 2026 unpaid invoice — showing operators an
+        // 8-year-old "oldest unpaid" ghost debt.
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2018-01-01', 1000.0, $this->credit);
+        $this->makePayment($c, '2018-01-10', 1000.0);   // settles 2018
+        $this->makeInvoice($c, now()->subDays(5)->toDateString(), 500.0, $this->credit);   // 5 days old, unpaid
+
+        $r = app(CustomerLedgerBuilder::class)->build($c);
+
+        $this->assertSame(500.0, $r->stats['balance']);
+        // Should be ~5 days, not ~8 years (2920 days).
+        $this->assertNotNull($r->stats['oldest_unpaid_days']);
+        $this->assertLessThanOrEqual(6, $r->stats['oldest_unpaid_days']);
+    }
+
+    public function test_buildStatsBlock_returns_only_filter_independent_sections(): void
+    {
+        // Locked-in contract: the optimization path (cache stats/aging/
+        // yearly across filter changes in the Filament page) depends
+        // on this method NOT including the chronological ledger.
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2026-05-01', 100.0, $this->credit);
+
+        $block = app(CustomerLedgerBuilder::class)->buildStatsBlock($c);
+
+        $this->assertArrayHasKey('stats', $block);
+        $this->assertArrayHasKey('aging', $block);
+        $this->assertArrayHasKey('yearly', $block);
+        $this->assertArrayNotHasKey('ledger', $block);
+    }
+
+    public function test_buildLedgerOnly_respects_filters(): void
+    {
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2025-06-01', 100.0, $this->credit);
+        $this->makeInvoice($c, '2026-03-01', 200.0, $this->credit);
+
+        $ledger = app(CustomerLedgerBuilder::class)->buildLedgerOnly($c, ['year' => 2026]);
+
+        $this->assertCount(1, $ledger);
+        $this->assertSame('2026-03-01', $ledger[0]['date']);
+        // Running balance still reflects full history (1000 + 200 carry).
+        $this->assertSame(300.0, $ledger[0]['running_balance']);
+    }
+
     public function test_different_tenants_do_not_mix(): void
     {
         $c1 = $this->makeCustomer();

@@ -95,11 +95,17 @@ class CustomerWhmcsLedger
 
         // Cross-reference: historic links (whmcs_invoice_log + invoices
         // join for the legacy_id). Single query to avoid N+1.
+        // Excludes soft-deleted invoices: if the operator (or ETL)
+        // trashed the historic invoice, surfacing it here as kind=historic
+        // would render a "filed historically" badge with a link that
+        // 404s in InvoiceResource (which respects SoftDeletes). Let it
+        // degrade to kind=absent instead.
         $historic = DB::table('whmcs_invoice_log')
             ->leftJoin('invoices', 'invoices.id', '=', 'whmcs_invoice_log.invoice_id')
             ->where('whmcs_invoice_log.company_id', $tenant->id)
             ->whereIn('whmcs_invoice_log.whmcs_invoice_id', $whmcsIds)
             ->whereNotNull('whmcs_invoice_log.invoice_id')
+            ->whereNull('invoices.deleted_at')
             ->select(
                 'whmcs_invoice_log.whmcs_invoice_id',
                 'whmcs_invoice_log.invoice_id',
