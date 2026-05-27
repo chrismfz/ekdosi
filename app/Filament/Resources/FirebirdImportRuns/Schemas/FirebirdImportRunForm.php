@@ -2,21 +2,30 @@
 
 namespace App\Filament\Resources\FirebirdImportRuns\Schemas;
 
+use Filament\Facades\Filament;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 /**
  * PR #30 — Upload form for a new Firebird import.
  *
  * Operator workflow:
- *   1. Pick the `.fbk` produced by `gbak` on the legacy box.
+ *   1. Pick the `.fbk` produced by `gbak` on the legacy box,
+ *      OR the already-restored `.fdb` directly.
  *   2. (Optional) tweak host / user — defaults match what the legacy
  *      app uses; password is the only thing the operator normally
  *      types.
  *   3. Submit → file streams to storage, run row created, queue
  *      job dispatched.
+ *
+ * For files that exceed php.ini's `upload_max_filesize`, the form
+ * surfaces an equivalent artisan command the operator can run on
+ * the host directly (bypassing Filament/Livewire upload entirely).
  *
  * After the job is dispatched, the operator lands on the View page
  * for the new run; it auto-refreshes (set on the Infolist) to show
@@ -26,13 +35,28 @@ class FirebirdImportRunForm
 {
     public static function configure(Schema $schema): Schema
     {
+        $uploadMax = ini_get('upload_max_filesize') ?: '?';
+        $postMax = ini_get('post_max_size') ?: '?';
+        $uploadMaxBytes = self::iniBytes($uploadMax);
+        $postMaxBytes = self::iniBytes($postMax);
+        $serverEffectiveLimit = min(
+            $uploadMaxBytes ?: PHP_INT_MAX,
+            $postMaxBytes ?: PHP_INT_MAX,
+        );
+        $serverEffectiveLimitMb = $serverEffectiveLimit !== PHP_INT_MAX
+            ? round($serverEffectiveLimit / 1024 / 1024, 0).' MB'
+            : 'unlimited';
+
+        $tenant = Filament::getTenant();
+        $companyIdForArtisan = $tenant?->getKey() ?? 'N';
+
         return $schema
             ->components([
                 Section::make('Backup file')
-                    ->description('Upload the `.fbk` produced by `gbak` on the legacy Firebird host. The file uploads privately to ekdosi\'s storage; it is deleted automatically after a successful import.')
+                    ->description('Upload either a `.fbk` (gbak backup — the job will restore it first) or a `.fdb` (already-restored Firebird DB — used directly). The file uploads privately to ekdosi\'s storage and is deleted automatically after a successful import.')
                     ->schema([
                         FileUpload::make('upload')
-                            ->label('Firebird backup (.fbk)')
+                            ->label('Firebird backup (.fbk) or database (.fdb)')
                             ->required()
                             ->disk('local')
                             ->directory('firebird-imports')
@@ -52,7 +76,19 @@ class FirebirdImportRunForm
                             // non-Firebird input with a clear stderr
                             // that we surface as the failure reason.
                             ->maxSize(500 * 1024)  // 500 MB
-                            ->helperText('Max 500 MB. Larger backups: SCP onto the host + use the artisan command.')
+                            ->helperText(new HtmlString(sprintf(
+                                '<strong>This server\'s PHP limits:</strong> '
+                                .'<code>upload_max_filesize=%s</code>, '
+                                .'<code>post_max_size=%s</code> → '
+                                .'effective max upload <strong>%s</strong>. '
+                                .'Filament-side cap is 500 MB; files larger '
+                                .'than the server limit will fail with a '
+                                .'generic "Error during upload" — fix php.ini '
+                                .'or use the artisan command below.',
+                                e($uploadMax),
+                                e($postMax),
+                                e($serverEffectiveLimitMb),
+                            )))
                             ->storeFileNamesIn('original_file_name')
                             ->columnSpanFull(),
                     ]),
@@ -84,6 +120,40 @@ class FirebirdImportRunForm
                             ->helperText('Held in-memory only — never stored on the run row. The legacy default is masterkey.')
                             ->columnSpanFull(),
                     ]),
+
+                Section::make('Or import via the artisan command')
+                    ->collapsible()
+                    ->collapsed()
+                    ->description('Use this when the file exceeds php.ini limits, or for scripting / cutover-day automation. Copy the line below, fill in your password, run on the ekdosi host.')
+                    ->schema([
+                        View::make('filament.import-artisan-snippet')
+                            ->viewData([
+                                'companyId' => $companyIdForArtisan,
+                            ]),
+                    ]),
             ]);
+    }
+
+    /**
+     * Convert a php.ini size string like "8M" / "1G" to bytes for
+     * comparison. Mirrors what PHP itself does for these directives
+     * (the `min()` of `upload_max_filesize` and `post_max_size` is
+     * the EFFECTIVE upload ceiling — `post_max_size` of 8M with
+     * `upload_max_filesize` of 100M still caps uploads at 8M).
+     */
+    private static function iniBytes(string $value): int
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '0' || $value === '-1') {
+            return 0;
+        }
+        $unit = strtolower($value[strlen($value) - 1]);
+        $num = (int) $value;
+        return match ($unit) {
+            'g'     => $num * 1024 * 1024 * 1024,
+            'm'     => $num * 1024 * 1024,
+            'k'     => $num * 1024,
+            default => $num,
+        };
     }
 }

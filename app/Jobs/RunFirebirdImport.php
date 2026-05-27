@@ -102,6 +102,22 @@ class RunFirebirdImport implements ShouldQueue
             throw new \RuntimeException("Uploaded file not found");
         }
 
+        // Two upload formats supported:
+        //   .fbk — gbak backup file. We run `gbak -r` to restore it
+        //          into a temp .fdb under sys_get_temp_dir(), then
+        //          drain that.
+        //   .fdb — already-restored Firebird database. Operators
+        //          who keep their legacy DB in .fdb form (or who
+        //          ran gbak -r themselves on the legacy host) can
+        //          upload directly. Skip the gbak step; use the
+        //          uploaded file in-place as the import source.
+        //
+        // Detection is by extension on the original filename, not
+        // MIME (both formats appear as image/x-atari-degas to
+        // Symfony's MIME guesser — see PR #30 review notes).
+        $extension = strtolower(pathinfo($run->file_name, PATHINFO_EXTENSION));
+        $usingDirectFdb = ($extension === 'fdb');
+
         // Temp .fdb + counts JSON live in the OS temp dir, NOT under
         // storage/. Reason: Laravel 11+ sets the `local` disk root to
         // storage/app/private/, while storage_path('app/...') points
@@ -116,31 +132,48 @@ class RunFirebirdImport implements ShouldQueue
         //     by default — so temp .fdb files would leak into
         //     nightly backups otherwise)
         $tempBase = rtrim(sys_get_temp_dir(), '/');
-        $tempFdb = "{$tempBase}/ekdosi-import-{$run->id}.fdb";
         $countsPath = "{$tempBase}/ekdosi-counts-{$run->id}.json";
-        @unlink($tempFdb);
         @unlink($countsPath);
 
-        $gbak = new Process([
-            'gbak', '-r',
-            $uploadedFullPath,
-            $tempFdb,
-            '-user', $run->fb_user,
-            '-password', $this->fbPassword,
-        ]);
-        $gbak->setTimeout(600);  // 10 minutes for the restore alone
+        // $fdbPathForArtisan is what we pass to --fdb=. For the
+        // .fbk path it's a temp file gbak produces; for the .fdb
+        // path it's the uploaded file itself. The cleanup at the
+        // end uses $tempFdbToDelete which is only set in the .fbk
+        // case — the .fdb path is owned by Storage::disk('local')
+        // and gets removed by the existing uploaded_path cleanup.
+        $tempFdbToDelete = null;
+        if ($usingDirectFdb) {
+            $fdbPathForArtisan = $uploadedFullPath;
+            Log::info('firebird-import.direct-fdb', [
+                'run_id'   => $run->id,
+                'fdb_path' => $fdbPathForArtisan,
+            ]);
+        } else {
+            $tempFdbToDelete = "{$tempBase}/ekdosi-import-{$run->id}.fdb";
+            $fdbPathForArtisan = $tempFdbToDelete;
+            @unlink($tempFdbToDelete);
 
-        try {
-            $gbak->run();
-        } catch (Throwable $e) {
-            $this->failRun($run, 'gbak', 'gbak execution failed: '.$e->getMessage());
-            throw $e;
-        }
+            $gbak = new Process([
+                'gbak', '-r',
+                $uploadedFullPath,
+                $tempFdbToDelete,
+                '-user', $run->fb_user,
+                '-password', $this->fbPassword,
+            ]);
+            $gbak->setTimeout(600);  // 10 minutes for the restore alone
 
-        if (! $gbak->isSuccessful()) {
-            $stderr = trim($gbak->getErrorOutput()) ?: trim($gbak->getOutput());
-            $this->failRun($run, 'gbak', "gbak exited {$gbak->getExitCode()}: {$stderr}");
-            throw new \RuntimeException("gbak failed: {$stderr}");
+            try {
+                $gbak->run();
+            } catch (Throwable $e) {
+                $this->failRun($run, 'gbak', 'gbak execution failed: '.$e->getMessage());
+                throw $e;
+            }
+
+            if (! $gbak->isSuccessful()) {
+                $stderr = trim($gbak->getErrorOutput()) ?: trim($gbak->getOutput());
+                $this->failRun($run, 'gbak', "gbak exited {$gbak->getExitCode()}: {$stderr}");
+                throw new \RuntimeException("gbak failed: {$stderr}");
+            }
         }
 
         // --- step 2: drain the .fdb into ekdosi via migrate:firebird ---
@@ -157,7 +190,9 @@ class RunFirebirdImport implements ShouldQueue
                 'migrate',
                 "pdo_firebird PHP extension is not loaded on the queue worker. Install it (apt: php-firebird from ondrej/php PPA, or build against firebird-dev) and restart the worker. See CLAUDE.md env-prep section.",
             );
-            @unlink($tempFdb);
+            if ($tempFdbToDelete) {
+                @unlink($tempFdbToDelete);
+            }
             throw new \RuntimeException('pdo_firebird extension not available');
         }
 
@@ -168,7 +203,7 @@ class RunFirebirdImport implements ShouldQueue
             base_path('artisan'),
             'migrate:firebird',
             '--company-id='.$run->company_id,
-            '--fdb='.$tempFdb,
+            '--fdb='.$fdbPathForArtisan,
             '--host='.$run->fb_host,
             '--fbuser='.$run->fb_user,
             '--fbpass='.$this->fbPassword,
@@ -180,14 +215,18 @@ class RunFirebirdImport implements ShouldQueue
             $artisan->run();
         } catch (Throwable $e) {
             $this->failRun($run, 'migrate', 'migrate:firebird execution failed: '.$e->getMessage());
-            @unlink($tempFdb);
+            if ($tempFdbToDelete) {
+                @unlink($tempFdbToDelete);
+            }
             throw $e;
         }
 
         if (! $artisan->isSuccessful()) {
             $stderr = trim($artisan->getErrorOutput()) ?: trim($artisan->getOutput());
             $this->failRun($run, 'migrate', "migrate:firebird exited {$artisan->getExitCode()}: {$stderr}");
-            @unlink($tempFdb);
+            if ($tempFdbToDelete) {
+                @unlink($tempFdbToDelete);
+            }
             throw new \RuntimeException("migrate:firebird failed: {$stderr}");
         }
 
@@ -210,7 +249,9 @@ class RunFirebirdImport implements ShouldQueue
         // resolution in this file — defends against a future env
         // flip of FILESYSTEM_DISK to e.g. s3, which would otherwise
         // silently fail to delete the local file.
-        @unlink($tempFdb);
+        if ($tempFdbToDelete) {
+            @unlink($tempFdbToDelete);
+        }
         if ($run->uploaded_path) {
             Storage::disk('local')->delete($run->uploaded_path);
             $run->update(['uploaded_path' => null]);

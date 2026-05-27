@@ -126,7 +126,26 @@ and 3-5; only step 2 (sandbox-test the ETL).
   pre-flights this and fails with a clear "extension not loaded"
   diagnostic before subprocessing).
 - `gbak` binary in PATH (firebird3.0-utils on Debian / firebird-classic
-  package — same source).
+  package — same source). Only needed for `.fbk` uploads; `.fdb`
+  uploads skip the restore step entirely (job uses the uploaded
+  file directly).
+- **PHP upload limits** in BOTH `php-fpm` AND `php-cli` configs (the
+  job uses cli for the artisan subprocess; the web request uses
+  fpm for the Livewire temp upload). The Filament-side `maxSize`
+  is the CLIENT-side limit only; PHP's defaults of
+  `upload_max_filesize=2M` + `post_max_size=8M` will silently
+  reject anything larger with Livewire's generic
+  "data.upload.UUID failed to upload" error. Bump to comfortably
+  above your largest expected `.fbk`/`.fdb`:
+  ```ini
+  ; /etc/php/8.4/fpm/php.ini  AND  /etc/php/8.4/cli/php.ini
+  upload_max_filesize = 600M
+  post_max_size = 700M       ; must be ≥ upload_max_filesize
+  memory_limit = 768M        ; should be > post_max_size
+  ```
+  Then `systemctl restart php8.4-fpm`. Symptom of forgetting:
+  Filament's drop-zone shows "Error during upload" with a generic
+  Livewire 4xx response.
 - `sys_get_temp_dir()` (typically `/tmp`) must have enough free space
   for the restored `.fdb` (1.5-2× the `.fbk` size; gbak inflates).
   On **containerized deploys where `/tmp` is tmpfs (RAM-backed)** —
