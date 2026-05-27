@@ -559,6 +559,75 @@ Expected `ps` output: one master as root, several `pool ekdosi`
 workers as `ekdosi`. If you see workers running as `apache`, the
 disable+restart in this section didn't take — re-run.
 
+### 9b. PHP upload limits — both fpm AND cli
+
+PHP's defaults (`upload_max_filesize=2M`, `post_max_size=8M`) are far
+too low for the **Firebird import UI** (`/admin/.../firebird-import`),
+which lets operators upload a `.fbk` or `.fdb` directly through the
+browser. Real ekdosi backups range from ~50 MB to a few hundred MB.
+
+You must bump **both** the fpm config (the web request hits fpm) AND
+the cli config (the queue worker runs the artisan subprocess that
+does the actual import). Remi's PHP 8.4 puts them at:
+
+```bash
+sudo tee /etc/php.d/99-ekdosi-uploads.ini >/dev/null <<'INI'
+; Upload limits for the Firebird import UI.
+; Must be set in BOTH fpm and cli SAPI — Remi's php.d/ is shared,
+; so this single drop-in covers both.
+upload_max_filesize = 600M
+post_max_size       = 700M      ; must be ≥ upload_max_filesize
+memory_limit        = 768M      ; must be > post_max_size
+
+; The import job can take a while on a large .fbk (gbak restore +
+; transactional inserts). Don't let fpm kill it mid-flight.
+max_execution_time  = 600
+max_input_time      = 600
+INI
+
+sudo systemctl restart php-fpm
+```
+
+**Verify both SAPIs picked it up:**
+
+```bash
+# fpm side — what the web request sees
+sudo -u ekdosi php-fpm -i 2>/dev/null | grep -E '^(upload_max_filesize|post_max_size|memory_limit)' \
+    || php --ri core | grep -E '(upload_max_filesize|post_max_size|memory_limit)'
+
+# cli side — what the queue worker sees when it shells out to artisan
+php -r 'echo "upload_max_filesize=", ini_get("upload_max_filesize"),
+        "\npost_max_size=", ini_get("post_max_size"),
+        "\nmemory_limit=", ini_get("memory_limit"), "\n";'
+```
+
+Both should show your new values. **The import form's helperText
+reads PHP's live `upload_max_filesize` / `post_max_size`** and
+displays the effective ceiling to the operator — once this is bumped,
+the form will show the new limit and stop suggesting the artisan
+workaround for normal-sized backups.
+
+**Don't forget** to bump nginx's `client_max_body_size` to match
+(§10a — already set to `700M` in the template). Nginx rejects the
+request before PHP ever sees it if the body exceeds its own limit.
+
+**Symptom of getting this wrong:** the Filament drop-zone shows a
+generic "Error during upload — tap to retry" and the Livewire request
+returns 4xx with a body like
+`The data.upload.<uuid> failed to upload.` No useful server-side log
+entry — PHP rejects the request before Laravel boots, so it never
+hits `storage/logs/laravel.log`. If you see this and the
+helperText still shows `upload_max_filesize=2M`, you missed this step.
+
+**`/tmp` sizing**: the import job restores `.fbk` to `.fdb` via
+`gbak` (skipped for direct `.fdb` uploads), and the restored `.fdb`
+lands in `sys_get_temp_dir()` (`/tmp` by default). Restored size is
+1.5-2× the `.fbk`. If `/tmp` is tmpfs on this box
+(`findmnt /tmp` shows `tmpfs`), a 500 MB `.fbk` can OOM the host.
+Either give the box enough RAM, or set `TMPDIR=/var/tmp` in
+`/etc/systemd/system/ekdosi-queue.service` (§11) and the same in the
+fpm pool's environment so the upload-temp + restore land on disk.
+
 ## 10. Web server — nginx (recommended)
 
 ### 10a. HTTP-only config first
@@ -581,7 +650,10 @@ server {
     root /var/www/ekdosi/public;
     index index.php;
 
-    client_max_body_size 32M;        # invoice PDFs / scanned attachments
+    client_max_body_size 700M;       # must match php.ini post_max_size (§9b);
+                                     # Firebird .fbk/.fdb uploads in the import UI
+                                     # are the largest thing this server takes.
+                                     # If you raise post_max_size, raise this too.
 
     add_header X-Frame-Options "SAMEORIGIN";
     add_header X-Content-Type-Options "nosniff";
