@@ -731,7 +731,10 @@ class MigrateFromFirebird extends Command
                     'request'       => $this->fld($r, 'REQUEST'),
                     'response'      => $this->fld($r, 'RESPONSE'),
                     'mark_date'     => $r['DATE'],
-                    'mark_time'     => $r['TIME'],
+                    // pdo_firebird may return TIME as either a pure
+                    // "HH:MM:SS" or a full "Y-m-d H:i:s" string depending
+                    // on driver build; extractTime() normalises both.
+                    'mark_time'     => $this->extractTime($r['TIME']),
                     'updated_at'    => now(),
                 ],
                 ['created_at' => $this->mergeDateTime($r['DATE'], $r['TIME']) ?? now()],
@@ -792,7 +795,24 @@ class MigrateFromFirebird extends Command
             return null;
         }
         $d = substr((string) $date, 0, 10);
-        $t = $time ? substr((string) $time, 0, 8) : '00:00:00';
+        $t = $this->extractTime($time);
         return "{$d} {$t}";
+    }
+
+    /**
+     * Extract HH:MM:SS from a value that pdo_firebird may return as either
+     * a pure TIME string ("15:50:42") or a full datetime string
+     * ("2021-05-31 15:50:42") depending on the driver build. Anything that
+     * doesnt contain an HH:MM:SS token degrades to "00:00:00".
+     */
+    private function extractTime($time): string
+    {
+        if ($time === null || $time === '') {
+            return '00:00:00';
+        }
+        if (preg_match('/(\d{2}:\d{2}:\d{2})/', (string) $time, $m)) {
+            return $m[1];
+        }
+        return '00:00:00';
     }
 }
