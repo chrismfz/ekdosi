@@ -141,12 +141,20 @@ class WhmcsClient
      */
     public function getPendingInvoices(int $limit = 100, int $offset = 0): array
     {
+        // order=desc: unfiled rows in a long-running tenant are
+        // overwhelmingly the most RECENT (legacy prepare_for_ekdosi
+        // plugin sets invoiced=0 on a new paid invoice; legacy ekdosi
+        // bumps it to a MARK once filed). A tenant with 10K+ historical
+        // invoices needs the most recent N on page 1, NOT the oldest.
+        // The previous `order=asc` would have made operators page
+        // through hundreds of pages of 2007-era filed rows just to
+        // see anything modern.
         $resp = $this->call('GetInvoices', [
             'status'    => 'Paid',
             'limit'     => $limit,
             'offset'    => $offset,
             'orderby'   => 'date',
-            'order'     => 'asc',
+            'order'     => 'desc',
         ]);
 
         // GetInvoices returns either:
