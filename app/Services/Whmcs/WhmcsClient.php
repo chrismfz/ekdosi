@@ -47,10 +47,38 @@ class WhmcsClient
      * Conservative HTTP timeout for sync calls. The artisan pull
      * command may iterate over hundreds of invoices per tenant; if
      * one tenant's WHMCS is slow we don't want to wedge the whole
-     * cycle. 20s is enough for a busy WHMCS install + slow upstream
-     * but short enough to fail visibly.
+     * cycle. 20s response budget + 5s connect budget = 25s worst-
+     * case wedge on a network blackhole. Short enough to fail
+     * visibly to a cron wrapper, long enough to tolerate a slow
+     * upstream during a normal request.
      */
     private const HTTP_TIMEOUT_SECONDS = 20;
+
+    private const HTTP_CONNECT_TIMEOUT_SECONDS = 5;
+
+    /**
+     * Substring fragments (lower-cased) that mark a response as an
+     * AUTH failure rather than a generic protocol error. WHMCS uses
+     * several distinct messages depending on what went wrong:
+     *   - "Invalid Username or Password" — bad identifier/secret pair
+     *     (the most common case operators hit)
+     *   - "Invalid Permissions" — credentials valid but role lacks
+     *     the requested action
+     *   - "Invalid IP" — IP allowlist on the API credential rejects
+     *     our source IP
+     *   - "Authentication Failed" — generic catch-all from older WHMCS
+     *   - "Invalid Credentials" — newer phrasing on some 8.x versions
+     * Per WHMCS dev docs (https://developers.whmcs.com/api/error-handling/).
+     * Sourced from real-world tenant feedback + WHMCS source. Extend
+     * here when a new variant surfaces.
+     */
+    private const AUTH_ERROR_FRAGMENTS = [
+        'invalid username',
+        'invalid permissions',
+        'invalid ip',
+        'authentication failed',
+        'invalid credentials',
+    ];
 
     public function __construct(
         private readonly HttpFactory $http,
@@ -223,6 +251,7 @@ class WhmcsClient
             /** @var Response $response */
             $response = $this->http
                 ->timeout(self::HTTP_TIMEOUT_SECONDS)
+                ->connectTimeout(self::HTTP_CONNECT_TIMEOUT_SECONDS)
                 ->asForm()
                 ->post($this->apiUrl, $body);
         } catch (ConnectionException $e) {
@@ -259,11 +288,14 @@ class WhmcsClient
         $message = (string) ($payload['message'] ?? 'unknown WHMCS error');
 
         // Auth rejections have specific message text. Distinguish
-        // so the UI can offer the right remediation.
-        if (str_contains(strtolower($message), 'invalid ip')
-            || str_contains(strtolower($message), 'authentication failed')
-            || str_contains(strtolower($message), 'invalid credentials')) {
-            throw new WhmcsAuthenticationFailed("WHMCS auth failed: {$message}");
+        // so the UI can offer the right remediation. Fragment list
+        // is the AUTH_ERROR_FRAGMENTS constant; covers the variants
+        // WHMCS uses across versions + IP allowlist + permissions.
+        $messageLower = strtolower($message);
+        foreach (self::AUTH_ERROR_FRAGMENTS as $fragment) {
+            if (str_contains($messageLower, $fragment)) {
+                throw new WhmcsAuthenticationFailed("WHMCS auth failed: {$message}");
+            }
         }
 
         throw new WhmcsApiException("WHMCS error on {$action}: {$message}");

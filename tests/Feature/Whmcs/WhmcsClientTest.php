@@ -9,6 +9,7 @@ use App\Services\Whmcs\WhmcsClient;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -58,6 +59,31 @@ class WhmcsClientTest extends TestCase
         });
     }
 
+    /**
+     * Lock the WIRE format. The body MUST be form-encoded — WHMCS's
+     * /includes/api.php rejects JSON-bodied requests. Without this
+     * test, a future refactor that drops asForm() (e.g. switching
+     * the global default Http settings) would 100% break production
+     * but all other tests would still pass (`$request->data()`
+     * normalises both encodings, verified at vendor/laravel/.../
+     * Http/Client/Request.php).
+     */
+    public function test_request_uses_form_encoded_body_not_json(): void
+    {
+        Http::fake([
+            'example.gr/*' => Http::response(['result' => 'success'], 200),
+        ]);
+
+        $this->makeClient()->testConnection();
+
+        Http::assertSent(function ($request) {
+            // asForm() sets exactly this header — verified at
+            // vendor/laravel/framework/.../Http/Client/PendingRequest.php
+            $contentType = $request->header('Content-Type')[0] ?? '';
+            return str_contains($contentType, 'application/x-www-form-urlencoded');
+        });
+    }
+
     public function test_test_connection_returns_unknown_when_version_field_missing(): void
     {
         Http::fake([
@@ -91,6 +117,48 @@ class WhmcsClientTest extends TestCase
 
         $this->expectException(WhmcsAuthenticationFailed::class);
         $this->makeClient()->testConnection();
+    }
+
+    /**
+     * WHMCS's most common bad-credential message is "Invalid Username
+     * or Password" — per official dev docs. Pre-PR-28-review the
+     * client matched on "invalid ip", "authentication failed",
+     * "invalid credentials" but missed the actual production
+     * variant. Verifying every fragment in AUTH_ERROR_FRAGMENTS
+     * routes to WhmcsAuthenticationFailed (not generic
+     * WhmcsApiException) so the UI can surface "credentials
+     * rejected" rather than the unhelpful "WHMCS error".
+     *
+     */
+    #[DataProvider('authErrorMessageProvider')]
+    public function test_auth_error_fragments_all_route_to_authentication_failed(string $message): void
+    {
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result'  => 'error',
+                'message' => $message,
+            ], 200),
+        ]);
+
+        $this->expectException(WhmcsAuthenticationFailed::class);
+        $this->makeClient()->testConnection();
+    }
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function authErrorMessageProvider(): iterable
+    {
+        // Every variant WHMCS uses, per dev docs + production
+        // tenant feedback. Adding a new message to
+        // AUTH_ERROR_FRAGMENTS must come with a row here.
+        yield 'invalid_username_or_password' => ['Invalid Username or Password'];
+        yield 'invalid_permissions'          => ['Invalid Permissions'];
+        yield 'invalid_ip'                   => ['Invalid IP'];
+        yield 'authentication_failed'        => ['Authentication Failed'];
+        yield 'invalid_credentials'          => ['Invalid Credentials'];
+        // Case-insensitive match — lowercase variants must also work
+        yield 'lowercase_invalid_username'   => ['invalid username or password'];
     }
 
     public function test_generic_whmcs_error_maps_to_base_exception(): void

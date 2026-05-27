@@ -42,11 +42,14 @@ class WhmcsPullPendingInvoicesCommandTest extends TestCase
             ->assertExitCode(\Symfony\Component\Console\Command\Command::INVALID);
     }
 
-    public function test_exits_2_when_tenant_slug_unknown(): void
+    public function test_exits_6_when_tenant_slug_unknown(): void
     {
+        // 6 (not 2) so cron wrappers can distinguish "command misuse"
+        // (Command::INVALID = 2) from "tenant doesn't exist" (6 —
+        // typically a data issue, possibly tenant deleted).
         $this->artisan('whmcs:pull-pending-invoices', ['--tenant' => 'does-not-exist'])
             ->expectsOutputToContain("No tenant with slug='does-not-exist'")
-            ->assertExitCode(2);
+            ->assertExitCode(6);
     }
 
     public function test_exits_3_when_tenant_has_no_whmcs_configured(): void

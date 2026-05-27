@@ -42,34 +42,34 @@ class EditCustomer extends EditRecord
                 ->modalDescription('Search WHMCS by name, email, or company. Pick a candidate to set customers.whmcs_client_id, which Stage B (PR #29) will use to route pulled invoices.')
                 ->modalSubmitActionLabel('Save link')
                 ->schema(fn (Customer $record) => [
-                    TextInput::make('search')
-                        ->label('Search WHMCS')
-                        ->placeholder('Name, email, or company name')
-                        ->live(onBlur: true)
-                        ->helperText('Hit Tab to search. Results appear below.'),
-
+                    // Filament-correct shape for "live-fetch options
+                    // from an external source": searchable Select
+                    // with getSearchResultsUsing(). Filament fires
+                    // the closure ONLY when the operator types in the
+                    // Select's built-in search box, debounced
+                    // automatically. Returns a [id => label] map.
+                    // The previous shape (->options(closure) reading
+                    // an external TextInput) re-fired on every form
+                    // re-render — easily 4-6 WHMCS API calls per
+                    // operator interaction.
                     Select::make('whmcs_client_id')
-                        ->label('Picked candidate')
-                        ->options(function (callable $get) use ($record): array {
-                            $needle = trim((string) $get('search'));
+                        ->label('Search WHMCS')
+                        ->searchable()
+                        ->getSearchResultsUsing(function (string $search) use ($record): array {
+                            $needle = trim($search);
                             if ($needle === '') {
-                                // Default to the existing link if any,
-                                // so an operator opening the modal
-                                // sees the current value preselected.
-                                return $record->whmcs_client_id
-                                    ? [$record->whmcs_client_id => '#'.$record->whmcs_client_id.' (current link)']
-                                    : [];
+                                return [];
                             }
                             try {
                                 $client = app(WhmcsClientFactory::class)->for($record->company);
                                 $hits = $client->searchClients($needle, limit: 25);
                             } catch (WhmcsApiException $e) {
-                                // Surfacing the error here would
-                                // require Filament livewire wiring;
-                                // simplest is to return an empty list
-                                // + log + let the operator click
-                                // Test Connection on the Company
-                                // form to diagnose.
+                                // Live search can't easily surface an
+                                // exception in the dropdown. Empty
+                                // result + the operator clicks Test
+                                // Connection on the Company form to
+                                // diagnose. Better than a broken
+                                // modal that won't dismiss.
                                 return [];
                             }
 
@@ -89,9 +89,32 @@ class EditCustomer extends EditRecord
                             }
                             return $options;
                         })
-                        ->default(fn () => $record->whmcs_client_id)
-                        ->searchable()
-                        ->helperText('Pick a row, or leave blank + click Save to UNLINK.'),
+                        ->getOptionLabelUsing(function ($value) use ($record): ?string {
+                            // Called when the modal first renders and
+                            // the Select needs to display the CURRENT
+                            // value. Hit the WHMCS API once to fetch
+                            // a sensible label. If WHMCS is
+                            // unavailable, fall back to the bare id.
+                            if (! $value) {
+                                return null;
+                            }
+                            try {
+                                $client = app(WhmcsClientFactory::class)->for($record->company);
+                                $hit = $client->getClient((int) $value);
+                                if ($hit === null) {
+                                    return '#'.$value.' (not found in WHMCS)';
+                                }
+                                $name = trim((string) ($hit['companyname'] ?? ''));
+                                if ($name === '') {
+                                    $name = trim(($hit['firstname'] ?? '').' '.($hit['lastname'] ?? ''));
+                                }
+                                return '#'.$value.' — '.($name ?: '(no name)');
+                            } catch (WhmcsApiException) {
+                                return '#'.$value.' (WHMCS unreachable)';
+                            }
+                        })
+                        ->default($record->whmcs_client_id)
+                        ->helperText('Type to search WHMCS by name, email, or company. Pick a candidate, or leave blank + Save to UNLINK.'),
 
                     TextInput::make('manual_id')
                         ->label('Or set the ID manually')

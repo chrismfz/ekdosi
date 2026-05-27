@@ -138,6 +138,83 @@ class WhmcsCustomerMatcherTest extends TestCase
         $this->assertSame('name', $match->reason);
     }
 
+    /**
+     * Raw GetInvoices rows have `id` = INVOICE id and `userid` = CLIENT
+     * id (verified at vendor WHMCS API docs). Matcher must prefer
+     * userid for the direct-link tier — otherwise it would look up
+     * customers.whmcs_client_id = <invoice id> and miss every match.
+     * Pre-PR-28-review: this was reversed and only worked because the
+     * dry-run command pre-massaged the payload.
+     */
+    public function test_direct_link_works_on_raw_get_invoices_row(): void
+    {
+        $linked = Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Linked',
+            'whmcs_client_id' => 555,
+        ]);
+
+        // Shape of a real WHMCS GetInvoices row: `id` is the invoice
+        // id (9876), `userid` is the client id (555). The matcher
+        // must follow `userid`, not `id`.
+        $match = app(WhmcsCustomerMatcher::class)->match($this->tenant, [
+            'id'     => 9876,   // invoice id — NOT the client id
+            'userid' => 555,    // actual client id
+        ]);
+
+        $this->assertTrue($match->isMatched());
+        $this->assertSame($linked->id, $match->customer->id);
+        $this->assertSame('linked', $match->reason);
+        $this->assertSame(555, $match->whmcsClientId);
+    }
+
+    /**
+     * Greek customer name in mixed case — the regression case the
+     * blind reviewer flagged. SQL LOWER() in SQLite doesn't fold
+     * "ΑΚΜΕ" to "ακμε", while MariaDB's utf8mb4_unicode_ci does.
+     * Matcher now uses MariaDB's native CI collation + a PHP-side
+     * mb_strtolower fallback for SQLite, so the test works on both
+     * engines AND production behaves correctly with real Greek names.
+     */
+    public function test_name_match_handles_greek_case_folding(): void
+    {
+        // Stored uppercase Greek
+        Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'ΑΚΜΕ ΑΕ',
+        ]);
+
+        // WHMCS-side mixed case
+        $match = app(WhmcsCustomerMatcher::class)->match($this->tenant, [
+            'id' => 0,
+            'companyname' => 'Ακμε ΑΕ',
+        ]);
+
+        $this->assertTrue($match->isMatched(),
+            'Greek-name case-insensitive match must work across SQLite + MariaDB.');
+        $this->assertSame('name', $match->reason);
+    }
+
+    public function test_email_match_handles_greek_case_folding(): void
+    {
+        // Realistic shape: stored email lowercase but operator typed
+        // mixed Greek somewhere in the local-part of a Greek mailbox.
+        Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Greek email',
+            'email' => 'ΧΡήστος@example.gr',  // mixed case Greek
+        ]);
+
+        $match = app(WhmcsCustomerMatcher::class)->match($this->tenant, [
+            'id' => 0,
+            'email' => 'χρήστος@example.gr',  // all lowercase Greek
+        ]);
+
+        $this->assertTrue($match->isMatched(),
+            'Greek-letter case-folding in emails must work across SQLite + MariaDB.');
+        $this->assertSame('email', $match->reason);
+    }
+
     public function test_unmatched_returns_null_customer_with_unmatched_reason(): void
     {
         $match = app(WhmcsCustomerMatcher::class)->match($this->tenant, [

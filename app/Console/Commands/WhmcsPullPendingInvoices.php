@@ -25,14 +25,19 @@ use Illuminate\Console\Command;
  * Exit codes (so a cron wrapper can route alerts):
  *   0  success — preview rendered (may include unmatched rows)
  *   1  generic error (parse, DB, unexpected throw)
- *   2  tenant not found
+ *   2  invalid usage (Command::INVALID — missing required option)
  *   3  WHMCS not configured for tenant
  *   4  WHMCS authentication failed
  *   5  WHMCS unreachable
+ *   6  unknown tenant slug (data error — tenant deleted / wrong slug)
  *
  * The differentiated exit codes let the scheduled wrapper distinguish
  * "broken config, page operator" from "transient network blip, retry
- * next tick" — Stage B builds on this.
+ * next tick" — Stage B builds on this. Code 6 deliberately avoids
+ * colliding with Symfony's Command::INVALID (2): a wrapper getting 2
+ * means "you invoked the command wrong"; a wrapper getting 6 means
+ * "the tenant slug you asked for no longer exists" — two different
+ * runbooks.
  */
 class WhmcsPullPendingInvoices extends Command
 {
@@ -56,7 +61,7 @@ class WhmcsPullPendingInvoices extends Command
         $tenant = Company::query()->where('slug', $slug)->first();
         if ($tenant === null) {
             $this->error("No tenant with slug='{$slug}'.");
-            return 2;
+            return 6;
         }
 
         $this->info("Tenant: {$tenant->name} (slug={$tenant->slug})");

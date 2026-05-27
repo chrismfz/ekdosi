@@ -4,6 +4,7 @@ namespace App\Services\Whmcs;
 
 use App\Models\Company;
 use App\Models\Customer;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Match a WHMCS client (or pending-invoice row carrying client fields)
@@ -62,7 +63,15 @@ class WhmcsCustomerMatcher
     public function match(Company $tenant, array $whmcsClient): MatchResult
     {
         // 1. Direct link (operator already mapped). Trust it.
-        $whmcsClientId = (int) ($whmcsClient['id'] ?? $whmcsClient['userid'] ?? 0);
+        // Prefer `userid` over `id`: for a raw GetInvoices row, `id`
+        // is the INVOICE id and `userid` is the client id. For a
+        // GetClientsDetails row, only `id` is the client id. Reversing
+        // the priority makes the matcher safe with raw rows from
+        // either endpoint — without requiring callers to pre-massage
+        // the payload (the prior shape silently picked invoice-id
+        // as client-id for raw GetInvoices rows → every match
+        // returned `unmatched`).
+        $whmcsClientId = (int) ($whmcsClient['userid'] ?? $whmcsClient['id'] ?? 0);
         if ($whmcsClientId > 0) {
             $direct = Customer::query()
                 ->where('company_id', $tenant->getKey())
@@ -89,16 +98,26 @@ class WhmcsCustomerMatcher
             }
         }
 
-        // 3. Email exact match (case-insensitive). LOWER() comparison
-        // because mariadb's collation isn't reliably case-insensitive
-        // for emails (utf8mb4_unicode_ci treats some address-like
-        // sequences inconsistently).
+        // 3. Email exact match (case-insensitive). MariaDB's default
+        // utf8mb4_unicode_ci collation case-folds ASCII reliably, so
+        // plain `where('email', ...)` IS case-insensitive in
+        // production. SQLite (the test env) is case-sensitive by
+        // default, so we layer a PHP-side fallback that uses
+        // mb_strtolower (mbstring-aware, unlike SQL LOWER()).
+        //
+        // Previously this used whereRaw('LOWER(email) = ?', ...) —
+        // which works for ASCII on both engines but diverges for
+        // Greek (verified: LOWER('ΑΚΜΕ') is 'ΑΚΜΕ' under SQLite's
+        // built-in, 'ακμε' under MariaDB utf8mb4_unicode_ci). Tests
+        // were passing for "acme@example.com" but a real Greek
+        // operator email would miss in test env yet match in prod —
+        // exactly the divergence test isolation is supposed to
+        // prevent.
         $email = trim((string) ($whmcsClient['email'] ?? ''));
         if ($email !== '') {
-            $byEmail = Customer::query()
-                ->where('company_id', $tenant->getKey())
-                ->whereRaw('LOWER(email) = ?', [strtolower($email)])
-                ->first();
+            $byEmail = $this->findCustomerByCaseInsensitiveString(
+                $tenant, 'email', $email,
+            );
             if ($byEmail !== null) {
                 return new MatchResult($byEmail, 'email', $whmcsClientId);
             }
@@ -117,16 +136,59 @@ class WhmcsCustomerMatcher
         }
 
         if ($candidateName !== '') {
-            $byName = Customer::query()
-                ->where('company_id', $tenant->getKey())
-                ->whereRaw('LOWER(name) = ?', [strtolower($candidateName)])
-                ->first();
+            // Same MariaDB-collation-aware comparison as email above.
+            // Critical here for Greek customer names ("Ακμε ΑΕ" vs
+            // "ΑΚΜΕ ΑΕ") — SQL LOWER() doesn't fold non-ASCII bytes
+            // in SQLite, mb_strtolower does in PHP.
+            $byName = $this->findCustomerByCaseInsensitiveString(
+                $tenant, 'name', $candidateName,
+            );
             if ($byName !== null) {
                 return new MatchResult($byName, 'name', $whmcsClientId);
             }
         }
 
         return new MatchResult(null, 'unmatched', $whmcsClientId);
+    }
+
+    /**
+     * Find a customer for the given tenant where `$column` matches
+     * `$needle` case-insensitively, working correctly across
+     * MariaDB (default utf8mb4_unicode_ci collation does case-folding
+     * including Greek) AND SQLite (default case-sensitive — we
+     * lowercase both sides via mbstring as a fallback).
+     *
+     * Order:
+     *   1. Native `where()` — case-insensitive under MariaDB; fast
+     *      ASCII path under SQLite.
+     *   2. SQLite-only fallback: load and PHP-side compare with
+     *      mb_strtolower. Only paid when (a) we're on SQLite AND
+     *      (b) the native lookup missed. Cost is one customer scan
+     *      per tenant per call; bounded by tenant size; acceptable
+     *      for test-env compatibility.
+     */
+    private function findCustomerByCaseInsensitiveString(
+        Company $tenant,
+        string $column,
+        string $needle,
+    ): ?Customer {
+        $direct = Customer::query()
+            ->where('company_id', $tenant->getKey())
+            ->where($column, $needle)
+            ->first();
+        if ($direct !== null) {
+            return $direct;
+        }
+
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            return null;  // MariaDB's CI collation already handled it
+        }
+
+        $lower = mb_strtolower($needle);
+        return Customer::query()
+            ->where('company_id', $tenant->getKey())
+            ->get()
+            ->first(fn (Customer $c) => mb_strtolower((string) $c->{$column}) === $lower);
     }
 
     /**
