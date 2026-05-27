@@ -44,6 +44,11 @@ class Company extends Model
         'mail_smtp_encryption',
         'mail_subject_template',
         'mail_body_template',
+        // PR #28: WHMCS bridge — Stage A credentials
+        'whmcs_api_url',
+        'whmcs_api_identifier',
+        'whmcs_api_secret',
+        'whmcs_custom_field_map',
     ];
 
     protected function casts(): array
@@ -52,9 +57,50 @@ class Company extends Model
             'mydata_subscription_key' => 'encrypted',
             'gsis_password' => 'encrypted',
             'mail_smtp_password' => 'encrypted',
+            'whmcs_api_secret' => 'encrypted',
+            'whmcs_custom_field_map' => 'array',
             'auto_email_on_mydata_accept' => 'boolean',
             'mail_smtp_port' => 'integer',
         ];
+    }
+
+    /**
+     * True iff this tenant has WHMCS integration configured. Empty
+     * url disables the bridge entirely (UI hidden, scheduled pulls
+     * skip the tenant). Identifier + secret are checked here too
+     * because a half-configured tenant should NOT see the integration
+     * as "active" — both halves are required.
+     */
+    public function hasWhmcsIntegration(): bool
+    {
+        return ! empty($this->whmcs_api_url)
+            && ! empty($this->whmcs_api_identifier)
+            && ! empty($this->whmcs_api_secret);
+    }
+
+    /**
+     * Resolve a canonical WHMCS-bridge role name to the tenant's
+     * actual WHMCS custom field id. Returns null when the role
+     * isn't mapped (operator hasn't filled in this row's id) —
+     * callers should treat null as "this WHMCS install doesn't
+     * track that field; skip the lookup, don't throw."
+     *
+     * Canonical roles (per CLAUDE.md WHMCS-bridge prep notes):
+     *   vatno      — customer AFM
+     *   taxoffice  — ΔΟΥ
+     *   occupation — Δραστηριότητα
+     *   griniaris  — immediate-invoice flag (custom-field boolean)
+     *   toinvoice  — alternative company-name-to-bill
+     */
+    public function whmcsCustomFieldId(string $role): ?int
+    {
+        $map = $this->whmcs_custom_field_map ?? [];
+        if (! isset($map[$role])) {
+            return null;
+        }
+        // JSON ints come back as int; defensive cast in case operators
+        // typed "13" as a string in a hand-edited row.
+        return (int) $map[$role] ?: null;
     }
 
     /**
