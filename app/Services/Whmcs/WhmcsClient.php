@@ -69,11 +69,18 @@ class WhmcsClient
      *   - "Authentication Failed" — generic catch-all from older WHMCS
      *   - "Invalid Credentials" — newer phrasing on some 8.x versions
      * Per WHMCS dev docs (https://developers.whmcs.com/api/error-handling/).
-     * Sourced from real-world tenant feedback + WHMCS source. Extend
-     * here when a new variant surfaces.
+     *
+     * CRITICAL — every fragment here MUST be uniquely auth-context.
+     * A bare "invalid username" would match validation errors on
+     * write endpoints (e.g. AddClient returns "You provided an
+     * invalid username for the new client account" — a validation
+     * error, NOT an auth failure). Use the full phrase to avoid
+     * misrouting. Stage B (PR #29+) introduces UpdateInvoice and
+     * similar write endpoints where this matters; today PR #28 is
+     * read-only, so the discipline is preventive.
      */
     private const AUTH_ERROR_FRAGMENTS = [
-        'invalid username',
+        'invalid username or password',
         'invalid permissions',
         'invalid ip',
         'authentication failed',

@@ -90,28 +90,42 @@ class EditCustomer extends EditRecord
                             return $options;
                         })
                         ->getOptionLabelUsing(function ($value) use ($record): ?string {
-                            // Called when the modal first renders and
-                            // the Select needs to display the CURRENT
-                            // value. Hit the WHMCS API once to fetch
-                            // a sensible label. If WHMCS is
-                            // unavailable, fall back to the bare id.
+                            // Render a CHEAP LOCAL label here — no
+                            // WHMCS API call on label render. The
+                            // earlier shape (calling getClient() to
+                            // surface the WHMCS-side name) stalled
+                            // the modal's initial render on a
+                            // synchronous HTTP call for up to 25s on
+                            // a network blackhole. Verified at
+                            // vendor/filament/forms/resources/views/
+                            // components/select.blade.php:172 —
+                            // getOptionLabelUsing fires inline during
+                            // server-side render; Choices.js can
+                            // also re-fire it asynchronously on
+                            // selection switches, multiplying the
+                            // cost. The previous shape's claim to
+                            // "fix per-render API calls" was only
+                            // true for the search closure; this one
+                            // re-introduced the problem on the label
+                            // render path.
+                            //
+                            // Defense-in-depth: also enforce tenant
+                            // boundary on the closure since Filament
+                            // exposes it as a Livewire-callable
+                            // endpoint. A cross-tenant URL bug would
+                            // otherwise let this closure leak a
+                            // different tenant's customer detail.
+                            // (Currently moot since BelongsToTenant
+                            // scopes the Customer query above, but
+                            // worth the explicit check at every
+                            // closure that takes a captured model.)
                             if (! $value) {
                                 return null;
                             }
-                            try {
-                                $client = app(WhmcsClientFactory::class)->for($record->company);
-                                $hit = $client->getClient((int) $value);
-                                if ($hit === null) {
-                                    return '#'.$value.' (not found in WHMCS)';
-                                }
-                                $name = trim((string) ($hit['companyname'] ?? ''));
-                                if ($name === '') {
-                                    $name = trim(($hit['firstname'] ?? '').' '.($hit['lastname'] ?? ''));
-                                }
-                                return '#'.$value.' — '.($name ?: '(no name)');
-                            } catch (WhmcsApiException) {
-                                return '#'.$value.' (WHMCS unreachable)';
+                            if ($record->company_id !== \Filament\Facades\Filament::getTenant()?->getKey()) {
+                                return '#'.$value;
                             }
+                            return 'Currently linked to WHMCS client #'.$value;
                         })
                         ->default($record->whmcs_client_id)
                         ->helperText('Type to search WHMCS by name, email, or company. Pick a candidate, or leave blank + Save to UNLINK.'),

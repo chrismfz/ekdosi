@@ -158,7 +158,7 @@ class WhmcsClientTest extends TestCase
         yield 'authentication_failed'        => ['Authentication Failed'];
         yield 'invalid_credentials'          => ['Invalid Credentials'];
         // Case-insensitive match — lowercase variants must also work
-        yield 'lowercase_invalid_username'   => ['invalid username or password'];
+        yield 'lowercase_invalid_username_or_password' => ['invalid username or password'];
     }
 
     public function test_generic_whmcs_error_maps_to_base_exception(): void

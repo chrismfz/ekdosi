@@ -161,11 +161,15 @@ class WhmcsCustomerMatcher
      * Order:
      *   1. Native `where()` — case-insensitive under MariaDB; fast
      *      ASCII path under SQLite.
-     *   2. SQLite-only fallback: load and PHP-side compare with
-     *      mb_strtolower. Only paid when (a) we're on SQLite AND
-     *      (b) the native lookup missed. Cost is one customer scan
-     *      per tenant per call; bounded by tenant size; acceptable
-     *      for test-env compatibility.
+     *   2. SQLite-only fallback: load (id, target column) — NOT the
+     *      whole row — PHP-side compare with mb_strtolower, and
+     *      re-fetch the full row only on match. Worst-case memory
+     *      pressure is N pairs of (int, string) for tenant size N,
+     *      not N full Customer models (10× drop in memory pressure
+     *      per missed lookup). Cost is one scan per missed lookup
+     *      per tenant; bounded by tenant size; only paid in test env
+     *      OR if someone misconfigures DB_CONNECTION to sqlite in
+     *      a non-test context.
      */
     private function findCustomerByCaseInsensitiveString(
         Company $tenant,
@@ -184,11 +188,22 @@ class WhmcsCustomerMatcher
             return null;  // MariaDB's CI collation already handled it
         }
 
+        // Slim scan: pull only (id, $column) into memory, not the
+        // whole row. For a tenant with 10k customers, this is ~200KB
+        // of (int, short-string) pairs instead of ~2MB of fully-
+        // hydrated Customer models. Match in PHP via mb_strtolower
+        // (mbstring-aware, unlike SQLite's built-in LOWER which
+        // ignores bytes >127). Re-fetch the full row on match so
+        // callers downstream see a fully-hydrated Customer.
         $lower = mb_strtolower($needle);
-        return Customer::query()
+        $matchedId = Customer::query()
             ->where('company_id', $tenant->getKey())
+            ->select('id', $column)
             ->get()
-            ->first(fn (Customer $c) => mb_strtolower((string) $c->{$column}) === $lower);
+            ->first(fn ($row) => mb_strtolower((string) $row->{$column}) === $lower)
+            ?->id;
+
+        return $matchedId ? Customer::find($matchedId) : null;
     }
 
     /**

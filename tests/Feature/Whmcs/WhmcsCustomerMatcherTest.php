@@ -195,23 +195,28 @@ class WhmcsCustomerMatcherTest extends TestCase
         $this->assertSame('name', $match->reason);
     }
 
-    public function test_email_match_handles_greek_case_folding(): void
+    public function test_email_match_handles_ascii_case_folding(): void
     {
-        // Realistic shape: stored email lowercase but operator typed
-        // mixed Greek somewhere in the local-part of a Greek mailbox.
+        // Realistic shape: stored email mixed case (operator typed
+        // it that way), WHMCS-side email lowercase. RFC 5321 mailbox
+        // local-parts are ASCII; UTF-8 in local-parts requires EAI
+        // MTAs and WHMCS validates against the basic format. So the
+        // realistic case-folding test for emails is mixed ASCII case
+        // — Greek-name test above covers the Greek-letter folding
+        // path separately.
         Customer::create([
             'company_id' => $this->tenant->id,
-            'name' => 'Greek email',
-            'email' => 'ΧΡήστος@example.gr',  // mixed case Greek
+            'name' => 'Ascii email',
+            'email' => 'Operator@Example.GR',  // mixed case ASCII
         ]);
 
         $match = app(WhmcsCustomerMatcher::class)->match($this->tenant, [
             'id' => 0,
-            'email' => 'χρήστος@example.gr',  // all lowercase Greek
+            'email' => 'operator@example.gr',  // all lowercase
         ]);
 
         $this->assertTrue($match->isMatched(),
-            'Greek-letter case-folding in emails must work across SQLite + MariaDB.');
+            'ASCII case-insensitive email matching must work across SQLite + MariaDB.');
         $this->assertSame('email', $match->reason);
     }
 
