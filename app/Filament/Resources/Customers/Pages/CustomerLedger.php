@@ -6,6 +6,7 @@ use App\DTOs\AadeRegistryRecord;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
@@ -104,37 +105,35 @@ class CustomerLedger extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        $user = auth()->user();
-        if (! $user) {
+        if (! auth()->check()) {
             return false;
         }
 
+        // Filament/Shield may call canAccess() before tenant context
+        // and permission-team scope are fully hydrated. Keep this as a
+        // lightweight existence/scope preflight and let mount() run the
+        // definitive policy check once the page boots.
         $recordParam = $parameters['record'] ?? null;
-
-        // Filament may call canAccess() in contexts where the page
-        // route params are not hydrated yet. Don't hard-fail those
-        // preflight checks; mount() enforces tenant + policy again.
         if ($recordParam === null) {
             return true;
         }
 
-        $customer = null;
-        if ($recordParam instanceof Customer) {
-            $customer = $recordParam;
-        } elseif (is_scalar($recordParam) && (int) $recordParam > 0) {
-            $customer = Customer::query()->withTrashed()->find((int) $recordParam);
-        }
+        $customer = $recordParam instanceof Customer
+            ? $recordParam
+            : (is_scalar($recordParam) && (int) $recordParam > 0
+                ? Customer::query()->withTrashed()->find((int) $recordParam)
+                : null);
 
         if (! $customer) {
             return false;
         }
 
-        $tenantId = \Filament\Facades\Filament::getTenant()?->getKey();
-        if ($tenantId !== null && (int) $customer->company_id !== (int) $tenantId) {
-            return false;
+        $tenantParam = $parameters['tenant'] ?? null;
+        if (is_object($tenantParam) && method_exists($tenantParam, 'getKey')) {
+            return (int) $customer->company_id === (int) $tenantParam->getKey();
         }
 
-        return $user->can('view', $customer);
+        return true;
     }
 
     public function mount(int|string $record): void
@@ -154,7 +153,21 @@ class CustomerLedger extends Page
         // fall through to the policy check below — we don't want to
         // 404 every legitimate operator because tenant resolution
         // timing differs from EditRecord pages.
-        $currentTenantId = \Filament\Facades\Filament::getTenant()?->getKey();
+        $routeTenant = request()->route('tenant');
+        $resolvedTenantId = null;
+
+        if (is_object($routeTenant) && method_exists($routeTenant, 'getKey')) {
+            $resolvedTenantId = (int) $routeTenant->getKey();
+        } elseif (is_scalar($routeTenant) && $routeTenant !== '') {
+            $resolvedTenantId = (int) Company::query()
+                ->where('slug', (string) $routeTenant)
+                ->value('id');
+        }
+
+        // Fallback for environments where the route parameter is not yet
+        // available in this lifecycle stage.
+        $currentTenantId = $resolvedTenantId ?? \Filament\Facades\Filament::getTenant()?->getKey();
+
         if ($currentTenantId !== null) {
             abort_unless(
                 (int) $this->record->company_id === (int) $currentTenantId,
