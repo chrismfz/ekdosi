@@ -68,7 +68,18 @@ class FirebirdImportRunTest extends TestCase
         $this->assertNotContains('password', $columns);
     }
 
-    public function test_dispatch_does_not_serialize_password_into_the_row(): void
+    /**
+     * NOTE: This test covers "no DB COLUMN holds the password",
+     * NOT "the password never reaches any DB row". The database
+     * queue driver serializes the job's public properties into
+     * the `jobs.payload` column — so the password IS in that
+     * row's blob until the job completes (when the row is
+     * deleted) or fails (when it moves to `failed_jobs.payload`).
+     * That trade-off is documented in `RunFirebirdImport`'s
+     * docblock; this test enforces the narrower invariant that
+     * no DOMAIN column ever holds it.
+     */
+    public function test_dispatch_does_not_serialize_password_into_the_run_row(): void
     {
         Bus::fake();
 
@@ -215,6 +226,86 @@ class FirebirdImportRunTest extends TestCase
             $finishedAtBefore->format('Y-m-d H:i:s'),
             $run->finished_at->format('Y-m-d H:i:s'),
         );
+    }
+
+    /**
+     * Three-way match on `failed_step`: blind review caught that a
+     * worker that crashes BEFORE any status update (still 'uploaded')
+     * was being labeled as failed at 'migrate' — misleading because
+     * the migrate step never started. Locked here.
+     */
+    public function test_failed_hook_records_correct_step_for_each_status(): void
+    {
+        $base = [
+            'company_id'  => $this->tenant->id,
+            'file_name'   => 't.fbk',
+            'file_size'   => 1,
+            'file_sha256' => str_repeat('5', 64),
+            'fb_host'     => '127.0.0.1',
+            'fb_user'     => 'SYSDBA',
+        ];
+
+        foreach ([
+            FirebirdImportRun::STATUS_UPLOADED  => 'gbak',
+            FirebirdImportRun::STATUS_RESTORING => 'gbak',
+            FirebirdImportRun::STATUS_IMPORTING => 'migrate',
+        ] as $status => $expectedStep) {
+            $run = FirebirdImportRun::create($base + [
+                'status'      => $status,
+                'file_sha256' => str_repeat($status[0], 64),  // unique per row
+            ]);
+
+            $job = new RunFirebirdImport($run->id, 'pw');
+            $job->failed(new \RuntimeException('worker died'));
+
+            $run->refresh();
+            $this->assertSame(
+                $expectedStep,
+                $run->failed_step,
+                "Expected failed_step='{$expectedStep}' when row was in status='{$status}', got '{$run->failed_step}'"
+            );
+        }
+    }
+
+    /**
+     * The head-and-tail truncation for huge gbak error blobs. The
+     * original `mb_strimwidth($msg, 0, 4000)` lopped off the tail
+     * — which is exactly where gbak prints the "failed: <reason>"
+     * line that operators need. Locked behaviour: head + elision
+     * marker + tail, under the 30K cap.
+     */
+    public function test_huge_error_messages_are_head_tail_truncated(): void
+    {
+        $run = FirebirdImportRun::create([
+            'company_id'    => $this->tenant->id,
+            'file_name'     => 'corrupt.fbk',
+            'file_size'     => 100,
+            'file_sha256'   => str_repeat('6', 64),
+            'uploaded_path' => 'firebird-imports/c.fbk',
+            'status'        => FirebirdImportRun::STATUS_RESTORING,
+            'fb_host'       => '127.0.0.1',
+            'fb_user'       => 'SYSDBA',
+        ]);
+
+        // Simulate gbak vomiting 50KB of stderr with the actual
+        // error at the very end (typical gbak shape).
+        $noise = str_repeat('restoring page... ok\n', 2000);
+        $actualError = 'gbak: ERROR: invalid block type encountered';
+        $huge = $noise.$actualError;
+
+        $job = new RunFirebirdImport($run->id, 'pw');
+        $reflection = new \ReflectionMethod($job, 'failRun');
+        $reflection->setAccessible(true);
+        $reflection->invoke($job, $run, 'gbak', $huge);
+
+        $run->refresh();
+        $this->assertLessThanOrEqual(30_000, mb_strlen($run->error_message));
+        // The crucial bit — the actual error line MUST survive
+        // (it's at the tail of the input).
+        $this->assertStringContainsString($actualError, $run->error_message,
+            'Head+tail truncation should preserve the gbak failure line at the tail.');
+        $this->assertStringContainsString('chars elided', $run->error_message,
+            'Truncation marker should be visible so the operator knows content was cut.');
     }
 
     public function test_is_terminal_returns_true_only_for_completed_or_failed(): void

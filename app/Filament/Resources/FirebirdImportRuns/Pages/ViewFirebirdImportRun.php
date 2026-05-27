@@ -5,21 +5,17 @@ namespace App\Filament\Resources\FirebirdImportRuns\Pages;
 use App\Filament\Resources\FirebirdImportRuns\FirebirdImportRunResource;
 use Filament\Resources\Pages\ViewRecord;
 
+/**
+ * Read-only details page for one Firebird import run.
+ *
+ * Polling lives on the Status Section inside the Infolist
+ * (`->poll('3s')`), NOT on this page. The blind review of PR #30
+ * verified that Filament 5's ViewRecord has no native polling —
+ * `pollingInterval` is dead code on the page class. Schema
+ * Components do have `CanPoll`, so the operator-visible status
+ * badge auto-refreshes from there.
+ */
 class ViewFirebirdImportRun extends ViewRecord
 {
     protected static string $resource = FirebirdImportRunResource::class;
-
-    /**
-     * Poll while the run is still in flight so the operator sees
-     * status transitions live (uploaded → restoring → importing →
-     * completed). Once the row reaches a terminal state, the
-     * polling is wasteful but harmless — a future refinement could
-     * disable it dynamically.
-     */
-    protected ?string $pollingInterval = '3s';
-
-    public function getPollingInterval(): ?string
-    {
-        return $this->record->isTerminal() ? null : '3s';
-    }
 }

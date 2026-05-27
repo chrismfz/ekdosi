@@ -21,6 +21,17 @@ class FirebirdImportRunInfolist
             ->components([
                 Section::make('Status')
                     ->columns(3)
+                    // Poll the status section so the operator sees
+                    // restoring → importing → completed transitions
+                    // without F5. Filament 5's ViewRecord page itself
+                    // does NOT have a pollingInterval property
+                    // (verified at vendor — only Tables and Schema
+                    // Components carry the CanPoll trait), so the
+                    // poll must live on a Section inside the Infolist.
+                    // Returns null for terminal rows so the polling
+                    // stops once the run is done; no point hammering
+                    // the DB for a row that won't change.
+                    ->poll(fn ($record) => $record?->isTerminal() ? null : '3s')
                     ->schema([
                         TextEntry::make('status')
                             ->badge()

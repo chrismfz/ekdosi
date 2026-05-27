@@ -5,9 +5,7 @@ namespace App\Filament\Resources\FirebirdImportRuns\Schemas;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
-use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * PR #30 — Upload form for a new Firebird import.
@@ -40,7 +38,19 @@ class FirebirdImportRunForm
                             ->directory('firebird-imports')
                             ->visibility('private')
                             ->preserveFilenames()
-                            ->acceptedFileTypes(['application/octet-stream', 'application/x-firebird-backup'])
+                            // NO acceptedFileTypes constraint. The blind
+                            // review verified that real .fbk files are
+                            // detected as `image/x-atari-degas` by
+                            // Symfony's FileinfoMimeTypeGuesser (the
+                            // Firebird format apparently shares a magic
+                            // number with that retro raster). Both
+                            // `application/octet-stream` and any
+                            // `application/x-firebird-*` would reject
+                            // every real backup. Validation falls back
+                            // to: (a) the extension hint in the form
+                            // label, (b) gbak's own rejection of
+                            // non-Firebird input with a clear stderr
+                            // that we surface as the failure reason.
                             ->maxSize(500 * 1024)  // 500 MB
                             ->helperText('Max 500 MB. Larger backups: SCP onto the host + use the artisan command.')
                             ->storeFileNamesIn('original_file_name')

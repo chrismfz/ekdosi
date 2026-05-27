@@ -81,24 +81,29 @@ class CreateFirebirdImportRun extends CreateRecord
             ->latest('finished_at')
             ->first();
 
+        // Single combined notification. Earlier shape had TWO
+        // notifications (dedup warning persistent + success toast);
+        // they stacked, and the auto-dismissing success was hidden
+        // by the persistent warning. One notification with both
+        // pieces of context — and a warning level when dedup hit
+        // (so the operator sees the colour difference) — reads
+        // cleaner.
+        $body = 'The import job has been dispatched. This page will refresh automatically as the status changes.';
         if ($priorRun !== null) {
-            Notification::make()
-                ->warning()
-                ->title('Identical backup already imported')
-                ->body(sprintf(
-                    'A backup with the same SHA256 was successfully imported on %s. Re-running will refresh legacy columns and add any rows new in the source, but is otherwise a no-op (safe by design).',
-                    $priorRun->finished_at?->format('Y-m-d H:i') ?? 'an earlier run',
-                ))
-                ->persistent()
-                ->send();
+            $body = sprintf(
+                'Identical backup was already imported on %s — re-running will refresh legacy columns and add any rows new in the source, but is otherwise a no-op (safe by design).%s%s',
+                $priorRun->finished_at?->format('Y-m-d H:i') ?? 'an earlier date',
+                "\n\n",
+                $body,
+            );
         }
 
         RunFirebirdImport::dispatch($run->id, $data['fb_password']);
 
         Notification::make()
-            ->success()
-            ->title('Import queued')
-            ->body('The import job has been dispatched. This page will refresh automatically as the status changes.')
+            ->{$priorRun !== null ? 'warning' : 'success'}()
+            ->title($priorRun !== null ? 'Import queued (duplicate backup)' : 'Import queued')
+            ->body($body)
             ->send();
 
         return $run;

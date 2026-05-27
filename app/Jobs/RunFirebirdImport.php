@@ -96,17 +96,30 @@ class RunFirebirdImport implements ShouldQueue
             'started_at' => now(),
         ]);
 
-        $uploadedFullPath = Storage::path($run->uploaded_path);
+        $uploadedFullPath = Storage::disk('local')->path($run->uploaded_path);
         if (! is_file($uploadedFullPath)) {
             $this->failRun($run, 'gbak', "Uploaded file vanished: {$run->uploaded_path}");
             throw new \RuntimeException("Uploaded file not found");
         }
 
-        // gbak unpacks the .fbk into a fresh .fdb on local disk.
-        // The temp path is per-run so concurrent imports (different
-        // tenants) don't collide.
-        $tempFdb = storage_path("app/firebird-imports/tmp-import-{$run->id}.fdb");
-        @unlink($tempFdb);  // clean up any leftover from a failed prior run
+        // Temp .fdb + counts JSON live in the OS temp dir, NOT under
+        // storage/. Reason: Laravel 11+ sets the `local` disk root to
+        // storage/app/private/, while storage_path('app/...') points
+        // at storage/app/. Mixing the two on a fresh install produced
+        // a "directory doesn't exist" failure that the blind review
+        // caught. sys_get_temp_dir() is the right home for truly
+        // ephemeral byproducts:
+        //   - Already exists on every host (no mkdir needed)
+        //   - Auto-cleaned by the OS on reboot if our explicit
+        //     cleanup misses one
+        //   - Not backed up by spatie/laravel-backup (storage/ IS,
+        //     by default — so temp .fdb files would leak into
+        //     nightly backups otherwise)
+        $tempBase = rtrim(sys_get_temp_dir(), '/');
+        $tempFdb = "{$tempBase}/ekdosi-import-{$run->id}.fdb";
+        $countsPath = "{$tempBase}/ekdosi-counts-{$run->id}.json";
+        @unlink($tempFdb);
+        @unlink($countsPath);
 
         $gbak = new Process([
             'gbak', '-r',
@@ -132,9 +145,6 @@ class RunFirebirdImport implements ShouldQueue
 
         // --- step 2: drain the .fdb into ekdosi via migrate:firebird ---
         $run->update(['status' => FirebirdImportRun::STATUS_IMPORTING]);
-
-        $countsPath = storage_path("app/firebird-imports/counts-{$run->id}.json");
-        @unlink($countsPath);
 
         $artisan = new Process([
             PHP_BINARY,
@@ -202,7 +212,7 @@ class RunFirebirdImport implements ShouldQueue
         $run->update([
             'status'        => FirebirdImportRun::STATUS_FAILED,
             'failed_step'   => $step,
-            'error_message' => mb_strimwidth($message, 0, 4000),
+            'error_message' => $this->truncateForLog($message),
             'finished_at'   => now(),
         ]);
         Log::warning('firebird-import.failed', [
@@ -210,6 +220,29 @@ class RunFirebirdImport implements ShouldQueue
             'step'   => $step,
             'error'  => $message,
         ]);
+    }
+
+    /**
+     * gbak's stderr on a corrupt `.fbk` can be tens of KB. The original
+     * `mb_strimwidth($msg, 0, 4000)` truncated from the TAIL — losing
+     * the actual error line which is usually at the end of gbak's
+     * "restoring from x... ok / failed: ..." output. Instead: keep
+     * head + tail bracketing a "… N chars elided …" marker, so the
+     * operator sees both the "what was happening" prefix AND the
+     * "what blew up" suffix. Total cap stays well under the TEXT
+     * column ceiling.
+     */
+    private function truncateForLog(string $message): string
+    {
+        $max = 30_000;
+        if (mb_strlen($message) <= $max) {
+            return $message;
+        }
+        $headLen = $tailLen = (int) ($max / 2) - 50;
+        $head = mb_substr($message, 0, $headLen);
+        $tail = mb_substr($message, -$tailLen);
+        $elided = mb_strlen($message) - $headLen - $tailLen;
+        return $head."\n…\n[{$elided} chars elided]\n…\n".$tail;
     }
 
     /**
@@ -227,9 +260,20 @@ class RunFirebirdImport implements ShouldQueue
         if ($run === null || $run->isTerminal()) {
             return;
         }
+        // Map the current status to the step it died IN. Edge case:
+        // 'uploaded' means the worker crashed BEFORE any update —
+        // never reached the gbak step. Record it as 'gbak' (the
+        // step we were ABOUT to run) so the operator sees a coherent
+        // "didn't even start" failure rather than the misleading
+        // 'migrate' (a step that definitely didn't run).
+        $step = match ($run->status) {
+            FirebirdImportRun::STATUS_IMPORTING => 'migrate',
+            FirebirdImportRun::STATUS_RESTORING => 'gbak',
+            default                             => 'gbak',  // 'uploaded' falls here
+        };
         $this->failRun(
             $run,
-            $run->status === FirebirdImportRun::STATUS_RESTORING ? 'gbak' : 'migrate',
+            $step,
             'Worker terminated unexpectedly: '.($exception?->getMessage() ?? 'unknown'),
         );
     }
