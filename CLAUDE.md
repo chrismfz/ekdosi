@@ -1314,6 +1314,32 @@ Locked in by PR #26 (don't re-litigate):
 - **FK-aware delete guards (`GuardedDeleteAction`)** — operators currently hit one of two confusing modes when deleting a row that has dependents: (a) the default soft-delete succeeds silently and the dependent invoice / line / customer ends up referencing a trashed lookup row that's now invisible in the panel; (b) ForceDelete crashes with a cryptic SQL error from `restrictOnDelete`. Proposed shape: a reusable `GuardedDeleteAction` (extends Filament's DeleteAction) that counts referencing rows on `->before()`, blocks with a friendly notification listing exactly what depends on the row, and offers "Deactivate" (set `is_active=false`) where the model supports it. Complementary `BeforeDeleteObserver` enforces the same check from artisan/queue/API paths. **Trigger PR**: after InvoiceResource lands — that's when the full reference graph is real (invoices touch every lookup we have). Applies across Product, ProductCategory, VatCategory, MetricUnit, PaymentMethod, DeliveryMethod, DistributionAim, InvoiceType, Customer.
 
 ### Deferred — tied to specific future PRs
+- **Customer "Καρτέλα" (statement/ledger) view** — currently the
+  CustomerResource only lets operators edit identity fields. Real-world
+  accounting workflow needs a per-customer financial dashboard
+  (Greek bookkeeping term "Καρτέλα Πελάτη"): all invoices issued to
+  this customer (date / code / type / net / VAT / gross / mark /
+  payment status), all payments received, running balance (matches
+  legacy `GET_CUSTOMER_BALANCE` SP semantics — DUE_DAYS>0 invoices
+  count toward balance, cash terms don't), per-year subtotals + grand
+  total, outstanding amount, age of oldest unpaid invoice. Operator
+  asked for this on 2026-05-27 from the Filament Customer view page.
+  Shape suggestion: a dedicated "Καρτέλα" tab on ViewCustomer with
+  three sections — (1) summary stats (total invoiced YTD, total paid
+  YTD, balance, oldest outstanding); (2) yearly breakdown table (year
+  → invoice count → net → gross → paid → balance); (3) chronological
+  invoice + payment ledger (every row with date, type=invoice/payment,
+  reference, debit, credit, running balance). Export-to-PDF button at
+  the top using the existing PDF infrastructure. Filterable by year
+  + paid/unpaid. **Trigger PR**: post-PR #32 (WHMCS Stage B-2 Inbox)
+  so the invoice CRUD surface is fully proven first. Fix shape: new
+  `App\Filament\Resources\Customers\Pages\CustomerLedger` custom page
+  + an `App\Services\CustomerLedgerBuilder` value-object builder that
+  pulls from Invoice + Payment for a given (customer, date-range).
+  **Open question for operator before the PR**: do we want this to
+  also include credit notes (επιστροφές / ακυρωτικά) as separate
+  ledger rows, or fold them into the source invoice's row as a
+  negative adjustment? Greek bookkeeping convention varies by firm.
 - **PDF generation on issue + auto-mail with audit-BCC** — legacy
   `FAutoInvoice.cpp:655` generates a PDF on every successful myDATA
   submission via the FR3 print harness; `FMailInvoices.cpp:106` then
