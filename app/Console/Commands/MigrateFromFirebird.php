@@ -546,7 +546,14 @@ class MigrateFromFirebird extends Command
                 ['created_at' => $issuedAt ?? now()],
             );
             $this->map['invoices'][(int) $r['INVOICE_ID']] = $id;
-            $convPointers[$id] = $r['CONV_INVOICE_ID'];  // raw legacy pointer or null
+            // Defensive `?? null` for older `.fbk` snapshots that
+            // predate the CONV_INVOICE_ID column. Matches the
+            // tolerance pattern used by fld() elsewhere in this file
+            // (and by the `fbTableExists()` skip-guards on MARK /
+            // CONF_PARAMS / AUTO_INVOICE_LOG). Without it, a raw
+            // array access on the missing key triggers
+            // "Undefined array key" under PHP 8+.
+            $convPointers[$id] = $r['CONV_INVOICE_ID'] ?? null;
         }
 
         // Pass 2: refresh EVERY row's conv_invoice_id from the legacy
@@ -554,6 +561,15 @@ class MigrateFromFirebird extends Command
         // fix vs. the previous shape that only walked rows where
         // legacy had a non-NULL conv pointer, so cleared-in-source
         // links survived as stale data in ekdosi.
+        //
+        // PERF NOTE — N individual UPDATEs even when value unchanged.
+        // For a 10K-invoice tenant on a re-run, this is 10K round
+        // trips (mostly NULL → NULL). Acceptable today (seconds, not
+        // minutes); will degrade as a tenant's invoice count grows
+        // 10×+ OR when activitylog wraps `invoices` (each UPDATE
+        // would write an activity row even though nothing changed).
+        // Future optimisation: skip the UPDATE when the existing
+        // value matches; OR batch into a single CASE WHEN UPDATE.
         foreach ($convPointers as $selfId => $legacyConvId) {
             $convSurrogate = $legacyConvId !== null
                 ? $this->legacyId('invoices', $legacyConvId)

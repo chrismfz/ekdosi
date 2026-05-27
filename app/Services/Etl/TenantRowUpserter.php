@@ -109,10 +109,13 @@ class TenantRowUpserter
         }
 
         // First insertion: merge match keys + legacy values + Filament
-        // defaults. Match keys come first so the explicit defaults
-        // can't accidentally override them (defensive ordering — if a
-        // caller passes 'company_id' in both buckets the match key
-        // wins).
+        // defaults. Match keys come LAST in array_merge so they
+        // override any same-key entries in $insertOnlyDefaults or
+        // $updateValues — PHP's array_merge follows "last wins" for
+        // string keys. The BEHAVIOUR is "matchKeys take precedence";
+        // a future maintainer reading this who reaches for the
+        // "obvious fix" of moving matchKeys to the front would
+        // INVERT the behaviour. Leave the order alone.
         $insertRow = array_merge(
             $insertOnlyDefaults,
             $updateValues,
