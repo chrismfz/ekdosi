@@ -102,6 +102,31 @@ class CustomerLedger extends Page
      */
     public array $availableInvoiceTypes = [];
 
+    public static function canAccess(array $parameters = []): bool
+    {
+        $user = auth()->user();
+        if (! $user) {
+            return false;
+        }
+
+        $recordId = (int) ($parameters['record'] ?? 0);
+        if ($recordId <= 0) {
+            return false;
+        }
+
+        $customer = Customer::query()->find($recordId);
+        if (! $customer) {
+            return false;
+        }
+
+        $tenantId = \Filament\Facades\Filament::getTenant()?->getKey();
+        if ($tenantId !== null && (int) $customer->company_id !== (int) $tenantId) {
+            return false;
+        }
+
+        return $user->can('view', $customer);
+    }
+
     public function mount(int|string $record): void
     {
         $this->record = Customer::query()->where('id', (int) $record)->firstOrFail();
