@@ -102,6 +102,41 @@ class CustomerLedger extends Page
      */
     public array $availableInvoiceTypes = [];
 
+    public static function canAccess(array $parameters = []): bool
+    {
+        $user = auth()->user();
+        if (! $user) {
+            return false;
+        }
+
+        $recordParam = $parameters['record'] ?? null;
+
+        // Filament may call canAccess() in contexts where the page
+        // route params are not hydrated yet. Don't hard-fail those
+        // preflight checks; mount() enforces tenant + policy again.
+        if ($recordParam === null) {
+            return true;
+        }
+
+        $customer = null;
+        if ($recordParam instanceof Customer) {
+            $customer = $recordParam;
+        } elseif (is_scalar($recordParam) && (int) $recordParam > 0) {
+            $customer = Customer::query()->find((int) $recordParam);
+        }
+
+        if (! $customer) {
+            return false;
+        }
+
+        $tenantId = \Filament\Facades\Filament::getTenant()?->getKey();
+        if ($tenantId !== null && (int) $customer->company_id !== (int) $tenantId) {
+            return false;
+        }
+
+        return $user->can('view', $customer);
+    }
+
     public function mount(int|string $record): void
     {
         $this->record = Customer::query()->where('id', (int) $record)->firstOrFail();
