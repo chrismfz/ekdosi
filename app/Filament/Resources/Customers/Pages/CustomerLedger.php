@@ -6,6 +6,7 @@ use App\DTOs\AadeRegistryRecord;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
@@ -15,6 +16,7 @@ use App\Services\Whmcs\CustomerWhmcsLedgerResult;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Καρτέλα Πελάτη: full customer financial dashboard.
@@ -104,37 +106,56 @@ class CustomerLedger extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        $user = auth()->user();
-        if (! $user) {
+        if (! auth()->check()) {
+            Log::warning('CustomerLedger denied in canAccess: unauthenticated', [
+                'parameters' => $parameters,
+                'url' => request()->fullUrl(),
+            ]);
+
             return false;
         }
 
+        // Filament/Shield may call canAccess() before tenant context
+        // and permission-team scope are fully hydrated. Keep this as a
+        // lightweight existence/scope preflight and let mount() run the
+        // definitive policy check once the page boots.
         $recordParam = $parameters['record'] ?? null;
-
-        // Filament may call canAccess() in contexts where the page
-        // route params are not hydrated yet. Don't hard-fail those
-        // preflight checks; mount() enforces tenant + policy again.
         if ($recordParam === null) {
             return true;
         }
 
-        $customer = null;
-        if ($recordParam instanceof Customer) {
-            $customer = $recordParam;
-        } elseif (is_scalar($recordParam) && (int) $recordParam > 0) {
-            $customer = Customer::query()->withTrashed()->find((int) $recordParam);
-        }
+        $customer = $recordParam instanceof Customer
+            ? $recordParam
+            : (is_scalar($recordParam) && (int) $recordParam > 0
+                ? Customer::query()->withTrashed()->find((int) $recordParam)
+                : null);
 
         if (! $customer) {
+            Log::warning('CustomerLedger denied in canAccess: customer not found', [
+                'record_param' => $recordParam,
+                'tenant_param' => $parameters['tenant'] ?? null,
+                'url' => request()->fullUrl(),
+            ]);
+
             return false;
         }
 
-        $tenantId = \Filament\Facades\Filament::getTenant()?->getKey();
-        if ($tenantId !== null && (int) $customer->company_id !== (int) $tenantId) {
-            return false;
+        $tenantParam = $parameters['tenant'] ?? null;
+        if (is_object($tenantParam) && method_exists($tenantParam, 'getKey')) {
+            $allowed = (int) $customer->company_id === (int) $tenantParam->getKey();
+            if (! $allowed) {
+                Log::warning('CustomerLedger denied in canAccess: tenant/customer mismatch in preflight', [
+                    'customer_id' => $customer->id,
+                    'customer_company_id' => $customer->company_id,
+                    'tenant_id' => $tenantParam->getKey(),
+                    'url' => request()->fullUrl(),
+                ]);
+            }
+
+            return $allowed;
         }
 
-        return $user->can('view', $customer);
+        return true;
     }
 
     public function mount(int|string $record): void
@@ -154,16 +175,45 @@ class CustomerLedger extends Page
         // fall through to the policy check below — we don't want to
         // 404 every legitimate operator because tenant resolution
         // timing differs from EditRecord pages.
-        $currentTenantId = \Filament\Facades\Filament::getTenant()?->getKey();
-        if ($currentTenantId !== null) {
-            abort_unless(
-                (int) $this->record->company_id === (int) $currentTenantId,
-                404,    // 404 not 403: don't disclose existence of cross-tenant records
-            );
+        $routeTenant = request()->route('tenant');
+        $resolvedTenantId = null;
+
+        if (is_object($routeTenant) && method_exists($routeTenant, 'getKey')) {
+            $resolvedTenantId = (int) $routeTenant->getKey();
+        } elseif (is_scalar($routeTenant) && $routeTenant !== '') {
+            $resolvedTenantId = (int) Company::query()
+                ->where('slug', (string) $routeTenant)
+                ->value('id');
+        }
+
+        // Fallback for environments where the route parameter is not yet
+        // available in this lifecycle stage.
+        $currentTenantId = $resolvedTenantId ?? \Filament\Facades\Filament::getTenant()?->getKey();
+
+        if ($currentTenantId !== null && (int) $this->record->company_id !== (int) $currentTenantId) {
+            Log::warning('CustomerLedger denied in mount: tenant/customer mismatch', [
+                'customer_id' => $this->record->id,
+                'customer_company_id' => $this->record->company_id,
+                'resolved_tenant_id' => $currentTenantId,
+                'route_tenant' => $routeTenant,
+                'filament_tenant_id' => \Filament\Facades\Filament::getTenant()?->getKey(),
+                'url' => request()->fullUrl(),
+            ]);
+
+            abort(404); // don't disclose existence of cross-tenant records
         }
 
         // Defense in depth #2: policy gate (per-user permission).
-        abort_unless(auth()->user()?->can('view', $this->record) ?? false, 403);
+        if (! (auth()->user()?->can('view', $this->record) ?? false)) {
+            Log::warning('CustomerLedger denied in mount: policy view failed', [
+                'customer_id' => $this->record->id,
+                'customer_company_id' => $this->record->company_id,
+                'user_id' => auth()->id(),
+                'url' => request()->fullUrl(),
+            ]);
+
+            abort(403);
+        }
 
         // Read filters from query string.
         $this->filterYear = request()->integer('year') ?: null;
