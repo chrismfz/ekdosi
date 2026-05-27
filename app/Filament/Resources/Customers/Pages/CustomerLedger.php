@@ -106,114 +106,23 @@ class CustomerLedger extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        if (! auth()->check()) {
-            Log::warning('CustomerLedger denied in canAccess: unauthenticated', [
-                'parameters' => $parameters,
-                'url' => request()->fullUrl(),
-            ]);
-
-            return false;
-        }
-
-        // Filament/Shield may call canAccess() before tenant context
-        // and permission-team scope are fully hydrated. Keep this as a
-        // lightweight existence/scope preflight and let mount() run the
-        // definitive policy check once the page boots.
-        $recordParam = $parameters['record'] ?? null;
-        if ($recordParam === null) {
-            return true;
-        }
-
-        $customer = $recordParam instanceof Customer
-            ? $recordParam
-            : (is_scalar($recordParam) && (int) $recordParam > 0
-                ? Customer::query()->withTrashed()->find((int) $recordParam)
-                : null);
-
-        if (! $customer) {
-            Log::warning('CustomerLedger denied in canAccess: customer not found', [
-                'record_param' => $recordParam,
-                'tenant_param' => $parameters['tenant'] ?? null,
-                'url' => request()->fullUrl(),
-            ]);
-
-            return false;
-        }
-
-        $tenantParam = $parameters['tenant'] ?? null;
-        if (is_object($tenantParam) && method_exists($tenantParam, 'getKey')) {
-            $allowed = (int) $customer->company_id === (int) $tenantParam->getKey();
-            if (! $allowed) {
-                Log::warning('CustomerLedger denied in canAccess: tenant/customer mismatch in preflight', [
-                    'customer_id' => $customer->id,
-                    'customer_company_id' => $customer->company_id,
-                    'tenant_id' => $tenantParam->getKey(),
-                    'url' => request()->fullUrl(),
-                ]);
-            }
-
-            return $allowed;
-        }
-
-        return true;
+        // Filament v5 custom-page authorization is best kept minimal here.
+        // Full tenant + policy authorization runs in mount() once record and
+        // panel context are available.
+        return auth()->check();
     }
 
     public function mount(int|string $record): void
     {
         $this->record = Customer::query()->withTrashed()->where('id', (int) $record)->firstOrFail();
 
-        // Defense in depth #1: the Customer model has no global
-        // BelongsToCompany scope (tracked in CLAUDE.md), so a raw
-        // ::query() bypasses Filament's panel tenant scope. Check
-        // that the loaded customer's company matches the current
-        // Filament tenant when available.
-        //
-        // Note: Filament::getTenant() can be null at custom-page
-        // mount time in some configs (the URL DOES contain the tenant
-        // slug, but tenant resolution may run after the page's
-        // boot lifecycle for non-standard page types). In that case,
-        // fall through to the policy check below — we don't want to
-        // 404 every legitimate operator because tenant resolution
-        // timing differs from EditRecord pages.
-        $routeTenant = request()->route('tenant');
-        $resolvedTenantId = null;
+        $tenant = \Filament\Facades\Filament::getTenant();
 
-        if (is_object($routeTenant) && method_exists($routeTenant, 'getKey')) {
-            $resolvedTenantId = (int) $routeTenant->getKey();
-        } elseif (is_scalar($routeTenant) && $routeTenant !== '') {
-            $resolvedTenantId = (int) Company::query()
-                ->where('slug', (string) $routeTenant)
-                ->value('id');
+        if ($tenant && (int) $this->record->company_id !== (int) $tenant->getKey()) {
+            abort(404);
         }
 
-        // Fallback for environments where the route parameter is not yet
-        // available in this lifecycle stage.
-        $currentTenantId = $resolvedTenantId ?? \Filament\Facades\Filament::getTenant()?->getKey();
-
-        if ($currentTenantId !== null && (int) $this->record->company_id !== (int) $currentTenantId) {
-            Log::warning('CustomerLedger denied in mount: tenant/customer mismatch', [
-                'customer_id' => $this->record->id,
-                'customer_company_id' => $this->record->company_id,
-                'resolved_tenant_id' => $currentTenantId,
-                'route_tenant' => $routeTenant,
-                'filament_tenant_id' => \Filament\Facades\Filament::getTenant()?->getKey(),
-                'url' => request()->fullUrl(),
-            ]);
-
-            abort(404); // don't disclose existence of cross-tenant records
-        }
-
-        // Defense in depth #2: policy gate (per-user permission).
-        if (! (auth()->user()?->can('view', $this->record) ?? false)) {
-            Log::warning('CustomerLedger denied in mount: policy view failed', [
-                'customer_id' => $this->record->id,
-                'customer_company_id' => $this->record->company_id,
-                'user_id' => auth()->id(),
-                'url' => request()->fullUrl(),
-            ]);
-
-            abort(403);
-        }
+        abort_unless(auth()->user()?->can('view', $this->record), 403);
 
         // Read filters from query string.
         $this->filterYear = request()->integer('year') ?: null;
