@@ -230,7 +230,18 @@ class CustomerLedgerBuilder
         $oldestUnpaidDays = null;
         if ($balance > 0) {
             $remainingPaid = $totalPaidLifetime;
-            foreach ($invoices as $inv) {
+            // Defensive sort: the FIFO correctness depends on iterating
+            // invoices oldest-first. loadInvoices() currently does
+            // orderBy('issued_at','asc') but that contract is not
+            // asserted at this site — a future loadInvoices change to
+            // a different ORDER BY (id desc for index-plan reasons,
+            // for example) would silently flip the FIFO to LIFO and
+            // resurrect the original "ghost-debt" bug fix #4 was
+            // meant to eliminate.
+            $orderedInvoices = $invoices
+                ->sortBy(fn ($inv) => Carbon::parse($inv->issued_at)->timestamp)
+                ->values();
+            foreach ($orderedInvoices as $inv) {
                 $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
                 if (! $isCreditTerm) {
                     continue;

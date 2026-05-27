@@ -7,6 +7,7 @@ use App\Exceptions\Aade\AadeCredentialsInvalid;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Exceptions\Aade\AadeUnreachable;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -58,8 +59,16 @@ trait HandlesAadeRegistryExceptions
                 'severity' => 'danger',
             ],
             default => [
-                'title'    => 'Error',
-                'body'     => $e->getMessage(),
+                // Unreachable today (CustomerLedger catches the
+                // AadeRegistryException base class — all 4 known
+                // subclasses are above). Future callers may pass an
+                // arbitrary Throwable here, so do NOT expose the raw
+                // message in the operator-facing body: Guzzle / SOAP
+                // exceptions can carry credentials in URLs or
+                // request envelopes. Log the raw message for ops to
+                // see in the system log; show a generic toast.
+                'title'    => 'Unexpected AADE error',
+                'body'     => 'See system logs for details.',
                 'severity' => 'danger',
             ],
         };
@@ -75,6 +84,18 @@ trait HandlesAadeRegistryExceptions
     protected function notifyAadeException(Throwable $e): void
     {
         $d = $this->aadeExceptionDetails($e);
+
+        // For the unmapped default case, log the raw exception so ops
+        // can diagnose — the toast body is intentionally generic to
+        // avoid leaking credentials in third-party exception messages.
+        if ($d['title'] === 'Unexpected AADE error') {
+            Log::warning('AADE exception not mapped to a specific operator message', [
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+                'tenant_id' => method_exists($this, 'getTenant') ? $this->getTenant()?->getKey() : null,
+            ]);
+        }
+
         Notification::make()
             ->title($d['title'])
             ->body($d['body'])

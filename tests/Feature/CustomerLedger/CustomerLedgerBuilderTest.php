@@ -290,6 +290,29 @@ class CustomerLedgerBuilderTest extends TestCase
         $this->assertSame(300.0, $ledger[0]['running_balance']);
     }
 
+    public function test_oldest_unpaid_days_walks_invoices_in_chronological_order_regardless_of_loader_ordering(): void
+    {
+        // Regression for the defensive-sort in computeStats: the FIFO
+        // walk explicitly sorts by issued_at so a future change to
+        // loadInvoices' ORDER BY can't silently flip FIFO to LIFO.
+        $c = $this->makeCustomer();
+        // Issue in NON-chronological CREATION order to simulate a
+        // future loadInvoices that orders by id instead of issued_at.
+        $this->makeInvoice($c, '2026-03-01', 50.0, $this->credit);   // newer first
+        $this->makeInvoice($c, '2020-01-01', 200.0, $this->credit);  // older second
+        $this->makePayment($c, '2020-02-01', 100.0);   // partial-pay on the 2020 one
+
+        $r = app(CustomerLedgerBuilder::class)->build($c);
+
+        // Balance: 250 - 100 = 150 outstanding.
+        $this->assertSame(150.0, $r->stats['balance']);
+        // FIFO: payment settles 100 of the 200 oldest invoice → that
+        // 2020 invoice still has 100 unpaid → it IS the oldest unpaid.
+        // Should be a multi-year-old number, not a few-months one.
+        $this->assertNotNull($r->stats['oldest_unpaid_days']);
+        $this->assertGreaterThan(365, $r->stats['oldest_unpaid_days']);
+    }
+
     public function test_different_tenants_do_not_mix(): void
     {
         $c1 = $this->makeCustomer();

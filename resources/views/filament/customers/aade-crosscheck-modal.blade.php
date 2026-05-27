@@ -1,9 +1,17 @@
 @php
     /** @var \App\Models\Customer $customer */
     /** @var array $result */
-    $error = $result['error'] ?? null;
-    $diffs = $result['diffs'] ?? [];
-    $aadeRecord = $result['record'] ?? null;
+    // Result shape is primitive (no DTO) — see runAadeCrosscheck.
+    // The memo holding a DTO would crash Livewire 3 dehydration
+    // between modalContent render and action submit (separate
+    // requests; the AadeRegistryRecord can't roundtrip through the
+    // snapshot Synth mechanism).
+    $error       = $result['error'] ?? null;
+    $diffs       = $result['diffs'] ?? [];
+    $isActive    = $result['is_active'] ?? null;
+    $statusDescr = $result['status_descr'] ?? null;
+    $activities  = $result['activities'] ?? [];
+    $hasAadeData = $error === null;
 
     $labels = [
         'name'       => 'Επωνυμία',
@@ -20,15 +28,15 @@
         <strong>Δεν ήταν δυνατή η ανάκτηση από ΑΑΔΕ:</strong>
         <div class="mt-1">{{ $error }}</div>
     </div>
-@elseif ($aadeRecord && ! $aadeRecord->active)
+@elseif ($isActive === false)
     <div class="rounded-lg bg-warning-50 dark:bg-warning-950/40 p-4 text-sm text-warning-700 dark:text-warning-200">
         <strong>Προσοχή:</strong> Η ΑΑΔΕ δείχνει αυτόν τον ΑΦΜ ως
-        <em>{{ $aadeRecord->statusDescr ?: 'ανενεργό' }}</em>.
+        <em>{{ $statusDescr ?: 'ανενεργό' }}</em>.
         Πιθανώς ο πελάτης έχει σταματήσει τη δραστηριότητά του.
     </div>
 @endif
 
-@if ($aadeRecord)
+@if ($hasAadeData)
     @if (empty($diffs))
         <div class="rounded-lg bg-success-50 dark:bg-success-950/40 p-4 text-sm text-success-700 dark:text-success-300">
             ✓ Όλα τα στοιχεία ταυτίζονται με την ΑΑΔΕ. Δεν χρειάζεται ενημέρωση.
@@ -67,15 +75,15 @@
         </div>
     @endif
 
-    @if (count($aadeRecord->activities) > 0)
+    @if (count($activities) > 0)
         <div class="mt-4 text-xs text-gray-500">
             <details>
-                <summary class="cursor-pointer">Όλες οι δραστηριότητες του ΑΦΜ ({{ count($aadeRecord->activities) }})</summary>
+                <summary class="cursor-pointer">Όλες οι δραστηριότητες του ΑΦΜ ({{ count($activities) }})</summary>
                 <ul class="mt-2 list-disc list-inside">
-                    @foreach ($aadeRecord->activities as $act)
+                    @foreach ($activities as $act)
                         <li>
-                            <code>{{ $act['code'] ?? '?' }}</code> — {{ $act['descr'] ?? '' }}
-                            @if (! empty($act['primary'])) <span class="text-success-600">(κύρια)</span> @endif
+                            <code>{{ $act['code'] ?? '?' }}</code> — {{ $act['description'] ?? '' }}
+                            @if (($act['kind'] ?? null) === 'primary') <span class="text-success-600">(κύρια)</span> @endif
                         </li>
                     @endforeach
                 </ul>

@@ -74,7 +74,21 @@ class CustomerLedger extends Page
      * AADE on cold cache, or (b) hit a race where the modal preview
      * and the apply ran against different AADE responses.
      *
-     * @var array{record: ?\App\DTOs\AadeRegistryRecord, diffs: array, error: ?string}|null
+     * Holds ONLY primitive types (arrays + scalars) - NOT the
+     * AadeRegistryRecord DTO. Livewire 3 cannot serialize arbitrary
+     * objects through its Synth mechanism, and modalContent vs action
+     * submit run in SEPARATE Livewire requests; the memo has to
+     * survive snapshot dehydration / hydration. Earlier draft held
+     * the DTO directly — would have thrown "Property type not
+     * supported" on every modal open.
+     *
+     * @var array{
+     *     diffs: array<string, array{stored: string, aade: string}>,
+     *     error: ?string,
+     *     is_active: ?bool,
+     *     status_descr: ?string,
+     *     activities: array<int, array{code: string, description: string, kind: string}>,
+     * }|null
      */
     public ?array $aadeCrosscheckMemo = null;
 
@@ -249,19 +263,30 @@ class CustomerLedger extends Page
      * AADE fetch + ONE diff computation. The memo is cleared after a
      * successful apply (so the next modal open re-fetches).
      *
-     * Returned shape:
+     * Returned shape (primitives only - see class docblock):
      *   [
-     *     'record' => ?AadeRegistryRecord,
-     *     'diffs'  => array<string, ['stored' => string, 'aade' => string]>,
-     *     'error'  => ?string,
+     *     'diffs'        => array<string, ['stored' => string, 'aade' => string]>,
+     *     'error'        => ?string,
+     *     'is_active'    => ?bool,            // AADE's active flag
+     *     'status_descr' => ?string,           // AADE's status description
+     *     'activities'   => array<int, array>, // for the "all activities" details
      *   ]
      *
      * 'diffs' is keyed by our customer column name; absent key means
      * the field already matches. Empty diffs = nothing to apply.
+     *
+     * Errors are NOT memoised: if the operator fixes the underlying
+     * issue (rotates credentials, restores network) in another tab
+     * and reopens the modal, we re-fetch instead of serving the
+     * stale error. Successful results ARE memoised — that's the
+     * race-fix between modalContent and action submit.
      */
     private function runAadeCrosscheck(): array
     {
-        if ($this->aadeCrosscheckMemo !== null) {
+        // Only return memo if it's a SUCCESSFUL result. Stale errors
+        // would lock the modal into a "GSIS creds missing" loop
+        // indefinitely if the operator fixed creds elsewhere.
+        if ($this->aadeCrosscheckMemo !== null && $this->aadeCrosscheckMemo['error'] === null) {
             return $this->aadeCrosscheckMemo;
         }
         $tenant = $this->record->company;
@@ -275,14 +300,16 @@ class CustomerLedger extends Page
             // is current when it isn't.
             $record = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm, bypassCache: true);
         } catch (AadeRegistryException $e) {
-            // Single catch via the trait - all four subclasses
-            // (AadeCredentialsInvalid / AadeAfmNotFound / AadeUnreachable
-            // / AadeRegistryException itself) flow through one mapping.
+            // Single catch via the trait - all subclasses flow through
+            // one mapping. Memo cleared via the success-only short-
+            // circuit above so a retry actually retries.
             $d = $this->aadeExceptionDetails($e);
             return $this->aadeCrosscheckMemo = [
-                'record' => null,
-                'diffs' => [],
-                'error' => $d['title'].': '.$d['body'],
+                'diffs'        => [],
+                'error'        => $d['title'].': '.$d['body'],
+                'is_active'    => null,
+                'status_descr' => null,
+                'activities'   => [],
             ];
         }
 
@@ -308,12 +335,32 @@ class CustomerLedger extends Page
 
         $diffs = [];
         foreach ($candidates as $field => $pair) {
-            if (trim($pair['stored']) !== trim($pair['aade'])) {
-                $diffs[$field] = $pair;
+            $storedTrimmed = trim($pair['stored']);
+            $aadeTrimmed   = trim($pair['aade']);
+            if ($storedTrimmed === $aadeTrimmed) {
+                continue;
             }
+            // AADE is authoritative WHEN AADE HAS DATA. If AADE
+            // returned blank for a field the operator filled in
+            // (common case: inactive AFMs with stripped registry
+            // data; operator typed it manually because AADE was
+            // missing), do NOT flag as a diff. Otherwise apply
+            // would clobber valid operator data with empty strings -
+            // exactly the bug fix #3 was supposed to eliminate.
+            // Stored value wins when AADE has nothing to say.
+            if ($aadeTrimmed === '' && $storedTrimmed !== '') {
+                continue;
+            }
+            $diffs[$field] = $pair;
         }
 
-        return $this->aadeCrosscheckMemo = ['record' => $record, 'diffs' => $diffs, 'error' => null];
+        return $this->aadeCrosscheckMemo = [
+            'diffs'        => $diffs,
+            'error'        => null,
+            'is_active'    => $record->active,
+            'status_descr' => $record->statusDescr,
+            'activities'   => $record->activities,
+        ];
     }
 
     /**
@@ -348,14 +395,25 @@ class CustomerLedger extends Page
 
         $builder = app(CustomerLedgerBuilder::class);
 
-        // First load: compute the filter-independent block ONCE and
-        // cache on the Livewire instance. Subsequent filter changes
-        // skip the stats/aging/yearly recomputation (3 O(N) passes
-        // over invoices+payments).
         if ($this->cachedStatsBlock === null) {
-            $this->cachedStatsBlock = $builder->buildStatsBlock($this->record);
+            // First mount: ONE full pass (build()) loads invoices +
+            // payments ONCE and computes all sections. Splitting into
+            // buildStatsBlock + buildLedgerOnly here would load both
+            // tables TWICE on first paint (the common case - operator
+            // opens Καρτέλα and never touches filters).
+            $full = $builder->build($this->record, $filters);
+            $this->cachedStatsBlock = [
+                'stats'  => $full->stats,
+                'aging'  => $full->aging,
+                'yearly' => $full->yearly,
+            ];
+            $this->ledger = $full;
+            return;
         }
 
+        // Filter change on an already-mounted page: skip the 3 O(N)
+        // stats/aging/yearly recomputes (filter-independent) and only
+        // rebuild the chronological ledger.
         $this->ledger = new CustomerLedgerResult(
             stats:          $this->cachedStatsBlock['stats'],
             aging:          $this->cachedStatsBlock['aging'],

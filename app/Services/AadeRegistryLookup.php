@@ -89,17 +89,13 @@ class AadeRegistryLookup
 
         $cacheKey = "aade.registry.{$this->tenant->getKey()}.{$afm}";
 
-        if ($bypassCache) {
-            try {
-                Cache::forget($cacheKey);
-            } catch (Throwable $e) {
-                Log::warning('AADE registry cache forget failed (bypass) — proceeding to live fetch', [
-                    'company_id' => $this->tenant->getKey(),
-                    'afm' => $afm,
-                    'exception' => get_class($e),
-                ]);
-            }
-        } else {
+        // bypassCache=true skips the cache READ but does NOT pre-delete
+        // the cached entry. Reasoning: if the live call fails (transient
+        // SOAP timeout, mid-rotation auth blip), we keep the previously-
+        // cached value intact so hot-path callers (CustomerForm AFM
+        // autocomplete) don't lose 24h of cached lookups because of one
+        // bad crosscheck attempt. On success we overwrite below.
+        if (! $bypassCache) {
             // Defensive read: if the DTO shape changes across deploys the
             // file/redis cache can hold incompatible payloads. Treat any
             // failure as a miss and re-fetch from AADE. Log the failure so
@@ -122,6 +118,9 @@ class AadeRegistryLookup
 
         $record = $this->callRegistry($afm);
 
+        // Overwrite the cache with the fresh value (whether or not we
+        // bypassed on the way in). Successful crosschecks refresh the
+        // 24h TTL for downstream hot-path callers.
         Cache::put($cacheKey, $record, self::CACHE_TTL_SECONDS);
 
         return $record;
