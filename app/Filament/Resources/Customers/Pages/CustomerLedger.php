@@ -122,7 +122,7 @@ class CustomerLedger extends Page
         if ($recordParam instanceof Customer) {
             $customer = $recordParam;
         } elseif (is_scalar($recordParam) && (int) $recordParam > 0) {
-            $customer = Customer::query()->find((int) $recordParam);
+            $customer = Customer::query()->withTrashed()->find((int) $recordParam);
         }
 
         if (! $customer) {
@@ -139,7 +139,7 @@ class CustomerLedger extends Page
 
     public function mount(int|string $record): void
     {
-        $this->record = Customer::query()->where('id', (int) $record)->firstOrFail();
+        $this->record = Customer::query()->withTrashed()->where('id', (int) $record)->firstOrFail();
 
         // Defense in depth #1: the Customer model has no global
         // BelongsToCompany scope (tracked in CLAUDE.md), so a raw
