@@ -1199,14 +1199,38 @@ Customer pays in WHMCS
 
 **Stage B is split into THREE PRs (operator approved 2026-05-27):**
 
-**PR #29 (Stage B-1: Ingestion)** — table + both ingestion paths, NO UI, NO issuance:
-- New migration: `pending_whmcs_invoices` table. Columns: id, company_id (FK), whmcs_invoice_id (unique with company_id), whmcs_userid, customer_id (FK nullable — suggested match), payload (JSON snapshot of WHMCS GetInvoice response), match_reason (linked/afm/email/name/unmatched), status (pending_review/filed/rejected/held), notes, created_at, updated_at, filed_at, filed_by_user_id, mydata_mark, rejected_reason. Index on (company_id, status, created_at) for the inbox filter.
-- New model: `PendingWhmcsInvoice`.
-- New service: `WhmcsInvoiceIngestor` — takes a WHMCS invoice payload + tenant, runs the matcher, upserts into pending_whmcs_invoices keyed on (company_id, whmcs_invoice_id). Idempotent — a re-push (or re-pull) of the same WHMCS invoice id updates the existing row, never creates duplicates.
-- Re-purposed pull command: `whmcs:fetch-pending --tenant=X` — REPLACES the Stage A dry-run preview. Same iteration over GetInvoices, but instead of printing a table, calls the ingestor to stage rows. Old behaviour available via `--preview` flag (still useful for testing).
-- New webhook endpoint: `POST /webhooks/whmcs/{tenant_slug}/invoice-paid` — HMAC-signed body containing whmcs_invoice_id. Fetches that invoice from WHMCS (one API call), calls the ingestor. Returns 202 Accepted + the new row id, OR 200 + existing row id if it was already staged. NEVER files at AADE in this PR.
-- Tests: ingestor idempotency, webhook signature verification, pull command stages instead of files.
-- NEW companies column: `whmcs_webhook_secret` (text, encrypted) — separate from `whmcs_api_secret` so a webhook secret leak in WHMCS error logs doesn't compromise the API credentials.
+**PR #31 (Stage B-1: Ingestion)** — ✅ LANDED. Table + both ingestion paths, NO UI, NO issuance:
+- ✅ Migration `pending_whmcs_invoices` (unique on `(company_id, whmcs_invoice_id)`, inbox-filter index on `(company_id, status, created_at)`).
+- ✅ Model `PendingWhmcsInvoice` with status + match-reason constants. Deliberately NO `BelongsToTenant` global trait — controller + ingestor scope explicitly by Company so non-panel paths can't leak across tenants (documented in model docblock).
+- ✅ Service `WhmcsInvoiceIngestor::ingest(Company, $payload): IngestionResult` — idempotent on the unique key. Refreshes payload + re-runs matcher on pre-filing rows; PRESERVES payload (audit-frozen) on `status=filed` rows. Wrapped in DB transaction with `lockForUpdate()` so two concurrent webhook pushes can't double-insert.
+- ✅ Re-purposed command `whmcs:fetch-pending --tenant=SLUG` (was `whmcs:pull-pending-invoices`). Default: GetInvoices list, then GetInvoice per row, stage each via ingestor. `--preview` keeps Stage A's dry-run table behaviour (cheap probe, no per-row GetInvoice calls). New exit code 7 = partial success (≥1 row failed to stage).
+- ✅ Webhook `POST /webhooks/whmcs/{slug}/invoice-paid` with HMAC-SHA256 verification (`X-Webhook-Signature: sha256=<hex>` over raw body, `hash_equals` constant-time compare). Body is `{"whmcs_invoice_id": N}` only — we don't accept the full invoice over the wire; we fetch the canonical payload via our outbound API credentials. Status codes: 202 created, 200 idempotent (incl. `audit_preserved=true` when already filed), 401 wrong/missing signature, 422 no webhook secret configured, 404 unknown tenant, 409 unknown WHMCS invoice, 502 WHMCS upstream failure. Signature verified BEFORE any DB writes or outbound calls — locked by `test_signature_check_runs_before_any_side_effects`.
+- ✅ `companies.whmcs_webhook_secret` (text, encrypted via Company model cast). Kept separate from `whmcs_api_secret` — outbound vs inbound auth, distinct blast radius.
+- ✅ CompanyForm gets a new "Inbound webhook" section so operators can configure the secret before Stage B-3 ships.
+- ✅ Routes wired via `bootstrap/app.php` `then:` callback under prefix `/webhooks` with the `api` middleware group (no session, no CSRF). `routes/webhooks.php` is the home for future webhook controllers.
+- ✅ Tests: 29 new (8 ingestor incl. audit-freeze + multi-tenant id collision, 12 webhook incl. all 7 status codes + side-effect-suppression on bad signature, 9 command incl. idempotency + partial-failure).
+
+**Operator action required after merge:**
+1. Run `php artisan migrate` to add the new table + column.
+2. For each WHMCS-using tenant: generate a fresh random 32+ char secret, paste into the new "Inbound webhook" field on the Company form. Save.
+3. End-to-end test until Stage B-3 plugin lands: hand-craft a curl POST with HMAC sig (the test file has a working example), confirm 202 + a row in `pending_whmcs_invoices`. The artisan `whmcs:fetch-pending --tenant=SLUG` is the alternative path that doesn't need the WHMCS-side plugin.
+
+**Deferred from PR #31 (Stage B-1):**
+- **`PendingWhmcsInvoice` has no factory class** — tests use `create()` with explicit payloads, which is enough for now. **Trigger PR**: Stage B-2 inbox UI will benefit from a factory for table-listing tests (filtering, sorting, bulk actions).
+- **No HMAC replay-window check** (timestamp + nonce) — current design relies on HTTPS + secret rotation as the trust boundary. A replay-window check (e.g. reject signatures with timestamps >5min old) would harden against TLS-MITM scenarios but adds clock-skew complexity. **Trigger PR**: if the WHMCS-side plugin's HTTPS layer is ever in question, or if we add other webhook providers (Blesta?) that warrant a shared pattern.
+- **No rate-limiting on the webhook endpoint** — Laravel's `RateLimiter` could throttle by tenant slug or by source IP. Not a concern today (single trusted upstream, low volume). **Trigger PR**: if production logs show abuse OR if the WHMCS-side plugin develops a runaway-retry bug.
+- **Webhook controller is procedural (`__invoke` does everything)** — verification + tenant resolution + outbound fetch + ingest in one method. Splitting into middlewares (`VerifyWebhookSignature`, `ResolveTenant`) would be more idiomatic Laravel. Today it's 100 lines of clear sequential code and over-engineering would obscure the security perimeter. **Trigger PR**: when we add a second webhook (Blesta, PEPPOL ACK, AADE callback) and the shared bits earn the abstraction.
+- **No "the WHMCS-side asked us about this but it's filed, ack it"** semantics — when the ingestor returns `audit_preserved=true` the webhook response just says so; there's no hook to call back into WHMCS and tell it "stop retrying, we already filed this with MARK X". **Trigger PR**: PR #33 (Stage B-3 WHMCS plugin) — the plugin can read the response body and update its own retry state.
+- **The `Refresh` log line in the artisan command does NOT explain WHY a row refreshed vs created** — operator running `whmcs:fetch-pending` against a freshly-cleared tenant sees all "staged" lines; if they re-run on the same data they see all "refresh" lines. Could be confusing without context. **Trigger PR**: when an operator complains; fix shape: add a `--verbose` flag that explains the matcher's decision per row.
+- **`payload` column is `json` (16KB-ish typical, 65KB MariaDB ceiling for the underlying TEXT). For very large WHMCS invoices (200+ line items with rich custom fields), this could approach the limit.** `mediumText` would lift the ceiling to 16MB. **Trigger PR**: first time an ingest fails on payload size; current design errs on the side of "the smallest sufficient type" since JSON is queryable in MariaDB and TEXT is not.
+- **No global tenant scope on `PendingWhmcsInvoice`** — locked-in trade-off, see model docblock. The inbox UI (PR #32) should add Filament's `BelongsToTenant` on top for defence-in-depth without removing the explicit scoping.
+
+**Locked in by PR #31 (don't re-litigate):**
+- Webhook body is `{"whmcs_invoice_id": N}` ONLY. Full invoice data NEVER travels the webhook; we fetch via our outbound API credentials. Closes a class of "proxy log captures sensitive customer data" leaks. Adding fields to the webhook body would re-open that surface; if you need more, fetch it via the API.
+- `audit_preserved=true` semantics: a re-push for a `status=filed` row touches `updated_at` but does NOT mutate payload / customer_id / match_reason. Operator-visible signal is "WHMCS pinged us again about this after we filed" — useful telemetry, but not actionable.
+- HMAC scheme: SHA-256 of raw request body, hex-encoded, prefixed with `sha256=`, header name `X-Webhook-Signature`. WHMCS-side plugin (Stage B-3) must use this exact shape; the test file is the canonical reference.
+- Default ingest path makes N+1 WHMCS API calls (1 GetInvoices + N GetInvoice). Locked in as the only way to capture line-item data for Stage B-2's File-at-AADE action. The `--preview` flag is the escape hatch when you only need a quick "what's pending" check.
+- Rename `whmcs:pull-pending-invoices` → `whmcs:fetch-pending`: no backwards-compat alias because Stage A was preview-only and explicitly NOT cronned. Existing wrappers (none in production yet) need the rename.
 
 **PR #30 (Stage B-2: Inbox UI + Issuance)** — operator-facing:
 - Filament "WHMCS Inbox" resource OR custom page (resource if standard CRUD shape works; custom page if needs an unusual layout). Lists pending_whmcs_invoices rows, filters by status, ordered by created_at desc.
@@ -1290,6 +1314,32 @@ Locked in by PR #26 (don't re-litigate):
 - **FK-aware delete guards (`GuardedDeleteAction`)** — operators currently hit one of two confusing modes when deleting a row that has dependents: (a) the default soft-delete succeeds silently and the dependent invoice / line / customer ends up referencing a trashed lookup row that's now invisible in the panel; (b) ForceDelete crashes with a cryptic SQL error from `restrictOnDelete`. Proposed shape: a reusable `GuardedDeleteAction` (extends Filament's DeleteAction) that counts referencing rows on `->before()`, blocks with a friendly notification listing exactly what depends on the row, and offers "Deactivate" (set `is_active=false`) where the model supports it. Complementary `BeforeDeleteObserver` enforces the same check from artisan/queue/API paths. **Trigger PR**: after InvoiceResource lands — that's when the full reference graph is real (invoices touch every lookup we have). Applies across Product, ProductCategory, VatCategory, MetricUnit, PaymentMethod, DeliveryMethod, DistributionAim, InvoiceType, Customer.
 
 ### Deferred — tied to specific future PRs
+- **Customer "Καρτέλα" (statement/ledger) view** — currently the
+  CustomerResource only lets operators edit identity fields. Real-world
+  accounting workflow needs a per-customer financial dashboard
+  (Greek bookkeeping term "Καρτέλα Πελάτη"): all invoices issued to
+  this customer (date / code / type / net / VAT / gross / mark /
+  payment status), all payments received, running balance (matches
+  legacy `GET_CUSTOMER_BALANCE` SP semantics — DUE_DAYS>0 invoices
+  count toward balance, cash terms don't), per-year subtotals + grand
+  total, outstanding amount, age of oldest unpaid invoice. Operator
+  asked for this on 2026-05-27 from the Filament Customer view page.
+  Shape suggestion: a dedicated "Καρτέλα" tab on ViewCustomer with
+  three sections — (1) summary stats (total invoiced YTD, total paid
+  YTD, balance, oldest outstanding); (2) yearly breakdown table (year
+  → invoice count → net → gross → paid → balance); (3) chronological
+  invoice + payment ledger (every row with date, type=invoice/payment,
+  reference, debit, credit, running balance). Export-to-PDF button at
+  the top using the existing PDF infrastructure. Filterable by year
+  + paid/unpaid. **Trigger PR**: post-PR #32 (WHMCS Stage B-2 Inbox)
+  so the invoice CRUD surface is fully proven first. Fix shape: new
+  `App\Filament\Resources\Customers\Pages\CustomerLedger` custom page
+  + an `App\Services\CustomerLedgerBuilder` value-object builder that
+  pulls from Invoice + Payment for a given (customer, date-range).
+  **Open question for operator before the PR**: do we want this to
+  also include credit notes (επιστροφές / ακυρωτικά) as separate
+  ledger rows, or fold them into the source invoice's row as a
+  negative adjustment? Greek bookkeeping convention varies by firm.
 - **PDF generation on issue + auto-mail with audit-BCC** — legacy
   `FAutoInvoice.cpp:655` generates a PDF on every successful myDATA
   submission via the FR3 print harness; `FMailInvoices.cpp:106` then

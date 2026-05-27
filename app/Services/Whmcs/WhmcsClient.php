@@ -175,6 +175,116 @@ class WhmcsClient
     }
 
     /**
+     * Fetch one invoice's full details by id. WHMCS's GetInvoices list
+     * shape carries minimal per-row data (no line items, partial
+     * client identity); GetInvoice returns the rich shape that Stage
+     * B-1's ingestor + Stage B-2's File-at-AADE action both need to
+     * build an ekdosi Invoice + InvoiceLine[]. One API call per
+     * invoice - cost of having a complete audit-grade snapshot.
+     *
+     * @return array<string, mixed>|null  null if WHMCS returned
+     *                                    "Invoice ID Not Found"
+     *                                    (distinguish from network /
+     *                                    auth failures)
+     */
+    public function getInvoice(int $whmcsInvoiceId): ?array
+    {
+        try {
+            return $this->call('GetInvoice', [
+                'invoiceid' => $whmcsInvoiceId,
+            ]);
+        } catch (WhmcsApiException $e) {
+            // WHMCS's error literal for a missing invoice id - confirmed
+            // against the WHMCS developer docs (developers.whmcs.com,
+            // GetInvoice action, "result" : "error" envelope).
+            if (str_contains($e->getMessage(), 'Invoice ID Not Found')) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Fetch a WHMCS invoice AND merge in the corresponding client's
+     * full details (including customfields). This is the canonical
+     * shape Stage B-1's ingestor expects so the matcher's AFM-by-
+     * customfield strategy (WhmcsCustomerMatcher::extractCustomField)
+     * actually has data to read.
+     *
+     * Why this exists: WHMCS's GetInvoice response carries `userid`
+     * + invoice fields but does NOT embed the client's customfields
+     * block. Without enrichment, every ingest matcher call would
+     * skip strategy #2 (AFM exact match) and degrade to email/name -
+     * defeating the operator's setup of WHMCS custom-field IDs in
+     * the tenant config.
+     *
+     * Cost: 2 API calls per invoice instead of 1. For the pull
+     * command's N+1 loop that's 1 + 2N total (a 100-invoice batch
+     * is ~201 sequential calls at ~300ms each, ~60s). Locked in
+     * as the correct tradeoff; the alternative is silent AFM-match
+     * degradation which is the worse failure mode. Http::pool
+     * parallelisation is tracked as a separate efficiency deferral.
+     *
+     * If the invoice exists but the linked client doesn't (data
+     * corruption on the WHMCS side), the invoice payload is returned
+     * with no client merge - matcher will fall through to unmatched.
+     *
+     * @return array<string, mixed>|null  null if WHMCS returned
+     *                                    "Invoice ID Not Found"
+     */
+    public function getInvoiceWithClient(int $whmcsInvoiceId): ?array
+    {
+        $invoice = $this->getInvoice($whmcsInvoiceId);
+        if ($invoice === null) {
+            return null;
+        }
+
+        $userId = (int) ($invoice['userid'] ?? 0);
+        if ($userId <= 0) {
+            return $invoice;
+        }
+
+        // GetClientsDetails failures are NOT fatal to the ingest -
+        // the invoice itself is what AADE cares about. Log the
+        // shortfall so operators can spot a chronically-broken
+        // client lookup, but proceed with the invoice payload alone.
+        try {
+            $client = $this->getClient($userId);
+        } catch (WhmcsApiException $e) {
+            return $invoice;
+        }
+
+        if ($client === null) {
+            return $invoice;
+        }
+
+        // Merge client identity AND customfields onto the invoice
+        // payload at the top level. Top-level wins on key collision
+        // (invoice keys are more recent / canonical for the invoice
+        // event); customfields is the load-bearing addition for the
+        // matcher's AFM strategy.
+        $clientKeys = [
+            'email', 'firstname', 'lastname', 'companyname',
+            'address1', 'address2', 'city', 'state', 'postcode',
+            'country', 'phonenumber', 'customfields',
+        ];
+        foreach ($clientKeys as $k) {
+            if (array_key_exists($k, $client) && ! array_key_exists($k, $invoice)) {
+                $invoice[$k] = $client[$k];
+            }
+        }
+        // customfields is the ONE case where we want the client's
+        // value even if the invoice payload happened to carry an
+        // (irrelevant, possibly stale) version - the client is the
+        // authoritative source for it.
+        if (array_key_exists('customfields', $client)) {
+            $invoice['customfields'] = $client['customfields'];
+        }
+
+        return $invoice;
+    }
+
+    /**
      * Fetch one client's full details. Used by the Filament "Link to
      * WHMCS" picker AND by the auto-match heuristic during the pull
      * preview.

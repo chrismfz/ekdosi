@@ -49,6 +49,8 @@ class Company extends Model
         'whmcs_api_identifier',
         'whmcs_api_secret',
         'whmcs_custom_field_map',
+        // PR #31: WHMCS bridge — Stage B-1 inbound webhook secret
+        'whmcs_webhook_secret',
     ];
 
     protected function casts(): array
@@ -58,6 +60,7 @@ class Company extends Model
             'gsis_password' => 'encrypted',
             'mail_smtp_password' => 'encrypted',
             'whmcs_api_secret' => 'encrypted',
+            'whmcs_webhook_secret' => 'encrypted',
             'whmcs_custom_field_map' => 'array',
             'auto_email_on_mydata_accept' => 'boolean',
             'mail_smtp_port' => 'integer',

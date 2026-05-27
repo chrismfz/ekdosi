@@ -616,6 +616,24 @@ class CompanyForm
                                             ->reorderable(false)
                                             ->helperText('Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), toinvoice (alternative billing-name). Leave empty if your WHMCS doesn\'t track a role.'),
                                     ]),
+
+                                // PR #31 (Stage B-1): per-tenant webhook secret. Used by the
+                                // /webhooks/whmcs/{slug}/invoice-paid endpoint to verify HMAC
+                                // signatures on inbound calls from the WHMCS-side plugin
+                                // (Stage B-3). Kept separate from the API secret deliberately:
+                                // outbound vs inbound auth, distinct blast radius if either leaks.
+                                Section::make('Inbound webhook')
+                                    ->description('Shared secret for the WHMCS-side plugin to sign push notifications to this tenant\'s ekdosi inbox. Endpoint: POST /webhooks/whmcs/{slug}/invoice-paid with header X-Webhook-Signature: sha256=<hex hmac of raw body>. Stage B-3 plugin ships in a later PR; configure now to test end-to-end against a real WHMCS install.')
+                                    ->schema([
+                                        TextInput::make('whmcs_webhook_secret')
+                                            ->label('Webhook secret')
+                                            ->password()
+                                            ->revealable()
+                                            ->maxLength(191)
+                                            ->helperText('Encrypted at rest. Generate a fresh random string (32+ chars) per tenant. Leave blank to keep existing.')
+                                            ->dehydrated(fn (?string $state) => filled($state))
+                                            ->dehydrateStateUsing(fn (string $state) => $state),
+                                    ]),
                             ]),
                     ]),
             ]);
