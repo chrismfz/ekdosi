@@ -5,10 +5,15 @@ namespace App\Filament\Resources\Companies\Schemas;
 use App\Exceptions\Aade\AadeAfmNotFound;
 use App\Exceptions\Aade\AadeCredentialsInvalid;
 use App\Exceptions\Aade\AadeUnreachable;
+use App\Exceptions\Whmcs\WhmcsApiException;
+use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
+use App\Exceptions\Whmcs\WhmcsNotConfigured;
+use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Services\AadeRegistryLookup;
 use App\Services\MailTemplateRenderer;
 use App\Services\TenantMailerFactory;
+use App\Services\Whmcs\WhmcsClientFactory;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -530,6 +535,87 @@ class CompanyForm
                                             }),
                                     ])
                                     ->columns(2),
+                            ]),
+
+                        // ====== PR #28: WHMCS bridge — Stage A tab ======
+                        Tab::make('WHMCS bridge')
+                            ->schema([
+                                Section::make('API credentials')
+                                    ->description('Connection to the tenant\'s WHMCS install. Stage A is read-only — we list paid+unfiled invoices and match them to ekdosi customers. Stage B (next PR) will issue them through myDATA.')
+                                    ->schema([
+                                        TextInput::make('whmcs_api_url')
+                                            ->label('API URL')
+                                            ->maxLength(500)
+                                            ->placeholder('https://billing.example.gr/includes/api.php')
+                                            ->helperText('Full URL ending in /includes/api.php.'),
+                                        TextInput::make('whmcs_api_identifier')
+                                            ->label('API Identifier')
+                                            ->maxLength(191)
+                                            ->helperText('From WHMCS: Setup → Staff Management → API Credentials.'),
+                                        TextInput::make('whmcs_api_secret')
+                                            ->label('API Secret')
+                                            ->password()
+                                            ->revealable()
+                                            ->maxLength(191)
+                                            ->helperText('Encrypted at rest. Leave blank to keep existing.')
+                                            ->dehydrated(fn (?string $state) => filled($state))
+                                            ->dehydrateStateUsing(fn (string $state) => $state),
+                                        FormAction::make('test_whmcs_connection')
+                                            ->label('Test connection')
+                                            ->icon('heroicon-o-signal')
+                                            ->color('gray')
+                                            ->authorize(fn (?Company $record) => $record === null
+                                                ? false
+                                                : (auth()->user()?->can('update', $record) ?? false))
+                                            ->action(function (?Company $record) {
+                                                if (! $record) {
+                                                    Notification::make()->title('Save the company first, then test.')->warning()->send();
+                                                    return;
+                                                }
+                                                try {
+                                                    $version = app(WhmcsClientFactory::class)
+                                                        ->for($record)
+                                                        ->testConnection();
+                                                    Notification::make()
+                                                        ->title('Connected to WHMCS')
+                                                        ->body("Reached WHMCS ({$version}). Credentials accepted.")
+                                                        ->success()->send();
+                                                } catch (WhmcsNotConfigured $e) {
+                                                    Notification::make()
+                                                        ->title('WHMCS not configured')
+                                                        ->body($e->getMessage())
+                                                        ->warning()->send();
+                                                } catch (WhmcsAuthenticationFailed $e) {
+                                                    Notification::make()
+                                                        ->title('WHMCS credentials rejected')
+                                                        ->body($e->getMessage().' Check Setup → Staff Management → API Credentials in WHMCS, plus the IP allowlist if any.')
+                                                        ->danger()->persistent()->send();
+                                                } catch (WhmcsUnreachable $e) {
+                                                    Notification::make()
+                                                        ->title('WHMCS unreachable')
+                                                        ->body($e->getMessage())
+                                                        ->danger()->persistent()->send();
+                                                } catch (WhmcsApiException $e) {
+                                                    Notification::make()
+                                                        ->title('WHMCS error')
+                                                        ->body($e->getMessage())
+                                                        ->danger()->persistent()->send();
+                                                }
+                                            }),
+                                    ]),
+
+                                Section::make('Custom field mapping')
+                                    ->description('Each WHMCS install assigns its own integer IDs to custom fields. Tell us which IDs carry which roles so we can read the right data when matching invoices and (in Stage B) building the myDATA payload.')
+                                    ->schema([
+                                        \Filament\Forms\Components\KeyValue::make('whmcs_custom_field_map')
+                                            ->label(false)
+                                            ->keyLabel('Role')
+                                            ->valueLabel('WHMCS field id')
+                                            ->addable(true)
+                                            ->editableKeys(true)
+                                            ->reorderable(false)
+                                            ->helperText('Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), toinvoice (alternative billing-name). Leave empty if your WHMCS doesn\'t track a role.'),
+                                    ]),
                             ]),
                     ]),
             ]);

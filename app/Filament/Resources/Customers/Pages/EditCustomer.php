@@ -2,8 +2,18 @@
 
 namespace App\Filament\Resources\Customers\Pages;
 
+use App\Exceptions\Whmcs\WhmcsApiException;
+use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
+use App\Exceptions\Whmcs\WhmcsNotConfigured;
+use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Models\Customer;
+use App\Services\Whmcs\WhmcsClientFactory;
+use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 
 class EditCustomer extends EditRecord
@@ -13,6 +23,138 @@ class EditCustomer extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            // PR #28: WHMCS linking action. Visible only when the
+            // tenant has WHMCS configured — otherwise it'd offer
+            // nothing useful. Two flows:
+            //   - Search-by-name picker that calls WHMCS GetClients
+            //     live; operator selects from candidates.
+            //   - Manual ID entry for the "I already know the
+            //     WHMCS client id" case (legacy data imports).
+            Action::make('link_whmcs')
+                ->label(fn (Customer $record) => $record->whmcs_client_id
+                    ? 'Re-link WHMCS (currently #'.$record->whmcs_client_id.')'
+                    : 'Link to WHMCS client')
+                ->icon('heroicon-o-link')
+                ->color('gray')
+                ->visible(fn (Customer $record) => $record->company?->hasWhmcsIntegration() ?? false)
+                ->authorize(fn (Customer $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Link this customer to a WHMCS client')
+                ->modalDescription('Search WHMCS by name, email, or company. Pick a candidate to set customers.whmcs_client_id, which Stage B (PR #29) will use to route pulled invoices.')
+                ->modalSubmitActionLabel('Save link')
+                ->schema(fn (Customer $record) => [
+                    // Filament-correct shape for "live-fetch options
+                    // from an external source": searchable Select
+                    // with getSearchResultsUsing(). Filament fires
+                    // the closure ONLY when the operator types in the
+                    // Select's built-in search box, debounced
+                    // automatically. Returns a [id => label] map.
+                    // The previous shape (->options(closure) reading
+                    // an external TextInput) re-fired on every form
+                    // re-render — easily 4-6 WHMCS API calls per
+                    // operator interaction.
+                    Select::make('whmcs_client_id')
+                        ->label('Search WHMCS')
+                        ->searchable()
+                        ->getSearchResultsUsing(function (string $search) use ($record): array {
+                            $needle = trim($search);
+                            if ($needle === '') {
+                                return [];
+                            }
+                            try {
+                                $client = app(WhmcsClientFactory::class)->for($record->company);
+                                $hits = $client->searchClients($needle, limit: 25);
+                            } catch (WhmcsApiException $e) {
+                                // Live search can't easily surface an
+                                // exception in the dropdown. Empty
+                                // result + the operator clicks Test
+                                // Connection on the Company form to
+                                // diagnose. Better than a broken
+                                // modal that won't dismiss.
+                                return [];
+                            }
+
+                            $options = [];
+                            foreach ($hits as $h) {
+                                $id = (int) ($h['id'] ?? 0);
+                                if ($id === 0) {
+                                    continue;
+                                }
+                                $name = trim((string) ($h['companyname'] ?? ''));
+                                if ($name === '') {
+                                    $name = trim(($h['firstname'] ?? '').' '.($h['lastname'] ?? ''));
+                                }
+                                $email = (string) ($h['email'] ?? '');
+                                $options[$id] = '#'.$id.' — '.($name ?: '(no name)')
+                                    .($email !== '' ? ' <'.$email.'>' : '');
+                            }
+                            return $options;
+                        })
+                        ->getOptionLabelUsing(function ($value) use ($record): ?string {
+                            // Render a CHEAP LOCAL label here — no
+                            // WHMCS API call on label render. The
+                            // earlier shape (calling getClient() to
+                            // surface the WHMCS-side name) stalled
+                            // the modal's initial render on a
+                            // synchronous HTTP call for up to 25s on
+                            // a network blackhole. Verified at
+                            // vendor/filament/forms/resources/views/
+                            // components/select.blade.php:172 —
+                            // getOptionLabelUsing fires inline during
+                            // server-side render; Choices.js can
+                            // also re-fire it asynchronously on
+                            // selection switches, multiplying the
+                            // cost. The previous shape's claim to
+                            // "fix per-render API calls" was only
+                            // true for the search closure; this one
+                            // re-introduced the problem on the label
+                            // render path.
+                            //
+                            // Defense-in-depth: also enforce tenant
+                            // boundary on the closure since Filament
+                            // exposes it as a Livewire-callable
+                            // endpoint. A cross-tenant URL bug would
+                            // otherwise let this closure leak a
+                            // different tenant's customer detail.
+                            // (Currently moot since BelongsToTenant
+                            // scopes the Customer query above, but
+                            // worth the explicit check at every
+                            // closure that takes a captured model.)
+                            if (! $value) {
+                                return null;
+                            }
+                            if ($record->company_id !== \Filament\Facades\Filament::getTenant()?->getKey()) {
+                                return '#'.$value;
+                            }
+                            return 'Currently linked to WHMCS client #'.$value;
+                        })
+                        ->default($record->whmcs_client_id)
+                        ->helperText('Type to search WHMCS by name, email, or company. Pick a candidate, or leave blank + Save to UNLINK.'),
+
+                    TextInput::make('manual_id')
+                        ->label('Or set the ID manually')
+                        ->numeric()
+                        ->minValue(1)
+                        ->placeholder('e.g. 4321')
+                        ->helperText('Overrides the picker. Use if you already know the WHMCS client id.'),
+                ])
+                ->action(function (array $data, Customer $record) {
+                    $manual = (int) ($data['manual_id'] ?? 0);
+                    $picked = (int) ($data['whmcs_client_id'] ?? 0);
+
+                    // Manual ID takes precedence (operator typed it
+                    // explicitly). Then the picker. Empty both = unlink.
+                    $newId = $manual ?: $picked ?: null;
+
+                    $record->update(['whmcs_client_id' => $newId]);
+
+                    Notification::make()
+                        ->title($newId
+                            ? "Linked to WHMCS client #{$newId}"
+                            : 'Unlinked from WHMCS')
+                        ->success()
+                        ->send();
+                }),
+
             DeleteAction::make(),
         ];
     }

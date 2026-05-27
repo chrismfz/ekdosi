@@ -1117,6 +1117,83 @@ Items still deferred from this third pass:
 - **`normaliseCountryCode()` country list** — seeded with GR / EE / CY / DE (current tenant scope). Extend the match arms as new tenant/customer countries appear. Operators see a clear error pointing at the helper if an unrecognised country shows up.
 - **vatExemptionCategory mechanism for 0% lines** — still throws (the right safe default). When intra-community customers need filing, add a `vat_exemption_category` column on `vat_categories` + per-line override + heuristic for invoice type ∈ {1.2, 2.2} → auto-suggest the right category. **Trigger PR**: first time an operator hits the 0% throw.
 
+### Deferred from PR #28 (WHMCS bridge — Stage A)
+Stage A is read-only: API client, tenant credentials, customer matcher, dry-run preview command. Findings + Stage B spec captured here so PR #29 starts informed.
+
+**Decision locked in 2026-05-27: WHMCS bridge is OPERATOR-GATED, not auto-issuing.** Invoices are legally significant; auto-firing on payment creates real cleanup pain in two common scenarios: (a) customer pays, then opens a ticket asking to invoice a different entity (employer / parent company) — auto-fire = we filed wrong + need CANCEL + reissue + permanent audit-trail entry; (b) customer pays via PayPal/recurring subscription then immediately disputes/refunds — auto-fire = we filed for money about to be reversed. Both are real operator pain. The corrected design is an **inbox model**: every paid+unfiled WHMCS invoice stages as a `pending_whmcs_invoices` row; nothing reaches AADE without an explicit operator click in the inbox UI.
+
+**Inbox flow:**
+```
+Customer pays in WHMCS
+        ↓
+[Push: WHMCS button "Send to ekdosi for review"]  OR  [Pull: scheduled poll]
+        ↓                            ↓
+        └──────────┬─────────────────┘
+                   ↓
+   pending_whmcs_invoices row staged
+   (idempotent on (company_id, whmcs_invoice_id))
+   status='pending_review', payload=JSON snapshot,
+   customer_id=suggested match, match_reason=<source>
+                   ↓
+       Ekdosi "WHMCS Inbox" UI (Filament resource or custom page)
+       Operator reviews each row:
+       ├─ "File at AADE" → IssueInvoice runs → MARK + write back invoiced=<mark>
+       ├─ "Reject" → status=rejected (won't re-pull); optional reason
+       └─ "Hold" → keeps in inbox; not processed until lifted
+```
+
+**Stage B is split into THREE PRs (operator approved 2026-05-27):**
+
+**PR #29 (Stage B-1: Ingestion)** — table + both ingestion paths, NO UI, NO issuance:
+- New migration: `pending_whmcs_invoices` table. Columns: id, company_id (FK), whmcs_invoice_id (unique with company_id), whmcs_userid, customer_id (FK nullable — suggested match), payload (JSON snapshot of WHMCS GetInvoice response), match_reason (linked/afm/email/name/unmatched), status (pending_review/filed/rejected/held), notes, created_at, updated_at, filed_at, filed_by_user_id, mydata_mark, rejected_reason. Index on (company_id, status, created_at) for the inbox filter.
+- New model: `PendingWhmcsInvoice`.
+- New service: `WhmcsInvoiceIngestor` — takes a WHMCS invoice payload + tenant, runs the matcher, upserts into pending_whmcs_invoices keyed on (company_id, whmcs_invoice_id). Idempotent — a re-push (or re-pull) of the same WHMCS invoice id updates the existing row, never creates duplicates.
+- Re-purposed pull command: `whmcs:fetch-pending --tenant=X` — REPLACES the Stage A dry-run preview. Same iteration over GetInvoices, but instead of printing a table, calls the ingestor to stage rows. Old behaviour available via `--preview` flag (still useful for testing).
+- New webhook endpoint: `POST /webhooks/whmcs/{tenant_slug}/invoice-paid` — HMAC-signed body containing whmcs_invoice_id. Fetches that invoice from WHMCS (one API call), calls the ingestor. Returns 202 Accepted + the new row id, OR 200 + existing row id if it was already staged. NEVER files at AADE in this PR.
+- Tests: ingestor idempotency, webhook signature verification, pull command stages instead of files.
+- NEW companies column: `whmcs_webhook_secret` (text, encrypted) — separate from `whmcs_api_secret` so a webhook secret leak in WHMCS error logs doesn't compromise the API credentials.
+
+**PR #30 (Stage B-2: Inbox UI + Issuance)** — operator-facing:
+- Filament "WHMCS Inbox" resource OR custom page (resource if standard CRUD shape works; custom page if needs an unusual layout). Lists pending_whmcs_invoices rows, filters by status, ordered by created_at desc.
+- Per-row actions:
+  - **File at AADE** — opens a modal: confirm customer (operator can change the suggested match), preview line items (built from WHMCS payload), confirm invoice type (defaults to tenant's standard). On submit: build Invoice + InvoiceLine rows from payload → run IssueInvoice action with chainSubmit=true → on success, update pending row (status=filed, filed_at, filed_by_user_id, mydata_mark) → call WhmcsClient::updateInvoice() to write back tblinvoices.invoiced=<mark> on the WHMCS side. On AADE failure: keep status=pending_review, surface the error in the row's notes.
+  - **Reject** — modal asks for an optional reason. Sets status=rejected, rejected_reason. Won't re-pull.
+  - **Hold** — sets status=held. Stays in inbox but filter hides by default; operator lifts when ready.
+  - **Re-stage** — only on rejected/filed rows: resets to status=pending_review (legacy `prepare_for_ekdosi` reset equivalent).
+- Bulk actions: bulk-reject (with single reason), bulk-hold.
+- Stats on the inbox page: pending count, age of oldest pending row, count by match_reason.
+- Tests: state transitions (pending → filed → resettable; pending → rejected → resettable; held → pending), the File-at-AADE chain through to MyDataSubmitter, WHMCS write-back idempotency.
+
+**PR #31 (Stage B-3: WHMCS-side plugin)** — PHP plugin shipped into the tenant's WHMCS install:
+- Replaces `legacy/whmcs/prepare_for_ekdosi/` entirely. Lives at `legacy/whmcs/ekdosi_bridge/` (and would be deployed to the tenant's `modules/addons/ekdosi_bridge/` on the WHMCS host).
+- Module config form: ekdosi webhook URL, webhook secret. Stored in WHMCS's standard `tbladdonmodules` config.
+- Per-invoice button hook: appears on WHMCS's admin invoice page. Three sub-actions:
+  - **Send to ekdosi for review** — POSTs to the webhook with HMAC sig. Inline feedback: "Staged in ekdosi for operator review (ekdosi row #N)" or error.
+  - **Show ekdosi status** — GET to a status endpoint, returns the pending_whmcs_invoices row state ("Pending review", "Filed with MARK X", "Rejected: <reason>").
+  - **Reset to unfiled** — for the legacy reset use case; sets `tblinvoices.invoiced=0` on the WHMCS side, prompts operator to also re-send to ekdosi if desired.
+- The WHMCS plugin itself doesn't talk to AADE; just to ekdosi via HTTPS. Keeps the WHMCS install dumb.
+- No tests in the ekdosi repo (plugin is shipped to a different stack); a deployment runbook lives in `legacy/whmcs/ekdosi_bridge/README.md`.
+
+**Other Stage B work (across the three PRs):**
+- **`mod_timologia` third-party-invoicing support** — discovered from reading legacy/whmcs/timologia/. The plugin's custom tables are:
+  - `mod_timologia_contacts(id, company_name, gr_vatno, city, address, tax_office, description, vies_vatno, email, country, telephone, postal_code, userid)` — a client's list of alternative billing identities (employer, parent company, etc).
+  - `mod_timologia(id, userid, contactid, serviceid, service_type)` — per-service routing: "service X gets invoiced to contact Y, not to the WHMCS client themselves."
+  Stage B logic: for each pulled invoice → for each line's `serviceid` → check `mod_timologia` → if mapped, use the linked `mod_timologia_contacts` row for customer-snapshot fields instead of the WHMCS client's standard custom fields. Two API options: (a) extend the WHMCS bridge with a custom endpoint that joins both tables and exposes per-service the resolved contact (requires a tenant-side WHMCS module — significant scope), or (b) call WHMCS `GetClientProducts` per pulled invoice to get serviceids, then a custom WHMCS endpoint or admin API to fetch `mod_timologia*` rows (still API-only, no DB credentials). Option (a) is the right call; defer until a real myip filing surfaces a mod_timologia row.
+- **`griniaris` immediate-invoicing flag** — Standard WHMCS custom field (legacy `FAutoInvoice.cpp:322` checks `fieldid=338`). When the pulled invoice's client has griniaris=true, Stage B should route it to a separate "issue immediately" queue (vs the weekly batch the default griniaris=false case takes). The `companies.whmcs_custom_field_map.griniaris` mapping in Stage A's UI already lets the operator say "fieldid 338" — Stage B reads it.
+- **The `prepare_for_ekdosi` plugin's reset capability** — verified at legacy/whmcs/prepare_for_ekdosi/lib/Admin/Controller.php: a manual admin UI for resetting `tblinvoices.invoiced = 0`. Stage B can either (a) keep operators using that WHMCS-side plugin for the rare reset case, or (b) add a Filament action that calls the same UpdateInvoice path with invoiced=0. Option (b) keeps the operator inside ekdosi.
+
+**Stage A items deferred:**
+- **No live WHMCS-against-a-real-server test** — Http::fake covers wire shape; the actual handshake against a real WHMCS install is unverified. First operator click on "Test connection" will reveal any wire-format surprises.
+- **The "search WHMCS" picker on the Customer link action runs one API call per `live(onBlur)` event** — fine for typical use, but a fast-typing operator could trigger 5+ searches in a few seconds. Filament has no per-action throttle baked in. **Trigger PR**: when this surfaces as a perf complaint or WHMCS rate-limits us.
+- **Customer-side `Link to WHMCS` action lives only on EditCustomer** — not on ListCustomers' bulk actions. If a tenant has 500 unlinked customers, manual linking is 500 clicks. **Trigger PR**: bulk-match wizard once Stage B is live + a real backlog exists.
+- **WHMCS API rate-limiting and retry policy** — current client has timeout=20s but no retry on 429/transient. Stage B's scheduled pull will iterate enough rows to hit this eventually. **Trigger PR**: scheduled pull command in Stage B.
+
+**Locked in by PR #28 (don't re-litigate):**
+- `customers.whmcs_client_id` is set ONLY via operator-confirmed action — never auto-written by the matcher. The matcher returns candidates with confidence labels; operator decides.
+- `invoiced=0` is the pending-filing flag (verified at legacy/whmcs/prepare_for_ekdosi/). Stage B writes back the MARK value (non-zero) post-filing.
+- Stage A makes ONE WHMCS API call per dry-run (GetInvoices). It does NOT batch-fetch GetClientsDetails per row — the per-invoice client info comes from the GetInvoices response's embedded fields. Stage B WILL need to batch-fetch when it actually issues (for the full client custom-fields lookup).
+- `afm2name` WHMCS-side GSIS lookup plugin is OUT OF SCOPE — we have native `AadeRegistryLookup` (PR #22) inside ekdosi; no need for the WHMCS-side equivalent.
+
 ### Deferred from PR #27 (PDF polish + per-tenant email + send-log) — post-fix double review
 PR #27 went through 3 review rounds: build, independent blind review (caught 2 CRITICAL bugs — PDF bytes leaking into queue payload because Mailable was ShouldQueue + premature 'sent' status; no failed() hook), then a double review on the fixes that found ANOTHER CRITICAL bug (the failed() hook itself was broken because `$this->logId` doesn't survive Laravel's serialize/deserialize round-trip — verified at vendor/laravel/.../CallQueuedHandler.php). All fixed. Residual items deferred:
 
