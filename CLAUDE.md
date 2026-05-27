@@ -1313,33 +1313,94 @@ Locked in by PR #26 (don't re-litigate):
 ### Deferred — application-wide patterns
 - **FK-aware delete guards (`GuardedDeleteAction`)** — operators currently hit one of two confusing modes when deleting a row that has dependents: (a) the default soft-delete succeeds silently and the dependent invoice / line / customer ends up referencing a trashed lookup row that's now invisible in the panel; (b) ForceDelete crashes with a cryptic SQL error from `restrictOnDelete`. Proposed shape: a reusable `GuardedDeleteAction` (extends Filament's DeleteAction) that counts referencing rows on `->before()`, blocks with a friendly notification listing exactly what depends on the row, and offers "Deactivate" (set `is_active=false`) where the model supports it. Complementary `BeforeDeleteObserver` enforces the same check from artisan/queue/API paths. **Trigger PR**: after InvoiceResource lands — that's when the full reference graph is real (invoices touch every lookup we have). Applies across Product, ProductCategory, VatCategory, MetricUnit, PaymentMethod, DeliveryMethod, DistributionAim, InvoiceType, Customer.
 
+### `HandlesAadeRegistryExceptions` trait (PR #35)
+`app/Filament/Concerns/HandlesAadeRegistryExceptions.php` centralises
+the AADE-exception → operator-message mapping that was previously
+duplicated across 4 sites (CustomerForm suffix-action, CompanyForm GSIS
+test, CompanyForm AFM lookup, CustomerLedger crosscheck). Two consumption
+patterns: `notifyAadeException($e)` for Filament Notification call sites,
+`aadeExceptionDetails($e)` for sites that need the title/body pair as
+strings (e.g. Καρτέλα crosscheck returns a structured result). When a
+new AADE exception class lands (e.g. `AadeRateLimited` per the deferred
+items), ONE match arm covers all consumers. CustomerLedger is migrated
+in PR #35; CustomerForm + CompanyForm sites keep their existing
+site-specific UX strings for now (incremental migration in a follow-up
+PR — adopting the trait is opt-in to avoid changing operator-facing
+copy without explicit decision).
+
+### Καρτέλα Πελάτη (landed PR #35)
+
+Customer financial dashboard at
+`/admin/{tenant}/customers/{id}/ledger`. Default row-click destination
+from the customers list (matches Singular / Atlantis / Soft1 UX
+convention). Sections:
+
+1. **Header card** — identity + AFM + ΔΟΥ + balance highlighted +
+   WHMCS link badge if linked.
+2. **Quick stats** — YTD net/gross/paid, balance, oldest unpaid days,
+   last activity, total invoices lifetime.
+3. **Aging buckets** — 0-30 / 31-60 / 61-90 / 90+ days outstanding.
+   FIFO payment allocation. Only shown if balance > 0.
+4. **Yearly breakdown** — count × net × gross × paid × year-end
+   running balance, newest year first.
+5. **Chronological ledger** — invoices + payments merged, oldest-first
+   for running-balance computation then reversed for display.
+   Filterable by year × invoice type × paid status. Running balance
+   preserved across filter window (operator wouldn't expect a year
+   filter to reset balance to zero — locked by
+   `test_chronological_ledger_year_filter_preserves_running_balance_from_history`).
+6. **WHMCS comparison panel** — collapsible. Cross-references each
+   WHMCS invoice for this client against `pending_whmcs_invoices`
+   AND `whmcs_invoice_log`. Per-row badges: filed historically /
+   pending review / filed via MARK / rejected / held / absent.
+7. **AADE διασταύρωση** header action — fetches live GSIS record by
+   AFM, diffs against stored customer columns (name, ΔΟΥ, address,
+   city, postcode, occupation), surfaces drifts in a modal,
+   optional one-click apply. Visible only when AFM is set + tenant
+   is Greek + GSIS configured. Reuses `AadeRegistryLookup` from
+   PR #22.
+
+**Balance semantics** mirror the legacy `GET_CUSTOMER_BALANCE` SP:
+only `payment_methods.due_days > 0` invoices count toward balance
+(cash-term invoices are settled at issue and don't create a
+receivable). Locked by `test_cash_term_invoices_do_not_count_toward_balance`
+and `test_credit_term_invoice_creates_balance_until_paid`.
+
+**Credit notes** treated as separate ledger rows with naturally-negative
+`gross_total` (operator never answered the fold-vs-separate question;
+safer default — preserves the audit trail. If they want folded later,
+small refactor).
+
+**Builder/value-object split**: `App\Services\CustomerLedger\CustomerLedgerBuilder`
++ `CustomerLedgerResult`. Builder runs ONE DB-light pass (two
+SELECTs total: invoices joined to payment_methods + invoice_types,
+plus payments). Pure data; Blade renders. 10 unit tests cover the
+math.
+
+**WHMCS subsystem** in this PR (also live in PR #34's bridge work):
+`App\Services\Whmcs\CustomerWhmcsLedger` + `CustomerWhmcsLedgerResult`
++ `WhmcsClient::getInvoicesForClient($whmcsUserId, $minDate, $limit)`.
+
+**Deferred** (out of scope for the MVP, all flagged for follow-up PRs):
+- **PDF export** — placeholder; needs new Blade template + paginator.
+- **Email Καρτέλα** to the customer via the tenant mailer.
+- **12-month sales chart** at the top.
+- **CSV / Excel export**.
+- **Custom date-range filter** (year filter is enough for v1).
+- **"Top products purchased" section**.
+- **Per-row settlement tracking** — paid/unpaid filter is coarse
+  (cash-term = paid, credit-term = unpaid) because we don't track
+  per-invoice payment allocation. Real fix needs a settlement
+  table.
+- **`availableYears` lookup uses driver-branched raw SQL** (SQLite
+  `strftime` vs MariaDB `YEAR()`). Acceptable; clean refactor would
+  be a `DatabaseHelpers::extractYear()` portable expression.
+- **AADE crosscheck doesn't snapshot the pre-change values** — applies
+  the diff directly; reversal requires manual edit. A `customer_changes`
+  audit table would close this gap. **Trigger PR**: when activitylog
+  wraps Customer.
+
 ### Deferred — tied to specific future PRs
-- **Customer "Καρτέλα" (statement/ledger) view** — currently the
-  CustomerResource only lets operators edit identity fields. Real-world
-  accounting workflow needs a per-customer financial dashboard
-  (Greek bookkeeping term "Καρτέλα Πελάτη"): all invoices issued to
-  this customer (date / code / type / net / VAT / gross / mark /
-  payment status), all payments received, running balance (matches
-  legacy `GET_CUSTOMER_BALANCE` SP semantics — DUE_DAYS>0 invoices
-  count toward balance, cash terms don't), per-year subtotals + grand
-  total, outstanding amount, age of oldest unpaid invoice. Operator
-  asked for this on 2026-05-27 from the Filament Customer view page.
-  Shape suggestion: a dedicated "Καρτέλα" tab on ViewCustomer with
-  three sections — (1) summary stats (total invoiced YTD, total paid
-  YTD, balance, oldest outstanding); (2) yearly breakdown table (year
-  → invoice count → net → gross → paid → balance); (3) chronological
-  invoice + payment ledger (every row with date, type=invoice/payment,
-  reference, debit, credit, running balance). Export-to-PDF button at
-  the top using the existing PDF infrastructure. Filterable by year
-  + paid/unpaid. **Trigger PR**: post-PR #32 (WHMCS Stage B-2 Inbox)
-  so the invoice CRUD surface is fully proven first. Fix shape: new
-  `App\Filament\Resources\Customers\Pages\CustomerLedger` custom page
-  + an `App\Services\CustomerLedgerBuilder` value-object builder that
-  pulls from Invoice + Payment for a given (customer, date-range).
-  **Open question for operator before the PR**: do we want this to
-  also include credit notes (επιστροφές / ακυρωτικά) as separate
-  ledger rows, or fold them into the source invoice's row as a
-  negative adjustment? Greek bookkeeping convention varies by firm.
 - **PDF generation on issue + auto-mail with audit-BCC** — legacy
   `FAutoInvoice.cpp:655` generates a PDF on every successful myDATA
   submission via the FR3 print harness; `FMailInvoices.cpp:106` then

@@ -127,6 +127,12 @@ class CustomersTable
                     ForceDeleteBulkAction::make(),
                 ]),
             ])
+            // Row click → Καρτέλα (the financial view). Matches Greek
+            // accounting software convention (Singular / Atlantis /
+            // Soft1) — operators primarily SEE customer accounts;
+            // edits are rare. The explicit Edit action above stays as
+            // the secondary path.
+            ->recordUrl(fn ($record) => \App\Filament\Resources\Customers\CustomerResource::getUrl('ledger', ['record' => $record]))
             ->defaultSort('name');
     }
 }

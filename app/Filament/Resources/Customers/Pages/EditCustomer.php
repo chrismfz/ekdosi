@@ -23,6 +23,14 @@ class EditCustomer extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            // Καρτέλα: the financial view, primary destination for
+            // operators looking at a customer's account.
+            Action::make('open_kartela')
+                ->label('Καρτέλα')
+                ->icon('heroicon-o-document-chart-bar')
+                ->color('primary')
+                ->url(fn (Customer $record) => CustomerResource::getUrl('ledger', ['record' => $record])),
+
             // PR #28: WHMCS linking action. Visible only when the
             // tenant has WHMCS configured — otherwise it'd offer
             // nothing useful. Two flows:

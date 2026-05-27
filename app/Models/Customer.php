@@ -84,4 +84,22 @@ class Customer extends Model
     {
         return $this->hasMany(self::class, 'referred_by_customer_id');
     }
+
+    /**
+     * All invoices issued to this customer. Used by the Καρτέλα page
+     * for the chronological ledger and yearly breakdown.
+     */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(\App\Models\Invoice::class);
+    }
+
+    /**
+     * All payments received from this customer. Used by the Καρτέλα
+     * page for the chronological ledger + balance calc.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(\App\Models\Payment::class);
+    }
 }
