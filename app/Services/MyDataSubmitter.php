@@ -144,7 +144,61 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         $responseXml = $action->getResponseXML() ?? '';
 
-        return $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+        $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+
+        // PR #27: dispatch the customer-mail job after a successful
+        // VALID filing IF the tenant has opted in via
+        // auto_email_on_mydata_accept. The job re-fetches the invoice,
+        // renders a fresh PDF, and routes to customer.email + the
+        // tenant's audit BCC. Skipped silently when:
+        //   - tenant flag is false
+        //   - customer has no email (job handler logs + returns)
+        //   - this submitter was reached via DRY_RUN (not this path)
+        $this->dispatchAutoEmailIfEnabled($invoice);
+
+        return $mark;
+    }
+
+    /**
+     * Best-effort dispatch of the customer-mail job. Silent on every
+     * tenant-opted-out path; logs (doesn't throw) if the dispatcher
+     * itself fails — we don't want a queue-connection hiccup to mask
+     * a successful AADE filing from the operator. The mail can always
+     * be re-sent via the ViewInvoice "Resend email" action.
+     *
+     * NOTE on DB::afterCommit: Laravel's transaction manager fires the
+     * callback IMMEDIATELY when there's no active transaction (verified
+     * at vendor/laravel/framework/.../DatabaseTransactionsManager.php
+     * :205). So in the IssueInvoice (CreateInvoice) path — which wraps
+     * the whole flow in Filament's outer transaction — the dispatch
+     * defers until that outer commit. But in the ViewInvoice "Submit
+     * to myDATA" path, there's no outer transaction, so the dispatch
+     * runs synchronously here. Either way, persistResponse() has
+     * already committed its own inner transaction by this point, so
+     * the invoice + mark row are durable. This is correct behaviour,
+     * not a defense — it's why we use afterCommit defensively even
+     * though it's a no-op in the common case.
+     */
+    private function dispatchAutoEmailIfEnabled(Invoice $invoice): void
+    {
+        if (! ($invoice->company?->auto_email_on_mydata_accept ?? false)) {
+            return;
+        }
+
+        $invoiceId = $invoice->getKey();
+        DB::afterCommit(function () use ($invoiceId): void {
+            try {
+                $fresh = Invoice::query()->whereKey($invoiceId)->first();
+                if ($fresh) {
+                    \App\Jobs\SendInvoiceEmail::dispatch($fresh);
+                }
+            } catch (Throwable $e) {
+                Log::warning('SendInvoiceEmail auto-dispatch failed (filing succeeded)', [
+                    'invoice_id' => $invoiceId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
     }
 
     /**

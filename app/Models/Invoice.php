@@ -157,6 +157,16 @@ class Invoice extends Model
     }
 
     /**
+     * Outbound mail send log — one row per attempt (queued / sending /
+     * sent / failed). Surfaces on the ViewInvoice page as a relation
+     * manager so operators can see delivery history.
+     */
+    public function mailLog(): HasMany
+    {
+        return $this->hasMany(InvoiceMailLog::class)->orderByDesc('created_at');
+    }
+
+    /**
      * Latest myDATA submission for this invoice — for the read-only
      * view page. Ordered by the legal action time (mark_date +
      * mark_time), NOT by autoincrement id. Live submissions get id

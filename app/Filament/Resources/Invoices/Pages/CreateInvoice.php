@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
+use App\Services\RecomputeInvoiceTotals;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
@@ -94,8 +95,7 @@ class CreateInvoice extends CreateRecord
      */
     protected function afterCreate(): void
     {
-        $invoice = $this->record->fresh(['lines']);
-        $this->recomputeTotals($invoice);
+        $invoice = app(RecomputeInvoiceTotals::class)($this->record);
 
         if ($this->shouldSubmitAfterCreate) {
             $invoiceId = $invoice->getKey();
@@ -106,17 +106,6 @@ class CreateInvoice extends CreateRecord
                 }
             });
         }
-    }
-
-    private function recomputeTotals(Invoice $invoice): void
-    {
-        $rawNet = $invoice->lines->sum(fn ($l) => (float) $l->net_price);
-        $rawGross = $invoice->lines->sum(fn ($l) => (float) $l->gross_price);
-        $discount = 1 - ((float) $invoice->header_discount_percent / 100);
-
-        $invoice->net_total = round($rawNet * $discount, 2);
-        $invoice->gross_total = round($rawGross * $discount, 2);
-        $invoice->save();
     }
 
     private function chainSubmit(Invoice $invoice): void

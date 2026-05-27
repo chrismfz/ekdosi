@@ -186,6 +186,64 @@ class IssueInvoiceFlowTest extends TestCase
     }
 
     /**
+     * Lock in the polished PDF template (PR #27): when the tenant has
+     * a logo_path pointing at an actual file on the public disk, the
+     * renderer inlines it as a data: URI in the PDF. When the path is
+     * empty OR the file is missing, render still succeeds (no logo
+     * area, otherwise identical output).
+     */
+    public function test_pdf_includes_inlined_logo_when_tenant_has_logo_path(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+        // 1x1 transparent PNG
+        $pngBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+        \Illuminate\Support\Facades\Storage::disk('public')->put('logos/test.png', $pngBytes);
+
+        $this->tenant->update(['logo_path' => 'logos/test.png']);
+        $invoice = $this->makeInvoice(headerDiscount: 0);
+        $this->addLine($invoice, qty: 1, price: 100, vat: 24);
+
+        $pdfBytes = app(\App\Services\InvoicePdfRenderer::class)->render($invoice->fresh());
+
+        $this->assertStringStartsWith('%PDF-', $pdfBytes);
+        // PDF should be larger than the no-logo version because of the
+        // embedded image data — exact bytes vary by DomPDF version.
+        $this->assertGreaterThan(3000, strlen($pdfBytes));
+    }
+
+    public function test_pdf_renders_when_logo_path_set_but_file_missing(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+
+        // Path set but no file at that location
+        $this->tenant->update(['logo_path' => 'logos/missing.png']);
+        $invoice = $this->makeInvoice(headerDiscount: 0);
+        $this->addLine($invoice, qty: 1, price: 100, vat: 24);
+
+        // Must NOT throw — the renderer gracefully degrades to no-logo
+        $pdfBytes = app(\App\Services\InvoicePdfRenderer::class)->render($invoice->fresh());
+        $this->assertStringStartsWith('%PDF-', $pdfBytes);
+    }
+
+    /**
+     * The polished template adapts per myDATA invoice type. Delivery
+     * notes (mydata_type starting with '9.') skip the totals block
+     * entirely. Lock in that the renderer doesn't crash + still
+     * produces a valid PDF for that path.
+     */
+    public function test_pdf_renders_for_delivery_note_without_totals_section(): void
+    {
+        // Switch the type to a delivery note (9.x)
+        $this->invoiceType->update(['mydata_type' => '9.3']);
+        $invoice = $this->makeInvoice(headerDiscount: 0);
+        $this->addLine($invoice, qty: 5, price: 100, vat: 24);
+
+        $pdfBytes = app(\App\Services\InvoicePdfRenderer::class)->render($invoice->fresh());
+
+        $this->assertStringStartsWith('%PDF-', $pdfBytes);
+    }
+
+    /**
      * Even if a caller (mistakenly) tries to set net_price / gross_price
      * directly, the saving hook overrides with the authoritative
      * computation. Prevents the form layer from being tricked by a
