@@ -2,12 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Etl\TenantRowUpserter;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use PDO;
 
 /**
- * One-time (re-runnable) ETL: legacy Firebird .fdb  ->  multi-tenant MariaDB.
+ * Re-runnable ETL: legacy Firebird .fdb  ->  multi-tenant MariaDB.
  *
  * Usage:
  *   php artisan migrate:firebird \
@@ -15,8 +16,11 @@ use PDO;
  *       --fdb="/opt/Data/ekdosi-myip.fdb" \
  *       --host=10.23.22.5 --fbuser=EKDOSI --fbpass=ekdosi1234
  *
- * Run once per legacy database (myip, nixpal, systemworx, ...). Each run is scoped
- * to ONE company_id and wipes only that company's rows first, so it is idempotent.
+ * Re-run-safe (PR #29): the new design upserts on (company_id, legacy_id).
+ * Rows the operator created entirely in Filament (no legacy_id) are never
+ * touched. Legacy-imported rows keep their surrogate id across runs;
+ * legacy-sourced columns refresh every run; Filament-managed columns
+ * (is_active, whmcs_client_id, peppol_endpoint, ...) survive untouched.
  *
  * Charset: the source DB is declared WIN1253. We connect with charset=UTF8 so the
  * Firebird client transliterates on read (UTF8 is a superset -> no transliteration
@@ -32,10 +36,11 @@ class MigrateFromFirebird extends Command
         {--fbuser=EKDOSI : Firebird user}
         {--fbpass= : Firebird password}';
 
-    protected $description = 'Import a legacy Firebird ekdosi database into the multi-tenant MariaDB schema';
+    protected $description = 'Import a legacy Firebird ekdosi database into the multi-tenant MariaDB schema (re-run-safe)';
 
     private PDO $fb;
     private int $companyId;
+    private TenantRowUpserter $upserter;
 
     /** legacy_id => new_id maps, per table, for FK remapping */
     private array $map = [
@@ -63,16 +68,30 @@ class MigrateFromFirebird extends Command
 
         $this->connectFirebird();
         $this->companyId = $this->resolveCompany();
+        $this->upserter = TenantRowUpserter::default();
 
         $this->info("Importing into company_id={$this->companyId} ({$this->option('slug')})");
 
         DB::transaction(function () {
-            // Filament-managed columns have no legacy source; preserve any
-            // manual edits across ETL re-runs by snapshotting BEFORE the
-            // wipe and re-applying AFTER the re-insert.
-            $this->snapshotManualEdits();
-
-            $this->wipeCompany();        // make the run idempotent
+            // PR #29: re-run safety via upsert-on-(company_id, legacy_id).
+            //
+            //   - Rows matched by legacy_id keep their surrogate id
+            //     across runs (FKs from ekdosi-only rows stay valid).
+            //   - Legacy-sourced columns refresh on every run.
+            //   - Filament-managed columns (is_active, whmcs_client_id,
+            //     etc.) are written ONLY on first insert; re-runs leave
+            //     them alone so operator customisation survives.
+            //   - Rows the operator created entirely in Filament (no
+            //     legacy_id) are never touched — no Firebird row matches
+            //     them.
+            //   - Rows deleted from the legacy source on day N+1 are
+            //     LEFT ALONE per the locked-in deletion policy
+            //     (CLAUDE.md PR #29). A future cleanup command can
+            //     offer to drop them.
+            //
+            // This replaces the previous wipeCompany() + snapshotManualEdits()
+            // dance which only preserved a few customer columns and
+            // destroyed every Filament-only row.
 
             // --- lookups (no inter-dependencies among these) ---
             $this->copyLookup('PAYMENT_METHOD',    'payment_methods',    'METHOD_ID', fn ($r) => [
@@ -113,11 +132,6 @@ class MigrateFromFirebird extends Command
 
             // --- customers (FK: payment_method) ---
             $this->copyCustomers();
-
-            // Re-apply Filament-managed columns onto the freshly-imported
-            // customers. Must run AFTER copyCustomers() so the legacy_id →
-            // new_id map is built (referred_by_customer_id remapping).
-            $this->restoreManualEdits();
 
             // --- invoice types (FK: aim/delivery/payment/customer) + carries the counter ---
             $this->copyInvoiceTypes();
@@ -171,83 +185,37 @@ class MigrateFromFirebird extends Command
         ]);
     }
 
-    private function wipeCompany(): void
-    {
-        // reverse dependency order
-        foreach ([
-            'whmcs_invoice_log', 'conf_params', 'mydata_marks', 'payments',
-            'return_invoice_extras', 'invoice_lines', 'invoices',
-            'product_price_tiers', 'products', 'invoice_types', 'customers',
-            'product_categories', 'vat_categories', 'metric_units',
-            'distribution_aims', 'delivery_methods', 'payment_methods',
-        ] as $table) {
-            DB::table($table)->where('company_id', $this->companyId)->delete();
-        }
+    /**
+     * Upsert helper. See App\Services\Etl\TenantRowUpserter for the
+     * full docblock — short version: match by (company_id, legacy_id)
+     * (or another natural key), refresh legacy-sourced columns from
+     * $values on every run, write $insertOnlyDefaults exactly once
+     * on first insertion (preserves Filament edits across re-runs).
+     *
+     * @param  array<string, mixed>  $matchKeys
+     * @param  array<string, mixed>  $values
+     * @param  array<string, mixed>  $insertOnlyDefaults
+     */
+    private function upsertGetId(
+        string $table,
+        array $matchKeys,
+        array $values,
+        array $insertOnlyDefaults = [],
+    ): int {
+        return $this->upserter->upsertGetId($table, $matchKeys, $values, $insertOnlyDefaults);
     }
 
     /**
-     * Filament-managed columns on `customers` (added in PR #16) — these are
-     * NOT sourced from Firebird, so a naive re-run of the ETL would destroy
-     * any manual edits the operator made in the panel between runs (CRM
-     * cleanup, peppol endpoint entry, is_active toggles, γκρινιάρης flags).
+     * Upsert without needing the resulting id (for child tables
+     * whose surrogate ids are never referenced downstream).
      *
-     * Snapshot the relevant columns by legacy_id BEFORE wipeCompany() blows
-     * them away; restoreManualEdits() re-applies after copyCustomers().
-     *
-     * The referred_by FK is captured as the TARGET's legacy_id (the
-     * surrogate id changes on re-insert; legacy_id is stable). On restore
-     * we remap back through $this->map['customers'].
-     *
-     * Customers created manually in Filament (no legacy_id) are NOT
-     * preserved — wipeCompany() removes them like any other row. If a
-     * legacy-imported customer was set as "referred by" a Filament-only
-     * customer, the referrer becomes null on re-import (the target no
-     * longer exists). That's correct.
+     * @param  array<string, mixed>  $matchKeys
+     * @param  array<string, mixed>  $values
+     * @param  array<string, mixed>  $insertOnlyDefaults
      */
-    private array $manualCustomerEdits = [];
-
-    private function snapshotManualEdits(): void
+    private function upsert(string $table, array $matchKeys, array $values, array $insertOnlyDefaults = []): void
     {
-        $this->manualCustomerEdits = DB::table('customers as c1')
-            ->leftJoin('customers as c2', function ($join) {
-                $join->on('c1.referred_by_customer_id', '=', 'c2.id')
-                    ->where('c2.company_id', $this->companyId);
-            })
-            ->where('c1.company_id', $this->companyId)
-            ->whereNotNull('c1.legacy_id')
-            ->select(
-                'c1.legacy_id',
-                'c2.legacy_id as referred_by_legacy_id',
-                'c1.peppol_endpoint',
-                'c1.is_active',
-                'c1.needs_immediate_invoice',
-            )
-            ->get()
-            ->keyBy('legacy_id')
-            ->all();
-    }
-
-    private function restoreManualEdits(): void
-    {
-        foreach ($this->manualCustomerEdits as $legacyId => $edit) {
-            $newId = $this->map['customers'][(int) $legacyId] ?? null;
-            if (! $newId) {
-                continue;
-            }
-
-            $update = [
-                'peppol_endpoint'         => $edit->peppol_endpoint,
-                'is_active'               => (bool) $edit->is_active,
-                'needs_immediate_invoice' => (bool) $edit->needs_immediate_invoice,
-            ];
-
-            if ($edit->referred_by_legacy_id !== null) {
-                $update['referred_by_customer_id'] =
-                    $this->map['customers'][(int) $edit->referred_by_legacy_id] ?? null;
-            }
-
-            DB::table('customers')->where('id', $newId)->update($update);
-        }
+        $this->upserter->upsert($table, $matchKeys, $values, $insertOnlyDefaults);
     }
 
     private function fbAll(string $sql): array
@@ -336,17 +304,17 @@ class MigrateFromFirebird extends Command
         ));
     }
 
-    /** Generic copy for simple lookup tables. */
+    /** Generic copy for simple lookup tables. Re-run-safe upsert. */
     private function copyLookup(string $fbTable, string $target, string $pk, callable $row): void
     {
         $this->line("  {$fbTable} -> {$target}");
         foreach ($this->fbAll("SELECT * FROM {$fbTable}") as $r) {
-            $id = DB::table($target)->insertGetId(array_merge($row($r), [
-                'company_id' => $this->companyId,
-                'legacy_id'  => $r[$pk],
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]));
+            $id = $this->upsertGetId(
+                $target,
+                ['company_id' => $this->companyId, 'legacy_id' => $r[$pk]],
+                array_merge($row($r), ['updated_at' => now()]),
+                ['created_at' => now()],
+            );
             $this->map[$target][(int) $r[$pk]] = $id;
         }
     }
@@ -357,38 +325,46 @@ class MigrateFromFirebird extends Command
     {
         $this->line('  CUSTOMER -> customers');
         foreach ($this->fbAll('SELECT * FROM CUSTOMER') as $r) {
-            $id = DB::table('customers')->insertGetId([
-                'company_id'             => $this->companyId,
-                'legacy_id'              => $r['CUST_ID'],
-                'type'                   => $this->fld($r, 'TYPE'),
-                'afm'                    => $this->fld($r, 'AFM'),
-                'name'                   => $this->fld($r, 'NAME') ?? '(no name)',
-                'address1'               => $this->fld($r, 'ADDRESS1'),
-                'address2'               => $this->fld($r, 'ADDRESS2'),
-                'city'                   => $this->fld($r, 'CITY'),
-                'postcode'               => $this->fld($r, 'POSTCODE'),
-                'phone1'                 => $this->fld($r, 'PHONE1'),
-                'phone2'                 => $this->fld($r, 'PHONE2'),
-                'fax'                    => $this->fld($r, 'FAX'),
-                'occupation'             => $this->fld($r, 'OCCUPATION'),
-                'tax_office'             => $this->fld($r, 'TAXOFFICE'),
-                'details'                => $this->fld($r, 'DETAILS'),
-                'discount'               => $r['DISCOUNT'] ?? 0,
-                'email'                  => $this->fld($r, 'EMAIL'),
-                'secondary_email'        => $this->fld($r, 'SECONDARY_EMAIL'),
-                'country'                => $this->fld($r, 'COUNTRY'),
-                'vat_vies'               => $this->fld($r, 'VAT_VIES'),
-                'withhold_tax'           => $r['WITHHOLD_TAX'] ?? null,
-                'sort_order'             => $r['ORDER'] ?? null,
-                'alt_customer_legacy_id' => $r['ALT_CUSTID'] ?? null,
-                'payment_method_id'      => $this->legacyId('payment_methods', $r['PAYMETH_ID'] ?? null),
-                // Defaults for forward-looking columns added in PR #15 —
-                // no legacy source for these:
-                'is_active'              => true,
-                'needs_immediate_invoice' => false,
-                'created_at'             => now(),
-                'updated_at'             => now(),
-            ]);
+            // Filament-managed columns (is_active, needs_immediate_invoice,
+            // peppol_endpoint, whmcs_client_id) are written ONLY on first
+            // insert. On re-runs they stay untouched so operator
+            // customisation in the panel survives.
+            $id = $this->upsertGetId(
+                'customers',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['CUST_ID']],
+                [
+                    'type'                   => $this->fld($r, 'TYPE'),
+                    'afm'                    => $this->fld($r, 'AFM'),
+                    'name'                   => $this->fld($r, 'NAME') ?? '(no name)',
+                    'address1'               => $this->fld($r, 'ADDRESS1'),
+                    'address2'               => $this->fld($r, 'ADDRESS2'),
+                    'city'                   => $this->fld($r, 'CITY'),
+                    'postcode'               => $this->fld($r, 'POSTCODE'),
+                    'phone1'                 => $this->fld($r, 'PHONE1'),
+                    'phone2'                 => $this->fld($r, 'PHONE2'),
+                    'fax'                    => $this->fld($r, 'FAX'),
+                    'occupation'             => $this->fld($r, 'OCCUPATION'),
+                    'tax_office'             => $this->fld($r, 'TAXOFFICE'),
+                    'details'                => $this->fld($r, 'DETAILS'),
+                    'discount'               => $r['DISCOUNT'] ?? 0,
+                    'email'                  => $this->fld($r, 'EMAIL'),
+                    'secondary_email'        => $this->fld($r, 'SECONDARY_EMAIL'),
+                    'country'                => $this->fld($r, 'COUNTRY'),
+                    'vat_vies'               => $this->fld($r, 'VAT_VIES'),
+                    'withhold_tax'           => $r['WITHHOLD_TAX'] ?? null,
+                    'sort_order'             => $r['ORDER'] ?? null,
+                    'alt_customer_legacy_id' => $r['ALT_CUSTID'] ?? null,
+                    'payment_method_id'      => $this->legacyId('payment_methods', $r['PAYMETH_ID'] ?? null),
+                    'updated_at'             => now(),
+                ],
+                [
+                    // Filament-managed columns — defaults on first
+                    // insert, never updated on re-runs.
+                    'is_active'              => true,
+                    'needs_immediate_invoice' => false,
+                    'created_at'             => now(),
+                ],
+            );
             $this->map['customers'][(int) $r['CUST_ID']] = $id;
         }
     }
@@ -397,26 +373,57 @@ class MigrateFromFirebird extends Command
     {
         $this->line('  INVTYPE -> invoice_types  (carries the ΑΑ counter)');
         foreach ($this->fbAll('SELECT * FROM INVTYPE') as $r) {
-            $id = DB::table('invoice_types')->insertGetId([
-                'company_id'                   => $this->companyId,
-                'code'                         => $this->fld($r, 'INVTYPE_ID'),
-                'name'                         => $this->fld($r, 'NAME') ?? $r['INVTYPE_ID'],
-                'invcount'                     => $r['INVCOUNT'] ?? 1, // <-- seed: next number continues here
-                'show_on_menu'                 => (bool) ($r['SHOW_ON_MENU'] ?? 1),
-                'is_credit'                    => (bool) ($r['CREDITINVOICE'] ?? 0),
-                'is_return'                    => (bool) ($r['RETURNINVOICE'] ?? 0),
-                'mydata_type'                  => $this->fld($r, 'MYDATA_TYPE'),
-                'mydata_income_class'          => $this->fld($r, 'MYDATA_INCOME_CLASS'),
-                'mydata_income_class_category' => $this->fld($r, 'MYDATA_INCOME_CLASS_CATEGORY'),
-                'distribution_aim_id'          => $this->legacyId('distribution_aims', $r['DISTAIM_ID']),
-                'delivery_method_id'           => $this->legacyId('delivery_methods', $r['DELIVERYMETHOD_ID']),
-                'payment_method_id'            => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
-                'default_customer_id'          => $this->legacyId('customers', $r['CUST_ID']),
-                'created_at'                   => now(),
-                'updated_at'                   => now(),
-            ]);
+            // invoice_types has no legacy_id column; (company_id, code)
+            // is the natural key.
+            //
+            // IMPORTANT — invcount preservation across runs: if the
+            // operator issued new invoices through ekdosi between
+            // imports, the local invcount has advanced past the
+            // legacy value. Overwriting it here would cause the next
+            // ekdosi issue to collide on (company_id, invcode) with
+            // an existing row. So on re-imports we take MAX(legacy,
+            // current) and never roll back. Day-0 (no existing row)
+            // uses legacy as the seed.
+            //
+            // PARALLEL-RUN CAVEAT — MAX preservation works ONLY when
+            // exactly one system is issuing at a time. If both
+            // legacy AND ekdosi issued invoices between imports
+            // (e.g. parallel-run with both apps live to users), they
+            // would have produced overlapping invcodes like TPY6,
+            // TPY7, TPY8 in both systems independently. The day-N
+            // re-import surfaces the collision via the
+            // (company_id, invcode) unique constraint on `invoices`
+            // — loud failure, not silent corruption. Parallel-run
+            // policy MUST be: one system writing at a time. See
+            // CLAUDE.md "Cutover sequence" for the runbook.
+            $code = $this->fld($r, 'INVTYPE_ID');
+            $existing = DB::table('invoice_types')
+                ->where(['company_id' => $this->companyId, 'code' => $code])
+                ->value('invcount');
+            $invcount = max((int) ($r['INVCOUNT'] ?? 1), (int) ($existing ?? 0));
+
+            $id = $this->upsertGetId(
+                'invoice_types',
+                ['company_id' => $this->companyId, 'code' => $code],
+                [
+                    'name'                         => $this->fld($r, 'NAME') ?? $r['INVTYPE_ID'],
+                    'invcount'                     => $invcount,
+                    'show_on_menu'                 => (bool) ($r['SHOW_ON_MENU'] ?? 1),
+                    'is_credit'                    => (bool) ($r['CREDITINVOICE'] ?? 0),
+                    'is_return'                    => (bool) ($r['RETURNINVOICE'] ?? 0),
+                    'mydata_type'                  => $this->fld($r, 'MYDATA_TYPE'),
+                    'mydata_income_class'          => $this->fld($r, 'MYDATA_INCOME_CLASS'),
+                    'mydata_income_class_category' => $this->fld($r, 'MYDATA_INCOME_CLASS_CATEGORY'),
+                    'distribution_aim_id'          => $this->legacyId('distribution_aims', $r['DISTAIM_ID']),
+                    'delivery_method_id'           => $this->legacyId('delivery_methods', $r['DELIVERYMETHOD_ID']),
+                    'payment_method_id'            => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
+                    'default_customer_id'          => $this->legacyId('customers', $r['CUST_ID']),
+                    'updated_at'                   => now(),
+                ],
+                ['created_at' => now()],
+            );
             // invoice_types keyed by its string code, not an int PK
-            $this->map['invoice_types'][$this->fld($r, 'INVTYPE_ID')] = $id;
+            $this->map['invoice_types'][$code] = $id;
         }
     }
 
@@ -424,24 +431,34 @@ class MigrateFromFirebird extends Command
     {
         $this->line('  PRODUCT -> products');
         foreach ($this->fbAll('SELECT * FROM PRODUCT') as $r) {
-            $id = DB::table('products')->insertGetId([
-                'company_id'          => $this->companyId,
-                'legacy_id'           => $r['PRODUCT_ID'],
-                'barcode'             => $this->fld($r, 'BARCODE'),
-                'description_short'   => $this->fld($r, 'DESCRIPTION_SHORT') ?? '(no description)',
-                'description'         => $this->fld($r, 'DESCRIPTION'),
-                'product_category_id' => $this->legacyId('product_categories', $r['CAT_ID']),
-                'vat_category_id'     => $this->legacyId('vat_categories', $r['VATCAT_ID']),
-                'metric_unit_id'      => $this->legacyId('metric_units', $r['METRIC_ID']),
-                'buy_price'           => $r['BUY_PRICE'] ?? 0,
-                'sell_price'          => $r['SELL_PRICE'] ?? 0,
-                'price_wvat'          => $r['PRICE_WVAT'] ?? 0,
-                'reserve'             => $r['RESERVE'] ?? 0,
-                'reserve_secure'      => $r['RESERVE_SECURE'] ?? 0,
-                'date_inserted'       => $r['DATE_INSERTED'],
-                'created_at'          => now(),
-                'updated_at'          => $r['LAST_UPDATE'] ?? now(),
-            ]);
+            // Filament-managed product columns (PR #20 deferred items
+            // in CLAUDE.md: is_active, internal_notes, sku,
+            // whmcs_product_id, supplier) get defaults on insert only.
+            // Re-runs never write these — operator customisation
+            // in the panel survives.
+            $id = $this->upsertGetId(
+                'products',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['PRODUCT_ID']],
+                [
+                    'barcode'             => $this->fld($r, 'BARCODE'),
+                    'description_short'   => $this->fld($r, 'DESCRIPTION_SHORT') ?? '(no description)',
+                    'description'         => $this->fld($r, 'DESCRIPTION'),
+                    'product_category_id' => $this->legacyId('product_categories', $r['CAT_ID']),
+                    'vat_category_id'     => $this->legacyId('vat_categories', $r['VATCAT_ID']),
+                    'metric_unit_id'      => $this->legacyId('metric_units', $r['METRIC_ID']),
+                    'buy_price'           => $r['BUY_PRICE'] ?? 0,
+                    'sell_price'          => $r['SELL_PRICE'] ?? 0,
+                    'price_wvat'          => $r['PRICE_WVAT'] ?? 0,
+                    'reserve'             => $r['RESERVE'] ?? 0,
+                    'reserve_secure'      => $r['RESERVE_SECURE'] ?? 0,
+                    'date_inserted'       => $r['DATE_INSERTED'],
+                    'updated_at'          => $r['LAST_UPDATE'] ?? now(),
+                ],
+                [
+                    'is_active'  => true,
+                    'created_at' => now(),
+                ],
+            );
             $this->map['products'][(int) $r['PRODUCT_ID']] = $id;
         }
     }
@@ -454,70 +471,112 @@ class MigrateFromFirebird extends Command
             if (! $product) {
                 continue;
             }
-            DB::table('product_price_tiers')->insert([
-                'company_id'       => $this->companyId,
-                'legacy_id'        => $r['PROD_PRICE_ID'],
-                'product_id'       => $product,
-                'value'            => $r['VAL'],
-                'discount_percent' => $r['DISCOUNT_PERCENT'],
-                'qty'              => $r['QTY'],
-                'created_at'       => now(),
-                'updated_at'       => now(),
-            ]);
+            $this->upsert(
+                'product_price_tiers',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['PROD_PRICE_ID']],
+                [
+                    'product_id'       => $product,
+                    'value'            => $r['VAL'],
+                    'discount_percent' => $r['DISCOUNT_PERCENT'],
+                    'qty'              => $r['QTY'],
+                    'updated_at'       => now(),
+                ],
+                ['created_at' => now()],
+            );
         }
     }
 
     private function copyInvoices(): void
     {
         $this->line('  INVOICE -> invoices');
-        // pass 1: insert without conv_invoice_id (self-reference resolved in pass 2)
+
+        // Pre-fetch the legacy_id → conv_invoice_id map. We can't
+        // resolve conv_invoice_id in pass 1 directly because the
+        // target legacy id may not have been imported yet (legacy
+        // doesn't guarantee CONV_INVOICE_ID points BACKWARDS in time
+        // — circular or forward references happen). So pass 1 walks
+        // every invoice, captures the raw legacy conv pointer, then
+        // pass 2 resolves the int→int map.
+        //
+        // Why this matters for re-run safety: the old pass-2
+        // implementation used `WHERE CONV_INVOICE_ID IS NOT NULL` —
+        // so if legacy CLEARED a conv link between imports, the
+        // ekdosi row kept the stale pointer. The new shape walks
+        // EVERY row in pass 2, setting conv_invoice_id to NULL when
+        // legacy says NULL. Source of truth wins.
+        $convPointers = [];  // ekdosi-side surrogate id => legacy CONV_INVOICE_ID
         foreach ($this->fbAll('SELECT * FROM INVOICE') as $r) {
             $issuedAt = $this->mergeDateTime($r['INVDATE'], $r['INVTIME']);
-            $id = DB::table('invoices')->insertGetId([
-                'company_id'          => $this->companyId,
-                'legacy_id'           => $r['INVOICE_ID'],
-                'invcode'             => $this->fld($r, 'INVCODE'),
-                'code'                => $r['CODE'] ?? 0,
-                'invoice_type_id'     => $this->map['invoice_types'][$this->fld($r, 'INVTYPE')] ?? null,
-                'customer_id'         => $this->legacyId('customers', $r['CUST_ID']),
-                'issued_at'           => $issuedAt,
-                'distribution_aim_id' => $this->legacyId('distribution_aims', $r['DISTRAIM_ID']),
-                'delivery_method_id'  => $this->legacyId('delivery_methods', $r['DELMETHOD_ID']),
-                'payment_method_id'   => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
-                'delivery_date'       => $r['DELIVERYDATE'] ?? null,
-                'header_discount_percent' => $r['DISCOUNT'] ?? 0,
-                'net_total'           => $r['PRICE'] ?? 0,
-                'gross_total'         => $r['PRICEWVAT'] ?? 0,
-                'withhold_amount'     => $r['WITHHOLD_AMOUNT'] ?? null,
-                'mailed'              => (bool) ($r['MAILED'] ?? 0),
-                'printed'             => (bool) ($r['PRINTED'] ?? 0),
-                'address1'            => $this->fld($r, 'ADDRESS1'),
-                'address2'            => $this->fld($r, 'ADDRESS2'),
-                'city'                => $this->fld($r, 'CITY'),
-                'postcode'            => $this->fld($r, 'POSTCODE'),
-                'country'             => $this->fld($r, 'COUNTRY'),
-                'company_name'        => $this->fld($r, 'COMPANY_NAME'),
-                'vat_no'              => $this->fld($r, 'VAT_NO'),
-                'vies_vat'            => $this->fld($r, 'VIES_VAT'),
-                'occupation'          => $this->fld($r, 'OCCUPATION'),
-                'notes'               => $this->fld($r, 'NOTES'),
-                'email_sent'          => $this->fld($r, 'EMAIL_SENT'),
-                'mydata_sent'         => isset($r['MYDATA_SENT']) ? (bool) $r['MYDATA_SENT'] : null,
-                'mydata_state'        => $this->fld($r, 'MYDATA_STATE'),
-                'mydata_mark'         => $this->fld($r, 'MYDATA_MARK'),
-                'mydata_url'          => $this->fld($r, 'MYDATA_URL'),
-                'created_at'          => $issuedAt ?? now(),
-                'updated_at'          => now(),
-            ]);
+            $id = $this->upsertGetId(
+                'invoices',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['INVOICE_ID']],
+                [
+                    'invcode'             => $this->fld($r, 'INVCODE'),
+                    'code'                => $r['CODE'] ?? 0,
+                    'invoice_type_id'     => $this->map['invoice_types'][$this->fld($r, 'INVTYPE')] ?? null,
+                    'customer_id'         => $this->legacyId('customers', $r['CUST_ID']),
+                    'issued_at'           => $issuedAt,
+                    'distribution_aim_id' => $this->legacyId('distribution_aims', $r['DISTRAIM_ID']),
+                    'delivery_method_id'  => $this->legacyId('delivery_methods', $r['DELMETHOD_ID']),
+                    'payment_method_id'   => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
+                    'delivery_date'       => $r['DELIVERYDATE'] ?? null,
+                    'header_discount_percent' => $r['DISCOUNT'] ?? 0,
+                    'net_total'           => $r['PRICE'] ?? 0,
+                    'gross_total'         => $r['PRICEWVAT'] ?? 0,
+                    'withhold_amount'     => $r['WITHHOLD_AMOUNT'] ?? null,
+                    'mailed'              => (bool) ($r['MAILED'] ?? 0),
+                    'printed'             => (bool) ($r['PRINTED'] ?? 0),
+                    'address1'            => $this->fld($r, 'ADDRESS1'),
+                    'address2'            => $this->fld($r, 'ADDRESS2'),
+                    'city'                => $this->fld($r, 'CITY'),
+                    'postcode'            => $this->fld($r, 'POSTCODE'),
+                    'country'             => $this->fld($r, 'COUNTRY'),
+                    'company_name'        => $this->fld($r, 'COMPANY_NAME'),
+                    'vat_no'              => $this->fld($r, 'VAT_NO'),
+                    'vies_vat'            => $this->fld($r, 'VIES_VAT'),
+                    'occupation'          => $this->fld($r, 'OCCUPATION'),
+                    'notes'               => $this->fld($r, 'NOTES'),
+                    'email_sent'          => $this->fld($r, 'EMAIL_SENT'),
+                    'mydata_sent'         => isset($r['MYDATA_SENT']) ? (bool) $r['MYDATA_SENT'] : null,
+                    'mydata_state'        => $this->fld($r, 'MYDATA_STATE'),
+                    'mydata_mark'         => $this->fld($r, 'MYDATA_MARK'),
+                    'mydata_url'          => $this->fld($r, 'MYDATA_URL'),
+                    'updated_at'          => now(),
+                ],
+                ['created_at' => $issuedAt ?? now()],
+            );
             $this->map['invoices'][(int) $r['INVOICE_ID']] = $id;
+            // Defensive `?? null` for older `.fbk` snapshots that
+            // predate the CONV_INVOICE_ID column. Matches the
+            // tolerance pattern used by fld() elsewhere in this file
+            // (and by the `fbTableExists()` skip-guards on MARK /
+            // CONF_PARAMS / AUTO_INVOICE_LOG). Without it, a raw
+            // array access on the missing key triggers
+            // "Undefined array key" under PHP 8+.
+            $convPointers[$id] = $r['CONV_INVOICE_ID'] ?? null;
         }
-        // pass 2: wire up conversion self-references
-        foreach ($this->fbAll('SELECT INVOICE_ID, CONV_INVOICE_ID FROM INVOICE WHERE CONV_INVOICE_ID IS NOT NULL') as $r) {
-            $self = $this->legacyId('invoices', $r['INVOICE_ID']);
-            $conv = $this->legacyId('invoices', $r['CONV_INVOICE_ID']);
-            if ($self && $conv) {
-                DB::table('invoices')->where('id', $self)->update(['conv_invoice_id' => $conv]);
-            }
+
+        // Pass 2: refresh EVERY row's conv_invoice_id from the legacy
+        // source — including rows where legacy says NULL. This is the
+        // fix vs. the previous shape that only walked rows where
+        // legacy had a non-NULL conv pointer, so cleared-in-source
+        // links survived as stale data in ekdosi.
+        //
+        // PERF NOTE — N individual UPDATEs even when value unchanged.
+        // For a 10K-invoice tenant on a re-run, this is 10K round
+        // trips (mostly NULL → NULL). Acceptable today (seconds, not
+        // minutes); will degrade as a tenant's invoice count grows
+        // 10×+ OR when activitylog wraps `invoices` (each UPDATE
+        // would write an activity row even though nothing changed).
+        // Future optimisation: skip the UPDATE when the existing
+        // value matches; OR batch into a single CASE WHEN UPDATE.
+        foreach ($convPointers as $selfId => $legacyConvId) {
+            $convSurrogate = $legacyConvId !== null
+                ? $this->legacyId('invoices', $legacyConvId)
+                : null;
+            DB::table('invoices')
+                ->where('id', $selfId)
+                ->update(['conv_invoice_id' => $convSurrogate]);
         }
     }
 
@@ -529,23 +588,25 @@ class MigrateFromFirebird extends Command
             if (! $invoice) {
                 continue; // legacy "basket" rows with NULL invoice are scratch state, skip
             }
-            $id = DB::table('invoice_lines')->insertGetId([
-                'company_id'     => $this->companyId,
-                'legacy_id'      => $r['INVLINE_ID'],
-                'invoice_id'     => $invoice,
-                'product_id'     => $this->legacyId('products', $r['PRODUCT_ID']),
-                'qty'            => $r['QTY'] ?? 1,
-                'price_per_item' => $r['PRICE_PER_ITEM'],
-                'discount'       => $r['DISCOUNT'] ?? 0,
-                'vat_percent'    => $r['VATPERCENT'],
-                'net_price'      => $r['PRICE'],
-                'gross_price'    => $r['PRICEWVAT'],
-                'product_descr'  => $this->fld($r, 'PRODUCT_DESCR'),
-                'metric_unit'    => $this->fld($r, 'METRIC_UNIT'),
-                'notes'          => $this->fld($r, 'NOTES'),
-                'created_at'     => now(),
-                'updated_at'     => now(),
-            ]);
+            $id = $this->upsertGetId(
+                'invoice_lines',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['INVLINE_ID']],
+                [
+                    'invoice_id'     => $invoice,
+                    'product_id'     => $this->legacyId('products', $r['PRODUCT_ID']),
+                    'qty'            => $r['QTY'] ?? 1,
+                    'price_per_item' => $r['PRICE_PER_ITEM'],
+                    'discount'       => $r['DISCOUNT'] ?? 0,
+                    'vat_percent'    => $r['VATPERCENT'],
+                    'net_price'      => $r['PRICE'],
+                    'gross_price'    => $r['PRICEWVAT'],
+                    'product_descr'  => $this->fld($r, 'PRODUCT_DESCR'),
+                    'metric_unit'    => $this->fld($r, 'METRIC_UNIT'),
+                    'notes'          => $this->fld($r, 'NOTES'),
+                    'updated_at'     => now(),
+                ],
+                ['created_at' => now()],
+            );
             $this->map['invoice_lines'][(int) $r['INVLINE_ID']] = $id;
         }
     }
@@ -558,15 +619,20 @@ class MigrateFromFirebird extends Command
             if (! $line) {
                 continue;
             }
-            DB::table('return_invoice_extras')->insert([
-                'company_id'      => $this->companyId,
-                'invoice_line_id' => $line,
-                'qty_given'       => $r['QTY_GIVEN'],
-                'qty_returned'    => $r['QTY_RETURNED'],
-                'qty_sent'        => $r['QTY_SENT'],
-                'created_at'      => now(),
-                'updated_at'      => now(),
-            ]);
+            // return_invoice_extras has unique(invoice_line_id) — one
+            // extras row per line. Upsert by that key.
+            $this->upsert(
+                'return_invoice_extras',
+                ['invoice_line_id' => $line],
+                [
+                    'company_id'   => $this->companyId,
+                    'qty_given'    => $r['QTY_GIVEN'],
+                    'qty_returned' => $r['QTY_RETURNED'],
+                    'qty_sent'     => $r['QTY_SENT'],
+                    'updated_at'   => now(),
+                ],
+                ['created_at' => now()],
+            );
         }
     }
 
@@ -578,16 +644,18 @@ class MigrateFromFirebird extends Command
             if (! $customer) {
                 continue;
             }
-            DB::table('payments')->insert([
-                'company_id'  => $this->companyId,
-                'legacy_id'   => $r['PAYMENT_ID'],
-                'customer_id' => $customer,
-                'pay_date'    => $r['PAY_DATE'],
-                'amount'      => $r['VALUE'],
-                'notes'       => $this->fld($r, 'NOTES'),
-                'created_at'  => now(),
-                'updated_at'  => now(),
-            ]);
+            $this->upsert(
+                'payments',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['PAYMENT_ID']],
+                [
+                    'customer_id' => $customer,
+                    'pay_date'    => $r['PAY_DATE'],
+                    'amount'      => $r['VALUE'],
+                    'notes'       => $this->fld($r, 'NOTES'),
+                    'updated_at'  => now(),
+                ],
+                ['created_at' => now()],
+            );
         }
     }
 
@@ -599,23 +667,29 @@ class MigrateFromFirebird extends Command
         }
         $this->line('  MARK -> mydata_marks  (full audit trail)');
         foreach ($this->fbAll('SELECT * FROM MARK') as $r) {
-            DB::table('mydata_marks')->insert([
-                'company_id'    => $this->companyId,
-                'legacy_id'     => $r['ID'],
-                'invoice_id'    => $this->legacyId('invoices', $r['INVOICE_ID']),
-                // After PR #24 the column is nullable. Legacy rows
-                // with no MARK (rare — pre-myDATA staging) now land
-                // as NULL instead of empty-string sentinels.
-                'mark'          => $this->fld($r, 'MARK'),
-                'mydata_action' => $this->fld($r, 'MYDATA_ACTION'),
-                'invoice_url'   => $this->fld($r, 'INVOICE_URL'),
-                'request'       => $this->fld($r, 'REQUEST'),
-                'response'      => $this->fld($r, 'RESPONSE'),
-                'mark_date'     => $r['DATE'],
-                'mark_time'     => $r['TIME'],
-                'created_at'    => now(),
-                'updated_at'    => now(),
-            ]);
+            // CRITICAL — mydata_marks is the LEGAL AUDIT TRAIL per
+            // CLAUDE.md. created_at on these rows must NOT be NULL
+            // (auditor-visible). Use the legacy MARK insert time when
+            // available; fall back to now() for pre-PR-24 rows.
+            $this->upsert(
+                'mydata_marks',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['ID']],
+                [
+                    'invoice_id'    => $this->legacyId('invoices', $r['INVOICE_ID']),
+                    // After PR #24 the column is nullable. Legacy rows
+                    // with no MARK (rare — pre-myDATA staging) now land
+                    // as NULL instead of empty-string sentinels.
+                    'mark'          => $this->fld($r, 'MARK'),
+                    'mydata_action' => $this->fld($r, 'MYDATA_ACTION'),
+                    'invoice_url'   => $this->fld($r, 'INVOICE_URL'),
+                    'request'       => $this->fld($r, 'REQUEST'),
+                    'response'      => $this->fld($r, 'RESPONSE'),
+                    'mark_date'     => $r['DATE'],
+                    'mark_time'     => $r['TIME'],
+                    'updated_at'    => now(),
+                ],
+                ['created_at' => $this->mergeDateTime($r['DATE'], $r['TIME']) ?? now()],
+            );
         }
     }
 
@@ -627,17 +701,20 @@ class MigrateFromFirebird extends Command
         }
         $this->line('  CONF_PARAMS -> conf_params');
         foreach ($this->fbAll('SELECT * FROM CONF_PARAMS') as $r) {
-            DB::table('conf_params')->insert([
-                'company_id'     => $this->companyId,
-                'varname'        => $this->fld($r, 'VARNAME') ?? '',
-                'data_int'       => $r['DATA_INT'],
-                'data_string'    => $this->fld($r, 'DATA_STRING'),
-                'data_timestamp' => $r['DATA_TIMESTAMP'],
-                'data_float'     => $r['DATA_FLOAT'],
-                'data_numeric'   => $r['DATA_NUMERIC'],
-                'created_at'     => now(),
-                'updated_at'     => now(),
-            ]);
+            // conf_params natural key is (company_id, varname).
+            $this->upsert(
+                'conf_params',
+                ['company_id' => $this->companyId, 'varname' => $this->fld($r, 'VARNAME') ?? ''],
+                [
+                    'data_int'       => $r['DATA_INT'],
+                    'data_string'    => $this->fld($r, 'DATA_STRING'),
+                    'data_timestamp' => $r['DATA_TIMESTAMP'],
+                    'data_float'     => $r['DATA_FLOAT'],
+                    'data_numeric'   => $r['DATA_NUMERIC'],
+                    'updated_at'     => now(),
+                ],
+                ['created_at' => now()],
+            );
         }
     }
 
@@ -649,15 +726,17 @@ class MigrateFromFirebird extends Command
         }
         $this->line('  AUTO_INVOICE_LOG -> whmcs_invoice_log');
         foreach ($this->fbAll('SELECT * FROM AUTO_INVOICE_LOG') as $r) {
-            DB::table('whmcs_invoice_log')->insert([
-                'company_id'       => $this->companyId,
-                'legacy_id'        => $r['LOG_ID'],
-                'whmcs_invoice_id' => $r['CS_INVID'],
-                'invoice_id'       => $this->legacyId('invoices', $r['CS_INVID']), // best-effort; adjust to your bridge semantics
-                'message'          => $this->fld($r, 'LOG_MESSAGE'),
-                'created_at'       => $r['LOG_TIMESTAMP'] ?? now(),
-                'updated_at'       => now(),
-            ]);
+            $this->upsert(
+                'whmcs_invoice_log',
+                ['company_id' => $this->companyId, 'legacy_id' => $r['LOG_ID']],
+                [
+                    'whmcs_invoice_id' => $r['CS_INVID'],
+                    'invoice_id'       => $this->legacyId('invoices', $r['CS_INVID']), // best-effort; adjust to your bridge semantics
+                    'message'          => $this->fld($r, 'LOG_MESSAGE'),
+                    'updated_at'       => now(),
+                ],
+                ['created_at' => $r['LOG_TIMESTAMP'] ?? now()],
+            );
         }
     }
 
