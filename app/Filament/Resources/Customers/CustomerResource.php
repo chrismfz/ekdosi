@@ -60,9 +60,10 @@ class CustomerResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => ListCustomers::route('/'),
+            'index'  => ListCustomers::route('/'),
             'create' => CreateCustomer::route('/create'),
-            'edit' => EditCustomer::route('/{record}/edit'),
+            'edit'   => EditCustomer::route('/{record}/edit'),
+            'ledger' => \App\Filament\Resources\Customers\Pages\CustomerLedger::route('/{record}/ledger'),
         ];
     }
 }

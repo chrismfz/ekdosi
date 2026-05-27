@@ -235,6 +235,58 @@ class WhmcsClient
     }
 
     /**
+     * Fetch ALL invoices for a single WHMCS client (any status),
+     * optionally filtered by minDate. Used by the per-customer
+     * comparison panel (CustomerWhmcsLedger) - the operator picks
+     * a customer in ekdosi and sees "here is what WHMCS has for them"
+     * cross-referenced with "here is what we have for them in ekdosi".
+     *
+     * Distinct from getPendingInvoices which returns paid+unfiled
+     * tenant-wide. This method:
+     *   - filters by client (userid) ON the WHMCS side
+     *   - does NOT filter by status (operator wants the full picture:
+     *     Paid, Unpaid, Cancelled, Refunded)
+     *   - does NOT filter by invoiced flag (we want to see ALL of
+     *     this client's invoices and explicitly mark which are in
+     *     ekdosi vs not)
+     *   - DOES apply the minDate cutoff so a 20-year-old customer
+     *     doesn't surface decades of test invoices
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getInvoicesForClient(int $whmcsUserId, ?string $minDate = null, int $limit = 100): array
+    {
+        $resp = $this->call('GetInvoices', [
+            'userid'  => $whmcsUserId,
+            'limit'   => $limit,
+            'orderby' => 'date',
+            'order'   => 'desc',
+        ]);
+
+        $list = $resp['invoices']['invoice'] ?? [];
+        if (! empty($list) && ! array_is_list($list)) {
+            $list = [$list];
+        }
+
+        if ($minDate === null) {
+            return $list;
+        }
+
+        // DESC ordering enables early-stop on the cutoff (same shape as
+        // getPendingInvoices). Don't drop rows past the boundary - that
+        // would require iterating + filtering everything.
+        $out = [];
+        foreach ($list as $row) {
+            $rowDate = (string) ($row['date'] ?? '');
+            if ($rowDate !== '' && $rowDate < $minDate) {
+                break;
+            }
+            $out[] = $row;
+        }
+        return $out;
+    }
+
+    /**
      * Fetch a WHMCS invoice AND merge in the corresponding client's
      * full details (including customfields). This is the canonical
      * shape Stage B-1's ingestor expects so the matcher's AFM-by-
