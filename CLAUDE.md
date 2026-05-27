@@ -1232,16 +1232,29 @@ Customer pays in WHMCS
 - Default ingest path makes N+1 WHMCS API calls (1 GetInvoices + N GetInvoice). Locked in as the only way to capture line-item data for Stage B-2's File-at-AADE action. The `--preview` flag is the escape hatch when you only need a quick "what's pending" check.
 - Rename `whmcs:pull-pending-invoices` → `whmcs:fetch-pending`: no backwards-compat alias because Stage A was preview-only and explicitly NOT cronned. Existing wrappers (none in production yet) need the rename.
 
-**PR #30 (Stage B-2: Inbox UI + Issuance)** — operator-facing:
-- Filament "WHMCS Inbox" resource OR custom page (resource if standard CRUD shape works; custom page if needs an unusual layout). Lists pending_whmcs_invoices rows, filters by status, ordered by created_at desc.
-- Per-row actions:
-  - **File at AADE** — opens a modal: confirm customer (operator can change the suggested match), preview line items (built from WHMCS payload), confirm invoice type (defaults to tenant's standard). On submit: build Invoice + InvoiceLine rows from payload → run IssueInvoice action with chainSubmit=true → on success, update pending row (status=filed, filed_at, filed_by_user_id, mydata_mark) → call WhmcsClient::updateInvoice() to write back tblinvoices.invoiced=<mark> on the WHMCS side. On AADE failure: keep status=pending_review, surface the error in the row's notes.
-  - **Reject** — modal asks for an optional reason. Sets status=rejected, rejected_reason. Won't re-pull.
-  - **Hold** — sets status=held. Stays in inbox but filter hides by default; operator lifts when ready.
-  - **Re-stage** — only on rejected/filed rows: resets to status=pending_review (legacy `prepare_for_ekdosi` reset equivalent).
-- Bulk actions: bulk-reject (with single reason), bulk-hold.
-- Stats on the inbox page: pending count, age of oldest pending row, count by match_reason.
-- Tests: state transitions (pending → filed → resettable; pending → rejected → resettable; held → pending), the File-at-AADE chain through to MyDataSubmitter, WHMCS write-back idempotency.
+**PR #46 (Stage B-2: Inbox UI + Issuance)** — ✅ LANDED. Operator-facing:
+- ✅ Filament `WhmcsInboxResource` registered as a standard resource (model = `PendingWhmcsInvoice`) under the "Data" navigation group. Single list page; no create/edit/view pages — rows are managed entirely through the per-row actions. Navigation badge shows pending-review count per tenant.
+- ✅ Per-row actions:
+  - ✅ **File at AADE** — modal with reactive form (customer Select + invoice type Select, both `->live()`) PLUS a Placeholder that re-renders a full preview Blade view on every change. Preview shows: customer snapshot card, lines table (description / qty / unit price / VAT% / net / gross), per-rate VAT breakdown, totals (net / vat / gross), source WHMCS metadata footer with a warning badge when WHMCS total ≠ ekdosi computed total. On submit: `WhmcsInvoiceFiler::file()` runs `InvoiceNumberer::allocate()` under lockForUpdate inside a transaction, creates Invoice + InvoiceLines, then submits via `EInvoiceSubmitterFactory` OUTSIDE the transaction (mirrors `CreateInvoice::chainSubmit()` pattern — no AADE call while holding row locks; orphan-MARK case can't happen because the rollback boundary excludes the HTTP call). On success: updates pending row to status=filed + mydata_mark + filed_at + filed_by_user_id.
+  - ✅ **Reject** — textarea for optional reason, confirms. status → rejected, rejected_reason captured.
+  - ✅ **Hold** — confirms only. status → held, hidden from default filter (which is pending_review).
+  - ✅ **Re-stage** — visible only on rejected/held rows. Confirms only. status → pending_review, rejected_reason cleared.
+- ✅ Default filter: `status = pending_review`. Operator can switch to filed / rejected / held via the SelectFilter.
+- ✅ Greek-first UX: status badges, action labels, modal copy all in Greek (operator-facing). Code-side identifiers stay English.
+
+WHMCS write-back DEFERRED to Stage B-3: on successful file, `WhmcsInvoiceFiler::file()` emits a `Log::info('WHMCS write-back deferred')` entry containing the WHMCS invoice id + the MARK the future Ekdosi-Bridge plugin should set. Operator manually flips `tblinvoices.invoiced=<mark>` on the WHMCS side during testing if needed.
+
+Services + value objects:
+- `App\Services\WhmcsInbox\WhmcsInvoiceMapper` — pure: maps WHMCS GetInvoice payload + chosen Customer + InvoiceType → header/lines/totals/source arrays. Assumes WHMCS line `amount` is GROSS (back-computes net via tenant's default VAT rate); skips empty descriptions; normalises single-item-object shape; throws on cross-tenant inputs or missing default VAT category. 9 unit tests.
+- `App\Services\WhmcsInbox\WhmcsInvoiceFiler` — orchestration: maps → transactional Invoice+Lines persist → out-of-tx AADE submit → updates pending row → logs deferred writeback. Refuses to re-file already-filed rows (LogicException). `preview()` method returns the same shape WITHOUT persisting, used by the modal Placeholder. 5 integration tests.
+- `App\Services\WhmcsInbox\FileResult` + `FilePreview` — readonly value objects.
+
+Deliberately out of scope for B-2 (deferred):
+- **Bulk actions** (bulk-reject with single reason, bulk-hold) — straightforward additions when the per-row flow is proven in production.
+- **Stats widget** (counts by match_reason, oldest pending age) — cosmetic; the per-row table already surfaces this via the match_reason badge column.
+- **WHMCS write-back** — Stage B-3 plugin.
+- **Per-line VAT override in the modal** — currently every line uses the tenant's default VAT rate. Operator can't override per-line in the modal yet. Tracked under the broader Greek-VAT-category mapping deferral; rare-but-real case for invoices that mix VAT rates.
+- **WHMCS "Tax Inclusive" mode toggle** — mapper assumes line `amount` is GROSS. A tenant whose WHMCS runs in tax-exclusive mode would silently get wrong VAT computation. When the first non-myip tenant configures WHMCS, add a `companies.whmcs_amount_includes_tax` boolean and branch.
 
 **PR #31 (Stage B-3: WHMCS-side plugin)** — PHP plugin shipped into the tenant's WHMCS install:
 - Replaces `legacy/whmcs/prepare_for_ekdosi/` entirely. Lives at `legacy/whmcs/ekdosi_bridge/` (and would be deployed to the tenant's `modules/addons/ekdosi_bridge/` on the WHMCS host).
