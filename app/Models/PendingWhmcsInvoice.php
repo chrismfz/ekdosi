@@ -67,6 +67,7 @@ class PendingWhmcsInvoice extends Model
         'whmcs_invoice_id',
         'whmcs_userid',
         'customer_id',
+        'invoice_id',
         'payload',
         'match_reason',
         'status',
@@ -100,6 +101,18 @@ class PendingWhmcsInvoice extends Model
     public function filedByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'filed_by_user_id');
+    }
+
+    /**
+     * The ekdosi Invoice this WHMCS row was filed against (set by
+     * WhmcsInvoiceFiler atomically inside the filing transaction).
+     * Null until the first filing attempt persists; remains set even
+     * after a failed AADE submit so a retry can reuse the SAME
+     * Invoice instead of allocating a new ΑΑ counter.
+     */
+    public function invoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class);
     }
 
     /**
