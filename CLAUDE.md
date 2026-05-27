@@ -121,6 +121,19 @@ whitelist that PPA in the environment's network policy, or build the
 extension from source against `firebird-dev`. Not blocking for steps 1
 and 3-5; only step 2 (sandbox-test the ETL).
 
+**Deploy-host env-prep for the PR #30 import UI**:
+- `pdo_firebird` PHP extension loaded by the queue worker (the job
+  pre-flights this and fails with a clear "extension not loaded"
+  diagnostic before subprocessing).
+- `gbak` binary in PATH (firebird3.0-utils on Debian / firebird-classic
+  package — same source).
+- `sys_get_temp_dir()` (typically `/tmp`) must have enough free space
+  for the restored `.fdb` (1.5-2× the `.fbk` size; gbak inflates).
+  On **containerized deploys where `/tmp` is tmpfs (RAM-backed)** —
+  Docker default in some images — a 500MB `.fbk` can OOM the
+  container. Set `TMPDIR` env to a disk-backed mount before starting
+  the queue worker, OR ensure `/tmp` is bind-mounted from disk.
+
 ## Repo layout
 ```
 /                              # Laravel 13 app at repo root
