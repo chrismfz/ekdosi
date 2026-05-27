@@ -109,12 +109,22 @@ class CustomerLedger extends Page
             return false;
         }
 
-        $recordId = (int) ($parameters['record'] ?? 0);
-        if ($recordId <= 0) {
-            return false;
+        $recordParam = $parameters['record'] ?? null;
+
+        // Filament may call canAccess() in contexts where the page
+        // route params are not hydrated yet. Don't hard-fail those
+        // preflight checks; mount() enforces tenant + policy again.
+        if ($recordParam === null) {
+            return true;
         }
 
-        $customer = Customer::query()->find($recordId);
+        $customer = null;
+        if ($recordParam instanceof Customer) {
+            $customer = $recordParam;
+        } elseif (is_scalar($recordParam) && (int) $recordParam > 0) {
+            $customer = Customer::query()->find((int) $recordParam);
+        }
+
         if (! $customer) {
             return false;
         }
