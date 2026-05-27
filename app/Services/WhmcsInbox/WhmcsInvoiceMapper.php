@@ -184,16 +184,23 @@ class WhmcsInvoiceMapper
         }
 
         $vatPercent = (float) $defaultVat->rate;
-        // 0%-VAT lines (WHMCS taxed=0) should reference an actual
-        // 0%-rate VatCategory if the tenant has one configured —
-        // otherwise downstream readers of vat_category_id (Καρτέλα
-        // per-category reports, future PEPPOL submitter, accountant
-        // CSV exports) misclassify the line under the default 24%
-        // category. Fall back to the default ONLY when no 0%-rate
-        // category exists (NullSubmitter / Off-mode tolerates this;
-        // the filer's refuseProblematicZeroVatLines blocks the
-        // sandbox/production path before we reach this code).
-        $zeroVat = $this->resolveZeroVatCategory($defaultVat);
+        // 0%-VAT lines (WHMCS taxed=0) MUST reference an actual
+        // 0%-rate VatCategory. The earlier fallback-to-default path
+        // silently misclassified tax-exempt lines under the tenant's
+        // default 24% category — every downstream consumer that
+        // groups by vat_category_id (Καρτέλα per-category reports,
+        // future PEPPOL submitter, accountant CSV exports, the
+        // companion vat_breakdown the operator sees in the modal)
+        // then double-counted the amount as standard-rate. The
+        // mapper now refuses to map untaxed lines without a
+        // configured 0%-rate row; operator-actionable resolution
+        // is "configure a 0%-rate category in Setup → VAT
+        // Categories before re-filing". This throws even on
+        // Off-mode tenants because the misclassification damage is
+        // identical regardless of whether AADE saw the data.
+        $zeroVat = $this->hasZeroVatLine($payload)
+            ? $this->resolveZeroVatCategory($defaultVat)
+            : null;
         $out = [];
         foreach ($items as $item) {
             $description = trim((string) ($item['description'] ?? ''));
@@ -224,6 +231,10 @@ class WhmcsInvoiceMapper
                 // rejects this case explicitly via
                 // refuseProblematicZeroVatLines to avoid producing
                 // a ghost invoice that crashes mid-submit.)
+                // $zeroVat is guaranteed non-null here because
+                // hasZeroVatLine() returned true and
+                // resolveZeroVatCategory() would have thrown if
+                // none was configured.
                 $lineNet = round($grossAmount, 2);
                 $lineGross = $lineNet;
                 $linePercent = 0.0;
@@ -261,11 +272,9 @@ class WhmcsInvoiceMapper
      * @param  array<int, array<string, mixed>>  $lines
      */
     /**
-     * Resolve a 0%-rate VatCategory for the tenant, falling back to
-     * the default category when none exists. The fallback path runs
-     * only on Off-mode tenants without a configured 0%-rate row;
-     * sandbox/production tenants are blocked by the filer's
-     * refuseProblematicZeroVatLines pre-flight before we'd hit this.
+     * Resolve the tenant's 0%-rate VatCategory. Throws if none is
+     * configured — see the call-site comment in buildLines() for why
+     * we removed the silent default-fallback shape.
      */
     private function resolveZeroVatCategory(VatCategory $defaultVat): VatCategory
     {
@@ -273,7 +282,35 @@ class WhmcsInvoiceMapper
             ->where('company_id', $defaultVat->company_id)
             ->where('rate', 0.0)
             ->first();
-        return $zero ?? $defaultVat;
+        if ($zero === null) {
+            throw new InvalidArgumentException(
+                'Tenant has no 0%-rate VatCategory configured but the WHMCS invoice has '
+                .'untaxed (taxed=0) line(s). Configure a 0%-rate category in Setup → VAT '
+                .'Categories before filing this invoice, otherwise the line would be '
+                .'misclassified under the default rate in downstream reports.'
+            );
+        }
+        return $zero;
+    }
+
+    /**
+     * Cheap pre-check: does the WHMCS payload contain ANY taxed=0
+     * line? Used to skip the 0%-rate VatCategory lookup (and its
+     * throw) entirely when every line is taxable — the tenant
+     * doesn't need a 0%-rate category for fully-taxed invoices.
+     */
+    private function hasZeroVatLine(array $payload): bool
+    {
+        $items = $payload['items']['item'] ?? [];
+        if (! empty($items) && ! array_is_list($items)) {
+            $items = [$items];
+        }
+        foreach ($items as $item) {
+            if ((int) ($item['taxed'] ?? 1) === 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

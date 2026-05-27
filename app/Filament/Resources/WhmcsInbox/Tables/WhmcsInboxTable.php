@@ -137,6 +137,12 @@ class WhmcsInboxTable
             ->label('Καταχώρηση στην ΑΑΔΕ')
             ->icon('heroicon-o-cloud-arrow-up')
             ->color('success')
+            // Tier 1 #1: gate on the policy. WhmcsInboxResource::canAccess
+            // intentionally allows any auth'd user to SEE the list (so the
+            // resource doesn't 404 between deploy and shield:generate),
+            // but every destructive action MUST consult the policy or
+            // any reader becomes a filer.
+            ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
             ->form(fn (PendingWhmcsInvoice $r) => [
                 Select::make('customer_id')
@@ -244,10 +250,30 @@ class WhmcsInboxTable
             ->modalWidth('5xl')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
                 $tenant = Filament::getTenant();
+                // Tier 1 #2: include trashed customers in the action's
+                // lookup. The Select's getOptionLabelUsing already uses
+                // withTrashed so a soft-deleted match is RENDERED in
+                // the dropdown ("(διαγραμμένος)" suffix), but without
+                // the same withTrashed on the action body's firstOrFail
+                // the submission silently 500s with ModelNotFoundException.
+                // After the row resolves, refuse the action when the
+                // customer is trashed — filing under a soft-deleted
+                // customer would propagate stale snapshot data and
+                // confuse the operator about who was really billed.
                 $customer = Customer::query()
+                    ->withTrashed()
                     ->where('company_id', $tenant->getKey())
                     ->whereKey($data['customer_id'])
                     ->firstOrFail();
+                if ($customer->trashed()) {
+                    Notification::make()
+                        ->title('Ο πελάτης είναι διαγραμμένος')
+                        ->body('Επανάφερέ τον από τη λίστα πελατών ή επίλεξε άλλον πελάτη πριν την καταχώρηση.')
+                        ->warning()
+                        ->persistent()
+                        ->send();
+                    return;
+                }
                 $invoiceType = InvoiceType::query()
                     ->where('company_id', $tenant->getKey())
                     ->whereKey($data['invoice_type_id'])
@@ -287,6 +313,7 @@ class WhmcsInboxTable
             ->label('Απόρριψη')
             ->icon('heroicon-o-x-circle')
             ->color('danger')
+            ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW
                 || $r->status === PendingWhmcsInvoice::STATUS_HELD)
             ->form([
@@ -315,6 +342,7 @@ class WhmcsInboxTable
             ->label('Σε αναμονή')
             ->icon('heroicon-o-pause-circle')
             ->color('gray')
+            ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
             ->requiresConfirmation()
             ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αναμονή για WHMCS #'.$r->whmcs_invoice_id)
@@ -331,6 +359,7 @@ class WhmcsInboxTable
             ->label('Επαναφορά προς έλεγχο')
             ->icon('heroicon-o-arrow-uturn-left')
             ->color('warning')
+            ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_REJECTED
                 || $r->status === PendingWhmcsInvoice::STATUS_HELD)
             ->requiresConfirmation()

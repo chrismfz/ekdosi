@@ -254,8 +254,12 @@ class WhmcsInvoiceFiler
                 .'local invoice but did not complete the AADE submit. To finish the filing, '
                 .'open invoice #'.$locked->invoice_id.' and use the "Submit to myDATA" action '
                 .'on the View Invoice page (this retries on the SAME invoice and avoids '
-                .'consuming another ΑΑ counter slot). If the orphan invoice needs to be '
-                .'force-deleted instead, do that first and then re-stage this row.'
+                .'consuming another ΑΑ counter slot). The invoice_id FK is restrictOnDelete '
+                .'(see migration 2026_05_28_000010), so force-deleting the orphan invoice '
+                .'will fail loudly with an FK violation until this pending row is rejected '
+                .'or re-staged — this is the protection against the double-MARK chain where '
+                .'a force-delete would silently null invoice_id and let the operator allocate '
+                .'a brand-new ΑΑ for the same WHMCS invoice.'
             );
         }
     }

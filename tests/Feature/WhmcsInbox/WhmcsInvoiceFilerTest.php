@@ -47,6 +47,16 @@ class WhmcsInvoiceFilerTest extends TestCase
             'rate' => 24.00,
             'is_default' => true,
         ]);
+        // 0%-rate row required for tests that exercise WHMCS taxed=0
+        // lines. The mapper now throws if a taxed=0 line is present
+        // without a configured 0%-rate VatCategory (Tier 2 #5 — see
+        // WhmcsInvoiceMapper::resolveZeroVatCategory).
+        VatCategory::create([
+            'company_id' => $this->tenant->id,
+            'name' => '0%',
+            'rate' => 0.00,
+            'is_default' => false,
+        ]);
         $pm = PaymentMethod::create([
             'company_id' => $this->tenant->id,
             'name' => 'Cash',
@@ -328,6 +338,28 @@ class WhmcsInvoiceFilerTest extends TestCase
                 return str_contains($message, 'WHMCS write-back deferred')
                     && $context['whmcs_invoice_id'] === 8888;
             });
+    }
+
+    public function test_force_deleting_linked_invoice_fails_with_fk_violation(): void
+    {
+        // Third-pass Tier 1 #3: the pending.invoice_id FK is now
+        // restrictOnDelete. Force-deleting an Invoice while a pending
+        // row still references it MUST fail at the DB layer — without
+        // this, the earlier nullOnDelete shape silently nulled
+        // invoice_id, which re-opened assertCanBeFiled's "in progress"
+        // gate and let the operator re-file the same WHMCS invoice
+        // with a fresh ΑΑ + a second AADE MARK.
+        $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
+        $result = app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+
+        $this->assertSame($result->invoice->id, $result->pending->invoice_id);
+
+        // Attempt force-delete of the linked Invoice — must throw FK
+        // violation, NOT silently null pending.invoice_id.
+        $this->expectException(\Illuminate\Database\QueryException::class);
+        $result->invoice->forceDelete();
     }
 
     public function test_preview_returns_FilePreview_without_persisting(): void

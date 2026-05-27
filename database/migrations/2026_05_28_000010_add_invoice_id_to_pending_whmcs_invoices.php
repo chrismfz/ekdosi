@@ -40,11 +40,16 @@ use Illuminate\Support\Facades\Schema;
  * (created by Stage B-1 ingestion, not yet filed). Required only
  * after the filer's tx commits.
  *
- * nullOnDelete: deleting an Invoice (force-delete from the panel)
- * shouldn't cascade-nuke the pending row. The pending row should
- * remain as audit evidence ("once linked to invoice 42, which
- * was force-deleted"), so a future investigator can see the
- * dangling state.
+ * restrictOnDelete: deleting an Invoice (force-delete from the panel)
+ * while a pending row still references it MUST fail loudly at the
+ * DB layer. The earlier nullOnDelete shape silently nulled the FK,
+ * which re-opened the assertCanBeFiled gate (it uses
+ * invoice_id !== null as the "in-progress, refuse to re-file" guard)
+ * — operator then re-clicked File-at-AADE and got a brand-new ΑΑ
+ * + a second AADE MARK for the same WHMCS invoice. With
+ * restrictOnDelete, the operator MUST first re-stage / reject the
+ * pending row OR keep the orphan Invoice; either way the double-MARK
+ * chain is unreachable.
  */
 return new class extends Migration
 {
@@ -55,7 +60,7 @@ return new class extends Migration
                 ->nullable()
                 ->after('customer_id')
                 ->constrained()
-                ->nullOnDelete();
+                ->restrictOnDelete();
         });
     }
 

@@ -23,6 +23,7 @@ class WhmcsInvoiceMapperTest extends TestCase
 
     private Company $tenant;
     private VatCategory $vat24;
+    private VatCategory $vat0;
     private PaymentMethod $pm;
     private InvoiceType $invoiceType;
     private Customer $customer;
@@ -43,6 +44,16 @@ class WhmcsInvoiceMapperTest extends TestCase
             'name' => 'ΦΠΑ 24%',
             'rate' => 24.00,
             'is_default' => true,
+        ]);
+        // 0%-rate row provided by default for the tests that exercise
+        // taxed=0 lines. Tests that explicitly assert the "throw when
+        // no 0%-rate category exists" behavior delete this row at the
+        // top of the test.
+        $this->vat0 = VatCategory::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'ΦΠΑ 0%',
+            'rate' => 0.00,
+            'is_default' => false,
         ]);
         $this->pm = PaymentMethod::create([
             'company_id' => $this->tenant->id,
@@ -304,14 +315,8 @@ class WhmcsInvoiceMapperTest extends TestCase
         // taxed=0 ones, producing vat_category_id/vat_percent mismatch
         // that misclassified tax-exempt amounts as standard-rate in
         // any consumer that groups by vat_category_id (Καρτέλα reports,
-        // future PEPPOL, accountant CSV exports).
-        $zeroVat = VatCategory::create([
-            'company_id' => $this->tenant->id,
-            'name' => 'ΦΠΑ 0%',
-            'rate' => 0.00,
-            'is_default' => false,
-        ]);
-
+        // future PEPPOL, accountant CSV exports). Uses the 0%-rate
+        // category seeded in setUp.
         $pending = $this->makePending([
             'invoiceid' => 1011,
             'items' => ['item' => [
@@ -324,15 +329,21 @@ class WhmcsInvoiceMapperTest extends TestCase
             ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'];
 
         $this->assertSame($this->vat24->id, $lines[0]['vat_category_id'], 'taxed=1 line should use default 24% category');
-        $this->assertSame($zeroVat->id, $lines[1]['vat_category_id'], 'taxed=0 line should use the 0%-rate category, NOT the default');
+        $this->assertSame($this->vat0->id, $lines[1]['vat_category_id'], 'taxed=0 line should use the 0%-rate category, NOT the default');
     }
 
-    public function test_zero_vat_lines_fall_back_to_default_when_no_zero_rate_category_exists(): void
+    public function test_zero_vat_lines_throw_when_no_zero_rate_category_exists(): void
     {
-        // Defense-in-depth path: when the tenant hasn't configured a
-        // 0%-rate VatCategory, fall back to the default rather than
-        // throwing. This is the off-mode breakglass; sandbox/prod
-        // tenants are already blocked by the filer's pre-flight.
+        // Third-pass Tier 2 #5: the previous "fall back to default 24%"
+        // behavior silently misclassified tax-exempt lines under the
+        // standard rate in every consumer that groups by
+        // vat_category_id (Καρτέλα reports, future PEPPOL, accountant
+        // CSV exports). The misclassification damage is identical
+        // regardless of submission mode, so the mapper now throws even
+        // on Off-mode tenants. Operator action: configure a 0%-rate
+        // VatCategory in Setup → VAT Categories before re-filing.
+        $this->vat0->forceDelete();   // strip the setUp default
+
         $pending = $this->makePending([
             'invoiceid' => 1012,
             'items' => ['item' => [
@@ -340,13 +351,32 @@ class WhmcsInvoiceMapperTest extends TestCase
             ]],
         ]);
 
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('0%-rate VatCategory');
+
+        app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+    }
+
+    public function test_zero_vat_throw_does_not_fire_when_invoice_is_fully_taxed(): void
+    {
+        // Pre-check guard: the mapper must NOT consult the 0%-rate
+        // VatCategory when every line is taxed=1. Tenants that file
+        // only fully-taxed WHMCS invoices shouldn't need to configure
+        // a 0%-rate row.
+        $pending = $this->makePending([
+            'invoiceid' => 1013,
+            'items' => ['item' => [
+                ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ]],
+        ]);
+
         $lines = app(WhmcsInvoiceMapper::class)
             ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'];
 
-        $this->assertSame($this->vat24->id, $lines[0]['vat_category_id'],
-            'Fallback to default when no 0%-rate category exists');
-        $this->assertSame(0.0, $lines[0]['vat_percent'],
-            'vat_percent stays 0% regardless — only the category-id fallback differs');
+        $this->assertCount(1, $lines);
+        $this->assertSame($this->vat24->id, $lines[0]['vat_category_id']);
+        $this->assertSame(24.0, $lines[0]['vat_percent']);
     }
 
     public function test_zero_vat_lines_are_surfaced_in_totals(): void
