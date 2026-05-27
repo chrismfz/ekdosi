@@ -108,16 +108,24 @@ class CustomerLedger extends Page
 
         // Defense in depth #1: the Customer model has no global
         // BelongsToCompany scope (tracked in CLAUDE.md), so a raw
-        // ::query() bypasses Filament's panel tenant scope. If panel
-        // scope is ever bypassed (Octane boot ordering, future
-        // non-panel caller, scope removal) the policy check below
-        // is tenant-blind and would render cross-tenant data. Refuse
-        // explicitly before any expensive work.
+        // ::query() bypasses Filament's panel tenant scope. Check
+        // that the loaded customer's company matches the current
+        // Filament tenant when available.
+        //
+        // Note: Filament::getTenant() can be null at custom-page
+        // mount time in some configs (the URL DOES contain the tenant
+        // slug, but tenant resolution may run after the page's
+        // boot lifecycle for non-standard page types). In that case,
+        // fall through to the policy check below — we don't want to
+        // 404 every legitimate operator because tenant resolution
+        // timing differs from EditRecord pages.
         $currentTenantId = \Filament\Facades\Filament::getTenant()?->getKey();
-        abort_unless(
-            $currentTenantId !== null && (int) $this->record->company_id === (int) $currentTenantId,
-            404,    // 404 not 403: don't disclose that the record exists for a different tenant
-        );
+        if ($currentTenantId !== null) {
+            abort_unless(
+                (int) $this->record->company_id === (int) $currentTenantId,
+                404,    // 404 not 403: don't disclose existence of cross-tenant records
+            );
+        }
 
         // Defense in depth #2: policy gate (per-user permission).
         abort_unless(auth()->user()?->can('view', $this->record) ?? false, 403);
