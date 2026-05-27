@@ -175,6 +175,36 @@ class WhmcsClient
     }
 
     /**
+     * Fetch one invoice's full details by id. WHMCS's GetInvoices list
+     * shape carries minimal per-row data (no line items, partial
+     * client identity); GetInvoice returns the rich shape that Stage
+     * B-1's ingestor + Stage B-2's File-at-AADE action both need to
+     * build an ekdosi Invoice + InvoiceLine[]. One API call per
+     * invoice - cost of having a complete audit-grade snapshot.
+     *
+     * @return array<string, mixed>|null  null if WHMCS returned
+     *                                    "Invoice ID Not Found"
+     *                                    (distinguish from network /
+     *                                    auth failures)
+     */
+    public function getInvoice(int $whmcsInvoiceId): ?array
+    {
+        try {
+            return $this->call('GetInvoice', [
+                'invoiceid' => $whmcsInvoiceId,
+            ]);
+        } catch (WhmcsApiException $e) {
+            // WHMCS's error literal for a missing invoice id - confirmed
+            // against the WHMCS developer docs (developers.whmcs.com,
+            // GetInvoice action, "result" : "error" envelope).
+            if (str_contains($e->getMessage(), 'Invoice ID Not Found')) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * Fetch one client's full details. Used by the Filament "Link to
      * WHMCS" picker AND by the auto-match heuristic during the pull
      * preview.
