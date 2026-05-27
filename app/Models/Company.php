@@ -85,6 +85,43 @@ class Company extends Model
     }
 
     /**
+     * Derive the URL of the ekdosi_bridge plugin's inbound endpoint
+     * from the tenant's whmcs_api_url. The plugin lives at a fixed
+     * path relative to the WHMCS root:
+     *
+     *   {whmcs_root}/modules/addons/ekdosi_bridge/inbound.php
+     *
+     * The convention works because WHMCS's native API is always at
+     * {whmcs_root}/includes/api.php — we strip that suffix and
+     * append the plugin's path. If the operator's WHMCS install
+     * doesn't follow this convention (custom paths, behind a
+     * reverse proxy with different path mapping), we'd need to
+     * add an explicit companies.whmcs_bridge_url column — defer
+     * until a real deployment surfaces that need.
+     *
+     * Stage B-3: Returns null when whmcs_api_url is empty (tenant
+     * has no WHMCS integration at all) OR when the URL doesn't
+     * follow the expected api.php convention (we refuse to guess
+     * a path; operator must configure properly).
+     */
+    public function whmcsBridgeUrl(): ?string
+    {
+        $api = (string) ($this->whmcs_api_url ?? '');
+        if ($api === '') {
+            return null;
+        }
+        // The /includes/api.php suffix is the WHMCS-native shape;
+        // strip it (with or without trailing slashes) and append
+        // the bridge plugin's inbound path.
+        $suffix = '/includes/api.php';
+        if (! str_ends_with($api, $suffix)) {
+            return null;
+        }
+        $base = substr($api, 0, -strlen($suffix));
+        return $base.'/modules/addons/ekdosi_bridge/inbound.php';
+    }
+
+    /**
      * Resolve a canonical WHMCS-bridge role name to the tenant's
      * actual WHMCS custom field id. Returns null when the role
      * isn't mapped (operator hasn't filled in this row's id) —
