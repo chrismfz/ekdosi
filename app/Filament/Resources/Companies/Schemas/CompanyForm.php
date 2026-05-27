@@ -14,6 +14,8 @@ use App\Services\AadeRegistryLookup;
 use App\Services\MailTemplateRenderer;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
+use App\Services\Whmcs\WhmcsCustomerMatcher;
+use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -600,6 +602,182 @@ class CompanyForm
                                                         ->title('WHMCS error')
                                                         ->body($e->getMessage())
                                                         ->danger()->persistent()->send();
+                                                }
+                                            }),
+
+                                        // PR #34 followup: Filament-side controls
+                                        // so operators don't have to SSH to the deploy
+                                        // box to run `php artisan whmcs:fetch-pending`.
+                                        // Same code paths as the artisan command.
+                                        FormAction::make('preview_pending_whmcs')
+                                            ->label('Preview pending')
+                                            ->icon('heroicon-o-eye')
+                                            ->color('gray')
+                                            ->authorize(fn (?Company $record) => $record === null
+                                                ? false
+                                                : (auth()->user()?->can('update', $record) ?? false))
+                                            ->action(function (?Company $record) {
+                                                if (! $record) {
+                                                    Notification::make()->title('Save the company first, then preview.')->warning()->send();
+                                                    return;
+                                                }
+                                                try {
+                                                    $client = app(WhmcsClientFactory::class)->for($record);
+                                                    $invoices = $client->getPendingInvoices(limit: 100);
+                                                } catch (WhmcsNotConfigured $e) {
+                                                    Notification::make()->title('WHMCS not configured')->body($e->getMessage())->warning()->send();
+                                                    return;
+                                                } catch (WhmcsAuthenticationFailed $e) {
+                                                    Notification::make()->title('WHMCS credentials rejected')->body($e->getMessage())->danger()->persistent()->send();
+                                                    return;
+                                                } catch (WhmcsUnreachable $e) {
+                                                    Notification::make()->title('WHMCS unreachable')->body($e->getMessage())->danger()->persistent()->send();
+                                                    return;
+                                                } catch (WhmcsApiException $e) {
+                                                    Notification::make()->title('WHMCS error')->body($e->getMessage())->danger()->persistent()->send();
+                                                    return;
+                                                }
+
+                                                $count = count($invoices);
+                                                if ($count === 0) {
+                                                    Notification::make()
+                                                        ->title('No paid + unfiled invoices')
+                                                        ->body('WHMCS returned no pending invoices for this tenant.')
+                                                        ->success()->send();
+                                                    return;
+                                                }
+
+                                                // Match each row so operators see what would land
+                                                // as linked / afm / email / name / unmatched.
+                                                $matcher = app(WhmcsCustomerMatcher::class);
+                                                $matched = 0;
+                                                foreach ($invoices as $inv) {
+                                                    $whmcsClientId = (int) ($inv['userid'] ?? 0);
+                                                    $m = $matcher->match($record, [
+                                                        'id'          => $whmcsClientId,
+                                                        'userid'      => $whmcsClientId,
+                                                        'email'       => $inv['email'] ?? null,
+                                                        'firstname'   => $inv['firstname'] ?? null,
+                                                        'lastname'    => $inv['lastname'] ?? null,
+                                                        'companyname' => $inv['companyname'] ?? null,
+                                                    ]);
+                                                    if ($m->isMatched()) {
+                                                        $matched++;
+                                                    }
+                                                }
+                                                $unmatched = $count - $matched;
+
+                                                Notification::make()
+                                                    ->title("Preview: {$count} pending invoice(s)")
+                                                    ->body("{$matched} would match an ekdosi customer · {$unmatched} unmatched. "
+                                                        .'Click "Fetch pending" to stage them in the inbox.')
+                                                    ->info()->persistent()->send();
+                                            }),
+
+                                        FormAction::make('fetch_pending_whmcs')
+                                            ->label('Fetch pending')
+                                            ->icon('heroicon-o-arrow-down-tray')
+                                            ->color('primary')
+                                            ->requiresConfirmation()
+                                            ->modalHeading('Fetch pending WHMCS invoices?')
+                                            ->modalDescription('Pulls the latest paid+unfiled invoices from WHMCS and stages them in the inbox for operator review. Idempotent — re-running is safe. Does NOT file at AADE (that needs operator click in the inbox).')
+                                            ->modalSubmitActionLabel('Fetch now')
+                                            ->authorize(fn (?Company $record) => $record === null
+                                                ? false
+                                                : (auth()->user()?->can('update', $record) ?? false))
+                                            ->action(function (?Company $record) {
+                                                if (! $record) {
+                                                    Notification::make()->title('Save the company first.')->warning()->send();
+                                                    return;
+                                                }
+                                                try {
+                                                    $client = app(WhmcsClientFactory::class)->for($record);
+                                                    $ingestor = app(WhmcsInvoiceIngestor::class);
+                                                    $list = $client->getPendingInvoices(limit: 100);
+                                                } catch (WhmcsNotConfigured $e) {
+                                                    Notification::make()->title('WHMCS not configured')->body($e->getMessage())->warning()->send();
+                                                    return;
+                                                } catch (WhmcsAuthenticationFailed $e) {
+                                                    Notification::make()->title('WHMCS credentials rejected')->body($e->getMessage())->danger()->persistent()->send();
+                                                    return;
+                                                } catch (WhmcsUnreachable $e) {
+                                                    Notification::make()->title('WHMCS unreachable')->body($e->getMessage())->danger()->persistent()->send();
+                                                    return;
+                                                } catch (WhmcsApiException $e) {
+                                                    Notification::make()->title('WHMCS error')->body($e->getMessage())->danger()->persistent()->send();
+                                                    return;
+                                                }
+
+                                                if (empty($list)) {
+                                                    Notification::make()
+                                                        ->title('Nothing to stage')
+                                                        ->body('WHMCS returned no paid+unfiled invoices.')
+                                                        ->success()->send();
+                                                    return;
+                                                }
+
+                                                $created = 0;
+                                                $updated = 0;
+                                                $frozen = 0;
+                                                $failed = 0;
+                                                $abortReason = null;
+
+                                                foreach ($list as $listRow) {
+                                                    $invoiceId = (int) ($listRow['id'] ?? 0);
+                                                    if ($invoiceId <= 0) {
+                                                        $failed++;
+                                                        continue;
+                                                    }
+                                                    try {
+                                                        $payload = $client->getInvoiceWithClient($invoiceId);
+                                                        if ($payload === null) {
+                                                            $failed++;
+                                                            continue;
+                                                        }
+                                                        $result = $ingestor->ingest($record, $payload);
+                                                        if ($result->created) {
+                                                            $created++;
+                                                        } elseif ($result->auditPreserved) {
+                                                            $frozen++;
+                                                        } else {
+                                                            $updated++;
+                                                        }
+                                                    } catch (WhmcsAuthenticationFailed $e) {
+                                                        // Tenant-fatal: same logic as the artisan
+                                                        // command. Abort the loop and surface the
+                                                        // partial result.
+                                                        $abortReason = 'WHMCS authentication failed: '.$e->getMessage();
+                                                        break;
+                                                    } catch (WhmcsUnreachable $e) {
+                                                        $abortReason = 'WHMCS unreachable: '.$e->getMessage();
+                                                        break;
+                                                    } catch (WhmcsApiException $e) {
+                                                        $failed++;
+                                                    } catch (\Throwable $e) {
+                                                        $failed++;
+                                                    }
+                                                }
+
+                                                $summary = sprintf(
+                                                    '%d new · %d refreshed · %d audit-frozen · %d failed',
+                                                    $created, $updated, $frozen, $failed,
+                                                );
+
+                                                if ($abortReason !== null) {
+                                                    Notification::make()
+                                                        ->title('Aborted: '.$abortReason)
+                                                        ->body('Partial result: '.$summary)
+                                                        ->danger()->persistent()->send();
+                                                } elseif ($failed > 0) {
+                                                    Notification::make()
+                                                        ->title('Fetched with partial failures')
+                                                        ->body($summary)
+                                                        ->warning()->persistent()->send();
+                                                } else {
+                                                    Notification::make()
+                                                        ->title('Fetched into inbox')
+                                                        ->body($summary.'. Open the WHMCS Inbox (coming in PR #32) to review and file.')
+                                                        ->success()->send();
                                                 }
                                             }),
                                     ]),
