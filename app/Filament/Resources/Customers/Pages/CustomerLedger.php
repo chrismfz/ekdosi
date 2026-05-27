@@ -6,6 +6,7 @@ use App\DTOs\AadeRegistryRecord;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
@@ -152,7 +153,21 @@ class CustomerLedger extends Page
         // fall through to the policy check below — we don't want to
         // 404 every legitimate operator because tenant resolution
         // timing differs from EditRecord pages.
-        $currentTenantId = \Filament\Facades\Filament::getTenant()?->getKey();
+        $routeTenant = request()->route('tenant');
+        $resolvedTenantId = null;
+
+        if (is_object($routeTenant) && method_exists($routeTenant, 'getKey')) {
+            $resolvedTenantId = (int) $routeTenant->getKey();
+        } elseif (is_scalar($routeTenant) && $routeTenant !== '') {
+            $resolvedTenantId = (int) Company::query()
+                ->where('slug', (string) $routeTenant)
+                ->value('id');
+        }
+
+        // Fallback for environments where the route parameter is not yet
+        // available in this lifecycle stage.
+        $currentTenantId = $resolvedTenantId ?? \Filament\Facades\Filament::getTenant()?->getKey();
+
         if ($currentTenantId !== null) {
             abort_unless(
                 (int) $this->record->company_id === (int) $currentTenantId,
