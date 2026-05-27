@@ -144,6 +144,23 @@ class RunFirebirdImport implements ShouldQueue
         }
 
         // --- step 2: drain the .fdb into ekdosi via migrate:firebird ---
+        // Pre-flight: the artisan subprocess uses PHP_BINARY (same
+        // PHP binary the queue worker is running). If pdo_firebird
+        // isn't loaded, the subprocess fails with a generic
+        // PDOException buried in the stderr — operator sees "exit
+        // code 1, error: could not find driver" and has to dig.
+        // Check upfront and surface a friendly diagnostic instead.
+        // Documented as a CLAUDE.md env-prep blocker.
+        if (! extension_loaded('pdo_firebird')) {
+            $this->failRun(
+                $run,
+                'migrate',
+                "pdo_firebird PHP extension is not loaded on the queue worker. Install it (apt: php-firebird from ondrej/php PPA, or build against firebird-dev) and restart the worker. See CLAUDE.md env-prep section.",
+            );
+            @unlink($tempFdb);
+            throw new \RuntimeException('pdo_firebird extension not available');
+        }
+
         $run->update(['status' => FirebirdImportRun::STATUS_IMPORTING]);
 
         $artisan = new Process([
@@ -188,10 +205,14 @@ class RunFirebirdImport implements ShouldQueue
         ]);
 
         // Clean up temp + uploaded files on success. Keep on failure
-        // (handled by failRun) for operator debugging.
+        // (handled by failRun) for operator debugging. Explicit
+        // disk('local') here for consistency with every other path
+        // resolution in this file — defends against a future env
+        // flip of FILESYSTEM_DISK to e.g. s3, which would otherwise
+        // silently fail to delete the local file.
         @unlink($tempFdb);
         if ($run->uploaded_path) {
-            Storage::delete($run->uploaded_path);
+            Storage::disk('local')->delete($run->uploaded_path);
             $run->update(['uploaded_path' => null]);
         }
 

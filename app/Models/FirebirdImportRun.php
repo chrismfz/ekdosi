@@ -12,8 +12,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Lifecycle: uploaded → restoring → importing → completed | failed.
  * Rows are immutable (no soft-delete, no edit) — they're audit trail.
  *
- * Multi-tenant via `company_id` (Filament's BelongsToTenant trait
- * uses the `company()` relation).
+ * Multi-tenant via `company_id`. Filament 5 detects tenancy from
+ * the `company()` relation defined below (no trait import needed
+ * on the model — the trait is applied to the Filament Resource,
+ * not the Eloquent model).
  */
 class FirebirdImportRun extends Model
 {

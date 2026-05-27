@@ -88,12 +88,17 @@ class CreateFirebirdImportRun extends CreateRecord
         // pieces of context — and a warning level when dedup hit
         // (so the operator sees the colour difference) — reads
         // cleaner.
+        //
+        // NB on body formatting: Filament 5's notification body is
+        // run through HtmlSanitizer, which permits `<br>` but
+        // strips raw `\n` (browsers collapse to a space). The
+        // double-review caught a "\n\n" → wall-of-text regression
+        // here; using <br><br> instead gets a real paragraph break.
         $body = 'The import job has been dispatched. This page will refresh automatically as the status changes.';
         if ($priorRun !== null) {
             $body = sprintf(
-                'Identical backup was already imported on %s — re-running will refresh legacy columns and add any rows new in the source, but is otherwise a no-op (safe by design).%s%s',
+                'Identical backup was already imported on %s — re-running will refresh legacy columns and add any rows new in the source, but is otherwise a no-op (safe by design).<br><br>%s',
                 $priorRun->finished_at?->format('Y-m-d H:i') ?? 'an earlier date',
-                "\n\n",
                 $body,
             );
         }
