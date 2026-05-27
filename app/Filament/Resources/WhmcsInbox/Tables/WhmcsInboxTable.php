@@ -162,9 +162,24 @@ class WhmcsInboxTable
                         ->get()
                         ->mapWithKeys(fn ($c) => [$c->id => $c->name.($c->afm ? ' ('.$c->afm.')' : '')])
                         ->toArray())
-                    ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
-                        ->where('company_id', Filament::getTenant()?->getKey())
-                        ->find($value))->name)
+                    // withTrashed: if Stage B-1 matched the row to a
+                    // customer that's since been soft-deleted, the
+                    // default ID rendering still resolves (with a
+                    // "(διαγραμμένος)" suffix) instead of producing
+                    // a blank-label Select. The action's firstOrFail
+                    // below would otherwise 500 on submit.
+                    ->getOptionLabelUsing(function ($value): ?string {
+                        $c = Customer::query()
+                            ->withTrashed()
+                            ->where('company_id', Filament::getTenant()?->getKey())
+                            ->find($value);
+                        if ($c === null) {
+                            return null;
+                        }
+                        return $c->trashed()
+                            ? $c->name.' (διαγραμμένος)'
+                            : $c->name;
+                    })
                     ->required()
                     ->live()     // re-renders the preview Placeholder below
                     ->default($r->customer_id)

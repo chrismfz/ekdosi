@@ -67,6 +67,22 @@ class WhmcsInboxResource extends Resource
         return 'warning';
     }
 
+    /**
+     * Bypass Shield's default deny-when-no-permission-exists behavior
+     * the way the Καρτέλα page does. Without this, the gap between
+     * deploy and the operator running `php artisan shield:generate
+     * --resource=WhmcsInboxResource` reproduces the same 404 storm
+     * the CustomerLedger had in PRs #39-45. The per-record actions
+     * (File at AADE / Reject / Hold / Re-stage) still consult the
+     * PendingWhmcsInvoicePolicy via update authorization, so a
+     * permission-less user gets a read-only view of the inbox until
+     * permissions are granted — not unrestricted file-at-AADE access.
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->check();
+    }
+
     public static function table(Table $table): Table
     {
         return WhmcsInboxTable::configure($table);

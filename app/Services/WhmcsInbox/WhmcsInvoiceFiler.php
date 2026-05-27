@@ -171,7 +171,13 @@ class WhmcsInvoiceFiler
 
         // Phase 3: link the pending row to the AADE result.
         $pendingFresh = $pending->fresh();
-        $hasMark = ! empty($mark->mark);
+        // Explicit null+empty check rather than ! empty() — empty()
+        // treats the string '0' as falsy, which could in theory
+        // misclassify a real MARK as off-mode if the submitter ever
+        // returned that shape. AADE MARKs today are 15-digit positive
+        // integers but defensive coding has prevented exactly this
+        // class of falsy-string regression elsewhere.
+        $hasMark = $mark->mark !== null && $mark->mark !== '';
         $pendingFresh->update([
             'status'           => PendingWhmcsInvoice::STATUS_FILED,
             'filed_at'         => now(),
