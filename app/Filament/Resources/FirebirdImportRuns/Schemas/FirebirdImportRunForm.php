@@ -29,10 +29,10 @@ class FirebirdImportRunForm
         return $schema
             ->components([
                 Section::make('Backup file')
-                    ->description('Upload the `.fbk` produced by `gbak` on the legacy Firebird host. The file uploads privately to ekdosi\'s storage; it is deleted automatically after a successful import.')
+                    ->description('Upload either a `.fbk` (gbak backup — the job will restore it first) or a `.fdb` (already-restored Firebird DB — used directly). The file uploads privately to ekdosi\'s storage and is deleted automatically after a successful import.')
                     ->schema([
                         FileUpload::make('upload')
-                            ->label('Firebird backup (.fbk)')
+                            ->label('Firebird backup (.fbk) or database (.fdb)')
                             ->required()
                             ->disk('local')
                             ->directory('firebird-imports')
@@ -52,7 +52,7 @@ class FirebirdImportRunForm
                             // non-Firebird input with a clear stderr
                             // that we surface as the failure reason.
                             ->maxSize(500 * 1024)  // 500 MB
-                            ->helperText('Max 500 MB. Larger backups: SCP onto the host + use the artisan command.')
+                            ->helperText('Max 500 MB (Filament-side). The PHP host needs `upload_max_filesize` + `post_max_size` ≥ your file size in php.ini — defaults are typically 2-8 MB. For larger backups: SCP onto the host and use the artisan command.')
                             ->storeFileNamesIn('original_file_name')
                             ->columnSpanFull(),
                     ]),

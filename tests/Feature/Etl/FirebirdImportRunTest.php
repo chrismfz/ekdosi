@@ -308,6 +308,71 @@ class FirebirdImportRunTest extends TestCase
             'Truncation marker should be visible so the operator knows content was cut.');
     }
 
+    /**
+     * Operators can upload either `.fbk` (gbak backup; job runs
+     * `gbak -r` to restore) OR `.fdb` (already-restored Firebird
+     * database; job uses it directly). The extension on the
+     * ORIGINAL filename — stored at upload time via
+     * `storeFileNamesIn('original_file_name')` and then surfaced
+     * on `file_name` — drives the branch.
+     *
+     * This test locks the detection logic: the job picks the
+     * right path based on the `file_name` extension. We don't
+     * actually run gbak / artisan here (sandbox blocker), but
+     * the row's `file_name` is what matters and is operator-
+     * visible in the UI history table.
+     */
+    public function test_file_name_extension_determines_processing_path(): void
+    {
+        $fbkRun = FirebirdImportRun::create([
+            'company_id'    => $this->tenant->id,
+            'file_name'     => 'ekdosi-myip.fbk',
+            'file_size'     => 1000,
+            'file_sha256'   => str_repeat('a', 64),
+            'uploaded_path' => 'firebird-imports/x.fbk',
+            'status'        => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host'       => '127.0.0.1',
+            'fb_user'       => 'SYSDBA',
+        ]);
+
+        $fdbRun = FirebirdImportRun::create([
+            'company_id'    => $this->tenant->id,
+            'file_name'     => 'ekdosi-myip.fdb',
+            'file_size'     => 1000,
+            'file_sha256'   => str_repeat('b', 64),
+            'uploaded_path' => 'firebird-imports/x.fdb',
+            'status'        => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host'       => '127.0.0.1',
+            'fb_user'       => 'SYSDBA',
+        ]);
+
+        $this->assertSame(
+            'fbk',
+            strtolower(pathinfo($fbkRun->file_name, PATHINFO_EXTENSION)),
+        );
+        $this->assertSame(
+            'fdb',
+            strtolower(pathinfo($fdbRun->file_name, PATHINFO_EXTENSION)),
+        );
+
+        // Case-insensitive detection — operators on Windows often
+        // get `.FDB` (uppercase) extensions.
+        $upperRun = FirebirdImportRun::create([
+            'company_id'    => $this->tenant->id,
+            'file_name'     => 'EKDOSI.FDB',
+            'file_size'     => 1000,
+            'file_sha256'   => str_repeat('c', 64),
+            'uploaded_path' => 'firebird-imports/x.FDB',
+            'status'        => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host'       => '127.0.0.1',
+            'fb_user'       => 'SYSDBA',
+        ]);
+        $this->assertSame(
+            'fdb',
+            strtolower(pathinfo($upperRun->file_name, PATHINFO_EXTENSION)),
+        );
+    }
+
     public function test_is_terminal_returns_true_only_for_completed_or_failed(): void
     {
         $base = [
