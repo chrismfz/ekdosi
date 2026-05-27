@@ -16,6 +16,8 @@ use App\Services\Whmcs\CustomerWhmcsLedgerResult;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Illuminate\Database\Eloquent\Model;
+use Livewire\Attributes\Locked;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -46,7 +48,22 @@ class CustomerLedger extends Page
 
     protected string $view = 'filament.customers.ledger';
 
-    public ?Customer $record = null;
+    /**
+     * Filament/Livewire URL parameter binding initially sets `$record`
+     * to the raw URL value (int|string), THEN our mount() resolves it
+     * to a Customer instance. A strict `?Customer` type rejects the
+     * int with a PHP TypeError mid-lifecycle - which surfaces as a
+     * 404 page in production (route appears broken). Filament's own
+     * `InteractsWithRecord` trait uses this exact union + `#[Locked]`
+     * combo to handle the same lifecycle:
+     *   - The union accepts the raw int|string from the URL
+     *   - `#[Locked]` tells Livewire NOT to re-sync this property
+     *     from the frontend snapshot (defence against tampering)
+     * After mount() runs, `$record` is always a Customer instance;
+     * the view + helper methods access ->name etc on the Model.
+     */
+    #[Locked]
+    public Customer | Model | int | string | null $record = null;
 
     public ?int $filterYear = null;
 
