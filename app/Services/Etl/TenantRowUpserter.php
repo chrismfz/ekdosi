@@ -127,14 +127,46 @@ class TenantRowUpserter
      * wrapper for child tables (payments, mydata_marks, etc.) where
      * the row's surrogate id is never referenced by other ETL passes.
      *
-     * Uses Laravel's built-in updateOrInsert — same SELECT-then-
-     * INSERT/UPDATE shape, no need to roll our own.
+     * Same $insertOnlyDefaults semantics as upsertGetId — written on
+     * INSERT, ignored on UPDATE. Critical for `created_at`: if it's
+     * not in $insertOnlyDefaults, the row inserts with created_at=NULL
+     * (verified at vendor/laravel/.../Builder.php:4347 —
+     * updateOrInsert's INSERT path doesn't auto-populate timestamps).
+     *
+     * The array_merge order MATCHES upsertGetId's — matchKeys win
+     * last, so a caller that accidentally passes the same key in
+     * $values doesn't shadow the match-key value used for the SELECT.
+     *
+     * @param  array<string, mixed>  $matchKeys
+     * @param  array<string, mixed>  $values
+     * @param  array<string, mixed>  $insertOnlyDefaults
      */
     public function upsert(
         string $table,
         array $matchKeys,
         array $values,
+        array $insertOnlyDefaults = [],
     ): void {
-        $this->db->table($table)->updateOrInsert($matchKeys, $values);
+        $existing = $this->db->table($table)
+            ->where($matchKeys)
+            ->select('id')
+            ->first();
+
+        if ($existing !== null) {
+            if (! empty($values)) {
+                $this->db->table($table)
+                    ->where('id', $existing->id)
+                    ->update($values);
+            }
+            return;
+        }
+
+        $insertRow = array_merge(
+            $insertOnlyDefaults,
+            $values,
+            $matchKeys,
+        );
+
+        $this->db->table($table)->insert($insertRow);
     }
 }

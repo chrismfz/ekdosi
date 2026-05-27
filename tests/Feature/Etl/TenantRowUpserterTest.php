@@ -154,31 +154,150 @@ class TenantRowUpserterTest extends TestCase
 
     public function test_no_update_when_update_values_empty(): void
     {
-        // Insert via the upserter; capture updated_at.
+        // Strengthen the no-UPDATE invariant by capturing the query
+        // log directly. Timestamp comparison alone is microsecond-
+        // flaky (an UPDATE within the same microsecond as the INSERT
+        // could pass a timestamp-equality check). Query log assertion
+        // is precise — we count UPDATE statements emitted.
         $id = $this->upserter->upsertGetId(
             'customers',
             ['company_id' => $this->tenant->id, 'legacy_id' => 100],
             ['name' => 'Acme', 'updated_at' => now()->subHour()],
             ['is_active' => true, 'created_at' => now()],
         );
-        $before = Customer::find($id)->updated_at;
 
-        // Call again with EMPTY update values — must not UPDATE.
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
         $this->upserter->upsertGetId(
             'customers',
             ['company_id' => $this->tenant->id, 'legacy_id' => 100],
-            [],  // no columns to refresh
+            [],  // no columns to refresh — UPDATE must NOT fire
             ['is_active' => false, 'created_at' => now()],  // ignored on existing rows
         );
 
-        $after = Customer::find($id)->updated_at;
-        // updated_at must be identical — we didn't run an UPDATE
-        // statement at all. (Important: empty $updateValues should
-        // NOT trigger a no-op UPDATE that bumps updated_at via DB
-        // triggers, but Eloquent models also have no auto-bump on
-        // raw DB::table writes anyway. Asserts the timestamp is the
-        // SAME microsecond.)
-        $this->assertEquals($before->format('Y-m-d H:i:s'), $after->format('Y-m-d H:i:s'));
+        $updates = array_filter(
+            DB::getQueryLog(),
+            fn ($q) => str_starts_with(strtolower(trim($q['query'])), 'update'),
+        );
+        DB::disableQueryLog();
+
+        $this->assertSame([], $updates,
+            'upsertGetId with empty $updateValues must not emit an UPDATE statement '
+            .'(otherwise activitylog + spatie/audit would record spurious changes on every re-import).');
+
+        // Also assert is_active stayed at the original true value (the
+        // insert-only default was correctly ignored on the second call).
+        $this->assertTrue((bool) Customer::find($id)->is_active);
+    }
+
+    /**
+     * Soft-delete behaviour: the upserter's SELECT uses DB::table()
+     * which bypasses Eloquent's SoftDeletes global scope. So a row
+     * the operator soft-deleted between imports is FOUND on the
+     * subsequent re-import; its columns refresh from the new legacy
+     * snapshot; the deleted_at column is preserved (not in
+     * $updateValues, not in $insertOnlyDefaults).
+     *
+     * The result is intentional — the operator's soft-delete decision
+     * is honoured (row stays hidden by default), but the legacy
+     * source's most recent data is reflected (visible if the operator
+     * uses "Show trashed" or restores).
+     *
+     * Locks the behaviour. If a future change makes the upserter
+     * either skip trashed rows entirely OR auto-restore them, this
+     * test fails immediately and the policy change is explicit.
+     */
+    public function test_soft_deleted_row_stays_deleted_after_reimport(): void
+    {
+        // Day 0: import customer.
+        $id = $this->upserter->upsertGetId(
+            'customers',
+            ['company_id' => $this->tenant->id, 'legacy_id' => 100],
+            ['name' => 'Day 0 name'],
+            ['is_active' => true, 'created_at' => now()->subDays(7)],
+        );
+
+        // Day 3: operator soft-deletes via Filament.
+        Customer::find($id)->delete();
+        $this->assertNotNull(Customer::withTrashed()->find($id)->deleted_at);
+
+        // Day 7: re-import with a refreshed name.
+        $reimportedId = $this->upserter->upsertGetId(
+            'customers',
+            ['company_id' => $this->tenant->id, 'legacy_id' => 100],
+            ['name' => 'Day 7 refreshed name'],
+            ['is_active' => false, 'created_at' => now()],
+        );
+
+        // Same surrogate id — upserter found the trashed row.
+        $this->assertSame($id, $reimportedId);
+
+        $fresh = Customer::withTrashed()->find($id);
+        // Row is STILL trashed (operator's delete preserved).
+        $this->assertNotNull($fresh->deleted_at);
+        // Legacy column refreshed (visible if operator restores or
+        // uses "Show trashed").
+        $this->assertSame('Day 7 refreshed name', $fresh->name);
+        // is_active preserved at its original true value (insert-only
+        // default IGNORED on update — unchanged from day 0).
+        $this->assertTrue((bool) $fresh->is_active);
+    }
+
+    /**
+     * The reviewer flagged a HIGH issue: the new upsert() helper for
+     * child tables previously omitted $insertOnlyDefaults, so every
+     * caller would insert rows with created_at = NULL. This test
+     * locks that fixed behaviour — upsert() now writes created_at
+     * on first insert and preserves it on update.
+     *
+     * Critical specifically for mydata_marks (the legal audit table
+     * per CLAUDE.md) — a NULL creation timestamp on legal-audit rows
+     * is the kind of regression that wouldn't show up in golden
+     * tests but would be visible to auditors.
+     */
+    public function test_upsert_writes_created_at_on_insert_via_defaults(): void
+    {
+        $customer = Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Parent',
+            'legacy_id' => 50,
+        ]);
+
+        $createdAt = now()->subDay();
+        $this->upserter->upsert(
+            'payments',
+            ['company_id' => $this->tenant->id, 'legacy_id' => 999],
+            ['customer_id' => $customer->id, 'amount' => 100.00, 'pay_date' => '2026-05-01',
+             'updated_at' => now()],
+            ['created_at' => $createdAt],
+        );
+
+        $row = DB::table('payments')->where('legacy_id', 999)->first();
+        $this->assertNotNull($row->created_at);
+        $this->assertSame(
+            $createdAt->format('Y-m-d H:i:s'),
+            \Illuminate\Support\Carbon::parse($row->created_at)->format('Y-m-d H:i:s'),
+        );
+
+        // Second call with a DIFFERENT created_at in defaults — must
+        // be IGNORED (existing row's created_at preserved).
+        $newerCreatedAt = now();
+        $this->upserter->upsert(
+            'payments',
+            ['company_id' => $this->tenant->id, 'legacy_id' => 999],
+            ['customer_id' => $customer->id, 'amount' => 200.00, 'pay_date' => '2026-05-01',
+             'updated_at' => now()],
+            ['created_at' => $newerCreatedAt],
+        );
+
+        $row = DB::table('payments')->where('legacy_id', 999)->first();
+        $this->assertEquals('200.00', $row->amount);  // values refreshed
+        // created_at preserved at original day-old value, NOT bumped.
+        $this->assertSame(
+            $createdAt->format('Y-m-d H:i:s'),
+            \Illuminate\Support\Carbon::parse($row->created_at)->format('Y-m-d H:i:s'),
+        );
     }
 
     public function test_upsert_without_get_id_creates_or_updates_child_row(): void
