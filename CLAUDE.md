@@ -1117,6 +1117,24 @@ Items still deferred from this third pass:
 - **`normaliseCountryCode()` country list** — seeded with GR / EE / CY / DE (current tenant scope). Extend the match arms as new tenant/customer countries appear. Operators see a clear error pointing at the helper if an unrecognised country shows up.
 - **vatExemptionCategory mechanism for 0% lines** — still throws (the right safe default). When intra-community customers need filing, add a `vat_exemption_category` column on `vat_categories` + per-line override + heuristic for invoice type ∈ {1.2, 2.2} → auto-suggest the right category. **Trigger PR**: first time an operator hits the 0% throw.
 
+### Deferred from PR #29 (ETL re-run safety: upsert-on-(company_id, legacy_id))
+PR #29 replaced the destructive `wipeCompany() → insert everything` design with `upsertGetId($table, $matchKeys, $updateValues, $insertOnlyDefaults)` on every copy method. **Locked in behaviour** (don't re-litigate):
+
+- **Re-imports are safe**: operators can take a fresh `gbak` backup days/weeks after the initial import and re-run. Surrogate ids stable across runs (FKs from ekdosi-only rows stay valid). Legacy-sourced columns refresh; Filament-managed columns survive untouched.
+- **Filament-only rows are NEVER touched**: any row with `legacy_id IS NULL` (operator-created in the panel) is invisible to the upserter — there's nothing in the legacy source to match it against.
+- **Deleted-from-source rows are LEFT ALONE**: if a customer existed in legacy on day 0 but was deleted from the source by day 7, the ekdosi row stays. A future cleanup command can offer to drop them; we never auto-delete because a corrupt/partial backup could otherwise nuke real data.
+- **`invoice_types.invcount` never rolls back**: re-imports take `MAX(legacy_invcount, current_local_invcount)` so any ekdosi-issued invoices that incremented the counter between imports are honoured. Prevents collision on `(company_id, invcode)` when the next ekdosi-issued invoice picks up the counter.
+- **Filament-managed customer columns** (preserved on update, defaulted on first insert): `is_active`, `needs_immediate_invoice`, `peppol_endpoint`, `whmcs_client_id`.
+- **Filament-managed product columns**: `is_active`, plus the future-looking PR #20 deferrals (`internal_notes`, `sku`, `whmcs_product_id`, `supplier`) get defaults on insert only.
+- **`TenantRowUpserter` is the canonical helper**: extracted into `App\Services\Etl\` so the upsert semantics are unit-testable without a real Firebird connection (which needs `pdo_firebird`, blocked in sandbox). The full ETL pipeline integration test waits on the extension being available.
+
+**Deferred items**:
+- **Soft-deleted-in-ekdosi rows refresh columns but stay trashed** — `DB::table()->where()` doesn't respect Eloquent's SoftDeletes global scope, so the upserter SELECT finds trashed rows and UPDATE's their columns. The row's `deleted_at` stays set. Operator behaviour: a customer they soft-deleted on day 3 now has refreshed columns but is still hidden. Probably the right behaviour (honour the delete) but worth a note. **Trigger PR**: if operators report confusion ("I deleted that customer but their address updated").
+- **Race conditions on concurrent imports** — SELECT-then-INSERT/UPDATE isn't atomic. Two simultaneous ETL runs for the same tenant could double-insert, hit unique constraint. ETL is single-process per tenant by design; UI button must disable after first click. **Trigger PR**: when the import UI lands (PR #30+).
+- **Invcode collisions if operator double-issues** — if an invoice was issued in BOTH systems with the same invcode (e.g. operator used legacy app + ekdosi concurrently with overlapping series), upsert hits the `(company_id, invcode)` unique and the import halts. Loud failure is correct here — silent overwrite would lose audit trail. Document in the eventual import UI's helperText.
+- **Live Firebird integration test** — sandbox lacks `pdo_firebird`. Upserter is unit-tested; the full pipeline integration runs when the extension is available (production / a CI box with the right PHP). The cutover-day runbook should include a smoke import against a sandboxed restored `.fbk` before the real cutover.
+- **Import UI** — flagged as PR #30+ in the original scoping. Operator workflow: upload `.fbk`, hash-dedup against prior runs, show drift warnings ("you have 10 rows created in ekdosi since last import"), queue background job, display progress + history. The TenantRowUpserter is the shared service the UI calls.
+
 ### Deferred from PR #28 (WHMCS bridge — Stage A)
 Stage A is read-only: API client, tenant credentials, customer matcher, dry-run preview command. Findings + Stage B spec captured here so PR #29 starts informed.
 
