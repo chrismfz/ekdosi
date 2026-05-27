@@ -29,12 +29,14 @@ use PDO;
 class MigrateFromFirebird extends Command
 {
     protected $signature = 'migrate:firebird
-        {--company= : Display name of the company/tenant}
-        {--slug= : URL slug for the tenant (Filament)}
+        {--company= : Display name of the company/tenant (ignored if --company-id is set)}
+        {--slug= : URL slug for the tenant (ignored if --company-id is set)}
+        {--company-id= : Existing tenant id to import INTO. UI-driven imports use this — no implicit create.}
         {--fdb= : Absolute path to the .fdb on the Firebird host}
         {--host=127.0.0.1 : Firebird host}
         {--fbuser=EKDOSI : Firebird user}
-        {--fbpass= : Firebird password}';
+        {--fbpass= : Firebird password}
+        {--counts-out= : Optional path. If set, the per-table row-count summary is written here as JSON on success.}';
 
     protected $description = 'Import a legacy Firebird ekdosi database into the multi-tenant MariaDB schema (re-run-safe)';
 
@@ -59,7 +61,13 @@ class MigrateFromFirebird extends Command
 
     public function handle(): int
     {
-        foreach (['company', 'slug', 'fdb', 'fbpass'] as $req) {
+        // Two entry shapes:
+        //   - Operator-typed CLI (legacy):   --company= --slug= (creates if missing)
+        //   - UI-driven (PR #30 job):        --company-id= (must already exist)
+        // --fdb and --fbpass are always required.
+        $useCompanyId = (bool) $this->option('company-id');
+        $required = $useCompanyId ? ['fdb', 'fbpass'] : ['company', 'slug', 'fdb', 'fbpass'];
+        foreach ($required as $req) {
             if (! $this->option($req)) {
                 $this->error("Missing required --{$req}");
                 return self::FAILURE;
@@ -67,7 +75,9 @@ class MigrateFromFirebird extends Command
         }
 
         $this->connectFirebird();
-        $this->companyId = $this->resolveCompany();
+        $this->companyId = $useCompanyId
+            ? $this->resolveCompanyById((int) $this->option('company-id'))
+            : $this->resolveCompany();
         $this->upserter = TenantRowUpserter::default();
 
         $this->info("Importing into company_id={$this->companyId} ({$this->option('slug')})");
@@ -154,6 +164,28 @@ class MigrateFromFirebird extends Command
 
         $this->newLine();
         $this->info('Done. Run the golden-test comparison next (see README).');
+
+        // PR #30 — optional per-table count emission for the UI job.
+        // The job reads this JSON to surface "1240 customers, 8500
+        // invoices imported" in the import-history UI. Counts are
+        // total per-tenant table sizes AFTER the import (not deltas)
+        // — simplest robust signal; deltas would require pre-snapshot
+        // which doubles the work for marginal UX gain.
+        if ($path = $this->option('counts-out')) {
+            $counts = [];
+            $tables = [
+                'payment_methods', 'delivery_methods', 'distribution_aims',
+                'metric_units', 'vat_categories', 'product_categories',
+                'customers', 'invoice_types', 'products', 'product_price_tiers',
+                'invoices', 'invoice_lines', 'return_invoice_extras',
+                'payments', 'mydata_marks', 'conf_params', 'whmcs_invoice_log',
+            ];
+            foreach ($tables as $t) {
+                $counts[$t] = DB::table($t)->where('company_id', $this->companyId)->count();
+            }
+            file_put_contents($path, json_encode($counts, JSON_PRETTY_PRINT));
+        }
+
         return self::SUCCESS;
     }
 
@@ -183,6 +215,20 @@ class MigrateFromFirebird extends Command
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    /**
+     * Strict company lookup for UI-driven imports — the operator selected
+     * an existing tenant from the panel, so we must NOT auto-create a row
+     * on typo. Throws if the id doesn't exist.
+     */
+    private function resolveCompanyById(int $id): int
+    {
+        $exists = DB::table('companies')->where('id', $id)->exists();
+        if (! $exists) {
+            throw new \RuntimeException("Tenant with id={$id} does not exist. Cannot import into a non-existent tenant.");
+        }
+        return $id;
     }
 
     /**
