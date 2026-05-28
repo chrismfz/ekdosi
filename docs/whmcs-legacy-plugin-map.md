@@ -128,23 +128,91 @@ this routing in a comment. Nothing on either side reads `mod_timologia*`.
 
 ---
 
-## Re-implementation plan for the timologia gap (T2/T3)
+## Re-implementation plan — timologia v2 inside `ekdosi_bridge`
 
-Bill **per service line**, not per client. Proposed shape (matches CLAUDE.md
-"option (a)" — keep the resolution on the WHMCS side, ekdosi consumes it):
+**Decision: expand `ekdosi_bridge`, not a new plugin.** The bridge is
+admin-only today (one `AdminInvoicesControlsOutput` hook); timologia adds
+new client-facing surface to it. Bill **per service line, not per client**.
 
-1. **WHMCS side (`ekdosi_bridge`):** add an endpoint that, for a given WHMCS
-   invoice, resolves each line's `serviceid`+`service_type`, `LEFT JOIN
-   mod_timologia` → `mod_timologia_contacts`, and returns either the resolved
-   contact (the end customer) or null per line, plus `isReceipt`.
-2. **ekdosi side:** `WhmcsInvoiceMapper` consumes that — when a line has a
-   resolved contact, snapshot it as the invoice counterpart (a `Customer` keyed
-   by `gr_vatno`, created/matched on the fly) instead of the reseller; map
-   `isReceipt` to the τιμολόγιο/απόδειξη invoice type.
-3. **Edge:** a single WHMCS invoice could mix lines billed to different
-   parties → may need to split into multiple ekdosi invoices (one per billing
-   party). Confirm against real reseller invoices before deciding split-vs-block.
+Phased so we can test against **real WHMCS data + sandbox AADE** without
+customers noticing anything, and cut over from the legacy plugin cleanly.
 
-**Pre-build data check:** dump the live `mod_timologia_contacts` /
-`mod_timologia` schemas from the production WHMCS DB (the DDL lies) and a few
-real reseller rows, so the column list + `isReceipt` type are confirmed.
+### Phase T‑1 — resolution + billing (backend only; no client UI)
+The only path we actually need to validate. No customer-visible change.
+1. **Bridge (WHMCS side):** add an endpoint (extend `inbound.php` +
+   `EkdosiClient`) that, for a WHMCS invoice, resolves each line's
+   `serviceid`+`service_type`, `LEFT JOIN mod_timologia → mod_timologia_contacts`,
+   and returns per-line `{contact | null, isReceipt}`. **Read-only** against
+   the existing live tables.
+2. **ekdosi side:** `WhmcsInvoiceMapper` consumes it — a resolved contact
+   becomes the invoice counterpart (match/create a `Customer` by `gr_vatno`)
+   instead of the reseller; `isReceipt` selects τιμολόγιο vs απόδειξη.
+3. **Multi-party edge:** a single WHMCS invoice can mix lines for different
+   end customers → split into multiple ekdosi invoices, or block+flag.
+   **Decide from real data** (see dump SQL below).
+
+### Phase T‑2 — client-area "v2" page (gated, hidden by default)
+- Bridge addon gains a `ClientAreaPrimaryNavbar` hook + a client page
+  (contacts CRUD + per-service routing), labelled **`Παραστατικά σε τρίτους (v2)`**
+  (distinct from the legacy link so testers tell them apart).
+- **Admin config checkbox** "Show client-area v2 link" — **default OFF**;
+  the hook only adds the menu item when checked, so customers see nothing.
+- **Optional pilot allowlist** (client IDs) — when set, only those clients
+  see/use v2. Lets a single real reseller pilot it while everyone else sees
+  nothing.
+- **Write-safety:** the v2 page writes the shared live `mod_timologia*`
+  tables (same rows the legacy plugin + desktop app read). Keep write access
+  limited to the pilot allowlist until cutover.
+
+### Phase T‑3 — import / sync + cutover  ⭐ (operator requirement)
+When v2 is ready it must **read and import/sync the legacy "παραστατικά
+τρίτων" data** so ekdosi becomes the system of record and the legacy
+timologia plugin can be retired. Same philosophy as the Firebird ETL —
+**re-runnable, keyed, idempotent**:
+- **Contacts** (`mod_timologia_contacts`) → ekdosi **Customers**
+  (match/create by `gr_vatno`; dedupe; keep a `whmcs_timologia_contact_id`
+  back-reference for re-sync). These end customers then exist natively in
+  ekdosi.
+- **Routing** (`mod_timologia`: service → contact) → adopt into the bridge's
+  own store (or keep reading the legacy table until the final sync), so the
+  legacy plugin can be uninstalled.
+- Re-run during transition (upsert by the legacy id); final sync at cutover,
+  then legacy timologia → read-only archive (mirrors the desktop-app cutover).
+
+### Pre-build data check (run on the production WHMCS DB) — the gating step
+The `CREATE TABLE` DDL is stale; confirm the REAL columns + answer the
+split question before building T‑1:
+```sql
+-- (a) the REAL columns (DDL lies — runtime adds English cols + isReceipt)
+SHOW CREATE TABLE mod_timologia_contacts;
+SHOW CREATE TABLE mod_timologia;
+
+-- (b) volume
+SELECT COUNT(*) AS contacts FROM mod_timologia_contacts;
+SELECT service_type, COUNT(*) AS routes, COUNT(DISTINCT userid) AS clients
+  FROM mod_timologia GROUP BY service_type;
+
+-- (c) sample routing joined to contact + the reseller (WHMCS client)
+SELECT t.id, t.userid AS reseller_id, c.companyname AS reseller,
+       t.serviceid, t.service_type, t.isReceipt,
+       k.id AS contact_id, k.company_name, k.gr_vatno, k.tax_office, k.city
+FROM mod_timologia t
+JOIN tblclients c ON c.id = t.userid
+LEFT JOIN mod_timologia_contacts k ON k.id = t.contactid
+ORDER BY t.userid
+LIMIT 50;
+
+-- (d) do single invoices mix billing parties? (decides split-vs-block)
+--     relid→service join differs by item type; refine per 'Hosting'/'Domain*'.
+SELECT i.id AS invoice_id, i.userid,
+       COUNT(DISTINCT COALESCE(t.contactid, 0)) AS distinct_parties
+FROM tblinvoices i
+JOIN tblinvoiceitems ii ON ii.invoiceid = i.id
+LEFT JOIN mod_timologia t ON t.serviceid = ii.relid
+WHERE i.status = 'Paid'
+GROUP BY i.id
+HAVING distinct_parties > 1
+LIMIT 50;
+```
+Paste the (a) column lists + (d) result back and we lock the schema + the
+split decision, then build T‑1.
