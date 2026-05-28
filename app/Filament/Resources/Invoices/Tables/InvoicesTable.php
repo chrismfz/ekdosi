@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Invoices\Tables;
 
+use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use Filament\Actions\ViewAction;
@@ -52,6 +53,21 @@ class InvoicesTable
                     ->money('EUR')
                     ->alignRight()
                     ->sortable(),
+
+                TextColumn::make('payment_status')
+                    ->label('Πληρωμή')
+                    ->badge()
+                    ->placeholder('—')
+                    // A credit note isn't a receivable — show a neutral
+                    // "Πιστωτικό" badge, not the (misleading) unpaid/paid
+                    // status its own row would otherwise compute.
+                    ->formatStateUsing(fn (?string $state, $record) => $record->credited_invoice_id !== null
+                        ? 'Πιστωτικό'
+                        : ($state ? PaymentStatus::from($state)->label() : '—'))
+                    ->color(fn (?string $state, $record) => $record->credited_invoice_id !== null
+                        ? 'info'
+                        : ($state ? PaymentStatus::from($state)->color() : 'gray'))
+                    ->toggleable(),
 
                 TextColumn::make('mydata_state')
                     ->label('myDATA')
@@ -123,6 +139,13 @@ class InvoicesTable
                             ->first();
                         return $c ? ($c->trashed() ? $c->name.' (deleted)' : $c->name) : null;
                     })()),
+
+                SelectFilter::make('payment_status')
+                    ->label('Κατάσταση πληρωμής')
+                    ->options(collect(PaymentStatus::cases())
+                        ->mapWithKeys(fn (PaymentStatus $s) => [$s->value => $s->label()])
+                        ->toArray())
+                    ->placeholder('All'),
 
                 SelectFilter::make('mydata_state')
                     ->label('myDATA state')

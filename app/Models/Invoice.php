@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Observers\InvoiceObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -30,6 +32,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * e.g. "APY423". Allocated by App\Services\InvoiceNumberer under a row
  * lock so concurrent issues for the same type can't collide.
  */
+#[ObservedBy(InvoiceObserver::class)]
 class Invoice extends Model
 {
     use HasFactory, SoftDeletes;
@@ -63,6 +66,7 @@ class Invoice extends Model
         'delivery_method_id',
         'payment_method_id',
         'conv_invoice_id',
+        'credited_invoice_id',
         'delivery_date',
         'header_discount_percent',
         'net_total',
@@ -100,6 +104,10 @@ class Invoice extends Model
             'header_discount_percent' => 'decimal:2',
             'net_total' => 'decimal:2',
             'gross_total' => 'decimal:2',
+            // Money-status cache — written ONLY by App\Services\InvoiceBalance
+            // (not $fillable, mirroring the mydata_* cache columns).
+            'paid_total' => 'decimal:2',
+            'credited_total' => 'decimal:2',
             'withhold_amount' => 'decimal:2',
             'mailed' => 'boolean',
             'printed' => 'boolean',
@@ -149,6 +157,44 @@ class Invoice extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(InvoiceLine::class);
+    }
+
+    /**
+     * Payments allocated directly to this invoice (not on-account ones,
+     * which carry invoice_id = null and belong to the customer).
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /** Credit notes issued against this invoice (credited_invoice_id → this). */
+    public function creditNotes(): HasMany
+    {
+        return $this->hasMany(self::class, 'credited_invoice_id');
+    }
+
+    /** If this invoice IS a credit note, the original it credits. */
+    public function creditedInvoice(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'credited_invoice_id');
+    }
+
+    private ?\App\Services\InvoiceBalanceData $balanceDataCache = null;
+
+    /**
+     * Live money snapshot (owed/paid/credited/balance/status) from
+     * App\Services\InvoiceBalance — the authoritative figure for views.
+     * Lists/tables read the cached payment_status column instead.
+     *
+     * Memoised per instance: an infolist renders ~5 entries off this and
+     * a modal reads it twice; without the memo each call would re-run two
+     * SQL aggregates. Fresh enough for a single read-only render; any
+     * write path recomputes the persisted cache separately.
+     */
+    public function balanceData(): \App\Services\InvoiceBalanceData
+    {
+        return $this->balanceDataCache ??= app(\App\Services\InvoiceBalance::class)->for($this);
     }
 
     public function mydataMarks(): HasMany

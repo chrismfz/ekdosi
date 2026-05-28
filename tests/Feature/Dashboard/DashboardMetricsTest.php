@@ -171,6 +171,42 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(300.0, $outstanding);   // 500 credit - 200 paid
     }
 
+    public function test_income_excludes_credit_notes(): void
+    {
+        // A sale this month.
+        $sale = $this->makeInvoice(['net_total' => 100, 'gross_total' => 124]);
+        // A credit note against it (positive gross) must NOT be counted
+        // as income — otherwise sale + credit reads as 2× revenue.
+        $this->makeInvoice(['net_total' => 100, 'gross_total' => 124, 'credited_invoice_id' => $sale->id]);
+
+        $fig = (new DashboardMetrics($this->tenant))->income(
+            Carbon::parse('2026-05-01')->startOfMonth(),
+            Carbon::parse('2026-05-31')->endOfMonth(),
+        );
+
+        $this->assertSame(100.0, $fig->net);    // sale only, credit note excluded
+        $this->assertSame(1, $fig->count);
+    }
+
+    public function test_outstanding_nets_out_valid_credit_notes(): void
+    {
+        // credit-term invoice of 500, with a VALID 200 credit note against it.
+        $original = $this->makeInvoice([
+            'payment_method_id' => $this->credit->id, 'gross_total' => 500, 'mydata_state' => 'VALID',
+        ]);
+        $original->forceFill(['credited_total' => 200])->save();   // cache as InvoiceBalance would
+
+        // the credit note itself (credited_invoice_id set) must NOT count as a receivable
+        $this->makeInvoice([
+            'payment_method_id' => $this->credit->id, 'gross_total' => 200,
+            'credited_invoice_id' => $original->id, 'mydata_state' => 'VALID',
+        ]);
+
+        $outstanding = (new DashboardMetrics($this->tenant))->outstandingReceivables();
+
+        $this->assertSame(300.0, $outstanding);   // 500 gross - 200 credited - 0 paid
+    }
+
     public function test_unfiled_counts_only_new_app_null_state(): void
     {
         $this->makeInvoice(['mydata_state' => null]);   // new-app draft → counts

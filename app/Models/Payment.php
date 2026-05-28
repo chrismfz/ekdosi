@@ -2,32 +2,44 @@
 
 namespace App\Models;
 
+use App\Observers\PaymentObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
- * Customer payment. Mirrors legacy PAYMENT.
+ * Customer payment. Legacy PAYMENT was customer-level only (CUST_ID,
+ * PAY_DATE, VALUE, NOTES — no invoice link, no method).
  *
- * Tied to a customer (not an invoice) — matches the legacy schema
- * where payments are running ledger entries and "balance" is
- * computed via GET_CUSTOMER_BALANCE: sum of invoice gross totals
- * (where payment_method.due_days > 0) minus sum of payments. There
- * is no invoice-to-payment FK; payment application is implicit
- * (FIFO by date).
+ * Forward-extended for a real invoicer:
+ * - `invoice_id` (nullable) allocates a payment to a specific invoice.
+ *   NULL = "on-account" (customer-level credit) — this is how every
+ *   legacy-imported payment lands, preserving GET_CUSTOMER_BALANCE.
+ *   A partial payment is several rows against one invoice.
+ * - `payment_method_id` (nullable) records the "way" it was paid.
  *
- * The GET_CUSTOMER_BALANCE port lands as a scope on this model or
- * on Customer — tracked in CLAUDE.md as a deferred item for the
- * customer-statement / collections workflow.
+ * The PaymentObserver keeps invoices.{paid_total,payment_status} in
+ * sync (via App\Services\InvoiceBalance) whenever an invoice-allocated
+ * payment changes. SoftDeletes so a mis-keyed payment is recoverable
+ * and excluded from the paid total while trashed.
+ *
+ * NOTE: spatie/activitylog is intentionally NOT wired here — it lands
+ * in the dedicated cross-model audit PR (invoices + customers +
+ * payments together) per CLAUDE.md, not piecemeal.
  */
+#[ObservedBy(PaymentObserver::class)]
 class Payment extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'company_id',
         'legacy_id',
         'customer_id',
+        'invoice_id',
+        'payment_method_id',
         'pay_date',
         'amount',
         'notes',
@@ -49,5 +61,15 @@ class Payment extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    public function invoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class);
+    }
+
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class);
     }
 }

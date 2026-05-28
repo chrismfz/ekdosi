@@ -2,9 +2,11 @@
 
 namespace App\Filament\Resources\Invoices\Pages;
 
+use App\Actions\IssueCreditNote;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Invoice;
+use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
@@ -28,6 +30,159 @@ class ViewInvoice extends ViewRecord
         );
 
         return [
+            // Record a payment against this invoice. Not shown on credit
+            // notes (they're money owed back, not collected). Overpay is
+            // allowed (warned, not blocked) — real prepayments/rounding.
+            Action::make('record_payment')
+                ->label('Καταχώριση πληρωμής')
+                ->icon('heroicon-o-banknotes')
+                ->color('success')
+                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
+                    && $record->customer_id !== null
+                    && $record->mydata_state !== 'CANCELLED')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Καταχώριση πληρωμής')
+                ->modalSubmitActionLabel('Καταχώριση')
+                ->schema([
+                    \Filament\Forms\Components\TextInput::make('amount')
+                        ->label('Ποσό')
+                        ->numeric()
+                        ->required()
+                        ->default(fn (Invoice $record) => number_format(max($record->balanceData()->balance, 0), 2, '.', ''))
+                        ->helperText(fn (Invoice $record) => 'Υπόλοιπο: '.number_format($record->balanceData()->balance, 2, ',', '.').' €'),
+                    \Filament\Forms\Components\DatePicker::make('pay_date')
+                        ->label('Ημερομηνία')
+                        ->required()
+                        ->default(now()),
+                    \Filament\Forms\Components\Select::make('payment_method_id')
+                        ->label('Τρόπος πληρωμής')
+                        ->options(fn (Invoice $record) => \App\Models\PaymentMethod::query()
+                            ->where('company_id', $record->company_id)
+                            ->pluck('description', 'id'))
+                        ->default(fn (Invoice $record) => $record->payment_method_id),
+                    \Filament\Forms\Components\Textarea::make('notes')
+                        ->label('Σημειώσεις')
+                        ->rows(2),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    \Illuminate\Support\Facades\DB::transaction(function () use ($record, $data) {
+                        \App\Models\Payment::create([
+                            'company_id'        => $record->company_id,
+                            'customer_id'       => $record->customer_id,
+                            'invoice_id'        => $record->id,
+                            'payment_method_id' => $data['payment_method_id'] ?? null,
+                            'amount'            => $data['amount'],
+                            'pay_date'          => $data['pay_date'],
+                            'notes'             => $data['notes'] ?? null,
+                        ]);
+                    });
+                    Notification::make()
+                        ->title('Η πληρωμή καταχωρίστηκε')
+                        ->success()->send();
+                }),
+
+            // Issue a credit note (πιστωτικό) against this invoice —
+            // full or partial return. Hidden on credit notes themselves,
+            // on cancelled invoices, and when the tenant has no credit
+            // invoice type configured. Mirrors CreateInvoice: persist in
+            // a transaction, then submit to myDATA AFTER commit.
+            Action::make('issue_credit_note')
+                ->label('Έκδοση πιστωτικού')
+                ->icon('heroicon-o-receipt-refund')
+                ->color('warning')
+                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
+                    && $record->mydata_state !== 'CANCELLED'
+                    && self::creditTypes($record)->isNotEmpty())
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Έκδοση πιστωτικού τιμολογίου')
+                ->modalDescription('Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
+                ->modalSubmitActionLabel('Έκδοση')
+                ->schema([
+                    \Filament\Forms\Components\Select::make('credit_type_id')
+                        ->label('Τύπος πιστωτικού')
+                        ->options(fn (Invoice $record) => self::creditTypes($record)
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name]))
+                        ->required(),
+                    \Filament\Forms\Components\Repeater::make('lines')
+                        ->label('Γραμμές')
+                        ->addable(false)
+                        ->deletable(false)
+                        ->reorderable(false)
+                        ->default(fn (Invoice $record) => $record->lines
+                            ->map(fn ($l) => [
+                                'line_id' => $l->id,
+                                'label'   => ($l->product_descr ?? '#'.$l->id).' (×'.rtrim(rtrim((string) $l->qty, '0'), '.').')',
+                                'qty'     => (float) $l->qty,
+                            ])->all())
+                        ->schema([
+                            \Filament\Forms\Components\Hidden::make('line_id'),
+                            \Filament\Forms\Components\Placeholder::make('label')
+                                ->label('')
+                                ->content(fn (\Filament\Schemas\Components\Utilities\Get $get) => $get('label') ?? ''),
+                            \Filament\Forms\Components\TextInput::make('qty')
+                                ->label('Ποσότητα πίστωσης')
+                                ->numeric()
+                                ->minValue(0)
+                                ->default(0),
+                        ])
+                        ->columns(2),
+                    // Filing to myDATA is OPT-IN per issuance, default OFF.
+                    // Early rollout: issue the credit note locally (it
+                    // already reduces the balance) and file it later with
+                    // the existing "Submit to myDATA" action when ready.
+                    // Hidden for off-mode / non-Greek tenants.
+                    \Filament\Forms\Components\Toggle::make('submit_now')
+                        ->label('Υποβολή στο myDATA τώρα')
+                        ->helperText('Αν είναι ανενεργό, το πιστωτικό αποθηκεύεται ως πρόχειρο και υποβάλλεται αργότερα χειροκίνητα.')
+                        ->default(false)
+                        ->visible($tenantSupportsMyData),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    try {
+                        $creditType = InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->whereKey($data['credit_type_id'])
+                            ->firstOrFail();
+
+                        $selections = collect($data['lines'] ?? [])
+                            ->map(fn ($row) => ['line_id' => (int) $row['line_id'], 'qty' => (float) $row['qty']])
+                            ->all();
+
+                        $credit = app(IssueCreditNote::class)($record, $creditType, $selections);
+
+                        // Only file when the operator opted in. Submission
+                        // runs AFTER the IssueCreditNote transaction
+                        // committed, mirroring CreateInvoice's post-commit
+                        // submit + correlated-MARK build in MyDataSubmitter.
+                        if ($data['submit_now'] ?? false) {
+                            try {
+                                $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
+                                $submitter->submit($credit);
+                            } catch (Throwable $e) {
+                                Notification::make()
+                                    ->title('Το πιστωτικό δημιουργήθηκε, αλλά η υποβολή στο myDATA απέτυχε')
+                                    ->body($e->getMessage().' Υποβάλετέ το ξανά από τη σελίδα του πιστωτικού.')
+                                    ->danger()->persistent()->send();
+                                $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
+
+                                return;
+                            }
+                        }
+
+                        Notification::make()
+                            ->title('Το πιστωτικό εκδόθηκε')
+                            ->body('Κωδικός: '.$credit->invcode
+                                .(($data['submit_now'] ?? false) ? '' : ' (πρόχειρο — δεν υποβλήθηκε στο myDATA)'))
+                            ->success()->send();
+                        $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία έκδοσης πιστωτικού')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
+                }),
+
             // Submit a draft invoice to myDATA. Visible only for drafts
             // (no mydata_state) on tenants in sandbox/production mode.
             // Off-mode + non-Greek tenants get no submission UI here.
@@ -221,5 +376,15 @@ class ViewInvoice extends ViewRecord
                     );
                 }),
         ];
+    }
+
+    /** Credit invoice types for the invoice's tenant. */
+    protected static function creditTypes(Invoice $invoice): \Illuminate\Support\Collection
+    {
+        return InvoiceType::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('is_credit', true)
+            ->orderBy('code')
+            ->get();
     }
 }

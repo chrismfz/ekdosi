@@ -1535,3 +1535,206 @@ code (2026-05-28):
 - `GET_COMB_*` cross-DB procedures — not ported (credential landmine).
 - `afm2name` WHMCS-side GSIS plugin — correctly superseded by native
   `AadeRegistryLookup`.
+
+---
+
+## Invoice money status — Payments (PR #1 of 2, landed)
+
+Closes the "no payment recording / no per-invoice paid status" gap. The
+companion PR #2 (credit notes / returns) builds on the same service.
+
+**Model.** Every invoice's money state is derived by ONE service,
+`App\Services\InvoiceBalance` (the single source of truth):
+`owed = gross − credited_total`, `balance = owed − paid_total`,
+`status ∈ {paid, partial, unpaid, credited, overpaid}` (the
+`App\Enums\PaymentStatus` enum owns the Greek label + badge colour).
+Cash-term invoices (`payment_method.due_days = 0`) are `paid` at issue
+(mirrors legacy `GET_CUSTOMER_BALANCE`). Compared with a 0.005 tolerance.
+
+**Schema (all nullable → ETL-safe).** `payments` gained `invoice_id`
+(direct allocation; NULL = on-account), `payment_method_id` (the "way"),
+`softDeletes`. `invoices` gained cache columns `paid_total`,
+`credited_total`, `payment_status` (written ONLY by `InvoiceBalance`
+via `forceFill` — NOT `$fillable`, like the `mydata_*` cache) plus
+`credited_invoice_id` (the credit-note link — a DEDICATED column, NOT
+`conv_invoice_id` which the ETL rewrites; the column lives here so the
+balance model is complete, the ISSUE flow is PR #2).
+
+**Sync.** `App\Observers\PaymentObserver` (#[ObservedBy] on `Payment`)
+recomputes the cache in-transaction on payment create/update/delete/
+restore (and recomputes both invoices on re-allocation). On-account
+payments (invoice_id null) skip it — they move only the customer-level
+ledger balance. `App\Services\InvoiceBalance::recompute()` locks the
+invoice row so concurrent payment writes serialise.
+
+**UI.** New `Payments` Filament resource (Data group); "Καταχώριση
+πληρωμής" action on `ViewInvoice` (defaults amount = balance);
+"Πληρωμή έναντι λογαριασμού" action on the customer Καρτέλα; a
+`payment_status` badge column + filter on the invoice list; a money
+section on the invoice view. `DashboardMetrics::outstandingReceivables()`
+now nets out VALID credit notes + trashed payments.
+
+**ETL.** `copyPayments`/`copyInvoices` unchanged — legacy payments land
+on-account (invoice_id null), preserving the legacy balance math; the
+new cache columns are absent from the upsert so re-imports never clobber
+them. `php artisan invoices:recompute-balances [--company=]` backfills
+the cache after an import (idempotent).
+
+**Deliberately deferred / out of scope (don't re-litigate):**
+- **spatie/activitylog on `Payment`** — deferred to the dedicated
+  cross-model audit PR (invoices + customers + payments together), not
+  wired piecemeal. SoftDeletes already gives a recoverable trail.
+- **Καρτέλα per-row paid/unpaid badge** — the ledger timeline shows
+  debit/credit + running balance (now credit-aware, see PR #2 below) but
+  not a per-row payment_status badge. Minor UX, still deferred.
+- **Single payment split across many invoices** — out of scope; current
+  model is one payment → one invoice (partial = multiple rows). Upgrade
+  path: a `payment_allocations` M:N table; `InvoiceBalance` is the only
+  consumer that would change.
+- **Multi-currency** — out of scope (EUR-only, matching MyDataSubmitter).
+- **Concurrency test for `recompute` lock** — sqlite ignores row locks;
+  the lock is real on MariaDB but not covered by a CI test.
+
+**Operator post-merge step:** run `php artisan shield:generate` (or
+re-sync Shield) so the new `Payment` resource permissions exist and are
+assigned to the relevant roles — otherwise the Payments resource is
+hidden. `app/Policies/PaymentPolicy.php` follows the existing per-model
+Shield policy shape.
+
+## Invoice money status — Credit notes / returns (PR #2 of 2, landed)
+
+Closes the "no way to issue a credit note" gap. Builds on PR #1's
+`InvoiceBalance` (the `credited_total` branch). Note: legacy
+`FInvoiceReturn` is the ΣΔΕΠ delivery flow, NOT a financial credit note,
+and `CREATE_RETURN_INVOICE` is lost — so this is a fresh design.
+
+**Flow.** `App\Actions\IssueCreditNote(original, creditType, selections)`
+mirrors `CreateInvoice`: in ONE transaction it allocates ΑΑ via
+`InvoiceNumberer`, creates a credit-type Invoice with
+`credited_invoice_id = original.id` + the original's party snapshot +
+POSITIVE lines (the saving hook computes net/gross), writes
+`return_invoice_extras.qty_returned` per ORIGINAL line, recomputes the
+credit-note totals and the original's balance. The caller (the
+"Έκδοση πιστωτικού" action on `ViewInvoice`) submits to myDATA AFTER
+commit (no AADE call under row locks; no orphan-MARK window). Modal:
+pick credit type + per-line qty (0 = skip); over-credit (qty >
+remaining un-returned) is blocked.
+
+**Sign convention (important).** A credit note is stored with POSITIVE
+gross (negatives would make `InvoiceVatBreakdown` emit negative VAT).
+The reduction is expressed by the ORIGINAL's `credited_total`, computed
+by `InvoiceBalance` as Σ gross of issued, non-cancelled credit notes
+(`credited_invoice_id = original`). A CANCELLED credit note stops
+counting. `InvoiceObserver` (#[ObservedBy] on `Invoice`) keeps the
+original's cache fresh when a credit note is created / cancelled /
+deleted / restored (no loop: it recomputes the parent, whose own
+`credited_invoice_id` is null).
+
+**myDATA.** `MyDataSubmitter::buildAadeInvoice` now correlates a credit
+note to the original via `InvoiceHeader::addCorrelatedInvoice((int)
+mark)`, reading the original's INSERT MARK from `mydata_marks`
+(`originalInsertMark()`, same "audit history not mirror column" logic
+as `cancel()`). Refuses if the original was never filed. The credit
+`mydata_type` comes from the credit `InvoiceType` (existing guard).
+
+**Ledger.** `CustomerLedgerBuilder` now treats credit notes as
+reductions everywhere (balance, aging FIFO, yearly running balance,
+timeline credit column) via an `isCreditNote()` helper — they credit
+the customer's account like a payment. Signed logic reduces to identical
+output when no credit notes exist, so existing ledger tests are
+unchanged. `DashboardMetrics::outstandingReceivables` (from PR #1)
+already nets out credit notes via `credited_total`.
+
+**Deferred / out of scope:**
+- **Standalone credit notes** (no `credited_invoice_id`): structurally
+  allowed and counted via the ledger's `is_credit` check, but the issue
+  UI always targets an original; no UI for issuer-less credits + they
+  can't set a correlated MARK. Edge case.
+- **myDATA credit submission has no automated test** — the firebed
+  Guzzle mock for the SendInvoices path is non-trivial (same deferral as
+  the original submit path). The `IssueCreditNote` service + observer +
+  balance + ledger ARE unit-tested; the correlated-MARK wiring needs a
+  sandbox smoke test.
+- **Crediting a cash-term original**: the ledger nets the credit against
+  the credit-term pool (consistent with its FIFO approximation) — a
+  credit note on a cash-term invoice slightly over-reduces the credit
+  balance. Same fuzziness as the no-per-invoice-settlement model.
+- **Stock movements on return** — not tracked (legacy stock logic lived
+  in the lost `CREATE_RETURN_INVOICE` proc).
+
+### Independent multi-agent review — fixes applied (whole branch)
+A high-effort review of the full payments + credit-notes branch found
+and we FIXED (each locked by a test):
+- **Ledger counted soft-deleted payments** — `CustomerLedgerBuilder::loadPayments`
+  uses `DB::table` (bypasses the SoftDeletes scope); added
+  `whereNull('deleted_at')`. A deleted payment no longer reduces the
+  Καρτέλα balance.
+- **Ledger counted CANCELLED invoices/credit notes** — `loadInvoices`
+  now excludes cancelled rows, matching `InvoiceBalance` + dashboard (a
+  cancelled credit note no longer keeps reducing the balance).
+- **Dashboard double-counted credit notes as income** — `income()`,
+  `monthlyIncome()`, `cumulativeNetByMonth()`, `topCustomersQuery()`
+  (via `baseInvoices()` + the top-customers window) now exclude credit
+  notes (`credited_invoice_id` set). Income = gross SALES; credit notes
+  are netted only in `outstandingReceivables`. (Net-of-returns revenue
+  is a future refinement; the bug was the 2× inflation.)
+- **Stale money-status cache on gross change** — `RecomputeInvoiceTotals`
+  now calls `InvoiceBalance::recompute()` so a header-discount / line
+  edit refreshes `payment_status` instead of leaving a stale badge.
+- **Credit note showed a misleading paid/unpaid badge** in the invoice
+  list — now renders a neutral "Πιστωτικό" badge.
+- **"Record payment" was offered on cancelled invoices** — added a
+  `mydata_state != CANCELLED` visibility guard.
+- **Over-credit TOCTOU** — `IssueCreditNote` now `lockForUpdate`s the
+  original so concurrent partial credits can't both pass the
+  remaining-qty check.
+- **Credit-note→credit-note recompute cycle** — `InvoiceObserver` skips
+  recomputing when the resolved "original" is itself a credit note
+  (breaks a DB-reachable A→B→A chain).
+- **`recompute()` lock-then-discard + N+1** — now computes from the
+  locked row and preloads `paymentMethod`.
+- **Efficiency**: `Invoice::balanceData()` is memoised per instance (the
+  invoice infolist reads it ~5× and the payment modal 2×).
+
+Reviewed but NOT changed (consistent / accepted):
+- **Null `payment_method_id` → classified Paid** — consistent with the
+  system-wide rule (only `due_days > 0` is a receivable; null PM = not a
+  receivable). An unmapped legacy credit-term invoice showing Paid is an
+  ETL data-quality issue, not a balance-logic bug.
+- **A payment on a cash-term invoice still reduces tenant receivables** —
+  the documented "payments aren't allocated per-invoice" fuzziness.
+- **Crediting a cash-term original over-reduces the credit pool** — same
+  FIFO approximation; rare.
+- **`IssueCreditNote` recomputes the original ~3× per issue** — rare
+  path; self-corrects within the transaction.
+- **"non-cancelled" predicate duplicated across 3 services** — candidate
+  for a shared `Invoice::scopeNotCancelled` later.
+
+### Credit-note myDATA filing is OPT-IN (early-rollout control)
+The "Έκδοση πιστωτικού" action does NOT auto-file to myDATA. The modal
+has a **"Υποβολή στο myDATA τώρα"** toggle, default **OFF**, shown only
+for sandbox/production tenants. Default behaviour: the credit note is
+issued as a draft (mydata_state null) — it ALREADY reduces the original's
+balance locally — and is filed later via the existing
+`ViewInvoice::submit_to_mydata` action (visible on any draft, builds the
+correlated MARK). So for the first days/months operators can issue credit
+notes without touching AADE, test the correlation in sandbox by flipping
+the toggle, and file historical credit notes manually when ready. (The
+correlated-MARK build in `MyDataSubmitter` runs on whichever path
+submits — toggle-on or the later Submit action.)
+
+### Cross-surface consistency tests (`MoneyStatusConsistencyTest`)
+The review showed the unit tests missed bugs because each money surface
+was tested in isolation. This test builds randomized-but-deterministic
+scenarios across 5 seeds (sales, allocated + on-account payments,
+partial/full credit notes, cancels, soft-deletes) and asserts the three
+surfaces AGREE:
+- **A**: `DashboardMetrics::outstandingReceivables` == Σ per-customer
+  `CustomerLedgerBuilder` balance.
+- **B**: every invoice's cached `{paid_total, credited_total,
+  payment_status}` == a freshly-computed `InvoiceBalance`.
+- **C**: Σ `invoices.credited_total` == Σ gross of non-cancelled credit
+  notes; and `invoices:recompute-balances` is a verified no-op (caches
+  already fresh). Re-run this whenever a money surface or the
+  cache-sync paths change — it's the regression net for "surfaces
+  disagree".

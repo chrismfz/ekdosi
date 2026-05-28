@@ -45,6 +45,12 @@ class RecomputeInvoiceTotals
         $fresh->gross_total = round($rawGross * $discountFactor, 2);
         $fresh->save();
 
+        // Gross just changed → the money-status cache (owed/balance/
+        // payment_status) is stale. Refresh it here so a header-discount
+        // or line edit can't leave a wrong badge until the next payment
+        // event. recompute() loads paymentMethod to avoid an N+1.
+        app(InvoiceBalance::class)->recompute($fresh->loadMissing('paymentMethod'));
+
         return $fresh;
     }
 }

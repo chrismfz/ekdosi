@@ -246,6 +246,42 @@ class CustomerLedger extends Page
                     $this->aadeCrosscheckMemo = null;
                 }),
 
+            // Record an ON-ACCOUNT payment (invoice_id = null): a
+            // customer-level credit not tied to a specific invoice. To
+            // settle a specific invoice instead, use the "Record payment"
+            // action on that invoice's view page.
+            Action::make('record_on_account_payment')
+                ->label('Πληρωμή έναντι λογαριασμού')
+                ->icon('heroicon-o-banknotes')
+                ->color('success')
+                ->modalHeading('Πληρωμή έναντι λογαριασμού')
+                ->modalSubmitActionLabel('Καταχώριση')
+                ->schema([
+                    \Filament\Forms\Components\TextInput::make('amount')
+                        ->label('Ποσό')->numeric()->required(),
+                    \Filament\Forms\Components\DatePicker::make('pay_date')
+                        ->label('Ημερομηνία')->required()->default(now()),
+                    \Filament\Forms\Components\Select::make('payment_method_id')
+                        ->label('Τρόπος πληρωμής')
+                        ->options(fn () => \App\Models\PaymentMethod::query()
+                            ->where('company_id', $this->record->company_id)
+                            ->pluck('description', 'id')),
+                    \Filament\Forms\Components\Textarea::make('notes')
+                        ->label('Σημειώσεις')->rows(2),
+                ])
+                ->action(function (array $data) {
+                    \App\Models\Payment::create([
+                        'company_id'        => $this->record->company_id,
+                        'customer_id'       => $this->record->getKey(),
+                        'invoice_id'        => null,
+                        'payment_method_id' => $data['payment_method_id'] ?? null,
+                        'amount'            => $data['amount'],
+                        'pay_date'          => $data['pay_date'],
+                        'notes'             => $data['notes'] ?? null,
+                    ]);
+                    Notification::make()->title('Η πληρωμή καταχωρίστηκε')->success()->send();
+                }),
+
             Action::make('edit')
                 ->label('Επεξεργασία')
                 ->icon('heroicon-o-pencil-square')
