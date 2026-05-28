@@ -372,9 +372,27 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
 legacy — see corrections); `invoiced=-333/-1000` WHMCS sentinel states;
 customer manual reorder UI; `conf_params` imported-but-unread; live VIES/AFM.
 
-**🆕 NEW phases discussed:** **Έξοδα / Expenses** (inbound `RequestDocs` +
-suppliers + ΦΠΑ εκροών−εισροών report — largest net-new); Estonian PEPPOL
-submitter; myDATA console one-click fixes; cross-model activitylog (do once).
+**🆕 NEW phases discussed:** **Έξοδα / Expenses** — the supplier/inbound mirror
+of the sales side (largest net-new). The AADE toolbox is all read-GETs in the
+spec (§4.2), so it's a real, supported phase — not a guess:
+- **`RequestDocs`** (§4.2.6) — παραστατικά/χαρακτηρισμοί/ακυρώσεις **που υπέβαλαν
+  ΑΛΛΟΙ και μας αφορούν** (i.e. supplier invoices *to* us). The exact reverse of
+  `RequestTransmittedDocs`; build an `ExpenseReconciler` mirroring
+  `SalesReconciler` (same pagination/continuationToken, same diff buckets).
+- **`RequestMyExpenses`** (§4.2.9) — expense summaries (twin of `RequestMyIncome`).
+- **`RequestVatInfo`** (§4.2.10) — **εισροές–εκροές ΦΠΑ**, per-invoice or
+  `GroupedPerDay` → this is the direct lever for the "πόσο ΦΠΑ θα χρωστάμε ανά
+  μήνα/τρίμηνο" report (compute locally like income, then cross-check vs this).
+- **`RequestE3Info`** (§4.2.11) — Ε3 figures per period.
+- **`SendExpensesClassification`** (§4.2.3) — classify expenses (needed to close
+  the expense picture at AADE; `postPerInvoice` for per-document vs per-line).
+Needs a new `Expense` model + a `suppliers`/προμηθευτές entity, expense
+classification (§8 code tables), and a ΦΠΑ εκροών−εισροών report. The issuer-side
+"αδέσποτα" console direction (find docs at myDATA missing locally) is the sales
+analog already built; the expense side is its mirror over `RequestDocs`.
+**Full blueprint + phased TODO: `docs/expenses-phase-plan.md`.**
+Also: Estonian PEPPOL submitter; myDATA console one-click fixes; cross-model
+activitylog (do once).
 
 **Suggested order:** (1)✅ sandbox myDATA. (2)✅ scheduler. (3)✅ timologia v2
 (T-1+T-2). (4)✅ **G1 withholding + G4 exempt** (merged, PR #68). (5)✅ **G3
