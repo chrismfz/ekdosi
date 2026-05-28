@@ -241,20 +241,20 @@ class ViewInvoice extends ViewRecord
             // invoices on myDATA-capable tenants. Confirmation modal
             // mandatory — cancellation is legally significant.
             Action::make('cancel_at_mydata')
-                ->label('Cancel via myDATA')
+                ->label('Ακύρωση μέσω myDATA')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
                 ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID')
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
-                ->modalHeading('Cancel this invoice at AADE')
-                ->modalDescription(fn (Invoice $record) => 'This sends a CANCEL request to AADE for MARK '.($record->mydata_mark ?? '?').'. The MARK is preserved in the audit trail; state becomes CANCELLED. Issue a correction invoice for the actual content fix.')
-                ->modalSubmitActionLabel('Confirm cancellation')
+                ->modalHeading('Ακύρωση παραστατικού στην ΑΑΔΕ')
+                ->modalDescription(fn (Invoice $record) => 'Αποστέλλεται αίτημα ΑΚΥΡΩΣΗΣ στην ΑΑΔΕ για το MARK '.($record->mydata_mark ?? '?').'. Το MARK διατηρείται στο ιστορικό· η κατάσταση γίνεται CANCELLED. Για διόρθωση περιεχομένου, εκδώστε πιστωτικό/διορθωτικό.')
+                ->modalSubmitActionLabel('Επιβεβαίωση ακύρωσης')
                 ->schema([
                     \Filament\Forms\Components\Textarea::make('reason')
-                        ->label('Reason (recorded locally)')
+                        ->label('Αιτία (καταγράφεται τοπικά)')
                         ->rows(3)
-                        ->placeholder('Why is this invoice being cancelled?'),
+                        ->placeholder('Γιατί ακυρώνεται το παραστατικό;'),
                 ])
                 ->action(function (Invoice $record, array $data) {
                     try {
@@ -269,8 +269,8 @@ class ViewInvoice extends ViewRecord
                         }
                         $submitter->cancel($record, $data['reason'] ?? '');
                         Notification::make()
-                            ->title('Cancelled at myDATA')
-                            ->body('AADE state is now CANCELLED; the original MARK is preserved in the audit trail.')
+                            ->title('Ακυρώθηκε στο myDATA')
+                            ->body('Η κατάσταση ΑΑΔΕ είναι πλέον CANCELLED· το αρχικό MARK διατηρείται στο ιστορικό.')
                             ->success()->send();
                         $this->redirect(static::getResource()::getUrl('view', [
                             'record' => $record,
@@ -278,7 +278,7 @@ class ViewInvoice extends ViewRecord
                         ]));
                     } catch (Throwable $e) {
                         Notification::make()
-                            ->title('Cancellation failed')
+                            ->title('Η ακύρωση απέτυχε')
                             ->body($e->getMessage())
                             ->danger()->persistent()->send();
                     }
