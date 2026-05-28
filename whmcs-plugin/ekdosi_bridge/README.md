@@ -197,8 +197,30 @@ all three fields.
 | `inbound.php`                           | Ekdosi → WHMCS write-back endpoint (HMAC-authenticated)|
 | `hooks.php`                             | Per-invoice admin sidebar button hook                  |
 | `lib/Admin/AdminDispatcher.php`         | Action router (mirrors prepare_for_ekdosi pattern)     |
-| `lib/Admin/Controller.php`              | Admin module page actions (index/show/push/reset)     |
+| `lib/Admin/Controller.php`              | Admin module page actions (index/show/push/reset/sync) |
 | `lib/EkdosiClient.php`                  | HMAC-signed HTTP client to ekdosi's webhooks          |
+| `resolve.php`                           | Ekdosi → WHMCS read-only third-party resolution (HMAC) |
+| `lib/ThirdPartyStore.php`               | Own `mod_ekdosi_*` tables + sync/resolve/resellers     |
+
+## Third-party invoicing (Παραστατικά σε τρίτους — timologia v2)
+
+The legacy `timologia` plugin lets a reseller route a service's invoice to a
+third party (the end customer). That data lives in custom tables the WHMCS API
+can't expose, so the bridge serves it to ekdosi over HMAC.
+
+- **Own tables.** On activation the addon creates `mod_ekdosi_contacts` +
+  `mod_ekdosi_routing` (it does NOT write the legacy `mod_timologia*`).
+- **Sync.** Admin page → **"Sync from legacy timologia"** imports the legacy
+  contacts + routing into the own tables. Re-runnable + idempotent (keyed on
+  the legacy id; rows created on the v2 side are never touched; legacy tables
+  are only READ). Re-run whenever the legacy data changes, until cutover.
+- **Resolve.** `resolve.php` (read-only, HMAC) answers ekdosi's
+  `op=resolve` (per-invoice line routing) and `op=resellers` (clients with
+  routing) from the own tables. ekdosi then bills the third party instead of
+  the reseller for single-party invoices, and parks multi-party invoices for an
+  operator split.
+- **ekdosi side is gated** by the per-tenant `whmcs_third_party_enabled` flag
+  (default OFF) — so the endpoint can be deployed before any behaviour changes.
 
 ## Not in scope (yet)
 

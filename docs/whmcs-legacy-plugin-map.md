@@ -241,12 +241,20 @@ The only path we actually need to validate. No customer-visible change.
 >   `php artisan whmcs:sync-resellers` (read-only mirror) + a Customer-list
 >   badge. Tests: 14 new (resolver + ingestor paths + sync); full suite green.
 >
-> **Storage decision (supersedes "shared vs own"): OWN tables, synced.** The
-> bridge will get its own `mod_ekdosi_*` tables (versatile, no collision with
-> the legacy plugin's writers, and the future hideable v2 client page writes
-> there), seeded by a re-runnable sync/import from `mod_timologia`. The
-> `ThirdPartyResolution` contract already decouples ekdosi from this — so it's a
-> WHMCS-side slice (**T‑1b‑2**) that changes nothing on the ekdosi side.
+> **T‑1b‑2 — DONE (bridge's own tables + sync).** Storage decision (supersedes
+> "shared vs own"): **OWN tables, synced.** Built (WHMCS-side only; ekdosi
+> contract unchanged):
+> - **`mod_ekdosi_contacts` + `mod_ekdosi_routing`** — created at addon
+>   activation (`ThirdPartyStore::ensureTables`). The bridge never writes the
+>   legacy `mod_timologia*`.
+> - **Sync** (admin page → "Sync from legacy timologia",
+>   `ThirdPartyStore::syncFromLegacy`) — re-runnable, idempotent, keyed on the
+>   legacy id; rows created on the v2 side (legacy id NULL) are never touched;
+>   legacy tables only READ. Orphan routing (deleted contact) skipped + counted.
+> - **`resolve.php` reads the own tables** now (`timologia_present` ⇒ "own
+>   tables exist"). Response shape identical → no ekdosi change.
+> - Decoupling confirmed: the `ThirdPartyResolution` contract is unchanged, so
+>   all T-1a/T-1b-1 ekdosi tests still pass untouched.
 >
 > **T‑1c — DEFERRED (needs sign-off): the guided split view** for multi-party
 > invoices (many ekdosi invoices ↔ one `whmcs_invoice_id`). Until built,
