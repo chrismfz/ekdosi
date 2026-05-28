@@ -499,12 +499,24 @@ class ThirdPartyStore
 
     /**
      * Route a service to one of the client's contacts (one contact per
-     * service — upsert). $contactid MUST belong to $userid. Returns false if
-     * the contact isn't theirs.
+     * service — upsert). BOTH the contact AND the service must belong to
+     * $userid (so a crafted POST can't create routing rows pointing at another
+     * client's service id — those would be inert, but we refuse them anyway).
+     * Returns false if either isn't theirs.
+     *
+     * NOTE: there is intentionally NO DB unique key on
+     * (userid, serviceid, service_type) — the legacy sync inserts here too and
+     * a hard constraint would abort a whole sync on any dirty/duplicate legacy
+     * row. The read-then-write upsert is sufficient for the single-client v2
+     * page (worst case: a double-click leaves a duplicate that resolveInvoice
+     * collapses via ->first()).
      */
     public static function setRouteForUser(int $userid, int $serviceid, string $serviceType, int $contactid, bool $isReceipt): bool
     {
         if (self::contactForUser($userid, $contactid) === null) {
+            return false;
+        }
+        if (! self::clientOwnsService($userid, $serviceid, $serviceType)) {
             return false;
         }
         self::ensureTables();
@@ -529,6 +541,20 @@ class ThirdPartyStore
         return true;
     }
 
+    /** Does this service (hosting/domain id) belong to the client? */
+    private static function clientOwnsService(int $userid, int $serviceid, string $serviceType): bool
+    {
+        $table = $serviceType === 'hosting' ? 'tblhosting' : ($serviceType === 'domain' ? 'tbldomains' : null);
+        if ($table === null) {
+            return false;
+        }
+
+        return Capsule::table($table)
+            ->where('id', $serviceid)
+            ->where('userid', $userid)
+            ->exists();
+    }
+
     /** Clear the routing for a service → bill the client themselves (default). */
     public static function clearRouteForUser(int $userid, int $serviceid, string $serviceType): void
     {
@@ -549,7 +575,9 @@ class ThirdPartyStore
         ];
         $out = [];
         foreach (self::CONTACT_FIELDS as $f) {
-            $out[$f] = self::clip(trim((string) ($input[$f] ?? '')), $widths[$f]) ?: null;
+            $trimmed = trim((string) ($input[$f] ?? ''));
+            // === '' (not ?:) so a legitimately falsy value like "0" survives.
+            $out[$f] = $trimmed === '' ? null : self::clip($trimmed, $widths[$f]);
         }
 
         return $out;

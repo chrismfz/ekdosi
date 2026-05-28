@@ -204,7 +204,7 @@ HTML;
         } else {
             $ok = ThirdPartyStore::setRouteForUser($clientId, $serviceid, $type, $contactid, $isReceipt);
             if (! $ok) {
-                return $this->alert('danger', 'Η επαφή δεν βρέθηκε.').$this->index($link, $clientId);
+                return $this->alert('danger', 'Μη έγκυρη επαφή ή υπηρεσία.').$this->index($link, $clientId);
             }
             $msg = 'Η δρομολόγηση αποθηκεύτηκε.';
         }
