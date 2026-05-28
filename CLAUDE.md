@@ -45,7 +45,9 @@ after cutover.
 - **PDF**: `barryvdh/laravel-dompdf`. **Backups**: `spatie/laravel-backup`.
 - **Audit log**: `spatie/laravel-activitylog` (installed; not yet wired —
   see latent items).
-- **Queue/scheduler**: Laravel built-in (DB driver). **No scheduler wired yet.**
+- **Queue/scheduler**: Laravel built-in (DB driver). Scheduler IS wired
+  (`routes/console.php`, gated by `config/ekdosi.php`) — needs the OS cron +
+  a queue worker to actually run (see Env-prep).
 - **Firebird driver on the ETL host**: `pdo_firebird` (only the artisan host
   needs it).
 
@@ -112,7 +114,7 @@ php artisan migrate:firebird --company="MyIP" --slug=myip \
     --fdb="/opt/Data/ekdosi-myip.fdb" --host=10.23.22.5 --fbuser=EKDOSI --fbpass=ekdosi1234
 php artisan invoices:recompute-balances --company=myip   # backfill money cache after import
 
-# myDATA ops (all MANUAL today — no scheduler wired)
+# myDATA ops (also run on the scheduler — see routes/console.php; safe to run manually anytime)
 php artisan mydata:preflight [--tenant=SLUG]             # READ-ONLY config audit vs AADE code tables
 php artisan mydata:set-credentials --tenant=SLUG --test  # set sandbox creds (key = hidden prompt), verify
 php artisan mydata:test-submit <invoiceId> [--execute]   # dry-run XML / --execute files to AADE
@@ -309,7 +311,8 @@ lookup + **Καρτέλα** ledger; products/tiers; 7 lookup tables; invoices
 (numbering, VAT math, QR, PDF); lifecycle + local & live reconciliation;
 **myDATA submit/cancel/dry-run** (sandbox-validated for myip's 4 types);
 payments + credit notes; WHMCS bridge (A–B3) + `ekdosi_bridge` plugin; PDF +
-per-tenant email + send-log; dashboard + widgets; ETL + import UI.
+per-tenant email + send-log; dashboard + widgets; ETL + import UI; **scheduler
+wired** (whmcs-fetch / mydata-reconcile / mail-sweep — `routes/console.php`).
 
 **🚧 PARTIAL:** auto-email on issue + audit BCC (email is a manual action, not
 auto on filing); one adaptive PDF template vs the 8 legacy FastReport designs;
@@ -317,10 +320,6 @@ auto on filing); one adaptive PDF template vs the 8 legacy FastReport designs;
 
 **❌ NOT YET** (confirm real usage against the production `.fbk` before building
 the usage-dependent ones):
-- **No scheduler / cron at all** — `whmcs:fetch-pending`,
-  `mydata:reconcile-sales`, `invoices:recompute-balances` are manual. The
-  legacy overnight `FAutoInvoice` batch has no replacement. *Biggest
-  "runs-itself" gap.*
 - **`mod_timologia`** third-party invoicing (see WHMCS gaps) — HIGH.
 - **Stock / inventory movements** — legacy decrements stock/reserve on issue +
   `CHECK_PROD_AVAILABILITY`; `products.reserve*` imported but no movement logic.
@@ -333,11 +332,11 @@ the usage-dependent ones):
 suppliers + ΦΠΑ εκροών−εισροών report — largest net-new); Estonian PEPPOL
 submitter; myDATA console one-click fixes; cross-model activitylog (do once).
 
-**Suggested order:** (1) ✅ sandbox-verify myDATA — done. (2) Wire the
-**scheduler** (unblocks griniaris). (3) **`mod_timologia`** (the HIGH WHMCS
-gap). (4) Confirm-then-build stock / ΣΔΕΠ / -333 by grepping the `.fbk`.
-(5) Auto-email on issue; gross-price-edit. (6) Έξοδα phase. (7) PDF per-type
-fidelity. (8) PEPPOL.
+**Suggested order:** (1) ✅ sandbox-verify myDATA — done. (2) ✅ scheduler —
+done (needs the OS cron + worker live; unblocks griniaris). (3)
+**`mod_timologia`** (the HIGH WHMCS gap). (4) Confirm-then-build stock / ΣΔΕΠ /
+-333 by grepping the `.fbk`. (5) Auto-email on issue; gross-price-edit.
+(6) Έξοδα phase. (7) PDF per-type fidelity. (8) PEPPOL.
 
 ---
 
@@ -367,6 +366,15 @@ fidelity. (8) PEPPOL.
   (`InvoiceNumberer`, `InvoiceBalance::recompute`) are real on MariaDB only.
 
 ## Env-prep gotchas (deploy host)
+- **Scheduler + queue worker** — the wired schedule (`routes/console.php`) is
+  inert until BOTH are live: one cron line `* * * * * cd /path && php artisan
+  schedule:run >> /dev/null 2>&1`, and a running worker
+  (`php artisan queue:work` / Horizon / supervisord) for the mail + import
+  jobs. Toggle individual tasks via `config/ekdosi.php` env flags
+  (`EKDOSI_SCHEDULE_*`). `withoutOverlapping` uses the cache-lock store, so
+  the cache driver must work (DB driver needs the `cache` tables migrated).
+  After editing `config/ekdosi.php` on a deploy that caches config, run
+  `php artisan config:clear`/`optimize`.
 - **`pdo_firebird`** — only the ETL/artisan host needs it (lives in the
   `ondrej/php` PPA, or build from `firebird-dev`). Blocks `migrate:firebird`.
 - **`ext-soap`** — needed for the GSIS lookup (`AadeRegistryLookup`) only; if
