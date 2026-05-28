@@ -102,15 +102,20 @@ php artisan migrate:firebird --company="MyIP" --slug=myip \
     --fbuser=EKDOSI --fbpass=ekdosi1234
 php artisan invoices:recompute-balances --company=myip   # backfill money cache after import
 
-# Operational helpers (currently MANUAL — no scheduler wired yet)
+# Operational helpers (also run on the wired scheduler — see INSTALL.md §11; safe to run manually)
 php artisan whmcs:fetch-pending --tenant=myip            # stage paid+unfiled WHMCS invoices into the inbox
 php artisan mydata:reconcile-sales --tenant=myip         # cross-check local invoices vs AADE
+php artisan mydata:preflight --tenant=myip               # READ-ONLY config audit vs AADE code tables
 ```
+
+**Deploy:** the scheduler is wired (`routes/console.php`, toggles in
+`config/ekdosi.php`) but inert until the **OS cron** + a **queue worker** are
+running — see **INSTALL.md §11**.
 
 ## Roadmap (suggested order)
 1. ~~**Sandbox-verify Phase 2** against AADE dev creds~~ ✅ **done 2026-05-28** — reconciliation parser confirmed; the run also fixed the SendInvoices submit payload (PR #57). Remaining myDATA follow-ups: payment-method→type map, conditional per-line quantity for goods types, `taxesTotals` for withholding/fees invoices, a SendInvoices mock-Guzzle integration test.
-2. **Scheduler** — wire `whmcs:fetch-pending` + `mydata:reconcile-sales` (+ a mail-log orphan sweep) into Laravel's scheduler; this unblocks griniaris routing.
-3. **`mod_timologia` third-party invoicing** — consume the alternate-billing-contact tables so employer/parent-company invoices bill the right entity.
+2. ~~**Scheduler**~~ ✅ **done** — `whmcs:fetch-pending` + `mydata:reconcile-sales` + `mail-log:sweep-orphans` wired (`routes/console.php`); needs the OS cron + worker live (INSTALL.md §11). Unblocks griniaris routing.
+3. **`mod_timologia` third-party (reseller) invoicing** — route specific services to the end customer instead of the reseller. Map + re-implementation spec: `docs/whmcs-legacy-plugin-map.md`.
 4. **Confirm-then-build** the usage-dependent legacy features: stock movements, ΣΔΕΠ cumulative invoices, `invoiced=-333` — grep the production `.fbk` first.
 5. **Auto-email on issue + audit BCC**; **gross-price-edit** on lines.
 6. **Έξοδα / expenses** phase — inbound `RequestDocs`, suppliers, ΦΠΑ εκροών−εισροών.
