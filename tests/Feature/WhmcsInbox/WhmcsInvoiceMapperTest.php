@@ -146,6 +146,29 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(124.0, $line['gross_price'], 'VAT added on top');
     }
 
+    public function test_tax_exclusive_flag_applies_on_the_split_subset_path_too(): void
+    {
+        // G3 belt-and-suspenders: the flag must hold when map() is called with
+        // an item subset (the multi-party split path), not just whole invoices.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => false])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 1009,
+            'userid' => 555,
+            'items' => ['item' => [
+                ['id' => 11, 'description' => 'Net line A', 'amount' => '100.00', 'taxed' => '1'],
+                ['id' => 22, 'description' => 'Net line B', 'amount' => '200.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $lines = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType, [11])['lines'];
+
+        $this->assertCount(1, $lines, 'only the selected item is mapped');
+        $this->assertSame(100.0, $lines[0]['net_price'], 'subset line still treats amount as net');
+        $this->assertSame(124.0, $lines[0]['gross_price']);
+    }
+
     public function test_untaxed_line_keeps_amount_as_net_and_gross(): void
     {
         $pending = $this->makePending([
