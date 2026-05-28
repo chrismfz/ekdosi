@@ -4,9 +4,9 @@ namespace App\Filament\Resources\FirebirdImportRuns\Pages;
 
 use App\Filament\Resources\FirebirdImportRuns\FirebirdImportRunResource;
 use Filament\Actions\CreateAction;
-use Filament\Resources\Pages\ListRecords;
+use App\Filament\BaseListRecords;
 
-class ListFirebirdImportRuns extends ListRecords
+class ListFirebirdImportRuns extends BaseListRecords
 {
     protected static string $resource = FirebirdImportRunResource::class;
 
