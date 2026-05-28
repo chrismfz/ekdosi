@@ -159,6 +159,21 @@ tblclients.id`. Implementation, as a by-product of T-1:
   "Παραστατικά σε τρίτους" tag on the Customer list/page). Read-only signal; no
   writes.
 
+## 7. End customer → reseller link via `referred_by` (later)
+
+Reuse the existing self-referential `customers.referred_by_customer_id`
+(`Customer::referredBy()` / `referrals()`, already in the form) to record that
+an end customer came in via a reseller. At T-1 match / T-3 import, when Haris is
+created/matched from a Chris-routed `mod_timologia` contact, set
+`Haris.referred_by_customer_id = Chris`. Result: Haris shows "Referred by Chris";
+`Chris.referrals()` is his whole third-party book; pairs with the reseller flag
+(#6). Each `mod_timologia_contacts` row is owned by exactly one `userid`, so the
+referrer is unambiguous in the common case.
+- **Edge (decide at build):** same ΑΦΜ as a contact under two resellers, or also
+  a direct customer → dedup-by-`gr_vatno` must not silently overwrite an existing
+  `referred_by`. Pick a precedence rule then.
+- **Status:** later (operator parked it); not part of T-1's critical path.
+
 ## Consolidation matrix
 
 | Legacy capability | Status in `ekdosi_bridge` |
