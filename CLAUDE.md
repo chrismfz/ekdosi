@@ -383,6 +383,7 @@ Needs a new `Expense` model + a `suppliers`/προμηθευτές entity, expen
 classification (§8 code tables), and a ΦΠΑ εκροών−εισροών report. The issuer-side
 "αδέσποτα" console direction (find docs at myDATA missing locally) is the sales
 analog already built; the expense side is its mirror over `RequestDocs`.
+**Full blueprint + phased TODO: `docs/expenses-phase-plan.md`.**
 Also: Estonian PEPPOL submitter; myDATA console one-click fixes; cross-model
 activitylog (do once).
 
