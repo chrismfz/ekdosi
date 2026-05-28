@@ -380,4 +380,191 @@ class ThirdPartyStore
 
         return mb_substr($s, 0, $len);
     }
+
+    // ----------------------------------------------------------------------
+    // T-2: client-area CRUD. All methods are scoped by $userid (the logged-in
+    // WHMCS client) — a client can only ever see/edit/route their OWN rows.
+    // v2-created rows have legacy_contact_id/legacy_routing_id = NULL, so the
+    // legacy→own sync never touches them. Writes go to the OWN tables only
+    // (decision: "v2 writes own tables only"); the legacy mod_timologia* are
+    // not written here.
+    // ----------------------------------------------------------------------
+
+    /** The fields a client may set on a contact. */
+    public const CONTACT_FIELDS = [
+        'company_name', 'gr_vatno', 'vies_vatno', 'tax_office',
+        'address1', 'address2', 'city', 'postal_code', 'country',
+        'description', 'email', 'telephone',
+    ];
+
+    /** @return array<int, object> the client's own contacts. */
+    public static function contactsForUser(int $userid): array
+    {
+        return Capsule::table(self::CONTACTS)
+            ->where('userid', $userid)
+            ->orderBy('company_name')
+            ->get()
+            ->all();
+    }
+
+    /** A single contact, but only if it belongs to $userid (ownership guard). */
+    public static function contactForUser(int $userid, int $id): ?object
+    {
+        return Capsule::table(self::CONTACTS)
+            ->where('id', $id)
+            ->where('userid', $userid)
+            ->first();
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     * @return int the new contact id
+     */
+    public static function createContactForUser(int $userid, array $input): int
+    {
+        self::ensureTables();
+        $now = date('Y-m-d H:i:s');
+
+        return (int) Capsule::table(self::CONTACTS)->insertGetId(
+            self::contactInput($input) + [
+                'userid' => $userid,
+                'source' => 'v2',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]
+        );
+    }
+
+    /** Update one of $userid's contacts. Returns false if it isn't theirs. */
+    public static function updateContactForUser(int $userid, int $id, array $input): bool
+    {
+        if (self::contactForUser($userid, $id) === null) {
+            return false;
+        }
+        Capsule::table(self::CONTACTS)
+            ->where('id', $id)
+            ->where('userid', $userid)
+            ->update(self::contactInput($input) + ['updated_at' => date('Y-m-d H:i:s')]);
+
+        return true;
+    }
+
+    /**
+     * Delete one of $userid's contacts AND cascade its routing rows (a route
+     * with no billing identity is meaningless). Scoped by userid throughout.
+     */
+    public static function deleteContactForUser(int $userid, int $id): bool
+    {
+        if (self::contactForUser($userid, $id) === null) {
+            return false;
+        }
+        Capsule::connection()->transaction(function () use ($userid, $id) {
+            Capsule::table(self::ROUTING)
+                ->where('userid', $userid)
+                ->where('contactid', $id)
+                ->delete();
+            Capsule::table(self::CONTACTS)
+                ->where('id', $id)
+                ->where('userid', $userid)
+                ->delete();
+        });
+
+        return true;
+    }
+
+    /**
+     * The client's services (hosting + domains) with any current routing.
+     * Used by the routing UI — "for each service, who is billed?".
+     *
+     * @return array<int, array{serviceid:int, service_type:string, label:string,
+     *               contactid:?int, is_receipt:bool}>
+     */
+    public static function servicesForUser(int $userid): array
+    {
+        $routes = [];
+        foreach (Capsule::table(self::ROUTING)->where('userid', $userid)->get() as $r) {
+            $routes[$r->service_type.':'.(int) $r->serviceid] = $r;
+        }
+
+        $services = [];
+        foreach (Capsule::table('tblhosting')->where('userid', $userid)->get(['id', 'domain']) as $h) {
+            $services[] = self::serviceRow($h, 'hosting', $routes);
+        }
+        foreach (Capsule::table('tbldomains')->where('userid', $userid)->get(['id', 'domain']) as $d) {
+            $services[] = self::serviceRow($d, 'domain', $routes);
+        }
+
+        return $services;
+    }
+
+    /**
+     * Route a service to one of the client's contacts (one contact per
+     * service — upsert). $contactid MUST belong to $userid. Returns false if
+     * the contact isn't theirs.
+     */
+    public static function setRouteForUser(int $userid, int $serviceid, string $serviceType, int $contactid, bool $isReceipt): bool
+    {
+        if (self::contactForUser($userid, $contactid) === null) {
+            return false;
+        }
+        self::ensureTables();
+        $now = date('Y-m-d H:i:s');
+
+        $existing = Capsule::table(self::ROUTING)
+            ->where('userid', $userid)
+            ->where('serviceid', $serviceid)
+            ->where('service_type', $serviceType)
+            ->first();
+
+        $data = ['contactid' => $contactid, 'is_receipt' => (int) $isReceipt, 'updated_at' => $now];
+        if ($existing) {
+            Capsule::table(self::ROUTING)->where('id', $existing->id)->update($data);
+        } else {
+            Capsule::table(self::ROUTING)->insert($data + [
+                'userid' => $userid, 'serviceid' => $serviceid, 'service_type' => $serviceType,
+                'source' => 'v2', 'created_at' => $now,
+            ]);
+        }
+
+        return true;
+    }
+
+    /** Clear the routing for a service → bill the client themselves (default). */
+    public static function clearRouteForUser(int $userid, int $serviceid, string $serviceType): void
+    {
+        Capsule::table(self::ROUTING)
+            ->where('userid', $userid)
+            ->where('serviceid', $serviceid)
+            ->where('service_type', $serviceType)
+            ->delete();
+    }
+
+    /** Whitelist + width-clip the client-supplied contact fields. */
+    private static function contactInput(array $input): array
+    {
+        $widths = [
+            'company_name' => 191, 'gr_vatno' => 30, 'vies_vatno' => 60, 'tax_office' => 120,
+            'address1' => 120, 'address2' => 120, 'city' => 120, 'postal_code' => 20,
+            'country' => 60, 'description' => 191, 'email' => 120, 'telephone' => 40,
+        ];
+        $out = [];
+        foreach (self::CONTACT_FIELDS as $f) {
+            $out[$f] = self::clip(trim((string) ($input[$f] ?? '')), $widths[$f]) ?: null;
+        }
+
+        return $out;
+    }
+
+    private static function serviceRow($svc, string $type, array $routes): array
+    {
+        $route = $routes[$type.':'.(int) $svc->id] ?? null;
+
+        return [
+            'serviceid' => (int) $svc->id,
+            'service_type' => $type,
+            'label' => (string) ($svc->domain ?? ('#'.$svc->id)),
+            'contactid' => $route ? (int) $route->contactid : null,
+            'is_receipt' => $route ? (bool) ((int) $route->is_receipt) : false,
+        ];
+    }
 }

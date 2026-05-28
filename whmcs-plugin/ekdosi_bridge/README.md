@@ -200,7 +200,10 @@ all three fields.
 | `lib/Admin/Controller.php`              | Admin module page actions (index/show/push/reset/sync) |
 | `lib/EkdosiClient.php`                  | HMAC-signed HTTP client to ekdosi's webhooks          |
 | `resolve.php`                           | Ekdosi → WHMCS read-only third-party resolution (HMAC) |
-| `lib/ThirdPartyStore.php`               | Own `mod_ekdosi_*` tables + sync/resolve/resellers     |
+| `lib/ThirdPartyStore.php`               | Own `mod_ekdosi_*` tables + sync/resolve/resellers + client CRUD |
+| `lib/Client/Gate.php`                   | Hide/reveal gate for the v2 client page (switch + pilot allowlist) |
+| `lib/Client/Controller.php`             | Client-area v2 page (contacts CRUD + per-service routing) |
+| `templates/clientpage.tpl`              | Client-area page shell (renders the controller HTML)   |
 
 ## Third-party invoicing (Παραστατικά σε τρίτους — timologia v2)
 
@@ -221,6 +224,29 @@ can't expose, so the bridge serves it to ekdosi over HMAC.
   operator split.
 - **ekdosi side is gated** by the per-tenant `whmcs_third_party_enabled` flag
   (default OFF) — so the endpoint can be deployed before any behaviour changes.
+
+### Client-area v2 page (hideable)
+
+The bridge adds a client-area page **"Παραστατικά σε τρίτους (v2)"** where a
+reseller manages their contacts (alternate billing identities) and routes each
+service to one — writing to the **own** `mod_ekdosi_*` tables (NOT the legacy
+`mod_timologia*`). Two admin config knobs gate visibility:
+
+- **Show client v2 page** (`show_client_v2`, default **OFF**) — master switch.
+  While off, customers see nothing. Flip on for an off-hours test, then off again.
+- **v2 pilot client IDs** (`v2_pilot_clients`) — optional comma-separated WHMCS
+  client ids; when set, ONLY those clients see/use v2 (everyone else sees
+  nothing even with the switch on).
+
+The same gate (`Client\Gate::visibleTo`) guards both the navbar link AND the
+page handler, so a hidden page can't be reached by URL-guessing. All CRUD is
+scoped to the logged-in client id and CSRF-protected. The "(v2)" label keeps it
+distinct from the legacy timologia link during the parallel run.
+
+> **Write direction:** v2 writes the own tables only. A pilot client's edits in
+> v2 are NOT mirrored back to the legacy `mod_timologia*` (the legacy plugin +
+> desktop app keep their own copy). Manage a pilot client's routing in one
+> place at a time.
 
 ## Not in scope (yet)
 

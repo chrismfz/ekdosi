@@ -1,4 +1,5 @@
 <?php
+
 /**
  * ekdosi_bridge — WHMCS addon module.
  *
@@ -38,42 +39,60 @@
  * the cutover steps).
  */
 
+use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\Admin\AdminDispatcher;
+use WHMCS\Module\Addon\EkdosiBridge\Client\Controller;
+use WHMCS\Module\Addon\EkdosiBridge\Client\Gate;
+use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
 
-if (!defined('WHMCS')) {
-    die('This file cannot be accessed directly');
+if (! defined('WHMCS')) {
+    exit('This file cannot be accessed directly');
 }
 
 require_once __DIR__.'/lib/Admin/AdminDispatcher.php';
 require_once __DIR__.'/lib/Admin/Controller.php';
 require_once __DIR__.'/lib/EkdosiClient.php';
 require_once __DIR__.'/lib/ThirdPartyStore.php';
+require_once __DIR__.'/lib/Client/Gate.php';
+require_once __DIR__.'/lib/Client/Controller.php';
 
 function ekdosi_bridge_config(): array
 {
     return [
-        'name'        => 'Ekdosi Bridge',
+        'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version'     => '0.1.0',
-        'author'      => 'MyIP Networks',
-        'fields'      => [
+        'version' => '0.1.0',
+        'author' => 'MyIP Networks',
+        'fields' => [
             'ekdosi_base_url' => [
                 'FriendlyName' => 'Ekdosi base URL',
-                'Type'         => 'text',
-                'Size'         => '80',
-                'Description'  => 'e.g. https://ekdosi.example.com — the host. We append /webhooks/whmcs/{slug}/... ourselves.',
+                'Type' => 'text',
+                'Size' => '80',
+                'Description' => 'e.g. https://ekdosi.example.com — the host. We append /webhooks/whmcs/{slug}/... ourselves.',
             ],
             'ekdosi_slug' => [
                 'FriendlyName' => 'Ekdosi tenant slug',
-                'Type'         => 'text',
-                'Size'         => '40',
-                'Description'  => 'The slug your tenant uses in ekdosi (e.g. "myip", "nixpal"). Must match companies.slug exactly.',
+                'Type' => 'text',
+                'Size' => '40',
+                'Description' => 'The slug your tenant uses in ekdosi (e.g. "myip", "nixpal"). Must match companies.slug exactly.',
             ],
             'webhook_secret' => [
                 'FriendlyName' => 'Shared HMAC secret',
-                'Type'         => 'password',
-                'Size'         => '64',
-                'Description'  => 'Must match companies.whmcs_webhook_secret on the ekdosi side, EXACTLY. Generate a 32+ char random string and paste it on both sides.',
+                'Type' => 'password',
+                'Size' => '64',
+                'Description' => 'Must match companies.whmcs_webhook_secret on the ekdosi side, EXACTLY. Generate a 32+ char random string and paste it on both sides.',
+            ],
+            // T-2: hide/reveal the client-area "Παραστατικά σε τρίτους (v2)" page.
+            'show_client_v2' => [
+                'FriendlyName' => 'Show client v2 page',
+                'Type' => 'yesno',
+                'Description' => 'Show the client-area "Παραστατικά σε τρίτους (v2)" link. OFF by default — flip on only when testing; customers see nothing while off.',
+            ],
+            'v2_pilot_clients' => [
+                'FriendlyName' => 'v2 pilot client IDs',
+                'Type' => 'text',
+                'Size' => '40',
+                'Description' => 'Optional. Comma-separated WHMCS client IDs. When set, ONLY these clients see/use v2 (everyone else sees nothing, even with the switch on). Leave blank for all clients.',
             ],
         ],
     ];
@@ -90,7 +109,7 @@ function ekdosi_bridge_activate(): array
     //    out of the box. Idempotent: re-running on an already-BIGINT
     //    column is a no-op ALTER.
     try {
-        $col = \WHMCS\Database\Capsule::selectOne(
+        $col = Capsule::selectOne(
             "SELECT DATA_TYPE FROM information_schema.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE()
                AND TABLE_NAME = 'tblinvoices'
@@ -98,14 +117,14 @@ function ekdosi_bridge_activate(): array
         );
         $type = $col ? strtolower((string) $col->DATA_TYPE) : '';
         if ($type !== '' && $type !== 'bigint') {
-            \WHMCS\Database\Capsule::statement(
+            Capsule::statement(
                 'ALTER TABLE tblinvoices MODIFY invoiced BIGINT NULL DEFAULT 0'
             );
             $notes[] = "Widened tblinvoices.invoiced from {$type} to BIGINT (holds 15-digit AADE MARKs).";
         } else {
             $notes[] = 'tblinvoices.invoiced is already BIGINT (or check skipped).';
         }
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         // Don't fail activation outright — the operator may lack ALTER
         // privileges (managed hosting). Surface the SQL so a DBA can
         // run it manually, and let the addon activate so config can
@@ -122,7 +141,7 @@ function ekdosi_bridge_activate(): array
     //    rather than refuse so the operator can run them side-by-side
     //    intentionally during the rollout — but they're told.
     try {
-        $legacyActive = \WHMCS\Database\Capsule::table('tbladdonmodules')
+        $legacyActive = Capsule::table('tbladdonmodules')
             ->where('module', 'prepare_for_ekdosi')
             ->exists();
         if ($legacyActive) {
@@ -130,7 +149,7 @@ function ekdosi_bridge_activate(): array
                 .'tblinvoices.invoiced; deactivate prepare_for_ekdosi once you have '
                 .'verified ekdosi_bridge end-to-end to avoid a silent overwrite.';
         }
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         // Non-fatal: the coexistence check is advisory only.
     }
 
@@ -138,15 +157,15 @@ function ekdosi_bridge_activate(): array
     //    (mod_ekdosi_contacts / mod_ekdosi_routing). Idempotent; seeded later
     //    by the admin "Sync from legacy timologia" action (T-1b-2).
     try {
-        \WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore::ensureTables();
+        ThirdPartyStore::ensureTables();
         $notes[] = 'Third-party tables (mod_ekdosi_contacts / mod_ekdosi_routing) ready.';
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         $notes[] = 'WARNING: could not create mod_ekdosi_* tables ('.$e->getMessage()
             .'). Use the "Sync from legacy timologia" admin action once DB privileges allow.';
     }
 
     return [
-        'status'      => 'success',
+        'status' => 'success',
         'description' => 'Addon activated. '.implode(' ', $notes),
     ];
 }
@@ -164,6 +183,38 @@ function ekdosi_bridge_deactivate(): array
 function ekdosi_bridge_output($vars): void
 {
     $action = isset($_REQUEST['action']) ? (string) $_REQUEST['action'] : '';
-    $dispatcher = new AdminDispatcher();
+    $dispatcher = new AdminDispatcher;
     echo $dispatcher->dispatch($action, $vars);
+}
+
+/**
+ * T-2: client-area page "Παραστατικά σε τρίτους (v2)". Gated by
+ * Gate::visibleTo (the show_client_v2 switch + the optional pilot allowlist) —
+ * enforced HERE too, not just on the navbar link, so a hidden page can't be
+ * reached by URL-guessing.
+ */
+function ekdosi_bridge_clientarea($vars): array
+{
+    $clientId = (int) ($_SESSION['uid'] ?? 0);
+
+    if (! Gate::visibleTo($clientId)) {
+        return [
+            'pagetitle' => 'Παραστατικά σε τρίτους',
+            'breadcrumb' => ['index.php?m=ekdosi_bridge' => 'Παραστατικά σε τρίτους'],
+            'templatefile' => 'clientpage',
+            'requirelogin' => true,
+            'vars' => ['pagecontent' => '<div class="alert alert-info">Η σελίδα δεν είναι διαθέσιμη.</div>'],
+        ];
+    }
+
+    $controller = new Controller;
+    $html = $controller->render($vars, $clientId);
+
+    return [
+        'pagetitle' => 'Παραστατικά σε τρίτους (v2)',
+        'breadcrumb' => ['index.php?m=ekdosi_bridge' => 'Παραστατικά σε τρίτους (v2)'],
+        'templatefile' => 'clientpage',
+        'requirelogin' => true,
+        'vars' => ['pagecontent' => $html],
+    ];
 }

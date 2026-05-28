@@ -184,10 +184,10 @@ referrer is unambiguous in the common case.
 | `afm2name`: GSIS AFM lookup | 🗑️ superseded — ekdosi does GSIS natively (drop; never carry the hardcoded creds) |
 | admin module shell (dispatcher/controller) | ✅ pattern reused |
 | outbound push + status query (HMAC) | 🆕 new in bridge (legacy ekdosi *polled*) |
-| `timologia`: client manages alternate contacts (CRUD) | ❌ not yet |
-| `timologia`: route a service → contact (`mod_timologia`) | ❌ **NOT YET — HIGH** |
-| `timologia`: invoice-vs-receipt per service (`isReceipt`) | ❌ not yet (no carry-through to ekdosi's invoice-type pick) |
-| `timologia`: admin contact/routing UI | ❌ not yet |
+| `timologia`: client manages alternate contacts (CRUD) | ✅ T-2 (v2 client page → own `mod_ekdosi_contacts`) |
+| `timologia`: route a service → contact | ✅ T-2 (per-service routing → own `mod_ekdosi_routing`); resolution T-1 |
+| `timologia`: invoice-vs-receipt per service (`isReceipt`) | ✅ T-2 captures it; T-1c split routes receipt groups to a receipt type |
+| `timologia`: admin contact/routing UI | ✅ admin "Sync from legacy" (T-1b-2); client CRUD is the v2 page (T-2) |
 | `transfer_invoice`: reassign whole invoice to another client | 🔜 absorb as manual split tool (low priority) |
 | `relid_remover`: detach a line from its service (`relid=0`) | 🔜 absorb as manual split tool (low priority) |
 | multi-party invoice handling | 🆕 T-1: **block + flag for operator** (not auto-split) |
@@ -295,6 +295,19 @@ The only path we actually need to validate. No customer-visible change.
    **Decide from real data** (see dump SQL below).
 
 ### Phase T‑2 — client-area "v2" page (gated, hidden by default)
+
+> **T‑2 — DONE.** Built (WHMCS-side only; ekdosi untouched):
+> - `ClientAreaPrimaryNavbar` hook + `ekdosi_bridge_clientarea` page
+>   **"Παραστατικά σε τρίτους (v2)"** — contacts CRUD + per-service routing
+>   (`lib/Client/Controller.php`, `templates/clientpage.tpl`).
+> - **Gate** (`lib/Client/Gate.php`): admin `show_client_v2` switch (default
+>   OFF) + optional `v2_pilot_clients` allowlist. Same gate guards the navbar
+>   link AND the page handler (no URL-guessing a hidden page).
+> - **Writes own tables only** (`mod_ekdosi_*`, `source='v2'`, legacy id NULL →
+>   sync never touches them). Per the locked decision; NOT mirrored to legacy.
+> - All CRUD client-id-scoped (ownership-guarded) + CSRF on POST.
+> - **Superseded** the earlier "writes shared `mod_timologia*`" note below.
+
 - Bridge addon gains a `ClientAreaPrimaryNavbar` hook + a client page
   (contacts CRUD + per-service routing), labelled **`Παραστατικά σε τρίτους (v2)`**
   (distinct from the legacy link so testers tell them apart).
