@@ -238,6 +238,11 @@ final class Codes
         return in_array($code, self::VAT_EXEMPTION_CATEGORIES, true);
     }
 
+    public static function withholdingCategoryExists(int $code): bool
+    {
+        return in_array($code, self::WITHHOLDING_CATEGORIES, true);
+    }
+
     /**
      * vatCategory enum(s) matching a percent rate. Usually one, but 4%
      * is ambiguous (6 = pre-existing island rate vs 10 = ν.5057/2023),

@@ -340,12 +340,17 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
   `IssueCreditNote` is a clean reimplementation, not a risky port.
 
 **Real remaining gaps (myDATA-filing correctness — the ones that matter):**
-- **G1 — Withholding (παρακράτηση): IN PROGRESS.** `withhold_amount` stored
-  manually; `MyDataSubmitter` omits `taxesTotals` + zeroes `totalWithheldAmount`
-  → a withholding invoice files wrong. Legacy auto-calc was 20%×net (ΠΚ-3).
-- **G4 — 0% / VAT-exempt lines: IN PROGRESS.** `vatCategoryFor()` THROWS on 0%;
-  needs `vatCategory=7` + a `vatExemptionCategory` (§8.3, 1–31). Blocks any
-  exempt/intra-community/export invoice.
+- **G1 — Withholding (παρακράτηση): ✅ DONE.** `MyDataSubmitter` now emits a
+  `taxesTotals[taxType=1]` block (category + amount) when `withhold_amount > 0`,
+  matching the summary's `totalWithheldAmount`. New `invoices.withhold_category`
+  (§8.4, 1–18) + a required-when-amount form select; throws if amount set
+  without a valid category. (Auto-calc of 20%×net from the customer flag is a
+  separate UX follow-up — the *transmission* gap is closed.)
+- **G4 — 0% / VAT-exempt lines: ✅ DONE.** `vatCategoryFor(0)` returns 7 and the
+  line carries `vatExemptionCategory` (§8.3) resolved from the tenant's 0%-rate
+  VatCategory's new `vat_exemption_category` field; throws if unconfigured or
+  ambiguous. WHMCS filer pre-flight aligned. Set the reason on the 0%-rate VAT
+  category (Setup → VAT Categories).
 - **G3 — `whmcs_amount_includes_tax`** (tax-exclusive WHMCS tenant → wrong VAT).
 - **G9 — PaymentMethod→myDATA type** hardcoded to 3 (cash) for every invoice.
 - **G5 — per-line `<quantity>`** omitted for all types (correct for services

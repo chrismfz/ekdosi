@@ -3,18 +3,23 @@
 namespace App\Filament\Resources\Invoices\Schemas;
 
 use App\Models\Customer;
+use App\Models\DeliveryMethod;
+use App\Models\DistributionAim;
 use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\Product;
-use App\Models\VatCategory;
+use App\Support\MyData\Codes;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 
 /**
@@ -128,7 +133,7 @@ class InvoiceForm
 
                             Select::make('payment_method_id')
                                 ->label('Payment method')
-                                ->options(fn () => \App\Models\PaymentMethod::query()
+                                ->options(fn () => PaymentMethod::query()
                                     ->where('company_id', Filament::getTenant()?->getKey())
                                     ->orderBy('description')
                                     ->pluck('description', 'id'))
@@ -137,7 +142,7 @@ class InvoiceForm
 
                             Select::make('delivery_method_id')
                                 ->label('Delivery method')
-                                ->options(fn () => \App\Models\DeliveryMethod::query()
+                                ->options(fn () => DeliveryMethod::query()
                                     ->where('company_id', Filament::getTenant()?->getKey())
                                     ->orderBy('description')
                                     ->pluck('description', 'id'))
@@ -146,14 +151,14 @@ class InvoiceForm
 
                             Select::make('distribution_aim_id')
                                 ->label('Distribution aim (Σκοπός διακίνησης)')
-                                ->options(fn () => \App\Models\DistributionAim::query()
+                                ->options(fn () => DistributionAim::query()
                                     ->where('company_id', Filament::getTenant()?->getKey())
                                     ->orderBy('description')
                                     ->pluck('description', 'id'))
                                 ->searchable()
                                 ->preload(),
 
-                            \Filament\Forms\Components\DatePicker::make('delivery_date')
+                            DatePicker::make('delivery_date')
                                 ->label('Delivery date'),
 
                             TextInput::make('header_discount_percent')
@@ -289,7 +294,21 @@ class InvoiceForm
                                 ->step('0.01')
                                 ->minValue(0)
                                 ->prefix('€')
+                                ->live(onBlur: true)
                                 ->helperText('Παρακράτηση φόρου — typically 20% on services. Stamped on the invoice; subtracted from amount payable.'),
+
+                            // G1: AADE needs the withholding CATEGORY (§8.4) to
+                            // file the taxesTotals block. Required whenever an
+                            // amount is set; depends on the service (fees 20%,
+                            // technicians 4/10%, lawyers 15%, …).
+                            Select::make('withhold_category')
+                                ->label('Withholding category (myDATA §8.4)')
+                                ->options(collect(Codes::WITHHOLDING_CATEGORIES)
+                                    ->mapWithKeys(fn (int $c) => [$c => 'Κατηγορία '.$c])
+                                    ->all())
+                                ->searchable()
+                                ->required(fn (Get $get) => (float) ($get('withhold_amount') ?? 0) > 0)
+                                ->helperText('Υποχρεωτικό όταν υπάρχει ποσό παρακράτησης — καθορίζει τον τύπο (π.χ. αμοιβές 20%, μηχανικοί 4/10%, δικηγόροι 15%).'),
                         ]),
                 ]),
         ]);

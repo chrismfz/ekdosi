@@ -19,6 +19,7 @@ class VatCategory extends Model
         'legacy_id',
         'description',
         'rate',
+        'vat_exemption_category',
         'long_description',
         'is_default',
     ];
@@ -28,6 +29,7 @@ class VatCategory extends Model
         return [
             'rate' => 'decimal:2',
             'is_default' => 'boolean',
+            'vat_exemption_category' => 'integer',
         ];
     }
 
