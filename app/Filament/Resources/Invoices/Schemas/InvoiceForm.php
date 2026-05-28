@@ -208,9 +208,13 @@ class InvoiceForm
                                             if (! $product) {
                                                 return;
                                             }
+                                            $net = (float) $product->sell_price;
+                                            $vat = (float) ($product->vatCategory?->rate ?? 24);
                                             $set('product_descr', $product->description_short);
-                                            $set('price_per_item', (float) $product->sell_price);
-                                            $set('vat_percent', (float) ($product->vatCategory?->rate ?? 24));
+                                            $set('price_per_item', $net);
+                                            $set('vat_percent', $vat);
+                                            // G7: keep the VAT-inclusive mirror in sync.
+                                            $set('price_per_item_wvat', self::grossFromNet($net, $vat));
                                             $set('metric_unit', $product->metricUnit?->name);
                                         })
                                         ->columnSpan(2),
@@ -237,7 +241,39 @@ class InvoiceForm
                                         ->numeric()
                                         ->step('0.01')
                                         ->minValue(0)
-                                        ->prefix('€'),
+                                        ->prefix('€')
+                                        ->live(onBlur: true)
+                                        // G7: typing net re-derives the gross mirror.
+                                        ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
+                                            'price_per_item_wvat',
+                                            self::grossFromNet(self::numOrNull($state), self::numOrNull($get('vat_percent')))
+                                        )),
+
+                                    // G7: gross-price affordance — operator may type the
+                                    // VAT-inclusive unit price and we back-compute net
+                                    // (legacy GridPricesWVat / FAddInvoice2.cpp gross-edit
+                                    // path). Net price_per_item stays the stored source of
+                                    // truth; this field is NOT persisted (dehydrated false)
+                                    // — InvoiceLine::saving recomputes line totals from net.
+                                    TextInput::make('price_per_item_wvat')
+                                        ->label('Unit price (incl. VAT)')
+                                        ->numeric()
+                                        ->step('0.01')
+                                        ->minValue(0)
+                                        ->prefix('€')
+                                        ->dehydrated(false)
+                                        ->live(onBlur: true)
+                                        ->helperText('Προαιρετικό — υπολογίζει αντίστροφα την καθαρή τιμή. Η καθαρή τιμή παραμένει η αποθηκευμένη τιμή.')
+                                        // Seed from the existing net price when editing a line.
+                                        ->afterStateHydrated(fn ($state, callable $set, Get $get) => $set(
+                                            'price_per_item_wvat',
+                                            self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($get('vat_percent')))
+                                        ))
+                                        // Typing gross back-computes the stored net price.
+                                        ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
+                                            'price_per_item',
+                                            self::netFromGross(self::numOrNull($state), self::numOrNull($get('vat_percent')))
+                                        )),
 
                                     TextInput::make('discount')
                                         ->label('Discount %')
@@ -255,7 +291,14 @@ class InvoiceForm
                                         ->step('0.01')
                                         ->minValue(0)
                                         ->maxValue(100)
-                                        ->suffix('%'),
+                                        ->suffix('%')
+                                        ->live(onBlur: true)
+                                        // G7: changing the rate re-derives the gross mirror
+                                        // from the (unchanged) stored net price.
+                                        ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
+                                            'price_per_item_wvat',
+                                            self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($state))
+                                        )),
 
                                     Textarea::make('notes')
                                         ->rows(2)
@@ -312,5 +355,33 @@ class InvoiceForm
                         ]),
                 ]),
         ]);
+    }
+
+    /**
+     * G7 gross-price affordance. Convert between the NET unit price
+     * (price_per_item — the stored source of truth) and the VAT-inclusive
+     * unit price the operator may prefer to type. Mirrors the legacy
+     * gross-edit path (FAddInvoice2.cpp):
+     *
+     *   price_per_item = price_per_item_wvat / (1 + vat/100)
+     *
+     * Rounded to 2dp to match the InvoiceLine decimal:2 columns. A null
+     * (empty) input passes through as null so a blank field never shows a
+     * spurious 0.
+     */
+    public static function grossFromNet(?float $net, ?float $vatPercent): ?float
+    {
+        return $net === null ? null : round($net * (1 + (float) $vatPercent / 100), 2);
+    }
+
+    public static function netFromGross(?float $gross, ?float $vatPercent): ?float
+    {
+        return $gross === null ? null : round($gross / (1 + (float) $vatPercent / 100), 2);
+    }
+
+    /** Normalise a Filament numeric-input value ('' / null → null) to float. */
+    private static function numOrNull(mixed $value): ?float
+    {
+        return ($value === null || $value === '') ? null : (float) $value;
     }
 }
