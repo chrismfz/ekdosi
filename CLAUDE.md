@@ -1661,3 +1661,51 @@ already nets out credit notes via `credited_total`.
   balance. Same fuzziness as the no-per-invoice-settlement model.
 - **Stock movements on return** — not tracked (legacy stock logic lived
   in the lost `CREATE_RETURN_INVOICE` proc).
+
+### Independent multi-agent review — fixes applied (whole branch)
+A high-effort review of the full payments + credit-notes branch found
+and we FIXED (each locked by a test):
+- **Ledger counted soft-deleted payments** — `CustomerLedgerBuilder::loadPayments`
+  uses `DB::table` (bypasses the SoftDeletes scope); added
+  `whereNull('deleted_at')`. A deleted payment no longer reduces the
+  Καρτέλα balance.
+- **Ledger counted CANCELLED invoices/credit notes** — `loadInvoices`
+  now excludes cancelled rows, matching `InvoiceBalance` + dashboard (a
+  cancelled credit note no longer keeps reducing the balance).
+- **Dashboard double-counted credit notes as income** — `income()`,
+  `monthlyIncome()`, `cumulativeNetByMonth()`, `topCustomersQuery()`
+  (via `baseInvoices()` + the top-customers window) now exclude credit
+  notes (`credited_invoice_id` set). Income = gross SALES; credit notes
+  are netted only in `outstandingReceivables`. (Net-of-returns revenue
+  is a future refinement; the bug was the 2× inflation.)
+- **Stale money-status cache on gross change** — `RecomputeInvoiceTotals`
+  now calls `InvoiceBalance::recompute()` so a header-discount / line
+  edit refreshes `payment_status` instead of leaving a stale badge.
+- **Credit note showed a misleading paid/unpaid badge** in the invoice
+  list — now renders a neutral "Πιστωτικό" badge.
+- **"Record payment" was offered on cancelled invoices** — added a
+  `mydata_state != CANCELLED` visibility guard.
+- **Over-credit TOCTOU** — `IssueCreditNote` now `lockForUpdate`s the
+  original so concurrent partial credits can't both pass the
+  remaining-qty check.
+- **Credit-note→credit-note recompute cycle** — `InvoiceObserver` skips
+  recomputing when the resolved "original" is itself a credit note
+  (breaks a DB-reachable A→B→A chain).
+- **`recompute()` lock-then-discard + N+1** — now computes from the
+  locked row and preloads `paymentMethod`.
+- **Efficiency**: `Invoice::balanceData()` is memoised per instance (the
+  invoice infolist reads it ~5× and the payment modal 2×).
+
+Reviewed but NOT changed (consistent / accepted):
+- **Null `payment_method_id` → classified Paid** — consistent with the
+  system-wide rule (only `due_days > 0` is a receivable; null PM = not a
+  receivable). An unmapped legacy credit-term invoice showing Paid is an
+  ETL data-quality issue, not a balance-logic bug.
+- **A payment on a cash-term invoice still reduces tenant receivables** —
+  the documented "payments aren't allocated per-invoice" fuzziness.
+- **Crediting a cash-term original over-reduces the credit pool** — same
+  FIFO approximation; rare.
+- **`IssueCreditNote` recomputes the original ~3× per issue** — rare
+  path; self-corrects within the transaction.
+- **"non-cancelled" predicate duplicated across 3 services** — candidate
+  for a shared `Invoice::scopeNotCancelled` later.

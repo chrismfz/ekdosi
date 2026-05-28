@@ -37,7 +37,9 @@ class ViewInvoice extends ViewRecord
                 ->label('Καταχώριση πληρωμής')
                 ->icon('heroicon-o-banknotes')
                 ->color('success')
-                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null && $record->customer_id !== null)
+                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
+                    && $record->customer_id !== null
+                    && $record->mydata_state !== 'CANCELLED')
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Καταχώριση πληρωμής')
                 ->modalSubmitActionLabel('Καταχώριση')

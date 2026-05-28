@@ -100,6 +100,36 @@ class CustomerLedgerBuilderTest extends TestCase
         ]);
     }
 
+    public function test_soft_deleted_payment_does_not_count_toward_balance(): void
+    {
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2026-05-01', 124.0, $this->credit);
+        $p = $this->makePayment($c, '2026-05-02', 124.0);
+
+        $this->assertSame(0.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
+
+        $p->delete();   // soft delete — must stop reducing the balance
+
+        $this->assertSame(124.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
+    }
+
+    public function test_cancelled_credit_note_does_not_reduce_ledger_balance(): void
+    {
+        $c = $this->makeCustomer();
+        $original = $this->makeInvoice($c, '2026-05-01', 124.0, $this->credit);
+        $original->forceFill(['mydata_state' => 'VALID'])->save();
+
+        // A VALID credit note reduces the balance to 0.
+        $credit = $this->makeInvoice($c, '2026-05-03', 124.0, $this->credit);
+        $credit->forceFill(['credited_invoice_id' => $original->id, 'mydata_state' => 'VALID'])->save();
+        $this->assertSame(0.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
+
+        // Cancelling it must restore the receivable (was diverging from
+        // InvoiceBalance before the fix).
+        $credit->forceFill(['mydata_state' => 'CANCELLED'])->save();
+        $this->assertSame(124.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
+    }
+
     public function test_empty_customer_returns_zeroed_stats(): void
     {
         $c = $this->makeCustomer();

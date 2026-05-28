@@ -51,6 +51,11 @@ class IssueCreditNote
         $linesById = $original->lines->keyBy('id');
 
         return DB::transaction(function () use ($original, $creditType, $selections, $linesById) {
+            // Lock the original so two concurrent credit notes can't both
+            // read the same already-returned qty and over-credit a line
+            // (TOCTOU on the remaining-qty check below).
+            Invoice::query()->whereKey($original->id)->lockForUpdate()->first();
+
             $allocation = app(InvoiceNumberer::class)->allocate($original->company, $creditType->code);
 
             $credit = Invoice::create([

@@ -132,6 +132,24 @@ class IssueCreditNoteTest extends TestCase
         $this->assertSame('unpaid', $original->payment_status);
     }
 
+    public function test_gross_change_refreshes_payment_status_cache(): void
+    {
+        $original = $this->originalWithLine();        // gross 124, credit-term
+        \App\Models\Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $original->id, 'amount' => 62, 'pay_date' => '2026-05-11',
+        ]);
+        $this->assertSame('partial', $original->refresh()->payment_status);
+
+        // Apply a 50% header discount → gross drops to 62, fully covered
+        // by the 62 already paid. RecomputeInvoiceTotals must refresh the
+        // money-status cache (was stale before the fix).
+        $original->forceFill(['header_discount_percent' => 50])->save();
+        app(\App\Services\RecomputeInvoiceTotals::class)($original);
+
+        $this->assertSame('paid', $original->refresh()->payment_status);
+    }
+
     public function test_refuses_non_credit_type(): void
     {
         $original = $this->originalWithLine();

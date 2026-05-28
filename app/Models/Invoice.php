@@ -180,14 +180,21 @@ class Invoice extends Model
         return $this->belongsTo(self::class, 'credited_invoice_id');
     }
 
+    private ?\App\Services\InvoiceBalanceData $balanceDataCache = null;
+
     /**
      * Live money snapshot (owed/paid/credited/balance/status) from
      * App\Services\InvoiceBalance — the authoritative figure for views.
      * Lists/tables read the cached payment_status column instead.
+     *
+     * Memoised per instance: an infolist renders ~5 entries off this and
+     * a modal reads it twice; without the memo each call would re-run two
+     * SQL aggregates. Fresh enough for a single read-only render; any
+     * write path recomputes the persisted cache separately.
      */
     public function balanceData(): \App\Services\InvoiceBalanceData
     {
-        return app(\App\Services\InvoiceBalance::class)->for($this);
+        return $this->balanceDataCache ??= app(\App\Services\InvoiceBalance::class)->for($this);
     }
 
     public function mydataMarks(): HasMany

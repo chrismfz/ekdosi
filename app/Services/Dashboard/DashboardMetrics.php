@@ -13,10 +13,11 @@ use Illuminate\Support\Facades\DB;
  *  - EVERY query filters by the tenant's company_id. Invoice has no
  *    global tenant scope (tracked deferral), so widgets can't rely on
  *    Filament's resource-layer scoping — we scope here, explicitly.
- *  - Revenue EXCLUDES cancelled invoices (mydata_state='CANCELLED').
- *    Drafts / never-filed (mydata_state IS NULL) and VALID both count.
- *    Credit notes stay in as naturally-negative gross_total rows
- *    (mirrors CustomerLedgerBuilder).
+ *  - Revenue EXCLUDES cancelled invoices (mydata_state='CANCELLED')
+ *    AND credit notes (credited_invoice_id set — they carry positive
+ *    gross and would double-count as income). Drafts / never-filed
+ *    (mydata_state IS NULL) and VALID sales both count. (Receivables are
+ *    netted for credits separately in outstandingReceivables.)
  *  - Output VAT = gross_total - net_total. We do NOT track input
  *    (expense) VAT, so the dashboard's "VAT" is the OUTPUT side only —
  *    a ΦΠΑ ballpark, not the net liability. The widget labels say so.
@@ -201,6 +202,7 @@ class DashboardMetrics
         $window = function ($q) use ($start, $end): void {
             $q->where('issued_at', '>=', $start)
                 ->where('issued_at', '<=', $end)
+                ->whereNull('credited_invoice_id')   // exclude credit notes from sales
                 ->where(fn ($inner) => $inner
                     ->whereNull('mydata_state')
                     ->orWhere('mydata_state', '!=', 'CANCELLED'));
@@ -221,16 +223,20 @@ class DashboardMetrics
     // ---- internals ------------------------------------------------------
 
     /**
-     * Base query: this tenant's non-deleted, non-cancelled invoices.
-     * NULL mydata_state (draft / never filed) is NOT cancelled, so it
-     * stays in — note the explicit NULL handling (a bare
+     * Base query: this tenant's non-deleted, non-cancelled SALES
+     * invoices. NULL mydata_state (draft / never filed) is NOT cancelled,
+     * so it stays in — note the explicit NULL handling (a bare
      * `!= 'CANCELLED'` would drop NULL rows in SQL three-valued logic).
+     * Credit notes (credited_invoice_id set) are EXCLUDED — they carry
+     * positive gross and would otherwise double-count as income (a sale +
+     * its credit would read as 2× revenue instead of net-zero).
      */
     private function baseInvoices()
     {
         return DB::table('invoices')
             ->where('company_id', $this->tenant->id)
             ->whereNull('deleted_at')
+            ->whereNull('credited_invoice_id')
             ->where(fn ($q) => $q
                 ->whereNull('mydata_state')
                 ->orWhere('mydata_state', '!=', 'CANCELLED'));

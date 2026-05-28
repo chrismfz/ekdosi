@@ -58,11 +58,19 @@ class InvoiceBalance
      */
     public function recompute(Invoice $invoice): void
     {
-        $invoice->newQuery()->whereKey($invoice->getKey())->lockForUpdate()->first();
+        // Lock + read the row we're about to write, and compute FROM the
+        // locked instance (not a discarded lock) so the figures match the
+        // row under the lock. paymentMethod is preloaded to avoid an N+1
+        // in status().
+        $locked = $invoice->newQuery()->whereKey($invoice->getKey())->lockForUpdate()->first();
+        if ($locked === null) {
+            return;   // deleted between caller and lock — nothing to cache
+        }
+        $locked->loadMissing('paymentMethod');
 
-        $data = $this->for($invoice);
+        $data = $this->for($locked);
 
-        $invoice->forceFill([
+        $locked->forceFill([
             'paid_total'     => $data->paid,
             'credited_total' => $data->credited,
             'payment_status' => $data->status->value,

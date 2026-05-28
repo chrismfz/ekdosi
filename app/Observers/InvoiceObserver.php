@@ -49,6 +49,15 @@ class InvoiceObserver
             return;
         }
 
+        // Cycle guard: a true original has credited_invoice_id = null.
+        // IssueCreditNote forbids crediting a credit note, but the schema
+        // (self-FK) allows a direct DB write to chain A→B→A; refusing to
+        // recompute when the "original" is itself a credit note breaks
+        // any such cycle instead of recursing until stack/lock exhaustion.
+        if ($original->credited_invoice_id !== null) {
+            return;
+        }
+
         DB::transaction(fn () => $this->balance->recompute($original));
     }
 }
