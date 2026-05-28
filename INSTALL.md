@@ -803,6 +803,27 @@ sudo systemctl status ekdosi-queue
 switch `QUEUE_CONNECTION=redis` and add `redis` to the install list.
 Database driver is fine for ~3 tenants.)
 
+**Notes on the wired schedule** (`routes/console.php` — `whmcs:fetch-pending`
+every 15 min, `mydata:reconcile-sales` daily 06:00, `mail-log:sweep-orphans`
+every 15 min):
+
+- **Toggles / timing** live in `config/ekdosi.php` via env, so you can disable
+  a task without touching cron: `EKDOSI_SCHEDULE_WHMCS_FETCH=false`,
+  `EKDOSI_SCHEDULE_MYDATA_RECONCILE=false`, `EKDOSI_SCHEDULE_MAIL_SWEEP=false`,
+  `EKDOSI_WHMCS_FETCH_CRON`, `EKDOSI_MYDATA_RECONCILE_TIME`. After changing
+  these on a host that caches config, run `php artisan config:clear` (or
+  `optimize`).
+- **`withoutOverlapping` needs the cache store working** — with the default
+  database cache driver the `cache` + `cache_locks` tables must be migrated
+  (they are, via §7). If you switch the cache driver, make sure it's reachable
+  or `schedule:run` will error.
+- **On every deploy run `php artisan queue:restart`** so the long-running
+  worker picks up new code (already in `clean.sh`); `--max-time=3600` also
+  recycles it hourly as a backstop.
+- **Cron output is discarded** (`>> /dev/null`). `mydata:reconcile-sales` exits
+  `2` when it finds discrepancies — if you want alerting, append the schedule
+  output to a log instead and watch it.
+
 ## 12. ETL host extras (Firebird → MariaDB import)
 
 Only needed on whatever box is going to run
