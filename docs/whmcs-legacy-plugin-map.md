@@ -111,6 +111,54 @@ this routing in a comment. Nothing on either side reads `mod_timologia*`.
 
 ---
 
+## 4. `transfer_invoice` — whole-invoice reassignment  →  **ABSORB (manual split tool)**
+
+**What it does.** Admin-only tool to move an **entire** WHMCS invoice from one
+client to another: search/validate/confirm modal, then updates BOTH
+`tblinvoices.userid` and `tblinvoiceitems.userid`, with a `logActivity()` audit
+line. Whole-invoice, not per-line. (Hook: `AdminInvoicesControlsOutput` adds a
+"Transfer invoice" button next to "View as client" — same hook the bridge
+already uses.)
+
+## 5. `relid_remover` — detach a line from its service  →  **ABSORB (manual split tool)**
+
+**What it does.** Admin-only tool that sets `tblinvoiceitems.relid = 0` on
+selected line items, i.e. **detaches a line from its service**
+(`tblhosting`/`tbldomains`). Search invoice → checkbox lines → "Set relid to 0".
+
+### Why they matter: the legacy "split" was MANUAL, not automatic
+Together these two are the operator toolkit the legacy system used **instead of**
+an auto-split. A reseller's single WHMCS invoice CAN mix billing parties —
+confirmed in production: client 793 routes 4 services to 4 distinct contacts, so
+one invoice covering several of their services bills multiple end customers. The
+legacy answer was hand-surgery: `relid_remover` to detach lines, `transfer_invoice`
+to reassign a whole invoice. **There is no automatic per-line split anywhere in
+the legacy app.**
+
+**Decision (multi-party split): block + flag for the operator, not auto-split.**
+T-1 detects a multi-party invoice (>1 distinct `contactid` across its lines) and
+stages it as a flagged item the operator resolves, rather than us silently
+splitting one WHMCS invoice into N ekdosi invoices. Equivalent manual
+split/transfer tooling can be absorbed into the bridge later if operators want
+it; auto-split is explicitly out of scope (too risky for legally-significant
+docs). Mirrors the legacy workflow.
+
+## 6. Flag resellers in ekdosi (operator double-check)  →  **PLANNED (T-1 by-product)**
+
+Operator request: in ekdosi, **flag Customers who have ≥1 entry in "Παραστατικά
+σε τρίτους"** so an operator can double-check whether that customer's invoices
+are really theirs (vs routed to a third party).
+
+Feasible and cheap — the join key already exists (`customers.whmcs_client_id`,
+the operator-set direct link). The reseller in `mod_timologia` is `userid →
+tblclients.id`. Implementation, as a by-product of T-1:
+- Bridge: a **read-only** endpoint returning the set of `userid`s with ≥1
+  routing row (optionally a per-userid count) — sibling to the T-1 resolution
+  endpoint, same `mod_timologia` read.
+- ekdosi: badge any `Customer` whose `whmcs_client_id` is in that set (a
+  "Παραστατικά σε τρίτους" tag on the Customer list/page). Read-only signal; no
+  writes.
+
 ## Consolidation matrix
 
 | Legacy capability | Status in `ekdosi_bridge` |
@@ -125,6 +173,10 @@ this routing in a comment. Nothing on either side reads `mod_timologia*`.
 | `timologia`: route a service → contact (`mod_timologia`) | ❌ **NOT YET — HIGH** |
 | `timologia`: invoice-vs-receipt per service (`isReceipt`) | ❌ not yet (no carry-through to ekdosi's invoice-type pick) |
 | `timologia`: admin contact/routing UI | ❌ not yet |
+| `transfer_invoice`: reassign whole invoice to another client | 🔜 absorb as manual split tool (low priority) |
+| `relid_remover`: detach a line from its service (`relid=0`) | 🔜 absorb as manual split tool (low priority) |
+| multi-party invoice handling | 🆕 T-1: **block + flag for operator** (not auto-split) |
+| flag resellers (≥1 `mod_timologia` row) in ekdosi | 🆕 T-1 by-product (read-only badge via `whmcs_client_id`) |
 
 ---
 
