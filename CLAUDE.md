@@ -1709,3 +1709,32 @@ Reviewed but NOT changed (consistent / accepted):
   path; self-corrects within the transaction.
 - **"non-cancelled" predicate duplicated across 3 services** — candidate
   for a shared `Invoice::scopeNotCancelled` later.
+
+### Credit-note myDATA filing is OPT-IN (early-rollout control)
+The "Έκδοση πιστωτικού" action does NOT auto-file to myDATA. The modal
+has a **"Υποβολή στο myDATA τώρα"** toggle, default **OFF**, shown only
+for sandbox/production tenants. Default behaviour: the credit note is
+issued as a draft (mydata_state null) — it ALREADY reduces the original's
+balance locally — and is filed later via the existing
+`ViewInvoice::submit_to_mydata` action (visible on any draft, builds the
+correlated MARK). So for the first days/months operators can issue credit
+notes without touching AADE, test the correlation in sandbox by flipping
+the toggle, and file historical credit notes manually when ready. (The
+correlated-MARK build in `MyDataSubmitter` runs on whichever path
+submits — toggle-on or the later Submit action.)
+
+### Cross-surface consistency tests (`MoneyStatusConsistencyTest`)
+The review showed the unit tests missed bugs because each money surface
+was tested in isolation. This test builds randomized-but-deterministic
+scenarios across 5 seeds (sales, allocated + on-account payments,
+partial/full credit notes, cancels, soft-deletes) and asserts the three
+surfaces AGREE:
+- **A**: `DashboardMetrics::outstandingReceivables` == Σ per-customer
+  `CustomerLedgerBuilder` balance.
+- **B**: every invoice's cached `{paid_total, credited_total,
+  payment_status}` == a freshly-computed `InvoiceBalance`.
+- **C**: Σ `invoices.credited_total` == Σ gross of non-cancelled credit
+  notes; and `invoices:recompute-balances` is a verified no-op (caches
+  already fresh). Re-run this whenever a money surface or the
+  cache-sync paths change — it's the regression net for "surfaces
+  disagree".

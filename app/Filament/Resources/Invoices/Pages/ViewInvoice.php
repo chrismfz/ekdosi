@@ -126,6 +126,16 @@ class ViewInvoice extends ViewRecord
                                 ->default(0),
                         ])
                         ->columns(2),
+                    // Filing to myDATA is OPT-IN per issuance, default OFF.
+                    // Early rollout: issue the credit note locally (it
+                    // already reduces the balance) and file it later with
+                    // the existing "Submit to myDATA" action when ready.
+                    // Hidden for off-mode / non-Greek tenants.
+                    \Filament\Forms\Components\Toggle::make('submit_now')
+                        ->label('Υποβολή στο myDATA τώρα')
+                        ->helperText('Αν είναι ανενεργό, το πιστωτικό αποθηκεύεται ως πρόχειρο και υποβάλλεται αργότερα χειροκίνητα.')
+                        ->default(false)
+                        ->visible($tenantSupportsMyData),
                 ])
                 ->action(function (Invoice $record, array $data) {
                     try {
@@ -140,25 +150,29 @@ class ViewInvoice extends ViewRecord
 
                         $credit = app(IssueCreditNote::class)($record, $creditType, $selections);
 
-                        // Submit AFTER the IssueCreditNote transaction
-                        // committed (we're outside any transaction here),
-                        // mirroring CreateInvoice's post-commit submit.
-                        try {
-                            $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
-                            $submitter->submit($credit);
-                        } catch (Throwable $e) {
-                            Notification::make()
-                                ->title('Το πιστωτικό δημιουργήθηκε, αλλά η υποβολή στο myDATA απέτυχε')
-                                ->body($e->getMessage().' Υποβάλετέ το ξανά από τη σελίδα του πιστωτικού.')
-                                ->danger()->persistent()->send();
-                            $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
+                        // Only file when the operator opted in. Submission
+                        // runs AFTER the IssueCreditNote transaction
+                        // committed, mirroring CreateInvoice's post-commit
+                        // submit + correlated-MARK build in MyDataSubmitter.
+                        if ($data['submit_now'] ?? false) {
+                            try {
+                                $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
+                                $submitter->submit($credit);
+                            } catch (Throwable $e) {
+                                Notification::make()
+                                    ->title('Το πιστωτικό δημιουργήθηκε, αλλά η υποβολή στο myDATA απέτυχε')
+                                    ->body($e->getMessage().' Υποβάλετέ το ξανά από τη σελίδα του πιστωτικού.')
+                                    ->danger()->persistent()->send();
+                                $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
 
-                            return;
+                                return;
+                            }
                         }
 
                         Notification::make()
                             ->title('Το πιστωτικό εκδόθηκε')
-                            ->body('Κωδικός: '.$credit->invcode)
+                            ->body('Κωδικός: '.$credit->invcode
+                                .(($data['submit_now'] ?? false) ? '' : ' (πρόχειρο — δεν υποβλήθηκε στο myDATA)'))
                             ->success()->send();
                         $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
                     } catch (Throwable $e) {
