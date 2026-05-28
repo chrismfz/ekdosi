@@ -67,6 +67,12 @@ want to change.
 - **Firebird driver on the ETL host**: `pdo_firebird` PHP extension. Only
   the artisan host needs it; the main app box doesn't.
 
+> **STATUS NOTE (2026-05-28):** the "scaffold done; build phase next"
+> framing below is HISTORICAL — the build phase is largely done. For the
+> current Legacy-vs-New status, gaps, and roadmap, jump to the section
+> **"Where we stand — Legacy vs New + roadmap (2026-05-28 audit)"** at the
+> END of this file. The history below is preserved for context.
+
 ## Getting started (status: scaffold done; build phase next)
 
 **Done** (see git log on the scaffold branch):
@@ -1961,3 +1967,143 @@ Reviewed + accepted as-is: window-edge false positives (operator picks the
 window — documented above); `$result` held in Livewire state can be large
 for hundreds of matched rows (acceptable for expected volume; lazy-load
 matched if it bites).
+
+---
+
+## Where we stand — Legacy vs New + roadmap (2026-05-28 audit)
+
+A three-way audit (new Laravel code · legacy C++Builder forms · WHMCS
+plugins, all verified against actual files, not docs) of where the port
+stands. The headline: **the core operator path — issue → file at myDATA →
+PDF → email → payment / credit note → reconcile — is built and
+unit-tested.** What's missing is mostly *automation* (no scheduler) plus a
+handful of legacy workflows whose real usage we must confirm against the
+production `.fbk` before deciding whether they block cutover.
+
+Counts (2026-05-28): 48 migrations, 21 models, 15 Filament resources, 3
+custom pages, ~36 services, 6 artisan commands.
+
+### ✅ DONE (built + unit-tested)
+- **Tenancy / auth**: Company tenant, Shield roles/permissions, policies.
+- **Customers**: CRUD, AADE/GSIS lookup (`AadeRegistryLookup`), **Καρτέλα
+  πελάτη** ledger (`CustomerLedger` + `CustomerLedgerBuilder`).
+- **Products / price tiers / categories**; **7 lookup tables** (vat,
+  payment/delivery methods, invoice types, metric units, distribution aims).
+- **Invoices**: create/edit/view, race-safe numbering (`InvoiceNumberer`),
+  VAT/discount/rounding math (`RecomputeInvoiceTotals`,
+  `InvoiceVatBreakdown`), QR, PDF (`InvoicePdfRenderer`).
+- **Invoice lifecycle**: `local_status` × `mydata_state` (`LocalStatus`,
+  `InvoiceScope::live`), transitions, local + Phase-2 live reconciliation.
+- **myDATA submit / cancel / dry-run** (`MyDataSubmitter` + factory).
+- **myDATA SALES reconciliation** (`SalesReconciler`, `MyDataConsole`,
+  `mydata:reconcile-sales`) — Phase 2; *not yet sandbox-tested vs AADE.*
+- **Payments** (`Payment`, `InvoiceBalance`, `PaymentObserver`, resource +
+  actions) and **credit notes / πιστωτικά** (`IssueCreditNote`).
+- **WHMCS bridge** (Stages A/B-1/B-2/B-3): `WhmcsClient`, ingestor, webhook
+  controllers, `pending_whmcs_invoices` inbox, `WhmcsInvoiceFiler`, MARK
+  write-back + the `ekdosi_bridge` WHMCS-side plugin.
+- **PDF + per-tenant email + send-log**; **Dashboard** + metric widgets.
+- **ETL** (`MigrateFromFirebird`, `TenantRowUpserter`) + in-panel import UI.
+
+### 🚧 PARTIAL (works, needs finishing)
+- **Auto-email on issue + audit BCC** — email is a *manual* `ViewInvoice`
+  action; `CreateInvoice::chainSubmit()` does NOT auto-mail/BCC on filing.
+  *Impact: daily friction, not a cutover blocker.* Trigger: any IssueInvoice touch.
+- **PDF templates** — one adaptive `pdf.blade.php` vs the 8 legacy
+  FastReport designs (apy/tpy/sdep/SDAP/SDAP2/simple/first/second).
+  *Impact: invoices print & are legal; specific layouts not reproduced. Confirm fidelity need.*
+- **`ekdosi_bridge` plugin error-handling** — round trip + HMAC are correct
+  on both sides, but the plugin's `summarisePush` only branches 2xx-vs-not:
+  it ignores ekdosi's `audit_preserved=true` (already-filed → "stop
+  re-pushing") and the distinct 409/502 error codes; `v0.1.0`; no bulk push;
+  `Controller::show` int-casts the MARK for *display* (cosmetic 32-bit risk).
+  *Impact: operator confusion only; data path is sound.*
+
+### ❌ NOT YET (legitimate legacy features, unbuilt)
+Ordered by likely impact. Several are "confirm usage in the production
+`.fbk` before building" — don't build speculatively.
+- **No scheduler / cron AT ALL** — `routes/console.php` has only `inspire`;
+  `bootstrap/app.php` wires no schedule. The legacy overnight `FAutoInvoice`
+  batch has no replacement; `whmcs:fetch-pending`, `mydata:reconcile-sales`,
+  `invoices:recompute-balances` are manual. *Impact: blocks automated daily
+  operation. This is the single biggest "make it run itself" gap.*
+- **`mod_timologia` third-party invoicing (WHMCS)** — legacy lets a client
+  route a service's invoice to an alternate billing identity (employer /
+  parent company) via `mod_timologia`/`mod_timologia_contacts`.
+  `WhmcsCustomerMatcher` only *documents* this in a comment; neither the
+  plugin nor ekdosi reads those tables — `WhmcsInvoiceMapper` always bills
+  the resolved WHMCS client. *Impact: HIGH for myip — wrong billing entity.
+  Blocks a real workflow.*
+- **Stock / inventory movements** — legacy decrements `PRODUCT.QTY`/reserve
+  on issue and runs `CHECK_PROD_AVAILABILITY`; `products.reserve*` columns
+  are imported but NO movement logic exists. *Impact: real if a tenant
+  tracks stock — CONFIRM with operator / grep `.fbk` before building.*
+- **ΣΔΕΠ / cumulative invoices** — `conv_invoice_id` column + self-relation
+  exist; no attach-to-running-ΣΔΕΠ, no delivery-note→invoice conversion, no
+  Reserve check (`FAddInvoice.cpp:298`). *Impact: blocks tenants using the
+  cumulative/delivery-note flow — CONFIRM usage.*
+- **griniaris immediate-invoicing** (WHMCS custom field 338) —
+  `customers.needs_immediate_invoice` + `whmcs_custom_field_map.griniaris`
+  scaffolded, but nothing reads field 338 to set it and there's no
+  immediate-vs-batch router. *Impact: dead scaffolding until the scheduler
+  + an auto-file path exist (currently inbox is operator-gated by design).*
+- **"Assigned invoices" `invoiced=-333`** workflow — not implemented,
+  purpose unconfirmed. *CONFIRM whether myip uses it.*
+- **Gross-price-edit on lines** — form takes net `price_per_item` only; no
+  gross→net back-fill (`FAddInvoice2.cpp:253`). *Impact: data-entry
+  inconvenience for operators who quote gross.*
+- **Live VIES/AFM validation + AFM-already-exists soft warning** — `vat_vies`
+  is plain text; discount 0–100 IS validated. *Impact: low (AADE lookup exists).* 
+- **WHMCS tax-inclusive vs exclusive** — `WhmcsInvoiceMapper` hardcodes
+  GROSS line amounts; `companies.whmcs_amount_includes_tax` is
+  documented-but-unimplemented. *Impact: wrong VAT for a tax-exclusive
+  WHMCS tenant — add the flag + branch before onboarding one.*
+- **`FShowDuplicates`** duplicate-document viewer — no equivalent. *Low.*
+
+### 🆕 NEW phases we've discussed (beyond legacy parity)
+- **Έξοδα / Expenses (inbound myDATA)** — the supplier side: a new
+  `Expense` resource + a `suppliers`/προμηθευτές entity + inbound
+  `RequestDocs` reconciliation (docs others filed against us) + a **ΦΠΑ
+  εκροών − εισροών** report (net VAT payable). Today only the sales side
+  (`RequestTransmittedDocs`) exists. This pairs with relabelling the menus
+  **Παραστατικά Εσόδων / Παραστατικά Εξόδων** for symmetry. Largest net-new
+  feature; its own phase.
+- **Estonian PEPPOL submitter** — `einvoice_provider='ee-peppol'` routes to
+  `NullSubmitter` (no-op stub); country-profile + `customers.peppol_endpoint`
+  scaffolded. Build when the Estonian e-invoicing deadline forces it.
+- **myDATA "one-click fixes"** on the reconciliation console (sync-local,
+  pull-and-create) — deliberately deferred until the read-only console is
+  proven against dev creds.
+- **Cross-model activity log** (spatie/activitylog on invoices + customers +
+  payments together) — installed, not yet wired; do it once, not piecemeal.
+
+### 🗑️ DROPPED (intentional — verified absent in new code)
+CS-Cart bridge (`FCSConnect`/`FManageCS*`, cipher key, `CUSTCS_LINK`),
+EAFDSS signing, `FMysqlSync` MySQL mirror, `GET_COMB_*` cross-DB procs,
+FastReport `.fr3` (→ Blade PDF), `afm2name` WHMCS plugin (ekdosi does GSIS
+natively — only relevant if a tenant wants AFM autocomplete inside WHMCS's
+own forms, which is out of scope).
+
+### Suggested next steps (priority order)
+1. **Sandbox-verify Phase 2** against AADE dev creds — confirms the firebed
+   `RequestTransmittedDocs` wire shape (the one thing the unit tests can't).
+2. **Wire the scheduler** — `whmcs:fetch-pending` + `mydata:reconcile-sales`
+   (+ a `mail-log:sweep-orphans` reconciler) on a cron. Biggest
+   "runs-itself" win; also unblocks griniaris.
+3. **`mod_timologia` third-party invoicing** — the one HIGH-impact WHMCS
+   correctness gap. Consume the alternate-contact tables (option (a): a
+   small WHMCS-side endpoint that joins + resolves per service).
+4. **Confirm-then-build** the usage-dependent legacy features — grep the
+   production `.fbk` for stock movements, ΣΔΕΠ (`CONV_INVOICE_ID` non-null),
+   and `status=-333` rows; build only what's actually used.
+5. **Auto-email on issue + audit BCC**, then **gross-price-edit** on lines.
+6. **Έξοδα / expenses** phase.
+7. **PDF per-type template fidelity** if the operator needs it.
+8. **PEPPOL** when Estonia's deadline lands.
+
+### Quick wins worth bundling (low effort, real value)
+- Make `ekdosi_bridge` act on `audit_preserved` (tell the operator "already
+  filed — stop re-pushing") and surface the distinct 409/502 messages; bump
+  to `v1.0.0`; drop the display-only int-cast on the MARK.
+- Add `whmcs_amount_includes_tax` + branch in `WhmcsInvoiceMapper` before
+  onboarding any tax-exclusive WHMCS tenant.
