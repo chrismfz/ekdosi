@@ -119,6 +119,38 @@ class WhmcsInvoiceSplitterTest extends TestCase
         $this->assertCount(2, $pending->splitInvoices);
     }
 
+    public function test_receipt_group_routes_to_receipt_type_and_requires_it(): void
+    {
+        // Haris's line is flagged απόδειξη (is_receipt=true); the reseller's is not.
+        $pending = $this->multiPartyPending();
+        $res = $pending->third_party_resolution;
+        $res['lines'][0]['is_receipt'] = true;
+        $pending->update(['third_party_resolution' => $res]);
+
+        // Without a receipt type → refuse (don't file a receipt routing as an invoice).
+        try {
+            $this->splitter()->split($this->tenant, $pending, $this->invoiceType);
+            $this->fail('Expected a refusal when a receipt group has no receipt type.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('απόδειξη', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::where('whmcs_pending_id', $pending->id)->count());
+
+        // With a receipt type → the receipt group files under it, the other under the invoice type.
+        $receiptType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'APY', 'name' => 'Απόδειξη',
+            'invcount' => 0, 'payment_method_id' => $this->invoiceType->payment_method_id,
+        ]);
+
+        $invoices = $this->splitter()->split($this->tenant, $pending->fresh(), $this->invoiceType, $receiptType);
+
+        $haris = Customer::where('company_id', $this->tenant->id)->where('afm', '081951154')->first();
+        $harisInvoice = collect($invoices)->firstWhere('customer_id', $haris->id);
+        $resellerInvoice = collect($invoices)->firstWhere('customer_id', $this->reseller->id);
+        $this->assertSame($receiptType->id, $harisInvoice->invoice_type_id, 'receipt group → receipt type');
+        $this->assertSame($this->invoiceType->id, $resellerInvoice->invoice_type_id, 'invoice group → invoice type');
+    }
+
     public function test_refuses_non_multi_party_rows(): void
     {
         $pending = $this->multiPartyPending();

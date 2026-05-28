@@ -29,8 +29,11 @@ use WHMCS\Database\Capsule;
 class ThirdPartyStore
 {
     public const CONTACTS = 'mod_ekdosi_contacts';
+
     public const ROUTING = 'mod_ekdosi_routing';
+
     public const LEGACY_CONTACTS = 'mod_timologia_contacts';
+
     public const LEGACY_ROUTING = 'mod_timologia';
 
     /**
@@ -152,81 +155,86 @@ class ThirdPartyStore
         self::ensureTables();
         $now = date('Y-m-d H:i:s');
 
-        // 1. Contacts. Build a legacy-id → own-id map for the routing pass.
-        $contactMap = [];
-        foreach (Capsule::table(self::LEGACY_CONTACTS)->get() as $lc) {
-            $legacyId = (int) $lc->id;
-            $data = [
-                'userid'       => (int) ($lc->userid ?? 0),
-                'company_name' => self::clip($lc->company_name ?? null, 191),
-                'gr_vatno'     => self::clip($lc->gr_vatno ?? null, 30),
-                'vies_vatno'   => self::clip($lc->vies_vatno ?? null, 60),
-                'tax_office'   => self::clip($lc->tax_office ?? null, 120),
-                'address1'     => self::clip($lc->address1 ?? null, 120),
-                'address2'     => self::clip($lc->address2 ?? null, 120),
-                'city'         => self::clip($lc->city ?? null, 120),
-                'postal_code'  => self::clip($lc->postal_code ?? null, 20),
-                'country'      => self::clip($lc->country ?? null, 60),
-                'description'  => self::clip($lc->description ?? null, 191),
-                'email'        => self::clip($lc->email ?? null, 120),
-                'telephone'    => self::clip($lc->telephone ?? null, 40),
-                'comments'     => $lc->comments ?? null,
-                'source'       => 'sync',
-                'updated_at'   => $now,
-            ];
+        // Atomic: contacts + routing in one transaction so a mid-sync failure
+        // doesn't leave a partial import (re-running is idempotent anyway).
+        Capsule::connection()->transaction(function () use (&$result, $now) {
+            // 1. Contacts. Build a legacy-id → own-id map for the routing pass.
+            $contactMap = [];
+            foreach (Capsule::table(self::LEGACY_CONTACTS)->get() as $lc) {
+                $legacyId = (int) $lc->id;
+                $data = [
+                    'userid' => (int) ($lc->userid ?? 0),
+                    'company_name' => self::clip($lc->company_name ?? null, 191),
+                    'gr_vatno' => self::clip($lc->gr_vatno ?? null, 30),
+                    'vies_vatno' => self::clip($lc->vies_vatno ?? null, 60),
+                    'tax_office' => self::clip($lc->tax_office ?? null, 120),
+                    'address1' => self::clip($lc->address1 ?? null, 120),
+                    'address2' => self::clip($lc->address2 ?? null, 120),
+                    'city' => self::clip($lc->city ?? null, 120),
+                    'postal_code' => self::clip($lc->postal_code ?? null, 20),
+                    'country' => self::clip($lc->country ?? null, 60),
+                    'description' => self::clip($lc->description ?? null, 191),
+                    'email' => self::clip($lc->email ?? null, 120),
+                    'telephone' => self::clip($lc->telephone ?? null, 40),
+                    'comments' => $lc->comments ?? null,
+                    'source' => 'sync',
+                    'updated_at' => $now,
+                ];
 
-            $existing = Capsule::table(self::CONTACTS)
-                ->where('legacy_contact_id', $legacyId)
-                ->first();
-            if ($existing) {
-                Capsule::table(self::CONTACTS)->where('id', $existing->id)->update($data);
-                $ownId = (int) $existing->id;
-                $result['contacts_updated']++;
-            } else {
-                $ownId = (int) Capsule::table(self::CONTACTS)->insertGetId(
-                    $data + ['legacy_contact_id' => $legacyId, 'created_at' => $now]
-                );
-                $result['contacts_inserted']++;
-            }
-            $contactMap[$legacyId] = $ownId;
-        }
-
-        // 2. Routing. Map the legacy contactid → our own contact id.
-        foreach (Capsule::table(self::LEGACY_ROUTING)->get() as $lr) {
-            $legacyContactId = (int) ($lr->contactid ?? 0);
-            $ownContactId = $contactMap[$legacyContactId] ?? null;
-            if ($ownContactId === null) {
-                // Contact referenced by this route wasn't synced (deleted /
-                // dangling). Skip rather than create a routing row with no
-                // billing identity.
-                $result['routes_skipped']++;
-                continue;
+                $existing = Capsule::table(self::CONTACTS)
+                    ->where('legacy_contact_id', $legacyId)
+                    ->first();
+                if ($existing) {
+                    Capsule::table(self::CONTACTS)->where('id', $existing->id)->update($data);
+                    $ownId = (int) $existing->id;
+                    $result['contacts_updated']++;
+                } else {
+                    $ownId = (int) Capsule::table(self::CONTACTS)->insertGetId(
+                        $data + ['legacy_contact_id' => $legacyId, 'created_at' => $now]
+                    );
+                    $result['contacts_inserted']++;
+                }
+                $contactMap[$legacyId] = $ownId;
             }
 
-            $legacyId = (int) $lr->id;
-            $data = [
-                'userid'       => (int) ($lr->userid ?? 0),
-                'contactid'    => $ownContactId,
-                'serviceid'    => (int) ($lr->serviceid ?? 0),
-                'service_type' => self::clip($lr->service_type ?? '', 20),
-                'is_receipt'   => (int) ((bool) ($lr->isReceipt ?? 0)),
-                'source'       => 'sync',
-                'updated_at'   => $now,
-            ];
+            // 2. Routing. Map the legacy contactid → our own contact id.
+            foreach (Capsule::table(self::LEGACY_ROUTING)->get() as $lr) {
+                $legacyContactId = (int) ($lr->contactid ?? 0);
+                $ownContactId = $contactMap[$legacyContactId] ?? null;
+                if ($ownContactId === null) {
+                    // Contact referenced by this route wasn't synced (deleted /
+                    // dangling). Skip rather than create a routing row with no
+                    // billing identity.
+                    $result['routes_skipped']++;
 
-            $existing = Capsule::table(self::ROUTING)
-                ->where('legacy_routing_id', $legacyId)
-                ->first();
-            if ($existing) {
-                Capsule::table(self::ROUTING)->where('id', $existing->id)->update($data);
-                $result['routes_updated']++;
-            } else {
-                Capsule::table(self::ROUTING)->insert(
-                    $data + ['legacy_routing_id' => $legacyId, 'created_at' => $now]
-                );
-                $result['routes_inserted']++;
+                    continue;
+                }
+
+                $legacyId = (int) $lr->id;
+                $data = [
+                    'userid' => (int) ($lr->userid ?? 0),
+                    'contactid' => $ownContactId,
+                    'serviceid' => (int) ($lr->serviceid ?? 0),
+                    'service_type' => self::clip($lr->service_type ?? '', 20),
+                    'is_receipt' => (int) ((bool) ($lr->isReceipt ?? 0)),
+                    'source' => 'sync',
+                    'updated_at' => $now,
+                ];
+
+                $existing = Capsule::table(self::ROUTING)
+                    ->where('legacy_routing_id', $legacyId)
+                    ->first();
+                if ($existing) {
+                    Capsule::table(self::ROUTING)->where('id', $existing->id)->update($data);
+                    $result['routes_updated']++;
+                } else {
+                    Capsule::table(self::ROUTING)->insert(
+                        $data + ['legacy_routing_id' => $legacyId, 'created_at' => $now]
+                    );
+                    $result['routes_inserted']++;
+                }
             }
-        }
+        });
 
         return $result;
     }
@@ -280,34 +288,34 @@ class ThirdPartyStore
             }
 
             $lines[] = [
-                'item_id'      => (int) $item->id,
-                'relid'        => $relid,
-                'type'         => (string) ($item->type ?? ''),
+                'item_id' => (int) $item->id,
+                'relid' => $relid,
+                'type' => (string) ($item->type ?? ''),
                 'service_type' => $serviceType,
-                'description'  => (string) ($item->description ?? ''),
-                'routed'       => $routed,
-                'is_receipt'   => $isReceipt,
-                'contact'      => $contact,
+                'description' => (string) ($item->description ?? ''),
+                'routed' => $routed,
+                'is_receipt' => $isReceipt,
+                'contact' => $contact,
             ];
         }
 
         $distinctParties = count($partyKeys);
 
         return [
-            'status'            => 'ok',
-            'whmcs_invoice_id'  => (int) $invoice->id,
-            'userid'            => $userId,
+            'status' => 'ok',
+            'whmcs_invoice_id' => (int) $invoice->id,
+            'userid' => $userId,
             // Kept for the ekdosi-side ThirdPartyResolution contract; now means
             // "the own routing tables exist" (they're created at activation /
             // first sync).
             'timologia_present' => $ownTables,
-            'lines'             => $lines,
-            'summary'           => [
-                'line_count'       => count($lines),
-                'routed_lines'     => $routedLines,
-                'unrouted_lines'   => count($lines) - $routedLines,
+            'lines' => $lines,
+            'summary' => [
+                'line_count' => count($lines),
+                'routed_lines' => $routedLines,
+                'unrouted_lines' => count($lines) - $routedLines,
                 'distinct_parties' => $distinctParties,
-                'multi_party'      => $distinctParties > 1,
+                'multi_party' => $distinctParties > 1,
             ],
         ];
     }
@@ -346,19 +354,19 @@ class ThirdPartyStore
     public static function contactArray($row): array
     {
         return [
-            'id'           => (int) $row->id,
+            'id' => (int) $row->id,
             'company_name' => (string) ($row->company_name ?? ''),
-            'gr_vatno'     => (string) ($row->gr_vatno ?? ''),
-            'vies_vatno'   => (string) ($row->vies_vatno ?? ''),
-            'tax_office'   => (string) ($row->tax_office ?? ''),
-            'address1'     => (string) ($row->address1 ?? ''),
-            'address2'     => (string) ($row->address2 ?? ''),
-            'city'         => (string) ($row->city ?? ''),
-            'postal_code'  => (string) ($row->postal_code ?? ''),
-            'country'      => (string) ($row->country ?? ''),
-            'description'  => (string) ($row->description ?? ''),
-            'email'        => (string) ($row->email ?? ''),
-            'telephone'    => (string) ($row->telephone ?? ''),
+            'gr_vatno' => (string) ($row->gr_vatno ?? ''),
+            'vies_vatno' => (string) ($row->vies_vatno ?? ''),
+            'tax_office' => (string) ($row->tax_office ?? ''),
+            'address1' => (string) ($row->address1 ?? ''),
+            'address2' => (string) ($row->address2 ?? ''),
+            'city' => (string) ($row->city ?? ''),
+            'postal_code' => (string) ($row->postal_code ?? ''),
+            'country' => (string) ($row->country ?? ''),
+            'description' => (string) ($row->description ?? ''),
+            'email' => (string) ($row->email ?? ''),
+            'telephone' => (string) ($row->telephone ?? ''),
         ];
     }
 

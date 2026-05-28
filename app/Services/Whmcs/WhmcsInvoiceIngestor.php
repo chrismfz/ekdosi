@@ -248,7 +248,28 @@ class WhmcsInvoiceIngestor
             ];
         }
 
-        $customer = $this->contactResolver->resolve($tenant, $contact);
+        try {
+            $customer = $this->contactResolver->resolve($tenant, $contact);
+        } catch (\Throwable $e) {
+            // Materialising the end-customer failed (e.g. a malformed contact
+            // row, a DB constraint). The "can't break ingestion" guarantee
+            // covers THIS too: never let one bad contact 500 the webhook and
+            // wedge an otherwise-valid invoice out of the inbox. Park it held
+            // for the operator rather than silently billing the reseller.
+            Log::warning('WHMCS third-party contact could not be materialised — parking held.', [
+                'company_id' => $tenant->id,
+                'whmcs_invoice_id' => $invoiceId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'state' => PendingWhmcsInvoice::TP_SINGLE,
+                'customer_id' => null,
+                'resolution' => $snapshot,
+                'hold' => true,
+                'note' => 'Παραστατικά σε τρίτους: αποτυχία δημιουργίας πελάτη-δικαιούχου — έλεγξε χειροκίνητα.',
+            ];
+        }
         if ($customer === null) {
             // The third party has no ΑΦΜ — can't bill a B2B invoice safely.
             return [

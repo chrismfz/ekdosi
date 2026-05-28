@@ -115,6 +115,7 @@ class WhmcsInvoiceSplitter
         Company $tenant,
         PendingWhmcsInvoice $pending,
         InvoiceType $invoiceType,
+        ?InvoiceType $receiptType = null,
         ?int $splitByUserId = null,
     ): array {
         if ($pending->company_id !== $tenant->id) {
@@ -126,14 +127,20 @@ class WhmcsInvoiceSplitter
         if ($invoiceType->company_id !== $tenant->id) {
             throw new RuntimeException('Invoice type belongs to a different tenant.');
         }
+        if ($receiptType !== null && $receiptType->company_id !== $tenant->id) {
+            throw new RuntimeException('Receipt type belongs to a different tenant.');
+        }
 
         $groups = $this->planGroups($tenant, $pending);
         if (count($groups) < 2) {
             throw new RuntimeException('Ο διαχωρισμός χρειάζεται τουλάχιστον δύο δικαιούχους.');
         }
 
-        // Validate up-front: every group must resolve to a customer, so the
-        // transaction below can't half-apply (e.g. contact missing ΑΦΜ).
+        // Validate up-front, so the transaction below can't half-apply:
+        //  - every group must resolve to a customer (e.g. contact missing ΑΦΜ);
+        //  - a group flagged απόδειξη (is_receipt) needs a receipt type to file
+        //    under — otherwise we'd silently issue a receipt routing as an
+        //    invoice (the legacy τιμολόγιο/απόδειξη distinction).
         foreach ($groups as $group) {
             if (! $group['customer'] instanceof Customer) {
                 throw new RuntimeException(sprintf(
@@ -142,9 +149,15 @@ class WhmcsInvoiceSplitter
                     $group['label'],
                 ));
             }
+            if ($group['is_receipt'] && $receiptType === null) {
+                throw new RuntimeException(sprintf(
+                    'Ο δικαιούχος «%s» χρειάζεται απόδειξη — επίλεξε τύπο απόδειξης πριν τον διαχωρισμό.',
+                    $group['label'],
+                ));
+            }
         }
 
-        return DB::transaction(function () use ($tenant, $pending, $invoiceType, $groups, $splitByUserId) {
+        return DB::transaction(function () use ($tenant, $pending, $invoiceType, $receiptType, $groups, $splitByUserId) {
             $locked = PendingWhmcsInvoice::query()
                 ->whereKey($pending->id)
                 ->lockForUpdate()
@@ -161,15 +174,24 @@ class WhmcsInvoiceSplitter
             foreach ($groups as $group) {
                 /** @var Customer $customer */
                 $customer = $group['customer'];
-                $mapped = $this->mapper->map($tenant, $locked, $customer, $invoiceType, $group['item_ids']);
+                // απόδειξη groups file under the receipt type; everything else
+                // under the invoice type (validated above that a receipt type
+                // exists when needed).
+                $groupType = $group['is_receipt'] ? $receiptType : $invoiceType;
+                $mapped = $this->mapper->map($tenant, $locked, $customer, $groupType, $group['item_ids']);
 
-                // A group whose items all mapped away (e.g. blank descriptions)
-                // yields no lines — skip rather than create an empty invoice.
+                // A group with items that all map away (e.g. every line blank)
+                // would silently vanish from billing — refuse rather than
+                // under-bill. (item_ids is non-empty by construction here.)
                 if ($mapped['lines'] === []) {
-                    continue;
+                    throw new RuntimeException(sprintf(
+                        'Ο δικαιούχος «%s» δεν παρήγαγε καμία γραμμή (κενές περιγραφές;) — '
+                        .'έλεγξε το WHMCS τιμολόγιο πριν τον διαχωρισμό.',
+                        $group['label'],
+                    ));
                 }
 
-                $allocation = $this->numberer->allocate($tenant, $invoiceType->code);
+                $allocation = $this->numberer->allocate($tenant, $groupType->code);
 
                 $header = $mapped['header'];
                 $header['code'] = $allocation->code;

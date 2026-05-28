@@ -352,14 +352,23 @@ class WhmcsInboxTable
                 && in_array($r->status, [PendingWhmcsInvoice::STATUS_HELD, PendingWhmcsInvoice::STATUS_PENDING_REVIEW], true))
             ->form([
                 Select::make('invoice_type_id')
-                    ->label('Τύπος παραστατικού (για όλα τα προσχέδια)')
+                    ->label('Τύπος τιμολογίου')
                     ->options(fn () => InvoiceType::query()
                         ->where('company_id', Filament::getTenant()?->getKey())
                         ->orderBy('code')
                         ->pluck('code', 'id'))
                     ->required()
                     ->searchable()
-                    ->helperText('Κάθε δικαιούχος παίρνει ξεχωριστό προσχέδιο. Μπορείς να αλλάξεις τύπο/στοιχεία σε κάθε προσχέδιο πριν την καταχώρηση.'),
+                    ->helperText('Για τους δικαιούχους που χρειάζονται τιμολόγιο.'),
+
+                Select::make('receipt_type_id')
+                    ->label('Τύπος απόδειξης')
+                    ->options(fn () => InvoiceType::query()
+                        ->where('company_id', Filament::getTenant()?->getKey())
+                        ->orderBy('code')
+                        ->pluck('code', 'id'))
+                    ->searchable()
+                    ->helperText('Υποχρεωτικό μόνο αν κάποιος δικαιούχος έχει σημανθεί ως απόδειξη (βλ. λίστα παρακάτω).'),
 
                 Placeholder::make('groups')
                     ->label('Δικαιούχοι που θα προκύψουν')
@@ -390,9 +399,15 @@ class WhmcsInboxTable
                     ->where('company_id', $tenant->getKey())
                     ->whereKey($data['invoice_type_id'])
                     ->firstOrFail();
+                $receiptType = ! empty($data['receipt_type_id'])
+                    ? InvoiceType::query()
+                        ->where('company_id', $tenant->getKey())
+                        ->whereKey($data['receipt_type_id'])
+                        ->first()
+                    : null;
                 try {
                     $invoices = app(WhmcsInvoiceSplitter::class)
-                        ->split($tenant, $r, $invoiceType, auth()->id());
+                        ->split($tenant, $r, $invoiceType, $receiptType, auth()->id());
                     $codes = implode(', ', array_map(fn ($i) => $i->invcode, $invoices));
                     Notification::make()
                         ->title('Δημιουργήθηκαν '.count($invoices).' προσχέδια')

@@ -93,7 +93,8 @@ class WhmcsResolveThirdParty extends Command
     {
         $this->line('');
         if (! $res->timologiaPresent) {
-            $this->warn('mod_timologia tables not present on this WHMCS — no third-party routing. Every line bills the WHMCS client.');
+            $this->warn('Third-party routing tables (mod_ekdosi_*) not present on this WHMCS — '
+                .'activate the bridge and run "Sync from legacy timologia". Every line bills the WHMCS client until then.');
         }
 
         $rows = [];

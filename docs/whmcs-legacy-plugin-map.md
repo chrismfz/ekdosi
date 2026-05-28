@@ -271,10 +271,17 @@ The only path we actually need to validate. No customer-visible change.
 > - **Inbox "Διαχωρισμός σε προσχέδια"** action (multi-party rows only) with a
 >   per-party preview; `split` status badge + filter. 4 new tests; full suite
 >   329 passed / 12 skipped.
-> - **Deferred follow-ups:** per-group invoice-type (τιμολόγιο vs απόδειξη from
->   `is_receipt`) — currently one type for all drafts, operator adjusts per
->   draft; WHMCS write-back for split invoices (the legacy `invoiced` column
->   holds one MARK, not N).
+> - **Independent review (post-build):** no HIGH issues; HMAC, tenant scoping,
+>   ΑΑ-counter, graceful-degradation cores sound. Fixed: split now routes
+>   `is_receipt` (απόδειξη) groups to a separate receipt type and **refuses**
+>   rather than file a receipt routing as an invoice; contact-resolution
+>   failures in the ingestor are caught (park held, never 500 the webhook);
+>   empty-line groups refuse rather than silently under-bill; sync wrapped in a
+>   transaction; stale diagnostic wording fixed.
+> - **Deferred follow-ups:** single-party path still relies on the operator
+>   picking the doc type at file time (preview shows the routing); WHMCS
+>   write-back for split invoices (the legacy `invoiced` column holds one MARK,
+>   not N).
 1. **Bridge (WHMCS side):** add an endpoint (extend `inbound.php` +
    `EkdosiClient`) that, for a WHMCS invoice, resolves each line's
    `serviceid`+`service_type`, `LEFT JOIN mod_timologia → mod_timologia_contacts`,
