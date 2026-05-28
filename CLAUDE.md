@@ -1834,3 +1834,130 @@ Reviewed + accepted as-is:
 - **Reconciliation Page duplicates the list's filter logic** — kept as a
   focused worklist; the VALID+draft inconsistency it couldn't catch is
   now structurally impossible (promotion synced at the submitter).
+
+## Live AADE reconciliation — "Κονσόλα myDATA" (Phase 2, landed — NOT yet sandbox-tested)
+
+The network-backed counterpart to Phase 1's local-only
+`MyDataReconciliation`. Phase 1 cross-checks our two internal columns
+(`local_status` × `mydata_state`) and never calls AADE; Phase 2 actually
+**pulls what AADE holds** (`RequestTransmittedDocs`) and diffs it against
+our local invoices for a date window.
+
+**Service** `App\Services\MyData\SalesReconciler` (tenant-scoped,
+MockHandler-testable like `MyDataSubmitter`). Split mirrors
+`CustomerLedgerBuilder` / `WhmcsInvoiceMapper`:
+- `fetchAadeDocs($from, $to)` — the network + firebed parsing. Follows
+  the `continuationToken` pagination loop until AADE stops, and **folds
+  cancellations from BOTH signals**: the inline `<cancelledByMark>` on an
+  invoice element AND the standalone `<cancelledInvoicesDoc>` list. MARKs
+  are kept as **strings** throughout (15+ digits overflow 32-bit ints —
+  same lesson as the submitter cancel path). Date format is `dd/MM/yyyy`
+  and the `$mark` arg is `''` not null (firebed gotchas, see
+  `MyDataSubmitter::testConnection`).
+- `diff($aadeDocs, $localInvoices, $from, $to)` — **pure**, no DB/network,
+  the unit-tested core. Buckets by MARK:
+  - **matched** — present both sides, cancel-states agree.
+  - **stateMismatch** — present both sides, AADE-cancelled ≠
+    locally-cancelled. Direction-aware `problem` text (AADE-cancelled/
+    local-active vs. local-cancelled/AADE-valid).
+  - **missingAtAade** — we hold a MARK AADE doesn't return (⚠ serious).
+  - **missingLocally** — AADE returns a MARK with no local invoice
+    (filed from another machine / lost local record).
+  Local scope: `invoices` for the tenant **with a `mydata_mark`** and
+  `issued_at` within the window. Drafts (no mark) are ignored — they're
+  Phase 1's concern, not the AADE cross-check.
+
+**Value objects**: `AadeDocSummary` (flattened AADE doc — mark, uid,
+cancelled flag, series/aa/issueDate, counterpart, gross),
+`ReconciliationRow` (one worklist row, all-nullable so it serves every
+bucket), `SalesReconciliationResult` (four bucket arrays + counts +
+`hasDiscrepancies()`).
+
+**UI**: `App\Filament\Pages\MyDataConsole` ("Κονσόλα myDATA", Data group,
+auto-discovered). Header action "Έλεγχος με AADE" opens a from/to date
+modal, runs the reconciler, renders summary cards + collapsible per-bucket
+tables; each row links to the invoice. **Read-only worklist** (operator
+decision 2026-05-28) — no inline state-mutating actions in v1; operators
+resolve via the existing per-invoice submit / cancel-via-myDATA actions.
+`shouldRegisterNavigation()` hides the page for non-`gr-mydata` and
+Off-mode tenants (no AADE endpoint to call).
+
+**CLI/cron**: `php artisan mydata:reconcile-sales --tenant=SLUG
+[--from=Y-m-d --to=Y-m-d]`. Read-only. Exit codes: 0 = clean, 1 = error
+(bad tenant / missing creds / AADE unreachable), 2 = discrepancies found
+(for cron alerting).
+
+**Tests** (5, all green): `SalesReconcilerDiffTest` (pure diff — all four
+buckets, direction-aware mismatch text, marks-ignored-without-mark,
+clean-agreement) + `SalesReconcilerFetchTest` (MockHandler feeds canned
+two-page `RequestedDoc` XML — asserts pagination consumed both pages and
+both cancellation signals fold to `CANCELLED`).
+
+**NOT yet verified against AADE** (sandbox blocker — no creds/network in
+the build env): the actual `RequestTransmittedDocs` wire shape, real
+continuationToken pagination, and the Filament page render. The diff +
+parse + pagination LOGIC is unit-tested via MockHandler, and the firebed
+getters are verified against vendor source — but AADE's live XML is the
+ground truth, so the first real dev-credential run may surface
+response-shape surprises. Refine after the operator's sandbox test.
+
+**Deferred / out of scope for v1:**
+- **One-click fixes** (sync-local-to-cancelled, pull-and-create for
+  AADE-only marks) — deliberately excluded; introduces new state-mutating
+  paths that can't be verified pre-sandbox. **Trigger**: after the
+  read-only console is proven against dev creds.
+- **`RequestDocs` (expense/inbound side)** — Phase 2 covers only the
+  SALES side (`RequestTransmittedDocs`, docs WE filed). The inbound
+  expense reconciliation (`RequestDocs` — docs others filed against us)
+  is the **Έξοδα / expenses** feature (separate Phase: new Expense
+  resource + suppliers + a ΦΠΑ εκροών−εισροών report).
+- **`maxMark` incremental sync** — v1 always re-queries the full date
+  window. A "remember the last MARK we saw, pull only newer" mode would
+  cut AADE calls for frequent runs. **Trigger**: if a tenant runs the
+  console often enough to care about call volume.
+- **Window-edge false positives** — an invoice whose local `issued_at`
+  sits just outside the window while AADE's filed-date differs can show
+  as `missingAtAade`/`missingLocally`. Operator picks the window; widen
+  it if edge cases appear. Not auto-reconciled.
+- **Octane/static-credential contention** — same firebed static-state
+  caveat as `MyDataSubmitter`; fine for FPM + sequential workers.
+
+### Independent review of Phase 2 — fixes applied
+Two blind reviewers (one verifying every firebed call against vendor
+source, one on correctness/tenant-safety). Findings FIXED, each locked by
+a test where applicable:
+- **[BUG] Empty-window AADE response crashed the fetch** — when nothing
+  matches the window AADE returns an empty `<invoicesDoc/>`; firebed
+  stores it as a scalar string and the typed `getInvoices(): ?InvoicesDoc`
+  getter THROWS a TypeError on it. Now read via the raw `Type::get()`
+  accessor + `is_iterable()` guard (same for `cancelledInvoicesDoc`, and
+  an `instanceof ContinuationToken` guard for the token). Locked by
+  `test_empty_window_response_does_not_crash`. This was the consequential
+  one — it would have failed on the most common real call (a quiet day).
+- **[BUG] No `canAccess()` on the console page** — `shouldRegisterNavigation()`
+  only hides the menu; a user could hand-type the URL and trigger a live
+  AADE call with tenant credentials. Added `canAccess()` (auth + gr-mydata
+  + non-Off), and `shouldRegisterNavigation()` now delegates to it.
+- **[RISK→fixed] Duplicate local MARK was silently collapsed** — `keyBy`
+  dropped all but one invoice sharing a MARK, hiding the exact integrity
+  fault the console exists to catch. Added a fifth bucket `duplicateLocal`
+  (each colliding row listed) + accurate `localTotal`. Locked by
+  `test_duplicate_local_mark_is_surfaced_not_collapsed`.
+- **[RISK→fixed] Pagination AND-condition could drop pages** — looped
+  while both continuation keys non-empty; now `token !== null && (pk || rk)`
+  so a one-key token still fetches the next page.
+- **[latent→fixed] `getTotalGrossValue()` is a STRING** (firebed declares
+  no cast); worked only because no `strict_types`. Now an explicit
+  `(float)` via a `toFloat()` helper.
+- **Exception-message leakage** — the console now shows our own
+  RuntimeException guard messages (safe Greek) but logs firebed/Guzzle
+  failures and shows a generic line (the raw message can carry the
+  endpoint URL).
+- **Command tenant resolver precedence** — wrapped `slug OR id` in a
+  closure so a future `where` can't escape the `orWhere`; date parsing
+  moved inside try/catch (bad `--from`/`--to` now fails cleanly).
+
+Reviewed + accepted as-is: window-edge false positives (operator picks the
+window — documented above); `$result` held in Livewire state can be large
+for hundreds of matched rows (acceptable for expected volume; lazy-load
+matched if it bites).
