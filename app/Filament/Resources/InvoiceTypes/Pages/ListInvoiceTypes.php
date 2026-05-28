@@ -4,9 +4,9 @@ namespace App\Filament\Resources\InvoiceTypes\Pages;
 
 use App\Filament\Resources\InvoiceTypes\InvoiceTypeResource;
 use Filament\Actions\CreateAction;
-use Filament\Resources\Pages\ListRecords;
+use App\Filament\BaseListRecords;
 
-class ListInvoiceTypes extends ListRecords
+class ListInvoiceTypes extends BaseListRecords
 {
     protected static string $resource = InvoiceTypeResource::class;
 

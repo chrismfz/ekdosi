@@ -4,9 +4,9 @@ namespace App\Filament\Resources\VatCategories\Pages;
 
 use App\Filament\Resources\VatCategories\VatCategoryResource;
 use Filament\Actions\CreateAction;
-use Filament\Resources\Pages\ListRecords;
+use App\Filament\BaseListRecords;
 
-class ListVatCategories extends ListRecords
+class ListVatCategories extends BaseListRecords
 {
     protected static string $resource = VatCategoryResource::class;
 

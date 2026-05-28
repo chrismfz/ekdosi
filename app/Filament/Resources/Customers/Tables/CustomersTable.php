@@ -45,6 +45,10 @@ class CustomersTable
                 TextColumn::make('email')
                     ->searchable()
                     ->copyable()
+                    // Truncate long addresses so they don't widen the row;
+                    // full value stays available on hover + via copy.
+                    ->limit(30)
+                    ->tooltip(fn ($state): ?string => $state)
                     ->toggleable(),
 
                 TextColumn::make('phone1')

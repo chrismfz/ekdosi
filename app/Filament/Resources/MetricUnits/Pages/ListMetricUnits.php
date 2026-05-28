@@ -4,9 +4,9 @@ namespace App\Filament\Resources\MetricUnits\Pages;
 
 use App\Filament\Resources\MetricUnits\MetricUnitResource;
 use Filament\Actions\CreateAction;
-use Filament\Resources\Pages\ListRecords;
+use App\Filament\BaseListRecords;
 
-class ListMetricUnits extends ListRecords
+class ListMetricUnits extends BaseListRecords
 {
     protected static string $resource = MetricUnitResource::class;
 
