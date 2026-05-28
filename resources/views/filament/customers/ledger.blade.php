@@ -52,8 +52,14 @@
             key('ledger-aging-' . $cust->id)
         )
 
-        {{-- ============= Balance trend (≥2 years) ============= --}}
+        {{-- ============= Year comparison + balance trend (≥2 years) ============= --}}
         @if ($this->hasBalanceTrend())
+            @livewire(
+                \App\Filament\Resources\Customers\Widgets\CustomerLedgerRevenueChart::class,
+                ['ledgerYearly' => $yearly],
+                key('ledger-revenue-' . $cust->id)
+            )
+
             @livewire(
                 \App\Filament\Resources\Customers\Widgets\CustomerLedgerBalanceChart::class,
                 ['ledgerYearly' => $yearly],

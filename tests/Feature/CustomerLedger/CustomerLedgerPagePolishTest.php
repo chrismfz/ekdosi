@@ -5,6 +5,7 @@ namespace Tests\Feature\CustomerLedger;
 use App\Filament\Resources\Customers\Pages\CustomerLedger;
 use App\Filament\Resources\Customers\Widgets\CustomerLedgerAging;
 use App\Filament\Resources\Customers\Widgets\CustomerLedgerBalanceChart;
+use App\Filament\Resources\Customers\Widgets\CustomerLedgerRevenueChart;
 use App\Filament\Resources\Customers\Widgets\CustomerLedgerStats;
 use App\Mail\CustomerStatementMail;
 use App\Models\Company;
@@ -127,8 +128,11 @@ class CustomerLedgerPagePolishTest extends TestCase
             ->assertSee('δεν έχει κινήσεις');
     }
 
-    public function test_stats_widget_renders_with_props(): void
+    public function test_stats_widget_renders_with_props_and_yoy(): void
     {
+        $cur = now()->year;
+        $prev = $cur - 1;
+
         Livewire::test(CustomerLedgerStats::class, [
             'ledgerStats' => [
                 'ytd_net' => 100.0, 'ytd_gross' => 124.0, 'ytd_paid' => 50.0,
@@ -137,10 +141,26 @@ class CustomerLedgerPagePolishTest extends TestCase
                 'total_invoices_lifetime' => 3,
             ],
             'ledgerYearly' => [
-                ['year' => 2025, 'year_end_balance' => 74.0],
-                ['year' => 2024, 'year_end_balance' => 0.0],
+                ['year' => $cur, 'net' => 100.0, 'gross' => 124.0, 'paid' => 50.0, 'year_end_balance' => 74.0],
+                ['year' => $prev, 'net' => 80.0, 'gross' => 99.0, 'paid' => 80.0, 'year_end_balance' => 0.0],
             ],
-        ])->assertOk()->assertSee('Υπόλοιπο');
+        ])
+            ->assertOk()
+            ->assertSee('Υπόλοιπο')
+            // YoY: net 100 vs 80 last year → +25% trend referencing prev year.
+            ->assertSee('vs '.$prev);
+    }
+
+    public function test_revenue_chart_widget_renders(): void
+    {
+        $cur = now()->year;
+
+        Livewire::test(CustomerLedgerRevenueChart::class, [
+            'ledgerYearly' => [
+                ['year' => $cur, 'net' => 100.0, 'gross' => 124.0, 'paid' => 50.0, 'year_end_balance' => 74.0],
+                ['year' => $cur - 1, 'net' => 80.0, 'gross' => 99.0, 'paid' => 80.0, 'year_end_balance' => 0.0],
+            ],
+        ])->assertOk();
     }
 
     public function test_aging_widget_collapses_when_settled(): void
