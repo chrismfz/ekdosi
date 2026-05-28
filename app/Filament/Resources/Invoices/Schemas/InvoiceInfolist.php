@@ -130,6 +130,39 @@ class InvoiceInfolist
                     ])
                     ->columns(4),
 
+                // Live money status from App\Services\InvoiceBalance (the
+                // authoritative figure; the list reads the cached column).
+                Section::make('Κατάσταση πληρωμής')
+                    ->schema([
+                        TextEntry::make('balance_owed')
+                            ->label('Οφειλόμενα')
+                            ->state(fn ($record) => $record->balanceData()->owed)
+                            ->money('EUR'),
+
+                        TextEntry::make('balance_credited')
+                            ->label('Πιστωμένα')
+                            ->state(fn ($record) => $record->balanceData()->credited)
+                            ->money('EUR'),
+
+                        TextEntry::make('balance_paid')
+                            ->label('Πληρωμένα')
+                            ->state(fn ($record) => $record->balanceData()->paid)
+                            ->money('EUR'),
+
+                        TextEntry::make('balance_remaining')
+                            ->label('Υπόλοιπο')
+                            ->state(fn ($record) => $record->balanceData()->balance)
+                            ->money('EUR')
+                            ->weight('bold'),
+
+                        TextEntry::make('balance_status')
+                            ->label('Κατάσταση')
+                            ->state(fn ($record) => $record->balanceData()->status->label())
+                            ->badge()
+                            ->color(fn ($record) => $record->balanceData()->status->color()),
+                    ])
+                    ->columns(5),
+
                 Section::make('myDATA')
                     ->description('Mirror columns reflecting the latest mydata_marks submission. Full audit trail below.')
                     ->schema([

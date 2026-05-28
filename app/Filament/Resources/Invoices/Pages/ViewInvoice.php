@@ -28,6 +28,55 @@ class ViewInvoice extends ViewRecord
         );
 
         return [
+            // Record a payment against this invoice. Not shown on credit
+            // notes (they're money owed back, not collected). Overpay is
+            // allowed (warned, not blocked) — real prepayments/rounding.
+            Action::make('record_payment')
+                ->label('Καταχώριση πληρωμής')
+                ->icon('heroicon-o-banknotes')
+                ->color('success')
+                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null && $record->customer_id !== null)
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Καταχώριση πληρωμής')
+                ->modalSubmitActionLabel('Καταχώριση')
+                ->schema([
+                    \Filament\Forms\Components\TextInput::make('amount')
+                        ->label('Ποσό')
+                        ->numeric()
+                        ->required()
+                        ->default(fn (Invoice $record) => number_format(max($record->balanceData()->balance, 0), 2, '.', ''))
+                        ->helperText(fn (Invoice $record) => 'Υπόλοιπο: '.number_format($record->balanceData()->balance, 2, ',', '.').' €'),
+                    \Filament\Forms\Components\DatePicker::make('pay_date')
+                        ->label('Ημερομηνία')
+                        ->required()
+                        ->default(now()),
+                    \Filament\Forms\Components\Select::make('payment_method_id')
+                        ->label('Τρόπος πληρωμής')
+                        ->options(fn (Invoice $record) => \App\Models\PaymentMethod::query()
+                            ->where('company_id', $record->company_id)
+                            ->pluck('description', 'id'))
+                        ->default(fn (Invoice $record) => $record->payment_method_id),
+                    \Filament\Forms\Components\Textarea::make('notes')
+                        ->label('Σημειώσεις')
+                        ->rows(2),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    \Illuminate\Support\Facades\DB::transaction(function () use ($record, $data) {
+                        \App\Models\Payment::create([
+                            'company_id'        => $record->company_id,
+                            'customer_id'       => $record->customer_id,
+                            'invoice_id'        => $record->id,
+                            'payment_method_id' => $data['payment_method_id'] ?? null,
+                            'amount'            => $data['amount'],
+                            'pay_date'          => $data['pay_date'],
+                            'notes'             => $data['notes'] ?? null,
+                        ]);
+                    });
+                    Notification::make()
+                        ->title('Η πληρωμή καταχωρίστηκε')
+                        ->success()->send();
+                }),
+
             // Submit a draft invoice to myDATA. Visible only for drafts
             // (no mydata_state) on tenants in sandbox/production mode.
             // Off-mode + non-Greek tenants get no submission UI here.

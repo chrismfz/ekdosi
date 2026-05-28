@@ -56,30 +56,38 @@ class DashboardMetrics
     }
 
     /**
-     * Outstanding receivables across ALL customers: credit-term
-     * (due_days > 0) non-cancelled invoice gross minus all payments.
-     * Matches the per-customer balance formula in CustomerLedgerBuilder
-     * summed tenant-wide (payments aren't allocated per invoice, so the
-     * tenant total is creditTermGross - totalPaid). Can be negative if
-     * customers have credit balances; we surface the real figure.
+     * Outstanding receivables across ALL customers:
+     *   Σ(credit-term, non-cancelled invoice gross − credited_total)
+     *   − Σ(all non-trashed payments)
+     * Credit notes (credited_invoice_id set) are excluded from the base
+     * — they're reductions, applied via the original's credited_total
+     * cache, not receivables of their own. Payments are subtracted
+     * tenant-wide (allocated + on-account both reduce what's owed),
+     * matching the CustomerLedgerBuilder balance summed across customers.
+     * Can be negative if customers carry credit balances; real figure.
      */
     public function outstandingReceivables(): float
     {
-        $creditTermGross = (float) DB::table('invoices')
+        $row = DB::table('invoices')
             ->join('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
             ->where('invoices.company_id', $this->tenant->id)
             ->whereNull('invoices.deleted_at')
+            ->whereNull('invoices.credited_invoice_id')
             ->where('payment_methods.due_days', '>', 0)
             ->where(fn ($q) => $q
                 ->whereNull('invoices.mydata_state')
                 ->orWhere('invoices.mydata_state', '!=', 'CANCELLED'))
-            ->sum('invoices.gross_total');
+            ->selectRaw('COALESCE(SUM(invoices.gross_total), 0) - COALESCE(SUM(invoices.credited_total), 0) AS net_owed')
+            ->first();
+
+        $netOwed = (float) ($row->net_owed ?? 0);
 
         $totalPaid = (float) DB::table('payments')
             ->where('company_id', $this->tenant->id)
+            ->whereNull('deleted_at')
             ->sum('amount');
 
-        return round($creditTermGross - $totalPaid, 2);
+        return round($netOwed - $totalPaid, 2);
     }
 
     /**

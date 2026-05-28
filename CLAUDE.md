@@ -1535,3 +1535,69 @@ code (2026-05-28):
 - `GET_COMB_*` cross-DB procedures — not ported (credential landmine).
 - `afm2name` WHMCS-side GSIS plugin — correctly superseded by native
   `AadeRegistryLookup`.
+
+---
+
+## Invoice money status — Payments (PR #1 of 2, landed)
+
+Closes the "no payment recording / no per-invoice paid status" gap. The
+companion PR #2 (credit notes / returns) builds on the same service.
+
+**Model.** Every invoice's money state is derived by ONE service,
+`App\Services\InvoiceBalance` (the single source of truth):
+`owed = gross − credited_total`, `balance = owed − paid_total`,
+`status ∈ {paid, partial, unpaid, credited, overpaid}` (the
+`App\Enums\PaymentStatus` enum owns the Greek label + badge colour).
+Cash-term invoices (`payment_method.due_days = 0`) are `paid` at issue
+(mirrors legacy `GET_CUSTOMER_BALANCE`). Compared with a 0.005 tolerance.
+
+**Schema (all nullable → ETL-safe).** `payments` gained `invoice_id`
+(direct allocation; NULL = on-account), `payment_method_id` (the "way"),
+`softDeletes`. `invoices` gained cache columns `paid_total`,
+`credited_total`, `payment_status` (written ONLY by `InvoiceBalance`
+via `forceFill` — NOT `$fillable`, like the `mydata_*` cache) plus
+`credited_invoice_id` (the credit-note link — a DEDICATED column, NOT
+`conv_invoice_id` which the ETL rewrites; the column lives here so the
+balance model is complete, the ISSUE flow is PR #2).
+
+**Sync.** `App\Observers\PaymentObserver` (#[ObservedBy] on `Payment`)
+recomputes the cache in-transaction on payment create/update/delete/
+restore (and recomputes both invoices on re-allocation). On-account
+payments (invoice_id null) skip it — they move only the customer-level
+ledger balance. `App\Services\InvoiceBalance::recompute()` locks the
+invoice row so concurrent payment writes serialise.
+
+**UI.** New `Payments` Filament resource (Data group); "Καταχώριση
+πληρωμής" action on `ViewInvoice` (defaults amount = balance);
+"Πληρωμή έναντι λογαριασμού" action on the customer Καρτέλα; a
+`payment_status` badge column + filter on the invoice list; a money
+section on the invoice view. `DashboardMetrics::outstandingReceivables()`
+now nets out VALID credit notes + trashed payments.
+
+**ETL.** `copyPayments`/`copyInvoices` unchanged — legacy payments land
+on-account (invoice_id null), preserving the legacy balance math; the
+new cache columns are absent from the upsert so re-imports never clobber
+them. `php artisan invoices:recompute-balances [--company=]` backfills
+the cache after an import (idempotent).
+
+**Deliberately deferred / out of scope (don't re-litigate):**
+- **spatie/activitylog on `Payment`** — deferred to the dedicated
+  cross-model audit PR (invoices + customers + payments together), not
+  wired piecemeal. SoftDeletes already gives a recoverable trail.
+- **Καρτέλα per-row paid/unpaid badge + credit-aware running balance** —
+  deferred to PR #2. The ledger's existing balance (Σ credit-term gross
+  − Σ all payments) stays CORRECT unchanged because payments sum
+  regardless of `invoice_id`; only the per-row badge is missing.
+- **Single payment split across many invoices** — out of scope; current
+  model is one payment → one invoice (partial = multiple rows). Upgrade
+  path: a `payment_allocations` M:N table; `InvoiceBalance` is the only
+  consumer that would change.
+- **Multi-currency** — out of scope (EUR-only, matching MyDataSubmitter).
+- **Concurrency test for `recompute` lock** — sqlite ignores row locks;
+  the lock is real on MariaDB but not covered by a CI test.
+
+**Operator post-merge step:** run `php artisan shield:generate` (or
+re-sync Shield) so the new `Payment` resource permissions exist and are
+assigned to the relevant roles — otherwise the Payments resource is
+hidden. `app/Policies/PaymentPolicy.php` follows the existing per-model
+Shield policy shape.
