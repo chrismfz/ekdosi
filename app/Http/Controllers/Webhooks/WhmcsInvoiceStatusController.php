@@ -17,12 +17,12 @@ use Symfony\Component\HttpFoundation\Response;
  *   GET /webhooks/whmcs/{slug}/invoice-status/{whmcs_invoice_id}
  *   X-Webhook-Signature: sha256=<hex hmac>
  *
- * Auth: HMAC-SHA256 over the request path (the resolved URL after
- * route matching, including the {slug} and {whmcs_invoice_id}
- * placeholders' actual values). GET has no body to sign, so the
- * path is the next-best canonical input. Hash with the same
- * whmcs_webhook_secret used for inbound POSTs — bidirectional trust
- * on one key.
+ * Auth: HMAC-SHA256 over the canonical string "{slug}:{whmcs_invoice_id}"
+ * (GET has no body to sign). The canonical string is transport-
+ * independent — both sides reconstruct it from the same two inputs,
+ * so reverse-proxy path rewriting or URL-encoding of the slug can't
+ * break verification. Hashed with the same whmcs_webhook_secret used
+ * for inbound POSTs — bidirectional trust on one key.
  *
  * Response shape (200 OK):
  *   {
@@ -72,11 +72,17 @@ class WhmcsInvoiceStatusController
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // HMAC verification over the request path. Path is the
-        // resolved URL (after route placeholder substitution) so a
-        // signature over "/webhooks/whmcs/foo/invoice-status/8888"
-        // doesn't validate "/webhooks/whmcs/foo/invoice-status/8889".
-        if (! $this->verifySignature($request, $secret)) {
+        // HMAC verification over a CANONICAL string ("{slug}:{id}")
+        // rather than the request path. Signing the path was fragile:
+        // getPathInfo() returns the URL-DECODED path and omits the
+        // app's route prefix, so a reverse proxy that rewrites/strips
+        // "/webhooks", or a slug containing URL-encoded characters,
+        // would make the plugin's signature (computed over the
+        // external URL) disagree with ours. The canonical string is
+        // something both sides can reconstruct deterministically from
+        // the same two inputs, independent of URL transport.
+        $canonical = $slug.':'.$whmcsInvoiceId;
+        if (! $this->verifySignature($request, $secret, $canonical)) {
             $this->logRejection($request, $slug, 'invalid_signature');
             return new JsonResponse(['error' => 'invalid_signature'], Response::HTTP_UNAUTHORIZED);
         }
@@ -107,16 +113,17 @@ class WhmcsInvoiceStatusController
     }
 
     /**
-     * HMAC-SHA256 verification over the request path (no body in GET).
-     * Header format: `X-Webhook-Signature: sha256=<hex>` where
-     * <hex> = hash_hmac('sha256', $request->getPathInfo(), $secret).
+     * HMAC-SHA256 verification over a caller-supplied canonical
+     * string (GET has no body to sign). Header format:
+     * `X-Webhook-Signature: sha256=<hex>` where
+     * <hex> = hash_hmac('sha256', "{slug}:{whmcs_invoice_id}", $secret).
      *
-     * getPathInfo() returns the URL-decoded path WITHOUT scheme/host/
-     * query — exactly what the WHMCS-side plugin can reconstruct
-     * deterministically from "{webhooks_prefix}/{slug}/invoice-status/
-     * {whmcs_invoice_id}".
+     * The WHMCS-side EkdosiClient::getInvoiceStatus() computes the
+     * SAME canonical string from the same two inputs — see
+     * legacy/whmcs/ekdosi_bridge/lib/EkdosiClient.php and the
+     * README's signature-scheme section.
      */
-    private function verifySignature(Request $request, string $secret): bool
+    private function verifySignature(Request $request, string $secret, string $canonical): bool
     {
         $header = (string) $request->header('X-Webhook-Signature', '');
         if (! str_starts_with($header, 'sha256=')) {
@@ -124,7 +131,7 @@ class WhmcsInvoiceStatusController
         }
         $sent = substr($header, strlen('sha256='));
 
-        $expected = hash_hmac('sha256', $request->getPathInfo(), $secret);
+        $expected = hash_hmac('sha256', $canonical, $secret);
 
         return hash_equals($expected, $sent);
     }

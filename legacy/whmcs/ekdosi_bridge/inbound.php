@@ -32,16 +32,18 @@
  * on 5xx, alert on 401) can branch on the error field.
  *
  * IMPORTANT — this file MUST live at the well-known path the
- * ekdosi-side Company::whmcsBridgeUrl() derives from
- * whmcs_api_url. Don't rename or move without updating that
- * derivation logic.
+ * ekdosi-side derives from whmcs_api_url. That path is the
+ * Company::WHMCS_BRIDGE_PATH constant
+ * ('/modules/addons/ekdosi_bridge/inbound.php') in the ekdosi repo.
+ * Don't rename or move without updating that constant.
  *
- * IMPORTANT — column-width caveat: WHMCS's tblinvoices.invoiced is
- * SMALLINT(5) by default (range 0..65535). AADE MARKs are 15-digit
- * positive integers. The deploy runbook documents the required
- * ALTER TABLE to widen this column to BIGINT before the bridge can
- * write real MARKs. If the column is still SMALLINT this endpoint
- * will return 500 with the truncation error from MySQL.
+ * Column-width: WHMCS's tblinvoices.invoiced is SMALLINT(5) by
+ * default (range 0..65535); AADE MARKs are 15-digit integers. The
+ * addon's activation hook (ekdosi_bridge_activate) auto-widens it to
+ * BIGINT, so normally this is handled. If the DB user lacked ALTER
+ * privilege at activation, this endpoint returns 500 with the
+ * truncation error and the operator must run the ALTER manually
+ * (see README troubleshooting).
  */
 
 // Bootstrap WHMCS. This file is hit directly (not via WHMCS's
@@ -136,13 +138,42 @@ if (! $invoice) {
     exit;
 }
 
-// Cast to int for the DB column. tblinvoices.invoiced may need to
-// be widened from SMALLINT to BIGINT to hold 15-digit AADE MARKs;
-// see the README for the ALTER TABLE.
+// Idempotent-write guard. tblinvoices.invoiced is the "filed" flag:
+//   0      -> not yet filed
+//   1      -> legacy prepare_for_ekdosi "ready to file" marker
+//   <MARK> -> filed at AADE with this MARK
+//
+// Allowed writes: from 0 (fresh), from 1 (replacing the legacy
+// ready-marker with the real MARK — the expected migration path),
+// or the SAME MARK again (idempotent retry after a transient
+// failure). REFUSED: overwriting an existing MARK with a DIFFERENT
+// one — that would silently erase the original MARK from WHMCS's
+// audit view (double-filing / cancel-and-refile must go through an
+// explicit "Reset to unfiled" first). Returns 409 so the ekdosi
+// side records a distinct, non-retryable failure.
+$current = (string) ($invoice->invoiced ?? '0');
+if ($current !== '0' && $current !== '1' && $current !== $mark) {
+    http_response_code(409);
+    echo json_encode([
+        'error'            => 'already_filed_with_different_mark',
+        'whmcs_invoice_id' => $whmcsInvoiceId,
+        'current'          => $current,
+        'incoming'         => $mark,
+        'message'          => 'Invoice already carries a different MARK. Reset to unfiled '
+            .'on the Ekdosi Bridge admin page before re-filing.',
+    ]);
+    exit;
+}
+
+// Persist the MARK as a STRING. Do NOT (int)-cast: AADE MARKs are
+// 15-digit values that overflow PHP's int on 32-bit hosts, and the
+// (widened-to-BIGINT — see README) column stores the numeric string
+// faithfully through Capsule's bound parameter. Casting here would
+// truncate on 32-bit and is unnecessary on 64-bit.
 try {
     Capsule::table('tblinvoices')
         ->where('id', $whmcsInvoiceId)
-        ->update(['invoiced' => (int) $mark]);
+        ->update(['invoiced' => $mark]);
 } catch (\Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'db_update_failed', 'message' => $e->getMessage()]);

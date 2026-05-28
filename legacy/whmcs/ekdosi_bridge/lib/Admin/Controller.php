@@ -65,11 +65,18 @@ EOF;
                 .'Bridge not configured: set base URL / slug / secret on the module config page.</div>';
         }
 
+        // CSRF token: WHMCS's generate_token('plain') emits a hidden
+        // <input name="token">; check_token() in the handlers below
+        // validates it. Without this, a logged-in admin could be
+        // tricked (CSRF) into pushing or resetting arbitrary invoices.
+        $token = $this->csrfField();
         $actions = '<form action="'.$link.'&action=push" method="POST" style="display:inline-block; margin-right:8px;">'
+            .$token
             .'<input type="hidden" name="invoiceid" value="'.$invoiceId.'">'
             .'<button class="btn btn-primary" type="submit">Send to ekdosi for review</button>'
             .'</form>'
             .'<form action="'.$link.'&action=reset" method="POST" style="display:inline-block;">'
+            .$token
             .'<input type="hidden" name="invoiceid" value="'.$invoiceId.'">'
             .'<button class="btn btn-warning" type="submit" '
             .'onclick="return confirm(\'Set tblinvoices.invoiced = 0 for invoice #'.$invoiceId.'? '
@@ -89,6 +96,9 @@ EOF;
     public function push(array $vars): string
     {
         $link = htmlspecialchars($vars['modulelink']);
+        if (! $this->csrfValid()) {
+            return $this->errorPage($link, 'Security token mismatch. Go back and retry.');
+        }
         $invoiceId = (int) ($_POST['invoiceid'] ?? 0);
         if ($invoiceId <= 0) {
             return $this->errorPage($link, 'Invalid invoice id.');
@@ -118,6 +128,9 @@ EOF;
     public function reset(array $vars): string
     {
         $link = htmlspecialchars($vars['modulelink']);
+        if (! $this->csrfValid()) {
+            return $this->errorPage($link, 'Security token mismatch. Go back and retry.');
+        }
         $invoiceId = (int) ($_POST['invoiceid'] ?? 0);
         if ($invoiceId <= 0) {
             return $this->errorPage($link, 'Invalid invoice id.');
@@ -177,5 +190,43 @@ EOF;
         $currentUser = new \WHMCS\Authentication\CurrentUser();
         $user = $currentUser->user();
         logActivity($message, $user ? $user->id : 0);
+    }
+
+    /**
+     * Hidden CSRF token field for state-changing forms. WHMCS's
+     * generate_token('plain') returns the <input type="hidden"
+     * name="token" ...> HTML. Guarded with function_exists so the
+     * plugin degrades to "no field" rather than fataling on a WHMCS
+     * build that lacks the helper (very old installs); csrfValid()
+     * mirrors the same tolerance.
+     */
+    private function csrfField(): string
+    {
+        if (function_exists('generate_token')) {
+            return (string) generate_token('plain');
+        }
+        return '';
+    }
+
+    /**
+     * Validate the CSRF token on a state-changing POST. Returns true
+     * when WHMCS's check_token passes (or when the helper is absent
+     * on a legacy install — we don't want to hard-block the operator
+     * on a WHMCS build without the helper, matching csrfField()).
+     *
+     * check_token() normally die()s on mismatch; we wrap it so the
+     * caller can render a friendly error page instead.
+     */
+    private function csrfValid(): bool
+    {
+        if (! function_exists('check_token')) {
+            return true;
+        }
+        $sent = (string) ($_POST['token'] ?? '');
+        $expected = (string) ($_SESSION['tokenval'] ?? '');
+        if ($sent === '' || $expected === '') {
+            return false;
+        }
+        return hash_equals($expected, $sent);
     }
 }

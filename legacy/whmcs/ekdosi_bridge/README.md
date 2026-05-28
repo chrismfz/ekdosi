@@ -42,20 +42,27 @@ Copy this entire `ekdosi_bridge/` directory to the WHMCS server:
 └── README.md  (this file)
 ```
 
-### 2. Widen `tblinvoices.invoiced` if needed
+### 2. Widen `tblinvoices.invoiced` (automatic on activation)
 
 AADE MARKs are 15-digit positive integers. WHMCS's default
 `tblinvoices.invoiced` column is `SMALLINT(5)` (max 65535) which
-truncates real MARKs to garbage. Run this BEFORE activating the
-addon:
+truncates real MARKs to garbage.
+
+**The addon's activation hook runs this ALTER automatically** —
+you don't normally need to do anything. On activation it inspects
+`information_schema`, and if `invoiced` isn't already `BIGINT` it
+runs:
 
 ```sql
 ALTER TABLE tblinvoices MODIFY invoiced BIGINT NULL DEFAULT 0;
 ```
 
-If the table already holds legacy values from `prepare_for_ekdosi`
-(0 or 1, never a MARK because the legacy plugin only flipped between
-those two), the ALTER is non-destructive.
+If the WHMCS DB user lacks `ALTER` privilege (some managed hosts),
+activation still succeeds but the activation message will contain a
+`WARNING: could not auto-widen ...` line with the exact SQL — hand
+it to your DBA and run it before filing real MARKs. The ALTER is
+idempotent and non-destructive (legacy `prepare_for_ekdosi` only
+ever stored 0 or 1).
 
 ### 3. Activate + configure
 
@@ -92,18 +99,38 @@ WHMCS's activity log.
 
 ### 5. Coexistence with `prepare_for_ekdosi`
 
-The legacy plugin can stay activated alongside this one — they use
-different module names and different paths. Once you've verified
-bridge-driven filings work end-to-end on a tenant, deactivate
-`prepare_for_ekdosi` (Addons → Manage → deactivate). Don't delete
-the directory immediately; if you need to roll back, just reactivate.
+The legacy plugin can stay activated alongside this one during the
+rollout — they use different module names and paths. **But both
+write `tblinvoices.invoiced`**, so the activation hook will emit a
+`WARNING: prepare_for_ekdosi is also active ...` if it detects the
+legacy module. Two safety nets prevent silent clobbering:
+
+1. The bridge's `inbound.php` refuses (409
+   `already_filed_with_different_mark`) to overwrite an existing
+   MARK with a *different* one — it only allows 0, the legacy `1`
+   marker, or an idempotent repeat of the same MARK.
+2. The activation warning reminds you to deactivate
+   `prepare_for_ekdosi` once bridge-driven filings are verified
+   end-to-end.
+
+Once verified, deactivate `prepare_for_ekdosi` (Addons → Manage →
+deactivate). Don't delete the directory immediately; if you need to
+roll back, just reactivate.
 
 ## Security model
 
 - **Shared HMAC secret** on the ekdosi-side `companies.whmcs_webhook_secret`
-  AND on this addon's config. ALL request bodies (or, for GET, the
-  request path) are HMAC-SHA256-signed.
+  AND on this addon's config. Every request is HMAC-SHA256-signed:
+  - **POST** (`invoice-paid` push, `inbound.php` write-back): sign the
+    raw request body.
+  - **GET** (`invoice-status`): sign the canonical string
+    `"{slug}:{whmcs_invoice_id}"` (NOT the URL path). The canonical
+    string is transport-independent, so a reverse proxy that rewrites
+    the path or a slug needing URL-encoding can't break verification.
 - Both sides verify with `hash_equals` (constant-time compare).
+- The admin module's state-changing forms (push, reset) carry a WHMCS
+  CSRF token (`generate_token`/`check_token`) so a logged-in admin
+  can't be CSRF'd into mutating invoice state.
 - The same secret authenticates BOTH directions. Rotate it on both
   sides at once.
 - The bridge endpoints throttle at the HTTP layer (rate-limit on
@@ -142,8 +169,20 @@ and `whmcs_api_secret`. Check those.
 
 **`inbound.php` returns 500 "db_update_failed: ... Out of range value for column 'invoiced'"**
 
-`tblinvoices.invoiced` is still SMALLINT. Run the ALTER TABLE from
-step 2 of deployment.
+`tblinvoices.invoiced` is still SMALLINT — the auto-widen at
+activation didn't run (usually because the WHMCS DB user lacks
+`ALTER`). Run it manually: `ALTER TABLE tblinvoices MODIFY invoiced
+BIGINT NULL DEFAULT 0;` (see deployment step 2).
+
+**`inbound.php` returns 409 "already_filed_with_different_mark"**
+
+The invoice already carries a MARK different from the one ekdosi is
+trying to write. This is the idempotent-write guard: it refuses to
+silently overwrite an existing MARK (protects the WHMCS-side audit
+trail and guards against double-filing). If the prior MARK is stale
+(e.g. the invoice was cancelled at AADE and re-filed under a new
+MARK), use "Reset to unfiled" on the bridge admin page first, then
+re-file from ekdosi.
 
 **Status block on the bridge admin page says "Bridge not configured"**
 

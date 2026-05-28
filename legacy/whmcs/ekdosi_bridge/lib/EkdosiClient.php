@@ -86,15 +86,23 @@ class EkdosiClient
 
     /**
      * GET {base}/webhooks/whmcs/{slug}/invoice-status/{whmcs_invoice_id}
-     * HMAC-signed over the path component (no body in GET).
+     *
+     * HMAC-signed over the CANONICAL string "{slug}:{invoice_id}"
+     * (NOT the URL path). The ekdosi side verifies the same canonical
+     * string — keeping the signature transport-independent so a
+     * reverse proxy that rewrites the path, or a slug needing URL
+     * encoding, can't break verification. See the README's
+     * "Security model" section and
+     * WhmcsInvoiceStatusController::verifySignature on the ekdosi side.
      *
      * Returns: same shape as pushInvoicePaid().
      */
     public function getInvoiceStatus(int $whmcsInvoiceId): array
     {
-        $path = '/webhooks/whmcs/'.rawurlencode($this->slug).'/invoice-status/'.$whmcsInvoiceId;
-        $url = $this->baseUrl.$path;
-        $sig = 'sha256='.hash_hmac('sha256', $path, $this->secret);
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug)
+            .'/invoice-status/'.$whmcsInvoiceId;
+        $canonical = $this->slug.':'.$whmcsInvoiceId;
+        $sig = 'sha256='.hash_hmac('sha256', $canonical, $this->secret);
 
         $result = $this->httpRequest('GET', $url, null, [
             'Accept: application/json',

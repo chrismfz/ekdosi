@@ -167,7 +167,7 @@ class WhmcsInvoiceFilerWritebackTest extends TestCase
         $this->seedFakeSubmitterReturningMark('999000111');
 
         $pending = $this->makePending();
-        app(WhmcsInvoiceFiler::class)->file(
+        $result = app(WhmcsInvoiceFiler::class)->file(
             $this->tenant, $pending, $this->customer, $this->invoiceType,
         );
 
@@ -190,16 +190,48 @@ class WhmcsInvoiceFilerWritebackTest extends TestCase
             $expected = 'sha256='.hash_hmac('sha256', $request->body(), str_repeat('a', 64));
             return $sigHeader === $expected;
         });
+
+        // Structured writeback state reflects success.
+        $this->assertSame(
+            PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,
+            $result->pending->fresh()->whmcs_writeback_state
+        );
+        $this->assertNull($result->pending->fresh()->whmcs_writeback_error);
+    }
+
+    public function test_writeback_skipped_records_skipped_state(): void
+    {
+        // Sandbox-mode, MARK present, but no bridge secret → the
+        // writeback factory throws WhmcsNotConfigured. The filing
+        // still completes; the writeback state is 'skipped' (NOT
+        // 'failed' — distinguishable in dashboards / retry sweeps).
+        Http::preventStrayRequests();
+
+        $this->tenant->update([
+            'mydata_mode'   => 'sandbox',
+            'whmcs_api_url' => 'https://whmcs.example.com/includes/api.php',
+            // no whmcs_webhook_secret
+        ]);
+        $this->seedFakeSubmitterReturningMark('999000333');
+
+        $pending = $this->makePending();
+        $result = app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+
+        $fresh = $result->pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $fresh->status);
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_SKIPPED, $fresh->whmcs_writeback_state);
     }
 
     public function test_writeback_failure_does_not_throw_or_undo_filing(): void
     {
         // Bridge endpoint returns 500 → WhmcsApiException. The AADE
-        // filing has already happened (the MARK is on the pending row);
-        // the filer must NOT propagate the bridge failure as a thrown
-        // exception, since that would surface to the operator as "the
-        // filing failed" when in fact AADE accepted it. Instead: log
-        // + append to pending notes.
+        // filing has already happened (status=filed committed in Phase
+        // 3 BEFORE the writeback); the filer must NOT propagate the
+        // bridge failure as a thrown exception, since that would
+        // surface to the operator as "the filing failed" when in fact
+        // AADE accepted it. Instead: record state=failed + the error.
         Http::fake([
             'https://whmcs.example.com/modules/addons/ekdosi_bridge/inbound.php' => Http::response([
                 'error' => 'database update failed',
@@ -220,17 +252,81 @@ class WhmcsInvoiceFilerWritebackTest extends TestCase
         );
 
         // Filing succeeded from caller's perspective.
-        $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $result->pending->fresh()->status);
-        $this->assertSame('999000222', $result->pending->fresh()->mydata_mark);
-        // Notes carry the write-back failure suffix.
-        $this->assertStringContainsString(
-            'WHMCS write-back failed',
-            (string) $result->pending->fresh()->notes
-        );
+        $fresh = $result->pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $fresh->status);
+        $this->assertSame('999000222', $fresh->mydata_mark);
+        // Structured writeback columns carry the failure + diagnostic.
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_FAILED, $fresh->whmcs_writeback_state);
+        $this->assertNotNull($fresh->whmcs_writeback_error);
         // Error logged.
         Log::shouldHaveReceived('error')->withArgs(
             fn ($msg) => str_contains($msg, 'WHMCS write-back failed')
         )->atLeast()->once();
+    }
+
+    public function test_writeback_unexpected_throwable_is_non_fatal(): void
+    {
+        // A non-WHMCS exception (e.g. the HTTP layer throwing a raw
+        // RuntimeException, or a JsonException) must ALSO be non-fatal:
+        // AADE already filed, so the filing must stand. The catch is
+        // \Throwable, not just the two WHMCS exception classes.
+        // Simulate by binding a bridge factory whose client throws a
+        // bare RuntimeException.
+        Log::spy();
+        $this->tenant->update([
+            'mydata_mode'          => 'sandbox',
+            'whmcs_api_url'        => 'https://whmcs.example.com/includes/api.php',
+            'whmcs_webhook_secret' => str_repeat('a', 64),
+        ]);
+        $this->seedFakeSubmitterReturningMark('999000444');
+
+        $bridgeFactory = \Mockery::mock(\App\Services\Whmcs\WhmcsBridgeClientFactory::class);
+        $bridgeClient = \Mockery::mock(\App\Services\Whmcs\WhmcsBridgeClient::class);
+        $bridgeClient->shouldReceive('setInvoiced')
+            ->andThrow(new \RuntimeException('totally unexpected'));
+        $bridgeFactory->shouldReceive('for')->andReturn($bridgeClient);
+        $this->app->instance(\App\Services\Whmcs\WhmcsBridgeClientFactory::class, $bridgeFactory);
+
+        $pending = $this->makePending();
+        $result = app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+
+        $fresh = $result->pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $fresh->status);
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_FAILED, $fresh->whmcs_writeback_state);
+        $this->assertStringContainsString('totally unexpected', (string) $fresh->whmcs_writeback_error);
+    }
+
+    public function test_trailing_slash_in_api_url_still_derives_bridge_url(): void
+    {
+        // A4 regression: a trailing slash on whmcs_api_url must NOT
+        // silently disable the bridge. The writeback should still
+        // fire against the derived bridge endpoint.
+        Http::fake([
+            'https://whmcs.example.com/modules/addons/ekdosi_bridge/inbound.php' => Http::response([
+                'status' => 'ok',
+            ], 200),
+        ]);
+
+        $this->tenant->update([
+            'mydata_mode'          => 'sandbox',
+            'whmcs_api_url'        => 'https://whmcs.example.com/includes/api.php/',
+            'whmcs_webhook_secret' => str_repeat('a', 64),
+        ]);
+        $this->seedFakeSubmitterReturningMark('999000555');
+
+        $pending = $this->makePending();
+        $result = app(WhmcsInvoiceFiler::class)->file(
+            $this->tenant, $pending, $this->customer, $this->invoiceType,
+        );
+
+        Http::assertSent(fn ($request) => $request->url()
+            === 'https://whmcs.example.com/modules/addons/ekdosi_bridge/inbound.php');
+        $this->assertSame(
+            PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,
+            $result->pending->fresh()->whmcs_writeback_state
+        );
     }
 
     /**

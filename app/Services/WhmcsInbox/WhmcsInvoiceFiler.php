@@ -182,7 +182,30 @@ class WhmcsInvoiceFiler
         // class of falsy-string regression elsewhere.
         $hasMark = $mark->mark !== null && $mark->mark !== '';
 
-        // Phase 3: write the MARK back to WHMCS via the ekdosi_bridge
+        // Phase 3: link the pending row to the AADE result. This is
+        // the legal-audit transition (status=filed + filed_at +
+        // mydata_mark), committed atomically with the AADE result and
+        // BEFORE any WHMCS write-back. Once this commits, the
+        // PendingWhmcsInvoiceObserver freezes the row against further
+        // mutations — EXCEPT the whmcs_writeback_* bookkeeping columns,
+        // which the write-back phase updates.
+        //
+        // whmcs_writeback_state starts at 'pending' when there's a
+        // MARK to push (Phase 4 flips it to succeeded/failed/skipped);
+        // null for off-mode tenants (nothing to push).
+        $pendingFresh = $pending->fresh();
+        $pendingFresh->update([
+            'status'                => PendingWhmcsInvoice::STATUS_FILED,
+            'filed_at'              => now(),
+            'filed_by_user_id'      => $filedByUserId,
+            'mydata_mark'           => $hasMark ? $mark->mark : null,
+            'whmcs_writeback_state' => $hasMark ? PendingWhmcsInvoice::WRITEBACK_PENDING : null,
+            'notes'                 => $hasMark
+                ? 'Filed at AADE as invoice #'.$invoice->invcode.' (MARK '.$mark->mark.').'
+                : 'Recorded locally (off-mode — not filed at AADE) as invoice #'.$invoice->invcode.'.',
+        ]);
+
+        // Phase 4: write the MARK back to WHMCS via the ekdosi_bridge
         // plugin so tblinvoices.invoiced flips from 0 to the MARK
         // value. The plugin runs Capsule::table('tblinvoices')
         // ->update(['invoiced' => $mark]) on the WHMCS side (the
@@ -190,46 +213,22 @@ class WhmcsInvoiceFiler
         // because WHMCS's native UpdateInvoice API doesn't expose
         // the invoiced column).
         //
-        // Failure semantics: the AADE filing has already succeeded
-        // and the local Invoice is committed; the write-back is
-        // additional bookkeeping that must NOT undo any of that.
-        // We capture the writeback outcome here and bake it into
-        // the pending row's notes in Phase 4. Phase 4's update is
-        // the row's transition to status=filed, after which the
-        // PendingWhmcsInvoiceObserver freezes the row against
-        // further mutations (legal-audit lock) — so the writeback
-        // attempt MUST happen BEFORE that transition.
-        //
-        // Skipped when: tenant is Off-mode (no MARK to push), OR
-        // tenant has no bridge plugin configured (no
-        // whmcs_webhook_secret, or whmcs_api_url doesn't follow the
-        // /includes/api.php convention).
-        $writebackNote = null;
+        // Runs AFTER the Phase 3 status=filed commit, updating ONLY
+        // the whmcs_writeback_* columns (allowed past the audit
+        // freeze). Failure here is non-fatal on EVERY path: the AADE
+        // filing is already recorded, the local Invoice is committed.
+        // A write-back failure leaves whmcs_writeback_state at
+        // 'failed' (with the error captured) so a future retry-sweep
+        // command can re-run it. Skipped (state='skipped') when the
+        // tenant has no bridge plugin configured.
         if ($hasMark) {
-            $writebackNote = $this->writebackInvoicedFlag($tenant, $pending, $invoice, $mark->mark);
+            $this->writebackInvoicedFlag($tenant, $pendingFresh, $invoice, $mark->mark);
         }
-
-        // Phase 4: link the pending row to the AADE result. Status=
-        // filed flips the audit-freeze observer; everything that
-        // needs to live on this row must be in THIS update call.
-        $pendingFresh = $pending->fresh();
-        $baseNote = $hasMark
-            ? 'Filed at AADE as invoice #'.$invoice->invcode.' (MARK '.$mark->mark.').'
-            : 'Recorded locally (off-mode — not filed at AADE) as invoice #'.$invoice->invcode.'.';
-        $pendingFresh->update([
-            'status'           => PendingWhmcsInvoice::STATUS_FILED,
-            'filed_at'         => now(),
-            'filed_by_user_id' => $filedByUserId,
-            'mydata_mark'      => $hasMark ? $mark->mark : null,
-            'notes'            => $writebackNote === null
-                ? $baseNote
-                : $baseNote.' '.$writebackNote,
-        ]);
 
         return new FileResult(
             invoice: $invoice->fresh('lines'),
             mark: $mark->mark,
-            pending: $pendingFresh,
+            pending: $pendingFresh->fresh(),
         );
     }
 
@@ -288,39 +287,45 @@ class WhmcsInvoiceFiler
 
     /**
      * Stage B-3: push the MARK back to tblinvoices.invoiced via the
-     * ekdosi_bridge plugin. Non-fatal on every failure path — see
-     * the call-site comment for the rationale. Returns an optional
-     * note string to append to the pending row's notes column in
-     * Phase 4 (the caller bakes it in BEFORE the status=filed
-     * transition trips the audit-freeze observer).
+     * ekdosi_bridge plugin, recording the outcome on the pending
+     * row's whmcs_writeback_* columns. Non-fatal on EVERY failure
+     * path — see the call-site comment for the rationale.
      *
-     * Returns:
-     *   null  - succeeded silently (no note needed — the "Filed at
-     *           AADE" base note is enough; WHMCS-side bookkeeping
-     *           matches)
-     *   string - note to append (skip / failure diagnostic)
+     * Catches \Throwable (not just the two WHMCS exception classes):
+     * the AADE filing has already committed, so ANY failure here —
+     * a JsonException from the client's json_encode, an unexpected
+     * RuntimeException from the HTTP layer, a future exception type —
+     * must leave the filing intact. The outcome is recorded as
+     * 'failed' with the diagnostic so a retry-sweep can find it.
+     *
+     * Updates only whmcs_writeback_state / whmcs_writeback_error,
+     * which the PendingWhmcsInvoiceObserver permits past the
+     * status=filed audit freeze.
      */
     private function writebackInvoicedFlag(
         Company $tenant,
         PendingWhmcsInvoice $pending,
         Invoice $invoice,
         string $mark,
-    ): ?string {
+    ): void {
         try {
             $client = $this->bridgeFactory->for($tenant);
         } catch (WhmcsNotConfigured $e) {
             // Tenant uses ekdosi for AADE filing but hasn't deployed
             // the bridge plugin (or hasn't configured the secret).
-            // Log so an operator running with logs visible spots it;
-            // skip silently otherwise — the operator already knows
-            // they didn't deploy the plugin.
+            // Record as 'skipped' so it's distinguishable from a
+            // genuine failure in dashboards / retry-sweeps.
             Log::info('WHMCS write-back skipped: bridge plugin not configured', [
                 'pending_id'       => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
                 'mydata_mark'      => $mark,
                 'reason'           => $e->getMessage(),
             ]);
-            return null;
+            $pending->update([
+                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
+                'whmcs_writeback_error' => null,
+            ]);
+            return;
         }
 
         try {
@@ -331,13 +336,19 @@ class WhmcsInvoiceFiler
                 'mydata_mark'      => $mark,
                 'ekdosi_invoice'   => $invoice->invcode,
             ]);
-            return null;
-        } catch (WhmcsUnreachable | WhmcsApiException $e) {
+            $pending->update([
+                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,
+                'whmcs_writeback_error' => null,
+            ]);
+        } catch (\Throwable $e) {
             // The AADE filing is complete and the local Invoice is
             // committed. We've lost the WHMCS-side bookkeeping but
-            // nothing else. Surface the failure in the notes so the
-            // operator sees the gap in the inbox without grepping
-            // logs.
+            // nothing else. Record state=failed + the diagnostic so
+            // the inbox surfaces the gap and a retry-sweep can target
+            // it. WhmcsUnreachable / 5xx are transient (retry helps);
+            // 4xx config errors (invalid_signature, secret_not_
+            // configured) need operator action — both are captured in
+            // the error string for triage.
             Log::error('WHMCS write-back failed (AADE filing already complete)', [
                 'pending_id'       => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
@@ -348,7 +359,10 @@ class WhmcsInvoiceFiler
                     .' for WHMCS invoice '.$pending->whmcs_invoice_id
                     .', or re-trigger the write-back via the bridge plugin admin page.',
             ]);
-            return '[WHMCS write-back failed: '.$e->getMessage().']';
+            $pending->update([
+                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
+                'whmcs_writeback_error' => $e->getMessage(),
+            ]);
         }
     }
 

@@ -80,7 +80,63 @@ function ekdosi_bridge_config(): array
 
 function ekdosi_bridge_activate(): array
 {
-    return ['status' => 'success', 'description' => 'Addon activated.'];
+    $notes = [];
+
+    // 1. Widen tblinvoices.invoiced to BIGINT so it can hold 15-digit
+    //    AADE MARKs. WHMCS ships it as SMALLINT(5) (max 65535) which
+    //    truncates real MARKs. Doing this at activation (instead of a
+    //    manual ALTER the operator might skip) makes the bridge work
+    //    out of the box. Idempotent: re-running on an already-BIGINT
+    //    column is a no-op ALTER.
+    try {
+        $col = \WHMCS\Database\Capsule::selectOne(
+            "SELECT DATA_TYPE FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'tblinvoices'
+               AND COLUMN_NAME = 'invoiced'"
+        );
+        $type = $col ? strtolower((string) $col->DATA_TYPE) : '';
+        if ($type !== '' && $type !== 'bigint') {
+            \WHMCS\Database\Capsule::statement(
+                'ALTER TABLE tblinvoices MODIFY invoiced BIGINT NULL DEFAULT 0'
+            );
+            $notes[] = "Widened tblinvoices.invoiced from {$type} to BIGINT (holds 15-digit AADE MARKs).";
+        } else {
+            $notes[] = 'tblinvoices.invoiced is already BIGINT (or check skipped).';
+        }
+    } catch (\Throwable $e) {
+        // Don't fail activation outright — the operator may lack ALTER
+        // privileges (managed hosting). Surface the SQL so a DBA can
+        // run it manually, and let the addon activate so config can
+        // still be entered.
+        $notes[] = 'WARNING: could not auto-widen tblinvoices.invoiced ('
+            .$e->getMessage().'). Run manually before filing real MARKs: '
+            .'ALTER TABLE tblinvoices MODIFY invoiced BIGINT NULL DEFAULT 0;';
+    }
+
+    // 2. Coexistence guard: warn (don't block) if the legacy
+    //    prepare_for_ekdosi addon is still active. Both write to
+    //    tblinvoices.invoiced with conflicting semantics ({0,1} vs
+    //    {0,MARK}); running both invites a silent clobber. We warn
+    //    rather than refuse so the operator can run them side-by-side
+    //    intentionally during the rollout — but they're told.
+    try {
+        $legacyActive = \WHMCS\Database\Capsule::table('tbladdonmodules')
+            ->where('module', 'prepare_for_ekdosi')
+            ->exists();
+        if ($legacyActive) {
+            $notes[] = 'WARNING: prepare_for_ekdosi is also active. Both plugins write '
+                .'tblinvoices.invoiced; deactivate prepare_for_ekdosi once you have '
+                .'verified ekdosi_bridge end-to-end to avoid a silent overwrite.';
+        }
+    } catch (\Throwable $e) {
+        // Non-fatal: the coexistence check is advisory only.
+    }
+
+    return [
+        'status'      => 'success',
+        'description' => 'Addon activated. '.implode(' ', $notes),
+    ];
 }
 
 function ekdosi_bridge_deactivate(): array

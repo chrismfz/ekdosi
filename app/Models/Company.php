@@ -12,6 +12,18 @@ class Company extends Model
 {
     use HasFactory;
 
+    /**
+     * Stage B-3: the two path fragments that couple ekdosi's
+     * outbound-bridge URL derivation to the WHMCS-side plugin's
+     * filesystem layout. Kept as named constants (not inline magic
+     * strings) so the coupling is grep-discoverable: if the WHMCS
+     * plugin's inbound.php is ever moved/renamed, this is the ONE
+     * place ekdosi needs to change. The plugin's inbound.php docblock
+     * cross-references this constant.
+     */
+    public const WHMCS_API_PATH_SUFFIX = '/includes/api.php';
+    public const WHMCS_BRIDGE_PATH = '/modules/addons/ekdosi_bridge/inbound.php';
+
     protected $fillable = [
         'name',
         'slug',
@@ -106,19 +118,24 @@ class Company extends Model
      */
     public function whmcsBridgeUrl(): ?string
     {
-        $api = (string) ($this->whmcs_api_url ?? '');
+        $api = trim((string) ($this->whmcs_api_url ?? ''));
         if ($api === '') {
             return null;
         }
-        // The /includes/api.php suffix is the WHMCS-native shape;
-        // strip it (with or without trailing slashes) and append
-        // the bridge plugin's inbound path.
-        $suffix = '/includes/api.php';
+        // Normalise before matching the suffix: operators routinely
+        // paste the URL with a trailing slash (copy from a docs page)
+        // or a stray ?query. Strip both so the well-known
+        // /includes/api.php convention still matches — otherwise the
+        // bridge silently disables itself on a cosmetic typo.
+        $api = preg_replace('/[?#].*$/', '', $api);   // drop query / fragment
+        $api = rtrim($api, '/');                       // drop trailing slashes
+
+        $suffix = self::WHMCS_API_PATH_SUFFIX;
         if (! str_ends_with($api, $suffix)) {
             return null;
         }
         $base = substr($api, 0, -strlen($suffix));
-        return $base.'/modules/addons/ekdosi_bridge/inbound.php';
+        return $base.self::WHMCS_BRIDGE_PATH;
     }
 
     /**

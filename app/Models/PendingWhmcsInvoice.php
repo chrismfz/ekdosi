@@ -62,6 +62,16 @@ class PendingWhmcsInvoice extends Model
     public const REASON_NAME      = 'name';
     public const REASON_UNMATCHED = 'unmatched';
 
+    /**
+     * Stage B-3: WHMCS write-back lifecycle. `null` means N/A
+     * (off-mode tenant — no MARK to push). See the
+     * add_writeback_state migration docblock for the full semantics.
+     */
+    public const WRITEBACK_PENDING   = 'pending';
+    public const WRITEBACK_SUCCEEDED = 'succeeded';
+    public const WRITEBACK_FAILED    = 'failed';
+    public const WRITEBACK_SKIPPED   = 'skipped';
+
     protected $fillable = [
         'company_id',
         'whmcs_invoice_id',
@@ -76,6 +86,8 @@ class PendingWhmcsInvoice extends Model
         'filed_at',
         'filed_by_user_id',
         'mydata_mark',
+        'whmcs_writeback_state',
+        'whmcs_writeback_error',
     ];
 
     protected function casts(): array

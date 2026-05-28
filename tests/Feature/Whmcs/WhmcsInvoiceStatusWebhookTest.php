@@ -12,9 +12,9 @@ use Tests\TestCase;
  * Stage B-3 (PR #48): HTTP contract of
  *   GET /webhooks/whmcs/{slug}/invoice-status/{whmcs_invoice_id}
  *
- * Covers the auth perimeter (signature over the request path, since
- * GET has no body) and the response-shape contract the WHMCS-side
- * ekdosi_bridge plugin parses into per-invoice badges.
+ * Covers the auth perimeter (HMAC over the canonical "{slug}:{id}"
+ * string, since GET has no body) and the response-shape contract the
+ * WHMCS-side ekdosi_bridge plugin parses into per-invoice badges.
  */
 class WhmcsInvoiceStatusWebhookTest extends TestCase
 {
@@ -34,9 +34,14 @@ class WhmcsInvoiceStatusWebhookTest extends TestCase
         ]);
     }
 
-    private function signedPath(string $path): string
+    /**
+     * Sign the canonical "{slug}:{invoice_id}" string — the
+     * transport-independent shape the controller verifies (NOT the
+     * URL path).
+     */
+    private function signedCanonical(string $slug, int $invoiceId): string
     {
-        return 'sha256='.hash_hmac('sha256', $path, self::WEBHOOK_SECRET);
+        return 'sha256='.hash_hmac('sha256', $slug.':'.$invoiceId, self::WEBHOOK_SECRET);
     }
 
     public function test_returns_404_for_unknown_tenant(): void
@@ -95,13 +100,12 @@ class WhmcsInvoiceStatusWebhookTest extends TestCase
 
     public function test_returns_401_when_signature_covers_a_different_invoice_id(): void
     {
-        // The security property the per-path HMAC provides: a
-        // signature for /invoice-status/123 must NOT validate
-        // /invoice-status/456. Otherwise an attacker observing one
-        // signed URL could query any other invoice.
+        // The security property the canonical-string HMAC provides:
+        // a signature for invoice 123 must NOT validate invoice 456.
+        // Otherwise an attacker observing one signed request could
+        // query any other invoice.
         $tenant = $this->configuredTenant();
-        $wrongPath = "/webhooks/whmcs/{$tenant->slug}/invoice-status/123";
-        $signature = $this->signedPath($wrongPath);
+        $signature = $this->signedCanonical($tenant->slug, 123);
 
         $response = $this->withHeaders([
             'X-Webhook-Signature' => $signature,
@@ -116,7 +120,7 @@ class WhmcsInvoiceStatusWebhookTest extends TestCase
         $path = "/webhooks/whmcs/{$tenant->slug}/invoice-status/8888";
 
         $response = $this->withHeaders([
-            'X-Webhook-Signature' => $this->signedPath($path),
+            'X-Webhook-Signature' => $this->signedCanonical($tenant->slug, 8888),
         ])->getJson($path);
 
         $response->assertStatus(200);
@@ -142,7 +146,7 @@ class WhmcsInvoiceStatusWebhookTest extends TestCase
 
         $path = "/webhooks/whmcs/{$tenant->slug}/invoice-status/8888";
         $response = $this->withHeaders([
-            'X-Webhook-Signature' => $this->signedPath($path),
+            'X-Webhook-Signature' => $this->signedCanonical($tenant->slug, 8888),
         ])->getJson($path);
 
         $response->assertStatus(200);
@@ -219,7 +223,7 @@ class WhmcsInvoiceStatusWebhookTest extends TestCase
 
         $path = "/webhooks/whmcs/{$tenantA->slug}/invoice-status/8888";
         $response = $this->withHeaders([
-            'X-Webhook-Signature' => $this->signedPath($path),
+            'X-Webhook-Signature' => $this->signedCanonical($tenantA->slug, 8888),
         ])->getJson($path);
 
         $response->assertStatus(200);
