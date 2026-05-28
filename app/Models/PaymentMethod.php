@@ -16,7 +16,16 @@ class PaymentMethod extends Model
         'legacy_id',
         'description',
         'due_days',
+        'mydata_payment_type',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'due_days' => 'integer',
+            'mydata_payment_type' => 'integer',
+        ];
+    }
 
     public function company(): BelongsTo
     {

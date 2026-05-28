@@ -108,7 +108,12 @@ class WhmcsInvoiceMapper
             : $this->filterPayloadItems($payload, $onlyWhmcsItemIds);
         $defaultVat = $this->resolveDefaultVatCategory($tenant);
 
-        $lines = $this->buildLines($linePayload, $defaultVat);
+        // G3: whether WHMCS sends line amounts VAT-inclusive (gross, the Greek
+        // norm + default) or tax-exclusive (net). A tax-exclusive tenant must
+        // NOT have a VAT divided out of an amount that never contained it.
+        $amountIncludesTax = (bool) ($tenant->whmcs_amount_includes_tax ?? true);
+
+        $lines = $this->buildLines($linePayload, $defaultVat, $amountIncludesTax);
         $totals = $this->computeTotals($lines);
 
         return [
@@ -204,7 +209,7 @@ class WhmcsInvoiceMapper
      *
      * @return array<int, array<string, mixed>>
      */
-    private function buildLines(array $payload, VatCategory $defaultVat): array
+    private function buildLines(array $payload, VatCategory $defaultVat, bool $amountIncludesTax = true): array
     {
         $items = $payload['items']['item'] ?? [];
         // Normalise single-item shape (WHMCS returns object not array
@@ -274,7 +279,12 @@ class WhmcsInvoiceMapper
                 $linePercent = 0.0;
                 $lineVatCategoryId = $zeroVat->id;
             } else {
-                $lineNet = round($grossAmount / (1 + ($vatPercent / 100)), 2);
+                // G3: gross-inclusive → back out the net; tax-exclusive → the
+                // amount IS the net. Either way re-derive gross from net via
+                // the same formula InvoiceLine::saving uses (preview == saved).
+                $lineNet = $amountIncludesTax
+                    ? round($grossAmount / (1 + ($vatPercent / 100)), 2)
+                    : round($grossAmount, 2);
                 $lineGross = round($lineNet * (1 + ($vatPercent / 100)), 2);
                 $linePercent = $vatPercent;
                 $lineVatCategoryId = $defaultVat->id;

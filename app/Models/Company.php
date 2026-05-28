@@ -68,6 +68,7 @@ class Company extends Model
         'whmcs_invoice_min_date',
         // T-1b: per-tenant backend kill-switch for third-party invoicing
         'whmcs_third_party_enabled',
+        'whmcs_amount_includes_tax',
     ];
 
     protected function casts(): array
@@ -81,6 +82,7 @@ class Company extends Model
             'whmcs_custom_field_map' => 'array',
             'whmcs_invoice_min_date' => 'date',
             'whmcs_third_party_enabled' => 'boolean',
+            'whmcs_amount_includes_tax' => 'boolean',
             'auto_email_on_mydata_accept' => 'boolean',
             'mail_smtp_port' => 'integer',
         ];

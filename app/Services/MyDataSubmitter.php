@@ -458,20 +458,28 @@ class MyDataSubmitter implements EInvoiceSubmitter
         $incomeClass = $invoice->invoiceType?->mydata_income_class;
         $incomeCat = $invoice->invoiceType?->mydata_income_class_category;
 
+        // G5: per-line <quantity> is FORBIDDEN for the service types we file
+        // ([205]) but expected on goods παραστατικά. Spec §5.x: quantity is
+        // optional at the XSD level, so goods types opt in via
+        // invoice_types.mydata_requires_quantity; service types (default off)
+        // stay byte-identical to the sandbox-validated payload.
+        $emitQuantity = (bool) ($invoice->invoiceType?->mydata_requires_quantity ?? false);
+
         $details = [];
         $lineNo = 1;
         foreach ($invoice->lines as $line) {
-            // No setQuantity: AADE rejects a per-line <quantity> for the
-            // service invoice types we file ("[205] Quantity Per Line is
-            // forbidden for this invoice type"). The legacy accepted
-            // payload never sent it. (Goods types that DO take quantity
-            // would reinstate it conditionally — follow-up.)
             $rate = (float) $line->vat_percent;
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
                 ->setNetValue((float) $line->net_price)
                 ->setVatCategory($this->vatCategoryFor($rate))
                 ->setVatAmount(round((float) $line->gross_price - (float) $line->net_price, 2));
+
+            if ($emitQuantity) {
+                // measurementUnit stays omitted (optional per spec; mapping
+                // free-text metric_unit → §8.13 codes is a follow-up).
+                $detail->setQuantity((float) $line->qty);
+            }
 
             // G4: a 0% line is filed as vatCategory=7 (exempt) WITH the reason
             // code AADE requires ([217] forbids category 7 without it). The
@@ -583,9 +591,19 @@ class MyDataSubmitter implements EInvoiceSubmitter
      * per-payment-method → myDATA-type mapping on the PaymentMethod
      * lookup. The amount on the detail is the invoice gross.
      */
+    /**
+     * G9: the AADE §8.12 payment-method type for the filing. Reads the
+     * invoice's PaymentMethod.mydata_payment_type (1–8); falls back to 3
+     * (Μετρητά / cash) when the method is unmapped or absent — the prior
+     * hardcoded behaviour, now only the default rather than the only value.
+     * A configured value outside 1–8 falls back to 3 rather than emitting a
+     * bad type AADE would reject.
+     */
     private function paymentMethodTypeFor(Invoice $invoice): int
     {
-        return 3;
+        $type = $invoice->paymentMethod?->mydata_payment_type;
+
+        return ($type !== null && Codes::paymentMethodExists((int) $type)) ? (int) $type : 3;
     }
 
     /**

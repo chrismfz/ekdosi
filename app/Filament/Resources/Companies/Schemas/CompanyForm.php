@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Companies\Schemas;
 
+use App\Enums\MyDataMode;
 use App\Exceptions\Aade\AadeAfmNotFound;
 use App\Exceptions\Aade\AadeCredentialsInvalid;
 use App\Exceptions\Aade\AadeUnreachable;
@@ -12,6 +13,7 @@ use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Services\AadeRegistryLookup;
 use App\Services\MailTemplateRenderer;
+use App\Services\MyDataSubmitter;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
@@ -19,9 +21,10 @@ use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
@@ -29,7 +32,8 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Illuminate\Mail\Mailables\Address;
-use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
 class CompanyForm
@@ -101,17 +105,19 @@ class CompanyForm
                                             ->label('Fetch from AADE')
                                             ->icon('heroicon-o-arrow-down-tray')
                                             ->visible(fn (callable $get) => $get('country_code') === 'GR')
-                                            ->action(function (callable $get, callable $set, ?\App\Models\Company $record) {
+                                            ->action(function (callable $get, callable $set, ?Company $record) {
                                                 if (! $record) {
                                                     Notification::make()
                                                         ->title('Save the company first, then click Fetch.')
                                                         ->warning()
                                                         ->send();
+
                                                     return;
                                                 }
                                                 $afm = trim((string) $get('afm'));
                                                 if ($afm === '') {
                                                     Notification::make()->title('Enter an AFM first.')->warning()->send();
+
                                                     return;
                                                 }
                                                 try {
@@ -121,12 +127,15 @@ class CompanyForm
                                                         ->title('GSIS credentials invalid')
                                                         ->body('Check the AADE registry credentials below.')
                                                         ->danger()->send();
+
                                                     return;
                                                 } catch (AadeAfmNotFound) {
                                                     Notification::make()->title('AFM not found or inactive in AADE registry')->warning()->send();
+
                                                     return;
                                                 } catch (AadeUnreachable) {
                                                     Notification::make()->title('AADE registry unreachable — try again later')->warning()->send();
+
                                                     return;
                                                 }
                                                 // Only overwrite fields the operator hasn't
@@ -217,30 +226,30 @@ class CompanyForm
 
                                         Select::make('mydata_mode')
                                             ->label('Submission mode')
-                                            ->options(\App\Enums\MyDataMode::options())
-                                            ->default(\App\Enums\MyDataMode::Off->value)
+                                            ->options(MyDataMode::options())
+                                            ->default(MyDataMode::Off->value)
                                             ->required()
                                             ->live()
-                                            ->helperText(new \Illuminate\Support\HtmlString(
+                                            ->helperText(new HtmlString(
                                                 '<strong>Off</strong> = no AADE call (PDFs only, safe for testing). '
-                                                . '<strong>Sandbox</strong> = AADE test endpoint (synthetic MARKs). '
-                                                . '<strong>Production</strong> = LIVE submissions affecting real tax records. '
-                                                . '<br><strong>⚠ Switching to/from Production:</strong> the change takes effect '
-                                                . 'on save. Verify credentials via "Test connection" before going Live; '
-                                                . 'switching back to Off/Sandbox stops legally-required filings.'
+                                                .'<strong>Sandbox</strong> = AADE test endpoint (synthetic MARKs). '
+                                                .'<strong>Production</strong> = LIVE submissions affecting real tax records. '
+                                                .'<br><strong>⚠ Switching to/from Production:</strong> the change takes effect '
+                                                .'on save. Verify credentials via "Test connection" before going Live; '
+                                                .'switching back to Off/Sandbox stops legally-required filings.'
                                             )),
-                                            // Note: a Notification-on-afterStateUpdated approach
-                                            // was tried and removed — it fired on every form
-                                            // state change (including immediate undos), creating
-                                            // toast spam that trained operators to ignore the
-                                            // warnings. The safer pattern is to surface the
-                                            // mode-change semantic in helperText + a real
-                                            // confirm modal on the EditCompany page's save
-                                            // action when mydata_mode transitions involve
-                                            // Production. That belongs on the page class, not
-                                            // the form schema — tracked in CLAUDE.md as a
-                                            // deferred follow-up since it requires touching
-                                            // EditCompany.php and a custom save action.
+                                        // Note: a Notification-on-afterStateUpdated approach
+                                        // was tried and removed — it fired on every form
+                                        // state change (including immediate undos), creating
+                                        // toast spam that trained operators to ignore the
+                                        // warnings. The safer pattern is to surface the
+                                        // mode-change semantic in helperText + a real
+                                        // confirm modal on the EditCompany page's save
+                                        // action when mydata_mode transitions involve
+                                        // Production. That belongs on the page class, not
+                                        // the form schema — tracked in CLAUDE.md as a
+                                        // deferred follow-up since it requires touching
+                                        // EditCompany.php and a custom save action.
                                     ])
                                     ->footerActions([
                                         FormAction::make('test_mydata_connection')
@@ -255,20 +264,22 @@ class CompanyForm
                                                 ['sandbox', 'production'],
                                                 true,
                                             ))
-                                            ->action(function (?\App\Models\Company $record) {
+                                            ->action(function (?Company $record) {
                                                 if (! $record) {
                                                     Notification::make()
                                                         ->title('Save the company first, then test.')
                                                         ->warning()->send();
+
                                                     return;
                                                 }
                                                 try {
-                                                    $ok = (new \App\Services\MyDataSubmitter($record))->testConnection();
+                                                    $ok = (new MyDataSubmitter($record))->testConnection();
                                                 } catch (\Throwable $e) {
                                                     Notification::make()
                                                         ->title('myDATA unreachable')
                                                         ->body($e->getMessage())
                                                         ->warning()->send();
+
                                                     return;
                                                 }
                                                 if ($ok) {
@@ -311,11 +322,12 @@ class CompanyForm
                                         FormAction::make('test_gsis')
                                             ->label('Test registry credentials')
                                             ->icon('heroicon-o-bolt')
-                                            ->action(function (callable $get, ?\App\Models\Company $record) {
+                                            ->action(function (callable $get, ?Company $record) {
                                                 if (! $record) {
                                                     Notification::make()
                                                         ->title('Save the company first, then test.')
                                                         ->warning()->send();
+
                                                     return;
                                                 }
                                                 // Use the form's current AFM, not the
@@ -329,9 +341,10 @@ class CompanyForm
                                                     Notification::make()
                                                         ->title('Enter an AFM on the Identity tab first.')
                                                         ->warning()->send();
+
                                                     return;
                                                 }
-                                                \Illuminate\Support\Facades\Cache::forget(
+                                                Cache::forget(
                                                     "aade.registry.{$record->getKey()}.{$afm}"
                                                 );
                                                 try {
@@ -484,6 +497,7 @@ class CompanyForm
                                             ->action(function (array $data, ?Company $record) {
                                                 if (! $record) {
                                                     Notification::make()->title('Save the company first, then test.')->warning()->send();
+
                                                     return;
                                                 }
                                                 try {
@@ -498,7 +512,7 @@ class CompanyForm
                                                     $html = '<p>This is a test email from ekdosi for tenant <strong>'.e($record->name).'</strong>.</p>'.
                                                         '<p>If you received this, the tenant\'s SMTP config (or the global fallback) is working.</p>';
                                                     $mailer->send(
-                                                        ['html' => new \Illuminate\Support\HtmlString($html)],
+                                                        ['html' => new HtmlString($html)],
                                                         [],
                                                         function ($message) use ($data, $record, $bcc) {
                                                             $message->to($data['to'])
@@ -575,6 +589,10 @@ class CompanyForm
                                             ->native(false)
                                             ->displayFormat('Y-m-d')
                                             ->helperText('IMPORTANT for long-running tenants with historical test data. Set to your ekdosi-cutover date (e.g. when you started filing via this app). Invoices dated before this are silently skipped by Fetch + Preview. Leave blank only if your WHMCS is fresh / has no historical noise.'),
+                                        Toggle::make('whmcs_amount_includes_tax')
+                                            ->label('WHMCS line amounts include VAT')
+                                            ->default(true)
+                                            ->helperText('ON (default, Greek norm): WHMCS sends GROSS line amounts and ekdosi backs out the VAT. OFF: this WHMCS runs tax-exclusive (NET amounts) — flip it so VAT is added, not divided out, otherwise filed VAT is wrong (G3).'),
                                         FormAction::make('test_whmcs_connection')
                                             ->label('Test connection')
                                             ->icon('heroicon-o-signal')
@@ -585,6 +603,7 @@ class CompanyForm
                                             ->action(function (?Company $record) {
                                                 if (! $record) {
                                                     Notification::make()->title('Save the company first, then test.')->warning()->send();
+
                                                     return;
                                                 }
                                                 try {
@@ -632,6 +651,7 @@ class CompanyForm
                                             ->action(function (?Company $record) {
                                                 if (! $record) {
                                                     Notification::make()->title('Save the company first, then preview.')->warning()->send();
+
                                                     return;
                                                 }
                                                 try {
@@ -640,15 +660,19 @@ class CompanyForm
                                                     $invoices = $client->getPendingInvoices(limit: 100, minDate: $minDate);
                                                 } catch (WhmcsNotConfigured $e) {
                                                     Notification::make()->title('WHMCS not configured')->body($e->getMessage())->warning()->send();
+
                                                     return;
                                                 } catch (WhmcsAuthenticationFailed $e) {
                                                     Notification::make()->title('WHMCS credentials rejected')->body($e->getMessage())->danger()->persistent()->send();
+
                                                     return;
                                                 } catch (WhmcsUnreachable $e) {
                                                     Notification::make()->title('WHMCS unreachable')->body($e->getMessage())->danger()->persistent()->send();
+
                                                     return;
                                                 } catch (WhmcsApiException $e) {
                                                     Notification::make()->title('WHMCS error')->body($e->getMessage())->danger()->persistent()->send();
+
                                                     return;
                                                 }
 
@@ -661,6 +685,7 @@ class CompanyForm
                                                         ->title('No paid + unfiled invoices')
                                                         ->body('WHMCS returned no pending invoices for this tenant'.$cutoffNote.'.')
                                                         ->success()->send();
+
                                                     return;
                                                 }
 
@@ -671,11 +696,11 @@ class CompanyForm
                                                 foreach ($invoices as $inv) {
                                                     $whmcsClientId = (int) ($inv['userid'] ?? 0);
                                                     $m = $matcher->match($record, [
-                                                        'id'          => $whmcsClientId,
-                                                        'userid'      => $whmcsClientId,
-                                                        'email'       => $inv['email'] ?? null,
-                                                        'firstname'   => $inv['firstname'] ?? null,
-                                                        'lastname'    => $inv['lastname'] ?? null,
+                                                        'id' => $whmcsClientId,
+                                                        'userid' => $whmcsClientId,
+                                                        'email' => $inv['email'] ?? null,
+                                                        'firstname' => $inv['firstname'] ?? null,
+                                                        'lastname' => $inv['lastname'] ?? null,
                                                         'companyname' => $inv['companyname'] ?? null,
                                                     ]);
                                                     if ($m->isMatched()) {
@@ -705,6 +730,7 @@ class CompanyForm
                                             ->action(function (?Company $record) {
                                                 if (! $record) {
                                                     Notification::make()->title('Save the company first.')->warning()->send();
+
                                                     return;
                                                 }
                                                 try {
@@ -714,15 +740,19 @@ class CompanyForm
                                                     $list = $client->getPendingInvoices(limit: 100, minDate: $minDate);
                                                 } catch (WhmcsNotConfigured $e) {
                                                     Notification::make()->title('WHMCS not configured')->body($e->getMessage())->warning()->send();
+
                                                     return;
                                                 } catch (WhmcsAuthenticationFailed $e) {
                                                     Notification::make()->title('WHMCS credentials rejected')->body($e->getMessage())->danger()->persistent()->send();
+
                                                     return;
                                                 } catch (WhmcsUnreachable $e) {
                                                     Notification::make()->title('WHMCS unreachable')->body($e->getMessage())->danger()->persistent()->send();
+
                                                     return;
                                                 } catch (WhmcsApiException $e) {
                                                     Notification::make()->title('WHMCS error')->body($e->getMessage())->danger()->persistent()->send();
+
                                                     return;
                                                 }
 
@@ -731,6 +761,7 @@ class CompanyForm
                                                         ->title('Nothing to stage')
                                                         ->body('WHMCS returned no paid+unfiled invoices.')
                                                         ->success()->send();
+
                                                     return;
                                                 }
 
@@ -744,12 +775,14 @@ class CompanyForm
                                                     $invoiceId = (int) ($listRow['id'] ?? 0);
                                                     if ($invoiceId <= 0) {
                                                         $failed++;
+
                                                         continue;
                                                     }
                                                     try {
                                                         $payload = $client->getInvoiceWithClient($invoiceId);
                                                         if ($payload === null) {
                                                             $failed++;
+
                                                             continue;
                                                         }
                                                         $result = $ingestor->ingest($record, $payload);
@@ -803,7 +836,7 @@ class CompanyForm
                                 Section::make('Custom field mapping')
                                     ->description('Each WHMCS install assigns its own integer IDs to custom fields. Tell us which IDs carry which roles so we can read the right data when matching invoices and (in Stage B) building the myDATA payload.')
                                     ->schema([
-                                        \Filament\Forms\Components\KeyValue::make('whmcs_custom_field_map')
+                                        KeyValue::make('whmcs_custom_field_map')
                                             ->label(false)
                                             ->keyLabel('Role')
                                             ->valueLabel('WHMCS field id')

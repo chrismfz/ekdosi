@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\VatCategory;
 use App\Services\MyDataSubmitter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -360,6 +361,76 @@ class MyDataSubmitterSafetyTest extends TestCase
         $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
 
         $this->assertStringNotContainsString('<taxesTotals>', $xml);
+    }
+
+    public function test_payment_method_type_defaults_to_cash_when_unmapped(): void
+    {
+        // G9 regression: no payment method (or unmapped) → type 3 (cash),
+        // the prior hardcoded behaviour, now the documented default.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<type>3</type>', $xml);
+    }
+
+    public function test_payment_method_type_comes_from_the_mapped_method(): void
+    {
+        // G9: a method mapped to §8.12 type 7 (POS/e-POS) files as type 7.
+        $pm = PaymentMethod::create([
+            'company_id' => $this->tenant->id,
+            'description' => 'Κάρτα',
+            'due_days' => 0,
+            'mydata_payment_type' => 7,
+        ]);
+        $inv = $this->makeInvoice();
+        $inv->forceFill(['payment_method_id' => $pm->id])->save();
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<type>7</type>', $xml);
+        $this->assertStringNotContainsString('<type>3</type>', $xml);
+    }
+
+    public function test_service_type_emits_no_per_line_quantity(): void
+    {
+        // G5 regression: the validated service path (mydata_requires_quantity
+        // off) must NOT send <quantity> ([205] forbids it).
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringNotContainsString('<quantity>', $xml);
+    }
+
+    public function test_goods_type_emits_per_line_quantity(): void
+    {
+        // G5: a goods-flagged invoice type sends the per-line quantity.
+        $goods = InvoiceType::create([
+            'company_id' => $this->tenant->id,
+            'code' => 'GDS',
+            'name' => 'Τιμολόγιο αγαθών',
+            'invcount' => 1,
+            'mydata_type' => '1.1',
+            'mydata_requires_quantity' => true,
+        ]);
+        $inv = $this->makeInvoice();
+        $inv->forceFill(['invoice_type_id' => $goods->id])->save();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 5,
+            'vat_percent' => 24,
+            'net_price' => 1000,
+            'gross_price' => 1240,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<quantity>5</quantity>', $xml);
     }
 
     private function zeroVatLine(Invoice $inv): void
