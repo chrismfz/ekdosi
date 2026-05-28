@@ -256,9 +256,25 @@ The only path we actually need to validate. No customer-visible change.
 > - Decoupling confirmed: the `ThirdPartyResolution` contract is unchanged, so
 >   all T-1a/T-1b-1 ekdosi tests still pass untouched.
 >
-> **T‑1c — DEFERRED (needs sign-off): the guided split view** for multi-party
-> invoices (many ekdosi invoices ↔ one `whmcs_invoice_id`). Until built,
-> multi-party rows are safely `held`.
+> **T‑1c — DONE (guided multi-party split).** Built + tested:
+> - **`invoices.whmcs_pending_id`** (many invoices ↔ one pending row,
+>   `nullOnDelete`); `PendingWhmcsInvoice::STATUS_SPLIT` + `splitInvoices()`.
+> - **`WhmcsInvoiceMapper::map(..., ?array $onlyWhmcsItemIds)`** — maps a line
+>   subset (one billing party).
+> - **`WhmcsInvoiceSplitter`** — groups the stored resolution by party, resolves
+>   each party's Customer (contacts via `ContactCustomerResolver`, reseller via
+>   the pending row's match), and creates one **DRAFT** invoice per party in a
+>   single all-or-nothing transaction. **Deliberately drafts, not batch-AADE** —
+>   each is filed individually via the proven per-invoice myDATA path, avoiding
+>   the partial-failure hazard of multi-MARK batch filing. Refuses to half-apply
+>   (any unresolvable party aborts the whole split).
+> - **Inbox "Διαχωρισμός σε προσχέδια"** action (multi-party rows only) with a
+>   per-party preview; `split` status badge + filter. 4 new tests; full suite
+>   329 passed / 12 skipped.
+> - **Deferred follow-ups:** per-group invoice-type (τιμολόγιο vs απόδειξη from
+>   `is_receipt`) — currently one type for all drafts, operator adjusts per
+>   draft; WHMCS write-back for split invoices (the legacy `invoiced` column
+>   holds one MARK, not N).
 1. **Bridge (WHMCS side):** add an endpoint (extend `inbound.php` +
    `EkdosiClient`) that, for a WHMCS invoice, resolves each line's
    `serviceid`+`service_type`, `LEFT JOIN mod_timologia → mod_timologia_contacts`,

@@ -90,6 +90,7 @@ class WhmcsInvoiceMapper
         PendingWhmcsInvoice $pending,
         Customer $customer,
         InvoiceType $invoiceType,
+        ?array $onlyWhmcsItemIds = null,
     ): array {
         if ($customer->company_id !== $tenant->id) {
             throw new InvalidArgumentException('Customer belongs to a different tenant.');
@@ -99,17 +100,23 @@ class WhmcsInvoiceMapper
         }
 
         $payload = $pending->payload ?? [];
+        // T-1c: when splitting a multi-party WHMCS invoice, map only the line
+        // items belonging to one billing party. Null = the whole invoice
+        // (the standard single-invoice path).
+        $linePayload = $onlyWhmcsItemIds === null
+            ? $payload
+            : $this->filterPayloadItems($payload, $onlyWhmcsItemIds);
         $defaultVat = $this->resolveDefaultVatCategory($tenant);
 
-        $lines = $this->buildLines($payload, $defaultVat);
+        $lines = $this->buildLines($linePayload, $defaultVat);
         $totals = $this->computeTotals($lines);
 
         return [
             'header' => [
-                'company_id'        => $tenant->id,
-                'customer_id'       => $customer->id,
-                'invoice_type_id'   => $invoiceType->id,
-                'issued_at'         => now()->format('Y-m-d H:i:s'),
+                'company_id' => $tenant->id,
+                'customer_id' => $customer->id,
+                'invoice_type_id' => $invoiceType->id,
+                'issued_at' => now()->format('Y-m-d H:i:s'),
                 'payment_method_id' => $invoiceType->payment_method_id,
                 // Snapshot: frozen at issue time per Greek legal-invoice
                 // requirements (the invoice must record the customer's
@@ -122,30 +129,57 @@ class WhmcsInvoiceMapper
                 // customer capture (address2 + vies_vat — relevant for
                 // VIES intra-community filings).
                 'company_name' => (string) $customer->name,
-                'vat_no'       => (string) ($customer->afm ?? ''),
+                'vat_no' => (string) ($customer->afm ?? ''),
                 // Source column on Customer is vat_vies; snapshot
                 // column on Invoice is vies_vat (legacy naming
                 // mismatch carried through from the Firebird ETL,
                 // documented in CLAUDE.md schema notes).
-                'vies_vat'     => (string) ($customer->vat_vies ?? ''),
-                'address1'     => (string) ($customer->address1 ?? ''),
-                'address2'     => (string) ($customer->address2 ?? ''),
-                'city'         => (string) ($customer->city ?? ''),
-                'postcode'     => (string) ($customer->postcode ?? ''),
-                'country'      => (string) ($customer->country ?? 'GR'),
-                'occupation'   => (string) ($customer->occupation ?? ''),
-                'email'        => (string) ($customer->email ?? ''),
-                'notes'        => 'Από WHMCS #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
+                'vies_vat' => (string) ($customer->vat_vies ?? ''),
+                'address1' => (string) ($customer->address1 ?? ''),
+                'address2' => (string) ($customer->address2 ?? ''),
+                'city' => (string) ($customer->city ?? ''),
+                'postcode' => (string) ($customer->postcode ?? ''),
+                'country' => (string) ($customer->country ?? 'GR'),
+                'occupation' => (string) ($customer->occupation ?? ''),
+                'email' => (string) ($customer->email ?? ''),
+                'notes' => 'Από WHMCS #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
             ],
-            'lines'  => $lines,
+            'lines' => $lines,
             'totals' => $totals,
             'source' => [
                 'whmcs_invoice_id' => (int) ($payload['invoiceid'] ?? $payload['id'] ?? 0),
-                'whmcs_userid'     => (int) ($payload['userid'] ?? 0),
-                'whmcs_date'       => (string) ($payload['date'] ?? ''),
-                'whmcs_total'      => (float) ($payload['total'] ?? 0.0),
+                'whmcs_userid' => (int) ($payload['userid'] ?? 0),
+                'whmcs_date' => (string) ($payload['date'] ?? ''),
+                'whmcs_total' => (float) ($payload['total'] ?? 0.0),
             ],
         ];
+    }
+
+    /**
+     * T-1c: return a copy of the payload whose items are restricted to the
+     * given WHMCS line-item ids (tblinvoiceitems.id, == resolve.php item_id).
+     * Normalises the single-item shape first so filtering is uniform.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, int>  $onlyWhmcsItemIds
+     * @return array<string, mixed>
+     */
+    private function filterPayloadItems(array $payload, array $onlyWhmcsItemIds): array
+    {
+        $items = $payload['items']['item'] ?? [];
+        if (! empty($items) && ! array_is_list($items)) {
+            $items = [$items];
+        }
+
+        $allow = array_flip(array_map('intval', $onlyWhmcsItemIds));
+        $filtered = array_values(array_filter(
+            $items,
+            static fn ($item) => isset($allow[(int) ($item['id'] ?? 0)]),
+        ));
+
+        $payload['items']['item'] = $filtered;
+
+        return $payload;
     }
 
     private function resolveDefaultVatCategory(Company $tenant): VatCategory
@@ -254,17 +288,18 @@ class WhmcsInvoiceMapper
             // so the values we set here are advisory — present for the
             // preview modal which doesn't trigger the hook.
             $out[] = [
-                'product_id'      => null,
-                'description'     => $description,
-                'qty'             => 1.0,
-                'price_per_item'  => $lineNet,           // net per unit (qty=1, so net == unit)
-                'discount'        => 0.0,
+                'product_id' => null,
+                'description' => $description,
+                'qty' => 1.0,
+                'price_per_item' => $lineNet,           // net per unit (qty=1, so net == unit)
+                'discount' => 0.0,
                 'vat_category_id' => $lineVatCategoryId,
-                'vat_percent'     => $linePercent,
-                'net_price'       => $lineNet,
-                'gross_price'     => $lineGross,
+                'vat_percent' => $linePercent,
+                'net_price' => $lineNet,
+                'gross_price' => $lineGross,
             ];
         }
+
         return $out;
     }
 
@@ -290,6 +325,7 @@ class WhmcsInvoiceMapper
                 .'misclassified under the default rate in downstream reports.'
             );
         }
+
         return $zero;
     }
 
@@ -310,6 +346,7 @@ class WhmcsInvoiceMapper
                 return true;
             }
         }
+
         return false;
     }
 
@@ -331,6 +368,7 @@ class WhmcsInvoiceMapper
                 $out[] = (string) $line['description'];
             }
         }
+
         return $out;
     }
 
@@ -354,18 +392,18 @@ class WhmcsInvoiceMapper
         ksort($byRate);
         $breakdown = array_values(array_map(
             fn ($r) => [
-                'rate'  => $r['rate'],
-                'net'   => round($r['net'], 2),
-                'vat'   => round($r['vat'], 2),
+                'rate' => $r['rate'],
+                'net' => round($r['net'], 2),
+                'vat' => round($r['vat'], 2),
                 'gross' => round($r['gross'], 2),
             ],
             $byRate,
         ));
 
         return [
-            'net_total'     => round($net, 2),
-            'vat_total'     => round($gross - $net, 2),
-            'gross_total'   => round($gross, 2),
+            'net_total' => round($net, 2),
+            'vat_total' => round($gross - $net, 2),
+            'gross_total' => round($gross, 2),
             'vat_breakdown' => $breakdown,
             // Fix #2 — does this invoice have any 0%-VAT lines that
             // MyDataSubmitter::vatCategoryFor would refuse? The filer

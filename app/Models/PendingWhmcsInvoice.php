@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * PR #31 (WHMCS bridge - Stage B-1): a WHMCS invoice awaiting operator
@@ -54,6 +55,11 @@ class PendingWhmcsInvoice extends Model
     public const STATUS_REJECTED = 'rejected';
 
     public const STATUS_HELD = 'held';
+
+    // T-1c: split into N per-party draft invoices (multi-party third-party
+    // invoicing). The drafts carry invoices.whmcs_pending_id back-references;
+    // the operator files each via the normal myDATA submit path.
+    public const STATUS_SPLIT = 'split';
 
     /**
      * Match-reason constants - mirror MatchResult::$reason values so
@@ -149,6 +155,16 @@ class PendingWhmcsInvoice extends Model
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(Invoice::class);
+    }
+
+    /**
+     * T-1c: the per-party draft invoices produced by splitting a multi-party
+     * WHMCS invoice (each carries invoices.whmcs_pending_id = this row). The
+     * 1:1 `invoice()` link above stays null on the split path.
+     */
+    public function splitInvoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class, 'whmcs_pending_id');
     }
 
     /**
