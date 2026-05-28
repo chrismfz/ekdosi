@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Webhooks\WhmcsInvoicePaidController;
+use App\Http\Controllers\Webhooks\WhmcsInvoiceStatusController;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -24,3 +25,20 @@ Route::post(
     'whmcs/{slug}/invoice-paid',
     WhmcsInvoicePaidController::class,
 )->middleware('throttle:60,1')->name('whmcs.invoice-paid');
+
+/**
+ * Stage B-3 (PR #48): outbound status query the ekdosi_bridge plugin
+ * uses to render "what does ekdosi know about this invoice" badges
+ * on the WHMCS admin invoice page. Authenticates via HMAC over the
+ * request path (no body in GET).
+ *
+ * Throttle 120/min — higher than the POST endpoint because the
+ * plugin polls this on every WHMCS admin invoice page view, which
+ * could spike if an admin opens many invoices in quick succession.
+ */
+Route::get(
+    'whmcs/{slug}/invoice-status/{whmcs_invoice_id}',
+    WhmcsInvoiceStatusController::class,
+)->middleware('throttle:120,1')
+    ->where('whmcs_invoice_id', '[0-9]+')
+    ->name('whmcs.invoice-status');

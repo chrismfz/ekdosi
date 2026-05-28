@@ -12,6 +12,18 @@ class Company extends Model
 {
     use HasFactory;
 
+    /**
+     * Stage B-3: the two path fragments that couple ekdosi's
+     * outbound-bridge URL derivation to the WHMCS-side plugin's
+     * filesystem layout. Kept as named constants (not inline magic
+     * strings) so the coupling is grep-discoverable: if the WHMCS
+     * plugin's inbound.php is ever moved/renamed, this is the ONE
+     * place ekdosi needs to change. The plugin's inbound.php docblock
+     * cross-references this constant.
+     */
+    public const WHMCS_API_PATH_SUFFIX = '/includes/api.php';
+    public const WHMCS_BRIDGE_PATH = '/modules/addons/ekdosi_bridge/inbound.php';
+
     protected $fillable = [
         'name',
         'slug',
@@ -82,6 +94,48 @@ class Company extends Model
         return ! empty($this->whmcs_api_url)
             && ! empty($this->whmcs_api_identifier)
             && ! empty($this->whmcs_api_secret);
+    }
+
+    /**
+     * Derive the URL of the ekdosi_bridge plugin's inbound endpoint
+     * from the tenant's whmcs_api_url. The plugin lives at a fixed
+     * path relative to the WHMCS root:
+     *
+     *   {whmcs_root}/modules/addons/ekdosi_bridge/inbound.php
+     *
+     * The convention works because WHMCS's native API is always at
+     * {whmcs_root}/includes/api.php — we strip that suffix and
+     * append the plugin's path. If the operator's WHMCS install
+     * doesn't follow this convention (custom paths, behind a
+     * reverse proxy with different path mapping), we'd need to
+     * add an explicit companies.whmcs_bridge_url column — defer
+     * until a real deployment surfaces that need.
+     *
+     * Stage B-3: Returns null when whmcs_api_url is empty (tenant
+     * has no WHMCS integration at all) OR when the URL doesn't
+     * follow the expected api.php convention (we refuse to guess
+     * a path; operator must configure properly).
+     */
+    public function whmcsBridgeUrl(): ?string
+    {
+        $api = trim((string) ($this->whmcs_api_url ?? ''));
+        if ($api === '') {
+            return null;
+        }
+        // Normalise before matching the suffix: operators routinely
+        // paste the URL with a trailing slash (copy from a docs page)
+        // or a stray ?query. Strip both so the well-known
+        // /includes/api.php convention still matches — otherwise the
+        // bridge silently disables itself on a cosmetic typo.
+        $api = preg_replace('/[?#].*$/', '', $api);   // drop query / fragment
+        $api = rtrim($api, '/');                       // drop trailing slashes
+
+        $suffix = self::WHMCS_API_PATH_SUFFIX;
+        if (! str_ends_with($api, $suffix)) {
+            return null;
+        }
+        $base = substr($api, 0, -strlen($suffix));
+        return $base.self::WHMCS_BRIDGE_PATH;
     }
 
     /**

@@ -45,12 +45,27 @@ class PendingWhmcsInvoiceObserver
             return;
         }
 
-        // Allow ONLY updated_at to change. Every other dirty attribute
-        // is a violation. We compare against $dirty's keys (not a
+        // Allow updated_at AND the WHMCS write-back bookkeeping
+        // columns to change. Every other dirty attribute is a
+        // violation. We compare against $dirty's keys (not a
         // hardcoded "frozen attributes" list) so a future schema
         // addition is automatically covered - the safer default.
+        //
+        // The write-back columns are carved out deliberately: the
+        // legal-audit truth is the payload + status + filed_at +
+        // mydata_mark snapshot, NOT whether the downstream WHMCS
+        // tblinvoices.invoiced flag got updated. Stage B-3 runs the
+        // write-back AFTER the status=filed transition and records
+        // its outcome (succeeded/failed/pending) on these columns;
+        // a future retry-sweep command can re-run a failed write-back
+        // and flip the state without touching the frozen audit
+        // snapshot.
         $dirty = $row->getDirty();
-        unset($dirty['updated_at']);
+        unset(
+            $dirty['updated_at'],
+            $dirty['whmcs_writeback_state'],
+            $dirty['whmcs_writeback_error'],
+        );
 
         if (empty($dirty)) {
             return;
