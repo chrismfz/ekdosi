@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Customers\Widgets;
 
+use App\Filament\Widgets\Concerns\FormatsDashboardValues;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
@@ -13,6 +14,8 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
  */
 class CustomerLedgerAging extends StatsOverviewWidget
 {
+    use FormatsDashboardValues;
+
     /** @var array<string, mixed> */
     public array $ledgerAging = [];
 
@@ -28,7 +31,7 @@ class CustomerLedgerAging extends StatsOverviewWidget
 
     protected function getStats(): array
     {
-        $fmt = fn ($v): string => number_format((float) ($v ?? 0), 2, ',', '.').' €';
+        $fmt = fn ($v): string => $this->eur((float) ($v ?? 0));
         $a = $this->ledgerAging;
         $balance = (float) ($this->ledgerStats['balance'] ?? 0);
 

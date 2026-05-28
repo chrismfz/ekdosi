@@ -15,6 +15,7 @@ use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\CustomerWhmcsLedger;
 use App\Services\Whmcs\CustomerWhmcsLedgerResult;
+use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Textarea;
@@ -326,7 +327,7 @@ class CustomerLedger extends Page implements HasTable
 
     private function fmtMoney(mixed $value): string
     {
-        return number_format((float) $value, 2, ',', '.').' €';
+        return Money::eur($value);
     }
 
     /* ===================== Header actions ===================== */
@@ -484,8 +485,23 @@ class CustomerLedger extends Page implements HasTable
 
     private function sendStatementEmail(string $recipient, ?string $subject, ?string $message): void
     {
+        $tenant = $this->record->company;
+        if ($tenant === null) {
+            // Defensive: a customer in a tenant panel always has its
+            // company, but an orphaned / soft-deleted company would
+            // otherwise hit TenantMailerFactory::for(Company)'s
+            // non-nullable type and surface as a misleading "email
+            // settings" error.
+            Notification::make()
+                ->title('Αποτυχία αποστολής')
+                ->body('Ο πελάτης δεν είναι συνδεδεμένος με εταιρεία.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
         try {
-            $tenant = $this->record->company;
             $bytes = app(CustomerStatementPdfRenderer::class)->render($this->record);
 
             $mail = new CustomerStatementMail(

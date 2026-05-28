@@ -179,6 +179,9 @@ class CustomerLedgerPagePolishTest extends TestCase
 
         $this->assertStringContainsString('Ημερομηνία', $csv);
         $this->assertStringContainsString('TPY', $csv);
+        // el-GR Excel locale: comma decimal, no thousands separator.
+        $this->assertStringContainsString('124,00', $csv);
+        $this->assertStringNotContainsString('124.00', $csv);
     }
 
     public function test_export_pdf_action_returns_download(): void

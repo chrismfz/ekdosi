@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Customers\Widgets;
 
+use App\Filament\Widgets\Concerns\FormatsDashboardValues;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Carbon;
@@ -18,6 +19,8 @@ use Illuminate\Support\Carbon;
  */
 class CustomerLedgerStats extends StatsOverviewWidget
 {
+    use FormatsDashboardValues;
+
     /** @var array<string, mixed> */
     public array $ledgerStats = [];
 
@@ -34,7 +37,7 @@ class CustomerLedgerStats extends StatsOverviewWidget
     protected function getStats(): array
     {
         $s = $this->ledgerStats;
-        $fmt = fn ($v): string => number_format((float) ($v ?? 0), 2, ',', '.').' €';
+        $fmt = fn ($v): string => $this->eur((float) ($v ?? 0));
         $year = now()->year;
 
         // Sparkline of year-end balances, oldest → newest (yearly is

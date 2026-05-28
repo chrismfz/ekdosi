@@ -23,7 +23,11 @@ class CustomerStatementCsv
     {
         $result = app(CustomerLedgerBuilder::class)->build($customer, $filters);
 
-        $fmt = fn ($v): string => number_format((float) ($v ?? 0), 2, '.', '');
+        // Comma decimal, NO thousands separator: matches the el-GR Excel
+        // locale this file targets (UTF-8 BOM + ';' delimiter below), so
+        // "1234,56" parses as a number rather than text. Omitting the
+        // thousands separator keeps each amount a single un-split cell.
+        $fmt = fn ($v): string => number_format((float) ($v ?? 0), 2, ',', '');
 
         $rows = [];
         $rows[] = ['Ημερομηνία', 'Τύπος', 'Αναφορά', 'Χρέωση', 'Πίστωση', 'Υπόλοιπο', 'myDATA'];
@@ -55,7 +59,7 @@ class CustomerStatementCsv
 
     public function filename(Customer $customer): string
     {
-        $slug = preg_replace('/[^A-Za-z0-9_-]/', '', \Illuminate\Support\Str::ascii((string) $customer->name)) ?: 'customer';
+        $slug = \App\Support\Filename::slug($customer->name, 'customer');
 
         return 'kartela-'.$slug.'-'.now()->format('Ymd').'.csv';
     }

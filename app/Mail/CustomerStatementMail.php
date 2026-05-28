@@ -74,7 +74,7 @@ class CustomerStatementMail extends Mailable
      */
     public function attachments(): array
     {
-        $slug = preg_replace('/[^A-Za-z0-9_-]/', '', \Illuminate\Support\Str::ascii((string) $this->customer->name)) ?: 'customer';
+        $slug = \App\Support\Filename::slug($this->customer->name, 'customer');
 
         return [
             Attachment::fromData(fn (): string => $this->pdfBytes, 'kartela-'.$slug.'.pdf')

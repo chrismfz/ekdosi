@@ -47,7 +47,7 @@ class CustomerStatementPdfRenderer
 
     public function filename(Customer $customer): string
     {
-        $slug = preg_replace('/[^A-Za-z0-9_-]/', '', \Illuminate\Support\Str::ascii((string) $customer->name)) ?: 'customer';
+        $slug = \App\Support\Filename::slug($customer->name, 'customer');
 
         return 'kartela-'.$slug.'-'.now()->format('Ymd').'.pdf';
     }

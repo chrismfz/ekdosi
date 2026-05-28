@@ -1,7 +1,7 @@
 @php
     /** @var \App\Models\Customer $customer */
     /** @var \App\Models\Company|null $company */
-    $fmt = fn ($v) => number_format((float) ($v ?? 0), 2, ',', '.') . ' €';
+    $fmt = fn ($v) => \App\Support\Money::eur($v);
     $balance = (float) ($stats['balance'] ?? 0);
 @endphp
 <!DOCTYPE html>
