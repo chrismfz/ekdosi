@@ -351,15 +351,22 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
   VatCategory's new `vat_exemption_category` field; throws if unconfigured or
   ambiguous. WHMCS filer pre-flight aligned. Set the reason on the 0%-rate VAT
   category (Setup → VAT Categories).
-- **G3 — `whmcs_amount_includes_tax`** (tax-exclusive WHMCS tenant → wrong VAT).
-- **G9 — PaymentMethod→myDATA type** hardcoded to 3 (cash) for every invoice.
-- **G5 — per-line `<quantity>`** omitted for all types (correct for services
-  1.1/2.1/11.2; goods types need it).
+- **G3 — `whmcs_amount_includes_tax`: ✅ DONE.** `companies.whmcs_amount_includes_tax`
+  (default true = GR gross norm); `WhmcsInvoiceMapper` adds VAT instead of
+  dividing it out when a tenant runs tax-exclusive. Company-form toggle.
+- **G9 — PaymentMethod→myDATA type: ✅ DONE.** `payment_methods.mydata_payment_type`
+  (§8.12, 1–8); `MyDataSubmitter::paymentMethodTypeFor` reads it, falls back to
+  3 (cash) when unmapped/invalid. PaymentMethod-form select.
+- **G5 — per-line `<quantity>`: ✅ DONE.** `invoice_types.mydata_requires_quantity`
+  (default false = the validated service path, no quantity); goods types opt in
+  and the submitter emits `setQuantity(qty)`. `measurementUnit` omitted
+  (optional per spec) — a follow-up if a goods tenant needs §8.13 units.
+  InvoiceType-form toggle. (Enable + sandbox-verify per the goods tenant.)
 - **G7 — gross-price line edit** (operator types VAT-inclusive unit price) —
-  legacy had it; ours is net-only. UX parity, not correctness.
-- **G6 — auto-email on the non-myDATA issue path** (see PARTIAL above).
+  legacy had it; ours is net-only. UX parity, not correctness. **UX tail.**
+- **G6 — auto-email on the non-myDATA issue path** (see PARTIAL above). **UX tail.**
 - **G8 — griniaris** immediate-invoicing (scaffolded `needs_immediate_invoice`,
-  waits on the live scheduler/worker).
+  waits on the live scheduler/worker). **UX tail.**
 
 **❌ NOT YET (lower / confirm-usage-first):** stock movements & ΣΔΕΠ (dead in
 legacy — see corrections); `invoiced=-333/-1000` WHMCS sentinel states;
@@ -370,10 +377,11 @@ suppliers + ΦΠΑ εκροών−εισροών report — largest net-new); Es
 submitter; myDATA console one-click fixes; cross-model activitylog (do once).
 
 **Suggested order:** (1)✅ sandbox myDATA. (2)✅ scheduler. (3)✅ timologia v2
-(T-1+T-2). (4) **G1 withholding + G4 exempt** (filing correctness — in progress;
-gate urgency on a `.fbk` usage check). (5) G3 tax-inclusive + G9 payment-type +
-G5 goods-quantity. (6) G7 gross-edit, G6 issue-email, G8 griniaris. (7) Έξοδα.
-(8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves real usage.
+(T-1+T-2). (4)✅ **G1 withholding + G4 exempt** (merged, PR #68). (5)✅ **G3
+tax-inclusive + G9 payment-type + G5 goods-quantity** (filing correctness).
+(6) **G7 gross-edit, G6 issue-email, G8 griniaris** — the UX tail (left for
+last). (7) Έξοδα. (8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves
+real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
 
 ---
 

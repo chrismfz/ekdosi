@@ -84,6 +84,13 @@ class InvoiceTypeForm
                                     ->searchable()
                                     ->preload()
                                     ->helperText('AADE per-rate bucket. e.g. "category1_1" = sales of goods at 24% VAT.'),
+
+                                // G5: goods παραστατικά carry a per-line quantity;
+                                // service types ([205]) forbid it. OFF by default
+                                // = the sandbox-validated service payload.
+                                Toggle::make('mydata_requires_quantity')
+                                    ->label('Goods type — send per-line quantity')
+                                    ->helperText('Enable ONLY for goods (πώληση αγαθών) types. Services (1.1/2.1/11.2) must leave this OFF — AADE rejects a quantity on them ([205]).'),
                             ])
                             ->columns(3),
 

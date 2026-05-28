@@ -22,6 +22,7 @@ class InvoiceType extends Model
         'mydata_type',
         'mydata_income_class',
         'mydata_income_class_category',
+        'mydata_requires_quantity',
         'distribution_aim_id',
         'delivery_method_id',
         'payment_method_id',
@@ -35,6 +36,7 @@ class InvoiceType extends Model
             'show_on_menu' => 'boolean',
             'is_credit' => 'boolean',
             'is_return' => 'boolean',
+            'mydata_requires_quantity' => 'boolean',
         ];
     }
 

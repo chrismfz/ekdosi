@@ -22,10 +22,15 @@ class WhmcsInvoiceMapperTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private VatCategory $vat24;
+
     private VatCategory $vat0;
+
     private PaymentMethod $pm;
+
     private InvoiceType $invoiceType;
+
     private Customer $customer;
 
     protected function setUp(): void
@@ -83,11 +88,11 @@ class WhmcsInvoiceMapperTest extends TestCase
     private function makePending(array $payload): PendingWhmcsInvoice
     {
         return PendingWhmcsInvoice::create([
-            'company_id'       => $this->tenant->id,
+            'company_id' => $this->tenant->id,
             'whmcs_invoice_id' => $payload['invoiceid'] ?? 7777,
-            'payload'          => $payload,
-            'match_reason'     => PendingWhmcsInvoice::REASON_LINKED,
-            'status'           => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'payload' => $payload,
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
         ]);
     }
 
@@ -95,10 +100,10 @@ class WhmcsInvoiceMapperTest extends TestCase
     {
         $pending = $this->makePending([
             'invoiceid' => 1001,
-            'userid'    => 555,
-            'date'      => '2026-05-20',
-            'total'     => '124.00',
-            'items'     => ['item' => [
+            'userid' => 555,
+            'date' => '2026-05-20',
+            'total' => '124.00',
+            'items' => ['item' => [
                 ['description' => 'Domain ekdosi.gr 1 έτος', 'amount' => '124.00', 'taxed' => '1'],
             ]],
         ]);
@@ -116,6 +121,29 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(100.0, $result['totals']['net_total']);
         $this->assertSame(24.0, $result['totals']['vat_total']);
         $this->assertSame(124.0, $result['totals']['gross_total']);
+    }
+
+    public function test_tax_exclusive_tenant_treats_amount_as_net(): void
+    {
+        // G3: when the WHMCS instance is tax-exclusive, the line amount IS the
+        // net — VAT must be ADDED, not divided out. €100 @ 24% → gross €124.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => false])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 1002,
+            'userid' => 555,
+            'date' => '2026-05-20',
+            'total' => '100.00',
+            'items' => ['item' => [
+                ['description' => 'Service (net)', 'amount' => '100.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame(100.0, $line['net_price'], 'amount taken as net');
+        $this->assertSame(124.0, $line['gross_price'], 'VAT added on top');
     }
 
     public function test_untaxed_line_keeps_amount_as_net_and_gross(): void
@@ -405,9 +433,9 @@ class WhmcsInvoiceMapperTest extends TestCase
     {
         $pending = $this->makePending([
             'invoiceid' => 12345,
-            'userid'    => 777,
-            'date'      => '2026-05-20',
-            'total'     => '1240.00',
+            'userid' => 777,
+            'date' => '2026-05-20',
+            'total' => '1240.00',
             'items' => ['item' => [['description' => 'X', 'amount' => '1240.00', 'taxed' => '1']]],
         ]);
 
