@@ -46,6 +46,30 @@ class InvoiceResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'invcode';
 
+    /**
+     * Top-bar global search across the invoice code, the snapshotted
+     * customer VAT number, and the snapshotted company name. Tenant-
+     * scoped via getEloquentQuery() below. Covers "find an invoice by
+     * its number or by the customer's AFM".
+     *
+     * @return array<int, string>
+     */
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['invcode', 'vat_no', 'company_name'];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    {
+        return array_filter([
+            'ΑΦΜ'   => $record->vat_no,
+            'Ημ/νία' => $record->issued_at?->format('d/m/Y'),
+        ]);
+    }
+
     public static function getEloquentQuery(): Builder
     {
         // Lift SoftDeletingScope on Invoice itself so TrashedFilter

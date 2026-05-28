@@ -24,6 +24,30 @@ class CustomerResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
+    /**
+     * Top-bar global search across customer name + AFM. Tenant-scoped
+     * automatically (the resource query already filters by the current
+     * Company). Lets an operator jump to a customer by typing either
+     * their name or their VAT number from anywhere in the panel.
+     *
+     * @return array<int, string>
+     */
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['name', 'afm'];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    {
+        return array_filter([
+            'ΑΦΜ'    => $record->afm,
+            'Πόλη'   => $record->city,
+        ]);
+    }
+
     // Default is true — customers are per-tenant (the company_id FK does the
     // scoping). Filament's BelongsToTenant trait uses the `company()` relation
     // defined on the Customer model.
