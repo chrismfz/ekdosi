@@ -78,10 +78,10 @@ class EditInvoice extends EditRecord
             ->lockForUpdate()
             ->first();
 
-        if ($current?->mydata_state !== null) {
+        if ($current?->mydata_state !== null || $current?->local_status !== 'draft') {
             Notification::make()
-                ->title('Invoice was filed in another tab')
-                ->body("Invoice {$current->invcode} now has AADE state={$current->mydata_state}. Your edits cannot be saved — refresh the page to see the filed version.")
+                ->title('Το παραστατικό άλλαξε σε άλλη καρτέλα')
+                ->body("Το {$current?->invcode} δεν είναι πλέον πρόχειρο (κατάσταση: {$current?->local_status}, myDATA: ".($current?->mydata_state ?? '—').'). Οι αλλαγές δεν αποθηκεύονται — ανανεώστε τη σελίδα.')
                 ->danger()
                 ->persistent()
                 ->send();

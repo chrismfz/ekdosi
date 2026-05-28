@@ -1798,3 +1798,39 @@ money are unit-tested (`LocalStatusTest`, consistency test extended with
 cancelled-local invoices). The bulk submit makes N sequential synchronous
 AADE calls in-request — fine for a manageable batch; queue it if a tenant
 files hundreds at once.
+
+### Independent review of Phase 1 — fixes applied
+A two-agent review found and we FIXED:
+- **Bulk submit could file a locally-cancelled invoice** — the skip guard
+  checked mydata_state + credited_invoice_id but NOT local_status; with
+  the default "show all" filter a cancelled draft could be selected and
+  filed at AADE. Now also skips `local_status='cancelled'`.
+- **draft→active not synced on 2 of 4 submit paths** (CreateInvoice
+  chain-submit + credit-note submit left filed invoices as VALID+draft).
+  Fixed at the ROOT: `MyDataSubmitter` now syncs local_status inside its
+  own persist (VALID→active if draft) and cancel (→cancelled) — the
+  single choke-point. Removed the 3 per-call-site syncs that had drifted.
+- **EditInvoice TOCTOU**: `beforeSave()` re-checked only mydata_state; a
+  concurrent finalize (draft→active) could land an edit on an active
+  invoice. Now also halts when `local_status != 'draft'`.
+- **Cancelling an already-credited original** double-removed value from
+  the ledger (original excluded by `live()` while its credit notes kept
+  reducing). `cancel_local` now refuses when live credit notes reference
+  the invoice.
+- **Cosmetic**: a cancelled invoice no longer shows "Ανεξόφλητο" in the
+  list payment column (now `—`; the Κατάσταση column says Ακυρωμένο).
+
+Reviewed + accepted as-is:
+- **`unfiledCount` counts drafts** (not only `active`) — deliberately
+  kept broad so a forgotten unfinalised draft still shows in the "pending
+  at myDATA" badge (serves the operator's "don't miss anything" goal).
+  Phase 1 strictly improved it by excluding cancelled.
+- **`revive` doesn't re-attach detached payments** — the modal says so;
+  the money nets out at the customer level, operator re-allocates if
+  wanted.
+- **`InvoiceScope::live` per-site `$prefix`** ('' vs 'invoices.') is a
+  hand-passed convention; a future joined query that forgets it errors on
+  MariaDB (not sqlite). Acceptable; revisit if a third joined site lands.
+- **Reconciliation Page duplicates the list's filter logic** — kept as a
+  focused worklist; the VALID+draft inconsistency it couldn't catch is
+  now structurally impossible (promotion synced at the submitter).

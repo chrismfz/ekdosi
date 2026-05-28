@@ -72,15 +72,22 @@ class InvoicesTable
                     ->label('Πληρωμή')
                     ->badge()
                     ->placeholder('—')
-                    // A credit note isn't a receivable — show a neutral
-                    // "Πιστωτικό" badge, not the (misleading) unpaid/paid
-                    // status its own row would otherwise compute.
-                    ->formatStateUsing(fn (?string $state, $record) => $record->credited_invoice_id !== null
-                        ? 'Πιστωτικό'
-                        : ($state ? PaymentStatus::from($state)->label() : '—'))
-                    ->color(fn (?string $state, $record) => $record->credited_invoice_id !== null
-                        ? 'info'
-                        : ($state ? PaymentStatus::from($state)->color() : 'gray'))
+                    // Cancelled invoices aren't receivables — show a
+                    // neutral dash (the Κατάσταση column already says
+                    // Ακυρωμένο). Credit notes show "Πιστωτικό". Otherwise
+                    // the computed payment status.
+                    ->formatStateUsing(fn (?string $state, $record) => match (true) {
+                        $record->local_status === 'cancelled' => '—',
+                        $record->credited_invoice_id !== null => 'Πιστωτικό',
+                        (bool) $state => PaymentStatus::from($state)->label(),
+                        default => '—',
+                    })
+                    ->color(fn (?string $state, $record) => match (true) {
+                        $record->local_status === 'cancelled' => 'gray',
+                        $record->credited_invoice_id !== null => 'info',
+                        (bool) $state => PaymentStatus::from($state)->color(),
+                        default => 'gray',
+                    })
                     ->toggleable(),
 
                 TextColumn::make('mydata_state')
@@ -255,16 +262,21 @@ class InvoicesTable
                             $submitter = app(EInvoiceSubmitterFactory::class)->for(Filament::getTenant());
 
                             foreach ($records as $record) {
-                                if ($record->mydata_state !== null || $record->credited_invoice_id !== null) {
+                                // Skip already-filed, credit notes, AND
+                                // locally-cancelled rows — never file a doc
+                                // the operator voided (the default filter
+                                // shows ALL, so a cancelled row can be in
+                                // the selection). local_status draft→active
+                                // is synced inside the submitter.
+                                if ($record->mydata_state !== null
+                                    || $record->credited_invoice_id !== null
+                                    || $record->local_status === 'cancelled') {
                                     $skip++;
 
                                     continue;
                                 }
                                 try {
                                     $submitter->submit($record);
-                                    if ($record->local_status === 'draft') {
-                                        $record->update(['local_status' => 'active']);
-                                    }
                                     $ok++;
                                 } catch (Throwable $e) {
                                     $fail++;

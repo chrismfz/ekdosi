@@ -11,6 +11,7 @@ use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
 use App\Models\Payment;
 use App\Services\MyDataSubmitter;
+use App\Support\InvoiceScope;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
@@ -82,6 +83,18 @@ class ViewInvoice extends ViewRecord
                         ->rows(2),
                 ])
                 ->action(function (Invoice $record, array $data) {
+                    // Refuse if live credit notes reference this invoice:
+                    // cancelling the original removes it from the ledger
+                    // while its credit notes keep reducing the balance →
+                    // double-removal. Handle the credit notes first.
+                    if (InvoiceScope::live(Invoice::where('credited_invoice_id', $record->id))->exists()) {
+                        Notification::make()
+                            ->title('Δεν είναι δυνατή η ακύρωση')
+                            ->body('Το παραστατικό έχει ενεργά πιστωτικά. Ακυρώστε/διαχειριστείτε πρώτα τα πιστωτικά.')
+                            ->danger()->persistent()->send();
+
+                        return;
+                    }
                     DB::transaction(function () use ($record, $data) {
                         // Detach any payments → on-account customer credit
                         // (each save fires PaymentObserver → recomputes
@@ -305,11 +318,8 @@ class ViewInvoice extends ViewRecord
                         // is the source of truth either way.
                         $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
                         $mark = $submitter->submit($record);
-                        // A filed invoice is a live document → promote a
-                        // draft to Ενεργό (no-op if already active).
-                        if ($record->local_status === 'draft') {
-                            $record->update(['local_status' => 'active']);
-                        }
+                        // local_status draft→active is synced inside the
+                        // submitter (single choke-point).
                         Notification::make()
                             ->title('Filed at myDATA')
                             ->body('MARK: '.($mark->mark ?? 'pending'))
@@ -363,8 +373,7 @@ class ViewInvoice extends ViewRecord
                             throw new \RuntimeException('Submitter does not support cancellation.');
                         }
                         $submitter->cancel($record, $data['reason'] ?? '');
-                        // Mirror the AADE cancel onto the local status.
-                        $record->update(['local_status' => 'cancelled']);
+                        // local_status → cancelled is synced inside the submitter.
                         Notification::make()
                             ->title('Ακυρώθηκε στο myDATA')
                             ->body('Η κατάσταση ΑΑΔΕ είναι πλέον CANCELLED· το αρχικό MARK διατηρείται στο ιστορικό.')
