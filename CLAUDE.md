@@ -2182,3 +2182,50 @@ PR: **295 pass**.
 - **SendInvoices mock-Guzzle integration test** — now FEASIBLE from the
   captured live success response (the long-standing deferral from PR #25).
   Build it from the real sandbox XML so the submit path has a regression net.
+
+## myDATA code tables + pre-flight audit (`mydata:preflight`)
+
+The official AADE spec is committed at the repo root:
+**`myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (the §8 appendix
+has every code table; §7.2 has the full business-error list 101–280).
+
+**`App\Support\MyData\Codes`** bakes the §8 tables into one authoritative
+PHP source (invoice types §8.1, VAT categories §8.2, VAT exemption
+categories §8.3, withholding §8.4, payment methods §8.12, income
+classification types §8.9 + categories §8.8, quantity types §8.13) with
+helpers (`invoiceTypeExists`, `isIncomeInvoiceType`,
+`isValidIncomeClassType/Category`, `vatCategoriesForRate`,
+`vatExemptionExists`, `paymentMethodExists`). This is the single place to
+refresh when AADE revises the spec, and the shared source for preflight,
+`MyDataSubmitter`, and the Filament forms.
+
+**`php artisan mydata:preflight [--tenant=SLUG]`** — read-only, no AADE
+calls. Audits each tenant's CONFIG against `Codes` so gaps are caught
+before AADE rejects a real filing. Flags (with the error code each would
+otherwise trigger): invoice types with missing/invalid `mydata_type`
+([223]); income types missing/invalid income classification ([230]); VAT
+rates that map to no AADE category; 0% categories that need a
+`vatExemptionCategory` ([217]); the 4% rate ambiguity (AADE category 6 vs
+10). Exit 0 = clean, 1 = error, 2 = issues found (warnings alone still
+exit 0). Default scope is `einvoice_provider=gr-mydata` tenants.
+
+**Validated business-error rules worth keeping in mind** (from §7.2, the
+ones our payload must satisfy beyond the PR #57 fixes):
+- `[217]` vatCategory=7 ⇒ `vatExemptionCategory` mandatory (§8.3, 1–31);
+  `[271]` it's allowed ONLY when category=7. Our `vatCategoryFor()` still
+  throws on 0% — the real fix is emit 7 + exemption.
+- `[203]/[207]/[208]/[209]` rounding cross-checks (gross=net+tax; Σlines =
+  totals) — exact-cent; golden-test after import.
+- `[230]/[231]/[234]` income classification mandatory AND type-compatible.
+- `[219]/[220]` issuer/counterpart name forbidden for GR parties.
+- `[242]/[243]/[244]` counterpart country must be GR / EU-non-GR / non-EU
+  per type (intra-community 1.2/2.2, third-country 1.3/2.3).
+- `[235]` issuer≠counterpart; `[212]` AA numeric; `[261]` unique line
+  numbers; `[224]` taxes per-line XOR per-invoice.
+- VAT table expanded: `9=3%`, `10=4%` (ν.5057/2023 island) on top of
+  `4=17%,5=9%,6=4%` → **4% is ambiguous (6 vs 10)**, regime-dependent.
+
+These are tracked as the remaining `MyDataSubmitter` follow-ups (0%
+exemption path, 4%/island regime, conditional per-line quantity for goods
+types, taxesTotals for withholding/fees). Preflight covers the config
+side; the submitter changes are the payload side.
