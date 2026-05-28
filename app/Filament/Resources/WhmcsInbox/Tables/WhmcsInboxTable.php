@@ -35,7 +35,7 @@ class WhmcsInboxTable
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
                 $query->where('company_id', $tenant?->getKey() ?? 0)
-                    ->with(['customer:id,name,afm', 'filedByUser:id,name']);
+                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name']);
             })
             ->columns([
                 TextColumn::make('whmcs_invoice_id')
@@ -79,6 +79,22 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::REASON_UNMATCHED => 'danger',
                         default => 'gray',
                     }),
+
+                // G8 (phase 1): γκρινιάρης / immediate-invoicing heads-up. A
+                // matched customer flagged needs_immediate_invoice wants their
+                // παραστατικό issued ASAP — surface it so the operator
+                // prioritises this row. Warning only here; auto-issue is a
+                // separate, default-OFF knob (see CLAUDE.md G8).
+                TextColumn::make('immediate')
+                    ->label('Άμεσο')
+                    ->badge()
+                    ->color('danger')
+                    ->icon('heroicon-o-bolt')
+                    ->placeholder('—')
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => $r->customer?->needs_immediate_invoice
+                        ? 'Άμεσο'
+                        : null)
+                    ->tooltip('Ο πελάτης ζητά άμεση έκδοση (γκρινιάρης) — δώσε προτεραιότητα.'),
 
                 TextColumn::make('third_party_state')
                     ->label('Τρίτος')
