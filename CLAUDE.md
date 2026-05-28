@@ -1257,14 +1257,14 @@ Deliberately out of scope for B-2 (deferred):
 - **WHMCS "Tax Inclusive" mode toggle** — mapper assumes line `amount` is GROSS. A tenant whose WHMCS runs in tax-exclusive mode would silently get wrong VAT computation. When the first non-myip tenant configures WHMCS, add a `companies.whmcs_amount_includes_tax` boolean and branch.
 
 **PR #31 (Stage B-3: WHMCS-side plugin)** — PHP plugin shipped into the tenant's WHMCS install:
-- Replaces `legacy/whmcs/prepare_for_ekdosi/` entirely. Lives at `legacy/whmcs/ekdosi_bridge/` (and would be deployed to the tenant's `modules/addons/ekdosi_bridge/` on the WHMCS host).
+- Replaces `legacy/whmcs/prepare_for_ekdosi/` entirely. Lives at `whmcs-plugin/ekdosi_bridge/` (OUR code, NOT under `legacy/`; deployed to the tenant's `modules/addons/ekdosi_bridge/` on the WHMCS host).
 - Module config form: ekdosi webhook URL, webhook secret. Stored in WHMCS's standard `tbladdonmodules` config.
 - Per-invoice button hook: appears on WHMCS's admin invoice page. Three sub-actions:
   - **Send to ekdosi for review** — POSTs to the webhook with HMAC sig. Inline feedback: "Staged in ekdosi for operator review (ekdosi row #N)" or error.
   - **Show ekdosi status** — GET to a status endpoint, returns the pending_whmcs_invoices row state ("Pending review", "Filed with MARK X", "Rejected: <reason>").
   - **Reset to unfiled** — for the legacy reset use case; sets `tblinvoices.invoiced=0` on the WHMCS side, prompts operator to also re-send to ekdosi if desired.
 - The WHMCS plugin itself doesn't talk to AADE; just to ekdosi via HTTPS. Keeps the WHMCS install dumb.
-- No tests in the ekdosi repo (plugin is shipped to a different stack); a deployment runbook lives in `legacy/whmcs/ekdosi_bridge/README.md`.
+- No tests in the ekdosi repo (plugin is shipped to a different stack); a deployment runbook lives in `whmcs-plugin/ekdosi_bridge/README.md`.
 
 **Other Stage B work (across the three PRs):**
 - **`mod_timologia` third-party-invoicing support** — discovered from reading legacy/whmcs/timologia/. The plugin's custom tables are:
@@ -1470,15 +1470,13 @@ code (2026-05-28):
       `legacy/`. Leave them there as reference.
     - **`ekdosi_bridge` is OURS** — the consolidated successor that
       migrates/updates/merges the three legacy plugins into one modern
-      bridge. It must live **OUTSIDE `legacy/`** (so it's never
-      mistaken for archived code). It is currently still sitting at
-      `legacy/whmcs/ekdosi_bridge/` mid-migration; **TODO: move it out
-      of `legacy/`** (e.g. top-level `whmcs-plugin/` or a deploy
-      artefact dir). The migration target: `ekdosi_bridge` absorbs the
-      `invoiced`-flag write-back (was `prepare_for_ekdosi`), and will
-      grow to cover the GSIS lookup (was `afm2name` — though ekdosi now
-      does this natively) and third-party invoicing (was `timologia` —
-      the `mod_timologia*` consumption is still TODO, see below).
+      bridge. It lives at top-level **`whmcs-plugin/ekdosi_bridge/`**
+      (moved OUT of `legacy/` on 2026-05-28 so it's never mistaken for
+      archived code). The migration target: `ekdosi_bridge` absorbs the
+      `invoiced`-flag write-back (was `prepare_for_ekdosi`, done), and
+      will grow to cover the GSIS lookup (was `afm2name` — though ekdosi
+      now does this natively) and third-party invoicing (was `timologia`
+      — the `mod_timologia*` consumption is still TODO, see below).
 - **WHMCS write-back (`invoiced = MARK`) is implemented**, not just
   logged. `WhmcsInvoiceFiler::writebackInvoicedFlag()` →
   `Whmcs\WhmcsBridgeClient::setInvoiced()` →

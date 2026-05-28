@@ -120,7 +120,7 @@ class WhmcsInvoiceStatusController
      *
      * The WHMCS-side EkdosiClient::getInvoiceStatus() computes the
      * SAME canonical string from the same two inputs — see
-     * legacy/whmcs/ekdosi_bridge/lib/EkdosiClient.php and the
+     * whmcs-plugin/ekdosi_bridge/lib/EkdosiClient.php and the
      * README's signature-scheme section.
      */
     private function verifySignature(Request $request, string $secret, string $canonical): bool
