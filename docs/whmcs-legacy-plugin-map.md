@@ -206,6 +206,25 @@ customers noticing anything, and cut over from the legacy plugin cleanly.
 
 ### Phase T‑1 — resolution + billing (backend only; no client UI)
 The only path we actually need to validate. No customer-visible change.
+
+> **T‑1a — DONE (read-only resolution foundation).** Built + tested:
+> - **Bridge `resolve.php`** — read-only HMAC endpoint (sibling of
+>   `inbound.php`, same auth). `op=resolve` returns per-line routing for an
+>   invoice (joins `mod_timologia → mod_timologia_contacts`); `op=resellers`
+>   lists WHMCS clients with ≥1 routing row. Resilient when the legacy tables
+>   are absent (`timologia_present=false`, not an error).
+> - **ekdosi `WhmcsBridgeClient::resolveThirdParty()` / `listResellers()`** +
+>   the `ThirdPartyResolution` value object (single source of the party /
+>   multi-party / single-contact logic).
+> - **`php artisan whmcs:resolve-third-party <inv> --tenant=` / `--resellers`**
+>   — read-only diagnostic to validate against live WHMCS data with zero risk
+>   to filing. Tests: 17 (value object + client HMAC/URL + command).
+>
+> **T‑1b — NEXT (the billing change).** Wire resolution into the ingestor /
+> inbox: single-contact → bill the contact (match/create Customer by
+> `gr_vatno`); multi-party → stage flagged for the guided operator split. Gated
+> on the **paid-at-issue money rule** decision (third-party invoices settled by
+> the reseller must not land on the end customer's balance).
 1. **Bridge (WHMCS side):** add an endpoint (extend `inbound.php` +
    `EkdosiClient`) that, for a WHMCS invoice, resolves each line's
    `serviceid`+`service_type`, `LEFT JOIN mod_timologia → mod_timologia_contacts`,
