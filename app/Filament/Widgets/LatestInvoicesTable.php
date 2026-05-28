@@ -2,6 +2,8 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
 use Filament\Facades\Filament;
@@ -42,14 +44,20 @@ class LatestInvoicesTable extends TableWidget
             ->paginated(false)
             ->columns([
                 TextColumn::make('invcode')
-                    ->label('Κωδικός'),
+                    ->label('Κωδικός')
+                    ->color('primary')
+                    ->url(fn (Invoice $record): string => InvoiceResource::getUrl('view', ['record' => $record])),
                 TextColumn::make('issued_at')
                     ->label('Ημ/νία')
                     ->dateTime('d/m/Y H:i'),
                 TextColumn::make('customer.name')
                     ->label('Πελάτης')
                     ->limit(35)
-                    ->placeholder('—'),
+                    ->placeholder('—')
+                    ->color(fn (Invoice $record): ?string => $record->customer ? 'primary' : null)
+                    ->url(fn (Invoice $record): ?string => $record->customer
+                        ? CustomerResource::getUrl('ledger', ['record' => $record->customer])
+                        : null),
                 TextColumn::make('gross_total')
                     ->label('Μικτά')
                     ->alignEnd()

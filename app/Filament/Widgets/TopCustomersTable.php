@@ -2,7 +2,9 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Resources\Customers\CustomerResource;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Services\Dashboard\DashboardMetrics;
 use Filament\Facades\Filament;
 use Filament\Tables\Columns\TextColumn;
@@ -47,7 +49,9 @@ class TopCustomersTable extends TableWidget
                 TextColumn::make('name')
                     ->label('Πελάτης')
                     ->searchable()
-                    ->limit(40),
+                    ->limit(40)
+                    ->color('primary')
+                    ->url(fn (Customer $record): string => CustomerResource::getUrl('ledger', ['record' => $record])),
                 TextColumn::make('afm')
                     ->label('ΑΦΜ'),
                 TextColumn::make('invoices_ytd')
