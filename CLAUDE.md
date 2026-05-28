@@ -1443,3 +1443,97 @@ math.
   Not blocking until a second human operator exists who needs roles
   scoped per tenant. **Trigger PR**: when the second real operator
   account is added.
+
+---
+
+## Legacy ↔ new parity gap analysis (2026-05-28)
+
+Multi-agent sweep comparing `/legacy/ekdosi-main/` (45 C++Builder
+forms) + `/legacy/whmcs/` (4 modules) against the current Laravel
+app. Findings below; the headline is that the **core
+issue→myDATA→PDF→email→WHMCS-inbox path is built**, and the two
+genuinely-impactful gaps for day-to-day operation are **credit
+notes** and a **payment-recording UI**.
+
+### Doc was STALE — these are actually DONE in code
+The WHMCS "Stage B roadmap" above under-states reality. Verified in
+code (2026-05-28):
+- **Stage B-3 WHMCS-side plugin is fully implemented**, not planned.
+  Files: `ekdosi_bridge.php`, `inbound.php`, `hooks.php`,
+  `lib/EkdosiClient.php`, `lib/Admin/Controller.php`, `README.md` —
+  bidirectional push/status/write-back/reset, HMAC-signed,
+  CSRF-guarded admin forms, auto-widens `tblinvoices.invoiced` to
+  BIGINT on activate.
+  - **WHMCS-side code, two kinds, keep them straight:**
+    - `legacy/whmcs/{afm2name,prepare_for_ekdosi,timologia}/` ARE
+      genuine legacy plugins — archived originals, correctly under
+      `legacy/`. Leave them there as reference.
+    - **`ekdosi_bridge` is OURS** — the consolidated successor that
+      migrates/updates/merges the three legacy plugins into one modern
+      bridge. It must live **OUTSIDE `legacy/`** (so it's never
+      mistaken for archived code). It is currently still sitting at
+      `legacy/whmcs/ekdosi_bridge/` mid-migration; **TODO: move it out
+      of `legacy/`** (e.g. top-level `whmcs-plugin/` or a deploy
+      artefact dir). The migration target: `ekdosi_bridge` absorbs the
+      `invoiced`-flag write-back (was `prepare_for_ekdosi`), and will
+      grow to cover the GSIS lookup (was `afm2name` — though ekdosi now
+      does this natively) and third-party invoicing (was `timologia` —
+      the `mod_timologia*` consumption is still TODO, see below).
+- **WHMCS write-back (`invoiced = MARK`) is implemented**, not just
+  logged. `WhmcsInvoiceFiler::writebackInvoicedFlag()` →
+  `Whmcs\WhmcsBridgeClient::setInvoiced()` →
+  `ekdosi_bridge/inbound.php`, with `whmcs_writeback_state`
+  (failed/skipped) tracking. The earlier "deferred to B-3 / just
+  logged" notes in the PR #46 section are superseded.
+- Stages **A, B-1, B-2 also confirmed done** (client+matcher+preview;
+  ingestor+webhook+`pending_whmcs_invoices`; inbox UI + `WhmcsInvoiceFiler`).
+
+### Genuinely missing AND not tracked as an active PR (highest value)
+1. **Credit notes / returns (`FInvoiceReturn.cpp`)** — **HIGH.** The
+   schema is ready (`return_invoice_extras` table + `ReturnInvoiceExtra`
+   model, ETL-import only) but there is **no UI/flow to CREATE a
+   credit note**. No Returns resource, no return-create service. This
+   bites the moment an operator needs to credit/cancel-and-reissue
+   (and the header-discount UX already tells operators to "issue a
+   credit invoice instead" — a path that doesn't exist yet). **Needs
+   a PR.** Shape: an `IssueCreditNote` action off an existing invoice
+   that builds a negative-line invoice of the credit invoice type and
+   submits through the same `MyDataSubmitter` (myDATA credit/cancel
+   semantics), persisting `return_invoice_extras` for partial returns.
+2. **Payment-recording UI (`FAddPayment.cpp`)** — **MEDIUM.**
+   `Payment` model exists and the Καρτέλα ledger READS payments, but
+   payments only ever land via the ETL — operators **cannot record a
+   payment in the panel**. Post-cutover, customer balances can never
+   be updated. **Needs a PR** (a small Payments resource or a "Record
+   payment" action on the customer ledger). Not previously tracked.
+
+### Missing but ALREADY tracked as deferred (see sections above)
+- **Gross-price-edit on invoice lines** (`FAddInvoice2.cpp`) — form
+  only takes net `price_per_item`; the gross→net back-fill path isn't
+  wired. (Tracked: "Gross-edit path on invoice lines".)
+- **Auto-email on issue + audit BCC** — email exists only as a manual
+  action; `CreateInvoice::chainSubmit()` doesn't auto-mail/BCC
+  `invoice@myip.gr`. (Tracked: "PDF generation on issue + auto-mail
+  with audit-BCC".)
+- **Scheduled batch (`FAutoInvoice.cpp`) + griniaris routing** — NO
+  scheduler is wired (`routes/console.php`/`bootstrap/app.php` have
+  none beyond `inspire`); `whmcs:fetch-pending` is manual-only; the
+  `customers.needs_immediate_invoice` flag exists but nothing reads
+  WHMCS field-id 338 to set it or routes immediate-vs-batch. (Tracked
+  across the WHMCS Stage-B + griniaris notes.)
+- **ΣΔΕΠ cumulative invoices** (`CONV_INVOICE_ID`) — column + self
+  relation exist; no attach-to-running-ΣΔΕΠ logic or Reserve check.
+- **`mod_timologia` third-party invoicing** — legacy WHMCS addon
+  tables not consumed; mapper always uses the resolved Customer.
+- **Per-invoice-type PDF templates** — one adaptive Blade template vs.
+  the 8 legacy FR3 designs (apy/tpy/sdep/SDAP/SDAP2/simple/first/second).
+- **status = -333 "assigned invoices"** — purpose unconfirmed; deferred.
+
+### Confirmed correctly DROPPED (absent on purpose — verified clean)
+- CS-Cart bridge (`FCSConnect`/`FManageCS*`, `CUSTCS_LINK`,
+  `CUSTOMER_CS_ACCEPTED`, cipher key) — zero refs in `app/`/`database/`.
+- EAFDSS pre-myDATA signing — zero refs.
+- `FMysqlSync` WHMCS MySQL mirror push — zero refs (replaced by API).
+- `GET_COMB_*` cross-DB procedures — not ported (credential landmine).
+- `afm2name` WHMCS-side GSIS plugin — correctly superseded by native
+  `AadeRegistryLookup`.
