@@ -3,15 +3,15 @@
 namespace App\Services\WhmcsInbox;
 
 use App\Enums\MyDataMode;
+use App\Exceptions\Whmcs\WhmcsNotConfigured;
+use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
-use App\Exceptions\Whmcs\WhmcsApiException;
-use App\Exceptions\Whmcs\WhmcsNotConfigured;
-use App\Exceptions\Whmcs\WhmcsUnreachable;
+use App\Models\VatCategory;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
@@ -73,8 +73,7 @@ class WhmcsInvoiceFiler
         private RecomputeInvoiceTotals $recompute,
         private EInvoiceSubmitterFactory $submitterFactory,
         private WhmcsBridgeClientFactory $bridgeFactory,
-    ) {
-    }
+    ) {}
 
     /**
      * Build the invoice locally (transactional + lockForUpdate),
@@ -162,12 +161,12 @@ class WhmcsInvoiceFiler
             $mark = $submitter->submit($invoice);
         } catch (Throwable $e) {
             Log::error('WHMCS inbox: invoice persisted locally but AADE submit failed', [
-                'pending_id'       => $pending->id,
-                'invoice_id'       => $invoice->id,
-                'invcode'          => $invoice->invcode,
+                'pending_id' => $pending->id,
+                'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'error'            => $e->getMessage(),
-                'next_step'        => 'Operator should open invoice #'.$invoice->id
+                'error' => $e->getMessage(),
+                'next_step' => 'Operator should open invoice #'.$invoice->id
                     .' and use the "Submit to myDATA" action to retry the AADE filing '
                     .'(retry on the SAME Invoice avoids ΑΑ-counter waste).',
             ]);
@@ -195,12 +194,12 @@ class WhmcsInvoiceFiler
         // null for off-mode tenants (nothing to push).
         $pendingFresh = $pending->fresh();
         $pendingFresh->update([
-            'status'                => PendingWhmcsInvoice::STATUS_FILED,
-            'filed_at'              => now(),
-            'filed_by_user_id'      => $filedByUserId,
-            'mydata_mark'           => $hasMark ? $mark->mark : null,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
+            'filed_at' => now(),
+            'filed_by_user_id' => $filedByUserId,
+            'mydata_mark' => $hasMark ? $mark->mark : null,
             'whmcs_writeback_state' => $hasMark ? PendingWhmcsInvoice::WRITEBACK_PENDING : null,
-            'notes'                 => $hasMark
+            'notes' => $hasMark
                 ? 'Filed at AADE as invoice #'.$invoice->invcode.' (MARK '.$mark->mark.').'
                 : 'Recorded locally (off-mode — not filed at AADE) as invoice #'.$invoice->invcode.'.',
         ]);
@@ -243,6 +242,7 @@ class WhmcsInvoiceFiler
         InvoiceType $invoiceType,
     ): FilePreview {
         $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
+
         return new FilePreview(
             header: $mapped['header'],
             lines: $mapped['lines'],
@@ -316,31 +316,32 @@ class WhmcsInvoiceFiler
             // Record as 'skipped' so it's distinguishable from a
             // genuine failure in dashboards / retry-sweeps.
             Log::info('WHMCS write-back skipped: bridge plugin not configured', [
-                'pending_id'       => $pending->id,
+                'pending_id' => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'mydata_mark'      => $mark,
-                'reason'           => $e->getMessage(),
+                'mydata_mark' => $mark,
+                'reason' => $e->getMessage(),
             ]);
             $pending->update([
                 'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
                 'whmcs_writeback_error' => null,
             ]);
+
             return;
         }
 
         try {
             $client->setInvoiced($pending->whmcs_invoice_id, $mark);
             Log::info('WHMCS write-back succeeded', [
-                'pending_id'       => $pending->id,
+                'pending_id' => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'mydata_mark'      => $mark,
-                'ekdosi_invoice'   => $invoice->invcode,
+                'mydata_mark' => $mark,
+                'ekdosi_invoice' => $invoice->invcode,
             ]);
             $pending->update([
                 'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,
                 'whmcs_writeback_error' => null,
             ]);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // The AADE filing is complete and the local Invoice is
             // committed. We've lost the WHMCS-side bookkeeping but
             // nothing else. Record state=failed + the diagnostic so
@@ -350,12 +351,12 @@ class WhmcsInvoiceFiler
             // configured) need operator action — both are captured in
             // the error string for triage.
             Log::error('WHMCS write-back failed (AADE filing already complete)', [
-                'pending_id'       => $pending->id,
+                'pending_id' => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'mydata_mark'      => $mark,
-                'ekdosi_invoice'   => $invoice->invcode,
-                'error'            => $e->getMessage(),
-                'next_step'        => 'Manually set tblinvoices.invoiced='.$mark
+                'mydata_mark' => $mark,
+                'ekdosi_invoice' => $invoice->invcode,
+                'error' => $e->getMessage(),
+                'next_step' => 'Manually set tblinvoices.invoiced='.$mark
                     .' for WHMCS invoice '.$pending->whmcs_invoice_id
                     .', or re-trigger the write-back via the bridge plugin admin page.',
             ]);
@@ -392,15 +393,31 @@ class WhmcsInvoiceFiler
         if ($tenantMode === MyDataMode::Off->value) {
             return;   // off-mode tenants don't hit the submitter validation
         }
+
+        // G4: a 0% line is now fileable IF the tenant has exactly one 0%-rate
+        // VatCategory carrying an exemption reason (§8.3) — the submitter emits
+        // vatCategory=7 + that reason. Refuse only when it's unconfigured or
+        // ambiguous (mirrors MyDataSubmitter::resolveVatExemptionCategory),
+        // BEFORE consuming an ΑΑ on a doomed submit.
+        $exemptions = VatCategory::query()
+            ->where('company_id', $tenant->id)
+            ->where('rate', 0)
+            ->whereNotNull('vat_exemption_category')
+            ->distinct()
+            ->pluck('vat_exemption_category');
+        if ($exemptions->count() === 1) {
+            return;   // resolvable — let the submitter file it
+        }
+
         $sample = implode('", "', array_slice($zero, 0, 3));
         $more = count($zero) > 3 ? ' (+'.(count($zero) - 3).' more)' : '';
+        $reason = $exemptions->count() > 1
+            ? 'multiple 0%-rate VAT categories define different exemption reasons (ambiguous — keep one).'
+            : 'no 0%-rate VAT category has a vat_exemption_category set (Setup → VAT Categories).';
         throw new LogicException(
             'WHMCS invoice #'.$pending->whmcs_invoice_id.' has '.count($zero).' untaxed line(s) '
-            .'("'.$sample.'"'.$more.') — these would crash myDATA submit because there is no '
-            .'configured vat_exemption_category for 0%-VAT lines (tracked deferral in CLAUDE.md). '
-            .'Resolve one of: (a) reject this WHMCS invoice in the inbox and issue it manually '
-            .'with the correct vat_exemption_category set per line; (b) wait for the '
-            .'vat_exemption_category mechanism to ship; (c) hold this row until then.'
+            .'("'.$sample.'"'.$more.') but '.$reason.' AADE requires an exemption reason (§8.3) '
+            .'for 0%/exempt lines; set it before filing, reject this row and issue manually, or hold it.'
         );
     }
 }

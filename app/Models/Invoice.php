@@ -77,6 +77,7 @@ class Invoice extends Model
         'net_total',
         'gross_total',
         'withhold_amount',
+        'withhold_category',
         'mailed',
         'printed',
         // Party snapshot at issue time
@@ -114,6 +115,7 @@ class Invoice extends Model
             'paid_total' => 'decimal:2',
             'credited_total' => 'decimal:2',
             'withhold_amount' => 'decimal:2',
+            'withhold_category' => 'integer',
             'mailed' => 'boolean',
             'printed' => 'boolean',
             'mydata_sent' => 'boolean',

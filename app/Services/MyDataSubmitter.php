@@ -8,11 +8,15 @@ use App\Jobs\SendInvoiceEmail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
 use Firebed\AadeMyData\Enums\InvoiceType as AadeInvoiceType;
+use Firebed\AadeMyData\Enums\TaxType;
+use Firebed\AadeMyData\Enums\VatExemption;
+use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
 use Firebed\AadeMyData\Exceptions\MyDataException;
@@ -32,6 +36,7 @@ use Firebed\AadeMyData\Models\Issuer;
 use Firebed\AadeMyData\Models\PaymentMethodDetail;
 use Firebed\AadeMyData\Models\Response;
 use Firebed\AadeMyData\Models\ResponseDoc;
+use Firebed\AadeMyData\Models\TaxTotals;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\DB;
@@ -76,6 +81,9 @@ class MyDataSubmitter implements EInvoiceSubmitter
          */
         private readonly ?MockHandler $mockHandler = null,
     ) {}
+
+    /** G4: memoised tenant VAT-exemption reason for 0% lines (§8.3). */
+    private ?int $resolvedExemptionCategory = null;
 
     public function submit(Invoice $invoice): MyDataMark
     {
@@ -458,11 +466,19 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // forbidden for this invoice type"). The legacy accepted
             // payload never sent it. (Goods types that DO take quantity
             // would reinstate it conditionally — follow-up.)
+            $rate = (float) $line->vat_percent;
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
                 ->setNetValue((float) $line->net_price)
-                ->setVatCategory($this->vatCategoryFor((float) $line->vat_percent))
+                ->setVatCategory($this->vatCategoryFor($rate))
                 ->setVatAmount(round((float) $line->gross_price - (float) $line->net_price, 2));
+
+            // G4: a 0% line is filed as vatCategory=7 (exempt) WITH the reason
+            // code AADE requires ([217] forbids category 7 without it). The
+            // reason lives on the tenant's 0%-rate VatCategory; resolve once.
+            if (abs($rate) < 0.01) {
+                $detail->setVatExemptionCategory(VatExemption::from($this->resolveVatExemptionCategory()));
+            }
 
             if ($incomeClass && $incomeCat) {
                 $detail->addIncomeClassification($incomeClass, $incomeCat, (float) $line->net_price);
@@ -520,6 +536,32 @@ class MyDataSubmitter implements EInvoiceSubmitter
                     ->setType($this->paymentMethodTypeFor($invoice))
                     ->setAmount($vatBreakdown->totalGross())
             );
+
+        // G1: withholding (παρακράτηση). When the invoice carries a withheld
+        // amount, AADE needs a taxesTotals[taxType=1] block naming the
+        // withholding category + amount, matching the summary's
+        // totalWithheldAmount (set above). Without it the summary declares a
+        // withholding AADE can't account for. Emitted ONLY when there's an
+        // amount — standard invoices (the sandbox-validated 4 types) are
+        // unaffected.
+        $withhold = round((float) ($invoice->withhold_amount ?? 0), 2);
+        if ($withhold > 0) {
+            $category = $invoice->withhold_category;
+            if ($category === null || ! Codes::withholdingCategoryExists((int) $category)) {
+                throw new RuntimeException(
+                    'Invoice '.$invoice->invcode.' has a withholding amount ('.$withhold.') but no valid '.
+                    'withholding category (§8.4, 1–18). Set invoices.withhold_category — it identifies which '.
+                    'withholding applies (fees 20%, technicians 4/10%, lawyers 15%, …); it cannot be guessed.'
+                );
+            }
+            $aade->addTaxesTotals(
+                (new TaxTotals)
+                    ->setTaxType(TaxType::TYPE_1)   // 1 = Παρακρατούμενος φόρος (withholding)
+                    ->setTaxCategory(WithheldPercentCategory::from((int) $category))
+                    ->setUnderlyingValue($vatBreakdown->totalNet())
+                    ->setTaxAmount($withhold)
+            );
+        }
 
         if ($counterpart) {
             $aade->setCounterpart($counterpart);
@@ -676,12 +718,10 @@ class MyDataSubmitter implements EInvoiceSubmitter
      * Values from AADE myDATA spec — kept conservative; unknown
      * rates throw so we don't silently file with the wrong category.
      *
-     * IMPORTANT: 0% is NOT mapped here. Real-world 0% lines need a
-     * separate `vatExemptionCategory` field (intra-community supply
-     * vs domestic exempt vs reverse-charge vs out-of-scope) that we
-     * don't yet capture. Throwing forces operators to wait for the
-     * exemption-category mechanism rather than silently filing wrong
-     * — tracked as a deferred follow-up.
+     * 0% → category 7 (Άνευ ΦΠΑ / exempt). The REASON (§8.3) is NOT chosen
+     * here — the caller attaches it per-line via setVatExemptionCategory,
+     * resolved from the tenant's 0%-rate VatCategory (resolveVatExemptionCategory).
+     * That resolution is what guards against filing an unexplained exempt line.
      */
     private function vatCategoryFor(float $rate): int
     {
@@ -692,17 +732,71 @@ class MyDataSubmitter implements EInvoiceSubmitter
             abs($rate - 17) < 0.01 => 4,  // 17% (islands)
             abs($rate - 9) < 0.01 => 5,   // 9% (islands)
             abs($rate - 4) < 0.01 => 6,   // 4% (islands)
-            abs($rate - 0) < 0.01 => throw new RuntimeException(
-                'Cannot submit 0% VAT line without an exemption category. '.
-                'AADE distinguishes domestic exempt / intra-community supply / reverse-charge / out-of-scope. '.
-                'Per-line vat_exemption_category support is tracked in CLAUDE.md as a deferred follow-up; '.
-                'for now this submitter refuses 0% lines rather than file with the wrong category.'
-            ),
+            // G4: 0% → category 7 (Άνευ ΦΠΑ). The exemption REASON is attached
+            // separately on the line (setVatExemptionCategory); resolving it is
+            // what guards against filing an unexplained exempt line.
+            abs($rate - 0) < 0.01 => 7,
             default => throw new RuntimeException(
                 "VAT rate {$rate}% has no AADE VatCategory mapping. ".
                 'Configure the VAT category on the lookup resource, or use category 8 (no VAT) manually.'
             ),
         };
+    }
+
+    /**
+     * G4: resolve the VAT exemption reason (§8.3, 1–31) for this tenant's 0%
+     * lines. Because invoice_lines store only vat_percent (no per-line VAT
+     * category), the reason lives on the tenant's 0%-rate VatCategory. We take
+     * the single configured exemption; if none is set, or several 0% categories
+     * disagree, we throw with operator guidance rather than file a wrong/blank
+     * reason. Memoised per submit.
+     */
+    private function resolveVatExemptionCategory(): int
+    {
+        if ($this->resolvedExemptionCategory !== null) {
+            return $this->resolvedExemptionCategory;
+        }
+
+        $codes = VatCategory::query()
+            ->where('company_id', $this->tenant->id)
+            ->where('rate', 0)
+            ->whereNotNull('vat_exemption_category')
+            ->pluck('vat_exemption_category')
+            ->map(fn ($c) => (int) $c)
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            throw new RuntimeException(
+                'This invoice has a 0% / exempt line, but no 0%-rate VAT category has a '.
+                'vat_exemption_category set. AADE requires an exemption reason (§8.3, 1–31) for '.
+                'vatCategory=7. Set it on the 0%-rate VAT category (Setup → VAT Categories), '.
+                'e.g. intra-community supply, export, or άρθρο 39α.'
+            );
+        }
+        if ($codes->count() > 1) {
+            throw new RuntimeException(
+                'Multiple 0%-rate VAT categories have different exemption reasons ('.
+                $codes->implode(', ').'). Invoice lines store only the rate, not which exempt '.
+                'category, so the correct reason is ambiguous. Keep a single 0%-rate VAT category '.
+                'per tenant (or split filing by reason — a follow-up if a tenant truly needs both).'
+            );
+        }
+
+        $code = (int) $codes->first();
+        if (! Codes::vatExemptionExists($code)) {
+            // Belt-and-suspenders: the Filament form restricts to §8.3 (1–31),
+            // but an ETL/direct-DB write could store an out-of-range value the
+            // unsignedTinyInteger column tolerates (0–255). Fail loud-and-
+            // friendly here rather than let VatExemption::from() throw a raw
+            // ValueError — symmetric with the withholding-category guard.
+            throw new RuntimeException(
+                'The 0%-rate VAT category has vat_exemption_category='.$code.', which is not a '.
+                'valid AADE exemption reason (§8.3, 1–31). Fix it in Setup → VAT Categories.'
+            );
+        }
+
+        return $this->resolvedExemptionCategory = $code;
     }
 
     private function payloadToXml(AadeInvoice $payload): string

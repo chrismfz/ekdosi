@@ -260,18 +260,110 @@ class MyDataSubmitterSafetyTest extends TestCase
         (new MyDataSubmitter($this->tenant))->previewXml($inv);
     }
 
-    public function test_zero_percent_vat_throws_instead_of_misclassifying(): void
+    public function test_zero_percent_vat_throws_when_no_exemption_category_configured(): void
     {
-        // 0% lines need a vatExemptionCategory we don't yet capture.
-        // Silent mapping to category 7 was the bug; throwing is the
-        // explicit refusal.
-        $vatZero = VatCategory::create([
+        // G4: a 0% line is now fileable as vatCategory=7 — BUT only if the
+        // tenant's 0%-rate VAT category carries an exemption reason. Without
+        // one, the submitter still refuses (rather than file a blank reason).
+        VatCategory::create([
             'company_id' => $this->tenant->id,
-            'description' => '0% (placeholder)',
+            'description' => '0% (no reason)',
             'rate' => 0,
             'is_default' => false,
         ]);
         $inv = $this->makeInvoice();
+        $this->zeroVatLine($inv);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/no 0%-rate VAT category has a vat_exemption_category/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv);
+    }
+
+    public function test_zero_percent_vat_files_as_category_7_with_exemption_reason(): void
+    {
+        // G4: with the exemption reason configured, the 0% line files as
+        // vatCategory=7 + the vatExemptionCategory code AADE requires.
+        VatCategory::create([
+            'company_id' => $this->tenant->id,
+            'description' => 'Ενδοκοινοτική παράδοση',
+            'rate' => 0,
+            'vat_exemption_category' => 5,
+            'is_default' => false,
+        ]);
+        $inv = $this->makeInvoice();
+        $this->zeroVatLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv)->request;
+
+        $this->assertStringContainsString('<vatCategory>7</vatCategory>', $xml);
+        $this->assertStringContainsString('<vatExemptionCategory>5</vatExemptionCategory>', $xml);
+    }
+
+    public function test_zero_percent_vat_throws_when_exemption_reason_ambiguous(): void
+    {
+        // Two 0%-rate categories with different reasons → the line can't say
+        // which, so refuse rather than guess.
+        foreach ([5, 12] as $i => $code) {
+            VatCategory::create([
+                'company_id' => $this->tenant->id,
+                'description' => '0% #'.$i,
+                'rate' => 0,
+                'vat_exemption_category' => $code,
+                'is_default' => false,
+            ]);
+        }
+        $inv = $this->makeInvoice();
+        $this->zeroVatLine($inv);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/different exemption reasons/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv);
+    }
+
+    public function test_withholding_emits_taxestotals_block(): void
+    {
+        // G1: an invoice carrying a withholding amount + category files a
+        // taxesTotals[taxType=1] block with the amount AADE can account for.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill(['withhold_amount' => 200, 'withhold_category' => 3])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<taxesTotals>', $xml);
+        $this->assertStringContainsString('<taxType>1</taxType>', $xml);
+        $this->assertStringContainsString('<taxAmount>200', $xml);
+        $this->assertStringContainsString('<totalWithheldAmount>200', $xml);
+    }
+
+    public function test_withholding_amount_without_category_throws(): void
+    {
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill(['withhold_amount' => 200, 'withhold_category' => null])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/no valid withholding category/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
+    }
+
+    public function test_standard_invoice_emits_no_taxestotals(): void
+    {
+        // Regression: the sandbox-validated path (no withholding) must NOT
+        // gain a taxesTotals block.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringNotContainsString('<taxesTotals>', $xml);
+    }
+
+    private function zeroVatLine(Invoice $inv): void
+    {
         InvoiceLine::create([
             'company_id' => $this->tenant->id,
             'invoice_id' => $inv->id,
@@ -280,11 +372,18 @@ class MyDataSubmitterSafetyTest extends TestCase
             'net_price' => 100,
             'gross_price' => 100,
         ]);
+    }
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/0% VAT line without an exemption category/');
-
-        (new MyDataSubmitter($this->tenant))->previewXml($inv);
+    private function standardLine(Invoice $inv): void
+    {
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'net_price' => 1000,
+            'gross_price' => 1240,
+        ]);
     }
 
     public function test_submit_refuses_already_cancelled_invoice(): void
