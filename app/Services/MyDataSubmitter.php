@@ -26,9 +26,8 @@ use Firebed\AadeMyData\Models\InvoiceDetails;
 use Firebed\AadeMyData\Models\InvoiceHeader;
 use Firebed\AadeMyData\Models\InvoiceSummary;
 use Firebed\AadeMyData\Models\Issuer;
+use Firebed\AadeMyData\Models\PaymentMethodDetail;
 use Firebed\AadeMyData\Models\ResponseDoc;
-use Firebed\AadeMyData\Models\TaxesTotals;
-use Firebed\AadeMyData\Models\TaxTotals;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\DB;
@@ -430,56 +429,109 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $header->addCorrelatedInvoice((int) $this->originalInsertMark($invoice));
         }
 
+        // Income classification (E3_561_xxx + categoryN_x) comes from the
+        // InvoiceType config. AADE requires it for income documents at the
+        // per-line level AND aggregated on the summary — verified against
+        // an imported legacy MARK request that AADE accepted (it carried
+        // the classification at BOTH levels). One class per invoice type,
+        // so the per-line amount is just the line net.
+        $incomeClass = $invoice->invoiceType?->mydata_income_class;
+        $incomeCat = $invoice->invoiceType?->mydata_income_class_category;
+
         $details = [];
         $lineNo = 1;
         foreach ($invoice->lines as $line) {
-            $details[] = (new InvoiceDetails())
+            // No setQuantity: AADE rejects a per-line <quantity> for the
+            // service invoice types we file ("[205] Quantity Per Line is
+            // forbidden for this invoice type"). The legacy accepted
+            // payload never sent it. (Goods types that DO take quantity
+            // would reinstate it conditionally — follow-up.)
+            $detail = (new InvoiceDetails())
                 ->setLineNumber($lineNo++)
                 ->setNetValue((float) $line->net_price)
                 ->setVatCategory($this->vatCategoryFor((float) $line->vat_percent))
-                ->setVatAmount(round((float) $line->gross_price - (float) $line->net_price, 2))
-                ->setQuantity((float) $line->qty);
+                ->setVatAmount(round((float) $line->gross_price - (float) $line->net_price, 2));
+
+            if ($incomeClass && $incomeCat) {
+                $detail->addIncomeClassification($incomeClass, $incomeCat, (float) $line->net_price);
+            }
+
+            $details[] = $detail;
         }
 
-        // TaxesTotals takes the TaxTotals[] in its constructor — no
-        // setTaxes() method exists. The trait-provided generic set()
-        // is also unavailable on TypeArray subclasses.
-        $taxesTotals = new TaxesTotals(array_map(
-            fn ($row) => (new TaxTotals())
-                ->setTaxType(1) // 1 = VAT
-                ->setTaxCategory($this->vatCategoryFor($row['rate']))
-                ->setUnderlyingValue($row['net'])
-                ->setTaxAmount($row['vat']),
-            $vatBreakdown->rows,
-        ));
+        // NOTE: deliberately NO <taxesTotals>. In myDATA the
+        // taxesTotals/taxes taxType enum is 1=Withholding, 2=Fees,
+        // 3=OtherTaxes, 4=StampDuty, 5=Deductions — VAT is NOT among them
+        // (it lives per-line via vatCategory/vatAmount and in the summary
+        // totalVatAmount). The legacy accepted payload carries no
+        // taxesTotals at all. The previous code stuffed VAT into
+        // taxType=1, which told AADE there was a withholding tax that
+        // didn't match totalWithheldAmount → "[226] withheld sum
+        // mismatch". Emit taxesTotals only when real non-VAT taxes are
+        // modelled (follow-up: withholding/fees support).
 
+        // AADE's InvoiceSummary XSD requires the intermediate tax-total
+        // elements between totalVatAmount and totalGrossValue. Omitting
+        // them is rejected with "[101] invalid child element
+        // 'totalGrossValue' ... expected 'totalWithheldAmount'". The
+        // legacy app sent them as 0.00 (verified against an imported
+        // legacy MARK request). Withheld comes from the invoice if set.
         $summary = (new InvoiceSummary())
             ->setTotalNetValue($vatBreakdown->totalNet())
             ->setTotalVatAmount($vatBreakdown->totalVat())
+            ->setTotalWithheldAmount((float) ($invoice->withhold_amount ?? 0))
+            ->setTotalFeesAmount(0.0)
+            ->setTotalStampDutyAmount(0.0)
+            ->setTotalOtherTaxesAmount(0.0)
+            ->setTotalDeductionsAmount(0.0)
             ->setTotalGrossValue($vatBreakdown->totalGross());
+
+        // Summary-level income classification = aggregate of the per-line
+        // classifications (single class per invoice type → total net).
+        if ($incomeClass && $incomeCat) {
+            $summary->addIncomeClassification($incomeClass, $incomeCat, $vatBreakdown->totalNet());
+        }
 
         $aade = (new AadeInvoice())
             ->setIssuer($issuer)
             ->setInvoiceHeader($header)
             ->setInvoiceDetails($details)
             ->setInvoiceSummary($summary)
-            ->setTaxesTotals($taxesTotals);
+            // paymentMethods is mandatory for the invoice types we file
+            // ("[204] Payment Methods is mandatory"). The amount must
+            // equal the gross total (the legacy payload sent a single
+            // detail with type + gross amount). Type defaults to 3
+            // (Μετρητά / cash) until per-tenant payment-method → myDATA
+            // type mapping is modelled (follow-up).
+            ->addPaymentMethod(
+                (new PaymentMethodDetail())
+                    ->setType($this->paymentMethodTypeFor($invoice))
+                    ->setAmount($vatBreakdown->totalGross())
+            );
 
         if ($counterpart) {
             $aade->setCounterpart($counterpart);
         }
 
-        // UID idempotency: AADE dedupes resubmissions by UID. Without
-        // it, a transient timeout that the operator retries results in
-        // a duplicate filing with a new MARK — tax-compliance breach.
-        // firebed's guessUid() computes the deterministic UID from
-        // VAT + date + branch + type + series + AA, so the same logical
-        // invoice always produces the same UID and AADE returns the
-        // ORIGINAL MARK on retry. Critical for the ETL cutover scenario
-        // and for any "click Submit twice on a slow network" path.
-        $aade->set('uid', $aade->guessUid());
+        // Deliberately NO client-supplied <uid>: AADE rejects it with
+        // "[273] uid is not allowed. It is generated/provided by myDATA".
+        // The legacy accepted payload sent no uid. AADE derives its own
+        // deterministic uid (from VAT + date + branch + type + series +
+        // AA) and uses THAT for resubmission dedup, so retry-idempotency
+        // still holds server-side without us sending guessUid().
 
         return $aade;
+    }
+
+    /**
+     * myDATA paymentMethods/type for an invoice. Defaults to 3 (Μετρητά
+     * / cash) — a safe, always-accepted value — until we model a
+     * per-payment-method → myDATA-type mapping on the PaymentMethod
+     * lookup. The amount on the detail is the invoice gross.
+     */
+    private function paymentMethodTypeFor(Invoice $invoice): int
+    {
+        return 3;
     }
 
     /**
@@ -772,13 +824,20 @@ class MyDataSubmitter implements EInvoiceSubmitter
         if (! method_exists($response, 'getErrors')) {
             return $response->getStatusCode() ?? 'unknown';
         }
-        $errs = $response->getErrors() ?? [];
-        return implode('; ', array_map(
-            fn ($e) => method_exists($e, 'getMessage')
-                ? $e->getMessage()
-                : (string) $e,
-            $errs,
-        )) ?: 'unknown';
+        // getErrors() returns a firebed Errors object (TypeArray —
+        // iterable, NOT a plain array), or null. Iterate it; array_map()
+        // over the object TypeErrors and masks the real AADE rejection.
+        $errs = $response->getErrors();
+        if ($errs === null) {
+            return $response->getStatusCode() ?? 'unknown';
+        }
+        $messages = [];
+        foreach ($errs as $e) {
+            $code = method_exists($e, 'getCode') ? $e->getCode() : null;
+            $msg = method_exists($e, 'getMessage') ? $e->getMessage() : (string) $e;
+            $messages[] = $code ? "[{$code}] {$msg}" : $msg;
+        }
+        return implode('; ', $messages) ?: ($response->getStatusCode() ?? 'unknown');
     }
 
     private function logFailure(Invoice $invoice, string $kind, Throwable $e): void

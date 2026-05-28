@@ -408,11 +408,15 @@ class MyDataSubmitterSafetyTest extends TestCase
         (new MyDataSubmitter($this->tenant))->previewXml($inv);
     }
 
-    public function test_preview_xml_sets_uid_for_idempotency(): void
+    public function test_preview_xml_omits_client_uid(): void
     {
-        // UID must appear in the payload so AADE dedupes retries.
-        // The two-line invoice issued today should always produce
-        // the same UID (deterministic).
+        // The payload must NOT carry a client-supplied <uid>. A live
+        // AADE sandbox filing (2026-05-28) rejected it with "[273] uid is
+        // not allowed. It is generated/provided by myDATA", and the
+        // legacy accepted payload sent no uid either. AADE derives its
+        // own deterministic uid (VAT + date + branch + type + series +
+        // AA) and uses THAT for retry dedup, so idempotency still holds
+        // server-side without us sending guessUid().
         $inv = $this->makeInvoice();
         InvoiceLine::create([
             'company_id' => $this->tenant->id,
@@ -425,9 +429,7 @@ class MyDataSubmitterSafetyTest extends TestCase
 
         $mark = (new MyDataSubmitter($this->tenant))->previewXml($inv);
 
-        // Look for <uid> in the request XML — firebed serialises the
-        // UID in that element.
-        $this->assertStringContainsString('<uid>', $mark->request, 'Payload must include <uid> for AADE-side dedup');
+        $this->assertStringNotContainsString('<uid>', $mark->request, 'AADE forbids a client-supplied <uid> ([273])');
     }
 
     private function makeInvoice(int $code = 1): Invoice
