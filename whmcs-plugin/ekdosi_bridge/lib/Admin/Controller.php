@@ -4,6 +4,7 @@ namespace WHMCS\Module\Addon\EkdosiBridge\Admin;
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\EkdosiClient;
+use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
 
 /**
  * Admin module page: configure + smoke-test + manual push.
@@ -24,6 +25,21 @@ class Controller
     public function index(array $vars): string
     {
         $link = htmlspecialchars($vars['modulelink']);
+        $token = $this->csrfField();
+
+        // Third-party (timologia v2) status: own tables present + row counts.
+        $tpStatus = '<span class="label label-default">tables not created — activate or sync</span>';
+        if (ThirdPartyStore::hasOwnTables()) {
+            $contacts = (int) Capsule::table(ThirdPartyStore::CONTACTS)->count();
+            $routes = (int) Capsule::table(ThirdPartyStore::ROUTING)->count();
+            $tpStatus = '<span class="label label-success">ready</span> '
+                .htmlspecialchars((string) $contacts).' contacts, '
+                .htmlspecialchars((string) $routes).' routing rows';
+        }
+        $legacyNote = ThirdPartyStore::hasLegacyTables()
+            ? 'Legacy mod_timologia tables detected — syncable.'
+            : 'No legacy mod_timologia tables found on this WHMCS.';
+
         return <<<EOF
 <h2>Ekdosi Bridge</h2>
 <p class="text-muted">Paste a WHMCS invoice id below to inspect / push / reset.</p>
@@ -33,6 +49,62 @@ class Controller
         <button class="btn btn-primary" type="submit">Inspect</button>
     </div>
 </form>
+<hr>
+<h3>Παραστατικά σε τρίτους (timologia v2)</h3>
+<p>Own routing tables: {$tpStatus}</p>
+<p class="text-muted">{$legacyNote}</p>
+<form action="{$link}&action=sync" method="POST" style="display:inline-block;">
+    {$token}
+    <button class="btn btn-default" type="submit"
+        onclick="return confirm('Import third-party contacts + routing from the legacy mod_timologia tables into the bridge\'s own tables? Re-runnable and idempotent; legacy tables are only read.');">
+        <i class="fa fa-download"></i> Sync from legacy timologia
+    </button>
+</form>
+EOF;
+    }
+
+    /**
+     * T-1b-2: import the legacy mod_timologia* routing into the bridge's own
+     * tables (re-runnable, idempotent). Read-only against the legacy tables.
+     */
+    public function sync(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink']);
+        if (! $this->csrfValid()) {
+            return $this->errorPage($link, 'Security token mismatch. Go back and retry.');
+        }
+
+        $r = ThirdPartyStore::syncFromLegacy();
+        if (empty($r['ok'])) {
+            $this->logActivity('EkdosiBridge: timologia sync skipped — '.($r['message'] ?? 'unknown'));
+
+            return $this->errorPage($link, $r['message'] ?? 'Sync could not run.');
+        }
+
+        $this->logActivity(sprintf(
+            'EkdosiBridge: timologia sync — contacts +%d/~%d, routes +%d/~%d, %d skipped.',
+            $r['contacts_inserted'], $r['contacts_updated'],
+            $r['routes_inserted'], $r['routes_updated'], $r['routes_skipped'],
+        ));
+
+        $ci = (int) $r['contacts_inserted'];
+        $cu = (int) $r['contacts_updated'];
+        $ri = (int) $r['routes_inserted'];
+        $ru = (int) $r['routes_updated'];
+        $rs = (int) $r['routes_skipped'];
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<h2>Sync from legacy timologia</h2>
+<div class="alert alert-success">Done.</div>
+<table class="table">
+    <tr><th>Contacts inserted</th><td>{$ci}</td></tr>
+    <tr><th>Contacts updated</th><td>{$cu}</td></tr>
+    <tr><th>Routing inserted</th><td>{$ri}</td></tr>
+    <tr><th>Routing updated</th><td>{$ru}</td></tr>
+    <tr><th>Routing skipped (orphan contact)</th><td>{$rs}</td></tr>
+</table>
+<p class="text-muted">Re-run any time the legacy data changes. Rows created on the v2 side (no legacy id) are never touched.</p>
 EOF;
     }
 

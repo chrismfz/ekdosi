@@ -47,6 +47,7 @@ if (!defined('WHMCS')) {
 require_once __DIR__.'/lib/Admin/AdminDispatcher.php';
 require_once __DIR__.'/lib/Admin/Controller.php';
 require_once __DIR__.'/lib/EkdosiClient.php';
+require_once __DIR__.'/lib/ThirdPartyStore.php';
 
 function ekdosi_bridge_config(): array
 {
@@ -131,6 +132,17 @@ function ekdosi_bridge_activate(): array
         }
     } catch (\Throwable $e) {
         // Non-fatal: the coexistence check is advisory only.
+    }
+
+    // 3. Create the bridge's own third-party-invoicing tables
+    //    (mod_ekdosi_contacts / mod_ekdosi_routing). Idempotent; seeded later
+    //    by the admin "Sync from legacy timologia" action (T-1b-2).
+    try {
+        \WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore::ensureTables();
+        $notes[] = 'Third-party tables (mod_ekdosi_contacts / mod_ekdosi_routing) ready.';
+    } catch (\Throwable $e) {
+        $notes[] = 'WARNING: could not create mod_ekdosi_* tables ('.$e->getMessage()
+            .'). Use the "Sync from legacy timologia" admin action once DB privileges allow.';
     }
 
     return [

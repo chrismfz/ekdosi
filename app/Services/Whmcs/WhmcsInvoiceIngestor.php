@@ -2,10 +2,14 @@
 
 namespace App\Services\Whmcs;
 
+use App\Exceptions\Whmcs\WhmcsApiException;
+use App\Exceptions\Whmcs\WhmcsNotConfigured;
+use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Models\PendingWhmcsInvoice;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 /**
@@ -35,15 +39,16 @@ class WhmcsInvoiceIngestor
 {
     public function __construct(
         private WhmcsCustomerMatcher $matcher,
-    ) {
-    }
+        private WhmcsBridgeClientFactory $bridgeFactory,
+        private ContactCustomerResolver $contactResolver,
+    ) {}
 
     /**
-     * @param array<string, mixed> $whmcsInvoicePayload The full
-     *        GetInvoice response from WHMCS (rich shape with line
-     *        items, userid, customer identity). NOT the GetInvoices
-     *        list shape - the pull command must call getInvoice($id)
-     *        per row before invoking the ingestor.
+     * @param  array<string, mixed>  $whmcsInvoicePayload  The full
+     *                                                     GetInvoice response from WHMCS (rich shape with line
+     *                                                     items, userid, customer identity). NOT the GetInvoices
+     *                                                     list shape - the pull command must call getInvoice($id)
+     *                                                     per row before invoking the ingestor.
      */
     public function ingest(Company $tenant, array $whmcsInvoicePayload): IngestionResult
     {
@@ -57,35 +62,54 @@ class WhmcsInvoiceIngestor
             );
         }
 
-        return DB::transaction(function () use ($tenant, $whmcsInvoicePayload, $invoiceId) {
+        // Pass the FULL payload to the matcher. Critically this
+        // includes `customfields` (when present - see
+        // WhmcsClient::getInvoiceWithClient which enriches the
+        // GetInvoice response with the linked client's
+        // customfields block). Without `customfields` the
+        // matcher's strategy #2 (AFM-by-customfield-id) is dead
+        // for every ingest; the cherry-picked array shape that
+        // existed here previously stripped it silently. Extra
+        // keys the matcher doesn't read are ignored - safe.
+        $whmcsUserId = (int) ($whmcsInvoicePayload['userid'] ?? 0);
+        $match = $this->matcher->match($tenant, $whmcsInvoicePayload);
+
+        // T-1b: third-party-invoicing resolution. Computed OUTSIDE the row
+        // transaction because it does an HTTP call to the bridge + may
+        // find-or-create the end-customer Customer — neither should run while
+        // holding a row lock. Off (kill-switch / not configured / resolve.php
+        // not deployed) → a no-op decision and today's behaviour is unchanged.
+        $tp = $this->thirdPartyDecision($tenant, $invoiceId);
+
+        return DB::transaction(function () use (
+            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp
+        ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
                 ->where('whmcs_invoice_id', $invoiceId)
                 ->lockForUpdate()
                 ->first();
 
-            // Pass the FULL payload to the matcher. Critically this
-            // includes `customfields` (when present - see
-            // WhmcsClient::getInvoiceWithClient which enriches the
-            // GetInvoice response with the linked client's
-            // customfields block). Without `customfields` the
-            // matcher's strategy #2 (AFM-by-customfield-id) is dead
-            // for every ingest; the cherry-picked array shape that
-            // existed here previously stripped it silently. Extra
-            // keys the matcher doesn't read are ignored - safe.
-            $whmcsUserId = (int) ($whmcsInvoicePayload['userid'] ?? 0);
-            $match = $this->matcher->match($tenant, $whmcsInvoicePayload);
+            // Third-party single-contact billing overrides the standard
+            // reseller match; otherwise keep the matched WHMCS client.
+            $customerId = $tp['customer_id'] ?? $match->customer?->id;
+            $createStatus = $tp['hold']
+                ? PendingWhmcsInvoice::STATUS_HELD
+                : PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
 
             if ($existing === null) {
                 try {
                     $row = PendingWhmcsInvoice::create([
-                        'company_id'       => $tenant->id,
+                        'company_id' => $tenant->id,
                         'whmcs_invoice_id' => $invoiceId,
-                        'whmcs_userid'     => $whmcsUserId ?: null,
-                        'customer_id'      => $match->customer?->id,
-                        'payload'          => $whmcsInvoicePayload,
-                        'match_reason'     => $match->reason,
-                        'status'           => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+                        'whmcs_userid' => $whmcsUserId ?: null,
+                        'customer_id' => $customerId,
+                        'payload' => $whmcsInvoicePayload,
+                        'match_reason' => $match->reason,
+                        'third_party_state' => $tp['state'],
+                        'third_party_resolution' => $tp['resolution'],
+                        'status' => $createStatus,
+                        'notes' => $tp['note'],
                     ]);
 
                     return new IngestionResult(row: $row, created: true, auditPreserved: false);
@@ -126,23 +150,144 @@ class WhmcsInvoiceIngestor
                 // overwrite payload / customer_id / match_reason.
                 // The decision-time payload is the audit truth.
                 $existing->touch();
+
                 return new IngestionResult(row: $existing, created: false, auditPreserved: true);
             }
 
             // Pre-filing (status=pending_review) row: refresh the
             // snapshot from the latest WHMCS payload, re-run the
             // matcher (a customer might have been linked since the
-            // first ingest). Status, notes, rejected_reason stay
-            // intact - those are operator decisions, not WHMCS-driven.
-            $existing->update([
+            // first ingest) and re-evaluate third-party routing.
+            // rejected_reason stays intact (operator decision); status
+            // is forced to held only when re-evaluation says multi-party /
+            // unresolvable so a newly-mixed invoice can't slip through to
+            // filing.
+            $update = [
                 'whmcs_userid' => $whmcsUserId ?: null,
-                'customer_id'  => $match->customer?->id,
-                'payload'      => $whmcsInvoicePayload,
+                'customer_id' => $customerId,
+                'payload' => $whmcsInvoicePayload,
                 'match_reason' => $match->reason,
-            ]);
+                'third_party_state' => $tp['state'],
+                'third_party_resolution' => $tp['resolution'],
+            ];
+            if ($tp['hold']) {
+                $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
+                $update['notes'] = $tp['note'];
+            }
+            $existing->update($update);
 
             return new IngestionResult(row: $existing, created: false, auditPreserved: false);
         });
+    }
+
+    /**
+     * T-1b: decide how third-party invoicing affects this ingest.
+     *
+     * Returns a decision array:
+     *   state       => null | 'none' | 'single' | 'multi'
+     *   customer_id => ?int  (set only for a resolved single third party)
+     *   resolution  => ?array (the resolve.php snapshot, for audit + inbox)
+     *   hold        => bool  (park as held — multi-party or unresolvable)
+     *   note        => ?string (operator-facing reason when held)
+     *
+     * Degrades to a no-op (all-null, hold=false) whenever the feature is off,
+     * the bridge isn't configured, resolve.php isn't deployed yet, or the
+     * bridge is unreachable — so enabling the flag before deploying the
+     * endpoint can't break ingestion; it just bills the WHMCS client as today.
+     *
+     * @return array{state: ?string, customer_id: ?int, resolution: ?array, hold: bool, note: ?string}
+     */
+    private function thirdPartyDecision(Company $tenant, int $invoiceId): array
+    {
+        $noop = ['state' => null, 'customer_id' => null, 'resolution' => null, 'hold' => false, 'note' => null];
+
+        if (! $tenant->whmcs_third_party_enabled) {
+            return $noop;
+        }
+
+        try {
+            $resolution = $this->bridgeFactory->for($tenant)->resolveThirdParty($invoiceId);
+        } catch (WhmcsNotConfigured|WhmcsUnreachable|WhmcsApiException $e) {
+            // Bridge not configured / resolve.php not deployed / unreachable.
+            // Non-fatal: fall back to today's behaviour.
+            Log::info('WHMCS third-party resolve skipped — falling back to client billing.', [
+                'company_id' => $tenant->id,
+                'whmcs_invoice_id' => $invoiceId,
+                'reason' => $e->getMessage(),
+            ]);
+
+            return $noop;
+        }
+
+        $snapshot = $resolution->toArray();
+
+        if (! $resolution->hasAnyRouting()) {
+            return ['state' => PendingWhmcsInvoice::TP_NONE, 'customer_id' => null, 'resolution' => $snapshot, 'hold' => false, 'note' => null];
+        }
+
+        if ($resolution->isMultiParty()) {
+            return [
+                'state' => PendingWhmcsInvoice::TP_MULTI,
+                'customer_id' => null,
+                'resolution' => $snapshot,
+                'hold' => true,
+                'note' => 'Παραστατικά σε τρίτους: πολλαπλοί δικαιούχοι σε ένα τιμολόγιο — χρειάζεται διαχωρισμός από τον χειριστή.',
+            ];
+        }
+
+        $contact = $resolution->singleContact();
+        if ($contact === null) {
+            // Routed but not a clean single party (defensive — isMultiParty
+            // should already have caught mixed reseller+contact). Park it.
+            return [
+                'state' => PendingWhmcsInvoice::TP_MULTI,
+                'customer_id' => null,
+                'resolution' => $snapshot,
+                'hold' => true,
+                'note' => 'Παραστατικά σε τρίτους: ασαφής δρομολόγηση — έλεγξε χειροκίνητα.',
+            ];
+        }
+
+        try {
+            $customer = $this->contactResolver->resolve($tenant, $contact);
+        } catch (\Throwable $e) {
+            // Materialising the end-customer failed (e.g. a malformed contact
+            // row, a DB constraint). The "can't break ingestion" guarantee
+            // covers THIS too: never let one bad contact 500 the webhook and
+            // wedge an otherwise-valid invoice out of the inbox. Park it held
+            // for the operator rather than silently billing the reseller.
+            Log::warning('WHMCS third-party contact could not be materialised — parking held.', [
+                'company_id' => $tenant->id,
+                'whmcs_invoice_id' => $invoiceId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'state' => PendingWhmcsInvoice::TP_SINGLE,
+                'customer_id' => null,
+                'resolution' => $snapshot,
+                'hold' => true,
+                'note' => 'Παραστατικά σε τρίτους: αποτυχία δημιουργίας πελάτη-δικαιούχου — έλεγξε χειροκίνητα.',
+            ];
+        }
+        if ($customer === null) {
+            // The third party has no ΑΦΜ — can't bill a B2B invoice safely.
+            return [
+                'state' => PendingWhmcsInvoice::TP_SINGLE,
+                'customer_id' => null,
+                'resolution' => $snapshot,
+                'hold' => true,
+                'note' => 'Παραστατικά σε τρίτους: ο δικαιούχος δεν έχει ΑΦΜ — έλεγξε χειροκίνητα.',
+            ];
+        }
+
+        return [
+            'state' => PendingWhmcsInvoice::TP_SINGLE,
+            'customer_id' => $customer->id,
+            'resolution' => $snapshot,
+            'hold' => false,
+            'note' => null,
+        ];
     }
 
     /**
@@ -161,6 +306,7 @@ class WhmcsInvoiceIngestor
             return false;
         }
         $msg = $e->getMessage();
+
         return str_contains($msg, 'Duplicate entry')
             || str_contains($msg, 'UNIQUE constraint failed');
     }

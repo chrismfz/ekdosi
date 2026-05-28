@@ -44,6 +44,9 @@ class Customer extends Model
         'is_active',
         'peppol_endpoint',
         'referred_by_customer_id',
+        // T-1b: count of WHMCS third-party routing rows this customer owns
+        // (0 = not a reseller). Maintained by whmcs:sync-resellers.
+        'whmcs_reseller_routes',
     ];
 
     protected function casts(): array
@@ -52,6 +55,7 @@ class Customer extends Model
             'discount' => 'decimal:2',
             'needs_immediate_invoice' => 'boolean',
             'is_active' => 'boolean',
+            'whmcs_reseller_routes' => 'integer',
         ];
     }
 
@@ -91,7 +95,7 @@ class Customer extends Model
      */
     public function invoices(): HasMany
     {
-        return $this->hasMany(\App\Models\Invoice::class);
+        return $this->hasMany(Invoice::class);
     }
 
     /**
@@ -100,6 +104,6 @@ class Customer extends Model
      */
     public function payments(): HasMany
     {
-        return $this->hasMany(\App\Models\Payment::class);
+        return $this->hasMany(Payment::class);
     }
 }

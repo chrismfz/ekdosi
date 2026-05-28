@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Observers\InvoiceObserver;
+use App\Services\InvoiceBalance;
+use App\Services\InvoiceBalanceData;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -67,6 +69,7 @@ class Invoice extends Model
         'payment_method_id',
         'conv_invoice_id',
         'credited_invoice_id',
+        'whmcs_pending_id',
         'local_status',
         'cancel_reason',
         'delivery_date',
@@ -182,7 +185,7 @@ class Invoice extends Model
         return $this->belongsTo(self::class, 'credited_invoice_id');
     }
 
-    private ?\App\Services\InvoiceBalanceData $balanceDataCache = null;
+    private ?InvoiceBalanceData $balanceDataCache = null;
 
     /**
      * Live money snapshot (owed/paid/credited/balance/status) from
@@ -194,9 +197,9 @@ class Invoice extends Model
      * SQL aggregates. Fresh enough for a single read-only render; any
      * write path recomputes the persisted cache separately.
      */
-    public function balanceData(): \App\Services\InvoiceBalanceData
+    public function balanceData(): InvoiceBalanceData
     {
-        return $this->balanceDataCache ??= app(\App\Services\InvoiceBalance::class)->for($this);
+        return $this->balanceDataCache ??= app(InvoiceBalance::class)->for($this);
     }
 
     public function mydataMarks(): HasMany

@@ -6,16 +6,18 @@ use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
+use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
-use Filament\Schemas\Components\Utilities\Get;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Throwable;
 
@@ -52,6 +54,7 @@ class WhmcsInboxTable
                     ->state(function (PendingWhmcsInvoice $r): string {
                         $total = (float) ($r->payload['total'] ?? 0);
                         $cur = (string) ($r->payload['currencycode'] ?? '');
+
                         return number_format($total, 2, ',', '.').' '.$cur;
                     })
                     ->alignRight(),
@@ -69,30 +72,51 @@ class WhmcsInboxTable
                     ->label('Match')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
-                        PendingWhmcsInvoice::REASON_LINKED    => 'success',
-                        PendingWhmcsInvoice::REASON_AFM       => 'success',
-                        PendingWhmcsInvoice::REASON_EMAIL     => 'info',
-                        PendingWhmcsInvoice::REASON_NAME      => 'warning',
+                        PendingWhmcsInvoice::REASON_LINKED => 'success',
+                        PendingWhmcsInvoice::REASON_AFM => 'success',
+                        PendingWhmcsInvoice::REASON_EMAIL => 'info',
+                        PendingWhmcsInvoice::REASON_NAME => 'warning',
                         PendingWhmcsInvoice::REASON_UNMATCHED => 'danger',
-                        default                               => 'gray',
+                        default => 'gray',
                     }),
+
+                TextColumn::make('third_party_state')
+                    ->label('Τρίτος')
+                    ->badge()
+                    ->placeholder('—')
+                    ->color(fn (?string $state): string => match ($state) {
+                        PendingWhmcsInvoice::TP_SINGLE => 'info',
+                        PendingWhmcsInvoice::TP_MULTI => 'warning',
+                        default => 'gray',
+                    })
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        PendingWhmcsInvoice::TP_SINGLE => 'Σε τρίτο',
+                        PendingWhmcsInvoice::TP_MULTI => 'Διαχωρισμός',
+                        PendingWhmcsInvoice::TP_NONE => 'Όχι',
+                        default => '—',
+                    })
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
+                        ? 'Πολλαπλοί δικαιούχοι σε ένα WHMCS τιμολόγιο — χρειάζεται χειροκίνητος διαχωρισμός.'
+                        : null),
 
                 TextColumn::make('status')
                     ->label('Κατάσταση')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'warning',
-                        PendingWhmcsInvoice::STATUS_FILED          => 'success',
-                        PendingWhmcsInvoice::STATUS_REJECTED       => 'danger',
-                        PendingWhmcsInvoice::STATUS_HELD           => 'gray',
-                        default                                    => 'gray',
+                        PendingWhmcsInvoice::STATUS_FILED => 'success',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'danger',
+                        PendingWhmcsInvoice::STATUS_HELD => 'gray',
+                        PendingWhmcsInvoice::STATUS_SPLIT => 'info',
+                        default => 'gray',
                     })
                     ->formatStateUsing(fn (string $state) => match ($state) {
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'Προς έλεγχο',
-                        PendingWhmcsInvoice::STATUS_FILED          => 'Καταχωρημένο',
-                        PendingWhmcsInvoice::STATUS_REJECTED       => 'Απορρίφθηκε',
-                        PendingWhmcsInvoice::STATUS_HELD           => 'Σε αναμονή',
-                        default                                    => $state,
+                        PendingWhmcsInvoice::STATUS_FILED => 'Καταχωρημένο',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
+                        PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
+                        PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
+                        default => $state,
                     }),
 
                 TextColumn::make('mydata_mark')
@@ -112,14 +136,16 @@ class WhmcsInboxTable
                     ->label('Κατάσταση')
                     ->options([
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'Προς έλεγχο',
-                        PendingWhmcsInvoice::STATUS_FILED          => 'Καταχωρημένο',
-                        PendingWhmcsInvoice::STATUS_REJECTED       => 'Απορρίφθηκε',
-                        PendingWhmcsInvoice::STATUS_HELD           => 'Σε αναμονή',
+                        PendingWhmcsInvoice::STATUS_FILED => 'Καταχωρημένο',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
+                        PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
+                        PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
                     ])
                     ->default(PendingWhmcsInvoice::STATUS_PENDING_REVIEW),
             ])
             ->recordActions([
                 self::fileAtAadeAction(),
+                self::splitAction(),
                 self::rejectAction(),
                 self::holdAction(),
                 self::reStageAction(),
@@ -182,6 +208,7 @@ class WhmcsInboxTable
                         if ($c === null) {
                             return null;
                         }
+
                         return $c->trashed()
                             ? $c->name.' (διαγραμμένος)'
                             : $c->name;
@@ -210,7 +237,7 @@ class WhmcsInboxTable
                 // what would go to AADE BEFORE clicking Confirm.
                 Placeholder::make('preview')
                     ->label('Προεπισκόπηση παραστατικού')
-                    ->content(function (Get $get) use ($r): \Illuminate\Contracts\View\View|string {
+                    ->content(function (Get $get) use ($r): View|string {
                         $customerId = (int) ($get('customer_id') ?? 0);
                         $invoiceTypeId = (int) ($get('invoice_type_id') ?? 0);
                         if ($customerId <= 0 || $invoiceTypeId <= 0) {
@@ -235,8 +262,9 @@ class WhmcsInboxTable
                         try {
                             $preview = app(WhmcsInvoiceFiler::class)
                                 ->preview($tenant, $r, $customer, $invoiceType);
+
                             return view('filament.whmcs-inbox.preview-partial', ['preview' => $preview]);
-                        } catch (\Throwable $e) {
+                        } catch (Throwable $e) {
                             return view('filament.whmcs-inbox.preview-partial', [
                                 'preview' => 'Σφάλμα προεπισκόπησης: '.$e->getMessage(),
                             ]);
@@ -272,6 +300,7 @@ class WhmcsInboxTable
                         ->warning()
                         ->persistent()
                         ->send();
+
                     return;
                 }
                 $invoiceType = InvoiceType::query()
@@ -307,6 +336,96 @@ class WhmcsInboxTable
             });
     }
 
+    /**
+     * T-1c: guided multi-party split. Visible only on multi-party rows.
+     * Creates one DRAFT invoice per billing party (operator files each via the
+     * normal myDATA submit path) — no risky batch AADE filing here.
+     */
+    private static function splitAction(): Action
+    {
+        return Action::make('split_third_party')
+            ->label('Διαχωρισμός σε προσχέδια')
+            ->icon('heroicon-o-scissors')
+            ->color('info')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
+                && in_array($r->status, [PendingWhmcsInvoice::STATUS_HELD, PendingWhmcsInvoice::STATUS_PENDING_REVIEW], true))
+            ->form([
+                Select::make('invoice_type_id')
+                    ->label('Τύπος τιμολογίου')
+                    ->options(fn () => InvoiceType::query()
+                        ->where('company_id', Filament::getTenant()?->getKey())
+                        ->orderBy('code')
+                        ->pluck('code', 'id'))
+                    ->required()
+                    ->searchable()
+                    ->helperText('Για τους δικαιούχους που χρειάζονται τιμολόγιο.'),
+
+                Select::make('receipt_type_id')
+                    ->label('Τύπος απόδειξης')
+                    ->options(fn () => InvoiceType::query()
+                        ->where('company_id', Filament::getTenant()?->getKey())
+                        ->orderBy('code')
+                        ->pluck('code', 'id'))
+                    ->searchable()
+                    ->helperText('Υποχρεωτικό μόνο αν κάποιος δικαιούχος έχει σημανθεί ως απόδειξη (βλ. λίστα παρακάτω).'),
+
+                Placeholder::make('groups')
+                    ->label('Δικαιούχοι που θα προκύψουν')
+                    ->content(function (PendingWhmcsInvoice $r): string {
+                        $tenant = Filament::getTenant();
+                        $groups = app(WhmcsInvoiceSplitter::class)->planGroups($tenant, $r);
+                        if ($groups === []) {
+                            return 'Δεν βρέθηκαν δικαιούχοι στην ανάλυση.';
+                        }
+                        $rows = array_map(function (array $g): string {
+                            $who = html_entity_decode((string) $g['label'], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                            $doc = $g['is_receipt'] ? 'απόδειξη' : 'τιμολόγιο';
+                            $count = count($g['item_ids']);
+                            $resolved = $g['customer'] ? '✓' : '⚠ χωρίς ΑΦΜ/πελάτη';
+
+                            return "• {$who} — {$count} γραμμή(ές), {$doc} [{$resolved}]";
+                        }, $groups);
+
+                        return implode("\n", $rows);
+                    }),
+            ])
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Διαχωρισμός WHMCS #'.$r->whmcs_invoice_id.' σε προσχέδια')
+            ->modalDescription('Δημιουργούνται ξεχωριστά προσχέδια παραστατικά ανά δικαιούχο. Δεν υποβάλλονται στην ΑΑΔΕ — τα καταχωρείς ένα-ένα από τη λίστα παραστατικών.')
+            ->modalSubmitActionLabel('Δημιουργία προσχεδίων')
+            ->action(function (PendingWhmcsInvoice $r, array $data) {
+                $tenant = Filament::getTenant();
+                $invoiceType = InvoiceType::query()
+                    ->where('company_id', $tenant->getKey())
+                    ->whereKey($data['invoice_type_id'])
+                    ->firstOrFail();
+                $receiptType = ! empty($data['receipt_type_id'])
+                    ? InvoiceType::query()
+                        ->where('company_id', $tenant->getKey())
+                        ->whereKey($data['receipt_type_id'])
+                        ->first()
+                    : null;
+                try {
+                    $invoices = app(WhmcsInvoiceSplitter::class)
+                        ->split($tenant, $r, $invoiceType, $receiptType, auth()->id());
+                    $codes = implode(', ', array_map(fn ($i) => $i->invcode, $invoices));
+                    Notification::make()
+                        ->title('Δημιουργήθηκαν '.count($invoices).' προσχέδια')
+                        ->body('Παραστατικά: '.$codes.'. Κατάχώρησε το καθένα στην ΑΑΔΕ από τη λίστα παραστατικών.')
+                        ->success()
+                        ->persistent()
+                        ->send();
+                } catch (Throwable $e) {
+                    Notification::make()
+                        ->title('Ο διαχωρισμός απέτυχε')
+                        ->body($e->getMessage())
+                        ->danger()
+                        ->persistent()
+                        ->send();
+                }
+            });
+    }
+
     private static function rejectAction(): Action
     {
         return Action::make('reject')
@@ -329,7 +448,7 @@ class WhmcsInboxTable
             ->modalSubmitActionLabel('Απόρριψη')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
                 $r->update([
-                    'status'          => PendingWhmcsInvoice::STATUS_REJECTED,
+                    'status' => PendingWhmcsInvoice::STATUS_REJECTED,
                     'rejected_reason' => trim((string) ($data['rejected_reason'] ?? '')) ?: null,
                 ]);
                 Notification::make()->title('Απορρίφθηκε')->success()->send();
@@ -367,7 +486,7 @@ class WhmcsInboxTable
             ->modalDescription('Επιστρέφει στην κατάσταση "Προς έλεγχο" — διαθέσιμο για καταχώρηση στην ΑΑΔΕ.')
             ->action(function (PendingWhmcsInvoice $r) {
                 $r->update([
-                    'status'          => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+                    'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
                     'rejected_reason' => null,
                 ]);
                 Notification::make()->title('Επαναφέρθηκε προς έλεγχο')->success()->send();
