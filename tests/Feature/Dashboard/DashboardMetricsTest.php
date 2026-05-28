@@ -38,12 +38,12 @@ class DashboardMetricsTest extends TestCase
         $this->other = $this->makeCompany('other');
 
         $this->credit = PaymentMethod::create([
-            'company_id' => $this->tenant->id, 'name' => 'Πίστωση',
-            'due_days' => 30, 'is_active' => true,
+            'company_id' => $this->tenant->id, 'description' => 'Πίστωση',
+            'due_days' => 30,
         ]);
         $this->cash = PaymentMethod::create([
-            'company_id' => $this->tenant->id, 'name' => 'Μετρητά',
-            'due_days' => 0, 'is_active' => true,
+            'company_id' => $this->tenant->id, 'description' => 'Μετρητά',
+            'due_days' => 0,
         ]);
         $this->type = InvoiceType::create([
             'company_id' => $this->tenant->id, 'name' => 'ΤΠΥ',
@@ -171,12 +171,15 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(300.0, $outstanding);   // 500 credit - 200 paid
     }
 
-    public function test_unfiled_counts_only_null_state(): void
+    public function test_unfiled_counts_only_new_app_null_state(): void
     {
-        $this->makeInvoice(['mydata_state' => null]);
-        $this->makeInvoice(['mydata_state' => null]);
+        $this->makeInvoice(['mydata_state' => null]);   // new-app draft → counts
+        $this->makeInvoice(['mydata_state' => null]);   // new-app draft → counts
         $this->makeInvoice(['mydata_state' => 'VALID']);
         $this->makeInvoice(['mydata_state' => 'CANCELLED']);
+        // ETL-imported legacy invoice, never filed → must NOT inflate the
+        // "to file at myDATA" backlog (it predates myDATA).
+        $this->makeInvoice(['mydata_state' => null, 'legacy_id' => 9001]);
 
         $this->assertSame(2, (new DashboardMetrics($this->tenant))->unfiledCount());
     }
@@ -225,15 +228,33 @@ class DashboardMetricsTest extends TestCase
         // cancelled big invoice must NOT inflate Big's total
         $this->makeInvoice(['customer_id' => $big->id, 'issued_at' => '2026-02-01 10:00:00', 'gross_total' => 9999, 'mydata_state' => 'CANCELLED']);
 
+        // A customer with NO invoices this year must not pad the list.
+        Customer::create(['company_id' => $this->tenant->id, 'name' => 'Idle', 'afm' => '333']);
+
         $rows = (new DashboardMetrics($this->tenant))->topCustomersQuery(
             Carbon::parse('2026-01-01')->startOfYear(),
             Carbon::parse('2026-12-31')->endOfYear(),
             10,
         )->get();
 
+        $this->assertCount(2, $rows);   // Idle excluded
         $this->assertSame('Big', $rows[0]->name);
         $this->assertSame(1000.0, (float) $rows[0]->gross_ytd);
         $this->assertSame(1, (int) $rows[0]->invoices_ytd);   // cancelled one excluded
         $this->assertSame('Small', $rows[1]->name);
+    }
+
+    public function test_monthly_income_does_not_overflow_on_month_end_days(): void
+    {
+        // Viewed on the 31st, a plain subMonths(11) would skip June 2025
+        // and append a future month. subMonthsNoOverflow keeps the window
+        // honest: it must run 2025-06 .. 2026-05.
+        Carbon::setTestNow(Carbon::parse('2026-05-31 12:00:00'));
+
+        $series = (new DashboardMetrics($this->tenant))->monthlyIncome(12);
+
+        $this->assertCount(12, $series);
+        $this->assertSame('2025-06', $series[0]['key']);
+        $this->assertSame('2026-05', $series[11]['key']);   // current month, not a future one
     }
 }

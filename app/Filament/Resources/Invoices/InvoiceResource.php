@@ -83,6 +83,14 @@ class InvoiceResource extends Resource
             ->with(['customer' => fn ($q) => $q->withTrashed()]);
     }
 
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        // getEloquentQuery() lifts the SoftDeletingScope so the table's
+        // TrashedFilter works — but global search shouldn't surface
+        // trashed (cancelled/deleted) invoices as live, badge-less hits.
+        return parent::getGlobalSearchEloquentQuery()->whereNull('invoices.deleted_at');
+    }
+
     public static function form(Schema $schema): Schema
     {
         return InvoiceForm::configure($schema);

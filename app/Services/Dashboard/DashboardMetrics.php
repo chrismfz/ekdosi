@@ -83,10 +83,15 @@ class DashboardMetrics
     }
 
     /**
-     * Count of non-cancelled invoices that carry no VALID myDATA MARK
-     * yet (mydata_state IS NULL) — the "still to file at AADE" backlog.
-     * For off-mode / non-myDATA tenants this is effectively "drafts not
-     * finalised"; the widget only surfaces it for gr-mydata tenants.
+     * Count of invoices that still need filing at AADE: no VALID myDATA
+     * MARK yet (mydata_state IS NULL) AND created in the new app
+     * (legacy_id IS NULL). The legacy_id filter is essential — the ETL
+     * imports thousands of pre-myDATA legacy invoices with a NULL state
+     * (MigrateFromFirebird::copyInvoices), and those are NOT a live
+     * backlog: they predate myDATA and will never be filed. Counting
+     * them would make the badge a permanently-inflated, never-converging
+     * number for exactly the Greek tenants it targets. The widget only
+     * surfaces this for gr-mydata tenants.
      */
     public function unfiledCount(): int
     {
@@ -94,6 +99,7 @@ class DashboardMetrics
             ->where('company_id', $this->tenant->id)
             ->whereNull('deleted_at')
             ->whereNull('mydata_state')
+            ->whereNull('legacy_id')
             ->count();
     }
 
@@ -107,7 +113,10 @@ class DashboardMetrics
      */
     public function monthlyIncome(int $months = 12): array
     {
-        $start = now()->subMonths($months - 1)->startOfMonth();
+        // subMonthsNoOverflow: a plain subMonths() viewed on the 29th-31st
+        // overflows a short month and shifts the whole window forward by
+        // one (dropping a real month, appending a future zero one).
+        $start = now()->subMonthsNoOverflow($months - 1)->startOfMonth();
         $expr = $this->monthKeyExpr();
 
         $rows = $this->baseInvoices()
@@ -191,6 +200,10 @@ class DashboardMetrics
 
         return \App\Models\Customer::query()
             ->where('customers.company_id', $this->tenant->id)
+            // whereHas keeps out customers with no invoices in the window:
+            // without it, withSum yields NULL gross_ytd for them and they
+            // pad the bottom of the top-N with blank totals.
+            ->whereHas('invoices', $window)
             ->withSum(['invoices as gross_ytd' => $window], 'gross_total')
             ->withCount(['invoices as invoices_ytd' => $window])
             ->orderByDesc('gross_ytd')

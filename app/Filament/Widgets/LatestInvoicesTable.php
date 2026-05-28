@@ -30,7 +30,9 @@ class LatestInvoicesTable extends TableWidget
         $tenant = Filament::getTenant();
 
         $query = Invoice::query()
-            ->with(['customer'])
+            // withTrashed so an invoice issued to a since-soft-deleted
+            // customer still shows the party name (matches InvoiceResource).
+            ->with(['customer' => fn ($q) => $q->withTrashed()])
             ->where('company_id', $tenant instanceof Company ? $tenant->id : 0)
             ->latest('issued_at')
             ->limit(10);

@@ -20,7 +20,14 @@ trait FormatsDashboardValues
     protected function trendText(float $current, float $previous): string
     {
         if (abs($previous) < 0.005) {
-            return $current > 0 ? 'νέα έσοδα' : '—';
+            // No baseline to compute a percentage against. Distinguish
+            // genuinely-flat (both ~0) from a new positive/negative month
+            // so the text never disagrees with the up/down icon.
+            return match (true) {
+                abs($current) < 0.005 => '—',
+                $current > 0          => 'νέα έσοδα',
+                default               => '▼ αρνητικά έσοδα',
+            };
         }
         $pct = ($current - $previous) / abs($previous) * 100;
         $arrow = $pct >= 0 ? '▲' : '▼';

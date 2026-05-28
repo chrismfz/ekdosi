@@ -64,6 +64,14 @@ class CustomerResource extends Resource
             ->withoutGlobalScopes([SoftDeletingScope::class]);
     }
 
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        // getEloquentQuery() lifts the SoftDeletingScope so the table's
+        // TrashedFilter works — but global search shouldn't surface
+        // trashed customers as live, badge-less hits. Re-exclude them.
+        return parent::getGlobalSearchEloquentQuery()->whereNull('customers.deleted_at');
+    }
+
     public static function form(Schema $schema): Schema
     {
         return CustomerForm::configure($schema);
