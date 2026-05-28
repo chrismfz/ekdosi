@@ -291,10 +291,13 @@ operator reviews in `WhmcsInbox` → File at AADE → write back `invoiced=MARK`
   successor to the 3 archived legacy plugins). Deployed to the tenant's WHMCS.
 
 **WHMCS gaps (real):**
-- **`mod_timologia` third-party invoicing — MISSING (HIGH for myip).** Lets a
-  client route a service's invoice to an alternate billing identity
-  (employer/parent). `WhmcsCustomerMatcher` only documents it; nothing reads
-  `mod_timologia*`. `WhmcsInvoiceMapper` always bills the resolved client.
+- **`mod_timologia` third-party invoicing — ✅ DONE (T-1 + T-2, merged).** The
+  bridge resolves each line's routing (own `mod_ekdosi_*` tables, synced from
+  legacy), ekdosi bills the end customer for single-party invoices and stages
+  multi-party ones for a guided operator split; a hideable v2 client page lets
+  resellers manage contacts + routing. Full story:
+  `docs/whmcs-legacy-plugin-map.md`. Remaining: per-group invoice-type at file
+  time relies on the operator; WHMCS write-back of split invoices (one MARK col).
 - **`whmcs_amount_includes_tax`** documented but unimplemented — the mapper
   assumes GROSS line amounts; a tax-exclusive WHMCS tenant gets wrong VAT.
 - **griniaris** (field 338 immediate-invoicing) — `needs_immediate_invoice`
@@ -307,36 +310,65 @@ operator reviews in `WhmcsInbox` → File at AADE → write back `invoiced=MARK`
 ## Where we stand — Legacy vs New + roadmap
 
 **✅ DONE (built + unit-tested):** tenancy/auth (Shield); customers + GSIS
-lookup + **Καρτέλα** ledger; products/tiers; 7 lookup tables; invoices
-(numbering, VAT math, QR, PDF); lifecycle + local & live reconciliation;
-**myDATA submit/cancel/dry-run** (sandbox-validated for myip's 4 types);
-payments + credit notes; WHMCS bridge (A–B3) + `ekdosi_bridge` plugin; PDF +
-per-tenant email + send-log; dashboard + widgets; ETL + import UI; **scheduler
-wired** (whmcs-fetch / mydata-reconcile / mail-sweep — `routes/console.php`).
+lookup + **Καρτέλα** ledger (+ YoY KPI/charts); products/tiers; 7 lookup tables;
+invoices (numbering, VAT math, QR, PDF); lifecycle + local & live
+reconciliation; **myDATA submit/cancel/dry-run** (sandbox-validated for myip's 4
+types); payments + credit notes; WHMCS bridge (A–B3) + `ekdosi_bridge` plugin;
+**timologia v2 / third-party invoicing — T-1 + T-2 DONE & merged** (resolution,
+single-party billing, multi-party split, hideable client page; see the WHMCS
+section + `docs/whmcs-legacy-plugin-map.md`); PDF + per-tenant email + send-log;
+dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`).
 
-**🚧 PARTIAL:** auto-email on issue + audit BCC (email is a manual action, not
-auto on filing); one adaptive PDF template vs the 8 legacy FastReport designs;
-`ekdosi_bridge` error-handling (see WHMCS gaps).
+**🚧 PARTIAL:** auto-email — implemented for the **myDATA-VALID** path
+(`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
+`auto_email_on_mydata_accept`, with audit BCC); the gap is the **non-myDATA
+issue path** (drafts / `none` / Estonian) + a batch mail sweep (G6). One
+adaptive PDF template vs 8 legacy FastReport designs (G10); `ekdosi_bridge`
+error-handling.
 
-**❌ NOT YET** (confirm real usage against the production `.fbk` before building
-the usage-dependent ones):
-- **`mod_timologia`** third-party invoicing (see WHMCS gaps) — HIGH.
-- **Stock / inventory movements** — legacy decrements stock/reserve on issue +
-  `CHECK_PROD_AVAILABILITY`; `products.reserve*` imported but no movement logic.
-- **ΣΔΕΠ / cumulative invoices** — `conv_invoice_id` + self-relation exist; no
-  attach-to-running-ΣΔΕΠ / delivery-note→invoice / Reserve check.
-- **griniaris** routing; **"assigned invoices" `invoiced=-333`** (purpose
-  unconfirmed); **gross-price-edit** on lines; live VIES/AFM validation.
+### Gap analysis — legacy vs new (verified 2026-05-28, by code scan)
+Two scans cross-checked legacy source + Firebird schema against the actual new
+code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
+- **Stock / inventory movements were NEVER implemented in legacy.**
+  `CHECK_PROD_AVAILABILITY` is an empty-body stub (`ekdosi-schema.sql`); no stock
+  table; `PRODUCT.RESERVE*` are fractional factors, not quantities; no decrement
+  code in any form. So this is a *net-new idea*, not a port we're "behind" on. LOW.
+- **ΣΔΕΠ / cumulative invoices are DEAD CODE in legacy.**
+  `findCumInvoiceDate()` starts with `return(0)`; `CREATE_RETURN_INVOICE` is an
+  empty stub. Build only if the prod `.fbk` shows real `CONV_INVOICE_ID` rows. LOW.
+- **Credit notes**: legacy `CREATE_RETURN_INVOICE` was an empty stub → our
+  `IssueCreditNote` is a clean reimplementation, not a risky port.
+
+**Real remaining gaps (myDATA-filing correctness — the ones that matter):**
+- **G1 — Withholding (παρακράτηση): IN PROGRESS.** `withhold_amount` stored
+  manually; `MyDataSubmitter` omits `taxesTotals` + zeroes `totalWithheldAmount`
+  → a withholding invoice files wrong. Legacy auto-calc was 20%×net (ΠΚ-3).
+- **G4 — 0% / VAT-exempt lines: IN PROGRESS.** `vatCategoryFor()` THROWS on 0%;
+  needs `vatCategory=7` + a `vatExemptionCategory` (§8.3, 1–31). Blocks any
+  exempt/intra-community/export invoice.
+- **G3 — `whmcs_amount_includes_tax`** (tax-exclusive WHMCS tenant → wrong VAT).
+- **G9 — PaymentMethod→myDATA type** hardcoded to 3 (cash) for every invoice.
+- **G5 — per-line `<quantity>`** omitted for all types (correct for services
+  1.1/2.1/11.2; goods types need it).
+- **G7 — gross-price line edit** (operator types VAT-inclusive unit price) —
+  legacy had it; ours is net-only. UX parity, not correctness.
+- **G6 — auto-email on the non-myDATA issue path** (see PARTIAL above).
+- **G8 — griniaris** immediate-invoicing (scaffolded `needs_immediate_invoice`,
+  waits on the live scheduler/worker).
+
+**❌ NOT YET (lower / confirm-usage-first):** stock movements & ΣΔΕΠ (dead in
+legacy — see corrections); `invoiced=-333/-1000` WHMCS sentinel states;
+customer manual reorder UI; `conf_params` imported-but-unread; live VIES/AFM.
 
 **🆕 NEW phases discussed:** **Έξοδα / Expenses** (inbound `RequestDocs` +
 suppliers + ΦΠΑ εκροών−εισροών report — largest net-new); Estonian PEPPOL
 submitter; myDATA console one-click fixes; cross-model activitylog (do once).
 
-**Suggested order:** (1) ✅ sandbox-verify myDATA — done. (2) ✅ scheduler —
-done (needs the OS cron + worker live; unblocks griniaris). (3)
-**`mod_timologia`** (the HIGH WHMCS gap). (4) Confirm-then-build stock / ΣΔΕΠ /
--333 by grepping the `.fbk`. (5) Auto-email on issue; gross-price-edit.
-(6) Έξοδα phase. (7) PDF per-type fidelity. (8) PEPPOL.
+**Suggested order:** (1)✅ sandbox myDATA. (2)✅ scheduler. (3)✅ timologia v2
+(T-1+T-2). (4) **G1 withholding + G4 exempt** (filing correctness — in progress;
+gate urgency on a `.fbk` usage check). (5) G3 tax-inclusive + G9 payment-type +
+G5 goods-quantity. (6) G7 gross-edit, G6 issue-email, G8 griniaris. (7) Έξοδα.
+(8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves real usage.
 
 ---
 
