@@ -135,7 +135,11 @@ class MyDataPreflight extends Command
 
             $mt = $type->mydata_type;
             if (empty($mt)) {
-                $issues[] = 'ERROR mydata_type missing (cannot file — [204]/[223])';
+                // Not an error: a blank mydata_type means "this type is
+                // never filed to myDATA" — legitimate for delivery /
+                // aggregation / internal docs (ΣΔΕΠ, ΣΔΑΠ, etc.). Only a
+                // problem if the operator expects it filed.
+                $issues[] = 'WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)';
             } elseif (! Codes::invoiceTypeExists($mt)) {
                 $issues[] = "ERROR mydata_type '{$mt}' is not a valid AADE invoice type ([223])";
             } elseif (Codes::isIncomeInvoiceType($mt)) {
@@ -204,7 +208,9 @@ class MyDataPreflight extends Command
             return;
         }
 
-        $this->line("<fg=red>  ✗</> {$label}");
+        // Red ✗ only if there's a genuine ERROR; warning-only rows get ⚠.
+        $hasError = collect($issues)->contains(fn ($i) => str_starts_with($i, 'ERROR'));
+        $this->line($hasError ? "<fg=red>  ✗</> {$label}" : "<fg=yellow>  ⚠</> {$label}");
         foreach ($issues as $issue) {
             $isError = str_starts_with($issue, 'ERROR');
             $isError ? $this->errorCount++ : $this->warnCount++;
