@@ -52,6 +52,17 @@ class MyDataConsole extends Page
     /** Serialized SalesReconciliationResult for the blade (Livewire-safe). */
     public ?array $result = null;
 
+    /**
+     * Which lens the current $result is shown through:
+     *   - 'compare' : OUR filed invoices → myDATA (are they all there / in
+     *                 sync?). Foregrounds discrepancies.
+     *   - 'inbound' : myDATA → US. Foregrounds "αδέσποτα" — docs myDATA holds
+     *                 for our AFM with no local ekdosi record (e-τιμολόγιο /
+     *                 other software). Same RequestTransmittedDocs fetch, read
+     *                 the other way round.
+     */
+    public ?string $resultMode = null;
+
     public bool $ran = false;
 
     public ?string $error = null;
@@ -90,34 +101,61 @@ class MyDataConsole extends Page
     protected function getHeaderActions(): array
     {
         return [
+            // Direction 1 — OUR records → myDATA. "Are the invoices we filed
+            // actually at AADE and in the same state?"
             Action::make('reconcile')
-                ->label('Έλεγχος με AADE')
-                ->icon('heroicon-o-cloud-arrow-down')
+                ->label('Έλεγχος δικών μας στο myDATA')
+                ->icon('heroicon-o-clipboard-document-check')
                 ->color('primary')
-                ->modalHeading('Έλεγχος με AADE')
-                ->modalDescription('Λήψη των παραστατικών που έχουν υποβληθεί στο AADE για το διάστημα και σύγκριση με τα τοπικά δεδομένα.')
+                ->modalHeading('Έλεγχος δικών μας στο myDATA')
+                ->modalDescription('Παίρνει τα παραστατικά που υποβάλαμε εμείς και επιβεβαιώνει ότι υπάρχουν και συμφωνούν (καταστάσεις/ακυρώσεις) στο myDATA. Εντοπίζει ό,τι λείπει από το myDATA ή διαφέρει.')
                 ->modalSubmitActionLabel('Έλεγχος')
-                ->schema([
-                    DatePicker::make('from')
-                        ->label('Από')
-                        ->required()
-                        ->default(now()->subMonth()->startOfMonth()),
-                    DatePicker::make('to')
-                        ->label('Έως')
-                        ->required()
-                        ->default(now()),
-                ])
-                ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'])),
+                ->schema($this->windowSchema())
+                ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'], 'compare')),
+
+            // Direction 2 — myDATA → US. The same RequestTransmittedDocs pull
+            // read the other way: surfaces "αδέσποτα" — docs AADE holds for our
+            // AFM with no local ekdosi record (issued via e-τιμολόγιο or other
+            // software).
+            Action::make('find_orphans')
+                ->label('Αδέσποτα από myDATA')
+                ->icon('heroicon-o-cloud-arrow-down')
+                ->color('warning')
+                ->modalHeading('Αδέσποτα παραστατικά από myDATA')
+                ->modalDescription('Κατεβάζει ό,τι έχει το myDATA για το ΑΦΜ μας και εντοπίζει «αδέσποτα»: παραστατικά που υπάρχουν στο myDATA αλλά ΟΧΙ στο ekdosi (π.χ. εκδόθηκαν από e-τιμολόγιο ΑΑΔΕ ή άλλο πρόγραμμα).')
+                ->modalSubmitActionLabel('Λήψη')
+                ->schema($this->windowSchema())
+                ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'], 'inbound')),
         ];
     }
 
-    protected function runReconciliation(string $from, string $to): void
+    /**
+     * Shared date-window form for both directions.
+     *
+     * @return array<int, \Filament\Forms\Components\Component>
+     */
+    private function windowSchema(): array
+    {
+        return [
+            DatePicker::make('from')
+                ->label('Από')
+                ->required()
+                ->default(now()->subMonth()->startOfMonth()),
+            DatePicker::make('to')
+                ->label('Έως')
+                ->required()
+                ->default(now()),
+        ];
+    }
+
+    protected function runReconciliation(string $from, string $to, string $mode = 'compare'): void
     {
         $tenant = Filament::getTenant();
 
         $this->ran = true;
         $this->error = null;
         $this->result = null;
+        $this->resultMode = $mode;
 
         try {
             $reconciler = new SalesReconciler($tenant);
@@ -130,15 +168,26 @@ class MyDataConsole extends Page
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
 
-            $msg = $result->hasDiscrepancies()
-                ? $result->discrepancyCount().' ασυμφωνίες βρέθηκαν'
-                : 'Όλα συμφωνούν με το AADE';
+            if ($mode === 'inbound') {
+                $orphans = count($result->missingLocally);
+                Notification::make()
+                    ->title('Η λήψη από myDATA ολοκληρώθηκε')
+                    ->body($orphans > 0
+                        ? $orphans.' αδέσποτα παραστατικά (στο myDATA, όχι στο ekdosi)'
+                        : 'Δεν βρέθηκαν αδέσποτα — όλα όσα έχει το myDATA είναι συνδεδεμένα.')
+                    ->{$orphans > 0 ? 'warning' : 'success'}()
+                    ->send();
+            } else {
+                $msg = $result->hasDiscrepancies()
+                    ? $result->discrepancyCount().' ασυμφωνίες βρέθηκαν'
+                    : 'Όλα συμφωνούν με το AADE';
 
-            Notification::make()
-                ->title('Ο έλεγχος ολοκληρώθηκε')
-                ->body($msg)
-                ->{$result->hasDiscrepancies() ? 'warning' : 'success'}()
-                ->send();
+                Notification::make()
+                    ->title('Ο έλεγχος ολοκληρώθηκε')
+                    ->body($msg)
+                    ->{$result->hasDiscrepancies() ? 'warning' : 'success'}()
+                    ->send();
+            }
         } catch (RuntimeException $e) {
             // Our own guard messages (provider/mode/credentials) — safe
             // Greek strings meant for the operator.
