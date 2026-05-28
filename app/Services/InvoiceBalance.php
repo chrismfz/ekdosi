@@ -16,9 +16,11 @@ use Illuminate\Support\Facades\DB;
  * - credited_total = Σ gross of issued, non-cancelled credit notes
  *   (credited_invoice_id = this). A CANCELLED credit note doesn't count.
  * - paid_total = Σ amount of non-trashed payments allocated to this invoice.
- * - Cash-term invoices (payment_method.due_days = 0) are settled at issue
- *   → always `paid` (mirrors legacy GET_CUSTOMER_BALANCE, which excludes
- *   cash-term invoices from the receivable).
+ * - Cash-term invoices (payment_method.due_days = 0, or no payment
+ *   method) are settled at issue → status `paid` AND balance 0 / paid =
+ *   owed (mirrors legacy GET_CUSTOMER_BALANCE, which excludes cash-term
+ *   invoices from the receivable). The figures must AGREE with the badge:
+ *   no "€X outstanding" next to "paid".
  *
  * Money compared with a 0.005 tolerance so 2dp rounding never flips a
  * status spuriously (same style as MyDataSubmitter's VAT matching).
@@ -33,22 +35,57 @@ class InvoiceBalance
 
     public function for(Invoice $invoice): InvoiceBalanceData
     {
-        $gross = (float) ($invoice->gross_total ?? 0);
-        $credited = $this->creditedTotal($invoice);
-        $paid = $this->paidTotal($invoice);
-
+        $gross = round((float) ($invoice->gross_total ?? 0), 2);
+        $credited = round($this->creditedTotal($invoice), 2);
+        $rawPaid = round($this->paidTotal($invoice), 2);
         $owed = round($gross - $credited, 2);
-        $balance = round($owed - $paid, 2);
-        $status = $this->status($invoice, $gross, $credited, $paid, $owed, $balance);
+
+        // Fully credited (return) — wins over payment state.
+        if ($credited >= $gross - self::EPS && $gross > self::EPS) {
+            return new InvoiceBalanceData(
+                gross: $gross, credited: $credited, paid: $rawPaid,
+                owed: $owed, balance: round($owed - $rawPaid, 2),
+                status: PaymentStatus::Credited,
+            );
+        }
+
+        // Cash-term (due_days = 0, or no payment method): settled the
+        // moment it's issued — legacy GET_CUSTOMER_BALANCE never counts
+        // it as a receivable. So there is NOTHING outstanding: report it
+        // as paid-in-full with a zero balance (the figures must AGREE
+        // with the Paid badge — a €X "balance" next to "Εξοφλημένο" is
+        // the contradiction this branch's review surfaced).
+        if ($this->isCashTerm($invoice)) {
+            return new InvoiceBalanceData(
+                gross: $gross, credited: $credited, paid: $owed,
+                owed: $owed, balance: 0.0,
+                status: PaymentStatus::Paid,
+            );
+        }
+
+        // Credit-term: a real receivable tracked against recorded payments.
+        $balance = round($owed - $rawPaid, 2);
+        $status = match (true) {
+            $rawPaid > $owed + self::EPS => PaymentStatus::Overpaid,
+            abs($balance) <= self::EPS   => PaymentStatus::Paid,
+            $rawPaid > self::EPS         => PaymentStatus::Partial,
+            default                      => PaymentStatus::Unpaid,
+        };
 
         return new InvoiceBalanceData(
-            gross: round($gross, 2),
-            credited: round($credited, 2),
-            paid: round($paid, 2),
-            owed: $owed,
-            balance: $balance,
-            status: $status,
+            gross: $gross, credited: $credited, paid: $rawPaid,
+            owed: $owed, balance: $balance, status: $status,
         );
+    }
+
+    /** Cash-term = due_days 0 OR no payment method (not a receivable). */
+    private function isCashTerm(Invoice $invoice): bool
+    {
+        $dueDays = $invoice->relationLoaded('paymentMethod')
+            ? $invoice->paymentMethod?->due_days
+            : optional($invoice->paymentMethod()->first())->due_days;
+
+        return (int) ($dueDays ?? 0) === 0;
     }
 
     /**
@@ -106,43 +143,5 @@ class InvoiceBalance
             ->where('invoice_id', $invoice->getKey())
             ->whereNull('deleted_at')
             ->sum('amount');
-    }
-
-    private function status(
-        Invoice $invoice,
-        float $gross,
-        float $credited,
-        float $paid,
-        float $owed,
-        float $balance,
-    ): PaymentStatus {
-        // Cash-term invoices are settled the moment they're issued.
-        if ($invoice->relationLoaded('paymentMethod')) {
-            $dueDays = $invoice->paymentMethod?->due_days;
-        } else {
-            $dueDays = optional($invoice->paymentMethod()->first())->due_days;
-        }
-        if ((int) ($dueDays ?? 0) === 0 && $credited < $gross - self::EPS) {
-            return PaymentStatus::Paid;
-        }
-
-        // Fully credited (return) wins over payment state.
-        if ($credited >= $gross - self::EPS && $gross > self::EPS) {
-            return PaymentStatus::Credited;
-        }
-
-        if ($paid > $owed + self::EPS) {
-            return PaymentStatus::Overpaid;
-        }
-
-        if (abs($balance) <= self::EPS) {
-            return PaymentStatus::Paid;
-        }
-
-        if ($paid > self::EPS) {
-            return PaymentStatus::Partial;
-        }
-
-        return PaymentStatus::Unpaid;
     }
 }

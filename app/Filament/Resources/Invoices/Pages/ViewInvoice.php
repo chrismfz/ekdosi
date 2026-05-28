@@ -37,9 +37,13 @@ class ViewInvoice extends ViewRecord
                 ->label('Καταχώριση πληρωμής')
                 ->icon('heroicon-o-banknotes')
                 ->color('success')
+                // Credit-term only: cash-term invoices are settled at
+                // issue (nothing to collect), and credit notes / cancelled
+                // docs aren't receivables.
                 ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
                     && $record->customer_id !== null
-                    && $record->mydata_state !== 'CANCELLED')
+                    && $record->mydata_state !== 'CANCELLED'
+                    && (int) ($record->paymentMethod?->due_days ?? 0) > 0)
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Καταχώριση πληρωμής')
                 ->modalSubmitActionLabel('Καταχώριση')
