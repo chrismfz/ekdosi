@@ -362,8 +362,11 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
   and the submitter emits `setQuantity(qty)`. `measurementUnit` omitted
   (optional per spec) — a follow-up if a goods tenant needs §8.13 units.
   InvoiceType-form toggle. (Enable + sandbox-verify per the goods tenant.)
-- **G7 — gross-price line edit** (operator types VAT-inclusive unit price) —
-  legacy had it; ours is net-only. UX parity, not correctness. **UX tail.**
+- **G7 — gross-price line edit: ✅ DONE.** `LinesRelationManager` adds a
+  VAT-inclusive "Τιμή μονάδας (με ΦΠΑ)" input that back-computes net
+  (`price_per_item = wvat / (1+vat/100)`); two-way synced with the net field +
+  re-derived on VAT/product change. Net stays the stored source of truth
+  (`dehydrated(false)`; `InvoiceLine::saving` is authoritative). UX parity.
 - **G6 — auto-email on the non-myDATA issue path** (see PARTIAL above). **UX tail.**
 - **G8 — griniaris** immediate-invoicing (scaffolded `needs_immediate_invoice`,
   waits on the live scheduler/worker). **UX tail.**
