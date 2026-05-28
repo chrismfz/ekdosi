@@ -30,7 +30,8 @@ class MyDataReconcileSales extends Command
     protected $signature = 'mydata:reconcile-sales
         {--tenant= : Company slug (or numeric id) to reconcile}
         {--from= : Window start (Y-m-d). Default: one month ago}
-        {--to= : Window end (Y-m-d). Default: today}';
+        {--to= : Window end (Y-m-d). Default: today}
+        {--raw : Print the RAW AADE response XML instead of reconciling (diagnostic, read-only)}';
 
     protected $description = 'Cross-check locally-filed invoices against what AADE holds (RequestTransmittedDocs).';
 
@@ -70,6 +71,26 @@ class MyDataReconcileSales extends Command
 
         $this->line("Tenant : {$tenant->name} (#{$tenant->id})");
         $this->line("Window : {$from->format('d/m/Y')} – {$to->format('d/m/Y')}");
+
+        if ($this->option('raw')) {
+            try {
+                $pages = (new SalesReconciler($tenant))->rawTransmittedDocs($from, $to);
+            } catch (Throwable $e) {
+                $this->error('Raw fetch failed: '.$e->getMessage());
+
+                return self::FAILURE;
+            }
+
+            $this->newLine();
+            $this->info('Raw RequestTransmittedDocs response ('.count($pages).' page(s)):');
+            foreach ($pages as $i => $xml) {
+                $this->newLine();
+                $this->comment('───── page '.($i + 1).' ─────');
+                $this->line($xml);
+            }
+
+            return self::SUCCESS;
+        }
 
         try {
             $result = (new SalesReconciler($tenant))->reconcile($from, $to);

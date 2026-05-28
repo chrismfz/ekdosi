@@ -190,6 +190,41 @@ class SalesReconciler
     }
 
     /**
+     * DIAGNOSTIC: return the RAW RequestTransmittedDocs response XML, one
+     * string per page, for a window. Read-only. Use this to eyeball the
+     * actual AADE wire shape against what the parser/mapper assumes — the
+     * fastest way to debug a "buckets look wrong" surprise on the first
+     * live sandbox run. Not used by the normal reconcile path.
+     *
+     * @return list<string>
+     */
+    public function rawTransmittedDocs(Carbon $from, Carbon $to): array
+    {
+        $this->initFirebed();
+
+        $dateFrom = $from->format('d/m/Y');
+        $dateTo = $to->format('d/m/Y');
+
+        $pages = [];
+        $nextPartitionKey = null;
+        $nextRowKey = null;
+
+        do {
+            $action = new RequestTransmittedDocs;
+            $response = $action->handle('', $dateFrom, $dateTo, null, null, null, null, $nextPartitionKey, $nextRowKey);
+
+            $pages[] = $action->getResponseXML() ?? '';
+
+            $token = $response->get('continuationToken');
+            $token = $token instanceof ContinuationToken ? $token : null;
+            $nextPartitionKey = $token?->getNextPartitionKey();
+            $nextRowKey = $token?->getNextRowKey();
+        } while ($token !== null && (! empty($nextPartitionKey) || ! empty($nextRowKey)));
+
+        return $pages;
+    }
+
+    /**
      * Pure diff: AADE summaries vs. local invoices, both already scoped
      * to the same window. No DB, no network — the unit-tested core.
      *
