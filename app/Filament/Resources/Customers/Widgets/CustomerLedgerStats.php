@@ -65,19 +65,36 @@ class CustomerLedgerStats extends StatsOverviewWidget
             ? Carbon::parse($s['last_activity_at'])->format('d/m/Y')
             : '—';
 
+        // Year-over-year: compare this year's figures against last year's
+        // for THIS customer. computeYearly already carries per-year
+        // net/gross/paid; reuse the dashboard trend helpers for the
+        // wording/icon/colour. trendText returns a percentage when there
+        // is a baseline (else "νέα έσοδα"/"—"), so only suffix the year
+        // when it's an actual percentage.
+        $byYear = collect($this->ledgerYearly)->keyBy('year');
+        $prevYear = $year - 1;
+        $yearVal = fn (int $y, string $key): float => (float) ($byYear[$y][$key] ?? 0);
+        $yoyDesc = function (string $key) use ($yearVal, $year, $prevYear): string {
+            $text = $this->trendText($yearVal($year, $key), $yearVal($prevYear, $key));
+
+            return str_contains($text, '%') ? $text.' vs '.$prevYear : $text;
+        };
+        $yoyIcon = fn (string $key): string => $this->trendIcon($yearVal($year, $key), $yearVal($prevYear, $key));
+        $yoyColor = fn (string $key): string => $this->trendColor($yearVal($year, $key), $yearVal($prevYear, $key));
+
         return [
             Stat::make('Καθαρή αξία ('.$year.')', $fmt($s['ytd_net'] ?? 0))
-                ->description('Τρέχον έτος')
-                ->descriptionIcon('heroicon-m-banknotes')
-                ->color('gray'),
+                ->description($yoyDesc('net'))
+                ->descriptionIcon($yoyIcon('net'))
+                ->color($yoyColor('net')),
             Stat::make('Αξία με ΦΠΑ ('.$year.')', $fmt($s['ytd_gross'] ?? 0))
-                ->description('Τρέχον έτος')
-                ->descriptionIcon('heroicon-m-receipt-percent')
-                ->color('gray'),
+                ->description($yoyDesc('gross'))
+                ->descriptionIcon($yoyIcon('gross'))
+                ->color($yoyColor('gross')),
             Stat::make('Πληρωμές ('.$year.')', $fmt($s['ytd_paid'] ?? 0))
-                ->description('Τρέχον έτος')
-                ->descriptionIcon('heroicon-m-arrow-down-circle')
-                ->color('success'),
+                ->description($yoyDesc('paid'))
+                ->descriptionIcon($yoyIcon('paid'))
+                ->color($yoyColor('paid')),
             Stat::make('Σύνολο τιμολογίων', (string) ($s['total_invoices_lifetime'] ?? 0))
                 ->description('Συνολικά')
                 ->descriptionIcon('heroicon-m-document-text')
