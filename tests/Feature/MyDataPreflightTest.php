@@ -71,6 +71,23 @@ class MyDataPreflightTest extends TestCase
             ->assertExitCode(2);
     }
 
+    public function test_missing_mydata_type_warns_but_does_not_fail(): void
+    {
+        // A blank mydata_type = "never filed to myDATA", legitimate for
+        // delivery/internal docs → WARN, not ERROR. Exit 0.
+        $c = $this->tenant();
+        $this->invoiceType($c, [
+            'code' => 'DELIVERY',
+            'mydata_type' => null,
+            'mydata_income_class' => null,
+            'mydata_income_class_category' => null,
+        ]);
+        $this->vat($c, 24);
+
+        $this->artisan('mydata:preflight', ['--tenant' => $c->slug])
+            ->assertExitCode(0);
+    }
+
     public function test_invalid_mydata_type_is_an_error(): void
     {
         $c = $this->tenant();
