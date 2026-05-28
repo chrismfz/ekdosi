@@ -37,6 +37,24 @@ class ThirdPartyResolution
     ) {}
 
     /**
+     * Compact snapshot for persisting on the pending row (audit + inbox
+     * display). Includes the derived party counts so the UI doesn't recompute.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return [
+            'whmcs_invoice_id' => $this->whmcsInvoiceId,
+            'whmcs_userid' => $this->whmcsUserId,
+            'timologia_present' => $this->timologiaPresent,
+            'distinct_parties' => $this->distinctParties(),
+            'multi_party' => $this->isMultiParty(),
+            'lines' => $this->lines,
+        ];
+    }
+
+    /**
      * Build from the decoded resolve.php JSON body. Tolerant of the
      * "timologia not installed" shape (timologia_present=false, lines may be
      * present-but-unrouted).

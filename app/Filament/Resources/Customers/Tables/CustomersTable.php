@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Customers\Tables;
 
+use App\Filament\Resources\Customers\CustomerResource;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -74,6 +75,22 @@ class CustomersTable
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
 
+                // T-1b (#6): flags customers who route some of their WHMCS
+                // invoices to third parties ("Παραστατικά σε τρίτους"). A
+                // heads-up that this customer's invoices may not all be
+                // theirs. Maintained by `whmcs:sync-resellers`.
+                TextColumn::make('whmcs_reseller_routes')
+                    ->label('Σε τρίτους')
+                    ->badge()
+                    ->color('warning')
+                    ->icon('heroicon-o-users')
+                    ->placeholder('—')
+                    ->state(fn ($record): ?string => ($record->whmcs_reseller_routes ?? 0) > 0
+                        ? $record->whmcs_reseller_routes.' υπηρ.'
+                        : null)
+                    ->tooltip('Δρομολογεί παραστατικά σε τρίτους — έλεγξε ότι τα τιμολόγια είναι όντως δικά του.')
+                    ->toggleable(),
+
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -132,7 +149,7 @@ class CustomersTable
             // Soft1) — operators primarily SEE customer accounts;
             // edits are rare. The explicit Edit action above stays as
             // the secondary path.
-            ->recordUrl(fn ($record) => \App\Filament\Resources\Customers\CustomerResource::getUrl('ledger', ['record' => $record]))
+            ->recordUrl(fn ($record) => CustomerResource::getUrl('ledger', ['record' => $record]))
             ->defaultSort('name');
     }
 }

@@ -48,18 +48,25 @@ class PendingWhmcsInvoice extends Model
      * a code-side migration. New states should be additive only.
      */
     public const STATUS_PENDING_REVIEW = 'pending_review';
-    public const STATUS_FILED          = 'filed';
-    public const STATUS_REJECTED       = 'rejected';
-    public const STATUS_HELD           = 'held';
+
+    public const STATUS_FILED = 'filed';
+
+    public const STATUS_REJECTED = 'rejected';
+
+    public const STATUS_HELD = 'held';
 
     /**
      * Match-reason constants - mirror MatchResult::$reason values so
      * downstream consumers can pattern-match without typo risk.
      */
-    public const REASON_LINKED    = 'linked';
-    public const REASON_AFM       = 'afm';
-    public const REASON_EMAIL     = 'email';
-    public const REASON_NAME      = 'name';
+    public const REASON_LINKED = 'linked';
+
+    public const REASON_AFM = 'afm';
+
+    public const REASON_EMAIL = 'email';
+
+    public const REASON_NAME = 'name';
+
     public const REASON_UNMATCHED = 'unmatched';
 
     /**
@@ -67,10 +74,24 @@ class PendingWhmcsInvoice extends Model
      * (off-mode tenant — no MARK to push). See the
      * add_writeback_state migration docblock for the full semantics.
      */
-    public const WRITEBACK_PENDING   = 'pending';
+    public const WRITEBACK_PENDING = 'pending';
+
     public const WRITEBACK_SUCCEEDED = 'succeeded';
-    public const WRITEBACK_FAILED    = 'failed';
-    public const WRITEBACK_SKIPPED   = 'skipped';
+
+    public const WRITEBACK_FAILED = 'failed';
+
+    public const WRITEBACK_SKIPPED = 'skipped';
+
+    /**
+     * T-1b: third-party-invoicing resolution state. `null` = not evaluated
+     * (kill-switch off, or resolution unavailable). Set by the ingestor from
+     * the bridge's resolve.php.
+     */
+    public const TP_NONE = 'none';    // resolved, every line bills the WHMCS client
+
+    public const TP_SINGLE = 'single';  // whole invoice → one third-party contact
+
+    public const TP_MULTI = 'multi';   // mixes billing parties → held for operator split (T-1c)
 
     protected $fillable = [
         'company_id',
@@ -80,6 +101,8 @@ class PendingWhmcsInvoice extends Model
         'invoice_id',
         'payload',
         'match_reason',
+        'third_party_state',
+        'third_party_resolution',
         'status',
         'notes',
         'rejected_reason',
@@ -93,10 +116,11 @@ class PendingWhmcsInvoice extends Model
     protected function casts(): array
     {
         return [
-            'payload'           => 'array',
-            'filed_at'          => 'datetime',
-            'whmcs_invoice_id'  => 'integer',
-            'whmcs_userid'      => 'integer',
+            'payload' => 'array',
+            'third_party_resolution' => 'array',
+            'filed_at' => 'datetime',
+            'whmcs_invoice_id' => 'integer',
+            'whmcs_userid' => 'integer',
         ];
     }
 

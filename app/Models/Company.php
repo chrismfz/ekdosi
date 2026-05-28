@@ -22,6 +22,7 @@ class Company extends Model
      * cross-references this constant.
      */
     public const WHMCS_API_PATH_SUFFIX = '/includes/api.php';
+
     public const WHMCS_BRIDGE_PATH = '/modules/addons/ekdosi_bridge/inbound.php';
 
     protected $fillable = [
@@ -65,6 +66,8 @@ class Company extends Model
         'whmcs_webhook_secret',
         // PR #34 followup: cutover date - skip WHMCS invoices older than this
         'whmcs_invoice_min_date',
+        // T-1b: per-tenant backend kill-switch for third-party invoicing
+        'whmcs_third_party_enabled',
     ];
 
     protected function casts(): array
@@ -77,6 +80,7 @@ class Company extends Model
             'whmcs_webhook_secret' => 'encrypted',
             'whmcs_custom_field_map' => 'array',
             'whmcs_invoice_min_date' => 'date',
+            'whmcs_third_party_enabled' => 'boolean',
             'auto_email_on_mydata_accept' => 'boolean',
             'mail_smtp_port' => 'integer',
         ];
@@ -135,6 +139,7 @@ class Company extends Model
             return null;
         }
         $base = substr($api, 0, -strlen($suffix));
+
         return $base.self::WHMCS_BRIDGE_PATH;
     }
 
@@ -158,6 +163,7 @@ class Company extends Model
         if (! isset($map[$role])) {
             return null;
         }
+
         // JSON ints come back as int; defensive cast in case operators
         // typed "13" as a string in a hand-edited row.
         return (int) $map[$role] ?: null;
@@ -205,6 +211,7 @@ class Company extends Model
                 $out[] = $trimmed;
             }
         }
+
         return $out;
     }
 

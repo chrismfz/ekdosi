@@ -220,11 +220,37 @@ The only path we actually need to validate. No customer-visible change.
 >   — read-only diagnostic to validate against live WHMCS data with zero risk
 >   to filing. Tests: 17 (value object + client HMAC/URL + command).
 >
-> **T‑1b — NEXT (the billing change).** Wire resolution into the ingestor /
-> inbox: single-contact → bill the contact (match/create Customer by
-> `gr_vatno`); multi-party → stage flagged for the guided operator split. Gated
-> on the **paid-at-issue money rule** decision (third-party invoices settled by
-> the reseller must not land on the end customer's balance).
+> **T‑1b‑1 — DONE (single-party billing + flag + kill-switch).** Built + tested:
+> - **Per-tenant kill-switch** `companies.whmcs_third_party_enabled` (default
+>   OFF). Off → ingestor never calls the bridge, behaviour identical to today.
+> - **Ingestor wiring** (`WhmcsInvoiceIngestor::thirdPartyDecision`): resolves
+>   at ingest (outside the row tx), then — single contact → bills the contact
+>   (find-or-create Customer via `ContactCustomerResolver`, by `gr_vatno`,
+>   entity-decoded); multi-party → `held` for the operator split (T-1c);
+>   no-ΑΦΜ / ambiguous → held with a note; no routing → `none`, bills the
+>   client. **Graceful degradation**: resolve.php not deployed / bridge down /
+>   not configured → no-op, bills the client (so enabling the flag before
+>   deploying the endpoint can't break ingestion).
+> - **`pending_whmcs_invoices.third_party_state` + `_resolution`** persisted;
+>   inbox shows a "Τρίτος" badge (Σε τρίτο / Διαχωρισμός / Όχι).
+> - **Paid-at-issue** needs NO new code — WHMCS invoices file with a cash-term
+>   invoice type, which `InvoiceBalance` already settles at issue and keeps off
+>   any balance; billing the contact inherits this. (Money rule confirmed
+>   2026-05-28.)
+> - **Reseller flag (#6):** `customers.whmcs_reseller_routes` +
+>   `php artisan whmcs:sync-resellers` (read-only mirror) + a Customer-list
+>   badge. Tests: 14 new (resolver + ingestor paths + sync); full suite green.
+>
+> **Storage decision (supersedes "shared vs own"): OWN tables, synced.** The
+> bridge will get its own `mod_ekdosi_*` tables (versatile, no collision with
+> the legacy plugin's writers, and the future hideable v2 client page writes
+> there), seeded by a re-runnable sync/import from `mod_timologia`. The
+> `ThirdPartyResolution` contract already decouples ekdosi from this — so it's a
+> WHMCS-side slice (**T‑1b‑2**) that changes nothing on the ekdosi side.
+>
+> **T‑1c — DEFERRED (needs sign-off): the guided split view** for multi-party
+> invoices (many ekdosi invoices ↔ one `whmcs_invoice_id`). Until built,
+> multi-party rows are safely `held`.
 1. **Bridge (WHMCS side):** add an endpoint (extend `inbound.php` +
    `EkdosiClient`) that, for a WHMCS invoice, resolves each line's
    `serviceid`+`service_type`, `LEFT JOIN mod_timologia → mod_timologia_contacts`,

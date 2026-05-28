@@ -11,11 +11,12 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
-use Filament\Schemas\Components\Utilities\Get;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Throwable;
 
@@ -52,6 +53,7 @@ class WhmcsInboxTable
                     ->state(function (PendingWhmcsInvoice $r): string {
                         $total = (float) ($r->payload['total'] ?? 0);
                         $cur = (string) ($r->payload['currencycode'] ?? '');
+
                         return number_format($total, 2, ',', '.').' '.$cur;
                     })
                     ->alignRight(),
@@ -69,30 +71,49 @@ class WhmcsInboxTable
                     ->label('Match')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
-                        PendingWhmcsInvoice::REASON_LINKED    => 'success',
-                        PendingWhmcsInvoice::REASON_AFM       => 'success',
-                        PendingWhmcsInvoice::REASON_EMAIL     => 'info',
-                        PendingWhmcsInvoice::REASON_NAME      => 'warning',
+                        PendingWhmcsInvoice::REASON_LINKED => 'success',
+                        PendingWhmcsInvoice::REASON_AFM => 'success',
+                        PendingWhmcsInvoice::REASON_EMAIL => 'info',
+                        PendingWhmcsInvoice::REASON_NAME => 'warning',
                         PendingWhmcsInvoice::REASON_UNMATCHED => 'danger',
-                        default                               => 'gray',
+                        default => 'gray',
                     }),
+
+                TextColumn::make('third_party_state')
+                    ->label('Τρίτος')
+                    ->badge()
+                    ->placeholder('—')
+                    ->color(fn (?string $state): string => match ($state) {
+                        PendingWhmcsInvoice::TP_SINGLE => 'info',
+                        PendingWhmcsInvoice::TP_MULTI => 'warning',
+                        default => 'gray',
+                    })
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        PendingWhmcsInvoice::TP_SINGLE => 'Σε τρίτο',
+                        PendingWhmcsInvoice::TP_MULTI => 'Διαχωρισμός',
+                        PendingWhmcsInvoice::TP_NONE => 'Όχι',
+                        default => '—',
+                    })
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
+                        ? 'Πολλαπλοί δικαιούχοι σε ένα WHMCS τιμολόγιο — χρειάζεται χειροκίνητος διαχωρισμός.'
+                        : null),
 
                 TextColumn::make('status')
                     ->label('Κατάσταση')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'warning',
-                        PendingWhmcsInvoice::STATUS_FILED          => 'success',
-                        PendingWhmcsInvoice::STATUS_REJECTED       => 'danger',
-                        PendingWhmcsInvoice::STATUS_HELD           => 'gray',
-                        default                                    => 'gray',
+                        PendingWhmcsInvoice::STATUS_FILED => 'success',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'danger',
+                        PendingWhmcsInvoice::STATUS_HELD => 'gray',
+                        default => 'gray',
                     })
                     ->formatStateUsing(fn (string $state) => match ($state) {
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'Προς έλεγχο',
-                        PendingWhmcsInvoice::STATUS_FILED          => 'Καταχωρημένο',
-                        PendingWhmcsInvoice::STATUS_REJECTED       => 'Απορρίφθηκε',
-                        PendingWhmcsInvoice::STATUS_HELD           => 'Σε αναμονή',
-                        default                                    => $state,
+                        PendingWhmcsInvoice::STATUS_FILED => 'Καταχωρημένο',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
+                        PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
+                        default => $state,
                     }),
 
                 TextColumn::make('mydata_mark')
@@ -112,9 +133,9 @@ class WhmcsInboxTable
                     ->label('Κατάσταση')
                     ->options([
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'Προς έλεγχο',
-                        PendingWhmcsInvoice::STATUS_FILED          => 'Καταχωρημένο',
-                        PendingWhmcsInvoice::STATUS_REJECTED       => 'Απορρίφθηκε',
-                        PendingWhmcsInvoice::STATUS_HELD           => 'Σε αναμονή',
+                        PendingWhmcsInvoice::STATUS_FILED => 'Καταχωρημένο',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
+                        PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
                     ])
                     ->default(PendingWhmcsInvoice::STATUS_PENDING_REVIEW),
             ])
@@ -182,6 +203,7 @@ class WhmcsInboxTable
                         if ($c === null) {
                             return null;
                         }
+
                         return $c->trashed()
                             ? $c->name.' (διαγραμμένος)'
                             : $c->name;
@@ -210,7 +232,7 @@ class WhmcsInboxTable
                 // what would go to AADE BEFORE clicking Confirm.
                 Placeholder::make('preview')
                     ->label('Προεπισκόπηση παραστατικού')
-                    ->content(function (Get $get) use ($r): \Illuminate\Contracts\View\View|string {
+                    ->content(function (Get $get) use ($r): View|string {
                         $customerId = (int) ($get('customer_id') ?? 0);
                         $invoiceTypeId = (int) ($get('invoice_type_id') ?? 0);
                         if ($customerId <= 0 || $invoiceTypeId <= 0) {
@@ -235,8 +257,9 @@ class WhmcsInboxTable
                         try {
                             $preview = app(WhmcsInvoiceFiler::class)
                                 ->preview($tenant, $r, $customer, $invoiceType);
+
                             return view('filament.whmcs-inbox.preview-partial', ['preview' => $preview]);
-                        } catch (\Throwable $e) {
+                        } catch (Throwable $e) {
                             return view('filament.whmcs-inbox.preview-partial', [
                                 'preview' => 'Σφάλμα προεπισκόπησης: '.$e->getMessage(),
                             ]);
@@ -272,6 +295,7 @@ class WhmcsInboxTable
                         ->warning()
                         ->persistent()
                         ->send();
+
                     return;
                 }
                 $invoiceType = InvoiceType::query()
@@ -329,7 +353,7 @@ class WhmcsInboxTable
             ->modalSubmitActionLabel('Απόρριψη')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
                 $r->update([
-                    'status'          => PendingWhmcsInvoice::STATUS_REJECTED,
+                    'status' => PendingWhmcsInvoice::STATUS_REJECTED,
                     'rejected_reason' => trim((string) ($data['rejected_reason'] ?? '')) ?: null,
                 ]);
                 Notification::make()->title('Απορρίφθηκε')->success()->send();
@@ -367,7 +391,7 @@ class WhmcsInboxTable
             ->modalDescription('Επιστρέφει στην κατάσταση "Προς έλεγχο" — διαθέσιμο για καταχώρηση στην ΑΑΔΕ.')
             ->action(function (PendingWhmcsInvoice $r) {
                 $r->update([
-                    'status'          => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+                    'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
                     'rejected_reason' => null,
                 ]);
                 Notification::make()->title('Επαναφέρθηκε προς έλεγχο')->success()->send();
