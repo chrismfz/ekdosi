@@ -1841,7 +1841,7 @@ Reviewed + accepted as-is:
   focused worklist; the VALID+draft inconsistency it couldn't catch is
   now structurally impossible (promotion synced at the submitter).
 
-## Live AADE reconciliation — "Κονσόλα myDATA" (Phase 2, landed — NOT yet sandbox-tested)
+## Live AADE reconciliation — "Κονσόλα myDATA" (Phase 2, landed — SANDBOX-VERIFIED 2026-05-28)
 
 The network-backed counterpart to Phase 1's local-only
 `MyDataReconciliation`. Phase 1 cross-checks our two internal columns
@@ -1899,13 +1899,18 @@ clean-agreement) + `SalesReconcilerFetchTest` (MockHandler feeds canned
 two-page `RequestedDoc` XML — asserts pagination consumed both pages and
 both cancellation signals fold to `CANCELLED`).
 
-**NOT yet verified against AADE** (sandbox blocker — no creds/network in
-the build env): the actual `RequestTransmittedDocs` wire shape, real
-continuationToken pagination, and the Filament page render. The diff +
-parse + pagination LOGIC is unit-tested via MockHandler, and the firebed
-getters are verified against vendor source — but AADE's live XML is the
-ground truth, so the first real dev-credential run may surface
-response-shape surprises. Refine after the operator's sandbox test.
+**SANDBOX-VERIFIED against AADE (2026-05-28).** A live `RequestTransmittedDocs`
+call against the AADE dev endpoint confirmed the reconciliation parser
+needed **NO changes** — `SalesReconciler`/`AadeDocSummary` parse the real
+empty, populated, and cancellation shapes correctly. Three regression
+tests were added from the captured live XML (see `SalesReconcilerFetchTest`):
+a populated retail (11.2) invoice (real `<RequestedDoc>` with icls/ecls/pm
+namespace prefixes, `<qrCodeUrl>` not `<qrUrl>`, ISO `Y-m-d` issueDate in
+the RESPONSE vs `dd/MM/yyyy` in the REQUEST, `.`-decimal gross, NO
+counterpart on retail → null is handled), a bare self-closing
+`<RequestedDoc/>` empty window, and a real `<cancelledInvoice>` element
+(with an `xsi:nil` reason). The same sandbox run surfaced bugs in the
+SENDInvoices SUBMIT path (a separate code path) — see the next subsection.
 
 **Deferred / out of scope for v1:**
 - **One-click fixes** (sync-local-to-cancelled, pull-and-create for
@@ -1994,9 +1999,12 @@ custom pages, ~36 services, 6 artisan commands.
   `InvoiceVatBreakdown`), QR, PDF (`InvoicePdfRenderer`).
 - **Invoice lifecycle**: `local_status` × `mydata_state` (`LocalStatus`,
   `InvoiceScope::live`), transitions, local + Phase-2 live reconciliation.
-- **myDATA submit / cancel / dry-run** (`MyDataSubmitter` + factory).
+- **myDATA submit / cancel / dry-run** (`MyDataSubmitter` + factory) —
+  SUBMIT path now validated against the AADE sandbox (PR #57; retail ΑΠΥ
+  filed & accepted). See "SendInvoices payload fixes" below.
 - **myDATA SALES reconciliation** (`SalesReconciler`, `MyDataConsole`,
-  `mydata:reconcile-sales`) — Phase 2; *not yet sandbox-tested vs AADE.*
+  `mydata:reconcile-sales`) — Phase 2; **sandbox-verified 2026-05-28**
+  (parser needed no changes).
 - **Payments** (`Payment`, `InvoiceBalance`, `PaymentObserver`, resource +
   actions) and **credit notes / πιστωτικά** (`IssueCreditNote`).
 - **WHMCS bridge** (Stages A/B-1/B-2/B-3): `WhmcsClient`, ingestor, webhook
@@ -2107,3 +2115,70 @@ own forms, which is out of scope).
   to `v1.0.0`; drop the display-only int-cast on the MARK.
 - Add `whmcs_amount_includes_tax` + branch in `WhmcsInvoiceMapper` before
   onboarding any tax-exclusive WHMCS tenant.
+
+## myDATA SendInvoices payload — validated against AADE (PR #57)
+
+Filing a dummy ΑΠΥ to the AADE **sandbox** during the Phase 2 verification
+(2026-05-28) revealed that the `MyDataSubmitter` SUBMIT path
+(`buildAadeInvoice` → `SendInvoices`) had **never been validated against
+the live API** and produced XML AADE rejected. Every fix below is grounded
+in an **imported legacy MARK request** — the proven, AADE-accepted payload
+shape — recovered from the old system. (This is exactly the "we will not
+byte-match legacy XML, only semantic equivalence" plan paying off: the
+legacy request told us which elements AADE actually wants.)
+
+Fixes (each tied to the AADE rejection code it cleared):
+- **`describeResponseErrors()` was masking every rejection.** firebed's
+  `getErrors()` returns an **`Errors` object (a `TypeArray` — iterable, not
+  a plain array)**; the old `array_map()` over it threw a TypeError, so the
+  operator never saw *why* AADE rejected. Now iterates and prints
+  `[code] message`. **This bug hid all the others** — fix it first when
+  debugging any AADE submit.
+- **`[101]` missing tax-total elements.** AADE's `InvoiceSummary` XSD
+  requires `totalWithheldAmount` / `totalFeesAmount` / `totalStampDutyAmount`
+  / `totalOtherTaxesAmount` / `totalDeductionsAmount` **between**
+  `totalVatAmount` and `totalGrossValue`. The legacy payload sent them as
+  `0.00`; we now emit them (withheld from `invoice->withhold_amount` if set,
+  rest 0.0).
+- **Income classification was missing entirely.** AADE requires it for
+  income docs **per-line AND aggregated on the summary**, sourced from
+  `invoice_types.mydata_income_class` / `mydata_income_class_category`
+  (one class per type → per-line amount = line net, summary = total net).
+  Added via `addIncomeClassification(...)`.
+- **`[273]` client `<uid>` is forbidden.** AADE generates its own
+  deterministic uid (VAT + date + branch + type + series + AA) and uses
+  THAT for resubmission dedup. The old code sent `guessUid()`; removed.
+  **Retry-idempotency still holds server-side** — we just must not send a
+  uid. (The PR #25 note that claimed "payload must include `<uid>`" is
+  SUPERSEDED; the safety test now asserts `<uid>` is ABSENT.)
+- **`[205]` per-line `<quantity>` forbidden** for the service invoice types
+  we file. Removed `setQuantity()`. (Goods types that DO take quantity would
+  reinstate it conditionally — follow-up.)
+- **`[226]` withheld-sum mismatch from a bogus `<taxesTotals>`.** The old
+  code stuffed VAT into a `TaxTotals` with `taxType=1` — but in myDATA
+  `taxType` 1–5 = Withholding/Fees/OtherTaxes/StampDuty/Deductions, **VAT
+  is NOT among them** (VAT lives per-line via `vatCategory`/`vatAmount` +
+  in `totalVatAmount`). The legacy payload carries NO `taxesTotals`. Removed
+  it; emit `taxesTotals` only when real non-VAT taxes are modelled
+  (follow-up). Dropped the `TaxesTotals`/`TaxTotals` imports.
+- **`[204]` `paymentMethods` is mandatory.** Added one `PaymentMethodDetail`
+  with `amount` = gross total and `type` = **3 (Μετρητά/cash)**, hardcoded
+  via a new `paymentMethodTypeFor()` until a per-PaymentMethod → myDATA-type
+  map exists (follow-up).
+
+Phase 2's reconciliation parser needed **no** changes. Full suite after the
+PR: **295 pass**.
+
+**In-code follow-up TODOs (deferred, don't re-discover):**
+- **PaymentMethod → myDATA payment-type map** — `paymentMethodTypeFor()`
+  returns 3 (cash) for everyone. Model a per-`payment_methods` row mapping
+  (1=cash-register, 2=…, 3=cash, 4=…, 5=card, 6=web-banking, 7=POS) when a
+  tenant files non-cash.
+- **Conditional per-line `<quantity>`** — reinstate for goods invoice types
+  (which require it) while keeping it off for the service types.
+- **`taxesTotals` for withholding / fees / stamp-duty invoices** — emit the
+  real non-VAT tax breakdown when such an invoice is filed (currently only
+  the zero-summary fields are sent).
+- **SendInvoices mock-Guzzle integration test** — now FEASIBLE from the
+  captured live success response (the long-standing deferral from PR #25).
+  Build it from the real sandbox XML so the submit path has a regression net.

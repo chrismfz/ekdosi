@@ -24,8 +24,8 @@ against production data.
 - **Καρτέλα πελάτη** — full customer financial ledger (aging, yearly, running balance, WHMCS cross-ref, AADE διασταύρωση).
 - Invoices: create/edit/view, race-safe numbering, VAT/discount/rounding math, QR, PDF.
 - **Invoice lifecycle** — `local_status` (draft/active/cancelled) orthogonal to the AADE `mydata_state`.
-- **myDATA submit + cancel + dry-run** (the firebed wrapper).
-- **myDATA sales reconciliation** ("Κονσόλα myDATA") — live `RequestTransmittedDocs` cross-check (Phase 2; *not yet sandbox-tested against AADE*).
+- **myDATA submit + cancel + dry-run** (the firebed wrapper) — submit path **validated against the AADE sandbox** (PR #57: a retail ΑΠΥ filed & accepted; payload fixes grounded in the legacy MARK request).
+- **myDATA sales reconciliation** ("Κονσόλα myDATA") — live `RequestTransmittedDocs` cross-check (Phase 2; **sandbox-verified 2026-05-28** — parser needed no changes).
 - **Payments** (per-invoice + on-account, balances, payment status) and **credit notes / πιστωτικά**.
 - **WHMCS bridge** — API client, webhook ingest, operator inbox, file-at-AADE, MARK write-back; plus the **`ekdosi_bridge` WHMCS-side plugin**.
 - PDF rendering, per-tenant email + send-log, dashboard + metrics widgets.
@@ -108,7 +108,7 @@ php artisan mydata:reconcile-sales --tenant=myip         # cross-check local inv
 ```
 
 ## Roadmap (suggested order)
-1. **Sandbox-verify Phase 2** (`mydata:reconcile-sales` against AADE dev creds) — confirms the firebed pull wire-shape.
+1. ~~**Sandbox-verify Phase 2** against AADE dev creds~~ ✅ **done 2026-05-28** — reconciliation parser confirmed; the run also fixed the SendInvoices submit payload (PR #57). Remaining myDATA follow-ups: payment-method→type map, conditional per-line quantity for goods types, `taxesTotals` for withholding/fees invoices, a SendInvoices mock-Guzzle integration test.
 2. **Scheduler** — wire `whmcs:fetch-pending` + `mydata:reconcile-sales` (+ a mail-log orphan sweep) into Laravel's scheduler; this unblocks griniaris routing.
 3. **`mod_timologia` third-party invoicing** — consume the alternate-billing-contact tables so employer/parent-company invoices bill the right entity.
 4. **Confirm-then-build** the usage-dependent legacy features: stock movements, ΣΔΕΠ cumulative invoices, `invoiced=-333` — grep the production `.fbk` first.
