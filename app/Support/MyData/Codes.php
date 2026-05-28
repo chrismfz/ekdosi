@@ -121,6 +121,16 @@ final class Codes
     ];
 
     /**
+     * Credit-note types that are NON-correlated (§8.1): AADE FORBIDS
+     * <correlatedInvoices> on these. 5.1 = correlated (link required),
+     * 5.2 = non-correlated (link forbidden). The submitter must not send
+     * a correlation for these even when an original exists locally.
+     *
+     * @var list<string>
+     */
+    public const NON_CORRELATED_CREDIT_TYPES = ['5.2'];
+
+    /**
      * §8.12 Τρόποι Πληρωμής — payment method type → description.
      *
      * @var array<int, string>
@@ -215,6 +225,12 @@ final class Codes
     public static function paymentMethodExists(int $type): bool
     {
         return isset(self::PAYMENT_METHODS[$type]);
+    }
+
+    /** Is this a credit-note type that FORBIDS a correlation (e.g. 5.2)? */
+    public static function isNonCorrelatedCreditType(string $code): bool
+    {
+        return in_array($code, self::NON_CORRELATED_CREDIT_TYPES, true);
     }
 
     public static function vatExemptionExists(int $code): bool

@@ -4,14 +4,15 @@ namespace App\Services;
 
 use App\Contracts\EInvoiceSubmitter;
 use App\Enums\MyDataMode;
+use App\Jobs\SendInvoiceEmail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
 use Firebed\AadeMyData\Enums\InvoiceType as AadeInvoiceType;
-use Firebed\AadeMyData\Enums\VatCategory as AadeVatCategory;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
 use Firebed\AadeMyData\Exceptions\MyDataException;
@@ -20,13 +21,16 @@ use Firebed\AadeMyData\Http\CancelInvoice;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
 use Firebed\AadeMyData\Http\SendInvoices;
+use Firebed\AadeMyData\Models\Address;
 use Firebed\AadeMyData\Models\Counterpart;
 use Firebed\AadeMyData\Models\Invoice as AadeInvoice;
 use Firebed\AadeMyData\Models\InvoiceDetails;
 use Firebed\AadeMyData\Models\InvoiceHeader;
+use Firebed\AadeMyData\Models\InvoicesDoc;
 use Firebed\AadeMyData\Models\InvoiceSummary;
 use Firebed\AadeMyData\Models\Issuer;
 use Firebed\AadeMyData\Models\PaymentMethodDetail;
+use Firebed\AadeMyData\Models\Response;
 use Firebed\AadeMyData\Models\ResponseDoc;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
 use GuzzleHttp\Handler\MockHandler;
@@ -123,14 +127,14 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // afterwards. ResponseDoc itself does NOT support __toString;
         // the raw XML lives on the action via the HasResponseDom trait
         // (see vendor/firebed/aade-mydata/src/Http/Traits/HasResponseDom.php).
-        $action = new SendInvoices();
+        $action = new SendInvoices;
 
         try {
             $response = $action->handle($payload);
         } catch (MyDataAuthenticationException $e) {
             $this->logFailure($invoice, 'auth', $e);
             throw new RuntimeException('myDATA rejected credentials. Check Company → myDATA submission tab.', 0, $e);
-        } catch (MyDataTimeoutException | MyDataConnectionException $e) {
+        } catch (MyDataTimeoutException|MyDataConnectionException $e) {
             $this->logFailure($invoice, 'transport', $e);
             throw new RuntimeException('myDATA endpoint unreachable. Try again later.', 0, $e);
         } catch (MyDataException $e) {
@@ -189,7 +193,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             try {
                 $fresh = Invoice::query()->whereKey($invoiceId)->first();
                 if ($fresh) {
-                    \App\Jobs\SendInvoiceEmail::dispatch($fresh);
+                    SendInvoiceEmail::dispatch($fresh);
                 }
             } catch (Throwable $e) {
                 Log::warning('SendInvoiceEmail auto-dispatch failed (filing succeeded)', [
@@ -217,6 +221,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
     {
         $payload = $this->buildAadeInvoice($invoice);
         $xml = $this->payloadToXml($payload);
+
         return $this->recordDryRun($invoice, $xml);
     }
 
@@ -274,7 +279,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // Hold the action so we can extract its raw response XML for
         // the audit row (HasResponseDom trait on the action — NOT
         // (string) on the ResponseDoc, which would crash).
-        $action = new CancelInvoice();
+        $action = new CancelInvoice;
 
         try {
             $action->handle($markToCancel);
@@ -328,12 +333,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
             //     rejects the wrong format with a 400 that surfaces as
             //     "myDATA unreachable" to the operator (misleading —
             //     they'd think creds are wrong).
-            $action = new RequestTransmittedDocs();
+            $action = new RequestTransmittedDocs;
             $action->handle(
                 '',
                 now()->subDay()->format('d/m/Y'),
                 now()->format('d/m/Y'),
             );
+
             return true;
         } catch (MyDataAuthenticationException) {
             return false;
@@ -403,19 +409,19 @@ class MyDataSubmitter implements EInvoiceSubmitter
         $type = $invoice->invoiceType?->mydata_type
             ?? throw new RuntimeException(
                 "Invoice {$invoice->invcode} cannot be submitted — its invoice_type "
-                ."has no mydata_type set. Configure on the InvoiceType resource."
+                .'has no mydata_type set. Configure on the InvoiceType resource.'
             );
 
         $vatBreakdown = InvoiceVatBreakdown::for($invoice);
 
-        $issuer = (new Issuer())
+        $issuer = (new Issuer)
             ->setVatNumber($this->tenant->afm ?? throw new RuntimeException('Issuer company has no AFM'))
             ->setCountry(CountryCode::GR)
             ->setBranch(0);
 
         $counterpart = $this->buildCounterpart($invoice, $type);
 
-        $header = (new InvoiceHeader())
+        $header = (new InvoiceHeader)
             ->setSeries($invoice->invoiceType->code)
             ->setAa((string) $invoice->code)
             ->setIssueDate(Carbon::parse($invoice->issued_at)->toDateString())
@@ -425,7 +431,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // Credit note: correlate to the original invoice's MARK so AADE
         // links the credit to the document it reverses. (int) is safe on
         // 64-bit PHP — AADE MARKs are ~15 digits, well under PHP_INT_MAX.
-        if ($invoice->credited_invoice_id !== null) {
+        //
+        // BUT only for CORRELATED credit types (5.1). For NON-correlated
+        // types (5.2) AADE FORBIDS <correlatedInvoices> and rejects the
+        // filing — so we must not send it even though we have an original.
+        // (myip's ΠΙΣ historically maps to 5.2; sandbox validated 5.1.)
+        if ($invoice->credited_invoice_id !== null
+            && ! Codes::isNonCorrelatedCreditType((string) $invoice->invoiceType?->mydata_type)) {
             $header->addCorrelatedInvoice((int) $this->originalInsertMark($invoice));
         }
 
@@ -446,7 +458,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // forbidden for this invoice type"). The legacy accepted
             // payload never sent it. (Goods types that DO take quantity
             // would reinstate it conditionally — follow-up.)
-            $detail = (new InvoiceDetails())
+            $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
                 ->setNetValue((float) $line->net_price)
                 ->setVatCategory($this->vatCategoryFor((float) $line->vat_percent))
@@ -476,7 +488,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // 'totalGrossValue' ... expected 'totalWithheldAmount'". The
         // legacy app sent them as 0.00 (verified against an imported
         // legacy MARK request). Withheld comes from the invoice if set.
-        $summary = (new InvoiceSummary())
+        $summary = (new InvoiceSummary)
             ->setTotalNetValue($vatBreakdown->totalNet())
             ->setTotalVatAmount($vatBreakdown->totalVat())
             ->setTotalWithheldAmount((float) ($invoice->withhold_amount ?? 0))
@@ -492,7 +504,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $summary->addIncomeClassification($incomeClass, $incomeCat, $vatBreakdown->totalNet());
         }
 
-        $aade = (new AadeInvoice())
+        $aade = (new AadeInvoice)
             ->setIssuer($issuer)
             ->setInvoiceHeader($header)
             ->setInvoiceDetails($details)
@@ -504,7 +516,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // (Μετρητά / cash) until per-tenant payment-method → myDATA
             // type mapping is modelled (follow-up).
             ->addPaymentMethod(
-                (new PaymentMethodDetail())
+                (new PaymentMethodDetail)
                     ->setType($this->paymentMethodTypeFor($invoice))
                     ->setAmount($vatBreakdown->totalGross())
             );
@@ -602,7 +614,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // anything else, including spelled-out names ("Greece").
         $country = $this->normaliseCountryCode($invoice->country ?: $customer->country ?: 'GR');
 
-        $counterpart = (new Counterpart())
+        $counterpart = (new Counterpart)
             ->setVatNumber($customer->afm)
             ->setCountry($country)
             ->setBranch(0);
@@ -619,7 +631,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 )
             );
             $counterpart->setAddress(
-                (new \Firebed\AadeMyData\Models\Address())
+                (new Address)
                     ->setStreet($invoice->address1 ?: ($customer->address1 ?: 'Unknown'))
                     ->setCity($invoice->city ?: ($customer->city ?: 'Unknown'))
                     ->setPostalCode($invoice->postcode ?: ($customer->postcode ?: '00000'))
@@ -645,6 +657,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         if (strlen($trimmed) === 2 && ctype_alpha($trimmed)) {
             return $trimmed;
         }
+
         return match ($trimmed) {
             'GREECE', 'HELLAS', 'ΕΛΛΑΔΑ', 'ΕΛΛΆΔΑ', 'GRC' => 'GR',
             'ESTONIA', 'EESTI', 'EST' => 'EE',
@@ -694,8 +707,8 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
     private function payloadToXml(AadeInvoice $payload): string
     {
-        return (new InvoicesDocWriter())->asXml(
-            new \Firebed\AadeMyData\Models\InvoicesDoc([$payload])
+        return (new InvoicesDocWriter)->asXml(
+            new InvoicesDoc([$payload])
         );
     }
 
@@ -724,7 +737,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // first(). It does NOT have a getResponses() method (the
         // earlier code's invocation of that would have crashed every
         // single successful submit). Iterate properly.
-        /** @var \Firebed\AadeMyData\Models\Response|null $firstResponse */
+        /** @var Response|null $firstResponse */
         $firstResponse = $response->first();
 
         if ($firstResponse === null || $firstResponse->getStatusCode() !== 'Success') {
@@ -751,6 +764,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'invoice_id' => $invoice->id,
                 'mark' => $mark,
             ]);
+
             return $existing;
         }
 
@@ -816,6 +830,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         if ($type instanceof \BackedEnum) {
             return (string) $type->value;
         }
+
         return (string) $type;
     }
 
@@ -837,6 +852,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $msg = method_exists($e, 'getMessage') ? $e->getMessage() : (string) $e;
             $messages[] = $code ? "[{$code}] {$msg}" : $msg;
         }
+
         return implode('; ', $messages) ?: ($response->getStatusCode() ?? 'unknown');
     }
 

@@ -7,7 +7,6 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
-use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\MyDataSubmitter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -369,7 +368,7 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<address>', $mark->request);
     }
 
-    public function test_buildCounterpart_throws_on_unknown_country_string(): void
+    public function test_build_counterpart_throws_on_unknown_country_string(): void
     {
         $type = InvoiceType::create([
             'company_id' => $this->tenant->id,
@@ -430,6 +429,52 @@ class MyDataSubmitterSafetyTest extends TestCase
         $mark = (new MyDataSubmitter($this->tenant))->previewXml($inv);
 
         $this->assertStringNotContainsString('<uid>', $mark->request, 'AADE forbids a client-supplied <uid> ([273])');
+    }
+
+    public function test_non_correlated_credit_5_2_omits_correlation(): void
+    {
+        // A 5.2 (non-correlated) credit note must NOT carry
+        // <correlatedInvoices> even though it has a credited_invoice_id —
+        // AADE forbids the correlation for this type. Because we skip it,
+        // originalInsertMark() is never called, so no INSERT MARK row is
+        // needed for the original (and it must not throw).
+        $creditType = InvoiceType::create([
+            'company_id' => $this->tenant->id,
+            'code' => 'PIS',
+            'name' => 'Πιστωτικό',
+            'invcount' => 1,
+            'mydata_type' => '5.2',
+            'is_credit' => true,
+        ]);
+
+        $original = $this->makeInvoice(code: 10);
+
+        $credit = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'PIS1',
+            'code' => 1,
+            'invoice_type_id' => $creditType->id,
+            'customer_id' => $this->customer->id,
+            'issued_at' => now(),
+            'header_discount_percent' => 0,
+            'credited_invoice_id' => $original->id,
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $credit->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'net_price' => 100,
+            'gross_price' => 124,
+        ]);
+
+        $mark = (new MyDataSubmitter($this->tenant))->previewXml($credit);
+
+        $this->assertStringNotContainsString(
+            '<correlatedInvoices>',
+            $mark->request,
+            'AADE forbids <correlatedInvoices> on a 5.2 non-correlated credit note',
+        );
     }
 
     private function makeInvoice(int $code = 1): Invoice
