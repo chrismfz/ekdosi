@@ -10,7 +10,7 @@ trait FormatsDashboardValues
 {
     protected function eur(float $value): string
     {
-        return number_format($value, 2, ',', '.').' €';
+        return \App\Support\Money::eur($value);
     }
 
     /**

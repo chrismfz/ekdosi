@@ -2,84 +2,83 @@
 
 namespace App\Filament\Resources\Customers\Pages;
 
-use App\DTOs\AadeRegistryRecord;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
-use App\Models\Company;
+use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Mail\CustomerStatementMail;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
-use App\Services\CustomerLedger\CustomerLedgerResult;
+use App\Services\CustomerLedger\CustomerStatementCsv;
+use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
+use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\CustomerWhmcsLedger;
 use App\Services\Whmcs\CustomerWhmcsLedgerResult;
+use App\Support\Money;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Carbon;
 use Livewire\Attributes\Locked;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Καρτέλα Πελάτη: full customer financial dashboard.
  *
- * Sections:
- *   1. Header card - identity + key facts + balance highlighted
- *   2. Quick stats - YTD net/gross/paid, balance, oldest unpaid days,
- *                    last activity
- *   3. Aging buckets - 0-30 / 31-60 / 61-90 / 90+ days outstanding
- *   4. Yearly breakdown - per-year totals + year-end balance
- *   5. Chronological ledger - merged invoices + payments with running
- *      balance (the main feature - what Greek accountants call "Καρτέλα")
- *   6. WHMCS comparison (collapsible) - what WHMCS has for this customer
- *      cross-referenced with ekdosi-side state
+ * Layout (top → bottom):
+ *   1. Header card — identity + key facts (Blade section).
+ *   2. KPI stats + aging + balance trend — Filament widgets embedded via
+ *      @livewire (always styled by Filament's compiled CSS; no custom
+ *      theme build needed). Data is the filter-independent stats block,
+ *      computed ONCE on mount.
+ *   3. Καρτέλα κινήσεων — a real Filament table (records()-backed) with
+ *      pagination, search, sortable date, native year/type/paid filters,
+ *      and click-through links to each invoice.
+ *   4. WHMCS comparison (collapsible).
  *
- * Read-only. Operator clicks "Open Καρτέλα" from EditCustomer or
- * navigates to /admin/{tenant}/customers/{id}/ledger directly.
+ * Header actions: AADE crosscheck, on-account payment, export PDF / CSV,
+ * email statement.
  *
- * Filters live on the URL query (?year=2025&invoice_type=3&paid=unpaid)
- * so operators can bookmark a specific view.
+ * Read-only ledger. The running balance shown in the table is always
+ * computed from the FULL history (CustomerLedgerBuilder), so a year/type
+ * filter never resets it to zero — operators expect carry-over.
  */
-class CustomerLedger extends Page
+class CustomerLedger extends Page implements HasTable
 {
     use HandlesAadeRegistryExceptions;
+    use InteractsWithTable;
 
     protected static string $resource = CustomerResource::class;
 
     protected string $view = 'filament.customers.ledger';
 
     /**
-     * Filament/Livewire URL parameter binding initially sets `$record`
-     * to the raw URL value (int|string), THEN our mount() resolves it
-     * to a Customer instance. A strict `?Customer` type rejects the
-     * int with a PHP TypeError mid-lifecycle - which surfaces as a
-     * 404 page in production (route appears broken). Filament's own
-     * `InteractsWithRecord` trait uses this exact union + `#[Locked]`
-     * combo to handle the same lifecycle:
-     *   - The union accepts the raw int|string from the URL
-     *   - `#[Locked]` tells Livewire NOT to re-sync this property
-     *     from the frontend snapshot (defence against tampering)
-     * After mount() runs, `$record` is always a Customer instance;
-     * the view + helper methods access ->name etc on the Model.
+     * Filament/Livewire binds `$record` to the raw URL value first, then
+     * mount() resolves it to a Customer. The union + #[Locked] mirrors
+     * Filament's own InteractsWithRecord lifecycle (see git history for
+     * the prod-404 this prevents).
      */
     #[Locked]
     public Customer | Model | int | string | null $record = null;
 
-    public ?int $filterYear = null;
-
-    public ?int $filterInvoiceTypeId = null;
-
-    public ?string $filterPaidStatus = null;
-
     public bool $showWhmcsPanel = false;
 
-    public ?CustomerLedgerResult $ledger = null;
-
     /**
-     * Filter-independent sections of the ledger (stats / aging /
-     * yearly). Computed ONCE on mount and reused across filter
-     * changes so the operator clicking a filter doesn't re-run 4
-     * O(N) passes that don't depend on the filter values.
+     * Filter-independent ledger sections (stats / aging / yearly).
+     * Computed ONCE on mount and fed to the KPI/aging/chart widgets +
+     * the header card. The movements table recomputes its own rows per
+     * interaction (cheap, bounded per customer).
      *
      * @var array{stats: array, aging: array, yearly: array}|null
      */
@@ -88,19 +87,6 @@ class CustomerLedger extends Page
     public ?CustomerWhmcsLedgerResult $whmcsLedger = null;
 
     /**
-     * Memoised AADE crosscheck result, shared across the modalContent
-     * render and the action submit so we don't (a) double-fetch from
-     * AADE on cold cache, or (b) hit a race where the modal preview
-     * and the apply ran against different AADE responses.
-     *
-     * Holds ONLY primitive types (arrays + scalars) - NOT the
-     * AadeRegistryRecord DTO. Livewire 3 cannot serialize arbitrary
-     * objects through its Synth mechanism, and modalContent vs action
-     * submit run in SEPARATE Livewire requests; the memo has to
-     * survive snapshot dehydration / hydration. Earlier draft held
-     * the DTO directly — would have thrown "Property type not
-     * supported" on every modal open.
-     *
      * @var array{
      *     diffs: array<string, array{stored: string, aade: string}>,
      *     error: ?string,
@@ -112,7 +98,7 @@ class CustomerLedger extends Page
     public ?array $aadeCrosscheckMemo = null;
 
     /**
-     * @var array<int, array{id: int, code: string}>
+     * @var array<int, int>
      */
     public array $availableYears = [];
 
@@ -123,9 +109,6 @@ class CustomerLedger extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        // Filament v5 custom-page authorization is best kept minimal here.
-        // Full tenant + policy authorization runs in mount() once record and
-        // panel context are available.
         return auth()->check();
     }
 
@@ -141,53 +124,8 @@ class CustomerLedger extends Page
 
         abort_unless(auth()->user()?->can('view', $this->record), 403);
 
-        // Read filters from query string.
-        $this->filterYear = request()->integer('year') ?: null;
-        $this->filterInvoiceTypeId = request()->integer('invoice_type') ?: null;
-        $this->filterPaidStatus = in_array(request()->string('paid')->toString(), ['paid', 'unpaid'], true)
-            ? request()->string('paid')->toString()
-            : null;
-
-        $this->buildLedger();
+        $this->cachedStatsBlock = app(CustomerLedgerBuilder::class)->buildStatsBlock($this->record);
         $this->loadDimensionLookups();
-    }
-
-    /**
-     * Trigger a re-build when any filter property changes (Livewire
-     * hook). Filament/Livewire calls updatedFilterYear etc on
-     * property-update; this single hook covers all three.
-     */
-    public function updated($name, $value): void
-    {
-        if (in_array($name, ['filterYear', 'filterInvoiceTypeId', 'filterPaidStatus'], true)) {
-            $this->buildLedger();
-        }
-    }
-
-    public function resetFilters(): void
-    {
-        $this->filterYear = null;
-        $this->filterInvoiceTypeId = null;
-        $this->filterPaidStatus = null;
-        $this->buildLedger();
-    }
-
-    public function toggleWhmcsPanel(): void
-    {
-        $this->showWhmcsPanel = ! $this->showWhmcsPanel;
-        if ($this->showWhmcsPanel && $this->whmcsLedger === null) {
-            $this->loadWhmcsLedger();
-        }
-    }
-
-    public function refreshWhmcsLedger(): void
-    {
-        $this->whmcsLedger = null;
-        $this->loadWhmcsLedger();
-        Notification::make()
-            ->title('WHMCS data refreshed')
-            ->success()
-            ->send();
     }
 
     public function getTitle(): string
@@ -200,14 +138,203 @@ class CustomerLedger extends Page
         return 'Καρτέλα';
     }
 
+    /**
+     * Does the customer have any movements? Drives the empty-state in
+     * the Blade view.
+     */
+    public function hasActivity(): bool
+    {
+        return ($this->cachedStatsBlock['stats']['total_invoices_lifetime'] ?? 0) > 0;
+    }
+
+    /**
+     * Should the balance-trend chart be shown? Only with ≥2 years of
+     * history (a single point isn't a trend).
+     */
+    public function hasBalanceTrend(): bool
+    {
+        return count($this->cachedStatsBlock['yearly'] ?? []) >= 2;
+    }
+
+    public function hasWhmcsLink(): bool
+    {
+        return $this->record->whmcs_client_id !== null
+            && ($this->record->company?->hasWhmcsIntegration() ?? false);
+    }
+
+    /* ===================== Movements table ===================== */
+
+    public function table(Table $table): Table
+    {
+        return $table
+            ->records(fn (
+                ?array $filters,
+                ?string $search,
+                ?string $sortColumn,
+                ?string $sortDirection,
+                int | string $page,
+                int | string $recordsPerPage,
+            ): LengthAwarePaginator => $this->paginateLedgerRows(
+                $filters,
+                $search,
+                $sortColumn,
+                $sortDirection,
+                $page,
+                $recordsPerPage,
+            ))
+            ->columns([
+                TextColumn::make('date')
+                    ->label('Ημερομηνία')
+                    ->formatStateUsing(fn ($state): string => Carbon::parse($state)->format('d/m/Y'))
+                    ->sortable()
+                    ->extraAttributes(['class' => 'font-mono whitespace-nowrap']),
+                TextColumn::make('type')
+                    ->label('Τύπος')
+                    ->badge()
+                    ->formatStateUsing(fn ($state, array $record): string => $state === 'invoice'
+                        ? ($record['invoice_type_code'] ?? 'Τιμολόγιο')
+                        : 'Πληρωμή')
+                    ->color(fn ($state): string => $state === 'invoice' ? 'info' : 'success'),
+                TextColumn::make('reference')
+                    ->label('Αναφορά')
+                    ->searchable()
+                    ->color(fn (array $record): ?string => ($record['type'] === 'invoice' && $record['invoice_id']) ? 'primary' : null),
+                TextColumn::make('debit')
+                    ->label('Χρέωση')
+                    ->alignEnd()
+                    ->formatStateUsing(fn ($state): string => $state > 0 ? $this->fmtMoney($state) : ''),
+                TextColumn::make('credit')
+                    ->label('Πίστωση')
+                    ->alignEnd()
+                    ->color('success')
+                    ->formatStateUsing(fn ($state): string => $state > 0 ? $this->fmtMoney($state) : ''),
+                TextColumn::make('running_balance')
+                    ->label('Υπόλοιπο')
+                    ->alignEnd()
+                    ->weight('bold')
+                    ->color(fn ($state): string => $state > 0 ? 'danger' : 'gray')
+                    ->formatStateUsing(fn ($state): string => $this->fmtMoney($state)),
+                TextColumn::make('mydata_state')
+                    ->label('myDATA')
+                    ->badge()
+                    ->placeholder('—')
+                    ->color(fn ($state): string => match ($state) {
+                        'VALID' => 'success',
+                        'CANCELLED' => 'gray',
+                        'INVALID' => 'danger',
+                        default => 'gray',
+                    }),
+            ])
+            ->filters([
+                SelectFilter::make('year')
+                    ->label('Έτος')
+                    ->options(array_combine($this->availableYears, $this->availableYears)),
+                SelectFilter::make('invoice_type')
+                    ->label('Τύπος παραστατικού')
+                    ->options(collect($this->availableInvoiceTypes)->pluck('code', 'id')->all()),
+                SelectFilter::make('paid')
+                    ->label('Κατάσταση')
+                    ->options([
+                        'paid' => 'Εξοφλημένα',
+                        'unpaid' => 'Ανεξόφλητα',
+                    ]),
+            ])
+            ->recordUrl(fn (array $record): ?string => ($record['type'] === 'invoice' && $record['invoice_id'])
+                ? InvoiceResource::getUrl('view', ['record' => $record['invoice_id']])
+                : null)
+            ->defaultSort('date', 'desc')
+            ->paginated([25, 50, 100, 'all'])
+            ->defaultPaginationPageOption(25)
+            ->emptyStateHeading('Δεν βρέθηκαν κινήσεις')
+            ->emptyStateIcon('heroicon-o-document-magnifying-glass');
+    }
+
+    /**
+     * Resolve, filter, search, sort and paginate the chronological
+     * movements for the records()-backed table.
+     *
+     * Filtering (year / invoice type / paid) is delegated to
+     * CustomerLedgerBuilder::buildLedgerOnly so the running balance is
+     * computed over the FULL history before filtering — never reset by
+     * the active filter window. Only search + sort + pagination are
+     * applied here on top of the already-correct rows.
+     *
+     * @param  array<string, mixed>|null  $filters
+     */
+    private function paginateLedgerRows(
+        ?array $filters,
+        ?string $search,
+        ?string $sortColumn,
+        ?string $sortDirection,
+        int | string $page,
+        int | string $recordsPerPage,
+    ): LengthAwarePaginator {
+        $builderFilters = [
+            'year' => isset($filters['year']['value']) && $filters['year']['value'] !== ''
+                ? (int) $filters['year']['value']
+                : null,
+            'invoice_type_id' => isset($filters['invoice_type']['value']) && $filters['invoice_type']['value'] !== ''
+                ? (int) $filters['invoice_type']['value']
+                : null,
+            'paid_status' => isset($filters['paid']['value']) && in_array($filters['paid']['value'], ['paid', 'unpaid'], true)
+                ? $filters['paid']['value']
+                : null,
+        ];
+
+        $rows = app(CustomerLedgerBuilder::class)->buildLedgerOnly($this->record, $builderFilters);
+
+        // Search across reference + type label + myDATA state.
+        if (filled($search)) {
+            $needle = mb_strtolower(trim($search));
+            $rows = array_values(array_filter($rows, function (array $r) use ($needle): bool {
+                $typeLabel = $r['type'] === 'invoice' ? ($r['invoice_type_code'] ?? 'τιμολόγιο') : 'πληρωμή';
+                $haystack = mb_strtolower(implode(' ', [
+                    $r['reference'] ?? '',
+                    $typeLabel,
+                    $r['mydata_state'] ?? '',
+                    $r['date'] ?? '',
+                ]));
+
+                return str_contains($haystack, $needle);
+            }));
+        }
+
+        // buildLedgerOnly already returns newest-first (date desc). Only
+        // re-sort when the operator explicitly flips the date column.
+        if ($sortColumn === 'date' && $sortDirection === 'asc') {
+            usort($rows, fn (array $a, array $b): int => strcmp($a['date'], $b['date']));
+        }
+
+        $total = count($rows);
+        $perPage = ($recordsPerPage === 'all' || (int) $recordsPerPage < 1)
+            ? max($total, 1)
+            : (int) $recordsPerPage;
+        $currentPage = max(1, (int) $page);
+
+        $slice = array_slice($rows, ($currentPage - 1) * $perPage, $perPage);
+
+        return new LengthAwarePaginator(
+            $slice,
+            $total,
+            $perPage,
+            $currentPage,
+            [
+                'path' => Paginator::resolveCurrentPath(),
+                'pageName' => 'page',
+            ],
+        );
+    }
+
+    private function fmtMoney(mixed $value): string
+    {
+        return Money::eur($value);
+    }
+
+    /* ===================== Header actions ===================== */
+
     protected function getHeaderActions(): array
     {
         return [
-            // Διασταύρωση with AADE registry: compare stored customer
-            // identity against the live GSIS record, surface drifts,
-            // optionally apply updates. Visible only when the customer
-            // has an AFM, the tenant is Greek, and GSIS is configured -
-            // otherwise the call would just throw or return useless data.
             Action::make('crosscheck_aade')
                 ->label('Διασταύρωση ΑΦΜ με ΑΑΔΕ')
                 ->icon('heroicon-o-shield-check')
@@ -218,23 +345,22 @@ class CustomerLedger extends Page
                 ->modalCancelActionLabel('Κλείσιμο')
                 ->modalContent(function () {
                     $result = $this->runAadeCrosscheck();
+
                     return view('filament.customers.aade-crosscheck-modal', [
-                        'customer'   => $this->record,
-                        'result'     => $result,
+                        'customer' => $this->record,
+                        'result' => $result,
                     ]);
                 })
                 ->action(function () {
-                    // Re-fetch is memoised (see runAadeCrosscheck) so
-                    // this is a cache hit when the modal preview already
-                    // ran; closes the race window where the operator
-                    // approved diffs A but the apply ran against diffs B.
                     $result = $this->runAadeCrosscheck();
                     if ($result['error'] !== null) {
                         Notification::make()->title('Δεν εφαρμόστηκαν αλλαγές')->body($result['error'])->warning()->send();
+
                         return;
                     }
                     if (empty($result['diffs'])) {
                         Notification::make()->title('Τα στοιχεία είναι ήδη συγχρονισμένα')->success()->send();
+
                         return;
                     }
                     $this->applyAadeCrosscheck($result['diffs']);
@@ -242,14 +368,9 @@ class CustomerLedger extends Page
                         ->title('Στοιχεία πελάτη ενημερώθηκαν')
                         ->body(count($result['diffs']).' πεδίο/α ενημερώθηκαν από την ΑΑΔΕ.')
                         ->success()->send();
-                    // Reset the memo so the next modal open re-fetches.
                     $this->aadeCrosscheckMemo = null;
                 }),
 
-            // Record an ON-ACCOUNT payment (invoice_id = null): a
-            // customer-level credit not tied to a specific invoice. To
-            // settle a specific invoice instead, use the "Record payment"
-            // action on that invoice's view page.
             Action::make('record_on_account_payment')
                 ->label('Πληρωμή έναντι λογαριασμού')
                 ->icon('heroicon-o-banknotes')
@@ -257,7 +378,7 @@ class CustomerLedger extends Page
                 ->modalHeading('Πληρωμή έναντι λογαριασμού')
                 ->modalSubmitActionLabel('Καταχώριση')
                 ->schema([
-                    \Filament\Forms\Components\TextInput::make('amount')
+                    TextInput::make('amount')
                         ->label('Ποσό')->numeric()->required(),
                     \Filament\Forms\Components\DatePicker::make('pay_date')
                         ->label('Ημερομηνία')->required()->default(now()),
@@ -266,21 +387,88 @@ class CustomerLedger extends Page
                         ->options(fn () => \App\Models\PaymentMethod::query()
                             ->where('company_id', $this->record->company_id)
                             ->pluck('description', 'id')),
-                    \Filament\Forms\Components\Textarea::make('notes')
+                    Textarea::make('notes')
                         ->label('Σημειώσεις')->rows(2),
                 ])
                 ->action(function (array $data) {
                     \App\Models\Payment::create([
-                        'company_id'        => $this->record->company_id,
-                        'customer_id'       => $this->record->getKey(),
-                        'invoice_id'        => null,
+                        'company_id' => $this->record->company_id,
+                        'customer_id' => $this->record->getKey(),
+                        'invoice_id' => null,
                         'payment_method_id' => $data['payment_method_id'] ?? null,
-                        'amount'            => $data['amount'],
-                        'pay_date'          => $data['pay_date'],
-                        'notes'             => $data['notes'] ?? null,
+                        'amount' => $data['amount'],
+                        'pay_date' => $data['pay_date'],
+                        'notes' => $data['notes'] ?? null,
                     ]);
                     Notification::make()->title('Η πληρωμή καταχωρίστηκε')->success()->send();
+                    // Redirect to self so the KPI widgets + table reflect
+                    // the new balance (header widgets are separate Livewire
+                    // components mounted with the pre-payment stats).
+                    $this->redirect(static::getUrl(['record' => $this->record]));
                 }),
+
+            ActionGroup::make([
+                Action::make('export_pdf')
+                    ->label('Εξαγωγή PDF')
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->action(function () {
+                        $renderer = app(CustomerStatementPdfRenderer::class);
+                        $bytes = $renderer->render($this->record);
+                        $filename = $renderer->filename($this->record);
+
+                        return response()->streamDownload(
+                            fn () => print($bytes),
+                            $filename,
+                            ['Content-Type' => 'application/pdf'],
+                        );
+                    }),
+                Action::make('export_csv')
+                    ->label('Εξαγωγή CSV')
+                    ->icon('heroicon-o-table-cells')
+                    ->action(function () {
+                        $csvService = app(CustomerStatementCsv::class);
+                        $csv = $csvService->build($this->record);
+                        $filename = $csvService->filename($this->record);
+
+                        return response()->streamDownload(
+                            fn () => print($csv),
+                            $filename,
+                            ['Content-Type' => 'text/csv; charset=UTF-8'],
+                        );
+                    }),
+                Action::make('email_statement')
+                    ->label('Αποστολή στο email')
+                    ->icon('heroicon-o-paper-airplane')
+                    ->modalHeading('Αποστολή καρτέλας στο email')
+                    ->modalSubmitActionLabel('Αποστολή')
+                    ->fillForm(fn (): array => [
+                        'recipient' => $this->record->email,
+                        'subject' => null,
+                        'message' => null,
+                    ])
+                    ->schema([
+                        TextInput::make('recipient')
+                            ->label('Παραλήπτης')
+                            ->email()
+                            ->required(),
+                        TextInput::make('subject')
+                            ->label('Θέμα')
+                            ->placeholder('Καρτέλα πελάτη: '.$this->record->name),
+                        Textarea::make('message')
+                            ->label('Μήνυμα (προαιρετικό)')
+                            ->rows(3),
+                    ])
+                    ->action(function (array $data) {
+                        $this->sendStatementEmail(
+                            $data['recipient'],
+                            $data['subject'] ?? null,
+                            $data['message'] ?? null,
+                        );
+                    }),
+            ])
+                ->label('Εξαγωγή / Αποστολή')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->button(),
 
             Action::make('edit')
                 ->label('Επεξεργασία')
@@ -295,6 +483,78 @@ class CustomerLedger extends Page
         ];
     }
 
+    private function sendStatementEmail(string $recipient, ?string $subject, ?string $message): void
+    {
+        $tenant = $this->record->company;
+        if ($tenant === null) {
+            // Defensive: a customer in a tenant panel always has its
+            // company, but an orphaned / soft-deleted company would
+            // otherwise hit TenantMailerFactory::for(Company)'s
+            // non-nullable type and surface as a misleading "email
+            // settings" error.
+            Notification::make()
+                ->title('Αποτυχία αποστολής')
+                ->body('Ο πελάτης δεν είναι συνδεδεμένος με εταιρεία.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        try {
+            $bytes = app(CustomerStatementPdfRenderer::class)->render($this->record);
+
+            $mail = new CustomerStatementMail(
+                customer: $this->record,
+                pdfBytes: $bytes,
+                bodyMessage: $message,
+                subjectLine: $subject ?: null,
+            );
+
+            app(TenantMailerFactory::class)->for($tenant)->to($recipient)->send($mail);
+
+            Notification::make()
+                ->title('Η καρτέλα στάλθηκε')
+                ->body('Παραλήπτης: '.$recipient)
+                ->success()
+                ->send();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Customer statement email failed', [
+                'customer_id' => $this->record->getKey(),
+                'error' => $e->getMessage(),
+            ]);
+            Notification::make()
+                ->title('Αποτυχία αποστολής')
+                ->body('Η καρτέλα δεν στάλθηκε. Ελέγξτε τις ρυθμίσεις email.')
+                ->danger()
+                ->send();
+        }
+    }
+
+    /* ===================== WHMCS panel ===================== */
+
+    public function toggleWhmcsPanel(): void
+    {
+        $this->showWhmcsPanel = ! $this->showWhmcsPanel;
+        if ($this->showWhmcsPanel && $this->whmcsLedger === null) {
+            $this->loadWhmcsLedger();
+        }
+    }
+
+    public function refreshWhmcsLedger(): void
+    {
+        $this->whmcsLedger = null;
+        $this->loadWhmcsLedger();
+        Notification::make()->title('WHMCS data refreshed')->success()->send();
+    }
+
+    private function loadWhmcsLedger(): void
+    {
+        $this->whmcsLedger = app(CustomerWhmcsLedger::class)->fetchFor($this->record);
+    }
+
+    /* ===================== AADE crosscheck ===================== */
+
     private function canCrosscheckAade(): bool
     {
         if (! $this->record->afm) {
@@ -307,40 +567,12 @@ class CustomerLedger extends Page
         if ($tenant->country_code !== 'GR') {
             return false;
         }
+
         return ! empty($tenant->gsis_username) && ! empty($tenant->gsis_password);
     }
 
-    /**
-     * Fetch from AADE + compute the diff against the stored customer.
-     *
-     * Memoised on the Livewire instance ($this->aadeCrosscheckMemo)
-     * so the modalContent render and the action submit share ONE
-     * AADE fetch + ONE diff computation. The memo is cleared after a
-     * successful apply (so the next modal open re-fetches).
-     *
-     * Returned shape (primitives only - see class docblock):
-     *   [
-     *     'diffs'        => array<string, ['stored' => string, 'aade' => string]>,
-     *     'error'        => ?string,
-     *     'is_active'    => ?bool,            // AADE's active flag
-     *     'status_descr' => ?string,           // AADE's status description
-     *     'activities'   => array<int, array>, // for the "all activities" details
-     *   ]
-     *
-     * 'diffs' is keyed by our customer column name; absent key means
-     * the field already matches. Empty diffs = nothing to apply.
-     *
-     * Errors are NOT memoised: if the operator fixes the underlying
-     * issue (rotates credentials, restores network) in another tab
-     * and reopens the modal, we re-fetch instead of serving the
-     * stale error. Successful results ARE memoised — that's the
-     * race-fix between modalContent and action submit.
-     */
     private function runAadeCrosscheck(): array
     {
-        // Only return memo if it's a SUCCESSFUL result. Stale errors
-        // would lock the modal into a "GSIS creds missing" loop
-        // indefinitely if the operator fixed creds elsewhere.
         if ($this->aadeCrosscheckMemo !== null && $this->aadeCrosscheckMemo['error'] === null) {
             return $this->aadeCrosscheckMemo;
         }
@@ -348,61 +580,38 @@ class CustomerLedger extends Page
         $afm = trim((string) $this->record->afm);
 
         try {
-            // bypassCache: true — the action label "Διασταύρωση με ΑΑΔΕ"
-            // promises a LIVE comparison; if we served the 24h cache
-            // here, drifts that AADE just published would silently not
-            // surface and the operator would think the customer record
-            // is current when it isn't.
             $record = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm, bypassCache: true);
         } catch (AadeRegistryException $e) {
-            // Single catch via the trait - all subclasses flow through
-            // one mapping. Memo cleared via the success-only short-
-            // circuit above so a retry actually retries.
             $d = $this->aadeExceptionDetails($e);
+
             return $this->aadeCrosscheckMemo = [
-                'diffs'        => [],
-                'error'        => $d['title'].': '.$d['body'],
-                'is_active'    => null,
+                'diffs' => [],
+                'error' => $d['title'].': '.$d['body'],
+                'is_active' => null,
                 'status_descr' => null,
-                'activities'   => [],
+                'activities' => [],
             ];
         }
 
-        // primaryActivity() shape: ['code', 'description', 'kind']
-        // (verified in app/DTOs/AadeRegistryRecord.php). Earlier
-        // commit read ['descr'] which never exists, causing every
-        // crosscheck to surface a phantom occupation diff.
         $primaryActivity = $record->primaryActivity();
         $aadeOccupation = (string) ($primaryActivity['description'] ?? '');
 
-        // Field-by-field comparison. Trimmed string compare; case-
-        // sensitive (Greek names sometimes vary by case but AADE is
-        // authoritative). Operator decides whether the casing drift
-        // is worth a sync.
         $candidates = [
-            'name'       => ['stored' => (string) $this->record->name, 'aade' => $record->name],
+            'name' => ['stored' => (string) $this->record->name, 'aade' => $record->name],
             'tax_office' => ['stored' => (string) $this->record->tax_office, 'aade' => $record->doy],
-            'address1'   => ['stored' => (string) $this->record->address1, 'aade' => $record->address],
-            'city'       => ['stored' => (string) $this->record->city, 'aade' => $record->city],
-            'postcode'   => ['stored' => (string) $this->record->postcode, 'aade' => $record->postcode],
+            'address1' => ['stored' => (string) $this->record->address1, 'aade' => $record->address],
+            'city' => ['stored' => (string) $this->record->city, 'aade' => $record->city],
+            'postcode' => ['stored' => (string) $this->record->postcode, 'aade' => $record->postcode],
             'occupation' => ['stored' => (string) $this->record->occupation, 'aade' => $aadeOccupation],
         ];
 
         $diffs = [];
         foreach ($candidates as $field => $pair) {
             $storedTrimmed = trim($pair['stored']);
-            $aadeTrimmed   = trim($pair['aade']);
+            $aadeTrimmed = trim($pair['aade']);
             if ($storedTrimmed === $aadeTrimmed) {
                 continue;
             }
-            // AADE is authoritative WHEN AADE HAS DATA. If AADE
-            // returned blank for a field the operator filled in
-            // (common case: inactive AFMs with stripped registry
-            // data; operator typed it manually because AADE was
-            // missing), do NOT flag as a diff. Otherwise apply
-            // would clobber valid operator data with empty strings -
-            // exactly the bug fix #3 was supposed to eliminate.
-            // Stored value wins when AADE has nothing to say.
             if ($aadeTrimmed === '' && $storedTrimmed !== '') {
                 continue;
             }
@@ -410,21 +619,15 @@ class CustomerLedger extends Page
         }
 
         return $this->aadeCrosscheckMemo = [
-            'diffs'        => $diffs,
-            'error'        => null,
-            'is_active'    => $record->active,
+            'diffs' => $diffs,
+            'error' => null,
+            'is_active' => $record->active,
             'status_descr' => $record->statusDescr,
-            'activities'   => $record->activities,
+            'activities' => $record->activities,
         ];
     }
 
     /**
-     * Apply ONLY the fields that drifted (per the computed diff).
-     * The previous implementation blindly overwrote all 6 fields,
-     * which destroyed valid operator-entered data whenever AADE
-     * returned blank values for fields the operator had filled in
-     * (common case: inactive AFMs with stripped registry data).
-     *
      * @param  array<string, array{stored: string, aade: string}>  $diffs
      */
     private function applyAadeCrosscheck(array $diffs): void
@@ -440,59 +643,14 @@ class CustomerLedger extends Page
         $this->record->refresh();
     }
 
-    private function buildLedger(): void
-    {
-        $filters = [
-            'year'            => $this->filterYear,
-            'invoice_type_id' => $this->filterInvoiceTypeId,
-            'paid_status'     => $this->filterPaidStatus,
-        ];
-
-        $builder = app(CustomerLedgerBuilder::class);
-
-        if ($this->cachedStatsBlock === null) {
-            // First mount: ONE full pass (build()) loads invoices +
-            // payments ONCE and computes all sections. Splitting into
-            // buildStatsBlock + buildLedgerOnly here would load both
-            // tables TWICE on first paint (the common case - operator
-            // opens Καρτέλα and never touches filters).
-            $full = $builder->build($this->record, $filters);
-            $this->cachedStatsBlock = [
-                'stats'  => $full->stats,
-                'aging'  => $full->aging,
-                'yearly' => $full->yearly,
-            ];
-            $this->ledger = $full;
-            return;
-        }
-
-        // Filter change on an already-mounted page: skip the 3 O(N)
-        // stats/aging/yearly recomputes (filter-independent) and only
-        // rebuild the chronological ledger.
-        $this->ledger = new CustomerLedgerResult(
-            stats:          $this->cachedStatsBlock['stats'],
-            aging:          $this->cachedStatsBlock['aging'],
-            yearly:         $this->cachedStatsBlock['yearly'],
-            ledger:         $builder->buildLedgerOnly($this->record, $filters),
-            appliedFilters: $filters,
-        );
-    }
-
     private function loadDimensionLookups(): void
     {
-        // Branch on driver BEFORE issuing the query. The previous code
-        // ran the SQLite strftime() query unconditionally then
-        // overrode it on MariaDB - but strftime is not a MariaDB
-        // function, so the first query threw "FUNCTION strftime does
-        // not exist" before the override could execute. Result: 500
-        // on every production page load. Tests passed because phpunit
-        // uses SQLite where strftime IS native.
         $driver = \DB::connection()->getDriverName();
         $yearExpr = match ($driver) {
             'mysql', 'mariadb' => 'YEAR(issued_at)',
-            'sqlite'           => 'CAST(strftime("%Y", issued_at) AS INTEGER)',
-            'pgsql'            => 'EXTRACT(YEAR FROM issued_at)',
-            default            => throw new \RuntimeException("Unsupported DB driver for Καρτέλα year-extract: {$driver}"),
+            'sqlite' => 'CAST(strftime("%Y", issued_at) AS INTEGER)',
+            'pgsql' => 'EXTRACT(YEAR FROM issued_at)',
+            default => throw new \RuntimeException("Unsupported DB driver for Καρτέλα year-extract: {$driver}"),
         };
 
         $this->availableYears = \DB::table('invoices')
@@ -514,10 +672,5 @@ class CustomerLedger extends Page
             ->get()
             ->map(fn ($r) => ['id' => (int) $r->id, 'code' => $r->code])
             ->all();
-    }
-
-    private function loadWhmcsLedger(): void
-    {
-        $this->whmcsLedger = app(CustomerWhmcsLedger::class)->fetchFor($this->record);
     }
 }

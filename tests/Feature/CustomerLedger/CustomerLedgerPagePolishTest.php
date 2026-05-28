@@ -1,0 +1,232 @@
+<?php
+
+namespace Tests\Feature\CustomerLedger;
+
+use App\Filament\Resources\Customers\Pages\CustomerLedger;
+use App\Filament\Resources\Customers\Widgets\CustomerLedgerAging;
+use App\Filament\Resources\Customers\Widgets\CustomerLedgerBalanceChart;
+use App\Filament\Resources\Customers\Widgets\CustomerLedgerStats;
+use App\Mail\CustomerStatementMail;
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
+use App\Models\User;
+use App\Services\CustomerLedger\CustomerStatementCsv;
+use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
+use Filament\Facades\Filament;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Mail;
+use Livewire\Livewire;
+use Tests\TestCase;
+
+/**
+ * The "polish" pass: the Καρτέλα page now renders Filament widgets + a
+ * records()-backed movements table, plus PDF/CSV export and email-the-
+ * statement actions. These tests stand in for visual verification —
+ * they assert the page + widgets render without runtime errors and the
+ * new actions behave.
+ */
+class CustomerLedgerPagePolishTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private Company $tenant;
+    private Customer $customer;
+    private PaymentMethod $credit;
+    private InvoiceType $invType;
+    private static int $seq = 0;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->tenant = Company::create([
+            'name' => 'Polish Test',
+            'slug' => 'polish-'.uniqid(),
+            'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata',
+            'mydata_mode' => 'off',
+        ]);
+
+        $this->credit = PaymentMethod::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Credit 30d',
+            'due_days' => 30,
+            'is_active' => true,
+        ]);
+
+        $this->invType = InvoiceType::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'ΤΠΥ',
+            'code' => 'TPY',
+            'invcount' => 0,
+            'payment_method_id' => $this->credit->id,
+        ]);
+
+        $this->customer = Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Πελάτης Πολυτελείας',
+            'afm' => '123456789',
+            'email' => 'pelatis@example.test',
+        ]);
+
+        $user = User::create([
+            'name' => 'Op',
+            'email' => 'op-'.uniqid().'@example.test',
+            'password' => bcrypt('x'),
+        ]);
+
+        Gate::before(fn () => true);
+        $this->actingAs($user);
+        Filament::setTenant($this->tenant);
+    }
+
+    private function makeInvoice(string $issuedAt, float $gross): Invoice
+    {
+        self::$seq++;
+
+        return Invoice::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'invoice_type_id' => $this->invType->id,
+            'payment_method_id' => $this->credit->id,
+            'invcode' => 'TPY'.self::$seq,
+            'code' => self::$seq,
+            'issued_at' => $issuedAt,
+            'gross_total' => $gross,
+            'net_total' => round($gross / 1.24, 2),
+            'mydata_state' => 'VALID',
+        ]);
+    }
+
+    public function test_page_renders_with_movements_table_and_widgets(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0);
+        $this->makeInvoice(now()->subDays(5)->toDateString(), 248.0);
+        Payment::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'pay_date' => now()->subDays(2)->toDateString(),
+            'amount' => 100.0,
+        ]);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertOk()
+            ->assertSee('Καρτέλα κινήσεων')
+            ->assertSee('TPY'); // an invoice reference appears in the table
+    }
+
+    public function test_empty_customer_shows_empty_state_and_still_renders(): void
+    {
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertOk()
+            ->assertSee('δεν έχει κινήσεις');
+    }
+
+    public function test_stats_widget_renders_with_props(): void
+    {
+        Livewire::test(CustomerLedgerStats::class, [
+            'ledgerStats' => [
+                'ytd_net' => 100.0, 'ytd_gross' => 124.0, 'ytd_paid' => 50.0,
+                'balance' => 74.0, 'oldest_unpaid_days' => 12,
+                'last_activity_at' => now()->toIso8601String(),
+                'total_invoices_lifetime' => 3,
+            ],
+            'ledgerYearly' => [
+                ['year' => 2025, 'year_end_balance' => 74.0],
+                ['year' => 2024, 'year_end_balance' => 0.0],
+            ],
+        ])->assertOk()->assertSee('Υπόλοιπο');
+    }
+
+    public function test_aging_widget_collapses_when_settled(): void
+    {
+        Livewire::test(CustomerLedgerAging::class, [
+            'ledgerAging' => ['bucket_0_30' => 0, 'bucket_31_60' => 0, 'bucket_61_90' => 0, 'bucket_90_plus' => 0],
+            'ledgerStats' => ['balance' => 0.0],
+        ])->assertOk()->assertSee('Καμία');
+    }
+
+    public function test_balance_chart_widget_renders(): void
+    {
+        Livewire::test(CustomerLedgerBalanceChart::class, [
+            'ledgerYearly' => [
+                ['year' => 2025, 'year_end_balance' => 74.0],
+                ['year' => 2024, 'year_end_balance' => 124.0],
+            ],
+        ])->assertOk();
+    }
+
+    public function test_pdf_renderer_produces_pdf_bytes(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        $bytes = app(CustomerStatementPdfRenderer::class)->render($this->customer);
+
+        $this->assertNotEmpty($bytes);
+        $this->assertSame('%PDF', substr($bytes, 0, 4));
+    }
+
+    public function test_csv_export_contains_header_and_movement(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        $csv = app(CustomerStatementCsv::class)->build($this->customer);
+
+        $this->assertStringContainsString('Ημερομηνία', $csv);
+        $this->assertStringContainsString('TPY', $csv);
+        // el-GR Excel locale: comma decimal, no thousands separator.
+        $this->assertStringContainsString('124,00', $csv);
+        $this->assertStringNotContainsString('124.00', $csv);
+    }
+
+    public function test_export_pdf_action_returns_download(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->callAction('export_pdf')
+            ->assertFileDownloaded();
+    }
+
+    public function test_renders_whmcs_panel_section_collapsed_without_calling_api(): void
+    {
+        // A WHMCS-linked customer on an integrated tenant: the collapsible
+        // panel section must render (and NOT hit the WHMCS API, since the
+        // panel starts collapsed / unloaded).
+        $this->tenant->forceFill([
+            'whmcs_api_url' => 'https://billing.example.test/includes/api.php',
+            'whmcs_api_identifier' => 'id',
+            'whmcs_api_secret' => 'secret',
+        ])->save();
+        $this->customer->forceFill(['whmcs_client_id' => 42])->save();
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertOk()
+            ->assertSee('Τιμολόγια από WHMCS')
+            ->assertSet('showWhmcsPanel', false);
+    }
+
+    public function test_email_statement_action_sends_mail(): void
+    {
+        Mail::fake();
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->callAction('email_statement', data: [
+                'recipient' => 'accountant@example.test',
+                'subject' => null,
+                'message' => 'Ορίστε η καρτέλα σας.',
+            ])
+            ->assertHasNoActionErrors();
+
+        Mail::assertSent(CustomerStatementMail::class, function (CustomerStatementMail $mail) {
+            return $mail->hasTo('accountant@example.test');
+        });
+    }
+}
