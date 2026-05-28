@@ -154,16 +154,17 @@ class InvoiceBalanceTest extends TestCase
         $this->assertSame('paid', $b->refresh()->payment_status);
     }
 
-    public function test_only_valid_credit_notes_reduce_owed(): void
+    public function test_non_cancelled_credit_notes_reduce_owed(): void
     {
         $original = $this->invoice(['mydata_state' => 'VALID']);
 
-        // A draft (null-state) credit note must NOT reduce owed.
-        $this->invoice(['gross_total' => 124, 'credited_invoice_id' => $original->id, 'mydata_state' => null]);
+        // A CANCELLED credit note must NOT reduce owed.
+        $this->invoice(['gross_total' => 124, 'credited_invoice_id' => $original->id, 'mydata_state' => 'CANCELLED']);
         $this->assertSame(PaymentStatus::Unpaid, $this->svc()->for($original)->status);
 
-        // A VALID credit note for the full amount → credited.
-        $this->invoice(['gross_total' => 124, 'credited_invoice_id' => $original->id, 'mydata_state' => 'VALID']);
+        // An issued credit note (null state = filed-or-pending, not
+        // cancelled) for the full amount → credited.
+        $this->invoice(['gross_total' => 124, 'credited_invoice_id' => $original->id, 'mydata_state' => null]);
         $b = $this->svc()->for($original);
         $this->assertSame(PaymentStatus::Credited, $b->status);
         $this->assertSame(124.0, $b->credited);

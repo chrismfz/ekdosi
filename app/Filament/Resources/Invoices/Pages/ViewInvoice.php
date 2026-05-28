@@ -2,9 +2,11 @@
 
 namespace App\Filament\Resources\Invoices\Pages;
 
+use App\Actions\IssueCreditNote;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Invoice;
+use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
@@ -75,6 +77,94 @@ class ViewInvoice extends ViewRecord
                     Notification::make()
                         ->title('Η πληρωμή καταχωρίστηκε')
                         ->success()->send();
+                }),
+
+            // Issue a credit note (πιστωτικό) against this invoice —
+            // full or partial return. Hidden on credit notes themselves,
+            // on cancelled invoices, and when the tenant has no credit
+            // invoice type configured. Mirrors CreateInvoice: persist in
+            // a transaction, then submit to myDATA AFTER commit.
+            Action::make('issue_credit_note')
+                ->label('Έκδοση πιστωτικού')
+                ->icon('heroicon-o-receipt-refund')
+                ->color('warning')
+                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
+                    && $record->mydata_state !== 'CANCELLED'
+                    && self::creditTypes($record)->isNotEmpty())
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Έκδοση πιστωτικού τιμολογίου')
+                ->modalDescription('Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
+                ->modalSubmitActionLabel('Έκδοση')
+                ->schema([
+                    \Filament\Forms\Components\Select::make('credit_type_id')
+                        ->label('Τύπος πιστωτικού')
+                        ->options(fn (Invoice $record) => self::creditTypes($record)
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name]))
+                        ->required(),
+                    \Filament\Forms\Components\Repeater::make('lines')
+                        ->label('Γραμμές')
+                        ->addable(false)
+                        ->deletable(false)
+                        ->reorderable(false)
+                        ->default(fn (Invoice $record) => $record->lines
+                            ->map(fn ($l) => [
+                                'line_id' => $l->id,
+                                'label'   => ($l->product_descr ?? '#'.$l->id).' (×'.rtrim(rtrim((string) $l->qty, '0'), '.').')',
+                                'qty'     => (float) $l->qty,
+                            ])->all())
+                        ->schema([
+                            \Filament\Forms\Components\Hidden::make('line_id'),
+                            \Filament\Forms\Components\Placeholder::make('label')
+                                ->label('')
+                                ->content(fn (\Filament\Schemas\Components\Utilities\Get $get) => $get('label') ?? ''),
+                            \Filament\Forms\Components\TextInput::make('qty')
+                                ->label('Ποσότητα πίστωσης')
+                                ->numeric()
+                                ->minValue(0)
+                                ->default(0),
+                        ])
+                        ->columns(2),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    try {
+                        $creditType = InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->whereKey($data['credit_type_id'])
+                            ->firstOrFail();
+
+                        $selections = collect($data['lines'] ?? [])
+                            ->map(fn ($row) => ['line_id' => (int) $row['line_id'], 'qty' => (float) $row['qty']])
+                            ->all();
+
+                        $credit = app(IssueCreditNote::class)($record, $creditType, $selections);
+
+                        // Submit AFTER the IssueCreditNote transaction
+                        // committed (we're outside any transaction here),
+                        // mirroring CreateInvoice's post-commit submit.
+                        try {
+                            $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
+                            $submitter->submit($credit);
+                        } catch (Throwable $e) {
+                            Notification::make()
+                                ->title('Το πιστωτικό δημιουργήθηκε, αλλά η υποβολή στο myDATA απέτυχε')
+                                ->body($e->getMessage().' Υποβάλετέ το ξανά από τη σελίδα του πιστωτικού.')
+                                ->danger()->persistent()->send();
+                            $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
+
+                            return;
+                        }
+
+                        Notification::make()
+                            ->title('Το πιστωτικό εκδόθηκε')
+                            ->body('Κωδικός: '.$credit->invcode)
+                            ->success()->send();
+                        $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία έκδοσης πιστωτικού')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
                 }),
 
             // Submit a draft invoice to myDATA. Visible only for drafts
@@ -270,5 +360,15 @@ class ViewInvoice extends ViewRecord
                     );
                 }),
         ];
+    }
+
+    /** Credit invoice types for the invoice's tenant. */
+    protected static function creditTypes(Invoice $invoice): \Illuminate\Support\Collection
+    {
+        return InvoiceType::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('is_credit', true)
+            ->orderBy('code')
+            ->get();
     }
 }

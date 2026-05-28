@@ -151,10 +151,24 @@ class CustomerLedgerBuilder
                 'invoices.gross_total',
                 'invoices.mydata_state',
                 'invoices.mydata_mark',
+                'invoices.credited_invoice_id',
                 'payment_methods.due_days',
                 'invoice_types.code as invoice_type_code',
+                'invoice_types.is_credit',
             )
             ->get();
+    }
+
+    /**
+     * A credit note (credit-type invoice or one issued against an
+     * original) credits the customer's account — it REDUCES what they
+     * owe rather than adding a receivable. Treated like a payment in the
+     * FIFO balance/aging math and as a credit (not a debit) in the
+     * timeline. Standalone credit-type invoices count too via is_credit.
+     */
+    private function isCreditNote(object $inv): bool
+    {
+        return $inv->credited_invoice_id !== null || (bool) ($inv->is_credit ?? false);
     }
 
     /**
@@ -181,21 +195,27 @@ class CustomerLedgerBuilder
         $ytdGross = 0.0;
         $ytdPaid = 0.0;
 
-        // Balance: credit-term invoices only minus all payments.
+        // Balance: credit-term invoices only minus all payments. Credit
+        // notes reduce the balance like a payment (creditReductions).
         $creditTermGross = 0.0;
+        $creditReductions = 0.0;
 
         $lastActivity = null;
 
         foreach ($invoices as $inv) {
             $issuedAt = Carbon::parse($inv->issued_at);
             $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
+            $isCreditNote = $this->isCreditNote($inv);
+            $sign = $isCreditNote ? -1 : 1;
 
             if ($issuedAt->year === $currentYear) {
-                $ytdNet += (float) $inv->net_total;
-                $ytdGross += (float) $inv->gross_total;
+                $ytdNet += $sign * (float) $inv->net_total;
+                $ytdGross += $sign * (float) $inv->gross_total;
             }
 
-            if ($isCreditTerm) {
+            if ($isCreditNote) {
+                $creditReductions += (float) $inv->gross_total;
+            } elseif ($isCreditTerm) {
                 $creditTermGross += (float) $inv->gross_total;
             }
 
@@ -217,7 +237,9 @@ class CustomerLedgerBuilder
             }
         }
 
-        $balance = round($creditTermGross - $totalPaidLifetime, 2);
+        // Credit notes settle receivables just like payments do.
+        $effectivePaid = $totalPaidLifetime + $creditReductions;
+        $balance = round($creditTermGross - $effectivePaid, 2);
 
         // Oldest unpaid is meaningful only if balance > 0. If settled,
         // return null (UI shows "—"). Previous implementation picked
@@ -229,7 +251,7 @@ class CustomerLedgerBuilder
         // invoice with leftover unpaid is the genuine oldest-unpaid.
         $oldestUnpaidDays = null;
         if ($balance > 0) {
-            $remainingPaid = $totalPaidLifetime;
+            $remainingPaid = $effectivePaid;
             // Defensive sort: the FIFO correctness depends on iterating
             // invoices oldest-first. loadInvoices() currently does
             // orderBy('issued_at','asc') but that contract is not
@@ -243,7 +265,7 @@ class CustomerLedgerBuilder
                 ->values();
             foreach ($orderedInvoices as $inv) {
                 $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
-                if (! $isCreditTerm) {
+                if (! $isCreditTerm || $this->isCreditNote($inv)) {
                     continue;
                 }
                 $gross = (float) $inv->gross_total;
@@ -281,7 +303,9 @@ class CustomerLedgerBuilder
     private function computeAging(Collection $invoices, Collection $payments): array
     {
         $now = now();
-        $totalPaid = (float) $payments->sum('amount');
+        // Credit notes settle receivables FIFO just like payments.
+        $totalPaid = (float) $payments->sum('amount')
+            + (float) $invoices->filter(fn ($inv) => $this->isCreditNote($inv))->sum('gross_total');
         $bucket = [
             'bucket_0_30'    => 0.0,
             'bucket_31_60'   => 0.0,
@@ -291,7 +315,7 @@ class CustomerLedgerBuilder
 
         foreach ($invoices as $inv) {
             $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
-            if (! $isCreditTerm) {
+            if (! $isCreditTerm || $this->isCreditNote($inv)) {
                 continue;
             }
 
@@ -328,10 +352,13 @@ class CustomerLedgerBuilder
 
         foreach ($invoices as $inv) {
             $year = (int) Carbon::parse($inv->issued_at)->year;
+            // Credit notes carry negative net/gross (they reduce sales +
+            // the year-end running balance).
+            $sign = $this->isCreditNote($inv) ? -1 : 1;
             $byYear[$year] ??= ['year' => $year, 'invoice_count' => 0, 'net' => 0.0, 'gross' => 0.0, 'paid' => 0.0];
             $byYear[$year]['invoice_count']++;
-            $byYear[$year]['net'] += (float) $inv->net_total;
-            $byYear[$year]['gross'] += (float) $inv->gross_total;
+            $byYear[$year]['net'] += $sign * (float) $inv->net_total;
+            $byYear[$year]['gross'] += $sign * (float) $inv->gross_total;
         }
 
         foreach ($payments as $p) {
@@ -376,6 +403,11 @@ class CustomerLedgerBuilder
     ): array {
         $events = [];
         foreach ($invoices as $inv) {
+            // A credit note lands in the CREDIT column (reduces running
+            // balance); a normal invoice is a debit. is_credit_term is
+            // forced false on credit notes so the debit branch is skipped.
+            $isCreditNote = $this->isCreditNote($inv);
+            $gross = (float) $inv->gross_total;
             $events[] = [
                 'date_sort' => Carbon::parse($inv->issued_at)->timestamp,
                 'date'      => Carbon::parse($inv->issued_at)->toDateString(),
@@ -386,11 +418,11 @@ class CustomerLedgerBuilder
                 'reference' => $inv->invcode ?? ('#'.$inv->id),
                 'invoice_type_id'   => (int) $inv->invoice_type_id,
                 'invoice_type_code' => $inv->invoice_type_code,
-                'debit'     => (float) $inv->gross_total,
-                'credit'    => 0.0,
+                'debit'     => $isCreditNote ? 0.0 : $gross,
+                'credit'    => $isCreditNote ? $gross : 0.0,
                 'mydata_state' => $inv->mydata_state,
                 'mydata_mark'  => $inv->mydata_mark,
-                'is_credit_term' => ((int) ($inv->due_days ?? 0)) > 0,
+                'is_credit_term' => ! $isCreditNote && ((int) ($inv->due_days ?? 0)) > 0,
             ];
         }
         foreach ($payments as $p) {

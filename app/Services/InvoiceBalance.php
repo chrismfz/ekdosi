@@ -13,8 +13,8 @@ use Illuminate\Support\Facades\DB;
  *   owed    = gross_total − credited_total
  *   balance = owed − paid_total
  *
- * - credited_total = Σ gross of VALID credit notes (credited_invoice_id
- *   = this, mydata_state = VALID). Draft/failed credits don't reduce owed.
+ * - credited_total = Σ gross of issued, non-cancelled credit notes
+ *   (credited_invoice_id = this). A CANCELLED credit note doesn't count.
  * - paid_total = Σ amount of non-trashed payments allocated to this invoice.
  * - Cash-term invoices (payment_method.due_days = 0) are settled at issue
  *   → always `paid` (mirrors legacy GET_CUSTOMER_BALANCE, which excludes
@@ -75,10 +75,16 @@ class InvoiceBalance
             return 0.0;
         }
 
+        // Issued, non-cancelled credit notes reduce what's owed — same
+        // "live invoice" filter used for receivables (null state = issued
+        // but not yet filed still counts; works for off-mode tenants that
+        // never reach VALID). A CANCELLED credit note does not.
         return (float) DB::table('invoices')
             ->where('credited_invoice_id', $invoice->getKey())
-            ->where('mydata_state', 'VALID')
             ->whereNull('deleted_at')
+            ->where(fn ($q) => $q
+                ->whereNull('mydata_state')
+                ->orWhere('mydata_state', '!=', 'CANCELLED'))
             ->sum('gross_total');
     }
 

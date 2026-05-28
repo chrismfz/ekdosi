@@ -1584,10 +1584,9 @@ the cache after an import (idempotent).
 - **spatie/activitylog on `Payment`** — deferred to the dedicated
   cross-model audit PR (invoices + customers + payments together), not
   wired piecemeal. SoftDeletes already gives a recoverable trail.
-- **Καρτέλα per-row paid/unpaid badge + credit-aware running balance** —
-  deferred to PR #2. The ledger's existing balance (Σ credit-term gross
-  − Σ all payments) stays CORRECT unchanged because payments sum
-  regardless of `invoice_id`; only the per-row badge is missing.
+- **Καρτέλα per-row paid/unpaid badge** — the ledger timeline shows
+  debit/credit + running balance (now credit-aware, see PR #2 below) but
+  not a per-row payment_status badge. Minor UX, still deferred.
 - **Single payment split across many invoices** — out of scope; current
   model is one payment → one invoice (partial = multiple rows). Upgrade
   path: a `payment_allocations` M:N table; `InvoiceBalance` is the only
@@ -1601,3 +1600,64 @@ re-sync Shield) so the new `Payment` resource permissions exist and are
 assigned to the relevant roles — otherwise the Payments resource is
 hidden. `app/Policies/PaymentPolicy.php` follows the existing per-model
 Shield policy shape.
+
+## Invoice money status — Credit notes / returns (PR #2 of 2, landed)
+
+Closes the "no way to issue a credit note" gap. Builds on PR #1's
+`InvoiceBalance` (the `credited_total` branch). Note: legacy
+`FInvoiceReturn` is the ΣΔΕΠ delivery flow, NOT a financial credit note,
+and `CREATE_RETURN_INVOICE` is lost — so this is a fresh design.
+
+**Flow.** `App\Actions\IssueCreditNote(original, creditType, selections)`
+mirrors `CreateInvoice`: in ONE transaction it allocates ΑΑ via
+`InvoiceNumberer`, creates a credit-type Invoice with
+`credited_invoice_id = original.id` + the original's party snapshot +
+POSITIVE lines (the saving hook computes net/gross), writes
+`return_invoice_extras.qty_returned` per ORIGINAL line, recomputes the
+credit-note totals and the original's balance. The caller (the
+"Έκδοση πιστωτικού" action on `ViewInvoice`) submits to myDATA AFTER
+commit (no AADE call under row locks; no orphan-MARK window). Modal:
+pick credit type + per-line qty (0 = skip); over-credit (qty >
+remaining un-returned) is blocked.
+
+**Sign convention (important).** A credit note is stored with POSITIVE
+gross (negatives would make `InvoiceVatBreakdown` emit negative VAT).
+The reduction is expressed by the ORIGINAL's `credited_total`, computed
+by `InvoiceBalance` as Σ gross of issued, non-cancelled credit notes
+(`credited_invoice_id = original`). A CANCELLED credit note stops
+counting. `InvoiceObserver` (#[ObservedBy] on `Invoice`) keeps the
+original's cache fresh when a credit note is created / cancelled /
+deleted / restored (no loop: it recomputes the parent, whose own
+`credited_invoice_id` is null).
+
+**myDATA.** `MyDataSubmitter::buildAadeInvoice` now correlates a credit
+note to the original via `InvoiceHeader::addCorrelatedInvoice((int)
+mark)`, reading the original's INSERT MARK from `mydata_marks`
+(`originalInsertMark()`, same "audit history not mirror column" logic
+as `cancel()`). Refuses if the original was never filed. The credit
+`mydata_type` comes from the credit `InvoiceType` (existing guard).
+
+**Ledger.** `CustomerLedgerBuilder` now treats credit notes as
+reductions everywhere (balance, aging FIFO, yearly running balance,
+timeline credit column) via an `isCreditNote()` helper — they credit
+the customer's account like a payment. Signed logic reduces to identical
+output when no credit notes exist, so existing ledger tests are
+unchanged. `DashboardMetrics::outstandingReceivables` (from PR #1)
+already nets out credit notes via `credited_total`.
+
+**Deferred / out of scope:**
+- **Standalone credit notes** (no `credited_invoice_id`): structurally
+  allowed and counted via the ledger's `is_credit` check, but the issue
+  UI always targets an original; no UI for issuer-less credits + they
+  can't set a correlated MARK. Edge case.
+- **myDATA credit submission has no automated test** — the firebed
+  Guzzle mock for the SendInvoices path is non-trivial (same deferral as
+  the original submit path). The `IssueCreditNote` service + observer +
+  balance + ledger ARE unit-tested; the correlated-MARK wiring needs a
+  sandbox smoke test.
+- **Crediting a cash-term original**: the ledger nets the credit against
+  the credit-term pool (consistent with its FIFO approximation) — a
+  credit note on a cash-term invoice slightly over-reduces the credit
+  balance. Same fuzziness as the no-per-invoice-settlement model.
+- **Stock movements on return** — not tracked (legacy stock logic lived
+  in the lost `CREATE_RETURN_INVOICE` proc).

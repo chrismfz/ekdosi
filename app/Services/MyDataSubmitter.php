@@ -421,6 +421,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
             ->setInvoiceType($type)
             ->setCurrency(CurrencyCode::EUR);
 
+        // Credit note: correlate to the original invoice's MARK so AADE
+        // links the credit to the document it reverses. (int) is safe on
+        // 64-bit PHP — AADE MARKs are ~15 digits, well under PHP_INT_MAX.
+        if ($invoice->credited_invoice_id !== null) {
+            $header->addCorrelatedInvoice((int) $this->originalInsertMark($invoice));
+        }
+
         $details = [];
         $lineNo = 1;
         foreach ($invoice->lines as $line) {
@@ -471,6 +478,38 @@ class MyDataSubmitter implements EInvoiceSubmitter
         $aade->set('uid', $aade->guessUid());
 
         return $aade;
+    }
+
+    /**
+     * The original invoice's INSERT MARK, for correlating a credit note.
+     * Mirrors cancel()'s "read MARK from the audit history, not the
+     * mirror column" reasoning. Refuses if the original was never filed
+     * (can't correlate a credit to an unfiled document).
+     */
+    private function originalInsertMark(Invoice $creditNote): string
+    {
+        $original = Invoice::query()->whereKey($creditNote->credited_invoice_id)->first();
+        if (! $original) {
+            throw new RuntimeException(
+                "Credit note {$creditNote->invcode} references a missing original invoice."
+            );
+        }
+
+        $mark = MyDataMark::query()
+            ->where('invoice_id', $original->id)
+            ->where('mydata_action', 'INSERT')
+            ->whereNotNull('mark')
+            ->orderByDesc('id')
+            ->value('mark');
+
+        if (! $mark) {
+            throw new RuntimeException(
+                "Cannot file credit note for invoice {$original->invcode} — the original has no "
+                .'INSERT MARK on file (never submitted to myDATA). File the original first.'
+            );
+        }
+
+        return (string) $mark;
     }
 
     /**

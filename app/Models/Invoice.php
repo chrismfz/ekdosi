@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Observers\InvoiceObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -30,6 +32,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * e.g. "APY423". Allocated by App\Services\InvoiceNumberer under a row
  * lock so concurrent issues for the same type can't collide.
  */
+#[ObservedBy(InvoiceObserver::class)]
 class Invoice extends Model
 {
     use HasFactory, SoftDeletes;
