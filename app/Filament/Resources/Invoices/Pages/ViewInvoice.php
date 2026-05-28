@@ -28,6 +28,7 @@ use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ViewInvoice extends ViewRecord
@@ -62,8 +63,21 @@ class ViewInvoice extends ViewRecord
                     // tenants get the mail on the VALID response instead;
                     // shouldAutoEmailOnFinalize() guards against a double
                     // send and honours the tenant + per-customer toggles.
+                    // Dispatch is best-effort: a queue hiccup must NOT mask
+                    // the successful finalize (mirrors MyDataSubmitter::
+                    // dispatchAutoEmailIfEnabled). afterCommit runs inline
+                    // here (no open transaction), so guard it with try/catch.
                     if ($record->shouldAutoEmailOnFinalize()) {
-                        DB::afterCommit(fn () => SendInvoiceEmail::dispatch($record, trigger: 'auto'));
+                        DB::afterCommit(function () use ($record): void {
+                            try {
+                                SendInvoiceEmail::dispatch($record, trigger: 'auto');
+                            } catch (Throwable $e) {
+                                Log::warning('SendInvoiceEmail auto-dispatch on finalize failed (finalize succeeded)', [
+                                    'invoice_id' => $record->getKey(),
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        });
                     }
 
                     Notification::make()->title('Έγινε Ενεργό')->success()->send();
