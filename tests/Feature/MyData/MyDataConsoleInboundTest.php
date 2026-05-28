@@ -94,7 +94,7 @@ class MyDataConsoleInboundTest extends TestCase
             ->assertSee('Συνδεδεμένα με τοπικό παραστατικό');
     }
 
-    public function test_compare_view_still_renders_discrepancy_buckets(): void
+    public function test_compare_view_points_to_orphans_without_duplicating_the_table(): void
     {
         $this->bootTenantUser();
 
@@ -102,7 +102,10 @@ class MyDataConsoleInboundTest extends TestCase
             ->set('ran', true)
             ->set('resultMode', 'compare')
             ->set('result', $this->fakeResult())
-            ->assertSee('Λείπουν τοπικά (αδέσποτα)')
+            // Compare view surfaces a slim pointer (count + reference), not a
+            // second full orphans table.
+            ->assertSee('αδέσποτα παραστατικά')
+            ->assertSee('Αδέσποτα από myDATA')
             ->assertSee('Ασυμφωνίες');
     }
 }

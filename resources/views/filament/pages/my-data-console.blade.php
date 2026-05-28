@@ -1,8 +1,4 @@
 <x-filament-panels::page>
-    @php
-        $money = fn ($v) => $v === null ? '—' : '€ ' . number_format((float) $v, 2, ',', '.');
-    @endphp
-
     @if (! $ran)
         <x-filament::section>
             <x-slot name="heading">Ζωντανός έλεγχος myDATA</x-slot>
@@ -47,7 +43,6 @@
                  which is linked to a local invoice and which is orphaned.
                  ============================================================ --}}
             @php
-                $linkedCount = count($result['matched']) + count($result['stateMismatch']);
                 $orphans = $result['missingLocally'];
                 $linked = array_merge($result['matched'], $result['stateMismatch']);
             @endphp
@@ -63,7 +58,7 @@
                 </x-filament::section>
                 <x-filament::section>
                     <div class="text-sm text-gray-500 dark:text-gray-400">Συνδεδεμένα</div>
-                    <div class="text-2xl font-bold text-success-600 dark:text-success-400">{{ $linkedCount }}</div>
+                    <div class="text-2xl font-bold text-success-600 dark:text-success-400">{{ count($linked) }}</div>
                 </x-filament::section>
                 <x-filament::section>
                     <div class="text-sm text-gray-500 dark:text-gray-400">Αδέσποτα (μόνο στο myDATA)</div>
@@ -106,38 +101,10 @@
                         πιθανότατα από e-τιμολόγιο ή άλλο πρόγραμμα. Καταχωρίστε τα στο ekdosi ή αγνοήστε.
                     </x-slot>
 
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead class="text-left text-gray-500 dark:text-gray-400">
-                                <tr class="border-b border-gray-200 dark:border-white/10">
-                                    <th class="py-2 pr-4">ΜΑΡΚ</th>
-                                    <th class="py-2 pr-4">Έκδοση</th>
-                                    <th class="py-2 pr-4">Πελάτης</th>
-                                    <th class="py-2 pr-4 text-right">Σύνολο</th>
-                                    <th class="py-2 pr-4">myDATA</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($orphans as $row)
-                                    <tr class="border-b border-gray-100 dark:border-white/5">
-                                        <td class="py-2 pr-4 font-mono text-xs">{{ $row['mark'] }}</td>
-                                        <td class="py-2 pr-4 whitespace-nowrap">{{ $row['issuedAt'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4">{{ $row['counterpartName'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row['gross']) }}</td>
-                                        <td class="py-2 pr-4">
-                                            @if ($row['aadeState'])
-                                                <x-filament::badge :color="$row['aadeState'] === 'CANCELLED' ? 'danger' : 'success'">
-                                                    {{ $row['aadeState'] }}
-                                                </x-filament::badge>
-                                            @else
-                                                <span class="text-gray-400">—</span>
-                                            @endif
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
+                    @include('filament.pages.partials.reconciliation-table', [
+                        'rows' => $orphans,
+                        'columns' => ['mark', 'issuedAt', 'counterpart', 'gross', 'mydataState'],
+                    ])
                 </x-filament::section>
             @endif
 
@@ -152,44 +119,10 @@
                         </span>
                     </x-slot>
 
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead class="text-left text-gray-500 dark:text-gray-400">
-                                <tr class="border-b border-gray-200 dark:border-white/10">
-                                    <th class="py-2 pr-4">Κωδικός</th>
-                                    <th class="py-2 pr-4">ΜΑΡΚ</th>
-                                    <th class="py-2 pr-4">Έκδοση</th>
-                                    <th class="py-2 pr-4">Πελάτης</th>
-                                    <th class="py-2 pr-4 text-right">Σύνολο</th>
-                                    <th class="py-2 pr-4">Σύνδεση</th>
-                                    <th class="py-2"></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($linked as $row)
-                                    <tr class="border-b border-gray-100 dark:border-white/5">
-                                        <td class="py-2 pr-4 font-medium">{{ $row['invcode'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4 font-mono text-xs">{{ $row['mark'] }}</td>
-                                        <td class="py-2 pr-4 whitespace-nowrap">{{ $row['issuedAt'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4">{{ $row['counterpartName'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row['gross']) }}</td>
-                                        <td class="py-2 pr-4">
-                                            @if ($row['problem'])
-                                                <x-filament::badge color="warning">Διαφορά κατάστασης</x-filament::badge>
-                                            @else
-                                                <x-filament::badge color="success">Συνδεδεμένο</x-filament::badge>
-                                            @endif
-                                        </td>
-                                        <td class="py-2">
-                                            @if ($row['url'])
-                                                <x-filament::link :href="$row['url']" size="sm">Άνοιγμα</x-filament::link>
-                                            @endif
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
+                    @include('filament.pages.partials.reconciliation-table', [
+                        'rows' => $linked,
+                        'columns' => ['invcode', 'mark', 'issuedAt', 'counterpart', 'gross', 'linkStatus', 'open'],
+                    ])
                 </x-filament::section>
             @endif
         @else
@@ -229,11 +162,13 @@
                 </x-filament::section>
             @endif
 
-            {{-- Discrepancy buckets --}}
+            {{-- Discrepancy buckets. NOTE: missingLocally (αδέσποτα) is NOT
+                 rendered here as a full table — it has its own dedicated
+                 "Αδέσποτα από myDATA" direction. We surface only a slim
+                 pointer below so the Ασυμφωνίες count still reconciles. --}}
             @foreach ([
                 ['key' => 'stateMismatch', 'title' => 'Ασυμφωνία κατάστασης', 'color' => 'warning', 'icon' => 'heroicon-o-exclamation-triangle'],
                 ['key' => 'missingAtAade', 'title' => 'Λείπουν από το AADE', 'color' => 'danger', 'icon' => 'heroicon-o-x-circle'],
-                ['key' => 'missingLocally', 'title' => 'Λείπουν τοπικά (αδέσποτα)', 'color' => 'warning', 'icon' => 'heroicon-o-question-mark-circle'],
                 ['key' => 'duplicateLocal', 'title' => 'Διπλά ΜΑΡΚ τοπικά', 'color' => 'danger', 'icon' => 'heroicon-o-document-duplicate'],
             ] as $bucket)
                 @if (count($result[$bucket['key']]) > 0)
@@ -250,61 +185,30 @@
                             </span>
                         </x-slot>
 
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm">
-                                <thead class="text-left text-gray-500 dark:text-gray-400">
-                                    <tr class="border-b border-gray-200 dark:border-white/10">
-                                        <th class="py-2 pr-4">Κωδικός</th>
-                                        <th class="py-2 pr-4">ΜΑΡΚ</th>
-                                        <th class="py-2 pr-4">Έκδοση</th>
-                                        <th class="py-2 pr-4">Πελάτης</th>
-                                        <th class="py-2 pr-4 text-right">Σύνολο</th>
-                                        <th class="py-2 pr-4">Τοπικά</th>
-                                        <th class="py-2 pr-4">AADE</th>
-                                        <th class="py-2 pr-4">Πρόβλημα</th>
-                                        <th class="py-2"></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach ($result[$bucket['key']] as $row)
-                                        <tr class="border-b border-gray-100 dark:border-white/5">
-                                            <td class="py-2 pr-4 font-medium">{{ $row['invcode'] ?? '—' }}</td>
-                                            <td class="py-2 pr-4 font-mono text-xs">{{ $row['mark'] }}</td>
-                                            <td class="py-2 pr-4 whitespace-nowrap">{{ $row['issuedAt'] ?? '—' }}</td>
-                                            <td class="py-2 pr-4">{{ $row['counterpartName'] ?? '—' }}</td>
-                                            <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row['gross']) }}</td>
-                                            <td class="py-2 pr-4">
-                                                @if ($row['localState'])
-                                                    <x-filament::badge :color="$row['localState'] === 'CANCELLED' ? 'danger' : 'success'">
-                                                        {{ $row['localState'] }}
-                                                    </x-filament::badge>
-                                                @else
-                                                    <span class="text-gray-400">—</span>
-                                                @endif
-                                            </td>
-                                            <td class="py-2 pr-4">
-                                                @if ($row['aadeState'])
-                                                    <x-filament::badge :color="$row['aadeState'] === 'CANCELLED' ? 'danger' : 'success'">
-                                                        {{ $row['aadeState'] }}
-                                                    </x-filament::badge>
-                                                @else
-                                                    <span class="text-gray-400">—</span>
-                                                @endif
-                                            </td>
-                                            <td class="py-2 pr-4 text-gray-600 dark:text-gray-300">{{ $row['problem'] }}</td>
-                                            <td class="py-2">
-                                                @if ($row['url'])
-                                                    <x-filament::link :href="$row['url']" size="sm">Άνοιγμα</x-filament::link>
-                                                @endif
-                                            </td>
-                                        </tr>
-                                    @endforeach
-                                </tbody>
-                            </table>
-                        </div>
+                        @include('filament.pages.partials.reconciliation-table', [
+                            'rows' => $result[$bucket['key']],
+                            'columns' => ['invcode', 'mark', 'issuedAt', 'counterpart', 'gross', 'localState', 'aadeState', 'problem', 'open'],
+                        ])
                     </x-filament::section>
                 @endif
             @endforeach
+
+            {{-- αδέσποτα: slim pointer to the dedicated direction (avoids
+                 showing the same list twice). --}}
+            @if (count($result['missingLocally']) > 0)
+                <x-filament::section>
+                    <div class="flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                        <x-filament::icon icon="heroicon-o-question-mark-circle" class="h-5 w-5 text-warning-500" />
+                        <span>
+                            <strong>{{ count($result['missingLocally']) }}</strong> αδέσποτα παραστατικά
+                            (στο myDATA, χωρίς τοπική εγγραφή).
+                        </span>
+                        <span class="text-gray-500 dark:text-gray-400">
+                            Αναλυτικά στη λειτουργία «Αδέσποτα από myDATA».
+                        </span>
+                    </div>
+                </x-filament::section>
+            @endif
 
             {{-- Matched (collapsed by default) --}}
             @if (count($result['matched']) > 0)
@@ -317,42 +221,10 @@
                         </span>
                     </x-slot>
 
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead class="text-left text-gray-500 dark:text-gray-400">
-                                <tr class="border-b border-gray-200 dark:border-white/10">
-                                    <th class="py-2 pr-4">Κωδικός</th>
-                                    <th class="py-2 pr-4">ΜΑΡΚ</th>
-                                    <th class="py-2 pr-4">Έκδοση</th>
-                                    <th class="py-2 pr-4">Πελάτης</th>
-                                    <th class="py-2 pr-4 text-right">Σύνολο</th>
-                                    <th class="py-2 pr-4">Κατάσταση</th>
-                                    <th class="py-2"></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($result['matched'] as $row)
-                                    <tr class="border-b border-gray-100 dark:border-white/5">
-                                        <td class="py-2 pr-4 font-medium">{{ $row['invcode'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4 font-mono text-xs">{{ $row['mark'] }}</td>
-                                        <td class="py-2 pr-4 whitespace-nowrap">{{ $row['issuedAt'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4">{{ $row['counterpartName'] ?? '—' }}</td>
-                                        <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row['gross']) }}</td>
-                                        <td class="py-2 pr-4">
-                                            <x-filament::badge :color="$row['aadeState'] === 'CANCELLED' ? 'danger' : 'success'">
-                                                {{ $row['aadeState'] }}
-                                            </x-filament::badge>
-                                        </td>
-                                        <td class="py-2">
-                                            @if ($row['url'])
-                                                <x-filament::link :href="$row['url']" size="sm">Άνοιγμα</x-filament::link>
-                                            @endif
-                                        </td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
+                    @include('filament.pages.partials.reconciliation-table', [
+                        'rows' => $result['matched'],
+                        'columns' => ['invcode', 'mark', 'issuedAt', 'counterpart', 'gross', 'state', 'open'],
+                    ])
                 </x-filament::section>
             @endif
         @endif
