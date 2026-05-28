@@ -16,11 +16,14 @@ namespace App\Services\MyData;
  *                        ⚠ Serious — we believe it's filed, AADE disagrees.
  *   - missingLocally   : AADE returns a MARK we have no local invoice for
  *                        (filed from another machine / lost local record).
+ *   - duplicateLocal   : two+ local invoices share one MARK. ⚠ Local
+ *                        data-integrity fault (each colliding row listed).
  *
  * @param  list<ReconciliationRow>  $matched
  * @param  list<ReconciliationRow>  $stateMismatch
  * @param  list<ReconciliationRow>  $missingAtAade
  * @param  list<ReconciliationRow>  $missingLocally
+ * @param  list<ReconciliationRow>  $duplicateLocal
  */
 final readonly class SalesReconciliationResult
 {
@@ -33,13 +36,15 @@ final readonly class SalesReconciliationResult
         public array $stateMismatch,
         public array $missingAtAade,
         public array $missingLocally,
+        public array $duplicateLocal = [],
     ) {}
 
     public function discrepancyCount(): int
     {
         return count($this->stateMismatch)
             + count($this->missingAtAade)
-            + count($this->missingLocally);
+            + count($this->missingLocally)
+            + count($this->duplicateLocal);
     }
 
     public function hasDiscrepancies(): bool

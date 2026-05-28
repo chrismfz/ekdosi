@@ -73,6 +73,30 @@ class SalesReconcilerFetchTest extends TestCase
         $this->assertSame(124.00, $byMark['400000000000001']->gross);
     }
 
+    public function test_empty_window_response_does_not_crash(): void
+    {
+        // AADE returns an empty <invoicesDoc/> container when nothing
+        // matches the window — firebed parses that to a scalar, so an
+        // unguarded foreach would TypeError. Must yield an empty result.
+        $mock = new MockHandler([
+            new Response(200, [], <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc/>
+</RequestedDoc>
+XML),
+        ]);
+
+        $result = (new SalesReconciler($this->tenant, $mock))->reconcile(
+            now()->subMonth(),
+            now(),
+        );
+
+        $this->assertSame(0, $result->aadeTotal);
+        $this->assertSame(0, $mock->count());
+        $this->assertFalse($result->hasDiscrepancies());
+    }
+
     private function pageOne(): string
     {
         return <<<'XML'

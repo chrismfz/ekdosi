@@ -14,6 +14,8 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 use UnitEnum;
 
@@ -66,9 +68,21 @@ class MyDataConsole extends Page
 
     public static function shouldRegisterNavigation(): bool
     {
+        return static::canAccess();
+    }
+
+    /**
+     * Route-level authorization. shouldRegisterNavigation() only hides
+     * the menu item — without this a user could hand-type the URL and
+     * trigger a live AADE call with the tenant's credentials. Gate the
+     * page itself to authenticated users of a Greek, non-Off tenant.
+     */
+    public static function canAccess(): bool
+    {
         $tenant = Filament::getTenant();
 
-        return $tenant
+        return auth()->check()
+            && $tenant
             && $tenant->einvoice_provider === 'gr-mydata'
             && $tenant->mydata_mode_enum !== MyDataMode::Off;
     }
@@ -125,12 +139,31 @@ class MyDataConsole extends Page
                 ->body($msg)
                 ->{$result->hasDiscrepancies() ? 'warning' : 'success'}()
                 ->send();
-        } catch (Throwable $e) {
+        } catch (RuntimeException $e) {
+            // Our own guard messages (provider/mode/credentials) — safe
+            // Greek strings meant for the operator.
             $this->error = $e->getMessage();
 
             Notification::make()
                 ->title('Ο έλεγχος απέτυχε')
                 ->body($e->getMessage())
+                ->danger()
+                ->send();
+        } catch (Throwable $e) {
+            // firebed / Guzzle / parsing failures — the message can carry
+            // the endpoint URL and internal context. Log the detail, show
+            // the operator a generic line.
+            Log::warning('myDATA sales reconciliation failed', [
+                'company_id' => $tenant?->getKey(),
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            $this->error = 'Η σύνδεση με το AADE απέτυχε. Ελέγξτε τα διαπιστευτήρια και προσπαθήστε ξανά.';
+
+            Notification::make()
+                ->title('Ο έλεγχος απέτυχε')
+                ->body($this->error)
                 ->danger()
                 ->send();
         }
@@ -150,6 +183,7 @@ class MyDataConsole extends Page
             'stateMismatch' => $rows($r->stateMismatch),
             'missingAtAade' => $rows($r->missingAtAade),
             'missingLocally' => $rows($r->missingLocally),
+            'duplicateLocal' => $rows($r->duplicateLocal),
         ];
     }
 

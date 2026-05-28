@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
+use Firebed\AadeMyData\Models\ContinuationToken;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Collection;
 use RuntimeException;
@@ -105,7 +106,14 @@ class SalesReconciler
                 $nextRowKey,
             );
 
-            if ($invoicesDoc = $response->getInvoices()) {
+            // AADE returns an EMPTY container element (<invoicesDoc/>)
+            // when nothing matches the window. firebed's reader then
+            // stores `invoicesDoc` as a scalar string — and the typed
+            // getInvoices(): ?InvoicesDoc getter THROWS a TypeError on
+            // that. Read the raw attribute via get() and guard with
+            // is_iterable() so the common "empty window" response is safe.
+            $invoicesDoc = $response->get('invoicesDoc');
+            if (is_iterable($invoicesDoc)) {
                 foreach ($invoicesDoc as $doc) {
                     $mark = (string) $doc->getMark();
                     if ($mark === '') {
@@ -127,12 +135,17 @@ class SalesReconciler
                         issueDate: $header?->getIssueDate(),
                         counterpartName: $counterpart?->getName(),
                         counterpartVat: $counterpart?->getVatNumber(),
-                        gross: $summary?->getTotalGrossValue(),
+                        // getTotalGrossValue() is parsed from XML as a
+                        // STRING (firebed declares no cast for it); make
+                        // the float explicit so a strict_types caller or
+                        // numeric comparison never trips.
+                        gross: $this->toFloat($summary?->getTotalGrossValue()),
                     );
                 }
             }
 
-            if ($cancelledDoc = $response->getCancelledInvoices()) {
+            $cancelledDoc = $response->get('cancelledInvoicesDoc');
+            if (is_iterable($cancelledDoc)) {
                 foreach ($cancelledDoc as $cancelled) {
                     $m = (string) $cancelled->getInvoiceMark();
                     if ($m !== '') {
@@ -141,10 +154,16 @@ class SalesReconciler
                 }
             }
 
-            $token = $response->getContinuationToken();
+            $token = $response->get('continuationToken');
+            $token = $token instanceof ContinuationToken ? $token : null;
             $nextPartitionKey = $token?->getNextPartitionKey();
             $nextRowKey = $token?->getNextRowKey();
-        } while (! empty($nextPartitionKey) && ! empty($nextRowKey));
+
+            // Continue while AADE handed back a continuation token with at
+            // least one key. ORing the keys (vs ANDing) is the safe choice:
+            // if AADE ever returns one key without the other we still
+            // fetch the next page instead of silently dropping it.
+        } while ($token !== null && (! empty($nextPartitionKey) || ! empty($nextRowKey)));
 
         // Fold the standalone cancellation list into the summaries: a
         // MARK listed in <cancelledInvoicesDoc> is cancelled even if its
@@ -185,14 +204,32 @@ class SalesReconciler
             $aadeByMark[$doc->mark] = $doc;
         }
 
-        $localByMark = $localInvoices
-            ->filter(fn (Invoice $i) => filled($i->mydata_mark))
-            ->keyBy(fn (Invoice $i) => (string) $i->mydata_mark);
+        $withMark = $localInvoices->filter(fn (Invoice $i) => filled($i->mydata_mark));
+        $grouped = $withMark->groupBy(fn (Invoice $i) => (string) $i->mydata_mark);
 
         $matched = [];
         $stateMismatch = [];
         $missingAtAade = [];
         $missingLocally = [];
+        $duplicateLocal = [];
+
+        // A MARK is unique per AADE filing — two local invoices sharing
+        // one is a data-integrity fault (bad ETL / double-write) that the
+        // console exists to surface. Without this the keyBy below would
+        // silently collapse them and hide the very problem we look for.
+        foreach ($grouped as $group) {
+            if ($group->count() > 1) {
+                foreach ($group as $invoice) {
+                    $duplicateLocal[] = $this->rowFromLocal(
+                        $invoice,
+                        aadeState: null,
+                        problem: 'Διπλό ΜΑΡΚ: '.$group->count().' τοπικά παραστατικά μοιράζονται αυτό το ΜΑΡΚ.',
+                    );
+                }
+            }
+        }
+
+        $localByMark = $grouped->map(fn (Collection $g) => $g->first());
 
         foreach ($localByMark as $mark => $invoice) {
             $aade = $aadeByMark[$mark] ?? null;
@@ -250,12 +287,18 @@ class SalesReconciler
             from: $from,
             to: $to,
             aadeTotal: count($aadeByMark),
-            localTotal: $localByMark->count(),
+            localTotal: $withMark->count(),
             matched: $matched,
             stateMismatch: $stateMismatch,
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
+            duplicateLocal: $duplicateLocal,
         );
+    }
+
+    private function toFloat(?string $value): ?float
+    {
+        return $value === null ? null : (float) $value;
     }
 
     private function rowFromLocal(

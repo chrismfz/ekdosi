@@ -44,8 +44,9 @@ class MyDataReconcileSales extends Command
         }
 
         $tenant = Company::query()
-            ->where('slug', $tenantArg)
-            ->orWhere('id', is_numeric($tenantArg) ? (int) $tenantArg : 0)
+            ->where(fn ($q) => $q
+                ->where('slug', $tenantArg)
+                ->orWhere('id', is_numeric($tenantArg) ? (int) $tenantArg : 0))
             ->first();
 
         if (! $tenant) {
@@ -54,12 +55,18 @@ class MyDataReconcileSales extends Command
             return self::FAILURE;
         }
 
-        $from = $this->option('from')
-            ? Carbon::parse($this->option('from'))->startOfDay()
-            : now()->subMonth()->startOfDay();
-        $to = $this->option('to')
-            ? Carbon::parse($this->option('to'))->endOfDay()
-            : now()->endOfDay();
+        try {
+            $from = $this->option('from')
+                ? Carbon::parse($this->option('from'))->startOfDay()
+                : now()->subMonth()->startOfDay();
+            $to = $this->option('to')
+                ? Carbon::parse($this->option('to'))->endOfDay()
+                : now()->endOfDay();
+        } catch (Throwable $e) {
+            $this->error('Invalid --from/--to date (expected Y-m-d): '.$e->getMessage());
+
+            return self::FAILURE;
+        }
 
         $this->line("Tenant : {$tenant->name} (#{$tenant->id})");
         $this->line("Window : {$from->format('d/m/Y')} – {$to->format('d/m/Y')}");
@@ -82,6 +89,7 @@ class MyDataReconcileSales extends Command
                 ['State mismatch', count($result->stateMismatch)],
                 ['Missing at AADE', count($result->missingAtAade)],
                 ['Missing locally', count($result->missingLocally)],
+                ['Duplicate local MARK', count($result->duplicateLocal)],
             ],
         );
 
@@ -89,6 +97,7 @@ class MyDataReconcileSales extends Command
             'State mismatch' => $result->stateMismatch,
             'Missing at AADE' => $result->missingAtAade,
             'Missing locally' => $result->missingLocally,
+            'Duplicate local MARK' => $result->duplicateLocal,
         ] as $title => $rows) {
             if (empty($rows)) {
                 continue;

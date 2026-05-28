@@ -1921,3 +1921,43 @@ response-shape surprises. Refine after the operator's sandbox test.
   it if edge cases appear. Not auto-reconciled.
 - **Octane/static-credential contention** — same firebed static-state
   caveat as `MyDataSubmitter`; fine for FPM + sequential workers.
+
+### Independent review of Phase 2 — fixes applied
+Two blind reviewers (one verifying every firebed call against vendor
+source, one on correctness/tenant-safety). Findings FIXED, each locked by
+a test where applicable:
+- **[BUG] Empty-window AADE response crashed the fetch** — when nothing
+  matches the window AADE returns an empty `<invoicesDoc/>`; firebed
+  stores it as a scalar string and the typed `getInvoices(): ?InvoicesDoc`
+  getter THROWS a TypeError on it. Now read via the raw `Type::get()`
+  accessor + `is_iterable()` guard (same for `cancelledInvoicesDoc`, and
+  an `instanceof ContinuationToken` guard for the token). Locked by
+  `test_empty_window_response_does_not_crash`. This was the consequential
+  one — it would have failed on the most common real call (a quiet day).
+- **[BUG] No `canAccess()` on the console page** — `shouldRegisterNavigation()`
+  only hides the menu; a user could hand-type the URL and trigger a live
+  AADE call with tenant credentials. Added `canAccess()` (auth + gr-mydata
+  + non-Off), and `shouldRegisterNavigation()` now delegates to it.
+- **[RISK→fixed] Duplicate local MARK was silently collapsed** — `keyBy`
+  dropped all but one invoice sharing a MARK, hiding the exact integrity
+  fault the console exists to catch. Added a fifth bucket `duplicateLocal`
+  (each colliding row listed) + accurate `localTotal`. Locked by
+  `test_duplicate_local_mark_is_surfaced_not_collapsed`.
+- **[RISK→fixed] Pagination AND-condition could drop pages** — looped
+  while both continuation keys non-empty; now `token !== null && (pk || rk)`
+  so a one-key token still fetches the next page.
+- **[latent→fixed] `getTotalGrossValue()` is a STRING** (firebed declares
+  no cast); worked only because no `strict_types`. Now an explicit
+  `(float)` via a `toFloat()` helper.
+- **Exception-message leakage** — the console now shows our own
+  RuntimeException guard messages (safe Greek) but logs firebed/Guzzle
+  failures and shows a generic line (the raw message can carry the
+  endpoint URL).
+- **Command tenant resolver precedence** — wrapped `slug OR id` in a
+  closure so a future `where` can't escape the `orWhere`; date parsing
+  moved inside try/catch (bad `--from`/`--to` now fails cleanly).
+
+Reviewed + accepted as-is: window-edge false positives (operator picks the
+window — documented above); `$result` held in Livewire state can be large
+for hundreds of matched rows (acceptable for expected volume; lazy-load
+matched if it bites).

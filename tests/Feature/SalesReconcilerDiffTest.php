@@ -145,6 +145,28 @@ class SalesReconcilerDiffTest extends TestCase
         $this->assertCount(0, $result->missingAtAade);
     }
 
+    public function test_duplicate_local_mark_is_surfaced_not_collapsed(): void
+    {
+        // Two local invoices sharing one MARK — a data-integrity fault
+        // the console must surface (keyBy would otherwise hide one).
+        $this->invoice('800000000000001', 'VALID');
+        $this->invoice('800000000000001', 'VALID');
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aade('800000000000001', cancelled: false)],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(2, $result->duplicateLocal);
+        $this->assertSame(2, $result->localTotal);
+        $this->assertTrue($result->hasDiscrepancies());
+        $this->assertSame(2, $result->discrepancyCount());
+        // The collapsed survivor still matches AADE, but the collision is flagged.
+        $this->assertCount(1, $result->matched);
+    }
+
     public function test_no_discrepancies_when_everything_agrees(): void
     {
         $this->invoice('700000000000001', 'VALID');

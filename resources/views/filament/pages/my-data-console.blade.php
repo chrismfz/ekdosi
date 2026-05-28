@@ -64,6 +64,7 @@
             ['key' => 'stateMismatch', 'title' => 'Ασυμφωνία κατάστασης', 'color' => 'warning', 'icon' => 'heroicon-o-exclamation-triangle'],
             ['key' => 'missingAtAade', 'title' => 'Λείπουν από το AADE', 'color' => 'danger', 'icon' => 'heroicon-o-x-circle'],
             ['key' => 'missingLocally', 'title' => 'Λείπουν τοπικά', 'color' => 'warning', 'icon' => 'heroicon-o-question-mark-circle'],
+            ['key' => 'duplicateLocal', 'title' => 'Διπλά ΜΑΡΚ τοπικά', 'color' => 'danger', 'icon' => 'heroicon-o-document-duplicate'],
         ] as $bucket)
             @if (count($result[$bucket['key']]) > 0)
                 <x-filament::section :collapsible="true">
