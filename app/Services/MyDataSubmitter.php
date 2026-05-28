@@ -718,12 +718,10 @@ class MyDataSubmitter implements EInvoiceSubmitter
      * Values from AADE myDATA spec — kept conservative; unknown
      * rates throw so we don't silently file with the wrong category.
      *
-     * IMPORTANT: 0% is NOT mapped here. Real-world 0% lines need a
-     * separate `vatExemptionCategory` field (intra-community supply
-     * vs domestic exempt vs reverse-charge vs out-of-scope) that we
-     * don't yet capture. Throwing forces operators to wait for the
-     * exemption-category mechanism rather than silently filing wrong
-     * — tracked as a deferred follow-up.
+     * 0% → category 7 (Άνευ ΦΠΑ / exempt). The REASON (§8.3) is NOT chosen
+     * here — the caller attaches it per-line via setVatExemptionCategory,
+     * resolved from the tenant's 0%-rate VatCategory (resolveVatExemptionCategory).
+     * That resolution is what guards against filing an unexplained exempt line.
      */
     private function vatCategoryFor(float $rate): int
     {
@@ -785,7 +783,20 @@ class MyDataSubmitter implements EInvoiceSubmitter
             );
         }
 
-        return $this->resolvedExemptionCategory = (int) $codes->first();
+        $code = (int) $codes->first();
+        if (! Codes::vatExemptionExists($code)) {
+            // Belt-and-suspenders: the Filament form restricts to §8.3 (1–31),
+            // but an ETL/direct-DB write could store an out-of-range value the
+            // unsignedTinyInteger column tolerates (0–255). Fail loud-and-
+            // friendly here rather than let VatExemption::from() throw a raw
+            // ValueError — symmetric with the withholding-category guard.
+            throw new RuntimeException(
+                'The 0%-rate VAT category has vat_exemption_category='.$code.', which is not a '.
+                'valid AADE exemption reason (§8.3, 1–31). Fix it in Setup → VAT Categories.'
+            );
+        }
+
+        return $this->resolvedExemptionCategory = $code;
     }
 
     private function payloadToXml(AadeInvoice $payload): string

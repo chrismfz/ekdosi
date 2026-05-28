@@ -30,6 +30,7 @@ class VatCategoryForm
                     ->minValue(0)
                     ->maxValue(100)
                     ->default(0)
+                    ->live(onBlur: true)   // so the exemption picker reacts to the rate
                     ->suffix('%'),
 
                 // G4: when the rate is 0%, AADE files it as vatCategory=7
@@ -41,8 +42,8 @@ class VatCategoryForm
                         ->mapWithKeys(fn (int $c) => [$c => 'Κατηγορία '.$c])
                         ->all())
                     ->searchable()
-                    ->visible(fn (Get $get) => (float) $get('rate') === 0.0)
-                    ->required(fn (Get $get) => (float) $get('rate') === 0.0)
+                    ->visible(fn (Get $get) => abs((float) $get('rate')) < 0.01)
+                    ->required(fn (Get $get) => abs((float) $get('rate')) < 0.01)
                     ->helperText('§8.3 ΑΑΔΕ: π.χ. ενδοκοινοτική παράδοση, εξαγωγή, άρθρο 39α. Υποχρεωτικό για συντελεστή 0% ώστε να υποβάλλονται τα παραστατικά.'),
 
                 Toggle::make('is_default')

@@ -260,11 +260,11 @@ class WhmcsInvoiceMapper
             // to round(8.06×1.24,2) = 9.99 — the preview lied to the
             // operator by €0.01 per line.
             if (! $taxed) {
-                // Untaxed line: gross == net, no VAT. (For myDATA a
-                // 0% line needs a vat_exemption_category; the filer
-                // rejects this case explicitly via
-                // refuseProblematicZeroVatLines to avoid producing
-                // a ghost invoice that crashes mid-submit.)
+                // Untaxed line: gross == net, no VAT. (For myDATA a 0% line
+                // needs a vat_exemption_category; the filer's
+                // refuseProblematicZeroVatLines now ALLOWS it when the tenant's
+                // 0%-rate VatCategory has a single exemption reason configured,
+                // and only blocks the unconfigured/ambiguous case — G4.)
                 // $zeroVat is guaranteed non-null here because
                 // hasZeroVatLine() returned true and
                 // resolveZeroVatCategory() would have thrown if
