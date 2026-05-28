@@ -2,11 +2,16 @@
 
 namespace App\Filament\Resources\Invoices\Tables;
 
+use App\Enums\LocalStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Customer;
 use App\Models\InvoiceType;
+use App\Services\EInvoiceSubmitterFactory;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -15,6 +20,8 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Throwable;
 
 class InvoicesTable
 {
@@ -52,6 +59,13 @@ class InvoicesTable
                     ->label('Total')
                     ->money('EUR')
                     ->alignRight()
+                    ->sortable(),
+
+                TextColumn::make('local_status')
+                    ->label('Κατάσταση')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state) => $state ? LocalStatus::from($state)->label() : '—')
+                    ->color(fn (?string $state) => $state ? LocalStatus::from($state)->color() : 'gray')
                     ->sortable(),
 
                 TextColumn::make('payment_status')
@@ -147,6 +161,13 @@ class InvoicesTable
                         ->toArray())
                     ->placeholder('All'),
 
+                SelectFilter::make('local_status')
+                    ->label('Κατάσταση')
+                    ->options(collect(LocalStatus::cases())
+                        ->mapWithKeys(fn (LocalStatus $s) => [$s->value => $s->label()])
+                        ->toArray())
+                    ->placeholder('Όλες'),
+
                 SelectFilter::make('mydata_state')
                     ->label('myDATA state')
                     ->options([
@@ -160,6 +181,35 @@ class InvoicesTable
                     ->placeholder('All')
                     ->trueLabel('Submitted only')
                     ->falseLabel('Not submitted only'),
+
+                // Quick period presets so nothing unsent slips past the
+                // weekly review (e.g. "Αυτό το τρίμηνο" + "Μη υποβληθέντα").
+                SelectFilter::make('period')
+                    ->label('Περίοδος')
+                    ->options([
+                        'week' => 'Αυτή την εβδομάδα',
+                        'month' => 'Αυτόν τον μήνα',
+                        'last_month' => 'Προηγούμενος μήνας',
+                        'quarter' => 'Αυτό το τρίμηνο',
+                        'year' => 'Φέτος',
+                    ])
+                    ->query(function (Builder $q, array $data) {
+                        $v = $data['value'] ?? null;
+                        if (! $v) {
+                            return $q;
+                        }
+                        $now = now();
+                        [$from, $to] = match ($v) {
+                            'week' => [$now->copy()->startOfWeek(), $now->copy()->endOfWeek()],
+                            'month' => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
+                            'last_month' => [$now->copy()->subMonthNoOverflow()->startOfMonth(), $now->copy()->subMonthNoOverflow()->endOfMonth()],
+                            'quarter' => [$now->copy()->startOfQuarter(), $now->copy()->endOfQuarter()],
+                            'year' => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+                            default => [null, null],
+                        };
+
+                        return $q->when($from, fn ($q) => $q->whereBetween('issued_at', [$from, $to]));
+                    }),
 
                 Filter::make('issued_at_range')
                     ->schema([
@@ -178,6 +228,56 @@ class InvoicesTable
             ])
             ->recordActions([
                 ViewAction::make(),
+            ])
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    // Weekly batch-file: filter (e.g. Ενεργό + Μη
+                    // υποβληθέντα + period) → select → submit. Only
+                    // un-filed, non-credit-note rows are sent; the rest
+                    // are skipped. Each submit is an independent AADE
+                    // call (per-row error handling, partial success OK).
+                    BulkAction::make('submit_mydata')
+                        ->label('Υποβολή επιλεγμένων στο myDATA')
+                        ->icon('heroicon-o-paper-airplane')
+                        ->color('success')
+                        ->visible(fn () => in_array(
+                            Filament::getTenant()?->mydata_mode,
+                            ['sandbox', 'production'],
+                            true,
+                        ))
+                        ->requiresConfirmation()
+                        ->modalHeading('Μαζική υποβολή στο myDATA')
+                        ->modalDescription('Υποβάλλονται μόνο τα μη υποβληθέντα (χωρίς MARK). Πιστωτικά και ήδη υποβληθέντα παραλείπονται.')
+                        ->action(function (Collection $records) {
+                            $ok = 0;
+                            $skip = 0;
+                            $fail = 0;
+                            $submitter = app(EInvoiceSubmitterFactory::class)->for(Filament::getTenant());
+
+                            foreach ($records as $record) {
+                                if ($record->mydata_state !== null || $record->credited_invoice_id !== null) {
+                                    $skip++;
+
+                                    continue;
+                                }
+                                try {
+                                    $submitter->submit($record);
+                                    if ($record->local_status === 'draft') {
+                                        $record->update(['local_status' => 'active']);
+                                    }
+                                    $ok++;
+                                } catch (Throwable $e) {
+                                    $fail++;
+                                }
+                            }
+
+                            Notification::make()
+                                ->title("Υποβλήθηκαν: {$ok} · Παραλείφθηκαν: {$skip} · Απέτυχαν: {$fail}")
+                                ->{$fail > 0 ? 'warning' : 'success'}()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion(),
+                ]),
             ])
             ->defaultSort('issued_at', 'desc');
     }

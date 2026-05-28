@@ -31,11 +31,13 @@ class EditInvoice extends EditRecord
 
         // canAccess() can't see the record easily on resource-level
         // (it runs before the record is resolved). Belt-and-suspenders
-        // here: refuse to mount if the invoice is filed.
-        if ($this->record->mydata_state !== null) {
+        // here: only DRAFTS are editable. Finalised (Ενεργό), filed, or
+        // cancelled invoices are locked — revert to draft (if unfiled) or
+        // cancel + reissue (if filed).
+        if ($this->record->mydata_state !== null || $this->record->local_status !== 'draft') {
             Notification::make()
-                ->title('Cannot edit a filed invoice')
-                ->body("Invoice {$this->record->invcode} has been filed at myDATA (state={$this->record->mydata_state}). Edits would diverge from what AADE recorded. Use Cancel + reissue to correct.")
+                ->title('Δεν επιτρέπεται η επεξεργασία')
+                ->body("Το παραστατικό {$this->record->invcode} δεν είναι πρόχειρο (κατάσταση: {$this->record->local_status}, myDATA: ".($this->record->mydata_state ?? '—').'). Επαναφέρετέ το σε πρόχειρο ή, αν έχει υποβληθεί, ακυρώστε + επανεκδώστε.')
                 ->danger()
                 ->persistent()
                 ->send();
@@ -50,7 +52,7 @@ class EditInvoice extends EditRecord
     {
         return [
             DeleteAction::make()
-                ->visible(fn (Invoice $record) => $record->mydata_state === null),
+                ->visible(fn (Invoice $record) => $record->mydata_state === null && $record->local_status === 'draft'),
         ];
     }
 

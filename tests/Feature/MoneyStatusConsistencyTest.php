@@ -151,6 +151,21 @@ class MoneyStatusConsistencyTest extends TestCase
                     $credit->forceFill(['mydata_state' => 'CANCELLED'])->save();   // observer reverts original
                 }
             }
+
+            // Occasionally cancel a sale locally (detach payments →
+            // on-account), mimicking the cancel_local action. Skip sales
+            // that have credit notes (cancelling those is a rare edge the
+            // ledger/dashboard handle differently — excluded to keep the
+            // invariant exact).
+            if (mt_rand(0, 2) === 0) {
+                /** @var Invoice $sale */
+                $sale = $sales[array_rand($sales)];
+                $hasCredit = Invoice::where('credited_invoice_id', $sale->id)->exists();
+                if (! $hasCredit && $sale->local_status !== 'cancelled') {
+                    \App\Models\Payment::where('invoice_id', $sale->id)->get()->each->update(['invoice_id' => null]);
+                    $sale->update(['local_status' => 'cancelled']);
+                }
+            }
         }
     }
 

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\PaymentStatus;
 use App\Models\Invoice;
+use App\Support\InvoiceScope;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -124,13 +125,11 @@ class InvoiceBalance
         // "live invoice" filter used for receivables (null state = issued
         // but not yet filed still counts; works for off-mode tenants that
         // never reach VALID). A CANCELLED credit note does not.
-        return (float) DB::table('invoices')
+        $q = DB::table('invoices')
             ->where('credited_invoice_id', $invoice->getKey())
-            ->whereNull('deleted_at')
-            ->where(fn ($q) => $q
-                ->whereNull('mydata_state')
-                ->orWhere('mydata_state', '!=', 'CANCELLED'))
-            ->sum('gross_total');
+            ->whereNull('deleted_at');
+
+        return (float) InvoiceScope::live($q)->sum('gross_total');
     }
 
     private function paidTotal(Invoice $invoice): float
