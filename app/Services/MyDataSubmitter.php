@@ -196,6 +196,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
             return;
         }
 
+        // G6: respect the per-customer opt-out (default true).
+        if (! $invoice->customerAcceptsAutoEmail()) {
+            return;
+        }
+
         $invoiceId = $invoice->getKey();
         DB::afterCommit(function () use ($invoiceId): void {
             try {

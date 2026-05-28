@@ -418,6 +418,13 @@ class CompanyForm
                                             ->label('Auto-email customer when AADE accepts')
                                             ->helperText('When a myDATA submission returns VALID, queue an email with the PDF to the customer. Off for sandbox/training tenants.')
                                             ->columnSpanFull(),
+                                        // G6: the non-myDATA counterpart — fires when a draft
+                                        // is finalized on a tenant that doesn't file via
+                                        // myDATA (provider 'none' / Estonian / mode off).
+                                        Toggle::make('auto_email_on_issue')
+                                            ->label('Auto-email customer on issue (non-myDATA)')
+                                            ->helperText('When a draft is finalized on a tenant that does NOT file via myDATA, queue an email with the PDF. Per-customer opt-out lives on each customer. Off = global kill-switch (e.g. for testing).')
+                                            ->columnSpanFull(),
                                         TextInput::make('mail_from_address')
                                             ->label('From address')
                                             ->email()

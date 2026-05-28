@@ -234,4 +234,40 @@ class Invoice extends Model
     {
         return $this->hasOne(MyDataMark::class)->latestOfMany(['mark_date', 'mark_time', 'id']);
     }
+
+    /**
+     * G6: per-customer auto-email opt-out. Gates ONLY the automatic mail
+     * paths (myDATA-VALID + non-myDATA finalize); the manual "Resend
+     * email" action ignores it (clicking is explicit operator intent).
+     * Defaults to true (no customer / flag unset → send) so existing
+     * behaviour is preserved.
+     */
+    public function customerAcceptsAutoEmail(): bool
+    {
+        return (bool) ($this->customer?->auto_email_invoices ?? true);
+    }
+
+    /**
+     * G6: should finalizing this DRAFT auto-email the customer? This is
+     * the NON-myDATA issue path. True only when:
+     *   - the tenant does NOT file via myDATA (sandbox/production) — those
+     *     invoices get the mail on the VALID response instead, so firing
+     *     here too would double-send;
+     *   - the tenant opted in (companies.auto_email_on_issue); and
+     *   - the customer hasn't opted out (customers.auto_email_invoices).
+     */
+    public function shouldAutoEmailOnFinalize(): bool
+    {
+        $company = $this->company;
+
+        if ($company === null) {
+            return false;
+        }
+
+        $filesViaMyData = in_array($company->mydata_mode, ['sandbox', 'production'], true);
+
+        return ! $filesViaMyData
+            && (bool) $company->auto_email_on_issue
+            && $this->customerAcceptsAutoEmail();
+    }
 }

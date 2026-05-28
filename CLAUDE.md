@@ -319,10 +319,14 @@ single-party billing, multi-party split, hideable client page; see the WHMCS
 section + `docs/whmcs-legacy-plugin-map.md`); PDF + per-tenant email + send-log;
 dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`).
 
-**🚧 PARTIAL:** auto-email — implemented for the **myDATA-VALID** path
-(`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
-`auto_email_on_mydata_accept`, with audit BCC); the gap is the **non-myDATA
-issue path** (drafts / `none` / Estonian) + a batch mail sweep (G6). One
+**🚧 PARTIAL:** auto-email — both issue paths now covered: the **myDATA-VALID**
+path (`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
+`auto_email_on_mydata_accept`, with audit BCC) and the **non-myDATA finalize
+path** (G6 ✅ — `companies.auto_email_on_issue` fires on draft→active for
+`none`/Estonian/mode-off tenants, guarded against double-send for myDATA
+tenants). Both honour a per-customer opt-out (`customers.auto_email_invoices`,
+default on); the manual "Resend email" action ignores both toggles. The
+remaining gap is a **batch mail sweep** (re-send failures / bulk). One
 adaptive PDF template vs 8 legacy FastReport designs (G10); `ekdosi_bridge`
 error-handling.
 
@@ -369,7 +373,15 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
   stored source of truth (`dehydrated(false)`; `InvoiceLine::saving` is
   authoritative). Conversion math unit-tested (`GrossPriceConversionTest`).
   UX parity.
-- **G6 — auto-email on the non-myDATA issue path** (see PARTIAL above). **UX tail.**
+- **G6 — auto-email on the non-myDATA issue path: ✅ DONE.** Two-level gate:
+  `companies.auto_email_on_issue` (global, default OFF — kill-switch for
+  testing) fires `SendInvoiceEmail` on the `finalize` action (draft→active)
+  for tenants NOT filing via myDATA (those get it on VALID — `Invoice::
+  shouldAutoEmailOnFinalize()` guards the double-send); `customers.
+  auto_email_invoices` (per-customer, default ON) opts a customer out of BOTH
+  auto paths (`Invoice::customerAcceptsAutoEmail()`); manual "Resend email"
+  ignores both. Gate predicates unit-tested (`AutoEmailGateTest`). Remaining:
+  a batch mail sweep (bulk / failure re-send).
 - **G8 — griniaris** immediate-invoicing (scaffolded `needs_immediate_invoice`,
   waits on the live scheduler/worker). **UX tail.**
 
