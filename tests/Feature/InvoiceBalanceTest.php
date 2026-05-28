@@ -80,6 +80,18 @@ class InvoiceBalanceTest extends TestCase
     {
         $b = $this->svc()->for($this->invoice(['payment_method_id' => $this->cash->id]));
         $this->assertSame(PaymentStatus::Paid, $b->status);
+        // Figures must agree with the Paid badge: nothing outstanding.
+        $this->assertSame(0.0, $b->balance);
+        $this->assertSame($b->owed, $b->paid);
+    }
+
+    public function test_invoice_with_no_payment_method_is_settled(): void
+    {
+        // null payment_method → cash-term → settled, balance 0 (not a
+        // "€X outstanding next to Paid" contradiction).
+        $b = $this->svc()->for($this->invoice(['payment_method_id' => null]));
+        $this->assertSame(PaymentStatus::Paid, $b->status);
+        $this->assertSame(0.0, $b->balance);
     }
 
     public function test_partial_then_full_payment_via_observer_cache(): void

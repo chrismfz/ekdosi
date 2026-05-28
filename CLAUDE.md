@@ -1738,3 +1738,99 @@ surfaces AGREE:
   already fresh). Re-run this whenever a money surface or the
   cache-sync paths change — it's the regression net for "surfaces
   disagree".
+
+## Invoice lifecycle — local status × myDATA (Phase 1, landed)
+
+Two ORTHOGONAL status dimensions on every invoice — operator intent vs.
+the AADE truth — so we can cross-check them without ever desyncing from
+the tax authority:
+
+- **`invoices.local_status`** (`App\Enums\LocalStatus`): `draft` / `active`
+  / `cancelled`. Freely editable business intent.
+- **`invoices.mydata_state`** (unchanged): `null` / `VALID` / `CANCELLED`.
+  The AADE record — only ever changed by a real submit/cancel API call.
+
+The pair is a reconciliation matrix; the meaningful combinations:
+`active+null` = queued to file, `active+VALID` = filed & live,
+`cancelled+null` = dropped draft (no AADE action), `cancelled+VALID` =
+⚠ **still needs a myDATA cancel**, `active+CANCELLED` = ⚠ contradiction.
+
+**One centralized predicate.** `App\Support\InvoiceScope::live($q, $prefix='')`
+= `local_status != 'cancelled'` AND not-AADE-cancelled. Applied at ALL
+money sites (InvoiceBalance::creditedTotal, DashboardMetrics
+baseInvoices/outstandingReceivables/topCustomers + unfiledCount,
+CustomerLedgerBuilder::loadInvoices) — retires the duplicated
+non-cancelled clause that caused the branch-review filter-gap bugs. A
+future terminal state is now a one-line edit. (It does NOT encode the
+credit-note or cash-term rules — those stay per-site.)
+
+**Transitions** (ViewInvoice actions): Οριστικοποίηση (draft→active,
+locks editing), Επαναφορά σε πρόχειρο (active→draft, unfiled only),
+**Ακύρωση** (→cancelled: detaches any payment to on-account → customer
+credit; works on filed invoices too but then surfaces the ⚠ reconciliation
+row and the existing Ακύρωση-μέσω-myDATA stays available), **Επαναφορά**
+(cancelled→active/draft — **blocked when `mydata_state=CANCELLED`**, the
+one legal guard: AADE cancel is terminal, reissue instead). Submit/
+cancel-myDATA also sync local_status. `EditInvoice` editable only while
+`local_status='draft'`.
+
+**Money on cancel** = the draft-equivalent of a πιστωτικό: NOT a credit
+note (that's only for filed docs), but the detached payment becomes an
+on-account credit (negative ledger balance) ready for a renewal. Cancelled
+invoices drop out of every money surface via `live()`.
+
+**List + reconciliation UI.** InvoicesTable: a Τοπική-κατάσταση badge
+column + filters (local status × myDATA state × **period presets**:
+week/month/last-month/quarter/year) so the weekly review can catch
+anything unsent; default shows ALL (cross-check). A **bulk "Υποβολή
+επιλεγμένων στο myDATA"** files a selected batch (un-filed, non-credit-note
+rows only; per-row error handling, partial-success summary). New nav page
+**`MyDataReconciliation`** ("Συμφωνία myDATA", Data group) lists the ⚠
+local-vs-myDATA mismatches with a count nav-badge. NOTE: this is a LOCAL
+cross-check of our two fields — it does NOT call AADE; the live
+RequestTransmittedDocs reconciliation is the deferred **Phase 2 myDATA
+Console** (its own branch).
+
+**Not yet verified (no browser/MariaDB in sandbox):** the Filament
+screens (lifecycle action buttons, the bulk submit, the reconciliation
+page render) and bulk-submit under many sequential AADE calls. Logic +
+money are unit-tested (`LocalStatusTest`, consistency test extended with
+cancelled-local invoices). The bulk submit makes N sequential synchronous
+AADE calls in-request — fine for a manageable batch; queue it if a tenant
+files hundreds at once.
+
+### Independent review of Phase 1 — fixes applied
+A two-agent review found and we FIXED:
+- **Bulk submit could file a locally-cancelled invoice** — the skip guard
+  checked mydata_state + credited_invoice_id but NOT local_status; with
+  the default "show all" filter a cancelled draft could be selected and
+  filed at AADE. Now also skips `local_status='cancelled'`.
+- **draft→active not synced on 2 of 4 submit paths** (CreateInvoice
+  chain-submit + credit-note submit left filed invoices as VALID+draft).
+  Fixed at the ROOT: `MyDataSubmitter` now syncs local_status inside its
+  own persist (VALID→active if draft) and cancel (→cancelled) — the
+  single choke-point. Removed the 3 per-call-site syncs that had drifted.
+- **EditInvoice TOCTOU**: `beforeSave()` re-checked only mydata_state; a
+  concurrent finalize (draft→active) could land an edit on an active
+  invoice. Now also halts when `local_status != 'draft'`.
+- **Cancelling an already-credited original** double-removed value from
+  the ledger (original excluded by `live()` while its credit notes kept
+  reducing). `cancel_local` now refuses when live credit notes reference
+  the invoice.
+- **Cosmetic**: a cancelled invoice no longer shows "Ανεξόφλητο" in the
+  list payment column (now `—`; the Κατάσταση column says Ακυρωμένο).
+
+Reviewed + accepted as-is:
+- **`unfiledCount` counts drafts** (not only `active`) — deliberately
+  kept broad so a forgotten unfinalised draft still shows in the "pending
+  at myDATA" badge (serves the operator's "don't miss anything" goal).
+  Phase 1 strictly improved it by excluding cancelled.
+- **`revive` doesn't re-attach detached payments** — the modal says so;
+  the money nets out at the customer level, operator re-allocates if
+  wanted.
+- **`InvoiceScope::live` per-site `$prefix`** ('' vs 'invoices.') is a
+  hand-passed convention; a future joined query that forgets it errors on
+  MariaDB (not sqlite). Acceptable; revisit if a third joined site lands.
+- **Reconciliation Page duplicates the list's filter logic** — kept as a
+  focused worklist; the VALID+draft inconsistency it couldn't catch is
+  now structurally impossible (promotion synced at the submitter).

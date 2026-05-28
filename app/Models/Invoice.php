@@ -67,6 +67,8 @@ class Invoice extends Model
         'payment_method_id',
         'conv_invoice_id',
         'credited_invoice_id',
+        'local_status',
+        'cancel_reason',
         'delivery_date',
         'header_discount_percent',
         'net_total',

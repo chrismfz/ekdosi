@@ -3,6 +3,7 @@
 namespace App\Services\Dashboard;
 
 use App\Models\Company;
+use App\Support\InvoiceScope;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
@@ -69,15 +70,14 @@ class DashboardMetrics
      */
     public function outstandingReceivables(): float
     {
-        $row = DB::table('invoices')
+        $base = DB::table('invoices')
             ->join('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
             ->where('invoices.company_id', $this->tenant->id)
             ->whereNull('invoices.deleted_at')
             ->whereNull('invoices.credited_invoice_id')
-            ->where('payment_methods.due_days', '>', 0)
-            ->where(fn ($q) => $q
-                ->whereNull('invoices.mydata_state')
-                ->orWhere('invoices.mydata_state', '!=', 'CANCELLED'))
+            ->where('payment_methods.due_days', '>', 0);
+
+        $row = InvoiceScope::live($base, 'invoices.')
             ->selectRaw('COALESCE(SUM(invoices.gross_total), 0) - COALESCE(SUM(invoices.credited_total), 0) AS net_owed')
             ->first();
 
@@ -109,6 +109,7 @@ class DashboardMetrics
             ->whereNull('deleted_at')
             ->whereNull('mydata_state')
             ->whereNull('legacy_id')
+            ->where('local_status', '!=', 'cancelled')   // a cancelled draft is not a filing backlog
             ->count();
     }
 
@@ -202,10 +203,8 @@ class DashboardMetrics
         $window = function ($q) use ($start, $end): void {
             $q->where('issued_at', '>=', $start)
                 ->where('issued_at', '<=', $end)
-                ->whereNull('credited_invoice_id')   // exclude credit notes from sales
-                ->where(fn ($inner) => $inner
-                    ->whereNull('mydata_state')
-                    ->orWhere('mydata_state', '!=', 'CANCELLED'));
+                ->whereNull('credited_invoice_id');   // exclude credit notes from sales
+            InvoiceScope::live($q);
         };
 
         return \App\Models\Customer::query()
@@ -233,13 +232,12 @@ class DashboardMetrics
      */
     private function baseInvoices()
     {
-        return DB::table('invoices')
+        $q = DB::table('invoices')
             ->where('company_id', $this->tenant->id)
             ->whereNull('deleted_at')
-            ->whereNull('credited_invoice_id')
-            ->where(fn ($q) => $q
-                ->whereNull('mydata_state')
-                ->orWhere('mydata_state', '!=', 'CANCELLED'));
+            ->whereNull('credited_invoice_id');
+
+        return InvoiceScope::live($q);
     }
 
     /** 'YYYY-MM' bucket expression, portable across sqlite (tests) + MariaDB. */

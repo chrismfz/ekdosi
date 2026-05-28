@@ -9,11 +9,14 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
+use App\Models\Payment;
 use App\Services\MyDataSubmitter;
+use App\Support\InvoiceScope;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
@@ -30,6 +33,106 @@ class ViewInvoice extends ViewRecord
         );
 
         return [
+            // --- Local lifecycle: Πρόχειρο → Ενεργό → Ακυρωμένο.
+            // Independent of myDATA (the AADE truth). Reviving an
+            // AADE-cancelled invoice is blocked (terminal there).
+            Action::make('finalize')
+                ->label('Οριστικοποίηση')
+                ->icon('heroicon-o-check-badge')
+                ->color('success')
+                ->visible(fn (Invoice $record) => $record->local_status === 'draft')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Οριστικοποίηση παραστατικού')
+                ->modalDescription('Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
+                ->action(function (Invoice $record) {
+                    $record->update(['local_status' => 'active']);
+                    Notification::make()->title('Έγινε Ενεργό')->success()->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                }),
+
+            Action::make('revert_to_draft')
+                ->label('Επαναφορά σε πρόχειρο')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $record->local_status === 'active' && $record->mydata_state === null)
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->action(function (Invoice $record) {
+                    $record->update(['local_status' => 'draft']);
+                    Notification::make()->title('Επαναφορά σε πρόχειρο')->success()->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                }),
+
+            Action::make('cancel_local')
+                ->label('Ακύρωση')
+                ->icon('heroicon-o-x-circle')
+                ->color('danger')
+                ->visible(fn (Invoice $record) => in_array($record->local_status, ['draft', 'active'], true)
+                    && $record->credited_invoice_id === null)
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Ακύρωση παραστατικού')
+                ->modalDescription(fn (Invoice $record) => $record->mydata_state === 'VALID'
+                    ? '⚠ Έχει υποβληθεί στο myDATA (VALID). Η τοπική ακύρωση ΔΕΝ ακυρώνει στην ΑΑΔΕ — εκτελέστε και «Ακύρωση μέσω myDATA». Τυχόν πληρωμές γίνονται πιστωτικό υπόλοιπο του πελάτη.'
+                    : 'Σημειώνεται ως Ακυρωμένο (χωρίς myDATA). Τυχόν πληρωμές γίνονται πιστωτικό υπόλοιπο του πελάτη, διαθέσιμο για επόμενο παραστατικό.')
+                ->modalSubmitActionLabel('Ακύρωση')
+                ->schema([
+                    \Filament\Forms\Components\Textarea::make('reason')
+                        ->label('Αιτία (προαιρετικό)')
+                        ->rows(2),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    // Refuse if live credit notes reference this invoice:
+                    // cancelling the original removes it from the ledger
+                    // while its credit notes keep reducing the balance →
+                    // double-removal. Handle the credit notes first.
+                    if (InvoiceScope::live(Invoice::where('credited_invoice_id', $record->id))->exists()) {
+                        Notification::make()
+                            ->title('Δεν είναι δυνατή η ακύρωση')
+                            ->body('Το παραστατικό έχει ενεργά πιστωτικά. Ακυρώστε/διαχειριστείτε πρώτα τα πιστωτικά.')
+                            ->danger()->persistent()->send();
+
+                        return;
+                    }
+                    DB::transaction(function () use ($record, $data) {
+                        // Detach any payments → on-account customer credit
+                        // (each save fires PaymentObserver → recomputes
+                        // this invoice's cache). Higher-order ->each.
+                        $record->payments()->get()->each->update(['invoice_id' => null]);
+                        $record->update([
+                            'local_status' => 'cancelled',
+                            'cancel_reason' => $data['reason'] ?? null,
+                        ]);
+                    });
+                    Notification::make()
+                        ->title('Ακυρώθηκε')
+                        ->body('Τυχόν πληρωμές έγιναν πιστωτικό υπόλοιπο του πελάτη.')
+                        ->success()->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                }),
+
+            Action::make('revive')
+                ->label('Επαναφορά')
+                ->icon('heroicon-o-arrow-path')
+                ->color('warning')
+                // Blocked when CANCELLED at myDATA — terminal at AADE;
+                // reissue a new invoice instead.
+                ->visible(fn (Invoice $record) => $record->local_status === 'cancelled'
+                    && $record->mydata_state !== 'CANCELLED')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Επαναφορά ακυρωμένου')
+                ->modalDescription('Επαναφέρεται σε «Ενεργό» αν είχε υποβληθεί στο myDATA, αλλιώς σε «Πρόχειρο». Πληρωμές που έγιναν πιστωτικό υπόλοιπο ΔΕΝ επανασυνδέονται αυτόματα.')
+                ->action(function (Invoice $record) {
+                    $record->update([
+                        'local_status' => $record->mydata_state === 'VALID' ? 'active' : 'draft',
+                        'cancel_reason' => null,
+                    ]);
+                    Notification::make()->title('Επαναφέρθηκε')->success()->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                }),
+
             // Record a payment against this invoice. Not shown on credit
             // notes (they're money owed back, not collected). Overpay is
             // allowed (warned, not blocked) — real prepayments/rounding.
@@ -37,9 +140,13 @@ class ViewInvoice extends ViewRecord
                 ->label('Καταχώριση πληρωμής')
                 ->icon('heroicon-o-banknotes')
                 ->color('success')
+                // Credit-term only: cash-term invoices are settled at
+                // issue (nothing to collect), and credit notes / cancelled
+                // docs aren't receivables.
                 ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
                     && $record->customer_id !== null
-                    && $record->mydata_state !== 'CANCELLED')
+                    && $record->mydata_state !== 'CANCELLED'
+                    && (int) ($record->paymentMethod?->due_days ?? 0) > 0)
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Καταχώριση πληρωμής')
                 ->modalSubmitActionLabel('Καταχώριση')
@@ -211,6 +318,8 @@ class ViewInvoice extends ViewRecord
                         // is the source of truth either way.
                         $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
                         $mark = $submitter->submit($record);
+                        // local_status draft→active is synced inside the
+                        // submitter (single choke-point).
                         Notification::make()
                             ->title('Filed at myDATA')
                             ->body('MARK: '.($mark->mark ?? 'pending'))
@@ -237,20 +346,20 @@ class ViewInvoice extends ViewRecord
             // invoices on myDATA-capable tenants. Confirmation modal
             // mandatory — cancellation is legally significant.
             Action::make('cancel_at_mydata')
-                ->label('Cancel via myDATA')
+                ->label('Ακύρωση μέσω myDATA')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
                 ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID')
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
-                ->modalHeading('Cancel this invoice at AADE')
-                ->modalDescription(fn (Invoice $record) => 'This sends a CANCEL request to AADE for MARK '.($record->mydata_mark ?? '?').'. The MARK is preserved in the audit trail; state becomes CANCELLED. Issue a correction invoice for the actual content fix.')
-                ->modalSubmitActionLabel('Confirm cancellation')
+                ->modalHeading('Ακύρωση παραστατικού στην ΑΑΔΕ')
+                ->modalDescription(fn (Invoice $record) => 'Αποστέλλεται αίτημα ΑΚΥΡΩΣΗΣ στην ΑΑΔΕ για το MARK '.($record->mydata_mark ?? '?').'. Το MARK διατηρείται στο ιστορικό· η κατάσταση γίνεται CANCELLED. Για διόρθωση περιεχομένου, εκδώστε πιστωτικό/διορθωτικό.')
+                ->modalSubmitActionLabel('Επιβεβαίωση ακύρωσης')
                 ->schema([
                     \Filament\Forms\Components\Textarea::make('reason')
-                        ->label('Reason (recorded locally)')
+                        ->label('Αιτία (καταγράφεται τοπικά)')
                         ->rows(3)
-                        ->placeholder('Why is this invoice being cancelled?'),
+                        ->placeholder('Γιατί ακυρώνεται το παραστατικό;'),
                 ])
                 ->action(function (Invoice $record, array $data) {
                     try {
@@ -264,9 +373,10 @@ class ViewInvoice extends ViewRecord
                             throw new \RuntimeException('Submitter does not support cancellation.');
                         }
                         $submitter->cancel($record, $data['reason'] ?? '');
+                        // local_status → cancelled is synced inside the submitter.
                         Notification::make()
-                            ->title('Cancelled at myDATA')
-                            ->body('AADE state is now CANCELLED; the original MARK is preserved in the audit trail.')
+                            ->title('Ακυρώθηκε στο myDATA')
+                            ->body('Η κατάσταση ΑΑΔΕ είναι πλέον CANCELLED· το αρχικό MARK διατηρείται στο ιστορικό.')
                             ->success()->send();
                         $this->redirect(static::getResource()::getUrl('view', [
                             'record' => $record,
@@ -274,7 +384,7 @@ class ViewInvoice extends ViewRecord
                         ]));
                     } catch (Throwable $e) {
                         Notification::make()
-                            ->title('Cancellation failed')
+                            ->title('Η ακύρωση απέτυχε')
                             ->body($e->getMessage())
                             ->danger()->persistent()->send();
                     }

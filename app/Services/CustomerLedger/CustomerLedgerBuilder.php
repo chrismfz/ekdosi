@@ -3,6 +3,7 @@
 namespace App\Services\CustomerLedger;
 
 use App\Models\Customer;
+use App\Support\InvoiceScope;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -140,13 +141,10 @@ class CustomerLedgerBuilder
             ->where('invoices.company_id', $customer->company_id)
             ->where('invoices.customer_id', $customer->id)
             ->whereNull('invoices.deleted_at')
-            // Exclude CANCELLED invoices (incl. cancelled credit notes)
-            // from the ledger money math, consistent with InvoiceBalance
-            // + DashboardMetrics. A cancelled credit note must not keep
-            // reducing the balance.
-            ->where(fn ($q) => $q
-                ->whereNull('invoices.mydata_state')
-                ->orWhere('invoices.mydata_state', '!=', 'CANCELLED'))
+            // Exclude CANCELLED invoices (locally OR at myDATA, incl.
+            // cancelled credit notes) from the ledger money math,
+            // consistent with InvoiceBalance + DashboardMetrics.
+            ->when(true, fn ($q) => InvoiceScope::live($q, 'invoices.'))
             ->orderBy('invoices.issued_at', 'asc')
             ->select(
                 'invoices.id',

@@ -300,9 +300,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
             // MARK_AI0 trigger replacement: flip the invoice's
             // mirror columns to reflect cancellation. The MARK is
-            // preserved for audit but state becomes CANCELLED.
+            // preserved for audit but state becomes CANCELLED. Sync the
+            // local status here too (single choke-point).
             $invoice->forceFill([
                 'mydata_state' => 'CANCELLED',
+                'local_status' => 'cancelled',
             ])->save();
 
             return $mark;
@@ -725,6 +727,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $invoice->forceFill([
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
+                // A filed invoice is a live document. Promote a draft to
+                // 'active' HERE (the single submit choke-point) so every
+                // path — ViewInvoice submit, create-and-submit, credit-note
+                // submit, bulk submit — stays in sync. (Leaves 'cancelled'
+                // alone: a cancelled-then-filed doc surfaces in the
+                // reconciliation worklist, not silently flipped active.)
+                'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
                 'mydata_mark' => $mark,
                 'mydata_url' => $qrUrl,
                 // firebed may return getInvoiceType() as either a raw
