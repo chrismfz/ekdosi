@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Customers;
 
+use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Customers\Pages\ListCustomers;
 use App\Models\Company;
 use App\Models\Customer;
@@ -118,5 +119,23 @@ class CustomersOutstandingFilterTest extends TestCase
             ->loadTable()
             ->sortTable('outstanding_balance', 'desc')
             ->assertOk();
+    }
+
+    public function test_drilldown_url_carries_the_with_balance_filter(): void
+    {
+        // The "Ανεξόφλητα (πιστωτικά)" dashboard card links here via
+        // CustomerResource::getUrl('index', ['tableFilters' => [...]]).
+        // Pin the generated URL's query-string shape: it MUST match the
+        // tableFilters[with_balance][value] state that the TernaryFilter
+        // above consumes (proven by the filterTable tests). Together they
+        // cover the card→filter contract. (The actual query-string→filter
+        // hydration is Filament-internal and only exercisable in a real
+        // browser — the headless harness can't drive it; deferFilters(false)
+        // on the table is what lets the landed URL apply immediately.)
+        $url = CustomerResource::getUrl('index', [
+            'tableFilters' => ['with_balance' => ['value' => true]],
+        ]);
+
+        $this->assertStringContainsString('tableFilters%5Bwith_balance%5D%5Bvalue%5D=1', $url);
     }
 }

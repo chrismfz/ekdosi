@@ -23,6 +23,14 @@ class CustomersTable
     public static function configure(Table $table): Table
     {
         return $table
+            // Apply filters immediately (Filament defers them by default).
+            // The dashboard's "Ανεξόφλητα (πιστωτικά)" card drills in via a
+            // ?tableFilters[with_balance][value]=1 URL; with deferred
+            // filters that value only PRE-FILLS the form and the operator
+            // would still have to click "Apply" — the list would land
+            // unfiltered. deferFilters(false) makes the drill-down (and all
+            // filtering on this list) take effect on load / on change.
+            ->deferFilters(false)
             // Attach the `outstanding_balance` alias (+ its cust_owed /
             // cust_paid join sub-selects) so the "Υπόλοιπο" column + the
             // "Με υπόλοιπο" filter below can read it. Computed in SQL,
