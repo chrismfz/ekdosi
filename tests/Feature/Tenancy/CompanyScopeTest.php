@@ -75,10 +75,24 @@ class CompanyScopeTest extends TestCase
     {
         app(CompanyContext::class)->set($this->a);
 
+        // Both the singular and plural forms used across the codebase work.
         $this->assertSame(
             3,
             Customer::withoutGlobalScope(\App\Models\Scopes\CompanyScope::class)->count(),
         );
+        $this->assertSame(3, Customer::withoutGlobalScopes()->count());
+    }
+
+    public function test_actAs_restores_to_null_context(): void
+    {
+        // Prior context is null → actAs must restore it to null, not leak A.
+        $this->assertNull(app(CompanyContext::class)->id());
+
+        $count = app(CompanyContext::class)->actAs($this->a, fn () => Customer::count());
+        $this->assertSame(2, $count);
+
+        $this->assertNull(app(CompanyContext::class)->id(), 'context restored to null');
+        $this->assertSame(3, Customer::count(), 'no-op again after actAs');
     }
 
     public function test_scope_applies_across_models_and_survives_creates_under_context(): void

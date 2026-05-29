@@ -16,10 +16,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * Έξοδα phase. A document a SUPPLIER filed against us (pulled from myDATA
  * RequestDocs) or keyed manually.
  *
- * Tenant scoping: like Invoice/Supplier, this relies on Filament's
- * BelongsToTenant in panel context; code outside a Filament request must
- * scope by company_id itself (see CLAUDE.md latent items). The myDATA state
- * columns mirror the latest AADE state — the audit trail is ExpenseMark.
+ * Tenant scoping: carries the `BelongsToCompany` global scope (auto-filters
+ * reads to the ambient tenant; no-op without context, so CLI/queue still scope
+ * by company_id explicitly). The myDATA state columns mirror the latest AADE
+ * state — the audit trail is ExpenseMark.
  */
 class Expense extends Model
 {
