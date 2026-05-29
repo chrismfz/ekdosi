@@ -30,8 +30,8 @@ class SuppliersTest extends TestCase
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata',
             'mydata_mode' => $mode,
-            'mydata_aade_id' => $withCreds ? 'user1' : null,
-            'mydata_subscription_key' => $withCreds ? 'key1' : null,
+            'mydata_aade_id_sandbox' => $withCreds ? 'user1' : null,
+            'mydata_subscription_key_sandbox' => $withCreds ? 'key1' : null,
         ]);
     }
 

@@ -108,8 +108,9 @@ class MyDataPreflight extends Command
         if ($company->mydata_mode_enum === MyDataMode::Off) {
             $this->flag('warn', 'mydata_mode is Off — no submissions will be attempted');
         }
-        if (empty($company->mydata_aade_id) || empty($company->mydata_subscription_key)) {
-            $this->flag('warn', 'myDATA credentials not set (mydata_aade_id / mydata_subscription_key)');
+        [$aadeId, $subKey] = $company->mydataCredentials();
+        if (empty($aadeId) || empty($subKey)) {
+            $this->flag('warn', "myDATA credentials not set for the active mode ('{$company->mydata_mode_enum->value}')");
         }
 
         $this->auditInvoiceTypes($company);

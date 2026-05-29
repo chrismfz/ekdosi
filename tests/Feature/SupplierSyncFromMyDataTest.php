@@ -37,8 +37,8 @@ class SupplierSyncFromMyDataTest extends TestCase
             'einvoice_provider' => 'gr-mydata',
             'mydata_mode' => 'sandbox',
             'afm' => '801280908',   // "us" — must never become a supplier
-            'mydata_aade_id' => 'TESTUSER',
-            'mydata_subscription_key' => 'TESTKEY',
+            'mydata_aade_id_sandbox' => 'TESTUSER',
+            'mydata_subscription_key_sandbox' => 'TESTKEY',
         ]);
     }
 

@@ -29,8 +29,10 @@ class CompanyFactory extends Factory
             'postcode' => $this->faker->postcode(),
             'phone' => $this->faker->phoneNumber(),
             'email' => $this->faker->safeEmail(),
-            'mydata_aade_id' => null,
-            'mydata_subscription_key' => null,
+            'mydata_aade_id_sandbox' => null,
+            'mydata_subscription_key_sandbox' => null,
+            'mydata_aade_id_production' => null,
+            'mydata_subscription_key_production' => null,
             'mydata_mode' => 'off',
         ];
     }
@@ -42,8 +44,10 @@ class CompanyFactory extends Factory
             'einvoice_provider' => 'ee-peppol',
             'afm' => null,
             'tax_office' => null,
-            'mydata_aade_id' => null,
-            'mydata_subscription_key' => null,
+            'mydata_aade_id_sandbox' => null,
+            'mydata_subscription_key_sandbox' => null,
+            'mydata_aade_id_production' => null,
+            'mydata_subscription_key_production' => null,
         ]);
     }
 }

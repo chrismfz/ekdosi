@@ -42,8 +42,8 @@ class MyDataSubmitterSafetyTest extends TestCase
             'einvoice_provider' => 'gr-mydata',
             'mydata_mode' => 'sandbox',
             'afm' => '800561849',
-            'mydata_aade_id' => 'TESTUSER',
-            'mydata_subscription_key' => 'TESTKEY',
+            'mydata_aade_id_sandbox' => 'TESTUSER',
+            'mydata_subscription_key_sandbox' => 'TESTKEY',
         ]);
 
         $this->customer = Customer::create([
@@ -141,7 +141,7 @@ class MyDataSubmitterSafetyTest extends TestCase
             'einvoice_provider' => 'gr-mydata',
             'mydata_mode' => 'off',
             'afm' => '800561849',
-            // mydata_aade_id + mydata_subscription_key both null
+            // sandbox + production credential slots all null
         ]);
 
         $type = InvoiceType::create([

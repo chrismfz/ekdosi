@@ -211,20 +211,13 @@ class CompanyForm
                             // Only relevant for the Greek myDATA submitter.
                             ->visible(fn (callable $get) => $get('einvoice_provider') === 'gr-mydata')
                             ->schema([
-                                Section::make()
-                                    ->description('REST credentials for posting invoices to AADE myDATA. Stored encrypted at rest. Leave the key blank on edit to keep the existing value.')
+                                // The mode picks WHICH credential set below is
+                                // actually used at submission time. Both sets are
+                                // stored permanently, so switching environments is
+                                // just changing this dropdown — no re-keying.
+                                Section::make('Περιβάλλον υποβολής')
+                                    ->description('Διάλεξε ποιο περιβάλλον AADE χρησιμοποιείται. Τα διαπιστευτήρια Sandbox και Production αποθηκεύονται χωριστά πιο κάτω — δεν χρειάζεται να τα ξαναβάζεις κάθε φορά, μόνο να αλλάζεις το mode.')
                                     ->schema([
-                                        TextInput::make('mydata_aade_id')
-                                            ->label('AADE user ID (aade-user-id header)')
-                                            ->maxLength(255),
-
-                                        TextInput::make('mydata_subscription_key')
-                                            ->label('Subscription key (Ocp-Apim-Subscription-Key)')
-                                            ->password()
-                                            ->revealable()
-                                            ->dehydrated(fn (?string $state): bool => filled($state))
-                                            ->maxLength(255),
-
                                         Select::make('mydata_mode')
                                             ->label('Submission mode')
                                             ->options(MyDataMode::options())
@@ -233,10 +226,10 @@ class CompanyForm
                                             ->live()
                                             ->helperText(new HtmlString(
                                                 '<strong>Off</strong> = no AADE call (PDFs only, safe for testing). '
-                                                .'<strong>Sandbox</strong> = AADE test endpoint (synthetic MARKs). '
-                                                .'<strong>Production</strong> = LIVE submissions affecting real tax records. '
+                                                .'<strong>Sandbox</strong> = AADE test endpoint (synthetic MARKs), uses the Sandbox credentials. '
+                                                .'<strong>Production</strong> = LIVE submissions affecting real tax records, uses the Production credentials. '
                                                 .'<br><strong>⚠ Switching to/from Production:</strong> the change takes effect '
-                                                .'on save. Verify credentials via "Test connection" before going Live; '
+                                                .'on save. Verify credentials via "Test … connection" before going Live; '
                                                 .'switching back to Off/Sandbox stops legally-required filings.'
                                             )),
                                         // Note: a Notification-on-afterStateUpdated approach
@@ -251,50 +244,50 @@ class CompanyForm
                                         // the form schema — tracked in CLAUDE.md as a
                                         // deferred follow-up since it requires touching
                                         // EditCompany.php and a custom save action.
+                                    ]),
+
+                                Section::make('Sandbox / Developer credentials')
+                                    ->description('REST credentials for the AADE test endpoint (synthetic MARKs). Stored encrypted at rest. Leave the key blank on edit to keep the existing value.')
+                                    ->schema([
+                                        TextInput::make('mydata_aade_id_sandbox')
+                                            ->label('SANDBOX — AADE user ID (aade-user-id header)')
+                                            ->maxLength(255),
+
+                                        TextInput::make('mydata_subscription_key_sandbox')
+                                            ->label('SANDBOX — Subscription key (Ocp-Apim-Subscription-Key)')
+                                            ->password()
+                                            ->revealable()
+                                            ->dehydrated(fn (?string $state): bool => filled($state))
+                                            ->maxLength(255),
                                     ])
                                     ->footerActions([
-                                        FormAction::make('test_mydata_connection')
-                                            ->label('Test myDATA connection')
-                                            ->icon('heroicon-o-bolt')
-                                            // Only meaningful when mode != off. NullSubmitter's
-                                            // testConnection trivially returns true so the
-                                            // button would lie about the credentials being
-                                            // valid (it never tries them).
-                                            ->visible(fn (callable $get) => in_array(
-                                                $get('mydata_mode'),
-                                                ['sandbox', 'production'],
-                                                true,
-                                            ))
-                                            ->action(function (?Company $record) {
-                                                if (! $record) {
-                                                    Notification::make()
-                                                        ->title('Save the company first, then test.')
-                                                        ->warning()->send();
+                                        self::mydataTestAction(
+                                            'test_mydata_sandbox',
+                                            'Test Sandbox connection',
+                                            MyDataMode::Sandbox,
+                                        ),
+                                    ]),
 
-                                                    return;
-                                                }
-                                                try {
-                                                    $ok = (new MyDataSubmitter($record))->testConnection();
-                                                } catch (\Throwable $e) {
-                                                    Notification::make()
-                                                        ->title('myDATA unreachable')
-                                                        ->body($e->getMessage())
-                                                        ->warning()->send();
+                                Section::make('Production / Live credentials')
+                                    ->description('REST credentials for LIVE submissions affecting real tax records. Stored encrypted at rest. Leave the key blank on edit to keep the existing value.')
+                                    ->schema([
+                                        TextInput::make('mydata_aade_id_production')
+                                            ->label('PRODUCTION — AADE user ID (aade-user-id header)')
+                                            ->maxLength(255),
 
-                                                    return;
-                                                }
-                                                if ($ok) {
-                                                    Notification::make()
-                                                        ->title('Connected to myDATA')
-                                                        ->body('Credentials accepted by AADE ('.($record->mydata_mode_enum->value ?? '?').' endpoint).')
-                                                        ->success()->send();
-                                                } else {
-                                                    Notification::make()
-                                                        ->title('myDATA rejected the credentials')
-                                                        ->body('Check the aade-user-id and Ocp-Apim-Subscription-Key fields.')
-                                                        ->danger()->send();
-                                                }
-                                            }),
+                                        TextInput::make('mydata_subscription_key_production')
+                                            ->label('PRODUCTION — Subscription key (Ocp-Apim-Subscription-Key)')
+                                            ->password()
+                                            ->revealable()
+                                            ->dehydrated(fn (?string $state): bool => filled($state))
+                                            ->maxLength(255),
+                                    ])
+                                    ->footerActions([
+                                        self::mydataTestAction(
+                                            'test_mydata_production',
+                                            'Test Production connection',
+                                            MyDataMode::Production,
+                                        ),
                                     ]),
                             ]),
 
@@ -899,5 +892,51 @@ class CompanyForm
                             ]),
                     ]),
             ]);
+    }
+
+    /**
+     * A "Test … connection" footer button for one myDATA environment.
+     *
+     * It tests the SAVED credentials for the given environment (sandbox
+     * or production) regardless of the tenant's selected mode — so an
+     * operator can verify either set without flipping the dropdown. The
+     * credentials must be saved first (the action reads $record, not the
+     * live form state) — same caveat as every other "Test" button here.
+     */
+    private static function mydataTestAction(string $name, string $label, MyDataMode $environment): FormAction
+    {
+        return FormAction::make($name)
+            ->label($label)
+            ->icon('heroicon-o-bolt')
+            ->action(function (?Company $record) use ($environment) {
+                if (! $record) {
+                    Notification::make()
+                        ->title('Save the company first, then test.')
+                        ->warning()->send();
+
+                    return;
+                }
+                try {
+                    $ok = (new MyDataSubmitter($record))->testConnection($environment);
+                } catch (\Throwable $e) {
+                    Notification::make()
+                        ->title('myDATA unreachable')
+                        ->body($e->getMessage())
+                        ->warning()->send();
+
+                    return;
+                }
+                if ($ok) {
+                    Notification::make()
+                        ->title('Connected to myDATA')
+                        ->body('Credentials accepted by AADE ('.$environment->value.' endpoint).')
+                        ->success()->send();
+                } else {
+                    Notification::make()
+                        ->title('myDATA rejected the credentials')
+                        ->body('Check the '.$environment->value.' aade-user-id and Ocp-Apim-Subscription-Key fields.')
+                        ->danger()->send();
+                }
+            });
     }
 }

@@ -82,11 +82,18 @@ class MyDataSetCredentials extends Command
         }
 
         // Direct attribute set (bypasses mass-assignment guard); the
-        // subscription key column is encrypted via the Company cast.
+        // subscription key columns are encrypted via the Company cast.
+        // Credentials land in the slot matching the chosen mode so the
+        // other environment's stored creds are left untouched.
         $tenant->einvoice_provider = 'gr-mydata';
         $tenant->mydata_mode = $mode;
-        $tenant->mydata_aade_id = $aadeId;
-        $tenant->mydata_subscription_key = $key;
+        if ($mode === 'production') {
+            $tenant->mydata_aade_id_production = $aadeId;
+            $tenant->mydata_subscription_key_production = $key;
+        } else {
+            $tenant->mydata_aade_id_sandbox = $aadeId;
+            $tenant->mydata_subscription_key_sandbox = $key;
+        }
         $tenant->save();
 
         $this->info("Saved: {$tenant->name} (#{$tenant->id}) → provider=gr-mydata, mode={$mode}, aade_id={$aadeId}.");
