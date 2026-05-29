@@ -17,7 +17,7 @@ use Filament\Widgets\TableWidget;
  */
 class TopCustomersTable extends TableWidget
 {
-    protected static ?int $sort = 6;
+    protected static ?int $sort = 5;
 
     protected int|string|array $columnSpan = 'full';
 

@@ -9,18 +9,36 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
+use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class CustomersTable
 {
     public static function configure(Table $table): Table
     {
         return $table
+            // Apply filters immediately (Filament defers them by default).
+            // The dashboard's "Ανεξόφλητα (πιστωτικά)" card drills in via a
+            // ?tableFilters[with_balance][value]=1 URL; with deferred
+            // filters that value only PRE-FILLS the form and the operator
+            // would still have to click "Apply" — the list would land
+            // unfiltered. deferFilters(false) makes the drill-down (and all
+            // filtering on this list) take effect on load / on change.
+            ->deferFilters(false)
+            // Attach the `outstanding_balance` alias (+ its cust_owed /
+            // cust_paid join sub-selects) so the "Υπόλοιπο" column + the
+            // "Με υπόλοιπο" filter below can read it. Computed in SQL,
+            // identical math to the dashboard headline. Always applied so
+            // the filter's whereRaw can reference the join aliases even
+            // when the column is toggled off.
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->withOutstandingBalance(Filament::getTenant()?->getKey() ?? 0))
             ->columns([
                 TextColumn::make('id')
                     ->label('#')
@@ -54,6 +72,16 @@ class CustomersTable
                 TextColumn::make('phone1')
                     ->label('Phone')
                     ->copyable()
+                    ->toggleable(),
+
+                TextColumn::make('outstanding_balance')
+                    ->label('Υπόλοιπο')
+                    ->money('EUR')
+                    ->alignRight()
+                    ->sortable()
+                    ->weight('bold')
+                    // Red when they owe, muted otherwise.
+                    ->color(fn ($state): ?string => (float) $state > 0.005 ? 'danger' : 'gray')
                     ->toggleable(),
 
                 IconColumn::make('is_active')
@@ -120,6 +148,22 @@ class CustomersTable
                     ->trueLabel('γκρινιάρης only')
                     ->falseLabel('Batched only')
                     ->placeholder('All'),
+
+                // "Με υπόλοιπο" — the target of the dashboard's
+                // "Ανεξόφλητα (πιστωτικά)" card. Reads the join aliases
+                // attached by modifyQueryUsing() above.
+                TernaryFilter::make('with_balance')
+                    ->label('Υπόλοιπο')
+                    ->placeholder('Όλοι')
+                    ->trueLabel('Μόνο με υπόλοιπο')
+                    ->falseLabel('Χωρίς υπόλοιπο')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query
+                            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) > 0.005'),
+                        false: fn (Builder $query): Builder => $query
+                            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) <= 0.005'),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
 
                 TrashedFilter::make(),
             ])

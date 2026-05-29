@@ -4,20 +4,25 @@ namespace App\Filament\Widgets;
 
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\PeriodFilter;
 use Filament\Facades\Filament;
 use Filament\Widgets\ChartWidget;
+use Filament\Widgets\Concerns\InteractsWithPageFilters;
 
 /**
- * Year-over-year cumulative net income: this year vs last year, as two
- * cumulative lines over the 12 months. Lets the operator eyeball "are
- * we ahead of where we were a year ago" — the closest honest thing to
- * an income projection without a forecasting model. The current year's
- * line flattens after the current month (no future invoices yet), so
- * the comparison is like-for-like up to today.
+ * Year-over-year cumulative net income: an anchor year vs the year
+ * before it, as two cumulative lines over the 12 months. Lets the
+ * operator eyeball "are we ahead of where we were a year ago". The
+ * anchor year follows the dashboard period filter (its END year) so the
+ * operator can compare any past year against its predecessor; default
+ * is the current year, whose line flattens after the current month (no
+ * future invoices yet) for a like-for-like read up to today.
  */
 class YearComparisonChart extends ChartWidget
 {
-    protected static ?int $sort = 4;
+    use InteractsWithPageFilters;
+
+    protected static ?int $sort = 8;
 
     protected ?string $heading = 'Σύγκριση ετών (σωρευτικά καθαρά έσοδα)';
 
@@ -29,7 +34,7 @@ class YearComparisonChart extends ChartWidget
         }
 
         $metrics = new DashboardMetrics($tenant);
-        $thisYear = (int) now()->year;
+        $thisYear = PeriodFilter::fromState($this->pageFilters)->anchorYear();
         $lastYear = $thisYear - 1;
 
         return [

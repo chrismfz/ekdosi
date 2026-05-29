@@ -4,17 +4,23 @@ namespace App\Filament\Widgets;
 
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\PeriodFilter;
 use Filament\Facades\Filament;
 use Filament\Widgets\ChartWidget;
+use Filament\Widgets\Concerns\InteractsWithPageFilters;
 
 /**
- * Net income + output VAT per month over the last 12 months, as a
+ * Net income + output VAT per month over the trailing 12 months, as a
  * grouped bar chart. The dense series (zero-filled empty months) keeps
- * the x-axis continuous.
+ * the x-axis continuous. Reacts to the dashboard period filter: the
+ * 12-month window is anchored on the selected period's END month
+ * (default = up to now).
  */
 class MonthlyIncomeChart extends ChartWidget
 {
-    protected static ?int $sort = 3;
+    use InteractsWithPageFilters;
+
+    protected static ?int $sort = 7;
 
     protected ?string $heading = 'Έσοδα ανά μήνα (12 μήνες)';
 
@@ -25,7 +31,8 @@ class MonthlyIncomeChart extends ChartWidget
             return ['datasets' => [], 'labels' => []];
         }
 
-        $rows = (new DashboardMetrics($tenant))->monthlyIncome(12);
+        $period = PeriodFilter::fromState($this->pageFilters);
+        $rows = (new DashboardMetrics($tenant))->monthlyIncome(12, $period->end);
 
         return [
             'datasets' => [

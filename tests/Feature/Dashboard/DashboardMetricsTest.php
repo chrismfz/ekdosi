@@ -171,6 +171,116 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(300.0, $outstanding);   // 500 credit - 200 paid
     }
 
+    public function test_top_debtors_lists_only_customers_who_owe_and_reconciles_with_headline(): void
+    {
+        $a = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Οφειλέτης Α']);
+        $b = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Εξοφλημένος Β']);
+        $cashCust = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Μετρητοίς Γ']);
+
+        // A: credit-term 500, paid 200 → owes 300 (a debtor).
+        $this->makeInvoice(['customer_id' => $a->id, 'payment_method_id' => $this->credit->id, 'gross_total' => 500]);
+        Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $a->id, 'pay_date' => '2026-05-12', 'amount' => 200]);
+
+        // B: credit-term 100, paid 100 → settled, NOT a debtor.
+        $this->makeInvoice(['customer_id' => $b->id, 'payment_method_id' => $this->credit->id, 'gross_total' => 100]);
+        Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $b->id, 'pay_date' => '2026-05-12', 'amount' => 100]);
+
+        // C: cash-term 999 → settled at issue, never a receivable.
+        $this->makeInvoice(['customer_id' => $cashCust->id, 'payment_method_id' => $this->cash->id, 'gross_total' => 999]);
+
+        // Cancelled credit invoice for A → excluded.
+        $this->makeInvoice(['customer_id' => $a->id, 'payment_method_id' => $this->credit->id, 'gross_total' => 888, 'mydata_state' => 'CANCELLED']);
+
+        $metrics = new DashboardMetrics($this->tenant);
+
+        $debtors = $metrics->topDebtorsQuery()->get();
+        $this->assertCount(1, $debtors);
+        $this->assertSame($a->id, $debtors->first()->id);
+        $this->assertSame(300.0, round((float) $debtors->first()->outstanding_balance, 2));
+
+        $this->assertSame([$a->id], $metrics->debtorIds());
+
+        // The per-customer view reconciles with the headline aggregate.
+        $this->assertSame(300.0, $metrics->outstandingReceivables());
+    }
+
+    public function test_top_debtors_orders_by_balance_desc_and_is_tenant_scoped(): void
+    {
+        $big = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Μεγάλος']);
+        $small = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Μικρός']);
+        $this->makeInvoice(['customer_id' => $small->id, 'payment_method_id' => $this->credit->id, 'gross_total' => 100]);
+        $this->makeInvoice(['customer_id' => $big->id, 'payment_method_id' => $this->credit->id, 'gross_total' => 900]);
+
+        // Another tenant's debtor must never bleed into this tenant's list.
+        $otherCredit = PaymentMethod::create([
+            'company_id' => $this->other->id, 'description' => 'Πίστωση', 'due_days' => 30,
+        ]);
+        $otherType = InvoiceType::create([
+            'company_id' => $this->other->id, 'name' => 'Τ', 'code' => 'Τ',
+            'invcount' => 1, 'payment_method_id' => $otherCredit->id,
+        ]);
+        $otherCust = Customer::create(['company_id' => $this->other->id, 'name' => 'Ξένος']);
+        Invoice::create([
+            'company_id' => $this->other->id, 'invcode' => 'O'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $otherType->id, 'issued_at' => '2026-05-10 10:00:00',
+            'net_total' => 1000, 'gross_total' => 1000,
+            'customer_id' => $otherCust->id, 'payment_method_id' => $otherCredit->id,
+        ]);
+
+        $debtors = (new DashboardMetrics($this->tenant))->topDebtorsQuery()->get();
+
+        $this->assertSame([$big->id, $small->id], $debtors->pluck('id')->all());
+    }
+
+    public function test_customers_list_balance_query_and_filter_run_on_the_db(): void
+    {
+        // Mirrors exactly what CustomersTable builds: withOutstandingBalance()
+        // (via modifyQueryUsing) + the "Με υπόλοιπο" filter whereRaw +
+        // sort by the aliased column. Catches SQL-level breakage (ambiguous
+        // columns, ORDER BY on a select alias) without booting Filament.
+        $debtor = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Χρωστάει']);
+        $settled = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Τακτοποιημένος']);
+        $this->makeInvoice(['customer_id' => $debtor->id, 'payment_method_id' => $this->credit->id, 'gross_total' => 250]);
+
+        $rows = Customer::query()
+            ->where('customers.company_id', $this->tenant->id)
+            ->withOutstandingBalance($this->tenant->id)
+            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) > 0.005')
+            ->orderByDesc('outstanding_balance')
+            ->get();
+
+        $this->assertSame([$debtor->id], $rows->pluck('id')->all());
+        $this->assertSame(250.0, round((float) $rows->first()->outstanding_balance, 2));
+
+        // The "Χωρίς υπόλοιπο" branch returns the settled customer.
+        $settledRows = Customer::query()
+            ->where('customers.company_id', $this->tenant->id)
+            ->withOutstandingBalance($this->tenant->id)
+            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) <= 0.005')
+            ->pluck('customers.id')
+            ->all();
+
+        $this->assertContains($settled->id, $settledRows);
+        $this->assertNotContains($debtor->id, $settledRows);
+    }
+
+    public function test_monthly_income_window_anchors_on_given_end(): void
+    {
+        // Inside the anchored window…
+        $this->makeInvoice(['issued_at' => '2026-03-10 10:00:00', 'net_total' => 100, 'gross_total' => 124]);
+        // …after the anchor month → must be excluded.
+        $this->makeInvoice(['issued_at' => '2026-05-10 10:00:00', 'net_total' => 999, 'gross_total' => 999]);
+
+        $series = (new DashboardMetrics($this->tenant))
+            ->monthlyIncome(3, Carbon::parse('2026-04-30'));
+
+        $this->assertSame(['2026-02', '2026-03', '2026-04'], array_column($series, 'key'));
+        $byKey = collect($series)->keyBy('key');
+        $this->assertSame(100.0, $byKey['2026-03']['net']);
+        // The May invoice is past the anchor → not in any bucket.
+        $this->assertSame(0.0, $byKey['2026-04']['net']);
+    }
+
     public function test_income_excludes_credit_notes(): void
     {
         // A sale this month.
