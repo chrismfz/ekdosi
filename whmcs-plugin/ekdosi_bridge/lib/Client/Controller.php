@@ -243,13 +243,21 @@ HTML;
         return function_exists('generate_token') ? (string) generate_token('plain') : '';
     }
 
+    /**
+     * Validate the CSRF token on a state-changing POST. WHMCS keeps the
+     * token in $_SESSION['token'] (the value generate_token('plain')
+     * embeds). The earlier version read $_SESSION['tokenval'], which WHMCS
+     * never sets → always '' → every save/route/delete was rejected with a
+     * session/invalid-request error. Read the canonical key (with a
+     * 'tokenval' fallback) and keep the no-helper tolerance.
+     */
     private function csrfValid(): bool
     {
-        if (! function_exists('check_token')) {
+        if (! function_exists('generate_token')) {
             return true;
         }
         $sent = (string) ($_POST['token'] ?? '');
-        $expected = (string) ($_SESSION['tokenval'] ?? '');
+        $expected = (string) ($_SESSION['token'] ?? ($_SESSION['tokenval'] ?? ''));
 
         return $sent !== '' && $expected !== '' && hash_equals($expected, $sent);
     }
