@@ -60,6 +60,137 @@ class Controller
         <i class="fa fa-download"></i> Sync from legacy timologia
     </button>
 </form>
+<p style="margin-top:14px">
+    <a class="btn btn-default" href="{$link}&action=prefs">
+        <i class="fa fa-users"></i> Προτιμήσεις τρίτων (πελάτες · επαφές · δρομολόγηση)
+    </a>
+</p>
+EOF;
+    }
+
+    /**
+     * Browse the synced third-party preferences (read-only). No userid → the
+     * list of clients that have contacts and/or routing; with ?userid=N → that
+     * client's contacts + service routing. The admin mirror of the legacy
+     * "Παραστατικά σε τρίτους" view, over the bridge's own mod_ekdosi_* tables.
+     */
+    public function prefs(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink']);
+        if (! ThirdPartyStore::hasOwnTables()) {
+            return $this->errorPage($link, 'Δεν υπάρχουν ακόμη πίνακες — ενεργοποιήστε το addon ή τρέξτε «Sync from legacy timologia».');
+        }
+
+        $userid = (int) ($_GET['userid'] ?? 0);
+
+        return $userid > 0
+            ? $this->prefsClient($link, $userid)
+            : $this->prefsList($link);
+    }
+
+    /** Client list: everyone with a contact and/or a route, with counts. */
+    private function prefsList(string $link): string
+    {
+        $contactCounts = Capsule::table(ThirdPartyStore::CONTACTS)
+            ->select('userid', Capsule::raw('COUNT(*) AS c'))
+            ->groupBy('userid')->pluck('c', 'userid');
+        $routeCounts = Capsule::table(ThirdPartyStore::ROUTING)
+            ->select('userid', Capsule::raw('COUNT(*) AS c'))
+            ->groupBy('userid')->pluck('c', 'userid');
+
+        $userids = array_values(array_unique(array_merge(
+            array_keys($contactCounts->all()),
+            array_keys($routeCounts->all()),
+        )));
+
+        if ($userids === []) {
+            return $this->errorPage($link, 'Καμία καταχωρημένη προτίμηση ακόμη. Τρέξτε «Sync from legacy timologia».');
+        }
+
+        $clients = Capsule::table('tblclients')->whereIn('id', $userids)
+            ->get(['id', 'firstname', 'lastname', 'companyname'])->keyBy('id');
+
+        $rows = '';
+        foreach ($userids as $uid) {
+            $client = $clients->get($uid);
+            $name = $client
+                ? htmlspecialchars(trim((string) $client->companyname) !== ''
+                    ? (string) $client->companyname
+                    : trim($client->firstname.' '.$client->lastname))
+                : '—';
+            $nc = (int) ($contactCounts[$uid] ?? 0);
+            $nr = (int) ($routeCounts[$uid] ?? 0);
+            $detail = $link.'&action=prefs&userid='.$uid;
+            $rows .= '<tr><td>'.$name.' <span class="text-muted">#'.$uid.'</span></td>'
+                .'<td>'.$nc.'</td><td>'.$nr.'</td>'
+                .'<td class="text-right"><a class="btn btn-xs btn-primary" href="'.htmlspecialchars($detail).'">Προβολή</a></td></tr>';
+        }
+
+        $count = count($userids);
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<h2>Προτιμήσεις τρίτων — Πελάτες ({$count})</h2>
+<table class="table table-striped">
+    <thead><tr><th>Πελάτης</th><th>Επαφές</th><th>Δρομολογήσεις</th><th></th></tr></thead>
+    <tbody>{$rows}</tbody>
+</table>
+EOF;
+    }
+
+    /** One client's contacts + service routing (read-only). */
+    private function prefsClient(string $link, int $userid): string
+    {
+        $client = Capsule::table('tblclients')->find($userid);
+        $name = $client
+            ? htmlspecialchars(trim((string) $client->companyname) !== ''
+                ? (string) $client->companyname
+                : trim($client->firstname.' '.$client->lastname))
+            : ('#'.$userid);
+
+        $contacts = ThirdPartyStore::contactsForUser($userid);
+        $byId = [];
+        $contactRows = '';
+        foreach ($contacts as $c) {
+            $byId[(int) $c->id] = (string) $c->company_name;
+            $contactRows .= '<tr><td>'.htmlspecialchars((string) $c->company_name).'</td>'
+                .'<td>'.htmlspecialchars((string) ($c->gr_vatno ?? '')).'</td>'
+                .'<td>'.htmlspecialchars((string) ($c->tax_office ?? '')).'</td>'
+                .'<td>'.htmlspecialchars((string) ($c->city ?? '')).'</td></tr>';
+        }
+        if ($contactRows === '') {
+            $contactRows = '<tr><td colspan="4" class="text-muted">Καμία επαφή.</td></tr>';
+        }
+
+        $serviceRows = '';
+        foreach (ThirdPartyStore::servicesForUser($userid) as $s) {
+            $target = ((int) $s['contactid'] === 0)
+                ? '<em>Στο όνομά του</em>'
+                : htmlspecialchars($byId[(int) $s['contactid']] ?? ('#'.$s['contactid']));
+            $receipt = ! empty($s['is_receipt']) ? ' <span class="label label-info">Απόδειξη</span>' : '';
+            $serviceRows .= '<tr><td>'.htmlspecialchars((string) $s['label'])
+                .' <span class="label label-default">'.htmlspecialchars((string) $s['service_type']).'</span></td>'
+                .'<td>'.$target.$receipt.'</td></tr>';
+        }
+        if ($serviceRows === '') {
+            $serviceRows = '<tr><td colspan="2" class="text-muted">Καμία υπηρεσία / δρομολόγηση.</td></tr>';
+        }
+
+        $backList = $link.'&action=prefs';
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$backList}">&larr; Όλοι οι πελάτες</a></p>
+<h2>{$name} <span class="text-muted">#{$userid}</span></h2>
+<h3>Επαφές (δικαιούχοι τιμολόγησης)</h3>
+<table class="table table-striped">
+    <thead><tr><th>Επωνυμία</th><th>ΑΦΜ</th><th>ΔΟΥ</th><th>Πόλη</th></tr></thead>
+    <tbody>{$contactRows}</tbody>
+</table>
+<h3>Δρομολόγηση υπηρεσιών</h3>
+<table class="table table-striped">
+    <thead><tr><th>Υπηρεσία</th><th>Εκδίδεται σε</th></tr></thead>
+    <tbody>{$serviceRows}</tbody>
+</table>
 EOF;
     }
 
