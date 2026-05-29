@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToCompany;
+
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
@@ -37,6 +39,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[ObservedBy(InvoiceObserver::class)]
 class Invoice extends Model
 {
+    use BelongsToCompany;
+
     use HasFactory, SoftDeletes;
 
     /**

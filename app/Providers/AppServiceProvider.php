@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\Tenancy\CompanyContext;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -11,7 +12,9 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
+        // Ambient tenant for the CompanyScope global scope. Singleton so the
+        // current company id lives for the whole request / command.
+        $this->app->singleton(CompanyContext::class);
     }
 
     public function boot(): void
@@ -46,6 +49,13 @@ class AppServiceProvider extends ServiceProvider
             function (\Filament\Events\TenantSet $event) {
                 app(PermissionRegistrar::class)
                     ->setPermissionsTeamId($event->getTenant()->getKey());
+
+                // Pin the ambient company so the CompanyScope global scope
+                // auto-filters raw tenant-owned model queries made anywhere
+                // inside the panel request (actions, pages, widgets, jobs
+                // dispatched synchronously) — not just Filament's resource
+                // queries.
+                app(CompanyContext::class)->set($event->getTenant());
             },
         );
     }

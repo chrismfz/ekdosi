@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToCompany;
+
 use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,6 +15,8 @@ use Illuminate\Support\Facades\DB;
 
 class Customer extends Model
 {
+    use BelongsToCompany;
+
     use HasFactory, SoftDeletes;
 
     protected $fillable = [

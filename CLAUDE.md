@@ -443,14 +443,20 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
 ---
 
 ## Known latent items / tech debt (still open — full context in the history doc)
-- **No global `BelongsToCompany` scope** on Invoice/InvoiceLine/MyDataMark/
-  Product/PaymentMethod — they rely on Filament's `BelongsToTenant`. Code
-  outside a Filament request (queue jobs, the WHMCS bridge, scheduled commands)
-  can see all tenants. Add scopes / assert tenant at service entry points.
-  Mitigation in practice: the CLI WHMCS paths (`whmcs:fetch-pending`,
-  `whmcs:auto-issue`, the filer/mapper) scope every query by `company_id`
-  explicitly and assert tenant ownership before filing — the pattern to follow
-  until a global scope lands.
+- **Global `BelongsToCompany` scope — ✅ LANDED (no-op mode).** All 22
+  tenant-owned models (`Invoice`/`InvoiceLine`/`MyDataMark`/`Product`/
+  `PaymentMethod`/`Customer`/`Supplier`/`Expense*`/… — `App\Models\Concerns\
+  BelongsToCompany`) carry a `CompanyScope` global scope driven by the ambient
+  `App\Support\Tenancy\CompanyContext` (a singleton). Filament sets it on
+  `TenantSet`, so raw `Invoice::where(...)` inside the panel (actions/pages/
+  widgets) is now auto-filtered — not just Filament's resource queries.
+  **Design = no-op when no context:** CLI/queue with no ambient tenant fall
+  through to a no-op, so the existing explicit `->where('company_id', ...)`
+  paths are unchanged (non-breaking). Opt in to auto-scoping from CLI/jobs with
+  `CompanyContext::actAs($company, fn () => ...)`; opt out per query with
+  `->withoutGlobalScope(CompanyScope::class)`. **Remaining (deferred):** flip
+  the null-context case to THROW (strict mode) once every CLI/queue path uses
+  `actAs` — the read scope is read-only (no `company_id` auto-fill on create).
 - **Soft-deleted FK rows render blank** in Filament Selects app-wide (a deleted
   lookup row's dependents show empty). Fix once with `withTrashed()` label
   lookups + a "deleted" badge.
