@@ -99,13 +99,14 @@ only wrap + map, exactly like `MyDataSubmitter`/`SalesReconciler` do today.
 - **Ε3 overview** from `RequestE3Info` + our classification.
 
 ## Phased TODO (incremental, each shippable)
-- [ ] **E0 — sandbox spike**: call `RequestDocs` + `RequestVatInfo` against the
-      AADE sandbox; capture sample XML (like `mydata-sandbox-validation`). Decide
-      header-only vs per-line from real payloads.
-- [ ] **E1 — data model**: migrations for `suppliers`, `expenses`,
-      (`expense_lines`?), `expense_marks`; models; tenant scoping; Shield perms.
-- [ ] **E2 — Suppliers resource**: CRUD + "Άντληση από ΑΑΔΕ" (reuse
-      `AadeRegistryLookup`); `source` provenance.
+- [~] **E0 — sandbox spike**: ✅ read-only command shipped
+      (`php artisan mydata:fetch-docs --tenant=SLUG [--vat] [--raw]`) — calls
+      `RequestDocs` + `RequestVatInfo`. ⏳ Pending: actually run it on a host with
+      creds, capture sample XML, and decide header-only vs per-line.
+- [~] **E1 — data model**: ✅ `suppliers` table + `Supplier` model (+ `SupplierSource`
+      enum). ⏳ Pending: `expenses`, (`expense_lines`?), `expense_marks`; Shield perms.
+- [x] **E2 — Suppliers resource**: ✅ CRUD + "Άντληση από ΑΑΔΕ" (reuses
+      `AadeRegistryLookup`) + `source` provenance + tenant-scoped list/table.
 - [ ] **E3 — ExpenseReconciler** over `RequestDocs` (mirror `SalesReconciler`;
       reuse pagination/continuationToken handling).
 - [ ] **E4 — Κονσόλα myDATA / Έξοδα** page (mirror inbound console; reuse the
