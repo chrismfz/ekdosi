@@ -83,21 +83,24 @@ These lock several open questions:
   (firebed `getCancelledInvoices()`) — fold it like the sales reconciler folds
   cancellations.
 
-### Larger sample (full 13-doc dump, committed `requestdocs-sample.xml`)
-- **Invoice types**: 1.1 ×6, 2.1 ×6, **11.2 ×1** (ΑΛΠ λιανικής — no counterpart
-  VAT number; the expense importer must tolerate a missing/blank counterpart AFM
-  for retail receipts, not assume every doc has one).
-- **🔑 vatCategory 8 with `vatAmount=0` and NO `vatExemptionCategory`** (2 lines).
-  AADE returns this legitimately on the expense side. ⇒ the expense parser must
-  **accept cat-8 / zero-VAT as-is** — do NOT reuse the sales-side rule
-  (`vatCategoryFor(0)` throws without an exemption reason, G4). Input-VAT for
-  cat-8 lines is simply 0.
-- **No `<continuationToken>`** in this window → single page; pagination still
-  required for big windows but this confirms the no-token (last-page) shape.
+### Larger sample (full 24-doc dump, committed `requestdocs-sample.xml`)
+- **Invoice types**: 1.1 ×17, 2.1 ×6, **9.3 ×1** (self-accounting entry; still
+  carries our counterpart AFM). All docs in this window have a counterpart.
+- **🔑 Zero-VAT comes in TWO distinct shapes — both must be accepted as-is:**
+  - **vatCategory 7 + `vatExemptionCategory` (4 lines; reasons 7 and 16).**
+    Reason **16 = reverse-charge άρθ. 39α** (κινητά/tablets/laptops/κονσόλες —
+    this is the phone/tablet 0% case): netValue normal, `vatAmount=0`, exemption
+    reason present.
+  - **vatCategory 8 with `netValue=0` + `vatAmount=0` and NO exemption** (1 line;
+    a zero-value replacement UPS). Legit on the expense side.
+  ⇒ the expense parser must store `vatCategory` + optional `vatExemptionCategory`
+  verbatim and treat input-VAT as 0 for both — do NOT reuse the sales-side rule
+  (`vatCategoryFor(0)` throws without a reason, G4).
+- **No `<continuationToken>`** in this window → single page (confirms last-page
+  shape; pagination still needed for big windows).
 - **No embedded income/expense classifications** → docs arrive UN-classified;
-  classifying them is our job (E5 `SendExpensesClassification`), not something
-  we read back here.
-- **No cancellations** in this window (the branch exists; just empty here).
+  classifying them is our job (E5 `SendExpensesClassification`).
+- **No cancellations** in this window (branch exists; empty here).
 
 ## Proposed data model (mirror the sales side)
 - **`suppliers`** (προμηθευτές) — twin of `customers`. `company_id`, `afm`,
