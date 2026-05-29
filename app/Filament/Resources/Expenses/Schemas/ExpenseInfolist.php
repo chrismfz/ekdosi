@@ -69,6 +69,22 @@ class ExpenseInfolist
                             ->weight('bold'),
                     ])
                     ->columns(3),
+
+                Section::make('Χαρακτηρισμός')
+                    ->schema([
+                        TextEntry::make('classification_type')
+                            ->label('Τύπος (E3)')
+                            ->placeholder('— (αχαρακτήριστο)'),
+                        TextEntry::make('classification_category')
+                            ->label('Κατηγορία')
+                            ->placeholder('—'),
+                        TextEntry::make('classification_state')
+                            ->label('Κατάσταση')
+                            ->badge()
+                            ->formatStateUsing(fn (?string $state): string => $state === 'classified' ? 'Χαρακτηρισμένο' : 'Αχαρακτήριστο')
+                            ->color(fn (?string $state): string => $state === 'classified' ? 'success' : 'gray'),
+                    ])
+                    ->columns(3),
             ]);
     }
 }

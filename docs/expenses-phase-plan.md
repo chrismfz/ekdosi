@@ -226,8 +226,23 @@ running VAT position toward the εφορία — no need to open a report:
       `expenseId`). Tests: `ExpenseImporterTest` (lines/supplier/exemption/audit/
       idempotency/only-mark) + `MyDataConsoleExpensesTest` (directions, orphan
       render, import gating, canAccess). Full suite 422.
-- [ ] **E5 — Expense classification** via `SendExpensesClassification`
-      (mirror `SendIncomeClassification`; §8 code tables).
+- [~] **E5 — Expense classification (LOCAL, per-document)**: ✅ the operator
+      assigns one §8.x classification (E3 type + category2_x) to a whole expense
+      via the ViewExpense "Χαρακτηρισμός" action; stored on new
+      `expenses.classification_type/category` (+ `classification_state`), shown
+      on the table/infolist with a filter. Codes gained
+      `expenseClassType/CategoryOptions()` + `isValidExpenseClass*()` which
+      delegate to firebed's validated §8 enums (88 types / 15 categories, Greek
+      labels) — no 88-code transcription. Covered by `ExpenseClassificationTest`.
+      ⏳ **DEFERRED (operator decision): AADE submit.** Filing the classification
+      via `SendExpensesClassification` is NOT built — for now ekdosi stores it
+      locally (for the ΦΠΑ/Ε3 reports) and the accountant files it. When needed:
+      build a submitter (mirror `MyDataSubmitter`) that derives the per-line
+      `InvoicesExpensesClassificationDetail` payload from this header choice
+      (apply to every `expense_line`, populating the E1 `expense_lines.
+      classification_*` columns), `postPerInvoice=true`, with a dry-run + opt-in
+      execute and an `expense_marks` audit row — and sandbox-validate before
+      trusting (the submit path is UNVALIDATED today).
 - [ ] **E6 — ΦΠΑ εκροών−εισροών report** (month/quarter) + cross-check vs
       `RequestVatInfo`.
 - [ ] **E7 — Ε3 overview** via `RequestE3Info`.
