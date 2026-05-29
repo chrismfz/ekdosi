@@ -45,6 +45,63 @@ only wrap + map, exactly like `MyDataSubmitter`/`SalesReconciler` do today.
 | **`RequestE3Info`** (§4.2.11) | Ε3 figures per period (per-doc or per-day). | Feeds an Ε3 overview; cross-check our classification. |
 | **`SendExpensesClassification`** (§4.2.3) | POST — classify expense docs (`postPerInvoice` = per-document vs per-line). | Needed to "close" each expense at AADE (assign E3/VAT category). Mirror of `SendIncomeClassification`. |
 
+## Sample findings — real `RequestDocs` payload (nexon, 2026-01…03)
+Captured via `php artisan mydata:fetch-docs --tenant=nexon … --raw` (E0 done).
+These lock several open questions:
+
+- **`RequestDocs` returns the FULL document**, not a summary: `<issuer>`,
+  `<counterpart>`, `<invoiceHeader>` (series/aa/issueDate/invoiceType/currency
+  + delivery-note fields), **one or more `<invoiceDetails>` lines**, and
+  `<invoiceSummary>` totals — plus `<uid>`, `<mark>`, `<authenticationCode>`,
+  `<qrCodeUrl>`, sometimes `<downloadingInvoiceUrl>` (external PDF).
+  ⇒ **DECISION: go per-line** (`expense_lines`) — the data is there and we'll
+  need it for classification. Not header-only.
+- **firebed parses all of it** with typed accessors — no hand-parsing:
+  `RequestedDoc->getInvoices()` → `Invoice` with `getIssuer()/getCounterpart()/
+  getInvoiceHeader()/getInvoiceDetails(): array/getInvoiceSummary()/getMark()/
+  getUid()`; line fields `getLineNumber/getNetValue/getVatCategory/getVatAmount/
+  getQuantity/getItemCode/getItemDescr`; summary `getTotalNetValue/
+  getTotalVatAmount/getTotalGrossValue`.
+- **Issuer (supplier) name/address is INCONSISTENT**: some docs carry full
+  `<name>`+`<address>` (ΑΛΦΑΝΕΤ, Electrosystems, MG MANAGER), others give **only
+  the AFM** (e.g. `099357493`, `802438394`). ⇒ confirms the supplier `name` must
+  be nullable **and** GSIS-enriched — exactly the E2 design. When the doc carries
+  a name, prefer it; otherwise fall back to `AadeRegistryLookup`.
+- **Same supplier AFM recurs** across docs, sometimes with name, sometimes
+  without (`998482379`×2, `802438394`×2). ⇒ the sync MUST **upsert the supplier on
+  `(company_id, afm)`**, not create one per document.
+- **`<counterpart>` is always us** (`801280908` = nexon). ⇒ sanity check: a doc
+  whose counterpart ≠ our AFM is not our expense — skip/flag.
+- **Per-line fields seen**: `lineNumber`, optional `itemCode`/`itemDescr`,
+  `quantity`, `measurementUnit`, `netValue`, `vatCategory` (1 = 24%), `vatAmount`,
+  `discountOption`. Multi-line docs exist (mark `400012434052750` has 2 lines).
+- **Invoice types seen**: 1.1 (πώλησης / ΔΑΤ-ΤΔΑ delivery notes), 2.1 (παροχή
+  υπηρεσιών). Delivery-note docs carry `isDeliveryNote`/`movePurpose`/
+  `otherDeliveryNoteHeader` and sometimes `otherCorrelatedEntities` (a third
+  party, e.g. ΚΙΦΑ) — keep the header fields we need, ignore the rest for v1.
+- **Cancellations**: the response also has a `<cancelledInvoicesDoc>` branch
+  (firebed `getCancelledInvoices()`) — fold it like the sales reconciler folds
+  cancellations.
+
+### Larger sample (full 24-doc dump, committed `requestdocs-sample.xml`)
+- **Invoice types**: 1.1 ×17, 2.1 ×6, **9.3 ×1** (self-accounting entry; still
+  carries our counterpart AFM). All docs in this window have a counterpart.
+- **🔑 Zero-VAT comes in TWO distinct shapes — both must be accepted as-is:**
+  - **vatCategory 7 + `vatExemptionCategory` (4 lines; reasons 7 and 16).**
+    Reason **16 = reverse-charge άρθ. 39α** (κινητά/tablets/laptops/κονσόλες —
+    this is the phone/tablet 0% case): netValue normal, `vatAmount=0`, exemption
+    reason present.
+  - **vatCategory 8 with `netValue=0` + `vatAmount=0` and NO exemption** (1 line;
+    a zero-value replacement UPS). Legit on the expense side.
+  ⇒ the expense parser must store `vatCategory` + optional `vatExemptionCategory`
+  verbatim and treat input-VAT as 0 for both — do NOT reuse the sales-side rule
+  (`vatCategoryFor(0)` throws without a reason, G4).
+- **No `<continuationToken>`** in this window → single page (confirms last-page
+  shape; pagination still needed for big windows).
+- **No embedded income/expense classifications** → docs arrive UN-classified;
+  classifying them is our job (E5 `SendExpensesClassification`).
+- **No cancellations** in this window (branch exists; empty here).
+
 ## Proposed data model (mirror the sales side)
 - **`suppliers`** (προμηθευτές) — twin of `customers`. `company_id`, `afm`,
   `name`, `tax_office`, address, `legacy_id` n/a (net-new). Sources:
@@ -99,12 +156,11 @@ only wrap + map, exactly like `MyDataSubmitter`/`SalesReconciler` do today.
 - **Ε3 overview** from `RequestE3Info` + our classification.
 
 ## Phased TODO (incremental, each shippable)
-- [~] **E0 — sandbox spike**: ✅ read-only command shipped
-      (`php artisan mydata:fetch-docs --tenant=SLUG [--vat] [--raw]`) — calls
-      `RequestDocs` + `RequestVatInfo`. ⏳ Pending: actually run it on a host with
-      creds, capture sample XML, and decide header-only vs per-line.
+- [x] **E0 — sandbox spike**: ✅ done. Command shipped + run on `nexon`; real
+      `RequestDocs` XML captured. Outcome: **per-line** model (see Sample findings).
 - [~] **E1 — data model**: ✅ `suppliers` table + `Supplier` model (+ `SupplierSource`
-      enum). ⏳ Pending: `expenses`, (`expense_lines`?), `expense_marks`; Shield perms.
+      enum). ⏳ Pending: `expenses` + **`expense_lines`** (decision locked) +
+      `expense_marks`; Shield perms.
 - [x] **E2 — Suppliers resource**: ✅ CRUD + "Άντληση από ΑΑΔΕ" (reuses
       `AadeRegistryLookup`) + `source` provenance + tenant-scoped list/table.
 - [ ] **E3 — ExpenseReconciler** over `RequestDocs` (mirror `SalesReconciler`;
@@ -130,8 +186,9 @@ only wrap + map, exactly like `MyDataSubmitter`/`SalesReconciler` do today.
 | Code tables (§8) | `App\Support\MyData\Codes` |
 
 ## Open decisions (resolve during E0/E1)
-- **Header-only vs per-line** expenses — depends on what `RequestDocs` returns
-  for typical supplier docs; per-line is needed only if we classify per-line.
+- **Header-only vs per-line** expenses — ✅ RESOLVED (E0): **per-line**.
+  `RequestDocs` returns full `<invoiceDetails>` lines (multi-line docs exist),
+  so `expense_lines` is built from real data, not guessed.
 - **Auto-create vs review** suppliers on sync — default to auto-create
   `source=sync` but flag for operator review (mirrors the inbox model; expenses
   affect VAT, so a review gate is the safer default).
