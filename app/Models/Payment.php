@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToCompany;
+
 use App\Observers\PaymentObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -32,6 +34,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[ObservedBy(PaymentObserver::class)]
 class Payment extends Model
 {
+    use BelongsToCompany;
+
     use HasFactory, SoftDeletes;
 
     protected $fillable = [

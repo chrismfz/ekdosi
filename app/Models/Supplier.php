@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToCompany;
+
 use App\Enums\SupplierSource;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,13 +14,15 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * Προμηθευτής — counterpart on the expenses (εισροές) side. Net-new for
  * the Έξοδα phase; the supplier mirror of Customer.
  *
- * Tenant scoping: like Customer, this relies on Filament's BelongsToTenant
- * (the `company()` relation + the panel's tenant). There is no global scope
- * here (see CLAUDE.md latent items) — code outside a Filament request must
- * scope by company_id itself.
+ * Tenant scoping: carries the `BelongsToCompany` global scope, so reads are
+ * auto-filtered to the ambient tenant (Filament panel, or a CLI `actAs`
+ * block). With no ambient context the scope is a no-op, so CLI/queue paths
+ * still scope by `company_id` explicitly.
  */
 class Supplier extends Model
 {
+    use BelongsToCompany;
+
     use HasFactory;
     use SoftDeletes;
 

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToCompany;
+
 use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,6 +15,8 @@ use Illuminate\Support\Facades\DB;
 
 class Customer extends Model
 {
+    use BelongsToCompany;
+
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
@@ -134,9 +138,10 @@ class Customer extends Model
      * (two grouped sub-selects, left-joined) — no per-row PHP, so it is
      * safe on a list with thousands of customers.
      *
-     * @param  int  $companyId  Tenant scope — Customer has no global
-     *                          company scope (CLAUDE.md deferral), so the
-     *                          caller passes it explicitly.
+     * @param  int  $companyId  Tenant scope for the DB::table() subselects
+     *                          inside (the BelongsToCompany global scope only
+     *                          covers Eloquent, not these raw subqueries), and
+     *                          works even with no ambient context.
      */
     public function scopeWithOutstandingBalance(Builder $query, int $companyId): Builder
     {

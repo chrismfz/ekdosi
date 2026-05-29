@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToCompany;
+
 use App\Observers\VatCategoryObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -12,6 +14,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[ObservedBy(VatCategoryObserver::class)]
 class VatCategory extends Model
 {
+    use BelongsToCompany;
+
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
