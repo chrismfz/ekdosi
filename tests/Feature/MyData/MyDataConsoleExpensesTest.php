@@ -29,6 +29,9 @@ class MyDataConsoleExpensesTest extends TestCase
             'country_code' => 'GR',
             'einvoice_provider' => $provider,
             'mydata_mode' => $mode,
+            'afm' => '801280908',
+            'mydata_aade_id' => 'TESTUSER',
+            'mydata_subscription_key' => 'TESTKEY',
         ]);
 
         $user = User::create([
@@ -107,5 +110,63 @@ class MyDataConsoleExpensesTest extends TestCase
         $this->bootTenantUser(provider: 'none', mode: 'off');
 
         $this->assertFalse(MyDataConsoleExpenses::canAccess());
+    }
+
+    /**
+     * Regression: importing then refreshing must survive a d/m/Y window whose
+     * day > 12. The reconciler outputs d/m/Y; an earlier version round-tripped
+     * it through Carbon::parse (reads '/' as m/d/Y) → InvalidFormatException on
+     * day 15. The action parses with createFromFormat and refreshes via Y-m-d.
+     */
+    public function test_import_orphans_handles_dmy_window_and_creates_expense(): void
+    {
+        $tenant = $this->bootTenantUser();
+
+        // Two responses: one for the import fetch, one for the refresh fetch.
+        // Two responses: one for the import fetch, one for the refresh fetch.
+        MyDataConsoleExpenses::$testHandler = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], $this->orphanDoc()),
+            new \GuzzleHttp\Psr7\Response(200, [], $this->orphanDoc()),
+        ]);
+
+        try {
+            Livewire::test(MyDataConsoleExpenses::class)
+                ->set('ran', true)
+                ->set('resultMode', 'inbound')
+                ->set('fromLabel', '15/01/2026')   // day > 12 → the crash case
+                ->set('toLabel', '20/01/2026')
+                ->set('result', $this->fakeResult())
+                ->callAction('import_orphans')
+                ->assertHasNoErrors();
+        } finally {
+            MyDataConsoleExpenses::$testHandler = null;
+        }
+
+        // The αδέσποτο was recorded (import ran) and the refresh didn't crash.
+        $this->assertDatabaseHas('expenses', [
+            'company_id' => $tenant->id,
+            'mydata_mark' => '400012434052701',
+        ]);
+    }
+
+    private function orphanDoc(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400012434052701</mark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΑΛΦΑΝΕΤ ΑΕ</name></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>A</series><aa>42</aa><issueDate>2026-01-15</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceDetails>
+                <lineNumber>1</lineNumber><netValue>100.00</netValue><vatCategory>1</vatCategory><vatAmount>24.00</vatAmount>
+            </invoiceDetails>
+            <invoiceSummary><totalNetValue>100.00</totalNetValue><totalVatAmount>24.00</totalVatAmount><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
     }
 }

@@ -56,6 +56,15 @@ class MyDataConsoleExpenses extends Page
 
     public ?string $error = null;
 
+    /**
+     * Test seam: a Guzzle MockHandler passed through to the reconciler /
+     * importer (which already accept one). STATIC (not a public Livewire
+     * property — Livewire can't serialize a handler object). Null in
+     * production → real AADE. Lets the import+refresh round-trip be exercised
+     * without the network.
+     */
+    public static ?\GuzzleHttp\Handler\MockHandler $testHandler = null;
+
     public static function getNavigationLabel(): string
     {
         return 'Κονσόλα myDATA — Έξοδα';
@@ -152,7 +161,7 @@ class MyDataConsoleExpenses extends Page
         $this->resultMode = $mode;
 
         try {
-            $result = (new ExpenseReconciler($tenant))->reconcile(
+            $result = (new ExpenseReconciler($tenant, static::$testHandler))->reconcile(
                 Carbon::parse($from)->startOfDay(),
                 Carbon::parse($to)->endOfDay(),
             );
@@ -201,11 +210,14 @@ class MyDataConsoleExpenses extends Page
             return;
         }
 
+        // fromLabel/toLabel are the reconciler's d/m/Y output. Parse them with
+        // an EXPLICIT format — Carbon::parse() reads '/' as m/d/Y and would
+        // throw (day > 12) or silently swap day/month.
+        $from = Carbon::createFromFormat('d/m/Y', $this->fromLabel)->startOfDay();
+        $to = Carbon::createFromFormat('d/m/Y', $this->toLabel)->endOfDay();
+
         try {
-            $result = (new ExpenseImporter($tenant))->import(
-                Carbon::createFromFormat('d/m/Y', $this->fromLabel)->startOfDay(),
-                Carbon::createFromFormat('d/m/Y', $this->toLabel)->endOfDay(),
-            );
+            $result = (new ExpenseImporter($tenant, static::$testHandler))->import($from, $to);
 
             Notification::make()
                 ->title("Καταχωρήθηκαν {$result->created} έξοδα")
@@ -214,7 +226,8 @@ class MyDataConsoleExpenses extends Page
                 ->send();
 
             // Refresh the worklist so imported docs leave the αδέσποτα list.
-            $this->runReconciliation($this->fromLabel, $this->toLabel, 'inbound');
+            // Pass Y-m-d so runReconciliation's Carbon::parse is unambiguous.
+            $this->runReconciliation($from->format('Y-m-d'), $to->format('Y-m-d'), 'inbound');
         } catch (RuntimeException $e) {
             Notification::make()->title('Η καταχώριση απέτυχε')->body($e->getMessage())->danger()->send();
         } catch (Throwable $e) {
