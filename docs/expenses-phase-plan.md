@@ -83,6 +83,22 @@ These lock several open questions:
   (firebed `getCancelledInvoices()`) — fold it like the sales reconciler folds
   cancellations.
 
+### Larger sample (full 13-doc dump, committed `requestdocs-sample.xml`)
+- **Invoice types**: 1.1 ×6, 2.1 ×6, **11.2 ×1** (ΑΛΠ λιανικής — no counterpart
+  VAT number; the expense importer must tolerate a missing/blank counterpart AFM
+  for retail receipts, not assume every doc has one).
+- **🔑 vatCategory 8 with `vatAmount=0` and NO `vatExemptionCategory`** (2 lines).
+  AADE returns this legitimately on the expense side. ⇒ the expense parser must
+  **accept cat-8 / zero-VAT as-is** — do NOT reuse the sales-side rule
+  (`vatCategoryFor(0)` throws without an exemption reason, G4). Input-VAT for
+  cat-8 lines is simply 0.
+- **No `<continuationToken>`** in this window → single page; pagination still
+  required for big windows but this confirms the no-token (last-page) shape.
+- **No embedded income/expense classifications** → docs arrive UN-classified;
+  classifying them is our job (E5 `SendExpensesClassification`), not something
+  we read back here.
+- **No cancellations** in this window (the branch exists; just empty here).
+
 ## Proposed data model (mirror the sales side)
 - **`suppliers`** (προμηθευτές) — twin of `customers`. `company_id`, `afm`,
   `name`, `tax_office`, address, `legacy_id` n/a (net-new). Sources:
