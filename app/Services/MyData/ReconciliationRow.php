@@ -10,6 +10,11 @@ namespace App\Services\MyData;
  *     where known (missingAtAade has no AADE side — aadeState is null).
  *   - missingLocally: only the AADE fields; invoiceId/invcode are null.
  *
+ * Shared by BOTH the sales reconciler (local side = an Invoice, `invoiceId`)
+ * and the expenses reconciler (local side = an Expense, `expenseId`). The two
+ * id fields are mutually exclusive per row and default null, so the one shared
+ * worklist table partial can render either side.
+ *
  * `problem` is the operator-facing Greek explanation for discrepancy
  * rows (null for matched rows).
  */
@@ -19,6 +24,7 @@ final readonly class ReconciliationRow
         public string $mark,
         public ?string $uid = null,
         public ?int $invoiceId = null,
+        public ?int $expenseId = null,
         public ?string $invcode = null,
         public ?string $issuedAt = null,
         public ?string $counterpartName = null,
