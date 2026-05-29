@@ -18,6 +18,7 @@
         'mark' => 'ΜΑΡΚ',
         'issuedAt' => 'Έκδοση',
         'counterpart' => 'Πελάτης',
+        'supplier' => 'Προμηθευτής',
         'gross' => 'Σύνολο',
         'localState' => 'Τοπικά',
         'aadeState' => 'AADE',
@@ -58,6 +59,7 @@
                                 <td class="py-2 pr-4 whitespace-nowrap">{{ $row['issuedAt'] ?? '—' }}</td>
                                 @break
                             @case('counterpart')
+                            @case('supplier')
                                 <td class="py-2 pr-4">{{ $row['counterpartName'] ?? '—' }}</td>
                                 @break
                             @case('gross')

@@ -164,6 +164,22 @@ These lock several open questions:
   side.
 - **Ε3 overview** from `RequestE3Info` + our classification.
 
+### 🆕 Dashboard widget — «Εικόνα από myDATA» (operator-requested, E6/E7)
+A glanceable panel on the main dashboard so the operator ALWAYS knows their
+running VAT position toward the εφορία — no need to open a report:
+- **Έσοδα** (gross) + **ΦΠΑ εκροών** — from our issued invoices (output side,
+  `InvoiceVatBreakdown`, live-scope only).
+- **Έξοδα** (gross) + **ΦΠΑ εισροών** — from local `expenses` (input side).
+- **Καθαρό ΦΠΑ = εκροών − εισροών** = "τι έχω να δώσω στο κράτος" — the
+  headline number, shown **per current quarter** AND **per month**.
+- Framing the operator asked for: «έκοψα τόσα παραστατικά / τόσο ΦΠΑ, μου
+  έκοψαν τόσα, γλίτωσα τόσο ΦΠΑ (εισροών), σύνολο οφειλή τόσα».
+- Period selector (τρέχων μήνας / τρίμηνο), with the AADE cross-check
+  (`RequestVatInfo`) surfaced as a drift badge once E6 lands — never present a
+  single number as gospel.
+- Built on `VatPeriodReport` (E6); the widget is the dashboard face of it.
+  Gate to gr-mydata tenants. **Do not forget — explicit operator ask.**
+
 ## Phased TODO (incremental, each shippable)
 - [x] **E0 — sandbox spike**: ✅ done. Command shipped + run on `nexon`; real
       `RequestDocs` XML captured. Outcome: **per-line** model (see Sample findings).
@@ -196,9 +212,20 @@ These lock several open questions:
       Covered by `ExpenseReconcilerTest` (MockHandler: pagination, issuer map,
       empty window, all five buckets). The E4 console page + import-expense
       action consume this.
-- [ ] **E4 — Κονσόλα myDATA / Έξοδα** page (mirror inbound console; reuse the
-      shared table partial) + **import-expense** action (auto-creating the
-      supplier on sync).
+- [x] **E4 — Κονσόλα myDATA / Έξοδα**: ✅ `MyDataConsoleExpenses` page mirrors
+      `MyDataConsole` (two directions, reuses the shared `reconciliation-table`
+      partial — gained a `supplier` column). **Import**: `ExpenseImporter`
+      re-fetches the FULL `RequestDocs` docs (the reconciler only keeps
+      summaries) and records each αδέσποτο as a local `Expense` + `expense_lines`
+      (§8.2/§8.3 codes verbatim) + audit `expense_mark`, linking/creating the
+      `Supplier` by issuer AFM. Idempotent (skips/never-resurrects an existing
+      MARK), one transaction per doc, tenant-scoped, operator-gated (a confirmed
+      "Καταχώριση αδέσποτων εξόδων" header action over the queried window). A
+      read-only `ExpenseResource` (list + view + lines) gives imported expenses a
+      home and powers the worklist "Άνοιγμα" link (`rowToArray` handles
+      `expenseId`). Tests: `ExpenseImporterTest` (lines/supplier/exemption/audit/
+      idempotency/only-mark) + `MyDataConsoleExpensesTest` (directions, orphan
+      render, import gating, canAccess). Full suite 422.
 - [ ] **E5 — Expense classification** via `SendExpensesClassification`
       (mirror `SendIncomeClassification`; §8 code tables).
 - [ ] **E6 — ΦΠΑ εκροών−εισροών report** (month/quarter) + cross-check vs
