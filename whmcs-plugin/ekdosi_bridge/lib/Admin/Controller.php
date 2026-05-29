@@ -281,24 +281,31 @@ EOF;
     }
 
     /**
-     * Validate the CSRF token on a state-changing POST. Returns true
-     * when WHMCS's check_token passes (or when the helper is absent
-     * on a legacy install — we don't want to hard-block the operator
-     * on a WHMCS build without the helper, matching csrfField()).
+     * Validate the CSRF token on a state-changing POST. We compare the
+     * posted `token` against the value WHMCS stores in the session —
+     * the SAME value generate_token('plain') embedded in our form.
      *
-     * check_token() normally die()s on mismatch; we wrap it so the
-     * caller can render a friendly error page instead.
+     * WHMCS keeps the admin CSRF token in $_SESSION['token']. The earlier
+     * version of this method compared against $_SESSION['tokenval'], which
+     * WHMCS never sets → the expected value was always '' → EVERY
+     * state-changing action (sync / push / reset) failed with
+     * "Security token mismatch", regardless of a correct form token. Read
+     * the canonical key (with a 'tokenval' fallback for any odd build).
+     *
+     * Tolerance: a (very old) WHMCS without generate_token() emits no token
+     * field at all, so we don't hard-block there — matching csrfField().
      */
     private function csrfValid(): bool
     {
-        if (! function_exists('check_token')) {
+        // No token helper at all → legacy build, don't hard-block (csrfField
+        // also degrades to an empty field there).
+        if (! function_exists('generate_token')) {
             return true;
         }
+
         $sent = (string) ($_POST['token'] ?? '');
-        $expected = (string) ($_SESSION['tokenval'] ?? '');
-        if ($sent === '' || $expected === '') {
-            return false;
-        }
-        return hash_equals($expected, $sent);
+        $expected = (string) ($_SESSION['token'] ?? ($_SESSION['tokenval'] ?? ''));
+
+        return $sent !== '' && $expected !== '' && hash_equals($expected, $sent);
     }
 }
