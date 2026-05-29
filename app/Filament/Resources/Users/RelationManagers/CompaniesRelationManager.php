@@ -2,6 +2,9 @@
 
 namespace App\Filament\Resources\Users\RelationManagers;
 
+use App\Models\Company;
+use App\Models\User;
+use App\Services\TenantRoleProvisioner;
 use Filament\Actions\AttachAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DetachAction;
@@ -53,7 +56,24 @@ class CompaniesRelationManager extends RelationManager
             ])
             ->headerActions([
                 AttachAction::make()
-                    ->preloadRecordSelect(),
+                    ->preloadRecordSelect()
+                    // Mirror of the Companies→Users hook: if THIS user is
+                    // already super_admin somewhere, propagate it to each
+                    // newly-attached company so they keep the bypass there.
+                    ->after(function (array $data): void {
+                        $user = $this->getOwnerRecord();
+                        if (! $user instanceof User) {
+                            return;
+                        }
+                        $provisioner = app(TenantRoleProvisioner::class);
+                        if (! $provisioner->isSuperAdminAnywhere($user)) {
+                            return;
+                        }
+                        $ids = (array) ($data['recordId'] ?? []);
+                        foreach (Company::whereKey($ids)->get() as $company) {
+                            $provisioner->assignSuperAdmin($user, $company);
+                        }
+                    }),
             ])
             ->recordActions([
                 DetachAction::make(),

@@ -456,7 +456,13 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
 - **activitylog not wired** on invoices/customers/payments (installed). Do all
   three at once; mind that re-imports bump `updated_at` and would spam it.
 - **Per-tenant role-assignment UI** in UserResource (Shield teams mode handles
-  the data layer; no per-tenant role picker yet).
+  the data layer; no per-tenant role picker yet). **TODO (deferred, larger):**
+  a proper UI to pick a user's role PER company (e.g. super_admin in A,
+  accountant_readonly in B). Until then: `super_admin` is auto-provisioned per
+  tenant (`CompanyObserver` + `App\Services\TenantRoleProvisioner`) and
+  back-fillable via `php artisan shield:sync-super-admin` — see the
+  "new-tenant super_admin" fix. The picker is the real solution when operators
+  need differentiated per-tenant permissions, not just blanket super_admin.
 - **ETL re-run preserves soft-delete but refreshes columns** — a row soft-
   deleted in ekdosi gets its legacy values re-applied on re-import (deleted_at
   stays). To truly drop a row across re-imports, force-delete it.
