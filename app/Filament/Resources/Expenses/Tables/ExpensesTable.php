@@ -61,6 +61,12 @@ class ExpensesTable
                     ->color(fn (?string $state): string => $state === 'CANCELLED' ? 'danger' : 'success')
                     ->placeholder('—'),
 
+                TextColumn::make('classification_state')
+                    ->label('Χαρακτηρισμός')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => $state === 'classified' ? 'Χαρακτηρισμένο' : 'Αχαρακτήριστο')
+                    ->color(fn (?string $state): string => $state === 'classified' ? 'success' : 'gray'),
+
                 TextColumn::make('source')
                     ->label('Προέλευση')
                     ->badge()
@@ -76,6 +82,13 @@ class ExpensesTable
                 SelectFilter::make('mydata_state')
                     ->label('Κατάσταση myDATA')
                     ->options(['VALID' => 'VALID', 'CANCELLED' => 'CANCELLED']),
+
+                SelectFilter::make('classification_state')
+                    ->label('Χαρακτηρισμός')
+                    ->options(['classified' => 'Χαρακτηρισμένο'])
+                    ->query(fn ($query, array $data) => ($data['value'] ?? null) === 'classified'
+                        ? $query->where('classification_state', 'classified')
+                        : $query),
 
                 TrashedFilter::make(),
             ])

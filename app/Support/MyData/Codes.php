@@ -222,6 +222,53 @@ final class Codes
         return in_array($code, self::INCOME_CLASS_CATEGORIES, true);
     }
 
+    /**
+     * §8.x Expense classification — type (E3_*) and category (category2_*).
+     *
+     * Unlike the income codes above (baked literals), the EXPENSE side has 88
+     * types + 15 categories that firebed already ships as validated backed
+     * enums (`ExpenseClassificationType` / `ExpenseClassificationCategory`) WITH
+     * Greek labels. We delegate to them — re-transcribing 88 opaque E3 codes
+     * here would only invite drift. Codes stays the single entry point.
+     */
+    public static function isValidExpenseClassType(string $code): bool
+    {
+        return \Firebed\AadeMyData\Enums\ExpenseClassificationType::tryFrom($code) !== null;
+    }
+
+    public static function isValidExpenseClassCategory(string $code): bool
+    {
+        return \Firebed\AadeMyData\Enums\ExpenseClassificationCategory::tryFrom($code) !== null;
+    }
+
+    /**
+     * value => "code — Greek label" maps for Filament Selects.
+     *
+     * @return array<string, string>
+     */
+    public static function expenseClassTypeOptions(): array
+    {
+        $out = [];
+        foreach (\Firebed\AadeMyData\Enums\ExpenseClassificationType::cases() as $c) {
+            $out[$c->value] = $c->value.' — '.$c->label();
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function expenseClassCategoryOptions(): array
+    {
+        $out = [];
+        foreach (\Firebed\AadeMyData\Enums\ExpenseClassificationCategory::cases() as $c) {
+            $out[$c->value] = $c->value.' — '.$c->label();
+        }
+
+        return $out;
+    }
+
     public static function paymentMethodExists(int $type): bool
     {
         return isset(self::PAYMENT_METHODS[$type]);

@@ -45,6 +45,8 @@ class Expense extends Model
         'qr_url',
         'downloading_invoice_url',
         'classification_state',
+        'classification_type',
+        'classification_category',
         'source',
         'notes',
     ];
