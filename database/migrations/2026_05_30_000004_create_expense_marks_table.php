@@ -27,7 +27,11 @@ return new class extends Migration
             $t->mediumText('request')->nullable();         // full submitted/queried XML
             $t->mediumText('response')->nullable();        // full AADE response XML
             $t->date('mark_date')->nullable();
-            $t->timestamp('mark_time')->nullable();
+            // TIME (HH:MM:SS), not TIMESTAMP — mirrors the mydata_marks fix
+            // (2026_05_27_000002). A bare time stored in a TIMESTAMP column
+            // forces a 0000-00-00 date (STRICT mode crash) or a synthesised
+            // date that breaks time comparisons. Left uncast on the model.
+            $t->time('mark_time')->nullable();
             $t->timestamps();
 
             $t->index('expense_id');
