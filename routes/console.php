@@ -47,6 +47,18 @@ if (config('ekdosi.schedule.whmcs_fetch_enabled')) {
         ->withoutOverlapping();
 }
 
+// whmcs:auto-issue — auto-FILE paid inbox rows for γκρινιάρης customers on
+// tenants that armed it (companies.whmcs_auto_issue_immediate). UNLIKE the
+// fetch above, this files at AADE, so it's a two-key arming: this scheduler
+// flag (default OFF) AND the per-tenant toggle. The command loops every
+// armed tenant itself + leaves anything ambiguous in the inbox for a human.
+if (config('ekdosi.schedule.whmcs_auto_issue_enabled')) {
+    Schedule::command('whmcs:auto-issue')
+        ->cron(config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'))
+        ->name('whmcs-auto-issue-all')
+        ->withoutOverlapping();
+}
+
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
 // per Greek / non-Off tenant. Discrepancies surface in the command output
 // (exit 2); pipe schedule output to a log for alerting.

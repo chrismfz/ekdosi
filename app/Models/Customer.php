@@ -32,6 +32,8 @@ class Customer extends Model
         'discount',
         'email',
         'secondary_email',
+        // G6: per-customer auto-email opt-out (default true).
+        'auto_email_invoices',
         'country',
         'vat_vies',
         'withhold_tax',
@@ -54,6 +56,7 @@ class Customer extends Model
         return [
             'discount' => 'decimal:2',
             'needs_immediate_invoice' => 'boolean',
+            'auto_email_invoices' => 'boolean',
             'is_active' => 'boolean',
             'whmcs_reseller_routes' => 'integer',
         ];

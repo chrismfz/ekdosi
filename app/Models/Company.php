@@ -6,6 +6,7 @@ use App\Enums\MyDataMode;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Company extends Model
@@ -50,6 +51,7 @@ class Company extends Model
         'mail_from_name',
         'invoice_audit_bcc',
         'auto_email_on_mydata_accept',
+        'auto_email_on_issue',
         'mail_smtp_host',
         'mail_smtp_port',
         'mail_smtp_username',
@@ -69,6 +71,9 @@ class Company extends Model
         // T-1b: per-tenant backend kill-switch for third-party invoicing
         'whmcs_third_party_enabled',
         'whmcs_amount_includes_tax',
+        // G8 phase 2: γκρινιάρης auto-issue knob + its default invoice type
+        'whmcs_auto_issue_immediate',
+        'whmcs_default_invoice_type_id',
     ];
 
     protected function casts(): array
@@ -83,7 +88,9 @@ class Company extends Model
             'whmcs_invoice_min_date' => 'date',
             'whmcs_third_party_enabled' => 'boolean',
             'whmcs_amount_includes_tax' => 'boolean',
+            'whmcs_auto_issue_immediate' => 'boolean',
             'auto_email_on_mydata_accept' => 'boolean',
+            'auto_email_on_issue' => 'boolean',
             'mail_smtp_port' => 'integer',
         ];
     }
@@ -248,5 +255,14 @@ class Company extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class);
+    }
+
+    /**
+     * G8 phase 2: the invoice type the γκρινιάρης auto-issue uses. Null =
+     * not configured → auto-issue skips this tenant (never guesses).
+     */
+    public function defaultWhmcsInvoiceType(): BelongsTo
+    {
+        return $this->belongsTo(InvoiceType::class, 'whmcs_default_invoice_type_id');
     }
 }

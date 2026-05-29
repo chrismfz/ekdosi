@@ -11,8 +11,8 @@ use App\Services\AadeRegistryLookup;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
@@ -70,11 +70,13 @@ class CustomerForm
                                                 $tenant = Filament::getTenant();
                                                 if (! $tenant) {
                                                     Notification::make()->title('No tenant context.')->warning()->send();
+
                                                     return;
                                                 }
                                                 $afm = trim((string) $get('afm'));
                                                 if ($afm === '') {
                                                     Notification::make()->title('Enter an AFM first.')->warning()->send();
+
                                                     return;
                                                 }
                                                 try {
@@ -84,18 +86,21 @@ class CustomerForm
                                                         ->title('GSIS credentials missing or invalid')
                                                         ->body('Configure them on the Company → AADE registry (GSIS) tab.')
                                                         ->danger()->send();
+
                                                     return;
                                                 } catch (AadeAfmNotFound) {
                                                     Notification::make()
                                                         ->title('AFM not found or inactive in AADE registry')
                                                         ->body('Double-check the digits, or fill the customer manually if this is a special case.')
                                                         ->warning()->send();
+
                                                     return;
                                                 } catch (AadeUnreachable) {
                                                     Notification::make()
                                                         ->title('AADE registry unreachable')
                                                         ->body('Try again in a moment, or fill the customer manually.')
                                                         ->warning()->send();
+
                                                     return;
                                                 }
                                                 // Only overwrite fields the operator hasn't
@@ -199,6 +204,16 @@ class CustomerForm
                                     ->label('Email (alt)')
                                     ->email()
                                     ->maxLength(120),
+
+                                // G6: per-customer auto-email opt-out. On by
+                                // default; turn off for a customer who doesn't
+                                // want automatic invoice mails. The manual
+                                // "Email PDF to customer" action ignores this.
+                                Toggle::make('auto_email_invoices')
+                                    ->label('Αυτόματη αποστολή τιμολογίων με email')
+                                    ->default(true)
+                                    ->helperText('Όταν είναι ενεργό, το παραστατικό αποστέλλεται αυτόματα στον πελάτη κατά την έκδοση/αποδοχή ΑΑΔΕ (εφόσον το ενεργοποιεί και η εταιρεία). Η χειροκίνητη αποστολή δεν επηρεάζεται.')
+                                    ->columnSpanFull(),
                             ])
                             ->columns(2),
 

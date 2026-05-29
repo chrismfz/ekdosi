@@ -32,6 +32,14 @@ return [
         'whmcs_fetch_enabled' => env('EKDOSI_SCHEDULE_WHMCS_FETCH', true),
         'whmcs_fetch_cron' => env('EKDOSI_WHMCS_FETCH_CRON', '*/15 * * * *'),
 
+        // whmcs:auto-issue — auto-FILE paid inbox rows for γκρινιάρης
+        // customers on armed tenants. UNLIKE the fetch above, this submits
+        // to AADE unattended, so it's OFF by default — a deliberate two-key
+        // arming (this flag AND companies.whmcs_auto_issue_immediate). Turn
+        // on only after validating the per-tenant config live.
+        'whmcs_auto_issue_enabled' => env('EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE', false),
+        'whmcs_auto_issue_cron' => env('EKDOSI_WHMCS_AUTO_ISSUE_CRON', '*/15 * * * *'),
+
         // mydata:reconcile-sales — daily read-only local↔AADE cross-check,
         // per gr-mydata / non-Off tenant. HH:MM (server time).
         'mydata_reconcile_enabled' => env('EKDOSI_SCHEDULE_MYDATA_RECONCILE', true),

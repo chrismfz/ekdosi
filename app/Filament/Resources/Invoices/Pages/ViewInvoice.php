@@ -7,17 +7,28 @@ use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
-use App\Models\Payment;
 use App\Services\MyDataSubmitter;
 use App\Support\InvoiceScope;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ViewInvoice extends ViewRecord
@@ -47,6 +58,28 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription('Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
                 ->action(function (Invoice $record) {
                     $record->update(['local_status' => 'active']);
+
+                    // G6: auto-email on the non-myDATA issue path. myDATA
+                    // tenants get the mail on the VALID response instead;
+                    // shouldAutoEmailOnFinalize() guards against a double
+                    // send and honours the tenant + per-customer toggles.
+                    // Dispatch is best-effort: a queue hiccup must NOT mask
+                    // the successful finalize (mirrors MyDataSubmitter::
+                    // dispatchAutoEmailIfEnabled). afterCommit runs inline
+                    // here (no open transaction), so guard it with try/catch.
+                    if ($record->shouldAutoEmailOnFinalize()) {
+                        DB::afterCommit(function () use ($record): void {
+                            try {
+                                SendInvoiceEmail::dispatch($record, trigger: 'auto');
+                            } catch (Throwable $e) {
+                                Log::warning('SendInvoiceEmail auto-dispatch on finalize failed (finalize succeeded)', [
+                                    'invoice_id' => $record->getKey(),
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        });
+                    }
+
                     Notification::make()->title('Έγινε Ενεργό')->success()->send();
                     $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),
@@ -78,7 +111,7 @@ class ViewInvoice extends ViewRecord
                     : 'Σημειώνεται ως Ακυρωμένο (χωρίς myDATA). Τυχόν πληρωμές γίνονται πιστωτικό υπόλοιπο του πελάτη, διαθέσιμο για επόμενο παραστατικό.')
                 ->modalSubmitActionLabel('Ακύρωση')
                 ->schema([
-                    \Filament\Forms\Components\Textarea::make('reason')
+                    Textarea::make('reason')
                         ->label('Αιτία (προαιρετικό)')
                         ->rows(2),
                 ])
@@ -151,36 +184,36 @@ class ViewInvoice extends ViewRecord
                 ->modalHeading('Καταχώριση πληρωμής')
                 ->modalSubmitActionLabel('Καταχώριση')
                 ->schema([
-                    \Filament\Forms\Components\TextInput::make('amount')
+                    TextInput::make('amount')
                         ->label('Ποσό')
                         ->numeric()
                         ->required()
                         ->default(fn (Invoice $record) => number_format(max($record->balanceData()->balance, 0), 2, '.', ''))
                         ->helperText(fn (Invoice $record) => 'Υπόλοιπο: '.number_format($record->balanceData()->balance, 2, ',', '.').' €'),
-                    \Filament\Forms\Components\DatePicker::make('pay_date')
+                    DatePicker::make('pay_date')
                         ->label('Ημερομηνία')
                         ->required()
                         ->default(now()),
-                    \Filament\Forms\Components\Select::make('payment_method_id')
+                    Select::make('payment_method_id')
                         ->label('Τρόπος πληρωμής')
-                        ->options(fn (Invoice $record) => \App\Models\PaymentMethod::query()
+                        ->options(fn (Invoice $record) => PaymentMethod::query()
                             ->where('company_id', $record->company_id)
                             ->pluck('description', 'id'))
                         ->default(fn (Invoice $record) => $record->payment_method_id),
-                    \Filament\Forms\Components\Textarea::make('notes')
+                    Textarea::make('notes')
                         ->label('Σημειώσεις')
                         ->rows(2),
                 ])
                 ->action(function (Invoice $record, array $data) {
-                    \Illuminate\Support\Facades\DB::transaction(function () use ($record, $data) {
-                        \App\Models\Payment::create([
-                            'company_id'        => $record->company_id,
-                            'customer_id'       => $record->customer_id,
-                            'invoice_id'        => $record->id,
+                    DB::transaction(function () use ($record, $data) {
+                        Payment::create([
+                            'company_id' => $record->company_id,
+                            'customer_id' => $record->customer_id,
+                            'invoice_id' => $record->id,
                             'payment_method_id' => $data['payment_method_id'] ?? null,
-                            'amount'            => $data['amount'],
-                            'pay_date'          => $data['pay_date'],
-                            'notes'             => $data['notes'] ?? null,
+                            'amount' => $data['amount'],
+                            'pay_date' => $data['pay_date'],
+                            'notes' => $data['notes'] ?? null,
                         ]);
                     });
                     Notification::make()
@@ -205,12 +238,12 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription('Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
                 ->modalSubmitActionLabel('Έκδοση')
                 ->schema([
-                    \Filament\Forms\Components\Select::make('credit_type_id')
+                    Select::make('credit_type_id')
                         ->label('Τύπος πιστωτικού')
                         ->options(fn (Invoice $record) => self::creditTypes($record)
                             ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name]))
                         ->required(),
-                    \Filament\Forms\Components\Repeater::make('lines')
+                    Repeater::make('lines')
                         ->label('Γραμμές')
                         ->addable(false)
                         ->deletable(false)
@@ -218,15 +251,15 @@ class ViewInvoice extends ViewRecord
                         ->default(fn (Invoice $record) => $record->lines
                             ->map(fn ($l) => [
                                 'line_id' => $l->id,
-                                'label'   => ($l->product_descr ?? '#'.$l->id).' (×'.rtrim(rtrim((string) $l->qty, '0'), '.').')',
-                                'qty'     => (float) $l->qty,
+                                'label' => ($l->product_descr ?? '#'.$l->id).' (×'.rtrim(rtrim((string) $l->qty, '0'), '.').')',
+                                'qty' => (float) $l->qty,
                             ])->all())
                         ->schema([
-                            \Filament\Forms\Components\Hidden::make('line_id'),
-                            \Filament\Forms\Components\Placeholder::make('label')
+                            Hidden::make('line_id'),
+                            Placeholder::make('label')
                                 ->label('')
-                                ->content(fn (\Filament\Schemas\Components\Utilities\Get $get) => $get('label') ?? ''),
-                            \Filament\Forms\Components\TextInput::make('qty')
+                                ->content(fn (Get $get) => $get('label') ?? ''),
+                            TextInput::make('qty')
                                 ->label('Ποσότητα πίστωσης')
                                 ->numeric()
                                 ->minValue(0)
@@ -238,7 +271,7 @@ class ViewInvoice extends ViewRecord
                     // already reduces the balance) and file it later with
                     // the existing "Submit to myDATA" action when ready.
                     // Hidden for off-mode / non-Greek tenants.
-                    \Filament\Forms\Components\Toggle::make('submit_now')
+                    Toggle::make('submit_now')
                         ->label('Υποβολή στο myDATA τώρα')
                         ->helperText('Αν είναι ανενεργό, το πιστωτικό αποθηκεύεται ως πρόχειρο και υποβάλλεται αργότερα χειροκίνητα.')
                         ->default(false)
@@ -356,7 +389,7 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription(fn (Invoice $record) => 'Αποστέλλεται αίτημα ΑΚΥΡΩΣΗΣ στην ΑΑΔΕ για το MARK '.($record->mydata_mark ?? '?').'. Το MARK διατηρείται στο ιστορικό· η κατάσταση γίνεται CANCELLED. Για διόρθωση περιεχομένου, εκδώστε πιστωτικό/διορθωτικό.')
                 ->modalSubmitActionLabel('Επιβεβαίωση ακύρωσης')
                 ->schema([
-                    \Filament\Forms\Components\Textarea::make('reason')
+                    Textarea::make('reason')
                         ->label('Αιτία (καταγράφεται τοπικά)')
                         ->rows(3)
                         ->placeholder('Γιατί ακυρώνεται το παραστατικό;'),
@@ -489,7 +522,7 @@ class ViewInvoice extends ViewRecord
     }
 
     /** Credit invoice types for the invoice's tenant. */
-    protected static function creditTypes(Invoice $invoice): \Illuminate\Support\Collection
+    protected static function creditTypes(Invoice $invoice): Collection
     {
         return InvoiceType::query()
             ->where('company_id', $invoice->company_id)

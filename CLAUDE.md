@@ -300,8 +300,9 @@ operator reviews in `WhmcsInbox` → File at AADE → write back `invoiced=MARK`
   time relies on the operator; WHMCS write-back of split invoices (one MARK col).
 - **`whmcs_amount_includes_tax`** documented but unimplemented — the mapper
   assumes GROSS line amounts; a tax-exclusive WHMCS tenant gets wrong VAT.
-- **griniaris** (field 338 immediate-invoicing) — `needs_immediate_invoice`
-  scaffolded, unwired (tied to the missing scheduler).
+- **griniaris** (field 338 immediate-invoicing) — ✅ DONE (G8, two phases):
+  phase 1 = an "Άμεσο" badge on inbox rows whose customer is `needs_immediate_invoice`;
+  phase 2 = the `whmcs:auto-issue` command auto-files those rows at AADE (see G8 below).
 - The plugin under-reacts to ekdosi's `audit_preserved` / distinct 409/502
   responses; still `v0.1.0`.
 
@@ -319,10 +320,14 @@ single-party billing, multi-party split, hideable client page; see the WHMCS
 section + `docs/whmcs-legacy-plugin-map.md`); PDF + per-tenant email + send-log;
 dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`).
 
-**🚧 PARTIAL:** auto-email — implemented for the **myDATA-VALID** path
-(`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
-`auto_email_on_mydata_accept`, with audit BCC); the gap is the **non-myDATA
-issue path** (drafts / `none` / Estonian) + a batch mail sweep (G6). One
+**🚧 PARTIAL:** auto-email — both issue paths now covered: the **myDATA-VALID**
+path (`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
+`auto_email_on_mydata_accept`, with audit BCC) and the **non-myDATA finalize
+path** (G6 ✅ — `companies.auto_email_on_issue` fires on draft→active for
+`none`/Estonian/mode-off tenants, guarded against double-send for myDATA
+tenants). Both honour a per-customer opt-out (`customers.auto_email_invoices`,
+default on); the manual "Resend email" action ignores both toggles. The
+remaining gap is a **batch mail sweep** (re-send failures / bulk). One
 adaptive PDF template vs 8 legacy FastReport designs (G10); `ekdosi_bridge`
 error-handling.
 
@@ -362,11 +367,37 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
   and the submitter emits `setQuantity(qty)`. `measurementUnit` omitted
   (optional per spec) — a follow-up if a goods tenant needs §8.13 units.
   InvoiceType-form toggle. (Enable + sandbox-verify per the goods tenant.)
-- **G7 — gross-price line edit** (operator types VAT-inclusive unit price) —
-  legacy had it; ours is net-only. UX parity, not correctness. **UX tail.**
-- **G6 — auto-email on the non-myDATA issue path** (see PARTIAL above). **UX tail.**
-- **G8 — griniaris** immediate-invoicing (scaffolded `needs_immediate_invoice`,
-  waits on the live scheduler/worker). **UX tail.**
+- **G7 — gross-price line edit: ✅ DONE.** The `InvoiceForm` lines repeater
+  adds a VAT-inclusive "Unit price (incl. VAT)" input that back-computes net
+  (`price_per_item = wvat / (1+vat/100)`, `InvoiceForm::netFromGross`); two-way
+  synced with the net field + re-derived on VAT/product change. Net stays the
+  stored source of truth (`dehydrated(false)`; `InvoiceLine::saving` is
+  authoritative). Conversion math unit-tested (`GrossPriceConversionTest`).
+  UX parity.
+- **G6 — auto-email on the non-myDATA issue path: ✅ DONE.** Two-level gate:
+  `companies.auto_email_on_issue` (global, default OFF — kill-switch for
+  testing) fires `SendInvoiceEmail` on the `finalize` action (draft→active)
+  for tenants NOT filing via myDATA (those get it on VALID — `Invoice::
+  shouldAutoEmailOnFinalize()` guards the double-send); `customers.
+  auto_email_invoices` (per-customer, default ON) opts a customer out of BOTH
+  auto paths (`Invoice::customerAcceptsAutoEmail()`); manual "Resend email"
+  ignores both. Gate predicates unit-tested (`AutoEmailGateTest`). Remaining:
+  a batch mail sweep (bulk / failure re-send).
+- **G8 — griniaris immediate-invoicing: ✅ DONE (two phases).** Phase 1: an
+  "Άμεσο" badge (`heroicon-o-bolt`) on WHMCS-inbox rows whose matched customer
+  is `needs_immediate_invoice` — pure prioritisation hint. Phase 2: the
+  `whmcs:auto-issue` command (scheduled, gated by `EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE`)
+  auto-FILES paid inbox rows at AADE for those customers, **two-key armed** (that
+  scheduler flag AND per-tenant `companies.whmcs_auto_issue_immediate`, both
+  default OFF). Reuses `WhmcsInvoiceFiler::file()` (all guards intact) and only
+  touches the unambiguous set — `status=pending_review`, `invoice_id` null,
+  `third_party_state ∈ {null,none,single}`; anything `held`/`multi`/unmatched is
+  left in the inbox for a human. Requires a per-tenant default invoice type
+  (`companies.whmcs_default_invoice_type_id`) — never guesses; skips the tenant
+  if unset. Tenant-safe (explicit `company_id` scope, no `BelongsToTenant` in
+  CLI). Loud audit: `Log::info` per filing + `Αυτόματη έκδοση (γκρινιάρης)` in
+  the row notes (filer gained an optional `$auditNote`). `WhmcsAutoIssueCommandTest`
+  covers the gate. **Inert until the scheduler + queue worker run.**
 
 **❌ NOT YET (lower / confirm-usage-first):** stock movements & ΣΔΕΠ (dead in
 legacy — see corrections); `invoiced=-333/-1000` WHMCS sentinel states;
@@ -397,8 +428,8 @@ activitylog (do once).
 **Suggested order:** (1)✅ sandbox myDATA. (2)✅ scheduler. (3)✅ timologia v2
 (T-1+T-2). (4)✅ **G1 withholding + G4 exempt** (merged, PR #68). (5)✅ **G3
 tax-inclusive + G9 payment-type + G5 goods-quantity** (filing correctness).
-(6) **G7 gross-edit, G6 issue-email, G8 griniaris** — the UX tail (left for
-last). (7) Έξοδα. (8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves
+(6)✅ **G7 gross-edit + G6 issue-email + G8 griniaris** — the UX tail (done).
+(7) Έξοδα. (8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves
 real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
 
 ---
@@ -408,6 +439,10 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
   Product/PaymentMethod — they rely on Filament's `BelongsToTenant`. Code
   outside a Filament request (queue jobs, the WHMCS bridge, scheduled commands)
   can see all tenants. Add scopes / assert tenant at service entry points.
+  Mitigation in practice: the CLI WHMCS paths (`whmcs:fetch-pending`,
+  `whmcs:auto-issue`, the filer/mapper) scope every query by `company_id`
+  explicitly and assert tenant ownership before filing — the pattern to follow
+  until a global scope lands.
 - **Soft-deleted FK rows render blank** in Filament Selects app-wide (a deleted
   lookup row's dependents show empty). Fix once with `withTrashed()` label
   lookups + a "deleted" badge.

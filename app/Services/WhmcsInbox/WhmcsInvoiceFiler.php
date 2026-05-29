@@ -85,6 +85,7 @@ class WhmcsInvoiceFiler
         Customer $customer,
         InvoiceType $invoiceType,
         ?int $filedByUserId = null,
+        ?string $auditNote = null,
     ): FileResult {
         // Defense: refuse to run inside an outer transaction. The
         // AADE HTTP call below MUST happen with no row locks held
@@ -199,9 +200,14 @@ class WhmcsInvoiceFiler
             'filed_by_user_id' => $filedByUserId,
             'mydata_mark' => $hasMark ? $mark->mark : null,
             'whmcs_writeback_state' => $hasMark ? PendingWhmcsInvoice::WRITEBACK_PENDING : null,
-            'notes' => $hasMark
+            'notes' => ($hasMark
                 ? 'Filed at AADE as invoice #'.$invoice->invcode.' (MARK '.$mark->mark.').'
-                : 'Recorded locally (off-mode — not filed at AADE) as invoice #'.$invoice->invcode.'.',
+                : 'Recorded locally (off-mode — not filed at AADE) as invoice #'.$invoice->invcode.'.')
+                // Optional audit suffix (e.g. the γκρινιάρης auto-issue
+                // reason). Appended here because the row is frozen against
+                // mutation once status flips to 'filed' below — the filer
+                // is the single writer of this notes column.
+                .($auditNote !== null && $auditNote !== '' ? ' '.$auditNote : ''),
         ]);
 
         // Phase 4: write the MARK back to WHMCS via the ekdosi_bridge
