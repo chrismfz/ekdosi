@@ -123,14 +123,15 @@ class WhmcsAutoIssue extends Command
             return collect([$tenant]);
         }
 
-        // All armed tenants. WHMCS-config check is belt-and-suspenders:
-        // the filer's AADE submit doesn't need WHMCS, but the rows only
-        // exist for WHMCS-configured tenants anyway.
+        // All armed tenants. Require full WHMCS integration (url + creds),
+        // mirroring the slug path's check — the rows only exist for
+        // WHMCS-configured tenants anyway. hasWhmcsIntegration() is a
+        // method (checks encrypted cols), so filter in PHP.
         return Company::query()
             ->where('whmcs_auto_issue_immediate', true)
-            ->whereNotNull('whmcs_api_url')
-            ->where('whmcs_api_url', '!=', '')
-            ->get();
+            ->get()
+            ->filter(fn (Company $c) => $c->hasWhmcsIntegration())
+            ->values();
     }
 
     /**

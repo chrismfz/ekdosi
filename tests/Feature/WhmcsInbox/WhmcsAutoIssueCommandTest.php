@@ -35,6 +35,8 @@ class WhmcsAutoIssueCommandTest extends TestCase
             'einvoice_provider' => 'gr-mydata',
             'mydata_mode' => 'off',               // NullSubmitter
             'whmcs_api_url' => 'https://whmcs.example.test/includes/api.php',
+            'whmcs_api_identifier' => 'id',
+            'whmcs_api_secret' => 'secret',
             'whmcs_auto_issue_immediate' => true,
         ], $overrides));
 
@@ -171,5 +173,52 @@ class WhmcsAutoIssueCommandTest extends TestCase
     public function test_unknown_tenant_slug_exits_invalid(): void
     {
         $this->artisan('whmcs:auto-issue --tenant=nope-nope')->assertExitCode(2);
+    }
+
+    public function test_does_not_file_row_whose_customer_belongs_to_another_tenant(): void
+    {
+        // The candidate query's whereHas('customer') is NOT company-scoped
+        // (customer is belongsTo by id). The per-row company_id assertion
+        // is the single CLI isolation guard — prove it holds: a pending
+        // row on tenant A pointing at tenant B's γκρινιάρης customer must
+        // NOT be auto-filed.
+        $tenantA = $this->tenant();
+        $tenantB = $this->tenant();   // separate company
+        $foreignCustomer = $this->customer($tenantB, grumpy: true);
+
+        $pending = $this->pending($tenantA, $foreignCustomer);   // company_id=A, customer_id=B's
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
+        $this->assertNull($pending->fresh()->invoice_id);
+    }
+
+    public function test_leaves_row_in_inbox_when_filer_rejects_zero_vat_without_exemption(): void
+    {
+        // Non-off mode → the filer's 0%-exempt guard is active. A taxed=0
+        // line with no configured exemption reason makes file() throw
+        // BEFORE any AADE submit; the command must catch it and leave the
+        // row in the inbox for the operator (the 'failed' branch).
+        $tenant = $this->tenant(['mydata_mode' => 'sandbox']);
+        $customer = $this->customer($tenant, grumpy: true);
+
+        $pending = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 7777,
+                'userid' => 1,
+                'date' => '2026-05-20',
+                'total' => '50.00',
+                'items' => ['item' => [
+                    ['description' => 'Exempt service', 'amount' => '50.00', 'taxed' => '0'],
+                ]],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status);
+        $this->assertNull($fresh->invoice_id);
     }
 }
