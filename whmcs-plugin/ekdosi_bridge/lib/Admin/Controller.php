@@ -71,7 +71,7 @@ EOF;
     {
         $link = htmlspecialchars($vars['modulelink']);
         if (! $this->csrfValid()) {
-            return $this->errorPage($link, 'Security token mismatch. Go back and retry.');
+            return $this->csrfFailPage($link);
         }
 
         $r = ThirdPartyStore::syncFromLegacy();
@@ -169,7 +169,7 @@ EOF;
     {
         $link = htmlspecialchars($vars['modulelink']);
         if (! $this->csrfValid()) {
-            return $this->errorPage($link, 'Security token mismatch. Go back and retry.');
+            return $this->csrfFailPage($link);
         }
         $invoiceId = (int) ($_POST['invoiceid'] ?? 0);
         if ($invoiceId <= 0) {
@@ -201,7 +201,7 @@ EOF;
     {
         $link = htmlspecialchars($vars['modulelink']);
         if (! $this->csrfValid()) {
-            return $this->errorPage($link, 'Security token mismatch. Go back and retry.');
+            return $this->csrfFailPage($link);
         }
         $invoiceId = (int) ($_POST['invoiceid'] ?? 0);
         if ($invoiceId <= 0) {
@@ -304,8 +304,52 @@ EOF;
         }
 
         $sent = (string) ($_POST['token'] ?? '');
-        $expected = (string) ($_SESSION['token'] ?? ($_SESSION['tokenval'] ?? ''));
+        if ($sent === '') {
+            return false;
+        }
 
-        return $sent !== '' && $expected !== '' && hash_equals($expected, $sent);
+        // Compare against the value generate_token('plain') embeds RIGHT NOW.
+        // This is the exact token WHMCS expects, regardless of which session
+        // key the installed version stores it under — WHMCS 8.x moved it off
+        // $_SESSION['token'], which is why the earlier key-based check failed
+        // on 8.13. The token is stable per session, so a second call returns
+        // the same value the form used.
+        if (preg_match('/value="([^"]+)"/', (string) generate_token('plain'), $m)
+            && hash_equals($m[1], $sent)) {
+            return true;
+        }
+
+        // Fallback: session keys used by older WHMCS builds.
+        foreach (['token', 'tokenval'] as $key) {
+            $expected = (string) ($_SESSION[$key] ?? '');
+            if ($expected !== '' && hash_equals($expected, $sent)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Non-sensitive one-liner shown on a CSRF failure so a still-broken install
+     * is diagnosable WITHOUT leaking token values — only booleans + lengths.
+     */
+    private function csrfFailPage(string $link): string
+    {
+        $sent = (string) ($_POST['token'] ?? '');
+        $field = function_exists('generate_token') ? (string) generate_token('plain') : '';
+        $fieldMatch = (bool) preg_match('/value="([^"]+)"/', $field);
+        $debug = sprintf(
+            'sent=%s(len %d) · generate_token=%s · field_parsed=%s · sess[token]=%s · sess[tokenval]=%s',
+            $sent !== '' ? 'Y' : 'N',
+            strlen($sent),
+            function_exists('generate_token') ? 'Y' : 'N',
+            $fieldMatch ? 'Y' : 'N',
+            empty($_SESSION['token']) ? 'N' : 'Y',
+            empty($_SESSION['tokenval']) ? 'N' : 'Y',
+        );
+
+        return $this->errorPage($link, 'Security token mismatch. Go back and retry.')
+            .'<p class="text-muted" style="font-size:11px">debug: '.htmlspecialchars($debug).'</p>';
     }
 }
