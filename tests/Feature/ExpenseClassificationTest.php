@@ -72,5 +72,18 @@ class ExpenseClassificationTest extends TestCase
         $this->assertSame('E3_585_001', $expense->classification_type);
         $this->assertSame('category2_3', $expense->classification_category);
         $this->assertSame('classified', $expense->classification_state);
+
+        // A forged code (bypassing the Select options) is rejected server-side
+        // by Filament's options-derived `in` rule — the action never persists
+        // it. Documents the security property the review confirmed.
+        Livewire::test(ViewExpense::class, ['record' => $expense->getRouteKey()])
+            ->callAction('classify', data: [
+                'classification_type' => 'E3_BOGUS',
+                'classification_category' => 'category2_3',
+            ])
+            ->assertHasActionErrors(['classification_type']);
+
+        $expense->refresh();
+        $this->assertSame('E3_585_001', $expense->classification_type, 'forged code must not overwrite the valid one');
     }
 }

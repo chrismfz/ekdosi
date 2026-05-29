@@ -23,6 +23,9 @@ return new class extends Migration
             // (category2_*) — stored as the AADE string codes.
             $t->string('classification_type', 20)->nullable()->after('classification_state');
             $t->string('classification_category', 30)->nullable()->after('classification_type');
+
+            // Supports the "Χαρακτηρισμός" table filter (classified vs not).
+            $t->index(['company_id', 'classification_state']);
         });
     }
 
