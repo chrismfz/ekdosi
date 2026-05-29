@@ -2,12 +2,9 @@
 
 namespace App\Filament\Resources\Customers\Schemas;
 
-use App\Exceptions\Aade\AadeAfmNotFound;
-use App\Exceptions\Aade\AadeCredentialsInvalid;
-use App\Exceptions\Aade\AadeUnreachable;
+use App\Filament\Support\AadeFormFill;
 use App\Models\Customer;
 use App\Models\PaymentMethod;
-use App\Services\AadeRegistryLookup;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -67,40 +64,8 @@ class CustomerForm
                                             // looks up Greek AFMs only.
                                             ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
                                             ->action(function (callable $get, callable $set) {
-                                                $tenant = Filament::getTenant();
-                                                if (! $tenant) {
-                                                    Notification::make()->title('No tenant context.')->warning()->send();
-
-                                                    return;
-                                                }
-                                                $afm = trim((string) $get('afm'));
-                                                if ($afm === '') {
-                                                    Notification::make()->title('Enter an AFM first.')->warning()->send();
-
-                                                    return;
-                                                }
-                                                try {
-                                                    $result = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm);
-                                                } catch (AadeCredentialsInvalid) {
-                                                    Notification::make()
-                                                        ->title('GSIS credentials missing or invalid')
-                                                        ->body('Configure them on the Company → AADE registry (GSIS) tab.')
-                                                        ->danger()->send();
-
-                                                    return;
-                                                } catch (AadeAfmNotFound) {
-                                                    Notification::make()
-                                                        ->title('AFM not found or inactive in AADE registry')
-                                                        ->body('Double-check the digits, or fill the customer manually if this is a special case.')
-                                                        ->warning()->send();
-
-                                                    return;
-                                                } catch (AadeUnreachable) {
-                                                    Notification::make()
-                                                        ->title('AADE registry unreachable')
-                                                        ->body('Try again in a moment, or fill the customer manually.')
-                                                        ->warning()->send();
-
+                                                $result = AadeFormFill::lookup($get('afm'));
+                                                if (! $result) {
                                                     return;
                                                 }
                                                 // Only overwrite fields the operator hasn't

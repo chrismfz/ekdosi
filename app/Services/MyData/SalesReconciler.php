@@ -377,35 +377,6 @@ class SalesReconciler
 
     private function initFirebed(): void
     {
-        if ($this->tenant->einvoice_provider !== 'gr-mydata') {
-            throw new RuntimeException(
-                'Η συμφωνία myDATA είναι διαθέσιμη μόνο για ελληνικούς (gr-mydata) μισθωτές.'
-            );
-        }
-
-        if ($this->tenant->mydata_mode_enum === MyDataMode::Off) {
-            throw new RuntimeException(
-                'Η λειτουργία myDATA είναι απενεργοποιημένη (Off) για αυτόν τον μισθωτή.'
-            );
-        }
-
-        $aadeId = $this->tenant->mydata_aade_id;
-        $subKey = $this->tenant->mydata_subscription_key; // decrypted by cast
-
-        if (empty($aadeId) || empty($subKey)) {
-            throw new RuntimeException(
-                'Δεν έχουν οριστεί διαπιστευτήρια myDATA για αυτόν τον μισθωτή '.
-                '(mydata_aade_id / mydata_subscription_key).'
-            );
-        }
-
-        $env = $this->tenant->mydata_mode_enum === MyDataMode::Production ? 'prod' : 'dev';
-
-        MyDataRequest::init($aadeId, $subKey, $env);
-
-        // Always (re)set the handler — passing null RESETS firebed's
-        // leftover static handler, so a MockHandler from an earlier test
-        // can't intercept a real call later in the same process.
-        MyDataRequest::setHandler($this->mockHandler);
+        FirebedCredentials::init($this->tenant, $this->mockHandler);
     }
 }
