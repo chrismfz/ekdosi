@@ -244,12 +244,12 @@ HTML;
     }
 
     /**
-     * Validate the CSRF token on a state-changing POST. WHMCS keeps the
-     * token in $_SESSION['token'] (the value generate_token('plain')
-     * embeds). The earlier version read $_SESSION['tokenval'], which WHMCS
-     * never sets → always '' → every save/route/delete was rejected with a
-     * session/invalid-request error. Read the canonical key (with a
-     * 'tokenval' fallback) and keep the no-helper tolerance.
+     * Validate the CSRF token on a state-changing POST. Compares the posted
+     * token against the value generate_token('plain') embeds RIGHT NOW — the
+     * exact token WHMCS expects, regardless of which session key the installed
+     * version stores it under (WHMCS 8.x moved it off $_SESSION['token'], which
+     * broke a key-based check). The token is stable per session. Session-key
+     * fallbacks cover older builds; no-helper builds aren't hard-blocked.
      */
     private function csrfValid(): bool
     {
@@ -257,8 +257,20 @@ HTML;
             return true;
         }
         $sent = (string) ($_POST['token'] ?? '');
-        $expected = (string) ($_SESSION['token'] ?? ($_SESSION['tokenval'] ?? ''));
+        if ($sent === '') {
+            return false;
+        }
+        if (preg_match('/value="([^"]+)"/', (string) generate_token('plain'), $m)
+            && hash_equals($m[1], $sent)) {
+            return true;
+        }
+        foreach (['token', 'tokenval'] as $key) {
+            $expected = (string) ($_SESSION[$key] ?? '');
+            if ($expected !== '' && hash_equals($expected, $sent)) {
+                return true;
+            }
+        }
 
-        return $sent !== '' && $expected !== '' && hash_equals($expected, $sent);
+        return false;
     }
 }
