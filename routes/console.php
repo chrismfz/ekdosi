@@ -74,3 +74,13 @@ if (config('ekdosi.schedule.mydata_reconcile_enabled')) {
         ->name('mydata-reconcile-all')
         ->withoutOverlapping();
 }
+
+// Refresh the cached dashboard "Εικόνα από myDATA" VAT snapshot (the widget
+// reads the cache; this is the heavy AADE pull). All gr-mydata / non-Off
+// tenants, every few hours.
+if (config('ekdosi.schedule.mydata_vat_picture_enabled')) {
+    Schedule::command('mydata:refresh-vat-picture')
+        ->cron(config('ekdosi.schedule.mydata_vat_picture_cron', '0 */4 * * *'))
+        ->name('mydata-vat-picture-all')
+        ->withoutOverlapping();
+}

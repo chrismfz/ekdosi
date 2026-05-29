@@ -19,6 +19,7 @@
         'issuedAt' => 'Έκδοση',
         'counterpart' => 'Πελάτης',
         'supplier' => 'Προμηθευτής',
+        'afm' => 'ΑΦΜ',
         'gross' => 'Σύνολο',
         'localState' => 'Τοπικά',
         'aadeState' => 'AADE',
@@ -61,6 +62,9 @@
                             @case('counterpart')
                             @case('supplier')
                                 <td class="py-2 pr-4">{{ $row['counterpartName'] ?? '—' }}</td>
+                                @break
+                            @case('afm')
+                                <td class="py-2 pr-4 font-mono text-xs">{{ $row['afm'] ?? '—' }}</td>
                                 @break
                             @case('gross')
                                 <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row['gross']) }}</td>

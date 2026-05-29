@@ -253,10 +253,21 @@ running VAT position toward the εφορία — no need to open a report:
       / Καθαρό ΦΠΑ with the current month alongside — the operator-requested
       "πόσο ΦΠΑ χρωστάω" glance; gr-mydata only. Tenant-scoped SQL aggregates.
       Covered by `VatPeriodReportTest`.
-      ⏳ **DEFERRED: AADE cross-check.** Figures are LOCAL. Diffing them against
-      the authoritative `RequestVatInfo` (per-invoice / GroupedPerDay) and
-      surfacing drift like the reconciliation worklists — never trust one side —
-      is the follow-up (a live read-GET, sandbox-verify the parser first).
+      **POLISH (post-go-live UI pass):** the widget now sources from **AADE**,
+      not local books — `MyDataVatAggregator` sums the ACTUAL docs AADE holds
+      (output = `RequestTransmittedDocs`, input = `RequestDocs`, cancelled
+      excluded) → `MyDataVatPicture`, cached by `mydata:refresh-vat-picture`
+      (scheduled every few hours; `VatPictureCache`). The widget READS the
+      cache only (never a live AADE call on page load) and shows "ενημερώθηκε…".
+      So "Εικόνα από myDATA" = what AADE actually has, working even before any
+      local expense import. `VatPeriodReport` stays as the LOCAL-books figure
+      (the basis for the local-vs-AADE cross-check below). Covered by
+      `MyDataVatPictureTest`.
+      ⏳ **DEFERRED: authoritative Φ2 cross-check.** `RequestVatInfo` returns raw
+      Φ2 form boxes (Vat301…Vat423), NOT a ready net — the committed spec only
+      documents the input boxes (VAT_361–366); computing the official net needs
+      the full Φ2 box semantics (risk of a WRONG "τι χρωστάς"). When that's
+      pinned down: diff the doc-sum vs `RequestVatInfo` and surface drift.
 - [x] **E7 — Ε3 overview**: ✅ `App\Services\MyData\E3Reporter` pulls AADE's
       `RequestE3Info` (read-GET; '' empty-window guard + continuationToken
       pagination + MockHandler seam) and rolls the entries up per (E3 type,

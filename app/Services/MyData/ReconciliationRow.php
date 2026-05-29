@@ -28,6 +28,7 @@ final readonly class ReconciliationRow
         public ?string $invcode = null,
         public ?string $issuedAt = null,
         public ?string $counterpartName = null,
+        public ?string $counterpartVat = null,   // issuer/customer AFM
         public ?float $gross = null,
         public ?string $localState = null,   // invoices.mydata_state
         public ?string $localStatus = null,  // invoices.local_status

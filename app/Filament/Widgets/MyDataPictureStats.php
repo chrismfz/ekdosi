@@ -3,29 +3,31 @@
 namespace App\Filament\Widgets;
 
 use App\Filament\Widgets\Concerns\FormatsDashboardValues;
-use App\Models\Company;
-use App\Services\Dashboard\VatPeriodReport;
+use App\Services\MyData\MyDataVatPicture;
+use App\Support\MyData\VatPictureCache;
+use Carbon\Carbon;
 use Filament\Facades\Filament;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 /**
- * "Εικόνα από myDATA" (E6) — the operator's running ΦΠΑ position toward the
- * εφορία, at a glance: Έσοδα (ΦΠΑ εκροών) vs Έξοδα (ΦΠΑ εισροών) vs the net
- * ΦΠΑ to pay. Shown for the CURRENT QUARTER, with the CURRENT MONTH alongside
- * in each stat's description.
+ * "Εικόνα από myDATA — ΦΠΑ": the operator's running VAT position toward the
+ * εφορία, AS HELD BY AADE. Έσοδα/ΦΠΑ εκροών (RequestTransmittedDocs) vs
+ * Έξοδα/ΦΠΑ εισροών (RequestDocs) vs the net ΦΠΑ, for the CURRENT QUARTER with
+ * the CURRENT MONTH alongside.
  *
- * Output side = our invoices; input side = local `expenses` (the Έξοδα phase).
- * Figures are LOCAL (the AADE RequestVatInfo cross-check is a follow-up).
+ * READS the cached snapshot only (VatPictureCache) — the heavy AADE pull runs
+ * on the `mydata:refresh-vat-picture` scheduler, never live on a dashboard
+ * load. Until the first refresh the cards prompt to sync. The "ενημερώθηκε…"
+ * line surfaces snapshot staleness.
  *
- * Only meaningful for gr-mydata tenants (myDATA is the data source); hidden
- * otherwise.
+ * gr-mydata tenants only.
  */
 class MyDataPictureStats extends StatsOverviewWidget
 {
     use FormatsDashboardValues;
 
-    protected static ?int $sort = 9;
+    protected static ?int $sort = 3;
 
     protected ?string $heading = 'Εικόνα από myDATA — ΦΠΑ';
 
@@ -37,38 +39,59 @@ class MyDataPictureStats extends StatsOverviewWidget
     protected function getStats(): array
     {
         $tenant = Filament::getTenant();
-        if (! $tenant instanceof Company) {
+        if ($tenant === null) {
             return [];
         }
 
-        $report = new VatPeriodReport($tenant);
-        $now = now();
+        $quarter = VatPictureCache::get($tenant, 'quarter');
+        $month = VatPictureCache::get($tenant, 'month');
 
-        $quarter = $report->forPeriod($now->copy()->startOfQuarter(), $now->copy()->endOfQuarter());
-        $month = $report->forPeriod($now->copy()->startOfMonth(), $now->copy()->endOfMonth());
+        if ($quarter === null) {
+            // Not refreshed yet (no scheduler run / first install).
+            return [
+                Stat::make('Εικόνα από myDATA', '—')
+                    ->description('Δεν έχει συγχρονιστεί ακόμη — εκτελέστε «mydata:refresh-vat-picture».')
+                    ->descriptionIcon('heroicon-m-cloud-arrow-down')
+                    ->color('gray'),
+            ];
+        }
 
         $netQuarter = $quarter->netVat();
-        $netMonth = $month->netVat();
-
-        // Net ΦΠΑ: positive = προς απόδοση (owe), negative = πιστωτικό (credit).
-        $netLabel = $quarter->isPayable() ? 'Προς απόδοση' : 'Πιστωτικό υπόλοιπο';
-        $netColor = $quarter->isPayable() ? 'danger' : 'success';
+        $netMonth = $month?->netVat() ?? 0.0;
 
         return [
             Stat::make('Τρίμηνο — Έσοδα', $this->eur($quarter->outputGross))
-                ->description('ΦΠΑ εκροών '.$this->eur($quarter->outputVat).' • μήνας '.$this->eur($month->outputGross))
+                ->description('ΦΠΑ εκροών '.$this->eur($quarter->outputVat).' • μήνας '.$this->eur($month?->outputGross ?? 0))
                 ->descriptionIcon('heroicon-m-arrow-up-right')
                 ->color('gray'),
 
             Stat::make('Τρίμηνο — Έξοδα', $this->eur($quarter->inputGross))
-                ->description('ΦΠΑ εισροών '.$this->eur($quarter->inputVat).' • μήνας '.$this->eur($month->inputGross))
+                ->description('ΦΠΑ εισροών '.$this->eur($quarter->inputVat).' • μήνας '.$this->eur($month?->inputGross ?? 0))
                 ->descriptionIcon('heroicon-m-arrow-down-right')
                 ->color('gray'),
 
             Stat::make('Τρίμηνο — Καθαρό ΦΠΑ', $this->eur(abs($netQuarter)))
-                ->description($netLabel.' • μήνας '.$this->eur(abs($netMonth)))
+                ->description(($quarter->isPayable() ? 'Προς απόδοση' : 'Πιστωτικό υπόλοιπο')
+                    .' • μήνας '.$this->eur(abs($netMonth)))
                 ->descriptionIcon('heroicon-m-banknotes')
-                ->color($netColor),
+                ->color($quarter->isPayable() ? 'danger' : 'success'),
         ];
+    }
+
+    protected function getDescription(): ?string
+    {
+        $tenant = Filament::getTenant();
+        $picture = $tenant ? VatPictureCache::get($tenant, 'quarter') : null;
+
+        return $this->stalenessNote($picture);
+    }
+
+    private function stalenessNote(?MyDataVatPicture $picture): ?string
+    {
+        if ($picture?->fetchedAt === null) {
+            return null;
+        }
+
+        return 'Στοιχεία ΑΑΔΕ — ενημερώθηκε '.Carbon::parse($picture->fetchedAt)->diffForHumans();
     }
 }

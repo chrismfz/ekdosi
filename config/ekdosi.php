@@ -45,6 +45,12 @@ return [
         'mydata_reconcile_enabled' => env('EKDOSI_SCHEDULE_MYDATA_RECONCILE', true),
         'mydata_reconcile_time' => env('EKDOSI_MYDATA_RECONCILE_TIME', '06:00'),
 
+        // mydata:refresh-vat-picture — caches the dashboard "Εικόνα από myDATA"
+        // VAT snapshot (εκροές−εισροές) per gr-mydata tenant. Heavy AADE pull;
+        // run every few hours so the widget reads a fresh-enough cache.
+        'mydata_vat_picture_enabled' => env('EKDOSI_SCHEDULE_MYDATA_VAT_PICTURE', true),
+        'mydata_vat_picture_cron' => env('EKDOSI_MYDATA_VAT_PICTURE_CRON', '0 */4 * * *'),
+
     ],
 
 ];

@@ -142,6 +142,8 @@ class MyDataE3Overview extends Page
             'rows' => array_map(fn ($r) => [
                 'classType' => $r->classType,
                 'classCategory' => $r->classCategory,
+                'typeLabel' => \App\Support\MyData\Codes::e3TypeLabel($r->classType),
+                'categoryLabel' => $r->classCategory ? \App\Support\MyData\Codes::e3CategoryLabel($r->classCategory) : null,
                 'value' => $r->value,
                 'count' => $r->count,
             ], $report->rows),
