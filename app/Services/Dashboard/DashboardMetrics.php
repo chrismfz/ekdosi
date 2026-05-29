@@ -219,6 +219,45 @@ class DashboardMetrics
             ->limit($limit);
     }
 
+    /**
+     * Customers who owe money, highest balance first — the per-customer
+     * breakdown behind the "Ανεξόφλητα (πιστωτικά)" headline. Each row
+     * carries an `outstanding_balance` aliased column (see
+     * Customer::scopeWithOutstandingBalance, which mirrors
+     * outstandingReceivables()'s math, so Σ(positive balances) reconciles
+     * with the headline). Returns an Eloquent builder for the Filament
+     * TableWidget; tests call ->get().
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<\App\Models\Customer>
+     */
+    public function topDebtorsQuery(int $limit = 10)
+    {
+        return \App\Models\Customer::query()
+            ->where('customers.company_id', $this->tenant->id)
+            ->withOutstandingBalance($this->tenant->id)
+            ->onlyDebtors()
+            ->orderByDesc('outstanding_balance')
+            ->limit($limit);
+    }
+
+    /**
+     * IDs of this tenant's customers who currently owe money — the set
+     * behind the Customers-list "Με υπόλοιπο" filter that the headline
+     * card links into. Unbounded (no limit): the filter needs ALL
+     * debtors, not just the top N.
+     *
+     * @return list<int>
+     */
+    public function debtorIds(): array
+    {
+        return \App\Models\Customer::query()
+            ->where('customers.company_id', $this->tenant->id)
+            ->withOutstandingBalance($this->tenant->id)
+            ->onlyDebtors()
+            ->pluck('customers.id')
+            ->all();
+    }
+
     // ---- internals ------------------------------------------------------
 
     /**

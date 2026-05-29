@@ -17,7 +17,7 @@ use Filament\Widgets\ChartWidget;
  */
 class YearComparisonChart extends ChartWidget
 {
-    protected static ?int $sort = 4;
+    protected static ?int $sort = 7;
 
     protected ?string $heading = 'Σύγκριση ετών (σωρευτικά καθαρά έσοδα)';
 

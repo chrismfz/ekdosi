@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Support\InvoiceScope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class Customer extends Model
 {
@@ -108,5 +111,74 @@ class Customer extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Attach an `outstanding_balance` column (and the `cust_owed` /
+     * `cust_paid` join aliases it derives from) to a Customer query.
+     *
+     * The balance is computed the SAME way as
+     * DashboardMetrics::outstandingReceivables() — so the sum of every
+     * customer's positive balance reconciles with the dashboard's
+     * "Ανεξόφλητα (πιστωτικά)" headline:
+     *
+     *   balance = Σ(credit-term, live, non-credit-note invoice
+     *               gross_total − credited_total)
+     *           − Σ(customer payments)
+     *
+     * Only `payment_methods.due_days > 0` (credit-term) invoices create a
+     * receivable; cash-term are settled at issue. Credit notes
+     * (credited_invoice_id set) are excluded from the base and netted via
+     * the original's credited_total cache. Cancelled invoices (local OR
+     * AADE) drop out via InvoiceScope::live(). All aggregation is in SQL
+     * (two grouped sub-selects, left-joined) — no per-row PHP, so it is
+     * safe on a list with thousands of customers.
+     *
+     * @param  int  $companyId  Tenant scope — Customer has no global
+     *                          company scope (CLAUDE.md deferral), so the
+     *                          caller passes it explicitly.
+     */
+    public function scopeWithOutstandingBalance(Builder $query, int $companyId): Builder
+    {
+        $owed = DB::table('invoices')
+            ->join('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
+            ->where('invoices.company_id', $companyId)
+            ->whereNull('invoices.deleted_at')
+            ->whereNull('invoices.credited_invoice_id')
+            ->whereNotNull('invoices.customer_id')
+            ->where('payment_methods.due_days', '>', 0)
+            ->groupBy('invoices.customer_id')
+            ->select('invoices.customer_id')
+            // COALESCE each SUM separately (NOT SUM(gross - credited)) —
+            // credited_total is NULL on never-credited invoices and
+            // per-row NULL arithmetic would null the whole sum. Mirrors
+            // DashboardMetrics::outstandingReceivables() exactly.
+            ->selectRaw('COALESCE(SUM(invoices.gross_total), 0) - COALESCE(SUM(invoices.credited_total), 0) as owed');
+        $owed = InvoiceScope::live($owed, 'invoices.');
+
+        $paid = DB::table('payments')
+            ->where('company_id', $companyId)
+            ->whereNull('deleted_at')
+            ->whereNotNull('customer_id')
+            ->groupBy('customer_id')
+            ->select('customer_id')
+            ->selectRaw('SUM(amount) as paid');
+
+        return $query
+            ->leftJoinSub($owed, 'cust_owed', 'cust_owed.customer_id', '=', 'customers.id')
+            ->leftJoinSub($paid, 'cust_paid', 'cust_paid.customer_id', '=', 'customers.id')
+            ->select('customers.*')
+            ->selectRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) as outstanding_balance');
+    }
+
+    /**
+     * Narrow a `withOutstandingBalance()` query to customers who actually
+     * owe money (positive balance, above a cent of rounding noise). Kept
+     * separate so a caller can show ALL customers' balances (incl. zero /
+     * credit) when wanted. Must be chained AFTER withOutstandingBalance().
+     */
+    public function scopeOnlyDebtors(Builder $query): Builder
+    {
+        return $query->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) > 0.005');
     }
 }

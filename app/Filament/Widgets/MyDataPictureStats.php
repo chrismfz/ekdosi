@@ -25,7 +25,7 @@ class MyDataPictureStats extends StatsOverviewWidget
 {
     use FormatsDashboardValues;
 
-    protected static ?int $sort = 7;
+    protected static ?int $sort = 8;
 
     protected ?string $heading = 'Εικόνα από myDATA — ΦΠΑ';
 

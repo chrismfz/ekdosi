@@ -14,7 +14,7 @@ use Filament\Widgets\ChartWidget;
  */
 class MonthlyIncomeChart extends ChartWidget
 {
-    protected static ?int $sort = 3;
+    protected static ?int $sort = 6;
 
     protected ?string $heading = 'Έσοδα ανά μήνα (12 μήνες)';
 

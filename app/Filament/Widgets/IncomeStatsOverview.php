@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Widgets\Concerns\FormatsDashboardValues;
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
@@ -20,6 +21,9 @@ class IncomeStatsOverview extends StatsOverviewWidget
     use FormatsDashboardValues;
 
     protected static ?int $sort = 1;
+
+    // Keep the headline figures live without a manual refresh.
+    protected ?string $pollingInterval = '60s';
 
     protected function getStats(): array
     {
@@ -57,9 +61,16 @@ class IncomeStatsOverview extends StatsOverviewWidget
                 ->chart($vatSpark),
 
             Stat::make('Ανεξόφλητα (πιστωτικά)', $this->eur($outstanding))
-                ->description('Υπόλοιπο πελατών με πίστωση')
+                ->description('Υπόλοιπο πελατών με πίστωση — δες ποιοι')
                 ->descriptionIcon('heroicon-m-banknotes')
-                ->color($outstanding > 0 ? 'danger' : 'success'),
+                ->color($outstanding > 0 ? 'danger' : 'success')
+                // Drill into the customers who owe (the "Με υπόλοιπο"
+                // filter on the Customers list). getUrl() carries the
+                // current tenant slug in the path automatically.
+                ->url(CustomerResource::getUrl('index', [
+                    'tableFilters' => ['with_balance' => ['value' => true]],
+                ]))
+                ->extraAttributes(['class' => 'cursor-pointer']),
 
             $this->invoiceCountStat($tenant, $metrics, $thisMonth->count),
         ];
