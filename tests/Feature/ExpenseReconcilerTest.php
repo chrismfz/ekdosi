@@ -1,0 +1,231 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Company;
+use App\Models\Expense;
+use App\Models\Supplier;
+use App\Services\MyData\ExpenseReconciler;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+/**
+ * Network-layer test for the EXPENSES reconciler: a Guzzle MockHandler feeds
+ * canned RequestDocs XML through firebed. Verifies pagination, the issuer→
+ * counterpart mapping, the empty-window TypeError guard, cancellation folding,
+ * and the five diff buckets against local expenses.
+ */
+class ExpenseReconcilerTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private Company $tenant;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->tenant = Company::create([
+            'name' => 'Exp recon',
+            'slug' => 'exprecon-'.uniqid(),
+            'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata',
+            'mydata_mode' => 'sandbox',
+            'afm' => '801280908',
+            'mydata_aade_id' => 'TESTUSER',
+            'mydata_subscription_key' => 'TESTKEY',
+        ]);
+    }
+
+    private function reconciler(MockHandler $mock): ExpenseReconciler
+    {
+        return new ExpenseReconciler($this->tenant, $mock);
+    }
+
+    public function test_paginates_folds_cancellations_and_maps_issuer(): void
+    {
+        $result = $this->reconciler(new MockHandler([
+            new Response(200, [], $this->pageOne()),
+            new Response(200, [], $this->pageTwo()),
+        ]))->reconcile(now()->subMonth(), now());
+
+        // 3 unique expense docs across the two pages, no local expenses yet.
+        $this->assertSame(3, $result->aadeTotal);
+        $this->assertCount(3, $result->missingLocally);
+
+        $byMark = collect($result->missingLocally)->keyBy('mark');
+
+        // Issuer (supplier) name + AFM folded into the counterpart* fields.
+        $this->assertSame('ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', $byMark['400000000000001']->counterpartName);
+        $this->assertSame(124.00, $byMark['400000000000001']->gross);
+        $this->assertSame('VALID', $byMark['400000000000001']->aadeState);
+
+        // Inline <cancelledByMark> → cancelled.
+        $this->assertSame('CANCELLED', $byMark['400000000000002']->aadeState);
+        // Listed in <cancelledInvoicesDoc> → folded to cancelled.
+        $this->assertSame('CANCELLED', $byMark['400000000000003']->aadeState);
+
+        // missingLocally rows carry no local id.
+        $this->assertNull($byMark['400000000000001']->expenseId);
+    }
+
+    public function test_empty_window_is_safe(): void
+    {
+        $result = $this->reconciler(new MockHandler([
+            new Response(200, [], <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc/>
+</RequestedDoc>
+XML),
+        ]))->reconcile(now()->subMonth(), now());
+
+        $this->assertSame(0, $result->aadeTotal);
+        $this->assertFalse($result->hasDiscrepancies());
+    }
+
+    public function test_buckets_matched_mismatch_and_missing(): void
+    {
+        $supplier = Supplier::create([
+            'company_id' => $this->tenant->id,
+            'afm' => '998482379',
+            'name' => 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ',
+            'source' => 'sync',
+        ]);
+
+        // matched: local VALID, AADE VALID (mark 001).
+        $this->expense('400000000000001', 'VALID', $supplier->id);
+        // stateMismatch: local VALID but AADE cancels it (page two: mark 002).
+        $this->expense('400000000000002', 'VALID', $supplier->id);
+        // missingAtAade: local holds a MARK the feed never returns.
+        $this->expense('400000000000999', 'VALID', $supplier->id);
+
+        $result = $this->reconciler(new MockHandler([
+            new Response(200, [], $this->pageOne()),
+            new Response(200, [], $this->pageTwo()),
+        ]))->reconcile(now()->subMonth(), now());
+
+        $this->assertCount(1, $result->matched);
+        $this->assertSame('400000000000001', $result->matched[0]->mark);
+        $this->assertNotNull($result->matched[0]->expenseId);
+        $this->assertSame('ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', $result->matched[0]->counterpartName);
+
+        $this->assertCount(1, $result->stateMismatch);
+        $this->assertSame('400000000000002', $result->stateMismatch[0]->mark);
+        $this->assertSame('CANCELLED', $result->stateMismatch[0]->aadeState);
+
+        $this->assertCount(1, $result->missingAtAade);
+        $this->assertSame('400000000000999', $result->missingAtAade[0]->mark);
+
+        // AADE mark 003 has no local expense → actionable "καταχώριση".
+        $this->assertCount(1, $result->missingLocally);
+        $this->assertSame('400000000000003', $result->missingLocally[0]->mark);
+
+        $this->assertTrue($result->hasDiscrepancies());
+    }
+
+    /**
+     * The unique (company_id, mydata_mark) index makes a local duplicate
+     * impossible to WRITE, so we exercise the duplicateLocal branch of the
+     * pure diff() directly with two in-memory expenses sharing a MARK — a
+     * belt-and-suspenders mirror of the sales reconciler.
+     */
+    public function test_duplicate_local_via_pure_diff(): void
+    {
+        $a = (new Expense)->forceFill(['id' => 1, 'mydata_mark' => '400000000000007', 'mydata_state' => 'VALID']);
+        $b = (new Expense)->forceFill(['id' => 2, 'mydata_mark' => '400000000000007', 'mydata_state' => 'VALID']);
+
+        $aade = [new \App\Services\MyData\AadeDocSummary(
+            mark: '400000000000007', uid: 'U', cancelled: false, cancelledByMark: null,
+            series: 'A', aa: '7', issueDate: '2026-01-10',
+            counterpartName: 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', counterpartVat: '998482379', gross: 124.0,
+        )];
+
+        $result = (new ExpenseReconciler($this->tenant))->diff(
+            $aade, collect([$a, $b]), '01/01/2026', '31/01/2026',
+        );
+
+        $this->assertCount(2, $result->duplicateLocal);
+        $this->assertSame('400000000000007', $result->duplicateLocal[0]->mark);
+        // The first of the colliding group still reconciles (→ matched).
+        $this->assertCount(1, $result->matched);
+    }
+
+    private function expense(string $mark, ?string $state, int $supplierId): Expense
+    {
+        return Expense::create([
+            'company_id' => $this->tenant->id,
+            'supplier_id' => $supplierId,
+            'mydata_mark' => $mark,
+            'mydata_state' => $state,
+            'issue_date' => now()->subDays(3)->toDateString(),
+            'supplier_afm' => '998482379',
+            'gross_total' => '124.00',
+            'source' => 'sync',
+        ]);
+    }
+
+    private function pageOne(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <continuationToken>
+        <nextPartitionKey>PK1</nextPartitionKey>
+        <nextRowKey>RK1</nextRowKey>
+    </continuationToken>
+    <invoicesDoc>
+        <invoice>
+            <uid>UID1</uid>
+            <mark>400000000000001</mark>
+            <issuer>
+                <vatNumber>998482379</vatNumber>
+                <country>GR</country>
+                <name>ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ</name>
+            </issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+    }
+
+    private function pageTwo(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <uid>UID2</uid>
+            <mark>400000000000002</mark>
+            <cancelledByMark>900000000000002</cancelledByMark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>A</series><aa>2</aa><issueDate>2026-01-11</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalGrossValue>200.00</totalGrossValue></invoiceSummary>
+        </invoice>
+        <invoice>
+            <uid>UID3</uid>
+            <mark>400000000000003</mark>
+            <issuer><vatNumber>802438394</vatNumber><country>GR</country></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>B</series><aa>3</aa><issueDate>2026-01-12</issueDate><invoiceType>2.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalGrossValue>50.00</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+    <cancelledInvoicesDoc>
+        <cancelledInvoice>
+            <invoiceMark>400000000000003</invoiceMark>
+            <cancellationMark>900000000000003</cancellationMark>
+            <cancellationDate>2026-01-13</cancellationDate>
+        </cancelledInvoice>
+    </cancelledInvoicesDoc>
+</RequestedDoc>
+XML;
+    }
+}

@@ -183,8 +183,19 @@ These lock several open questions:
       Scans `RequestDocs` → unique issuer AFMs → upsert `source=sync`
       suppliers (doc name / GSIS / AFM-only). The bulk twin of E2's per-AFM
       button; reusable by E3. Tested via MockHandler.
-- [ ] **E3 — ExpenseReconciler** over `RequestDocs` (mirror `SalesReconciler`;
-      reuse pagination/continuationToken handling).
+- [x] **E3 — ExpenseReconciler** over `RequestDocs`: ✅ `App\Services\MyData\
+      ExpenseReconciler` mirrors `SalesReconciler` (same pagination /
+      continuationToken / empty-window TypeError guard / cancellation folding),
+      diffs AADE expense docs vs local `expenses` into the five buckets
+      (`ExpenseReconciliationResult`): matched / stateMismatch / missingAtAade /
+      **missingLocally** (the actionable "καταχώριση εξόδου") / duplicateLocal.
+      The relevant party is the ISSUER (supplier) — folded into the shared
+      `AadeDocSummary`/`ReconciliationRow` counterpart* fields; `ReconciliationRow`
+      gained an optional `expenseId` so the one worklist row/partial serves both
+      sides. Pure `diff()` + a `rawDocs()` diagnostic, like the sales side.
+      Covered by `ExpenseReconcilerTest` (MockHandler: pagination, issuer map,
+      empty window, all five buckets). The E4 console page + import-expense
+      action consume this.
 - [ ] **E4 — Κονσόλα myDATA / Έξοδα** page (mirror inbound console; reuse the
       shared table partial) + **import-expense** action (auto-creating the
       supplier on sync).
