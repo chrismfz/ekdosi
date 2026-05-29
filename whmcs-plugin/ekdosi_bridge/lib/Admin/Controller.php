@@ -274,10 +274,19 @@ EOF;
      */
     private function csrfField(): string
     {
-        if (function_exists('generate_token')) {
-            return (string) generate_token('plain');
+        if (! function_exists('generate_token')) {
+            return '';
         }
-        return '';
+        $t = (string) generate_token('plain');
+        // WHMCS 8.x 'plain' returns the RAW token string (not HTML); older
+        // builds may return an <input>. Emit a real hidden input either way so
+        // the token is actually submitted (don't rely on WHMCS auto-injecting
+        // one into the form).
+        if (stripos($t, '<input') !== false) {
+            return $t;
+        }
+
+        return '<input type="hidden" name="token" value="'.htmlspecialchars($t, ENT_QUOTES).'">';
     }
 
     /**
@@ -308,18 +317,19 @@ EOF;
             return false;
         }
 
-        // Compare against the value generate_token('plain') embeds RIGHT NOW.
-        // This is the exact token WHMCS expects, regardless of which session
-        // key the installed version stores it under — WHMCS 8.x moved it off
-        // $_SESSION['token'], which is why the earlier key-based check failed
-        // on 8.13. The token is stable per session, so a second call returns
-        // the same value the form used.
-        if (preg_match('/value="([^"]+)"/', (string) generate_token('plain'), $m)
-            && hash_equals($m[1], $sent)) {
+        // The token WHMCS expects == generate_token('plain'), stable per
+        // session. WHMCS 8.x returns the RAW token there (not an <input>), so
+        // compare DIRECTLY first; older builds returned an <input value="X">
+        // (either quote), so also try the embedded value; legacy builds used
+        // $_SESSION['token']/'tokenval'. (8.x moved it off those session keys,
+        // which broke the earlier key-based check.)
+        $plain = trim((string) generate_token('plain'));
+        if ($plain !== '' && hash_equals($plain, $sent)) {
             return true;
         }
-
-        // Fallback: session keys used by older WHMCS builds.
+        if (preg_match('/value=["\']([^"\']+)["\']/', $plain, $m) && hash_equals($m[1], $sent)) {
+            return true;
+        }
         foreach (['token', 'tokenval'] as $key) {
             $expected = (string) ($_SESSION[$key] ?? '');
             if ($expected !== '' && hash_equals($expected, $sent)) {
@@ -337,14 +347,14 @@ EOF;
     private function csrfFailPage(string $link): string
     {
         $sent = (string) ($_POST['token'] ?? '');
-        $field = function_exists('generate_token') ? (string) generate_token('plain') : '';
-        $fieldMatch = (bool) preg_match('/value="([^"]+)"/', $field);
+        $plain = function_exists('generate_token') ? trim((string) generate_token('plain')) : '';
         $debug = sprintf(
-            'sent=%s(len %d) · generate_token=%s · field_parsed=%s · sess[token]=%s · sess[tokenval]=%s',
+            'sent=%s(len %d) · plain(len %d, input=%s) · direct_match=%s · sess[token]=%s · sess[tokenval]=%s',
             $sent !== '' ? 'Y' : 'N',
             strlen($sent),
-            function_exists('generate_token') ? 'Y' : 'N',
-            $fieldMatch ? 'Y' : 'N',
+            strlen($plain),
+            stripos($plain, '<input') !== false ? 'Y' : 'N',
+            ($plain !== '' && hash_equals($plain, $sent)) ? 'Y' : 'N',
             empty($_SESSION['token']) ? 'N' : 'Y',
             empty($_SESSION['tokenval']) ? 'N' : 'Y',
         );

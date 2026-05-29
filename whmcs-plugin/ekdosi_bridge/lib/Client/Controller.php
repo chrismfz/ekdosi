@@ -240,7 +240,17 @@ HTML;
 
     private function csrfField(): string
     {
-        return function_exists('generate_token') ? (string) generate_token('plain') : '';
+        if (! function_exists('generate_token')) {
+            return '';
+        }
+        $t = (string) generate_token('plain');
+        // WHMCS 8.x 'plain' returns the RAW token (not HTML) — emit a real
+        // hidden input either way so the token is actually submitted.
+        if (stripos($t, '<input') !== false) {
+            return $t;
+        }
+
+        return '<input type="hidden" name="token" value="'.htmlspecialchars($t, ENT_QUOTES).'">';
     }
 
     /**
@@ -260,8 +270,13 @@ HTML;
         if ($sent === '') {
             return false;
         }
-        if (preg_match('/value="([^"]+)"/', (string) generate_token('plain'), $m)
-            && hash_equals($m[1], $sent)) {
+        // WHMCS 8.x: 'plain' is the RAW token → compare directly. Older builds:
+        // an <input value="X"> (either quote). Legacy: session keys.
+        $plain = trim((string) generate_token('plain'));
+        if ($plain !== '' && hash_equals($plain, $sent)) {
+            return true;
+        }
+        if (preg_match('/value=["\']([^"\']+)["\']/', $plain, $m) && hash_equals($m[1], $sent)) {
             return true;
         }
         foreach (['token', 'tokenval'] as $key) {
