@@ -242,6 +242,25 @@ final class Codes
     }
 
     /**
+     * Greek label for ANY E3 classification type code, income OR expense
+     * (RequestE3Info mixes both — E3_561_x income, E3_585_x/E3_581_x expense).
+     * Tries both firebed enums; returns null if neither knows the code (AADE
+     * occasionally returns aggregate pseudo-codes we leave raw).
+     */
+    public static function e3TypeLabel(string $code): ?string
+    {
+        return \Firebed\AadeMyData\Enums\IncomeClassificationType::tryFrom($code)?->label()
+            ?? \Firebed\AadeMyData\Enums\ExpenseClassificationType::tryFrom($code)?->label();
+    }
+
+    /** Greek label for an E3 classification category (income or expense). */
+    public static function e3CategoryLabel(string $code): ?string
+    {
+        return \Firebed\AadeMyData\Enums\IncomeClassificationCategory::tryFrom($code)?->label()
+            ?? \Firebed\AadeMyData\Enums\ExpenseClassificationCategory::tryFrom($code)?->label();
+    }
+
+    /**
      * value => "code — Greek label" maps for Filament Selects.
      *
      * @return array<string, string>

@@ -18,7 +18,7 @@ use Filament\Widgets\TableWidget;
  */
 class LatestInvoicesTable extends TableWidget
 {
-    protected static ?int $sort = 4;
+    protected static ?int $sort = 5;
 
     protected int|string|array $columnSpan = 'full';
 

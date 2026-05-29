@@ -24,7 +24,7 @@ use Filament\Widgets\TableWidget;
 class OutstandingCustomersTable extends TableWidget
 {
     // Right under the headline + comparison cards, above the charts.
-    protected static ?int $sort = 3;
+    protected static ?int $sort = 4;
 
     protected int|string|array $columnSpan = 'full';
 

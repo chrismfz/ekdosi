@@ -57,10 +57,24 @@
                         <tbody>
                             @foreach ($result['rows'] as $row)
                                 <tr class="border-b border-gray-100 dark:border-white/5">
-                                    <td class="py-2 pr-4 font-mono text-xs">{{ $row['classType'] }}</td>
-                                    <td class="py-2 pr-4 font-mono text-xs">{{ $row['classCategory'] ?? '—' }}</td>
-                                    <td class="py-2 pr-4 text-right">{{ $row['count'] }}</td>
-                                    <td class="py-2 text-right whitespace-nowrap">{{ $money($row['value']) }}</td>
+                                    <td class="py-2 pr-4">
+                                        <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ $row['classType'] }}</span>
+                                        @if ($row['typeLabel'])
+                                            <div>{{ $row['typeLabel'] }}</div>
+                                        @endif
+                                    </td>
+                                    <td class="py-2 pr-4">
+                                        @if ($row['classCategory'])
+                                            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ $row['classCategory'] }}</span>
+                                            @if ($row['categoryLabel'])
+                                                <div>{{ $row['categoryLabel'] }}</div>
+                                            @endif
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
+                                    <td class="py-2 pr-4 text-right align-top">{{ $row['count'] }}</td>
+                                    <td class="py-2 text-right whitespace-nowrap align-top">{{ $money($row['value']) }}</td>
                                 </tr>
                             @endforeach
                         </tbody>

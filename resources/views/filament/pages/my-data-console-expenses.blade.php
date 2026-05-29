@@ -87,7 +87,7 @@
 
                     @include('filament.pages.partials.reconciliation-table', [
                         'rows' => $orphans,
-                        'columns' => ['mark', 'issuedAt', 'supplier', 'gross', 'mydataState'],
+                        'columns' => ['mark', 'issuedAt', 'supplier', 'afm', 'gross', 'mydataState'],
                     ])
                 </x-filament::section>
             @endif
@@ -104,7 +104,7 @@
 
                     @include('filament.pages.partials.reconciliation-table', [
                         'rows' => $linked,
-                        'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'gross', 'linkStatus', 'open'],
+                        'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'afm', 'gross', 'linkStatus', 'open'],
                     ])
                 </x-filament::section>
             @endif
@@ -162,7 +162,7 @@
 
                         @include('filament.pages.partials.reconciliation-table', [
                             'rows' => $result[$bucket['key']],
-                            'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'gross', 'localState', 'aadeState', 'problem', 'open'],
+                            'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'afm', 'gross', 'localState', 'aadeState', 'problem', 'open'],
                         ])
                     </x-filament::section>
                 @endif
@@ -190,7 +190,7 @@
 
                     @include('filament.pages.partials.reconciliation-table', [
                         'rows' => $result['matched'],
-                        'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'gross', 'state', 'open'],
+                        'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'afm', 'gross', 'state', 'open'],
                     ])
                 </x-filament::section>
             @endif

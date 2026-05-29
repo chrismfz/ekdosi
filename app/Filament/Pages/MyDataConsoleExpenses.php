@@ -242,7 +242,12 @@ class MyDataConsoleExpenses extends Page
 
     private function serialize(ExpenseReconciliationResult $r): array
     {
-        $rows = fn (array $rows) => array_map($this->rowToArray(...), $rows);
+        // GR issuers' names are forbidden in myDATA ([219]/[220]) — only the
+        // AFM arrives. Resolve those AFMs against our synced suppliers so the
+        // αδέσποτα worklist shows a name, not a blank. Batch-load once.
+        $names = $this->supplierNamesByAfm($r);
+
+        $rows = fn (array $rows) => array_map(fn (ReconciliationRow $row) => $this->rowToArray($row, $names), $rows);
 
         return [
             'from' => $r->from,
@@ -258,15 +263,23 @@ class MyDataConsoleExpenses extends Page
         ];
     }
 
-    private function rowToArray(ReconciliationRow $row): array
+    /**
+     * @param  array<string, string>  $names  afm => supplier name
+     */
+    private function rowToArray(ReconciliationRow $row, array $names = []): array
     {
+        $afm = $row->counterpartVat;
+        // Name from the doc → else our synced supplier (by AFM) → else null.
+        $name = $row->counterpartName ?: ($afm !== null ? ($names[$afm] ?? null) : null);
+
         return [
             'mark' => $row->mark,
             'uid' => $row->uid,
             'expenseId' => $row->expenseId,
             'invcode' => $row->invcode,
             'issuedAt' => $row->issuedAt,
-            'counterpartName' => $row->counterpartName,
+            'counterpartName' => $name,
+            'afm' => $afm,
             'gross' => $row->gross,
             'localState' => $row->localState,
             'localStatus' => $row->localStatus,
@@ -275,6 +288,39 @@ class MyDataConsoleExpenses extends Page
             'problem' => $row->problem,
             'url' => $row->expenseId ? $this->expenseUrl($row->expenseId) : null,
         ];
+    }
+
+    /**
+     * Batch-load supplier names for every AFM the result references, scoped to
+     * the tenant (Supplier has no global scope). One query, no N+1.
+     *
+     * @return array<string, string>  afm => name
+     */
+    private function supplierNamesByAfm(ExpenseReconciliationResult $r): array
+    {
+        $tenant = Filament::getTenant();
+        if ($tenant === null) {
+            return [];
+        }
+
+        $afms = collect([
+            ...$r->matched, ...$r->stateMismatch, ...$r->missingAtAade,
+            ...$r->missingLocally, ...$r->duplicateLocal,
+        ])->map(fn (ReconciliationRow $row) => $row->counterpartVat)
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($afms->isEmpty()) {
+            return [];
+        }
+
+        return \App\Models\Supplier::query()
+            ->where('company_id', $tenant->getKey())
+            ->whereIn('afm', $afms->all())
+            ->whereNotNull('name')
+            ->pluck('name', 'afm')
+            ->all();
     }
 
     private function expenseUrl(int $expenseId): ?string
