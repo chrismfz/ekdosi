@@ -243,8 +243,20 @@ running VAT position toward the εφορία — no need to open a report:
       classification_*` columns), `postPerInvoice=true`, with a dry-run + opt-in
       execute and an `expense_marks` audit row — and sandbox-validate before
       trusting (the submit path is UNVALIDATED today).
-- [ ] **E6 — ΦΠΑ εκροών−εισροών report** (month/quarter) + cross-check vs
-      `RequestVatInfo`.
+- [~] **E6 — ΦΠΑ εκροών−εισροών report + dashboard widget**: ✅
+      `App\Services\Dashboard\VatPeriodReport` → `VatPeriodSummary`: output VAT
+      (εκροών, reuses `DashboardMetrics::income` so the live-scope + credit-note
+      + cancelled rules stay in one place) − input VAT (εισροών, from local
+      `expenses`, excluding AADE-cancelled) = net ΦΠΑ (>0 προς απόδοση / <0
+      πιστωτικό). Per-period + `monthsOfQuarter()`. The **`MyDataPictureStats`**
+      dashboard widget ("Εικόνα από myDATA") shows current-quarter Έσοδα / Έξοδα
+      / Καθαρό ΦΠΑ with the current month alongside — the operator-requested
+      "πόσο ΦΠΑ χρωστάω" glance; gr-mydata only. Tenant-scoped SQL aggregates.
+      Covered by `VatPeriodReportTest`.
+      ⏳ **DEFERRED: AADE cross-check.** Figures are LOCAL. Diffing them against
+      the authoritative `RequestVatInfo` (per-invoice / GroupedPerDay) and
+      surfacing drift like the reconciliation worklists — never trust one side —
+      is the follow-up (a live read-GET, sandbox-verify the parser first).
 - [ ] **E7 — Ε3 overview** via `RequestE3Info`.
 
 ## Reuse map (don't reinvent)
