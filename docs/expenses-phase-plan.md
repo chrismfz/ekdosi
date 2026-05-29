@@ -123,9 +123,18 @@ These lock several open questions:
   (E3_* codes, VAT categories, expense classification categories §8.x).
 
 ## Suppliers — sync / import / manual
-- **sync**: when `RequestDocs` returns a doc whose issuer AFM we don't have,
-  auto-create a `supplier` (`source=sync`) — the "αδέσποτος προμηθευτής" case,
-  directly analogous to the issuer-side `missingLocally`.
+- **sync**: ✅ **DONE** (ahead of E3, standalone). `App\Services\MyData\
+  SupplierSyncFromMyData` scans `RequestDocs` over a window, extracts the
+  UNIQUE issuer AFMs, and upserts a `supplier` (`source=sync`) for each one we
+  don't have — the "αδέσποτος προμηθευτής" case. Name resolution: doc name →
+  GSIS (`AadeRegistryLookup`, GR only) → AFM-only. Skips our own AFM
+  (self-billing/9.3) and never resurrects a soft-deleted supplier. Tenant-
+  scoped explicitly by `company_id` (no Filament context on the CLI path).
+  Triggers: `php artisan suppliers:sync --tenant= [--from --to --no-enrich]`
+  AND a "Συγχρονισμός από myDATA" header action on the Suppliers list
+  (GR-tenant-only). Mirrors `SalesReconciler`'s pagination + empty-window
+  TypeError guard; covered by `SupplierSyncFromMyDataTest` (MockHandler).
+  Reusable building block for E3.
 - **import**: bulk (ETL / CSV) — later, low priority.
 - **manual**: operator adds a supplier by AFM → one click "Άντληση από ΑΑΔΕ"
   fills the rest via `AadeRegistryLookup`. (Already-built service; just point it
@@ -163,6 +172,11 @@ These lock several open questions:
       `expense_marks`; Shield perms.
 - [x] **E2 — Suppliers resource**: ✅ CRUD + "Άντληση από ΑΑΔΕ" (reuses
       `AadeRegistryLookup`) + `source` provenance + tenant-scoped list/table.
+- [x] **E2.5 — Supplier sync from myDATA**: ✅ `SupplierSyncFromMyData` +
+      `suppliers:sync` command + "Συγχρονισμός από myDATA" list action.
+      Scans `RequestDocs` → unique issuer AFMs → upsert `source=sync`
+      suppliers (doc name / GSIS / AFM-only). The bulk twin of E2's per-AFM
+      button; reusable by E3. Tested via MockHandler.
 - [ ] **E3 — ExpenseReconciler** over `RequestDocs` (mirror `SalesReconciler`;
       reuse pagination/continuationToken handling).
 - [ ] **E4 — Κονσόλα myDATA / Έξοδα** page (mirror inbound console; reuse the
