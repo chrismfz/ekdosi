@@ -264,6 +264,23 @@ class DashboardMetricsTest extends TestCase
         $this->assertNotContains($debtor->id, $settledRows);
     }
 
+    public function test_monthly_income_window_anchors_on_given_end(): void
+    {
+        // Inside the anchored window…
+        $this->makeInvoice(['issued_at' => '2026-03-10 10:00:00', 'net_total' => 100, 'gross_total' => 124]);
+        // …after the anchor month → must be excluded.
+        $this->makeInvoice(['issued_at' => '2026-05-10 10:00:00', 'net_total' => 999, 'gross_total' => 999]);
+
+        $series = (new DashboardMetrics($this->tenant))
+            ->monthlyIncome(3, Carbon::parse('2026-04-30'));
+
+        $this->assertSame(['2026-02', '2026-03', '2026-04'], array_column($series, 'key'));
+        $byKey = collect($series)->keyBy('key');
+        $this->assertSame(100.0, $byKey['2026-03']['net']);
+        // The May invoice is past the anchor → not in any bucket.
+        $this->assertSame(0.0, $byKey['2026-04']['net']);
+    }
+
     public function test_income_excludes_credit_notes(): void
     {
         // A sale this month.

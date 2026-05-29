@@ -5,6 +5,7 @@ namespace App\Services\Dashboard;
 use App\Models\Company;
 use App\Support\InvoiceScope;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -119,18 +120,24 @@ class DashboardMetrics
      * dense series — months with no invoices come back as zeros so the
      * chart x-axis is continuous.
      *
+     * @param  CarbonInterface|null  $end  Anchor the trailing window on
+     *         this month's end instead of "now" — lets the period filter
+     *         shift the 12-month trend. Null = up to the current month
+     *         (the default headline behaviour).
      * @return list<array{key: string, label: string, net: float, vat: float}>
      */
-    public function monthlyIncome(int $months = 12): array
+    public function monthlyIncome(int $months = 12, ?CarbonInterface $end = null): array
     {
         // subMonthsNoOverflow: a plain subMonths() viewed on the 29th-31st
         // overflows a short month and shifts the whole window forward by
         // one (dropping a real month, appending a future zero one).
-        $start = now()->subMonthsNoOverflow($months - 1)->startOfMonth();
+        $anchor = ($end ? Carbon::parse($end) : Carbon::now())->startOfMonth();
+        $start = $anchor->copy()->subMonthsNoOverflow($months - 1);
         $expr = $this->monthKeyExpr();
 
         $rows = $this->baseInvoices()
             ->where('issued_at', '>=', $start)
+            ->where('issued_at', '<=', $anchor->copy()->endOfMonth())
             ->selectRaw("$expr as ym, COALESCE(SUM(net_total), 0) net, COALESCE(SUM(gross_total), 0) gross")
             ->groupBy('ym')
             ->get()
