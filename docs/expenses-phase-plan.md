@@ -167,9 +167,15 @@ These lock several open questions:
 ## Phased TODO (incremental, each shippable)
 - [x] **E0 — sandbox spike**: ✅ done. Command shipped + run on `nexon`; real
       `RequestDocs` XML captured. Outcome: **per-line** model (see Sample findings).
-- [~] **E1 — data model**: ✅ `suppliers` table + `Supplier` model (+ `SupplierSource`
-      enum). ⏳ Pending: `expenses` + **`expense_lines`** (decision locked) +
-      `expense_marks`; Shield perms.
+- [x] **E1 — data model**: ✅ `suppliers` table + `Supplier` model (+ `SupplierSource`
+      enum). ✅ `expenses` + **`expense_lines`** + `expense_marks` tables + models
+      (`Expense`/`ExpenseLine`/`ExpenseMark`) + `ExpenseSource` enum. Mirrors the
+      sales-side `invoices`/`invoice_lines`/`mydata_marks` (house decimals, myDATA
+      state cache vs. byte-exact mark audit, soft-deletes, `(company_id, mydata_mark)`
+      unique with NULLs allowed). 0%/exempt line shapes (§8.2 vat_category + §8.3
+      vat_exemption_category) stored VERBATIM — not re-derived. Covered by
+      `ExpenseModelTest` (migrate, relations/casts, cascade, unique). Shield perms
+      land with the Filament resource (E4).
 - [x] **E2 — Suppliers resource**: ✅ CRUD + "Άντληση από ΑΑΔΕ" (reuses
       `AadeRegistryLookup`) + `source` provenance + tenant-scoped list/table.
 - [x] **E2.5 — Supplier sync from myDATA**: ✅ `SupplierSyncFromMyData` +
