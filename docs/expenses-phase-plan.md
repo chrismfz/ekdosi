@@ -257,7 +257,35 @@ running VAT position toward the εφορία — no need to open a report:
       the authoritative `RequestVatInfo` (per-invoice / GroupedPerDay) and
       surfacing drift like the reconciliation worklists — never trust one side —
       is the follow-up (a live read-GET, sandbox-verify the parser first).
-- [ ] **E7 — Ε3 overview** via `RequestE3Info`.
+- [x] **E7 — Ε3 overview**: ✅ `App\Services\MyData\E3Reporter` pulls AADE's
+      `RequestE3Info` (read-GET; '' empty-window guard + continuationToken
+      pagination + MockHandler seam) and rolls the entries up per (E3 type,
+      category) into an `E3Report`. The **`MyDataE3Overview`** page (Data group,
+      gr-mydata only) shows the aggregated figures for a window. Read-only.
+      Covered by `E3ReporterTest`.
+
+---
+
+## Phase status — FIRST COMPLETE PASS ✅
+All planned steps **E0–E7 built**, each its own reviewed PR (full suite 433).
+The expenses side now mirrors the sales side end-to-end: suppliers (sync +
+manual+GSIS), expenses data model, live reconciliation console with one-click
+import, per-document classification, the ΦΠΑ εκροών−εισροών report + dashboard
+widget, and the Ε3 overview.
+
+**Remaining / polish (deferred, none blocking):**
+- **AADE submit of expense classification** (`SendExpensesClassification`) — E5
+  stores locally only; build the per-line payload from the header choice +
+  dry-run + opt-in execute + sandbox-validate (see E5 note).
+- **ΦΠΑ AADE cross-check** (`RequestVatInfo`) — diff our local net-VAT vs AADE's
+  authoritative figure, surface drift (see E6 note).
+- **Ε3 ↔ local classification diff** — once classification coverage is real,
+  cross-check E3Reporter vs our classified expenses.
+- **Reconciliation polish**: per-row import action (today the console imports
+  the whole window's αδέσποτα at once); a "held/needs-review" state.
+- **Suppliers**: bulk CSV import (`source=import`); soft-deleted-FK-label fix.
+- **`RequestMyExpenses`** (§4.2.9) — period expense summaries sanity-check; not built.
+- **Manual expense entry** (`source=manual`) — ExpenseResource is view-only today.
 
 ## Reuse map (don't reinvent)
 | Need | Existing thing to mirror/reuse |

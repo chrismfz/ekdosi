@@ -249,7 +249,7 @@ against them (read-only) and flags what AADE would reject. Exit 0/1/2.
   cancellations) and diffs vs local into matched / stateMismatch / missingAtAade
   / missingLocally / duplicateLocal. Read-only worklist. **Sandbox-verified
   2026-05-28** (parser needed no changes). Inbound `RequestDocs` (expense side)
-  is NOT built — that's the Έξοδα phase.
+  IS built — see the Έξοδα phase (`ExpenseReconciler` / `MyDataConsoleExpenses`).
 
 ---
 
@@ -403,33 +403,38 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
 legacy — see corrections); `invoiced=-333/-1000` WHMCS sentinel states;
 customer manual reorder UI; `conf_params` imported-but-unread; live VIES/AFM.
 
-**🆕 NEW phases discussed:** **Έξοδα / Expenses** — the supplier/inbound mirror
-of the sales side (largest net-new). The AADE toolbox is all read-GETs in the
-spec (§4.2), so it's a real, supported phase — not a guess:
-- **`RequestDocs`** (§4.2.6) — παραστατικά/χαρακτηρισμοί/ακυρώσεις **που υπέβαλαν
-  ΑΛΛΟΙ και μας αφορούν** (i.e. supplier invoices *to* us). The exact reverse of
-  `RequestTransmittedDocs`; build an `ExpenseReconciler` mirroring
-  `SalesReconciler` (same pagination/continuationToken, same diff buckets).
-- **`RequestMyExpenses`** (§4.2.9) — expense summaries (twin of `RequestMyIncome`).
-- **`RequestVatInfo`** (§4.2.10) — **εισροές–εκροές ΦΠΑ**, per-invoice or
-  `GroupedPerDay` → this is the direct lever for the "πόσο ΦΠΑ θα χρωστάμε ανά
-  μήνα/τρίμηνο" report (compute locally like income, then cross-check vs this).
-- **`RequestE3Info`** (§4.2.11) — Ε3 figures per period.
-- **`SendExpensesClassification`** (§4.2.3) — classify expenses (needed to close
-  the expense picture at AADE; `postPerInvoice` for per-document vs per-line).
-Needs a new `Expense` model + a `suppliers`/προμηθευτές entity, expense
-classification (§8 code tables), and a ΦΠΑ εκροών−εισροών report. The issuer-side
-"αδέσποτα" console direction (find docs at myDATA missing locally) is the sales
-analog already built; the expense side is its mirror over `RequestDocs`.
-**Full blueprint + phased TODO: `docs/expenses-phase-plan.md`.**
-Also: Estonian PEPPOL submitter; myDATA console one-click fixes; cross-model
-activitylog (do once).
+**✅ Έξοδα / Expenses phase — FIRST COMPLETE PASS (E0–E7, built + reviewed).**
+The supplier/inbound mirror of the sales side, end-to-end:
+- **Suppliers** (`Supplier` + `SupplierSource`): the προμηθευτές entity. CRUD +
+  "Άντληση από ΑΑΔΕ" (GSIS) + bulk `SupplierSyncFromMyData` (`suppliers:sync`
+  command + list action) that scans `RequestDocs` for unique issuer AFMs.
+- **Data model**: `expenses` + `expense_lines` + `expense_marks` (twins of
+  invoices/invoice_lines/mydata_marks; §8.2/§8.3 codes stored verbatim).
+- **`ExpenseReconciler`** over `RequestDocs` — the exact reverse of
+  `SalesReconciler` (same pagination/folding/buckets), `missingLocally` =
+  αδέσποτα έξοδα.
+- **`MyDataConsoleExpenses`** page + **`ExpenseImporter`** — one-click import of
+  αδέσποτα into local `expenses` (+ lines + supplier + audit mark, idempotent),
+  and a read-only `ExpenseResource` (list/view/lines).
+- **`Expense` classification (E5, LOCAL)** — per-document E3 type + category2_x
+  via the ViewExpense action; `Codes::expenseClass*` delegate to firebed's §8
+  enums. **AADE submit (`SendExpensesClassification`) deferred.**
+- **`VatPeriodReport` + `MyDataPictureStats` widget** — ΦΠΑ εκροών−εισροών per
+  month/quarter ("πόσο ΦΠΑ χρωστάω"). **`RequestVatInfo` cross-check deferred.**
+- **`E3Reporter` + `MyDataE3Overview`** — Ε3 figures from `RequestE3Info`.
+**Full story + remaining-polish list: `docs/expenses-phase-plan.md`.** Deferred:
+expense-classification AADE submit, RequestVatInfo/E3 cross-checks,
+`RequestMyExpenses`, manual expense entry, per-row import, supplier CSV import.
+
+Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes;
+cross-model activitylog (do once).
 
 **Suggested order:** (1)✅ sandbox myDATA. (2)✅ scheduler. (3)✅ timologia v2
 (T-1+T-2). (4)✅ **G1 withholding + G4 exempt** (merged, PR #68). (5)✅ **G3
 tax-inclusive + G9 payment-type + G5 goods-quantity** (filing correctness).
 (6)✅ **G7 gross-edit + G6 issue-email + G8 griniaris** — the UX tail (done).
-(7) Έξοδα. (8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves
+(7)✅ **Έξοδα / Expenses (E0–E7)** — first complete pass, see above.
+(8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves
 real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
 
 ---
