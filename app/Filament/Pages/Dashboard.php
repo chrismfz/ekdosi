@@ -14,7 +14,7 @@ use Filament\Schemas\Schema;
  * ordered by each widget's $sort.
  *
  * The period filter (HasFiltersForm) drives ONLY the filter-aware
- * widgets — PeriodIncomeStats + the two charts (which read it via
+ * widgets — the two charts (which read it via
  * App\Support\Dashboard\PeriodFilter). The fixed headline / comparison
  * cards are intentionally period-independent, so the filter's helper
  * text says so.

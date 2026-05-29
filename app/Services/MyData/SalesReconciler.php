@@ -311,6 +311,7 @@ class SalesReconciler
                 invcode: $aade->series !== null ? trim(($aade->series ?? '').' '.($aade->aa ?? '')) : $aade->aa,
                 issuedAt: $aade->issueDate,
                 counterpartName: $aade->counterpartName,
+                counterpartVat: $aade->counterpartVat,
                 gross: $aade->gross,
                 aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
                 cancelledByMark: $aade->cancelledByMark,
