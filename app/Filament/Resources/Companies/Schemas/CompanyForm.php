@@ -11,6 +11,7 @@ use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
+use App\Models\InvoiceType;
 use App\Services\AadeRegistryLookup;
 use App\Services\MailTemplateRenderer;
 use App\Services\MyDataSubmitter;
@@ -838,6 +839,31 @@ class CompanyForm
                                                         ->success()->send();
                                                 }
                                             }),
+                                    ]),
+
+                                // G8 phase 2: γκρινιάρης auto-issue. DANGER zone —
+                                // files legal documents unattended. Two-key armed:
+                                // this toggle + the scheduler flag
+                                // (EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE).
+                                Section::make('Αυτόματη έκδοση (γκρινιάρης)')
+                                    ->description('Όταν ενεργοποιηθεί, οι πληρωμένες εγγραφές του Inbox για πελάτες με σήμανση «άμεσης έκδοσης» (γκρινιάρης) εκδίδονται + υποβάλλονται ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ από το προγραμματισμένο whmcs:auto-issue — μόνο οι σαφείς μονομερείς εγγραφές· οτιδήποτε αμφίβολο μένει στο Inbox για τον χειριστή. ΠΡΟΣΟΧΗ: εκδίδει νομικά παραστατικά χωρίς έγκριση.')
+                                    ->schema([
+                                        Toggle::make('whmcs_auto_issue_immediate')
+                                            ->label('Αυτόματη έκδοση για γκρινιάρηδες')
+                                            ->default(false)
+                                            ->helperText('Απαιτεί ΚΑΙ τον γενικό διακόπτη του scheduler (EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE) ΚΑΙ ορισμένο προεπιλεγμένο τύπο παραστατικού παρακάτω. Με OFF (προεπιλογή) δεν εκδίδεται τίποτα αυτόματα — η εγγραφή απλώς επισημαίνεται «Άμεσο» στο Inbox.'),
+                                        Select::make('whmcs_default_invoice_type_id')
+                                            ->label('Προεπιλεγμένος τύπος παραστατικού (αυτόματη έκδοση)')
+                                            ->options(fn (?Company $record) => $record
+                                                ? InvoiceType::query()
+                                                    ->where('company_id', $record->id)
+                                                    ->orderBy('code')
+                                                    ->get()
+                                                    ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+                                                    ->toArray()
+                                                : [])
+                                            ->searchable()
+                                            ->helperText('Ο τύπος που χρησιμοποιεί η αυτόματη έκδοση. Χωρίς αυτόν, η αυτόματη έκδοση παραλείπει τον tenant (δεν μαντεύει ποτέ τον τύπο). Η χειροκίνητη επιλογή στο Inbox δεν επηρεάζεται.'),
                                     ]),
 
                                 Section::make('Custom field mapping')
