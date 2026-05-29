@@ -165,6 +165,18 @@ feature backlog.
 
 ---
 
+## Reference files (committed under `docs/reference/`)
+- `aade-provider-invoicesDoc-v0.6.1.xsd` — the AADE **provider** invoice schema
+  (`InvoicesDoc` / `AadeBookInvoiceType`; carries `authenticationCode` +
+  `transmissionFailure`).
+- `aade-A.1112.2025-provider-application-form.docx` — full-provider licence
+  application (Άδεια [1]/[2]/[3]).
+- `aade-A.1112.2025-self-provider-idioparochos-application-form.docx` —
+  **ιδιοπάροχος** application (own docs, wholesale-only).
+- NOT committed: the main Α.1112/2025 decision PDF (the AADE copy is **corrupt**
+  — won't open anywhere; re-add when AADE publishes a valid one) and the 2.6 MB
+  annex-templates zip (binary boilerplate, not needed for the blueprint).
+
 ## 6. Deferred TODO (when it's time)
 1. Factor the AADE-invoice builder out of `MyDataSubmitter` into a reusable
    serializer (prep for a 2nd serializer).
