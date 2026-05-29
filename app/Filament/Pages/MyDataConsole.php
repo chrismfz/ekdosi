@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Enums\MyDataMode;
+use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Services\MyData\ReconciliationRow;
 use App\Services\MyData\SalesReconciler;
@@ -62,6 +63,11 @@ class MyDataConsole extends Page
      *                 the other way round.
      */
     public ?string $resultMode = null;
+
+    /** Y-m-d window actually queried — carried into each MARK detail link. */
+    public ?string $windowFrom = null;
+
+    public ?string $windowTo = null;
 
     public bool $ran = false;
 
@@ -156,6 +162,8 @@ class MyDataConsole extends Page
         $this->error = null;
         $this->result = null;
         $this->resultMode = $mode;
+        $this->windowFrom = $from;
+        $this->windowTo = $to;
 
         try {
             $reconciler = new SalesReconciler($tenant);
@@ -252,6 +260,9 @@ class MyDataConsole extends Page
             'cancelledByMark' => $row->cancelledByMark,
             'problem' => $row->problem,
             'url' => $row->invoiceId ? $this->invoiceUrl($row->invoiceId) : null,
+            // Every MARK (linked or orphan) gets a detail link, carrying the
+            // queried window so an orphan lookup re-fetches the right page.
+            'markUrl' => $this->markUrl($row->mark),
         ];
     }
 
@@ -262,6 +273,20 @@ class MyDataConsole extends Page
         return InvoiceResource::getUrl('view', [
             'record' => $invoiceId,
             'tenant' => $tenant,
+        ]);
+    }
+
+    private function markUrl(string $mark): ?string
+    {
+        if ($mark === '') {
+            return null;
+        }
+
+        return MyDataMarkDetail::getUrl([
+            'mark' => $mark,
+            'tenant' => Filament::getTenant(),
+            'from' => $this->windowFrom,
+            'to' => $this->windowTo,
         ]);
     }
 }

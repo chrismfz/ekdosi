@@ -54,7 +54,13 @@
                                 <td class="py-2 pr-4 font-medium">{{ $row['invcode'] ?? '—' }}</td>
                                 @break
                             @case('mark')
-                                <td class="py-2 pr-4 font-mono text-xs">{{ $row['mark'] }}</td>
+                                <td class="py-2 pr-4 font-mono text-xs">
+                                    @if (! empty($row['markUrl']))
+                                        <x-filament::link :href="$row['markUrl']" size="sm" class="font-mono">{{ $row['mark'] }}</x-filament::link>
+                                    @else
+                                        {{ $row['mark'] }}
+                                    @endif
+                                </td>
                                 @break
                             @case('issuedAt')
                                 <td class="py-2 pr-4 whitespace-nowrap">{{ $row['issuedAt'] ?? '—' }}</td>
