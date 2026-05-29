@@ -94,6 +94,25 @@ class SuppliersTest extends TestCase
         Livewire::test(CreateSupplier::class)->assertOk();
     }
 
+    public function test_duplicate_afm_in_same_tenant_is_rejected_with_form_error(): void
+    {
+        $tenant = $this->tenant();
+        $this->actingOperator($tenant);
+
+        Supplier::create([
+            'company_id' => $tenant->id,
+            'afm' => '999999999',
+            'name' => 'Υπάρχων',
+            'source' => 'manual',
+        ]);
+
+        // Friendly validation error (not a raw DB unique violation).
+        Livewire::test(CreateSupplier::class)
+            ->fillForm(['afm' => '999999999', 'name' => 'Διπλός', 'source' => 'manual'])
+            ->call('create')
+            ->assertHasFormErrors(['afm']);
+    }
+
     /* ---------------- spike command guards (no live AADE) ---------------- */
 
     public function test_fetch_docs_requires_tenant(): void

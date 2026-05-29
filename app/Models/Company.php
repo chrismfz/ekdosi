@@ -110,6 +110,24 @@ class Company extends Model
     }
 
     /**
+     * Resolve a tenant from a CLI "--tenant" argument that may be a slug or
+     * a numeric id. Shared by the myDATA / WHMCS console commands so the
+     * lookup isn't copy-pasted (and inconsistent) per command.
+     */
+    public static function findBySlugOrId(?string $arg): ?self
+    {
+        if ($arg === null || $arg === '') {
+            return null;
+        }
+
+        return static::query()
+            ->where(fn ($q) => $q
+                ->where('slug', $arg)
+                ->orWhere('id', is_numeric($arg) ? (int) $arg : 0))
+            ->first();
+    }
+
+    /**
      * Derive the URL of the ekdosi_bridge plugin's inbound endpoint
      * from the tenant's whmcs_api_url. The plugin lives at a fixed
      * path relative to the WHMCS root:

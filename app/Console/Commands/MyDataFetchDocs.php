@@ -2,10 +2,9 @@
 
 namespace App\Console\Commands;
 
-use App\Enums\MyDataMode;
 use App\Models\Company;
+use App\Services\MyData\FirebedCredentials;
 use Carbon\Carbon;
-use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestDocs;
 use Firebed\AadeMyData\Http\RequestVatInfo;
 use Illuminate\Console\Command;
@@ -51,11 +50,7 @@ class MyDataFetchDocs extends Command
             return self::FAILURE;
         }
 
-        $tenant = Company::query()
-            ->where(fn ($q) => $q
-                ->where('slug', $tenantArg)
-                ->orWhere('id', is_numeric($tenantArg) ? (int) $tenantArg : 0))
-            ->first();
+        $tenant = Company::findBySlugOrId($tenantArg);
 
         if (! $tenant) {
             $this->error("Tenant '{$tenantArg}' not found.");
@@ -100,24 +95,13 @@ class MyDataFetchDocs extends Command
     }
 
     /**
-     * Initialise firebed credentials for the tenant (mirror of
-     * SalesReconciler::initFirebed). Read-only path: no MockHandler.
+     * Initialise firebed credentials for the tenant. Delegates to the
+     * shared FirebedCredentials (provider/mode/creds/decrypt guards) — the
+     * read-only path needs no MockHandler.
      */
     private function initFirebed(Company $tenant): void
     {
-        if ($tenant->mydata_mode_enum === MyDataMode::Off) {
-            throw new RuntimeException('Η λειτουργία myDATA είναι απενεργοποιημένη (Off) για αυτόν τον μισθωτή.');
-        }
-
-        $aadeId = $tenant->mydata_aade_id;
-        $subKey = $tenant->mydata_subscription_key; // decrypted by cast
-
-        if (empty($aadeId) || empty($subKey)) {
-            throw new RuntimeException('Δεν έχουν οριστεί διαπιστευτήρια myDATA (mydata_aade_id / mydata_subscription_key).');
-        }
-
-        $env = $tenant->mydata_mode_enum === MyDataMode::Production ? 'prod' : 'dev';
-        MyDataRequest::init($aadeId, $subKey, $env);
+        FirebedCredentials::init($tenant);
     }
 
     private function dumpResponse(?string $xml, string $label): void

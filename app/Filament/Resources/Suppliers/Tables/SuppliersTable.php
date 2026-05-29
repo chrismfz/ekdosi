@@ -77,9 +77,7 @@ class SuppliersTable
 
                 SelectFilter::make('source')
                     ->label('Προέλευση')
-                    ->options(collect(SupplierSource::cases())
-                        ->mapWithKeys(fn (SupplierSource $s) => [$s->value => $s->label()])
-                        ->all()),
+                    ->options(SupplierSource::options()),
 
                 TrashedFilter::make(),
             ])

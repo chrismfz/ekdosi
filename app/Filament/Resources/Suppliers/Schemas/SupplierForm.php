@@ -3,10 +3,7 @@
 namespace App\Filament\Resources\Suppliers\Schemas;
 
 use App\Enums\SupplierSource;
-use App\Exceptions\Aade\AadeAfmNotFound;
-use App\Exceptions\Aade\AadeCredentialsInvalid;
-use App\Exceptions\Aade\AadeUnreachable;
-use App\Services\AadeRegistryLookup;
+use App\Filament\Support\AadeFormFill;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -16,6 +13,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Validation\Rules\Unique;
 
 class SupplierForm
 {
@@ -29,6 +27,14 @@ class SupplierForm
                         TextInput::make('afm')
                             ->label('ΑΦΜ')
                             ->maxLength(20)
+                            // One supplier per AFM per tenant — friendly
+                            // message instead of a raw DB unique violation.
+                            ->unique(
+                                table: 'suppliers',
+                                column: 'afm',
+                                ignoreRecord: true,
+                                modifyRuleUsing: fn (Unique $rule) => $rule->where('company_id', Filament::getTenant()?->getKey()),
+                            )
                             ->suffixAction(
                                 // Reuse the GSIS lookup we already have for
                                 // customers. For GR suppliers this is the ONLY
@@ -38,39 +44,8 @@ class SupplierForm
                                     ->icon('heroicon-o-arrow-down-tray')
                                     ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
                                     ->action(function (callable $get, callable $set): void {
-                                        $tenant = Filament::getTenant();
-                                        if (! $tenant) {
-                                            Notification::make()->title('Λείπει το tenant context.')->warning()->send();
-
-                                            return;
-                                        }
-                                        $afm = trim((string) $get('afm'));
-                                        if ($afm === '') {
-                                            Notification::make()->title('Συμπληρώστε πρώτα ΑΦΜ.')->warning()->send();
-
-                                            return;
-                                        }
-                                        try {
-                                            $result = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm);
-                                        } catch (AadeCredentialsInvalid) {
-                                            Notification::make()
-                                                ->title('Λείπουν/άκυρα διαπιστευτήρια GSIS')
-                                                ->body('Ρυθμίστε τα στο Company → AADE registry (GSIS).')
-                                                ->danger()->send();
-
-                                            return;
-                                        } catch (AadeAfmNotFound) {
-                                            Notification::make()
-                                                ->title('Το ΑΦΜ δεν βρέθηκε ή είναι ανενεργό')
-                                                ->warning()->send();
-
-                                            return;
-                                        } catch (AadeUnreachable) {
-                                            Notification::make()
-                                                ->title('Το μητρώο ΑΑΔΕ δεν είναι προσβάσιμο')
-                                                ->body('Δοκιμάστε ξανά ή συμπληρώστε χειροκίνητα.')
-                                                ->warning()->send();
-
+                                        $result = AadeFormFill::lookup($get('afm'));
+                                        if (! $result) {
                                             return;
                                         }
 
@@ -130,9 +105,7 @@ class SupplierForm
                     ->schema([
                         Select::make('source')
                             ->label('Προέλευση')
-                            ->options(collect(SupplierSource::cases())
-                                ->mapWithKeys(fn (SupplierSource $s) => [$s->value => $s->label()])
-                                ->all())
+                            ->options(SupplierSource::options())
                             ->default(SupplierSource::Manual->value)
                             ->required(),
 
