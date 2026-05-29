@@ -42,10 +42,10 @@ class FirebedCredentials
             );
         }
 
-        $aadeId = $tenant->mydata_aade_id;
-
         try {
-            $subKey = $tenant->mydata_subscription_key; // decrypted by cast
+            // Credentials for the tenant's CURRENT mode (sandbox vs
+            // production slot); the subscription key is decrypted by cast.
+            [$aadeId, $subKey] = $tenant->mydataCredentials();
         } catch (DecryptException) {
             throw new RuntimeException(
                 'Αδυναμία αποκρυπτογράφησης των διαπιστευτηρίων myDATA (πιθανή εναλλαγή APP_KEY).'
@@ -55,7 +55,7 @@ class FirebedCredentials
         if (empty($aadeId) || empty($subKey)) {
             throw new RuntimeException(
                 'Δεν έχουν οριστεί διαπιστευτήρια myDATA για αυτόν τον μισθωτή '.
-                '(mydata_aade_id / mydata_subscription_key).'
+                'στο περιβάλλον '.$tenant->mydata_mode_enum->value.'.'
             );
         }
 

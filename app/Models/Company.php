@@ -42,8 +42,10 @@ class Company extends Model
         'postcode',
         'phone',
         'email',
-        'mydata_aade_id',
-        'mydata_subscription_key',
+        'mydata_aade_id_sandbox',
+        'mydata_subscription_key_sandbox',
+        'mydata_aade_id_production',
+        'mydata_subscription_key_production',
         'mydata_mode',
         'gsis_username',
         'gsis_password',
@@ -82,7 +84,8 @@ class Company extends Model
     protected function casts(): array
     {
         return [
-            'mydata_subscription_key' => 'encrypted',
+            'mydata_subscription_key_sandbox' => 'encrypted',
+            'mydata_subscription_key_production' => 'encrypted',
             'gsis_password' => 'encrypted',
             'mail_smtp_password' => 'encrypted',
             'whmcs_api_secret' => 'encrypted',
@@ -263,6 +266,30 @@ class Company extends Model
             // query) before ?? gets a chance to short-circuit.
             get: fn () => MyDataMode::tryFrom((string) ($this->attributes['mydata_mode'] ?? '')) ?? MyDataMode::Off,
         );
+    }
+
+    /**
+     * Resolve the myDATA REST credentials for a given submission mode.
+     *
+     * We keep TWO independent credential pairs on the tenant — one for
+     * the AADE sandbox/developer endpoint, one for production/live — so
+     * an operator flips `mydata_mode` to switch environments WITHOUT
+     * re-keying the aade-user-id / subscription-key each time.
+     *
+     * Off has no endpoint of its own; it falls back to the sandbox pair
+     * for the few read-only audit callers that ask, but the submitter /
+     * reconciler guards reject Off long before any AADE call is made.
+     *
+     * @param  MyDataMode|null  $mode  Defaults to the tenant's current mode.
+     * @return array{0: ?string, 1: ?string}  [aadeUserId, subscriptionKey]
+     */
+    public function mydataCredentials(?MyDataMode $mode = null): array
+    {
+        $mode ??= $this->mydata_mode_enum;
+
+        return $mode === MyDataMode::Production
+            ? [$this->mydata_aade_id_production, $this->mydata_subscription_key_production]
+            : [$this->mydata_aade_id_sandbox, $this->mydata_subscription_key_sandbox];
     }
 
     public function getRouteKeyName(): string

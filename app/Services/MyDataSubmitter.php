@@ -328,9 +328,17 @@ class MyDataSubmitter implements EInvoiceSubmitter
         });
     }
 
-    public function testConnection(): bool
+    /**
+     * Verify the tenant's credentials against AADE.
+     *
+     * @param  MyDataMode|null  $environment  Test a SPECIFIC environment's
+     *         credentials (sandbox / production) regardless of the tenant's
+     *         saved mode — lets the Company form offer a "Test" button per
+     *         credential set. Null = the tenant's current mode.
+     */
+    public function testConnection(?MyDataMode $environment = null): bool
     {
-        $this->initFirebed();
+        $this->initFirebed($environment);
 
         try {
             // RequestTransmittedDocs with a tight date range — minimal
@@ -370,19 +378,23 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
     // ---- internals ------------------------------------------------------
 
-    private function initFirebed(): void
+    private function initFirebed(?MyDataMode $environment = null): void
     {
-        $aadeId = $this->tenant->mydata_aade_id;
-        $subKey = $this->tenant->mydata_subscription_key;  // decrypted by Eloquent cast
+        // The environment drives BOTH the credential slot AND the AADE
+        // endpoint. An explicit override (from the per-environment "Test"
+        // buttons) wins over the tenant's saved mode.
+        $mode = $environment ?? $this->tenant->mydata_mode_enum;
+
+        [$aadeId, $subKey] = $this->tenant->mydataCredentials($mode);  // key decrypted by Eloquent cast
 
         if (empty($aadeId) || empty($subKey)) {
             throw new RuntimeException(
-                'myDATA credentials are not configured for this tenant. '.
-                'Set mydata_aade_id and mydata_subscription_key on the Company.'
+                'myDATA credentials are not configured for this tenant ('.
+                $mode->value.' environment).'
             );
         }
 
-        $env = $this->tenant->mydata_mode_enum === MyDataMode::Production ? 'prod' : 'dev';
+        $env = $mode === MyDataMode::Production ? 'prod' : 'dev';
 
         MyDataRequest::init($aadeId, $subKey, $env);
 
