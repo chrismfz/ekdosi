@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
@@ -62,6 +63,16 @@ class LatestInvoicesTable extends TableWidget
                     ->label('Μικτά')
                     ->alignEnd()
                     ->money('EUR'),
+                TextColumn::make('mydata_mark')
+                    ->label('ΜΑΡΚ')
+                    ->placeholder('—')
+                    ->limit(20)
+                    ->copyable()
+                    ->color(fn (Invoice $record): ?string => $record->mydata_mark ? 'primary' : null)
+                    ->url(fn (Invoice $record): ?string => $record->mydata_mark
+                        ? MyDataMarkDetail::getUrl(['mark' => $record->mydata_mark, 'tenant' => Filament::getTenant()])
+                        : null)
+                    ->toggleable(),
                 TextColumn::make('mydata_state')
                     ->label('myDATA')
                     ->badge()

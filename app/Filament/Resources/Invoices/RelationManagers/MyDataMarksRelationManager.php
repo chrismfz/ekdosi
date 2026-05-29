@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\Invoices\RelationManagers;
 
+use App\Filament\Pages\MyDataMarkDetail;
 use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Textarea;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
@@ -52,7 +54,13 @@ class MyDataMarksRelationManager extends RelationManager
                 TextColumn::make('mark')
                     ->label('MARK')
                     ->placeholder('—')  // SKIPPED + DRY_RUN rows have null mark
-                    ->copyable(),
+                    ->copyable()
+                    // Link the MARK to its full detail page (header + lines +
+                    // XML). Null marks (DRY_RUN / SKIPPED) stay plain text.
+                    ->color(fn ($record) => $record->mark ? 'primary' : null)
+                    ->url(fn ($record) => $record->mark
+                        ? MyDataMarkDetail::getUrl(['mark' => $record->mark, 'tenant' => Filament::getTenant()])
+                        : null),
 
                 TextColumn::make('mark_date')
                     ->label('Date')
