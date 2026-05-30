@@ -238,6 +238,67 @@ class WhmcsInvoiceFiler
     }
 
     /**
+     * Draft-first flow: create an editable DRAFT invoice from a WHMCS pending
+     * row — allocate the ΑΑ, persist the invoice + lines, link the pending row
+     * (status='drafted', invoice_id) — but DO NOT submit to AADE. The operator
+     * reviews/fixes the line text (e.g. strip a domain a customer asked to
+     * hide) and issues it through the normal invoice lifecycle (Οριστικοποίηση
+     * → Υποβολή στο myDATA). Mirrors the per-party create in
+     * WhmcsInvoiceSplitter; safe inside the request (no AADE HTTP, no outer-tx
+     * restriction).
+     *
+     * NOTE (tracked follow-up): when the draft is later filed via the
+     * lifecycle, the WHMCS write-back (tblinvoices.invoiced = MARK) +
+     * pending→filed sync are NOT yet wired — the same known gap as split
+     * drafts. To be addressed by hooking MyDataSubmitter's VALID persist on
+     * invoices that carry whmcs_pending_id.
+     */
+    public function createDraft(
+        Company $tenant,
+        PendingWhmcsInvoice $pending,
+        Customer $customer,
+        InvoiceType $invoiceType,
+        ?int $createdByUserId = null,
+    ): Invoice {
+        $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
+
+        return DB::transaction(function () use ($tenant, $pending, $invoiceType, $mapped, $createdByUserId) {
+            $locked = PendingWhmcsInvoice::query()
+                ->whereKey($pending->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $this->assertCanBeFiled($locked);
+
+            $allocation = $this->numberer->allocate($tenant, $invoiceType->code);
+
+            $header = $mapped['header'];
+            $header['code'] = $allocation->code;
+            $header['invcode'] = $allocation->invcode;
+            $header['whmcs_pending_id'] = $locked->id;
+            $header['local_status'] = 'draft';
+
+            $invoice = Invoice::create($header);
+            foreach ($mapped['lines'] as $lineData) {
+                InvoiceLine::create(array_merge($lineData, [
+                    'company_id' => $tenant->id,
+                    'invoice_id' => $invoice->id,
+                ]));
+            }
+
+            $locked->update([
+                'invoice_id' => $invoice->id,
+                'status' => PendingWhmcsInvoice::STATUS_DRAFTED,
+                'filed_by_user_id' => $createdByUserId,
+                'notes' => 'Δημιουργήθηκε προσχέδιο '.$allocation->invcode
+                    .' — έλεγξε/διόρθωσε και έκδωσέ το από τα Παραστατικά.',
+            ]);
+
+            return ($this->recompute)($invoice->fresh('lines'));
+        });
+    }
+
+    /**
      * Build the preview WITHOUT persisting. Used by the modal so the
      * operator sees exactly what would be filed before they commit.
      */

@@ -128,6 +128,48 @@ class WhmcsInvoiceFilerTest extends TestCase
         $this->assertNull($fresh->mydata_mark);
     }
 
+    public function test_create_draft_makes_an_editable_draft_without_filing(): void
+    {
+        $pending = $this->makePending([
+            ['description' => 'Hosting 20 for www.pelatis.gr', 'amount' => '124.00', 'taxed' => '1'],
+        ]);
+
+        $invoice = app(WhmcsInvoiceFiler::class)->createDraft(
+            $this->tenant,
+            $pending,
+            $this->customer,
+            $this->invoiceType,
+            createdByUserId: null,
+        );
+
+        // ΑΑ allocated + lines persisted, but it's an editable DRAFT — NOT filed.
+        $this->assertSame('ΤΠΥ1', $invoice->invcode);
+        $this->assertSame('draft', $invoice->local_status);
+        $this->assertNull($invoice->mydata_state);
+        $this->assertNull($invoice->mydata_mark);
+        $this->assertSame($pending->id, $invoice->whmcs_pending_id);
+        $this->assertSame(1, InvoiceLine::where('invoice_id', $invoice->id)->count());
+
+        // Pending row → 'drafted', linked, no MARK (nothing filed).
+        $fresh = $pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_DRAFTED, $fresh->status);
+        $this->assertSame($invoice->id, $fresh->invoice_id);
+        $this->assertNull($fresh->mydata_mark);
+        $this->assertNull($fresh->filed_at);
+    }
+
+    public function test_create_draft_refuses_when_pending_already_has_invoice(): void
+    {
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+        ]);
+        app(WhmcsInvoiceFiler::class)->createDraft($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        // Second attempt on the same row is blocked (assertCanBeFiled guard).
+        $this->expectException(\LogicException::class);
+        app(WhmcsInvoiceFiler::class)->createDraft($this->tenant->fresh(), $pending->fresh(), $this->customer, $this->invoiceType);
+    }
+
     public function test_file_bumps_invcount_for_next_invoice_of_same_type(): void
     {
         $a = $this->makePending([['description' => 'A', 'amount' => '124.00', 'taxed' => '1']]);

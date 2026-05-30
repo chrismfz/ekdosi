@@ -65,6 +65,12 @@ class PendingWhmcsInvoice extends Model
     // the operator files each via the normal myDATA submit path.
     public const STATUS_SPLIT = 'split';
 
+    // Draft-first single-party flow: the inbox creates an editable DRAFT
+    // invoice (no AADE submit) so the operator reviews/fixes line text before
+    // issuing it through the normal invoice lifecycle. Safer than filing
+    // straight from the inbox.
+    public const STATUS_DRAFTED = 'drafted';
+
     /**
      * Match-reason constants - mirror MatchResult::$reason values so
      * downstream consumers can pattern-match without typo risk.

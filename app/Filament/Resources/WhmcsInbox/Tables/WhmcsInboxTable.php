@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\WhmcsInbox\Tables;
 
+use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
@@ -182,6 +183,7 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_REJECTED => 'danger',
                         PendingWhmcsInvoice::STATUS_HELD => 'gray',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'info',
+                        PendingWhmcsInvoice::STATUS_DRAFTED => 'info',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (string $state) => match ($state) {
@@ -190,6 +192,7 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
                         PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
+                        PendingWhmcsInvoice::STATUS_DRAFTED => 'Προσχέδιο',
                         default => $state,
                     })
                     // Surface WHY a row is held (e.g. "Αναμονή για ΑΦΜ") /
@@ -221,11 +224,13 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
                         PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
+                        PendingWhmcsInvoice::STATUS_DRAFTED => 'Προσχέδιο',
                     ])
                     ->default(PendingWhmcsInvoice::STATUS_PENDING_REVIEW),
             ])
             ->recordActions([
-                self::fileAtAadeAction(),
+                self::createDraftAction(),
+                self::openInvoiceAction(),
                 self::splitAction(),
                 self::rejectAction(),
                 self::holdAction(),
@@ -234,16 +239,36 @@ class WhmcsInboxTable
     }
 
     /**
-     * The headline action: full-preview modal -> file at AADE.
-     * Visible only on pending_review rows (filed/rejected/held can't
-     * be filed; held must be re-staged first).
+     * Jump to the draft (or filed) invoice this row produced, so the operator
+     * can review/fix/issue it. Visible once an invoice is linked.
      */
-    private static function fileAtAadeAction(): Action
+    private static function openInvoiceAction(): Action
     {
-        return Action::make('file_at_aade')
-            ->label('Καταχώρηση στην ΑΑΔΕ')
-            ->icon('heroicon-o-cloud-arrow-up')
-            ->color('success')
+        return Action::make('open_invoice')
+            ->label('Άνοιγμα παραστατικού')
+            ->icon('heroicon-o-arrow-top-right-on-square')
+            ->color('gray')
+            ->visible(fn (PendingWhmcsInvoice $r) => $r->invoice_id !== null)
+            ->url(fn (PendingWhmcsInvoice $r) => $r->invoice_id
+                ? InvoiceResource::getUrl('view', ['record' => $r->invoice_id, 'tenant' => Filament::getTenant()])
+                : null)
+            ->openUrlInNewTab();
+    }
+
+    /**
+     * The headline action: full-preview modal -> create an editable DRAFT
+     * invoice (NOT filed at AADE). Safer than filing straight from the inbox:
+     * the operator opens the draft, fixes line text (e.g. a domain the
+     * customer asked to hide), then issues it via the normal lifecycle
+     * (Οριστικοποίηση → Υποβολή στο myDATA). Visible only on pending_review
+     * rows.
+     */
+    private static function createDraftAction(): Action
+    {
+        return Action::make('create_draft')
+            ->label('Δημιουργία Παραστατικού')
+            ->icon('heroicon-o-document-plus')
+            ->color('primary')
             // Tier 1 #1: gate on the policy. WhmcsInboxResource::canAccess
             // intentionally allows any auth'd user to SEE the list (so the
             // resource doesn't 404 between deploy and shield:generate),
@@ -384,23 +409,16 @@ class WhmcsInboxTable
                         }
                     }),
             ])
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Καταχώρηση WHMCS #'.$r->whmcs_invoice_id.' στην ΑΑΔΕ')
-            ->modalDescription('Επιλέγεις πελάτη και τύπο. Η προεπισκόπηση παρακάτω ανανεώνεται αυτόματα. Πατώντας Καταχώρηση δημιουργείται το παραστατικό στο ekdosi και υποβάλλεται στην ΑΑΔΕ.')
-            ->modalSubmitActionLabel('Καταχώρηση στην ΑΑΔΕ')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δημιουργία προσχεδίου από WHMCS #'.$r->whmcs_invoice_id)
+            ->modalDescription('Επιλέγεις πελάτη και τύπο. Δημιουργείται ΠΡΟΣΧΕΔΙΟ παραστατικό στο ekdosi (δεν υποβάλλεται στην ΑΑΔΕ). Άνοιξέ το από τα Παραστατικά, διόρθωσε ό,τι χρειάζεται (π.χ. περιγραφές) και έκδωσέ το από εκεί.')
+            ->modalSubmitActionLabel('Δημιουργία προσχεδίου')
             ->modalCancelActionLabel('Άκυρο')
             ->modalWidth('5xl')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
                 $tenant = Filament::getTenant();
-                // Tier 1 #2: include trashed customers in the action's
-                // lookup. The Select's getOptionLabelUsing already uses
-                // withTrashed so a soft-deleted match is RENDERED in
-                // the dropdown ("(διαγραμμένος)" suffix), but without
-                // the same withTrashed on the action body's firstOrFail
-                // the submission silently 500s with ModelNotFoundException.
-                // After the row resolves, refuse the action when the
-                // customer is trashed — filing under a soft-deleted
-                // customer would propagate stale snapshot data and
-                // confuse the operator about who was really billed.
+                // withTrashed so a soft-deleted matched customer still resolves
+                // (the Select renders it with a "(διαγραμμένος)" suffix); refuse
+                // creating a draft under a trashed customer — stale snapshot.
                 $customer = Customer::query()
                     ->withTrashed()
                     ->where('company_id', $tenant->getKey())
@@ -409,7 +427,7 @@ class WhmcsInboxTable
                 if ($customer->trashed()) {
                     Notification::make()
                         ->title('Ο πελάτης είναι διαγραμμένος')
-                        ->body('Επανάφερέ τον από τη λίστα πελατών ή επίλεξε άλλον πελάτη πριν την καταχώρηση.')
+                        ->body('Επανάφερέ τον από τη λίστα πελατών ή επίλεξε άλλον πελάτη.')
                         ->warning()
                         ->persistent()
                         ->send();
@@ -422,25 +440,22 @@ class WhmcsInboxTable
                     ->firstOrFail();
 
                 try {
-                    $filer = app(WhmcsInvoiceFiler::class);
-                    $result = $filer->file(
+                    $invoice = app(WhmcsInvoiceFiler::class)->createDraft(
                         tenant: $tenant,
                         pending: $r,
                         customer: $customer,
                         invoiceType: $invoiceType,
-                        filedByUserId: auth()->id(),
+                        createdByUserId: auth()->id(),
                     );
                     Notification::make()
-                        ->title('Καταχώρηση επιτυχής')
-                        ->body('Παραστατικό '.$result->invoice->invcode
-                            .($result->mark ? ' με MARK '.$result->mark : ' (off-mode, χωρίς MARK)')
-                            .'. Δες το στη λίστα παραστατικών.')
+                        ->title('Δημιουργήθηκε προσχέδιο '.$invoice->invcode)
+                        ->body('Άνοιξέ το από τα Παραστατικά, έλεγξε/διόρθωσε τις γραμμές και έκδωσέ το (Οριστικοποίηση → Υποβολή στο myDATA).')
                         ->success()
                         ->persistent()
                         ->send();
                 } catch (Throwable $e) {
                     Notification::make()
-                        ->title('Η καταχώρηση ΑΠΕΤΥΧΕ')
+                        ->title('Η δημιουργία προσχεδίου ΑΠΕΤΥΧΕ')
                         ->body($e->getMessage())
                         ->danger()
                         ->persistent()
