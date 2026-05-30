@@ -55,6 +55,26 @@ add_hook('ClientAreaPrimaryNavbar', 50, function (MenuItem $primaryNavbar) {
     ]);
 });
 
+/**
+ * Visibility: a link on the admin client profile to the per-client 3-way
+ * mapping page (WHMCS # → ekdosi παραστατικό → ΜΑΡΚ, drafts included). Uses the
+ * supported AdminClientProfileTabFields hook (renders an extra field row);
+ * keeps the heavy table on the addon's own page (full HTML control) rather
+ * than fighting WHMCS's profile-field escaping.
+ */
+add_hook('AdminClientProfileTabFields', 1, function ($vars) {
+    $clientId = (int) ($vars['userid'] ?? $vars['id'] ?? 0);
+    if ($clientId <= 0) {
+        return [];
+    }
+    $url = htmlspecialchars('addonmodules.php?module=ekdosi_bridge&action=client&userid='.$clientId);
+
+    return [
+        'Ekdosi / ΑΑΔΕ' => '<a href="'.$url.'" class="btn btn-default btn-sm">'
+            .'<i class="fa fa-file-text-o"></i> Παραστατικά ekdosi (WHMCS→ΜΑΡΚ)</a>',
+    ];
+});
+
 add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     $invoiceId = (int) ($vars['invoiceid'] ?? 0);
     if ($invoiceId <= 0) {

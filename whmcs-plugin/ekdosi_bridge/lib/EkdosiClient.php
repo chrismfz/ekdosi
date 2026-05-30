@@ -113,6 +113,25 @@ class EkdosiClient
     }
 
     /**
+     * GET the 3-way mapping for a WHMCS client (WHMCS # → ekdosi παραστατικό →
+     * ΜΑΡΚ + state, drafts included). Canonical "{slug}:map:{whmcs_userid}";
+     * the "map:" infix keeps it distinct from an invoice-status signature.
+     * Result shape matches the others; mapping rows are under data['rows'].
+     */
+    public function getClientInvoiceMap(int $whmcsUserId): array
+    {
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug)
+            .'/invoice-map/'.$whmcsUserId;
+        $canonical = $this->slug.':map:'.$whmcsUserId;
+        $sig = 'sha256='.hash_hmac('sha256', $canonical, $this->secret);
+
+        return $this->httpRequest('GET', $url, null, [
+            'Accept: application/json',
+            'X-Webhook-Signature: '.$sig,
+        ]);
+    }
+
+    /**
      * Minimal cURL wrapper. WHMCS hosts vary in what HTTP libraries
      * are available; cURL is the lowest-common-denominator and
      * available on every supported PHP install.

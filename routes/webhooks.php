@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Webhooks\WhmcsClientInvoiceMapController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicePaidController;
 use App\Http\Controllers\Webhooks\WhmcsInvoiceStatusController;
 use Illuminate\Support\Facades\Route;
@@ -42,3 +43,16 @@ Route::get(
 )->middleware('throttle:120,1')
     ->where('whmcs_invoice_id', '[0-9]+')
     ->name('whmcs.invoice-status');
+
+/**
+ * Visibility: the 3-way mapping (WHMCS # → ekdosi παραστατικό → ΜΑΡΚ/state) for
+ * a whole WHMCS client, rendered by the plugin on the admin client profile.
+ * Same HMAC scheme as invoice-status, canonical "{slug}:map:{whmcs_userid}".
+ * Read-only; surfaces drafts too (παραστατικό exists, not yet filed).
+ */
+Route::get(
+    'whmcs/{slug}/invoice-map/{whmcs_userid}',
+    WhmcsClientInvoiceMapController::class,
+)->middleware('throttle:120,1')
+    ->where('whmcs_userid', '[0-9]+')
+    ->name('whmcs.invoice-map');
