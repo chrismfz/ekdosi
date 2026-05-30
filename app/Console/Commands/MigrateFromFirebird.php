@@ -585,6 +585,16 @@ class MigrateFromFirebird extends Command
         $convPointers = [];  // ekdosi-side surrogate id => legacy CONV_INVOICE_ID
         foreach ($this->fbAll('SELECT * FROM INVOICE') as $r) {
             $issuedAt = $this->mergeDateTime($r['INVDATE'], $r['INVTIME']);
+            // Derive local_status from the legacy myDATA state. Legacy ekdosi
+            // had NO "draft" concept for posted παραστατικά — every INVOICE row
+            // is an issued document — so a fresh import must land them as
+            // 'active' (or 'cancelled' if AADE-cancelled), NEVER the column
+            // default 'draft'. Without this, freshly-imported invoices show as
+            // «Πρόχειρο» in the panel even though they carry a VALID MARK (the
+            // migration's one-time backfill only touched rows present when it
+            // ran, not later imports). Legacy-sourced → refreshes every run.
+            $mydataState = $this->fld($r, 'MYDATA_STATE');
+            $localStatus = ($mydataState === 'CANCELLED') ? 'cancelled' : 'active';
             $id = $this->upsertGetId(
                 'invoices',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['INVOICE_ID']],
@@ -616,9 +626,10 @@ class MigrateFromFirebird extends Command
                     'notes'               => $this->fld($r, 'NOTES'),
                     'email_sent'          => $this->fld($r, 'EMAIL_SENT'),
                     'mydata_sent'         => isset($r['MYDATA_SENT']) ? (bool) $r['MYDATA_SENT'] : null,
-                    'mydata_state'        => $this->fld($r, 'MYDATA_STATE'),
+                    'mydata_state'        => $mydataState,
                     'mydata_mark'         => $this->fld($r, 'MYDATA_MARK'),
                     'mydata_url'          => $this->fld($r, 'MYDATA_URL'),
+                    'local_status'        => $localStatus,
                     'updated_at'          => now(),
                 ],
                 ['created_at' => $issuedAt ?? now()],

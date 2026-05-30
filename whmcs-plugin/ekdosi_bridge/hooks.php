@@ -87,25 +87,37 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     $baseLink = '/admin/addonmodules.php?module=ekdosi_bridge';
     $showLink = htmlspecialchars($baseLink.'&action=show&invoiceid='.$invoiceId);
 
-    // At-a-glance AADE state, straight from tblinvoices.invoiced (the bridge
-    // writes the MARK back there). No ekdosi call — just the local column:
-    //   0/null = not filed · 1 = legacy prepare_for_ekdosi "filed" flag ·
-    //   a long number = a real AADE MARK.
-    $badge = '<span class="label label-default">Όχι στο AADE</span>';
+    // At-a-glance AADE state from tblinvoices.invoiced — but only TWO honest
+    // readings: a real AADE MARK (>=10 digits, written back by the bridge), or
+    // nothing. The old {0,1} prepare_for_ekdosi flag is NOT treated as "filed"
+    // (it only meant "the legacy script touched this") — showing it as
+    // «Σημειωμένο (legacy)» wrongly implied the invoice was in ekdosi/AADE,
+    // when the real per-invoice WHMCS→ekdosi link was never stored. The
+    // authoritative answer for historical invoices lives on the client's
+    // Ekdosi card (matched by ΑΦΜ) — linked below.
+    $userId = (int) ($vars['userid'] ?? 0);
+    $badge = '<span class="label label-default" title="Καμία επιστροφή ΜΑΡΚ μέσω WHMCS">Όχι στο AADE μέσω WHMCS</span>';
     try {
         $invoiced = (string) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('invoiced') ?? '0');
-        if ($invoiced !== '' && $invoiced !== '0') {
-            if (strlen($invoiced) >= 10) {
-                $badge = '<span class="label label-success" title="MARK">Στο AADE · ΜΑΡΚ '
-                    .htmlspecialchars($invoiced).'</span>';
-            } else {
-                // Short non-zero value = the legacy {0,1} flag, not a MARK.
-                $badge = '<span class="label label-info" title="legacy prepare_for_ekdosi flag">Σημειωμένο (legacy)</span>';
-            }
+        if ($userId <= 0) {
+            $userId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
+        }
+        if ($invoiced !== '' && strlen($invoiced) >= 10) {
+            $badge = '<span class="label label-success" title="MARK">Στο AADE · ΜΑΡΚ '
+                .htmlspecialchars($invoiced).'</span>';
         }
     } catch (Throwable $e) {
         $badge = '<span class="label label-warning">κατάσταση μη διαθέσιμη</span>';
     }
+
+    // Link to the client's full Ekdosi card (WHMCS#→παραστατικό live rows +
+    // ΑΦΜ-matched historical ΤΠΥ/ΜΑΡΚ). This is where an imported invoice that
+    // has NO WHMCS-side MARK still shows up — matched by the client's ΑΦΜ.
+    $clientCardLink = $userId > 0
+        ? '<a href="'.htmlspecialchars($baseLink.'&action=client&userid='.$userId).'" '
+            .'class="btn btn-default btn-sm" title="Δες όλα τα παραστατικά ekdosi αυτού του πελάτη (αντιστοίχιση ΑΦΜ)">'
+            .'<i class="fa fa-file-text-o"></i> Παραστατικά πελάτη στο Ekdosi</a>'
+        : '';
 
     // "Αποστολή στο Ekdosi" — POST (CSRF) to the addon's push action, which
     // sends {whmcs_invoice_id} to ekdosi's webhook → the invoice appears in the
@@ -136,6 +148,7 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
         <a href="{$showLink}" class="btn btn-default btn-sm" title="Δες κατάσταση ekdosi / push / reset γι' αυτό το τιμολόγιο">
             <i class="fa fa-external-link"></i> Άνοιγμα στο Ekdosi Bridge
         </a>
+        {$clientCardLink}
     </div>
 </div>
 EOF;
