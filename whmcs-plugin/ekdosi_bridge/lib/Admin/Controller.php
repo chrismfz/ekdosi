@@ -479,10 +479,29 @@ EOF;
             return $this->errorPage($link, 'Λείπει το userid του πελάτη.');
         }
 
+        $serviceId = (int) ($_POST['serviceid'] ?? 0);
+        $serviceType = (string) ($_POST['service_type'] ?? '');
+
+        // Guard: the service must actually belong to THIS client. setRouteForUser
+        // already verifies the contact ownership; this keeps a crafted/stale POST
+        // from writing an inert route row for someone else's service id (junk in
+        // mod_ekdosi_routing). Match against the client's real services.
+        $ownsService = false;
+        foreach (ThirdPartyStore::servicesForUser($userid) as $s) {
+            if ((int) $s['serviceid'] === $serviceId && (string) $s['service_type'] === $serviceType) {
+                $ownsService = true;
+                break;
+            }
+        }
+        if (! $ownsService) {
+            return $this->prefsClient($link, $userid,
+                $this->alert('warning', 'Η υπηρεσία δεν ανήκει σε αυτόν τον πελάτη — δεν αποθηκεύτηκε.'));
+        }
+
         $ok = ThirdPartyStore::setRouteForUser(
             $userid,
-            (int) ($_POST['serviceid'] ?? 0),
-            (string) ($_POST['service_type'] ?? ''),
+            $serviceId,
+            $serviceType,
             (int) ($_POST['contactid'] ?? 0),
             ! empty($_POST['is_receipt']),
         );
