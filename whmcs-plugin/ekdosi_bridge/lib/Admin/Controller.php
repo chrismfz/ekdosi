@@ -387,37 +387,162 @@ EOF;
         $rows = $result['data']['rows'] ?? [];
         $clientHref = htmlspecialchars('clientssummary.php?userid='.$userid);
 
+        // Live section: deterministic WHMCS # → ekdosi παραστατικό links from
+        // pending_whmcs_invoices (new, post-cutover rows). Empty for the ~16k
+        // historical invoices — those never went through the inbox.
+        $liveSection = '';
         if ($rows === []) {
-            return <<<EOF
-<p><a class="btn btn-default" href="{$clientHref}">&larr; Πελάτης</a></p>
-<h2>Παραστατικά ekdosi — πελάτης #{$userid}</h2>
-<div class="alert alert-info">Δεν υπάρχουν παραστατικά στο ekdosi για αυτόν τον πελάτη ακόμη.</div>
-EOF;
-        }
-
-        $body = '';
-        foreach ($rows as $r) {
-            $whmcs = (int) ($r['whmcs_invoice_id'] ?? 0);
-            $invHref = htmlspecialchars('invoices.php?action=edit&id='.$whmcs);
-            $invcode = $r['ekdosi_invcode'] ?? null;
-            $mark = $r['mydata_mark'] ?? null;
-            $body .= '<tr>'
-                .'<td><a href="'.$invHref.'">#'.$whmcs.'</a></td>'
-                .'<td>'.($invcode !== null ? htmlspecialchars((string) $invcode) : '<span class="text-muted">—</span>').'</td>'
-                .'<td>'.$this->mapStatusBadge((string) ($r['pending_status'] ?? ''), $r['local_status'] ?? null, $r['mydata_state'] ?? null).'</td>'
-                .'<td>'.($mark !== null && $mark !== '' ? '<code>'.htmlspecialchars((string) $mark).'</code>' : '<span class="text-muted">—</span>').'</td>'
-                .'</tr>';
-        }
-
-        return <<<EOF
-<p><a class="btn btn-default" href="{$clientHref}">&larr; Πελάτης</a></p>
-<h2>Παραστατικά ekdosi — πελάτης #{$userid}</h2>
-<p class="text-muted">Αντιστοίχιση WHMCS τιμολογίου → παραστατικού ekdosi → ΜΑΡΚ ΑΑΔΕ. Τα «Προσχέδια» έχουν παραστατικό αλλά δεν έχουν υποβληθεί ακόμη.</p>
+            $liveSection = '<div class="alert alert-info">Καμία εγγραφή inbox (νέα ροή) για αυτόν τον πελάτη ακόμη.</div>';
+        } else {
+            $body = '';
+            foreach ($rows as $r) {
+                $whmcs = (int) ($r['whmcs_invoice_id'] ?? 0);
+                $invHref = htmlspecialchars('invoices.php?action=edit&id='.$whmcs);
+                $invcode = $r['ekdosi_invcode'] ?? null;
+                $mark = $r['mydata_mark'] ?? null;
+                $body .= '<tr>'
+                    .'<td><a href="'.$invHref.'">#'.$whmcs.'</a></td>'
+                    .'<td>'.($invcode !== null ? htmlspecialchars((string) $invcode) : '<span class="text-muted">—</span>').'</td>'
+                    .'<td>'.$this->mapStatusBadge((string) ($r['pending_status'] ?? ''), $r['local_status'] ?? null, $r['mydata_state'] ?? null).'</td>'
+                    .'<td>'.($mark !== null && $mark !== '' ? '<code>'.htmlspecialchars((string) $mark).'</code>' : '<span class="text-muted">—</span>').'</td>'
+                    .'</tr>';
+            }
+            $liveSection = <<<EOF
 <table class="table table-striped">
   <thead><tr><th>WHMCS #</th><th>Παραστατικό ekdosi</th><th>Κατάσταση</th><th>ΜΑΡΚ</th></tr></thead>
   <tbody>{$body}</tbody>
 </table>
 EOF;
+        }
+
+        // Historical section: ΑΦΜ-matched. The legacy import preserved no
+        // WHMCS↔ekdosi id link (verified NULL/empty in prod), so we match on
+        // ΑΦΜ — the client's own VAT id plus any third-party contact ΑΦΜ they
+        // route services to. This is what lights up the imported invoices.
+        $afmSection = $this->afmInvoicesSection($client, $userid);
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$clientHref}">&larr; Πελάτης</a></p>
+<h2>Παραστατικά ekdosi — πελάτης #{$userid}</h2>
+<h3>Νέα ροή (WHMCS # → παραστατικό)</h3>
+<p class="text-muted">Αντιστοίχιση WHMCS τιμολογίου → παραστατικού ekdosi → ΜΑΡΚ ΑΑΔΕ. Τα «Προσχέδια» έχουν παραστατικό αλλά δεν έχουν υποβληθεί ακόμη.</p>
+{$liveSection}
+<hr>
+{$afmSection}
+EOF;
+    }
+
+    /**
+     * The ΑΦΜ-matched section: gather the client's ΑΦΜ set (their own VAT id +
+     * every third-party contact's gr_vatno) and ask ekdosi for each ΑΦΜ's
+     * invoices, grouped «Δικά του» vs «Τρίτοι». Read-only.
+     */
+    private function afmInvoicesSection(EkdosiClient $client, int $userid): string
+    {
+        // Own ΑΦΜ: WHMCS stores the client's VAT id in tblclients.tax_id.
+        $ownAfm = (string) (Capsule::table('tblclients')->where('id', $userid)->value('tax_id') ?? '');
+        $ownAfm = preg_replace('/\D+/', '', $ownAfm) ?? '';
+
+        // Third-party ΑΦΜ: contacts this client routes services to.
+        $contactAfms = [];
+        if (ThirdPartyStore::hasOwnTables()) {
+            foreach (ThirdPartyStore::contactsForUser($userid) as $c) {
+                $a = preg_replace('/\D+/', '', (string) ($c->gr_vatno ?? '')) ?? '';
+                if ($a !== '') {
+                    $contactAfms[$a] = (string) ($c->company_name ?? '');
+                }
+            }
+        }
+
+        // Cast keys to string: PHP coerces all-numeric array keys to int, so
+        // array_keys($contactAfms) would otherwise mix int (contacts) with the
+        // string $ownAfm — and the own-vs-third-party grouping below relies on
+        // a strict ($afm === $ownAfm) comparison. Normalise to string up front.
+        $afms = array_values(array_unique(array_filter(
+            array_merge([$ownAfm], array_map('strval', array_keys($contactAfms))),
+            static fn (string $a): bool => $a !== '',
+        )));
+
+        if ($afms === []) {
+            return '<h3>Ιστορικά (αντιστοίχιση ΑΦΜ)</h3>'
+                .'<div class="alert alert-info">Ο πελάτης δεν έχει ΑΦΜ στο WHMCS — αδύνατη η αντιστοίχιση ιστορικού.</div>';
+        }
+
+        $resp = $client->getInvoicesByAfm($afms);
+        if (empty($resp['ok'])) {
+            $err = htmlspecialchars((string) ($resp['data']['error'] ?? ('HTTP '.($resp['http_status'] ?? '?'))));
+
+            return '<h3>Ιστορικά (αντιστοίχιση ΑΦΜ)</h3>'
+                .'<div class="alert alert-warning">Αποτυχία λήψης από ekdosi: '.$err.'</div>';
+        }
+
+        $afmMap = $resp['data']['afms'] ?? [];
+        $blocks = '';
+        foreach ($afms as $afm) {
+            $isOwn = ($afm === $ownAfm);
+            $label = $isOwn
+                ? 'Δικά του <span class="label label-default">ΑΦΜ '.htmlspecialchars($afm).'</span>'
+                : 'Τρίτος: '.htmlspecialchars($contactAfms[$afm] ?? '').' <span class="label label-default">ΑΦΜ '.htmlspecialchars($afm).'</span>';
+
+            $entry = $afmMap[$afm] ?? null;
+            if (! is_array($entry)) {
+                $blocks .= '<h4>'.$label.'</h4><p class="text-muted">Καμία αντιστοίχιση πελάτη στο ekdosi.</p>';
+
+                continue;
+            }
+            $invoices = $entry['invoices'] ?? [];
+            if ($invoices === []) {
+                $blocks .= '<h4>'.$label.'</h4><p class="text-muted">Κανένα παραστατικό.</p>';
+
+                continue;
+            }
+
+            $trs = '';
+            foreach ($invoices as $inv) {
+                $invcode = (string) ($inv['ekdosi_invcode'] ?? '');
+                $mark = $inv['mydata_mark'] ?? null;
+                $issued = (string) ($inv['issued_at'] ?? '');
+                $trs .= '<tr>'
+                    .'<td>'.htmlspecialchars($issued).'</td>'
+                    .'<td>'.($invcode !== '' ? htmlspecialchars($invcode) : '<span class="text-muted">—</span>').'</td>'
+                    .'<td>'.$this->afmStateBadge($inv['local_status'] ?? null, $inv['mydata_state'] ?? null).'</td>'
+                    .'<td>'.($mark !== null && $mark !== '' ? '<code>'.htmlspecialchars((string) $mark).'</code>' : '<span class="text-muted">—</span>').'</td>'
+                    .'</tr>';
+            }
+            $name = htmlspecialchars((string) ($entry['customer_name'] ?? ''));
+            $count = count($invoices);
+            $blocks .= <<<EOF
+<h4>{$label} <small class="text-muted">{$name} · {$count}</small></h4>
+<table class="table table-striped table-condensed">
+  <thead><tr><th>Ημ/νία</th><th>Παραστατικό</th><th>Κατάσταση</th><th>ΜΑΡΚ</th></tr></thead>
+  <tbody>{$trs}</tbody>
+</table>
+EOF;
+        }
+
+        return '<h3>Ιστορικά (αντιστοίχιση ΑΦΜ)</h3>'
+            .'<p class="text-muted">Όλα τα παραστατικά ekdosi που ταιριάζουν με το ΑΦΜ του πελάτη και των τρίτων δικαιούχων. '
+            .'Ο ιστορικός σύνδεσμος WHMCS→παραστατικό δεν διατηρήθηκε στη μετάπτωση· η αντιστοίχιση γίνεται με ΑΦΜ.</p>'
+            .$blocks;
+    }
+
+    /** Greek state badge from the two ekdosi statuses (no pending status here). */
+    private function afmStateBadge(?string $localStatus, ?string $mydataState): string
+    {
+        if ($mydataState === 'CANCELLED') {
+            return '<span class="label label-danger">Ακυρωμένο (ΑΑΔΕ)</span>';
+        }
+        if ($mydataState === 'VALID') {
+            return '<span class="label label-success">Καταχωρημένο</span>';
+        }
+        if ($localStatus === 'draft') {
+            return '<span class="label label-info">Προσχέδιο</span>';
+        }
+        if ($localStatus === 'cancelled') {
+            return '<span class="label label-default">Ακυρωμένο</span>';
+        }
+
+        return '<span class="label label-warning">Χωρίς ΜΑΡΚ</span>';
     }
 
     /** Greek status badge from the pending status (+ myDATA hints). */

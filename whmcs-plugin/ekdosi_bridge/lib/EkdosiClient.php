@@ -132,6 +132,36 @@ class EkdosiClient
     }
 
     /**
+     * POST {base}/webhooks/whmcs/{slug}/invoices-by-afm with
+     *   { afms: ["123456789", ...] }
+     * HMAC-signed over the RAW body (same scheme as pushInvoicePaid).
+     *
+     * The AFM-keyed per-client card: ekdosi matches each ΑΦΜ against its
+     * customers and returns that customer's live invoices (ΤΠΥ + ΜΑΡΚ +
+     * state). ΑΦΜ is the only WHMCS↔ekdosi link that survives the legacy
+     * import — there is no stored client/invoice id mapping. We pass the
+     * whole SET (client's own VAT id + any third-party contact ΑΦΜ they
+     * route services to) so the card can group «Δικά του» vs «Τρίτοι».
+     *
+     * Returns the standard httpRequest() shape; data['afms'] is a map of
+     * ΑΦΜ → {customer_id, customer_name, invoices[]} | null.
+     *
+     * @param  list<string>  $afms
+     */
+    public function getInvoicesByAfm(array $afms): array
+    {
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug).'/invoices-by-afm';
+        $body = json_encode(['afms' => array_values($afms)], JSON_THROW_ON_ERROR);
+        $sig = 'sha256='.hash_hmac('sha256', $body, $this->secret);
+
+        return $this->httpRequest('POST', $url, $body, [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            'X-Webhook-Signature: '.$sig,
+        ]);
+    }
+
+    /**
      * Minimal cURL wrapper. WHMCS hosts vary in what HTTP libraries
      * are available; cURL is the lowest-common-denominator and
      * available on every supported PHP install.

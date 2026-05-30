@@ -807,12 +807,23 @@ class MigrateFromFirebird extends Command
         }
         $this->line('  AUTO_INVOICE_LOG -> whmcs_invoice_log');
         foreach ($this->fbAll('SELECT * FROM AUTO_INVOICE_LOG') as $r) {
+            // invoice_id stays NULL: AUTO_INVOICE_LOG has NO ekdosi-invoice
+            // link. Its only columns are LOG_ID / LOG_TIMESTAMP / CS_INVID /
+            // LOG_MESSAGE — and CS_INVID is the WHMCS invoice id, not an
+            // ekdosi one. The previous code resolved invoice_id via
+            // legacyId('invoices', CS_INVID), feeding a WHMCS id into the
+            // ekdosi-invoice id map — wrong keyspace, yielding either NULL or
+            // a coincidental WRONG invoice. The real WHMCS↔ekdosi link was
+            // never persisted in legacy (CUSTOMER has no WHMCS column either),
+            // so it's structurally unrecoverable; the live bridge matches on
+            // ΑΦΜ instead (WhmcsInvoicesByAfmController). We still import the
+            // row for its LOG_MESSAGE audit trail + CS_INVID.
             $this->upsert(
                 'whmcs_invoice_log',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['LOG_ID']],
                 [
                     'whmcs_invoice_id' => $r['CS_INVID'],
-                    'invoice_id'       => $this->legacyId('invoices', $r['CS_INVID']), // best-effort; adjust to your bridge semantics
+                    'invoice_id'       => null,
                     'message'          => $this->fld($r, 'LOG_MESSAGE'),
                     'updated_at'       => now(),
                 ],

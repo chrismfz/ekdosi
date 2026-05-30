@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Webhooks\WhmcsClientInvoiceMapController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicePaidController;
+use App\Http\Controllers\Webhooks\WhmcsInvoicesByAfmController;
 use App\Http\Controllers\Webhooks\WhmcsInvoiceStatusController;
 use Illuminate\Support\Facades\Route;
 
@@ -56,3 +57,17 @@ Route::get(
 )->middleware('throttle:120,1')
     ->where('whmcs_userid', '[0-9]+')
     ->name('whmcs.invoice-map');
+
+/**
+ * Visibility (AFM-keyed): the per-client "Παραστατικά ekdosi" card, matched on
+ * ΑΦΜ — the only link that survives the legacy import (no stored WHMCS↔ekdosi
+ * id; verified NULL/empty in prod). POST because the body carries an ΑΦΜ SET
+ * (client's own + third-party routed contacts); HMAC over the raw body, same
+ * scheme as invoice-paid. Read-only; lights up imported VALID invoices with no
+ * re-import. Throttle matches the other read endpoints (plugin polls on a
+ * client-profile view).
+ */
+Route::post(
+    'whmcs/{slug}/invoices-by-afm',
+    WhmcsInvoicesByAfmController::class,
+)->middleware('throttle:120,1')->name('whmcs.invoices-by-afm');

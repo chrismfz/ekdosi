@@ -184,9 +184,13 @@ add_hook('AdminAreaFooterOutput', 1, function ($vars) {
             b.className = 'ekdosi-aade-badge label';
             b.style.marginLeft = '6px';
             b.style.fontSize = '11px';
+            // Only two honest states on the WHMCS side: a real AADE MARK
+            // (>=10 digits, written back by the bridge) or nothing. The old
+            // {0,1} prepare_for_ekdosi flag is dropped — it conflated "we
+            // touched this" with "filed", reading as a misleading "legacy"
+            // badge on the 16k imported invoices ekdosi already knows about.
             if (v.length >= 10) { b.className += ' label-success'; b.title = 'ΜΑΡΚ ' + v; b.textContent = 'ΑΑΔΕ ✓'; }
-            else if (v !== '0' && v !== '') { b.className += ' label-info'; b.title = 'legacy flag'; b.textContent = 'legacy'; }
-            else { b.className += ' label-default'; b.title = 'Δεν έχει υποβληθεί στην ΑΑΔΕ'; b.textContent = '—'; }
+            else { b.className += ' label-default'; b.title = 'Δεν έχει υποβληθεί στην ΑΑΔΕ μέσω WHMCS'; b.textContent = '—'; }
             a.parentNode.insertBefore(b, a.nextSibling);
           });
         });
