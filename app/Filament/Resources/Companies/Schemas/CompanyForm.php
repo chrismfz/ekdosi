@@ -869,7 +869,7 @@ class CompanyForm
                                             ->addable(true)
                                             ->editableKeys(true)
                                             ->reorderable(false)
-                                            ->helperText('Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), toinvoice (alternative billing-name). Leave empty if your WHMCS doesn\'t track a role.'),
+                                            ->helperText('Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), wantsinvoice ("θα ήθελα τιμολόγιο" → invoice vs receipt), toinvoice (alternative billing-name). Leave empty if your WHMCS doesn\'t track a role.'),
                                     ]),
 
                                 // PR #31 (Stage B-1): per-tenant webhook secret. Used by the

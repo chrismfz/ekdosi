@@ -35,7 +35,7 @@ class WhmcsInboxTable
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
                 $query->where('company_id', $tenant?->getKey() ?? 0)
-                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name']);
+                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
             })
             ->columns([
                 TextColumn::make('whmcs_invoice_id')
@@ -59,14 +59,44 @@ class WhmcsInboxTable
                     })
                     ->alignRight(),
 
+                // Who the invoice is from on the WHMCS side — always shown,
+                // even for unmatched rows, so the operator has the full picture
+                // (#xxxx from WHMCS client "X") and knows who to link/import.
+                TextColumn::make('whmcs_client')
+                    ->label('Πελάτης (WHMCS)')
+                    ->state(fn (PendingWhmcsInvoice $r): string => $r->whmcsClientName() ?? '—')
+                    ->description(fn (PendingWhmcsInvoice $r): ?string => $r->whmcsAfm()
+                        ? 'ΑΦΜ '.$r->whmcsAfm()
+                        : null),
+
                 TextColumn::make('customer.name')
                     ->label('Πελάτης (ekdosi)')
                     ->placeholder('— μη συνδεδεμένος —')
-                    ->description(fn (PendingWhmcsInvoice $r) => $r->customer?->afm
+                    ->description(fn (PendingWhmcsInvoice $r): ?string => $r->customer?->afm
                         ? 'ΑΦΜ '.$r->customer->afm
-                        : null
-                    )
+                        : null)
                     ->searchable(),
+
+                // A: billing intent the customer set in WHMCS — τιμολόγιο vs
+                // απόδειξη. "—" when the tenant hasn't mapped the field (the
+                // operator then decides at file time).
+                TextColumn::make('wants_invoice')
+                    ->label('Πρόθεση')
+                    ->badge()
+                    ->placeholder('—')
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->wantsInvoice()) {
+                        true => 'Τιμολόγιο',
+                        false => 'Απόδειξη',
+                        default => null,
+                    })
+                    ->color(fn (?string $state): string => match ($state) {
+                        'Τιμολόγιο' => 'info',
+                        'Απόδειξη' => 'gray',
+                        default => 'gray',
+                    })
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->wantsInvoice() === true
+                        ? 'Ο πελάτης ζήτησε τιμολόγιο στο WHMCS.'
+                        : ($r->wantsInvoice() === false ? 'Δεν ζήτησε τιμολόγιο — μάλλον απόδειξη.' : null)),
 
                 TextColumn::make('match_reason')
                     ->label('Match')
@@ -187,6 +217,34 @@ class WhmcsInboxTable
             ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
             ->form(fn (PendingWhmcsInvoice $r) => [
+                // B: surface the billing intent the customer set in WHMCS so
+                // the operator picks the right type without digging — wants
+                // invoice?, ΑΦΜ, ΔΟΥ, δραστηριότητα. Read-only hint.
+                Placeholder::make('whmcs_intent')
+                    ->label('Πρόθεση πελάτη (WHMCS)')
+                    ->content(function (PendingWhmcsInvoice $r): string {
+                        $wants = $r->wantsInvoice();
+                        $lines = [];
+                        if ($name = $r->whmcsClientName()) {
+                            $lines[] = 'Πελάτης WHMCS: '.$name;
+                        }
+                        $lines[] = match ($wants) {
+                            true => '📄 Ζήτησε ΤΙΜΟΛΟΓΙΟ',
+                            false => '🧾 Δεν ζήτησε τιμολόγιο → μάλλον ΑΠΟΔΕΙΞΗ',
+                            default => 'ℹ️ Άγνωστη πρόθεση (δεν έχει αντιστοιχιστεί το πεδίο)',
+                        };
+                        $afm = $r->whmcsAfm();
+                        $lines[] = 'ΑΦΜ: '.($afm ?: '— (λείπει — μάλλον ιδιώτης/απόδειξη)');
+                        if ($doy = $r->whmcsTaxOffice()) {
+                            $lines[] = 'ΔΟΥ: '.$doy;
+                        }
+                        if ($act = $r->whmcsActivity()) {
+                            $lines[] = 'Δραστηριότητα: '.$act;
+                        }
+
+                        return implode("\n", $lines);
+                    }),
+
                 Select::make('customer_id')
                     ->label('Πελάτης')
                     // Mirror InvoiceForm.php's canonical pattern: lazy
@@ -244,7 +302,11 @@ class WhmcsInboxTable
                     ->required()
                     ->searchable()
                     ->live()
-                    ->helperText('Επιλέγει σειρά + ΑΑ counter + myDATA mapping.'),
+                    // Pre-select the tenant's configured default WHMCS invoice
+                    // type (Setup → Company). The operator still changes it —
+                    // e.g. to a receipt type when the intent above says so.
+                    ->default(fn () => Filament::getTenant()?->whmcs_default_invoice_type_id)
+                    ->helperText('Επιλέγει σειρά + ΑΑ counter + myDATA mapping. Προ-επιλογή: ο προεπιλεγμένος τύπος WHMCS του tenant.'),
 
                 // Full preview: re-renders whenever customer / invoice
                 // type change. Calls the filer's preview() (no DB writes)
