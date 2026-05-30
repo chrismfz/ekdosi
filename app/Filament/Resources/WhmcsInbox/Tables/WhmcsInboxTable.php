@@ -306,6 +306,27 @@ class WhmcsInboxTable
                         return implode("\n", $lines);
                     }),
 
+                // Third-party routing visibility: if the bridge resolved any
+                // routed lines for this invoice, list EVERY routed beneficiary
+                // (contact + ΑΦΜ + which line) so the operator sees who the
+                // customer chose AND can spot a mis-routing before picking the
+                // recipient below. Hidden entirely when there's no routing.
+                Placeholder::make('third_party_routing')
+                    ->label('Δρομολόγηση σε τρίτους')
+                    ->visible(fn (PendingWhmcsInvoice $r): bool => self::routedBeneficiaries($r) !== [])
+                    ->content(function (PendingWhmcsInvoice $r): string {
+                        $rows = self::routedBeneficiaries($r);
+                        $out = ['Ο πελάτης έχει δρομολογήσει γραμμές σε:'];
+                        foreach ($rows as $b) {
+                            $afm = $b['afm'] !== '' ? ' (ΑΦΜ '.$b['afm'].')' : ' (χωρίς ΑΦΜ)';
+                            $doc = $b['is_receipt'] ? ' — απόδειξη' : '';
+                            $out[] = '• '.$b['name'].$afm.' → '.$b['lines'].' γραμμή(ές)'.$doc;
+                        }
+                        $out[] = 'Διάλεξε τον σωστό δικαιούχο παρακάτω (ή τον πελάτη, αν είναι λάθος δρομολόγηση).';
+
+                        return implode("\n", $out);
+                    }),
+
                 Select::make('customer_id')
                     ->label('Πελάτης')
                     // Mirror InvoiceForm.php's canonical pattern: lazy

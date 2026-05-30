@@ -192,6 +192,7 @@ EOF;
             $state = $states[(string) $id] ?? ($states[$id] ?? null);
 
             [$badge, $invcode, $mark] = $this->stateCells(is_array($state) ? $state : null);
+            $tpCell = $this->thirdPartyCell(is_array($state) ? ($state['third_party_state'] ?? null) : null);
 
             // Action: «Αποστολή» when not yet in ekdosi; «Άνοιγμα» otherwise.
             if ($state === null) {
@@ -210,6 +211,7 @@ EOF;
                 .'<td>'.$badge.'</td>'
                 .'<td>'.$invcode.'</td>'
                 .'<td>'.$mark.'</td>'
+                .'<td>'.$tpCell.'</td>'
                 .'<td class="text-right">'.$action.'</td>'
                 .'</tr>';
         }
@@ -228,7 +230,7 @@ EOF;
 <table class="table table-striped table-condensed">
   <thead><tr>
     <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th class="text-right">Σύνολο</th>
-    <th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th></th>
+    <th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th>Τρίτος</th><th></th>
   </tr></thead>
   <tbody>{$rows}</tbody>
 </table>
@@ -260,6 +262,25 @@ EOF;
             ? '<code>'.htmlspecialchars((string) $state['mydata_mark']).'</code>' : $dash;
 
         return [$badge, $invcode, $mark];
+    }
+
+    /**
+     * The «Τρίτος» cell: shows whether ekdosi resolved this invoice as routed
+     * to a third-party beneficiary (single/multi), billed to the client (none),
+     * or not yet evaluated (null — detection off / not pushed).
+     */
+    private function thirdPartyCell(?string $tpState): string
+    {
+        switch ($tpState) {
+            case 'single':
+                return '<span class="label label-info" title="Δρομολογείται σε έναν τρίτο δικαιούχο">Τρίτος</span>';
+            case 'multi':
+                return '<span class="label label-warning" title="Πολλαπλοί δικαιούχοι — χρειάζεται διαχωρισμός">Πολλοί</span>';
+            case 'none':
+                return '<span class="label label-default" title="Χρέωση στον πελάτη">—</span>';
+            default:
+                return '<span class="text-muted" title="Δεν ελέγχθηκε">·</span>';
+        }
     }
 
     /** Status filter tabs for the invoice list. */
