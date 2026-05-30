@@ -149,56 +149,68 @@ class WhmcsClient
      */
     public function getPendingInvoices(int $limit = 100, int $offset = 0, ?string $minDate = null): array
     {
-        // order=desc: unfiled rows in a long-running tenant are
-        // overwhelmingly the most RECENT (legacy prepare_for_ekdosi
-        // plugin sets invoiced=0 on a new paid invoice; legacy ekdosi
-        // bumps it to a MARK once filed). A tenant with 10K+ historical
-        // invoices needs the most recent N on page 1, NOT the oldest.
-        // DESC also enables early-stop on minDate below.
-        $resp = $this->call('GetInvoices', [
-            'status'    => 'Paid',
-            'limit'     => $limit,
-            'offset'    => $offset,
-            'orderby'   => 'date',
-            'order'     => 'desc',
-        ]);
-
-        // GetInvoices returns either:
-        //   { invoices: { invoice: [...] } }   (XML-ish shape WHMCS
-        //                                       preserves under JSON)
-        //   { invoices: { invoice: {single} } } (when count == 1)
-        $list = $resp['invoices']['invoice'] ?? [];
-
-        // Normalise the single-row-returned-as-object case.
-        if (! empty($list) && ! array_is_list($list)) {
-            $list = [$list];
-        }
-
-        // Two client-side filters:
-        //   1. invoiced=0 (or absent). WHMCS doesn't accept this as an
-        //      API filter parameter; legacy prepare_for_ekdosi adds the
-        //      column. Treat absent as "pending" so non-plugin WHMCS
-        //      installs still surface rows for the operator to triage.
-        //   2. date >= minDate. Operators set the tenant's cutover date
-        //      here to avoid staging years of historical test/staff/
-        //      internal invoices. DESC ordering means: once we see one
-        //      row older than the cutoff, ALL remaining rows are older -
-        //      break early instead of iterating + filtering each.
+        // PAGINATE until the minDate cutoff (or the result set ends). A single
+        // page is NOT enough: GetInvoices returns ALL Paid invoices (filed +
+        // unfiled) newest-first, and we keep only the unfiled ones client-side.
+        // In a busy tenant a date window can contain far more than `limit`
+        // already-filed invoices that are NEWER than the oldest unfiled one —
+        // so a single page silently drops the oldest unfiled rows (the "21 in
+        // DB, 16 in inbox" gap). We walk pages from `offset` until we cross the
+        // minDate boundary (DESC ordering → everything past it is older) or a
+        // short/empty page signals the end. A safety cap bounds the walk for a
+        // tenant with no minDate set.
+        //
+        // `limit`/`offset` are the per-page size + starting page; callers that
+        // want a single page can still pass a high limit, but the default now
+        // sweeps the whole window.
+        $maxPages = 200;   // hard stop: 200 * limit invoices scanned, worst case
         $out = [];
-        foreach ($list as $row) {
-            // Early-stop on minDate (DESC-ordered, so older rows
-            // dominate the tail). String compare on YYYY-MM-DD shape
-            // is lexicographically correct.
-            if ($minDate !== null) {
-                $rowDate = (string) ($row['date'] ?? '');
-                if ($rowDate !== '' && $rowDate < $minDate) {
-                    break;
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $resp = $this->call('GetInvoices', [
+                'status'  => 'Paid',
+                'limit'   => $limit,
+                'offset'  => $offset + ($page * $limit),
+                'orderby' => 'date',
+                'order'   => 'desc',
+            ]);
+
+            // GetInvoices returns either:
+            //   { invoices: { invoice: [...] } }    (list)
+            //   { invoices: { invoice: {single} } } (count == 1)
+            $list = $resp['invoices']['invoice'] ?? [];
+            if (! empty($list) && ! array_is_list($list)) {
+                $list = [$list];
+            }
+            if ($list === []) {
+                break;   // no more invoices
+            }
+
+            $crossedCutoff = false;
+            foreach ($list as $row) {
+                // Early-stop on minDate (DESC-ordered, so older rows dominate
+                // the tail). Lexicographic compare on YYYY-MM-DD is correct.
+                if ($minDate !== null) {
+                    $rowDate = (string) ($row['date'] ?? '');
+                    if ($rowDate !== '' && $rowDate < $minDate) {
+                        $crossedCutoff = true;
+                        break;
+                    }
                 }
+                // Keep only unfiled: invoiced=0 or absent. WHMCS can't filter
+                // this server-side; the legacy prepare_for_ekdosi plugin adds
+                // the column. Absent → treat as pending (non-plugin installs).
+                if (array_key_exists('invoiced', $row) && (int) $row['invoiced'] !== 0) {
+                    continue;
+                }
+                $out[] = $row;
             }
-            if (array_key_exists('invoiced', $row) && (int) $row['invoiced'] !== 0) {
-                continue;
+
+            // Stop once we've passed the cutoff, or the API returned a
+            // short page (the last one).
+            if ($crossedCutoff || count($list) < $limit) {
+                break;
             }
-            $out[] = $row;
         }
 
         return $out;
