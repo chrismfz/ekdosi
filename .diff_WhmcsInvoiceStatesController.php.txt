@@ -1,0 +1,171 @@
+--- .b_states.php
++++ app/Http/Controllers/Webhooks/WhmcsInvoiceStatesController.php
+@@ -0,0 +1,168 @@
++<?php
++
++namespace App\Http\Controllers\Webhooks;
++
++use App\Models\Company;
++use App\Models\PendingWhmcsInvoice;
++use Illuminate\Http\JsonResponse;
++use Illuminate\Http\Request;
++use Illuminate\Support\Facades\Log;
++use Symfony\Component\HttpFoundation\Response;
++
++/**
++ * Batch state lookup powering the ekdosi_bridge addon's consolidated invoice
++ * list: the plugin reads its own tblinvoices (WHMCS-side) and asks ekdosi, in
++ * ONE call, "for these WHMCS invoice ids, what's the deterministic ekdosi
++ * state?" — so each row shows ΤΠΥ + ΜΑΡΚ + κατάσταση without N per-invoice
++ * round-trips.
++ *
++ *   POST /webhooks/whmcs/{slug}/invoice-states
++ *   X-Webhook-Signature: sha256=<hex hmac of raw body>
++ *   {"whmcs_invoice_ids": [31639, 31640, ...]}
++ *
++ * The batch sibling of WhmcsInvoiceStatusController (which is one-at-a-time for
++ * the per-invoice manage page). Same deterministic source — the
++ * pending_whmcs_invoices row + its linked ekdosi invoice — NOT ΑΦΜ matching
++ * (that's the per-client card). An id with no pending row returns null
++ * ("never pushed to ekdosi"); the plugin renders it as «Δεν στάλθηκε».
++ *
++ * Auth: HMAC-SHA256 over the RAW body, same whmcs_webhook_secret as the other
++ * webhooks. Read-only, tenant-scoped, capped.
++ *
++ * Response (200 OK):
++ *   {
++ *     "states": {
++ *       "31639": {
++ *         "status": "filed", "ekdosi_invoice_id": 6753, "ekdosi_invcode": "ΤΠΥ6643",
++ *         "local_status": "active", "mydata_state": "VALID",
++ *         "mydata_mark": "400013724770604"
++ *       },
++ *       "31640": null
++ *     }
++ *   }
++ */
++class WhmcsInvoiceStatesController
++{
++    /** Max WHMCS invoice ids accepted per request (one list page). */
++    private const MAX_IDS = 500;
++
++    public function __invoke(Request $request, string $slug): JsonResponse
++    {
++        $tenant = Company::query()->where('slug', $slug)->first();
++        if ($tenant === null) {
++            $this->logRejection($request, $slug, 'tenant_not_found');
++
++            return new JsonResponse(['error' => 'tenant_not_found'], Response::HTTP_NOT_FOUND);
++        }
++
++        $secret = (string) ($tenant->whmcs_webhook_secret ?? '');
++        if ($secret === '') {
++            $this->logRejection($request, $slug, 'webhook_secret_not_configured');
++
++            return new JsonResponse([
++                'error' => 'webhook_secret_not_configured',
++                'message' => 'Tenant exists but has no whmcs_webhook_secret. Set it in the company config form.',
++            ], Response::HTTP_UNPROCESSABLE_ENTITY);
++        }
++
++        if (! $this->verifySignature($request, $secret)) {
++            $this->logRejection($request, $slug, 'invalid_signature');
++
++            return new JsonResponse(['error' => 'invalid_signature'], Response::HTTP_UNAUTHORIZED);
++        }
++
++        $ids = $this->normaliseIds($request->json('whmcs_invoice_ids'));
++        if ($ids === []) {
++            return new JsonResponse([
++                'error' => 'missing_or_invalid_ids',
++                'message' => 'Body must be {"whmcs_invoice_ids": [<int>, ...]} with at least one positive id.',
++            ], Response::HTTP_BAD_REQUEST);
++        }
++
++        // One query for all requested rows (tenant-scoped), keyed by WHMCS id.
++        $rows = PendingWhmcsInvoice::query()
++            ->where('company_id', $tenant->id)
++            ->whereIn('whmcs_invoice_id', $ids)
++            ->with('invoice:id,invcode,local_status,mydata_state,mydata_mark')
++            ->get()
++            ->keyBy('whmcs_invoice_id');
++
++        $states = [];
++        foreach ($ids as $id) {
++            $row = $rows->get($id);
++            if ($row === null) {
++                $states[$id] = null;   // never pushed to ekdosi
++
++                continue;
++            }
++            $states[$id] = [
++                'status' => $row->status,
++                'ekdosi_invoice_id' => $row->invoice_id,
++                'ekdosi_invcode' => $row->invoice?->invcode,
++                'local_status' => $row->invoice?->local_status,
++                'mydata_state' => $row->invoice?->mydata_state,
++                // Prefer the invoice's MARK (authoritative once issued via the
++                // lifecycle); fall back to the pending row's cached mark.
++                'mydata_mark' => $row->invoice?->mydata_mark ?? $row->mydata_mark,
++                // Third-party routing bucket (none/single/multi/null) so the
++                // addon list can flag «παραστατικό σε τρίτο» without a 2nd call.
++                'third_party_state' => $row->third_party_state,
++            ];
++        }
++
++        return new JsonResponse(['states' => $states], Response::HTTP_OK);
++    }
++
++    /**
++     * Clean the inbound id list: ints > 0, de-duped, capped. Returns
++     * list<int>.
++     *
++     * @return list<int>
++     */
++    private function normaliseIds(mixed $raw): array
++    {
++        if (! is_array($raw)) {
++            return [];
++        }
++
++        $clean = [];
++        foreach ($raw as $value) {
++            if (! is_int($value) && ! (is_string($value) && ctype_digit($value))) {
++                continue;
++            }
++            $id = (int) $value;
++            if ($id <= 0) {
++                continue;
++            }
++            $clean[$id] = true;   // de-dupe via keys
++            if (count($clean) >= self::MAX_IDS) {
++                break;
++            }
++        }
++
++        return array_keys($clean);
++    }
++
++    private function verifySignature(Request $request, string $secret): bool
++    {
++        $header = (string) $request->header('X-Webhook-Signature', '');
++        if (! str_starts_with($header, 'sha256=')) {
++            return false;
++        }
++        $sent = substr($header, strlen('sha256='));
++        $expected = hash_hmac('sha256', $request->getContent(), $secret);
++
++        return hash_equals($expected, $sent);
++    }
++
++    private function logRejection(Request $request, string $slug, string $reason): void
++    {
++        $sig = (string) $request->header('X-Webhook-Signature', '');
++        Log::warning('whmcs.invoice-states.rejected', [
++            'reason' => $reason,
++            'slug' => $slug,
++            'ip' => $request->ip(),
++            'sig_prefix' => $sig === '' ? '<missing>' : substr($sig, 0, 15).'...',
++        ]);
++    }
++}

@@ -1,0 +1,47 @@
+database/migrations/2026_05_28_000026_add_whmcs_and_mydata_filing_correctness.php
+database/migrations/2026_05_28_000023_add_third_party_invoicing_to_whmcs_bridge.php
+database/migrations/2026_05_28_000028_add_whmcs_auto_issue_to_companies.php
+whmcs-plugin/ekdosi_bridge/RUNBOOK.md
+whmcs-plugin/ekdosi_bridge/README.md
+whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php
+17:use Filament\Schemas\Components\Utilities\Get;
+53:                            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'WHMCS τιμολόγιο #'.$r->whmcs_invoice_id)
+54:                            ->modalContent(fn (PendingWhmcsInvoice $r) => view('filament.whmcs-inbox.invoice-view', ['r' => $r]))
+55:                            ->modalSubmitAction(false)
+56:                            ->modalCancelActionLabel('Κλείσιμο')
+57:                            ->modalWidth('3xl')
+158:                TextColumn::make('third_party_state')
+159:                    ->label('Τρίτος')
+173:                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
+244:     * for the createDraft modal: each routed contact with ΑΦΜ + line count +
+246:     * modal placeholder is hidden in that case.
+252:        $resolution = $r->third_party_resolution;
+300:     * The headline action: full-preview modal -> create an editable DRAFT
+349:                // Third-party routing visibility: if the bridge resolved any
+352:                // customer chose AND can spot a mis-routing before picking the
+353:                // recipient below. Hidden entirely when there's no routing.
+354:                Placeholder::make('third_party_routing')
+474:            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δημιουργία προσχεδίου από WHMCS #'.$r->whmcs_invoice_id)
+475:            ->modalDescription('Επιλέγεις πελάτη και τύπο. Δημιουργείται ΠΡΟΣΧΕΔΙΟ παραστατικό στο ekdosi (δεν υποβάλλεται στην ΑΑΔΕ). Άνοιξέ το από τα Παραστατικά, διόρθωσε ό,τι χρειάζεται (π.χ. περιγραφές) και έκδωσέ το από εκεί.')
+476:            ->modalSubmitActionLabel('Δημιουργία προσχεδίου')
+477:            ->modalCancelActionLabel('Άκυρο')
+478:            ->modalWidth('5xl')
+536:        return Action::make('split_third_party')
+541:            ->visible(fn (PendingWhmcsInvoice $r) => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
+583:            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Διαχωρισμός WHMCS #'.$r->whmcs_invoice_id.' σε προσχέδια')
+584:            ->modalDescription('Δημιουργούνται ξεχωριστά προσχέδια παραστατικά ανά δικαιούχο. Δεν υποβάλλονται στην ΑΑΔΕ — τα καταχωρείς ένα-ένα από τη λίστα παραστατικών.')
+585:            ->modalSubmitActionLabel('Δημιουργία προσχεδίων')
+636:            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Απόρριψη WHMCS #'.$r->whmcs_invoice_id.';')
+637:            ->modalDescription('Δεν θα καταχωρηθεί στην ΑΑΔΕ. Μπορείς να το επανεκκινήσεις αργότερα αν αλλάξεις γνώμη.')
+638:            ->modalSubmitActionLabel('Απόρριψη')
+666:            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αναμονή για WHMCS #'.$r->whmcs_invoice_id)
+667:            ->modalDescription('Κρύβεται από την προεπιλεγμένη λίστα. Άρε το από κατάσταση = "Σε αναμονή" όταν είσαι έτοιμος. Ο λόγος φαίνεται στο tooltip της κατάστασης.')
+668:            ->modalSubmitActionLabel('Σε αναμονή')
+688:            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Επαναφορά WHMCS #'.$r->whmcs_invoice_id)
+689:            ->modalDescription('Επιστρέφει στην κατάσταση "Προς έλεγχο" — διαθέσιμο για καταχώρηση στην ΑΑΔΕ.')
+702:     * row, filling the «Τρίτος» column for rows that were ingested while
+703:     * whmcs_third_party_enabled was OFF (or before resolve.php was deployed).
+710:        return Action::make('re_resolve_third_party')
+715:            ->visible(fn (PendingWhmcsInvoice $r) => (bool) (Filament::getTenant()?->whmcs_third_party_enabled)
+718:            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Έλεγχος δρομολόγησης τρίτων — WHMCS #'.$r->whmcs_invoice_id)
+719:            ->modalDescription('Ρωτά ξανά τη γέφυρα αν το τιμολόγιο δρομολογείται σε τρίτους δικαιούχους και ενημερώνει τη στήλη «Τρίτος». Δεν αλλάζει κατάσταση ή σύνδεση.')
