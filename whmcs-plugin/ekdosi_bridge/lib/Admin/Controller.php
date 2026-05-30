@@ -439,15 +439,17 @@ EOF;
      */
     private function afmInvoicesSection(EkdosiClient $client, int $userid): string
     {
-        // Own ΑΦΜ: WHMCS stores the client's VAT id in tblclients.tax_id.
-        $ownAfm = (string) (Capsule::table('tblclients')->where('id', $userid)->value('tax_id') ?? '');
-        $ownAfm = preg_replace('/\D+/', '', $ownAfm) ?? '';
+        // Own ΑΦΜ: this WHMCS install never used the native tblclients.tax_id
+        // (VAT was never enabled) — the ΑΦΜ lives in a client custom field
+        // ("ΑΦΜ / Vies Vat No"), the same field the legacy timologia/afm2name
+        // plugins read. Resolve it from the custom field, not tax_id.
+        $ownAfm = $this->digits($this->clientVatCustomField($userid));
 
         // Third-party ΑΦΜ: contacts this client routes services to.
         $contactAfms = [];
         if (ThirdPartyStore::hasOwnTables()) {
             foreach (ThirdPartyStore::contactsForUser($userid) as $c) {
-                $a = preg_replace('/\D+/', '', (string) ($c->gr_vatno ?? '')) ?? '';
+                $a = $this->digits((string) ($c->gr_vatno ?? ''));
                 if ($a !== '') {
                     $contactAfms[$a] = (string) ($c->company_name ?? '');
                 }
@@ -524,6 +526,46 @@ EOF;
             .'<p class="text-muted">Όλα τα παραστατικά ekdosi που ταιριάζουν με το ΑΦΜ του πελάτη και των τρίτων δικαιούχων. '
             .'Ο ιστορικός σύνδεσμος WHMCS→παραστατικό δεν διατηρήθηκε στη μετάπτωση· η αντιστοίχιση γίνεται με ΑΦΜ.</p>'
             .$blocks;
+    }
+
+    /**
+     * The client's ΑΦΜ from their WHMCS custom field. This install never used
+     * the native tblclients.tax_id (VAT was never enabled at WHMCS setup), so
+     * the ΑΦΜ lives in a client custom field. We resolve the field by name —
+     * "ΑΦΜ / Vies Vat No" (id 13 on myip), matched case-insensitively on the
+     * ΑΦΜ/VAT/ΦΠΑ tokens so it survives a field-id change or a re-install —
+     * and read its value for this client. Returns '' if unset.
+     */
+    private function clientVatCustomField(int $userid): string
+    {
+        try {
+            $fieldId = (int) Capsule::table('tblcustomfields')
+                ->where('type', 'client')
+                ->where(function ($q): void {
+                    $q->where('fieldname', 'like', '%ΑΦΜ%')
+                        ->orWhere('fieldname', 'like', '%VAT%')
+                        ->orWhere('fieldname', 'like', '%ΦΠΑ%')
+                        ->orWhere('fieldname', 'like', '%Vies%');
+                })
+                ->orderBy('id')
+                ->value('id');
+            if ($fieldId <= 0) {
+                return '';
+            }
+
+            return (string) (Capsule::table('tblcustomfieldsvalues')
+                ->where('fieldid', $fieldId)
+                ->where('relid', $userid)
+                ->value('value') ?? '');
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
+    /** Canonical ΑΦΜ: digits only (strip EL/GR prefix, spaces, dashes). */
+    private function digits(string $value): string
+    {
+        return preg_replace('/\D+/', '', $value) ?? '';
     }
 
     /** Greek state badge from the two ekdosi statuses (no pending status here). */
