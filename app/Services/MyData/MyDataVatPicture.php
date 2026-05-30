@@ -4,9 +4,15 @@ namespace App\Services\MyData;
 
 /**
  * "Εικόνα από myDATA" — the VAT position computed from the ACTUAL documents
- * AADE holds for a period: output (εκροές, our RequestTransmittedDocs sales)
- * vs input (εισροές, the RequestDocs filed against us), summed. This is the
- * authoritative-source twin of the LOCAL VatPeriodReport.
+ * AADE holds for a period: output (έσοδα/εκροές) — RequestTransmittedDocs
+ * FILTERED to income types — vs input (έξοδα/εισροές, the RequestDocs filed
+ * against us), summed. The authoritative-source twin of the local
+ * VatPeriodReport.
+ *
+ * `breakdown` holds the self-declared transmitted docs that are NOT sales
+ * income (μισθοδοσία, ενδοκοινοτικά, ασφαλιστικές εισφορές, πάγια…), kept out
+ * of Έσοδα and surfaced as their own lines so they don't pollute the income
+ * total / charts.
  *
  * `fetchedAt` is when the snapshot was pulled (the widget shows "ενημερώθηκε…")
  * — the picture is cached and refreshed by a scheduler, never fetched live on
@@ -17,6 +23,9 @@ namespace App\Services\MyData;
  */
 final readonly class MyDataVatPicture
 {
+    /**
+     * @param  array<string, array{label: string, net: float, vat: float, count: int}>  $breakdown
+     */
     public function __construct(
         public float $outputNet = 0,
         public float $outputVat = 0,
@@ -27,6 +36,7 @@ final readonly class MyDataVatPicture
         public float $inputGross = 0,
         public int $inputCount = 0,
         public ?string $fetchedAt = null,   // ISO-8601 of the snapshot
+        public array $breakdown = [],
     ) {}
 
     public function netVat(): float
@@ -52,6 +62,7 @@ final readonly class MyDataVatPicture
             'inputGross' => $this->inputGross,
             'inputCount' => $this->inputCount,
             'fetchedAt' => $this->fetchedAt,
+            'breakdown' => $this->breakdown,
         ];
     }
 
@@ -68,6 +79,7 @@ final readonly class MyDataVatPicture
             inputGross: (float) ($data['inputGross'] ?? 0),
             inputCount: (int) ($data['inputCount'] ?? 0),
             fetchedAt: $data['fetchedAt'] ?? null,
+            breakdown: is_array($data['breakdown'] ?? null) ? $data['breakdown'] : [],
         );
     }
 }

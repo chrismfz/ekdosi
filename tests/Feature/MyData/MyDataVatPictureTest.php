@@ -131,10 +131,12 @@ class MyDataVatPictureTest extends TestCase
     <invoicesDoc>
         <invoice>
             <mark>400000000000001</mark>
+            <invoiceHeader><invoiceType>1.1</invoiceType></invoiceHeader>
             <invoiceSummary><totalNetValue>1000.00</totalNetValue><totalVatAmount>240.00</totalVatAmount><totalGrossValue>1240.00</totalGrossValue></invoiceSummary>
         </invoice>
         <invoice>
             <mark>400000000000002</mark>
+            <invoiceHeader><invoiceType>1.1</invoiceType></invoiceHeader>
             <cancelledByMark>900000000000002</cancelledByMark>
             <invoiceSummary><totalNetValue>500.00</totalNetValue><totalVatAmount>120.00</totalVatAmount><totalGrossValue>620.00</totalGrossValue></invoiceSummary>
         </invoice>
