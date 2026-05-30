@@ -59,7 +59,7 @@ class MyDataPictureStats extends StatsOverviewWidget
         $netQuarter = $quarter->netVat();
         $netMonth = $month?->netVat() ?? 0.0;
 
-        return [
+        $stats = [
             Stat::make('Τρίμηνο — Έσοδα', $this->eur($quarter->outputGross))
                 ->description('ΦΠΑ εκροών '.$this->eur($quarter->outputVat).' • μήνας '.$this->eur($month?->outputGross ?? 0))
                 ->descriptionIcon('heroicon-m-arrow-up-right')
@@ -76,6 +76,22 @@ class MyDataPictureStats extends StatsOverviewWidget
                 ->descriptionIcon('heroicon-m-banknotes')
                 ->color($quarter->isPayable() ? 'danger' : 'success'),
         ];
+
+        // Self-declared transmitted docs that are NOT sales (μισθοδοσία,
+        // ενδοκοινοτικά, ΑΛΠ…) — broken out so they don't inflate Έσοδα.
+        foreach ($quarter->breakdown as $b) {
+            if ((int) ($b['count'] ?? 0) === 0) {
+                continue;
+            }
+            $vat = (float) ($b['vat'] ?? 0);
+            $stats[] = Stat::make('Τρίμηνο — '.($b['label'] ?? 'Λοιπά'), $this->eur((float) ($b['net'] ?? 0)))
+                ->description(((int) ($b['count'] ?? 0)).' παραστατικά'
+                    .(abs($vat) > 0.005 ? ' • ΦΠΑ '.$this->eur($vat) : ''))
+                ->descriptionIcon('heroicon-m-information-circle')
+                ->color('gray');
+        }
+
+        return $stats;
     }
 
     protected function getDescription(): ?string

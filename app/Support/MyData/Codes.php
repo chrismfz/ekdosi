@@ -252,6 +252,30 @@ final class Codes
         return in_array($prefix, self::EXPENSE_TYPE_PREFIXES, true) ? 'expense' : 'other';
     }
 
+    /**
+     * For a NON-income transmitted doc (self-declared expenses + accounting
+     * entries in RequestTransmittedDocs), the coarse VAT-picture category it
+     * belongs to — so the dashboard breaks them out as their own lines
+     * («Ενδοκοινοτικά», «Μισθοδοσία») instead of inflating Έσοδα.
+     *
+     *   14.x → intra-community / third-country
+     *   13.x → retail expense (ΑΛΠ)
+     *   17.x (+ 3/15/16) → payroll / other accounting entries
+     *
+     * @return array{key: string, label: string}
+     */
+    public static function selfDeclaredVatCategory(?string $code): array
+    {
+        $prefix = $code === null ? '' : explode('.', $code)[0];
+
+        return match ($prefix) {
+            '14' => ['key' => 'intracommunity', 'label' => 'Ενδοκοινοτικά / Τρίτων χωρών'],
+            '13' => ['key' => 'retail_expense', 'label' => 'Έξοδα λιανικής (ΑΛΠ)'],
+            '17' => ['key' => 'payroll', 'label' => 'Μισθοδοσία / Λοιπές εγγραφές'],
+            default => ['key' => 'other', 'label' => 'Λοιπές εγγραφές'],
+        };
+    }
+
     public static function isValidIncomeClassType(string $code): bool
     {
         return in_array($code, self::INCOME_CLASS_TYPES, true);
