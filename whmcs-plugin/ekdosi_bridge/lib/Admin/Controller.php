@@ -637,14 +637,20 @@ EOF;
         }
         $status = htmlspecialchars((string) ($data['status'] ?? '?'));
         $mark = $data['mydata_mark'] ?? null;
+        $invcode = $data['ekdosi_invcode'] ?? null;
         $notes = htmlspecialchars((string) ($data['notes'] ?? ''));
         $rejected = htmlspecialchars((string) ($data['rejected_reason'] ?? ''));
+        // ΤΠΥ (invcode) — the deterministic ekdosi document number for THIS
+        // WHMCS invoice. Lives here on the manage-invoice page, queried live.
+        $invcodeRow = ($invcode !== null && $invcode !== '')
+            ? '<li>Παραστατικό: <strong>'.htmlspecialchars((string) $invcode).'</strong></li>' : '';
         $markRow = $mark ? '<li>MARK: <code>'.htmlspecialchars((string) $mark).'</code></li>' : '';
         $rejRow = $rejected !== '' ? '<li>Rejected reason: '.$rejected.'</li>' : '';
         return <<<EOF
 <div class="alert alert-info">
 <strong>Ekdosi status: {$status}</strong>
 <ul>
+    {$invcodeRow}
     {$markRow}
     {$rejRow}
     <li>Notes: {$notes}</li>

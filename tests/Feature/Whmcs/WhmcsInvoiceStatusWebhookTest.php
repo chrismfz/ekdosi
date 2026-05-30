@@ -159,8 +159,50 @@ class WhmcsInvoiceStatusWebhookTest extends TestCase
         ]);
         $response->assertJsonStructure([
             'found', 'pending_id', 'whmcs_invoice_id', 'status',
-            'mydata_mark', 'filed_at', 'rejected_reason', 'notes',
-            'ekdosi_invoice_id',
+            'mydata_mark', 'mydata_state', 'local_status', 'filed_at',
+            'rejected_reason', 'notes', 'ekdosi_invoice_id', 'ekdosi_invcode',
+        ]);
+    }
+
+    public function test_returns_invcode_and_authoritative_mark_from_linked_invoice(): void
+    {
+        // When the pending row links to an issued ekdosi invoice, the endpoint
+        // surfaces the deterministic ΤΠΥ (invcode) + the INVOICE's mark/state
+        // (authoritative — overrides the pending row's cached mark), so the
+        // WHMCS manage-invoice page can show "ΤΠΥ6643 · MARK ...".
+        $tenant = $this->configuredTenant();
+        $type = \App\Models\InvoiceType::create([
+            'company_id' => $tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1,
+        ]);
+        $invoice = \App\Models\Invoice::create([
+            'company_id' => $tenant->id, 'invoice_type_id' => $type->id,
+            'invcode' => 'ΤΠΥ6643', 'code' => 6643, 'issued_at' => now(),
+        ]);
+        $invoice->forceFill([
+            'local_status' => 'active', 'mydata_state' => 'VALID', 'mydata_mark' => '400013724770604',
+        ])->save();
+
+        PendingWhmcsInvoice::create([
+            'company_id'       => $tenant->id,
+            'whmcs_invoice_id' => 31619,
+            'payload'          => ['invoiceid' => 31619],
+            'match_reason'     => PendingWhmcsInvoice::REASON_LINKED,
+            'status'           => PendingWhmcsInvoice::STATUS_FILED,
+            'mydata_mark'      => null,                 // pending row has no cached mark
+            'invoice_id'       => $invoice->id,
+        ]);
+
+        $response = $this->withHeaders([
+            'X-Webhook-Signature' => $this->signedCanonical($tenant->slug, 31619),
+        ])->getJson("/webhooks/whmcs/{$tenant->slug}/invoice-status/31619");
+
+        $response->assertStatus(200)->assertJson([
+            'found'           => true,
+            'ekdosi_invcode'  => 'ΤΠΥ6643',
+            'ekdosi_invoice_id' => $invoice->id,
+            'mydata_mark'     => '400013724770604',   // from the invoice, not the (null) pending mark
+            'mydata_state'    => 'VALID',
+            'local_status'    => 'active',
         ]);
     }
 
