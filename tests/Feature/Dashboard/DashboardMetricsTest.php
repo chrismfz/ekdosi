@@ -390,6 +390,179 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame('Small', $rows[1]->name);
     }
 
+    public function test_available_years_lists_distinct_years_desc_with_current_always_present(): void
+    {
+        $this->makeInvoice(['issued_at' => '2024-07-10 10:00:00']);
+        $this->makeInvoice(['issued_at' => '2026-02-10 10:00:00']);
+        // a cancelled invoice's year must not appear on its own
+        $this->makeInvoice(['issued_at' => '2022-01-10 10:00:00', 'mydata_state' => 'CANCELLED']);
+
+        $years = (new DashboardMetrics($this->tenant))->availableYears();
+
+        // 2026 (current, has an invoice) + 2024; 2022 only cancelled → absent.
+        $this->assertSame([2026, 2024], $years);
+    }
+
+    public function test_monthly_for_year_is_dense_and_non_cumulative(): void
+    {
+        $this->makeInvoice(['issued_at' => '2026-03-10 10:00:00', 'net_total' => 50, 'gross_total' => 62]);
+        $this->makeInvoice(['issued_at' => '2026-05-10 10:00:00', 'net_total' => 100, 'gross_total' => 124]);
+        // prior year must not bleed into this year's months
+        $this->makeInvoice(['issued_at' => '2025-05-10 10:00:00', 'net_total' => 999, 'gross_total' => 999]);
+
+        $rows = (new DashboardMetrics($this->tenant))->monthlyForYear(2026);
+
+        $this->assertCount(12, $rows);
+        $this->assertSame(50.0, $rows[2]['net']);    // March
+        $this->assertSame(12.0, $rows[2]['vat']);    // 62-50
+        $this->assertSame(100.0, $rows[4]['net']);   // May (NOT cumulative)
+        $this->assertSame(0.0, $rows[0]['net']);     // January empty
+    }
+
+    public function test_yearly_totals_are_dense_and_tenant_scoped(): void
+    {
+        $this->makeInvoice(['issued_at' => '2024-06-10 10:00:00', 'net_total' => 100, 'gross_total' => 124]);
+        $this->makeInvoice(['issued_at' => '2026-06-10 10:00:00', 'net_total' => 300, 'gross_total' => 372]);
+        // other tenant's invoice must not leak into the totals
+        Invoice::create([
+            'company_id' => $this->other->id, 'invcode' => 'X'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'issued_at' => '2026-06-10 10:00:00',
+            'net_total' => 9999, 'gross_total' => 9999,
+        ]);
+
+        $rows = (new DashboardMetrics($this->tenant))->yearlyTotals(3, 2026);
+
+        $this->assertSame([2024, 2025, 2026], array_column($rows, 'year'));
+        $byYear = collect($rows)->keyBy('year');
+        $this->assertSame(100.0, $byYear[2024]['net']);
+        $this->assertSame(0.0, $byYear[2025]['net']);   // empty year zero-filled
+        $this->assertSame(300.0, $byYear[2026]['net']);
+        $this->assertSame(1, $byYear[2026]['count']);
+    }
+
+    public function test_kpi_summary_year_to_date_yoy_and_quality_ratios(): void
+    {
+        $cust = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης Α', 'afm' => '1']);
+
+        // Current-year (2026) sale, within YTD (now = 2026-05-15).
+        $sale = $this->makeInvoice([
+            'customer_id' => $cust->id, 'issued_at' => '2026-05-10 10:00:00',
+            'net_total' => 200, 'gross_total' => 248,
+        ]);
+        // Prior-year SAME-SPAN sale (Jan–May15 2025) → the YoY baseline.
+        $this->makeInvoice(['issued_at' => '2025-03-10 10:00:00', 'net_total' => 100, 'gross_total' => 124]);
+        // A credit note in 2026 → feeds the credit-rate KPI, excluded from income.
+        $this->makeInvoice([
+            'issued_at' => '2026-04-10 10:00:00', 'net_total' => 40, 'gross_total' => 48,
+            'credited_invoice_id' => $sale->id,
+        ]);
+
+        $k = (new DashboardMetrics($this->tenant))->kpiSummary(2026);
+
+        $this->assertSame(200.0, $k['net']);          // sale only (credit note excluded)
+        $this->assertSame(1, $k['count']);
+        $this->assertSame(100.0, $k['priorNet']);
+        $this->assertSame(100.0, $k['yoyPct']);       // (200-100)/100
+        $this->assertSame(40.0, $k['avgMonthlyNet']); // 200 / 5 months elapsed
+        $this->assertSame(200.0, $k['avgInvoiceNet']);
+        $this->assertSame(48.0, $k['creditGross']);
+        $this->assertSame(19.4, $k['creditRatioPct']);   // 48 / 248
+        $this->assertSame('Πελάτης Α', $k['topCustomerName']);
+        $this->assertSame(100.0, $k['topCustomerShare']); // 248 / 248
+        // cash-term sale → no receivable → DSO snapshot is zero, not null.
+        $this->assertSame(0, $k['dsoDays']);
+    }
+
+    public function test_kpi_summary_handles_no_prior_year(): void
+    {
+        $this->makeInvoice(['issued_at' => '2026-05-10 10:00:00', 'net_total' => 200, 'gross_total' => 248]);
+
+        $k = (new DashboardMetrics($this->tenant))->kpiSummary(2026);
+
+        $this->assertNull($k['yoyPct']);              // no 2025 sales → no comparison
+        $this->assertSame(0.0, $k['creditRatioPct']);
+    }
+
+    public function test_net_by_month_matrix_is_dense_with_max_and_tenant_scoped(): void
+    {
+        $this->makeInvoice(['issued_at' => '2025-02-10 10:00:00', 'net_total' => 80, 'gross_total' => 99]);
+        $this->makeInvoice(['issued_at' => '2026-02-10 10:00:00', 'net_total' => 200, 'gross_total' => 248]);
+        // other tenant must not leak
+        Invoice::create([
+            'company_id' => $this->other->id, 'invcode' => 'X'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'issued_at' => '2026-02-10 10:00:00',
+            'net_total' => 9999, 'gross_total' => 9999,
+        ]);
+
+        $m = (new DashboardMetrics($this->tenant))->netByMonthMatrix(2, 2026);
+
+        $this->assertSame([2025, 2026], $m['years']);
+        $this->assertSame(80.0, $m['matrix'][2025][2]);
+        $this->assertSame(200.0, $m['matrix'][2026][2]);
+        $this->assertSame(0.0, $m['matrix'][2026][5]);   // empty cell zeroed
+        $this->assertSame(200.0, $m['max']);
+    }
+
+    public function test_seasonal_profile_indexes_months_against_the_average(): void
+    {
+        // 2025: a clear December peak (1200) vs flat 100 elsewhere.
+        for ($month = 1; $month <= 11; $month++) {
+            $this->makeInvoice(['issued_at' => sprintf('2025-%02d-10 10:00:00', $month), 'net_total' => 100, 'gross_total' => 124]);
+        }
+        $this->makeInvoice(['issued_at' => '2025-12-10 10:00:00', 'net_total' => 1200, 'gross_total' => 1488]);
+
+        $p = (new DashboardMetrics($this->tenant))->seasonalProfile(3, 2025);
+
+        $this->assertSame([2025], $p['yearsUsed']);
+        $this->assertSame(100.0, $p['monthlyAvg'][1]);
+        $this->assertSame(1200.0, $p['monthlyAvg'][12]);
+        // overall avg = (11*100 + 1200)/12 = 191.67 → Dec index ≈ 6.26, Jan ≈ 0.52
+        $this->assertGreaterThan(5.0, $p['index'][12]);
+        $this->assertLessThan(1.0, $p['index'][1]);
+    }
+
+    public function test_projection_distributes_last_year_total_by_seasonal_shape(): void
+    {
+        // Single completed year (2025), 100/month → flat seasonal index (1.0),
+        // no prior year to grow from → growth 0, projected total == base.
+        for ($month = 1; $month <= 12; $month++) {
+            $this->makeInvoice(['issued_at' => sprintf('2025-%02d-10 10:00:00', $month), 'net_total' => 100, 'gross_total' => 124]);
+        }
+
+        $p = (new DashboardMetrics($this->tenant))->projectNextYear(3);
+
+        $this->assertSame(2027, $p['nextYear']);
+        $this->assertSame(2025, $p['baseYear']);
+        $this->assertSame(1200.0, $p['baseTotal']);
+        $this->assertSame(0.0, $p['growthPct']);     // no predecessor year
+        $this->assertSame(1200.0, $p['total']);
+        $this->assertCount(12, $p['monthly']);
+        $this->assertSame(100.0, $p['monthly'][0]);  // flat shape → 1200/12
+        $this->assertTrue($p['hasHistory']);
+    }
+
+    public function test_projection_applies_clamped_average_growth(): void
+    {
+        // 2024 net 1000, 2025 net 1500 → YoY +50% → projected 2026-base*(1.5).
+        for ($month = 1; $month <= 12; $month++) {
+            $this->makeInvoice(['issued_at' => sprintf('2024-%02d-10 10:00:00', $month), 'net_total' => 1000 / 12, 'gross_total' => 1000 / 12]);
+            $this->makeInvoice(['issued_at' => sprintf('2025-%02d-10 10:00:00', $month), 'net_total' => 1500 / 12, 'gross_total' => 1500 / 12]);
+        }
+
+        $p = (new DashboardMetrics($this->tenant))->projectNextYear(3);
+
+        $this->assertSame(50.0, $p['growthPct']);
+        $this->assertEqualsWithDelta(2250.0, $p['total'], 0.5);   // 1500 * 1.5
+    }
+
+    public function test_projection_is_empty_without_history(): void
+    {
+        $p = (new DashboardMetrics($this->tenant))->projectNextYear(3);
+
+        $this->assertFalse($p['hasHistory']);
+        $this->assertSame(0.0, $p['total']);
+    }
+
     public function test_monthly_income_does_not_overflow_on_month_end_days(): void
     {
         // Viewed on the 31st, a plain subMonths(11) would skip June 2025
