@@ -37,8 +37,10 @@ class WhmcsFetchPendingCommandTest extends TestCase
      */
     private function invoicesPage(\Illuminate\Http\Client\Request $request, array $rows)
     {
-        $offset = (int) ($request->data()['offset'] ?? 0);
-        $invoice = $offset > 0 ? [] : $rows;
+        // GetInvoices paginates via limitstart (not offset). Rows on the first
+        // page; empty after, so the paginating fetcher terminates.
+        $start = (int) ($request->data()['limitstart'] ?? 0);
+        $invoice = $start > 0 ? [] : $rows;
 
         return Http::response([
             'result' => 'success',

@@ -349,53 +349,62 @@ class WhmcsClientTest extends TestCase
         $this->assertSame(50, $rows[0]['id']);
     }
 
-    public function test_get_pending_invoices_keeps_paging_past_a_short_page(): void
+    public function test_get_pending_invoices_uses_limitstart_limitnum_not_limit_offset(): void
     {
-        // WHMCS caps page size server-side, so a page SHORTER than `limit` is
-        // NOT the end — only an EMPTY page is. The loop must keep going: page 1
-        // returns 1 row (< limit), page 2 another, page 3 empty → stop. The old
-        // count<limit stop would have missed rows 5 and 6.
-        Http::fakeSequence('example.gr/*')
-            ->push(['result' => 'success', 'invoices' => ['invoice' => [
-                ['id' => 7, 'date' => '2026-05-15', 'invoiced' => 0],
-            ]]], 200)
-            ->push(['result' => 'success', 'invoices' => ['invoice' => [
-                ['id' => 6, 'date' => '2026-05-14', 'invoiced' => 0],
-            ]]], 200)
-            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
-
-        $rows = $this->makeClient()->getPendingInvoices(limit: 10);
-
-        $this->assertSame([7, 6], array_column($rows, 'id'));
-    }
-
-    public function test_get_pending_invoices_advances_cursor_by_actual_page_size(): void
-    {
-        // The "146 expected, 16 returned" bug: WHMCS returned ~25 per page but
-        // the loop advanced offset by limit (100), skipping rows 25–99. Assert
-        // the cursor advances by what WHMCS ACTUALLY returned: page 1 (offset 0)
-        // = 2 rows, page 2 MUST request offset=2 (not offset=limit).
+        // The real "stuck at 16 / 5-minute freeze" bug: GetInvoices paginates
+        // via limitstart/limitnum — limit/offset are SILENTLY IGNORED, so the
+        // API returns the same first page forever → infinite walk. Lock the
+        // correct param names + that the cursor advances by the actual count.
         Http::fakeSequence('example.gr/*')
             ->push(['result' => 'success', 'invoices' => ['invoice' => [
                 ['id' => 20, 'date' => '2026-05-20', 'invoiced' => 0],
                 ['id' => 19, 'date' => '2026-05-19', 'invoiced' => 0],
             ]]], 200)
+            // Short page (1 < limitnum 2) → the natural last-page signal.
             ->push(['result' => 'success', 'invoices' => ['invoice' => [
                 ['id' => 18, 'date' => '2026-05-18', 'invoiced' => 0],
-            ]]], 200)
-            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
+            ]]], 200);
 
-        $rows = $this->makeClient()->getPendingInvoices(limit: 100);
+        $rows = $this->makeClient()->getPendingInvoices(limit: 2);
 
         $this->assertSame([20, 19, 18], array_column($rows, 'id'));
-        // Second request advanced by the real count (2), not by limit (100).
-        $offsets = [];
+
+        $starts = [];
         Http::assertSentInOrder([
-            function ($req) use (&$offsets) { $offsets[] = (int) ($req->data()['offset'] ?? -1); return true; },
-            function ($req) use (&$offsets) { $offsets[] = (int) ($req->data()['offset'] ?? -1); return true; },
-            function ($req) use (&$offsets) { $offsets[] = (int) ($req->data()['offset'] ?? -1); return true; },
+            function ($req) use (&$starts) {
+                $starts[] = (int) ($req->data()['limitstart'] ?? -1);
+                // limitnum carries the page size; limit/offset are NOT sent.
+                return (int) ($req->data()['limitnum'] ?? 0) === 2
+                    && ! array_key_exists('offset', $req->data());
+            },
+            function ($req) use (&$starts) {
+                $starts[] = (int) ($req->data()['limitstart'] ?? -1);
+
+                return true;
+            },
         ]);
-        $this->assertSame([0, 2, 3], $offsets);
+        // 2nd page starts at 2 (the actual count returned), not at limit.
+        $this->assertSame([0, 2], $starts);
+    }
+
+    public function test_get_pending_invoices_loop_guard_stops_a_nonpaginating_server(): void
+    {
+        // Defence in depth: if a server ignores pagination and keeps returning
+        // the SAME page (the failure mode that hung prod), the id-repeat guard
+        // must stop after the second identical page instead of looping to
+        // maxPages. Http::fake (no sequence) repeats the same response.
+        Http::fake([
+            'example.gr/*' => Http::response(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 5, 'date' => '2026-05-15', 'invoiced' => 0],
+                ['id' => 4, 'date' => '2026-05-14', 'invoiced' => 0],
+            ]]], 200),
+        ]);
+
+        $rows = $this->makeClient()->getPendingInvoices(limit: 2);
+
+        // Page 1 keeps both; page 2 repeats id 5 → guard breaks. No hang, no
+        // duplicates beyond the first page.
+        $this->assertSame([5, 4], array_column($rows, 'id'));
     }
 
     public function test_get_pending_invoices_no_min_date_pulls_everything(): void
