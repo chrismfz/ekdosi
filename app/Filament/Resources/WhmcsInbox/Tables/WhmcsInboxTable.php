@@ -164,15 +164,28 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::TP_MULTI => 'warning',
                         default => 'gray',
                     })
-                    ->formatStateUsing(fn (?string $state): string => match ($state) {
-                        PendingWhmcsInvoice::TP_SINGLE => 'Σε τρίτο',
-                        PendingWhmcsInvoice::TP_MULTI => 'Διαχωρισμός',
-                        PendingWhmcsInvoice::TP_NONE => 'Όχι',
-                        default => '—',
+                    // For a single third-party invoice show WHO it's billed to
+                    // (the beneficiary name), not just «Σε τρίτο» — the operator
+                    // sees the recipient at a glance.
+                    ->formatStateUsing(function (?string $state, PendingWhmcsInvoice $r): string {
+                        return match ($state) {
+                            PendingWhmcsInvoice::TP_SINGLE => self::firstBeneficiaryName($r) ?? 'Σε τρίτο',
+                            PendingWhmcsInvoice::TP_MULTI => 'Διαχωρισμός',
+                            PendingWhmcsInvoice::TP_NONE => 'Όχι',
+                            default => '—',
+                        };
                     })
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
-                        ? 'Πολλαπλοί δικαιούχοι σε ένα WHMCS τιμολόγιο — χρειάζεται χειροκίνητος διαχωρισμός.'
-                        : null),
+                    ->tooltip(function (PendingWhmcsInvoice $r): ?string {
+                        $names = self::beneficiaryNames($r);
+                        if ($r->third_party_state === PendingWhmcsInvoice::TP_MULTI) {
+                            return 'Πολλαπλοί δικαιούχοι ('.implode(' · ', $names).') — χρειάζεται χειροκίνητος διαχωρισμός.';
+                        }
+                        if ($r->third_party_state === PendingWhmcsInvoice::TP_SINGLE && $names !== []) {
+                            return 'Δικαιούχος: '.$names[0];
+                        }
+
+                        return null;
+                    }),
 
                 TextColumn::make('status')
                     ->label('Κατάσταση')
@@ -277,6 +290,23 @@ class WhmcsInboxTable
         }
 
         return array_values($byContact);
+    }
+
+    /** @return list<string> distinct routed-beneficiary names for the row. */
+    private static function beneficiaryNames(PendingWhmcsInvoice $r): array
+    {
+        return array_values(array_filter(array_map(
+            static fn (array $b): string => (string) ($b['name'] ?? ''),
+            self::routedBeneficiaries($r),
+        ), static fn (string $n): bool => $n !== '' && $n !== '—'));
+    }
+
+    /** The single beneficiary's name (for the «Τρίτος» badge), or null. */
+    private static function firstBeneficiaryName(PendingWhmcsInvoice $r): ?string
+    {
+        $names = self::beneficiaryNames($r);
+
+        return $names[0] ?? null;
     }
 
     /**

@@ -35,41 +35,27 @@ class SupplierForm
                                 ignoreRecord: true,
                                 modifyRuleUsing: fn (Unique $rule) => $rule->where('company_id', Filament::getTenant()?->getKey()),
                             )
-                            ->suffixAction(
-                                // Reuse the GSIS lookup we already have for
-                                // customers. For GR suppliers this is the ONLY
-                                // way to get the name (myDATA never sends it).
+                            // Reuse the GSIS lookup we already have for customers.
+                            // For GR suppliers this is the ONLY way to get the
+                            // name (myDATA never sends it). Two modes: "Άντληση"
+                            // fills empty fields, "Διόρθωση" overwrites from AADE
+                            // (source of truth).
+                            ->suffixActions([
                                 FormAction::make('fetch_supplier_from_aade')
                                     ->label('Άντληση από ΑΑΔΕ')
                                     ->icon('heroicon-o-arrow-down-tray')
                                     ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
-                                    ->action(function (callable $get, callable $set): void {
-                                        $result = AadeFormFill::lookup($get('afm'));
-                                        if (! $result) {
-                                            return;
-                                        }
-
-                                        // Only fill fields the operator left empty (don't
-                                        // clobber a typed trade name / friendly address).
-                                        $fillIfEmpty = function (string $field, ?string $value) use ($get, $set): void {
-                                            if (empty($get($field)) && filled($value)) {
-                                                $set($field, $value);
-                                            }
-                                        };
-                                        $fillIfEmpty('name', $result->name);
-                                        $fillIfEmpty('tax_office', $result->doy);
-                                        $fillIfEmpty('address1', $result->address);
-                                        $fillIfEmpty('city', $result->city);
-                                        $fillIfEmpty('postcode', $result->postcode);
-                                        $fillIfEmpty('country', 'GR');
-                                        $primary = $result->primaryActivity();
-                                        if ($primary) {
-                                            $fillIfEmpty('occupation', $primary['description'] ?? null);
-                                        }
-
-                                        Notification::make()->title('Στοιχεία αντλήθηκαν από την ΑΑΔΕ')->success()->send();
-                                    }),
-                            ),
+                                    ->action(fn (callable $get, callable $set) => self::applyAadeToSupplier($get, $set, overwrite: false)),
+                                FormAction::make('correct_supplier_from_aade')
+                                    ->label('Διόρθωση από ΑΑΔΕ')
+                                    ->icon('heroicon-o-arrow-path')
+                                    ->color('warning')
+                                    ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
+                                    ->requiresConfirmation()
+                                    ->modalHeading('Διόρθωση στοιχείων από ΑΑΔΕ')
+                                    ->modalDescription('Αντικαθιστά επωνυμία/ΔΟΥ/διεύθυνση/δραστηριότητα με τα επίσημα στοιχεία του μητρώου ΑΑΔΕ (πηγή αλήθειας).')
+                                    ->action(fn (callable $get, callable $set) => self::applyAadeToSupplier($get, $set, overwrite: true)),
+                            ]),
 
                         TextInput::make('name')
                             ->label('Επωνυμία')
@@ -119,5 +105,33 @@ class SupplierForm
                             ->columnSpanFull(),
                     ]),
             ]);
+    }
+
+    /**
+     * GSIS lookup → supplier fields. overwrite=false fills empty fields
+     * (import); overwrite=true replaces them (AADE source of truth). Shares
+     * the empty/overwrite rule with the customer form via AadeFormFill::assign.
+     */
+    private static function applyAadeToSupplier(callable $get, callable $set, bool $overwrite): void
+    {
+        $result = AadeFormFill::lookup($get('afm'));
+        if (! $result) {
+            return;
+        }
+
+        AadeFormFill::assign($get, $set, 'name', $result->name, $overwrite);
+        AadeFormFill::assign($get, $set, 'tax_office', $result->doy, $overwrite);
+        AadeFormFill::assign($get, $set, 'address1', $result->address, $overwrite);
+        AadeFormFill::assign($get, $set, 'city', $result->city, $overwrite);
+        AadeFormFill::assign($get, $set, 'postcode', $result->postcode, $overwrite);
+        AadeFormFill::assign($get, $set, 'country', 'GR', $overwrite);
+        $primary = $result->primaryActivity();
+        if ($primary) {
+            AadeFormFill::assign($get, $set, 'occupation', $primary['description'] ?? null, $overwrite);
+        }
+
+        Notification::make()
+            ->title($overwrite ? 'Διορθώθηκε από την ΑΑΔΕ' : 'Στοιχεία αντλήθηκαν από την ΑΑΔΕ')
+            ->success()->send();
     }
 }
