@@ -1,0 +1,224 @@
+<?php
+
+namespace App\Http\Controllers\Webhooks;
+
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Support\InvoiceScope;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\Response;
+
+/**
+ * Visibility (AFM-keyed): the per-client "Παραστατικά ekdosi" card the
+ * WHMCS-side ekdosi_bridge plugin renders on a client's admin profile —
+ * keyed by ΑΦΜ, the ONLY link that actually survives in the data.
+ *
+ *   POST /webhooks/whmcs/{slug}/invoices-by-afm
+ *   X-Webhook-Signature: sha256=<hex hmac of raw body>
+ *   {"afms": ["123456789", "998482379", ...]}
+ *
+ * WHY ΑΦΜ and not a stored WHMCS→ekdosi id:
+ * The legacy Firebird app never persisted the WHMCS client id (CUSTOMER has
+ * no CS/WHMCS column) nor a per-invoice WHMCS link (AUTO_INVOICE_LOG carries
+ * only LOG_ID/CS_INVID/LOG_MESSAGE — no ekdosi invoice id). Verified against
+ * the restored production DB: customers.whmcs_client_id is NULL for 100% of
+ * rows and whmcs_invoice_log is empty. So the historical link is
+ * unrecoverable structurally — but BOTH sides carry the ΑΦΜ. ekdosi
+ * customers.afm is populated; matching on it lights up every imported
+ * VALID invoice with no re-import.
+ *
+ * WHY an AFM *set* (not one AFM):
+ * Third-party invoicing ("Παραστατικά σε τρίτους" / per-product→other-VAT,
+ * ported from legacy/whmcs/timologia into ekdosi_bridge) means one WHMCS
+ * client routes different services to different ΑΦΜ — their own plus N
+ * third-party contacts (mod_ekdosi_contacts.gr_vatno). The plugin gathers
+ * the whole set (client tax_id + routed contacts) and we return invoices
+ * for any of them, grouped under each ΑΦΜ key so the plugin can render
+ * «Δικά του» vs «Τρίτοι».
+ *
+ * Auth mirrors WhmcsInvoicePaidController: HMAC-SHA256 over the RAW request
+ * body, same whmcs_webhook_secret. POST (not GET) because the AFM set is a
+ * list — and signing the raw body is the established scheme for our
+ * body-carrying webhooks.
+ *
+ * Read-only: never writes. Tenant-scoped by construction (Customer/Invoice
+ * filtered on company_id). Caps both the requested AFM count and the
+ * returned invoice count so a crafted request can't ask for the world.
+ *
+ * Response (200 OK):
+ *   {
+ *     "found": true,
+ *     "afms": {
+ *       "998482379": {
+ *         "customer_id": 412,
+ *         "customer_name": "ACME ΕΠΕ",
+ *         "invoices": [
+ *           {"ekdosi_invoice_id": 130, "ekdosi_invcode": "ΤΠΥ130",
+ *            "local_status": "active", "mydata_state": "VALID",
+ *            "mydata_mark": "400013690089505", "issued_at": "2026-05-12"},
+ *           ...
+ *         ]
+ *       },
+ *       "123456789": null    // no ekdosi customer with this ΑΦΜ
+ *     }
+ *   }
+ */
+class WhmcsInvoicesByAfmController
+{
+    /** Max ΑΦΜ accepted per request (a client + their third-party contacts). */
+    private const MAX_AFMS = 200;
+
+    /** Max invoices returned per ΑΦΜ (newest first); keeps the response bounded. */
+    private const MAX_INVOICES_PER_AFM = 500;
+
+    public function __invoke(Request $request, string $slug): JsonResponse
+    {
+        $tenant = Company::query()->where('slug', $slug)->first();
+        if ($tenant === null) {
+            $this->logRejection($request, $slug, 'tenant_not_found');
+
+            return new JsonResponse(['error' => 'tenant_not_found'], Response::HTTP_NOT_FOUND);
+        }
+
+        $secret = (string) ($tenant->whmcs_webhook_secret ?? '');
+        if ($secret === '') {
+            $this->logRejection($request, $slug, 'webhook_secret_not_configured');
+
+            return new JsonResponse([
+                'error' => 'webhook_secret_not_configured',
+                'message' => 'Tenant exists but has no whmcs_webhook_secret. Set it in the company config form.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if (! $this->verifySignature($request, $secret)) {
+            $this->logRejection($request, $slug, 'invalid_signature');
+
+            return new JsonResponse(['error' => 'invalid_signature'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $afms = $this->normaliseAfms($request->json('afms'));
+        if ($afms === []) {
+            return new JsonResponse([
+                'error' => 'missing_or_invalid_afms',
+                'message' => 'Body must be {"afms": ["123456789", ...]} with at least one non-empty ΑΦΜ.',
+            ], Response::HTTP_BAD_REQUEST);
+        }
+
+        // One query for all matching customers (tenant-scoped), keyed by ΑΦΜ.
+        // A duplicate ΑΦΜ across customers is unusual but possible (data-entry);
+        // keyBy keeps the first — acceptable for a visibility card.
+        $customers = Customer::query()
+            ->where('company_id', $tenant->id)
+            ->whereIn('afm', $afms)
+            ->get(['id', 'afm', 'name'])
+            ->keyBy('afm');
+
+        $result = [];
+        foreach ($afms as $afm) {
+            $customer = $customers->get($afm);
+            if ($customer === null) {
+                $result[$afm] = null;   // no ekdosi customer with this ΑΦΜ
+
+                continue;
+            }
+
+            $result[$afm] = [
+                'customer_id' => $customer->id,
+                'customer_name' => $customer->name,
+                'invoices' => $this->invoicesFor($tenant->id, $customer->id),
+            ];
+        }
+
+        return new JsonResponse([
+            'found' => true,
+            'afms' => $result,
+        ], Response::HTTP_OK);
+    }
+
+    /**
+     * The customer's invoices, newest first, as plain rows for the plugin
+     * table. `live()` drops locally- and AADE-cancelled documents so the
+     * card doesn't surface withdrawn παραστατικά as if they stand.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function invoicesFor(int $companyId, int $customerId): array
+    {
+        $query = Invoice::query()
+            ->where('company_id', $companyId)
+            ->where('customer_id', $customerId);
+
+        return InvoiceScope::live($query)
+            ->orderByDesc('issued_at')
+            ->orderByDesc('id')
+            ->limit(self::MAX_INVOICES_PER_AFM)
+            ->get(['id', 'invcode', 'local_status', 'mydata_state', 'mydata_mark', 'issued_at'])
+            ->map(fn (Invoice $i): array => [
+                'ekdosi_invoice_id' => $i->id,
+                'ekdosi_invcode' => $i->invcode,
+                'local_status' => $i->local_status,
+                'mydata_state' => $i->mydata_state,
+                'mydata_mark' => $i->mydata_mark,
+                'issued_at' => $i->issued_at?->toDateString(),
+            ])
+            ->all();
+    }
+
+    /**
+     * Clean the inbound ΑΦΜ list: strip non-digits (WHMCS tax_id fields are
+     * free-text and pick up spaces / "EL" prefixes / dashes), drop empties,
+     * de-dupe, cap. Returns a list<string> of bare numeric ΑΦΜ.
+     *
+     * @return list<string>
+     */
+    private function normaliseAfms(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $clean = [];
+        foreach ($raw as $value) {
+            if (! is_string($value) && ! is_int($value)) {
+                continue;
+            }
+            // Greek ΑΦΜ are numeric; drop anything else (EL/GR prefix, spaces).
+            $digits = preg_replace('/\D+/', '', (string) $value);
+            if ($digits === '' || $digits === null) {
+                continue;
+            }
+            $clean[$digits] = true;   // de-dupe via keys
+            if (count($clean) >= self::MAX_AFMS) {
+                break;
+            }
+        }
+
+        return array_keys($clean);
+    }
+
+    private function verifySignature(Request $request, string $secret): bool
+    {
+        $header = (string) $request->header('X-Webhook-Signature', '');
+        if (! str_starts_with($header, 'sha256=')) {
+            return false;
+        }
+        $sent = substr($header, strlen('sha256='));
+        $expected = hash_hmac('sha256', $request->getContent(), $secret);
+
+        return hash_equals($expected, $sent);
+    }
+
+    private function logRejection(Request $request, string $slug, string $reason): void
+    {
+        $sig = (string) $request->header('X-Webhook-Signature', '');
+        Log::warning('whmcs.invoices-by-afm.rejected', [
+            'reason' => $reason,
+            'slug' => $slug,
+            'ip' => $request->ip(),
+            'sig_prefix' => $sig === '' ? '<missing>' : substr($sig, 0, 15).'...',
+        ]);
+    }
+}
