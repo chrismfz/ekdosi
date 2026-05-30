@@ -250,6 +250,16 @@ against them (read-only) and flags what AADE would reject. Exit 0/1/2.
   / missingLocally / duplicateLocal. Read-only worklist. **Sandbox-verified
   2026-05-28** (parser needed no changes). Inbound `RequestDocs` (expense side)
   IS built — see the Έξοδα phase (`ExpenseReconciler` / `MyDataConsoleExpenses`).
+- **Console UX (2026-05-31):** orphans (`missingLocally`) are bucketed by
+  economic type — `Codes::transmittedDocBucket()` → income (1/2/5/6/7/8/11) /
+  expense (13/14) / other (3/15/16/17 = μισθοδοσία, πάγια…) — so a €5k payroll
+  no longer reads as a missed sale. All three consoles (sales / expenses / E3)
+  cache the last fetch per tenant (`RemembersLastFetch`, 12h) and rehydrate on
+  mount. **MARK detail** (`MyDataMarkDetail` / `MarkDetail`) is direction-aware
+  (issuer vs us; «λιανική — δεν δηλώνεται» when myDATA omits the issuer) and
+  surfaces the per-line E3 classification (no free-text description exists in
+  myDATA). The **E3 overview** splits income vs expense with separate subtotals
+  + a ΦΠΑ-τριμήνου box from `VatPictureCache`.
 
 ---
 
@@ -279,7 +289,11 @@ credit; works on filed invoices but then surfaces the ⚠ reconciliation row),
 ## WHMCS bridge (built — Stages A / B-1 / B-2 / B-3)
 Operator-gated **inbox** model (NOT auto-issuing — invoices are legally
 significant): WHMCS push/poll → ekdosi webhook → `pending_whmcs_invoices` →
-operator reviews in `WhmcsInbox` → File at AADE → write back `invoiced=MARK`.
+operator reviews in `WhmcsInbox` → **«Δημιουργία Παραστατικού» (editable draft)**
+→ fix line text → issue via the normal invoice lifecycle (Οριστικοποίηση →
+myDATA submit) → write-back `invoiced=MARK`. The inbox no longer files straight
+to AADE (safer — review the real παραστατικό first); the direct `file()` path
+survives only for the γκρινιάρης `whmcs:auto-issue` command.
 - Services: `Whmcs\WhmcsClient` (+factory), `WhmcsInvoiceIngestor`,
   `WhmcsInbox\WhmcsInvoiceMapper` + `WhmcsInvoiceFiler`, `WhmcsBridgeClient`
   (write-back). Webhook controllers in `routes/webhooks.php`.
@@ -290,7 +304,30 @@ operator reviews in `WhmcsInbox` → File at AADE → write back `invoiced=MARK`
 - **`whmcs-plugin/ekdosi_bridge/`** is OUR WHMCS-side plugin (the consolidated
   successor to the 3 archived legacy plugins). Deployed to the tenant's WHMCS.
 
+**Inbox UX + visibility (2026-05-31):**
+- **Draft-first inbox** (`WhmcsInvoiceFiler::createDraft`): primary action
+  «Δημιουργία Παραστατικού» creates an editable draft (`status='drafted'`, ΑΑ
+  allocated, `local_status='draft'`, `whmcs_pending_id` linked) — NO AADE submit;
+  mirrors the splitter. Operator edits then issues via the lifecycle.
+- **Billing-intent surfacing**: the inbox reads the WHMCS client custom fields
+  off the staged payload via `companies.whmcs_custom_field_map` (roles `vatno`,
+  `taxoffice`, `occupation`, `griniaris`, **`wantsinvoice`**) →
+  `PendingWhmcsInvoice::wantsInvoice()/whmcsAfm()/needsAfm()/whmcsClientName()`.
+  Columns «Πελάτης (WHMCS)» + «Πρόθεση» (Τιμολόγιο/Απόδειξη, red «λείπει ΑΦΜ»);
+  the Hold action takes a reason (`hold_reason`); the WHMCS # opens a full
+  read-only invoice modal. `whmcs_third_party_enabled` is now a Company toggle.
+- **`ekdosi_bridge` plugin v0.5.0 — WHMCS-side visibility** (PR #101 branch):
+  per-invoice admin badge with the real MARK, an invoice-LIST badge (footer-JS
+  + read-only `marks` JSON action), a CSRF «Αποστολή στο Ekdosi» button, and a
+  per-client **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ, drafts incl.) via
+  `GET /webhooks/whmcs/{slug}/invoice-map/{whmcs_userid}`
+  (`WhmcsClientInvoiceMapController`, HMAC `"{slug}:map:{userid}"`).
+
 **WHMCS gaps (real):**
+- **Write-back on lifecycle-filed drafts (tracked):** when a draft is issued via
+  the normal lifecycle (not the direct `file()`), `invoiced=MARK` + pending→filed
+  sync don't fire yet. Wire it off `MyDataSubmitter`'s VALID persist for invoices
+  carrying `whmcs_pending_id` — fixes the split-draft write-back gap too.
 - **`mod_timologia` third-party invoicing — ✅ DONE (T-1 + T-2, merged).** The
   bridge resolves each line's routing (own `mod_ekdosi_*` tables, synced from
   legacy), ekdosi bills the end customer for single-party invoices and stages
