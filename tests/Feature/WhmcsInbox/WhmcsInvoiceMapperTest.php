@@ -146,6 +146,79 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(124.0, $line['gross_price'], 'VAT added on top');
     }
 
+    public function test_payload_breakdown_detects_net_amounts_overriding_a_wrong_toggle(): void
+    {
+        // The real #31476 case: tenant toggle defaults to includes_tax=TRUE
+        // (gross), but the WHMCS payload's own breakdown proves the line
+        // amounts are NET (subtotal 19 + tax 4.56 == total 23.56). The mapper
+        // must TRUST the payload and add VAT on top — not divide it out.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31476,
+            'userid' => 59,
+            'date' => '2026-05-06',
+            'subtotal' => '19.00',
+            'tax' => '4.56',
+            'taxrate' => '24.000',
+            'total' => '23.56',
+            'items' => ['item' => [
+                ['description' => 'Ανανέωση Domain - nutriwellness.gr', 'amount' => '19.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $result = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $this->assertSame(19.0, $result['lines'][0]['net_price'], 'amount detected as net from payload');
+        $this->assertSame(23.56, $result['lines'][0]['gross_price'], 'VAT added on top → matches WHMCS total');
+    }
+
+    public function test_payload_breakdown_detects_gross_amounts(): void
+    {
+        // The other direction: subtotal already includes the tax (subtotal ==
+        // total), so the line amount is GROSS → back out the net. €124 @ 24%
+        // → net €100. Toggle says net, but the payload wins.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => false])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31477,
+            'userid' => 60,
+            'date' => '2026-05-06',
+            'subtotal' => '124.00',
+            'tax' => '24.00',
+            'taxrate' => '24.000',
+            'total' => '124.00',     // tax already inside → gross amounts
+            'items' => ['item' => [
+                ['description' => 'Gross line', 'amount' => '124.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame(100.0, $line['net_price'], 'gross detected → net backed out');
+        $this->assertSame(124.0, $line['gross_price']);
+    }
+
+    public function test_no_payload_breakdown_falls_back_to_toggle(): void
+    {
+        // No subtotal/tax fields → detection returns null → tenant toggle
+        // (here: tax-exclusive) decides. Guards the fallback path.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => false])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 1009, 'userid' => 5, 'date' => '2026-05-20', 'total' => '100.00',
+            'items' => ['item' => [['description' => 'No breakdown', 'amount' => '100.00', 'taxed' => '1']]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame(100.0, $line['net_price'], 'toggle (net) used when payload has no breakdown');
+        $this->assertSame(124.0, $line['gross_price']);
+    }
+
     public function test_tax_exclusive_flag_applies_on_the_split_subset_path_too(): void
     {
         // G3 belt-and-suspenders: the flag must hold when map() is called with

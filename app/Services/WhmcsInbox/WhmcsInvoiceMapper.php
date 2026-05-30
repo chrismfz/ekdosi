@@ -108,10 +108,16 @@ class WhmcsInvoiceMapper
             : $this->filterPayloadItems($payload, $onlyWhmcsItemIds);
         $defaultVat = $this->resolveDefaultVatCategory($tenant);
 
-        // G3: whether WHMCS sends line amounts VAT-inclusive (gross, the Greek
-        // norm + default) or tax-exclusive (net). A tax-exclusive tenant must
-        // NOT have a VAT divided out of an amount that never contained it.
-        $amountIncludesTax = (bool) ($tenant->whmcs_amount_includes_tax ?? true);
+        // G3 / payload-authoritative: whether WHMCS line `amount` is gross
+        // (VAT-inclusive, the Greek norm) or net (tax-exclusive). Prefer to
+        // DETECT it from the invoice's own tax breakdown — the WHMCS payload
+        // carries subtotal/tax/taxrate/total + per-line `taxed`, so we don't
+        // have to guess. Only fall back to the per-tenant toggle when the
+        // payload has no usable breakdown. detectAmountIncludesTax returns
+        // null when it can't tell.
+        $detected = $this->detectAmountIncludesTax($linePayload);
+        $amountIncludesTax = $detected
+            ?? (bool) ($tenant->whmcs_amount_includes_tax ?? true);
 
         $lines = $this->buildLines($linePayload, $defaultVat, $amountIncludesTax);
         $totals = $this->computeTotals($lines);
@@ -201,6 +207,53 @@ class WhmcsInvoiceMapper
         }
 
         return $default;
+    }
+
+    /**
+     * Detect from the WHMCS payload whether line `amount`s are tax-EXCLUSIVE
+     * (net) or tax-INCLUSIVE (gross), instead of guessing per tenant. The
+     * GetInvoice payload carries the authoritative breakdown:
+     *   subtotal (sum of line amounts), tax, taxrate, total.
+     *
+     * Decision (only when tax > 0 and there is a positive taxrate — i.e. the
+     * invoice actually charges VAT):
+     *   - subtotal ≈ Σ(taxed line amounts)  AND  subtotal + tax ≈ total
+     *       → the line amounts are NET, WHMCS added tax on top → return FALSE.
+     *   - subtotal ≈ total (tax already inside)
+     *       → line amounts are GROSS → return TRUE.
+     * Returns null when the payload has no usable breakdown (no tax / missing
+     * fields / inconsistent) — caller falls back to the tenant toggle.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function detectAmountIncludesTax(array $payload): ?bool
+    {
+        $taxRate = (float) ($payload['taxrate'] ?? 0);
+        $tax = (float) ($payload['tax'] ?? 0);
+        $subtotal = isset($payload['subtotal']) ? (float) $payload['subtotal'] : null;
+        $total = isset($payload['total']) ? (float) $payload['total'] : null;
+
+        // No VAT on this invoice, or breakdown missing → can't tell.
+        if ($taxRate <= 0.0 || $tax <= 0.005 || $subtotal === null || $total === null) {
+            return null;
+        }
+
+        $eps = 0.02;   // rounding tolerance between the two systems
+
+        // Net amounts: WHMCS adds tax on top, so subtotal + tax == total and
+        // subtotal is the pre-tax base.
+        if (abs(($subtotal + $tax) - $total) <= $eps) {
+            return false;
+        }
+
+        // Gross amounts: the tax is already inside subtotal, so subtotal ==
+        // total (tax is informational).
+        if (abs($subtotal - $total) <= $eps) {
+            return true;
+        }
+
+        // Inconsistent / unrecognised shape → defer to the tenant toggle.
+        return null;
     }
 
     /**
