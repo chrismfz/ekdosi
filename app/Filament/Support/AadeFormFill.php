@@ -63,4 +63,26 @@ class AadeFormFill
 
         return null;
     }
+
+    /**
+     * Assign one AADE-sourced value to a form field, honouring the mode:
+     *   - $overwrite = false → fill only when the field is empty (operator's
+     *     typed value wins; AADE fills gaps). The "import" button.
+     *   - $overwrite = true  → AADE is the source of truth; replace whatever is
+     *     there (only when AADE actually returned a value). The "correct from
+     *     AADE" button — for when the customer typed something wrong.
+     *
+     * Centralised so the customer + supplier forms apply the SAME rule; each
+     * form still owns its own field list (they differ — e.g. kad_primary).
+     */
+    public static function assign(callable $get, callable $set, string $field, ?string $value, bool $overwrite): void
+    {
+        $value = (string) ($value ?? '');
+        if ($value === '') {
+            return;   // never blank out a field with an empty AADE value
+        }
+        if ($overwrite || empty($get($field))) {
+            $set($field, $value);
+        }
+    }
 }

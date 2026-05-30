@@ -62,4 +62,50 @@ class AadeFormFillTest extends TestCase
         // regression this guards), this line would fatal instead of null.
         $this->assertNull(AadeFormFill::lookup('123456789'));
     }
+
+    /**
+     * @return array{0: callable, 1: callable}  [get, set] over a shared store
+     */
+    private function formStore(array $initial = []): array
+    {
+        $store = $initial;
+        $get = function (string $field) use (&$store) { return $store[$field] ?? null; };
+        $set = function (string $field, $value) use (&$store) { $store[$field] = $value; };
+
+        return [$get, $set, function () use (&$store) { return $store; }];
+    }
+
+    public function test_assign_import_mode_fills_only_empty_fields(): void
+    {
+        [$get, $set, $dump] = $this->formStore(['name' => 'Ο πελάτης το έγραψε']);
+
+        // overwrite=false → typed value wins, empty field gets filled.
+        AadeFormFill::assign($get, $set, 'name', 'ΕΠΙΣΗΜΗ ΕΠΩΝΥΜΙΑ ΑΕ', false);
+        AadeFormFill::assign($get, $set, 'tax_office', 'Α ΑΘΗΝΩΝ', false);
+
+        $s = $dump();
+        $this->assertSame('Ο πελάτης το έγραψε', $s['name'], 'typed value not clobbered in import mode');
+        $this->assertSame('Α ΑΘΗΝΩΝ', $s['tax_office'], 'empty field filled');
+    }
+
+    public function test_assign_correct_mode_overwrites_from_aade(): void
+    {
+        [$get, $set, $dump] = $this->formStore(['name' => 'Λάθος που έγραψε ο πελάτης']);
+
+        // overwrite=true → AADE is the source of truth, replace it.
+        AadeFormFill::assign($get, $set, 'name', 'ΕΠΙΣΗΜΗ ΕΠΩΝΥΜΙΑ ΑΕ', true);
+
+        $this->assertSame('ΕΠΙΣΗΜΗ ΕΠΩΝΥΜΙΑ ΑΕ', $dump()['name']);
+    }
+
+    public function test_assign_never_blanks_a_field_with_empty_aade_value(): void
+    {
+        [$get, $set, $dump] = $this->formStore(['name' => 'Υπάρχον']);
+
+        // Even in overwrite mode, an empty AADE value must NOT wipe the field.
+        AadeFormFill::assign($get, $set, 'name', '', true);
+        AadeFormFill::assign($get, $set, 'name', null, true);
+
+        $this->assertSame('Υπάρχον', $dump()['name']);
+    }
 }

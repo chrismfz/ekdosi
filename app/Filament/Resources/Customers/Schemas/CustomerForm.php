@@ -56,63 +56,27 @@ class CustomerForm
                                 TextInput::make('afm')
                                     ->label('AFM / VAT number')
                                     ->maxLength(20)
-                                    ->suffixAction(
+                                    // Two AADE actions — both Greek-tenant only (RgWsPublic2
+                                    // looks up Greek AFMs). "Άντληση" fills only EMPTY fields
+                                    // (operator's typed value wins); "Διόρθωση" OVERWRITES from
+                                    // AADE (the registry is the source of truth — for when the
+                                    // customer typed something wrong).
+                                    ->suffixActions([
                                         FormAction::make('fetch_customer_from_aade')
-                                            ->label('Fetch from AADE')
+                                            ->label('Άντληση από ΑΑΔΕ')
                                             ->icon('heroicon-o-arrow-down-tray')
-                                            // Only meaningful for Greek tenants — RgWsPublic2
-                                            // looks up Greek AFMs only.
                                             ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
-                                            ->action(function (callable $get, callable $set) {
-                                                $result = AadeFormFill::lookup($get('afm'));
-                                                if (! $result) {
-                                                    return;
-                                                }
-                                                // Only overwrite fields the operator hasn't
-                                                // typed into. Without this guard a typed
-                                                // trade name "My Customer Ltd" gets
-                                                // clobbered by the AADE legal name
-                                                // "MY CUSTOMER ΕΠΕ", and friendly addresses
-                                                // get replaced with the registry form.
-                                                // Operators can clear a field to force AADE
-                                                // to populate it.
-                                                $fillIfEmpty = function (string $field, string $value) use ($get, $set): void {
-                                                    if (empty($get($field)) && $value !== '') {
-                                                        $set($field, $value);
-                                                    }
-                                                };
-                                                $fillIfEmpty('name', $result->name);
-                                                $fillIfEmpty('tax_office', $result->doy);
-                                                $fillIfEmpty('address1', $result->address);
-                                                $fillIfEmpty('city', $result->city);
-                                                $fillIfEmpty('postcode', $result->postcode);
-                                                $fillIfEmpty('country', 'GR');
-                                                $primary = $result->primaryActivity();
-                                                if ($primary) {
-                                                    $fillIfEmpty('kad_primary', $primary['code']);
-                                                    // occupation is the human-readable activity
-                                                    // text that legacy prints on invoices as
-                                                    // "Δραστηριότητα: ...".
-                                                    $fillIfEmpty('occupation', $primary['description']);
-                                                }
-                                                // Surface the AADE-reported status. An AFM in
-                                                // suspension or deactivated state would be
-                                                // imported and then fail myDATA submission on
-                                                // first invoice — operator should see it now,
-                                                // before they commit the row.
-                                                $body = $result->doy.($primary ? ' · '.$primary['description'] : '');
-                                                $notification = Notification::make()
-                                                    ->title('Loaded from AADE: '.$result->name);
-                                                if ($result->active) {
-                                                    $notification->body($body)->success();
-                                                } else {
-                                                    $notification
-                                                        ->body($body.' · ⚠ Status: '.($result->statusDescr ?: 'unknown — verify with AADE before issuing'))
-                                                        ->warning();
-                                                }
-                                                $notification->send();
-                                            }),
-                                    ),
+                                            ->action(fn (callable $get, callable $set) => self::applyAadeToCustomer($get, $set, overwrite: false)),
+                                        FormAction::make('correct_customer_from_aade')
+                                            ->label('Διόρθωση από ΑΑΔΕ')
+                                            ->icon('heroicon-o-arrow-path')
+                                            ->color('warning')
+                                            ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
+                                            ->requiresConfirmation()
+                                            ->modalHeading('Διόρθωση στοιχείων από ΑΑΔΕ')
+                                            ->modalDescription('Αντικαθιστά επωνυμία/ΔΟΥ/διεύθυνση/δραστηριότητα με τα επίσημα στοιχεία του μητρώου ΑΑΔΕ (πηγή αλήθειας). Ό,τι έχει γράψει ο πελάτης λάθος θα διορθωθεί.')
+                                            ->action(fn (callable $get, callable $set) => self::applyAadeToCustomer($get, $set, overwrite: true)),
+                                    ]),
 
                                 TextInput::make('vat_vies')
                                     ->label('VIES VAT (EU intra-community)')
@@ -249,5 +213,48 @@ class CustomerForm
                             ]),
                     ]),
             ]);
+    }
+
+    /**
+     * Look up the form's ΑΦΜ in the GSIS registry and apply the result to the
+     * customer fields. $overwrite=false fills only empty fields (import);
+     * $overwrite=true replaces them (AADE is the source of truth — correct a
+     * wrong/changed entry). Shared by both AADE buttons; the empty/overwrite
+     * rule lives in AadeFormFill::assign so customer + supplier can't drift.
+     */
+    private static function applyAadeToCustomer(callable $get, callable $set, bool $overwrite): void
+    {
+        $result = AadeFormFill::lookup($get('afm'));
+        if (! $result) {
+            return;
+        }
+
+        AadeFormFill::assign($get, $set, 'name', $result->name, $overwrite);
+        AadeFormFill::assign($get, $set, 'tax_office', $result->doy, $overwrite);
+        AadeFormFill::assign($get, $set, 'address1', $result->address, $overwrite);
+        AadeFormFill::assign($get, $set, 'city', $result->city, $overwrite);
+        AadeFormFill::assign($get, $set, 'postcode', $result->postcode, $overwrite);
+        AadeFormFill::assign($get, $set, 'country', 'GR', $overwrite);
+        $primary = $result->primaryActivity();
+        if ($primary) {
+            AadeFormFill::assign($get, $set, 'kad_primary', $primary['code'] ?? null, $overwrite);
+            // occupation = human-readable activity, printed on invoices as
+            // "Δραστηριότητα: ...".
+            AadeFormFill::assign($get, $set, 'occupation', $primary['description'] ?? null, $overwrite);
+        }
+
+        // Surface AADE status — a suspended/deactivated AFM would fail myDATA
+        // on first invoice; the operator should see it now.
+        $body = $result->doy.($primary ? ' · '.($primary['description'] ?? '') : '');
+        $title = ($overwrite ? 'Διορθώθηκε από ΑΑΔΕ: ' : 'Loaded from AADE: ').$result->name;
+        $notification = Notification::make()->title($title);
+        if ($result->active) {
+            $notification->body($body)->success();
+        } else {
+            $notification
+                ->body($body.' · ⚠ Status: '.($result->statusDescr ?: 'unknown — verify with AADE before issuing'))
+                ->warning();
+        }
+        $notification->send();
     }
 }
