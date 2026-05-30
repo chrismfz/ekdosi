@@ -109,6 +109,45 @@ class WhmcsInvoicesByAfmWebhookTest extends TestCase
         $this->assertCount(2, $resp->json('afms.998482379.invoices'));
     }
 
+    public function test_matches_customers_whose_stored_afm_is_not_digit_clean(): void
+    {
+        // customers.afm is imported verbatim from legacy Firebird and can carry
+        // an EL/GR prefix, spaces or dashes. The inbound ΑΦΜ is digits-only.
+        // Both sides must normalise so these still match (the silent-miss bug).
+        $t = $this->tenant();
+        $it = InvoiceType::create(['company_id' => $t->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1]);
+
+        $prefixed = $this->customer($t, 'EL 998482379', 'Με EL prefix');
+        $this->invoice($t, $it, $prefixed, 'ΤΠΥ300', 300, 'active', 'VALID', '400000000000300');
+
+        $dashed = $this->customer($t, '12-345-6789', 'Με παύλες');
+        $this->invoice($t, $it, $dashed, 'ΤΠΥ301', 301, 'active', 'VALID', '400000000000301');
+
+        $resp = $this->call_afm($t->slug, ['afms' => ['998482379', '123456789']]);
+
+        $resp->assertOk()
+            ->assertJsonPath('afms.998482379.invoices.0.ekdosi_invcode', 'ΤΠΥ300')
+            ->assertJsonPath('afms.123456789.invoices.0.ekdosi_invcode', 'ΤΠΥ301');
+    }
+
+    public function test_like_prefilter_does_not_overmatch_a_longer_afm(): void
+    {
+        // The LIKE '%afm%' prefilter can over-match (a longer stored ΑΦΜ that
+        // contains the wanted digits as a substring); the PHP re-key must drop
+        // those so only an EXACT normalised ΑΦΜ resolves.
+        $t = $this->tenant();
+        $it = InvoiceType::create(['company_id' => $t->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1]);
+
+        // Stored ΑΦΜ 1234567890 contains '234567890' — must NOT match a query
+        // for '234567890'.
+        $longer = $this->customer($t, '1234567890', 'Πιο μακρύ');
+        $this->invoice($t, $it, $longer, 'ΤΠΥ400', 400, 'active', 'VALID', '400000000000400');
+
+        $resp = $this->call_afm($t->slug, ['afms' => ['234567890']]);
+
+        $resp->assertOk()->assertJsonPath('afms.234567890', null);
+    }
+
     public function test_excludes_cancelled_invoices(): void
     {
         $t = $this->tenant();

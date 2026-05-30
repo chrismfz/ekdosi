@@ -454,8 +454,12 @@ EOF;
             }
         }
 
+        // Cast keys to string: PHP coerces all-numeric array keys to int, so
+        // array_keys($contactAfms) would otherwise mix int (contacts) with the
+        // string $ownAfm — and the own-vs-third-party grouping below relies on
+        // a strict ($afm === $ownAfm) comparison. Normalise to string up front.
         $afms = array_values(array_unique(array_filter(
-            array_merge([$ownAfm], array_keys($contactAfms)),
+            array_merge([$ownAfm], array_map('strval', array_keys($contactAfms))),
             static fn (string $a): bool => $a !== '',
         )));
 

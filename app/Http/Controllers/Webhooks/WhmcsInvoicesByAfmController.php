@@ -112,14 +112,24 @@ class WhmcsInvoicesByAfmController
             ], Response::HTTP_BAD_REQUEST);
         }
 
-        // One query for all matching customers (tenant-scoped), keyed by ΑΦΜ.
-        // A duplicate ΑΦΜ across customers is unusual but possible (data-entry);
-        // keyBy keeps the first — acceptable for a visibility card.
+        // Match customers by ΑΦΜ — NORMALISED on BOTH sides. customers.afm is
+        // imported verbatim from legacy Firebird (free-text: may carry an
+        // EL/GR prefix, spaces, or INTERIOR dashes like "12-345-6789"), so a
+        // raw whereIn — or even a LIKE prefilter — against the digits-only
+        // inbound set silently misses those rows (a LIKE can't bridge a
+        // separator in the middle). Portable, driver-agnostic fix: load the
+        // tenant's customers once (a single company_id-scoped query — ~1k rows
+        // for a profile card) and re-key by the digits-only canonical ΑΦΜ in
+        // PHP, keeping only the ones we asked for. A duplicate ΑΦΜ across
+        // customers is unusual but possible (data-entry); keyBy keeps the last
+        // — acceptable for a visibility card.
+        $wanted = array_flip($afms);   // digits-only ΑΦΜ => position
         $customers = Customer::query()
             ->where('company_id', $tenant->id)
-            ->whereIn('afm', $afms)
+            ->whereNotNull('afm')
             ->get(['id', 'afm', 'name'])
-            ->keyBy('afm');
+            ->keyBy(fn (Customer $c): string => $this->digits((string) $c->afm))
+            ->filter(fn (Customer $c, string $afm): bool => $afm !== '' && isset($wanted[$afm]));
 
         // ONE query for all matched customers' invoices (not one per ΑΦΜ),
         // globally capped, then grouped per customer in PHP. The aggregate
@@ -213,18 +223,31 @@ class WhmcsInvoicesByAfmController
             if (! is_string($value) && ! is_int($value)) {
                 continue;
             }
-            // Greek ΑΦΜ are numeric; drop anything else (EL/GR prefix, spaces).
-            $digits = preg_replace('/\D+/', '', (string) $value);
-            if ($digits === '' || $digits === null) {
+            $afm = $this->digits((string) $value);
+            if ($afm === '') {
                 continue;
             }
-            $clean[$digits] = true;   // de-dupe via keys
+            $clean[$afm] = true;   // de-dupe via keys
             if (count($clean) >= self::MAX_AFMS) {
                 break;
             }
         }
 
-        return array_keys($clean);
+        // Cast keys back to string: PHP coerces all-numeric array keys to int,
+        // so array_keys() would otherwise hand back int|string (a typing
+        // landmine for any strict === / typed downstream use).
+        return array_map('strval', array_keys($clean));
+    }
+
+    /**
+     * Canonical ΑΦΜ form: digits only. Greek ΑΦΜ are numeric; strip any
+     * EL/GR prefix, spaces, dashes so both the inbound set and the stored
+     * customers.afm compare on the same shape. preg_replace returns null only
+     * on PCRE error (never for this pattern) — coalesce defensively.
+     */
+    private function digits(string $value): string
+    {
+        return preg_replace('/\D+/', '', $value) ?? '';
     }
 
     private function verifySignature(Request $request, string $secret): bool
