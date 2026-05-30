@@ -205,6 +205,46 @@ class WhmcsClient
     }
 
     /**
+     * Fetch ALL Paid invoices in the window — WITHOUT the invoiced=0 filter
+     * that getPendingInvoices applies. The historical matcher
+     * (whmcs:match-historical) needs invoices that are ALREADY filed (legacy
+     * set tblinvoices.invoiced = MARK, so getPendingInvoices excludes them) —
+     * those are exactly the historical ones whose WHMCS#→ΤΠΥ link we're
+     * recovering. Same DESC ordering + minDate early-stop as
+     * getPendingInvoices; differs only in not dropping already-invoiced rows.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPaidInvoices(int $limit = 100, int $offset = 0, ?string $minDate = null): array
+    {
+        $resp = $this->call('GetInvoices', [
+            'status'  => 'Paid',
+            'limit'   => $limit,
+            'offset'  => $offset,
+            'orderby' => 'date',
+            'order'   => 'desc',
+        ]);
+
+        $list = $resp['invoices']['invoice'] ?? [];
+        if (! empty($list) && ! array_is_list($list)) {
+            $list = [$list];
+        }
+
+        $out = [];
+        foreach ($list as $row) {
+            if ($minDate !== null) {
+                $rowDate = (string) ($row['date'] ?? '');
+                if ($rowDate !== '' && $rowDate < $minDate) {
+                    break;   // DESC: everything past the first old row is older
+                }
+            }
+            $out[] = $row;   // NO invoiced=0 filter — we want filed ones too
+        }
+
+        return $out;
+    }
+
+    /**
      * Fetch one invoice's full details by id. WHMCS's GetInvoices list
      * shape carries minimal per-row data (no line items, partial
      * client identity); GetInvoice returns the rich shape that Stage
