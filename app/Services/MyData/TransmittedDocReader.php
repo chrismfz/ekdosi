@@ -54,7 +54,7 @@ class TransmittedDocReader
         $inline = $doc->getCancelledByMark();
         $cancelled = ($inline !== null && $inline !== '') || isset($cancelledMarks[$mark]);
 
-        return MarkDetail::fromAadeDoc($doc, $cancelled);
+        return MarkDetail::fromAadeDoc($doc, $cancelled, $this->tenant->afm);
     }
 
     /**

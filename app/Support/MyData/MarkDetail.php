@@ -58,6 +58,9 @@ final class MarkDetail
                 'vatCategory' => null,
                 'vatExemptionCategory' => null,
                 'vatAmount' => round($gross - $net, 2),
+                // Local lines carry a real product description, so no need for
+                // the E3-classification fallback the AADE side uses.
+                'classifications' => [],
             ];
         })->all();
 
@@ -89,6 +92,8 @@ final class MarkDetail
             'grossTotal' => $gross,
             'state' => $invoice->mydata_state ?? 'VALID',
             'localStatus' => $invoice->local_status,
+            // We always issue our own invoices → outbound (we are the issuer).
+            'direction' => 'outbound',
             'lines' => $lines,
             // Audit XML is injected by the page from the mydata_marks row.
             'requestXml' => null,
@@ -105,7 +110,7 @@ final class MarkDetail
      *
      * @return array<string, mixed>
      */
-    public static function fromAadeDoc(AadeInvoice $doc, bool $cancelled): array
+    public static function fromAadeDoc(AadeInvoice $doc, bool $cancelled, ?string $ourVat = null): array
     {
         $header = $doc->getInvoiceHeader();
         $summary = $doc->getInvoiceSummary();
@@ -116,6 +121,27 @@ final class MarkDetail
         $series = $header?->getSeries();
         $aa = $header?->getAa();
         $invcode = trim(((string) ($series ?? '')).' '.((string) ($aa ?? '')));
+
+        $issuerVat = $issuer instanceof Issuer ? $issuer->getVatNumber() : null;
+        $counterVat = $counterpart?->getVatNumber();
+
+        // Which side are WE on? RequestTransmittedDocs returns both docs we
+        // issued (outbound) and docs others issued to us (inbound expenses).
+        // Compare against our own ΑΦΜ so the view can label issuer/counterpart
+        // correctly instead of always assuming "Εκδότης (εμείς)".
+        $direction = 'unknown';
+        if ($ourVat !== null && $ourVat !== '') {
+            if ($issuerVat !== null && $issuerVat === $ourVat) {
+                $direction = 'outbound';
+            } elseif ($counterVat !== null && $counterVat === $ourVat) {
+                $direction = 'inbound';
+            }
+        }
+        // No <issuer> at all + we're the counterpart = an inbound retail (ΑΛΠ
+        // 13.1) receipt: myDATA doesn't carry who sold to us.
+        if ($direction === 'unknown' && $issuerVat === null && $counterVat !== null) {
+            $direction = 'inbound';
+        }
 
         return [
             'mark' => (string) $doc->getMark(),
@@ -129,14 +155,15 @@ final class MarkDetail
             'issuedAtHuman' => self::humanDate($header?->getIssueDate()),
             'currency' => $header?->getCurrency() ?: 'EUR',
             'counterpartName' => $counterpart?->getName(),
-            'counterpartVat' => $counterpart?->getVatNumber(),
+            'counterpartVat' => $counterVat,
             'issuerName' => $issuer instanceof Issuer ? $issuer->getName() : null,
-            'issuerVat' => $issuer instanceof Issuer ? $issuer->getVatNumber() : null,
+            'issuerVat' => $issuerVat,
             'netTotal' => self::toFloat($summary?->getTotalNetValue()),
             'vatTotal' => self::toFloat($summary?->getTotalVatAmount()),
             'grossTotal' => self::toFloat($summary?->getTotalGrossValue()),
             'state' => $cancelled ? 'CANCELLED' : 'VALID',
             'localStatus' => null,
+            'direction' => $direction,
             'lines' => self::aadeLines($doc),
             // No request XML on the inbound side — only AADE's response doc.
             'requestXml' => null,
@@ -169,10 +196,52 @@ final class MarkDetail
                 'vatCategory' => $line->getVatCategory()?->value,
                 'vatExemptionCategory' => $line->getVatExemptionCategory()?->value,
                 'vatAmount' => self::toFloat($line->getVatAmount()),
+                // myDATA never carries a free-text line description for these
+                // docs, but it DOES carry the E3 classification — that's the
+                // "what is this" signal. Surface it so an orphan reads as e.g.
+                // "E3_585_010 — Λήψη υπηρεσιών" instead of a blank "—".
+                'classifications' => self::lineClassifications($line),
             ];
         }
 
         return $lines;
+    }
+
+    /**
+     * Flatten a line's income OR expense classifications into display rows.
+     * AADE returns one or the other depending on whether the doc is a sale or
+     * an expense; we read both and label via Codes.
+     *
+     * @return list<array{type: string, typeLabel: ?string, category: ?string, categoryLabel: ?string, amount: ?float}>
+     */
+    private static function lineClassifications(object $line): array
+    {
+        $out = [];
+
+        $income = method_exists($line, 'getIncomeClassification') ? $line->getIncomeClassification() : null;
+        $expense = method_exists($line, 'getExpensesClassification') ? $line->getExpensesClassification() : null;
+
+        foreach ([$income, $expense] as $set) {
+            if (! is_array($set)) {
+                continue;
+            }
+            foreach ($set as $c) {
+                $type = $c->getClassificationType()?->value;
+                if ($type === null) {
+                    continue;
+                }
+                $category = $c->getClassificationCategory()?->value;
+                $out[] = [
+                    'type' => $type,
+                    'typeLabel' => Codes::e3TypeLabel($type),
+                    'category' => $category,
+                    'categoryLabel' => $category !== null ? Codes::e3CategoryLabel($category) : null,
+                    'amount' => self::toFloat($c->getAmount()),
+                ];
+            }
+        }
+
+        return $out;
     }
 
     private static function safeXml(AadeInvoice $doc): ?string
