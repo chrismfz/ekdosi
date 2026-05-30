@@ -146,9 +146,19 @@ EOF;
             $status = 'Paid';
         }
 
+        // Date window — the «εικόνα μήνα» need: «τι κόψαμε τον τελευταίο μήνα».
+        // Default 1 month; 3 = quarter; 0 = no limit (full history).
+        $months = (int) ($_GET['months'] ?? 1);
+        if (! in_array($months, [1, 3, 0], true)) {
+            $months = 1;
+        }
+
         $q = Capsule::table('tblinvoices')->orderBy('id', 'desc');
         if ($status !== 'All') {
             $q->where('status', $status);
+        }
+        if ($months > 0) {
+            $q->where('date', '>=', date('Y-m-d', strtotime("-{$months} months")));
         }
         $total = (clone $q)->count();
         $invoices = $q->forPage($page, $perPage)->get(['id', 'userid', 'date', 'total', 'status']);
@@ -183,6 +193,10 @@ EOF;
         // page — historical ones included, which never reach the inbox.
         $tpBuckets = ThirdPartyStore::bucketsForInvoices($invoices->all());
 
+        // «Είδος» (τιμολόγιο vs απόδειξη): the client's "θέλω τιμολόγιο" intent
+        // from their WHMCS custom field, per client, in one batch.
+        $wantsInvoice = $this->wantsInvoiceByClient($userIds);
+
         $token = $this->csrfField();
         $rows = '';
         foreach ($invoices as $inv) {
@@ -208,21 +222,25 @@ EOF;
                 $action = '<a class="btn btn-xs btn-default" href="'.$link.'&action=show&invoiceid='.$id.'">Άνοιγμα</a>';
             }
 
+            $kind = $this->kindCell($wantsInvoice[(int) $inv->userid] ?? null);
+
             $rows .= '<tr>'
                 .'<td><a href="'.$invHref.'">#'.$id.'</a></td>'
                 .'<td>'.htmlspecialchars((string) $inv->date).'</td>'
                 .'<td>'.$name.'</td>'
+                .'<td>'.$tpCell.'</td>'
+                .'<td>'.$kind.'</td>'
                 .'<td class="text-right">'.htmlspecialchars(number_format((float) $inv->total, 2)).'</td>'
                 .'<td>'.$badge.'</td>'
                 .'<td>'.$invcode.'</td>'
                 .'<td>'.$mark.'</td>'
-                .'<td>'.$tpCell.'</td>'
                 .'<td class="text-right">'.$action.'</td>'
                 .'</tr>';
         }
 
-        $pager = $this->pager($link, $status, $page, $perPage, $total);
-        $statusTabs = $this->statusTabs($link, $status);
+        $pager = $this->pager($link, $status, $page, $perPage, $total, $months);
+        $statusTabs = $this->statusTabs($link, $status, $months);
+        $monthTabs = $this->monthTabs($link, $status, $months);
         $from = ($page - 1) * $perPage + 1;
         $to = min($page * $perPage, $total);
 
@@ -230,12 +248,13 @@ EOF;
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <h2>Τιμολόγια WHMCS → Ekdosi</h2>
 {$bridgeWarn}
+{$monthTabs}
 {$statusTabs}
 <p class="text-muted">Εμφάνιση {$from}–{$to} από {$total}.</p>
 <table class="table table-striped table-condensed">
   <thead><tr>
-    <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th class="text-right">Σύνολο</th>
-    <th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th>Τρίτος</th><th></th>
+    <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th>Τρίτος (δικαιούχος)</th><th>Είδος</th>
+    <th class="text-right">Σύνολο</th><th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th></th>
   </tr></thead>
   <tbody>{$rows}</tbody>
 </table>
@@ -270,44 +289,64 @@ EOF;
     }
 
     /**
-     * The «Τρίτος» cell: shows whether ekdosi resolved this invoice as routed
-     * to a third-party beneficiary (single/multi), billed to the client (none),
-     * or not yet evaluated (null — detection off / not pushed).
+     * The «Τρίτος» cell: shows WHO the invoice is billed to when it's routed to
+     * a third-party beneficiary — the contact name(s), not just yes/no. Resolved
+     * locally from mod_ekdosi_routing.
+     *
+     * @param  array{bucket: string, names: list<string>}|null  $tp
      */
-    private function thirdPartyCell(?string $tpState): string
+    private function thirdPartyCell(?array $tp): string
     {
-        switch ($tpState) {
-            case 'single':
-                return '<span class="label label-info" title="Δρομολογείται σε έναν τρίτο δικαιούχο">Τρίτος</span>';
-            case 'multi':
-                return '<span class="label label-warning" title="Πολλαπλοί δικαιούχοι — χρειάζεται διαχωρισμός">Πολλοί</span>';
-            case 'none':
-                return '<span class="label label-default" title="Χρέωση στον πελάτη">—</span>';
-            default:
-                return '<span class="text-muted" title="Δεν ελέγχθηκε">·</span>';
+        $bucket = $tp['bucket'] ?? 'none';
+        $names = $tp['names'] ?? [];
+
+        if ($bucket === 'single') {
+            $who = htmlspecialchars((string) ($names[0] ?? 'τρίτος'));
+
+            return '<span class="label label-info" title="Δρομολογείται στον δικαιούχο">'.$who.'</span>';
         }
+        if ($bucket === 'multi') {
+            $list = htmlspecialchars(implode(' · ', $names));
+            $extra = $list !== '' ? ' title="'.$list.'"' : ' title="Πολλαπλοί δικαιούχοι — χρειάζεται διαχωρισμός"';
+
+            return '<span class="label label-warning"'.$extra.'>Πολλοί ('.count($names).')</span>';
+        }
+
+        return '<span class="text-muted" title="Χρέωση στον πελάτη">—</span>';
     }
 
-    /** Status filter tabs for the invoice list. */
-    private function statusTabs(string $link, string $current): string
+    /** Status filter tabs for the invoice list (preserves the month window). */
+    private function statusTabs(string $link, string $current, int $months): string
     {
         $tabs = '';
         foreach (['Paid' => 'Εξοφλημένα', 'Unpaid' => 'Ανεξόφλητα', 'All' => 'Όλα'] as $key => $label) {
             $active = $key === $current ? ' class="btn btn-xs btn-primary"' : ' class="btn btn-xs btn-default"';
-            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$key.'">'.$label.'</a> ';
+            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$key.'&months='.$months.'">'.$label.'</a> ';
         }
 
         return '<p>'.$tabs.'</p>';
     }
 
-    /** Prev/next pager for the invoice list. */
-    private function pager(string $link, string $status, int $page, int $perPage, int $total): string
+    /** Date-window tabs: last month / quarter / all (preserves the status). */
+    private function monthTabs(string $link, string $status, int $current): string
+    {
+        $tabs = '';
+        foreach ([1 => 'Τελευταίος μήνας', 3 => 'Τρίμηνο', 0 => 'Όλα'] as $key => $label) {
+            $active = $key === $current ? ' class="btn btn-xs btn-success"' : ' class="btn btn-xs btn-default"';
+            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$status.'&months='.$key.'">'.$label.'</a> ';
+        }
+
+        return '<p><strong>Περίοδος:</strong> '.$tabs.'</p>';
+    }
+
+    /** Prev/next pager for the invoice list (preserves status + month window). */
+    private function pager(string $link, string $status, int $page, int $perPage, int $total, int $months): string
     {
         $pages = (int) ceil($total / $perPage);
         if ($pages <= 1) {
             return '';
         }
-        $base = $link.'&action=invoices&status='.$status.'&p=';
+        $base = $link.'&action=invoices&status='.$status.'&months='.$months.'&p=';
         $prev = $page > 1
             ? '<a class="btn btn-default" href="'.$base.($page - 1).'">&larr; Προηγούμενα</a> '
             : '';
@@ -316,6 +355,70 @@ EOF;
             : '';
 
         return '<p>'.$prev.'<span class="text-muted">Σελίδα '.$page.'/'.$pages.'</span> '.$next.'</p>';
+    }
+
+    /**
+     * «Είδος» cell from the client's "θέλω τιμολόγιο" intent: true → Τιμολόγιο,
+     * false → Απόδειξη, null → unknown (field unmapped / not set).
+     */
+    private function kindCell(?bool $wants): string
+    {
+        if ($wants === true) {
+            return '<span class="label label-primary" title="Ο πελάτης ζήτησε τιμολόγιο">Τιμολόγιο</span>';
+        }
+        if ($wants === false) {
+            return '<span class="label label-default" title="Δεν ζήτησε τιμολόγιο → απόδειξη">Απόδειξη</span>';
+        }
+
+        return '<span class="text-muted" title="Άγνωστο">—</span>';
+    }
+
+    /**
+     * Batch: per WHMCS client, did they ask for an invoice? Reads the client
+     * custom field whose name matches the "θέλω τιμολόγιο" intent (resolved by
+     * name, like the AFM field), for the page's clients in one query.
+     *
+     * @param  array<int, int>  $userIds
+     * @return array<int, bool|null>   userid => wants-invoice (null = unknown)
+     */
+    private function wantsInvoiceByClient(array $userIds): array
+    {
+        $out = [];
+        if ($userIds === []) {
+            return $out;
+        }
+
+        try {
+            $fieldId = (int) Capsule::table('tblcustomfields')
+                ->where('type', 'client')
+                ->where(function ($q): void {
+                    $q->where('fieldname', 'like', '%τιμολ%')
+                        ->orWhere('fieldname', 'like', '%τιμολόγιο%')
+                        ->orWhere('fieldname', 'like', '%invoice%');
+                })
+                ->orderBy('id')
+                ->value('id');
+            if ($fieldId <= 0) {
+                return $out;   // field not present → all unknown
+            }
+
+            $vals = Capsule::table('tblcustomfieldsvalues')
+                ->where('fieldid', $fieldId)
+                ->whereIn('relid', $userIds)
+                ->pluck('value', 'relid');
+
+            foreach ($userIds as $uid) {
+                if (! isset($vals[$uid])) {
+                    continue;   // leave unknown
+                }
+                $v = strtolower(trim((string) $vals[$uid]));
+                $out[$uid] = in_array($v, ['on', 'yes', '1', 'true', 'ναι', 'checked'], true);
+            }
+        } catch (\Throwable $e) {
+            return $out;
+        }
+
+        return $out;
     }
 
     /**
