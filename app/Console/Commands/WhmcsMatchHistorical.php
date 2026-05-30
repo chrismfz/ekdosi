@@ -37,6 +37,10 @@ use Illuminate\Console\Command;
  *                         API calls — only the GetInvoices list pages).
  *   - amount_date (MED):  total + date ±1, from the list shape alone.
  *
+ * Pulls via getPaidInvoices (ALL Paid in the window) — NOT getPendingInvoices,
+ * which drops already-filed rows (invoiced != 0); the historical invoices we
+ * want are precisely the already-filed ones.
+ *
  * Exit codes mirror whmcs:fetch-pending (3 not-configured, 4 auth, 5
  * unreachable, 6 unknown tenant).
  */
@@ -47,6 +51,8 @@ class WhmcsMatchHistorical extends Command
         {--months=12 : Match WHMCS invoices issued within the last N months (ignored if --since is set).}
         {--since= : Explicit cutoff date YYYY-MM-DD (overrides --months).}
         {--no-line-text : Skip the high-confidence line-text tier (no per-invoice GetInvoice calls); match amount+date only.}
+        {--min-confidence=medium : Lowest tier to ACCEPT: "high" (line_text only — safest) or "medium" (also amount_date).}
+        {--diagnose : For unmatched invoices, print the WHMCS line text + nearest ekdosi product_descr so a text mismatch is visible. Implies --preview.}
         {--limit=100 : WHMCS list page size (WHMCS caps at ~100).}
         {--max-pages=50 : Safety cap on list pages to walk.}
         {--preview : Read-only; report what WOULD be linked, write nothing.}';
@@ -70,12 +76,15 @@ class WhmcsMatchHistorical extends Command
         }
 
         $since = $this->resolveSince();
-        $withLineText = ! (bool) $this->option('no-line-text');
-        $preview = (bool) $this->option('preview');
+        $diagnose = (bool) $this->option('diagnose');
+        $withLineText = ! (bool) $this->option('no-line-text') || $diagnose;
+        $preview = (bool) $this->option('preview') || $diagnose;
+        $minConfidence = strtolower((string) $this->option('min-confidence')) === 'high' ? 'high' : 'medium';
 
         $this->info("Tenant: {$tenant->name} (slug={$tenant->slug})");
         $this->line('Window: invoices issued on/after '.$since->toDateString()
             .' · tier: '.($withLineText ? 'line_text + amount_date' : 'amount_date only')
+            .' · accept: '.$minConfidence.'+'
             .($preview ? ' · PREVIEW (no writes)' : ''));
 
         try {
@@ -96,12 +105,14 @@ class WhmcsMatchHistorical extends Command
         $limit = max(1, (int) $this->option('limit'));
         $maxPages = max(1, (int) $this->option('max-pages'));
 
-        $stats = ['seen' => 0, 'high' => 0, 'medium' => 0, 'none' => 0, 'written' => 0, 'skipped_manual' => 0, 'zero' => 0];
+        $stats = ['seen' => 0, 'high' => 0, 'medium' => 0, 'none' => 0, 'written' => 0,
+            'skipped_manual' => 0, 'zero' => 0, 'below_threshold' => 0];
         $samples = [];
+        $diagSamples = [];
 
         try {
             for ($page = 0; $page < $maxPages; $page++) {
-                $rows = $client->getPendingInvoices(limit: $limit, offset: $page * $limit, minDate: $sinceStr);
+                $rows = $client->getPaidInvoices(limit: $limit, offset: $page * $limit, minDate: $sinceStr);
                 if ($rows === []) {
                     break;
                 }
@@ -132,6 +143,12 @@ class WhmcsMatchHistorical extends Command
 
                     if ($match === null) {
                         $stats['none']++;
+                        // --diagnose: show WHY line_text missed — the WHMCS text
+                        // next to the nearest ekdosi product_descr. Reveals a
+                        // fixable format drift (period/prefix) vs a true absence.
+                        if ($diagnose && count($diagSamples) < 15 && $descriptions !== []) {
+                            $diagSamples[] = $this->diagnoseLine($whmcsId, $total, $descriptions, $index);
+                        }
 
                         continue;
                     }
@@ -142,16 +159,24 @@ class WhmcsMatchHistorical extends Command
                             $whmcsId, $date, $total, $match['invoice_id'], $match['method'], $match['confidence']);
                     }
 
-                    if (! $preview) {
+                    // Confidence gate: never WRITE below the accepted tier. A
+                    // medium (amount_date) match is reported but not persisted
+                    // when --min-confidence=high (the safe choice tenant-wide,
+                    // where a common renewal price collides easily).
+                    $accepted = $minConfidence === 'medium' || $match['confidence'] === 'high';
+
+                    if (! $preview && $accepted) {
                         if ($matcher->persist($tenant, $whmcsId, $match)) {
                             $stats['written']++;
                         } else {
                             $stats['skipped_manual']++;
                         }
+                    } elseif (! $accepted) {
+                        $stats['below_threshold']++;
                     }
                 }
 
-                // getPendingInvoices early-stops on minDate within a page, so a
+                // getPaidInvoices early-stops on minDate within a page, so a
                 // short page means we've crossed the window edge.
                 if (count($rows) < $limit) {
                     break;
@@ -173,7 +198,46 @@ class WhmcsMatchHistorical extends Command
 
         $this->report($stats, $samples, $preview);
 
+        if ($diagnose && $diagSamples !== []) {
+            $this->line('');
+            $this->warn('Diagnostics — unmatched WHMCS line text vs nearest ekdosi product_descr:');
+            foreach ($diagSamples as $d) {
+                $this->line($d);
+            }
+            $this->line('');
+            $this->line('If the texts are CLOSE but not equal (period format, prefix, an operator edit),');
+            $this->line('line_text matching needs a tweak. If they are UNRELATED, the ekdosi side has no');
+            $this->line('such invoice in the window — widen --months or accept --min-confidence=medium.');
+        }
+
         return Command::SUCCESS;
+    }
+
+    /**
+     * Build a one-line diagnostic for an unmatched WHMCS invoice: its first
+     * line text + the closest ekdosi product_descr by similarity. Shows
+     * whether line_text failed on a fixable format drift or a true absence.
+     *
+     * @param  list<string>  $descriptions
+     * @param  array{text: array<string, array<int, true>>, amountDate: array<string, array<int, true>>, gross: array<int, float>}  $index
+     */
+    private function diagnoseLine(int $whmcsId, float $total, array $descriptions, array $index): string
+    {
+        $whmcsText = trim($descriptions[0]);
+        $needle = mb_strtolower(preg_replace('/\s+/u', ' ', $whmcsText) ?? $whmcsText);
+
+        $best = null;
+        $bestScore = -1.0;
+        foreach (array_keys($index['text']) as $candidate) {
+            similar_text($needle, $candidate, $pct);
+            if ($pct > $bestScore) {
+                $bestScore = $pct;
+                $best = $candidate;
+            }
+        }
+
+        return sprintf("  #%d (%.2f€)\n    WHMCS:  %s\n    ekdosi: %s  (%.0f%% similar)",
+            $whmcsId, $total, $whmcsText, $best ?? '—', $bestScore < 0 ? 0 : $bestScore);
     }
 
     /** @return list<string> the WHMCS invoice's line descriptions (one GetInvoice call). */
@@ -225,8 +289,9 @@ class WhmcsMatchHistorical extends Command
             ['  €0 skipped (no ΤΠΥ)', $stats['zero']],
             ['HIGH (line_text)', $stats['high']],
             ['MEDIUM (amount_date)', $stats['medium']],
+            ['  below threshold (not written)', $stats['below_threshold']],
             ['No confident match → review', $stats['none']],
-            [$preview ? 'WOULD write' : 'Links written', $preview ? ($stats['high'] + $stats['medium']) : $stats['written']],
+            [$preview ? 'WOULD write' : 'Links written', $preview ? ($stats['high'] + $stats['medium'] - $stats['below_threshold']) : $stats['written']],
             ['Skipped (manual link kept)', $stats['skipped_manual']],
         ]);
 
