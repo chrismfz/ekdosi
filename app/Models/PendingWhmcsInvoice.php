@@ -116,6 +116,7 @@ class PendingWhmcsInvoice extends Model
         'status',
         'notes',
         'rejected_reason',
+        'hold_reason',
         'filed_at',
         'filed_by_user_id',
         'mydata_mark',
@@ -169,6 +170,140 @@ class PendingWhmcsInvoice extends Model
     public function splitInvoices(): HasMany
     {
         return $this->hasMany(Invoice::class, 'whmcs_pending_id');
+    }
+
+    /**
+     * Read a WHMCS client custom field off the staged payload by canonical
+     * role (vatno / taxoffice / occupation / griniaris / wantsinvoice …),
+     * resolving the role → WHMCS field-id via the tenant's
+     * whmcs_custom_field_map. The payload is enriched with the client's
+     * `customfields` block at ingest (WhmcsClient::getInvoiceWithClient), so
+     * the billing-intent the customer set in WHMCS is readable here — no
+     * extra API call. Returns null when unmapped or absent.
+     */
+    /**
+     * Per-instance memo so a single table row (state + color + icon + tooltip
+     * + needsAfm all read intent) parses the payload / resolves the field map
+     * once, not 5-7×.
+     *
+     * @var array<string, ?string>
+     */
+    private array $whmcsFieldCache = [];
+
+    public function whmcsCustomField(string $role): ?string
+    {
+        if (array_key_exists($role, $this->whmcsFieldCache)) {
+            return $this->whmcsFieldCache[$role];
+        }
+
+        return $this->whmcsFieldCache[$role] = $this->resolveWhmcsCustomField($role);
+    }
+
+    private function resolveWhmcsCustomField(string $role): ?string
+    {
+        $fieldId = $this->company?->whmcsCustomFieldId($role);
+        if ($fieldId === null) {
+            return null;
+        }
+
+        $fields = $this->payload['customfields'] ?? [];
+        if ($fields === [] || $fields === null) {
+            return null;
+        }
+        // WHMCS returns a list of {id,name,value} — or a single such object
+        // when there's exactly one field (same quirk the matcher handles).
+        // NOTE (review follow-up): this lookup + the AFM normalisation below
+        // duplicate WhmcsCustomerMatcher::extractCustomField/normaliseAfm — a
+        // shared WHMCS-payload reader should fold the two together (deferred,
+        // touches the matcher).
+        if (! array_is_list($fields)) {
+            $fields = [$fields];
+        }
+
+        foreach ($fields as $f) {
+            if ((int) ($f['id'] ?? 0) === $fieldId) {
+                $v = trim((string) ($f['value'] ?? ''));
+
+                return $v === '' ? null : $v;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Did the customer ask for an invoice (τιμολόγιο) vs a receipt? Reads the
+     * 'wantsinvoice' role checkbox. null = the tenant hasn't mapped the field
+     * (intent unknown → operator decides).
+     */
+    public function wantsInvoice(): ?bool
+    {
+        if ($this->company?->whmcsCustomFieldId('wantsinvoice') === null) {
+            return null;
+        }
+        $v = mb_strtolower((string) $this->whmcsCustomField('wantsinvoice'));
+
+        return in_array($v, ['on', '1', 'yes', 'true', 'ναι', 'checked'], true);
+    }
+
+    /** The ΑΦΜ the customer entered in WHMCS (role 'vatno'), digits only. */
+    public function whmcsAfm(): ?string
+    {
+        $raw = $this->whmcsCustomField('vatno');
+        if ($raw === null) {
+            return null;
+        }
+        $digits = preg_replace('/\D+/', '', $raw);
+
+        return $digits === '' ? null : $digits;
+    }
+
+    public function whmcsTaxOffice(): ?string
+    {
+        return $this->whmcsCustomField('taxoffice');
+    }
+
+    public function whmcsActivity(): ?string
+    {
+        return $this->whmcsCustomField('occupation');
+    }
+
+    /**
+     * The WHMCS client's display name off the staged payload — company name if
+     * present, else firstname + lastname. Lets the inbox show "from WHMCS
+     * client X" even when no ekdosi customer is linked yet.
+     */
+    public function whmcsClientName(): ?string
+    {
+        $p = $this->payload ?? [];
+
+        $company = trim((string) ($p['companyname'] ?? ''));
+        if ($company !== '') {
+            return $company;
+        }
+
+        $name = trim(trim((string) ($p['firstname'] ?? '')).' '.trim((string) ($p['lastname'] ?? '')));
+
+        return $name !== '' ? $name : null;
+    }
+
+    /**
+     * C: the customer wants a τιμολόγιο but no ΑΦΜ is available anywhere — not
+     * on the matched ekdosi customer, not in WHMCS. You can't file a proper
+     * invoice without it, so the inbox flags it (hold "Αναμονή για ΑΦΜ").
+     * Only fires when the intent is KNOWN to be "invoice" (wantsInvoice true);
+     * unknown intent doesn't raise a false alarm. Needs the customer relation
+     * loaded (the inbox eager-loads it).
+     */
+    public function needsAfm(): bool
+    {
+        if ($this->wantsInvoice() !== true) {
+            return false;
+        }
+
+        $hasAfm = filled($this->customer?->afm) || filled($this->whmcsAfm());
+
+        return ! $hasAfm;
     }
 
     /**

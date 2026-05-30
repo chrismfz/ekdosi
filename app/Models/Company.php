@@ -185,10 +185,11 @@ class Company extends Model
      *
      * Canonical roles (per CLAUDE.md WHMCS-bridge prep notes):
      *   vatno      — customer AFM
-     *   taxoffice  — ΔΟΥ
-     *   occupation — Δραστηριότητα
-     *   griniaris  — immediate-invoice flag (custom-field boolean)
-     *   toinvoice  — alternative company-name-to-bill
+     *   taxoffice    — ΔΟΥ
+     *   occupation   — Δραστηριότητα
+     *   griniaris    — immediate-invoice flag (custom-field boolean)
+     *   wantsinvoice — "θα ήθελα τιμολόγιο" checkbox: invoice-vs-receipt intent
+     *   toinvoice    — alternative company-name-to-bill
      */
     public function whmcsCustomFieldId(string $role): ?int
     {

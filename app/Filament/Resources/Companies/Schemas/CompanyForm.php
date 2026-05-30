@@ -859,6 +859,22 @@ class CompanyForm
                                             ->helperText('Ο τύπος που χρησιμοποιεί η αυτόματη έκδοση. Χωρίς αυτόν, η αυτόματη έκδοση παραλείπει τον tenant (δεν μαντεύει ποτέ τον τύπο). Η χειροκίνητη επιλογή στο Inbox δεν επηρεάζεται.'),
                                     ]),
 
+                                // T-1 (timologia v2): third-party invoicing. When ON, the
+                                // ingestor asks the WHMCS-side plugin's resolve.php which of a
+                                // WHMCS invoice's lines route to an alternate beneficiary
+                                // (reseller → end-customer), bills single-party invoices to
+                                // that contact, and stages multi-party ones for a guided split.
+                                // OFF (default) = today's behaviour: everything bills the
+                                // matched WHMCS client.
+                                Section::make('Παραστατικά σε τρίτους (timologia v2)')
+                                    ->description('Δρομολόγηση γραμμών WHMCS σε εναλλακτικό δικαιούχο (π.χ. reseller που τιμολογεί τους δικούς του πελάτες). Με ON, το ekdosi ρωτά το plugin (resolve.php) ποιος χρεώνεται ανά γραμμή.')
+                                    ->schema([
+                                        Toggle::make('whmcs_third_party_enabled')
+                                            ->label('Ενεργοποίηση δρομολόγησης τρίτων')
+                                            ->default(false)
+                                            ->helperText('Απαιτεί το resolve.php εγκατεστημένο στο WHMCS (αδελφάκι του inbound.php) + ρυθμισμένο API URL/secret. Με OFF, η στήλη «Τρίτος» στο Inbox μένει «—» και όλα χρεώνονται στον πελάτη του WHMCS. Μονομερή → χρέωση στον δικαιούχο· πολλαπλά → «Διαχωρισμός» για τον χειριστή.'),
+                                    ]),
+
                                 Section::make('Custom field mapping')
                                     ->description('Each WHMCS install assigns its own integer IDs to custom fields. Tell us which IDs carry which roles so we can read the right data when matching invoices and (in Stage B) building the myDATA payload.')
                                     ->schema([
@@ -869,7 +885,7 @@ class CompanyForm
                                             ->addable(true)
                                             ->editableKeys(true)
                                             ->reorderable(false)
-                                            ->helperText('Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), toinvoice (alternative billing-name). Leave empty if your WHMCS doesn\'t track a role.'),
+                                            ->helperText('Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), wantsinvoice ("θα ήθελα τιμολόγιο" → invoice vs receipt), toinvoice (alternative billing-name). Leave empty if your WHMCS doesn\'t track a role.'),
                                     ]),
 
                                 // PR #31 (Stage B-1): per-tenant webhook secret. Used by the
