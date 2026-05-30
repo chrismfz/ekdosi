@@ -24,7 +24,7 @@
     <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
         <div>
             <div class="text-gray-500 dark:text-gray-400">WHMCS #</div>
-            <div class="font-semibold">{{ $p['invoicenum'] ?: ('#'.$r->whmcs_invoice_id) }}</div>
+            <div class="font-semibold">{{ ($p['invoicenum'] ?? '') ?: ('#'.$r->whmcs_invoice_id) }}</div>
         </div>
         <div>
             <div class="text-gray-500 dark:text-gray-400">Ημερομηνία</div>

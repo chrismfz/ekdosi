@@ -107,12 +107,16 @@ class WhmcsInboxTable
                             default => null,
                         };
                     })
-                    ->color(fn (?string $state): string => match ($state) {
-                        'Τιμολόγιο · λείπει ΑΦΜ' => 'danger',
-                        'Τιμολόγιο' => 'info',
+                    // Color/icon driven by the underlying booleans, NOT the
+                    // rendered Greek label — a wording tweak can't silently
+                    // break the badge styling. (whmcsCustomField is memoised,
+                    // so these extra reads are free.)
+                    ->color(fn (PendingWhmcsInvoice $record): string => match (true) {
+                        $record->needsAfm() => 'danger',
+                        $record->wantsInvoice() === true => 'info',
                         default => 'gray',
                     })
-                    ->icon(fn (?string $state): ?string => $state === 'Τιμολόγιο · λείπει ΑΦΜ'
+                    ->icon(fn (PendingWhmcsInvoice $record): ?string => $record->needsAfm()
                         ? 'heroicon-o-exclamation-triangle'
                         : null)
                     ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match (true) {

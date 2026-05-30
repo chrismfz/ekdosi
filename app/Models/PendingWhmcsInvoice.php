@@ -181,7 +181,25 @@ class PendingWhmcsInvoice extends Model
      * the billing-intent the customer set in WHMCS is readable here — no
      * extra API call. Returns null when unmapped or absent.
      */
+    /**
+     * Per-instance memo so a single table row (state + color + icon + tooltip
+     * + needsAfm all read intent) parses the payload / resolves the field map
+     * once, not 5-7×.
+     *
+     * @var array<string, ?string>
+     */
+    private array $whmcsFieldCache = [];
+
     public function whmcsCustomField(string $role): ?string
+    {
+        if (array_key_exists($role, $this->whmcsFieldCache)) {
+            return $this->whmcsFieldCache[$role];
+        }
+
+        return $this->whmcsFieldCache[$role] = $this->resolveWhmcsCustomField($role);
+    }
+
+    private function resolveWhmcsCustomField(string $role): ?string
     {
         $fieldId = $this->company?->whmcsCustomFieldId($role);
         if ($fieldId === null) {
@@ -194,6 +212,10 @@ class PendingWhmcsInvoice extends Model
         }
         // WHMCS returns a list of {id,name,value} — or a single such object
         // when there's exactly one field (same quirk the matcher handles).
+        // NOTE (review follow-up): this lookup + the AFM normalisation below
+        // duplicate WhmcsCustomerMatcher::extractCustomField/normaliseAfm — a
+        // shared WHMCS-payload reader should fold the two together (deferred,
+        // touches the matcher).
         if (! array_is_list($fields)) {
             $fields = [$fields];
         }
