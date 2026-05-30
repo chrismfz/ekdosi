@@ -10,13 +10,17 @@ high-level map + current status.
 
 ---
 
-## Status at a glance (2026-05-28)
+## Status at a glance (2026-05-31)
 
 The core operator workflow — **issue an invoice → file at myDATA → PDF →
-email → record payment / credit note → reconcile with AADE** — is built
-and unit-tested. What's NOT yet done is mostly *automation* (no scheduler)
-and a few legacy workflows whose real-world usage we still need to confirm
-against production data.
+email → record payment / credit note → reconcile with AADE** — is built,
+unit-tested, and sandbox-validated. Since then the app has moved **past the
+legacy**: the **Έξοδα/expenses** phase, the **scheduler**, the **draft-first
+WHMCS bridge with bi-directional visibility** (the WHMCS operator sees the
+MARK + a WHMCS#→ΤΠΥ→ΜΑΡΚ map), third-party invoicing, and myDATA console
+polish (orphan bucketing, cached fetches, MARK detail, E3 income/expense split)
+are all in. What remains is mostly niche legacy flows (mostly dead code) and a
+few tracked follow-ups. See `docs/Comparison.md`.
 
 **✅ Done (built + unit-tested):**
 - Tenancy (Company tenant), roles/permissions (Shield), audit-ready models.
@@ -32,20 +36,28 @@ against production data.
 - Re-runnable **Firebird → MariaDB ETL** (`migrate:firebird`) + an in-panel import UI.
 
 **🚧 Partial / needs finishing:**
-- **Auto-email on issue + audit BCC** — email works as a *manual* action; not auto-sent on filing.
+- **Auto-email** — both issue paths covered (myDATA-VALID + non-myDATA finalize), per-customer opt-out; remaining gap is a **batch mail sweep** (bulk / failure re-send).
 - **PDF templates** — one adaptive Blade template vs. the 8 legacy FastReport designs (ΑΠΥ/ΤΠΥ/ΣΔΕΠ/ΣΔΑΠ/…).
-- **WHMCS `ekdosi_bridge` plugin** — round trip works, but it under-reacts to ekdosi's "already-filed" / distinct error responses, is `v0.1.0`, no bulk push.
+- **WHMCS `ekdosi_bridge` plugin** — now `v0.5.0` (inbox push/status, draft-first, third-party, MARK/list badges, 3-way client map); still under-reacts to some distinct ekdosi error responses; no bulk push.
 
-**❌ Not yet (legitimate, unbuilt):**
-- **No scheduler/cron at all** — the legacy overnight batch (`FAutoInvoice`) has no replacement; `whmcs:fetch-pending`, `mydata:reconcile-sales`, `invoices:recompute-balances` are **manual-only**.
-- **`mod_timologia` third-party invoicing** (WHMCS) — invoice routed to an alternate billing entity (employer/parent). *Not consumed* on either side. **Highest-value WHMCS gap.**
-- **Stock / inventory movements** — legacy decrements stock/reserve on issue & checks availability; not ported. *Confirm if a live tenant uses it.*
-- **ΣΔΕΠ / cumulative invoices** (`conv_invoice_id`, delivery-note→invoice, Reserve check) — column + relation exist, no logic. *Confirm usage.*
-- **griniaris** immediate-invoicing routing (WHMCS field 338) — column scaffolded, unwired (tied to the missing scheduler).
-- **"Assigned invoices" (`invoiced=-333`)** workflow — purpose unconfirmed.
-- **Gross-price-edit** on invoice lines; **live VIES/AFM** validation + AFM-exists warning.
-- **Έξοδα / expenses** — inbound `RequestDocs`, suppliers, ΦΠΑ εκροών−εισροών report. Entirely absent (next major phase).
+**✅ Since 2026-05-28 (now done):** scheduler wired (`routes/console.php`);
+**Έξοδα/expenses** phase (suppliers, RequestDocs, classification, ΦΠΑ, Ε3);
+**WHMCS third-party invoicing** (resolve + block-and-split); **griniaris**
+auto-issue (`whmcs:auto-issue`, two-key armed); **gross-price edit**, **G1/G4**
+(withholding / 0%-exempt) and the filing-correctness set; **draft-first WHMCS
+inbox** + **WHMCS-side visibility** (MARK badge, invoice-list badge, "Send to
+ekdosi", 3-way client map); myDATA console polish + auto DB backup on deploy.
+
+**❌ Not yet / tracked follow-ups:**
+- **WHMCS write-back on lifecycle-filed drafts** — `invoiced=MARK` + pending→filed
+  fire on the direct path only; wire off `MyDataSubmitter`'s VALID persist (also
+  fixes split drafts).
+- **Stock / inventory movements** — *was an empty stub in legacy* (not a real gap); build only if a live tenant needs it.
+- **ΣΔΕΠ / cumulative invoices** — *dead code in legacy*; confirm `.fbk` usage first.
+- **"Assigned invoices" (`invoiced=-333/-1000`)** sentinels — purpose unconfirmed.
+- **Live VIES/AFM** realtime validation (GSIS lookup is native; VIES live not wired).
 - **Estonian PEPPOL** — provider selectable but submission is a no-op stub.
+- **activitylog** wiring; **batch mail sweep**; PDF attach + sales-orphan import (see `docs/expenses-phase-plan.md`).
 
 **🗑️ Deliberately dropped:** CS-Cart bridge, EAFDSS signing, `FMysqlSync` MySQL mirror, `GET_COMB_*` cross-DB procs, FastReport `.fr3` (replaced by Blade PDF), `afm2name` WHMCS plugin (ekdosi does GSIS natively).
 
