@@ -384,7 +384,7 @@ EOF;
     }
 
     /** One client's contacts + service routing (read-only). */
-    private function prefsClient(string $link, int $userid): string
+    private function prefsClient(string $link, int $userid, ?string $flash = null): string
     {
         $client = Capsule::table('tblclients')->find($userid);
         $name = $client
@@ -407,36 +407,95 @@ EOF;
             $contactRows = '<tr><td colspan="4" class="text-muted">Καμία επαφή.</td></tr>';
         }
 
+        // Contact <option> set for the routing selects (admin-side EDIT — the
+        // operator can re-route a service to the correct beneficiary when the
+        // customer set it wrong; takes effect on the NEXT invoice because
+        // resolve.php reads mod_ekdosi_routing live). Mirrors the client v2
+        // page's write path (ThirdPartyStore::setRouteForUser).
+        $options = '<option value="0">— Στο όνομά του —</option>';
+        foreach ($contacts as $c) {
+            $options .= '<option value="'.(int) $c->id.'">'
+                .htmlspecialchars((string) $c->company_name).'</option>';
+        }
+
+        $token = $this->csrfField();
         $serviceRows = '';
         foreach (ThirdPartyStore::servicesForUser($userid) as $s) {
-            $target = ((int) $s['contactid'] === 0)
-                ? '<em>Στο όνομά του</em>'
-                : htmlspecialchars($byId[(int) $s['contactid']] ?? ('#'.$s['contactid']));
-            $receipt = ! empty($s['is_receipt']) ? ' <span class="label label-info">Απόδειξη</span>' : '';
+            $sel = $this->optionsWithSelected($options, (int) ($s['contactid'] ?? 0));
+            $checked = ! empty($s['is_receipt']) ? ' checked' : '';
             $serviceRows .= '<tr><td>'.htmlspecialchars((string) $s['label'])
                 .' <span class="label label-default">'.htmlspecialchars((string) $s['service_type']).'</span></td>'
-                .'<td>'.$target.$receipt.'</td></tr>';
+                .'<td><form method="POST" action="'.$link.'&action=route" class="form-inline">'
+                .$token
+                .'<input type="hidden" name="userid" value="'.$userid.'">'
+                .'<input type="hidden" name="serviceid" value="'.(int) $s['serviceid'].'">'
+                .'<input type="hidden" name="service_type" value="'.htmlspecialchars((string) $s['service_type']).'">'
+                .'<select name="contactid" class="form-control input-sm">'.$sel.'</select> '
+                .'<label class="checkbox-inline"><input type="checkbox" name="is_receipt" value="1"'.$checked.'> Απόδειξη</label> '
+                .'<button class="btn btn-sm btn-primary">Αποθήκευση</button>'
+                .'</form></td></tr>';
         }
         if ($serviceRows === '') {
             $serviceRows = '<tr><td colspan="2" class="text-muted">Καμία υπηρεσία / δρομολόγηση.</td></tr>';
         }
 
         $backList = $link.'&action=prefs';
+        $flashHtml = $flash ?? '';
 
         return <<<EOF
 <p><a class="btn btn-default" href="{$backList}">&larr; Όλοι οι πελάτες</a></p>
 <h2>{$name} <span class="text-muted">#{$userid}</span></h2>
+{$flashHtml}
 <h3>Επαφές (δικαιούχοι τιμολόγησης)</h3>
 <table class="table table-striped">
     <thead><tr><th>Επωνυμία</th><th>ΑΦΜ</th><th>ΔΟΥ</th><th>Πόλη</th></tr></thead>
     <tbody>{$contactRows}</tbody>
 </table>
 <h3>Δρομολόγηση υπηρεσιών</h3>
+<p class="text-muted">Άλλαξε τον δικαιούχο μιας υπηρεσίας — ισχύει από το ΕΠΟΜΕΝΟ τιμολόγιο (το ekdosi διαβάζει τη δρομολόγηση ζωντανά).</p>
 <table class="table table-striped">
     <thead><tr><th>Υπηρεσία</th><th>Εκδίδεται σε</th></tr></thead>
     <tbody>{$serviceRows}</tbody>
 </table>
 EOF;
+    }
+
+    /**
+     * Admin-side write of a single service's routing (the operator re-routes a
+     * service to the correct third-party beneficiary, or back to the client).
+     * CSRF-guarded; reuses the SAME store write the client v2 page uses
+     * (ThirdPartyStore::setRouteForUser, which verifies the contact belongs to
+     * the user). Takes effect on the next invoice — resolve.php reads
+     * mod_ekdosi_routing live, no cache.
+     */
+    public function route(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        $userid = (int) ($_POST['userid'] ?? 0);
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage();
+        }
+        if ($userid <= 0) {
+            return $this->errorPage($link, 'Λείπει το userid του πελάτη.');
+        }
+
+        $ok = ThirdPartyStore::setRouteForUser(
+            $userid,
+            (int) ($_POST['serviceid'] ?? 0),
+            (string) ($_POST['service_type'] ?? ''),
+            (int) ($_POST['contactid'] ?? 0),
+            ! empty($_POST['is_receipt']),
+        );
+
+        $this->logActivity('EkdosiBridge: admin re-routed service '
+            .(int) ($_POST['serviceid'] ?? 0).' for client #'.$userid
+            .' → contact '.(int) ($_POST['contactid'] ?? 0).($ok ? '' : ' (FAILED)'));
+
+        $flash = $ok
+            ? $this->alert('success', 'Η δρομολόγηση αποθηκεύτηκε — ισχύει από το επόμενο τιμολόγιο.')
+            : $this->alert('warning', 'Αποτυχία: η επαφή δεν ανήκει σε αυτόν τον πελάτη.');
+
+        return $this->prefsClient($link, $userid, $flash);
     }
 
     /**
@@ -956,6 +1015,24 @@ EOF;
 <div class="alert alert-warning">{$safe}</div>
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 EOF;
+    }
+
+    /** Bootstrap alert box (admin-side routing edit feedback). */
+    private function alert(string $type, string $msg): string
+    {
+        return '<div class="alert alert-'.htmlspecialchars($type).'">'.htmlspecialchars($msg).'</div>';
+    }
+
+    /**
+     * Render a <option> set with the matching id pre-selected. $options is the
+     * pre-built option HTML (value="ID">label); we inject ` selected` into the
+     * one whose value matches. Mirrors the client v2 controller helper.
+     */
+    private function optionsWithSelected(string $options, int $selectedId): string
+    {
+        $needle = 'value="'.$selectedId.'"';
+
+        return str_replace($needle, $needle.' selected', $options);
     }
 
     private function logActivity(string $message): void
