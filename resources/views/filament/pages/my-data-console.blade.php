@@ -36,6 +36,12 @@
     @if ($ran && $result)
         @php $mode = $resultMode ?? 'compare'; @endphp
 
+        @if ($fetchedAtHuman)
+            <div class="text-xs text-gray-400 dark:text-gray-500">
+                Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — πατήστε ξανά «Έλεγχος»/«Αδέσποτα» για ανανέωση.
+            </div>
+        @endif
+
         @if ($mode === 'inbound')
             {{-- ============================================================
                  Direction 2 — myDATA → US ("αδέσποτα").

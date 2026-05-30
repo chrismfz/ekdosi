@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Enums\MyDataMode;
+use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Services\MyData\ReconciliationRow;
@@ -38,6 +39,8 @@ use UnitEnum;
  */
 class MyDataConsole extends Page
 {
+    use RemembersLastFetch;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cloud-arrow-down';
 
     protected static string|UnitEnum|null $navigationGroup = 'Data';
@@ -73,6 +76,16 @@ class MyDataConsole extends Page
     public bool $ran = false;
 
     public ?string $error = null;
+
+    public function mount(): void
+    {
+        $this->restoreFetch();
+    }
+
+    protected function cachedFetchProps(): array
+    {
+        return ['result', 'resultMode', 'fromLabel', 'toLabel', 'windowFrom', 'windowTo', 'ran'];
+    }
 
     public static function getNavigationLabel(): string
     {
@@ -176,6 +189,7 @@ class MyDataConsole extends Page
             $this->result = $this->serialize($result);
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
+            $this->rememberFetch();
 
             if ($mode === 'inbound') {
                 // Bucket the orphans so a €5.000 payroll (17.1) or a Hetzner

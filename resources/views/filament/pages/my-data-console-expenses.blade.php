@@ -27,6 +27,12 @@
     @if ($ran && $result)
         @php $mode = $resultMode ?? 'compare'; @endphp
 
+        @if ($fetchedAtHuman)
+            <div class="text-xs text-gray-400 dark:text-gray-500">
+                Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — πατήστε ξανά για ανανέωση.
+            </div>
+        @endif
+
         @if ($mode === 'inbound')
             @php
                 $orphans = $result['missingLocally'];

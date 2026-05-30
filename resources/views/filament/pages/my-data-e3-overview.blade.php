@@ -1,6 +1,28 @@
 <x-filament-panels::page>
     @php $money = fn ($v) => '€ ' . number_format((float) $v, 2, ',', '.'); @endphp
 
+    {{-- ΦΠΑ τριμήνου — the same authoritative snapshot the dashboard shows
+         (RequestVatInfo, refreshed by the scheduler), surfaced here too. --}}
+    @if ($vatQuarter)
+        <x-filament::section>
+            <x-slot name="heading">ΦΠΑ τριμήνου (από myDATA)</x-slot>
+            <x-slot name="description">
+                Εκροών {{ $money($vatQuarter['outputVat']) }} − εισροών {{ $money($vatQuarter['inputVat']) }}
+                @if ($vatQuarter['fetchedAt']) · ενημερώθηκε {{ $vatQuarter['fetchedAt'] }} @endif
+            </x-slot>
+            <div class="flex items-baseline gap-3">
+                <div @class([
+                    'text-2xl font-bold',
+                    'text-danger-600 dark:text-danger-400' => $vatQuarter['payable'],
+                    'text-success-600 dark:text-success-400' => ! $vatQuarter['payable'],
+                ])>{{ $money(abs($vatQuarter['netVat'])) }}</div>
+                <div class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ $vatQuarter['payable'] ? 'Προς απόδοση' : 'Πιστωτικό υπόλοιπο' }}
+                </div>
+            </div>
+        </x-filament::section>
+    @endif
+
     @if (! $ran)
         <x-filament::section>
             <x-slot name="heading">Επισκόπηση Ε3</x-slot>
@@ -19,6 +41,12 @@
     @endif
 
     @if ($ran && $result)
+        @if ($fetchedAtHuman)
+            <div class="text-xs text-gray-400 dark:text-gray-500">
+                Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — πατήστε ξανά «Λήψη Ε3 από myDATA» για ανανέωση.
+            </div>
+        @endif
+
         {{-- Summary: income and expense are shown SEPARATELY — summing them is
              meaningless (they're opposite sides of the Ε3). --}}
         <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
