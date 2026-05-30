@@ -321,6 +321,91 @@ class ThirdPartyStore
     }
 
     /**
+     * Batch third-party bucket for a PAGE of invoices — for the admin invoice
+     * list's «Τρίτος» column. Returns invoiceId => 'none'|'single'|'multi',
+     * computed LOCALLY from mod_ekdosi_routing (no ekdosi call, no inbox
+     * dependency — works for every invoice, historical included).
+     *
+     * Efficient: 3 queries total regardless of page size — all line items for
+     * the page, then the routing rows for the (userid, serviceid, type) tuples
+     * present, joined in PHP. Mirrors resolveInvoice's per-line logic
+     * (relid → routing → contact) but without the per-invoice query fan-out.
+     *
+     * @param  array<int, object>  $invoices  rows with ->id and ->userid
+     * @return array<int, string>             invoiceId => bucket
+     */
+    public static function bucketsForInvoices(array $invoices): array
+    {
+        $out = [];
+        if ($invoices === [] || ! self::hasOwnTables()) {
+            // No routing tables → nothing is third-party; caller renders '—'.
+            foreach ($invoices as $inv) {
+                $out[(int) $inv->id] = 'none';
+            }
+
+            return $out;
+        }
+
+        $userById = [];
+        foreach ($invoices as $inv) {
+            $userById[(int) $inv->id] = (int) $inv->userid;
+        }
+        $invoiceIds = array_keys($userById);
+
+        // 1. All line items for the page's invoices.
+        $items = Capsule::table('tblinvoiceitems')
+            ->whereIn('invoiceid', $invoiceIds)
+            ->get(['invoiceid', 'type', 'relid']);
+
+        // 2. The routing rows that could match — scoped to the page's users +
+        //    the relids present. One query; matched in PHP by the composite key.
+        $userIds = array_values(array_unique(array_values($userById)));
+        $relIds = [];
+        foreach ($items as $it) {
+            $rid = (int) ($it->relid ?? 0);
+            if ($rid > 0) {
+                $relIds[$rid] = true;
+            }
+        }
+        $routeKey = [];   // "userid:serviceid:service_type" => true
+        if ($userIds !== [] && $relIds !== []) {
+            foreach (Capsule::table(self::ROUTING)
+                ->whereIn('userid', $userIds)
+                ->whereIn('serviceid', array_keys($relIds))
+                ->get(['userid', 'serviceid', 'service_type']) as $r) {
+                $routeKey[((int) $r->userid).':'.((int) $r->serviceid).':'.((string) $r->service_type)] = true;
+            }
+        }
+
+        // 3. Fold per invoice: distinct billing parties (each routed line = its
+        //    contact; each unrouted line = the reseller). >1 → multi, exactly
+        //    one routed-and-no-reseller-mix → single, else none.
+        $partyKeys = [];   // invoiceId => set of party keys
+        foreach ($items as $it) {
+            $invId = (int) $it->invoiceid;
+            $userId = $userById[$invId] ?? 0;
+            $relid = (int) ($it->relid ?? 0);
+            $serviceType = self::serviceType((string) ($it->type ?? ''));
+            $routed = $serviceType !== null && $relid > 0
+                && isset($routeKey[$userId.':'.$relid.':'.$serviceType]);
+            $partyKeys[$invId][$routed ? 'c:'.$relid : 'reseller'] = true;
+        }
+
+        foreach ($invoiceIds as $invId) {
+            $keys = $partyKeys[$invId] ?? [];
+            if (count($keys) > 1) {
+                $out[$invId] = 'multi';
+            } elseif (count($keys) === 1 && ! isset($keys['reseller'])) {
+                $out[$invId] = 'single';
+            } else {
+                $out[$invId] = 'none';
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Every WHMCS client with >=1 routing row in the OWN tables, with counts.
      *
      * @return array<string, mixed>
