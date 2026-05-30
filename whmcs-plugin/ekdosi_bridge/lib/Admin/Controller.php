@@ -178,6 +178,11 @@ EOF;
             ? '<div class="alert alert-warning">Η γέφυρα δεν έχει ρυθμιστεί — η στήλη κατάστασης ekdosi είναι κενή.</div>'
             : '';
 
+        // «Τρίτος» is computed LOCALLY from mod_ekdosi_routing (one batch, no
+        // ekdosi/inbox dependency) so it's correct for EVERY invoice on the
+        // page — historical ones included, which never reach the inbox.
+        $tpBuckets = ThirdPartyStore::bucketsForInvoices($invoices->all());
+
         $token = $this->csrfField();
         $rows = '';
         foreach ($invoices as $inv) {
@@ -192,7 +197,7 @@ EOF;
             $state = $states[(string) $id] ?? ($states[$id] ?? null);
 
             [$badge, $invcode, $mark] = $this->stateCells(is_array($state) ? $state : null);
-            $tpCell = $this->thirdPartyCell(is_array($state) ? ($state['third_party_state'] ?? null) : null);
+            $tpCell = $this->thirdPartyCell($tpBuckets[$id] ?? null);
 
             // Action: «Αποστολή» when not yet in ekdosi; «Άνοιγμα» otherwise.
             if ($state === null) {
