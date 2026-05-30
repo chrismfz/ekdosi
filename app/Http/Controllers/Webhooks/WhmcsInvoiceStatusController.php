@@ -87,9 +87,16 @@ class WhmcsInvoiceStatusController
             return new JsonResponse(['error' => 'invalid_signature'], Response::HTTP_UNAUTHORIZED);
         }
 
+        // Eager-load the linked ekdosi invoice so the WHMCS manage-invoice
+        // page can show the deterministic ΤΠΥ (invcode) + the invoice's
+        // authoritative MARK/state — not just the pending row's cached mark.
+        // The invoice is the source of truth once a draft is issued via the
+        // lifecycle (the pending row's mydata_mark is only set on the direct
+        // file() path), so prefer it.
         $row = PendingWhmcsInvoice::query()
             ->where('company_id', $tenant->id)
             ->where('whmcs_invoice_id', $whmcsInvoiceId)
+            ->with('invoice:id,invcode,local_status,mydata_state,mydata_mark')
             ->first();
 
         if ($row === null) {
@@ -104,11 +111,16 @@ class WhmcsInvoiceStatusController
             'pending_id'        => $row->id,
             'whmcs_invoice_id'  => $whmcsInvoiceId,
             'status'            => $row->status,
-            'mydata_mark'       => $row->mydata_mark,
+            // Prefer the invoice's MARK (authoritative once issued via the
+            // lifecycle); fall back to the pending row's cached mark.
+            'mydata_mark'       => $row->invoice?->mydata_mark ?? $row->mydata_mark,
+            'mydata_state'      => $row->invoice?->mydata_state,
+            'local_status'      => $row->invoice?->local_status,
             'filed_at'          => $row->filed_at?->toIso8601String(),
             'rejected_reason'   => $row->rejected_reason,
             'notes'             => $row->notes,
             'ekdosi_invoice_id' => $row->invoice_id,
+            'ekdosi_invcode'    => $row->invoice?->invcode,
         ], Response::HTTP_OK);
     }
 

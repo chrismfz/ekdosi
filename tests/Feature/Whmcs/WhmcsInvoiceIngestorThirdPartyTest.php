@@ -171,4 +171,44 @@ class WhmcsInvoiceIngestorThirdPartyTest extends TestCase
         $this->assertSame($reseller->id, $row->customer_id);
         $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
     }
+
+    public function test_re_resolve_fills_third_party_state_on_an_already_staged_row(): void
+    {
+        // Staged while the feature was OFF → third_party_state null.
+        $tenant = $this->tenant(enabled: false);
+        $reseller = $this->reseller($tenant);
+        $row = $this->ingestor()->ingest($tenant, $this->payload())->row;
+        $this->assertNull($row->third_party_state);
+
+        // Operator enables the feature + deploys resolve.php; re-resolve now
+        // fills «Τρίτος» WITHOUT touching status / customer link.
+        $tenant->update(['whmcs_third_party_enabled' => true]);
+        $this->fakeResolve([
+            $this->routedLine(5, 'Haris', '081951154'),
+            $this->routedLine(6, 'Maria', '062062062'),
+        ]);
+
+        $state = $this->ingestor()->reResolveThirdParty($tenant, $row->fresh());
+
+        $this->assertSame(PendingWhmcsInvoice::TP_MULTI, $state);
+        $row->refresh();
+        $this->assertSame(PendingWhmcsInvoice::TP_MULTI, $row->third_party_state);
+        // Lifecycle untouched: still the original status + reference customer.
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
+        $this->assertSame($reseller->id, $row->customer_id);
+    }
+
+    public function test_re_resolve_is_a_noop_when_feature_disabled(): void
+    {
+        Http::fake();
+        $tenant = $this->tenant(enabled: false);
+        $this->reseller($tenant);
+        $row = $this->ingestor()->ingest($tenant, $this->payload())->row;
+
+        $state = $this->ingestor()->reResolveThirdParty($tenant, $row->fresh());
+
+        Http::assertNothingSent();
+        $this->assertNull($state);
+        $this->assertNull($row->fresh()->third_party_state);
+    }
 }

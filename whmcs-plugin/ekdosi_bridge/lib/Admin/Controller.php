@@ -535,11 +535,19 @@ EOF;
      * "ΑΦΜ / Vies Vat No" (id 13 on myip), matched case-insensitively on the
      * ΑΦΜ/VAT/ΦΠΑ tokens so it survives a field-id change or a re-install —
      * and read its value for this client. Returns '' if unset.
+     *
+     * Field selection is SCORED, not lowest-id: a broad "%VAT%" LIKE can also
+     * hit unrelated fields ("VAT rate", "VAT scheme", "VAT exempt"), and an
+     * older such field would win a naive ORDER BY id. So we rank candidates —
+     * ΑΦΜ/Vies-number names score highest, rate/scheme/percent/category names
+     * are excluded — and, among ties, prefer a field that actually holds a
+     * value for THIS client. Resolution is independent of which field has the
+     * lowest id.
      */
     private function clientVatCustomField(int $userid): string
     {
         try {
-            $fieldId = (int) Capsule::table('tblcustomfields')
+            $candidates = Capsule::table('tblcustomfields')
                 ->where('type', 'client')
                 ->where(function ($q): void {
                     $q->where('fieldname', 'like', '%ΑΦΜ%')
@@ -548,18 +556,55 @@ EOF;
                         ->orWhere('fieldname', 'like', '%Vies%');
                 })
                 ->orderBy('id')
-                ->value('id');
-            if ($fieldId <= 0) {
-                return '';
+                ->get(['id', 'fieldname']);
+
+            $best = null;       // ['id' => int, 'score' => int]
+            foreach ($candidates as $field) {
+                $score = $this->vatFieldScore((string) $field->fieldname);
+                if ($score <= 0) {
+                    continue;   // excluded (rate/scheme/exempt/percent/category)
+                }
+                $value = (string) (Capsule::table('tblcustomfieldsvalues')
+                    ->where('fieldid', $field->id)
+                    ->where('relid', $userid)
+                    ->value('value') ?? '');
+                // Prefer a field that actually has a value for this client.
+                $effective = $score + ($value !== '' ? 100 : 0);
+                if ($best === null || $effective > $best['score']) {
+                    $best = ['value' => $value, 'score' => $effective];
+                }
             }
 
-            return (string) (Capsule::table('tblcustomfieldsvalues')
-                ->where('fieldid', $fieldId)
-                ->where('relid', $userid)
-                ->value('value') ?? '');
+            return $best['value'] ?? '';
         } catch (\Throwable $e) {
             return '';
         }
+    }
+
+    /**
+     * Rank a custom-field name as a ΑΦΜ/VAT-NUMBER holder. >0 = candidate
+     * (higher is better); 0 = exclude (a VAT-related field that is NOT the
+     * number — rate/scheme/percentage/exemption/category).
+     */
+    private function vatFieldScore(string $name): int
+    {
+        $n = mb_strtolower($name);
+        // Exclude obvious non-number VAT fields outright.
+        foreach (['rate', 'scheme', 'exempt', 'percent', 'category', 'απαλλαγ', 'συντελεστ', 'ποσοστ'] as $bad) {
+            if (mb_strpos($n, $bad) !== false) {
+                return 0;
+            }
+        }
+        // Strongest signals: an explicit ΑΦΜ or Vies/VAT-number name.
+        if (mb_strpos($n, 'αφμ') !== false) {
+            return 30;
+        }
+        if (mb_strpos($n, 'vies') !== false || mb_strpos($n, 'vat no') !== false
+            || mb_strpos($n, 'vat number') !== false || mb_strpos($n, 'vatno') !== false) {
+            return 20;
+        }
+        // Generic VAT/ΦΠΑ — plausible but weakest.
+        return 10;
     }
 
     /** Canonical ΑΦΜ: digits only (strip EL/GR prefix, spaces, dashes). */
@@ -637,14 +682,20 @@ EOF;
         }
         $status = htmlspecialchars((string) ($data['status'] ?? '?'));
         $mark = $data['mydata_mark'] ?? null;
+        $invcode = $data['ekdosi_invcode'] ?? null;
         $notes = htmlspecialchars((string) ($data['notes'] ?? ''));
         $rejected = htmlspecialchars((string) ($data['rejected_reason'] ?? ''));
+        // ΤΠΥ (invcode) — the deterministic ekdosi document number for THIS
+        // WHMCS invoice. Lives here on the manage-invoice page, queried live.
+        $invcodeRow = ($invcode !== null && $invcode !== '')
+            ? '<li>Παραστατικό: <strong>'.htmlspecialchars((string) $invcode).'</strong></li>' : '';
         $markRow = $mark ? '<li>MARK: <code>'.htmlspecialchars((string) $mark).'</code></li>' : '';
         $rejRow = $rejected !== '' ? '<li>Rejected reason: '.$rejected.'</li>' : '';
         return <<<EOF
 <div class="alert alert-info">
 <strong>Ekdosi status: {$status}</strong>
 <ul>
+    {$invcodeRow}
     {$markRow}
     {$rejRow}
     <li>Notes: {$notes}</li>

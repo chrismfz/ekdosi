@@ -232,6 +232,7 @@ class WhmcsInboxTable
                 self::createDraftAction(),
                 self::openInvoiceAction(),
                 self::splitAction(),
+                self::reResolveThirdPartyAction(),
                 self::rejectAction(),
                 self::holdAction(),
                 self::reStageAction(),
@@ -632,6 +633,41 @@ class WhmcsInboxTable
                     'hold_reason' => null,
                 ]);
                 Notification::make()->title('Επαναφέρθηκε προς έλεγχο')->success()->send();
+            });
+    }
+
+    /**
+     * Re-run third-party resolution against the bridge for an already-staged
+     * row, filling the «Τρίτος» column for rows that were ingested while
+     * whmcs_third_party_enabled was OFF (or before resolve.php was deployed).
+     * Touches ONLY the third-party columns — not status / link / customer
+     * (see WhmcsInvoiceIngestor::reResolveThirdParty). Visible only when the
+     * feature is enabled for the tenant.
+     */
+    private static function reResolveThirdPartyAction(): Action
+    {
+        return Action::make('re_resolve_third_party')
+            ->label('Έλεγχος δικαιούχων (τρίτοι)')
+            ->icon('heroicon-o-arrow-path')
+            ->color('gray')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => (bool) (Filament::getTenant()?->whmcs_third_party_enabled)
+                && ! in_array($r->status, [PendingWhmcsInvoice::STATUS_FILED], true))
+            ->requiresConfirmation()
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Έλεγχος δρομολόγησης τρίτων — WHMCS #'.$r->whmcs_invoice_id)
+            ->modalDescription('Ρωτά ξανά τη γέφυρα αν το τιμολόγιο δρομολογείται σε τρίτους δικαιούχους και ενημερώνει τη στήλη «Τρίτος». Δεν αλλάζει κατάσταση ή σύνδεση.')
+            ->action(function (PendingWhmcsInvoice $r) {
+                $tenant = Filament::getTenant();
+                $state = app(\App\Services\Whmcs\WhmcsInvoiceIngestor::class)
+                    ->reResolveThirdParty($tenant, $r);
+
+                $label = match ($state) {
+                    PendingWhmcsInvoice::TP_MULTI => 'πολλαπλοί δικαιούχοι (χρειάζεται διαχωρισμός)',
+                    PendingWhmcsInvoice::TP_SINGLE => 'ένας τρίτος δικαιούχος',
+                    PendingWhmcsInvoice::TP_NONE => 'κανένας τρίτος (δικό του)',
+                    default => 'χωρίς απάντηση από τη γέφυρα (απενεργοποιημένο ή μη διαθέσιμο)',
+                };
+                Notification::make()->title('Δρομολόγηση: '.$label)->success()->send();
             });
     }
 }

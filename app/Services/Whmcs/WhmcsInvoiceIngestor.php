@@ -181,6 +181,38 @@ class WhmcsInvoiceIngestor
     }
 
     /**
+     * Re-run third-party resolution for an ALREADY-staged pending row and
+     * refresh only its third-party columns. For rows ingested while
+     * whmcs_third_party_enabled was OFF (third_party_state stayed null): after
+     * the flag is turned on + resolve.php deployed, this fills in the «Τρίτος»
+     * picture WITHOUT waiting for a fresh WHMCS push.
+     *
+     * Deliberately narrow — touches ONLY third_party_state /
+     * third_party_resolution. It does NOT change status, customer_id, or the
+     * invoice link: a row the operator has already acted on keeps its
+     * lifecycle untouched; we only surface the routing info. Returns the
+     * resolved state (or the row's existing state unchanged when the feature
+     * is off / bridge unreachable — a no-op, same degradation as ingest()).
+     */
+    public function reResolveThirdParty(Company $tenant, PendingWhmcsInvoice $row): ?string
+    {
+        $decision = $this->thirdPartyDecision($tenant, $row->whmcs_invoice_id);
+
+        // No-op (feature off, bridge not deployed/unreachable) returns an
+        // all-null decision — don't wipe an existing resolution back to null.
+        if ($decision['state'] === null && $decision['resolution'] === null) {
+            return $row->third_party_state;
+        }
+
+        $row->forceFill([
+            'third_party_state' => $decision['state'],
+            'third_party_resolution' => $decision['resolution'],
+        ])->save();
+
+        return $decision['state'];
+    }
+
+    /**
      * T-1b: decide how third-party invoicing affects this ingest.
      *
      * Returns a decision array:
