@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Enums\MyDataMode;
+use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Resources\Expenses\ExpenseResource;
 use App\Services\MyData\ExpenseImporter;
 use App\Services\MyData\ExpenseReconciler;
@@ -35,6 +36,8 @@ use UnitEnum;
  */
 class MyDataConsoleExpenses extends Page
 {
+    use RemembersLastFetch;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-document-arrow-down';
 
     protected static string|UnitEnum|null $navigationGroup = 'Data';
@@ -64,6 +67,16 @@ class MyDataConsoleExpenses extends Page
      * without the network.
      */
     public static ?\GuzzleHttp\Handler\MockHandler $testHandler = null;
+
+    public function mount(): void
+    {
+        $this->restoreFetch();
+    }
+
+    protected function cachedFetchProps(): array
+    {
+        return ['result', 'resultMode', 'fromLabel', 'toLabel', 'ran'];
+    }
 
     public static function getNavigationLabel(): string
     {
@@ -169,6 +182,7 @@ class MyDataConsoleExpenses extends Page
             $this->result = $this->serialize($result);
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
+            $this->rememberFetch();
 
             if ($mode === 'inbound') {
                 $orphans = count($result->missingLocally);

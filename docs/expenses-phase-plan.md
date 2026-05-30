@@ -298,6 +298,26 @@ widget, and the Ε3 overview.
 - **`RequestMyExpenses`** (§4.2.9) — period expense summaries sanity-check; not built.
 - **Manual expense entry** (`source=manual`) — ExpenseResource is view-only today.
 
+### TODO — do these two TOGETHER (shared FileUpload + import path)
+> Requested 2026-05-30. They overlap enough (both touch the import flow and a
+> document-attachment field) that splitting them would duplicate work.
+
+- **PDF/scan attachment on expense docs.** Add `expenses.document_path` (+
+  original filename), a Filament `FileUpload` (PDF/image, stored on a disk) on
+  the expense form / `ViewExpense`, and an "Άνοιγμα/Λήψη παραστατικού" link in
+  the infolist. Rationale: myDATA carries no line description, and foreign
+  suppliers (Hetzner, Hosting Concepts …) read as opaque E3 codes — so an
+  operator working expenses wants the real invoice attached. Likely wanted
+  generally on supplier/expense documents, not just imported ones.
+- **Sales-orphan import** (income-side mirror of `ExpenseImporter`). Today the
+  myDATA console shows "Η αυτόματη καταχώριση αδέσποτων πωλήσεων… δεν είναι
+  ακόμη διαθέσιμη". Build `SalesOrphanImporter` over the SAME
+  `MarkDetail::fromAadeDoc` parse (it's already shaped for this — see the class
+  docblock) to create a local `Invoice` (+ lines + customer + audit mark,
+  idempotent) from an αδέσποτο, with a per-row import action. When done, offer
+  the PDF-attach step at import time so the operator can drop the real document
+  in the same motion.
+
 ## Reuse map (don't reinvent)
 | Need | Existing thing to mirror/reuse |
 |---|---|

@@ -3,6 +3,8 @@
 namespace App\Filament\Pages;
 
 use App\Enums\MyDataMode;
+use App\Filament\Pages\Concerns\RemembersLastFetch;
+use App\Support\MyData\VatPictureCache;
 use App\Services\MyData\E3Report;
 use App\Services\MyData\E3Reporter;
 use App\Support\MyData\Codes;
@@ -31,6 +33,8 @@ use UnitEnum;
  */
 class MyDataE3Overview extends Page
 {
+    use RemembersLastFetch;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-table-cells';
 
     protected static string|UnitEnum|null $navigationGroup = 'Data';
@@ -46,6 +50,48 @@ class MyDataE3Overview extends Page
     public ?string $error = null;
 
     public static ?\GuzzleHttp\Handler\MockHandler $testHandler = null;
+
+    /** Authoritative ΦΠΑ τριμήνου box, read from the same cache the dashboard uses. */
+    public ?array $vatQuarter = null;
+
+    public function mount(): void
+    {
+        $this->restoreFetch();
+        $this->loadVatQuarter();
+    }
+
+    protected function cachedFetchProps(): array
+    {
+        return ['result', 'ran'];
+    }
+
+    /**
+     * Pull the current-quarter VAT picture from VatPictureCache — the same
+     * authoritative snapshot (RequestVatInfo, refreshed by the scheduler) the
+     * dashboard widget reads. Cache-only: no live AADE call on this page.
+     */
+    private function loadVatQuarter(): void
+    {
+        $tenant = Filament::getTenant();
+        if (! $tenant) {
+            return;
+        }
+
+        $picture = VatPictureCache::get($tenant, 'quarter');
+        if ($picture === null) {
+            return;
+        }
+
+        $this->vatQuarter = [
+            'outputVat' => $picture->outputVat,
+            'inputVat' => $picture->inputVat,
+            'netVat' => $picture->netVat(),
+            'payable' => $picture->isPayable(),
+            'fetchedAt' => $picture->fetchedAt
+                ? \Carbon\Carbon::parse($picture->fetchedAt)->diffForHumans()
+                : null,
+        ];
+    }
 
     public static function getNavigationLabel(): string
     {
@@ -111,6 +157,7 @@ class MyDataE3Overview extends Page
             );
 
             $this->result = $this->serialize($report);
+            $this->rememberFetch();
 
             Notification::make()
                 ->title('Η λήψη Ε3 ολοκληρώθηκε')

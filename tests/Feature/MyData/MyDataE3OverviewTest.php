@@ -21,7 +21,7 @@ class MyDataE3OverviewTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function bootTenantUser(): void
+    private function bootTenantUser(): Company
     {
         $tenant = Company::create([
             'name' => 'E3 Test',
@@ -40,6 +40,8 @@ class MyDataE3OverviewTest extends TestCase
         Gate::before(fn () => true);
         $this->actingAs($user);
         Filament::setTenant($tenant);
+
+        return $tenant;
     }
 
     /** @return array<string, mixed> */
@@ -61,6 +63,25 @@ class MyDataE3OverviewTest extends TestCase
                 ],
             ],
         ];
+    }
+
+    public function test_a_cached_fetch_is_restored_on_mount(): void
+    {
+        $tenant = $this->bootTenantUser();
+
+        // Simulate a prior fetch parked in the cache (the shape rememberFetch
+        // writes); a fresh page mount should rehydrate it without re-calling AADE.
+        \Illuminate\Support\Facades\Cache::put(
+            'mydata-fetch:MyDataE3Overview:'.$tenant->getKey(),
+            ['state' => ['result' => $this->fakeResult(), 'ran' => true], 'at' => now()->toIso8601String()],
+            now()->addHour(),
+        );
+
+        Livewire::test(MyDataE3Overview::class)
+            ->assertSet('ran', true)
+            ->assertSee('Έσοδα')
+            ->assertSee('E3_561_001')
+            ->assertSee('Αποθηκευμένο αποτέλεσμα');
     }
 
     public function test_e3_overview_splits_income_and_expense_with_separate_subtotals(): void
