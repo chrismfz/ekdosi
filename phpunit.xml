@@ -19,6 +19,10 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!-- Throwaway key so encryption-dependent tests (credential casts,
+             Livewire render smoke tests) run green without a host .env. A
+             real APP_KEY in the environment still wins (env is non-forcing). -->
+        <env name="APP_KEY" value="base64:KqlUO/pz2uSaYRH0djCCOftRMmnQvzfcMbuge+vswOg="/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>

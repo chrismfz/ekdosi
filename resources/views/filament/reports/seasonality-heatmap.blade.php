@@ -27,9 +27,11 @@
                             @for ($m = 1; $m <= 12; $m++)
                                 @php
                                     $value = $d['matrix'][$year][$m] ?? 0.0;
-                                    // Alpha 0..0.9 scaled by the largest cell; a faint floor so
-                                    // non-zero months are still visible.
-                                    $alpha = $max > 0 ? round(min(0.9, 0.08 + ($value / $max) * 0.82), 3) : 0;
+                                    // Alpha 0.08..0.9 on a sqrt scale of the largest cell: sqrt
+                                    // compresses the high end so one outlier month doesn't wash
+                                    // the rest toward the faint floor (linear did). Floor keeps
+                                    // non-zero months visible.
+                                    $alpha = $max > 0 ? round(min(0.9, 0.08 + sqrt($value / $max) * 0.82), 3) : 0;
                                 @endphp
                                 <td
                                     class="px-2 py-1 tabular-nums text-gray-800 dark:text-gray-100"

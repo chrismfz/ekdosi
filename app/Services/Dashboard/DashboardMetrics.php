@@ -401,6 +401,10 @@ class DashboardMetrics
         $cur = $this->income($periodStart, $periodEnd);
 
         // Like-for-like prior period (same span, one year earlier).
+        // subYearNoOverflow (NOT subYear) on purpose: on a Feb-29 "now" it
+        // clamps the prior bound to Feb 28 — the prior window is one day
+        // shorter (a negligible rounded-% effect), vs subYear() which would
+        // overflow Feb 29 → Mar 1 and silently shift the whole window.
         $prior = $this->income(
             $periodStart->copy()->subYearNoOverflow(),
             $periodEnd->copy()->subYearNoOverflow(),
