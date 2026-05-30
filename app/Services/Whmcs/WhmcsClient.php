@@ -166,14 +166,20 @@ class WhmcsClient
         $maxPages = 2000;   // hard stop bounded by ACTUAL rows walked, not limit
         $out = [];
         $cursor = $offset;   // advance by the ACTUAL page size WHMCS returns
+        $seenIds = [];       // loop guard against a non-paginating WHMCS
 
         for ($page = 0; $page < $maxPages; $page++) {
             $resp = $this->call('GetInvoices', [
-                'status'  => 'Paid',
-                'limit'   => $limit,
-                'offset'  => $cursor,
-                'orderby' => 'date',
-                'order'   => 'desc',
+                'status' => 'Paid',
+                // WHMCS GetInvoices pagination params are limitstart/limitnum
+                // (NOT limit/offset — those are silently IGNORED, so the API
+                // returns the SAME first page every call → an infinite walk
+                // that hangs. This was the real "stuck at 16 / 5-min freeze"
+                // bug.). orderby/order keep DESC for the minDate early-stop.
+                'limitstart' => $cursor,
+                'limitnum'   => $limit,
+                'orderby'    => 'date',
+                'order'      => 'desc',
             ]);
 
             // GetInvoices returns either:
@@ -185,11 +191,23 @@ class WhmcsClient
             }
             $returned = count($list);
             if ($returned === 0) {
-                break;   // no more invoices — the only reliable end signal
+                break;   // no more invoices — the natural end signal
+            }
+
+            // Loop guard: if the FIRST id of this page repeats one we've
+            // already seen, the server isn't honouring pagination (wrong
+            // param names / a proxy stripping them). Stop instead of hanging.
+            $firstId = (int) ($list[0]['id'] ?? 0);
+            if ($firstId > 0 && isset($seenIds[$firstId])) {
+                break;
             }
 
             $crossedCutoff = false;
             foreach ($list as $row) {
+                $id = (int) ($row['id'] ?? 0);
+                if ($id > 0) {
+                    $seenIds[$id] = true;
+                }
                 // Early-stop on minDate (DESC-ordered, so older rows dominate
                 // the tail). Lexicographic compare on YYYY-MM-DD is correct.
                 if ($minDate !== null) {
@@ -212,15 +230,13 @@ class WhmcsClient
                 break;
             }
 
-            // CRITICAL: advance by what WHMCS ACTUALLY returned, not by $limit.
-            // GetInvoices caps page size server-side (commonly 25, configurable),
-            // so it routinely returns fewer rows than requested. The previous
-            // code (a) stopped on count<limit — which fired after page 1 since
-            // WHMCS returned ~25 < 100, dropping everything older; and
-            // (b) advanced offset by $limit, skipping the un-returned rows.
-            // Walking by the real count + only stopping on an EMPTY page fixes
-            // both — we sweep the whole window regardless of WHMCS's cap.
+            // Advance by what WHMCS ACTUALLY returned, not by $limit — the API
+            // caps page size server-side, so it routinely returns fewer rows
+            // than limitnum. Stop on a short page too (no more rows after it).
             $cursor += $returned;
+            if ($returned < $limit) {
+                break;
+            }
         }
 
         return $out;
