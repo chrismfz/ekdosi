@@ -1,0 +1,38 @@
+app/Models/PendingWhmcsInvoice.php:120:        'third_party_state',
+app/Filament/Resources/WhmcsInbox/Tables/WhmcsInboxTable.php:158:                TextColumn::make('third_party_state')
+app/Filament/Resources/WhmcsInbox/Tables/WhmcsInboxTable.php:173:                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
+app/Filament/Resources/WhmcsInbox/Tables/WhmcsInboxTable.php:541:            ->visible(fn (PendingWhmcsInvoice $r) => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI
+app/Http/Controllers/Webhooks/WhmcsInvoiceStatesController.php:109:                'third_party_state' => $row->third_party_state,
+app/Console/Commands/WhmcsAutoIssue.php:35: *   - Only third_party_state in {null, none, single} — 'multi' is ingested
+app/Console/Commands/WhmcsAutoIssue.php:247:            // third_party_state: null (feature off / noop), 'none' (bills
+app/Console/Commands/WhmcsAutoIssue.php:252:                ->whereNull('third_party_state')
+app/Console/Commands/WhmcsAutoIssue.php:253:                ->orWhereIn('third_party_state', [
+database/migrations/2026_05_28_000023_add_third_party_invoicing_to_whmcs_bridge.php:16: * - pending_whmcs_invoices.third_party_state — null (not evaluated) /
+database/migrations/2026_05_28_000023_add_third_party_invoicing_to_whmcs_bridge.php:39:            $table->string('third_party_state', 16)->nullable()->after('match_reason');
+database/migrations/2026_05_28_000023_add_third_party_invoicing_to_whmcs_bridge.php:40:            $table->json('third_party_resolution')->nullable()->after('third_party_state');
+database/migrations/2026_05_28_000023_add_third_party_invoicing_to_whmcs_bridge.php:57:            $table->dropColumn(['third_party_state', 'third_party_resolution']);
+tests/Feature/Whmcs/WhmcsInvoiceStatesWebhookTest.php:66:            'invoice_id' => $inv->id, 'third_party_state' => PendingWhmcsInvoice::TP_SINGLE]);
+tests/Feature/Whmcs/WhmcsInvoiceStatesWebhookTest.php:77:            ->assertJsonPath('states.31619.third_party_state', PendingWhmcsInvoice::TP_SINGLE)
+tests/Feature/Whmcs/WhmcsInvoiceStatesWebhookTest.php:80:            ->assertJsonPath('states.31640.third_party_state', null)
+app/Services/Whmcs/WhmcsInvoiceIngestor.php:109:                        'third_party_state' => $tp['state'],
+app/Services/Whmcs/WhmcsInvoiceIngestor.php:170:                'third_party_state' => $tp['state'],
+app/Services/Whmcs/WhmcsInvoiceIngestor.php:186:     * whmcs_third_party_enabled was OFF (third_party_state stayed null): after
+app/Services/Whmcs/WhmcsInvoiceIngestor.php:190:     * Deliberately narrow — touches ONLY third_party_state /
+app/Services/Whmcs/WhmcsInvoiceIngestor.php:204:            return $row->third_party_state;
+app/Services/Whmcs/WhmcsInvoiceIngestor.php:208:            'third_party_state' => $decision['state'],
+app/Services/WhmcsInbox/WhmcsInvoiceSplitter.php:124:        if ($pending->third_party_state !== PendingWhmcsInvoice::TP_MULTI) {
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:91:        $this->assertNull($row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:107:        $this->assertSame(PendingWhmcsInvoice::TP_SINGLE, $row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:127:        $this->assertSame(PendingWhmcsInvoice::TP_MULTI, $row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:142:        $this->assertSame(PendingWhmcsInvoice::TP_SINGLE, $row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:155:        $this->assertSame(PendingWhmcsInvoice::TP_NONE, $row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:170:        $this->assertNull($row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:175:    public function test_re_resolve_fills_third_party_state_on_an_already_staged_row(): void
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:177:        // Staged while the feature was OFF → third_party_state null.
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:181:        $this->assertNull($row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:195:        $this->assertSame(PendingWhmcsInvoice::TP_MULTI, $row->third_party_state);
+tests/Feature/Whmcs/WhmcsInvoiceIngestorThirdPartyTest.php:212:        $this->assertNull($row->fresh()->third_party_state);
+tests/Feature/WhmcsInbox/WhmcsInvoiceSplitterTest.php:79:            'third_party_state' => PendingWhmcsInvoice::TP_MULTI,
+tests/Feature/WhmcsInbox/WhmcsInvoiceSplitterTest.php:157:        $pending->update(['third_party_state' => PendingWhmcsInvoice::TP_SINGLE]);
+tests/Feature/WhmcsInbox/WhmcsInboxThirdPartyModalTest.php:49:            'third_party_state' => $resolution !== null ? PendingWhmcsInvoice::TP_SINGLE : null,
+tests/Feature/WhmcsInbox/WhmcsAutoIssueCommandTest.php:151:            'third_party_state' => PendingWhmcsInvoice::TP_MULTI,

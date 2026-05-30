@@ -60,10 +60,10 @@ class WhmcsInvoiceStatesWebhookTest extends TestCase
             'local_status' => 'active', 'mydata_state' => 'VALID', 'mydata_mark' => '400013724770604',
         ])->save();
 
-        // 31619 filed + linked; 31640 staged but not linked; 31999 unknown.
+        // 31619 filed + linked + single third-party; 31640 staged; 31999 unknown.
         PendingWhmcsInvoice::create(['company_id' => $t->id, 'whmcs_invoice_id' => 31619, 'payload' => [],
             'match_reason' => PendingWhmcsInvoice::REASON_LINKED, 'status' => PendingWhmcsInvoice::STATUS_FILED,
-            'invoice_id' => $inv->id]);
+            'invoice_id' => $inv->id, 'third_party_state' => PendingWhmcsInvoice::TP_SINGLE]);
         PendingWhmcsInvoice::create(['company_id' => $t->id, 'whmcs_invoice_id' => 31640, 'payload' => [],
             'match_reason' => PendingWhmcsInvoice::REASON_UNMATCHED, 'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW]);
 
@@ -74,8 +74,10 @@ class WhmcsInvoiceStatesWebhookTest extends TestCase
             ->assertJsonPath('states.31619.ekdosi_invcode', 'ΤΠΥ6643')
             ->assertJsonPath('states.31619.mydata_mark', '400013724770604')
             ->assertJsonPath('states.31619.mydata_state', 'VALID')
+            ->assertJsonPath('states.31619.third_party_state', PendingWhmcsInvoice::TP_SINGLE)
             ->assertJsonPath('states.31640.status', PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
             ->assertJsonPath('states.31640.ekdosi_invcode', null)
+            ->assertJsonPath('states.31640.third_party_state', null)
             ->assertJsonPath('states.31999', null);   // never pushed
     }
 

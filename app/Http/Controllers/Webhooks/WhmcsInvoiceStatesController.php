@@ -104,6 +104,9 @@ class WhmcsInvoiceStatesController
                 // Prefer the invoice's MARK (authoritative once issued via the
                 // lifecycle); fall back to the pending row's cached mark.
                 'mydata_mark' => $row->invoice?->mydata_mark ?? $row->mydata_mark,
+                // Third-party routing bucket (none/single/multi/null) so the
+                // addon list can flag «παραστατικό σε τρίτο» without a 2nd call.
+                'third_party_state' => $row->third_party_state,
             ];
         }
 

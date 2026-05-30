@@ -1,0 +1,8 @@
+CHANGED:
+  C app/Filament/Resources/WhmcsInbox/Tables/WhmcsInboxTable.php
+  C app/Http/Controllers/Webhooks/WhmcsInvoiceStatesController.php
+  C tests/Feature/Whmcs/WhmcsInvoiceStatesWebhookTest.php
+  C whmcs-plugin/ekdosi_bridge/ekdosi_bridge.php
+  C whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php
+ADDED:
+REMOVED:

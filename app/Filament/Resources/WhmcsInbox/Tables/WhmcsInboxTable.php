@@ -240,6 +240,46 @@ class WhmcsInboxTable
     }
 
     /**
+     * Collapse the stored third-party resolution into a per-beneficiary list
+     * for the createDraft modal: each routed contact with ΑΦΜ + line count +
+     * receipt flag. Empty when nothing routed (or no resolution stored) — the
+     * modal placeholder is hidden in that case.
+     *
+     * @return list<array{name: string, afm: string, lines: int, is_receipt: bool}>
+     */
+    private static function routedBeneficiaries(PendingWhmcsInvoice $r): array
+    {
+        $resolution = $r->third_party_resolution;
+        $lines = is_array($resolution) ? ($resolution['lines'] ?? []) : [];
+        if (! is_array($lines)) {
+            return [];
+        }
+
+        $byContact = [];
+        foreach ($lines as $line) {
+            if (! is_array($line) || empty($line['routed']) || empty($line['contact']) || ! is_array($line['contact'])) {
+                continue;
+            }
+            $contact = $line['contact'];
+            $id = (int) ($contact['id'] ?? 0);
+            if (! isset($byContact[$id])) {
+                $byContact[$id] = [
+                    'name' => html_entity_decode((string) ($contact['company_name'] ?? '—'), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                    'afm' => preg_replace('/\D+/', '', (string) ($contact['gr_vatno'] ?? '')) ?? '',
+                    'lines' => 0,
+                    'is_receipt' => false,
+                ];
+            }
+            $byContact[$id]['lines']++;
+            if (! empty($line['is_receipt'])) {
+                $byContact[$id]['is_receipt'] = true;
+            }
+        }
+
+        return array_values($byContact);
+    }
+
+    /**
      * Jump to the draft (or filed) invoice this row produced, so the operator
      * can review/fix/issue it. Visible once an invoice is linked.
      */
@@ -304,6 +344,27 @@ class WhmcsInboxTable
                         }
 
                         return implode("\n", $lines);
+                    }),
+
+                // Third-party routing visibility: if the bridge resolved any
+                // routed lines for this invoice, list EVERY routed beneficiary
+                // (contact + ΑΦΜ + which line) so the operator sees who the
+                // customer chose AND can spot a mis-routing before picking the
+                // recipient below. Hidden entirely when there's no routing.
+                Placeholder::make('third_party_routing')
+                    ->label('Δρομολόγηση σε τρίτους')
+                    ->visible(fn (PendingWhmcsInvoice $r): bool => self::routedBeneficiaries($r) !== [])
+                    ->content(function (PendingWhmcsInvoice $r): string {
+                        $rows = self::routedBeneficiaries($r);
+                        $out = ['Ο πελάτης έχει δρομολογήσει γραμμές σε:'];
+                        foreach ($rows as $b) {
+                            $afm = $b['afm'] !== '' ? ' (ΑΦΜ '.$b['afm'].')' : ' (χωρίς ΑΦΜ)';
+                            $doc = $b['is_receipt'] ? ' — απόδειξη' : '';
+                            $out[] = '• '.$b['name'].$afm.' → '.$b['lines'].' γραμμή(ές)'.$doc;
+                        }
+                        $out[] = 'Διάλεξε τον σωστό δικαιούχο παρακάτω (ή τον πελάτη, αν είναι λάθος δρομολόγηση).';
+
+                        return implode("\n", $out);
                     }),
 
                 Select::make('customer_id')
