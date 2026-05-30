@@ -90,6 +90,17 @@ final class Codes
     public const INCOME_TYPE_PREFIXES = ['1', '2', '5', '6', '7', '8', '11'];
 
     /**
+     * Supplier-expense (εισροές) type prefixes — αγορές λιανικής (13.x) and
+     * ενδοκοινοτικές/τρίτων-χωρών αποκτήσεις & λήψεις υπηρεσιών (14.x). These
+     * are the orphan types that belong to the Έξοδα console (RequestDocs +
+     * import). Kept as a named const beside INCOME_TYPE_PREFIXES so the two
+     * halves of the taxonomy stay at the same altitude (transmittedDocBucket).
+     *
+     * @var list<string>
+     */
+    public const EXPENSE_TYPE_PREFIXES = ['13', '14'];
+
+    /**
      * §8.2 Κατηγορία Φ.Π.Α. — vatCategory enum → percent rate.
      * 7 = Άνευ ΦΠΑ (0%, needs vatExemptionCategory — error [217]).
      * 8 = Εγγραφές χωρίς ΦΠΑ (no VAT, e.g. payroll/depreciation).
@@ -210,6 +221,35 @@ final class Codes
         $prefix = explode('.', $code)[0];
 
         return in_array($prefix, self::INCOME_TYPE_PREFIXES, true);
+    }
+
+    /**
+     * Coarse economic bucket for a TRANSMITTED document. RequestTransmittedDocs
+     * returns EVERYTHING the tenant filed — real sales, self-declared supplier
+     * expenses (ενδοκοινοτικά/τρίτων χωρών), AND accounting entries (μισθοδοσία,
+     * πάγια, τακτοποιήσεις). The sales console uses this to stop a €5.000
+     * payroll (17.1) from sitting in the "αδέσποτα πωλήσεων" list looking like
+     * a missed sale.
+     *
+     *   - 'income'  : 1/2/5/6/7/8/11 — real sales. Actionable on THIS console.
+     *   - 'expense' : 13/14 — έξοδα/εισροές προμηθευτών. Belong to the Έξοδα
+     *                 console (RequestDocs + 1-click import live there).
+     *   - 'other'   : 3/15/16/17/… — μισθοδοσία, πάγια, ΕΦΚΑ, τακτοποιήσεις.
+     *                 Self-declared accounting entries; informational only.
+     */
+    public static function transmittedDocBucket(?string $code): string
+    {
+        if ($code === null || $code === '') {
+            return 'other';
+        }
+
+        if (self::isIncomeInvoiceType($code)) {
+            return 'income';
+        }
+
+        $prefix = explode('.', $code)[0];
+
+        return in_array($prefix, self::EXPENSE_TYPE_PREFIXES, true) ? 'expense' : 'other';
     }
 
     public static function isValidIncomeClassType(string $code): bool

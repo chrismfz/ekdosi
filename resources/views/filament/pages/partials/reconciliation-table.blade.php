@@ -16,6 +16,7 @@
     $headers = [
         'invcode' => 'Κωδικός',
         'mark' => 'ΜΑΡΚ',
+        'type' => 'Τύπος',
         'issuedAt' => 'Έκδοση',
         'counterpart' => 'Πελάτης',
         'supplier' => 'Προμηθευτής',
@@ -59,6 +60,18 @@
                                         <x-filament::link :href="$row['markUrl']" size="sm" class="font-mono">{{ $row['mark'] }}</x-filament::link>
                                     @else
                                         {{ $row['mark'] }}
+                                    @endif
+                                </td>
+                                @break
+                            @case('type')
+                                <td class="py-2 pr-4">
+                                    @if (! empty($row['invoiceType']))
+                                        <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ $row['invoiceType'] }}</span>
+                                        @if (! empty($row['invoiceTypeLabel']))
+                                            <span class="text-gray-700 dark:text-gray-200">{{ $row['invoiceTypeLabel'] }}</span>
+                                        @endif
+                                    @else
+                                        <span class="text-gray-400">—</span>
                                     @endif
                                 </td>
                                 @break

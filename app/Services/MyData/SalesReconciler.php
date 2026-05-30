@@ -5,6 +5,7 @@ namespace App\Services\MyData;
 use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
@@ -140,6 +141,7 @@ class SalesReconciler
                         // the float explicit so a strict_types caller or
                         // numeric comparison never trips.
                         gross: $this->toFloat($summary?->getTotalGrossValue()),
+                        invoiceType: $header?->getInvoiceType()?->value,
                     );
                 }
             }
@@ -182,6 +184,7 @@ class SalesReconciler
                     counterpartName: $existing->counterpartName,
                     counterpartVat: $existing->counterpartVat,
                     gross: $existing->gross,
+                    invoiceType: $existing->invoiceType,
                 );
             }
         }
@@ -316,6 +319,10 @@ class SalesReconciler
                 aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
                 cancelledByMark: $aade->cancelledByMark,
                 problem: 'Υπάρχει στο AADE αλλά δεν βρέθηκε τοπικά (πιθανή υποβολή από άλλο σύστημα ή χαμένη εγγραφή).',
+                invoiceType: $aade->invoiceType,
+                invoiceTypeLabel: $aade->invoiceType !== null
+                    ? (Codes::INVOICE_TYPES[$aade->invoiceType] ?? null)
+                    : null,
             );
         }
 

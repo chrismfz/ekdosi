@@ -30,5 +30,9 @@ final readonly class AadeDocSummary
         public ?string $counterpartName,
         public ?string $counterpartVat,
         public ?float $gross,
+        // §8.1 invoice type (e.g. '1.1', '14.3', '17.1') — lets the console
+        // bucket an orphan as income / supplier-expense / accounting-entry
+        // instead of dumping payroll into the "αδέσποτα πωλήσεων" list.
+        public ?string $invoiceType = null,
     ) {}
 }

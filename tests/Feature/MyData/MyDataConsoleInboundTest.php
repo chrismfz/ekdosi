@@ -50,24 +50,35 @@ class MyDataConsoleInboundTest extends TestCase
     /** @return array<string, mixed> */
     private function fakeResult(): array
     {
-        $orphan = [
+        // An income orphan (a real sale filed elsewhere) — the actionable one.
+        $orphanIncome = [
             'mark' => '400099999999999', 'uid' => null, 'invoiceId' => null, 'invcode' => null,
             'issuedAt' => '02/04/2026', 'counterpartName' => 'e-τιμολόγιο πελάτης', 'gross' => 124.0,
             'localState' => null, 'localStatus' => null, 'aadeState' => 'VALID',
             'cancelledByMark' => null, 'problem' => 'Στο myDATA, χωρίς τοπική εγγραφή.', 'url' => null,
+            'invoiceType' => '1.1', 'invoiceTypeLabel' => 'Τιμολόγιο Πώλησης', 'bucket' => 'income',
+        ];
+        // A payroll entry (17.1) — must NOT be lumped in as a missed sale.
+        $orphanPayroll = [
+            'mark' => '400088888888888', 'uid' => null, 'invoiceId' => null, 'invcode' => null,
+            'issuedAt' => '30/04/2026', 'counterpartName' => null, 'gross' => 5311.43,
+            'localState' => null, 'localStatus' => null, 'aadeState' => 'VALID',
+            'cancelledByMark' => null, 'problem' => 'Στο myDATA, χωρίς τοπική εγγραφή.', 'url' => null,
+            'invoiceType' => '17.1', 'invoiceTypeLabel' => 'Μισθοδοσία', 'bucket' => 'other',
         ];
         $linked = [
             'mark' => '400011111111111', 'uid' => null, 'invoiceId' => 7, 'invcode' => 'ΤΠΥ7',
             'issuedAt' => '03/04/2026', 'counterpartName' => 'Πελάτης Α', 'gross' => 62.0,
             'localState' => 'VALID', 'localStatus' => 'active', 'aadeState' => 'VALID',
             'cancelledByMark' => null, 'problem' => null, 'url' => 'https://example.test/invoice/7',
+            'invoiceType' => '1.1', 'invoiceTypeLabel' => 'Τιμολόγιο Πώλησης', 'bucket' => 'income',
         ];
 
         return [
             'from' => '01/04/2026', 'to' => '29/05/2026',
-            'aadeTotal' => 2, 'localTotal' => 1, 'discrepancyCount' => 1,
+            'aadeTotal' => 3, 'localTotal' => 1, 'discrepancyCount' => 2,
             'matched' => [$linked], 'stateMismatch' => [],
-            'missingAtAade' => [], 'missingLocally' => [$orphan], 'duplicateLocal' => [],
+            'missingAtAade' => [], 'missingLocally' => [$orphanIncome, $orphanPayroll], 'duplicateLocal' => [],
         ];
     }
 
@@ -89,8 +100,14 @@ class MyDataConsoleInboundTest extends TestCase
             ->set('ran', true)
             ->set('resultMode', 'inbound')
             ->set('result', $this->fakeResult())
-            ->assertSee('Αδέσποτα παραστατικά')
-            ->assertSee('400099999999999')      // the orphan MARK
+            // Income orphans get the actionable "πωλήσεων" heading + their MARK.
+            ->assertSee('Αδέσποτα πωλήσεων')
+            ->assertSee('400099999999999')
+            // Payroll (17.1) is routed to the informational "λοιπές" bucket,
+            // NOT the missed-sales list — and shows its type so it reads right.
+            ->assertSee('Λοιπές δικές σου εγγραφές')
+            ->assertSee('400088888888888')
+            ->assertSee('Μισθοδοσία')
             ->assertSee('Συνδεδεμένα με τοπικό παραστατικό');
     }
 
@@ -103,8 +120,8 @@ class MyDataConsoleInboundTest extends TestCase
             ->set('resultMode', 'compare')
             ->set('result', $this->fakeResult())
             // Compare view surfaces a slim pointer (count + reference), not a
-            // second full orphans table.
-            ->assertSee('αδέσποτα παραστατικά')
+            // second full orphans table. Headlines income orphans.
+            ->assertSee('αδέσποτα πωλήσεων')
             ->assertSee('Αδέσποτα από myDATA')
             ->assertSee('Ασυμφωνίες');
     }
