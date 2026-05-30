@@ -301,6 +301,25 @@ final class Codes
     }
 
     /**
+     * Which side of the Ε3 an E3_* type belongs to — so the overview can split
+     * income (E3_56x) from expense (E3_58x) instead of summing them into one
+     * meaningless grand total. Resolved off firebed's two backed enums (the
+     * same source e3TypeLabel reads), with 'unknown' for any aggregate
+     * pseudo-code AADE returns that neither enum knows.
+     */
+    public static function e3Direction(string $code): string
+    {
+        if (\Firebed\AadeMyData\Enums\IncomeClassificationType::tryFrom($code) !== null) {
+            return 'income';
+        }
+        if (\Firebed\AadeMyData\Enums\ExpenseClassificationType::tryFrom($code) !== null) {
+            return 'expense';
+        }
+
+        return 'unknown';
+    }
+
+    /**
      * value => "code — Greek label" maps for Filament Selects.
      *
      * @return array<string, string>

@@ -96,16 +96,32 @@
         <x-filament::section>
             <x-slot name="heading">Συναλλασσόμενοι</x-slot>
 
+            @php
+                // Direction-aware labels. For an INBOUND (expense) doc the
+                // issuer is the SUPPLIER, not us — labelling it "Εκδότης (εμείς)"
+                // is misleading. myDATA also omits the issuer entirely for retail
+                // ΑΛΠ (13.1), so make the "who sold to us" gap explicit.
+                $inbound = ($doc['direction'] ?? null) === 'inbound';
+                $issuerLabel = $inbound ? 'Εκδότης (προμηθευτής)' : 'Εκδότης (εμείς)';
+                $counterLabel = $inbound ? 'Λήπτης (εμείς)' : 'Προς (πελάτης)';
+                $hasIssuer = ($doc['issuerName'] ?? null) || ($doc['issuerVat'] ?? null);
+            @endphp
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">Εκδότης (εμείς)</div>
-                    <div class="font-medium">{{ $doc['issuerName'] ?? '—' }}</div>
-                    <div class="font-mono text-xs text-gray-500 dark:text-gray-400">
-                        ΑΦΜ {{ $doc['issuerVat'] ?? '—' }}
-                    </div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">{{ $issuerLabel }}</div>
+                    @if ($hasIssuer)
+                        <div class="font-medium">{{ $doc['issuerName'] ?? '—' }}</div>
+                        <div class="font-mono text-xs text-gray-500 dark:text-gray-400">
+                            ΑΦΜ {{ $doc['issuerVat'] ?? '—' }}
+                        </div>
+                    @elseif ($inbound)
+                        <div class="text-gray-500 dark:text-gray-400 italic">δεν δηλώνεται στο myDATA (λιανική συναλλαγή)</div>
+                    @else
+                        <div class="font-medium">—</div>
+                    @endif
                 </div>
                 <div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">Προς (πελάτης)</div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">{{ $counterLabel }}</div>
                     <div class="font-medium">{{ $doc['counterpartName'] ?? '— (λιανική / ιδιώτης)' }}</div>
                     <div class="font-mono text-xs text-gray-500 dark:text-gray-400">
                         ΑΦΜ {{ $doc['counterpartVat'] ?? '—' }}
@@ -143,9 +159,27 @@
                                 <tr class="border-b border-gray-100 dark:border-white/5">
                                     <td class="py-2 pr-4">{{ $line['lineNumber'] ?? $loop->iteration }}</td>
                                     <td class="py-2 pr-4">
-                                        {{ $line['itemDescr'] ?? '—' }}
-                                        @if ($line['itemCode'] ?? null)
-                                            <span class="text-xs text-gray-400">({{ $line['itemCode'] }})</span>
+                                        @if ($line['itemDescr'] ?? null)
+                                            {{ $line['itemDescr'] }}
+                                            @if ($line['itemCode'] ?? null)
+                                                <span class="text-xs text-gray-400">({{ $line['itemCode'] }})</span>
+                                            @endif
+                                        @elseif (! empty($line['classifications']))
+                                            {{-- myDATA carries no free-text description for these docs;
+                                                 the E3 classification is the "what is this" signal. --}}
+                                            @foreach ($line['classifications'] as $cls)
+                                                <div>
+                                                    <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ $cls['type'] }}</span>
+                                                    @if ($cls['typeLabel'])
+                                                        — {{ $cls['typeLabel'] }}
+                                                    @endif
+                                                    @if ($cls['categoryLabel'])
+                                                        <span class="text-xs text-gray-400">({{ $cls['categoryLabel'] }})</span>
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                        @else
+                                            —
                                         @endif
                                     </td>
                                     <td class="py-2 pr-4 text-right whitespace-nowrap">

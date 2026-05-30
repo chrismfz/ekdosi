@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Enums\MyDataMode;
 use App\Services\MyData\E3Report;
 use App\Services\MyData\E3Reporter;
+use App\Support\MyData\Codes;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
@@ -134,19 +135,31 @@ class MyDataE3Overview extends Page
 
     private function serialize(E3Report $report): array
     {
+        $rows = array_map(fn ($r) => [
+            'classType' => $r->classType,
+            'classCategory' => $r->classCategory,
+            'typeLabel' => Codes::e3TypeLabel($r->classType),
+            'categoryLabel' => $r->classCategory ? Codes::e3CategoryLabel($r->classCategory) : null,
+            // Split the table into income (E3_56x) vs expense (E3_58x) — summing
+            // both into one total is meaningless; each side gets its own subtotal.
+            'direction' => Codes::e3Direction($r->classType),
+            'value' => $r->value,
+            'count' => $r->count,
+        ], $report->rows);
+
+        $sumWhere = fn (string $dir) => round(array_sum(
+            array_map(fn ($r) => $r['direction'] === $dir ? $r['value'] : 0.0, $rows)
+        ), 2);
+
         return [
             'from' => $report->from,
             'to' => $report->to,
             'docCount' => $report->docCount,
             'total' => $report->total,
-            'rows' => array_map(fn ($r) => [
-                'classType' => $r->classType,
-                'classCategory' => $r->classCategory,
-                'typeLabel' => \App\Support\MyData\Codes::e3TypeLabel($r->classType),
-                'categoryLabel' => $r->classCategory ? \App\Support\MyData\Codes::e3CategoryLabel($r->classCategory) : null,
-                'value' => $r->value,
-                'count' => $r->count,
-            ], $report->rows),
+            'incomeTotal' => $sumWhere('income'),
+            'expenseTotal' => $sumWhere('expense'),
+            'unknownTotal' => $sumWhere('unknown'),
+            'rows' => $rows,
         ];
     }
 }

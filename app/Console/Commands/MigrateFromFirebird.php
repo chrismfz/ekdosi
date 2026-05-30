@@ -2,7 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Company;
+use App\Models\User;
 use App\Services\Etl\TenantRowUpserter;
+use App\Services\TenantRoleProvisioner;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use PDO;
@@ -205,16 +208,45 @@ class MigrateFromFirebird extends Command
 
     private function resolveCompany(): int
     {
-        $existing = DB::table('companies')->where('slug', $this->option('slug'))->first();
+        $existing = Company::query()->where('slug', $this->option('slug'))->first();
         if ($existing) {
-            return $existing->id;
+            return $existing->getKey();
         }
-        return DB::table('companies')->insertGetId([
-            'name'       => $this->option('company'),
-            'slug'       => $this->option('slug'),
-            'created_at' => now(),
-            'updated_at' => now(),
+
+        // Eloquent create (NOT a raw insert) so the CompanyObserver fires and
+        // the per-team super_admin role is provisioned for this new tenant.
+        // The old raw insert bypassed the observer, leaving every ETL-created
+        // tenant without a super_admin role — an admin switching into it saw a
+        // stripped menu until a manual `shield:sync-super-admin`.
+        $company = Company::create([
+            'name' => $this->option('company'),
+            'slug' => $this->option('slug'),
         ]);
+
+        $this->provisionSuperAdmins($company);
+
+        return $company->getKey();
+    }
+
+    /**
+     * Make a freshly-imported tenant immediately usable: attach it to — and
+     * grant its super_admin role within — every user who is already a
+     * super_admin somewhere. Mirrors `shield:sync-super-admin`'s default, so a
+     * new ETL tenant needs no manual repair step. Per-tenant operators are
+     * untouched (we only lift existing super-admins).
+     */
+    private function provisionSuperAdmins(Company $company): void
+    {
+        $provisioner = app(TenantRoleProvisioner::class);
+
+        foreach (User::all() as $user) {
+            if (! $provisioner->isSuperAdminAnywhere($user)) {
+                continue;
+            }
+            $user->companies()->syncWithoutDetaching([$company->getKey()]);
+            $provisioner->assignSuperAdmin($user, $company);
+            $this->line("  → super_admin provisioned for {$user->email} in {$company->slug}");
+        }
     }
 
     /**
