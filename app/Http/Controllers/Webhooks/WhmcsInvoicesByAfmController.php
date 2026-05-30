@@ -71,8 +71,13 @@ class WhmcsInvoicesByAfmController
     /** Max ΑΦΜ accepted per request (a client + their third-party contacts). */
     private const MAX_AFMS = 200;
 
-    /** Max invoices returned per ΑΦΜ (newest first); keeps the response bounded. */
-    private const MAX_INVOICES_PER_AFM = 500;
+    /**
+     * Global cap on invoices returned across ALL requested ΑΦΜ (newest first).
+     * Bounds the whole response in one query — not per-ΑΦΜ — so a large ΑΦΜ
+     * set can't balloon the payload. 2000 comfortably covers a client + their
+     * third-party contacts' visible history.
+     */
+    private const MAX_INVOICES_TOTAL = 2000;
 
     public function __invoke(Request $request, string $slug): JsonResponse
     {
@@ -116,6 +121,12 @@ class WhmcsInvoicesByAfmController
             ->get(['id', 'afm', 'name'])
             ->keyBy('afm');
 
+        // ONE query for all matched customers' invoices (not one per ΑΦΜ),
+        // globally capped, then grouped per customer in PHP. The aggregate
+        // cap bounds the response so a 200-ΑΦΜ request can't materialise
+        // hundreds of thousands of rows.
+        $byCustomer = $this->invoicesByCustomer($tenant->id, $customers->pluck('id')->all());
+
         $result = [];
         foreach ($afms as $afm) {
             $customer = $customers->get($afm);
@@ -128,7 +139,7 @@ class WhmcsInvoicesByAfmController
             $result[$afm] = [
                 'customer_id' => $customer->id,
                 'customer_name' => $customer->name,
-                'invoices' => $this->invoicesFor($tenant->id, $customer->id),
+                'invoices' => $byCustomer[$customer->id] ?? [],
             ];
         }
 
@@ -139,32 +150,49 @@ class WhmcsInvoicesByAfmController
     }
 
     /**
-     * The customer's invoices, newest first, as plain rows for the plugin
-     * table. `live()` drops locally- and AADE-cancelled documents so the
-     * card doesn't surface withdrawn παραστατικά as if they stand.
+     * Live invoices for the given customer ids, in ONE query, newest first,
+     * grouped into customer_id => list<row>. `live()` drops locally- and
+     * AADE-cancelled documents so the card doesn't surface withdrawn
+     * παραστατικά as if they stand.
      *
-     * @return list<array<string, mixed>>
+     * The single global `limit` (MAX_INVOICES_TOTAL) bounds the whole
+     * response regardless of how many ΑΦΜ were requested — the N+1 per-ΑΦΜ
+     * loop and the unbounded-aggregate footgun the review flagged. For the
+     * realistic case (a client + a handful of third-party contacts) the cap
+     * is never hit; a tenant with one customer holding tens of thousands of
+     * invoices simply gets the newest MAX_INVOICES_TOTAL of them.
+     *
+     * @param  list<int>  $customerIds
+     * @return array<int, list<array<string, mixed>>>
      */
-    private function invoicesFor(int $companyId, int $customerId): array
+    private function invoicesByCustomer(int $companyId, array $customerIds): array
     {
+        if ($customerIds === []) {
+            return [];
+        }
+
         $query = Invoice::query()
             ->where('company_id', $companyId)
-            ->where('customer_id', $customerId);
+            ->whereIn('customer_id', $customerIds);
 
-        return InvoiceScope::live($query)
+        $grouped = [];
+        InvoiceScope::live($query)
             ->orderByDesc('issued_at')
             ->orderByDesc('id')
-            ->limit(self::MAX_INVOICES_PER_AFM)
-            ->get(['id', 'invcode', 'local_status', 'mydata_state', 'mydata_mark', 'issued_at'])
-            ->map(fn (Invoice $i): array => [
-                'ekdosi_invoice_id' => $i->id,
-                'ekdosi_invcode' => $i->invcode,
-                'local_status' => $i->local_status,
-                'mydata_state' => $i->mydata_state,
-                'mydata_mark' => $i->mydata_mark,
-                'issued_at' => $i->issued_at?->toDateString(),
-            ])
-            ->all();
+            ->limit(self::MAX_INVOICES_TOTAL)
+            ->get(['id', 'customer_id', 'invcode', 'local_status', 'mydata_state', 'mydata_mark', 'issued_at'])
+            ->each(function (Invoice $i) use (&$grouped): void {
+                $grouped[$i->customer_id][] = [
+                    'ekdosi_invoice_id' => $i->id,
+                    'ekdosi_invcode' => $i->invcode,
+                    'local_status' => $i->local_status,
+                    'mydata_state' => $i->mydata_state,
+                    'mydata_mark' => $i->mydata_mark,
+                    'issued_at' => $i->issued_at?->toDateString(),
+                ];
+            });
+
+        return $grouped;
     }
 
     /**
