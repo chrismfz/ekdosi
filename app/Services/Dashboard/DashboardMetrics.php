@@ -265,6 +265,193 @@ class DashboardMetrics
             ->all();
     }
 
+    /**
+     * Distinct calendar years that have at least one (live, non-credit)
+     * sales invoice, newest first — the option set for the Reports page
+     * year selectors. The current year is always included even on a fresh
+     * tenant so the selector is never empty.
+     *
+     * @return list<int>
+     */
+    public function availableYears(): array
+    {
+        $expr = $this->yearExpr();
+
+        $years = $this->baseInvoices()
+            ->selectRaw("$expr as y")
+            ->groupBy('y')
+            ->orderByRaw('y DESC')
+            ->pluck('y')
+            ->map(fn ($y) => (int) $y)
+            ->all();
+
+        $current = (int) Carbon::now()->year;
+        if (! in_array($current, $years, true)) {
+            array_unshift($years, $current);
+            rsort($years);
+        }
+
+        return $years;
+    }
+
+    /**
+     * Net + output VAT per calendar month (1..12) for a single year, as a
+     * DENSE 12-element list (empty months come back zeroed). The non-
+     * cumulative twin of cumulativeNetByMonth — feeds the "τζίρος ανά μήνα"
+     * bar chart for an arbitrary year.
+     *
+     * @return list<array{month: int, net: float, vat: float}>
+     */
+    public function monthlyForYear(int $year): array
+    {
+        $expr = $this->monthNumberExpr();
+
+        $rows = $this->baseInvoices()
+            ->whereBetween('issued_at', ["$year-01-01 00:00:00", "$year-12-31 23:59:59"])
+            ->selectRaw("$expr as m, COALESCE(SUM(net_total), 0) net, COALESCE(SUM(gross_total), 0) gross")
+            ->groupBy('m')
+            ->get()
+            ->keyBy(fn ($r) => (int) $r->m);
+
+        $out = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $net = (float) ($rows->get($m)->net ?? 0);
+            $gross = (float) ($rows->get($m)->gross ?? 0);
+            $out[] = [
+                'month' => $m,
+                'net'   => round($net, 2),
+                'vat'   => round($gross - $net, 2),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Per-year totals for the trailing $count years (oldest first,
+     * including $endYear which defaults to the current year). Dense:
+     * years with no invoices come back zeroed so the bar chart x-axis is
+     * continuous and the YoY growth read is honest.
+     *
+     * @return list<array{year: int, net: float, gross: float, vat: float, count: int}>
+     */
+    public function yearlyTotals(int $count = 5, ?int $endYear = null): array
+    {
+        $endYear ??= (int) Carbon::now()->year;
+        $startYear = $endYear - $count + 1;
+        $expr = $this->yearExpr();
+
+        $rows = $this->baseInvoices()
+            ->whereBetween('issued_at', ["$startYear-01-01 00:00:00", "$endYear-12-31 23:59:59"])
+            ->selectRaw("$expr as y, COALESCE(SUM(net_total), 0) net, COALESCE(SUM(gross_total), 0) gross, COUNT(*) cnt")
+            ->groupBy('y')
+            ->get()
+            ->keyBy(fn ($r) => (int) $r->y);
+
+        $out = [];
+        for ($y = $startYear; $y <= $endYear; $y++) {
+            $net = (float) ($rows->get($y)->net ?? 0);
+            $gross = (float) ($rows->get($y)->gross ?? 0);
+            $out[] = [
+                'year'  => $y,
+                'net'   => round($net, 2),
+                'gross' => round($gross, 2),
+                'vat'   => round($gross - $net, 2),
+                'count' => (int) ($rows->get($y)->cnt ?? 0),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Headline KPIs for the Reports scorecard, for a single year.
+     *
+     * The year's window is [Jan 1 .. Dec 31], but for the CURRENT year it
+     * is clamped to "now" so the figure is year-to-date — and the YoY
+     * comparison uses the SAME calendar span shifted one year back
+     * (priorStart/priorEnd), so "+12% vs πέρσι" compares Jan–May to Jan–May,
+     * not Jan–May to a full prior year. DSO + receivables are a "now"
+     * snapshot (receivables have no year), DSO annualised over trailing 365
+     * days of sales.
+     *
+     * @return array{
+     *   year: int, net: float, gross: float, vat: float, count: int,
+     *   priorNet: float, yoyPct: float|null,
+     *   avgMonthlyNet: float, avgInvoiceNet: float,
+     *   creditRatioPct: float, creditGross: float,
+     *   topCustomerName: string|null, topCustomerShare: float|null,
+     *   receivables: float, dsoDays: int|null
+     * }
+     */
+    public function kpiSummary(int $year): array
+    {
+        $now = Carbon::now();
+        $currentYear = (int) $now->year;
+
+        $periodStart = Carbon::create($year, 1, 1)->startOfDay();
+        $periodEnd = Carbon::create($year, 12, 31)->endOfDay();
+        if ($year === $currentYear) {
+            $periodEnd = $now->copy();
+        } elseif ($year > $currentYear) {
+            // Future year selected — nothing to show, avoid a bogus window.
+            $periodEnd = $periodStart->copy();
+        }
+
+        $cur = $this->income($periodStart, $periodEnd);
+
+        // Like-for-like prior period (same span, one year earlier).
+        $prior = $this->income(
+            $periodStart->copy()->subYearNoOverflow(),
+            $periodEnd->copy()->subYearNoOverflow(),
+        );
+        $yoy = $prior->net > 0.005
+            ? round(($cur->net - $prior->net) / $prior->net * 100, 1)
+            : null;
+
+        $monthsElapsed = $year === $currentYear ? (int) $now->month : ($year > $currentYear ? 0 : 12);
+        $avgMonthly = $monthsElapsed > 0 ? round($cur->net / $monthsElapsed, 2) : 0.0;
+        $avgInvoice = $cur->count > 0 ? round($cur->net / $cur->count, 2) : 0.0;
+
+        // Credit notes issued in the window (positive gross) as a share of
+        // sales gross — a returns / correction-rate quality signal.
+        $creditGross = (float) $this->creditNotesQuery()
+            ->where('issued_at', '>=', $periodStart)
+            ->where('issued_at', '<=', $periodEnd)
+            ->sum('gross_total');
+        $creditRatio = $cur->gross > 0.005 ? round($creditGross / $cur->gross * 100, 1) : 0.0;
+
+        // Concentration risk: the single biggest customer's share of sales.
+        $top = $this->topCustomersQuery($periodStart, $periodEnd, 1)->first();
+        $topShare = ($top && $cur->gross > 0.005)
+            ? round(((float) $top->gross_ytd) / $cur->gross * 100, 1)
+            : null;
+
+        // DSO snapshot: receivables / (trailing-365-day sales per day).
+        $receivables = $this->outstandingReceivables();
+        $trailing = $this->income($now->copy()->subYearNoOverflow(), $now);
+        $perDay = $trailing->gross / 365.0;
+        $dso = $perDay > 0.005 ? (int) round($receivables / $perDay) : null;
+
+        return [
+            'year'             => $year,
+            'net'              => $cur->net,
+            'gross'            => $cur->gross,
+            'vat'              => $cur->vat,
+            'count'            => $cur->count,
+            'priorNet'         => $prior->net,
+            'yoyPct'           => $yoy,
+            'avgMonthlyNet'    => $avgMonthly,
+            'avgInvoiceNet'    => $avgInvoice,
+            'creditRatioPct'   => $creditRatio,
+            'creditGross'      => round($creditGross, 2),
+            'topCustomerName'  => $top?->name,
+            'topCustomerShare' => $topShare,
+            'receivables'      => $receivables,
+            'dsoDays'          => $dso,
+        ];
+    }
+
     // ---- internals ------------------------------------------------------
 
     /**
@@ -284,6 +471,29 @@ class DashboardMetrics
             ->whereNull('credited_invoice_id');
 
         return InvoiceScope::live($q);
+    }
+
+    /**
+     * Credit notes (credited_invoice_id set), live + tenant-scoped. They
+     * carry POSITIVE gross; baseInvoices() deliberately excludes them from
+     * income, so the credit-rate KPI reads them from here instead.
+     */
+    private function creditNotesQuery()
+    {
+        $q = DB::table('invoices')
+            ->where('company_id', $this->tenant->id)
+            ->whereNull('deleted_at')
+            ->whereNotNull('credited_invoice_id');
+
+        return InvoiceScope::live($q);
+    }
+
+    /** Numeric year expression, portable across sqlite (tests) + MariaDB. */
+    private function yearExpr(): string
+    {
+        return DB::connection()->getDriverName() === 'sqlite'
+            ? "CAST(strftime('%Y', issued_at) AS INTEGER)"
+            : 'YEAR(issued_at)';
     }
 
     /** 'YYYY-MM' bucket expression, portable across sqlite (tests) + MariaDB. */
