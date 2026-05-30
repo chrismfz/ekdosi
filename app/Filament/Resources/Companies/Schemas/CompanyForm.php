@@ -870,9 +870,9 @@ class CompanyForm
                                     ->description('Δρομολόγηση γραμμών WHMCS σε εναλλακτικό δικαιούχο (π.χ. reseller που τιμολογεί τους δικούς του πελάτες). Με ON, το ekdosi ρωτά το plugin (resolve.php) ποιος χρεώνεται ανά γραμμή.')
                                     ->schema([
                                         Toggle::make('whmcs_third_party_enabled')
-                                            ->label('Ενεργοποίηση δρομολόγησης τρίτων')
+                                            ->label('Ανίχνευση δρομολόγησης τρίτων (admin)')
                                             ->default(false)
-                                            ->helperText('Απαιτεί το resolve.php εγκατεστημένο στο WHMCS (αδελφάκι του inbound.php) + ρυθμισμένο API URL/secret. Με OFF, η στήλη «Τρίτος» στο Inbox μένει «—» και όλα χρεώνονται στον πελάτη του WHMCS. Μονομερή → χρέωση στον δικαιούχο· πολλαπλά → «Διαχωρισμός» για τον χειριστή.'),
+                                            ->helperText('ADMIN-ONLY — οι πελάτες ΔΕΝ βλέπουν τίποτα από αυτό. Όταν είναι ON, ο ingestor ρωτά τη γέφυρα (resolve.php) ανά τιμολόγιο και γεμίζει τη στήλη «Τρίτος» στο WHMCS Inbox (μονομερή → χρέωση στον δικαιούχο· πολλαπλά → «Διαχωρισμός»). Με OFF η «Τρίτος» μένει «—». Απαιτεί resolve.php εγκατεστημένο + API URL/secret. Η ορατότητα της σελίδας ΠΕΛΑΤΩΝ «Παραστατικά σε τρίτους (v2)» ελέγχεται ΞΕΧΩΡΙΣΤΑ στο WHMCS plugin (ρύθμιση «Show client v2»).'),
                                     ]),
 
                                 Section::make('Custom field mapping')
