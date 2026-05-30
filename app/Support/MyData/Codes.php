@@ -90,6 +90,17 @@ final class Codes
     public const INCOME_TYPE_PREFIXES = ['1', '2', '5', '6', '7', '8', '11'];
 
     /**
+     * Supplier-expense (εισροές) type prefixes — αγορές λιανικής (13.x) and
+     * ενδοκοινοτικές/τρίτων-χωρών αποκτήσεις & λήψεις υπηρεσιών (14.x). These
+     * are the orphan types that belong to the Έξοδα console (RequestDocs +
+     * import). Kept as a named const beside INCOME_TYPE_PREFIXES so the two
+     * halves of the taxonomy stay at the same altitude (transmittedDocBucket).
+     *
+     * @var list<string>
+     */
+    public const EXPENSE_TYPE_PREFIXES = ['13', '14'];
+
+    /**
      * §8.2 Κατηγορία Φ.Π.Α. — vatCategory enum → percent rate.
      * 7 = Άνευ ΦΠΑ (0%, needs vatExemptionCategory — error [217]).
      * 8 = Εγγραφές χωρίς ΦΠΑ (no VAT, e.g. payroll/depreciation).
@@ -238,7 +249,7 @@ final class Codes
 
         $prefix = explode('.', $code)[0];
 
-        return in_array($prefix, ['13', '14'], true) ? 'expense' : 'other';
+        return in_array($prefix, self::EXPENSE_TYPE_PREFIXES, true) ? 'expense' : 'other';
     }
 
     public static function isValidIncomeClassType(string $code): bool
