@@ -328,6 +328,36 @@ EOF;
 EOF;
     }
 
+    /**
+     * Read-only JSON map { "<invoiceid>": "<invoiced value>" } for the ids in
+     * ?ids=1,2,3. Powers the invoice-LIST badge (the AdminAreaFooterOutput JS
+     * fetches this and decorates each row). No state change → no CSRF; access
+     * is already gated by addonmodules.php's admin session. Echoes + exits so
+     * WHMCS doesn't wrap the JSON in admin chrome.
+     */
+    public function marks(array $vars): string
+    {
+        $ids = array_values(array_filter(
+            array_map('intval', explode(',', (string) ($_GET['ids'] ?? ''))),
+            static fn (int $id): bool => $id > 0
+        ));
+
+        $out = [];
+        if ($ids !== []) {
+            // Cap the batch so a crafted ?ids= can't ask for the whole table.
+            $rows = Capsule::table('tblinvoices')
+                ->whereIn('id', array_slice($ids, 0, 200))
+                ->get(['id', 'invoiced']);
+            foreach ($rows as $row) {
+                $out[(int) $row->id] = (string) ($row->invoiced ?? '0');
+            }
+        }
+
+        header('Content-Type: application/json');
+        echo json_encode($out);
+        exit;
+    }
+
     public function reset(array $vars): string
     {
         $link = htmlspecialchars($vars['modulelink']);
