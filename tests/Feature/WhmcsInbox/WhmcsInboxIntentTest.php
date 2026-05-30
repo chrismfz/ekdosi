@@ -80,6 +80,27 @@ class WhmcsInboxIntentTest extends TestCase
         $this->assertFalse($row->wantsInvoice());
     }
 
+    public function test_needs_afm_when_wants_invoice_but_no_afm_anywhere(): void
+    {
+        $tenant = $this->tenant(['wantsinvoice' => 10]);
+
+        // Wants invoice, no ΑΦΜ in WHMCS, no linked customer → needs ΑΦΜ.
+        $row = $this->row($tenant, [['id' => 10, 'value' => 'on']]);
+        $this->assertTrue($row->needsAfm());
+
+        // Same but with a WHMCS ΑΦΜ present → fine.
+        $tenant2 = $this->tenant(['wantsinvoice' => 10, 'vatno' => 13]);
+        $ok = $this->row($tenant2, [
+            ['id' => 10, 'value' => 'on'],
+            ['id' => 13, 'value' => '123456789'],
+        ]);
+        $this->assertFalse($ok->needsAfm());
+
+        // Doesn't want an invoice → never flagged, even without ΑΦΜ.
+        $receipt = $this->row($tenant, [['id' => 10, 'value' => '']]);
+        $this->assertFalse($receipt->needsAfm());
+    }
+
     public function test_intent_is_null_when_role_unmapped(): void
     {
         // No wantsinvoice mapping → intent unknown (operator decides).

@@ -84,19 +84,31 @@ class WhmcsInboxTable
                     ->label('Πρόθεση')
                     ->badge()
                     ->placeholder('—')
-                    ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->wantsInvoice()) {
-                        true => 'Τιμολόγιο',
-                        false => 'Απόδειξη',
-                        default => null,
+                    ->state(function (PendingWhmcsInvoice $r): ?string {
+                        if ($r->needsAfm()) {
+                            return 'Τιμολόγιο · λείπει ΑΦΜ';
+                        }
+
+                        return match ($r->wantsInvoice()) {
+                            true => 'Τιμολόγιο',
+                            false => 'Απόδειξη',
+                            default => null,
+                        };
                     })
                     ->color(fn (?string $state): string => match ($state) {
+                        'Τιμολόγιο · λείπει ΑΦΜ' => 'danger',
                         'Τιμολόγιο' => 'info',
-                        'Απόδειξη' => 'gray',
                         default => 'gray',
                     })
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->wantsInvoice() === true
-                        ? 'Ο πελάτης ζήτησε τιμολόγιο στο WHMCS.'
-                        : ($r->wantsInvoice() === false ? 'Δεν ζήτησε τιμολόγιο — μάλλον απόδειξη.' : null)),
+                    ->icon(fn (?string $state): ?string => $state === 'Τιμολόγιο · λείπει ΑΦΜ'
+                        ? 'heroicon-o-exclamation-triangle'
+                        : null)
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match (true) {
+                        $r->needsAfm() => 'Ζήτησε τιμολόγιο αλλά δεν υπάρχει ΑΦΜ (ούτε στο WHMCS ούτε σε πελάτη ekdosi). Βάλ\' το «Σε αναμονή» μέχρι να το δώσει.',
+                        $r->wantsInvoice() === true => 'Ο πελάτης ζήτησε τιμολόγιο στο WHMCS.',
+                        $r->wantsInvoice() === false => 'Δεν ζήτησε τιμολόγιο — μάλλον απόδειξη.',
+                        default => null,
+                    }),
 
                 TextColumn::make('match_reason')
                     ->label('Match')
@@ -163,6 +175,13 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
                         default => $state,
+                    })
+                    // Surface WHY a row is held (e.g. "Αναμονή για ΑΦΜ") /
+                    // why it was rejected, without opening it.
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match ($r->status) {
+                        PendingWhmcsInvoice::STATUS_HELD => $r->hold_reason,
+                        PendingWhmcsInvoice::STATUS_REJECTED => $r->rejected_reason,
+                        default => null,
                     }),
 
                 TextColumn::make('mydata_mark')
@@ -541,11 +560,24 @@ class WhmcsInboxTable
             ->color('gray')
             ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
-            ->requiresConfirmation()
+            ->form(fn (PendingWhmcsInvoice $r) => [
+                Textarea::make('hold_reason')
+                    ->label('Λόγος αναμονής')
+                    ->rows(2)
+                    ->maxLength(200)
+                    // For the forgetful-customer case the reason is pre-filled —
+                    // one click parks it correctly.
+                    ->default(fn () => $r->needsAfm() ? 'Αναμονή για ΑΦΜ / στοιχεία τιμολόγησης' : null)
+                    ->placeholder('π.χ. αναμονή για ΑΦΜ, να επιβεβαιωθεί ο πελάτης'),
+            ])
             ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αναμονή για WHMCS #'.$r->whmcs_invoice_id)
-            ->modalDescription('Κρύβεται από την προεπιλεγμένη λίστα. Άρε το από κατάσταση = "Σε αναμονή" όταν είσαι έτοιμος.')
-            ->action(function (PendingWhmcsInvoice $r) {
-                $r->update(['status' => PendingWhmcsInvoice::STATUS_HELD]);
+            ->modalDescription('Κρύβεται από την προεπιλεγμένη λίστα. Άρε το από κατάσταση = "Σε αναμονή" όταν είσαι έτοιμος. Ο λόγος φαίνεται στο tooltip της κατάστασης.')
+            ->modalSubmitActionLabel('Σε αναμονή')
+            ->action(function (PendingWhmcsInvoice $r, array $data) {
+                $r->update([
+                    'status' => PendingWhmcsInvoice::STATUS_HELD,
+                    'hold_reason' => trim((string) ($data['hold_reason'] ?? '')) ?: null,
+                ]);
                 Notification::make()->title('Μπήκε σε αναμονή')->success()->send();
             });
     }
@@ -566,6 +598,7 @@ class WhmcsInboxTable
                 $r->update([
                     'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
                     'rejected_reason' => null,
+                    'hold_reason' => null,
                 ]);
                 Notification::make()->title('Επαναφέρθηκε προς έλεγχο')->success()->send();
             });

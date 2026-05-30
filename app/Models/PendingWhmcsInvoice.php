@@ -116,6 +116,7 @@ class PendingWhmcsInvoice extends Model
         'status',
         'notes',
         'rejected_reason',
+        'hold_reason',
         'filed_at',
         'filed_by_user_id',
         'mydata_mark',
@@ -262,6 +263,25 @@ class PendingWhmcsInvoice extends Model
         $name = trim(trim((string) ($p['firstname'] ?? '')).' '.trim((string) ($p['lastname'] ?? '')));
 
         return $name !== '' ? $name : null;
+    }
+
+    /**
+     * C: the customer wants a τιμολόγιο but no ΑΦΜ is available anywhere — not
+     * on the matched ekdosi customer, not in WHMCS. You can't file a proper
+     * invoice without it, so the inbox flags it (hold "Αναμονή για ΑΦΜ").
+     * Only fires when the intent is KNOWN to be "invoice" (wantsInvoice true);
+     * unknown intent doesn't raise a false alarm. Needs the customer relation
+     * loaded (the inbox eager-loads it).
+     */
+    public function needsAfm(): bool
+    {
+        if ($this->wantsInvoice() !== true) {
+            return false;
+        }
+
+        $hasAfm = filled($this->customer?->afm) || filled($this->whmcsAfm());
+
+        return ! $hasAfm;
     }
 
     /**
