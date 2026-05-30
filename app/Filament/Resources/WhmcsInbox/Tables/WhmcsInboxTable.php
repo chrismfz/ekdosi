@@ -42,7 +42,19 @@ class WhmcsInboxTable
                     ->label('WHMCS #')
                     ->sortable()
                     ->searchable()
-                    ->prefix('#'),
+                    ->prefix('#')
+                    ->color('primary')
+                    ->tooltip('Προβολή ολόκληρου του WHMCS τιμολογίου')
+                    // E: click the # → full invoice view, rendered from the
+                    // staged payload (no live API call).
+                    ->action(
+                        Action::make('view_whmcs')
+                            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'WHMCS τιμολόγιο #'.$r->whmcs_invoice_id)
+                            ->modalContent(fn (PendingWhmcsInvoice $r) => view('filament.whmcs-inbox.invoice-view', ['r' => $r]))
+                            ->modalSubmitAction(false)
+                            ->modalCancelActionLabel('Κλείσιμο')
+                            ->modalWidth('3xl')
+                    ),
 
                 TextColumn::make('payload.date')
                     ->label('Ημερομηνία')

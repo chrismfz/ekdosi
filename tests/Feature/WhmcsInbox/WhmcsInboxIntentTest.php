@@ -2,9 +2,14 @@
 
 namespace Tests\Feature\WhmcsInbox;
 
+use App\Filament\Resources\WhmcsInbox\Pages\ListWhmcsInbox;
 use App\Models\Company;
 use App\Models\PendingWhmcsInvoice;
+use App\Models\User;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -78,6 +83,28 @@ class WhmcsInboxIntentTest extends TestCase
         $row = $this->row($tenant, [['id' => 10, 'name' => 'Θα ήθελα τιμολόγιο', 'value' => '']]);
 
         $this->assertFalse($row->wantsInvoice());
+    }
+
+    public function test_inbox_list_renders_with_intent_columns(): void
+    {
+        $tenant = $this->tenant(['wantsinvoice' => 10, 'vatno' => 13]);
+        $row = $this->row($tenant, [
+            ['id' => 10, 'value' => 'on'],
+            ['id' => 13, 'value' => '123456789'],
+        ]);
+        $row->update(['payload' => array_merge($row->payload, [
+            'companyname' => 'ACME OE', 'date' => '2026-04-01', 'total' => '100.00', 'currencycode' => 'EUR',
+        ])]);
+
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@e.test', 'password' => bcrypt('x')]);
+        Gate::before(fn () => true);
+        $this->actingAs($user);
+        Filament::setTenant($tenant);
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->assertOk()
+            ->assertSee('ACME OE')      // WHMCS client name column
+            ->assertSee('Τιμολόγιο');   // intent column
     }
 
     public function test_needs_afm_when_wants_invoice_but_no_afm_anywhere(): void
