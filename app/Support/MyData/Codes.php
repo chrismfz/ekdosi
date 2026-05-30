@@ -266,12 +266,18 @@ final class Codes
      */
     public static function selfDeclaredVatCategory(?string $code): array
     {
-        $prefix = $code === null ? '' : explode('.', $code)[0];
+        $code ??= '';
+        $prefix = $code === '' ? '' : explode('.', $code)[0];
 
-        return match ($prefix) {
-            '14' => ['key' => 'intracommunity', 'label' => 'Ενδοκοινοτικά / Τρίτων χωρών'],
-            '13' => ['key' => 'retail_expense', 'label' => 'Έξοδα λιανικής (ΑΛΠ)'],
-            '17' => ['key' => 'payroll', 'label' => 'Μισθοδοσία / Λοιπές εγγραφές'],
+        // Finer split for what an accountant commonly self-declares, so ΕΦΚΑ /
+        // πάγια don't hide under a generic label and muddy the charts.
+        return match (true) {
+            $code === '14.5' => ['key' => 'social_security', 'label' => 'Ασφαλιστικές εισφορές (ΕΦΚΑ)'],
+            $code === '17.1' => ['key' => 'payroll', 'label' => 'Μισθοδοσία'],
+            $code === '17.2' => ['key' => 'depreciation', 'label' => 'Αποσβέσεις / Πάγια'],
+            $prefix === '14' => ['key' => 'intracommunity', 'label' => 'Ενδοκοινοτικά / Τρίτων χωρών'],
+            $prefix === '13' => ['key' => 'retail_expense', 'label' => 'Έξοδα λιανικής (ΑΛΠ)'],
+            $prefix === '17' => ['key' => 'adjustments', 'label' => 'Λοιπές εγγραφές τακτοποίησης'],
             default => ['key' => 'other', 'label' => 'Λοιπές εγγραφές'],
         };
     }
