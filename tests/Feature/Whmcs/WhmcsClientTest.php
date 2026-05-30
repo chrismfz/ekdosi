@@ -308,6 +308,61 @@ class WhmcsClientTest extends TestCase
         $this->assertSame(9001, $rows[0]['id']);
     }
 
+    public function test_get_pending_invoices_paginates_until_min_date(): void
+    {
+        // Regression for the "21 unfiled in DB, only 16 reached the inbox" gap:
+        // a single page (limit) of newest-first Paid invoices can be dominated
+        // by ALREADY-FILED rows, pushing the OLDEST unfiled rows off the page.
+        // The fetcher must paginate until it crosses minDate, not stop at page
+        // 1. Here limit=2: page 0 is FULL (2 filed rows, count==limit → keep
+        // going), page 1 carries the unfiled row we'd otherwise miss, page 2
+        // crosses minDate and stops.
+        Http::fakeSequence('example.gr/*')
+            ->push([
+                'result' => 'success',
+                'invoices' => ['invoice' => [
+                    ['id' => 100, 'date' => '2026-05-30', 'invoiced' => 700001],   // filed
+                    ['id' => 99, 'date' => '2026-05-29', 'invoiced' => 700002],    // filed
+                ]],
+            ], 200)
+            ->push([
+                'result' => 'success',
+                'invoices' => ['invoice' => [
+                    ['id' => 50, 'date' => '2026-05-20', 'invoiced' => 0],         // unfiled — the one a single page missed
+                    ['id' => 49, 'date' => '2026-05-19', 'invoiced' => 700003],    // filed
+                ]],
+            ], 200)
+            ->push([
+                'result' => 'success',
+                'invoices' => ['invoice' => [
+                    ['id' => 10, 'date' => '2026-04-01', 'invoiced' => 0],         // older than minDate → triggers stop
+                ]],
+            ], 200);
+
+        $rows = $this->makeClient()->getPendingInvoices(limit: 2, minDate: '2026-05-01');
+
+        // Only the in-window unfiled row (50). 100/99/49 filed; 10 past cutoff.
+        $this->assertCount(1, $rows);
+        $this->assertSame(50, $rows[0]['id']);
+    }
+
+    public function test_get_pending_invoices_stops_on_short_page(): void
+    {
+        // A page shorter than `limit` is the last page → no extra API call.
+        Http::fakeSequence('example.gr/*')
+            ->push([
+                'result' => 'success',
+                'invoices' => ['invoice' => [
+                    ['id' => 5, 'date' => '2026-05-15', 'invoiced' => 0],
+                ]],
+            ], 200);
+
+        $rows = $this->makeClient()->getPendingInvoices(limit: 10);
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(5, $rows[0]['id']);
+    }
+
     public function test_get_pending_invoices_no_min_date_pulls_everything(): void
     {
         // Null minDate (default) = no cutoff. All invoiced=0 rows
