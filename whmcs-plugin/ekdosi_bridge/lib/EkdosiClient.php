@@ -162,6 +162,29 @@ class EkdosiClient
     }
 
     /**
+     * POST {base}/webhooks/whmcs/{slug}/invoice-states with
+     *   { whmcs_invoice_ids: [N, ...] }
+     * HMAC-signed over the RAW body. Returns the deterministic ekdosi state
+     * for each WHMCS invoice id in ONE call (ΤΠΥ + ΜΑΡΚ + κατάσταση) — powers
+     * the addon's consolidated invoice list. data['states'] maps id →
+     * {status, ekdosi_invcode, mydata_mark, ...} | null (null = never pushed).
+     *
+     * @param  list<int>  $ids
+     */
+    public function getInvoiceStates(array $ids): array
+    {
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug).'/invoice-states';
+        $body = json_encode(['whmcs_invoice_ids' => array_values($ids)], JSON_THROW_ON_ERROR);
+        $sig = 'sha256='.hash_hmac('sha256', $body, $this->secret);
+
+        return $this->httpRequest('POST', $url, $body, [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            'X-Webhook-Signature: '.$sig,
+        ]);
+    }
+
+    /**
      * Minimal cURL wrapper. WHMCS hosts vary in what HTTP libraries
      * are available; cURL is the lowest-common-denominator and
      * available on every supported PHP install.

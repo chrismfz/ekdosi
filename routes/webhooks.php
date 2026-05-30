@@ -3,6 +3,7 @@
 use App\Http\Controllers\Webhooks\WhmcsClientInvoiceMapController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicePaidController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicesByAfmController;
+use App\Http\Controllers\Webhooks\WhmcsInvoiceStatesController;
 use App\Http\Controllers\Webhooks\WhmcsInvoiceStatusController;
 use Illuminate\Support\Facades\Route;
 
@@ -71,3 +72,15 @@ Route::post(
     'whmcs/{slug}/invoices-by-afm',
     WhmcsInvoicesByAfmController::class,
 )->middleware('throttle:120,1')->name('whmcs.invoices-by-afm');
+
+/**
+ * Batch state lookup for the addon's consolidated invoice list: the plugin
+ * reads its own tblinvoices and asks ekdosi, in ONE call, for the deterministic
+ * state of those WHMCS invoice ids (ΤΠΥ + ΜΑΡΚ + κατάσταση). POST (the body
+ * carries an id list); HMAC over the raw body, same scheme as invoices-by-afm.
+ * Read-only.
+ */
+Route::post(
+    'whmcs/{slug}/invoice-states',
+    WhmcsInvoiceStatesController::class,
+)->middleware('throttle:120,1')->name('whmcs.invoice-states');

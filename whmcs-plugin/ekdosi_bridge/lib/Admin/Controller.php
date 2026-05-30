@@ -40,13 +40,23 @@ class Controller
             ? 'Legacy mod_timologia tables detected — syncable.'
             : 'No legacy mod_timologia tables found on this WHMCS.';
 
+        $insights = $this->insightsPanel();
+        $invoicesLink = htmlspecialchars($link.'&action=invoices');
+
         return <<<EOF
 <h2>Ekdosi Bridge</h2>
-<p class="text-muted">Paste a WHMCS invoice id below to inspect / push / reset.</p>
+{$insights}
+<p style="margin:12px 0">
+    <a class="btn btn-primary" href="{$invoicesLink}">
+        <i class="fa fa-list"></i> Λίστα τιμολογίων WHMCS → Ekdosi (ΤΠΥ / ΜΑΡΚ)
+    </a>
+</p>
+<hr>
+<p class="text-muted">Ή επιθεώρησε ένα συγκεκριμένο τιμολόγιο:</p>
 <form action="{$link}&action=show" method="POST">
     <div class="form-inline">
         <input class="form-control" name="invoiceid" placeholder="Invoice ID (e.g. 12345)" type="text" required>
-        <button class="btn btn-primary" type="submit">Inspect</button>
+        <button class="btn btn-default" type="submit">Inspect</button>
     </div>
 </form>
 <hr>
@@ -66,6 +76,220 @@ class Controller
     </a>
 </p>
 EOF;
+    }
+
+    /**
+     * Insights header: at-a-glance bridge health for the addon landing —
+     * configured?, ekdosi target, plugin version, third-party readiness. Pure
+     * status (no writes); each piece degrades gracefully if a check fails.
+     */
+    private function insightsPanel(): string
+    {
+        $client = EkdosiClient::fromConfig();
+        $configured = $client !== null
+            ? '<span class="label label-success">ενεργό</span>'
+            : '<span class="label label-warning">δεν έχει ρυθμιστεί</span>';
+
+        $version = '—';
+        if (function_exists('ekdosi_bridge_config')) {
+            $cfg = ekdosi_bridge_config();
+            $version = htmlspecialchars((string) ($cfg['version'] ?? '—'));
+        }
+
+        // ekdosi target (host only — never echo the secret).
+        $target = '—';
+        $rows = Capsule::table('tbladdonmodules')
+            ->where('module', 'ekdosi_bridge')
+            ->whereIn('setting', ['ekdosi_base_url', 'ekdosi_slug'])
+            ->pluck('value', 'setting');
+        $base = trim((string) ($rows['ekdosi_base_url'] ?? ''));
+        $slug = trim((string) ($rows['ekdosi_slug'] ?? ''));
+        if ($base !== '') {
+            $host = parse_url($base, PHP_URL_HOST) ?: $base;
+            $target = htmlspecialchars($host).($slug !== '' ? ' / '.htmlspecialchars($slug) : '');
+        }
+
+        $tp = '<span class="label label-default">ανενεργό</span>';
+        if (ThirdPartyStore::hasOwnTables()) {
+            $contacts = (int) Capsule::table(ThirdPartyStore::CONTACTS)->count();
+            $routes = (int) Capsule::table(ThirdPartyStore::ROUTING)->count();
+            $tp = '<span class="label label-success">έτοιμο</span> '
+                .$contacts.' επαφές, '.$routes.' δρομολογήσεις';
+        }
+
+        return <<<EOF
+<table class="table table-condensed" style="max-width:640px">
+    <tr><th style="width:200px">Γέφυρα</th><td>{$configured}</td></tr>
+    <tr><th>Ekdosi</th><td>{$target}</td></tr>
+    <tr><th>Έκδοση plugin</th><td>{$version}</td></tr>
+    <tr><th>Παραστατικά τρίτων</th><td>{$tp}</td></tr>
+</table>
+EOF;
+    }
+
+    /**
+     * Consolidated invoice list: this WHMCS install's recent tblinvoices, each
+     * cross-referenced LIVE with ekdosi (ΤΠΥ + ΜΑΡΚ + κατάσταση) via ONE batch
+     * call. Replaces the "go open each invoice to see its state" workflow and
+     * the bare "—" on the native WHMCS list. Read-only except the per-row
+     * «Αποστολή» (reuses the existing push action → ekdosi inbox).
+     *
+     * Paging: ?p=N (50/page). Filter: ?status=Paid|Unpaid|... (default Paid).
+     */
+    public function invoices(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        $perPage = 50;
+        $page = max(1, (int) ($_GET['p'] ?? 1));
+        $status = (string) ($_GET['status'] ?? 'Paid');
+        if (! in_array($status, ['Paid', 'Unpaid', 'Cancelled', 'Refunded', 'All'], true)) {
+            $status = 'Paid';
+        }
+
+        $q = Capsule::table('tblinvoices')->orderBy('id', 'desc');
+        if ($status !== 'All') {
+            $q->where('status', $status);
+        }
+        $total = (clone $q)->count();
+        $invoices = $q->forPage($page, $perPage)->get(['id', 'userid', 'date', 'total', 'status']);
+
+        if ($invoices->isEmpty()) {
+            return '<p><a class="btn btn-default" href="'.$link.'">&larr; Back</a></p>'
+                .'<div class="alert alert-info">Κανένα τιμολόγιο για το φίλτρο «'.htmlspecialchars($status).'».</div>';
+        }
+
+        // Client names in one query.
+        $userIds = $invoices->pluck('userid')->unique()->filter()->all();
+        $clients = $userIds === []
+            ? collect()
+            : Capsule::table('tblclients')->whereIn('id', $userIds)
+                ->get(['id', 'firstname', 'lastname', 'companyname'])->keyBy('id');
+
+        // Batch ekdosi state for this page's ids (one call; degrades to empty).
+        $states = [];
+        $client = EkdosiClient::fromConfig();
+        if ($client !== null) {
+            $resp = $client->getInvoiceStates($invoices->pluck('id')->map(fn ($i) => (int) $i)->all());
+            if (! empty($resp['ok']) && isset($resp['data']['states']) && is_array($resp['data']['states'])) {
+                $states = $resp['data']['states'];
+            }
+        }
+        $bridgeWarn = $client === null
+            ? '<div class="alert alert-warning">Η γέφυρα δεν έχει ρυθμιστεί — η στήλη κατάστασης ekdosi είναι κενή.</div>'
+            : '';
+
+        $token = $this->csrfField();
+        $rows = '';
+        foreach ($invoices as $inv) {
+            $id = (int) $inv->id;
+            $clientRow = $clients->get($inv->userid);
+            $name = $clientRow
+                ? htmlspecialchars(trim((string) $clientRow->companyname) !== ''
+                    ? (string) $clientRow->companyname
+                    : trim($clientRow->firstname.' '.$clientRow->lastname))
+                : '—';
+            $invHref = htmlspecialchars('invoices.php?action=edit&id='.$id);
+            $state = $states[(string) $id] ?? ($states[$id] ?? null);
+
+            [$badge, $invcode, $mark] = $this->stateCells(is_array($state) ? $state : null);
+
+            // Action: «Αποστολή» when not yet in ekdosi; «Άνοιγμα» otherwise.
+            if ($state === null) {
+                $action = '<form action="'.$link.'&action=push" method="POST" style="display:inline">'
+                    .$token.'<input type="hidden" name="invoiceid" value="'.$id.'">'
+                    .'<button class="btn btn-xs btn-primary" type="submit"><i class="fa fa-paper-plane"></i> Αποστολή</button></form>';
+            } else {
+                $action = '<a class="btn btn-xs btn-default" href="'.$link.'&action=show&invoiceid='.$id.'">Άνοιγμα</a>';
+            }
+
+            $rows .= '<tr>'
+                .'<td><a href="'.$invHref.'">#'.$id.'</a></td>'
+                .'<td>'.htmlspecialchars((string) $inv->date).'</td>'
+                .'<td>'.$name.'</td>'
+                .'<td class="text-right">'.htmlspecialchars(number_format((float) $inv->total, 2)).'</td>'
+                .'<td>'.$badge.'</td>'
+                .'<td>'.$invcode.'</td>'
+                .'<td>'.$mark.'</td>'
+                .'<td class="text-right">'.$action.'</td>'
+                .'</tr>';
+        }
+
+        $pager = $this->pager($link, $status, $page, $perPage, $total);
+        $statusTabs = $this->statusTabs($link, $status);
+        $from = ($page - 1) * $perPage + 1;
+        $to = min($page * $perPage, $total);
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<h2>Τιμολόγια WHMCS → Ekdosi</h2>
+{$bridgeWarn}
+{$statusTabs}
+<p class="text-muted">Εμφάνιση {$from}–{$to} από {$total}.</p>
+<table class="table table-striped table-condensed">
+  <thead><tr>
+    <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th class="text-right">Σύνολο</th>
+    <th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th></th>
+  </tr></thead>
+  <tbody>{$rows}</tbody>
+</table>
+{$pager}
+EOF;
+    }
+
+    /**
+     * Render the three ekdosi state cells (badge, ΤΠΥ, ΜΑΡΚ) for one row.
+     *
+     * @param  array<string, mixed>|null  $state
+     * @return array{0:string,1:string,2:string}
+     */
+    private function stateCells(?array $state): array
+    {
+        $dash = '<span class="text-muted">—</span>';
+        if ($state === null) {
+            return ['<span class="label label-default" title="Δεν έχει σταλεί στο ekdosi">Δεν στάλθηκε</span>', $dash, $dash];
+        }
+
+        $badge = $this->mapStatusBadge(
+            (string) ($state['status'] ?? ''),
+            $state['local_status'] ?? null,
+            $state['mydata_state'] ?? null,
+        );
+        $invcode = ($state['ekdosi_invcode'] ?? null)
+            ? '<strong>'.htmlspecialchars((string) $state['ekdosi_invcode']).'</strong>' : $dash;
+        $mark = ($state['mydata_mark'] ?? null)
+            ? '<code>'.htmlspecialchars((string) $state['mydata_mark']).'</code>' : $dash;
+
+        return [$badge, $invcode, $mark];
+    }
+
+    /** Status filter tabs for the invoice list. */
+    private function statusTabs(string $link, string $current): string
+    {
+        $tabs = '';
+        foreach (['Paid' => 'Εξοφλημένα', 'Unpaid' => 'Ανεξόφλητα', 'All' => 'Όλα'] as $key => $label) {
+            $active = $key === $current ? ' class="btn btn-xs btn-primary"' : ' class="btn btn-xs btn-default"';
+            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$key.'">'.$label.'</a> ';
+        }
+
+        return '<p>'.$tabs.'</p>';
+    }
+
+    /** Prev/next pager for the invoice list. */
+    private function pager(string $link, string $status, int $page, int $perPage, int $total): string
+    {
+        $pages = (int) ceil($total / $perPage);
+        if ($pages <= 1) {
+            return '';
+        }
+        $base = $link.'&action=invoices&status='.$status.'&p=';
+        $prev = $page > 1
+            ? '<a class="btn btn-default" href="'.$base.($page - 1).'">&larr; Προηγούμενα</a> '
+            : '';
+        $next = $page < $pages
+            ? '<a class="btn btn-default" href="'.$base.($page + 1).'">Επόμενα &rarr;</a>'
+            : '';
+
+        return '<p>'.$prev.'<span class="text-muted">Σελίδα '.$page.'/'.$pages.'</span> '.$next.'</p>';
     }
 
     /**
