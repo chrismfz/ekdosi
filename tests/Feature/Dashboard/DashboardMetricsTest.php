@@ -483,6 +483,86 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(0.0, $k['creditRatioPct']);
     }
 
+    public function test_net_by_month_matrix_is_dense_with_max_and_tenant_scoped(): void
+    {
+        $this->makeInvoice(['issued_at' => '2025-02-10 10:00:00', 'net_total' => 80, 'gross_total' => 99]);
+        $this->makeInvoice(['issued_at' => '2026-02-10 10:00:00', 'net_total' => 200, 'gross_total' => 248]);
+        // other tenant must not leak
+        Invoice::create([
+            'company_id' => $this->other->id, 'invcode' => 'X'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'issued_at' => '2026-02-10 10:00:00',
+            'net_total' => 9999, 'gross_total' => 9999,
+        ]);
+
+        $m = (new DashboardMetrics($this->tenant))->netByMonthMatrix(2, 2026);
+
+        $this->assertSame([2025, 2026], $m['years']);
+        $this->assertSame(80.0, $m['matrix'][2025][2]);
+        $this->assertSame(200.0, $m['matrix'][2026][2]);
+        $this->assertSame(0.0, $m['matrix'][2026][5]);   // empty cell zeroed
+        $this->assertSame(200.0, $m['max']);
+    }
+
+    public function test_seasonal_profile_indexes_months_against_the_average(): void
+    {
+        // 2025: a clear December peak (1200) vs flat 100 elsewhere.
+        for ($month = 1; $month <= 11; $month++) {
+            $this->makeInvoice(['issued_at' => sprintf('2025-%02d-10 10:00:00', $month), 'net_total' => 100, 'gross_total' => 124]);
+        }
+        $this->makeInvoice(['issued_at' => '2025-12-10 10:00:00', 'net_total' => 1200, 'gross_total' => 1488]);
+
+        $p = (new DashboardMetrics($this->tenant))->seasonalProfile(3, 2025);
+
+        $this->assertSame([2025], $p['yearsUsed']);
+        $this->assertSame(100.0, $p['monthlyAvg'][1]);
+        $this->assertSame(1200.0, $p['monthlyAvg'][12]);
+        // overall avg = (11*100 + 1200)/12 = 191.67 → Dec index ≈ 6.26, Jan ≈ 0.52
+        $this->assertGreaterThan(5.0, $p['index'][12]);
+        $this->assertLessThan(1.0, $p['index'][1]);
+    }
+
+    public function test_projection_distributes_last_year_total_by_seasonal_shape(): void
+    {
+        // Single completed year (2025), 100/month → flat seasonal index (1.0),
+        // no prior year to grow from → growth 0, projected total == base.
+        for ($month = 1; $month <= 12; $month++) {
+            $this->makeInvoice(['issued_at' => sprintf('2025-%02d-10 10:00:00', $month), 'net_total' => 100, 'gross_total' => 124]);
+        }
+
+        $p = (new DashboardMetrics($this->tenant))->projectNextYear(3);
+
+        $this->assertSame(2027, $p['nextYear']);
+        $this->assertSame(2025, $p['baseYear']);
+        $this->assertSame(1200.0, $p['baseTotal']);
+        $this->assertSame(0.0, $p['growthPct']);     // no predecessor year
+        $this->assertSame(1200.0, $p['total']);
+        $this->assertCount(12, $p['monthly']);
+        $this->assertSame(100.0, $p['monthly'][0]);  // flat shape → 1200/12
+        $this->assertTrue($p['hasHistory']);
+    }
+
+    public function test_projection_applies_clamped_average_growth(): void
+    {
+        // 2024 net 1000, 2025 net 1500 → YoY +50% → projected 2026-base*(1.5).
+        for ($month = 1; $month <= 12; $month++) {
+            $this->makeInvoice(['issued_at' => sprintf('2024-%02d-10 10:00:00', $month), 'net_total' => 1000 / 12, 'gross_total' => 1000 / 12]);
+            $this->makeInvoice(['issued_at' => sprintf('2025-%02d-10 10:00:00', $month), 'net_total' => 1500 / 12, 'gross_total' => 1500 / 12]);
+        }
+
+        $p = (new DashboardMetrics($this->tenant))->projectNextYear(3);
+
+        $this->assertSame(50.0, $p['growthPct']);
+        $this->assertEqualsWithDelta(2250.0, $p['total'], 0.5);   // 1500 * 1.5
+    }
+
+    public function test_projection_is_empty_without_history(): void
+    {
+        $p = (new DashboardMetrics($this->tenant))->projectNextYear(3);
+
+        $this->assertFalse($p['hasHistory']);
+        $this->assertSame(0.0, $p['total']);
+    }
+
     public function test_monthly_income_does_not_overflow_on_month_end_days(): void
     {
         // Viewed on the 31st, a plain subMonths(11) would skip June 2025

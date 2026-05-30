@@ -2,9 +2,12 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Reports\Widgets\ProjectionChart;
 use App\Filament\Reports\Widgets\ReportKpis;
 use App\Filament\Reports\Widgets\RevenueByMonthChart;
 use App\Filament\Reports\Widgets\RevenueByYearChart;
+use App\Filament\Reports\Widgets\SeasonalCurveChart;
+use App\Filament\Reports\Widgets\SeasonalityHeatmap;
 use App\Filament\Reports\Widgets\YearVsYearChart;
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
@@ -71,6 +74,10 @@ class Reports extends BaseDashboard
             RevenueByMonthChart::class,
             YearVsYearChart::class,
             RevenueByYearChart::class,
+            // Phase 2 — εποχικότητα + πρόβλεψη.
+            SeasonalCurveChart::class,
+            ProjectionChart::class,
+            SeasonalityHeatmap::class,
         ];
     }
 

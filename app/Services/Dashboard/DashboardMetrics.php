@@ -452,6 +452,158 @@ class DashboardMetrics
         ];
     }
 
+    /**
+     * Net turnover per (year, month) for the trailing $years years ending
+     * on $endYear (default current) — the matrix behind the seasonality
+     * heatmap. Dense: every year row has all 12 months (zeros where empty).
+     * `max` is the largest single cell, for colour scaling in the view.
+     *
+     * @return array{years: list<int>, matrix: array<int, array<int, float>>, max: float}
+     */
+    public function netByMonthMatrix(int $years = 4, ?int $endYear = null): array
+    {
+        $endYear ??= (int) Carbon::now()->year;
+        $startYear = $endYear - $years + 1;
+        $monthExpr = $this->monthNumberExpr();
+        $yearExpr = $this->yearExpr();
+
+        $rows = $this->baseInvoices()
+            ->whereBetween('issued_at', ["$startYear-01-01 00:00:00", "$endYear-12-31 23:59:59"])
+            ->selectRaw("$yearExpr as y, $monthExpr as m, COALESCE(SUM(net_total), 0) net")
+            ->groupBy('y', 'm')
+            ->get();
+
+        $matrix = [];
+        $yearsList = [];
+        for ($y = $startYear; $y <= $endYear; $y++) {
+            $yearsList[] = $y;
+            $matrix[$y] = array_fill(1, 12, 0.0);
+        }
+
+        $max = 0.0;
+        foreach ($rows as $r) {
+            $y = (int) $r->y;
+            $m = (int) $r->m;
+            if (isset($matrix[$y][$m])) {
+                $net = round((float) $r->net, 2);
+                $matrix[$y][$m] = $net;
+                $max = max($max, $net);
+            }
+        }
+
+        return ['years' => $yearsList, 'matrix' => $matrix, 'max' => $max];
+    }
+
+    /**
+     * The seasonal shape of the business: average net per calendar month
+     * over the trailing $years years ending on $endYear (default = last
+     * COMPLETED year, so a partial current year doesn't distort the shape).
+     * Averaged only over "active" years (years with any turnover), so a
+     * brand-new tenant's empty back-years don't halve the averages.
+     *
+     *   - monthlyAvg[1..12] : average net for that month
+     *   - index[1..12]      : monthlyAvg / overall monthly average
+     *                         (1.0 = an average month; >1 = a peak month)
+     *
+     * @return array{yearsUsed: list<int>, monthlyAvg: array<int, float>, index: array<int, float>, overallAvg: float}
+     */
+    public function seasonalProfile(int $years = 3, ?int $endYear = null): array
+    {
+        $endYear ??= (int) Carbon::now()->year - 1;
+        $data = $this->netByMonthMatrix($years, $endYear);
+
+        $activeYears = array_values(array_filter(
+            $data['years'],
+            fn (int $y): bool => array_sum($data['matrix'][$y]) > 0.005,
+        ));
+        $n = count($activeYears);
+
+        $monthlyAvg = array_fill(1, 12, 0.0);
+        if ($n > 0) {
+            for ($m = 1; $m <= 12; $m++) {
+                $sum = 0.0;
+                foreach ($activeYears as $y) {
+                    $sum += $data['matrix'][$y][$m];
+                }
+                $monthlyAvg[$m] = round($sum / $n, 2);
+            }
+        }
+
+        $overall = array_sum($monthlyAvg) / 12;
+        $index = array_fill(1, 12, 1.0);
+        if ($overall > 0.005) {
+            for ($m = 1; $m <= 12; $m++) {
+                $index[$m] = round($monthlyAvg[$m] / $overall, 4);
+            }
+        }
+
+        return [
+            'yearsUsed'  => $activeYears,
+            'monthlyAvg' => $monthlyAvg,
+            'index'      => $index,
+            'overallAvg' => round($overall, 2),
+        ];
+    }
+
+    /**
+     * Seasonal-naive projection for NEXT calendar year (now-anchored, not
+     * filter-driven — "next year" is a fixed concept). Deliberately simple
+     * and explainable, NOT a statistical model:
+     *
+     *   total   = last completed year's net × (1 + growth)
+     *   growth  = average YoY growth over the trailing completed years,
+     *             clamped to [-50%, +100%] so a single freak year can't
+     *             produce an absurd extrapolation (0 if <2 years of history)
+     *   monthly = total distributed by the seasonal index (seasonalProfile)
+     *
+     * Fallback base = trailing-12-months net when last year is empty. The
+     * widget labels this an εκτίμηση, never a commitment.
+     *
+     * @return array{nextYear: int, baseYear: int, baseTotal: float, growthPct: float, total: float, monthly: list<float>, hasHistory: bool}
+     */
+    public function projectNextYear(int $historyYears = 3): array
+    {
+        $now = Carbon::now();
+        $currentYear = (int) $now->year;
+        $baseYear = $currentYear - 1;
+
+        $index = $this->seasonalProfile($historyYears, $baseYear)['index'];
+        $sumIndex = array_sum($index) ?: 12.0;
+
+        // Base level: last completed year's net, or trailing 12 months if empty.
+        $baseTotal = $this->yearlyTotals(1, $baseYear)[0]['net'] ?? 0.0;
+        if ($baseTotal <= 0.005) {
+            $baseTotal = $this->income($now->copy()->subYearNoOverflow(), $now)->net;
+        }
+
+        // Average YoY growth over the trailing completed years.
+        $totals = array_column($this->yearlyTotals($historyYears + 1, $baseYear), 'net');
+        $ratios = [];
+        for ($i = 1; $i < count($totals); $i++) {
+            if ($totals[$i - 1] > 0.005) {
+                $ratios[] = $totals[$i] / $totals[$i - 1] - 1;
+            }
+        }
+        $growth = $ratios === [] ? 0.0 : array_sum($ratios) / count($ratios);
+        $growth = max(-0.5, min(1.0, $growth));
+
+        $total = round($baseTotal * (1 + $growth), 2);
+        $monthly = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $monthly[] = round($total * ($index[$m] / $sumIndex), 2);
+        }
+
+        return [
+            'nextYear'  => $currentYear + 1,
+            'baseYear'  => $baseYear,
+            'baseTotal' => round($baseTotal, 2),
+            'growthPct' => round($growth * 100, 1),
+            'total'     => $total,
+            'monthly'   => $monthly,
+            'hasHistory' => $baseTotal > 0.005,
+        ];
+    }
+
     // ---- internals ------------------------------------------------------
 
     /**
