@@ -28,3 +28,8 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Scratch / debug artifacts (review agents, ad-hoc diffs) — root dotfiles like
+# .admin_diff.txt, .base_admin.php, .show1.txt. Never part of the app.
+/.*.txt
+/.*.php

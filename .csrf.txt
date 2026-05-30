@@ -1,5 +1,0 @@
-476:            return $this->csrfFailPage();
-528:            return $this->csrfFailPage($link);
-626:            return $this->csrfFailPage($link);
-980:            return $this->csrfFailPage($link);
-1147:    private function csrfFailPage(string $link): string

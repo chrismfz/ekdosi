@@ -1,8 +1,0 @@
-whmcs-plugin/ekdosi_bridge/lib/EkdosiClient.php:165:     * POST {base}/webhooks/whmcs/{slug}/invoice-states with
-whmcs-plugin/ekdosi_bridge/lib/EkdosiClient.php:176:        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug).'/invoice-states';
-whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php:195:            $tpCell = $this->thirdPartyCell(is_array($state) ? ($state['third_party_state'] ?? null) : null);
-whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php:233:    <th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th>Τρίτος</th><th></th>
-whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php:268:     * The «Τρίτος» cell: shows whether ekdosi resolved this invoice as routed
-whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php:272:    private function thirdPartyCell(?string $tpState): string
-whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php:276:                return '<span class="label label-info" title="Δρομολογείται σε έναν τρίτο δικαιούχο">Τρίτος</span>';
-whmcs-plugin/ekdosi_bridge/lib/Admin/Controller.php:810:                : 'Τρίτος: '.htmlspecialchars($contactAfms[$afm] ?? '').' <span class="label label-default">ΑΦΜ '.htmlspecialchars($afm).'</span>';
