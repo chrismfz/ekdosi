@@ -328,6 +328,116 @@ EOF;
 EOF;
     }
 
+    /**
+     * Read-only JSON map { "<invoiceid>": "<invoiced value>" } for the ids in
+     * ?ids=1,2,3. Powers the invoice-LIST badge (the AdminAreaFooterOutput JS
+     * fetches this and decorates each row). No state change → no CSRF; access
+     * is already gated by addonmodules.php's admin session. Echoes + exits so
+     * WHMCS doesn't wrap the JSON in admin chrome.
+     */
+    public function marks(array $vars): string
+    {
+        $ids = array_values(array_filter(
+            array_map('intval', explode(',', (string) ($_GET['ids'] ?? ''))),
+            static fn (int $id): bool => $id > 0
+        ));
+
+        $out = [];
+        if ($ids !== []) {
+            // Cap the batch so a crafted ?ids= can't ask for the whole table.
+            $rows = Capsule::table('tblinvoices')
+                ->whereIn('id', array_slice($ids, 0, 200))
+                ->get(['id', 'invoiced']);
+            foreach ($rows as $row) {
+                $out[(int) $row->id] = (string) ($row->invoiced ?? '0');
+            }
+        }
+
+        header('Content-Type: application/json');
+        echo json_encode($out);
+        exit;
+    }
+
+    /**
+     * Per-client 3-way mapping page: WHMCS # → ekdosi παραστατικό → ΜΑΡΚ +
+     * κατάσταση, for every invoice of one WHMCS client that ekdosi knows about
+     * (drafts included). Pulls it live from ekdosi's invoice-map endpoint.
+     * Linked from the admin client profile (see hooks.php).
+     */
+    public function client(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        $userid = (int) ($_GET['userid'] ?? 0);
+        if ($userid <= 0) {
+            return $this->errorPage($link, 'Λείπει το userid του πελάτη.');
+        }
+
+        $client = EkdosiClient::fromConfig();
+        if ($client === null) {
+            return $this->errorPage($link, 'Το bridge δεν έχει ρυθμιστεί (base URL / slug / secret).');
+        }
+
+        $result = $client->getClientInvoiceMap($userid);
+        if (empty($result['ok'])) {
+            $err = htmlspecialchars((string) ($result['data']['error'] ?? ('HTTP '.($result['http_status'] ?? '?'))));
+
+            return $this->errorPage($link, 'Αποτυχία λήψης από ekdosi: '.$err);
+        }
+
+        $rows = $result['data']['rows'] ?? [];
+        $clientHref = htmlspecialchars('clientssummary.php?userid='.$userid);
+
+        if ($rows === []) {
+            return <<<EOF
+<p><a class="btn btn-default" href="{$clientHref}">&larr; Πελάτης</a></p>
+<h2>Παραστατικά ekdosi — πελάτης #{$userid}</h2>
+<div class="alert alert-info">Δεν υπάρχουν παραστατικά στο ekdosi για αυτόν τον πελάτη ακόμη.</div>
+EOF;
+        }
+
+        $body = '';
+        foreach ($rows as $r) {
+            $whmcs = (int) ($r['whmcs_invoice_id'] ?? 0);
+            $invHref = htmlspecialchars('invoices.php?action=edit&id='.$whmcs);
+            $invcode = $r['ekdosi_invcode'] ?? null;
+            $mark = $r['mydata_mark'] ?? null;
+            $body .= '<tr>'
+                .'<td><a href="'.$invHref.'">#'.$whmcs.'</a></td>'
+                .'<td>'.($invcode !== null ? htmlspecialchars((string) $invcode) : '<span class="text-muted">—</span>').'</td>'
+                .'<td>'.$this->mapStatusBadge((string) ($r['pending_status'] ?? ''), $r['local_status'] ?? null, $r['mydata_state'] ?? null).'</td>'
+                .'<td>'.($mark !== null && $mark !== '' ? '<code>'.htmlspecialchars((string) $mark).'</code>' : '<span class="text-muted">—</span>').'</td>'
+                .'</tr>';
+        }
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$clientHref}">&larr; Πελάτης</a></p>
+<h2>Παραστατικά ekdosi — πελάτης #{$userid}</h2>
+<p class="text-muted">Αντιστοίχιση WHMCS τιμολογίου → παραστατικού ekdosi → ΜΑΡΚ ΑΑΔΕ. Τα «Προσχέδια» έχουν παραστατικό αλλά δεν έχουν υποβληθεί ακόμη.</p>
+<table class="table table-striped">
+  <thead><tr><th>WHMCS #</th><th>Παραστατικό ekdosi</th><th>Κατάσταση</th><th>ΜΑΡΚ</th></tr></thead>
+  <tbody>{$body}</tbody>
+</table>
+EOF;
+    }
+
+    /** Greek status badge from the pending status (+ myDATA hints). */
+    private function mapStatusBadge(string $pendingStatus, ?string $localStatus, ?string $mydataState): string
+    {
+        if ($mydataState === 'CANCELLED') {
+            return '<span class="label label-danger">Ακυρωμένο (ΑΑΔΕ)</span>';
+        }
+
+        return match ($pendingStatus) {
+            'filed' => '<span class="label label-success">Καταχωρημένο</span>',
+            'drafted' => '<span class="label label-info">Προσχέδιο</span>',
+            'split' => '<span class="label label-info">Διαχωρισμένο</span>',
+            'pending_review' => '<span class="label label-warning">Προς έλεγχο</span>',
+            'held' => '<span class="label label-default">Σε αναμονή</span>',
+            'rejected' => '<span class="label label-danger">Απορρίφθηκε</span>',
+            default => '<span class="label label-default">'.htmlspecialchars($pendingStatus).'</span>',
+        };
+    }
+
     public function reset(array $vars): string
     {
         $link = htmlspecialchars($vars['modulelink']);
