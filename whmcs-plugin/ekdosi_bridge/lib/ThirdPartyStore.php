@@ -321,26 +321,29 @@ class ThirdPartyStore
     }
 
     /**
-     * Batch third-party bucket for a PAGE of invoices — for the admin invoice
-     * list's «Τρίτος» column. Returns invoiceId => 'none'|'single'|'multi',
-     * computed LOCALLY from mod_ekdosi_routing (no ekdosi call, no inbox
-     * dependency — works for every invoice, historical included).
+     * Batch third-party resolution for a PAGE of invoices — for the admin
+     * invoice list's «Τρίτος» column. Returns
+     *   invoiceId => ['bucket' => 'none'|'single'|'multi', 'names' => string[]]
+     * where `names` are the distinct third-party beneficiary company names on
+     * the invoice (so the column can show WHO, not just yes/no). Computed
+     * LOCALLY from mod_ekdosi_routing (no ekdosi/inbox dependency — works for
+     * every invoice, historical included).
      *
-     * Efficient: 3 queries total regardless of page size — all line items for
-     * the page, then the routing rows for the (userid, serviceid, type) tuples
-     * present, joined in PHP. Mirrors resolveInvoice's per-line logic
-     * (relid → routing → contact) but without the per-invoice query fan-out.
+     * Efficient: ~3 queries total regardless of page size — line items for the
+     * page, the routing rows for the (userid, serviceid, type) tuples present,
+     * and the contacts those route to — joined in PHP. Mirrors resolveInvoice's
+     * per-line logic (relid → routing → contact) without per-invoice fan-out.
      *
      * @param  array<int, object>  $invoices  rows with ->id and ->userid
-     * @return array<int, string>             invoiceId => bucket
+     * @return array<int, array{bucket: string, names: list<string>}>
      */
     public static function bucketsForInvoices(array $invoices): array
     {
         $out = [];
+        $blank = ['bucket' => 'none', 'names' => []];
         if ($invoices === [] || ! self::hasOwnTables()) {
-            // No routing tables → nothing is third-party; caller renders '—'.
             foreach ($invoices as $inv) {
-                $out[(int) $inv->id] = 'none';
+                $out[(int) $inv->id] = $blank;
             }
 
             return $out;
@@ -357,8 +360,8 @@ class ThirdPartyStore
             ->whereIn('invoiceid', $invoiceIds)
             ->get(['invoiceid', 'type', 'relid']);
 
-        // 2. The routing rows that could match — scoped to the page's users +
-        //    the relids present. One query; matched in PHP by the composite key.
+        // 2. Routing rows that could match — scoped to the page's users + the
+        //    relids present. Keyed "userid:serviceid:service_type" => contactid.
         $userIds = array_values(array_unique(array_values($userById)));
         $relIds = [];
         foreach ($items as $it) {
@@ -367,39 +370,63 @@ class ThirdPartyStore
                 $relIds[$rid] = true;
             }
         }
-        $routeKey = [];   // "userid:serviceid:service_type" => true
+        $routeContact = [];   // composite key => contactid
+        $contactIds = [];
         if ($userIds !== [] && $relIds !== []) {
             foreach (Capsule::table(self::ROUTING)
                 ->whereIn('userid', $userIds)
                 ->whereIn('serviceid', array_keys($relIds))
-                ->get(['userid', 'serviceid', 'service_type']) as $r) {
-                $routeKey[((int) $r->userid).':'.((int) $r->serviceid).':'.((string) $r->service_type)] = true;
+                ->get(['userid', 'serviceid', 'service_type', 'contactid']) as $r) {
+                $cid = (int) $r->contactid;
+                $routeContact[((int) $r->userid).':'.((int) $r->serviceid).':'.((string) $r->service_type)] = $cid;
+                $contactIds[$cid] = true;
             }
         }
 
-        // 3. Fold per invoice: distinct billing parties (each routed line = its
-        //    contact; each unrouted line = the reseller). >1 → multi, exactly
-        //    one routed-and-no-reseller-mix → single, else none.
+        // 3. Contact names for the routed contacts (one query).
+        $contactName = [];
+        if ($contactIds !== []) {
+            foreach (Capsule::table(self::CONTACTS)
+                ->whereIn('id', array_keys($contactIds))
+                ->get(['id', 'company_name']) as $c) {
+                $contactName[(int) $c->id] = (string) $c->company_name;
+            }
+        }
+
+        // 4. Fold per invoice: distinct billing parties (each routed line = its
+        //    contact; each unrouted line = the reseller). Collect routed
+        //    contact names for display.
         $partyKeys = [];   // invoiceId => set of party keys
+        $names = [];       // invoiceId => [contactName => true]
         foreach ($items as $it) {
             $invId = (int) $it->invoiceid;
             $userId = $userById[$invId] ?? 0;
             $relid = (int) ($it->relid ?? 0);
             $serviceType = self::serviceType((string) ($it->type ?? ''));
-            $routed = $serviceType !== null && $relid > 0
-                && isset($routeKey[$userId.':'.$relid.':'.$serviceType]);
-            $partyKeys[$invId][$routed ? 'c:'.$relid : 'reseller'] = true;
+            $key = $userId.':'.$relid.':'.$serviceType;
+            $cid = ($serviceType !== null && $relid > 0) ? ($routeContact[$key] ?? 0) : 0;
+
+            if ($cid > 0) {
+                $partyKeys[$invId]['c:'.$cid] = true;
+                $nm = $contactName[$cid] ?? ('#'.$cid);
+                $names[$invId][$nm] = true;
+            } else {
+                $partyKeys[$invId]['reseller'] = true;
+            }
         }
 
         foreach ($invoiceIds as $invId) {
             $keys = $partyKeys[$invId] ?? [];
+            $bucket = 'none';
             if (count($keys) > 1) {
-                $out[$invId] = 'multi';
+                $bucket = 'multi';
             } elseif (count($keys) === 1 && ! isset($keys['reseller'])) {
-                $out[$invId] = 'single';
-            } else {
-                $out[$invId] = 'none';
+                $bucket = 'single';
             }
+            $out[$invId] = [
+                'bucket' => $bucket,
+                'names' => array_keys($names[$invId] ?? []),
+            ];
         }
 
         return $out;

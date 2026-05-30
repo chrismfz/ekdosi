@@ -212,11 +212,11 @@ EOF;
                 .'<td><a href="'.$invHref.'">#'.$id.'</a></td>'
                 .'<td>'.htmlspecialchars((string) $inv->date).'</td>'
                 .'<td>'.$name.'</td>'
+                .'<td>'.$tpCell.'</td>'
                 .'<td class="text-right">'.htmlspecialchars(number_format((float) $inv->total, 2)).'</td>'
                 .'<td>'.$badge.'</td>'
                 .'<td>'.$invcode.'</td>'
                 .'<td>'.$mark.'</td>'
-                .'<td>'.$tpCell.'</td>'
                 .'<td class="text-right">'.$action.'</td>'
                 .'</tr>';
         }
@@ -234,8 +234,8 @@ EOF;
 <p class="text-muted">Εμφάνιση {$from}–{$to} από {$total}.</p>
 <table class="table table-striped table-condensed">
   <thead><tr>
-    <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th class="text-right">Σύνολο</th>
-    <th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th>Τρίτος</th><th></th>
+    <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th>Τρίτος (δικαιούχος)</th>
+    <th class="text-right">Σύνολο</th><th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th></th>
   </tr></thead>
   <tbody>{$rows}</tbody>
 </table>
@@ -270,22 +270,30 @@ EOF;
     }
 
     /**
-     * The «Τρίτος» cell: shows whether ekdosi resolved this invoice as routed
-     * to a third-party beneficiary (single/multi), billed to the client (none),
-     * or not yet evaluated (null — detection off / not pushed).
+     * The «Τρίτος» cell: shows WHO the invoice is billed to when it's routed to
+     * a third-party beneficiary — the contact name(s), not just yes/no. Resolved
+     * locally from mod_ekdosi_routing.
+     *
+     * @param  array{bucket: string, names: list<string>}|null  $tp
      */
-    private function thirdPartyCell(?string $tpState): string
+    private function thirdPartyCell(?array $tp): string
     {
-        switch ($tpState) {
-            case 'single':
-                return '<span class="label label-info" title="Δρομολογείται σε έναν τρίτο δικαιούχο">Τρίτος</span>';
-            case 'multi':
-                return '<span class="label label-warning" title="Πολλαπλοί δικαιούχοι — χρειάζεται διαχωρισμός">Πολλοί</span>';
-            case 'none':
-                return '<span class="label label-default" title="Χρέωση στον πελάτη">—</span>';
-            default:
-                return '<span class="text-muted" title="Δεν ελέγχθηκε">·</span>';
+        $bucket = $tp['bucket'] ?? 'none';
+        $names = $tp['names'] ?? [];
+
+        if ($bucket === 'single') {
+            $who = htmlspecialchars((string) ($names[0] ?? 'τρίτος'));
+
+            return '<span class="label label-info" title="Δρομολογείται στον δικαιούχο">'.$who.'</span>';
         }
+        if ($bucket === 'multi') {
+            $list = htmlspecialchars(implode(' · ', $names));
+            $extra = $list !== '' ? ' title="'.$list.'"' : ' title="Πολλαπλοί δικαιούχοι — χρειάζεται διαχωρισμός"';
+
+            return '<span class="label label-warning"'.$extra.'>Πολλοί ('.count($names).')</span>';
+        }
+
+        return '<span class="text-muted" title="Χρέωση στον πελάτη">—</span>';
     }
 
     /** Status filter tabs for the invoice list. */
