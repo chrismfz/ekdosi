@@ -38,7 +38,7 @@ few tracked follow-ups. See `docs/Comparison.md`.
 **🚧 Partial / needs finishing:**
 - **Auto-email** — both issue paths covered (myDATA-VALID + non-myDATA finalize), per-customer opt-out; remaining gap is a **batch mail sweep** (bulk / failure re-send).
 - **PDF templates** — one adaptive Blade template vs. the 8 legacy FastReport designs (ΑΠΥ/ΤΠΥ/ΣΔΕΠ/ΣΔΑΠ/…).
-- **WHMCS `ekdosi_bridge` plugin** — now `v0.5.0` (inbox push/status, draft-first, third-party, MARK/list badges, 3-way client map); still under-reacts to some distinct ekdosi error responses; no bulk push.
+- **WHMCS `ekdosi_bridge` plugin** — now `v0.12.0` (inbox push/status, draft-first, third-party with beneficiary names, MARK/list badges, 3-way client map, **consolidated WHMCS→ekdosi invoice list** with month/quarter window + Είδος + Τρίτος, **editable admin routing**); still under-reacts to some distinct ekdosi error responses; no bulk push (per-invoice "Αποστολή" exists).
 
 **✅ Since 2026-05-28 (now done):** scheduler wired (`routes/console.php`);
 **Έξοδα/expenses** phase (suppliers, RequestDocs, classification, ΦΠΑ, Ε3);
@@ -47,6 +47,17 @@ auto-issue (`whmcs:auto-issue`, two-key armed); **gross-price edit**, **G1/G4**
 (withholding / 0%-exempt) and the filing-correctness set; **draft-first WHMCS
 inbox** + **WHMCS-side visibility** (MARK badge, invoice-list badge, "Send to
 ekdosi", 3-way client map); myDATA console polish + auto DB backup on deploy.
+
+**✅ 2026-05-31 (live-deploy hardening, prod-verified):** **AFM-keyed
+visibility** (the legacy import preserved no WHMCS↔ekdosi link → match on ΑΦΜ;
+the unsound historical content-matcher was built then removed for forward-only
+deterministic linking); **inbox paging fix** (WHMCS GetInvoices wants
+`limitstart/limitnum`, not `limit/offset` — was silently capped at one page,
+16→146); **VAT net-vs-gross auto-detected** from the invoice payload (no
+per-tenant guess); **third-party recipient at file time** + beneficiary names
+in the inbox; **AADE «Διόρθωση»** (overwrite from GSIS registry) on
+customer/supplier forms; plugin **invoice list** (month window, Είδος, Τρίτος
+resolved locally) + **editable admin routing**.
 
 **❌ Not yet / tracked follow-ups:**
 - **WHMCS write-back on lifecycle-filed drafts** — `invoiced=MARK` + pending→filed
