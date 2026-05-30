@@ -35,5 +35,10 @@ final readonly class ReconciliationRow
         public ?string $aadeState = null,    // 'VALID' | 'CANCELLED' | null
         public ?string $cancelledByMark = null,
         public ?string $problem = null,
+        // §8.1 invoice type + its Greek label, for orphan rows only — the
+        // console groups αδέσποτα by economic bucket (έσοδα / έξοδα / λοιπά)
+        // and shows the type so a payroll/Hetzner row reads as what it is.
+        public ?string $invoiceType = null,
+        public ?string $invoiceTypeLabel = null,
     ) {}
 }

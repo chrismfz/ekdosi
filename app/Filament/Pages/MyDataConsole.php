@@ -8,6 +8,7 @@ use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Services\MyData\ReconciliationRow;
 use App\Services\MyData\SalesReconciler;
 use App\Services\MyData\SalesReconciliationResult;
+use App\Support\MyData\Codes;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
@@ -177,13 +178,26 @@ class MyDataConsole extends Page
             $this->toLabel = $result->to;
 
             if ($mode === 'inbound') {
-                $orphans = count($result->missingLocally);
+                // Bucket the orphans so a €5.000 payroll (17.1) or a Hetzner
+                // expense (14.3) doesn't inflate the "missed sales" alarm.
+                $byBucket = ['income' => 0, 'expense' => 0, 'other' => 0];
+                foreach ($result->missingLocally as $row) {
+                    $byBucket[Codes::transmittedDocBucket($row->invoiceType)]++;
+                }
+                $income = $byBucket['income'];
+                $rest = $byBucket['expense'] + $byBucket['other'];
+
+                $body = $income > 0
+                    ? "{$income} αδέσποτα πωλήσεων (έσοδα χωρίς τοπική εγγραφή)"
+                    : 'Καμία αδέσποτη πώληση.';
+                if ($rest > 0) {
+                    $body .= " — και {$rest} λοιπά (έξοδα/μισθοδοσία/τακτοποιήσεις, ενημερωτικά).";
+                }
+
                 Notification::make()
                     ->title('Η λήψη από myDATA ολοκληρώθηκε')
-                    ->body($orphans > 0
-                        ? $orphans.' αδέσποτα παραστατικά (στο myDATA, όχι στο ekdosi)'
-                        : 'Δεν βρέθηκαν αδέσποτα — όλα όσα έχει το myDATA είναι συνδεδεμένα.')
-                    ->{$orphans > 0 ? 'warning' : 'success'}()
+                    ->body($body)
+                    ->{$income > 0 ? 'warning' : 'success'}()
                     ->send();
             } else {
                 $msg = $result->hasDiscrepancies()
@@ -259,6 +273,10 @@ class MyDataConsole extends Page
             'aadeState' => $row->aadeState,
             'cancelledByMark' => $row->cancelledByMark,
             'problem' => $row->problem,
+            'invoiceType' => $row->invoiceType,
+            'invoiceTypeLabel' => $row->invoiceTypeLabel,
+            // Economic bucket for orphan grouping: income / expense / other.
+            'bucket' => Codes::transmittedDocBucket($row->invoiceType),
             'url' => $row->invoiceId ? $this->invoiceUrl($row->invoiceId) : null,
             // Every MARK (linked or orphan) gets a detail link, carrying the
             // queried window so an orphan lookup re-fetches the right page.

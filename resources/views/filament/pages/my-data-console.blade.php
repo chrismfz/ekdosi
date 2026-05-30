@@ -45,6 +45,13 @@
             @php
                 $orphans = $result['missingLocally'];
                 $linked = array_merge($result['matched'], $result['stateMismatch']);
+
+                // Split αδέσποτα by economic bucket so payroll/expenses don't
+                // masquerade as missed sales. 'income' is the only actionable
+                // one on THIS console; the rest are informational.
+                $orphanIncome = array_values(array_filter($orphans, fn ($r) => ($r['bucket'] ?? 'other') === 'income'));
+                $orphanExpense = array_values(array_filter($orphans, fn ($r) => ($r['bucket'] ?? 'other') === 'expense'));
+                $orphanOther = array_values(array_filter($orphans, fn ($r) => ($r['bucket'] ?? 'other') === 'other'));
             @endphp
 
             <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -61,12 +68,17 @@
                     <div class="text-2xl font-bold text-success-600 dark:text-success-400">{{ count($linked) }}</div>
                 </x-filament::section>
                 <x-filament::section>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">Αδέσποτα (μόνο στο myDATA)</div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">Αδέσποτα πωλήσεων</div>
                     <div @class([
                         'text-2xl font-bold',
-                        'text-success-600 dark:text-success-400' => count($orphans) === 0,
-                        'text-warning-600 dark:text-warning-400' => count($orphans) > 0,
-                    ])>{{ count($orphans) }}</div>
+                        'text-success-600 dark:text-success-400' => count($orphanIncome) === 0,
+                        'text-warning-600 dark:text-warning-400' => count($orphanIncome) > 0,
+                    ])>{{ count($orphanIncome) }}</div>
+                    @if (count($orphanExpense) + count($orphanOther) > 0)
+                        <div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                            + {{ count($orphanExpense) + count($orphanOther) }} λοιπά (έξοδα/εγγραφές)
+                        </div>
+                    @endif
                 </x-filament::section>
             </div>
 
@@ -86,24 +98,75 @@
                 </x-filament::section>
             @endif
 
-            {{-- Orphans — the actionable list --}}
-            @if (count($orphans) > 0)
+            {{-- Bucket 1 — INCOME orphans: the only actionable list here.
+                 "Did I forget to file a sale that's already at myDATA?" --}}
+            @if (count($orphanIncome) > 0)
                 <x-filament::section>
                     <x-slot name="heading">
                         <span class="flex items-center gap-2">
                             <x-filament::icon icon="heroicon-o-cloud-arrow-down" class="h-5 w-5 text-warning-500" />
-                            Αδέσποτα παραστατικά (στο myDATA, όχι στο ekdosi)
-                            <x-filament::badge color="warning">{{ count($orphans) }}</x-filament::badge>
+                            Αδέσποτα πωλήσεων (έσοδα, όχι στο ekdosi)
+                            <x-filament::badge color="warning">{{ count($orphanIncome) }}</x-filament::badge>
                         </span>
                     </x-slot>
                     <x-slot name="description">
-                        Υπάρχουν στο myDATA για το ΑΦΜ μας αλλά δεν έχουν τοπική εγγραφή — εκδόθηκαν
-                        πιθανότατα από e-τιμολόγιο ή άλλο πρόγραμμα. Καταχωρίστε τα στο ekdosi ή αγνοήστε.
+                        Τιμολόγια/αποδείξεις εσόδων που υπάρχουν στο myDATA για το ΑΦΜ μας αλλά δεν έχουν
+                        τοπική εγγραφή — εκδόθηκαν πιθανότατα από e-τιμολόγιο ή άλλο πρόγραμμα.
+                        Καταχωρίστε τα στο ekdosi ή αγνοήστε.
                     </x-slot>
 
                     @include('filament.pages.partials.reconciliation-table', [
-                        'rows' => $orphans,
-                        'columns' => ['mark', 'issuedAt', 'counterpart', 'gross', 'mydataState'],
+                        'rows' => $orphanIncome,
+                        'columns' => ['mark', 'type', 'issuedAt', 'counterpart', 'gross', 'mydataState'],
+                    ])
+                </x-filament::section>
+            @endif
+
+            {{-- Bucket 2 — SUPPLIER EXPENSES: not sales. Belong to the Έξοδα
+                 console (RequestDocs + 1-click import live there). --}}
+            @if (count($orphanExpense) > 0)
+                <x-filament::section :collapsible="true" :collapsed="true">
+                    <x-slot name="heading">
+                        <span class="flex items-center gap-2">
+                            <x-filament::icon icon="heroicon-o-receipt-percent" class="h-5 w-5 text-gray-400" />
+                            Έξοδα προμηθευτών (όχι πωλήσεις)
+                            <x-filament::badge color="gray">{{ count($orphanExpense) }}</x-filament::badge>
+                        </span>
+                    </x-slot>
+                    <x-slot name="description">
+                        Παραστατικά εξόδων/εισροών (ενδοκοινοτικά, τρίτων χωρών, αγορές λιανικής).
+                        <strong>Δεν είναι δικές σου πωλήσεις.</strong> Η καταχώρισή τους γίνεται στην
+                        «Κονσόλα myDATA — Έξοδα», όπου υπάρχει αντιστοίχιση προμηθευτή και import με ένα κλικ.
+                    </x-slot>
+
+                    @include('filament.pages.partials.reconciliation-table', [
+                        'rows' => $orphanExpense,
+                        'columns' => ['mark', 'type', 'issuedAt', 'gross', 'mydataState'],
+                    ])
+                </x-filament::section>
+            @endif
+
+            {{-- Bucket 3 — OTHER self-declared entries: payroll, fixed assets,
+                 ΕΦΚΑ, accounting adjustments. Informational; the accountant's
+                 territory, NOT something ekdosi issues. --}}
+            @if (count($orphanOther) > 0)
+                <x-filament::section :collapsible="true" :collapsed="true">
+                    <x-slot name="heading">
+                        <span class="flex items-center gap-2">
+                            <x-filament::icon icon="heroicon-o-document-text" class="h-5 w-5 text-gray-400" />
+                            Λοιπές δικές σου εγγραφές (μισθοδοσία, πάγια, τακτοποιήσεις)
+                            <x-filament::badge color="gray">{{ count($orphanOther) }}</x-filament::badge>
+                        </span>
+                    </x-slot>
+                    <x-slot name="description">
+                        Αυτο-δηλούμενες λογιστικές εγγραφές (π.χ. <strong>μισθοδοσία 17.1</strong>, αποσβέσεις,
+                        ΕΦΚΑ). <strong>Δεν είναι πωλήσεις</strong> — υποβάλλονται συνήθως από τον λογιστή ή
+                        άλλο πρόγραμμα. Εμφανίζονται εδώ μόνο ενημερωτικά.
+                    </x-slot>
+
+                    @include('filament.pages.partials.reconciliation-table', [
+                        'rows' => $orphanOther,
+                        'columns' => ['mark', 'type', 'issuedAt', 'gross', 'mydataState'],
                     ])
                 </x-filament::section>
             @endif
@@ -194,14 +257,22 @@
             @endforeach
 
             {{-- αδέσποτα: slim pointer to the dedicated direction (avoids
-                 showing the same list twice). --}}
+                 showing the same list twice). Headline the INCOME orphans —
+                 the rest (έξοδα/εγγραφές) are informational. --}}
+            @php
+                $missIncome = count(array_filter($result['missingLocally'], fn ($r) => ($r['bucket'] ?? 'other') === 'income'));
+                $missRest = count($result['missingLocally']) - $missIncome;
+            @endphp
             @if (count($result['missingLocally']) > 0)
                 <x-filament::section>
                     <div class="flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                         <x-filament::icon icon="heroicon-o-question-mark-circle" class="h-5 w-5 text-warning-500" />
                         <span>
-                            <strong>{{ count($result['missingLocally']) }}</strong> αδέσποτα παραστατικά
-                            (στο myDATA, χωρίς τοπική εγγραφή).
+                            <strong>{{ $missIncome }}</strong> αδέσποτα πωλήσεων
+                            @if ($missRest > 0)
+                                <span class="text-gray-500 dark:text-gray-400">(+ {{ $missRest }} έξοδα/εγγραφές)</span>
+                            @endif
+                            στο myDATA, χωρίς τοπική εγγραφή.
                         </span>
                         <span class="text-gray-500 dark:text-gray-400">
                             Αναλυτικά στη λειτουργία «Αδέσποτα από myDATA».
