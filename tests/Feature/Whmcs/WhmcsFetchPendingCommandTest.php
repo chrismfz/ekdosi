@@ -25,6 +25,28 @@ class WhmcsFetchPendingCommandTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * Wrap a GetInvoices list page so the paginating fetcher terminates:
+     * return the rows on the FIRST page (offset 0) and an EMPTY page on any
+     * subsequent offset. getPendingInvoices now stops only on an empty page
+     * (WHMCS caps page size, so count<limit is not the end), so a repeating
+     * fake would otherwise loop. Use inside an Http::fake closure for the
+     * 'GetInvoices' branch.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     */
+    private function invoicesPage(\Illuminate\Http\Client\Request $request, array $rows)
+    {
+        $offset = (int) ($request->data()['offset'] ?? 0);
+        $invoice = $offset > 0 ? [] : $rows;
+
+        return Http::response([
+            'result' => 'success',
+            'totalresults' => count($rows),
+            'invoices' => ['invoice' => $invoice],
+        ], 200);
+    }
+
     private function makeConfiguredTenant(): Company
     {
         return Company::create([
@@ -99,17 +121,11 @@ class WhmcsFetchPendingCommandTest extends TestCase
             'email' => 'b@x.com',
         ]);
 
-        Http::fake([
-            'example.gr/*' => Http::response([
-                'result'       => 'success',
-                'totalresults' => 3,
-                'invoices'     => ['invoice' => [
-                    ['id' => 5001, 'userid' => 101, 'date' => '2026-05-10', 'total' => 100, 'currencycode' => 'EUR', 'invoiced' => 0, 'companyname' => 'Acme A'],
-                    ['id' => 5002, 'userid' => 202, 'date' => '2026-05-11', 'total' => 200, 'currencycode' => 'EUR', 'invoiced' => 0, 'email' => 'b@x.com'],
-                    ['id' => 5003, 'userid' => 303, 'date' => '2026-05-12', 'total' => 300, 'currencycode' => 'EUR', 'invoiced' => 0, 'email' => 'stranger@nope.com'],
-                ]],
-            ], 200),
-        ]);
+        Http::fake(fn ($request) => $this->invoicesPage($request, [
+            ['id' => 5001, 'userid' => 101, 'date' => '2026-05-10', 'total' => 100, 'currencycode' => 'EUR', 'invoiced' => 0, 'companyname' => 'Acme A'],
+            ['id' => 5002, 'userid' => 202, 'date' => '2026-05-11', 'total' => 200, 'currencycode' => 'EUR', 'invoiced' => 0, 'email' => 'b@x.com'],
+            ['id' => 5003, 'userid' => 303, 'date' => '2026-05-12', 'total' => 300, 'currencycode' => 'EUR', 'invoiced' => 0, 'email' => 'stranger@nope.com'],
+        ]));
 
         $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug, '--preview' => true])
             ->expectsOutputToContain('Found 3 paid+unfiled invoice(s)')
@@ -131,22 +147,18 @@ class WhmcsFetchPendingCommandTest extends TestCase
             'whmcs_client_id' => 101,
         ]);
 
-        Http::fake([
-            'example.gr/*' => Http::response([
-                'result' => 'success',
-                'invoices' => ['invoice' => [
-                    ['id' => 5001, 'userid' => 101, 'date' => '2026-05-10', 'total' => 100, 'invoiced' => 0],
-                ]],
-            ], 200),
-        ]);
+        Http::fake(fn ($request) => $this->invoicesPage($request, [
+            ['id' => 5001, 'userid' => 101, 'date' => '2026-05-10', 'total' => 100, 'invoiced' => 0],
+        ]));
 
         $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug, '--preview' => true])
             ->assertExitCode(0);
 
         $this->assertSame(0, PendingWhmcsInvoice::count());
-        // Preview makes ONE WHMCS call (GetInvoices), no per-row
-        // GetInvoice calls (those happen in the ingest path).
-        Http::assertSentCount(1);
+        // Preview makes only GetInvoices LIST calls (now paginated: page 1 +
+        // an empty page-2 terminator), and NO per-row GetInvoice calls — those
+        // happen only in the ingest path.
+        Http::assertNotSent(fn ($request) => ($request->data()['action'] ?? null) === 'GetInvoice');
     }
 
     public function test_prints_no_pending_message_on_empty_result(): void
@@ -182,13 +194,10 @@ class WhmcsFetchPendingCommandTest extends TestCase
         Http::fake(function ($request) {
             $action = $request->data()['action'] ?? null;
             return match ($action) {
-                'GetInvoices' => Http::response([
-                    'result' => 'success',
-                    'invoices' => ['invoice' => [
-                        ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
-                        ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
-                    ]],
-                ], 200),
+                'GetInvoices' => $this->invoicesPage($request, [
+                    ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
+                    ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
+                ]),
                 'GetInvoice' => Http::response([
                     'result'    => 'success',
                     'invoiceid' => (int) ($request->data()['invoiceid'] ?? 0),
@@ -224,12 +233,9 @@ class WhmcsFetchPendingCommandTest extends TestCase
         Http::fake(function ($request) {
             $action = $request->data()['action'] ?? null;
             return match ($action) {
-                'GetInvoices' => Http::response([
-                    'result' => 'success',
-                    'invoices' => ['invoice' => [
-                        ['id' => 9001, 'userid' => 999, 'invoiced' => 0],
-                    ]],
-                ], 200),
+                'GetInvoices' => $this->invoicesPage($request, [
+                    ['id' => 9001, 'userid' => 999, 'invoiced' => 0],
+                ]),
                 'GetInvoice' => Http::response([
                     'result' => 'success', 'invoiceid' => 9001, 'userid' => 999, 'total' => '50.00',
                 ], 200),
@@ -256,13 +262,10 @@ class WhmcsFetchPendingCommandTest extends TestCase
         Http::fake(function ($request) {
             $action = $request->data()['action'] ?? null;
             if ($action === 'GetInvoices') {
-                return Http::response([
-                    'result' => 'success',
-                    'invoices' => ['invoice' => [
-                        ['id' => 7001, 'userid' => 101, 'invoiced' => 0],
-                        ['id' => 7002, 'userid' => 202, 'invoiced' => 0],
-                    ]],
-                ], 200);
+                return $this->invoicesPage($request, [
+                    ['id' => 7001, 'userid' => 101, 'invoiced' => 0],
+                    ['id' => 7002, 'userid' => 202, 'invoiced' => 0],
+                ]);
             }
             if ($action === 'GetInvoice') {
                 // Second invoice gets a "not found" - simulating
@@ -306,14 +309,11 @@ class WhmcsFetchPendingCommandTest extends TestCase
         Http::fake(function ($request) use (&$getInvoiceCalls) {
             $action = $request->data()['action'] ?? null;
             if ($action === 'GetInvoices') {
-                return Http::response([
-                    'result' => 'success',
-                    'invoices' => ['invoice' => [
-                        ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
-                        ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
-                        ['id' => 5003, 'userid' => 303, 'invoiced' => 0],
-                    ]],
-                ], 200);
+                return $this->invoicesPage($request, [
+                    ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
+                    ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
+                    ['id' => 5003, 'userid' => 303, 'invoiced' => 0],
+                ]);
             }
             if ($action === 'GetInvoice') {
                 $getInvoiceCalls++;
@@ -342,13 +342,10 @@ class WhmcsFetchPendingCommandTest extends TestCase
         Http::fake(function ($request) use (&$getInvoiceCalls) {
             $action = $request->data()['action'] ?? null;
             if ($action === 'GetInvoices') {
-                return Http::response([
-                    'result' => 'success',
-                    'invoices' => ['invoice' => [
-                        ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
-                        ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
-                    ]],
-                ], 200);
+                return $this->invoicesPage($request, [
+                    ['id' => 5001, 'userid' => 101, 'invoiced' => 0],
+                    ['id' => 5002, 'userid' => 202, 'invoiced' => 0],
+                ]);
             }
             if ($action === 'GetInvoice') {
                 $getInvoiceCalls++;
@@ -394,12 +391,9 @@ class WhmcsFetchPendingCommandTest extends TestCase
         Http::fake(function ($request) {
             $action = $request->data()['action'] ?? null;
             return match ($action) {
-                'GetInvoices' => Http::response([
-                    'result' => 'success',
-                    'invoices' => ['invoice' => [
-                        ['id' => 8001, 'userid' => 555, 'invoiced' => 0],
-                    ]],
-                ], 200),
+                'GetInvoices' => $this->invoicesPage($request, [
+                    ['id' => 8001, 'userid' => 555, 'invoiced' => 0],
+                ]),
                 'GetInvoice' => Http::response([
                     'result' => 'success', 'invoiceid' => 8001, 'userid' => 555, 'total' => '50.00',
                 ], 200),

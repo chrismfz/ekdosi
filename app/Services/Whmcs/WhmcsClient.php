@@ -163,14 +163,15 @@ class WhmcsClient
         // `limit`/`offset` are the per-page size + starting page; callers that
         // want a single page can still pass a high limit, but the default now
         // sweeps the whole window.
-        $maxPages = 200;   // hard stop: 200 * limit invoices scanned, worst case
+        $maxPages = 2000;   // hard stop bounded by ACTUAL rows walked, not limit
         $out = [];
+        $cursor = $offset;   // advance by the ACTUAL page size WHMCS returns
 
         for ($page = 0; $page < $maxPages; $page++) {
             $resp = $this->call('GetInvoices', [
                 'status'  => 'Paid',
                 'limit'   => $limit,
-                'offset'  => $offset + ($page * $limit),
+                'offset'  => $cursor,
                 'orderby' => 'date',
                 'order'   => 'desc',
             ]);
@@ -182,8 +183,9 @@ class WhmcsClient
             if (! empty($list) && ! array_is_list($list)) {
                 $list = [$list];
             }
-            if ($list === []) {
-                break;   // no more invoices
+            $returned = count($list);
+            if ($returned === 0) {
+                break;   // no more invoices — the only reliable end signal
             }
 
             $crossedCutoff = false;
@@ -206,11 +208,19 @@ class WhmcsClient
                 $out[] = $row;
             }
 
-            // Stop once we've passed the cutoff, or the API returned a
-            // short page (the last one).
-            if ($crossedCutoff || count($list) < $limit) {
+            if ($crossedCutoff) {
                 break;
             }
+
+            // CRITICAL: advance by what WHMCS ACTUALLY returned, not by $limit.
+            // GetInvoices caps page size server-side (commonly 25, configurable),
+            // so it routinely returns fewer rows than requested. The previous
+            // code (a) stopped on count<limit — which fired after page 1 since
+            // WHMCS returned ~25 < 100, dropping everything older; and
+            // (b) advanced offset by $limit, skipping the un-returned rows.
+            // Walking by the real count + only stopping on an EMPTY page fixes
+            // both — we sweep the whole window regardless of WHMCS's cap.
+            $cursor += $returned;
         }
 
         return $out;
