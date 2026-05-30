@@ -473,7 +473,7 @@ EOF;
         $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
         $userid = (int) ($_POST['userid'] ?? 0);
         if (! $this->csrfValid()) {
-            return $this->csrfFailPage();
+            return $this->csrfFailPage($link);
         }
         if ($userid <= 0) {
             return $this->errorPage($link, 'Λείπει το userid του πελάτη.');

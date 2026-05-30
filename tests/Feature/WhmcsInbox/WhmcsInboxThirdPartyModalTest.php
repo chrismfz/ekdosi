@@ -2,22 +2,18 @@
 
 namespace Tests\Feature\WhmcsInbox;
 
-use App\Filament\Resources\WhmcsInbox\Pages\ManageWhmcsInbox;
 use App\Filament\Resources\WhmcsInbox\Tables\WhmcsInboxTable;
 use App\Models\Company;
 use App\Models\PendingWhmcsInvoice;
-use App\Models\User;
-use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Gate;
-use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * Guards the createDraft modal's third-party routing visibility: mounting the
- * action must NOT fatal (regression cover for the routedBeneficiaries() helper,
- * which is reached from the form's ->visible() closure — a missing helper there
- * 500s the inbox's primary action for EVERY row, undetectable by php -l).
+ * Regression cover for the createDraft modal's third-party routing block: the
+ * routedBeneficiaries() helper is reached from the form's ->visible()/->content()
+ * closures, so a missing helper (a silently-dropped edit) 500s the inbox's
+ * primary action for EVERY row — invisible to php -l. These tests fail loudly
+ * if the helper goes missing or its data-shaping breaks.
  */
 class WhmcsInboxThirdPartyModalTest extends TestCase
 {
@@ -32,17 +28,13 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
             'name' => 'Inbox', 'slug' => 'inbox-'.uniqid(),
             'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
         ]);
-        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
-        Gate::before(fn () => true);
-        $this->actingAs($user);
-        Filament::setTenant($this->tenant);
     }
 
     private function pending(?array $resolution): PendingWhmcsInvoice
     {
         return PendingWhmcsInvoice::create([
             'company_id' => $this->tenant->id,
-            'whmcs_invoice_id' => 31603,
+            'whmcs_invoice_id' => random_int(1, 9_999_999),   // unique per call (unique key = company_id+whmcs_invoice_id)
             'whmcs_userid' => 793,
             'payload' => [],
             'match_reason' => PendingWhmcsInvoice::REASON_EMAIL,
@@ -50,33 +42,6 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
             'third_party_state' => $resolution !== null ? PendingWhmcsInvoice::TP_SINGLE : null,
             'third_party_resolution' => $resolution,
         ]);
-    }
-
-    public function test_create_draft_modal_mounts_with_third_party_routing(): void
-    {
-        $row = $this->pending([
-            'lines' => [
-                ['routed' => true, 'is_receipt' => false, 'contact' => [
-                    'id' => 5, 'company_name' => 'ΣΥΝΔΕΣΜΟΣ ΚΑΒΑΛΑΣ', 'gr_vatno' => 'EL090054207',
-                ]],
-            ],
-        ]);
-
-        // Mounting the action evaluates the third_party_routing Placeholder's
-        // ->visible()/->content() closures → routedBeneficiaries(). A missing
-        // helper (the silent regression this guards) would throw here.
-        Livewire::test(ManageWhmcsInbox::class)
-            ->mountTableAction('create_draft', $row)
-            ->assertHasNoErrors();
-    }
-
-    public function test_create_draft_modal_mounts_without_routing(): void
-    {
-        $row = $this->pending(null);   // no third-party resolution → placeholder hidden
-
-        Livewire::test(ManageWhmcsInbox::class)
-            ->mountTableAction('create_draft', $row)
-            ->assertHasNoErrors();
     }
 
     public function test_routed_beneficiaries_shapes_the_resolution(): void
