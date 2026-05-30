@@ -60,13 +60,23 @@ class MyDataPictureStats extends StatsOverviewWidget
         $netMonth = $month?->netVat() ?? 0.0;
 
         $stats = [
-            Stat::make('Τρίμηνο — Έσοδα', $this->eur($quarter->outputGross))
-                ->description('ΦΠΑ εκροών '.$this->eur($quarter->outputVat).' • μήνας '.$this->eur($month?->outputGross ?? 0))
+            // Headline = NET (καθαρά), so it compares like-for-like with the
+            // local "Τρίμηνο — Έσοδα (καθαρά)" card (IncomeVsVatStats) and with
+            // this widget's own breakdown lines. The «(καθαρά)» label + the
+            // «Με ΦΠΑ …» (gross) in the description spell out each figure, so
+            // an operator never reads the net total as if it were gross — the
+            // confusion that made the picture look ~ one VAT-amount off.
+            Stat::make('Τρίμηνο — Έσοδα (καθαρά)', $this->eur($quarter->outputNet))
+                ->description('Με ΦΠΑ '.$this->eur($quarter->outputGross)
+                    .' • ΦΠΑ εκροών '.$this->eur($quarter->outputVat)
+                    .' • μήνας '.$this->eur($month?->outputNet ?? 0).' καθ.')
                 ->descriptionIcon('heroicon-m-arrow-up-right')
                 ->color('gray'),
 
-            Stat::make('Τρίμηνο — Έξοδα', $this->eur($quarter->inputGross))
-                ->description('ΦΠΑ εισροών '.$this->eur($quarter->inputVat).' • μήνας '.$this->eur($month?->inputGross ?? 0))
+            Stat::make('Τρίμηνο — Έξοδα (καθαρά)', $this->eur($quarter->inputNet))
+                ->description('Με ΦΠΑ '.$this->eur($quarter->inputGross)
+                    .' • ΦΠΑ εισροών '.$this->eur($quarter->inputVat)
+                    .' • μήνας '.$this->eur($month?->inputNet ?? 0).' καθ.')
                 ->descriptionIcon('heroicon-m-arrow-down-right')
                 ->color('gray'),
 

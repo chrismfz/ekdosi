@@ -41,13 +41,18 @@ class IncomeVsVatStats extends StatsOverviewWidget
         $quarter = $metrics->income($now->copy()->startOfQuarter(), $now->copy()->endOfQuarter());
 
         return [
-            Stat::make('Προηγ. μήνας — Έσοδα', $this->eur($prevMonth->net))
-                ->description('ΦΠΑ εκροών: '.$this->eur($prevMonth->vat))
+            // «(καθαρά)» in the label mirrors the myDATA-picture cards
+            // (MyDataPictureStats) so the two Έσοδα figures read as the same
+            // unit — net + ΦΠΑ shown apart, never gross.
+            Stat::make('Προηγ. μήνας — Έσοδα (καθαρά)', $this->eur($prevMonth->net))
+                ->description('ΦΠΑ εκροών: '.$this->eur($prevMonth->vat)
+                    .' • με ΦΠΑ '.$this->eur($prevMonth->net + $prevMonth->vat))
                 ->descriptionIcon('heroicon-m-calendar-days')
                 ->color('gray'),
 
-            Stat::make('Τρίμηνο — Έσοδα', $this->eur($quarter->net))
-                ->description('ΦΠΑ εκροών: '.$this->eur($quarter->vat))
+            Stat::make('Τρίμηνο — Έσοδα (καθαρά)', $this->eur($quarter->net))
+                ->description('ΦΠΑ εκροών: '.$this->eur($quarter->vat)
+                    .' • με ΦΠΑ '.$this->eur($quarter->net + $quarter->vat))
                 ->descriptionIcon('heroicon-m-calendar')
                 ->color('gray'),
         ];
