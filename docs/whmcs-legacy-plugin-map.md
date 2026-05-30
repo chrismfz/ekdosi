@@ -372,3 +372,44 @@ LIMIT 50;
 ```
 Paste the (a) column lists + (d) result back and we lock the schema + the
 split decision, then build T‑1.
+
+---
+
+## Verified legacy semantics (forensic sweep, 2026‑05‑31)
+
+Reference only — the legacy was a DB‑hack; we keep the *intent*, not the method.
+
+- **Auto‑select criteria** (`FAutoInvoice.dfm:215`): `status='Paid' AND
+  invoiced=0 AND gkriniaris='on'`. The new inbox is **broader on purpose**:
+  it stages ALL paid+unfiled for operator review; only γκρινιάρηδες auto‑file
+  (G8). `invoiced` is now owned by us (bridge write‑back), not the desktop app.
+- **€0,00**: legacy skipped zero‑amount lines + suppressed empty invoices
+  (`-1000`). **We deliberately DON'T skip** — operator decision: show all "για
+  να ξέρουμε τι μας γίνεται".
+- **Sentinels**: `-333` = operator re‑queue (manual), `-1000` = auto‑suppressed
+  /error. New equivalents: `status` + `third_party_state` + `hold_reason`.
+- **timologia routing** runtime columns (DDL is stale): `mod_ekdosi_contacts`
+  (company_name, gr_vatno, tax_office, occupation, address…); `mod_ekdosi_routing`
+  (userid, contactid, serviceid, service_type, **isReceipt** 0=τιμολόγιο/1=απόδειξη).
+- **Multi‑party**: legacy SILENTLY mixed beneficiaries in one doc (a legal
+  bug). We **block + flag** (TP_MULTI → guided split) — better than legacy.
+
+## Operator‑visibility TODO (WHMCS‑side — "easier for staff")
+
+Make the AADE state visible to a WHMCS operator WITHOUT opening ekdosi. The
+single‑invoice admin badge already exists (`hooks.php`
+`AdminInvoicesControlsOutput` → "Στο AADE · ΜΑΡΚ {value}"). Requested extras:
+
+- **Invoice LIST column** (Billing → Invoices): a "filed/MARK" column/badge
+  across the whole list, not just the single invoice page. WHMCS hook:
+  `AdminAreaPage`/invoice‑list output (or a small JS/Capsule decorator reading
+  `tblinvoices.invoiced`). High value, low risk (read‑only).
+- **Client‑profile tab** (à la ModulesGarden CRM): a custom admin tab on the
+  client showing the full mapping per invoice — **WHMCS #33333 → ΜΑΡΚ xxxx →
+  ΤΠΥ‑129 (ekdosi)**. Needs an ekdosi bridge read endpoint (HMAC) returning
+  the tenant's WHMCS↔MARK↔invcode rows for a client, rendered in an
+  `AdminClientProfileTabFields`/custom‑tab hook.
+- (Optional) client‑facing: show "Καταχωρήθηκε στην ΑΑΔΕ" + ΜΑΡΚ on the
+  customer's invoice/PDF.
+
+Guiding principle: anything that makes it easier for staff is welcome.
