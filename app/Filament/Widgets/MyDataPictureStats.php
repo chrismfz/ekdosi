@@ -60,13 +60,19 @@ class MyDataPictureStats extends StatsOverviewWidget
         $netMonth = $month?->netVat() ?? 0.0;
 
         $stats = [
-            Stat::make('Τρίμηνο — Έσοδα', $this->eur($quarter->outputGross))
-                ->description('ΦΠΑ εκροών '.$this->eur($quarter->outputVat).' • μήνας '.$this->eur($month?->outputGross ?? 0))
+            // NET (καθαρά), so this compares like-for-like with the local
+            // "Τρίμηνο — Έσοδα" card (IncomeVsVatStats, which shows net) and
+            // with this widget's own breakdown lines (which already use net).
+            // Showing gross here made the myDATA picture look ~ one VAT-amount
+            // higher than the books — a phantom "discrepancy" that was really
+            // just net-vs-gross. ΦΠΑ stays in the description.
+            Stat::make('Τρίμηνο — Έσοδα', $this->eur($quarter->outputNet))
+                ->description('ΦΠΑ εκροών '.$this->eur($quarter->outputVat).' • μήνας '.$this->eur($month?->outputNet ?? 0))
                 ->descriptionIcon('heroicon-m-arrow-up-right')
                 ->color('gray'),
 
-            Stat::make('Τρίμηνο — Έξοδα', $this->eur($quarter->inputGross))
-                ->description('ΦΠΑ εισροών '.$this->eur($quarter->inputVat).' • μήνας '.$this->eur($month?->inputGross ?? 0))
+            Stat::make('Τρίμηνο — Έξοδα', $this->eur($quarter->inputNet))
+                ->description('ΦΠΑ εισροών '.$this->eur($quarter->inputVat).' • μήνας '.$this->eur($month?->inputNet ?? 0))
                 ->descriptionIcon('heroicon-m-arrow-down-right')
                 ->color('gray'),
 

@@ -87,7 +87,13 @@ class MyDataVatPictureTest extends TestCase
         Livewire::test(MyDataPictureStats::class)
             ->assertSee('Τρίμηνο — Έξοδα')
             ->assertSee('Προς απόδοση')          // net 120 > 0
-            ->assertSee('ΦΠΑ εισροών');
+            ->assertSee('ΦΠΑ εισροών')
+            // Headline Έσοδα/Έξοδα must show NET (καθαρά), not gross — else
+            // the myDATA picture reads ~ one VAT-amount above the books.
+            ->assertSee('1.000,00 €')             // outputNet
+            ->assertSee('500,00 €')               // inputNet
+            ->assertDontSee('1.240,00 €')         // NOT outputGross
+            ->assertDontSee('620,00 €');          // NOT inputGross
     }
 
     public function test_widget_prompts_when_not_synced(): void
