@@ -202,8 +202,11 @@ class WhmcsClientTest extends TestCase
         // Mixed payload: two unfiled (invoiced=0), one already filed
         // (invoiced=1), one without the field at all (legacy WHMCS
         // without the prepare_for_ekdosi plugin — treat as pending).
-        Http::fake([
-            'example.gr/*' => Http::response([
+        // Page 1 has the rows; page 2 is empty (the loop's end signal —
+        // it now stops ONLY on an empty page, never on count<limit, since
+        // WHMCS caps page size server-side).
+        Http::fakeSequence('example.gr/*')
+            ->push([
                 'result'       => 'success',
                 'totalresults' => 3,
                 'invoices'     => ['invoice' => [
@@ -212,8 +215,8 @@ class WhmcsClientTest extends TestCase
                     ['id' => 1003, 'status' => 'Paid', 'invoiced' => 0, 'total' => 30.00],
                     ['id' => 1004, 'status' => 'Paid', 'total' => 40.00],  // no invoiced field
                 ]],
-            ], 200),
-        ]);
+            ], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
 
         $rows = $this->makeClient()->getPendingInvoices();
 
@@ -225,13 +228,13 @@ class WhmcsClientTest extends TestCase
     public function test_get_pending_invoices_normalises_single_row_object_shape(): void
     {
         // WHMCS returns count=1 as a single object, not a list.
-        Http::fake([
-            'example.gr/*' => Http::response([
+        Http::fakeSequence('example.gr/*')
+            ->push([
                 'result'       => 'success',
                 'totalresults' => 1,
                 'invoices'     => ['invoice' => ['id' => 1001, 'invoiced' => 0]],
-            ], 200),
-        ]);
+            ], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
 
         $rows = $this->makeClient()->getPendingInvoices();
 
@@ -346,37 +349,65 @@ class WhmcsClientTest extends TestCase
         $this->assertSame(50, $rows[0]['id']);
     }
 
-    public function test_get_pending_invoices_stops_on_short_page(): void
+    public function test_get_pending_invoices_keeps_paging_past_a_short_page(): void
     {
-        // A page shorter than `limit` is the last page → no extra API call.
+        // WHMCS caps page size server-side, so a page SHORTER than `limit` is
+        // NOT the end — only an EMPTY page is. The loop must keep going: page 1
+        // returns 1 row (< limit), page 2 another, page 3 empty → stop. The old
+        // count<limit stop would have missed rows 5 and 6.
         Http::fakeSequence('example.gr/*')
-            ->push([
-                'result' => 'success',
-                'invoices' => ['invoice' => [
-                    ['id' => 5, 'date' => '2026-05-15', 'invoiced' => 0],
-                ]],
-            ], 200);
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 7, 'date' => '2026-05-15', 'invoiced' => 0],
+            ]]], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 6, 'date' => '2026-05-14', 'invoiced' => 0],
+            ]]], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
 
         $rows = $this->makeClient()->getPendingInvoices(limit: 10);
 
-        $this->assertCount(1, $rows);
-        $this->assertSame(5, $rows[0]['id']);
+        $this->assertSame([7, 6], array_column($rows, 'id'));
+    }
+
+    public function test_get_pending_invoices_advances_cursor_by_actual_page_size(): void
+    {
+        // The "146 expected, 16 returned" bug: WHMCS returned ~25 per page but
+        // the loop advanced offset by limit (100), skipping rows 25–99. Assert
+        // the cursor advances by what WHMCS ACTUALLY returned: page 1 (offset 0)
+        // = 2 rows, page 2 MUST request offset=2 (not offset=limit).
+        Http::fakeSequence('example.gr/*')
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 20, 'date' => '2026-05-20', 'invoiced' => 0],
+                ['id' => 19, 'date' => '2026-05-19', 'invoiced' => 0],
+            ]]], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 18, 'date' => '2026-05-18', 'invoiced' => 0],
+            ]]], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
+
+        $rows = $this->makeClient()->getPendingInvoices(limit: 100);
+
+        $this->assertSame([20, 19, 18], array_column($rows, 'id'));
+        // Second request advanced by the real count (2), not by limit (100).
+        $offsets = [];
+        Http::assertSentInOrder([
+            function ($req) use (&$offsets) { $offsets[] = (int) ($req->data()['offset'] ?? -1); return true; },
+            function ($req) use (&$offsets) { $offsets[] = (int) ($req->data()['offset'] ?? -1); return true; },
+            function ($req) use (&$offsets) { $offsets[] = (int) ($req->data()['offset'] ?? -1); return true; },
+        ]);
+        $this->assertSame([0, 2, 3], $offsets);
     }
 
     public function test_get_pending_invoices_no_min_date_pulls_everything(): void
     {
-        // Null minDate (default) = no cutoff. All invoiced=0 rows
-        // returned regardless of age. The historic / fresh-install
-        // path.
-        Http::fake([
-            'example.gr/*' => Http::response([
-                'result' => 'success',
-                'invoices' => ['invoice' => [
-                    ['id' => 1, 'date' => '2026-05-15', 'invoiced' => 0],
-                    ['id' => 2, 'date' => '2007-12-10', 'invoiced' => 0],
-                ]],
-            ], 200),
-        ]);
+        // Null minDate (default) = no cutoff. All invoiced=0 rows returned
+        // regardless of age. Page 1 has them, page 2 empty → stop.
+        Http::fakeSequence('example.gr/*')
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 1, 'date' => '2026-05-15', 'invoiced' => 0],
+                ['id' => 2, 'date' => '2007-12-10', 'invoiced' => 0],
+            ]]], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
 
         $rows = $this->makeClient()->getPendingInvoices();
 
