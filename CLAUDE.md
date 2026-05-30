@@ -323,6 +323,48 @@ survives only for the γκρινιάρης `whmcs:auto-issue` command.
   `GET /webhooks/whmcs/{slug}/invoice-map/{whmcs_userid}`
   (`WhmcsClientInvoiceMapController`, HMAC `"{slug}:map:{userid}"`).
 
+**Live-deploy hardening + UX (2026-05-31, plugin v0.12.0 — PRs #112–#120,
+verified against the restored prod WHMCS):**
+- **AFM-keyed visibility** (no stored WHMCS↔ekdosi link survived the import —
+  verified `customers.whmcs_client_id` NULL 100%, `whmcs_invoice_log` empty):
+  `POST /webhooks/whmcs/{slug}/invoices-by-afm` (per-client card, ΑΦΜ set) +
+  `POST .../invoice-states` (batch ΤΠΥ/ΜΑΡΚ for the addon invoice list). The
+  per-invoice `invoice-status` now also returns `ekdosi_invcode`. **The legacy
+  historical WHMCS#→ΤΠΥ matcher was BUILT then REMOVED** — content-matching is
+  heuristic and wrong on a legal link; forward-only deterministic
+  (`whmcs_pending_id`) is the policy.
+- **Inbox paging — THE bug that hid invoices:** `getPendingInvoices` used
+  `limit`/`offset`, which WHMCS GetInvoices SILENTLY IGNORES (it paginates via
+  **`limitstart`/`limitnum`**) → every page identical → "stuck at 16 / 5-min
+  freeze". Fixed: correct params, advance cursor by ACTUAL returned count, stop
+  on short/empty page, id-repeat loop guard. Prod 16→146.
+- **VAT net-vs-gross from the payload, not a guess:** `WhmcsInvoiceMapper`
+  reads the invoice's own `subtotal/tax/taxrate/total` — subtotal+tax==total →
+  amounts are NET (add VAT); subtotal==total → GROSS (back out). Falls back to
+  `whmcs_amount_includes_tax` only when no breakdown. (Closed the "ekdosi
+  πετσοκόβει την τιμή" €19 vs €23.56 bug.)
+- **Third-party recipient at file time:** the «Δημιουργία Παραστατικού» modal
+  shows the routed beneficiaries (read-only) + lets the operator pick ANY
+  customer as recipient (name+ΑΦΜ search — covers "pick the third party"); the
+  inbox «Τρίτος» column (now right after «Πελάτης (ekdosi)») shows the
+  beneficiary NAME, not just «Σε τρίτο». Changing the recipient while a draft
+  works via EditInvoice (`customer_id` editable until a MARK is issued).
+- **AADE as source of truth on Customer/Supplier forms:** «Άντληση από ΑΑΔΕ»
+  (fill-empty) **+** «Διόρθωση από ΑΑΔΕ» (overwrite, confirm) — when the
+  customer typed wrong, the GSIS registry wins. Shared rule in
+  `AadeFormFill::assign($get,$set,$field,$value,$overwrite)` (never blanks on
+  empty AADE value).
+- **Addon invoice list** (plugin): consolidated WHMCS→ekdosi list with date
+  window (μήνας/τρίμηνο/όλα), «Είδος» (τιμολόγιο/απόδειξη), «Τρίτος» resolved
+  LOCALLY from `mod_ekdosi_routing` (`ThirdPartyStore::bucketsForInvoices`,
+  shows the beneficiary name) — works for every invoice, no ekdosi/inbox
+  dependency. Admin third-party routing is now EDITABLE
+  (`ThirdPartyStore::setRouteForUser`, CS-side re-route; takes effect next
+  invoice since `resolve.php` reads routing live).
+- **Admin-only `whmcs_third_party_enabled`** gates the per-invoice resolve.php
+  call (fills «Τρίτος»); independent from the client-area `show_client_v2`
+  visibility switch. `whmcs:fetch-pending` re-resolves third parties per ingest.
+
 **WHMCS gaps (real):**
 - **Write-back on lifecycle-filed drafts (tracked):** when a draft is issued via
   the normal lifecycle (not the direct `file()`), `invoiced=MARK` + pending→filed
@@ -335,8 +377,17 @@ survives only for the γκρινιάρης `whmcs:auto-issue` command.
   resellers manage contacts + routing. Full story:
   `docs/whmcs-legacy-plugin-map.md`. Remaining: per-group invoice-type at file
   time relies on the operator; WHMCS write-back of split invoices (one MARK col).
-- **`whmcs_amount_includes_tax`** documented but unimplemented — the mapper
-  assumes GROSS line amounts; a tax-exclusive WHMCS tenant gets wrong VAT.
+- **`whmcs_amount_includes_tax`: ✅ SUPERSEDED (2026-05-31).** The mapper now
+  DETECTS net-vs-gross from the invoice payload's `subtotal/tax/taxrate/total`;
+  the toggle is only the fallback when no breakdown is present. A tax-exclusive
+  tenant is handled automatically.
+- **FUTURE IDEA — "all of a client's third parties" 2nd dropdown** in the
+  create-draft modal: pre-fill a recipient picker with EVERY third party the
+  client routes to (not just this invoice's). The data lives in WHMCS
+  `mod_ekdosi_contacts` (ekdosi can't read it → would need a new
+  `contacts-by-userid` bridge endpoint). DEFERRED: the existing ΑΦΜ search on
+  the recipient dropdown already covers picking any third party; this is a
+  speed/convenience nicety, not a gap.
 - **griniaris** (field 338 immediate-invoicing) — ✅ DONE (G8, two phases):
   phase 1 = an "Άμεσο" badge on inbox rows whose customer is `needs_immediate_invoice`;
   phase 2 = the `whmcs:auto-issue` command auto-files those rows at AADE (see G8 below).
@@ -393,9 +444,11 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
   VatCategory's new `vat_exemption_category` field; throws if unconfigured or
   ambiguous. WHMCS filer pre-flight aligned. Set the reason on the 0%-rate VAT
   category (Setup → VAT Categories).
-- **G3 — `whmcs_amount_includes_tax`: ✅ DONE.** `companies.whmcs_amount_includes_tax`
-  (default true = GR gross norm); `WhmcsInvoiceMapper` adds VAT instead of
-  dividing it out when a tenant runs tax-exclusive. Company-form toggle.
+- **G3 — net/gross handling: ✅ DONE + HARDENED (2026-05-31).** `WhmcsInvoiceMapper`
+  now DETECTS net-vs-gross from the invoice payload (`subtotal/tax/taxrate/total`:
+  subtotal+tax==total → net, add VAT; subtotal==total → gross, back out net),
+  so it's correct without per-tenant config. `companies.whmcs_amount_includes_tax`
+  (default true) is only the fallback when the payload carries no breakdown.
 - **G9 — PaymentMethod→myDATA type: ✅ DONE.** `payment_methods.mydata_payment_type`
   (§8.12, 1–8); `MyDataSubmitter::paymentMethodTypeFor` reads it, falls back to
   3 (cash) when unmapped/invalid. PaymentMethod-form select.

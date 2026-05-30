@@ -23,7 +23,7 @@
 | Εκτυπώσεις | FastReport 3 (`.fr3`) | PDF μέσω Blade/dompdf | ➡️/✅ |
 | myDATA | `CMyData.cpp` (χαμένο), προ-myDATA ΕΑΦΔΣΣ | `firebed/aade-mydata`, ζωντανός συγχρονισμός + reconciliation | ✅ |
 | WHMCS | 5 plugins + MySQL mirror push | Ενοποιημένο `ekdosi_bridge`, PHP-to-PHP API, **draft-first** inbox | ✅ |
-| Ορατότητα WHMCS | Κρυφή στήλη `invoiced` μόνο | Badge+ΜΑΡΚ, badge λίστας, «Αποστολή στο Ekdosi», **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ) | 🆕 |
+| Ορατότητα WHMCS | Κρυφή στήλη `invoiced` μόνο | Badge+ΜΑΡΚ, badge λίστας, «Αποστολή στο Ekdosi», **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ), **συγκεντρωτική λίστα** (περίοδος/Είδος/Τρίτος) — plugin v0.12.0 | 🆕 |
 | Reconciliation | Καμία | Τοπικό + ζωντανό (πωλήσεις & έξοδα), ομαδοποίηση αδέσποτων | 🆕 |
 | Έξοδα/Ε3 | Καμία | Προμηθευτές, RequestDocs, classification, ΦΠΑ, Ε3 | 🆕 |
 | Πολλές χώρες | Όχι (μόνο ΕΛ) | Multi-country από την αρχή (ΕΛ myDATA + ΕΕ PEPPOL stub) | 🆕 |
@@ -121,8 +121,22 @@ shared-DB:
   Το legacy εξέθετε μόνο μια κρυφή αριθμητική στήλη `invoiced`.
 - ✅ **timologia v2 / τιμολόγηση σε τρίτους** (T-1 + T-2): resolution,
   single-party billing, **πολλαπλοί δικαιούχοι → block + guided split** (το
-  legacy τους **ανακάτευε σιωπηλά** σε ένα παραστατικό — νομικό λάθος).
-- ❌ `afm2name` καταργήθηκε (το ekdosi κάνει GSIS native — `AadeRegistryLookup`).
+  legacy τους **ανακάτευε σιωπηλά** σε ένα παραστατικό — νομικό λάθος). Το
+  inbox + η λίστα του plugin δείχνουν το **όνομα δικαιούχου**· admin μπορεί να
+  **διορθώσει δρομολόγηση** (CS-side).
+- ❌ `afm2name` καταργήθηκε (το ekdosi κάνει GSIS native — `AadeRegistryLookup`),
+  με **«Διόρθωση από ΑΑΔΕ»** (overwrite — το μητρώο είναι η πηγή αλήθειας).
+
+**Live-deploy hardening (2026-05-31, prod-verified):**
+- 🐞→✅ **Inbox paging:** το WHMCS `GetInvoices` σελιδοποιεί με
+  `limitstart/limitnum` (όχι `limit/offset` — αγνοούνταν σιωπηλά) → το inbox
+  κολλούσε σε 1 σελίδα (16 αντί 146). Διορθώθηκε + loop guard.
+- 🐞→✅ **ΦΠΑ:** ο mapper **αναγνωρίζει** net/gross από το payload του
+  τιμολογίου (`subtotal/tax/taxrate/total`) αντί να μαντεύει — τέλος το
+  «πετσόκομμα» τιμής σε tax-exclusive tenant.
+- ✅ **Ορατότητα με ΑΦΜ:** ο ιστορικός σύνδεσμος WHMCS→ΤΠΥ δεν σώθηκε ποτέ στη
+  μετάπτωση· η αντιστοίχιση γίνεται με ΑΦΜ (ο heuristic content-matcher χτίστηκε
+  και **αφαιρέθηκε** — δεν μαντεύουμε νομικό σύνδεσμο).
 
 ---
 
