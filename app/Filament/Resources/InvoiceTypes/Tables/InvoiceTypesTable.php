@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\InvoiceTypes\Tables;
 
+use App\Support\MyData\InvoiceTypeClassSuggester;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -42,7 +43,37 @@ class InvoiceTypesTable
 
                 TextColumn::make('mydata_type')
                     ->label('myDATA')
-                    ->placeholder('—')
+                    ->badge()
+                    // Empty classification = AADE would reject it at filing.
+                    // Flag it red and show the suggested §8.1 code so the operator
+                    // knows what to set (Edit → myDATA). Filled = plain gray code.
+                    ->state(function ($record): string {
+                        if (filled($record->mydata_type)) {
+                            return $record->mydata_type;
+                        }
+                        $s = InvoiceTypeClassSuggester::suggest(
+                            (string) $record->name,
+                            (bool) $record->is_credit,
+                            (bool) $record->is_return,
+                        );
+
+                        return $s ? "λείπει → {$s['code']}?" : 'λείπει';
+                    })
+                    ->color(fn ($record): string => filled($record->mydata_type) ? 'gray' : 'danger')
+                    ->tooltip(function ($record): ?string {
+                        if (filled($record->mydata_type)) {
+                            return null;
+                        }
+                        $s = InvoiceTypeClassSuggester::suggest(
+                            (string) $record->name,
+                            (bool) $record->is_credit,
+                            (bool) $record->is_return,
+                        );
+
+                        return $s
+                            ? "Προτεινόμενη: {$s['code']} — {$s['label']} (επιβεβαιώστε στο Edit)"
+                            : 'Ορίστε κατηγορία myDATA στο Edit';
+                    })
                     ->toggleable(),
 
                 IconColumn::make('show_on_menu')

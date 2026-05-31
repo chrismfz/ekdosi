@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\DistributionAim;
 use App\Models\PaymentMethod;
+use App\Support\MyData\InvoiceTypeClassSuggester;
 use App\Support\MyDataOptions;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -14,6 +15,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rule;
 
 class InvoiceTypeForm
@@ -69,7 +71,23 @@ class InvoiceTypeForm
                                     ->options(MyDataOptions::invoiceTypes())
                                     ->searchable()
                                     ->preload()
-                                    ->helperText('AADE classification code that determines how this series is filed at myDATA. e.g. "1.1" sales invoice, "2.1" service invoice, "11.2" ΑΠΥ.'),
+                                    // When empty, surface a name-based suggestion
+                                    // (display-only — the operator still picks it).
+                                    ->helperText(function ($state, $get): string|HtmlString {
+                                        $base = 'AADE classification code that determines how this series is filed at myDATA. e.g. "1.1" sales invoice, "2.1" service invoice, "11.2" ΑΠΥ.';
+                                        if (filled($state)) {
+                                            return $base;
+                                        }
+                                        $s = InvoiceTypeClassSuggester::suggest(
+                                            (string) $get('name'),
+                                            (bool) $get('is_credit'),
+                                            (bool) $get('is_return'),
+                                        );
+
+                                        return $s
+                                            ? new HtmlString('<span class="fi-color-warning-600">Προτεινόμενη βάσει ονόματος: <strong>'.e($s['code']).'</strong> — '.e($s['label']).'</span> · '.$base)
+                                            : $base;
+                                    }),
 
                                 Select::make('mydata_income_class')
                                     ->label('Income classification')
