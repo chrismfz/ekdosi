@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Quotes\Schemas;
 
 use App\Models\Customer;
 use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -159,6 +160,18 @@ class QuoteForm
                                                 ->numeric()
                                                 ->default(0)
                                                 ->prefix('€'),
+                                            // product_category_id is NOT NULL (restrictOnDelete) on
+                                            // `products` — required here or the inline create hits an
+                                            // integrity-constraint violation.
+                                            Select::make('product_category_id')
+                                                ->label('Κατηγορία')
+                                                ->options(fn () => ProductCategory::query()
+                                                    ->where('company_id', Filament::getTenant()?->getKey())
+                                                    ->orderBy('description_short')
+                                                    ->pluck('description_short', 'id')
+                                                    ->toArray())
+                                                ->searchable()
+                                                ->required(),
                                             Select::make('vat_category_id')
                                                 ->label('Κατηγορία ΦΠΑ')
                                                 ->options(fn () => VatCategory::query()
@@ -174,7 +187,8 @@ class QuoteForm
                                                 'company_id' => Filament::getTenant()?->getKey(),
                                                 'description_short' => $data['description_short'],
                                                 'sell_price' => $data['sell_price'] ?? 0,
-                                                'vat_category_id' => $data['vat_category_id'] ?? null,
+                                                'product_category_id' => $data['product_category_id'],
+                                                'vat_category_id' => $data['vat_category_id'],
                                                 'is_active' => true,
                                             ]);
 
