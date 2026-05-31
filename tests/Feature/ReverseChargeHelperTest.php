@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use App\Support\MyData\ReverseCharge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -46,6 +47,41 @@ class ReverseChargeHelperTest extends TestCase
 
         $nonEu = Customer::create(['company_id' => $tenant->id, 'name' => 'US Co', 'country' => 'US', 'vat_vies' => 'US123']);
         $this->assertFalse(ReverseCharge::appliesTo($nonEu));
+    }
+
+    public function test_should_default_zero_vat_only_with_single_exempt_category(): void
+    {
+        $tenant = Company::factory()->create();
+        $eu = Customer::create(['company_id' => $tenant->id, 'name' => 'AT', 'country' => 'AT', 'vat_vies' => 'ATU18522105']);
+
+        // No 0% category configured → no auto-default (would throw at submit).
+        $this->assertFalse(ReverseCharge::shouldDefaultZeroVat($tenant, $eu));
+
+        // Exactly one 0% category WITH an exemption reason → auto-default on.
+        VatCategory::create([
+            'company_id' => $tenant->id, 'description' => '0% ενδοκοινοτικό',
+            'rate' => 0, 'vat_exemption_category' => Codes::VAT_EXEMPTION_INTRACOMMUNITY,
+        ]);
+        $this->assertTrue(ReverseCharge::shouldDefaultZeroVat($tenant, $eu));
+
+        // A SECOND 0% exempt category → ambiguous → no auto-default.
+        VatCategory::create([
+            'company_id' => $tenant->id, 'description' => '0% εξαγωγή',
+            'rate' => 0, 'vat_exemption_category' => 15,
+        ]);
+        $this->assertFalse(ReverseCharge::shouldDefaultZeroVat($tenant, $eu));
+    }
+
+    public function test_should_not_default_for_greek_customer_even_with_category(): void
+    {
+        $tenant = Company::factory()->create();
+        VatCategory::create([
+            'company_id' => $tenant->id, 'description' => '0%',
+            'rate' => 0, 'vat_exemption_category' => 16,
+        ]);
+        $gr = Customer::create(['company_id' => $tenant->id, 'name' => 'GR', 'country' => 'GR', 'afm' => '123456789']);
+
+        $this->assertFalse(ReverseCharge::shouldDefaultZeroVat($tenant, $gr));
     }
 
     public function test_exemption_options_are_human_readable_and_code_16_is_article_45(): void

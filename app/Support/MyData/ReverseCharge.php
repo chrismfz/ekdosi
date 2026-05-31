@@ -2,7 +2,9 @@
 
 namespace App\Support\MyData;
 
+use App\Models\Company;
 use App\Models\Customer;
+use App\Models\VatCategory;
 
 /**
  * The single predicate for "is this an EU intra-community supply that should be
@@ -54,5 +56,33 @@ class ReverseCharge
             || trim((string) ($customer->afm ?? '')) !== '';
 
         return $hasVat;
+    }
+
+    /**
+     * Should new invoice lines for this customer DEFAULT to 0% (reverse charge)?
+     *
+     * True only when BOTH hold, so the auto-default is deterministic and never
+     * produces an invoice the submitter would reject:
+     *   1. appliesTo($customer) — EU non-GR counterparty with a VAT id; and
+     *   2. the tenant has EXACTLY ONE 0%-rate VatCategory carrying a §8.3
+     *      exemption reason. (This is the same single-category invariant
+     *      MyDataSubmitter::resolveVatExemptionCategory needs — if it's
+     *      missing or ambiguous, filing would throw, so we must NOT silently
+     *      pre-fill 0% and lead the operator into a doomed submit.)
+     *
+     * The operator can still change the per-line VAT afterwards (mixed
+     * invoices), and a domestic/GR customer is never affected.
+     */
+    public static function shouldDefaultZeroVat(Company $tenant, Customer $customer): bool
+    {
+        if (! self::appliesTo($customer)) {
+            return false;
+        }
+
+        return VatCategory::query()
+            ->where('company_id', $tenant->getKey())
+            ->where('rate', 0)
+            ->whereNotNull('vat_exemption_category')
+            ->count() === 1;
     }
 }
