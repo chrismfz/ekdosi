@@ -31,17 +31,17 @@ class ListExpenses extends BaseListRecords
             'all' => Tab::make('Όλα'),
 
             'suppliers' => Tab::make('Προμηθευτών')
-                ->modifyQueryUsing(fn (Builder $q) => $q->where('source', ExpenseSource::Sync->value)),
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('source', ExpenseSource::Sync->value)),
 
             'ours' => Tab::make('Δικά μας παραστατικά')
-                ->modifyQueryUsing(fn (Builder $q) => $q
+                ->modifyQueryUsing(fn (Builder $query) => $query
                     ->where('source', ExpenseSource::SelfDeclared->value)
                     ->where(fn (Builder $w) => $w
                         ->whereNull('category')
                         ->orWhereNotIn('category', $accounting))),
 
             'accounting' => Tab::make('Λοιπά (πάγια/μισθοδοσία)')
-                ->modifyQueryUsing(fn (Builder $q) => $q
+                ->modifyQueryUsing(fn (Builder $query) => $query
                     ->where('source', ExpenseSource::SelfDeclared->value)
                     ->whereIn('category', $accounting)),
         ];
