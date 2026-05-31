@@ -582,9 +582,15 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
   (`App\Filament\RelationManagers\ActivityLogRelationManager`, relationship
   `activitiesAsSubject`, «Ιστορικό» tab) registered on the Invoice / Customer /
   Payment resources — naturally tenant-safe (a record's own activities; the page
-  already scopes the record, so no `company_id` on the log needed). `php artisan
-  migrate` creates `activity_log` (the migration already matches the v5 stub).
-  **Deferred:** a tenant-wide activity feed (would need `company_id` on the log).
+  already scopes the record). **Tenant-wide feed** too: `activity_log.company_id`
+  (stamped on write by `App\Models\Activity` from the subject; config points
+  `activity_model` at it) powers `App\Filament\Pages\ActivityFeed`
+  («Πρόσφατη δραστηριότητα», admin-only via `View:ActivityFeed`) — the whole
+  tenant's changes in one chronological, filterable list. `App\Models\Activity`
+  is the single home for the Greek subject label + the diff formatter, shared by
+  the relation manager and the feed. **Deploy:** `php artisan migrate` (creates
+  `activity_log` + adds `company_id`), then `shield:generate` + `shield:sync-super-admin`
+  so `View:ActivityFeed` exists and `company_admin` holds it.
 - **Per-tenant roles + role-picker — ✅ DONE (PR1–PR3, PR #136).** Three managed
   roles per tenant (`super_admin`, `company_admin`, `operator`), all provisioned
   by `App\Services\TenantRoleProvisioner` (`ensureStandardRoles` from the
