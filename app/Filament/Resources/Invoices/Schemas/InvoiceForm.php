@@ -61,6 +61,7 @@ class InvoiceForm
         return $schema->components([
             // ─── Κεφαλίδα: τύπος, πελάτης, τρόποι, ημερομηνίες ───
             Section::make()
+                ->columnSpanFull()
                 ->columns(2)
                 ->schema([
                     Select::make('invoice_type_id')
@@ -191,6 +192,7 @@ class InvoiceForm
 
             // ─── Γραμμές (Excel-style) ───
             Section::make('Γραμμές')
+                ->columnSpanFull()
                 ->schema([
                     Repeater::make('lines')
                         ->relationship('lines')
@@ -341,6 +343,7 @@ class InvoiceForm
 
             // ─── Στοιχεία πελάτη (snapshot) — collapsed ───
             Section::make('Customer snapshot')
+                ->columnSpanFull()
                 ->description('Frozen at issue time. Auto-fills from the customer; you can override before save. Once filed at myDATA, the snapshot is legally locked.')
                 ->collapsed()
                 ->columns(2)
@@ -359,6 +362,7 @@ class InvoiceForm
 
             // ─── Σημειώσεις + παρακράτηση — collapsed ───
             Section::make('Σημειώσεις & παρακράτηση')
+                ->columnSpanFull()
                 ->collapsed()
                 ->schema([
                     Textarea::make('notes')->rows(4)->columnSpanFull()->label('Internal / printed notes'),

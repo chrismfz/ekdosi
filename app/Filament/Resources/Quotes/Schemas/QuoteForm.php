@@ -37,6 +37,7 @@ class QuoteForm
         return $schema->components([
             // ─── Κεφαλίδα: θέμα + πελάτης + ημερομηνίες ───
             Section::make()
+                ->columnSpanFull()
                 ->columns(2)
                 ->schema([
                     TextInput::make('subject')
@@ -108,6 +109,7 @@ class QuoteForm
 
             // ─── Γραμμές (Excel-style) ───
             Section::make('Γραμμές')
+                ->columnSpanFull()
                 ->schema([
                     Repeater::make('lines')
                         ->relationship('lines')
@@ -246,6 +248,7 @@ class QuoteForm
 
             // ─── Στοιχεία πελάτη (snapshot) — collapsed by default ───
             Section::make('Στοιχεία πελάτη')
+                ->columnSpanFull()
                 ->description('Συμπληρώνονται αυτόματα από τον πελάτη· αντιγράφονται στο παραστατικό κατά τη μετατροπή.')
                 ->collapsed()
                 ->columns(2)
@@ -263,6 +266,7 @@ class QuoteForm
 
             // ─── Σημειώσεις — collapsed by default ───
             Section::make('Σημειώσεις')
+                ->columnSpanFull()
                 ->collapsed()
                 ->schema([
                     Textarea::make('proposal_text')
