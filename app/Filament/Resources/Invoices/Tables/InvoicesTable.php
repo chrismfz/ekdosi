@@ -4,13 +4,16 @@ namespace App\Filament\Resources\Invoices\Tables;
 
 use App\Enums\LocalStatus;
 use App\Enums\PaymentStatus;
+use App\Jobs\SendInvoiceEmail;
 use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -112,6 +115,30 @@ class InvoicesTable
                     ->boolean()
                     ->toggleable(isToggledHiddenByDefault: true),
 
+                // Last email attempt at a glance — so a 'failed' send is visible
+                // in the list (filter below) without opening each invoice.
+                TextColumn::make('email_status')
+                    ->label('Email')
+                    ->badge()
+                    ->state(fn (?Invoice $record): ?string => $record?->latestMailLog?->status)
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'sent' => 'Στάλθηκε',
+                        'failed' => 'Απέτυχε',
+                        'queued' => 'Σε ουρά',
+                        'sending' => 'Αποστολή…',
+                        default => '—',
+                    })
+                    ->color(fn (?string $state): string => match ($state) {
+                        'sent' => 'success',
+                        'failed' => 'danger',
+                        'queued', 'sending' => 'info',
+                        default => 'gray',
+                    })
+                    ->tooltip(fn (?Invoice $record): ?string => $record?->latestMailLog?->status === 'failed'
+                        ? $record->latestMailLog->error_message
+                        : null)
+                    ->toggleable(),
+
                 IconColumn::make('printed')
                     ->boolean()
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -158,6 +185,7 @@ class InvoicesTable
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->whereKey($value)
                             ->first();
+
                         return $c ? ($c->trashed() ? $c->name.' (deleted)' : $c->name) : null;
                     })()),
 
@@ -188,6 +216,28 @@ class InvoicesTable
                     ->placeholder('All')
                     ->trueLabel('Submitted only')
                     ->falseLabel('Not submitted only'),
+
+                // Surface invoices whose email needs attention. "Απέτυχε" =
+                // the LATEST send attempt failed (a later success supersedes it).
+                SelectFilter::make('mail_status')
+                    ->label('Κατάσταση email')
+                    ->options([
+                        'failed' => 'Απέτυχε',
+                        'sent' => 'Στάλθηκε',
+                        'pending' => 'Σε ουρά / αποστολή',
+                        'none' => 'Χωρίς αποστολή',
+                    ])
+                    ->query(function (Builder $q, array $data): Builder {
+                        $v = $data['value'] ?? null;
+                        if ($v === null || $v === '') {
+                            return $q;
+                        }
+                        if ($v === 'none') {
+                            return $q->whereDoesntHave('mailLog');
+                        }
+
+                        return $q->whereLatestMailStatus($v === 'pending' ? ['queued', 'sending'] : [$v]);
+                    }),
 
                 // Quick period presets so nothing unsent slips past the
                 // weekly review (e.g. "Αυτό το τρίμηνο" + "Μη υποβληθέντα").
@@ -220,9 +270,9 @@ class InvoicesTable
 
                 Filter::make('issued_at_range')
                     ->schema([
-                        \Filament\Forms\Components\DatePicker::make('from')
+                        DatePicker::make('from')
                             ->label('Issued from'),
-                        \Filament\Forms\Components\DatePicker::make('to')
+                        DatePicker::make('to')
                             ->label('Issued to'),
                     ])
                     ->query(function (Builder $q, array $data) {
@@ -286,6 +336,36 @@ class InvoicesTable
                             Notification::make()
                                 ->title("Υποβλήθηκαν: {$ok} · Παραλείφθηκαν: {$skip} · Απέτυχαν: {$fail}")
                                 ->{$fail > 0 ? 'warning' : 'success'}()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion(),
+
+                    // Re-send the invoice email for the selection (same as the
+                    // per-invoice "Email PDF" action). Pair with the «Κατάσταση
+                    // email = Απέτυχε» filter to clear failures from the web.
+                    BulkAction::make('resend_email')
+                        ->label('Επαναποστολή email')
+                        ->icon('heroicon-o-envelope')
+                        ->color('gray')
+                        ->requiresConfirmation()
+                        ->modalHeading('Επαναποστολή email στους πελάτες')
+                        ->modalDescription('Μπαίνει στην ουρά ένα email με το τρέχον PDF για κάθε επιλεγμένο τιμολόγιο. Όσα δεν έχουν email πελάτη παραλείπονται.')
+                        ->action(function (Collection $records): void {
+                            $queued = 0;
+                            $skip = 0;
+                            foreach ($records as $record) {
+                                if (blank($record->customer?->email)) {
+                                    $skip++;
+
+                                    continue;
+                                }
+                                SendInvoiceEmail::dispatch($record, trigger: 'manual', triggeredByUserId: auth()->id());
+                                $queued++;
+                            }
+
+                            Notification::make()
+                                ->title("Στην ουρά: {$queued} · Παραλείφθηκαν (χωρίς email): {$skip}")
+                                ->{$skip > 0 ? 'warning' : 'success'}()
                                 ->send();
                         })
                         ->deselectRecordsAfterCompletion(),

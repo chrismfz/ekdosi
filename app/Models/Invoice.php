@@ -8,6 +8,7 @@ use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -248,6 +249,32 @@ class Invoice extends Model
     public function mailLog(): HasMany
     {
         return $this->hasMany(InvoiceMailLog::class)->orderByDesc('created_at');
+    }
+
+    /**
+     * The most recent send attempt (by id) — drives the "email status" column +
+     * filter on the invoices list without an N+1. Latest id == latest attempt
+     * since mail-log rows are insert-ordered.
+     */
+    public function latestMailLog(): HasOne
+    {
+        return $this->hasOne(InvoiceMailLog::class)->latestOfMany();
+    }
+
+    /**
+     * Invoices whose LATEST mail-log row (max id) has one of the given statuses.
+     * A correlated subquery — NOT whereHas on latestMailLog (Laravel can't build
+     * an existence query for a latestOfMany relation). Backs the list's email
+     * filter; kept here so it's testable without the Filament harness.
+     *
+     * @param  list<string>  $statuses
+     */
+    public function scopeWhereLatestMailStatus(Builder $query, array $statuses): Builder
+    {
+        return $query->whereIn('id', InvoiceMailLog::query()
+            ->whereIn('status', $statuses)
+            ->whereRaw('invoice_mail_log.id = (select max(m2.id) from invoice_mail_log m2 where m2.invoice_id = invoice_mail_log.invoice_id)')
+            ->select('invoice_id'));
     }
 
     /**

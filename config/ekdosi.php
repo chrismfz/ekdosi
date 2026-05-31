@@ -26,6 +26,13 @@ return [
         'mail_sweep_enabled' => env('EKDOSI_SCHEDULE_MAIL_SWEEP', true),
         'mail_sweep_threshold_minutes' => (int) env('EKDOSI_MAIL_SWEEP_THRESHOLD', 15),
 
+        // invoices:resend-failed-emails — re-queue invoice emails whose last
+        // send attempt failed. Default OFF: a systemic mail outage would
+        // otherwise re-queue en masse every run; enable once SMTP is healthy.
+        'resend_failed_emails_enabled' => env('EKDOSI_SCHEDULE_RESEND_FAILED_EMAILS', false),
+        'resend_failed_emails_cron' => env('EKDOSI_RESEND_FAILED_EMAILS_CRON', '30 * * * *'),
+        'resend_failed_emails_since_days' => (int) env('EKDOSI_RESEND_FAILED_EMAILS_SINCE', 3),
+
         // whmcs:fetch-pending — pull paid+unfiled WHMCS invoices into the
         // inbox, per WHMCS-configured tenant. Cron expression (default
         // every 15 min).
