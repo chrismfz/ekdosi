@@ -145,6 +145,10 @@ class TenantRoleProvisioner
      */
     public const OPERATOR_RESOURCES = [
         'Invoice', 'Quote', 'Customer', 'Product', 'Payment', 'Expense', 'Supplier',
+        // The WHMCS inbox is daily operator work (review staged invoices, file
+        // them). Create:* isn't generated for it (no create policy method) — the
+        // operatorPermissions() whereIn filter drops the non-existent combos.
+        'PendingWhmcsInvoice',
     ];
 
     /**

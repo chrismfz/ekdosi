@@ -6,6 +6,7 @@ use App\Filament\Resources\WhmcsInbox\Pages\ListWhmcsInbox;
 use App\Filament\Resources\WhmcsInbox\Tables\WhmcsInboxTable;
 use App\Models\PendingWhmcsInvoice;
 use BackedEnum;
+use Filament\Facades\Filament;
 use Filament\Resources\Resource;
 use Filament\Tables\Table;
 use UnitEnum;
@@ -51,7 +52,7 @@ class WhmcsInboxResource extends Resource
      */
     public static function getNavigationBadge(): ?string
     {
-        $tenant = \Filament\Facades\Filament::getTenant();
+        $tenant = Filament::getTenant();
         if (! $tenant) {
             return null;
         }
@@ -59,6 +60,7 @@ class WhmcsInboxResource extends Resource
             ->where('company_id', $tenant->getKey())
             ->where('status', PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
             ->count();
+
         return $count > 0 ? (string) $count : null;
     }
 
@@ -67,21 +69,12 @@ class WhmcsInboxResource extends Resource
         return 'warning';
     }
 
-    /**
-     * Bypass Shield's default deny-when-no-permission-exists behavior
-     * the way the Καρτέλα page does. Without this, the gap between
-     * deploy and the operator running `php artisan shield:generate
-     * --resource=WhmcsInboxResource` reproduces the same 404 storm
-     * the CustomerLedger had in PRs #39-45. The per-record actions
-     * (File at AADE / Reject / Hold / Re-stage) still consult the
-     * PendingWhmcsInvoicePolicy via update authorization, so a
-     * permission-less user gets a read-only view of the inbox until
-     * permissions are granted — not unrestricted file-at-AADE access.
-     */
-    public static function canAccess(): bool
-    {
-        return auth()->check();
-    }
+    // Access is governed by PendingWhmcsInvoicePolicy (ViewAny:PendingWhmcsInvoice
+    // …) — no canAccess override. `PendingWhmcsInvoice` is in the operator role's
+    // curated set, so operators work the inbox; the per-record File-at-AADE /
+    // Reject / Hold / Re-stage actions still require Update:PendingWhmcsInvoice.
+    // A missing-permission user falls through to a clean Gate deny (false, not a
+    // PermissionDoesNotExist throw), so no 404 storm before shield:generate runs.
 
     public static function table(Table $table): Table
     {

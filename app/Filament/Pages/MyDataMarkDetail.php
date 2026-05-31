@@ -73,18 +73,22 @@ class MyDataMarkDetail extends Page
     }
 
     /**
-     * Route-level authorization — same gate as the myDATA console: an
-     * orphan lookup hits AADE with the tenant's credentials, so a
-     * hand-typed URL must be blocked for non-Greek / Off tenants.
+     * Route-level authorization — same tenant gate as the myDATA console (an
+     * orphan lookup hits AADE with the tenant's credentials, so a hand-typed URL
+     * must be blocked for non-Greek / Off tenants). Unlike the consoles this is a
+     * READ-ONLY drill-down linked from invoice rows, so operators reach it too:
+     * View:MyDataMarkDetail (admin page perm) OR View:Invoice (operators have it).
+     * Gate::can is 404-storm-safe.
      */
     public static function canAccess(): bool
     {
         $tenant = Filament::getTenant();
+        $user = auth()->user();
 
-        return auth()->check()
-            && $tenant
+        return $tenant
             && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off;
+            && $tenant->mydata_mode_enum !== MyDataMode::Off
+            && (bool) ($user?->can('View:MyDataMarkDetail') || $user?->can('View:Invoice'));
     }
 
     public function getTitle(): string

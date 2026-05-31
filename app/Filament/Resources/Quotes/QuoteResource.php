@@ -22,9 +22,11 @@ use Illuminate\Database\Eloquent\SoftDeletingScope;
 /**
  * Προσφορές (Quotes). A non-legal sales offer — see App\Models\Quote.
  *
- * canAccess() is opened to any authenticated user (the same Shield-bypass the
- * WhmcsInbox / other operational screens use) so a fresh tenant without
- * generated Shield permissions still sees the menu item.
+ * Access is governed by QuotePolicy (ViewAny:Quote …) — no canAccess override.
+ * `Quote` is in the operator role's curated permission set, so operators +
+ * company_admins + super_admins see it; missing-permission users fall through
+ * to a clean deny (Gate::can returns false, never the PermissionDoesNotExist
+ * throw), so there's no 404 storm before shield:generate has run.
  */
 class QuoteResource extends Resource
 {
@@ -49,11 +51,6 @@ class QuoteResource extends Resource
     public static function getPluralModelLabel(): string
     {
         return 'Προσφορές';
-    }
-
-    public static function canAccess(): bool
-    {
-        return auth()->check();
     }
 
     public static function getEloquentQuery(): Builder
