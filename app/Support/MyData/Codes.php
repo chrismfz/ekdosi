@@ -329,18 +329,35 @@ final class Codes
     }
 
     /**
-     * Is this an AADE-valid §8.2 VAT rate (0/4/6/9/13/17/24)? Single source of
-     * truth for "would AADE accept a line at this rate" — used by the ETL
-     * post-import warning, the VatCategories table flag, and matches what
-     * MyDataSubmitter::vatCategoryFor accepts. Tolerant float compare (0.01).
+     * The VAT rates ekdosi can actually FILE — i.e. the exact set
+     * MyDataSubmitter::vatCategoryFor() maps to an AADE vatCategory enum.
+     *
+     * NOTE this is a SUBSET of VAT_CATEGORY_RATES: that table lists the full
+     * §8.2 enum including codes 9 (3%) and 10 (4% island) from ν.5057/2023,
+     * which the submitter does NOT yet map (no match arm → it throws). So the
+     * "would AADE accept a line at this rate" check (ETL warning, table flag)
+     * MUST use THIS set, not the full enum — otherwise a 3% category passes the
+     * warning clean and then explodes at filing. Keep in lockstep with
+     * vatCategoryFor(): if a 3% arm is added there, add 3.0 here.
+     *
+     * @var list<float>
+     */
+    public const FILEABLE_VAT_RATES = [0.0, 4.0, 6.0, 9.0, 13.0, 17.0, 24.0];
+
+    /**
+     * Is this a VAT rate ekdosi can file at AADE? Single source of truth for
+     * "would AADE accept a line at this rate" — used by the ETL post-import
+     * warning AND the VatCategories table flag, and kept in sync with
+     * MyDataSubmitter::vatCategoryFor via FILEABLE_VAT_RATES. Tolerant float
+     * compare (0.01).
      */
     public static function vatRateIsValid(int|float|string|null $rate): bool
     {
         if ($rate === null || $rate === '') {
             return false;
         }
-        foreach (self::VAT_CATEGORY_RATES as $r) {
-            if ($r !== null && abs((float) $rate - $r) < 0.01) {
+        foreach (self::FILEABLE_VAT_RATES as $r) {
+            if (abs((float) $rate - $r) < 0.01) {
                 return true;
             }
         }

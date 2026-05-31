@@ -173,7 +173,15 @@ class MigrateFromFirebird extends Command
         // do NOT silently rewrite it (it's accounting data the operator may
         // have relied on); we WARN so they fix it via the lookup resources
         // (Setup → VAT Categories / Invoice Types, «Εισαγωγή τυπικών» seed).
-        $this->warnInvalidLookups();
+        //
+        // Wrapped: this runs AFTER the import transaction committed, so a
+        // failure here (a flaky read on the freshly-populated tables) must not
+        // turn a successful import into a command failure. Report and move on.
+        try {
+            $this->warnInvalidLookups();
+        } catch (\Throwable $e) {
+            $this->warn('  (post-import lookup check skipped: '.$e->getMessage().')');
+        }
 
         $this->newLine();
         $this->info('Done. Run the golden-test comparison next (see README).');
