@@ -328,6 +328,26 @@ final class Codes
         return isset(self::INVOICE_TYPES[$code]);
     }
 
+    /**
+     * Is this an AADE-valid §8.2 VAT rate (0/4/6/9/13/17/24)? Single source of
+     * truth for "would AADE accept a line at this rate" — used by the ETL
+     * post-import warning, the VatCategories table flag, and matches what
+     * MyDataSubmitter::vatCategoryFor accepts. Tolerant float compare (0.01).
+     */
+    public static function vatRateIsValid(int|float|string|null $rate): bool
+    {
+        if ($rate === null || $rate === '') {
+            return false;
+        }
+        foreach (self::VAT_CATEGORY_RATES as $r) {
+            if ($r !== null && abs((float) $rate - $r) < 0.01) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** Does this invoice type require an income classification? */
     public static function isIncomeInvoiceType(string $code): bool
     {
