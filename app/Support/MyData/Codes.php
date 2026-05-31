@@ -132,6 +132,74 @@ final class Codes
     ];
 
     /**
+     * §8.3 human-readable reasons (ν.5144/2024) — verbatim from the AADE spec
+     * (myDATA_API_Documentation_v2.0.0 §8.3, lines 2187–2226). Used to label the
+     * exemption-reason picker so the operator picks the RIGHT reason instead of
+     * a meaningless "Κατηγορία 16". Do NOT paraphrase — these are legal citations.
+     *
+     * For an EU intra-community supply (reverse charge) the reason is
+     * **code 16 — άρθρο 45** (ex-«άρθρο 39α»).
+     *
+     * @var array<int, string>
+     */
+    public const VAT_EXEMPTION_LABELS = [
+        1 => 'Χωρίς ΦΠΑ - άρθρο 2 και 3 του Κώδικα ΦΠΑ',
+        2 => 'Χωρίς ΦΠΑ - άρθρο 5 του Κώδικα ΦΠΑ',
+        3 => 'Χωρίς ΦΠΑ - άρθρο 17 του Κώδικα ΦΠΑ',
+        4 => 'Χωρίς ΦΠΑ - άρθρο 18 του Κώδικα ΦΠΑ',
+        5 => 'Χωρίς ΦΠΑ - άρθρο 21 του Κώδικα ΦΠΑ',
+        6 => 'Χωρίς ΦΠΑ - άρθρο 24 του Κώδικα ΦΠΑ',
+        7 => 'Χωρίς ΦΠΑ - άρθρο 27 του Κώδικα ΦΠΑ',
+        8 => 'Χωρίς ΦΠΑ - άρθρο 29 του Κώδικα ΦΠΑ',
+        9 => 'Χωρίς ΦΠΑ - άρθρο 30 του Κώδικα ΦΠΑ',
+        10 => 'Χωρίς ΦΠΑ - άρθρο 31 του Κώδικα ΦΠΑ',
+        11 => 'Χωρίς ΦΠΑ - άρθρο 32 του Κώδικα ΦΠΑ',
+        12 => 'Χωρίς ΦΠΑ - άρθρο 32 του Κώδικα ΦΠΑ - Πλοία Ανοικτής Θαλάσσης του Κώδικα ΦΠΑ',
+        13 => 'Χωρίς ΦΠΑ - άρθρο 32 .1.γ. του Κώδικα ΦΠΑ - Πλοία Ανοικτής Θαλάσσης του Κώδικα ΦΠΑ',
+        14 => 'Χωρίς ΦΠΑ - άρθρο 33 του Κώδικα ΦΠΑ',
+        15 => 'Χωρίς ΦΠΑ - άρθρο 44 του Κώδικα ΦΠΑ',
+        16 => 'Χωρίς ΦΠΑ - άρθρο 45 του Κώδικα ΦΠΑ',
+        17 => 'Χωρίς ΦΠΑ - άρθρο 47 του Κώδικα ΦΠΑ',
+        18 => 'Χωρίς ΦΠΑ - άρθρο 48 του Κώδικα ΦΠΑ',
+        19 => 'Χωρίς ΦΠΑ - άρθρο 54 του Κώδικα ΦΠΑ',
+        20 => 'ΦΠΑ εμπεριεχόμενος - άρθρο 50 του Κώδικα ΦΠΑ',
+        21 => 'ΦΠΑ εμπεριεχόμενος - άρθρο 51 του Κώδικα ΦΠΑ',
+        22 => 'ΦΠΑ εμπεριεχόμενος - άρθρο 52 του Κώδικα ΦΠΑ',
+        23 => 'ΦΠΑ εμπεριεχόμενος - άρθρο 53 του Κώδικα ΦΠΑ',
+        24 => 'Χωρίς ΦΠΑ - άρθρο 8 του Κώδικα ΦΠΑ',
+        25 => 'Χωρίς ΦΠΑ - ΠΟΛ.1029/1995',
+        26 => 'Χωρίς ΦΠΑ - ΠΟΛ.1167/2015',
+        27 => 'Λοιπές Εξαιρέσεις ΦΠΑ',
+        28 => 'Χωρίς ΦΠΑ – άρθρο 29 περ. β’ παρ.1 του Κώδικα ΦΠΑ, (Tax Free)',
+        29 => 'Χωρίς ΦΠΑ – άρθρο 56 του Κώδικα ΦΠΑ (OSS_μη ενωσιακό καθεστώς)',
+        30 => 'Χωρίς ΦΠΑ – άρθρο 57 του Κώδικα ΦΠΑ (OSS_ενωσιακό καθεστώς)',
+        31 => 'Χωρίς ΦΠΑ – άρθρο 58 του Κώδικα ΦΠΑ (IOSS)',
+    ];
+
+    /**
+     * §8.3 exemption reason that AADE expects for an EU intra-community supply
+     * (reverse charge): code 16 (άρθρο 45, ex-«άρθρο 39α»). Surfaced as the
+     * recommended default in the VAT-category form's 0% helper.
+     */
+    public const VAT_EXEMPTION_INTRACOMMUNITY = 16;
+
+    /**
+     * Options for an exemption-reason picker: "16 — Χωρίς ΦΠΑ - άρθρο 45 …".
+     *
+     * @return array<int, string>
+     */
+    public static function vatExemptionOptions(): array
+    {
+        $out = [];
+        foreach (self::VAT_EXEMPTION_CATEGORIES as $code) {
+            $label = self::VAT_EXEMPTION_LABELS[$code] ?? ('Κατηγορία '.$code);
+            $out[$code] = $code.' — '.$label;
+        }
+
+        return $out;
+    }
+
+    /**
      * Credit-note types that are NON-correlated (§8.1): AADE FORBIDS
      * <correlatedInvoices> on these. 5.1 = correlated (link required),
      * 5.2 = non-correlated (link forbidden). The submitter must not send

@@ -9,7 +9,9 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Support\MyData\Codes;
+use App\Support\MyData\ReverseCharge;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
@@ -128,6 +130,20 @@ class InvoiceForm
                                     $set('city', $customer->city);
                                     $set('postcode', $customer->postcode);
                                     $set('country', $customer->country ?: 'GR');
+
+                                    // Reverse-charge hint: EU non-GR customer with a VAT id →
+                                    // this is (almost certainly) an intra-community supply that
+                                    // should be invoiced at 0% with §8.3 reason 16 (άρθρο 45).
+                                    // We don't force it (the operator chooses the 0% VAT category
+                                    // per line) — just a one-time nudge so it isn't forgotten.
+                                    if (ReverseCharge::appliesTo($customer)) {
+                                        Notification::make()
+                                            ->title('Πιθανή ενδοκοινοτική παράδοση (reverse charge)')
+                                            ->body('Πελάτης ΕΕ ('.strtoupper((string) $customer->country).') με ΑΦΜ/ΦΠΑ. '
+                                                .'Συνήθως εκδίδεται με 0% ΦΠΑ και αιτία εξαίρεσης «16 — άρθρο 45» (πρώην 39α). '
+                                                .'Επιλέξτε την κατηγορία ΦΠΑ 0% στις γραμμές.')
+                                            ->info()->send();
+                                    }
                                 })
                                 ->disabled(fn ($record) => $record && $record->mydata_state !== null),
 

@@ -417,7 +417,7 @@ types); payments + credit notes; WHMCS bridge (A–B3) + `ekdosi_bridge` plugin;
 **timologia v2 / third-party invoicing — T-1 + T-2 DONE & merged** (resolution,
 single-party billing, multi-party split, hideable client page; see the WHMCS
 section + `docs/whmcs-legacy-plugin-map.md`); PDF + per-tenant email + send-log;
-dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`); **Προσφορές / Quotes** (μη-νομικό sales offer σε ΞΕΧΩΡΙΣΤΟΥΣ πίνακες — δεν αγγίζει InvoiceScope/χρήματα/ΦΠΑ· form/lines με προϊόν|free-text|inline-create· lifecycle Αποδοχή·Απόρριψη·Επαναφορά + **Μετατροπή→πρόχειρο παραστατικό** με αμφίδρομο ιστορικό quote↔invoice· δικός counter `ΠΡ-{n}` ποτέ το ΑΑ· PDF + email + send-log — **independent-reviewed**).
+dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`); **Προσφορές / Quotes** (μη-νομικό sales offer σε ΞΕΧΩΡΙΣΤΟΥΣ πίνακες — δεν αγγίζει InvoiceScope/χρήματα/ΦΠΑ· form/lines με προϊόν|free-text|inline-create· lifecycle Αποδοχή·Απόρριψη·Επαναφορά + **Μετατροπή→πρόχειρο παραστατικό** με αμφίδρομο ιστορικό quote↔invoice· δικός counter `ΠΡ-{n}` ποτέ το ΑΑ· PDF + email + send-log — **independent-reviewed**); **VIES EU-VAT validation/import** (`ViesLookup` REST `check-vat-number` — ο non-GR δίδυμος του GSIS· `ViesFormFill` «Επαλήθευση/Άντληση VIES» σε Customer/Supplier forms· typed result + 24h cache + transient-error handling)· **reverse-charge UX** (`ReverseCharge` predicate + invoice-form hint για ΕΕ-non-GR πελάτη· human-readable §8.3 exemption labels — code 16/άρθρο 45 = ενδοκοινοτική).
 
 **🚧 PARTIAL:** auto-email — both issue paths now covered: the **myDATA-VALID**
 path (`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
