@@ -18,7 +18,8 @@
 |---|---|---|---|
 | Πλατφόρμα | Windows desktop, μόνο σε εύθραυστο Win7 VM | Web — από οποιονδήποτε browser | ✅ |
 | Βάση | Firebird, **ένα DB ανά εταιρεία** | MariaDB **multi-tenant** (`company_id`) | ✅ |
-| Χρήστες/ρόλοι | Ουσιαστικά single-user | Πολλοί χρήστες + ρόλοι/δικαιώματα (Shield) | 🆕 |
+| Χρήστες/ρόλοι | Ουσιαστικά single-user | Πολλοί χρήστες + ρόλοι/δικαιώματα ανά εταιρεία (`super_admin`/`company_admin`/`operator`, Shield teams) + role-picker | 🆕 |
+| Audit / ιστορικό | Κανένα στο UI (μόνο DB triggers) | activitylog: ποιος-άλλαξε-τι σε τιμολόγια/πελάτες/πληρωμές (καρτέλα «Ιστορικό») | 🆕 |
 | Διεπαφή | VCL φόρμες | Filament panel, responsive, dark mode, ελληνικό UI | ✅ |
 | Εκτυπώσεις | FastReport 3 (`.fr3`) | PDF μέσω Blade/dompdf | ➡️/✅ |
 | myDATA | `CMyData.cpp` (χαμένο), προ-myDATA ΕΑΦΔΣΣ | `firebed/aade-mydata`, ζωντανός συγχρονισμός + reconciliation | ✅ |
@@ -198,9 +199,11 @@ scheduler + queue worker** να ενεργοποιηθούν στον deploy hos
 
 ## 10. Λοιπά νέα που δεν υπήρχαν στο legacy (🆕)
 - **Multi-tenant** + **multi-country** (ΕΛ myDATA + ΕΕ PEPPOL stub).
-- **Ρόλοι/δικαιώματα** ανά εταιρεία (Shield: `admin`/`operator`/`accountant_readonly`).
+- **Ρόλοι/δικαιώματα** ανά εταιρεία (Shield teams: `super_admin`/`company_admin`/
+  `operator`) + role-picker UI· role management μόνο για super_admin.
 - **Dashboard + widgets/charts** (έσοδα/μήνα, σύγκριση ετών, top πελάτες, ΦΠΑ).
-- **Audit trail** πλήρους XML (`mydata_marks`).
+- **Audit trail**: πλήρες XML myDATA (`mydata_marks`) **+** activitylog
+  (ποιος-άλλαξε-τι σε τιμολόγια/πελάτες/πληρωμές, καρτέλα «Ιστορικό»).
 - **Backups** (`spatie/laravel-backup`), **scheduler** (wired).
 - **Email παραστατικών** per-tenant + send-log· **αποστολή Καρτέλας** στο email.
 
@@ -229,7 +232,8 @@ scheduler + queue worker** να ενεργοποιηθούν στον deploy hos
   G7 gross-edit, G6 auto-email στο non-myDATA path.
 - **griniaris** άμεση τιμολόγηση (περιμένει live scheduler/worker).
 - **PEPPOL** submitter (Εσθονία) — stub μέχρι την προθεσμία.
-- **activitylog** σε invoices/customers/payments (installed, όχι wired).
+- ~~**activitylog** σε invoices/customers/payments~~ ✅ **DONE** (καρτέλα «Ιστορικό»).
+- ~~**Ρόλοι/δικαιώματα** ανά εταιρεία + role-picker~~ ✅ **DONE** (PR #136).
 
 ---
 

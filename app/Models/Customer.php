@@ -3,7 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
+use App\Models\Concerns\TracksActivity;
 use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,8 +16,22 @@ use Illuminate\Support\Facades\DB;
 class Customer extends Model
 {
     use BelongsToCompany;
+    use HasFactory, SoftDeletes, TracksActivity;
 
-    use HasFactory, SoftDeletes;
+    /**
+     * Audited identity/contact/terms columns. See TracksActivity.
+     *
+     * @return list<string>
+     */
+    protected function loggedAttributes(): array
+    {
+        return [
+            'type', 'afm', 'name', 'address1', 'address2', 'city', 'postcode',
+            'phone1', 'phone2', 'occupation', 'tax_office', 'email', 'secondary_email',
+            'discount', 'country', 'vat_vies', 'withhold_tax', 'payment_method_id',
+            'is_active', 'needs_immediate_invoice', 'auto_email_invoices',
+        ];
+    }
 
     protected $fillable = [
         'company_id',

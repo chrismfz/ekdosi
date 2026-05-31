@@ -41,10 +41,11 @@ after cutover.
   separate multi-tenancy package).
 - **myDATA**: `firebed/aade-mydata`.
 - **Roles/permissions**: `spatie/laravel-permission` + `bezhanSalleh/filament-shield`
-  (default roles per tenant: `admin`, `operator`, `accountant_readonly`).
+  (teams mode; managed roles per tenant: `super_admin`, `company_admin`,
+  `operator` — provisioned by `TenantRoleProvisioner`, see latent items).
 - **PDF**: `barryvdh/laravel-dompdf`. **Backups**: `spatie/laravel-backup`.
-- **Audit log**: `spatie/laravel-activitylog` (installed; not yet wired —
-  see latent items).
+- **Audit log**: `spatie/laravel-activitylog` (wired on invoices/customers/
+  payments via `App\Models\Concerns\TracksActivity`; «Ιστορικό» tab per record).
 - **Queue/scheduler**: Laravel built-in (DB driver). Scheduler IS wired
   (`routes/console.php`, gated by `config/ekdosi.php`) — needs the OS cron +
   a queue worker to actually run (see Env-prep).
@@ -527,8 +528,9 @@ The supplier/inbound mirror of the sales side, end-to-end:
 expense-classification AADE submit, RequestVatInfo/E3 cross-checks,
 `RequestMyExpenses`, manual expense entry, per-row import, supplier CSV import.
 
-Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes;
-cross-model activitylog (do once). **E-invoicing-via-provider (GR ΥΠΑΗΕΣ) +
+Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
+(Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see
+the latent-items section.) **E-invoicing-via-provider (GR ΥΠΑΗΕΣ) +
 PEPPOL blueprint: `docs/einvoice-provider-bridge.md`** (deferred; the
 `EInvoiceSubmitter` factory already has the slot — a `gr-provider`/`PeppolSubmitter`
 drops in. Provider schema reference: `docs/reference/aade-provider-invoicesDoc-v0.6.1.xsd`).
@@ -568,29 +570,42 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
 - **FK-aware delete guards** (`GuardedDeleteAction`) — deleting a referenced
   lookup either silently soft-deletes (orphaning dependents) or crashes on
   `restrictOnDelete`. Add a friendly count-and-block + "Deactivate".
-- **activitylog not wired** on invoices/customers/payments (installed). Do all
-  three at once; mind that re-imports bump `updated_at` and would spam it.
-- **Per-tenant roles + role-picker — ✅ DONE (PR1–PR3).** Three managed roles
-  per tenant (`super_admin`, `company_admin`, `operator`), all provisioned by
-  `App\Services\TenantRoleProvisioner` (`ensureStandardRoles` from the
-  `CompanyObserver` + `DatabaseSeeder` + `shield:sync-super-admin`).
-  `company_admin` = every permission of THIS tenant (no cross-tenant bypass);
-  `operator` = curated subset (`OPERATOR_RESOURCES` × `OPERATOR_ACTIONS`, no
-  delete/Setup/users). **Role-picker UI** (`App\Filament\Support\
-  ManageTenantRoleAction`) on both sides of the user↔company pivot sets one role
-  per company via `setRoleInCompany` (picker semantics, team-scoped); granting
-  `super_admin` needs the actor to already be super_admin there (no escalation).
-  **The 8 ex-`auth()->check()` screens now ride on real permissions** (PR3):
-  Quotes (`QuotePolicy`), WHMCS inbox (`PendingWhmcsInvoicePolicy`, added to the
-  operator set), Καρτέλα (`View:Customer`), ΜΑΡΚ detail (`View:MyDataMarkDetail`
-  OR `View:Invoice` — operator-reachable read-only); the live myDATA consoles +
-  Reports stay admin-only (`View:MyDataConsole`/`…Expenses`/`…E3Overview`/
-  `View:Reports`). All use `Gate::can` → missing permission resolves to false,
-  never a `PermissionDoesNotExist` throw, so no 404 storm before
-  `shield:generate`. After deploy, re-run `shield:sync-super-admin` so the
-  operator role picks up `PendingWhmcsInvoice`. **Remaining (deferred):** a
-  per-tenant role-picker test at the Livewire level for the escalation-guard
-  hidden-option path (the provisioner + the two pivot sides are covered).
+- **Cross-model activity log — ✅ DONE.** `spatie/laravel-activitylog` wired on
+  `Invoice`, `Customer`, `Payment` via `App\Models\Concerns\TracksActivity`
+  (`LogsActivity` + house rules: `logOnly($this->loggedAttributes())` — business
+  columns only, NEVER the money/myDATA CACHE columns; `logOnlyDirty()` +
+  `dontLogEmptyChanges()` so a cache-only recompute or the query-builder ETL —
+  which fires no Eloquent events — never spams the trail; `log_name` = the table;
+  Greek event labels). v5 stores the diff in the **`attribute_changes`** column
+  (not `properties`). Causer = the auth user (null = «Σύστημα» on CLI/queue).
+  Viewed via ONE shared read-only relation manager
+  (`App\Filament\RelationManagers\ActivityLogRelationManager`, relationship
+  `activitiesAsSubject`, «Ιστορικό» tab) registered on the Invoice / Customer /
+  Payment resources — naturally tenant-safe (a record's own activities; the page
+  already scopes the record, so no `company_id` on the log needed). `php artisan
+  migrate` creates `activity_log` (the migration already matches the v5 stub).
+  **Deferred:** a tenant-wide activity feed (would need `company_id` on the log).
+- **Per-tenant roles + role-picker — ✅ DONE (PR1–PR3, PR #136).** Three managed
+  roles per tenant (`super_admin`, `company_admin`, `operator`), all provisioned
+  by `App\Services\TenantRoleProvisioner` (`ensureStandardRoles` from the
+  `CompanyObserver` + `DatabaseSeeder` + `shield:sync-super-admin`; one
+  `withTeam()` helper owns the team-pin/cache discipline). `company_admin` = every
+  permission of THIS tenant **EXCEPT** `ADMIN_FORBIDDEN_RESOURCES`
+  (`User`/`Company`/`Role` — the panel-global, non-tenant-scoped resources), so a
+  tenant admin can't reach the cross-tenant user/company roster or escalate;
+  `operator` = explicit per-resource `OPERATOR_PERMISSION_MAP` (incl. WHMCS inbox
+  + read-only `View:MyDataMarkDetail`, no delete/Setup/users). **Role management
+  is super_admin-only:** `ManageTenantRoleAction` is `->visible()` to super_admins
+  AND hard-guards in the action body (Filament's `mountAction` doesn't re-check
+  `->visible()`), so a non-super actor can neither grant nor strip any role.
+  **The 8 ex-`auth()->check()` screens ride on real permissions** (PR3): Quotes
+  (`QuotePolicy`), WHMCS inbox (`PendingWhmcsInvoicePolicy`), Καρτέλα
+  (`View:Customer`), ΜΑΡΚ detail (`View:MyDataMarkDetail`); the live myDATA
+  consoles + Reports stay admin-only. All use `Gate::can` → missing permission =
+  false, never a `PermissionDoesNotExist` throw (no 404 storm). The live-AADE
+  orphan lookup inside ΜΑΡΚ detail is separately gated on `View:MyDataConsole`.
+  **After `git pull`/deploy, run `shield:sync-super-admin`** so the role maps
+  (operator's WHMCS-inbox/MARK perms, company_admin's deny-list) are applied.
 - **ETL re-run preserves soft-delete but refreshes columns** — a row soft-
   deleted in ekdosi gets its legacy values re-applied on re-import (deleted_at
   stays). To truly drop a row across re-imports, force-delete it.
