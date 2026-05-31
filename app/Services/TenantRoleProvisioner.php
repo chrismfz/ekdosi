@@ -261,6 +261,12 @@ class TenantRoleProvisioner
      * permission of the guard EXCEPT those whose resource is in
      * ADMIN_FORBIDDEN_RESOURCES (User/Company/Role).
      *
+     * NB: the resource is the part after the first ':'. A permission name with
+     * NO ':' (a non-Shield custom/global ability — none exist today,
+     * `custom_permissions` is empty) has no resource to match, so it would be
+     * GRANTED. If a cross-tenant-sensitive custom permission is ever added, give
+     * it a `:Resource` suffix in the forbidden list or this filter won't catch it.
+     *
      * @return Collection<int, Permission>
      */
     private function companyAdminPermissions(string $guard): Collection
@@ -268,11 +274,8 @@ class TenantRoleProvisioner
         return Permission::query()
             ->where('guard_name', $guard)
             ->get()
-            ->reject(fn (Permission $p): bool => in_array(
-                Str::after($p->name, ':'),
-                self::ADMIN_FORBIDDEN_RESOURCES,
-                true,
-            ));
+            ->reject(fn (Permission $p): bool => str_contains($p->name, ':')
+                && in_array(Str::after($p->name, ':'), self::ADMIN_FORBIDDEN_RESOURCES, true));
     }
 
     /**

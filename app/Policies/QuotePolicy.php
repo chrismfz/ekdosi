@@ -14,7 +14,7 @@ use Illuminate\Foundation\Auth\User as AuthUser;
  * generated permissions drive access:
  *   ViewAny:Quote / View:Quote / Create:Quote / Update:Quote / …
  *
- * `Quote` is in TenantRoleProvisioner::OPERATOR_RESOURCES, so the operator role
+ * `Quote` is in TenantRoleProvisioner::OPERATOR_PERMISSION_MAP, so the operator role
  * gets ViewAny/View/Create/Update:Quote; company_admin (all perms) and
  * super_admin (Gate::before bypass) see everything. Replaces the previous
  * blanket `canAccess() => auth()->check()` bypass on QuoteResource.
