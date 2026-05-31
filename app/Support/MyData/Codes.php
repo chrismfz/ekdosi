@@ -121,6 +121,51 @@ final class Codes
     ];
 
     /**
+     * §8.2 official descriptions (verbatim from the AADE spec, §8.2 table) used
+     * to SEED a tenant's vat_categories with the standard Greek rates. There is
+     * NO myDATA "fetch VAT rates" API — §8.2 is a static enum in the spec — so
+     * the seed source is this committed table (which IS the AADE spec).
+     *
+     * Keyed by §8.2 code. Code 8 (records without VAT) is intentionally omitted
+     * from the seed: it has no numeric rate and isn't a sales-line VAT category.
+     *
+     * @var array<int, string>
+     */
+    public const VAT_CATEGORY_LABELS = [
+        1 => 'Κανονικός ΦΠΑ 24%',
+        2 => 'Μειωμένος ΦΠΑ 13%',
+        3 => 'Υπερμειωμένος ΦΠΑ 6%',
+        4 => 'ΦΠΑ νήσων 17%',
+        5 => 'ΦΠΑ νήσων 9%',
+        6 => 'ΦΠΑ νήσων 4%',
+        7 => 'Άνευ ΦΠΑ 0%',
+        9 => 'ΦΠΑ 3% (αρ.31 ν.5057/2023)',
+        10 => 'ΦΠΑ νήσων 4% (αρ.31 ν.5057/2023)',
+    ];
+
+    /**
+     * The standard sales-line VAT categories to seed, as [rate, description]
+     * rows. Skips code 8 (no rate) and code 10 (duplicate 4% of code 6 — would
+     * just create a confusing second 4% row; a tenant on the ν.5057/2023 island
+     * regime can add it manually). Code 7 (0%) is seeded WITHOUT an exemption
+     * reason — the operator sets §8.3 per their case (Setup → VAT Categories).
+     *
+     * @return list<array{rate: float, description: string}>
+     */
+    public static function vatCategorySeedRows(): array
+    {
+        $rows = [];
+        foreach ([1, 2, 3, 4, 5, 6, 7] as $code) {
+            $rows[] = [
+                'rate' => (float) self::VAT_CATEGORY_RATES[$code],
+                'description' => self::VAT_CATEGORY_LABELS[$code],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * §8.3 Κατηγορία Αιτίας Εξαίρεσης ΦΠΑ — valid exemption reason codes
      * (1–31, ν.5144/2024). Required when vatCategory = 7.
      *
@@ -281,6 +326,43 @@ final class Codes
     public static function invoiceTypeExists(string $code): bool
     {
         return isset(self::INVOICE_TYPES[$code]);
+    }
+
+    /**
+     * The VAT rates ekdosi can actually FILE — i.e. the exact set
+     * MyDataSubmitter::vatCategoryFor() maps to an AADE vatCategory enum.
+     *
+     * NOTE this is a SUBSET of VAT_CATEGORY_RATES: that table lists the full
+     * §8.2 enum including codes 9 (3%) and 10 (4% island) from ν.5057/2023,
+     * which the submitter does NOT yet map (no match arm → it throws). So the
+     * "would AADE accept a line at this rate" check (ETL warning, table flag)
+     * MUST use THIS set, not the full enum — otherwise a 3% category passes the
+     * warning clean and then explodes at filing. Keep in lockstep with
+     * vatCategoryFor(): if a 3% arm is added there, add 3.0 here.
+     *
+     * @var list<float>
+     */
+    public const FILEABLE_VAT_RATES = [0.0, 4.0, 6.0, 9.0, 13.0, 17.0, 24.0];
+
+    /**
+     * Is this a VAT rate ekdosi can file at AADE? Single source of truth for
+     * "would AADE accept a line at this rate" — used by the ETL post-import
+     * warning AND the VatCategories table flag, and kept in sync with
+     * MyDataSubmitter::vatCategoryFor via FILEABLE_VAT_RATES. Tolerant float
+     * compare (0.01).
+     */
+    public static function vatRateIsValid(int|float|string|null $rate): bool
+    {
+        if ($rate === null || $rate === '') {
+            return false;
+        }
+        foreach (self::FILEABLE_VAT_RATES as $r) {
+            if (abs((float) $rate - $r) < 0.01) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Does this invoice type require an income classification? */

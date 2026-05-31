@@ -165,6 +165,24 @@ class MigrateFromFirebird extends Command
             $this->copyWhmcsLog();
         });
 
+        // Surface legacy lookup data that AADE would REJECT at filing time.
+        // The ETL copies VAT rates + invoice mydata_type VERBATIM from the
+        // legacy DB (which had no AADE validation — VAT_CATEGORY.VALUE was a
+        // free 0–100 numeric, INVTYPE.MYDATA_TYPE a nullable varchar). So a
+        // legacy typo (e.g. a "9%" category stored as 10%) imports as-is. We
+        // do NOT silently rewrite it (it's accounting data the operator may
+        // have relied on); we WARN so they fix it via the lookup resources
+        // (Setup → VAT Categories / Invoice Types, «Εισαγωγή τυπικών» seed).
+        //
+        // Wrapped: this runs AFTER the import transaction committed, so a
+        // failure here (a flaky read on the freshly-populated tables) must not
+        // turn a successful import into a command failure. Report and move on.
+        try {
+            $this->warnInvalidLookups();
+        } catch (\Throwable $e) {
+            $this->warn('  (post-import lookup check skipped: '.$e->getMessage().')');
+        }
+
         $this->newLine();
         $this->info('Done. Run the golden-test comparison next (see README).');
 
@@ -502,6 +520,60 @@ class MigrateFromFirebird extends Command
             );
             // invoice_types keyed by its string code, not an int PK
             $this->map['invoice_types'][$code] = $id;
+        }
+    }
+
+    /**
+     * Post-import sanity report (warn-only): flag imported lookup rows that
+     * AADE would reject at filing time, so the operator fixes them via the
+     * Filament lookup resources rather than discovering it on first submit.
+     *
+     *  - VAT categories whose rate is NOT an AADE §8.2 value
+     *    (0/4/6/9/13/17/24 — see Codes::VAT_CATEGORY_RATES). A legacy typo
+     *    like a "9%" category stored as 10% lands here.
+     *  - Invoice types with an empty or unknown mydata_type (Codes::INVOICE_TYPES).
+     *    Empty = the legacy row never got an AADE classification; unknown =
+     *    a code not in the §8.1 catalogue.
+     *
+     * Never mutates — this is the "warn-only" half of the import-data fix; the
+     * "correct it" half is the in-app seed / edit on the lookup resources.
+     */
+    private function warnInvalidLookups(): void
+    {
+        $badVat = DB::table('vat_categories')
+            ->where('company_id', $this->companyId)
+            ->get(['description', 'rate'])
+            ->filter(fn ($v) => ! \App\Support\MyData\Codes::vatRateIsValid($v->rate));
+
+        if ($badVat->isNotEmpty()) {
+            $this->newLine();
+            $this->warn('⚠ VAT CATEGORIES (templates for NEW invoices) with a non-AADE rate (§8.2):');
+            foreach ($badVat as $v) {
+                $this->warn(sprintf('    • %s = %s%%', $v->description ?? '(no description)', rtrim(rtrim((string) $v->rate, '0'), '.')));
+            }
+            $this->warn('    These would be rejected if used to issue a NEW invoice. Fix/seed in');
+            $this->warn('    Setup → VAT Categories (valid: 0/4/6/9/13/17/24%).');
+            // Historical invoices are intentionally NOT touched: an imported
+            // invoice line keeps its original rate (e.g. an old 23% from before
+            // the 24% change) — that's a correct historical record, never
+            // re-filed, and is NOT what this warning is about.
+            $this->line('    (Imported invoices keep their original rates — historical lines like 23% are fine.)');
+        }
+
+        $knownTypes = \App\Support\MyData\Codes::INVOICE_TYPES;
+        $badTypes = DB::table('invoice_types')
+            ->where('company_id', $this->companyId)
+            ->get(['code', 'name', 'mydata_type'])
+            ->filter(fn ($t) => empty($t->mydata_type) || ! isset($knownTypes[$t->mydata_type]));
+
+        if ($badTypes->isNotEmpty()) {
+            $this->newLine();
+            $this->warn('⚠ Invoice types with a missing/unknown myDATA type (§8.1) — cannot be filed until set:');
+            foreach ($badTypes as $t) {
+                $this->warn(sprintf('    • %s (%s) → myDATA type: %s',
+                    $t->code, $t->name ?? '?', $t->mydata_type ? '«'.$t->mydata_type.'» (unknown)' : '(empty)'));
+            }
+            $this->warn('    Fix in Setup → Invoice Types (or «Εισαγωγή τυπικών» to add the standard set).');
         }
     }
 

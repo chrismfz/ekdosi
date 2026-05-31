@@ -33,7 +33,15 @@ class VatCategoriesTable
                 TextColumn::make('rate')
                     ->suffix('%')
                     ->alignRight()
-                    ->sortable(),
+                    ->sortable()
+                    // Flag a rate AADE won't accept (§8.2 = 0/4/6/9/13/17/24).
+                    // MyDataSubmitter::vatCategoryFor throws on anything else, so
+                    // an invoice using this category would be rejected at filing.
+                    ->color(fn ($record) => self::isAadeRate((float) $record->rate) ? null : 'danger')
+                    ->tooltip(fn ($record) => self::isAadeRate((float) $record->rate)
+                        ? null
+                        : 'Μη έγκυρος συντελεστής ΑΑΔΕ (§8.2). Τα παραστατικά με αυτή την κατηγορία θα απορριφθούν στο myDATA.')
+                    ->icon(fn ($record) => self::isAadeRate((float) $record->rate) ? null : 'heroicon-o-exclamation-triangle'),
 
                 IconColumn::make('is_default')
                     ->label('Default')
@@ -84,5 +92,11 @@ class VatCategoriesTable
                 ]),
             ])
             ->defaultSort('rate');
+    }
+
+    /** Is this an AADE-valid §8.2 VAT rate? Single source of truth in Codes. */
+    private static function isAadeRate(float $rate): bool
+    {
+        return \App\Support\MyData\Codes::vatRateIsValid($rate);
     }
 }
