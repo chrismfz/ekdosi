@@ -2,9 +2,9 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\MyDataMode;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Models\Company;
 use App\Services\MyData\ReconciliationRow;
 use App\Services\MyData\SalesReconciler;
 use App\Services\MyData\SalesReconciliationResult;
@@ -115,9 +115,8 @@ class MyDataConsole extends Page
     {
         $tenant = Filament::getTenant();
 
-        return $tenant
-            && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off
+        return $tenant instanceof Company
+            && $tenant->isLiveMyDataTenant()
             && (bool) auth()->user()?->can('View:MyDataConsole');
     }
 

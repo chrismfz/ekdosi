@@ -2,8 +2,8 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\MyDataMode;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
+use App\Models\Company;
 use App\Services\MyData\E3Report;
 use App\Services\MyData\E3Reporter;
 use App\Support\Money;
@@ -119,9 +119,8 @@ class MyDataE3Overview extends Page
     {
         $tenant = Filament::getTenant();
 
-        return $tenant
-            && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off
+        return $tenant instanceof Company
+            && $tenant->isLiveMyDataTenant()
             && (bool) auth()->user()?->can('View:MyDataE3Overview');
     }
 

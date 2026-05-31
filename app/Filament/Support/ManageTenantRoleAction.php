@@ -10,24 +10,26 @@ use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
+use Filament\Tables\Columns\TextColumn;
 
 /**
- * The per-tenant role picker (PR2). A single record action, reused by both
- * sides of the user↔company pivot:
+ * The per-tenant role picker. A single record action + a matching badge column,
+ * reused by both sides of the user↔company pivot:
  *   - UserResource → Tenants relation manager (record = Company, owner = User)
  *   - CompanyResource → Users relation manager (record = User, owner = Company)
  *
  * It edits the ONE managed role a user holds within a company's team
- * (super_admin | company_admin | operator | none), via
- * TenantRoleProvisioner::setRoleInCompany — picker semantics, not a multi-role
- * list. The two callbacks resolve the (User, Company) pair from whatever record
- * the relation manager hands us.
+ * (super_admin | company_admin | operator | none) via
+ * TenantRoleProvisioner::setRoleInCompany — picker semantics. The two callbacks
+ * resolve the (User, Company) pair from whatever record the manager hands us.
  *
- * Escalation guard: granting super_admin is offered/allowed ONLY when the
- * ACTING user is themselves super_admin in the target company. A company_admin
- * (who otherwise has every permission in their tenant, including Update:User)
- * therefore cannot lift anyone — including themselves — to the cross-tenant
- * super_admin bypass.
+ * Authorization: role management is super_admin-only. The action is VISIBLE only
+ * to an actor who is super_admin in the target company, and the in-action guard
+ * additionally refuses any change that GRANTS OR REMOVES super_admin unless the
+ * actor is super_admin there — so a company_admin can neither escalate anyone
+ * nor knock out an existing super_admin (defence in depth behind the visibility
+ * gate, and it also covers the null-submit case where a hidden super_admin
+ * default would otherwise strip the role).
  */
 final class ManageTenantRoleAction
 {
@@ -43,6 +45,12 @@ final class ManageTenantRoleAction
             ->modalHeading('Ρόλος χρήστη στην εταιρία')
             ->modalWidth('md')
             ->modalSubmitActionLabel('Αποθήκευση')
+            // Only a super_admin of the target company may manage roles there.
+            ->visible(function ($record) use ($resolveCompany): bool {
+                $company = $resolveCompany($record);
+
+                return $company instanceof Company && self::actorMayManageRoles($company);
+            })
             ->schema(function ($record) use ($resolveUser, $resolveCompany): array {
                 $user = $resolveUser($record);
                 $company = $resolveCompany($record);
@@ -72,19 +80,25 @@ final class ManageTenantRoleAction
                     $role = null;
                 }
 
-                // Escalation guard (defence in depth — the option is also hidden):
-                // only an existing super_admin in THIS company may grant it.
-                if ($role === ShieldUtils::getSuperAdminName() && ! self::actorMayGrantSuperAdmin($company)) {
+                // Escalation/demotion guard: any change that touches super_admin
+                // — granting it, OR replacing/clearing an existing super_admin —
+                // requires the actor to be super_admin in this company.
+                $provisioner = app(TenantRoleProvisioner::class);
+                $superName = ShieldUtils::getSuperAdminName();
+                $touchesSuper = $role === $superName
+                    || $provisioner->roleInCompany($user, $company) === $superName;
+
+                if ($touchesSuper && ! self::actorMayManageRoles($company)) {
                     Notification::make()
                         ->danger()
                         ->title('Δεν επιτρέπεται')
-                        ->body('Μόνο ένας super admin αυτής της εταιρίας μπορεί να αναθέσει ρόλο super admin.')
+                        ->body('Μόνο ένας super admin αυτής της εταιρίας μπορεί να αναθέσει ή να αφαιρέσει ρόλο super admin.')
                         ->send();
 
                     return;
                 }
 
-                app(TenantRoleProvisioner::class)->setRoleInCompany($user, $company, $role);
+                $provisioner->setRoleInCompany($user, $company, $role);
 
                 Notification::make()
                     ->success()
@@ -95,8 +109,34 @@ final class ManageTenantRoleAction
     }
 
     /**
-     * The picker options for a company. super_admin is included only when the
-     * acting user is allowed to grant it in this company.
+     * The team-scoped "current role" badge column, shared by both relation
+     * managers. $state carries the role NAME (stable), formatted to a Greek
+     * label and coloured by name — so neither presentation depends on the
+     * other's text.
+     *
+     * @param  Closure(mixed): ?User  $resolveUser
+     * @param  Closure(mixed): ?Company  $resolveCompany
+     */
+    public static function badgeColumn(Closure $resolveUser, Closure $resolveCompany): TextColumn
+    {
+        return TextColumn::make('tenant_role')
+            ->label('Ρόλος')
+            ->badge()
+            ->state(function ($record) use ($resolveUser, $resolveCompany): ?string {
+                $user = $resolveUser($record);
+                $company = $resolveCompany($record);
+
+                return $user instanceof User && $company instanceof Company
+                    ? app(TenantRoleProvisioner::class)->roleInCompany($user, $company)
+                    : null;
+            })
+            ->formatStateUsing(fn (?string $state): string => self::roleLabel($state))
+            ->color(fn (?string $state): string => self::roleColor($state));
+    }
+
+    /**
+     * The picker options for a company. super_admin is offered only when the
+     * acting user may manage super_admin there.
      *
      * @return array<string, string>
      */
@@ -104,7 +144,7 @@ final class ManageTenantRoleAction
     {
         $options = [];
 
-        if ($company instanceof Company && self::actorMayGrantSuperAdmin($company)) {
+        if ($company instanceof Company && self::actorMayManageRoles($company)) {
             $options[ShieldUtils::getSuperAdminName()] = self::roleLabel(ShieldUtils::getSuperAdminName());
         }
 
@@ -128,10 +168,24 @@ final class ManageTenantRoleAction
     }
 
     /**
-     * May the currently authenticated user grant super_admin in this company?
-     * True only if they themselves are super_admin there.
+     * Filament badge colour for a managed role name. Keyed on the role NAME
+     * (super_admin resolved dynamically), not the label text.
      */
-    private static function actorMayGrantSuperAdmin(Company $company): bool
+    public static function roleColor(?string $role): string
+    {
+        return match ($role) {
+            ShieldUtils::getSuperAdminName() => 'danger',
+            TenantRoleProvisioner::ROLE_COMPANY_ADMIN => 'warning',
+            TenantRoleProvisioner::ROLE_OPERATOR => 'success',
+            default => 'gray',
+        };
+    }
+
+    /**
+     * May the currently authenticated user manage roles in this company? True
+     * only if they are super_admin there (role management is super_admin-only).
+     */
+    private static function actorMayManageRoles(Company $company): bool
     {
         $actor = auth()->user();
 

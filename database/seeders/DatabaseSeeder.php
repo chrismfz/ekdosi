@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\TenantRoleProvisioner;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -70,9 +71,11 @@ class DatabaseSeeder extends Seeder
 
         // (2b) Standard non-super roles (company_admin, operator) per tenant,
         //      AFTER shield:generate so their permission maps attach the
-        //      now-existing permissions. The CompanyObserver created the role
-        //      rows on (1) but permissions didn't exist yet — re-sync here.
-        $provisioner = app(\App\Services\TenantRoleProvisioner::class);
+        //      now-existing permissions. NB: this seeder uses WithoutModelEvents,
+        //      so the CompanyObserver did NOT fire on (1) — this explicit loop is
+        //      the only thing creating + populating the standard roles for the
+        //      seeded tenants.
+        $provisioner = app(TenantRoleProvisioner::class);
         foreach ([$myip, $nixpal, $estonian] as $company) {
             $provisioner->ensureStandardRoles($company);
         }

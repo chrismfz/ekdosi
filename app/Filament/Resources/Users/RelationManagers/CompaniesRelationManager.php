@@ -54,25 +54,13 @@ class CompaniesRelationManager extends RelationManager
                         'none' => 'PDF only',
                         default => $state,
                     }),
-                // The user's role WITHIN this tenant (team-scoped). Computed, not
-                // a column on companies — resolved per row via the provisioner.
-                TextColumn::make('tenant_role')
-                    ->label('Ρόλος')
-                    ->badge()
-                    ->state(function (Company $record): string {
-                        $user = $this->getOwnerRecord();
-                        $role = $user instanceof User
-                            ? app(TenantRoleProvisioner::class)->roleInCompany($user, $record)
-                            : null;
-
-                        return ManageTenantRoleAction::roleLabel($role);
-                    })
-                    ->color(fn (string $state): string => match ($state) {
-                        ManageTenantRoleAction::roleLabel('super_admin') => 'danger',
-                        ManageTenantRoleAction::roleLabel(TenantRoleProvisioner::ROLE_COMPANY_ADMIN) => 'warning',
-                        ManageTenantRoleAction::roleLabel(TenantRoleProvisioner::ROLE_OPERATOR) => 'success',
-                        default => 'gray',
-                    }),
+                // The user's role WITHIN this tenant (team-scoped, computed).
+                ManageTenantRoleAction::badgeColumn(
+                    resolveUser: fn (Company $record): ?User => $this->getOwnerRecord() instanceof User
+                        ? $this->getOwnerRecord()
+                        : null,
+                    resolveCompany: fn (Company $record): Company => $record,
+                ),
             ])
             ->headerActions([
                 AttachAction::make()

@@ -75,7 +75,7 @@ class TenantStandardRolesTest extends TestCase
         }
     }
 
-    public function test_company_admin_gets_all_permissions_operator_gets_curated_subset(): void
+    public function test_company_admin_gets_all_but_forbidden_operator_gets_curated_subset(): void
     {
         $this->seedPermissions();
         $company = $this->makeCompany('maps');
@@ -88,8 +88,14 @@ class TenantStandardRolesTest extends TestCase
         $admin = Role::where('name', TenantRoleProvisioner::ROLE_COMPANY_ADMIN)->where('company_id', $company->getKey())->first();
         $operator = Role::where('name', TenantRoleProvisioner::ROLE_OPERATOR)->where('company_id', $company->getKey())->first();
 
-        // company_admin = ALL global permissions.
-        $this->assertCount(Permission::count(), $admin->permissions);
+        // company_admin = every permission EXCEPT the cross-tenant/platform ones
+        // (User / Company / Role — ADMIN_FORBIDDEN_RESOURCES).
+        $adminPerms = $this->permNames($admin);
+        $this->assertContains('ViewAny:Invoice', $adminPerms);
+        $this->assertContains('ViewAny:VatCategory', $adminPerms, 'admin keeps Setup lookups');
+        $this->assertNotContains('ViewAny:User', $adminPerms, 'admin must NOT manage the panel-global user roster');
+        $this->assertNotContains('Update:User', $adminPerms);
+        $this->assertNotContains('ViewAny:Company', $adminPerms, 'admin must NOT reach cross-tenant Companies');
 
         $opPerms = $this->permNames($operator);
         // Operator HAS the curated invoice/customer/quote view+create+update.
@@ -105,7 +111,6 @@ class TenantStandardRolesTest extends TestCase
         $this->assertNotContains('ViewAny:Company', $opPerms);
 
         // Operator is a strict subset of company_admin.
-        $adminPerms = $this->permNames($admin);
         $this->assertEmpty(array_diff($opPerms, $adminPerms), 'operator perms must be a subset of admin perms');
         $this->assertNotEmpty(array_diff($adminPerms, $opPerms), 'admin must have more than operator');
     }

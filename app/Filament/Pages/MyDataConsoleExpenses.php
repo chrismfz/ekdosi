@@ -2,9 +2,9 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\MyDataMode;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Resources\Expenses\ExpenseResource;
+use App\Models\Company;
 use App\Models\Supplier;
 use App\Services\MyData\ExpenseImporter;
 use App\Services\MyData\ExpenseReconciler;
@@ -105,9 +105,8 @@ class MyDataConsoleExpenses extends Page
     {
         $tenant = Filament::getTenant();
 
-        return $tenant
-            && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off
+        return $tenant instanceof Company
+            && $tenant->isLiveMyDataTenant()
             && (bool) auth()->user()?->can('View:MyDataConsoleExpenses');
     }
 

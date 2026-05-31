@@ -23,9 +23,13 @@ class CompanyObserver
     public function created(Company $company): void
     {
         $this->provisioner->ensureSuperAdminRole($company);
-        // company_admin + operator (with their permission sets). Safe even if
-        // shield:generate hasn't populated permissions yet — the maps just
-        // resolve to whatever exists, and re-running re-syncs.
+        // company_admin + operator with their permission maps. This attaches
+        // whatever permissions EXIST right now: on a normal deploy shield:generate
+        // already ran at install, so a UI-created tenant gets the full maps. On a
+        // brand-new install where permissions don't exist yet, the role rows are
+        // created (possibly empty) and must be re-synced by running
+        // `php artisan shield:sync-super-admin` once after shield:generate — there
+        // is no automatic re-sync for tenants created before permissions exist.
         $this->provisioner->ensureStandardRoles($company);
     }
 }

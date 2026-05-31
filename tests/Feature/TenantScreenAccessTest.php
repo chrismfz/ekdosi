@@ -89,7 +89,7 @@ class TenantScreenAccessTest extends TestCase
         $this->assertTrue(QuoteResource::canAccess(), 'operator → Quotes');
         $this->assertTrue(WhmcsInboxResource::canAccess(), 'operator → WHMCS inbox');
         $this->assertTrue(CustomerLedger::canAccess(), 'operator → Καρτέλα');
-        $this->assertTrue(MyDataMarkDetail::canAccess(), 'operator → ΜΑΡΚ detail (via View:Invoice)');
+        $this->assertTrue(MyDataMarkDetail::canAccess(), 'operator → ΜΑΡΚ detail (via View:MyDataMarkDetail)');
 
         // Admin-only surfaces are hidden from the operator.
         $this->assertFalse(MyDataConsole::canAccess(), 'operator ✗ myDATA console');

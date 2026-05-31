@@ -6,89 +6,146 @@ use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
+use Closure;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
- * Keeps the per-tenant `super_admin` role in sync under Shield's teams mode.
+ * Provisions + maintains the per-tenant managed roles under Shield's teams mode.
  *
  * Background: Shield runs in teams mode (`team_foreign_key=company_id`), so a
- * `super_admin` role row exists PER company. The super-admin bypass in
- * AppServiceProvider is `Gate::before(fn => $user->hasRole(super_admin))`,
- * evaluated against the CURRENT tenant's team — so the role must exist in,
- * and be assigned within, each company's team.
+ * role row exists PER company. The super-admin bypass in AppServiceProvider is
+ * `Gate::before(fn => $user->hasRole(super_admin))`, evaluated against the
+ * CURRENT tenant's team — so a role must exist in, and be assigned within, each
+ * company's team. This service is the single place that creates/repairs those
+ * roles and assigns them, called from the CompanyObserver, the DatabaseSeeder,
+ * the `shield:sync-super-admin` backfill command, and the role-picker UI.
  *
- * The DatabaseSeeder set this up for the seeded tenants, but a company created
- * later (e.g. from the Companies UI) never got a `super_admin` role for its
- * team, so an admin switching into it lost the bypass and saw a stripped-down
- * menu. This service is the single place that repairs/maintains that, called
- * from the Company observer (role existence) and on user attach (assignment),
- * plus a backfill command.
+ * Three managed roles per tenant:
+ *   - super_admin   : Gate::before bypass; needs no permissions.
+ *   - company_admin : every permission of THIS tenant EXCEPT the cross-tenant /
+ *                     platform-level resources in ADMIN_FORBIDDEN_RESOURCES
+ *                     (User/Company/Role) — so a tenant admin can't reach the
+ *                     panel-global user/company roster or escalate roles.
+ *   - operator      : the curated daily-work subset (OPERATOR_PERMISSION_MAP).
  *
- * Note: the role needs no attached permissions — the Gate::before bypass
- * short-circuits every check the moment the user has the role. Permissions are
- * only relevant for non-super roles.
+ * Team-cache discipline: every role read/write must pin the registrar's team id
+ * and restore it afterwards, and a WRITE must bust the permission cache. All of
+ * that lives in one place — `withTeam()` — so no caller hand-rolls (and forgets
+ * a step of) the envelope.
  */
 class TenantRoleProvisioner
 {
+    public const ROLE_COMPANY_ADMIN = 'company_admin';
+
+    public const ROLE_OPERATOR = 'operator';
+
+    /**
+     * The OPERATOR role's permissions, as an explicit per-resource action map
+     * (resources have heterogeneous action sets — the WHMCS inbox has no Create,
+     * the MARK-detail page is a single read-only View). {action}:{resource}
+     * combos that shield:generate didn't create are dropped by operatorPermissions().
+     *
+     * @var array<string, list<string>>
+     */
+    public const OPERATOR_PERMISSION_MAP = [
+        'Invoice' => ['ViewAny', 'View', 'Create', 'Update'],
+        'Quote' => ['ViewAny', 'View', 'Create', 'Update'],
+        'Customer' => ['ViewAny', 'View', 'Create', 'Update'],
+        'Product' => ['ViewAny', 'View', 'Create', 'Update'],
+        'Payment' => ['ViewAny', 'View', 'Create', 'Update'],
+        'Expense' => ['ViewAny', 'View', 'Create', 'Update'],
+        'Supplier' => ['ViewAny', 'View', 'Create', 'Update'],
+        // WHMCS inbox: daily operator work (review/file staged invoices). No
+        // Create:* exists (rows arrive via ingestion only).
+        'PendingWhmcsInvoice' => ['ViewAny', 'View', 'Update'],
+        // Read-only ΜΑΡΚ drill-down, linked from invoice rows. Granting the page
+        // perm directly (instead of piggy-backing on View:Invoice) keeps the
+        // access model honest; the live-AADE orphan lookup inside the page is
+        // separately gated on View:MyDataConsole (admin-only).
+        'MyDataMarkDetail' => ['View'],
+    ];
+
+    /**
+     * Resources a company_admin must NOT hold permissions for — they are
+     * panel-global (`$isScopedToTenant=false`) or escalation-sensitive, so
+     * granting them to a per-tenant admin would leak/allow cross-tenant
+     * management. Default-deny: a new sensitive resource is excluded until
+     * deliberately removed from this list.
+     *
+     * @var list<string>
+     */
+    public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role'];
+
+    // ── Team-scoped envelope ───────────────────────────────────────────────
+
+    /**
+     * Run $fn with the registrar's team pinned to $company, restoring the
+     * previous team afterwards. WRITES pass $flushCache=true to bust the
+     * permission cache on entry + exit; READS (role-name lookups) pass false —
+     * they only need the team switch + the caller's own unsetRelation('roles'),
+     * so they don't thrash the global permission cache (important: the role
+     * badge columns call the reads once PER ROW).
+     *
+     * @template T
+     *
+     * @param  Closure(PermissionRegistrar): T  $fn
+     * @return T
+     */
+    private function withTeam(Company $company, Closure $fn, bool $flushCache = true): mixed
+    {
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+
+        if ($flushCache) {
+            $registrar->forgetCachedPermissions();
+        }
+
+        try {
+            return $fn($registrar);
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeam);
+            if ($flushCache) {
+                $registrar->forgetCachedPermissions();
+            }
+        }
+    }
+
+    // ── super_admin ────────────────────────────────────────────────────────
+
     /**
      * Ensure the given company's team has a `super_admin` role row.
      * Idempotent. Returns the role.
      */
     public function ensureSuperAdminRole(Company $company): Role
     {
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-
-        // Role lookups are team-scoped; pin the team for this operation then
-        // restore whatever was set (we may be mid-request inside a tenant).
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        try {
-            /** @var Role $role */
-            $role = Role::query()->firstOrCreate(
-                [
-                    'name' => ShieldUtils::getSuperAdminName(),
-                    'guard_name' => ShieldUtils::getFilamentAuthGuard(),
-                    'company_id' => $company->getKey(),
-                ],
-            );
-
-            return $role;
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
-        }
+        return $this->withTeam($company, fn (): Role => Role::query()->firstOrCreate([
+            'name' => ShieldUtils::getSuperAdminName(),
+            'guard_name' => ShieldUtils::getFilamentAuthGuard(),
+            'company_id' => $company->getKey(),
+        ]));
     }
 
     /**
      * Assign the company's super_admin role to a user (creating the role if
-     * needed). Idempotent. Used when a user is attached to a company AND that
-     * user is already a super_admin elsewhere — we do NOT blanket-grant
-     * super_admin to every attached user (that would defeat per-tenant
-     * operators); the caller decides eligibility.
+     * needed). Idempotent. The caller decides eligibility — we do NOT
+     * blanket-grant super_admin to every attached user.
      */
     public function assignSuperAdmin(User $user, Company $company): void
     {
         $role = $this->ensureSuperAdminRole($company);
 
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        try {
-            $registrar->forgetCachedPermissions();
+        $this->withTeam($company, function () use ($user, $role): void {
             // Drop any roles relation cached under a different team, else the
             // hasRole() guard reads stale data across team switches.
             $user->unsetRelation('roles');
             if (! $user->hasRole($role)) {
                 $user->assignRole($role);
             }
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
-        }
+        });
     }
 
     /**
@@ -97,119 +154,98 @@ class TenantRoleProvisioner
      */
     public function isSuperAdminAnywhere(User $user): bool
     {
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
         $superName = ShieldUtils::getSuperAdminName();
 
-        try {
-            foreach ($user->companies as $company) {
-                $registrar->setPermissionsTeamId($company->getKey());
-                $registrar->forgetCachedPermissions();
-                // Force a fresh team-scoped roles load each iteration —
-                // otherwise the relation cached for the first team masks a
-                // super_admin grant that lives in a later team.
+        foreach ($user->companies as $company) {
+            // Read-only role check per team — no cache flush needed.
+            $hasIt = $this->withTeam($company, function () use ($user, $superName): bool {
                 $user->unsetRelation('roles');
-                if ($user->hasRole($superName)) {
-                    return true;
-                }
-            }
 
-            return false;
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
+                return $user->hasRole($superName);
+            }, flushCache: false);
+
+            if ($hasIt) {
+                return true;
+            }
         }
+
+        return false;
     }
 
-    // ── Standard non-super roles ───────────────────────────────────────────
-    //
-    // Under Shield teams mode the ROLE rows are per-company (team-scoped) but
-    // the PERMISSION rows are global (Spatie default — only model_has_roles /
-    // role_has_permissions carry the team id). So we create a company_admin and
-    // an operator role per tenant and attach the right slice of the GLOBAL
-    // permissions to each. Unlike super_admin, these roles do NOT trigger the
-    // Gate::before bypass — they're enforced by the actual permission set, and
-    // are confined to their own tenant by the team scope on assignment.
-
-    public const ROLE_COMPANY_ADMIN = 'company_admin';
-
-    public const ROLE_OPERATOR = 'operator';
-
     /**
-     * Resource permission prefixes an OPERATOR gets: issue + manage the daily
-     * documents/people/money, but NOT delete, NOT Setup lookups, NOT users,
-     * NOT company/myDATA credentials. Keyed by Shield resource permission base
-     * name (the part after the prefix, e.g. "Invoice" in "ViewAny:Invoice").
-     *
-     * @var list<string>
+     * Does the user hold super_admin specifically within THIS company's team?
+     * (Distinct from isSuperAdminAnywhere — drives the role-picker escalation
+     * guard: only a super_admin in the target company may grant or remove it.)
      */
-    public const OPERATOR_RESOURCES = [
-        'Invoice', 'Quote', 'Customer', 'Product', 'Payment', 'Expense', 'Supplier',
-        // The WHMCS inbox is daily operator work (review staged invoices, file
-        // them). Create:* isn't generated for it (no create policy method) — the
-        // operatorPermissions() whereIn filter drops the non-existent combos.
-        'PendingWhmcsInvoice',
-    ];
+    public function hasSuperAdminIn(User $user, Company $company): bool
+    {
+        return $this->withTeam($company, function () use ($user): bool {
+            $user->unsetRelation('roles');
+
+            return $user->hasRole(ShieldUtils::getSuperAdminName());
+        }, flushCache: false);
+    }
+
+    // ── Standard non-super roles (company_admin, operator) ─────────────────
 
     /**
-     * The action prefixes an operator may perform on the above resources.
-     * No delete/forceDelete/restore — destructive ops stay with the admin.
+     * Ensure a tenant has the standard non-super roles WITH their permission
+     * sets attached. This is the PROVISIONING path (CompanyObserver, seeder,
+     * backfill command) — it re-syncs the permission maps, so it's also how you
+     * refresh roles after shield:generate adds new permissions. Idempotent.
      *
-     * @var list<string>
-     */
-    public const OPERATOR_ACTIONS = ['ViewAny', 'View', 'Create', 'Update'];
-
-    /**
-     * Ensure a tenant has the standard non-super roles (company_admin,
-     * operator) with their permission sets attached. Idempotent + team-scoped.
-     * Call from the CompanyObserver (alongside ensureSuperAdminRole) and the
-     * backfill command. No-op-safe to re-run after shield:generate adds new
-     * permissions — it re-syncs the maps.
+     * NB: re-syncs permissions, so it must NOT be on the per-assignment hot path
+     * (the role picker uses ensureManagedRolesExist instead — rows only).
      */
     public function ensureStandardRoles(Company $company): void
     {
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        try {
+        $this->withTeam($company, function () use ($company): void {
             $guard = ShieldUtils::getFilamentAuthGuard();
 
-            // company_admin = every permission that exists (full control of THIS
-            // tenant), but NOT the super_admin role → no cross-tenant bypass.
-            $admin = Role::query()->firstOrCreate([
-                'name' => self::ROLE_COMPANY_ADMIN,
-                'guard_name' => $guard,
-                'company_id' => $company->getKey(),
-            ]);
-            $admin->syncPermissions(Permission::query()->where('guard_name', $guard)->get());
+            $admin = $this->firstOrCreateRole(self::ROLE_COMPANY_ADMIN, $guard, $company);
+            $admin->syncPermissions($this->companyAdminPermissions($guard));
 
-            // operator = curated subset (see OPERATOR_* maps).
-            $operator = Role::query()->firstOrCreate([
-                'name' => self::ROLE_OPERATOR,
-                'guard_name' => $guard,
-                'company_id' => $company->getKey(),
-            ]);
+            $operator = $this->firstOrCreateRole(self::ROLE_OPERATOR, $guard, $company);
             $operator->syncPermissions($this->operatorPermissions($guard));
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
-        }
+        });
     }
 
     /**
-     * The global Permission rows an operator role should hold:
-     * {action}:{resource} for the curated resource/action maps. Filters to
-     * permissions that actually exist (shield:generate may not have created
-     * every combination — e.g. a resource without a Create policy method).
+     * Ensure the managed role ROWS exist for a team WITHOUT re-syncing their
+     * permission maps — used before assigning a role so we never block on a
+     * missing row, but don't do a full permission re-sync on every picker save
+     * (that would also clobber any manual per-tenant role customization).
+     */
+    private function ensureManagedRolesExist(Company $company): void
+    {
+        $this->withTeam($company, function () use ($company): void {
+            $guard = ShieldUtils::getFilamentAuthGuard();
+            foreach ($this->managedRoleNames() as $name) {
+                $this->firstOrCreateRole($name, $guard, $company);
+            }
+        });
+    }
+
+    private function firstOrCreateRole(string $name, string $guard, Company $company): Role
+    {
+        return Role::query()->firstOrCreate([
+            'name' => $name,
+            'guard_name' => $guard,
+            'company_id' => $company->getKey(),
+        ]);
+    }
+
+    /**
+     * The global Permission rows the OPERATOR role should hold, from
+     * OPERATOR_PERMISSION_MAP, filtered to those that actually exist.
      *
      * @return Collection<int, Permission>
      */
     private function operatorPermissions(string $guard): Collection
     {
         $wanted = [];
-        foreach (self::OPERATOR_RESOURCES as $resource) {
-            foreach (self::OPERATOR_ACTIONS as $action) {
+        foreach (self::OPERATOR_PERMISSION_MAP as $resource => $actions) {
+            foreach ($actions as $action) {
                 $wanted[] = "{$action}:{$resource}";
             }
         }
@@ -221,9 +257,28 @@ class TenantRoleProvisioner
     }
 
     /**
-     * Assign a standard role to a user within a company's team. Mirrors
-     * assignSuperAdmin's cache discipline. Pass self::ROLE_COMPANY_ADMIN or
-     * ROLE_OPERATOR. Ensures the roles exist first.
+     * The global Permission rows the COMPANY_ADMIN role should hold: every
+     * permission of the guard EXCEPT those whose resource is in
+     * ADMIN_FORBIDDEN_RESOURCES (User/Company/Role).
+     *
+     * @return Collection<int, Permission>
+     */
+    private function companyAdminPermissions(string $guard): Collection
+    {
+        return Permission::query()
+            ->where('guard_name', $guard)
+            ->get()
+            ->reject(fn (Permission $p): bool => in_array(
+                Str::after($p->name, ':'),
+                self::ADMIN_FORBIDDEN_RESOURCES,
+                true,
+            ));
+    }
+
+    /**
+     * Assign a standard role (company_admin|operator) to a user within a team.
+     * Additive — does NOT strip other roles (use setRoleInCompany for picker
+     * semantics). Ensures the role rows exist first.
      */
     public function assignStandardRole(User $user, Company $company, string $roleName): void
     {
@@ -231,30 +286,21 @@ class TenantRoleProvisioner
             throw new \InvalidArgumentException("Unknown standard role: {$roleName}");
         }
 
-        $this->ensureStandardRoles($company);
+        $this->ensureManagedRolesExist($company);
 
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        try {
-            $registrar->forgetCachedPermissions();
+        $this->withTeam($company, function () use ($user, $roleName): void {
             $user->unsetRelation('roles');
             if (! $user->hasRole($roleName)) {
                 $user->assignRole($roleName);
             }
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
-        }
+        });
     }
 
     // ── Role picker (per user × company) ───────────────────────────────────
     //
-    // The UserResource role-picker treats each (user, company) pivot as holding
-    // AT MOST ONE managed role: super_admin | company_admin | operator. These
-    // helpers read and set that single role within a team, so the picker is a
-    // simple Select rather than a multi-role checkbox list.
+    // The role-picker treats each (user, company) pivot as holding AT MOST ONE
+    // managed role: super_admin | company_admin | operator. These helpers read
+    // and set that single role within a team.
 
     /**
      * The three roles the picker manages, in privilege order. super_admin is
@@ -272,41 +318,12 @@ class TenantRoleProvisioner
     }
 
     /**
-     * Does the user hold the super_admin role specifically within THIS
-     * company's team? (Distinct from isSuperAdminAnywhere — used to decide
-     * whether the acting user may grant super_admin in a given tenant, so a
-     * company_admin can't escalate.)
-     */
-    public function hasSuperAdminIn(User $user, Company $company): bool
-    {
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        try {
-            $registrar->forgetCachedPermissions();
-            $user->unsetRelation('roles');
-
-            return $user->hasRole(ShieldUtils::getSuperAdminName());
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
-        }
-    }
-
-    /**
-     * Which managed role (if any) the user holds in the company's team. Returns
-     * the role name (super_admin / company_admin / operator) or null. If more
-     * than one is somehow present, returns the highest-privilege one.
+     * Which managed role (if any) the user holds in the company's team — the
+     * highest-privilege one if somehow more than one is present, else null.
      */
     public function roleInCompany(User $user, Company $company): ?string
     {
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        try {
-            $registrar->forgetCachedPermissions();
+        return $this->withTeam($company, function () use ($user): ?string {
             $user->unsetRelation('roles');
 
             foreach ($this->managedRoleNames() as $name) {
@@ -316,20 +333,17 @@ class TenantRoleProvisioner
             }
 
             return null;
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
-        }
+        }, flushCache: false);
     }
 
     /**
      * Set the user's single managed role within a company's team (picker
      * semantics): strips any other managed role they hold there first, then
-     * assigns the chosen one. Pass null to clear all managed roles (no access
-     * beyond plain attach). Ensures the role rows exist first.
+     * assigns the chosen one. Pass null to clear all managed roles. Ensures the
+     * role rows exist first (rows only — does not re-sync permission maps).
      *
-     * Does NOT enforce escalation rules — the caller (UI action) decides
-     * whether the acting user may grant super_admin. Non-managed roles are
+     * Does NOT enforce escalation rules — the caller (UI action) decides whether
+     * the acting user may grant OR remove super_admin. Non-managed roles are
      * left untouched.
      */
     public function setRoleInCompany(User $user, Company $company, ?string $roleName): void
@@ -340,16 +354,9 @@ class TenantRoleProvisioner
             throw new \InvalidArgumentException("Unknown managed role: {$roleName}");
         }
 
-        // Make sure both super_admin and the standard roles exist for this team.
-        $this->ensureSuperAdminRole($company);
-        $this->ensureStandardRoles($company);
+        $this->ensureManagedRolesExist($company);
 
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        try {
-            $registrar->forgetCachedPermissions();
+        $this->withTeam($company, function () use ($user, $roleName, $managed): void {
             $user->unsetRelation('roles');
 
             foreach ($managed as $name) {
@@ -361,9 +368,6 @@ class TenantRoleProvisioner
             if ($roleName !== null && ! $user->hasRole($roleName)) {
                 $user->assignRole($roleName);
             }
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            $registrar->forgetCachedPermissions();
-        }
+        });
     }
 }
