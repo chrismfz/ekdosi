@@ -226,23 +226,73 @@ class EkdosiClient
         if ($r['ok']) {
             $pid = $r['data']['pending_whmcs_invoice_id'] ?? '?';
             $created = ! empty($r['data']['created']);
+            // audit_preserved (success flag): ekdosi already filed this
+            // invoice at AADE, so the re-push did NOT refresh the frozen
+            // payload — distinct from a normal "re-push refreshed" so the
+            // operator knows the legal record is untouched.
+            if (! empty($r['data']['audit_preserved'])) {
+                return "Already filed at AADE (pending #{$pid}); re-push left the audit-frozen "
+                    . 'record unchanged — nothing to do, reconcile if WHMCS-side data changed.';
+            }
             return $created
                 ? "Staged in ekdosi as pending #{$pid}."
                 : "Already staged (pending #{$pid}). Re-push refreshed the payload.";
         }
-        $err = $r['data']['error'] ?? ('HTTP '.$r['http_status']);
-        return 'Push failed: '.$err;
+        return 'Push failed: '.$this->classifyError($r);
     }
 
     private function summariseStatus(array $r): string
     {
         if (! $r['ok']) {
-            $err = $r['data']['error'] ?? ('HTTP '.$r['http_status']);
-            return 'Status query failed: '.$err;
+            return 'Status query failed: '.$this->classifyError($r);
         }
         if (empty($r['data']['found'])) {
             return 'No row in ekdosi yet.';
         }
         return 'Status: '.($r['data']['status'] ?? '?');
+    }
+
+    /**
+     * Turn a failed ekdosi response into an operator-actionable message,
+     * distinguishing the cases that need DIFFERENT reactions instead of
+     * collapsing everything into "HTTP NNN". Status codes match the ekdosi
+     * webhook controller (WhmcsInvoicePaidController):
+     *
+     *  - 409  → `whmcs_invoice_not_found`: WHMCS knows the tenant but not this
+     *    invoice id (deleted post-push, or a typo). Input contradicts upstream;
+     *    re-pushing won't help — check the invoice exists.
+     *  - 502  → `whmcs_upstream_failure`: ekdosi reached WHMCS's API but it
+     *    failed. Transient — retry shortly.
+     *  - 503/504 → gateway/timeout, also transient.
+     *  - 401/403 → HMAC/secret mismatch; fix the shared webhook secret.
+     *  - else  → the ekdosi `error` field, or a bare HTTP code.
+     */
+    private function classifyError(array $r): string
+    {
+        $status = (int) ($r['http_status'] ?? 0);
+        $data = is_array($r['data'] ?? null) ? $r['data'] : array();
+        $err = isset($data['error']) ? (string) $data['error'] : '';
+
+        if ($status === 409) {
+            $detail = $err !== '' ? $err : 'invoice not found upstream';
+            return "input contradicts WHMCS state ({$detail}) — verify the invoice exists; "
+                . 're-pushing will not help.';
+        }
+
+        if ($status === 401 || $status === 403) {
+            $detail = $err !== '' ? $err : 'authentication rejected';
+            return "auth/signature rejected ({$detail}) — check the shared webhook secret.";
+        }
+
+        if ($status === 502 || $status === 503 || $status === 504) {
+            $detail = $err !== '' ? $err : 'upstream failure';
+            return "ekdosi/WHMCS temporarily unavailable (HTTP {$status}: {$detail}) — transient, retry shortly.";
+        }
+
+        if ($err !== '') {
+            return $err.($status ? " (HTTP {$status})" : '');
+        }
+
+        return $status ? "HTTP {$status}" : 'no response (connection failed)';
     }
 }
