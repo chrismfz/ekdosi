@@ -94,15 +94,9 @@ class VatCategoriesTable
             ->defaultSort('rate');
     }
 
-    /** Is this an AADE-valid §8.2 VAT rate? (matches MyDataSubmitter::vatCategoryFor.) */
+    /** Is this an AADE-valid §8.2 VAT rate? Single source of truth in Codes. */
     private static function isAadeRate(float $rate): bool
     {
-        foreach (\App\Support\MyData\Codes::VAT_CATEGORY_RATES as $r) {
-            if ($r !== null && abs($rate - $r) < 0.01) {
-                return true;
-            }
-        }
-
-        return false;
+        return \App\Support\MyData\Codes::vatRateIsValid($rate);
     }
 }
