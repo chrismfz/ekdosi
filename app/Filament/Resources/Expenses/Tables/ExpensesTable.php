@@ -98,6 +98,10 @@ class ExpensesTable
                     ->label('Κατάσταση myDATA')
                     ->options(['VALID' => 'VALID', 'CANCELLED' => 'CANCELLED']),
 
+                SelectFilter::make('category')
+                    ->label('Κατηγορία (δικά μας)')
+                    ->options(\App\Support\MyData\Codes::selfDeclaredVatCategoryOptions()),
+
                 SelectFilter::make('classification_state')
                     ->label('Χαρακτηρισμός')
                     ->options(['classified' => 'Χαρακτηρισμένο'])

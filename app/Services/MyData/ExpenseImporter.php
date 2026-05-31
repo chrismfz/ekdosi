@@ -61,9 +61,9 @@ class ExpenseImporter
     {
         FirebedCredentials::init($this->tenant, $this->mockHandler);
 
-        $docs = $this->fetchFullDocs(new RequestDocs, $from->format('d/m/Y'), $to->format('d/m/Y'));
+        [$docs, $cancelledMarks] = $this->fetchFullDocs(new RequestDocs, $from->format('d/m/Y'), $to->format('d/m/Y'));
 
-        return $this->persistDocs($docs, mode: 'sync', onlyMark: $onlyMark);
+        return $this->persistDocs($docs, $cancelledMarks, mode: 'sync', onlyMark: $onlyMark);
     }
 
     /**
@@ -75,7 +75,7 @@ class ExpenseImporter
     {
         FirebedCredentials::init($this->tenant, $this->mockHandler);
 
-        $all = $this->fetchFullDocs(new RequestTransmittedDocs, $from->format('d/m/Y'), $to->format('d/m/Y'));
+        [$all, $cancelledMarks] = $this->fetchFullDocs(new RequestTransmittedDocs, $from->format('d/m/Y'), $to->format('d/m/Y'));
 
         // Keep only what we file as an EXPENSE/other (13/14/17…); drop our sales.
         $docs = array_filter(
@@ -83,7 +83,7 @@ class ExpenseImporter
             fn ($doc): bool => Codes::transmittedDocBucket($doc->getInvoiceHeader()?->getInvoiceType()?->value) !== 'income',
         );
 
-        return $this->persistDocs($docs, mode: 'self_declared', onlyMark: $onlyMark);
+        return $this->persistDocs($docs, $cancelledMarks, mode: 'self_declared', onlyMark: $onlyMark);
     }
 
     /**
@@ -92,8 +92,9 @@ class ExpenseImporter
      * action label). The sync path is byte-identical to the original.
      *
      * @param  array<string, \Firebed\AadeMyData\Models\Invoice>  $docs
+     * @param  array<string, true>  $cancelledMarks  MARKs AADE folds as cancelled
      */
-    private function persistDocs(array $docs, string $mode, ?string $onlyMark): ExpenseImportResult
+    private function persistDocs(array $docs, array $cancelledMarks, string $mode, ?string $onlyMark): ExpenseImportResult
     {
         $created = 0;
         $skipped = 0;
@@ -128,7 +129,13 @@ class ExpenseImporter
 
             $supplierWasCreated = false;
 
-            DB::transaction(function () use ($doc, $mark, $mode, &$supplierWasCreated): void {
+            // Fold cancellation from both the inline <cancelledByMark> and the
+            // standalone <cancelledInvoicesDoc> list (same as the reconciler), so
+            // a doc we filed then cancelled isn't recorded as a live expense.
+            $inlineCancel = (string) ($doc->getCancelledByMark() ?? '');
+            $isCancelled = $inlineCancel !== '' || isset($cancelledMarks[$mark]);
+
+            DB::transaction(function () use ($doc, $mark, $mode, $isCancelled, &$supplierWasCreated): void {
                 $header = $doc->getInvoiceHeader();
                 $summary = $doc->getInvoiceSummary();
                 $type = $header?->getInvoiceType()?->value;
@@ -155,10 +162,9 @@ class ExpenseImporter
                     'net_total' => $this->toDecimal($summary?->getTotalNetValue()),
                     'vat_total' => $this->toDecimal($summary?->getTotalVatAmount()),
                     'gross_total' => $this->toDecimal($summary?->getTotalGrossValue()),
-                    // A cancelled doc would be folded by the reconciler; on
-                    // import we record the live state. AADE only returns active
-                    // docs in invoicesDoc, so default VALID.
-                    'mydata_state' => 'VALID',
+                    // Folded from <cancelledByMark> / <cancelledInvoicesDoc> so a
+                    // cancelled doc imports as CANCELLED, not as a live expense.
+                    'mydata_state' => $isCancelled ? 'CANCELLED' : 'VALID',
                     'source' => $mode,
                     // Coarse economic bucket — only for self-declared, so the UI
                     // splits πάγια/μισθοδοσία from real invoices. Null for sync.
@@ -198,9 +204,11 @@ class ExpenseImporter
     /**
      * Fetch the full firebed Invoice objects for the window via the given GET
      * request (RequestDocs or RequestTransmittedDocs), keyed by MARK (last write
-     * wins — a MARK is unique per AADE doc).
+     * wins — a MARK is unique per AADE doc), plus the set of MARKs AADE lists as
+     * cancelled in <cancelledInvoicesDoc>. Mirrors the reconciler's fold so a
+     * cancelled doc is recorded as CANCELLED, not as a live expense.
      *
-     * @return array<string, \Firebed\AadeMyData\Models\Invoice>
+     * @return array{0: array<string, \Firebed\AadeMyData\Models\Invoice>, 1: array<string, true>}
      */
     private function fetchFullDocs(
         \Firebed\AadeMyData\Http\MyDataGetRequest $action,
@@ -208,6 +216,7 @@ class ExpenseImporter
         string $dateTo
     ): array {
         $byMark = [];
+        $cancelledMarks = [];
         $nextPartitionKey = null;
         $nextRowKey = null;
 
@@ -224,13 +233,23 @@ class ExpenseImporter
                 }
             }
 
+            $cancelledDoc = $response->get('cancelledInvoicesDoc');
+            if (is_iterable($cancelledDoc)) {
+                foreach ($cancelledDoc as $cancel) {
+                    $m = (string) $cancel->getInvoiceMark();
+                    if ($m !== '') {
+                        $cancelledMarks[$m] = true;
+                    }
+                }
+            }
+
             $token = $response->get('continuationToken');
             $token = $token instanceof ContinuationToken ? $token : null;
             $nextPartitionKey = $token?->getNextPartitionKey();
             $nextRowKey = $token?->getNextRowKey();
         } while ($token !== null && (! empty($nextPartitionKey) || ! empty($nextRowKey)));
 
-        return $byMark;
+        return [$byMark, $cancelledMarks];
     }
 
     /**

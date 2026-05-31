@@ -264,28 +264,50 @@ final class Codes
      *
      * @return array{key: string, label: string}
      */
+    /**
+     * Self-declared bucket KEYS that are accounting entries (μισθοδοσία/πάγια/
+     * τακτοποιήσεις), NOT real expense invoices. Used to split the Έξοδα list so
+     * a payroll doesn't read as a τιμολόγιο. One source for the UI.
+     *
+     * @var list<string>
+     */
+    public const ACCOUNTING_EXPENSE_CATEGORIES = ['payroll', 'depreciation', 'adjustments'];
+
     public static function selfDeclaredVatCategory(?string $code): array
+    {
+        $key = self::selfDeclaredVatCategoryKey($code);
+
+        return ['key' => $key, 'label' => self::selfDeclaredVatCategoryLabel($key) ?? 'Λοιπά έξοδα'];
+    }
+
+    /**
+     * The bucket KEY for a self-declared invoice TYPE code (e.g. '17.1' →
+     * 'payroll'). Finer split for what an accountant commonly self-declares, so
+     * ΕΦΚΑ / πάγια don't hide under a generic label and muddy the charts.
+     */
+    public static function selfDeclaredVatCategoryKey(?string $code): string
     {
         $code ??= '';
         $prefix = $code === '' ? '' : explode('.', $code)[0];
 
-        // Finer split for what an accountant commonly self-declares, so ΕΦΚΑ /
-        // πάγια don't hide under a generic label and muddy the charts.
         return match (true) {
-            $code === '14.5' => ['key' => 'social_security', 'label' => 'Ασφαλιστικές εισφορές (ΕΦΚΑ)'],
-            $code === '17.1' => ['key' => 'payroll', 'label' => 'Μισθοδοσία'],
-            $code === '17.2' => ['key' => 'depreciation', 'label' => 'Αποσβέσεις / Πάγια'],
-            $prefix === '14' => ['key' => 'intracommunity', 'label' => 'Ενδοκοινοτικά / Τρίτων χωρών'],
-            $prefix === '13' => ['key' => 'retail_expense', 'label' => 'Έξοδα λιανικής (ΑΛΠ)'],
-            $prefix === '17' => ['key' => 'adjustments', 'label' => 'Λοιπές εγγραφές τακτοποίησης'],
-            default => ['key' => 'other', 'label' => 'Λοιπές εγγραφές'],
+            $code === '14.5' => 'social_security',
+            $code === '17.1' => 'payroll',
+            $code === '17.2' => 'depreciation',
+            $prefix === '14' => 'intracommunity',
+            $prefix === '13' => 'retail_expense',
+            $prefix === '17' => 'adjustments',
+            default => 'other',
         };
     }
 
     /**
      * Greek label for a self-declared expense bucket KEY (the value stored in
-     * `expenses.category`, produced by selfDeclaredVatCategory()['key']).
-     * Kept in sync with that method's labels — one place for both.
+     * `expenses.category`). THE single source of these labels —
+     * selfDeclaredVatCategory() composes its 'label' from here, so the two can
+     * never drift. Null for an unknown key (caller falls back to the raw key).
+     *
+     * @var array<string, string>
      */
     public static function selfDeclaredVatCategoryLabel(string $key): ?string
     {
@@ -298,6 +320,22 @@ final class Codes
             'adjustments' => 'Λοιπές εγγραφές τακτοποίησης',
             'other' => 'Λοιπά έξοδα',
         ][$key] ?? null;
+    }
+
+    /**
+     * value => Greek-label map of every self-declared bucket — for Filament
+     * SelectFilters. Derived from the one label source above.
+     *
+     * @return array<string, string>
+     */
+    public static function selfDeclaredVatCategoryOptions(): array
+    {
+        $out = [];
+        foreach (['retail_expense', 'intracommunity', 'social_security', 'payroll', 'depreciation', 'adjustments', 'other'] as $key) {
+            $out[$key] = self::selfDeclaredVatCategoryLabel($key);
+        }
+
+        return $out;
     }
 
     public static function isValidIncomeClassType(string $code): bool
