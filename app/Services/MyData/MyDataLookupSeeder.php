@@ -82,22 +82,41 @@ class MyDataLookupSeeder
      * Matched by `code` (the human series prefix), which is the tenant's unique
      * key for an invoice type. `invcount` starts at 1; `show_on_menu` true.
      *
-     * @return array{created: int, skipped: int}
+     * For a type that ALREADY exists by code (e.g. ΤΙΜ imported from legacy with
+     * an empty mydata_type), we don't just skip it — we FILL the myDATA
+     * classification when it's missing (`mydata_type` empty → set the §8.1 code,
+     * and turn on `mydata_requires_quantity` for goods). Fill-empty only: a
+     * mydata_type the operator already set is never overwritten. So «Εισαγωγή
+     * τυπικών» also back-fills the AADE category onto pre-existing rows.
+     *
+     * @return array{created: int, skipped: int, filled: int}
      */
     public function seedInvoiceTypes(Company $tenant): array
     {
         $created = 0;
         $skipped = 0;
+        $filled = 0;
 
-        DB::transaction(function () use ($tenant, &$created, &$skipped) {
+        DB::transaction(function () use ($tenant, &$created, &$skipped, &$filled) {
             foreach (self::INVOICE_TYPE_SEED as $row) {
-                $exists = InvoiceType::query()
+                $existing = InvoiceType::query()
                     ->where('company_id', $tenant->getKey())
                     ->where('code', $row['code'])
-                    ->exists();
+                    ->first();
 
-                if ($exists) {
-                    $skipped++;
+                if ($existing !== null) {
+                    // Back-fill the myDATA classification if it's missing, but
+                    // never touch a value the operator already set.
+                    if (blank($existing->mydata_type)) {
+                        $existing->mydata_type = $row['mydata_type'];
+                        if (($row['goods'] ?? false) && ! $existing->mydata_requires_quantity) {
+                            $existing->mydata_requires_quantity = true;
+                        }
+                        $existing->save();
+                        $filled++;
+                    } else {
+                        $skipped++;
+                    }
 
                     continue;
                 }
@@ -116,7 +135,7 @@ class MyDataLookupSeeder
             }
         });
 
-        return ['created' => $created, 'skipped' => $skipped];
+        return ['created' => $created, 'skipped' => $skipped, 'filled' => $filled];
     }
 
     /**

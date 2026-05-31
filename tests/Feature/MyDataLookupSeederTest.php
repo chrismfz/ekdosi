@@ -90,9 +90,46 @@ class MyDataLookupSeederTest extends TestCase
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
         $this->assertSame(7, $r['created']);    // all but ΤΠΥ
-        $this->assertSame(1, $r['skipped']);
+        $this->assertSame(1, $r['skipped']);    // ΤΠΥ already has a mydata_type → skipped, not filled
+        $this->assertSame(0, $r['filled']);
 
-        // Existing ΤΠΥ kept (invcount untouched).
-        $this->assertSame(50, (int) InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->value('invcount'));
+        // Existing ΤΠΥ kept (invcount + mydata_type untouched).
+        $row = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->first();
+        $this->assertSame(50, (int) $row->invcount);
+        $this->assertSame('2.1', $row->mydata_type);
+    }
+
+    public function test_seed_backfills_mydata_type_on_existing_row_without_one(): void
+    {
+        $tenant = $this->tenant();
+        // Mirrors a legacy-imported ΤΙΜ with NO myDATA classification + a custom
+        // series counter the operator must keep.
+        InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο πώλησης', 'invcount' => 3, 'mydata_type' => null]);
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+
+        // ΤΙΜ was filled (not skipped); the other 7 are created.
+        $this->assertSame(7, $r['created']);
+        $this->assertSame(1, $r['filled']);
+        $this->assertSame(0, $r['skipped']);
+
+        $tim = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
+        $this->assertSame('1.1', $tim->mydata_type, 'goods sale class back-filled');
+        $this->assertTrue((bool) $tim->mydata_requires_quantity, 'goods → quantity required');
+        $this->assertSame(3, (int) $tim->invcount, 'operator counter preserved');
+        $this->assertSame('Τιμολόγιο πώλησης', $tim->name, 'operator name preserved');
+    }
+
+    public function test_seed_never_overwrites_an_operator_set_mydata_type(): void
+    {
+        $tenant = $this->tenant();
+        // Operator deliberately classified ΤΙΜ as something else — must survive.
+        InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΙΜ', 'name' => 'ΤΙΜ', 'invcount' => 1, 'mydata_type' => '1.2']);
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+
+        $this->assertSame(0, $r['filled']);
+        $this->assertSame(1, $r['skipped']);
+        $this->assertSame('1.2', InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->value('mydata_type'));
     }
 }

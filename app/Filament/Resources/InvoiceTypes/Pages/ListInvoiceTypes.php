@@ -30,7 +30,7 @@ class ListInvoiceTypes extends BaseListRecords
                 ->color('gray')
                 ->requiresConfirmation()
                 ->modalHeading('Εισαγωγή τυπικών τύπων παραστατικών')
-                ->modalDescription('Προστίθεται ένα βασικό σετ: Τιμολόγιο Πώλησης (εμπόρευμα), Τιμολόγιο/Δελτίο Αποστολής, Παροχής Υπηρεσιών, Λιανικής, Πιστωτικό, Δελτίο Αποστολής. Υπάρχοντες (ίδιος κωδικός σειράς) διατηρούνται. Οι σειρές/κωδικοί επεξεργάζονται μετά.')
+                ->modalDescription('Προστίθεται ένα βασικό σετ: Τιμολόγιο Πώλησης (εμπόρευμα), Τιμολόγιο/Δελτίο Αποστολής, Παροχής Υπηρεσιών, Λιανικής, Πιστωτικό, Δελτίο Αποστολής. Σε όσους τύπους υπάρχουν ήδη αλλά ΔΕΝ έχουν κατηγορία myDATA, συμπληρώνεται η κατηγορία (π.χ. 1.1 στο ΤΙΜ) — όσοι την έχουν ήδη μένουν ως έχουν. Οι σειρές/κωδικοί επεξεργάζονται μετά.')
                 ->modalSubmitActionLabel('Εισαγωγή')
                 ->action(function (): void {
                     $tenant = Filament::getTenant();
@@ -39,7 +39,7 @@ class ListInvoiceTypes extends BaseListRecords
                     }
                     $r = app(MyDataLookupSeeder::class)->seedInvoiceTypes($tenant);
                     Notification::make()
-                        ->title("Προστέθηκαν {$r['created']} · Υπήρχαν ήδη {$r['skipped']}")
+                        ->title("Προστέθηκαν {$r['created']} · Συμπληρώθηκε myDATA σε {$r['filled']} · Υπήρχαν ήδη {$r['skipped']}")
                         ->success()->send();
                 }),
 
