@@ -26,6 +26,7 @@
 | Ορατότητα WHMCS | Κρυφή στήλη `invoiced` μόνο | Badge+ΜΑΡΚ, badge λίστας, «Αποστολή στο Ekdosi», **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ), **συγκεντρωτική λίστα** (περίοδος/Είδος/Τρίτος) — plugin v0.12.0 | 🆕 |
 | Reconciliation | Καμία | Τοπικό + ζωντανό (πωλήσεις & έξοδα), ομαδοποίηση αδέσποτων | 🆕 |
 | Έξοδα/Ε3 | Καμία | Προμηθευτές, RequestDocs, classification, ΦΠΑ, Ε3 | 🆕 |
+| Προσφορές (quotes) | Καμία | Μη-νομικό sales offer σε ξεχωριστούς πίνακες + μετατροπή σε παραστατικό | 🆕 |
 | Πολλές χώρες | Όχι (μόνο ΕΛ) | Multi-country από την αρχή (ΕΛ myDATA + ΕΕ PEPPOL stub) | 🆕 |
 
 ---
@@ -95,6 +96,7 @@ FastReport.
 - ✅ **Έξοδα/ΦΠΑ εισροών** (`RequestDocs`/Ε3) — **υλοποιημένα** (προμηθευτές,
   reconciliation εξόδων, classification, ΦΠΑ εκροών−εισροών, Ε3 με διαχωρισμό
   εσόδων/εξόδων)· δεν υπήρχε **τίποτα** στο legacy. Βλ. `docs/expenses-phase-plan.md`.
+- 🆕 **Self-declared έσοδα/έξοδα + αυτόματη είσοδος από myDATA**: εισαγωγή με ένα κλικ των **αδέσποτων** παραστατικών που έχει η ΑΑΔΕ αλλά λείπουν τοπικά (`ExpenseImporter`/`ExpenseReconciler` πάνω στο `RequestDocs`), **plus** εισαγωγή των **δικών μας** self-declared εξόδων (αποδείξεις/μισθοδοσία/ΔΕΚΟ/VIES) και του **χαρακτηρισμού E3 ανά γραμμή** απευθείας από τα myDATA docs. Τα πιστωτικά εξόδων αφαιρούνται σωστά από το ΦΠΑ εισροών (δεν το φουσκώνουν).
 
 ---
 
@@ -178,6 +180,20 @@ scheduler + queue worker** να ενεργοποιηθούν στον deploy hos
 
 ---
 
+## 9.5 Προσφορές / Quotes (🆕 — δεν υπήρχε)
+Μη-νομικό sales offer (ΔΕΝ φιλιάρεται myDATA, ΔΕΝ μετράει σε χρήματα/καρτέλα/ΦΠΑ):
+- **Ξεχωριστοί πίνακες** (`quotes`/`quote_lines`/`quote_mail_logs`) — μηδενικό blast
+  radius στο money-path· regression test ότι δεν διαρρέει στο `InvoiceScope::live()`.
+- Γραμμές: προϊόν/υπηρεσία **ή** ελεύθερο κείμενο **ή** inline-create προϊόντος.
+- Lifecycle: Πρόχειρη → Απεσταλμένη → Αποδεκτή/Απορριφθείσα + **Μετατροπή σε πρόχειρο
+  παραστατικό** (αμφίδρομο ιστορικό quote↔invoice, χωρίς στήλη στον νόμιμο πίνακα).
+- Δικός counter `ΠΡ-{n}` (`companies.quote_counter`) — **ποτέ** το νόμιμο ΑΑ.
+- **PDF** (fork του invoice renderer, χωρίς QR/MARK) + **email** + **send-log** (queue job).
+- Παρακολούθηση: «ισχύει έως» (λήξη προσφοράς) + «λήξη υπηρεσίας» (χειροκίνητη
+  παρακολούθηση ανανέωσης μέχρι να μπει το recurring engine). **Independent-reviewed.**
+
+---
+
 ## 10. Λοιπά νέα που δεν υπήρχαν στο legacy (🆕)
 - **Multi-tenant** + **multi-country** (ΕΛ myDATA + ΕΕ PEPPOL stub).
 - **Ρόλοι/δικαιώματα** ανά εταιρεία (Shield: `admin`/`operator`/`accountant_readonly`).
@@ -204,8 +220,8 @@ scheduler + queue worker** να ενεργοποιηθούν στον deploy hos
 ---
 
 ## 12. Σε εξέλιξη / planned (🚧)
-- **Έξοδα / Προμηθευτές + ΦΠΑ εισροών–εκροών + Ε3** — blueprint
-  (`docs/expenses-phase-plan.md`).
+- ~~**Έξοδα / Προμηθευτές + ΦΠΑ εισροών–εκροών + Ε3**~~ ✅ **DONE** (E0–E7 + self-declared import + per-line E3)· βλ. `docs/expenses-phase-plan.md`.
+- ~~**Προσφορές / Quotes**~~ ✅ **DONE** (βλ. §9.5)· **Υπηρεσίες/Συμβόλαια (recurring)** σχεδιασμένο, όχι υλοποιημένο.
 - **Διορθώσεις myDATA filing**: ✅ G1 παρακράτηση, ✅ G4 0%/απαλλαγή· 🚧 G3
   tax-inclusive WHMCS, G9 τρόπος πληρωμής→myDATA, G5 ποσότητα για αγαθά,
   G7 gross-edit, G6 auto-email στο non-myDATA path.
