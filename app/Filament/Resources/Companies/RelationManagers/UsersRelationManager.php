@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Companies\RelationManagers;
 
+use App\Filament\Support\ManageTenantRoleAction;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
@@ -42,6 +43,24 @@ class UsersRelationManager extends RelationManager
                     ->searchable(),
                 TextColumn::make('email')
                     ->searchable(),
+                // This user's role within THIS company (team-scoped, computed).
+                TextColumn::make('tenant_role')
+                    ->label('Ρόλος')
+                    ->badge()
+                    ->state(function (User $record): string {
+                        $company = $this->getOwnerRecord();
+                        $role = $company instanceof Company
+                            ? app(TenantRoleProvisioner::class)->roleInCompany($record, $company)
+                            : null;
+
+                        return ManageTenantRoleAction::roleLabel($role);
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        ManageTenantRoleAction::roleLabel('super_admin') => 'danger',
+                        ManageTenantRoleAction::roleLabel(TenantRoleProvisioner::ROLE_COMPANY_ADMIN) => 'warning',
+                        ManageTenantRoleAction::roleLabel(TenantRoleProvisioner::ROLE_OPERATOR) => 'success',
+                        default => 'gray',
+                    }),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -70,6 +89,13 @@ class UsersRelationManager extends RelationManager
                     }),
             ])
             ->recordActions([
+                // Set the row user's role within this company (team-scoped).
+                ManageTenantRoleAction::make(
+                    resolveUser: fn (User $record): User => $record,
+                    resolveCompany: fn (User $record): ?Company => $this->getOwnerRecord() instanceof Company
+                        ? $this->getOwnerRecord()
+                        : null,
+                ),
                 DetachAction::make(),
             ])
             ->toolbarActions([

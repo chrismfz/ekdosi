@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
+use Illuminate\Support\Collection;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -198,9 +199,9 @@ class TenantRoleProvisioner
      * permissions that actually exist (shield:generate may not have created
      * every combination — e.g. a resource without a Create policy method).
      *
-     * @return \Illuminate\Support\Collection<int, Permission>
+     * @return Collection<int, Permission>
      */
-    private function operatorPermissions(string $guard): \Illuminate\Support\Collection
+    private function operatorPermissions(string $guard): Collection
     {
         $wanted = [];
         foreach (self::OPERATOR_RESOURCES as $resource) {
@@ -236,6 +237,124 @@ class TenantRoleProvisioner
             $registrar->forgetCachedPermissions();
             $user->unsetRelation('roles');
             if (! $user->hasRole($roleName)) {
+                $user->assignRole($roleName);
+            }
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeam);
+            $registrar->forgetCachedPermissions();
+        }
+    }
+
+    // ── Role picker (per user × company) ───────────────────────────────────
+    //
+    // The UserResource role-picker treats each (user, company) pivot as holding
+    // AT MOST ONE managed role: super_admin | company_admin | operator. These
+    // helpers read and set that single role within a team, so the picker is a
+    // simple Select rather than a multi-role checkbox list.
+
+    /**
+     * The three roles the picker manages, in privilege order. super_admin is
+     * resolved dynamically from Shield config (its name is configurable).
+     *
+     * @return list<string>
+     */
+    public function managedRoleNames(): array
+    {
+        return [
+            ShieldUtils::getSuperAdminName(),
+            self::ROLE_COMPANY_ADMIN,
+            self::ROLE_OPERATOR,
+        ];
+    }
+
+    /**
+     * Does the user hold the super_admin role specifically within THIS
+     * company's team? (Distinct from isSuperAdminAnywhere — used to decide
+     * whether the acting user may grant super_admin in a given tenant, so a
+     * company_admin can't escalate.)
+     */
+    public function hasSuperAdminIn(User $user, Company $company): bool
+    {
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+
+        try {
+            $registrar->forgetCachedPermissions();
+            $user->unsetRelation('roles');
+
+            return $user->hasRole(ShieldUtils::getSuperAdminName());
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeam);
+            $registrar->forgetCachedPermissions();
+        }
+    }
+
+    /**
+     * Which managed role (if any) the user holds in the company's team. Returns
+     * the role name (super_admin / company_admin / operator) or null. If more
+     * than one is somehow present, returns the highest-privilege one.
+     */
+    public function roleInCompany(User $user, Company $company): ?string
+    {
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+
+        try {
+            $registrar->forgetCachedPermissions();
+            $user->unsetRelation('roles');
+
+            foreach ($this->managedRoleNames() as $name) {
+                if ($user->hasRole($name)) {
+                    return $name;
+                }
+            }
+
+            return null;
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeam);
+            $registrar->forgetCachedPermissions();
+        }
+    }
+
+    /**
+     * Set the user's single managed role within a company's team (picker
+     * semantics): strips any other managed role they hold there first, then
+     * assigns the chosen one. Pass null to clear all managed roles (no access
+     * beyond plain attach). Ensures the role rows exist first.
+     *
+     * Does NOT enforce escalation rules — the caller (UI action) decides
+     * whether the acting user may grant super_admin. Non-managed roles are
+     * left untouched.
+     */
+    public function setRoleInCompany(User $user, Company $company, ?string $roleName): void
+    {
+        $managed = $this->managedRoleNames();
+
+        if ($roleName !== null && ! in_array($roleName, $managed, true)) {
+            throw new \InvalidArgumentException("Unknown managed role: {$roleName}");
+        }
+
+        // Make sure both super_admin and the standard roles exist for this team.
+        $this->ensureSuperAdminRole($company);
+        $this->ensureStandardRoles($company);
+
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+
+        try {
+            $registrar->forgetCachedPermissions();
+            $user->unsetRelation('roles');
+
+            foreach ($managed as $name) {
+                if ($name !== $roleName && $user->hasRole($name)) {
+                    $user->removeRole($name);
+                }
+            }
+
+            if ($roleName !== null && ! $user->hasRole($roleName)) {
                 $user->assignRole($roleName);
             }
         } finally {
