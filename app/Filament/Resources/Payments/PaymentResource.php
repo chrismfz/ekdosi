@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Payments;
 
+use App\Filament\RelationManagers\ActivityLogRelationManager;
 use App\Filament\Resources\Payments\Pages\CreatePayment;
 use App\Filament\Resources\Payments\Pages\EditPayment;
 use App\Filament\Resources\Payments\Pages\ListPayments;
@@ -46,6 +47,13 @@ class PaymentResource extends Resource
     public static function table(Table $table): Table
     {
         return PaymentsTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            ActivityLogRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

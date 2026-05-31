@@ -14,7 +14,10 @@ MariaDB**, multi-tenant and multi-country from day one.
 - **PHP 8.4+**, **Laravel 13**, **MariaDB 11.x** (`utf8mb4_unicode_ci`)
 - **FilamentPHP 5** — admin panel **and** tenancy driver (Company = tenant)
 - **myDATA**: `firebed/aade-mydata` (wrapped in `App\Services\MyDataSubmitter`)
-- **Roles**: `spatie/laravel-permission` + `bezhanSalleh/filament-shield`
+- **Roles**: `spatie/laravel-permission` + `bezhanSalleh/filament-shield` —
+  per-tenant `super_admin` / `company_admin` / `operator`, with a role-picker UI
+- **Audit log**: `spatie/laravel-activitylog` — who-changed-what on invoices,
+  customers, payments (read-only «Ιστορικό» tab per record)
 - **PDF**: `barryvdh/laravel-dompdf` · **Backups**: `spatie/laravel-backup`
 - **Queue/scheduler**: Laravel built-in (DB driver)
 
@@ -38,6 +41,10 @@ MariaDB**, multi-tenant and multi-country from day one.
 - **Multi-tenant / multi-country** — one codebase, one panel with tenant
   switching; `companies.einvoice_provider` selects the submitter
   (`gr-mydata` / `ee-peppol` / `none`) behind a common issue flow.
+- **Roles & audit** — per-tenant roles (`super_admin` / `company_admin` /
+  `operator`) assigned via a role-picker; an activity log records
+  who-changed-what on invoices, customers and payments, shown as a read-only
+  «Ιστορικό» tab on each record.
 
 ## Layout
 
@@ -56,8 +63,9 @@ MariaDB**, multi-tenant and multi-country from day one.
 composer install
 cp .env.example .env && php artisan key:generate
 php artisan migrate
-php artisan db:seed            # if seeders are configured for your env
-php artisan shield:generate    # sync resource permissions
+php artisan db:seed                 # if seeders are configured for your env
+php artisan shield:generate         # sync resource permissions
+php artisan shield:sync-super-admin # sync per-tenant role maps + super_admin
 php artisan serve
 ```
 

@@ -3,7 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
+use App\Models\Concerns\TracksActivity;
 use App\Observers\PaymentObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -27,16 +27,25 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * payment changes. SoftDeletes so a mis-keyed payment is recoverable
  * and excluded from the paid total while trashed.
  *
- * NOTE: spatie/activitylog is intentionally NOT wired here — it lands
- * in the dedicated cross-model audit PR (invoices + customers +
- * payments together) per CLAUDE.md, not piecemeal.
+ * Audited via TracksActivity (the cross-model audit pass — invoices +
+ * customers + payments together).
  */
 #[ObservedBy(PaymentObserver::class)]
 class Payment extends Model
 {
     use BelongsToCompany;
+    use HasFactory, SoftDeletes, TracksActivity;
 
-    use HasFactory, SoftDeletes;
+    /**
+     * Audited columns — every business field on a payment is audit-worthy.
+     * See TracksActivity.
+     *
+     * @return list<string>
+     */
+    protected function loggedAttributes(): array
+    {
+        return ['customer_id', 'invoice_id', 'payment_method_id', 'pay_date', 'amount', 'notes'];
+    }
 
     protected $fillable = [
         'company_id',

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Invoices;
 
+use App\Filament\RelationManagers\ActivityLogRelationManager;
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
 use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Pages\ListInvoices;
@@ -19,6 +20,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 /**
@@ -62,10 +64,10 @@ class InvoiceResource extends Resource
     /**
      * @return array<string, string>
      */
-    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    public static function getGlobalSearchResultDetails(Model $record): array
     {
         return array_filter([
-            'ΑΦΜ'   => $record->vat_no,
+            'ΑΦΜ' => $record->vat_no,
             'Ημ/νία' => $record->issued_at?->format('d/m/Y'),
         ]);
     }
@@ -112,6 +114,7 @@ class InvoiceResource extends Resource
             LinesRelationManager::class,
             MyDataMarksRelationManager::class,
             MailLogRelationManager::class,
+            ActivityLogRelationManager::class,
         ];
     }
 

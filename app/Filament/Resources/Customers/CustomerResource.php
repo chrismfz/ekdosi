@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\Customers;
 
+use App\Filament\RelationManagers\ActivityLogRelationManager;
 use App\Filament\Resources\Customers\Pages\CreateCustomer;
+use App\Filament\Resources\Customers\Pages\CustomerLedger;
 use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Filament\Resources\Customers\Pages\ListCustomers;
 use App\Filament\Resources\Customers\Schemas\CustomerForm;
@@ -14,6 +16,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class CustomerResource extends Resource
@@ -40,11 +43,11 @@ class CustomerResource extends Resource
     /**
      * @return array<string, string>
      */
-    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    public static function getGlobalSearchResultDetails(Model $record): array
     {
         return array_filter([
-            'ΑΦΜ'    => $record->afm,
-            'Πόλη'   => $record->city,
+            'ΑΦΜ' => $record->afm,
+            'Πόλη' => $record->city,
         ]);
     }
 
@@ -85,17 +88,17 @@ class CustomerResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            ActivityLogRelationManager::class,
         ];
     }
 
     public static function getPages(): array
     {
         return [
-            'index'  => ListCustomers::route('/'),
+            'index' => ListCustomers::route('/'),
             'create' => CreateCustomer::route('/create'),
-            'edit'   => EditCustomer::route('/{record}/edit'),
-            'ledger' => \App\Filament\Resources\Customers\Pages\CustomerLedger::route('/{record}/ledger'),
+            'edit' => EditCustomer::route('/{record}/edit'),
+            'ledger' => CustomerLedger::route('/{record}/ledger'),
         ];
     }
 }

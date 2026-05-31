@@ -3,7 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
+use App\Models\Concerns\TracksActivity;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
@@ -40,8 +40,24 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Invoice extends Model
 {
     use BelongsToCompany;
+    use HasFactory, SoftDeletes, TracksActivity;
 
-    use HasFactory, SoftDeletes;
+    /**
+     * Audited columns — lifecycle + money figures + the myDATA state mirror, but
+     * NOT the money cache (paid_total / credited_total / payment_status), which
+     * InvoiceBalance rewrites on every payment recompute. See TracksActivity.
+     *
+     * @return list<string>
+     */
+    protected function loggedAttributes(): array
+    {
+        return [
+            'code', 'customer_id', 'invoice_type_id', 'issued_at', 'local_status',
+            'cancel_reason', 'header_discount_percent', 'net_total', 'gross_total',
+            'withhold_amount', 'withhold_category', 'payment_method_id',
+            'mydata_state', 'mydata_mark',
+        ];
+    }
 
     /**
      * Mass-assignable columns. The myDATA cache columns
