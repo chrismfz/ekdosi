@@ -2,8 +2,16 @@
 
 > **Status: NOT STARTED — design/roadmap only.** This is a planned future
 > capability, captured here so the design isn't lost. Nothing in it is built.
-> Order when we start: **Services first**, then Quotes (Quotes depend on
-> Services for the convert→service path). Implement as small, reviewable PRs.
+> Implement as small, reviewable PRs.
+>
+> **BUILD ORDER (revised):** **Quotes first**, then Services. Quotes are the
+> easier, higher-reuse feature (fork Invoices/mail) and ship fully functional
+> with only `ConvertQuoteToInvoice` — the *single* coupling to Services is
+> `ConvertQuoteToServiceContract` (PR 2.5), which we **defer** until Services
+> land (its "Μετατροπή σε Υπηρεσία" button stays hidden until then). Services
+> are stubbed in the meantime: only the additive `products` recurring columns
+> are reserved (inert) — no resource, scheduler, or provisioning yet. The
+> "hardcore" recurring/provisioning engine is intentionally last.
 
 ## Why
 
@@ -46,7 +54,11 @@ counter) — quotes must **never** touch it.
 
 ---
 
-## PHASE 1 — Υπηρεσίες / Συμβόλαια (first)
+> **NOTE (revised order):** Despite the heading numbers below, we now build
+> **Phase 2 (Quotes) FIRST**, with PR 2.5 (convert→service) deferred. Phase 1
+> (Services) follows. The phase content is unchanged — only the build order is.
+
+## PHASE 1 — Υπηρεσίες / Συμβόλαια (built SECOND)
 
 ### Data model
 **Migration A — extend catalog `products` (additive)** (precedent: existing
@@ -171,7 +183,7 @@ not the provisioning mechanism.
 
 ---
 
-## PHASE 2 — Προσφορές (after; depends on Phase 1 for convert→service)
+## PHASE 2 — Προσφορές (built FIRST; only PR 2.5 depends on Phase 1)
 
 ### Data model
 **Migration D — `quotes`:** `id, legacy_id, company_id` (BelongsToCompany),
