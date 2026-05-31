@@ -17,8 +17,8 @@ customer portal), that compiled only on a fragile Windows 7 VM — escaping
 that toolchain is the whole point.
 
 Scope: customers, stock/products, services, invoices (παραστατικά),
-payments, credit notes, myDATA submission + reconciliation + audit trail,
-WHMCS bridge. The old C++Builder/Firebird app becomes a read-only archive
+payments, credit notes, quotes (προσφορές), myDATA submission +
+reconciliation + audit trail, WHMCS bridge. The old C++Builder/Firebird app becomes a read-only archive
 after cutover.
 
 ## Goal & end state
@@ -406,7 +406,7 @@ types); payments + credit notes; WHMCS bridge (A–B3) + `ekdosi_bridge` plugin;
 **timologia v2 / third-party invoicing — T-1 + T-2 DONE & merged** (resolution,
 single-party billing, multi-party split, hideable client page; see the WHMCS
 section + `docs/whmcs-legacy-plugin-map.md`); PDF + per-tenant email + send-log;
-dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`).
+dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`); **Προσφορές / Quotes** (μη-νομικό sales offer σε ΞΕΧΩΡΙΣΤΟΥΣ πίνακες — δεν αγγίζει InvoiceScope/χρήματα/ΦΠΑ· form/lines με προϊόν|free-text|inline-create· lifecycle Αποδοχή·Απόρριψη·Επαναφορά + **Μετατροπή→πρόχειρο παραστατικό** με αμφίδρομο ιστορικό quote↔invoice· δικός counter `ΠΡ-{n}` ποτέ το ΑΑ· PDF + email + send-log — **independent-reviewed**).
 
 **🚧 PARTIAL:** auto-email — both issue paths now covered: the **myDATA-VALID**
 path (`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
