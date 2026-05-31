@@ -282,6 +282,24 @@ final class Codes
         };
     }
 
+    /**
+     * Greek label for a self-declared expense bucket KEY (the value stored in
+     * `expenses.category`, produced by selfDeclaredVatCategory()['key']).
+     * Kept in sync with that method's labels — one place for both.
+     */
+    public static function selfDeclaredVatCategoryLabel(string $key): ?string
+    {
+        return [
+            'social_security' => 'Ασφαλιστικές εισφορές (ΕΦΚΑ)',
+            'payroll' => 'Μισθοδοσία',
+            'depreciation' => 'Αποσβέσεις / Πάγια',
+            'intracommunity' => 'Ενδοκοινοτικά / Τρίτων χωρών',
+            'retail_expense' => 'Έξοδα λιανικής (ΑΛΠ)',
+            'adjustments' => 'Λοιπές εγγραφές τακτοποίησης',
+            'other' => 'Λοιπά έξοδα',
+        ][$key] ?? null;
+    }
+
     public static function isValidIncomeClassType(string $code): bool
     {
         return in_array($code, self::INCOME_CLASS_TYPES, true);

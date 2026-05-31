@@ -71,8 +71,23 @@ class ExpensesTable
                     ->label('Προέλευση')
                     ->badge()
                     ->formatStateUsing(fn (ExpenseSource $state): string => $state->label())
-                    ->color(fn (ExpenseSource $state): string => $state === ExpenseSource::Sync ? 'info' : 'gray')
+                    ->color(fn (ExpenseSource $state): string => match ($state) {
+                        ExpenseSource::Sync => 'info',
+                        ExpenseSource::SelfDeclared => 'warning',
+                        default => 'gray',
+                    })
                     ->toggleable(isToggledHiddenByDefault: true),
+
+                // Economic bucket label for self-declared docs (πάγια / μισθοδοσία
+                // / ενδοκοινοτικά…). Blank for supplier-sync rows (their type
+                // already says it). Resolved via the same §8 table the dashboard uses.
+                TextColumn::make('category')
+                    ->label('Κατηγορία')
+                    ->placeholder('—')
+                    ->formatStateUsing(fn (?string $state): string => $state === null
+                        ? '—'
+                        : (\App\Support\MyData\Codes::selfDeclaredVatCategoryLabel($state) ?? $state))
+                    ->toggleable(),
             ])
             ->filters([
                 SelectFilter::make('source')

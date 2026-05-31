@@ -27,6 +27,14 @@ class ExpenseInfolist
                         TextEntry::make('vat_total')->label('ΦΠΑ')->money('EUR'),
                         TextEntry::make('gross_total')->label('Σύνολο')->money('EUR'),
                         TextEntry::make('mydata_mark')->label('MARK')->copyable(),
+                        // Self-declared bucket (πάγια/μισθοδοσία/ενδοκοινοτικά…);
+                        // blank for supplier docs.
+                        TextEntry::make('category')
+                            ->label('Κατηγορία')
+                            ->placeholder('—')
+                            ->formatStateUsing(fn (?string $state): string => $state === null
+                                ? '—'
+                                : (\App\Support\MyData\Codes::selfDeclaredVatCategoryLabel($state) ?? $state)),
                     ]),
 
                 RepeatableEntry::make('lines')

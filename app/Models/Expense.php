@@ -52,6 +52,7 @@ class Expense extends Model
         'classification_type',
         'classification_category',
         'source',
+        'category',
         'notes',
     ];
 
