@@ -17,6 +17,7 @@ use Filament\Forms\Components\Component;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -174,12 +175,10 @@ class MyDataConsole extends Page
     {
         $tenant = Filament::getTenant();
 
-        $this->ran = true;
+        // NB: do NOT wipe $this->result here. On a failed fetch (e.g. AADE 429)
+        // we keep the last cached result + the «as of …» banner instead of
+        // blanking the page; result/labels are overwritten only on success.
         $this->error = null;
-        $this->result = null;
-        $this->resultMode = $mode;
-        $this->windowFrom = $from;
-        $this->windowTo = $to;
 
         try {
             $reconciler = new SalesReconciler($tenant);
@@ -188,6 +187,10 @@ class MyDataConsole extends Page
                 Carbon::parse($to)->endOfDay(),
             );
 
+            $this->ran = true;
+            $this->resultMode = $mode;
+            $this->windowFrom = $from;
+            $this->windowTo = $to;
             $this->result = $this->serialize($result);
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
@@ -226,6 +229,16 @@ class MyDataConsole extends Page
                     ->{$result->hasDiscrepancies() ? 'warning' : 'success'}()
                     ->send();
             }
+        } catch (RateLimitExceededException $e) {
+            // AADE 429 — keep whatever was on screen (preserved above) and tell
+            // the operator when to retry, instead of a scary credentials error.
+            $this->error = $this->rateLimitMessage($e->getMessage());
+
+            Notification::make()
+                ->title('Προσωρινό όριο myDATA')
+                ->body($this->error)
+                ->warning()
+                ->send();
         } catch (RuntimeException $e) {
             // Our own guard messages (provider/mode/credentials) — safe
             // Greek strings meant for the operator.

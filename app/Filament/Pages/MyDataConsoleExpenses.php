@@ -18,6 +18,7 @@ use Filament\Forms\Components\Component;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -189,10 +190,10 @@ class MyDataConsoleExpenses extends Page
     {
         $tenant = Filament::getTenant();
 
-        $this->ran = true;
+        // NB: do NOT wipe $this->result here — keep the last cached result on a
+        // failed fetch (e.g. AADE 429) instead of blanking the page; it's
+        // overwritten only on success.
         $this->error = null;
-        $this->result = null;
-        $this->resultMode = $mode;
 
         try {
             $result = (new ExpenseReconciler($tenant, static::$testHandler))->reconcile(
@@ -200,6 +201,8 @@ class MyDataConsoleExpenses extends Page
                 Carbon::parse($to)->endOfDay(),
             );
 
+            $this->ran = true;
+            $this->resultMode = $mode;
             $this->result = $this->serialize($result);
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
@@ -223,6 +226,9 @@ class MyDataConsoleExpenses extends Page
                     ->{$result->hasDiscrepancies() ? 'warning' : 'success'}()
                     ->send();
             }
+        } catch (RateLimitExceededException $e) {
+            $this->error = $this->rateLimitMessage($e->getMessage());
+            Notification::make()->title('Προσωρινό όριο myDATA')->body($this->error)->warning()->send();
         } catch (RuntimeException $e) {
             $this->error = $e->getMessage();
             Notification::make()->title('Ο έλεγχος απέτυχε')->body($e->getMessage())->danger()->send();

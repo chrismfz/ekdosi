@@ -16,6 +16,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -152,9 +153,10 @@ class MyDataE3Overview extends Page
     {
         $tenant = Filament::getTenant();
 
-        $this->ran = true;
+        // NB: do NOT wipe $this->result here. If the fetch fails (e.g. AADE 429),
+        // we keep the last cached result on screen + the «as of …» banner rather
+        // than blanking the page; $this->result is overwritten only on success.
         $this->error = null;
-        $this->result = null;
 
         try {
             $report = (new E3Reporter($tenant, static::$testHandler))->report(
@@ -163,6 +165,7 @@ class MyDataE3Overview extends Page
             );
 
             $this->result = $this->serialize($report);
+            $this->ran = true;
             $this->rememberFetch();
 
             Notification::make()
@@ -172,6 +175,9 @@ class MyDataE3Overview extends Page
                     : count($report->rows).' γραμμές, σύνολο '.Money::eur($report->total))
                 ->{$report->isEmpty() ? 'warning' : 'success'}()
                 ->send();
+        } catch (RateLimitExceededException $e) {
+            $this->error = $this->rateLimitMessage($e->getMessage());
+            Notification::make()->title('Προσωρινό όριο myDATA')->body($this->error)->warning()->send();
         } catch (RuntimeException $e) {
             $this->error = $e->getMessage();
             Notification::make()->title('Η λήψη απέτυχε')->body($e->getMessage())->danger()->send();
