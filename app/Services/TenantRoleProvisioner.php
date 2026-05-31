@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
@@ -113,6 +114,130 @@ class TenantRoleProvisioner
             }
 
             return false;
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeam);
+            $registrar->forgetCachedPermissions();
+        }
+    }
+
+    // ── Standard non-super roles ───────────────────────────────────────────
+    //
+    // Under Shield teams mode the ROLE rows are per-company (team-scoped) but
+    // the PERMISSION rows are global (Spatie default — only model_has_roles /
+    // role_has_permissions carry the team id). So we create a company_admin and
+    // an operator role per tenant and attach the right slice of the GLOBAL
+    // permissions to each. Unlike super_admin, these roles do NOT trigger the
+    // Gate::before bypass — they're enforced by the actual permission set, and
+    // are confined to their own tenant by the team scope on assignment.
+
+    public const ROLE_COMPANY_ADMIN = 'company_admin';
+
+    public const ROLE_OPERATOR = 'operator';
+
+    /**
+     * Resource permission prefixes an OPERATOR gets: issue + manage the daily
+     * documents/people/money, but NOT delete, NOT Setup lookups, NOT users,
+     * NOT company/myDATA credentials. Keyed by Shield resource permission base
+     * name (the part after the prefix, e.g. "Invoice" in "ViewAny:Invoice").
+     *
+     * @var list<string>
+     */
+    public const OPERATOR_RESOURCES = [
+        'Invoice', 'Quote', 'Customer', 'Product', 'Payment', 'Expense', 'Supplier',
+    ];
+
+    /**
+     * The action prefixes an operator may perform on the above resources.
+     * No delete/forceDelete/restore — destructive ops stay with the admin.
+     *
+     * @var list<string>
+     */
+    public const OPERATOR_ACTIONS = ['ViewAny', 'View', 'Create', 'Update'];
+
+    /**
+     * Ensure a tenant has the standard non-super roles (company_admin,
+     * operator) with their permission sets attached. Idempotent + team-scoped.
+     * Call from the CompanyObserver (alongside ensureSuperAdminRole) and the
+     * backfill command. No-op-safe to re-run after shield:generate adds new
+     * permissions — it re-syncs the maps.
+     */
+    public function ensureStandardRoles(Company $company): void
+    {
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+
+        try {
+            $guard = ShieldUtils::getFilamentAuthGuard();
+
+            // company_admin = every permission that exists (full control of THIS
+            // tenant), but NOT the super_admin role → no cross-tenant bypass.
+            $admin = Role::query()->firstOrCreate([
+                'name' => self::ROLE_COMPANY_ADMIN,
+                'guard_name' => $guard,
+                'company_id' => $company->getKey(),
+            ]);
+            $admin->syncPermissions(Permission::query()->where('guard_name', $guard)->get());
+
+            // operator = curated subset (see OPERATOR_* maps).
+            $operator = Role::query()->firstOrCreate([
+                'name' => self::ROLE_OPERATOR,
+                'guard_name' => $guard,
+                'company_id' => $company->getKey(),
+            ]);
+            $operator->syncPermissions($this->operatorPermissions($guard));
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeam);
+            $registrar->forgetCachedPermissions();
+        }
+    }
+
+    /**
+     * The global Permission rows an operator role should hold:
+     * {action}:{resource} for the curated resource/action maps. Filters to
+     * permissions that actually exist (shield:generate may not have created
+     * every combination — e.g. a resource without a Create policy method).
+     *
+     * @return \Illuminate\Support\Collection<int, Permission>
+     */
+    private function operatorPermissions(string $guard): \Illuminate\Support\Collection
+    {
+        $wanted = [];
+        foreach (self::OPERATOR_RESOURCES as $resource) {
+            foreach (self::OPERATOR_ACTIONS as $action) {
+                $wanted[] = "{$action}:{$resource}";
+            }
+        }
+
+        return Permission::query()
+            ->where('guard_name', $guard)
+            ->whereIn('name', $wanted)
+            ->get();
+    }
+
+    /**
+     * Assign a standard role to a user within a company's team. Mirrors
+     * assignSuperAdmin's cache discipline. Pass self::ROLE_COMPANY_ADMIN or
+     * ROLE_OPERATOR. Ensures the roles exist first.
+     */
+    public function assignStandardRole(User $user, Company $company, string $roleName): void
+    {
+        if (! in_array($roleName, [self::ROLE_COMPANY_ADMIN, self::ROLE_OPERATOR], true)) {
+            throw new \InvalidArgumentException("Unknown standard role: {$roleName}");
+        }
+
+        $this->ensureStandardRoles($company);
+
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+
+        try {
+            $registrar->forgetCachedPermissions();
+            $user->unsetRelation('roles');
+            if (! $user->hasRole($roleName)) {
+                $user->assignRole($roleName);
+            }
         } finally {
             $registrar->setPermissionsTeamId($previousTeam);
             $registrar->forgetCachedPermissions();

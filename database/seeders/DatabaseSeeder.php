@@ -68,6 +68,15 @@ class DatabaseSeeder extends Seeder
             '--no-interaction' => true,
         ]);
 
+        // (2b) Standard non-super roles (company_admin, operator) per tenant,
+        //      AFTER shield:generate so their permission maps attach the
+        //      now-existing permissions. The CompanyObserver created the role
+        //      rows on (1) but permissions didn't exist yet — re-sync here.
+        $provisioner = app(\App\Services\TenantRoleProvisioner::class);
+        foreach ([$myip, $nixpal, $estonian] as $company) {
+            $provisioner->ensureStandardRoles($company);
+        }
+
         // (3) Admin user attached to every tenant
         $admin = User::create([
             'name' => 'Admin',
