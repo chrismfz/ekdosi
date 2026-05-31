@@ -431,8 +431,13 @@ mail sweep — ✅ DONE:** `invoices:resend-failed-emails` re-queues invoices wh
 LATEST mail-log row is still `failed` (a later `sent` supersedes it), `--tenant`/
 `--since`/`--limit`/`--dry-run`, trigger=`batch` (opt-out NOT re-checked — only
 retrying SMTP). Scheduler entry gated by `resend_failed_emails_enabled` (default
-OFF — a mail outage would mass-requeue). Remaining: one adaptive PDF template vs
-8 legacy FastReport designs (G10); `ekdosi_bridge` error-handling.
+OFF — a mail outage would mass-requeue). **Web surface too:** the invoices list
+has an «Email» status badge (Στάλθηκε/Απέτυχε/Σε ουρά, error in the tooltip), a
+«Κατάσταση email» filter (`Invoice::scopeWhereLatestMailStatus` — latest log per
+invoice via correlated subquery, NOT whereHas on the `latestMailLog`
+latestOfMany), and a bulk «Επαναποστολή email» action (skips no-email customers).
+Remaining: one adaptive PDF template vs 8 legacy FastReport designs (G10);
+`ekdosi_bridge` error-handling.
 
 ### Gap analysis — legacy vs new (verified 2026-05-28, by code scan)
 Two scans cross-checked legacy source + Firebird schema against the actual new
