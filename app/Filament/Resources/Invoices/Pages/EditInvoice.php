@@ -25,6 +25,15 @@ class EditInvoice extends EditRecord
 {
     protected static string $resource = InvoiceResource::class;
 
+    /**
+     * Full-width content so the Excel-style lines table uses the whole screen
+     * (the default centred container squeezed the columns).
+     */
+    public function getMaxContentWidth(): \Filament\Support\Enums\Width
+    {
+        return \Filament\Support\Enums\Width::Full;
+    }
+
     public function mount(int|string $record): void
     {
         parent::mount($record);

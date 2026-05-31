@@ -40,6 +40,15 @@ class CreateInvoice extends CreateRecord
     protected static string $resource = InvoiceResource::class;
 
     /**
+     * Full-width content so the Excel-style lines table uses the whole screen
+     * (the default centred container squeezed the columns).
+     */
+    public function getMaxContentWidth(): \Filament\Support\Enums\Width
+    {
+        return \Filament\Support\Enums\Width::Full;
+    }
+
+    /**
      * Set by the Save-and-Submit button's action() before triggering
      * create(). afterCreate() reads it to know whether to chain a
      * submission. Cleaner than two separate code paths because all

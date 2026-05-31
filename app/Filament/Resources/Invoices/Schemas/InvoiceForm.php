@@ -198,15 +198,14 @@ class InvoiceForm
                         ->relationship('lines')
                         ->hiddenLabel()
                         ->table([
-                            TableColumn::make('Προϊόν')->width('18%'),
-                            TableColumn::make('Περιγραφή')->width('20%'),
+                            TableColumn::make('Προϊόν')->width('20%'),
+                            TableColumn::make('Περιγραφή')->width('26%'),
                             TableColumn::make('Ποσότ.')->width('8%'),
-                            TableColumn::make('Μ.Μ.')->width('7%'),
-                            TableColumn::make('Τιμή (καθ.)')->width('10%'),
+                            TableColumn::make('Μ.Μ.')->width('8%'),
+                            TableColumn::make('Τιμή (καθ.)')->width('11%'),
                             TableColumn::make('Τιμή (με ΦΠΑ)')->width('11%'),
                             TableColumn::make('Έκπτ.%')->width('8%'),
                             TableColumn::make('ΦΠΑ%')->width('8%'),
-                            TableColumn::make('Σημ.')->width('10%'),
                         ])
                         ->schema([
                             Select::make('product_id')
