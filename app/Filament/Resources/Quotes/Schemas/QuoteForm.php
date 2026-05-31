@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Quotes\Schemas;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Filament\Support\VatRateOptions;
 use App\Models\VatCategory;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -153,7 +154,8 @@ class QuoteForm
                                     }
                                     $set('product_descr', $product->description_short);
                                     $set('price_per_item', (float) $product->sell_price);
-                                    $set('vat_percent', (float) ($product->vatCategory?->rate ?? 24));
+                                    // Normalised so the value matches a VAT-rate Select option.
+                                    $set('vat_percent', VatRateOptions::normalize($product->vatCategory?->rate ?? 24));
                                     $set('metric_unit', $product->metricUnit?->name);
                                 })
                                 ->createOptionForm([
@@ -233,14 +235,12 @@ class QuoteForm
                                 ->default(0)
                                 ->suffix('%'),
 
-                            TextInput::make('vat_percent')
+                            Select::make('vat_percent')
                                 ->label('ΦΠΑ %')
-                                ->numeric()
-                                ->step('0.01')
-                                ->minValue(0)
-                                ->maxValue(100)
-                                ->default(24)
-                                ->suffix('%'),
+                                ->options(fn () => VatRateOptions::options())
+                                ->default(VatRateOptions::normalize(24))
+                                // allowHtml off; native select so it fits a table cell.
+                                ->selectablePlaceholder(false),
                         ])
                         ->addActionLabel('+ Προσθήκη γραμμής')
                         ->reorderable(false),

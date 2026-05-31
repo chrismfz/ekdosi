@@ -8,6 +8,7 @@ use App\Models\DistributionAim;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Filament\Support\VatRateOptions;
 use App\Support\MyData\Codes;
 use App\Support\MyData\ReverseCharge;
 use Filament\Facades\Filament;
@@ -247,7 +248,8 @@ class InvoiceForm
                                         : (float) ($product->vatCategory?->rate ?? 24);
                                     $set('product_descr', $product->description_short);
                                     $set('price_per_item', $net);
-                                    $set('vat_percent', $vat);
+                                    // Normalised so the value matches a VAT-rate Select option.
+                                    $set('vat_percent', VatRateOptions::normalize($vat));
                                     // G7: keep the VAT-inclusive mirror in sync.
                                     $set('price_per_item_wvat', self::grossFromNet($net, $vat));
                                     $set('metric_unit', $product->metricUnit?->name);
@@ -316,15 +318,13 @@ class InvoiceForm
                                 ->default(0)
                                 ->suffix('%'),
 
-                            TextInput::make('vat_percent')
+                            Select::make('vat_percent')
                                 ->label('VAT %')
                                 ->required()
-                                ->numeric()
-                                ->step('0.01')
-                                ->minValue(0)
-                                ->maxValue(100)
-                                ->suffix('%')
-                                ->live(onBlur: true)
+                                ->options(fn () => VatRateOptions::options())
+                                ->default(VatRateOptions::normalize(24))
+                                ->selectablePlaceholder(false)
+                                ->live()
                                 // G7: changing the rate re-derives the gross mirror
                                 // from the (unchanged) stored net price.
                                 ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
