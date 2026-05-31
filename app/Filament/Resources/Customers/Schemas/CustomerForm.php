@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Customers\Schemas;
 
 use App\Filament\Support\AadeFormFill;
+use App\Filament\Support\ViesFormFill;
 use App\Models\Customer;
 use App\Models\PaymentMethod;
 use Filament\Actions\Action as FormAction;
@@ -80,7 +81,27 @@ class CustomerForm
 
                                 TextInput::make('vat_vies')
                                     ->label('VIES VAT (EU intra-community)')
-                                    ->maxLength(30),
+                                    ->maxLength(30)
+                                    ->helperText('Ενδοκοινοτικό ΦΠΑ άλλης χώρας ΕΕ (π.χ. ATU18522105). Επαληθεύεται μέσω VIES — για ελληνικά ΑΦΜ χρησιμοποιήστε το «Άντληση από ΑΑΔΕ» πιο πάνω.')
+                                    // EU VIES validation (the non-GR twin of the GSIS actions).
+                                    // "Επαλήθευση" only reports valid/invalid; "Άντληση"
+                                    // also fills name/address WHERE the member state
+                                    // publishes them (AT yes, DE withholds). Uses the vat_vies
+                                    // value, falling back to the afm field, with the customer
+                                    // country as the prefix hint.
+                                    ->suffixActions([
+                                        FormAction::make('verify_vies')
+                                            ->label('Επαλήθευση VIES')
+                                            ->icon('heroicon-o-shield-check')
+                                            ->action(fn (callable $get) => ViesFormFill::check(
+                                                $get('vat_vies') ?: $get('afm'),
+                                                $get('country'),
+                                            )),
+                                        FormAction::make('fetch_vies')
+                                            ->label('Άντληση από VIES')
+                                            ->icon('heroicon-o-arrow-down-tray')
+                                            ->action(fn (callable $get, callable $set) => self::applyViesToCustomer($get, $set)),
+                                    ]),
 
                                 TextInput::make('tax_office')
                                     ->label('Tax office (ΔΟΥ)')
@@ -256,5 +277,37 @@ class CustomerForm
                 ->warning();
         }
         $notification->send();
+    }
+
+    /**
+     * Validate the form's EU VAT (vat_vies, falling back to afm) against VIES
+     * and fill name/address where the member state publishes them. Fill-empty
+     * only (the operator's typed values win); the validity outcome is surfaced
+     * by ViesFormFill::check as a notification. For Greek AFMs use the GSIS
+     * actions above (richer data) — VIES withholds Greek identity fields.
+     */
+    private static function applyViesToCustomer(callable $get, callable $set): void
+    {
+        $result = ViesFormFill::check($get('vat_vies') ?: $get('afm'), $get('country'));
+        if (! $result || ! $result->valid) {
+            return;
+        }
+
+        // Normalise the stored VIES value to the canonical prefixed id.
+        ViesFormFill::assign($get, $set, 'vat_vies', $result->fullVatId(), overwrite: true);
+        ViesFormFill::assign($get, $set, 'country', $result->countryCode === 'EL' ? 'GR' : $result->countryCode, overwrite: false);
+        // Also seed afm (only-when-empty): for a FOREIGN B2B customer the afm
+        // field carries the foreign VAT number — MyDataSubmitter::buildCounterpart
+        // reads afm (not vat_vies) and throws if it's empty. Filling it here
+        // closes the "VIES-validated but unfileable" edge. Greek customers keep
+        // their GSIS-sourced 9-digit AFM (this only fills when afm is blank).
+        ViesFormFill::assign($get, $set, 'afm', $result->fullVatId(), overwrite: false);
+
+        if ($result->hasIdentity()) {
+            ViesFormFill::assign($get, $set, 'name', $result->name, overwrite: false);
+            // VIES returns address as one multi-line string; drop it into
+            // address1 only when empty (we don't try to split city/postcode).
+            ViesFormFill::assign($get, $set, 'address1', str_replace("\n", ', ', $result->address), overwrite: false);
+        }
     }
 }

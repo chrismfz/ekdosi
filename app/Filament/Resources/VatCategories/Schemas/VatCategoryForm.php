@@ -38,13 +38,15 @@ class VatCategoryForm
                 // so MyDataSubmitter can emit it. Only relevant for 0% rows.
                 Select::make('vat_exemption_category')
                     ->label('Αιτία εξαίρεσης ΦΠΑ (για 0%)')
-                    ->options(collect(Codes::VAT_EXEMPTION_CATEGORIES)
-                        ->mapWithKeys(fn (int $c) => [$c => 'Κατηγορία '.$c])
-                        ->all())
+                    // Human-readable §8.3 reasons (verbatim legal citations) so
+                    // the operator picks the RIGHT one — not a bare "Κατηγορία 16".
+                    ->options(Codes::vatExemptionOptions())
                     ->searchable()
                     ->visible(fn (Get $get) => abs((float) $get('rate')) < 0.01)
                     ->required(fn (Get $get) => abs((float) $get('rate')) < 0.01)
-                    ->helperText('§8.3 ΑΑΔΕ: π.χ. ενδοκοινοτική παράδοση, εξαγωγή, άρθρο 39α. Υποχρεωτικό για συντελεστή 0% ώστε να υποβάλλονται τα παραστατικά.'),
+                    ->helperText('§8.3 ΑΑΔΕ — υποχρεωτικό για 0% ώστε να υποβάλλονται τα παραστατικά. '
+                        .'Για ΕΝΔΟΚΟΙΝΟΤΙΚΗ παράδοση / reverse charge επιλέξτε «16 — άρθρο 45» '
+                        .'(πρώην 39α). Για εξαγωγή εκτός ΕΕ: «15 — άρθρο 44».'),
 
                 Toggle::make('is_default')
                     ->label('Default for new products')

@@ -9,7 +9,9 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Support\MyData\Codes;
+use App\Support\MyData\ReverseCharge;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
@@ -128,6 +130,23 @@ class InvoiceForm
                                     $set('city', $customer->city);
                                     $set('postcode', $customer->postcode);
                                     $set('country', $customer->country ?: 'GR');
+
+                                    // Reverse-charge hint: EU non-GR customer with a VAT id →
+                                    // this is (almost certainly) an intra-community supply that
+                                    // should be invoiced at 0% with §8.3 reason 16 (άρθρο 45).
+                                    // We don't force it (the operator chooses the 0% VAT category
+                                    // per line) — just a one-time nudge so it isn't forgotten.
+                                    if (ReverseCharge::appliesTo($customer)) {
+                                        $tenant = Filament::getTenant();
+                                        $autoDefaults = $tenant && ReverseCharge::shouldDefaultZeroVat($tenant, $customer);
+                                        Notification::make()
+                                            ->title('Ενδοκοινοτική παράδοση (reverse charge)')
+                                            ->body('Πελάτης ΕΕ ('.strtoupper((string) $customer->country).') με ΑΦΜ/ΦΠΑ. '
+                                                .($autoDefaults
+                                                    ? 'Οι νέες γραμμές προεπιλέγονται σε 0% ΦΠΑ (αιτία «16 — άρθρο 45»). Αλλάξτε ανά γραμμή αν χρειάζεται.'
+                                                    : 'Συνήθως 0% ΦΠΑ με αιτία «16 — άρθρο 45» — ρυθμίστε ΜΙΑ 0% κατηγορία ΦΠΑ με αιτία εξαίρεσης (Setup → VAT Categories) για αυτόματη προεπιλογή.'))
+                                            ->info()->send();
+                                    }
                                 })
                                 ->disabled(fn ($record) => $record && $record->mydata_state !== null),
 
@@ -200,7 +219,7 @@ class InvoiceForm
                                             ->where('company_id', Filament::getTenant()?->getKey())
                                             ->find($value))->description_short)
                                         ->live()
-                                        ->afterStateUpdated(function ($state, callable $set) {
+                                        ->afterStateUpdated(function ($state, callable $set, Get $get) {
                                             if (! $state) {
                                                 return;
                                             }
@@ -209,7 +228,15 @@ class InvoiceForm
                                                 return;
                                             }
                                             $net = (float) $product->sell_price;
-                                            $vat = (float) ($product->vatCategory?->rate ?? 24);
+                                            // Reverse-charge default: for an EU-non-GR customer
+                                            // (with a single configured 0% exemption category)
+                                            // a picked product defaults to 0% instead of its own
+                                            // rate — the operator can still override per line.
+                                            // $get('../../customer_id') reads the parent invoice's
+                                            // customer from inside the lines repeater.
+                                            $vat = self::reverseChargeApplies($get('../../customer_id'))
+                                                ? 0.0
+                                                : (float) ($product->vatCategory?->rate ?? 24);
                                             $set('product_descr', $product->description_short);
                                             $set('price_per_item', $net);
                                             $set('vat_percent', $vat);
@@ -383,5 +410,22 @@ class InvoiceForm
     private static function numOrNull(mixed $value): ?float
     {
         return ($value === null || $value === '') ? null : (float) $value;
+    }
+
+    /**
+     * Does reverse-charge (0% intra-community) apply for the given customer in
+     * the current tenant? Used by the lines repeater to default a picked
+     * product's VAT to 0%. Deterministic — true only for an EU-non-GR customer
+     * AND a single configured 0% exemption category (see ReverseCharge).
+     */
+    private static function reverseChargeApplies(mixed $customerId): bool
+    {
+        $tenant = Filament::getTenant();
+        if (! $tenant || ! $customerId) {
+            return false;
+        }
+        $customer = Customer::find($customerId);
+
+        return $customer !== null && ReverseCharge::shouldDefaultZeroVat($tenant, $customer);
     }
 }
