@@ -26,7 +26,7 @@ class EditQuote extends EditRecord
                 ->warning()
                 ->send();
 
-            $this->redirect(QuoteResource::getUrl('view', ['record' => $this->record]));
+            $this->redirect(QuoteResource::getUrl('view', ['record' => $this->record, 'tenant' => $this->record->company]));
         }
     }
 

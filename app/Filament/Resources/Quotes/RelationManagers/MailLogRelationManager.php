@@ -67,6 +67,12 @@ class MailLogRelationManager extends RelationManager
                     ->dateTime('d/m/Y H:i:s')
                     ->placeholder('—'),
 
+                TextColumn::make('failed_at')
+                    ->label('Απέτυχε')
+                    ->dateTime('d/m/Y H:i:s')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('triggeredByUser.name')
                     ->label('Από')
                     ->placeholder('σύστημα')

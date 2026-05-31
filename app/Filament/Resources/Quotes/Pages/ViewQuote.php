@@ -6,8 +6,10 @@ use App\Actions\ConvertQuoteToInvoice;
 use App\Enums\QuoteStatus;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Resources\Quotes\QuoteResource;
+use App\Jobs\SendQuoteEmail;
 use App\Models\InvoiceType;
 use App\Models\Quote;
+use App\Services\QuotePdfRenderer;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
@@ -140,6 +142,47 @@ class ViewQuote extends ViewRecord
                             ->body($e->getMessage())
                             ->danger()->persistent()->send();
                     }
+                }),
+
+            // Download the quote PDF — any state.
+            Action::make('download_pdf')
+                ->label('Λήψη PDF')
+                ->icon('heroicon-o-document-arrow-down')
+                ->color('gray')
+                ->action(function (Quote $record) {
+                    // Render up-front so an error surfaces as a notification,
+                    // not a half-streamed corrupt download (same as ViewInvoice).
+                    $pdfBytes = app(QuotePdfRenderer::class)->render($record);
+
+                    return response()->streamDownload(
+                        function () use ($pdfBytes): void {
+                            echo $pdfBytes;
+                        },
+                        'quote-'.$record->code.'.pdf',
+                        ['Content-Type' => 'application/pdf'],
+                    );
+                }),
+
+            // Email the quote PDF to the customer (queued; history below).
+            Action::make('send_email')
+                ->label('Αποστολή με email')
+                ->icon('heroicon-o-envelope')
+                ->color('gray')
+                ->visible(fn (Quote $record) => $record->customer?->email !== null && $record->customer?->email !== '')
+                ->requiresConfirmation()
+                ->modalHeading('Αποστολή προσφοράς με email')
+                ->modalDescription(fn (Quote $record) => 'Μπαίνει στην ουρά email με το PDF συνημμένο. Προς: '.($record->customer?->email ?? '—').'. Δείτε το «Ιστορικό αποστολών» πιο κάτω για την κατάσταση.')
+                ->modalSubmitActionLabel('Αποστολή')
+                ->action(function (Quote $record) {
+                    SendQuoteEmail::dispatch(
+                        $record,
+                        trigger: 'manual',
+                        triggeredByUserId: auth()->id(),
+                    );
+                    Notification::make()
+                        ->title('Η προσφορά μπήκε στην ουρά αποστολής')
+                        ->body('Δείτε το «Ιστορικό αποστολών» σε λίγο για την κατάσταση.')
+                        ->success()->send();
                 }),
 
             // Link to the produced invoice (bidirectional history).
