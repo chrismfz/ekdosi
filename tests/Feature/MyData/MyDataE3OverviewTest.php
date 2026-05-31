@@ -6,7 +6,10 @@ use App\Filament\Pages\MyDataE3Overview;
 use App\Models\Company;
 use App\Models\User;
 use Filament\Facades\Filament;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -71,7 +74,7 @@ class MyDataE3OverviewTest extends TestCase
 
         // Simulate a prior fetch parked in the cache (the shape rememberFetch
         // writes); a fresh page mount should rehydrate it without re-calling AADE.
-        \Illuminate\Support\Facades\Cache::put(
+        Cache::put(
             'mydata-fetch:MyDataE3Overview:'.$tenant->getKey(),
             ['state' => ['result' => $this->fakeResult(), 'ran' => true], 'at' => now()->toIso8601String()],
             now()->addHour(),
@@ -82,6 +85,35 @@ class MyDataE3OverviewTest extends TestCase
             ->assertSee('Έσοδα')
             ->assertSee('E3_561_001')
             ->assertSee('Αποθηκευμένο αποτέλεσμα');
+    }
+
+    public function test_a_429_fetch_keeps_the_cached_result_and_shows_a_rate_limit_notice(): void
+    {
+        $tenant = $this->bootTenantUser();
+        // Credentials must exist or FirebedCredentials::init throws BEFORE the
+        // AADE call (we want to reach the mocked 429, not the missing-creds guard).
+        $tenant->update(['mydata_aade_id_sandbox' => 'x', 'mydata_subscription_key_sandbox' => 'y']);
+
+        // AADE replies 429 to the fetch. The page must NOT blank the result it
+        // already had — it keeps it and surfaces a friendly rate-limit message.
+        MyDataE3Overview::$testHandler = new MockHandler([
+            new Response(429, [], '{"message":"Rate limit is exceeded. Try again in 157 seconds."}'),
+        ]);
+
+        try {
+            Livewire::test(MyDataE3Overview::class)
+                ->set('ran', true)
+                ->set('result', $this->fakeResult())
+                ->callAction('fetch', data: ['from' => '2026-04-01', 'to' => '2026-04-30'])
+                // The previously-loaded data is still there…
+                ->assertSet('ran', true)
+                ->assertSee('E3_561_001')
+                // …and the operator is told it's a transient rate limit, with the retry hint.
+                ->assertSet('error', fn ($error) => str_contains((string) $error, 'rate limit')
+                    && str_contains((string) $error, '157'));
+        } finally {
+            MyDataE3Overview::$testHandler = null;
+        }
     }
 
     public function test_e3_overview_splits_income_and_expense_with_separate_subtotals(): void

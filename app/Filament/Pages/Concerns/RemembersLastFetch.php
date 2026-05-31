@@ -62,4 +62,23 @@ trait RemembersLastFetch
 
         return 'mydata-fetch:'.class_basename(static::class).':'.$tenant;
     }
+
+    /**
+     * Operator-facing message for an AADE 429. Pulls the "try again in N
+     * seconds" hint out of the rate-limit message when present, and reminds the
+     * operator that whatever was already on screen is the last cached fetch.
+     */
+    protected function rateLimitMessage(string $raw): string
+    {
+        $seconds = preg_match('/(\d+)\s*second/i', $raw, $m) ? (int) $m[1] : null;
+        $retry = $seconds !== null
+            ? 'Δοκιμάστε ξανά σε ~'.$seconds.' δευτερόλεπτα.'
+            : 'Δοκιμάστε ξανά σε λίγο.';
+
+        $note = $this->result !== null
+            ? ' Εμφανίζονται τα προηγούμενα αποθηκευμένα στοιχεία.'
+            : '';
+
+        return 'Το myDATA περιόρισε προσωρινά τα αιτήματα (rate limit). '.$retry.$note;
+    }
 }
