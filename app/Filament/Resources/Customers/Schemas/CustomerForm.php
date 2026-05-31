@@ -296,6 +296,12 @@ class CustomerForm
         // Normalise the stored VIES value to the canonical prefixed id.
         ViesFormFill::assign($get, $set, 'vat_vies', $result->fullVatId(), overwrite: true);
         ViesFormFill::assign($get, $set, 'country', $result->countryCode === 'EL' ? 'GR' : $result->countryCode, overwrite: false);
+        // Also seed afm (only-when-empty): for a FOREIGN B2B customer the afm
+        // field carries the foreign VAT number — MyDataSubmitter::buildCounterpart
+        // reads afm (not vat_vies) and throws if it's empty. Filling it here
+        // closes the "VIES-validated but unfileable" edge. Greek customers keep
+        // their GSIS-sourced 9-digit AFM (this only fills when afm is blank).
+        ViesFormFill::assign($get, $set, 'afm', $result->fullVatId(), overwrite: false);
 
         if ($result->hasIdentity()) {
             ViesFormFill::assign($get, $set, 'name', $result->name, overwrite: false);
