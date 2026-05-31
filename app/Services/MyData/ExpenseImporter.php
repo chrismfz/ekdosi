@@ -228,6 +228,12 @@ class ExpenseImporter
         }
 
         foreach ($details as $line) {
+            // Per-line E3 expense classification, if the issuer sent one. A line
+            // may carry several; we keep the dominant (first) one — same single
+            // type+category shape the header `classify` action uses, so the
+            // codes resolve through the same Codes::expenseClass*Label() tables.
+            $cls = $this->firstExpenseClassification($line);
+
             $expense->lines()->create([
                 'company_id' => $this->tenant->getKey(),
                 'line_number' => $line->getLineNumber(),
@@ -244,8 +250,27 @@ class ExpenseImporter
                 'vat_category' => $line->getVatCategory()?->value,
                 'vat_exemption_category' => $line->getVatExemptionCategory()?->value,
                 'vat_amount' => $this->toDecimal($line->getVatAmount()),
+                // E3 classification codes stored verbatim (firebed backed enums
+                // → string value, e.g. E3_102 / category2_3).
+                'classification_type' => $cls?->getClassificationType()?->value,
+                'classification_category' => $cls?->getClassificationCategory()?->value,
             ]);
         }
+    }
+
+    /**
+     * The dominant per-line expense classification (the first, when present).
+     * A line can carry several; we record one — mirroring the single
+     * type+category the header `classify` action stores. Null when the issuer
+     * sent no per-line classification (common — many docs classify only at the
+     * recipient's discretion later).
+     */
+    private function firstExpenseClassification(
+        \Firebed\AadeMyData\Models\InvoiceDetails $line
+    ): ?\Firebed\AadeMyData\Models\ExpensesClassification {
+        $list = $line->getExpensesClassification();
+
+        return is_array($list) && $list !== [] ? $list[0] : null;
     }
 
     /**
