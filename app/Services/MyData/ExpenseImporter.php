@@ -232,7 +232,11 @@ class ExpenseImporter
                 'company_id' => $this->tenant->getKey(),
                 'line_number' => $line->getLineNumber(),
                 'item_code' => $line->getItemCode(),
-                'item_descr' => $line->getItemDescr(),
+                // myDATA carries NO free-text on most expense docs: `itemDescr`
+                // only exists for tax-free / delivery (9.3) types. Fall back to
+                // the line comments when present so the row isn't blank; the raw
+                // XML viewer (ExpenseInfolist) covers what's still not shown.
+                'item_descr' => $this->lineDescription($line),
                 'quantity' => $line->getQuantity(),
                 'measurement_unit' => $line->getMeasurementUnit()?->value,
                 'net_value' => $this->toDecimal($line->getNetValue()),
@@ -242,6 +246,24 @@ class ExpenseImporter
                 'vat_amount' => $this->toDecimal($line->getVatAmount()),
             ]);
         }
+    }
+
+    /**
+     * Best-available human label for an imported expense line. myDATA expense
+     * documents seldom carry `itemDescr` (spec-restricted to tax-free / delivery
+     * types), so fall back to the line comments; null when neither exists (the
+     * raw-XML viewer is the source of truth for everything else).
+     */
+    private function lineDescription(\Firebed\AadeMyData\Models\InvoiceDetails $line): ?string
+    {
+        $descr = trim((string) ($line->getItemDescr() ?? ''));
+        if ($descr !== '') {
+            return $descr;
+        }
+
+        $comments = trim((string) ($line->getLineComments() ?? ''));
+
+        return $comments !== '' ? $comments : null;
     }
 
     private function toDecimal(?float $value): float
