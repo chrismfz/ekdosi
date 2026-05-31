@@ -570,14 +570,27 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
   `restrictOnDelete`. Add a friendly count-and-block + "Deactivate".
 - **activitylog not wired** on invoices/customers/payments (installed). Do all
   three at once; mind that re-imports bump `updated_at` and would spam it.
-- **Per-tenant role-assignment UI** in UserResource (Shield teams mode handles
-  the data layer; no per-tenant role picker yet). **TODO (deferred, larger):**
-  a proper UI to pick a user's role PER company (e.g. super_admin in A,
-  accountant_readonly in B). Until then: `super_admin` is auto-provisioned per
-  tenant (`CompanyObserver` + `App\Services\TenantRoleProvisioner`) and
-  back-fillable via `php artisan shield:sync-super-admin` — see the
-  "new-tenant super_admin" fix. The picker is the real solution when operators
-  need differentiated per-tenant permissions, not just blanket super_admin.
+- **Per-tenant roles + role-picker — ✅ DONE (PR1–PR3).** Three managed roles
+  per tenant (`super_admin`, `company_admin`, `operator`), all provisioned by
+  `App\Services\TenantRoleProvisioner` (`ensureStandardRoles` from the
+  `CompanyObserver` + `DatabaseSeeder` + `shield:sync-super-admin`).
+  `company_admin` = every permission of THIS tenant (no cross-tenant bypass);
+  `operator` = curated subset (`OPERATOR_RESOURCES` × `OPERATOR_ACTIONS`, no
+  delete/Setup/users). **Role-picker UI** (`App\Filament\Support\
+  ManageTenantRoleAction`) on both sides of the user↔company pivot sets one role
+  per company via `setRoleInCompany` (picker semantics, team-scoped); granting
+  `super_admin` needs the actor to already be super_admin there (no escalation).
+  **The 8 ex-`auth()->check()` screens now ride on real permissions** (PR3):
+  Quotes (`QuotePolicy`), WHMCS inbox (`PendingWhmcsInvoicePolicy`, added to the
+  operator set), Καρτέλα (`View:Customer`), ΜΑΡΚ detail (`View:MyDataMarkDetail`
+  OR `View:Invoice` — operator-reachable read-only); the live myDATA consoles +
+  Reports stay admin-only (`View:MyDataConsole`/`…Expenses`/`…E3Overview`/
+  `View:Reports`). All use `Gate::can` → missing permission resolves to false,
+  never a `PermissionDoesNotExist` throw, so no 404 storm before
+  `shield:generate`. After deploy, re-run `shield:sync-super-admin` so the
+  operator role picks up `PendingWhmcsInvoice`. **Remaining (deferred):** a
+  per-tenant role-picker test at the Livewire level for the escalation-guard
+  hidden-option path (the provisioner + the two pivot sides are covered).
 - **ETL re-run preserves soft-delete but refreshes columns** — a row soft-
   deleted in ekdosi gets its legacy values re-applied on re-import (deleted_at
   stays). To truly drop a row across re-imports, force-delete it.

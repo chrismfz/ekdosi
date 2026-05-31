@@ -49,10 +49,16 @@ class SyncSuperAdmin extends Command
             return self::FAILURE;
         }
 
-        // 1) Ensure the role exists for each target company.
+        // 1) Ensure the roles exist for each target company: super_admin AND
+        //    the standard non-super roles (company_admin, operator) with their
+        //    permission sets. Re-running re-syncs the permission maps, so this
+        //    is also how you refresh roles after shield:generate adds new
+        //    resource permissions. (Assigning company_admin/operator to a
+        //    specific user is done in the per-tenant role picker UI.)
         foreach ($companies as $company) {
             $provisioner->ensureSuperAdminRole($company);
-            $this->line("✓ super_admin role ensured for: {$company->slug}");
+            $provisioner->ensureStandardRoles($company);
+            $this->line("✓ roles ensured (super_admin, company_admin, operator) for: {$company->slug}");
         }
 
         // 2) Assignment.

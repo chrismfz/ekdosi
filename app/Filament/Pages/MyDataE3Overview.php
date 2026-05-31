@@ -2,12 +2,13 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\MyDataMode;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
-use App\Support\MyData\VatPictureCache;
+use App\Models\Company;
 use App\Services\MyData\E3Report;
 use App\Services\MyData\E3Reporter;
+use App\Support\Money;
 use App\Support\MyData\Codes;
+use App\Support\MyData\VatPictureCache;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
@@ -15,6 +16,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -49,7 +51,7 @@ class MyDataE3Overview extends Page
 
     public ?string $error = null;
 
-    public static ?\GuzzleHttp\Handler\MockHandler $testHandler = null;
+    public static ?MockHandler $testHandler = null;
 
     /** Authoritative ΦΠΑ τριμήνου box, read from the same cache the dashboard uses. */
     public ?array $vatQuarter = null;
@@ -88,7 +90,7 @@ class MyDataE3Overview extends Page
             'netVat' => $picture->netVat(),
             'payable' => $picture->isPayable(),
             'fetchedAt' => $picture->fetchedAt
-                ? \Carbon\Carbon::parse($picture->fetchedAt)->diffForHumans()
+                ? Carbon::parse($picture->fetchedAt)->diffForHumans()
                 : null,
         ];
     }
@@ -108,14 +110,18 @@ class MyDataE3Overview extends Page
         return static::canAccess();
     }
 
+    /**
+     * Admin-only Ε3 overview — gated on View:MyDataE3Overview (company_admin +
+     * super_admin; operators excluded). Gate::can is 404-storm-safe; the tenant
+     * must be a live myDATA tenant.
+     */
     public static function canAccess(): bool
     {
         $tenant = Filament::getTenant();
 
-        return auth()->check()
-            && $tenant
-            && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off;
+        return $tenant instanceof Company
+            && $tenant->isLiveMyDataTenant()
+            && (bool) auth()->user()?->can('View:MyDataE3Overview');
     }
 
     protected function getHeaderActions(): array
@@ -163,7 +169,7 @@ class MyDataE3Overview extends Page
                 ->title('Η λήψη Ε3 ολοκληρώθηκε')
                 ->body($report->isEmpty()
                     ? 'Δεν επιστράφηκαν στοιχεία Ε3 για το διάστημα.'
-                    : count($report->rows).' γραμμές, σύνολο '.\App\Support\Money::eur($report->total))
+                    : count($report->rows).' γραμμές, σύνολο '.Money::eur($report->total))
                 ->{$report->isEmpty() ? 'warning' : 'success'}()
                 ->send();
         } catch (RuntimeException $e) {

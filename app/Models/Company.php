@@ -282,7 +282,7 @@ class Company extends Model
      * reconciler guards reject Off long before any AADE call is made.
      *
      * @param  MyDataMode|null  $mode  Defaults to the tenant's current mode.
-     * @return array{0: ?string, 1: ?string}  [aadeUserId, subscriptionKey]
+     * @return array{0: ?string, 1: ?string} [aadeUserId, subscriptionKey]
      */
     public function mydataCredentials(?MyDataMode $mode = null): array
     {
@@ -296,6 +296,18 @@ class Company extends Model
     public function getRouteKeyName(): string
     {
         return 'slug';
+    }
+
+    /**
+     * Is this a live myDATA tenant — a Greek (`gr-mydata`) tenant whose mode is
+     * not Off? The single home for the "can this tenant reach AADE" predicate
+     * that the myDATA console / Ε3 / MARK-detail pages gate their access on
+     * (previously copy-pasted into each page's canAccess()).
+     */
+    public function isLiveMyDataTenant(): bool
+    {
+        return $this->einvoice_provider === 'gr-mydata'
+            && $this->mydata_mode_enum !== MyDataMode::Off;
     }
 
     /**

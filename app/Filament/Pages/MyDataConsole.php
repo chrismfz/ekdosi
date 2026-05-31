@@ -2,10 +2,9 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\MyDataMode;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
-use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Models\Company;
 use App\Services\MyData\ReconciliationRow;
 use App\Services\MyData\SalesReconciler;
 use App\Services\MyData\SalesReconciliationResult;
@@ -14,6 +13,7 @@ use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Component;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -103,19 +103,21 @@ class MyDataConsole extends Page
     }
 
     /**
-     * Route-level authorization. shouldRegisterNavigation() only hides
-     * the menu item — without this a user could hand-type the URL and
-     * trigger a live AADE call with the tenant's credentials. Gate the
-     * page itself to authenticated users of a Greek, non-Off tenant.
+     * Route-level authorization. shouldRegisterNavigation() only hides the menu
+     * item — without this a user could hand-type the URL and trigger a live AADE
+     * call with the tenant's credentials. Live myDATA reconciliation is admin
+     * territory: gated on View:MyDataConsole, which company_admin (all perms) and
+     * super_admin (Gate::before) hold but operators don't. Gate::can is
+     * 404-storm-safe (missing permission → false, not a throw). The tenant must
+     * still be a live (Greek, non-Off) myDATA tenant.
      */
     public static function canAccess(): bool
     {
         $tenant = Filament::getTenant();
 
-        return auth()->check()
-            && $tenant
-            && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off;
+        return $tenant instanceof Company
+            && $tenant->isLiveMyDataTenant()
+            && (bool) auth()->user()?->can('View:MyDataConsole');
     }
 
     protected function getHeaderActions(): array
@@ -152,7 +154,7 @@ class MyDataConsole extends Page
     /**
      * Shared date-window form for both directions.
      *
-     * @return array<int, \Filament\Forms\Components\Component>
+     * @return array<int, Component>
      */
     private function windowSchema(): array
     {

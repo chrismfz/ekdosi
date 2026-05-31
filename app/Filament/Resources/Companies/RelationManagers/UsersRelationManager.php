@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Companies\RelationManagers;
 
+use App\Filament\Support\ManageTenantRoleAction;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
@@ -42,6 +43,13 @@ class UsersRelationManager extends RelationManager
                     ->searchable(),
                 TextColumn::make('email')
                     ->searchable(),
+                // This user's role within THIS company (team-scoped, computed).
+                ManageTenantRoleAction::badgeColumn(
+                    resolveUser: fn (User $record): User => $record,
+                    resolveCompany: fn (User $record): ?Company => $this->getOwnerRecord() instanceof Company
+                        ? $this->getOwnerRecord()
+                        : null,
+                ),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -70,6 +78,13 @@ class UsersRelationManager extends RelationManager
                     }),
             ])
             ->recordActions([
+                // Set the row user's role within this company (team-scoped).
+                ManageTenantRoleAction::make(
+                    resolveUser: fn (User $record): User => $record,
+                    resolveCompany: fn (User $record): ?Company => $this->getOwnerRecord() instanceof Company
+                        ? $this->getOwnerRecord()
+                        : null,
+                ),
                 DetachAction::make(),
             ])
             ->toolbarActions([

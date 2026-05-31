@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Users\RelationManagers;
 
+use App\Filament\Support\ManageTenantRoleAction;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
@@ -53,6 +54,13 @@ class CompaniesRelationManager extends RelationManager
                         'none' => 'PDF only',
                         default => $state,
                     }),
+                // The user's role WITHIN this tenant (team-scoped, computed).
+                ManageTenantRoleAction::badgeColumn(
+                    resolveUser: fn (Company $record): ?User => $this->getOwnerRecord() instanceof User
+                        ? $this->getOwnerRecord()
+                        : null,
+                    resolveCompany: fn (Company $record): Company => $record,
+                ),
             ])
             ->headerActions([
                 AttachAction::make()
@@ -76,6 +84,13 @@ class CompaniesRelationManager extends RelationManager
                     }),
             ])
             ->recordActions([
+                // Set this user's role within the row's company (team-scoped).
+                ManageTenantRoleAction::make(
+                    resolveUser: fn (Company $record): ?User => $this->getOwnerRecord() instanceof User
+                        ? $this->getOwnerRecord()
+                        : null,
+                    resolveCompany: fn (Company $record): Company => $record,
+                ),
                 DetachAction::make(),
             ])
             ->toolbarActions([

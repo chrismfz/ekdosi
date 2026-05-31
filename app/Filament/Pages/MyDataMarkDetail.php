@@ -2,8 +2,8 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\MyDataMode;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\MyData\TransmittedDocReader;
@@ -73,18 +73,20 @@ class MyDataMarkDetail extends Page
     }
 
     /**
-     * Route-level authorization — same gate as the myDATA console: an
-     * orphan lookup hits AADE with the tenant's credentials, so a
-     * hand-typed URL must be blocked for non-Greek / Off tenants.
+     * Route-level authorization. READ-ONLY drill-down linked from invoice rows;
+     * the operator role holds View:MyDataMarkDetail directly (see
+     * TenantRoleProvisioner::OPERATOR_PERMISSION_MAP), so no piggy-backing on
+     * View:Invoice. The live-AADE orphan lookup inside load() is separately
+     * gated on View:MyDataConsole (admin-only). Gate::can is 404-storm-safe; the
+     * tenant must still be a live myDATA tenant (the page hits AADE).
      */
     public static function canAccess(): bool
     {
         $tenant = Filament::getTenant();
 
-        return auth()->check()
-            && $tenant
-            && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off;
+        return $tenant instanceof Company
+            && $tenant->isLiveMyDataTenant()
+            && (bool) auth()->user()?->can('View:MyDataMarkDetail');
     }
 
     public function getTitle(): string
@@ -203,6 +205,17 @@ class MyDataMarkDetail extends Page
         // Orphan — pull the full document from AADE for the window.
         $this->isOrphan = true;
         $this->invoiceId = null;
+
+        // The orphan lookup is a LIVE AADE call with the tenant's credentials —
+        // admin territory, same as the consoles. Operators reach this page (for
+        // their own filed invoices) via View:MyDataMarkDetail, but must NOT be
+        // able to trigger billable/rate-limited live AADE calls for arbitrary
+        // hand-typed MARKs. Gate the live branch on the console permission.
+        if (! auth()->user()?->can('View:MyDataConsole')) {
+            $this->error = 'Το ΜΑΡΚ δεν αντιστοιχεί σε τοπικό παραστατικό. Η αναζήτηση στο myDATA είναι διαθέσιμη μόνο σε διαχειριστές.';
+
+            return;
+        }
 
         [$from, $to] = $this->resolveWindow();
 

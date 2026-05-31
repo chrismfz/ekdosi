@@ -8,6 +8,8 @@ use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Mail\CustomerStatementMail;
 use App\Models\Customer;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
 use App\Services\CustomerLedger\CustomerStatementCsv;
@@ -18,6 +20,9 @@ use App\Services\Whmcs\CustomerWhmcsLedgerResult;
 use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Facades\Filament;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -31,6 +36,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Locked;
 
 /**
@@ -39,6 +45,7 @@ use Livewire\Attributes\Locked;
  * Layout (top → bottom):
  *   1. Header card — identity + key facts (Blade section).
  *   2. KPI stats + aging + balance trend — Filament widgets embedded via
+ *
  *      @livewire (always styled by Filament's compiled CSS; no custom
  *      theme build needed). Data is the filter-independent stats block,
  *      computed ONCE on mount.
@@ -70,7 +77,7 @@ class CustomerLedger extends Page implements HasTable
      * the prod-404 this prevents).
      */
     #[Locked]
-    public Customer | Model | int | string | null $record = null;
+    public Customer|Model|int|string|null $record = null;
 
     public bool $showWhmcsPanel = false;
 
@@ -107,16 +114,23 @@ class CustomerLedger extends Page implements HasTable
      */
     public array $availableInvoiceTypes = [];
 
+    /**
+     * The Καρτέλα is a read-only drill-down of a customer's invoices/payments,
+     * so it rides on Customer view rights (Customer ∈ the operator role's set).
+     * Using Gate::can keeps it 404-storm-safe: a missing permission resolves to
+     * false (not a PermissionDoesNotExist throw), and super_admin bypasses via
+     * Gate::before.
+     */
     public static function canAccess(array $parameters = []): bool
     {
-        return auth()->check();
+        return (bool) auth()->user()?->can('View:Customer');
     }
 
     public function mount(int|string $record): void
     {
         $this->record = Customer::query()->withTrashed()->where('id', (int) $record)->firstOrFail();
 
-        $tenant = \Filament\Facades\Filament::getTenant();
+        $tenant = Filament::getTenant();
 
         if ($tenant && (int) $this->record->company_id !== (int) $tenant->getKey()) {
             abort(404);
@@ -172,8 +186,8 @@ class CustomerLedger extends Page implements HasTable
                 ?string $search,
                 ?string $sortColumn,
                 ?string $sortDirection,
-                int | string $page,
-                int | string $recordsPerPage,
+                int|string $page,
+                int|string $recordsPerPage,
             ): LengthAwarePaginator => $this->paginateLedgerRows(
                 $filters,
                 $search,
@@ -266,8 +280,8 @@ class CustomerLedger extends Page implements HasTable
         ?string $search,
         ?string $sortColumn,
         ?string $sortDirection,
-        int | string $page,
-        int | string $recordsPerPage,
+        int|string $page,
+        int|string $recordsPerPage,
     ): LengthAwarePaginator {
         $builderFilters = [
             'year' => isset($filters['year']['value']) && $filters['year']['value'] !== ''
@@ -380,18 +394,18 @@ class CustomerLedger extends Page implements HasTable
                 ->schema([
                     TextInput::make('amount')
                         ->label('Ποσό')->numeric()->required(),
-                    \Filament\Forms\Components\DatePicker::make('pay_date')
+                    DatePicker::make('pay_date')
                         ->label('Ημερομηνία')->required()->default(now()),
-                    \Filament\Forms\Components\Select::make('payment_method_id')
+                    Select::make('payment_method_id')
                         ->label('Τρόπος πληρωμής')
-                        ->options(fn () => \App\Models\PaymentMethod::query()
+                        ->options(fn () => PaymentMethod::query()
                             ->where('company_id', $this->record->company_id)
                             ->pluck('description', 'id')),
                     Textarea::make('notes')
                         ->label('Σημειώσεις')->rows(2),
                 ])
                 ->action(function (array $data) {
-                    \App\Models\Payment::create([
+                    Payment::create([
                         'company_id' => $this->record->company_id,
                         'customer_id' => $this->record->getKey(),
                         'invoice_id' => null,
@@ -417,7 +431,7 @@ class CustomerLedger extends Page implements HasTable
                         $filename = $renderer->filename($this->record);
 
                         return response()->streamDownload(
-                            fn () => print($bytes),
+                            fn () => print ($bytes),
                             $filename,
                             ['Content-Type' => 'application/pdf'],
                         );
@@ -431,7 +445,7 @@ class CustomerLedger extends Page implements HasTable
                         $filename = $csvService->filename($this->record);
 
                         return response()->streamDownload(
-                            fn () => print($csv),
+                            fn () => print ($csv),
                             $filename,
                             ['Content-Type' => 'text/csv; charset=UTF-8'],
                         );
@@ -519,7 +533,7 @@ class CustomerLedger extends Page implements HasTable
                 ->success()
                 ->send();
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Customer statement email failed', [
+            Log::error('Customer statement email failed', [
                 'customer_id' => $this->record->getKey(),
                 'error' => $e->getMessage(),
             ]);

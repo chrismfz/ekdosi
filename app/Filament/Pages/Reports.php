@@ -17,6 +17,7 @@ use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
 use Filament\Schemas\Schema;
+use Filament\Widgets\Widget;
 use Illuminate\Support\Carbon;
 
 /**
@@ -49,9 +50,15 @@ class Reports extends BaseDashboard
         return 'Αναφορές & Στατιστικά';
     }
 
+    /**
+     * Financial analytics → admin territory: gated on View:Reports (company_admin
+     * + super_admin; operators excluded). Gate::can is 404-storm-safe (missing
+     * permission → false, not a throw).
+     */
     public static function canAccess(): bool
     {
-        return auth()->check() && Filament::getTenant() instanceof Company;
+        return Filament::getTenant() instanceof Company
+            && (bool) auth()->user()?->can('View:Reports');
     }
 
     public static function shouldRegisterNavigation(): bool
@@ -65,7 +72,7 @@ class Reports extends BaseDashboard
     }
 
     /**
-     * @return array<class-string<\Filament\Widgets\Widget>>
+     * @return array<class-string<Widget>>
      */
     public function getWidgets(): array
     {

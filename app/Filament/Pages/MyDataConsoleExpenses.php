@@ -2,9 +2,10 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\MyDataMode;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Resources\Expenses\ExpenseResource;
+use App\Models\Company;
+use App\Models\Supplier;
 use App\Services\MyData\ExpenseImporter;
 use App\Services\MyData\ExpenseReconciler;
 use App\Services\MyData\ExpenseReconciliationResult;
@@ -13,9 +14,11 @@ use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Component;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -66,7 +69,7 @@ class MyDataConsoleExpenses extends Page
      * production → real AADE. Lets the import+refresh round-trip be exercised
      * without the network.
      */
-    public static ?\GuzzleHttp\Handler\MockHandler $testHandler = null;
+    public static ?MockHandler $testHandler = null;
 
     public function mount(): void
     {
@@ -93,14 +96,18 @@ class MyDataConsoleExpenses extends Page
         return static::canAccess();
     }
 
+    /**
+     * Admin-only like the sales console — gated on View:MyDataConsoleExpenses
+     * (company_admin + super_admin; operators excluded). Gate::can is
+     * 404-storm-safe; the tenant must be a live myDATA tenant.
+     */
     public static function canAccess(): bool
     {
         $tenant = Filament::getTenant();
 
-        return auth()->check()
-            && $tenant
-            && $tenant->einvoice_provider === 'gr-mydata'
-            && $tenant->mydata_mode_enum !== MyDataMode::Off;
+        return $tenant instanceof Company
+            && $tenant->isLiveMyDataTenant()
+            && (bool) auth()->user()?->can('View:MyDataConsoleExpenses');
     }
 
     protected function getHeaderActions(): array
@@ -162,7 +169,7 @@ class MyDataConsoleExpenses extends Page
     }
 
     /**
-     * @return array<int, \Filament\Forms\Components\Component>
+     * @return array<int, Component>
      */
     private function windowSchema(): array
     {
@@ -349,7 +356,7 @@ class MyDataConsoleExpenses extends Page
      * Batch-load supplier names for every AFM the result references, scoped to
      * the tenant (Supplier has no global scope). One query, no N+1.
      *
-     * @return array<string, string>  afm => name
+     * @return array<string, string> afm => name
      */
     private function supplierNamesByAfm(ExpenseReconciliationResult $r): array
     {
@@ -370,7 +377,7 @@ class MyDataConsoleExpenses extends Page
             return [];
         }
 
-        return \App\Models\Supplier::query()
+        return Supplier::query()
             ->where('company_id', $tenant->getKey())
             ->whereIn('afm', $afms->all())
             ->whereNotNull('name')
