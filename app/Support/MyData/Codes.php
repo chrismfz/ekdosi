@@ -121,6 +121,51 @@ final class Codes
     ];
 
     /**
+     * §8.2 official descriptions (verbatim from the AADE spec, §8.2 table) used
+     * to SEED a tenant's vat_categories with the standard Greek rates. There is
+     * NO myDATA "fetch VAT rates" API — §8.2 is a static enum in the spec — so
+     * the seed source is this committed table (which IS the AADE spec).
+     *
+     * Keyed by §8.2 code. Code 8 (records without VAT) is intentionally omitted
+     * from the seed: it has no numeric rate and isn't a sales-line VAT category.
+     *
+     * @var array<int, string>
+     */
+    public const VAT_CATEGORY_LABELS = [
+        1 => 'Κανονικός ΦΠΑ 24%',
+        2 => 'Μειωμένος ΦΠΑ 13%',
+        3 => 'Υπερμειωμένος ΦΠΑ 6%',
+        4 => 'ΦΠΑ νήσων 17%',
+        5 => 'ΦΠΑ νήσων 9%',
+        6 => 'ΦΠΑ νήσων 4%',
+        7 => 'Άνευ ΦΠΑ 0%',
+        9 => 'ΦΠΑ 3% (αρ.31 ν.5057/2023)',
+        10 => 'ΦΠΑ νήσων 4% (αρ.31 ν.5057/2023)',
+    ];
+
+    /**
+     * The standard sales-line VAT categories to seed, as [rate, description]
+     * rows. Skips code 8 (no rate) and code 10 (duplicate 4% of code 6 — would
+     * just create a confusing second 4% row; a tenant on the ν.5057/2023 island
+     * regime can add it manually). Code 7 (0%) is seeded WITHOUT an exemption
+     * reason — the operator sets §8.3 per their case (Setup → VAT Categories).
+     *
+     * @return list<array{rate: float, description: string}>
+     */
+    public static function vatCategorySeedRows(): array
+    {
+        $rows = [];
+        foreach ([1, 2, 3, 4, 5, 6, 7] as $code) {
+            $rows[] = [
+                'rate' => (float) self::VAT_CATEGORY_RATES[$code],
+                'description' => self::VAT_CATEGORY_LABELS[$code],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * §8.3 Κατηγορία Αιτίας Εξαίρεσης ΦΠΑ — valid exemption reason codes
      * (1–31, ν.5144/2024). Required when vatCategory = 7.
      *
