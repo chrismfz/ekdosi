@@ -102,13 +102,17 @@ class TenantRolePickerActionTest extends TestCase
         $provisioner->assignSuperAdmin($target, $company);
         $provisioner->assignStandardRole($this->actor, $company, TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
 
-        // The action is not even visible to a non-super actor → calling it is
-        // rejected, and the target keeps super_admin.
+        // The action is hidden to a non-super actor…
         Livewire::test(UsersRelationManager::class, [
             'ownerRecord' => $company,
             'pageClass' => EditCompany::class,
         ])->assertTableActionHidden('manageTenantRole', $target);
 
         $this->assertTrue($provisioner->hasSuperAdminIn($target, $company), 'target must remain super_admin');
+
+        // NB: the in-action closure ALSO hard-guards on actorMayManageRoles (the
+        // Livewire test helper won't call a hidden action, so the bypass path
+        // can't be exercised here — the guard is runtime defence-in-depth in case
+        // Filament's mountAction doesn't re-check ->visible()).
     }
 }

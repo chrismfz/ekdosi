@@ -80,25 +80,24 @@ final class ManageTenantRoleAction
                     $role = null;
                 }
 
-                // Escalation/demotion guard: any change that touches super_admin
-                // — granting it, OR replacing/clearing an existing super_admin —
-                // requires the actor to be super_admin in this company.
-                $provisioner = app(TenantRoleProvisioner::class);
-                $superName = ShieldUtils::getSuperAdminName();
-                $touchesSuper = $role === $superName
-                    || $provisioner->roleInCompany($user, $company) === $superName;
-
-                if ($touchesSuper && ! self::actorMayManageRoles($company)) {
+                // HARD authorization — NOT defence-in-depth behind ->visible():
+                // Filament does not re-check isVisible() at action mount (only
+                // isDisabled()), so callTableAction reaches here even when the
+                // button is hidden. Role management is super_admin-only, so reject
+                // EVERY change (not just super_admin-touching ones) unless the
+                // actor is super_admin in this company. This is the real boundary
+                // alongside the UserResource/CompanyResource view policies.
+                if (! self::actorMayManageRoles($company)) {
                     Notification::make()
                         ->danger()
                         ->title('Δεν επιτρέπεται')
-                        ->body('Μόνο ένας super admin αυτής της εταιρίας μπορεί να αναθέσει ή να αφαιρέσει ρόλο super admin.')
+                        ->body('Μόνο ένας super admin αυτής της εταιρίας μπορεί να διαχειριστεί ρόλους.')
                         ->send();
 
                     return;
                 }
 
-                $provisioner->setRoleInCompany($user, $company, $role);
+                app(TenantRoleProvisioner::class)->setRoleInCompany($user, $company, $role);
 
                 Notification::make()
                     ->success()
