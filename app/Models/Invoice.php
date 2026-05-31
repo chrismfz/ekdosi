@@ -171,6 +171,17 @@ class Invoice extends Model
     }
 
     /**
+     * The Προσφορά this invoice was produced from via «Μετατροπή σε
+     * Παραστατικό», if any. Read-only reverse of Quote::convertedInvoice()
+     * (keyed on quotes.converted_invoice_id) — gives the invoice ↔ quote
+     * history both ways without a column on this legal table.
+     */
+    public function convertedFromQuote(): HasOne
+    {
+        return $this->hasOne(Quote::class, 'converted_invoice_id');
+    }
+
+    /**
      * Payments allocated directly to this invoice (not on-account ones,
      * which carry invoice_id = null and belong to the customer).
      */
