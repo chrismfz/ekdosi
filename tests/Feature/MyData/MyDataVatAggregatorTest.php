@@ -88,4 +88,35 @@ XML;
         $this->assertSame(50.0, $picture->inputNet);
         $this->assertSame(12.0, $picture->inputVat);
     }
+
+    public function test_credit_notes_reduce_both_output_and_input_vat(): void
+    {
+        // Output: a 1.1 sale and a 5.1 credit note (πιστωτικό) against it.
+        $transmitted = $this->docXml([
+            ['mark' => '1', 'type' => '1.1', 'net' => '1000', 'vat' => '240', 'gross' => '1240'],
+            ['mark' => '2', 'type' => '5.1', 'net' => '200', 'vat' => '48', 'gross' => '248'],
+        ]);
+        // Input: a 14.x expense and a 14.31 credit note (πιστωτικό αλλοδαπής).
+        $docs = $this->docXml([
+            ['mark' => '9', 'type' => '14.3', 'net' => '500', 'vat' => '120', 'gross' => '620'],
+            ['mark' => '10', 'type' => '14.31', 'net' => '100', 'vat' => '24', 'gross' => '124'],
+        ]);
+
+        $mock = new MockHandler([
+            new Response(200, [], $transmitted),
+            new Response(200, [], $docs),
+        ]);
+
+        $picture = (new MyDataVatAggregator($this->tenant(), $mock))
+            ->forPeriod(now()->subMonth(), now());
+
+        // Output income = sale − credit note (1000−200 net, 240−48 vat).
+        $this->assertSame(800.0, $picture->outputNet);
+        $this->assertSame(192.0, $picture->outputVat);
+
+        // Input = expense − credit note (500−100 net, 120−24 vat); the credit
+        // note no longer inflates deductible VAT.
+        $this->assertSame(400.0, $picture->inputNet);
+        $this->assertSame(96.0, $picture->inputVat);
+    }
 }

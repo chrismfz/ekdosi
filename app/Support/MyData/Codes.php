@@ -224,6 +224,29 @@ final class Codes
     }
 
     /**
+     * §8.1 invoice types that are CREDIT NOTES (πιστωτικά) — they REDUCE the
+     * figure they relate to, so in any sum of myDATA documents their net/vat
+     * must be subtracted, not added. Covers both the income side (5.1, 5.2
+     * πιστωτικό τιμολόγιο, 11.4 πιστωτικό λιανικής) and the expense side (13.31,
+     * 14.31 πιστωτικά ημεδαπής/αλλοδαπής). Without this, a refund/return reads
+     * as extra income or extra deductible input VAT.
+     *
+     * @var list<string>
+     */
+    public const CREDIT_NOTE_TYPES = ['5.1', '5.2', '11.4', '13.31', '14.31'];
+
+    public static function isCreditNoteType(?string $code): bool
+    {
+        return $code !== null && in_array($code, self::CREDIT_NOTE_TYPES, true);
+    }
+
+    /** -1 for a credit note (subtract from any myDATA-document sum), else +1. */
+    public static function documentSign(?string $code): int
+    {
+        return self::isCreditNoteType($code) ? -1 : 1;
+    }
+
+    /**
      * Coarse economic bucket for a TRANSMITTED document. RequestTransmittedDocs
      * returns EVERYTHING the tenant filed — real sales, self-declared supplier
      * expenses (ενδοκοινοτικά/τρίτων χωρών), AND accounting entries (μισθοδοσία,
