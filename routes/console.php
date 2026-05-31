@@ -31,6 +31,16 @@ if (config('ekdosi.schedule.mail_sweep_enabled')) {
         ->withoutOverlapping();
 }
 
+// invoices:resend-failed-emails — re-queue invoice emails whose last attempt
+// failed. Default OFF (two-key: this flag); run manually until SMTP is healthy.
+if (config('ekdosi.schedule.resend_failed_emails_enabled')) {
+    Schedule::command('invoices:resend-failed-emails', [
+        '--since' => config('ekdosi.schedule.resend_failed_emails_since_days', 3),
+    ])
+        ->cron(config('ekdosi.schedule.resend_failed_emails_cron', '30 * * * *'))
+        ->withoutOverlapping();
+}
+
 // whmcs:fetch-pending — stage paid+unfiled WHMCS invoices into the inbox,
 // once per WHMCS-configured tenant. Operator-gated: this only STAGES,
 // it never files at AADE.
