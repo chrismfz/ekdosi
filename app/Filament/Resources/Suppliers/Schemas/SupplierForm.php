@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Suppliers\Schemas;
 
 use App\Enums\SupplierSource;
 use App\Filament\Support\AadeFormFill;
+use App\Filament\Support\ViesFormFill;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -55,6 +56,13 @@ class SupplierForm
                                     ->modalHeading('Διόρθωση στοιχείων από ΑΑΔΕ')
                                     ->modalDescription('Αντικαθιστά επωνυμία/ΔΟΥ/διεύθυνση/δραστηριότητα με τα επίσημα στοιχεία του μητρώου ΑΑΔΕ (πηγή αλήθειας).')
                                     ->action(fn (callable $get, callable $set) => self::applyAadeToSupplier($get, $set, overwrite: true)),
+                                // EU supplier (non-GR): validate the VAT via VIES and
+                                // fill name/address where the member state publishes them.
+                                FormAction::make('verify_supplier_vies')
+                                    ->label('Επαλήθευση VIES')
+                                    ->icon('heroicon-o-shield-check')
+                                    ->visible(fn (callable $get) => ($get('country') ?: 'GR') !== 'GR')
+                                    ->action(fn (callable $get, callable $set) => self::applyViesToSupplier($get, $set)),
                             ]),
 
                         TextInput::make('name')
@@ -133,5 +141,24 @@ class SupplierForm
         Notification::make()
             ->title($overwrite ? 'Διορθώθηκε από την ΑΑΔΕ' : 'Στοιχεία αντλήθηκαν από την ΑΑΔΕ')
             ->success()->send();
+    }
+
+    /**
+     * VIES validation → supplier fields (non-GR EU). Validity is surfaced by
+     * ViesFormFill::check; identity fields fill only-when-empty where the
+     * member state publishes them.
+     */
+    private static function applyViesToSupplier(callable $get, callable $set): void
+    {
+        $result = ViesFormFill::check($get('afm'), $get('country'));
+        if (! $result || ! $result->valid) {
+            return;
+        }
+
+        ViesFormFill::assign($get, $set, 'country', $result->countryCode === 'EL' ? 'GR' : $result->countryCode, overwrite: false);
+        if ($result->hasIdentity()) {
+            ViesFormFill::assign($get, $set, 'name', $result->name, overwrite: false);
+            ViesFormFill::assign($get, $set, 'address1', str_replace("\n", ', ', $result->address), overwrite: false);
+        }
     }
 }
