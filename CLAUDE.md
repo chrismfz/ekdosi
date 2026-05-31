@@ -366,10 +366,16 @@ verified against the restored prod WHMCS):**
   visibility switch. `whmcs:fetch-pending` re-resolves third parties per ingest.
 
 **WHMCS gaps (real):**
-- **Write-back on lifecycle-filed drafts (tracked):** when a draft is issued via
-  the normal lifecycle (not the direct `file()`), `invoiced=MARK` + pending→filed
-  sync don't fire yet. Wire it off `MyDataSubmitter`'s VALID persist for invoices
-  carrying `whmcs_pending_id` — fixes the split-draft write-back gap too.
+- **Write-back on lifecycle-filed drafts — ✅ DONE.** A draft created from the
+  inbox (`createDraft`, carrying `whmcs_pending_id`) and later issued via the
+  normal lifecycle now triggers write-back: `MyDataSubmitter`'s VALID persist
+  calls `WhmcsWritebackService::syncFiledFromLifecycle`, which flips the pending
+  row drafted→filed and pushes `invoiced=MARK`. The write-back push was extracted
+  into the shared `WhmcsWritebackService` (used by both `WhmcsInvoiceFiler::file()`
+  and the lifecycle path). **Multi-party SPLIT drafts still excluded** (one WHMCS
+  invoice → many MARKs but `tblinvoices.invoiced` is one column — separate design).
+  `WhmcsLifecycleWritebackTest` covers flip+push / no-op(non-WHMCS,no-mark,split) /
+  skipped(no bridge) / failed(bridge rejects).
 - **`mod_timologia` third-party invoicing — ✅ DONE (T-1 + T-2, merged).** The
   bridge resolves each line's routing (own `mod_ekdosi_*` tables, synced from
   legacy), ekdosi bills the end customer for single-party invoices and stages
@@ -391,8 +397,13 @@ verified against the restored prod WHMCS):**
 - **griniaris** (field 338 immediate-invoicing) — ✅ DONE (G8, two phases):
   phase 1 = an "Άμεσο" badge on inbox rows whose customer is `needs_immediate_invoice`;
   phase 2 = the `whmcs:auto-issue` command auto-files those rows at AADE (see G8 below).
-- The plugin under-reacts to ekdosi's `audit_preserved` / distinct 409/502
-  responses; still `v0.1.0`.
+- **Plugin error-handling — ✅ IMPROVED (plugin v0.13.0).** `EkdosiClient`'s
+  push/status summarisers now classify failures distinctly via `classifyError()`:
+  409 (`whmcs_invoice_not_found` — input contradicts upstream, re-push won't help),
+  502/503/504 (transient — retry), 401/403 (HMAC/secret mismatch), and surface the
+  `audit_preserved` success flag (already filed at AADE → re-push left the frozen
+  record untouched) instead of a generic "HTTP NNN". (The earlier note said
+  "still v0.1.0" — that was stale; the plugin was already v0.12.0.)
 
 ---
 

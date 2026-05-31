@@ -3,8 +3,6 @@
 namespace App\Services\WhmcsInbox;
 
 use App\Enums\MyDataMode;
-use App\Exceptions\Whmcs\WhmcsNotConfigured;
-use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -15,7 +13,7 @@ use App\Models\VatCategory;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
-use App\Services\Whmcs\WhmcsBridgeClientFactory;
+use App\Services\Whmcs\WhmcsWritebackService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use LogicException;
@@ -72,7 +70,7 @@ class WhmcsInvoiceFiler
         private InvoiceNumberer $numberer,
         private RecomputeInvoiceTotals $recompute,
         private EInvoiceSubmitterFactory $submitterFactory,
-        private WhmcsBridgeClientFactory $bridgeFactory,
+        private WhmcsWritebackService $writeback,
     ) {}
 
     /**
@@ -227,7 +225,7 @@ class WhmcsInvoiceFiler
         // command can re-run it. Skipped (state='skipped') when the
         // tenant has no bridge plugin configured.
         if ($hasMark) {
-            $this->writebackInvoicedFlag($tenant, $pendingFresh, $invoice, $mark->mark);
+            $this->writeback->pushMark($tenant, $pendingFresh, $invoice, $mark->mark);
         }
 
         return new FileResult(
@@ -247,11 +245,12 @@ class WhmcsInvoiceFiler
      * WhmcsInvoiceSplitter; safe inside the request (no AADE HTTP, no outer-tx
      * restriction).
      *
-     * NOTE (tracked follow-up): when the draft is later filed via the
-     * lifecycle, the WHMCS write-back (tblinvoices.invoiced = MARK) +
-     * pending→filed sync are NOT yet wired — the same known gap as split
-     * drafts. To be addressed by hooking MyDataSubmitter's VALID persist on
-     * invoices that carry whmcs_pending_id.
+     * When the draft is later issued via the lifecycle (Οριστικοποίηση →
+     * Υποβολή), MyDataSubmitter's VALID persist calls
+     * WhmcsWritebackService::syncFiledFromLifecycle — which flips this pending
+     * row drafted→filed and pushes the MARK back to WHMCS. (Multi-party SPLIT
+     * drafts remain a separate design: one WHMCS invoice → many MARKs, but
+     * tblinvoices.invoiced is a single column.)
      */
     public function createDraft(
         Company $tenant,
@@ -349,88 +348,6 @@ class WhmcsInvoiceFiler
                 .'a force-delete would silently null invoice_id and let the operator allocate '
                 .'a brand-new ΑΑ for the same WHMCS invoice.'
             );
-        }
-    }
-
-    /**
-     * Stage B-3: push the MARK back to tblinvoices.invoiced via the
-     * ekdosi_bridge plugin, recording the outcome on the pending
-     * row's whmcs_writeback_* columns. Non-fatal on EVERY failure
-     * path — see the call-site comment for the rationale.
-     *
-     * Catches \Throwable (not just the two WHMCS exception classes):
-     * the AADE filing has already committed, so ANY failure here —
-     * a JsonException from the client's json_encode, an unexpected
-     * RuntimeException from the HTTP layer, a future exception type —
-     * must leave the filing intact. The outcome is recorded as
-     * 'failed' with the diagnostic so a retry-sweep can find it.
-     *
-     * Updates only whmcs_writeback_state / whmcs_writeback_error,
-     * which the PendingWhmcsInvoiceObserver permits past the
-     * status=filed audit freeze.
-     */
-    private function writebackInvoicedFlag(
-        Company $tenant,
-        PendingWhmcsInvoice $pending,
-        Invoice $invoice,
-        string $mark,
-    ): void {
-        try {
-            $client = $this->bridgeFactory->for($tenant);
-        } catch (WhmcsNotConfigured $e) {
-            // Tenant uses ekdosi for AADE filing but hasn't deployed
-            // the bridge plugin (or hasn't configured the secret).
-            // Record as 'skipped' so it's distinguishable from a
-            // genuine failure in dashboards / retry-sweeps.
-            Log::info('WHMCS write-back skipped: bridge plugin not configured', [
-                'pending_id' => $pending->id,
-                'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'mydata_mark' => $mark,
-                'reason' => $e->getMessage(),
-            ]);
-            $pending->update([
-                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
-                'whmcs_writeback_error' => null,
-            ]);
-
-            return;
-        }
-
-        try {
-            $client->setInvoiced($pending->whmcs_invoice_id, $mark);
-            Log::info('WHMCS write-back succeeded', [
-                'pending_id' => $pending->id,
-                'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'mydata_mark' => $mark,
-                'ekdosi_invoice' => $invoice->invcode,
-            ]);
-            $pending->update([
-                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,
-                'whmcs_writeback_error' => null,
-            ]);
-        } catch (Throwable $e) {
-            // The AADE filing is complete and the local Invoice is
-            // committed. We've lost the WHMCS-side bookkeeping but
-            // nothing else. Record state=failed + the diagnostic so
-            // the inbox surfaces the gap and a retry-sweep can target
-            // it. WhmcsUnreachable / 5xx are transient (retry helps);
-            // 4xx config errors (invalid_signature, secret_not_
-            // configured) need operator action — both are captured in
-            // the error string for triage.
-            Log::error('WHMCS write-back failed (AADE filing already complete)', [
-                'pending_id' => $pending->id,
-                'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'mydata_mark' => $mark,
-                'ekdosi_invoice' => $invoice->invcode,
-                'error' => $e->getMessage(),
-                'next_step' => 'Manually set tblinvoices.invoiced='.$mark
-                    .' for WHMCS invoice '.$pending->whmcs_invoice_id
-                    .', or re-trigger the write-back via the bridge plugin admin page.',
-            ]);
-            $pending->update([
-                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
-                'whmcs_writeback_error' => $e->getMessage(),
-            ]);
         }
     }
 

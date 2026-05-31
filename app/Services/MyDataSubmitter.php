@@ -9,6 +9,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Models\VatCategory;
+use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -156,6 +157,17 @@ class MyDataSubmitter implements EInvoiceSubmitter
         $responseXml = $action->getResponseXML() ?? '';
 
         $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+
+        // WHMCS write-back on the draft-first LIFECYCLE path. A draft created
+        // from the WHMCS inbox (WhmcsInvoiceFiler::createDraft) carries
+        // invoices.whmcs_pending_id; when it's later issued through the normal
+        // lifecycle and reaches VALID here, flip the linked pending row
+        // drafted→filed and push the MARK back to tblinvoices.invoiced. No-ops
+        // for non-WHMCS invoices, off-mode (no MARK), or split rows. Never
+        // throws — a write-back hiccup must not mask the successful filing.
+        // (The direct WhmcsInvoiceFiler::file() path does its own write-back;
+        // its invoices don't carry whmcs_pending_id, so this won't double-fire.)
+        app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, $mark->mark);
 
         // PR #27: dispatch the customer-mail job after a successful
         // VALID filing IF the tenant has opted in via
