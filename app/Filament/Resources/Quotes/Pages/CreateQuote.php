@@ -16,6 +16,15 @@ class CreateQuote extends CreateRecord
     protected static string $resource = QuoteResource::class;
 
     /**
+     * Full-width content so the Excel-style lines table uses the whole screen
+     * (the default centred container squeezed the columns).
+     */
+    public function getMaxContentWidth(): \Filament\Support\Enums\Width
+    {
+        return \Filament\Support\Enums\Width::Full;
+    }
+
+    /**
      * Allocate the ΠΡ-{n} code under a row lock inside the same transaction as
      * the INSERT — same atomic discipline as the invoice numberer, on the
      * SEPARATE companies.quote_counter (never the legal ΑΑ).
