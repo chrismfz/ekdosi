@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\User;
 use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
+use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use PDO;
@@ -44,22 +45,24 @@ class MigrateFromFirebird extends Command
     protected $description = 'Import a legacy Firebird ekdosi database into the multi-tenant MariaDB schema (re-run-safe)';
 
     private PDO $fb;
+
     private int $companyId;
+
     private TenantRowUpserter $upserter;
 
     /** legacy_id => new_id maps, per table, for FK remapping */
     private array $map = [
-        'payment_methods'    => [],
-        'delivery_methods'   => [],
-        'distribution_aims'  => [],
-        'metric_units'       => [],
-        'vat_categories'     => [],
+        'payment_methods' => [],
+        'delivery_methods' => [],
+        'distribution_aims' => [],
+        'metric_units' => [],
+        'vat_categories' => [],
         'product_categories' => [],
-        'customers'          => [],
-        'invoice_types'      => [],
-        'products'           => [],
-        'invoices'           => [],
-        'invoice_lines'      => [],
+        'customers' => [],
+        'invoice_types' => [],
+        'products' => [],
+        'invoices' => [],
+        'invoice_lines' => [],
     ];
 
     public function handle(): int
@@ -73,6 +76,7 @@ class MigrateFromFirebird extends Command
         foreach ($required as $req) {
             if (! $this->option($req)) {
                 $this->error("Missing required --{$req}");
+
                 return self::FAILURE;
             }
         }
@@ -107,25 +111,25 @@ class MigrateFromFirebird extends Command
             // destroyed every Filament-only row.
 
             // --- lookups (no inter-dependencies among these) ---
-            $this->copyLookup('PAYMENT_METHOD',    'payment_methods',    'METHOD_ID', fn ($r) => [
+            $this->copyLookup('PAYMENT_METHOD', 'payment_methods', 'METHOD_ID', fn ($r) => [
                 'description' => $this->fld($r, 'DESCRIPTION'),
-                'due_days'    => $r['DUE_DAYS'],
+                'due_days' => $r['DUE_DAYS'],
             ]);
-            $this->copyLookup('DELIVERY_METHOD',   'delivery_methods',   'METHOD_ID', fn ($r) => [
-                'description' => $this->fld($r, 'DESCRIPTION'),
-            ]);
-            $this->copyLookup('DISTRIBUTION_AIM',  'distribution_aims',  'DISTAIM_ID', fn ($r) => [
+            $this->copyLookup('DELIVERY_METHOD', 'delivery_methods', 'METHOD_ID', fn ($r) => [
                 'description' => $this->fld($r, 'DESCRIPTION'),
             ]);
-            $this->copyLookup('METRIC_UNITS',      'metric_units',       'METRIC_ID', fn ($r) => [
-                'name'  => $this->fld($r, 'NAME'),
+            $this->copyLookup('DISTRIBUTION_AIM', 'distribution_aims', 'DISTAIM_ID', fn ($r) => [
+                'description' => $this->fld($r, 'DESCRIPTION'),
+            ]);
+            $this->copyLookup('METRIC_UNITS', 'metric_units', 'METRIC_ID', fn ($r) => [
+                'name' => $this->fld($r, 'NAME'),
                 'notes' => $this->fld($r, 'NOTES'),
             ]);
-            $this->copyLookup('VAT_CATEGORY',      'vat_categories',     'VATCAT_ID', fn ($r) => [
-                'rate'             => $r['VALUE'],
-                'description'      => $this->fld($r, 'DESCRIPTION'),
+            $this->copyLookup('VAT_CATEGORY', 'vat_categories', 'VATCAT_ID', fn ($r) => [
+                'rate' => $r['VALUE'],
+                'description' => $this->fld($r, 'DESCRIPTION'),
                 'long_description' => $this->fld($r, 'LONG_DESCRIPTION'),
-                'is_default'       => (bool) $r['DEFAULT_CAT'],
+                'is_default' => (bool) $r['DEFAULT_CAT'],
             ]);
 
             // Legacy schema enforced single-default VAT via the VAT_CATEGORY_AU0
@@ -139,8 +143,8 @@ class MigrateFromFirebird extends Command
 
             $this->copyLookup('PRODUCT_CATEGORIES', 'product_categories', 'CAT_ID', fn ($r) => [
                 'description_short' => $this->fld($r, 'DESCRIPTION_SHORT'),
-                'description'       => $this->fld($r, 'DESCRIPTION'),
-                'markup'            => $r['MARKUP'],
+                'description' => $this->fld($r, 'DESCRIPTION'),
+                'markup' => $r['MARKUP'],
             ]);
 
             // --- customers (FK: payment_method) ---
@@ -278,6 +282,7 @@ class MigrateFromFirebird extends Command
         if (! $exists) {
             throw new \RuntimeException("Tenant with id={$id} does not exist. Cannot import into a non-existent tenant.");
         }
+
         return $id;
     }
 
@@ -331,6 +336,7 @@ class MigrateFromFirebird extends Command
             'SELECT 1 FROM RDB$RELATIONS WHERE RDB$RELATION_NAME = ? AND RDB$SYSTEM_FLAG = 0'
         );
         $stmt->execute([strtoupper($name)]);
+
         return (bool) $stmt->fetchColumn();
     }
 
@@ -341,6 +347,7 @@ class MigrateFromFirebird extends Command
             return null;
         }
         $v = iconv('UTF-8', 'UTF-8//IGNORE', $v);
+
         return trim($v) === '' ? null : trim($v);
     }
 
@@ -361,6 +368,7 @@ class MigrateFromFirebird extends Command
         if ($legacy === null) {
             return null;
         }
+
         return $this->map[$table][(int) $legacy] ?? null;
     }
 
@@ -394,7 +402,7 @@ class MigrateFromFirebird extends Command
 
         $this->warn(sprintf(
             'vat_categories: legacy data had %d rows with is_default=1 for this tenant; '
-            . 'kept id=%d, demoted the rest. (Single-default invariant restored.)',
+            .'kept id=%d, demoted the rest. (Single-default invariant restored.)',
             $defaults->count(),
             $defaults->first(),
         ));
@@ -429,36 +437,36 @@ class MigrateFromFirebird extends Command
                 'customers',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['CUST_ID']],
                 [
-                    'type'                   => $this->fld($r, 'TYPE'),
-                    'afm'                    => $this->fld($r, 'AFM'),
-                    'name'                   => $this->fld($r, 'NAME') ?? '(no name)',
-                    'address1'               => $this->fld($r, 'ADDRESS1'),
-                    'address2'               => $this->fld($r, 'ADDRESS2'),
-                    'city'                   => $this->fld($r, 'CITY'),
-                    'postcode'               => $this->fld($r, 'POSTCODE'),
-                    'phone1'                 => $this->fld($r, 'PHONE1'),
-                    'phone2'                 => $this->fld($r, 'PHONE2'),
-                    'fax'                    => $this->fld($r, 'FAX'),
-                    'occupation'             => $this->fld($r, 'OCCUPATION'),
-                    'tax_office'             => $this->fld($r, 'TAXOFFICE'),
-                    'details'                => $this->fld($r, 'DETAILS'),
-                    'discount'               => $r['DISCOUNT'] ?? 0,
-                    'email'                  => $this->fld($r, 'EMAIL'),
-                    'secondary_email'        => $this->fld($r, 'SECONDARY_EMAIL'),
-                    'country'                => $this->fld($r, 'COUNTRY'),
-                    'vat_vies'               => $this->fld($r, 'VAT_VIES'),
-                    'withhold_tax'           => $r['WITHHOLD_TAX'] ?? null,
-                    'sort_order'             => $r['ORDER'] ?? null,
+                    'type' => $this->fld($r, 'TYPE'),
+                    'afm' => $this->fld($r, 'AFM'),
+                    'name' => $this->fld($r, 'NAME') ?? '(no name)',
+                    'address1' => $this->fld($r, 'ADDRESS1'),
+                    'address2' => $this->fld($r, 'ADDRESS2'),
+                    'city' => $this->fld($r, 'CITY'),
+                    'postcode' => $this->fld($r, 'POSTCODE'),
+                    'phone1' => $this->fld($r, 'PHONE1'),
+                    'phone2' => $this->fld($r, 'PHONE2'),
+                    'fax' => $this->fld($r, 'FAX'),
+                    'occupation' => $this->fld($r, 'OCCUPATION'),
+                    'tax_office' => $this->fld($r, 'TAXOFFICE'),
+                    'details' => $this->fld($r, 'DETAILS'),
+                    'discount' => $r['DISCOUNT'] ?? 0,
+                    'email' => $this->fld($r, 'EMAIL'),
+                    'secondary_email' => $this->fld($r, 'SECONDARY_EMAIL'),
+                    'country' => $this->fld($r, 'COUNTRY'),
+                    'vat_vies' => $this->fld($r, 'VAT_VIES'),
+                    'withhold_tax' => $r['WITHHOLD_TAX'] ?? null,
+                    'sort_order' => $r['ORDER'] ?? null,
                     'alt_customer_legacy_id' => $r['ALT_CUSTID'] ?? null,
-                    'payment_method_id'      => $this->legacyId('payment_methods', $r['PAYMETH_ID'] ?? null),
-                    'updated_at'             => now(),
+                    'payment_method_id' => $this->legacyId('payment_methods', $r['PAYMETH_ID'] ?? null),
+                    'updated_at' => now(),
                 ],
                 [
                     // Filament-managed columns — defaults on first
                     // insert, never updated on re-runs.
-                    'is_active'              => true,
+                    'is_active' => true,
                     'needs_immediate_invoice' => false,
-                    'created_at'             => now(),
+                    'created_at' => now(),
                 ],
             );
             $this->map['customers'][(int) $r['CUST_ID']] = $id;
@@ -502,21 +510,24 @@ class MigrateFromFirebird extends Command
                 'invoice_types',
                 ['company_id' => $this->companyId, 'code' => $code],
                 [
-                    'name'                         => $this->fld($r, 'NAME') ?? $r['INVTYPE_ID'],
-                    'invcount'                     => $invcount,
-                    'show_on_menu'                 => (bool) ($r['SHOW_ON_MENU'] ?? 1),
-                    'is_credit'                    => (bool) ($r['CREDITINVOICE'] ?? 0),
-                    'is_return'                    => (bool) ($r['RETURNINVOICE'] ?? 0),
-                    'mydata_type'                  => $this->fld($r, 'MYDATA_TYPE'),
-                    'mydata_income_class'          => $this->fld($r, 'MYDATA_INCOME_CLASS'),
+                    'name' => $this->fld($r, 'NAME') ?? $r['INVTYPE_ID'],
+                    'invcount' => $invcount,
+                    'is_credit' => (bool) ($r['CREDITINVOICE'] ?? 0),
+                    'is_return' => (bool) ($r['RETURNINVOICE'] ?? 0),
+                    'mydata_type' => $this->fld($r, 'MYDATA_TYPE'),
+                    'mydata_income_class' => $this->fld($r, 'MYDATA_INCOME_CLASS'),
                     'mydata_income_class_category' => $this->fld($r, 'MYDATA_INCOME_CLASS_CATEGORY'),
-                    'distribution_aim_id'          => $this->legacyId('distribution_aims', $r['DISTAIM_ID']),
-                    'delivery_method_id'           => $this->legacyId('delivery_methods', $r['DELIVERYMETHOD_ID']),
-                    'payment_method_id'            => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
-                    'default_customer_id'          => $this->legacyId('customers', $r['CUST_ID']),
-                    'updated_at'                   => now(),
+                    'distribution_aim_id' => $this->legacyId('distribution_aims', $r['DISTAIM_ID']),
+                    'delivery_method_id' => $this->legacyId('delivery_methods', $r['DELIVERYMETHOD_ID']),
+                    'payment_method_id' => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
+                    'default_customer_id' => $this->legacyId('customers', $r['CUST_ID']),
+                    'updated_at' => now(),
                 ],
-                ['created_at' => now()],
+                // show_on_menu is a UI-only convenience flag (NOT legal data), so
+                // ignore the legacy SHOW_ON_MENU and default every imported type to
+                // on-menu — the operator hides what they don't want. Insert-only,
+                // so a re-import never clobbers that operator choice.
+                ['created_at' => now(), 'show_on_menu' => true],
             );
             // invoice_types keyed by its string code, not an int PK
             $this->map['invoice_types'][$code] = $id;
@@ -543,7 +554,7 @@ class MigrateFromFirebird extends Command
         $badVat = DB::table('vat_categories')
             ->where('company_id', $this->companyId)
             ->get(['description', 'rate'])
-            ->filter(fn ($v) => ! \App\Support\MyData\Codes::vatRateIsValid($v->rate));
+            ->filter(fn ($v) => ! Codes::vatRateIsValid($v->rate));
 
         if ($badVat->isNotEmpty()) {
             $this->newLine();
@@ -560,7 +571,7 @@ class MigrateFromFirebird extends Command
             $this->line('    (Imported invoices keep their original rates — historical lines like 23% are fine.)');
         }
 
-        $knownTypes = \App\Support\MyData\Codes::INVOICE_TYPES;
+        $knownTypes = Codes::INVOICE_TYPES;
         $badTypes = DB::table('invoice_types')
             ->where('company_id', $this->companyId)
             ->get(['code', 'name', 'mydata_type'])
@@ -590,22 +601,22 @@ class MigrateFromFirebird extends Command
                 'products',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['PRODUCT_ID']],
                 [
-                    'barcode'             => $this->fld($r, 'BARCODE'),
-                    'description_short'   => $this->fld($r, 'DESCRIPTION_SHORT') ?? '(no description)',
-                    'description'         => $this->fld($r, 'DESCRIPTION'),
+                    'barcode' => $this->fld($r, 'BARCODE'),
+                    'description_short' => $this->fld($r, 'DESCRIPTION_SHORT') ?? '(no description)',
+                    'description' => $this->fld($r, 'DESCRIPTION'),
                     'product_category_id' => $this->legacyId('product_categories', $r['CAT_ID']),
-                    'vat_category_id'     => $this->legacyId('vat_categories', $r['VATCAT_ID']),
-                    'metric_unit_id'      => $this->legacyId('metric_units', $r['METRIC_ID']),
-                    'buy_price'           => $r['BUY_PRICE'] ?? 0,
-                    'sell_price'          => $r['SELL_PRICE'] ?? 0,
-                    'price_wvat'          => $r['PRICE_WVAT'] ?? 0,
-                    'reserve'             => $r['RESERVE'] ?? 0,
-                    'reserve_secure'      => $r['RESERVE_SECURE'] ?? 0,
-                    'date_inserted'       => $r['DATE_INSERTED'],
-                    'updated_at'          => $r['LAST_UPDATE'] ?? now(),
+                    'vat_category_id' => $this->legacyId('vat_categories', $r['VATCAT_ID']),
+                    'metric_unit_id' => $this->legacyId('metric_units', $r['METRIC_ID']),
+                    'buy_price' => $r['BUY_PRICE'] ?? 0,
+                    'sell_price' => $r['SELL_PRICE'] ?? 0,
+                    'price_wvat' => $r['PRICE_WVAT'] ?? 0,
+                    'reserve' => $r['RESERVE'] ?? 0,
+                    'reserve_secure' => $r['RESERVE_SECURE'] ?? 0,
+                    'date_inserted' => $r['DATE_INSERTED'],
+                    'updated_at' => $r['LAST_UPDATE'] ?? now(),
                 ],
                 [
-                    'is_active'  => true,
+                    'is_active' => true,
                     'created_at' => now(),
                 ],
             );
@@ -625,11 +636,11 @@ class MigrateFromFirebird extends Command
                 'product_price_tiers',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['PROD_PRICE_ID']],
                 [
-                    'product_id'       => $product,
-                    'value'            => $r['VAL'],
+                    'product_id' => $product,
+                    'value' => $r['VAL'],
                     'discount_percent' => $r['DISCOUNT_PERCENT'],
-                    'qty'              => $r['QTY'],
-                    'updated_at'       => now(),
+                    'qty' => $r['QTY'],
+                    'updated_at' => now(),
                 ],
                 ['created_at' => now()],
             );
@@ -671,38 +682,38 @@ class MigrateFromFirebird extends Command
                 'invoices',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['INVOICE_ID']],
                 [
-                    'invcode'             => $this->fld($r, 'INVCODE'),
-                    'code'                => $r['CODE'] ?? 0,
-                    'invoice_type_id'     => $this->map['invoice_types'][$this->fld($r, 'INVTYPE')] ?? null,
-                    'customer_id'         => $this->legacyId('customers', $r['CUST_ID']),
-                    'issued_at'           => $issuedAt,
+                    'invcode' => $this->fld($r, 'INVCODE'),
+                    'code' => $r['CODE'] ?? 0,
+                    'invoice_type_id' => $this->map['invoice_types'][$this->fld($r, 'INVTYPE')] ?? null,
+                    'customer_id' => $this->legacyId('customers', $r['CUST_ID']),
+                    'issued_at' => $issuedAt,
                     'distribution_aim_id' => $this->legacyId('distribution_aims', $r['DISTRAIM_ID']),
-                    'delivery_method_id'  => $this->legacyId('delivery_methods', $r['DELMETHOD_ID']),
-                    'payment_method_id'   => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
-                    'delivery_date'       => $r['DELIVERYDATE'] ?? null,
+                    'delivery_method_id' => $this->legacyId('delivery_methods', $r['DELMETHOD_ID']),
+                    'payment_method_id' => $this->legacyId('payment_methods', $r['PAYMETH_ID']),
+                    'delivery_date' => $r['DELIVERYDATE'] ?? null,
                     'header_discount_percent' => $r['DISCOUNT'] ?? 0,
-                    'net_total'           => $r['PRICE'] ?? 0,
-                    'gross_total'         => $r['PRICEWVAT'] ?? 0,
-                    'withhold_amount'     => $r['WITHHOLD_AMOUNT'] ?? null,
-                    'mailed'              => (bool) ($r['MAILED'] ?? 0),
-                    'printed'             => (bool) ($r['PRINTED'] ?? 0),
-                    'address1'            => $this->fld($r, 'ADDRESS1'),
-                    'address2'            => $this->fld($r, 'ADDRESS2'),
-                    'city'                => $this->fld($r, 'CITY'),
-                    'postcode'            => $this->fld($r, 'POSTCODE'),
-                    'country'             => $this->fld($r, 'COUNTRY'),
-                    'company_name'        => $this->fld($r, 'COMPANY_NAME'),
-                    'vat_no'              => $this->fld($r, 'VAT_NO'),
-                    'vies_vat'            => $this->fld($r, 'VIES_VAT'),
-                    'occupation'          => $this->fld($r, 'OCCUPATION'),
-                    'notes'               => $this->fld($r, 'NOTES'),
-                    'email_sent'          => $this->fld($r, 'EMAIL_SENT'),
-                    'mydata_sent'         => isset($r['MYDATA_SENT']) ? (bool) $r['MYDATA_SENT'] : null,
-                    'mydata_state'        => $mydataState,
-                    'mydata_mark'         => $this->fld($r, 'MYDATA_MARK'),
-                    'mydata_url'          => $this->fld($r, 'MYDATA_URL'),
-                    'local_status'        => $localStatus,
-                    'updated_at'          => now(),
+                    'net_total' => $r['PRICE'] ?? 0,
+                    'gross_total' => $r['PRICEWVAT'] ?? 0,
+                    'withhold_amount' => $r['WITHHOLD_AMOUNT'] ?? null,
+                    'mailed' => (bool) ($r['MAILED'] ?? 0),
+                    'printed' => (bool) ($r['PRINTED'] ?? 0),
+                    'address1' => $this->fld($r, 'ADDRESS1'),
+                    'address2' => $this->fld($r, 'ADDRESS2'),
+                    'city' => $this->fld($r, 'CITY'),
+                    'postcode' => $this->fld($r, 'POSTCODE'),
+                    'country' => $this->fld($r, 'COUNTRY'),
+                    'company_name' => $this->fld($r, 'COMPANY_NAME'),
+                    'vat_no' => $this->fld($r, 'VAT_NO'),
+                    'vies_vat' => $this->fld($r, 'VIES_VAT'),
+                    'occupation' => $this->fld($r, 'OCCUPATION'),
+                    'notes' => $this->fld($r, 'NOTES'),
+                    'email_sent' => $this->fld($r, 'EMAIL_SENT'),
+                    'mydata_sent' => isset($r['MYDATA_SENT']) ? (bool) $r['MYDATA_SENT'] : null,
+                    'mydata_state' => $mydataState,
+                    'mydata_mark' => $this->fld($r, 'MYDATA_MARK'),
+                    'mydata_url' => $this->fld($r, 'MYDATA_URL'),
+                    'local_status' => $localStatus,
+                    'updated_at' => now(),
                 ],
                 ['created_at' => $issuedAt ?? now()],
             );
@@ -753,18 +764,18 @@ class MigrateFromFirebird extends Command
                 'invoice_lines',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['INVLINE_ID']],
                 [
-                    'invoice_id'     => $invoice,
-                    'product_id'     => $this->legacyId('products', $r['PRODUCT_ID']),
-                    'qty'            => $r['QTY'] ?? 1,
+                    'invoice_id' => $invoice,
+                    'product_id' => $this->legacyId('products', $r['PRODUCT_ID']),
+                    'qty' => $r['QTY'] ?? 1,
                     'price_per_item' => $r['PRICE_PER_ITEM'],
-                    'discount'       => $r['DISCOUNT'] ?? 0,
-                    'vat_percent'    => $r['VATPERCENT'],
-                    'net_price'      => $r['PRICE'],
-                    'gross_price'    => $r['PRICEWVAT'],
-                    'product_descr'  => $this->fld($r, 'PRODUCT_DESCR'),
-                    'metric_unit'    => $this->fld($r, 'METRIC_UNIT'),
-                    'notes'          => $this->fld($r, 'NOTES'),
-                    'updated_at'     => now(),
+                    'discount' => $r['DISCOUNT'] ?? 0,
+                    'vat_percent' => $r['VATPERCENT'],
+                    'net_price' => $r['PRICE'],
+                    'gross_price' => $r['PRICEWVAT'],
+                    'product_descr' => $this->fld($r, 'PRODUCT_DESCR'),
+                    'metric_unit' => $this->fld($r, 'METRIC_UNIT'),
+                    'notes' => $this->fld($r, 'NOTES'),
+                    'updated_at' => now(),
                 ],
                 ['created_at' => now()],
             );
@@ -786,11 +797,11 @@ class MigrateFromFirebird extends Command
                 'return_invoice_extras',
                 ['invoice_line_id' => $line],
                 [
-                    'company_id'   => $this->companyId,
-                    'qty_given'    => $r['QTY_GIVEN'],
+                    'company_id' => $this->companyId,
+                    'qty_given' => $r['QTY_GIVEN'],
                     'qty_returned' => $r['QTY_RETURNED'],
-                    'qty_sent'     => $r['QTY_SENT'],
-                    'updated_at'   => now(),
+                    'qty_sent' => $r['QTY_SENT'],
+                    'updated_at' => now(),
                 ],
                 ['created_at' => now()],
             );
@@ -810,10 +821,10 @@ class MigrateFromFirebird extends Command
                 ['company_id' => $this->companyId, 'legacy_id' => $r['PAYMENT_ID']],
                 [
                     'customer_id' => $customer,
-                    'pay_date'    => $r['PAY_DATE'],
-                    'amount'      => $r['VALUE'],
-                    'notes'       => $this->fld($r, 'NOTES'),
-                    'updated_at'  => now(),
+                    'pay_date' => $r['PAY_DATE'],
+                    'amount' => $r['VALUE'],
+                    'notes' => $this->fld($r, 'NOTES'),
+                    'updated_at' => now(),
                 ],
                 ['created_at' => now()],
             );
@@ -824,6 +835,7 @@ class MigrateFromFirebird extends Command
     {
         if (! $this->fbTableExists('MARK')) {
             $this->line('  MARK -> mydata_marks  (skipped: table absent in this .fbk — pre-myDATA snapshot)');
+
             return;
         }
         $this->line('  MARK -> mydata_marks  (full audit trail)');
@@ -836,21 +848,21 @@ class MigrateFromFirebird extends Command
                 'mydata_marks',
                 ['company_id' => $this->companyId, 'legacy_id' => $r['ID']],
                 [
-                    'invoice_id'    => $this->legacyId('invoices', $r['INVOICE_ID']),
+                    'invoice_id' => $this->legacyId('invoices', $r['INVOICE_ID']),
                     // After PR #24 the column is nullable. Legacy rows
                     // with no MARK (rare — pre-myDATA staging) now land
                     // as NULL instead of empty-string sentinels.
-                    'mark'          => $this->fld($r, 'MARK'),
+                    'mark' => $this->fld($r, 'MARK'),
                     'mydata_action' => $this->fld($r, 'MYDATA_ACTION'),
-                    'invoice_url'   => $this->fld($r, 'INVOICE_URL'),
-                    'request'       => $this->fld($r, 'REQUEST'),
-                    'response'      => $this->fld($r, 'RESPONSE'),
-                    'mark_date'     => $r['DATE'],
+                    'invoice_url' => $this->fld($r, 'INVOICE_URL'),
+                    'request' => $this->fld($r, 'REQUEST'),
+                    'response' => $this->fld($r, 'RESPONSE'),
+                    'mark_date' => $r['DATE'],
                     // pdo_firebird may return TIME as either a pure
                     // "HH:MM:SS" or a full "Y-m-d H:i:s" string depending
                     // on driver build; extractTime() normalises both.
-                    'mark_time'     => $this->extractTime($r['TIME']),
-                    'updated_at'    => now(),
+                    'mark_time' => $this->extractTime($r['TIME']),
+                    'updated_at' => now(),
                 ],
                 ['created_at' => $this->mergeDateTime($r['DATE'], $r['TIME']) ?? now()],
             );
@@ -861,6 +873,7 @@ class MigrateFromFirebird extends Command
     {
         if (! $this->fbTableExists('CONF_PARAMS')) {
             $this->line('  CONF_PARAMS -> conf_params (skipped: table absent in this .fbk)');
+
             return;
         }
         $this->line('  CONF_PARAMS -> conf_params');
@@ -870,12 +883,12 @@ class MigrateFromFirebird extends Command
                 'conf_params',
                 ['company_id' => $this->companyId, 'varname' => $this->fld($r, 'VARNAME') ?? ''],
                 [
-                    'data_int'       => $r['DATA_INT'],
-                    'data_string'    => $this->fld($r, 'DATA_STRING'),
+                    'data_int' => $r['DATA_INT'],
+                    'data_string' => $this->fld($r, 'DATA_STRING'),
                     'data_timestamp' => $r['DATA_TIMESTAMP'],
-                    'data_float'     => $r['DATA_FLOAT'],
-                    'data_numeric'   => $r['DATA_NUMERIC'],
-                    'updated_at'     => now(),
+                    'data_float' => $r['DATA_FLOAT'],
+                    'data_numeric' => $r['DATA_NUMERIC'],
+                    'updated_at' => now(),
                 ],
                 ['created_at' => now()],
             );
@@ -886,6 +899,7 @@ class MigrateFromFirebird extends Command
     {
         if (! $this->fbTableExists('AUTO_INVOICE_LOG')) {
             $this->line('  AUTO_INVOICE_LOG -> whmcs_invoice_log (skipped: table absent in this .fbk — pre-WHMCS-bridge snapshot)');
+
             return;
         }
         $this->line('  AUTO_INVOICE_LOG -> whmcs_invoice_log');
@@ -906,9 +920,9 @@ class MigrateFromFirebird extends Command
                 ['company_id' => $this->companyId, 'legacy_id' => $r['LOG_ID']],
                 [
                     'whmcs_invoice_id' => $r['CS_INVID'],
-                    'invoice_id'       => null,
-                    'message'          => $this->fld($r, 'LOG_MESSAGE'),
-                    'updated_at'       => now(),
+                    'invoice_id' => null,
+                    'message' => $this->fld($r, 'LOG_MESSAGE'),
+                    'updated_at' => now(),
                 ],
                 ['created_at' => $r['LOG_TIMESTAMP'] ?? now()],
             );
@@ -922,6 +936,7 @@ class MigrateFromFirebird extends Command
         }
         $d = substr((string) $date, 0, 10);
         $t = $this->extractTime($time);
+
         return "{$d} {$t}";
     }
 
@@ -939,6 +954,7 @@ class MigrateFromFirebird extends Command
         if (preg_match('/(\d{2}:\d{2}:\d{2})/', (string) $time, $m)) {
             return $m[1];
         }
+
         return '00:00:00';
     }
 }

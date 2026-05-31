@@ -48,6 +48,11 @@ class InvoiceResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'invcode';
 
+    // Operator-facing UI is Greek; this was the last English nav item.
+    protected static ?string $modelLabel = 'παραστατικό';
+
+    protected static ?string $pluralModelLabel = 'Παραστατικά';
+
     /**
      * Top-bar global search across the invoice code, the snapshotted
      * customer VAT number, and the snapshotted company name. Tenant-
