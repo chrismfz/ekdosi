@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Expenses\RelationManagers;
 
+use App\Support\MyData\Codes;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -9,7 +10,9 @@ use Filament\Tables\Table;
 
 /**
  * Expense lines, READ-ONLY display. The vatCategory / vatExemptionCategory
- * are the §8.2 / §8.3 codes stored verbatim from the supplier's doc.
+ * are the §8.2 / §8.3 codes stored verbatim from the supplier's doc; the
+ * classification_type / classification_category are the per-line E3 codes
+ * (when the issuer sent any), rendered through the §8 label tables.
  */
 class LinesRelationManager extends RelationManager
 {
@@ -61,6 +64,26 @@ class LinesRelationManager extends RelationManager
                     ->label('ΦΠΑ')
                     ->money('EUR')
                     ->alignRight(),
+
+                // Per-line E3 classification (when the issuer sent one). Show
+                // "CODE — label" via the §8 tables; "—" when unclassified.
+                TextColumn::make('classification_type')
+                    ->label('Χαρ. E3')
+                    ->placeholder('—')
+                    ->formatStateUsing(fn (?string $state): ?string => $state === null
+                        ? null
+                        : trim($state.' — '.(Codes::e3TypeLabel($state) ?? ''), ' —'))
+                    ->wrap()
+                    ->toggleable(),
+
+                TextColumn::make('classification_category')
+                    ->label('Κατηγορία')
+                    ->placeholder('—')
+                    ->formatStateUsing(fn (?string $state): ?string => $state === null
+                        ? null
+                        : trim($state.' — '.(Codes::e3CategoryLabel($state) ?? ''), ' —'))
+                    ->wrap()
+                    ->toggleable(),
             ])
             ->defaultSort('line_number');
     }

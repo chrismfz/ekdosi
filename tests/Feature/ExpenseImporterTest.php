@@ -117,6 +117,105 @@ class ExpenseImporterTest extends TestCase
         $this->assertSame(0, Expense::where('company_id', $this->tenant->id)->count());
     }
 
+    public function test_cancelled_doc_imports_as_cancelled(): void
+    {
+        // The doc's MARK is listed in <cancelledInvoicesDoc> → must import as
+        // CANCELLED, not as a live VALID expense.
+        $this->import(new MockHandler([new Response(200, [], $this->cancelledDoc())]));
+
+        $expense = Expense::where('company_id', $this->tenant->id)->firstOrFail();
+        $this->assertSame('CANCELLED', $expense->mydata_state);
+    }
+
+    private function cancelledDoc(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400012434052701</mark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>A</series><aa>42</aa><issueDate>2026-01-15</issueDate><invoiceType>1.1</invoiceType><currency>EUR</currency></invoiceHeader>
+            <invoiceDetails><lineNumber>1</lineNumber><netValue>100.00</netValue><vatCategory>1</vatCategory><vatAmount>24.00</vatAmount></invoiceDetails>
+            <invoiceSummary><totalNetValue>100.00</totalNetValue><totalVatAmount>24.00</totalVatAmount><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+    <cancelledInvoicesDoc>
+        <cancelledInvoice>
+            <invoiceMark>400012434052701</invoiceMark>
+            <cancellationMark>400012434099999</cancellationMark>
+            <cancellationDate>2026-01-20</cancellationDate>
+        </cancelledInvoice>
+    </cancelledInvoicesDoc>
+</RequestedDoc>
+XML;
+    }
+
+    public function test_imports_per_line_expense_classification(): void
+    {
+        $this->import(new MockHandler([
+            new Response(200, [], $this->classifiedLineDoc()),
+        ]));
+
+        $expense = Expense::where('company_id', $this->tenant->id)->firstOrFail();
+        $line = $expense->lines->firstWhere('line_number', 1);
+
+        // The line's <expensesClassification> is recorded verbatim.
+        $this->assertSame('E3_102_001', $line->classification_type);
+        $this->assertSame('category2_1', $line->classification_category);
+
+        // A line with NO classification leaves both fields null.
+        $line2 = $expense->lines->firstWhere('line_number', 2);
+        $this->assertNull($line2->classification_type);
+        $this->assertNull($line2->classification_category);
+    }
+
+    private function classifiedLineDoc(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <uid>UID-IMP-CLS</uid>
+            <mark>400012434052702</mark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader>
+                <series>A</series><aa>43</aa>
+                <issueDate>2026-01-16</issueDate>
+                <invoiceType>1.1</invoiceType><currency>EUR</currency>
+            </invoiceHeader>
+            <invoiceDetails>
+                <lineNumber>1</lineNumber>
+                <netValue>100.00</netValue>
+                <vatCategory>1</vatCategory>
+                <vatAmount>24.00</vatAmount>
+                <expensesClassification>
+                    <classificationType>E3_102_001</classificationType>
+                    <classificationCategory>category2_1</classificationCategory>
+                    <amount>100.00</amount>
+                </expensesClassification>
+            </invoiceDetails>
+            <invoiceDetails>
+                <lineNumber>2</lineNumber>
+                <netValue>50.00</netValue>
+                <vatCategory>1</vatCategory>
+                <vatAmount>12.00</vatAmount>
+            </invoiceDetails>
+            <invoiceSummary>
+                <totalNetValue>150.00</totalNetValue>
+                <totalVatAmount>36.00</totalVatAmount>
+                <totalGrossValue>186.00</totalGrossValue>
+            </invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+    }
+
     private function twoLineDoc(): string
     {
         return <<<'XML'

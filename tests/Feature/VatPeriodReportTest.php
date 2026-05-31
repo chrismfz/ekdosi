@@ -62,12 +62,13 @@ class VatPeriodReportTest extends TestCase
         ]);
     }
 
-    private function expense(string $issueDate, float $net, float $vat, float $gross, ?string $state = 'VALID'): Expense
+    private function expense(string $issueDate, float $net, float $vat, float $gross, ?string $state = 'VALID', ?string $invoiceType = null): Expense
     {
         return Expense::create([
             'company_id' => $this->tenant->id,
             'mydata_mark' => (string) random_int(1, PHP_INT_MAX),
             'issue_date' => $issueDate,
+            'invoice_type' => $invoiceType,
             'net_total' => $net,
             'vat_total' => $vat,
             'gross_total' => $gross,
@@ -131,6 +132,24 @@ class VatPeriodReportTest extends TestCase
         $this->assertSame(120.00, $summary->inputVat, 'only the live in-period expense counts');
         $this->assertSame(1, $summary->inputCount);
         $this->assertSame(-96.00, $summary->netVat());        // 24 − 120
+    }
+
+    public function test_expense_credit_note_reduces_input_vat(): void
+    {
+        $this->invoice('2026-04-10 10:00:00', 100, 124);                        // output VAT 24
+
+        $this->expense('2026-04-12', 1000, 240, 1240, invoiceType: '14.3');     // input VAT +240
+        $this->expense('2026-04-15', 100, 24, 124, invoiceType: '14.31');       // πιστωτικό → −24
+
+        $summary = (new VatPeriodReport($this->tenant))->forPeriod(
+            Carbon::parse('2026-04-01')->startOfDay(),
+            Carbon::parse('2026-04-30')->endOfDay(),
+        );
+
+        // Input nets the credit note out: 240 − 24 = 216 (not 264).
+        $this->assertSame(216.00, $summary->inputVat);
+        $this->assertSame(900.00, $summary->inputNet);
+        $this->assertSame(-192.00, $summary->netVat());        // 24 − 216
     }
 
     public function test_months_of_quarter_returns_three(): void

@@ -3,6 +3,7 @@
 namespace App\Services\Dashboard;
 
 use App\Models\Company;
+use App\Support\MyData\Codes;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
@@ -70,9 +71,21 @@ class VatPeriodReport
      * Σ net/vat/gross/count of this tenant's expenses issued in [$start, $end],
      * excluding AADE-cancelled docs (mydata_state='CANCELLED'; null/VALID stay).
      * issue_date is a DATE column → compare on date strings.
+     *
+     * Credit-note expense types (13.31 / 14.31 — self-declared πιστωτικά that
+     * the importer lands here with POSITIVE totals) SUBTRACT: a supplier's
+     * πιστωτικό reduces deductible input VAT, so summing it positively would
+     * overstate it. The sign is driven by Codes::CREDIT_NOTE_TYPES so the
+     * "this type subtracts" rule lives in ONE place (same authority the myDATA
+     * VAT-picture aggregator uses).
      */
     private function expenseInput(CarbonInterface $start, CarbonInterface $end): object
     {
+        $credit = Codes::CREDIT_NOTE_TYPES;
+        $in = implode(',', array_fill(0, count($credit), '?'));
+        // -1 for a credit-note invoice_type, +1 otherwise.
+        $sign = "CASE WHEN invoice_type IN ($in) THEN -1 ELSE 1 END";
+
         $row = DB::table('expenses')
             ->where('company_id', $this->tenant->getKey())
             ->whereNull('deleted_at')
@@ -80,7 +93,13 @@ class VatPeriodReport
             ->where(fn ($q) => $q
                 ->whereNull('mydata_state')
                 ->orWhere('mydata_state', '!=', 'CANCELLED'))
-            ->selectRaw('COALESCE(SUM(net_total), 0) net, COALESCE(SUM(vat_total), 0) vat, COALESCE(SUM(gross_total), 0) gross, COUNT(*) cnt')
+            ->selectRaw(
+                "COALESCE(SUM($sign * net_total), 0) net, "
+                ."COALESCE(SUM($sign * vat_total), 0) vat, "
+                ."COALESCE(SUM($sign * gross_total), 0) gross, "
+                .'COUNT(*) cnt',
+                [...$credit, ...$credit, ...$credit],
+            )
             ->first();
 
         return (object) [

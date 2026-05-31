@@ -52,10 +52,14 @@ class MyDataVatAggregator
 
         foreach ($this->fetchLiveDocs(fn () => new RequestTransmittedDocs, $fromStr, $toStr) as $doc) {
             $type = $doc['type'];
+            // Credit notes (5.x / 11.4 / 13.31 / 14.31) REDUCE the figure they
+            // relate to — subtract them so a refund/return doesn't read as extra
+            // income or extra deductible VAT.
+            $sign = Codes::documentSign($type);
             if ($type !== null && Codes::isIncomeInvoiceType($type)) {
-                $outNet += $doc['net'];
-                $outVat += $doc['vat'];
-                $outGross += $doc['gross'];
+                $outNet += $sign * $doc['net'];
+                $outVat += $sign * $doc['vat'];
+                $outGross += $sign * $doc['gross'];
                 $outCount++;
 
                 continue;
@@ -64,8 +68,8 @@ class MyDataVatAggregator
             $cat = Codes::selfDeclaredVatCategory($type);
             $key = $cat['key'];
             $breakdown[$key] ??= ['label' => $cat['label'], 'net' => 0.0, 'vat' => 0.0, 'count' => 0];
-            $breakdown[$key]['net'] += $doc['net'];
-            $breakdown[$key]['vat'] += $doc['vat'];
+            $breakdown[$key]['net'] += $sign * $doc['net'];
+            $breakdown[$key]['vat'] += $sign * $doc['vat'];
             $breakdown[$key]['count']++;
         }
         foreach ($breakdown as &$b) {
@@ -74,13 +78,15 @@ class MyDataVatAggregator
         }
         unset($b);
 
-        // Input side: every expense doc filed against us.
+        // Input side: every expense doc filed against us. Credit notes (13.31 /
+        // 14.31) subtract — a supplier's πιστωτικό reduces our deductible VAT.
         $inNet = $inVat = $inGross = 0.0;
         $inCount = 0;
         foreach ($this->fetchLiveDocs(fn () => new RequestDocs, $fromStr, $toStr) as $doc) {
-            $inNet += $doc['net'];
-            $inVat += $doc['vat'];
-            $inGross += $doc['gross'];
+            $sign = Codes::documentSign($doc['type']);
+            $inNet += $sign * $doc['net'];
+            $inVat += $sign * $doc['vat'];
+            $inGross += $sign * $doc['gross'];
             $inCount++;
         }
 

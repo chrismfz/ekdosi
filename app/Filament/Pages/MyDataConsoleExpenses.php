@@ -128,6 +128,20 @@ class MyDataConsoleExpenses extends Page
                 ->schema($this->windowSchema())
                 ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'], 'inbound')),
 
+            // Direction 3 — OUR OWN non-income docs (RequestTransmittedDocs):
+            // αποδείξεις (13.x), ενδοκοινοτικά/VIES/ΕΦΚΑ (14.x), μισθοδοσία/
+            // πάγια/τακτοποιήσεις (17.x). One-shot import into Έξοδα; real sales
+            // are filtered out. Idempotent, source='self_declared'.
+            Action::make('import_self_declared')
+                ->label('Λήψη δικών μας εξόδων')
+                ->icon('heroicon-o-inbox-arrow-down')
+                ->color('gray')
+                ->modalHeading('Λήψη δικών μας εξόδων από myDATA')
+                ->modalDescription('Κατεβάζει ΟΣΑ έχουμε δηλώσει εμείς ΚΑΙ δεν είναι έσοδα — αποδείξεις, ενδοκοινοτικά/VIES, ΕΦΚΑ, μισθοδοσία, πάγια, τακτοποιήσεις — και τα καταχωρίζει στα Έξοδα (με κατηγορία). Οι πωλήσεις αγνοούνται. Ήδη καταχωρημένα παραλείπονται.')
+                ->modalSubmitActionLabel('Λήψη')
+                ->schema($this->windowSchema())
+                ->action(fn (array $data) => $this->importSelfDeclared($data['from'], $data['to'])),
+
             // Import: record every αδέσποτο of the queried window locally.
             // Visible only after an inbound fetch that found orphans.
             Action::make('import_orphans')
@@ -213,6 +227,33 @@ class MyDataConsoleExpenses extends Page
             ]);
             $this->error = 'Η σύνδεση με το AADE απέτυχε. Ελέγξτε τα διαπιστευτήρια και προσπαθήστε ξανά.';
             Notification::make()->title('Ο έλεγχος απέτυχε')->body($this->error)->danger()->send();
+        }
+    }
+
+    protected function importSelfDeclared(string $from, string $to): void
+    {
+        $tenant = Filament::getTenant();
+
+        try {
+            $result = (new ExpenseImporter($tenant, static::$testHandler))->importSelfDeclared(
+                Carbon::parse($from)->startOfDay(),
+                Carbon::parse($to)->endOfDay(),
+            );
+
+            Notification::make()
+                ->title("Καταχωρήθηκαν {$result->created} δικά μας έξοδα")
+                ->body($result->summary())
+                ->{$result->created > 0 ? 'success' : 'warning'}()
+                ->send();
+        } catch (RuntimeException $e) {
+            Notification::make()->title('Η λήψη απέτυχε')->body($e->getMessage())->danger()->send();
+        } catch (Throwable $e) {
+            Log::warning('myDATA self-declared expense import failed', [
+                'company_id' => $tenant?->getKey(),
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+            Notification::make()->title('Η λήψη απέτυχε')->body('Σφάλμα κατά τη λήψη/καταχώριση από το AADE.')->danger()->send();
         }
     }
 
