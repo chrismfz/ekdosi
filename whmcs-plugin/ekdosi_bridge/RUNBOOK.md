@@ -172,6 +172,8 @@ Notes:
 | Status/push says "not configured" | Base URL / slug / secret all set on the config page? Secret matches ekdosi exactly? |
 | Write-back fails / MARK not in WHMCS | Does `mod_ekdosi_invoice_marks` exist? (re-activate, or run the CREATE TABLE from §2). |
 | Legacy app says "invoiced is not SMALLINT" | A pre-0.14 version widened it. Update the files and **re-activate** so the rollback runs (or run the SQL in README §2). |
+| "Send to ekdosi" button → **404** | A pre-0.17 version hardcoded `/admin/`; your admin folder is custom (e.g. `/clients/sysadmin/`). v0.17.0 uses a relative URL — update the files. |
+| Invoice **list** shows «—» for old/imported invoices | Needs v0.17.0 (historical ΤΠΥ/ΜΑΡΚ in the list) **and** the ekdosi side deployed (its `invoices-by-legacy-id` endpoint live). The per-invoice page already showed it from v0.16.0. |
 | `resolve-third-party` shows no routing | Did you click **"Sync from legacy timologia"**? Are the legacy `mod_timologia*` tables present? |
 | Client can't see the v2 page | **Show client v2 page** on? If a pilot list is set, is the client's id in it? |
 | Customers can see v2 unexpectedly | Switch is on with an **empty** pilot list → it's visible to all. Add ids or switch off. |
