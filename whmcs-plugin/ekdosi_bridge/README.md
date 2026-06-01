@@ -29,10 +29,11 @@ live one.
    ETL kept that same id as `invoices.legacy_id`. So
    `tblinvoices.invoiced === invoices.legacy_id` is an **exact key**
    (not heuristic). Two read-only surfaces use it:
-   - the bridge admin invoice page resolves a filed-in-legacy invoice to
+   - both the **consolidated invoice list** («Τιμολόγια WHMCS → Ekdosi»)
+     and the per-invoice admin page resolve a filed-in-legacy invoice to
      its **ΤΠΥ + ΜΑΡΚ** (`POST .../invoices-by-legacy-id` on the ekdosi
      side), lighting up the thousands of imported invoices with no
-     re-import;
+     re-import (badge «Στο AADE (legacy)»);
    - `resolve.php` op `legacy_invoice_links` pages `(whmcs_id, invoiced)`
      for ekdosi's `whmcs:backfill-invoice-ids`, which stamps
      `invoices.whmcs_invoice_id` so ekdosi knows each invoice's WHMCS

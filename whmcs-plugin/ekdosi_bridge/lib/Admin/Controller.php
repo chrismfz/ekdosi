@@ -163,7 +163,7 @@ EOF;
             $q->where('date', '>=', date('Y-m-d', strtotime("-{$months} months")));
         }
         $total = (clone $q)->count();
-        $invoices = $q->forPage($page, $perPage)->get(['id', 'userid', 'date', 'total', 'status']);
+        $invoices = $q->forPage($page, $perPage)->get(['id', 'userid', 'date', 'total', 'status', 'invoiced']);
 
         if ($invoices->isEmpty()) {
             return '<p><a class="btn btn-default" href="'.$link.'">&larr; Back</a></p>'
@@ -190,6 +190,29 @@ EOF;
             ? '<div class="alert alert-warning">Η γέφυρα δεν έχει ρυθμιστεί — η στήλη κατάστασης ekdosi είναι κενή.</div>'
             : '';
 
+        // HISTORICAL fallback (deterministic, legacy_id): rows with no forward
+        // ekdosi state but a legacy filing (tblinvoices.invoiced > 0 = the legacy
+        // ekdosi INVOICE_ID == invoices.legacy_id). One batch call lights up the
+        // imported invoices' ΤΠΥ + ΜΑΡΚ — the whole point of the list. (Negative
+        // sentinels -1000/-333/-1 are not legacy ids → skipped.)
+        $histByLegacy = [];   // legacy_id (string) => {ekdosi_invcode, mydata_mark, mydata_state, …}
+        if ($client !== null) {
+            $legacyIds = [];
+            foreach ($invoices as $inv) {
+                $hasForward = isset($states[(string) (int) $inv->id]) || isset($states[(int) $inv->id]);
+                $legacy = (int) ($inv->invoiced ?? 0);
+                if (! $hasForward && $legacy > 0) {
+                    $legacyIds[$legacy] = $legacy;
+                }
+            }
+            if ($legacyIds !== []) {
+                $hResp = $client->invoicesByLegacyId(array_values($legacyIds));
+                if (! empty($hResp['ok']) && isset($hResp['data']['invoices']) && is_array($hResp['data']['invoices'])) {
+                    $histByLegacy = $hResp['data']['invoices'];
+                }
+            }
+        }
+
         // «Τρίτος» is computed LOCALLY from mod_ekdosi_routing (one batch, no
         // ekdosi/inbox dependency) so it's correct for EVERY invoice on the
         // page — historical ones included, which never reach the inbox.
@@ -212,11 +235,27 @@ EOF;
             $invHref = htmlspecialchars('invoices.php?action=edit&id='.$id);
             $state = $states[(string) $id] ?? ($states[$id] ?? null);
 
-            [$badge, $invcode, $mark] = $this->stateCells(is_array($state) ? $state : null);
+            // Forward state (pushed via the bridge) wins; else fall back to the
+            // deterministic historical hit (filed in the legacy app), keyed by
+            // tblinvoices.invoiced == ekdosi legacy_id.
+            $legacy = (int) ($inv->invoiced ?? 0);
+            $hist = ($state === null && $legacy > 0 && isset($histByLegacy[(string) $legacy]) && is_array($histByLegacy[(string) $legacy]))
+                ? $histByLegacy[(string) $legacy]
+                : null;
+
+            if (is_array($state)) {
+                [$badge, $invcode, $mark] = $this->stateCells($state);
+            } elseif ($hist !== null) {
+                [$badge, $invcode, $mark] = $this->legacyCells($hist);
+            } else {
+                [$badge, $invcode, $mark] = $this->stateCells(null);
+            }
             $tpCell = $this->thirdPartyCell($tpBuckets[$id] ?? null);
 
-            // Action: «Αποστολή» when not yet in ekdosi; «Άνοιγμα» otherwise.
-            if ($state === null) {
+            // Action: «Αποστολή» only when ekdosi knows NOTHING about it (neither
+            // forward nor legacy). A legacy-filed invoice is already at AADE —
+            // offering «Αποστολή» would invite a double filing — so show «Άνοιγμα».
+            if ($state === null && $hist === null) {
                 $action = '<form action="'.$link.'&action=push" method="POST" style="display:inline">'
                     .$token.'<input type="hidden" name="invoiceid" value="'.$id.'">'
                     .'<button class="btn btn-xs btn-primary" type="submit"><i class="fa fa-paper-plane"></i> Αποστολή</button></form>';
@@ -286,6 +325,31 @@ EOF;
             ? '<strong>'.htmlspecialchars((string) $state['ekdosi_invcode']).'</strong>' : $dash;
         $mark = ($state['mydata_mark'] ?? null)
             ? '<code>'.htmlspecialchars((string) $state['mydata_mark']).'</code>' : $dash;
+
+        return [$badge, $invcode, $mark];
+    }
+
+    /**
+     * Render the three cells for a HISTORICAL (legacy-filed) invoice — resolved
+     * deterministically via tblinvoices.invoiced == ekdosi invoices.legacy_id.
+     * Distinct «(legacy)» badge so it reads apart from a bridge-pushed filing;
+     * the ΤΠΥ + ΜΑΡΚ are the real ekdosi/AADE values.
+     *
+     * @param  array<string, mixed>  $hist  {ekdosi_invcode, mydata_mark, mydata_state, …}
+     * @return array{0:string,1:string,2:string}
+     */
+    private function legacyCells(array $hist): array
+    {
+        $dash = '<span class="text-muted">—</span>';
+        $state = (string) ($hist['mydata_state'] ?? '');
+        $cancelled = $state === 'CANCELLED';
+        $badge = '<span class="label '.($cancelled ? 'label-danger' : 'label-success').'" '
+            .'title="Τιμολογήθηκε στην παλιά εφαρμογή (αντιστοίχιση legacy_id)">'
+            .($cancelled ? 'ΑΚΥΡΩΜΕΝΟ (legacy)' : 'Στο AADE (legacy)').'</span>';
+        $invcode = ($hist['ekdosi_invcode'] ?? null)
+            ? '<strong>'.htmlspecialchars((string) $hist['ekdosi_invcode']).'</strong>' : $dash;
+        $mark = ($hist['mydata_mark'] ?? null)
+            ? '<code>'.htmlspecialchars((string) $hist['mydata_mark']).'</code>' : $dash;
 
         return [$badge, $invcode, $mark];
     }

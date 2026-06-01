@@ -84,9 +84,13 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     }
 
     // The link points at the bridge addon's module page with the
-    // invoice id pre-filled. WHMCS's standard admin URL for an
-    // addon module page is /admin/addonmodules.php?module=...
-    $baseLink = '/admin/addonmodules.php?module=ekdosi_bridge';
+    // invoice id pre-filled. RELATIVE on purpose: this output renders
+    // INSIDE a WHMCS admin page (invoices.php), so 'addonmodules.php?...'
+    // resolves against the real admin directory — which is operator-
+    // configurable (e.g. /clients/sysadmin/, not the default /admin/).
+    // Hardcoding '/admin/' 404s on a custom admin folder; the other hooks
+    // (client profile tab, footer marks JS) already use a relative path.
+    $baseLink = 'addonmodules.php?module=ekdosi_bridge';
     $showLink = htmlspecialchars($baseLink.'&action=show&invoiceid='.$invoiceId);
 
     // At-a-glance state — TWO independent signals during the dual-run
