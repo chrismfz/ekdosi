@@ -697,14 +697,43 @@ EOF;
             $markLabel = '<span class="label label-success">filed ·'.$tpy.' MARK '.htmlspecialchars($mark).'</span>';
         }
 
-        // Legacy flag — READ-ONLY visibility during the dual-run.
+        $client = EkdosiClient::fromConfig();
+
+        // Legacy flag — READ-ONLY visibility during the dual-run. When the legacy
+        // app filed it, tblinvoices.invoiced holds the legacy ekdosi INVOICE_ID
+        // (== ekdosi invoices.legacy_id). Resolve it to the actual ΤΠΥ + ΜΑΡΚ
+        // deterministically — works for every imported invoice, no re-import.
+        // (Negative values like -1000/-333 are sentinels, not legacy ids.)
         $legacyInvoiced = (int) ($invoice->invoiced ?? 0);
-        $legacyLabel = $legacyInvoiced !== 0
-            ? '<span class="label label-info">ναι (invoiced='.htmlspecialchars((string) $legacyInvoiced).')</span>'
-            : '<span class="label label-default">όχι</span>';
+        if ($legacyInvoiced <= 0) {
+            $legacyLabel = '<span class="label label-default">όχι</span>';
+        } else {
+            $legacyLabel = '<span class="label label-info">ναι (legacy INVOICE_ID='.htmlspecialchars((string) $legacyInvoiced).')</span>';
+            if ($client !== null && ($mark === null || $mark === '')) {
+                $resp = $client->invoicesByLegacyId([$legacyInvoiced]);
+                $hit = $resp['data']['invoices'][(string) $legacyInvoiced] ?? null;
+                if (is_array($hit)) {
+                    $hInvcode = (string) ($hit['ekdosi_invcode'] ?? '');
+                    $hMark = (string) ($hit['mydata_mark'] ?? '');
+                    $hState = (string) ($hit['mydata_state'] ?? '');
+                    $bits = [];
+                    if ($hInvcode !== '') {
+                        $bits[] = 'ΤΠΥ '.htmlspecialchars($hInvcode);
+                    }
+                    if ($hMark !== '') {
+                        $bits[] = 'ΜΑΡΚ '.htmlspecialchars($hMark);
+                    }
+                    if ($hState !== '') {
+                        $bits[] = htmlspecialchars($hState);
+                    }
+                    if ($bits !== []) {
+                        $legacyLabel .= ' <span class="label label-success">'.implode(' · ', $bits).' (ekdosi)</span>';
+                    }
+                }
+            }
+        }
 
         // Pull live status from ekdosi.
-        $client = EkdosiClient::fromConfig();
         $statusBlock = '<p class="text-muted">Ekdosi status: <em>not queried</em></p>';
         if ($client !== null) {
             $statusResp = $client->getInvoiceStatus($invoiceId);

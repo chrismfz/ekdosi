@@ -24,6 +24,19 @@ live one.
    read-only): serves the legacy `tblinvoices.invoiced` value for a
    batch of invoice ids so the ekdosi inbox can warn "already invoiced
    in the old app" during the dual-run (and offer a filter on it).
+6. **Historical link (deterministic)** — the legacy auto-invoicer wrote
+   the legacy ekdosi `INVOICE_ID` into `tblinvoices.invoiced`, and the
+   ETL kept that same id as `invoices.legacy_id`. So
+   `tblinvoices.invoiced === invoices.legacy_id` is an **exact key**
+   (not heuristic). Two read-only surfaces use it:
+   - the bridge admin invoice page resolves a filed-in-legacy invoice to
+     its **ΤΠΥ + ΜΑΡΚ** (`POST .../invoices-by-legacy-id` on the ekdosi
+     side), lighting up the thousands of imported invoices with no
+     re-import;
+   - `resolve.php` op `legacy_invoice_links` pages `(whmcs_id, invoiced)`
+     for ekdosi's `whmcs:backfill-invoice-ids`, which stamps
+     `invoices.whmcs_invoice_id` so ekdosi knows each invoice's WHMCS
+     origin too.
 
 > **`tblinvoices.invoiced` is the legacy app's column — we never write
 > it.** Earlier versions widened it to BIGINT to stuff the MARK in,

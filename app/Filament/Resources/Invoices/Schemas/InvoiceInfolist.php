@@ -209,6 +209,14 @@ class InvoiceInfolist
                             ->label('Distribution aim')
                             ->placeholder('—'),
 
+                        // Deterministic WHMCS origin (whmcs:backfill-invoice-ids
+                        // stamps it from the legacy invoiced→legacy_id link).
+                        // Hidden when this invoice didn't come from WHMCS.
+                        TextEntry::make('whmcs_invoice_id')
+                            ->label('WHMCS #')
+                            ->prefix('#')
+                            ->visible(fn ($record) => filled($record->whmcs_invoice_id)),
+
                         IconEntry::make('mailed')
                             ->boolean(),
 

@@ -427,6 +427,23 @@ verified against the restored prod WHMCS):**
   → badges read «Στο AADE · ΤΠΥ ΑΠΥ423 · ΜΑΡΚ …» (stored in
   `mod_ekdosi_invoice_marks.invcode`). **Deploy:** `php artisan migrate` (adds
   `legacy_invoiced`).
+- **Deterministic historical WHMCS↔ekdosi link — ✅ DONE (plugin v0.16.0).**
+  THE breakthrough that the removed content-matcher couldn't do: the legacy
+  auto-invoicer (`FAutoInvoice.cpp`) wrote the legacy ekdosi `INVOICE_ID` into
+  WHMCS `tblinvoices.invoiced`, and the ETL kept that same id as
+  `invoices.legacy_id` — so **`tblinvoices.invoiced === invoices.legacy_id`** is
+  an EXACT foreign key (verified end-to-end: WHMCS #31618 invoiced=7677 →
+  ΤΠΥ6642/MARK). Lights up the ~6.7k imported invoices retroactively, no
+  re-import, no ΑΦΜ guessing. Two read-only surfaces: (a) WHMCS-side badges —
+  the bridge admin invoice page resolves a filed-in-legacy invoice to its ΤΠΥ +
+  ΜΑΡΚ via `POST /webhooks/whmcs/{slug}/invoices-by-legacy-id`
+  (`WhmcsInvoicesByLegacyIdController`, HMAC raw body); (b) ekdosi-side backfill —
+  `whmcs:backfill-invoice-ids --tenant=` pages the bridge's `resolve.php` op
+  `legacy_invoice_links` and stamps `invoices.whmcs_invoice_id` (shown on
+  ViewInvoice «WHMCS #»). Sentinels (`-1000`/`-333`/`-1`) and `0` are skipped
+  (not legacy ids). **Deploy:** `php artisan migrate` (adds
+  `invoices.whmcs_invoice_id`) + deploy plugin v0.16.0, then
+  `php artisan whmcs:backfill-invoice-ids --tenant=SLUG` (idempotent, re-runnable).
 
 ---
 

@@ -176,6 +176,29 @@ class WhmcsBridgeClientResolveTest extends TestCase
         });
     }
 
+    public function test_get_legacy_invoice_links_parses_and_filters_junk(): void
+    {
+        Http::fake([self::RESOLVE_URL => Http::response([
+            'status' => 'ok',
+            'links' => [
+                ['whmcs_id' => 31618, 'invoiced' => 7677],
+                ['whmcs_id' => 0, 'invoiced' => 7680],   // junk: dropped
+                ['whmcs_id' => 31619, 'invoiced' => 0],   // junk (invoiced<=0): dropped
+                'not-an-array',                            // junk: dropped
+                ['whmcs_id' => 31620, 'invoiced' => 7685],
+            ],
+        ], 200)]);
+
+        $links = $this->client($this->tenant())->getLegacyInvoiceLinks(0, 500);
+
+        $this->assertSame(
+            [['whmcs_id' => 31618, 'invoiced' => 7677], ['whmcs_id' => 31620, 'invoiced' => 7685]],
+            $links,
+        );
+
+        Http::assertSent(fn (Request $r) => json_decode($r->body(), true) === ['op' => 'legacy_invoice_links', 'offset' => 0, 'limit' => 500]);
+    }
+
     public function test_non_2xx_becomes_api_exception_with_error_field(): void
     {
         Http::fake([self::RESOLVE_URL => Http::response(['error' => 'invoice_not_found'], 404)]);
