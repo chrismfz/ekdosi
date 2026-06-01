@@ -29,11 +29,12 @@ use Illuminate\Http\Client\Response;
  *    envelope, not the WHMCS API's result=success/error shape)
  *
  * Currently supports ONE operation: setInvoiced() — the write-back
- * after ekdosi files an invoice at AADE. The plugin updates
- * tblinvoices.invoiced for the matching WHMCS invoice id with the
- * MARK value. Stage B-3's scope is intentionally narrow; future
- * bridge-specific operations (mark-as-cancelled, attach-PDF) get
- * added as separate methods here.
+ * after ekdosi files an invoice at AADE. The plugin stores the MARK
+ * in its OWN mod_ekdosi_invoice_marks table (keyed by WHMCS invoice
+ * id), NOT in the legacy tblinvoices.invoiced SMALLINT flag. Stage
+ * B-3's scope is intentionally narrow; future bridge-specific
+ * operations (mark-as-cancelled, attach-PDF) get added as separate
+ * methods here.
  */
 class WhmcsBridgeClient
 {
@@ -54,21 +55,22 @@ class WhmcsBridgeClient
     ) {}
 
     /**
-     * Push the MARK value into tblinvoices.invoiced for the given
-     * WHMCS invoice. The plugin authenticates the request via HMAC
-     * over the raw body using whmcs_webhook_secret; on success it
-     * runs Capsule::table('tblinvoices')->update(['invoiced' => $mark])
-     * and returns 200 OK.
+     * Push the MARK value into the bridge's mod_ekdosi_invoice_marks
+     * table for the given WHMCS invoice. The plugin authenticates the
+     * request via HMAC over the raw body using whmcs_webhook_secret;
+     * on success it upserts the MARK (as a VARCHAR string) keyed by the
+     * WHMCS invoice id and returns 200 OK. It does NOT touch the legacy
+     * tblinvoices.invoiced flag — that stays a SMALLINT the legacy
+     * ekdosi app reads/writes.
      *
      * @param  int  $whmcsInvoiceId  The WHMCS invoice id (tblinvoices.id)
-     * @param  string  $mark  The AADE MARK value as a string.
-     *                        Stored in tblinvoices.invoiced
-     *                        which is a SMALLINT(5) in WHMCS's
-     *                        native schema BUT AADE MARKs are
-     *                        15-digit ints. The plugin handles
-     *                        column-widening on its end (the
-     *                        deploy runbook documents the
-     *                        required ALTER TABLE).
+     * @param  string  $mark  The AADE MARK value as a string (a 15-digit
+     *                        int). Stored verbatim in the bridge's own
+     *                        VARCHAR column, so there are no
+     *                        column-width concerns.
+     * @param  string|null  $invcode  The ekdosi ΤΠΥ (e.g. ΑΠΥ423) shown next to
+     *                                 the MARK on the WHMCS admin badges. Optional
+     *                                 — omitted from the body when null.
      *
      * Throws:
      *  - WhmcsUnreachable if the WHMCS server is unreachable / TLS handshake fails
@@ -80,12 +82,16 @@ class WhmcsBridgeClient
      * message if they need to distinguish (the filer currently
      * treats it as a non-fatal log).
      */
-    public function setInvoiced(int $whmcsInvoiceId, string $mark): void
+    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null): void
     {
-        $body = json_encode([
+        $bodyData = [
             'whmcs_invoice_id' => $whmcsInvoiceId,
             'mark' => $mark,
-        ], JSON_THROW_ON_ERROR);
+        ];
+        if ($invcode !== null && $invcode !== '') {
+            $bodyData['invcode'] = $invcode;
+        }
+        $body = json_encode($bodyData, JSON_THROW_ON_ERROR);
 
         $signature = 'sha256='.hash_hmac('sha256', $body, $this->webhookSecret);
 
@@ -167,6 +173,43 @@ class WhmcsBridgeClient
                 continue;
             }
             $out[] = ['userid' => $userId, 'routes' => (int) ($row['routes'] ?? 0)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Dual-run visibility: the legacy `tblinvoices.invoiced` flag for a batch of
+     * WHMCS invoice ids (the WHMCS API can't expose this custom column, so the
+     * bridge reads it directly — READ-ONLY). ekdosi shows "already invoiced in
+     * the legacy app" on its inbox so the operator doesn't double-issue.
+     *
+     * Returns a map { whmcsInvoiceId => invoiced } for the ids the bridge knew;
+     * ids absent from the response are simply omitted (caller treats missing as
+     * unknown). Throws WhmcsUnreachable / WhmcsApiException like resolveThirdParty.
+     *
+     * @param  array<int>  $ids
+     * @return array<int, int>
+     */
+    public function getInvoicedFlags(array $ids): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0));
+        if ($ids === []) {
+            return [];
+        }
+
+        $data = $this->postResolve(['op' => 'invoiced_flags', 'ids' => $ids]);
+        $flags = $data['flags'] ?? [];
+        if (! is_array($flags)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($flags as $id => $value) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $out[$id] = (int) $value;
+            }
         }
 
         return $out;

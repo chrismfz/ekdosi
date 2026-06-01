@@ -405,6 +405,28 @@ verified against the restored prod WHMCS):**
   `audit_preserved` success flag (already filed at AADE → re-push left the frozen
   record untouched) instead of a generic "HTTP NNN". (The earlier note said
   "still v0.1.0" — that was stale; the plugin was already v0.12.0.)
+- **`invoiced` rollback — ✅ DONE (plugin v0.14.0).** An earlier version WIDENED
+  `tblinvoices.invoiced` SMALLINT→BIGINT to stuff the 15-digit MARK in — which
+  BROKE the legacy ekdosi app (it reads `invoiced` as a SMALLINT {0,1} flag).
+  Fixed: the MARK now lives in OUR OWN `mod_ekdosi_invoice_marks`
+  (`InvoiceMarkStore`); the bridge NEVER writes `invoiced` at runtime; activation
+  RESTORES it to SMALLINT (detect type → move MARKs out → reset >65535 to 1,
+  NULL→0 → `MODIFY … SMALLINT(5)`), privilege-safe (warns with exact manual SQL,
+  never fails activation). `WhmcsBridgeClient::setInvoiced` / `inbound.php` /
+  `WhmcsWritebackService` all decoupled. **Deploy = deactivate → upload →
+  reactivate** (the rollback runs on activate).
+- **Dual-run visibility — ✅ DONE (plugin v0.15.0).** During "test new, keep
+  invoicing from old": (a) `invoiced` kept as a READ-ONLY signal — admin badges
+  show «Τιμολογήθηκε στη legacy» next to the AADE MARK; (b) the **ekdosi inbox**
+  gets a «Legacy» badge column + filter («τιμολογήθηκε στη legacy / όχι /
+  άγνωστο») + «Έλεγχος legacy» action, fed by `pending_whmcs_invoices.legacy_invoiced`
+  (refreshed by `LegacyInvoicedRefresher` over the bridge's read-only
+  `resolve.php` op `invoiced_flags`, and at the tail of `whmcs:fetch-pending`).
+  Catches an invoice the partner files in the OLD app AFTER it was staged here →
+  no double-issue. (c) The write-back now also carries the ekdosi **ΤΠΥ invcode**
+  → badges read «Στο AADE · ΤΠΥ ΑΠΥ423 · ΜΑΡΚ …» (stored in
+  `mod_ekdosi_invoice_marks.invcode`). **Deploy:** `php artisan migrate` (adds
+  `legacy_invoiced`).
 
 ---
 

@@ -162,7 +162,8 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // from the WHMCS inbox (WhmcsInvoiceFiler::createDraft) carries
         // invoices.whmcs_pending_id; when it's later issued through the normal
         // lifecycle and reaches VALID here, flip the linked pending row
-        // drafted→filed and push the MARK back to tblinvoices.invoiced. No-ops
+        // drafted→filed and push the MARK back to the bridge's mark store
+        // (mod_ekdosi_invoice_marks, NOT tblinvoices.invoiced). No-ops
         // for non-WHMCS invoices, off-mode (no MARK), or split rows. Never
         // throws — a write-back hiccup must not mask the successful filing.
         // (The direct WhmcsInvoiceFiler::file() path does its own write-back;

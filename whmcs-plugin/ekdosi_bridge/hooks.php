@@ -25,12 +25,14 @@
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Gate;
+use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
 use WHMCS\View\Menu\Item as MenuItem;
 
 if (! defined('WHMCS')) {
     exit('This file cannot be accessed directly');
 }
 
+require_once __DIR__.'/lib/InvoiceMarkStore.php';
 require_once __DIR__.'/lib/ThirdPartyStore.php';
 require_once __DIR__.'/lib/Client/Gate.php';
 
@@ -87,28 +89,37 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     $baseLink = '/admin/addonmodules.php?module=ekdosi_bridge';
     $showLink = htmlspecialchars($baseLink.'&action=show&invoiceid='.$invoiceId);
 
-    // At-a-glance AADE state from tblinvoices.invoiced — but only TWO honest
-    // readings: a real AADE MARK (>=10 digits, written back by the bridge), or
-    // nothing. The old {0,1} prepare_for_ekdosi flag is NOT treated as "filed"
-    // (it only meant "the legacy script touched this") — showing it as
-    // «Σημειωμένο (legacy)» wrongly implied the invoice was in ekdosi/AADE,
-    // when the real per-invoice WHMCS→ekdosi link was never stored. The
-    // authoritative answer for historical invoices lives on the client's
+    // At-a-glance state — TWO independent signals during the dual-run
+    // ("test new, keep invoicing from old"):
+    //   1. our AADE MARK from mod_ekdosi_invoice_marks (ekdosi filed it), and
+    //   2. the legacy `tblinvoices.invoiced` flag, READ-ONLY — "Τιμολογήθηκε
+    //      στη legacy" (!= 0). We never WRITE invoiced anymore.
+    // The authoritative answer for historical invoices lives on the client's
     // Ekdosi card (matched by ΑΦΜ) — linked below.
     $userId = (int) ($vars['userid'] ?? 0);
     $badge = '<span class="label label-default" title="Καμία επιστροφή ΜΑΡΚ μέσω WHMCS">Όχι στο AADE μέσω WHMCS</span>';
+    $legacyBadge = '';
     try {
-        $invoiced = (string) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('invoiced') ?? '0');
+        $mark = InvoiceMarkStore::get($invoiceId);
+        $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
+        $invoiced = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('invoiced') ?? 0);
         if ($userId <= 0) {
             $userId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
         }
-        if ($invoiced !== '' && strlen($invoiced) >= 10) {
-            $badge = '<span class="label label-success" title="MARK">Στο AADE · ΜΑΡΚ '
-                .htmlspecialchars($invoiced).'</span>';
+        if ($mark !== null && $mark !== '') {
+            $tpy = ($invcode !== null && $invcode !== '')
+                ? 'ΤΠΥ '.htmlspecialchars($invcode).' · '
+                : '';
+            $badge = '<span class="label label-success" title="ekdosi / AADE">Στο AADE · '
+                .$tpy.'ΜΑΡΚ '.htmlspecialchars($mark).'</span>';
+        }
+        if ($invoiced !== 0) {
+            $legacyBadge = ' <span class="label label-info" title="tblinvoices.invoiced != 0">Τιμολογήθηκε στη legacy</span>';
         }
     } catch (Throwable $e) {
         $badge = '<span class="label label-warning">κατάσταση μη διαθέσιμη</span>';
     }
+    $badge .= $legacyBadge;
 
     // Link to the client's full Ekdosi card (WHMCS#→παραστατικό live rows +
     // ΑΦΜ-matched historical ΤΠΥ/ΜΑΡΚ). This is where an imported invoice that
@@ -159,8 +170,8 @@ EOF;
  * has no per-row hook for that table, so we inject a tiny script (footer hook,
  * fires on every admin page but self-gates to invoices.php list) that:
  *   - reads the invoice ids from the per-row "edit" links,
- *   - fetches their tblinvoices.invoiced via the addon's read-only `marks`
- *     JSON action (same-origin, admin-authed),
+ *   - fetches their ekdosi MARK via the addon's read-only `marks`
+ *     JSON action (from mod_ekdosi_invoice_marks; same-origin, admin-authed),
  *   - appends a badge next to each invoice link (green "ΑΑΔΕ ✓" + MARK tooltip
  *     when filed, "—" when not, "legacy" for the old {0,1} flag).
  *

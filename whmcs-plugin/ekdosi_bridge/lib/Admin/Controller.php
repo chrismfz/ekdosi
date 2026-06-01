@@ -4,6 +4,7 @@ namespace WHMCS\Module\Addon\EkdosiBridge\Admin;
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\EkdosiClient;
+use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
 use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
 
 /**
@@ -16,9 +17,10 @@ use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
  *            webhook with HMAC signature
  *   - status: "Show ekdosi status" — GETs from ekdosi's status
  *             endpoint and renders the response
- *   - reset: legacy "set invoiced=0" — kept for the rare rollback
- *            workflow (e.g. operator cancelled an invoice at AADE
- *            and needs WHMCS to forget about it)
+ *   - reset: drop OUR ekdosi MARK (mod_ekdosi_invoice_marks) — kept
+ *            for the rare rollback workflow (e.g. operator cancelled
+ *            an invoice at AADE and needs to re-file). Never touches
+ *            the legacy tblinvoices.invoiced flag.
  */
 class Controller
 {
@@ -683,10 +685,23 @@ EOF;
             return $this->errorPage($link, "Invoice #{$invoiceId} not found in tblinvoices.");
         }
 
-        $invoiced = (int) ($invoice->invoiced ?? 0);
-        $invoicedLabel = $invoiced === 0
-            ? '<span class="label label-default">not filed yet</span>'
-            : '<span class="label label-success">filed (MARK '.htmlspecialchars((string) $invoiced).')</span>';
+        // Our AADE MARK (ekdosi) — from our own table, never tblinvoices.invoiced.
+        $mark = InvoiceMarkStore::get($invoiceId);
+        $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
+        if ($mark === null || $mark === '') {
+            $markLabel = '<span class="label label-default">not filed yet</span>';
+        } else {
+            $tpy = ($invcode !== null && $invcode !== '')
+                ? ' ΤΠΥ '.htmlspecialchars($invcode).' ·'
+                : '';
+            $markLabel = '<span class="label label-success">filed ·'.$tpy.' MARK '.htmlspecialchars($mark).'</span>';
+        }
+
+        // Legacy flag — READ-ONLY visibility during the dual-run.
+        $legacyInvoiced = (int) ($invoice->invoiced ?? 0);
+        $legacyLabel = $legacyInvoiced !== 0
+            ? '<span class="label label-info">ναι (invoiced='.htmlspecialchars((string) $legacyInvoiced).')</span>'
+            : '<span class="label label-default">όχι</span>';
 
         // Pull live status from ekdosi.
         $client = EkdosiClient::fromConfig();
@@ -713,14 +728,15 @@ EOF;
             .$token
             .'<input type="hidden" name="invoiceid" value="'.$invoiceId.'">'
             .'<button class="btn btn-warning" type="submit" '
-            .'onclick="return confirm(\'Set tblinvoices.invoiced = 0 for invoice #'.$invoiceId.'? '
+            .'onclick="return confirm(\'Forget the ekdosi MARK for invoice #'.$invoiceId.'? '
             .'Use this only after cancelling the AADE filing first.\');">Reset to unfiled</button>'
             .'</form>';
 
         return <<<EOF
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <h2>Invoice #{$invoiceId}</h2>
-<p>tblinvoices.invoiced: {$invoicedLabel}</p>
+<p>ΜΑΡΚ (ekdosi / AADE): {$markLabel}</p>
+<p>Τιμολογήθηκε στη legacy εφαρμογή (tblinvoices.invoiced): {$legacyLabel}</p>
 {$statusBlock}
 <hr>
 <p>{$actions}</p>
@@ -760,11 +776,12 @@ EOF;
     }
 
     /**
-     * Read-only JSON map { "<invoiceid>": "<invoiced value>" } for the ids in
-     * ?ids=1,2,3. Powers the invoice-LIST badge (the AdminAreaFooterOutput JS
-     * fetches this and decorates each row). No state change → no CSRF; access
-     * is already gated by addonmodules.php's admin session. Echoes + exits so
-     * WHMCS doesn't wrap the JSON in admin chrome.
+     * Read-only JSON map { "<invoiceid>": "<MARK>" } for the ids in ?ids=1,2,3,
+     * from our mod_ekdosi_invoice_marks table (NOT tblinvoices.invoiced). Powers
+     * the invoice-LIST badge (the AdminAreaFooterOutput JS fetches this and
+     * decorates each row). No state change → no CSRF; access is already gated by
+     * addonmodules.php's admin session. Echoes + exits so WHMCS doesn't wrap the
+     * JSON in admin chrome.
      */
     public function marks(array $vars): string
     {
@@ -773,16 +790,8 @@ EOF;
             static fn (int $id): bool => $id > 0
         ));
 
-        $out = [];
-        if ($ids !== []) {
-            // Cap the batch so a crafted ?ids= can't ask for the whole table.
-            $rows = Capsule::table('tblinvoices')
-                ->whereIn('id', array_slice($ids, 0, 200))
-                ->get(['id', 'invoiced']);
-            foreach ($rows as $row) {
-                $out[(int) $row->id] = (string) ($row->invoiced ?? '0');
-            }
-        }
+        // Cap the batch so a crafted ?ids= can't ask for the whole table.
+        $out = $ids === [] ? [] : InvoiceMarkStore::map(array_slice($ids, 0, 200));
 
         header('Content-Type: application/json');
         echo json_encode($out);
@@ -1091,12 +1100,13 @@ EOF;
         if ($invoiceId <= 0) {
             return $this->errorPage($link, 'Invalid invoice id.');
         }
-        Capsule::table('tblinvoices')->where('id', $invoiceId)->update(['invoiced' => 0]);
-        $this->logActivity("EkdosiBridge: reset tblinvoices.invoiced=0 for invoice #{$invoiceId}.");
+        // Forget OUR mark — never touch the legacy tblinvoices.invoiced flag.
+        InvoiceMarkStore::forget($invoiceId);
+        $this->logActivity("EkdosiBridge: cleared ekdosi MARK for invoice #{$invoiceId} (mod_ekdosi_invoice_marks).");
         $showLink = $link.'&action=show&invoiceid='.$invoiceId;
         return <<<EOF
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
-<div class="alert alert-success">Invoice #{$invoiceId} reset: tblinvoices.invoiced = 0.</div>
+<div class="alert alert-success">Invoice #{$invoiceId}: το ΜΑΡΚ ekdosi διαγράφηκε (unfiled).</div>
 <p><a class="btn btn-primary" href="{$showLink}">Back to invoice</a></p>
 EOF;
     }

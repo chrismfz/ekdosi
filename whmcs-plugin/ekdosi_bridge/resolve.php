@@ -15,8 +15,11 @@
  * (no DDL, no writes); safe against a live WHMCS.
  *
  * Request (POST, HMAC over the raw body):
- *   op = "resolve":   { "op": "resolve", "invoice_id": 1234 }
- *   op = "resellers": { "op": "resellers" }
+ *   op = "resolve":        { "op": "resolve", "invoice_id": 1234 }
+ *   op = "resellers":      { "op": "resellers" }
+ *   op = "invoiced_flags": { "op": "invoiced_flags", "ids": [1,2,3] }
+ *                          → { "flags": { "1": 0, "2": 1, ... } } (legacy
+ *                            tblinvoices.invoiced per id; READ-ONLY)
  *
  * Response shapes + error envelope are unchanged from T-1a (the ekdosi-side
  * ThirdPartyResolution contract): see ThirdPartyStore::resolveInvoice/resellers.
@@ -96,6 +99,35 @@ try {
         exit;
     }
 
+    if ($op === 'invoiced_flags') {
+        // READ-ONLY: the legacy `tblinvoices.invoiced` flag for a batch of
+        // invoice ids. ekdosi uses this to show "already invoiced in the legacy
+        // app" on its WHMCS inbox during the dual-run. We read the column
+        // DIRECTLY (reliable — the WHMCS API doesn't expose this custom column)
+        // and never write it. Real-world values are {0 (prepare_for_ekdosi),
+        // 1 (WHMCS native / our rollback), <15-digit MARK> (old bridge, pre
+        // rollback)} — ekdosi collapses anything > 0 to a boolean.
+        $rawIds = $payload['ids'] ?? [];
+        if (! is_array($rawIds)) {
+            $rawIds = [];
+        }
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $rawIds),
+            static fn (int $id): bool => $id > 0
+        )));
+        $flags = [];
+        if ($ids !== []) {
+            // Cap to keep a single query bounded; ekdosi pages its inbox anyway.
+            foreach (Capsule::table('tblinvoices')
+                ->whereIn('id', array_slice($ids, 0, 500))
+                ->get(['id', 'invoiced']) as $row) {
+                $flags[(string) (int) $row->id] = (int) ($row->invoiced ?? 0);
+            }
+        }
+        echo json_encode(['status' => 'ok', 'flags' => (object) $flags]);
+        exit;
+    }
+
     if ($op === 'resolve') {
         $invoiceId = (int) ($payload['invoice_id'] ?? 0);
         if ($invoiceId <= 0) {
@@ -114,7 +146,7 @@ try {
     }
 
     http_response_code(400);
-    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve" or "resellers".']);
+    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers" or "invoiced_flags".']);
     exit;
 } catch (\Throwable $e) {
     http_response_code(500);
