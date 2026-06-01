@@ -40,7 +40,11 @@ class WhmcsInboxTable
             })
             ->columns([
                 TextColumn::make('whmcs_invoice_id')
-                    ->label('WHMCS #')
+                    // Phase 0 (Bridges/Connectors): the external-id label comes
+                    // from the billing source's capabilities, so a future source
+                    // reads «WooCommerce #» from one place. WHMCS-only today.
+                    ->label(app(\App\Services\Billing\BillingSourceRegistry::class)
+                        ->for(PendingWhmcsInvoice::SOURCE_WHMCS)?->capabilities()->externalIdLabel ?? 'WHMCS #')
                     ->sortable()
                     ->searchable()
                     ->prefix('#')
