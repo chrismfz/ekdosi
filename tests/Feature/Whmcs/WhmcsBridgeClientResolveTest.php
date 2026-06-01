@@ -113,6 +113,69 @@ class WhmcsBridgeClientResolveTest extends TestCase
         Http::assertSent(fn (Request $r) => json_decode($r->body(), true) === ['op' => 'resellers']);
     }
 
+    public function test_get_invoiced_flags_signs_body_and_maps_response(): void
+    {
+        Http::fake([self::RESOLVE_URL => Http::response([
+            'status' => 'ok',
+            'flags' => ['8001' => 0, '8002' => 1, '8003' => 400001234567890],
+        ], 200)]);
+
+        $flags = $this->client($this->tenant())->getInvoicedFlags([8001, 8002, 8003]);
+
+        $this->assertSame([8001 => 0, 8002 => 1, 8003 => 400001234567890], $flags);
+
+        Http::assertSent(function (Request $request) {
+            $body = $request->body();
+            $expectedSig = 'sha256='.hash_hmac('sha256', $body, self::SECRET);
+
+            return $request->url() === self::RESOLVE_URL
+                && $request->hasHeader('X-Webhook-Signature', $expectedSig)
+                && json_decode($body, true) === ['op' => 'invoiced_flags', 'ids' => [8001, 8002, 8003]];
+        });
+    }
+
+    public function test_get_invoiced_flags_short_circuits_on_empty_ids(): void
+    {
+        Http::fake();
+
+        $this->assertSame([], $this->client($this->tenant())->getInvoicedFlags([]));
+
+        Http::assertNothingSent();
+    }
+
+    public function test_set_invoiced_includes_invcode_when_present(): void
+    {
+        Http::fake(['*inbound.php' => Http::response(['status' => 'ok'], 200)]);
+
+        $this->client($this->tenant())->setInvoiced(8888, '400001234567890', 'ΑΠΥ423');
+
+        Http::assertSent(function (Request $request) {
+            if (! str_contains($request->url(), 'inbound.php')) {
+                return false;
+            }
+            $body = json_decode($request->body(), true);
+
+            return ($body['whmcs_invoice_id'] ?? null) === 8888
+                && ($body['mark'] ?? null) === '400001234567890'
+                && ($body['invcode'] ?? null) === 'ΑΠΥ423';
+        });
+    }
+
+    public function test_set_invoiced_omits_invcode_when_null(): void
+    {
+        Http::fake(['*inbound.php' => Http::response(['status' => 'ok'], 200)]);
+
+        $this->client($this->tenant())->setInvoiced(8888, '400001234567890');
+
+        Http::assertSent(function (Request $request) {
+            if (! str_contains($request->url(), 'inbound.php')) {
+                return false;
+            }
+
+            return ! array_key_exists('invcode', json_decode($request->body(), true));
+        });
+    }
+
     public function test_non_2xx_becomes_api_exception_with_error_field(): void
     {
         Http::fake([self::RESOLVE_URL => Http::response(['error' => 'invoice_not_found'], 404)]);

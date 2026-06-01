@@ -68,6 +68,9 @@ class WhmcsBridgeClient
      *                        int). Stored verbatim in the bridge's own
      *                        VARCHAR column, so there are no
      *                        column-width concerns.
+     * @param  string|null  $invcode  The ekdosi ΤΠΥ (e.g. ΑΠΥ423) shown next to
+     *                                 the MARK on the WHMCS admin badges. Optional
+     *                                 — omitted from the body when null.
      *
      * Throws:
      *  - WhmcsUnreachable if the WHMCS server is unreachable / TLS handshake fails
@@ -79,12 +82,16 @@ class WhmcsBridgeClient
      * message if they need to distinguish (the filer currently
      * treats it as a non-fatal log).
      */
-    public function setInvoiced(int $whmcsInvoiceId, string $mark): void
+    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null): void
     {
-        $body = json_encode([
+        $bodyData = [
             'whmcs_invoice_id' => $whmcsInvoiceId,
             'mark' => $mark,
-        ], JSON_THROW_ON_ERROR);
+        ];
+        if ($invcode !== null && $invcode !== '') {
+            $bodyData['invcode'] = $invcode;
+        }
+        $body = json_encode($bodyData, JSON_THROW_ON_ERROR);
 
         $signature = 'sha256='.hash_hmac('sha256', $body, $this->webhookSecret);
 
@@ -166,6 +173,43 @@ class WhmcsBridgeClient
                 continue;
             }
             $out[] = ['userid' => $userId, 'routes' => (int) ($row['routes'] ?? 0)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Dual-run visibility: the legacy `tblinvoices.invoiced` flag for a batch of
+     * WHMCS invoice ids (the WHMCS API can't expose this custom column, so the
+     * bridge reads it directly — READ-ONLY). ekdosi shows "already invoiced in
+     * the legacy app" on its inbox so the operator doesn't double-issue.
+     *
+     * Returns a map { whmcsInvoiceId => invoiced } for the ids the bridge knew;
+     * ids absent from the response are simply omitted (caller treats missing as
+     * unknown). Throws WhmcsUnreachable / WhmcsApiException like resolveThirdParty.
+     *
+     * @param  array<int>  $ids
+     * @return array<int, int>
+     */
+    public function getInvoicedFlags(array $ids): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0));
+        if ($ids === []) {
+            return [];
+        }
+
+        $data = $this->postResolve(['op' => 'invoiced_flags', 'ids' => $ids]);
+        $flags = $data['flags'] ?? [];
+        if (! is_array($flags)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($flags as $id => $value) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $out[$id] = (int) $value;
+            }
         }
 
         return $out;

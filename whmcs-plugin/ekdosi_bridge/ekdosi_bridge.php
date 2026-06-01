@@ -22,10 +22,11 @@
  *      sidebar.
  *
  *   4. Inbound write-back endpoint (`inbound.php`, NOT this addon's
- *      output handler): ekdosi POSTs the MARK after filing at AADE,
- *      the endpoint authenticates via the same HMAC secret and stores
- *      it in OUR OWN `mod_ekdosi_invoice_marks` table (NOT in
- *      tblinvoices.invoiced — that stays a legacy SMALLINT flag).
+ *      output handler): ekdosi POSTs the MARK (+ its ΤΠΥ invcode) after
+ *      filing at AADE, the endpoint authenticates via the same HMAC
+ *      secret and stores both in OUR OWN `mod_ekdosi_invoice_marks`
+ *      table (NOT in tblinvoices.invoiced — that stays a legacy SMALLINT
+ *      flag). The admin badges show "Στο AADE · ΤΠΥ … · ΜΑΡΚ …".
  *
  *   5. "Reset to unfiled": operator-initiated rollback that drops our
  *      MARK row (rare path; e.g. cancelled at AADE and re-filing).
@@ -35,6 +36,8 @@
  * legacy app"). So the bridge runs safely alongside the legacy ekdosi
  * app during the dual-run ("test new, keep invoicing from old"): the
  * legacy side owns `invoiced`, ekdosi owns the MARK in its own table.
+ * resolve.php's read-only `invoiced_flags` op serves that legacy flag in
+ * batch so the ekdosi inbox can warn "already invoiced in the old app".
  */
 
 use WHMCS\Database\Capsule;
@@ -61,7 +64,7 @@ function ekdosi_bridge_config(): array
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.14.0',
+        'version' => '0.15.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [

@@ -148,7 +148,7 @@ class WhmcsWritebackService
         }
 
         try {
-            $client->setInvoiced($pending->whmcs_invoice_id, $mark);
+            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode);
             Log::info('WHMCS write-back succeeded', [
                 'pending_id' => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,

@@ -687,9 +687,15 @@ EOF;
 
         // Our AADE MARK (ekdosi) — from our own table, never tblinvoices.invoiced.
         $mark = InvoiceMarkStore::get($invoiceId);
-        $markLabel = ($mark === null || $mark === '')
-            ? '<span class="label label-default">not filed yet</span>'
-            : '<span class="label label-success">filed (MARK '.htmlspecialchars($mark).')</span>';
+        $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
+        if ($mark === null || $mark === '') {
+            $markLabel = '<span class="label label-default">not filed yet</span>';
+        } else {
+            $tpy = ($invcode !== null && $invcode !== '')
+                ? ' ΤΠΥ '.htmlspecialchars($invcode).' ·'
+                : '';
+            $markLabel = '<span class="label label-success">filed ·'.$tpy.' MARK '.htmlspecialchars($mark).'</span>';
+        }
 
         // Legacy flag — READ-ONLY visibility during the dual-run.
         $legacyInvoiced = (int) ($invoice->invoiced ?? 0);

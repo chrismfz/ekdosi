@@ -210,6 +210,19 @@ class WhmcsFetchPending extends Command
             }
         }
 
+        // Dual-run: refresh the "already invoiced in the legacy app" flag for
+        // still-actionable rows (catches invoices the partner filed from the old
+        // app AFTER they were staged here). Non-fatal — a bridge hiccup must not
+        // fail the fetch.
+        try {
+            $legacyChanged = app(\App\Services\Whmcs\LegacyInvoicedRefresher::class)->refresh($tenant);
+            if ($legacyChanged > 0) {
+                $this->warn(sprintf('Legacy check: %d row(s) are now flagged "already invoiced in the legacy app".', $legacyChanged));
+            }
+        } catch (\Throwable $e) {
+            $this->warn('Legacy-invoiced refresh skipped: '.$e->getMessage());
+        }
+
         $this->line('');
         $this->info(sprintf(
             'Summary: %d created, %d refreshed, %d audit-frozen, %d failed.',

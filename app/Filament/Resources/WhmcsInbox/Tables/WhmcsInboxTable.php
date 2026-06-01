@@ -223,6 +223,24 @@ class WhmcsInboxTable
                     ->placeholder('—')
                     ->fontFamily('mono'),
 
+                // Dual-run heads-up: this WHMCS invoice has ALSO been invoiced
+                // in the LEGACY ekdosi app (tblinvoices.invoiced != 0). Warns the
+                // operator not to issue a duplicate παραστατικό here. Quiet "—"
+                // for known-not-invoiced and unknown (no false alarm). Populated
+                // by whmcs:fetch-pending + the «Έλεγχος legacy» header action.
+                TextColumn::make('legacy_invoiced')
+                    ->label('Legacy')
+                    ->badge()
+                    ->placeholder('—')
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => $r->invoicedInLegacy()
+                        ? 'Στην παλιά εφαρμογή'
+                        : null)
+                    ->color('danger')
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->invoicedInLegacy()
+                        ? 'Έχει ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi (invoiced='.$r->legacy_invoiced.'). Μην το ξαναεκδώσεις εδώ — θα γίνει διπλή υποβολή στην ΑΑΔΕ.'
+                        : null),
+
                 TextColumn::make('created_at')
                     ->label('Στάλθηκε')
                     ->dateTime('Y-m-d H:i')
@@ -241,6 +259,26 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_DRAFTED => 'Προσχέδιο',
                     ])
                     ->default(PendingWhmcsInvoice::STATUS_PENDING_REVIEW),
+
+                // Filter on the legacy-invoiced flag (the dual-run «τιμολογήθηκε
+                // στην παλιά εφαρμογή» signal). >0 = invoiced in legacy, 0 =
+                // not, null = not checked yet.
+                SelectFilter::make('legacy_invoiced')
+                    ->label('Legacy (παλιά εφαρμογή)')
+                    ->options([
+                        'yes' => 'Τιμολογήθηκε στη legacy',
+                        'no' => 'Όχι στη legacy',
+                        'unknown' => 'Άγνωστο (δεν ελέγχθηκε)',
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'yes' => $query->where('legacy_invoiced', '>', 0),
+                        'no' => $query->where('legacy_invoiced', 0),
+                        'unknown' => $query->whereNull('legacy_invoiced'),
+                        default => $query,
+                    }),
+            ])
+            ->headerActions([
+                self::refreshLegacyInvoicedAction(),
             ])
             ->recordActions([
                 self::createDraftAction(),
@@ -308,6 +346,43 @@ class WhmcsInboxTable
         $names = self::beneficiaryNames($r);
 
         return $names[0] ?? null;
+    }
+
+    /**
+     * Dual-run: ask the bridge whether any of the still-actionable inbox rows
+     * (προς έλεγχο / σε αναμονή) have meanwhile been invoiced in the LEGACY
+     * ekdosi app, and refresh the «Legacy» column. Lets the operator spot —
+     * before issuing — an invoice the partner already filed from the old app.
+     * No-op (and a friendly notice) when the bridge isn't configured/reachable.
+     */
+    private static function refreshLegacyInvoicedAction(): Action
+    {
+        return Action::make('refresh_legacy_invoiced')
+            ->label('Έλεγχος legacy')
+            ->icon('heroicon-o-arrow-path')
+            ->color('gray')
+            ->requiresConfirmation()
+            ->modalHeading('Έλεγχος: τιμολογήθηκαν στην παλιά εφαρμογή;')
+            ->modalDescription('Ρωτά τη γέφυρα WHMCS αν κάποια από τα τιμολόγια «προς έλεγχο» ή «σε αναμονή» έχουν ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi, και ενημερώνει τη στήλη «Legacy». Χρήσιμο στη φάση που εκδίδεις ακόμη από την παλιά εφαρμογή, για να μην κάνεις διπλό τιμολόγιο.')
+            ->modalSubmitActionLabel('Έλεγχος τώρα')
+            ->action(function () {
+                $tenant = Filament::getTenant();
+                try {
+                    $changed = app(\App\Services\Whmcs\LegacyInvoicedRefresher::class)->refresh($tenant);
+                    Notification::make()
+                        ->title($changed > 0
+                            ? $changed.' τιμολόγιο(α) σημάνθηκαν ως «τιμολογημένα στη legacy»'
+                            : 'Καμία αλλαγή — τίποτα νέο δεν τιμολογήθηκε στη legacy')
+                        ->success()
+                        ->send();
+                } catch (Throwable $e) {
+                    Notification::make()
+                        ->title('Ο έλεγχος legacy απέτυχε')
+                        ->body($e->getMessage())
+                        ->danger()
+                        ->send();
+                }
+            });
     }
 
     /**

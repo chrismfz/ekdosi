@@ -28,10 +28,45 @@ class InvoiceMarkStore
             'CREATE TABLE IF NOT EXISTS '.self::TABLE.' (
                 invoiceid BIGINT UNSIGNED NOT NULL,
                 mark VARCHAR(40) NOT NULL,
+                invcode VARCHAR(60) NULL DEFAULT NULL,
                 updated_at DATETIME NULL DEFAULT NULL,
                 PRIMARY KEY (invoiceid)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
         );
+
+        // The `invcode` column was added after the table first shipped (it
+        // carries the ekdosi ΤΠΥ — e.g. ΑΠΥ423 — shown next to the MARK). Add
+        // it to pre-existing tables; IF NOT EXISTS keeps it idempotent on the
+        // versions of MariaDB the tenants run.
+        try {
+            Capsule::statement('ALTER TABLE '.self::TABLE.' ADD COLUMN IF NOT EXISTS invcode VARCHAR(60) NULL DEFAULT NULL AFTER mark');
+        } catch (\Throwable $e) {
+            // Older MariaDB without ADD COLUMN IF NOT EXISTS, or no ALTER
+            // privilege — fall back to a probe, and ignore "already there".
+            if (! self::hasInvcodeColumn()) {
+                try {
+                    Capsule::statement('ALTER TABLE '.self::TABLE.' ADD COLUMN invcode VARCHAR(60) NULL DEFAULT NULL AFTER mark');
+                } catch (\Throwable $ignored) {
+                    // Last resort: leave the column absent. set()/get() guard
+                    // against it so the MARK still stores; only invcode is lost.
+                }
+            }
+        }
+    }
+
+    private static function hasInvcodeColumn(): bool
+    {
+        try {
+            $col = Capsule::selectOne(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'invcode'",
+                [self::TABLE]
+            );
+
+            return $col !== null;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     public static function hasTable(): bool
@@ -51,12 +86,33 @@ class InvoiceMarkStore
         return $v !== null ? (string) $v : null;
     }
 
-    /** Upsert the MARK for an invoice (string — never int-cast a 15-digit MARK). */
-    public static function set(int $invoiceId, string $mark): void
+    /** The ekdosi ΤΠΥ (invcode, e.g. ΑΠΥ423) for this WHMCS invoice, or null. */
+    public static function invcodeFor(int $invoiceId): ?string
     {
+        if (! self::hasInvcodeColumn()) {
+            return null;
+        }
+        $v = Capsule::table(self::TABLE)->where('invoiceid', $invoiceId)->value('invcode');
+
+        return ($v !== null && $v !== '') ? (string) $v : null;
+    }
+
+    /**
+     * Upsert the MARK for an invoice (string — never int-cast a 15-digit MARK).
+     * Optionally also stores the ekdosi ΤΠΥ (`invcode`, e.g. ΑΠΥ423) shown next
+     * to the MARK. The invcode write is guarded so a tenant whose table predates
+     * the column (and couldn't be ALTERed) still stores the MARK.
+     */
+    public static function set(int $invoiceId, string $mark, ?string $invcode = null): void
+    {
+        $values = ['mark' => $mark, 'updated_at' => date('Y-m-d H:i:s')];
+        if ($invcode !== null && $invcode !== '' && self::hasInvcodeColumn()) {
+            $values['invcode'] = $invcode;
+        }
+
         Capsule::table(self::TABLE)->updateOrInsert(
             ['invoiceid' => $invoiceId],
-            ['mark' => $mark, 'updated_at' => date('Y-m-d H:i:s')],
+            $values,
         );
     }
 

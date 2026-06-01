@@ -14,10 +14,16 @@ live one.
    current state of an invoice (pending / filed with MARK X /
    rejected / held).
 3. **Inbound write-back** (`inbound.php`): when ekdosi files an
-   invoice at AADE, it POSTs the MARK back to this endpoint, which
-   stores it in our own `mod_ekdosi_invoice_marks` table — keyed by
-   WHMCS invoice id. We do **not** touch `tblinvoices.invoiced`.
+   invoice at AADE, it POSTs the MARK (+ its ΤΠΥ `invcode`) back to this
+   endpoint, which stores both in our own `mod_ekdosi_invoice_marks`
+   table — keyed by WHMCS invoice id. We do **not** touch
+   `tblinvoices.invoiced`. The admin badges show
+   "Στο AADE · ΤΠΥ ΑΠΥ423 · ΜΑΡΚ …".
 4. **Reset to unfiled**: drops our MARK row (rare cancel-at-AADE case).
+5. **Legacy-invoiced flag** (`resolve.php` op `invoiced_flags`,
+   read-only): serves the legacy `tblinvoices.invoiced` value for a
+   batch of invoice ids so the ekdosi inbox can warn "already invoiced
+   in the old app" during the dual-run (and offer a filter on it).
 
 > **`tblinvoices.invoiced` is the legacy app's column — we never write
 > it.** Earlier versions widened it to BIGINT to stuff the MARK in,
@@ -189,8 +195,10 @@ and `whmcs_api_secret`. Check those.
 The MARK table couldn't be created/written — usually the WHMCS DB user
 lacks `CREATE`/`INSERT` privilege. Create it manually:
 `CREATE TABLE IF NOT EXISTS mod_ekdosi_invoice_marks (invoiceid BIGINT
-UNSIGNED NOT NULL PRIMARY KEY, mark VARCHAR(40) NOT NULL, updated_at
-DATETIME NULL);` (the addon's activation does this — see step 2).
+UNSIGNED NOT NULL PRIMARY KEY, mark VARCHAR(40) NOT NULL, invcode
+VARCHAR(60) NULL, updated_at DATETIME NULL);` (the addon's activation
+does this — see step 2). `invcode` (the ekdosi ΤΠΥ) was added in
+v0.15.0; activation `ALTER`s it onto a pre-existing table.
 
 **`inbound.php` returns 409 "already_filed_with_different_mark"**
 
@@ -217,7 +225,7 @@ all three fields.
 | `lib/Admin/AdminDispatcher.php`         | Action router (mirrors prepare_for_ekdosi pattern)     |
 | `lib/Admin/Controller.php`              | Admin module page actions (index/show/push/reset/sync) |
 | `lib/EkdosiClient.php`                  | HMAC-signed HTTP client to ekdosi's webhooks          |
-| `resolve.php`                           | Ekdosi → WHMCS read-only third-party resolution (HMAC) |
+| `resolve.php`                           | Ekdosi → WHMCS read-only ops (HMAC): third-party resolution + `invoiced_flags` (legacy flag) |
 | `lib/ThirdPartyStore.php`               | Own `mod_ekdosi_*` tables + sync/resolve/resellers + client CRUD |
 | `lib/Client/Gate.php`                   | Hide/reveal gate for the v2 client page (switch + pilot allowlist) |
 | `lib/Client/Controller.php`             | Client-area v2 page (contacts CRUD + per-service routing) |

@@ -7,7 +7,8 @@
  *   POST /modules/addons/ekdosi_bridge/inbound.php
  *   Content-Type: application/json
  *   X-Webhook-Signature: sha256=<hex hmac of raw body>
- *   { "whmcs_invoice_id": 8888, "mark": "999000111" }
+ *   { "whmcs_invoice_id": 8888, "mark": "999000111", "invcode": "ΑΠΥ423" }
+ *   (invcode is optional — the ekdosi ΤΠΥ shown next to the MARK.)
  *
  * Authenticated via HMAC over the raw body using the shared secret
  * configured on the addon's module config page (the same secret
@@ -114,6 +115,9 @@ if (! is_array($payload)) {
 }
 $whmcsInvoiceId = (int) ($payload['whmcs_invoice_id'] ?? 0);
 $mark = (string) ($payload['mark'] ?? '');
+// Optional: the ekdosi ΤΠΥ (e.g. ΑΠΥ423), shown next to the MARK on the admin
+// badges. Absent on older ekdosi versions → stored as null, no behaviour change.
+$invcode = trim((string) ($payload['invcode'] ?? ''));
 if ($whmcsInvoiceId <= 0 || $mark === '') {
     http_response_code(400);
     echo json_encode([
@@ -165,7 +169,7 @@ if ($current !== null && $current !== $mark) {
 // Persist the MARK as a STRING in our own table — never touch
 // tblinvoices.invoiced (legacy SMALLINT flag).
 try {
-    InvoiceMarkStore::set($whmcsInvoiceId, $mark);
+    InvoiceMarkStore::set($whmcsInvoiceId, $mark, $invcode !== '' ? $invcode : null);
 } catch (\Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'db_update_failed', 'message' => $e->getMessage()]);
@@ -183,4 +187,5 @@ echo json_encode([
     'status'           => 'ok',
     'whmcs_invoice_id' => $whmcsInvoiceId,
     'mark'             => $mark,
+    'invcode'          => $invcode !== '' ? $invcode : null,
 ]);

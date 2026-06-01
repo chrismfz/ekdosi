@@ -101,13 +101,17 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     $legacyBadge = '';
     try {
         $mark = InvoiceMarkStore::get($invoiceId);
+        $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
         $invoiced = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('invoiced') ?? 0);
         if ($userId <= 0) {
             $userId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
         }
         if ($mark !== null && $mark !== '') {
-            $badge = '<span class="label label-success" title="MARK (ekdosi)">Στο AADE · ΜΑΡΚ '
-                .htmlspecialchars($mark).'</span>';
+            $tpy = ($invcode !== null && $invcode !== '')
+                ? 'ΤΠΥ '.htmlspecialchars($invcode).' · '
+                : '';
+            $badge = '<span class="label label-success" title="ekdosi / AADE">Στο AADE · '
+                .$tpy.'ΜΑΡΚ '.htmlspecialchars($mark).'</span>';
         }
         if ($invoiced !== 0) {
             $legacyBadge = ' <span class="label label-info" title="tblinvoices.invoiced != 0">Τιμολογήθηκε στη legacy</span>';

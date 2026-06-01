@@ -126,6 +126,7 @@ class PendingWhmcsInvoice extends Model
         'filed_at',
         'filed_by_user_id',
         'mydata_mark',
+        'legacy_invoiced',
         'whmcs_writeback_state',
         'whmcs_writeback_error',
     ];
@@ -138,7 +139,19 @@ class PendingWhmcsInvoice extends Model
             'filed_at' => 'datetime',
             'whmcs_invoice_id' => 'integer',
             'whmcs_userid' => 'integer',
+            'legacy_invoiced' => 'integer',
         ];
+    }
+
+    /**
+     * Has this WHMCS invoice ALSO been invoiced in the LEGACY ekdosi app
+     * (tblinvoices.invoiced != 0)? During the dual-run this warns the operator
+     * not to issue an ekdosi παραστατικό for something the old app already
+     * filed. null legacy_invoiced = unknown → returns false (no false alarm).
+     */
+    public function invoicedInLegacy(): bool
+    {
+        return $this->legacy_invoiced !== null && $this->legacy_invoiced !== 0;
     }
 
     public function company(): BelongsTo
