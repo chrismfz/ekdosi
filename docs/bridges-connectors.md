@@ -8,6 +8,8 @@ ekdosi invoices, **without** entangling those systems with the legal core
 > **Status:** Phase 0 landed (the seam + the multi-source registry). Phase 1
 > (a real second source) is deferred until one actually arrives — that's when
 > the data contract is finalised from *two* shapes, not guessed from one.
+> **§8–§10 capture the candidate sources + concrete Phase-1 pickup notes** so a
+> future implementer (or a fresh session) can start without re-deriving them.
 
 ---
 
@@ -162,7 +164,92 @@ historical WHMCS data + links (`whmcs_invoice_id`, `invoiced === legacy_id`)
 remain as a **read-only archive** — exactly like the Firebird `legacy_id` today.
 No fork, no data loss.
 
-## 8. Files (Phase 0)
+## 8. Candidate sources at a glance
+
+The shape splits cleanly into **billing apps** (invoice/B2B — close to what we
+already do) and **e-commerce** (order/B2C — receipts, often no ΑΦΜ, webhooks
+need a module). This split is exactly why the `ExternalDocument` contract is
+finalised against *two* shapes, not guessed from WHMCS alone.
+
+| Source | Kind | Doc (`docNoun`) | Typical party | Connect / auth | Inbound (fetch/webhook) | Write-back | Third-party |
+|---|---|---|---|---|---|---|---|
+| **WHMCS** | billing | invoice (ΤΠΥ/ΑΠΥ) | B2B (ΑΦΜ via custom field) | WHMCS API (identifier+secret) **+** our addon plugin (HMAC) | API poll (`whmcs:fetch-pending`) + plugin push | `mod_ekdosi_invoice_marks` (our table) | yes (timologia) |
+| **Blesta** | billing | invoice | B2B | Blesta API (user+key) **+** a Blesta plugin (HMAC) | API poll + plugin push | Blesta custom field / our table via plugin | no |
+| **WooCommerce** | e-commerce | order → ΑΠΥ (ΤΠΥ if ΑΦΜ given) | B2C (EU-VAT plugin for B2B) | WP REST API (consumer key/secret) **+** WC webhooks (HMAC secret) | WC webhook on `order.paid` + REST poll | order meta / order note | no |
+| **PrestaShop** | e-commerce | order | B2C/B2B | Webservice API (API key, basic auth) **+** a module | module hook push (native webhooks thin → module or poll) | order message / custom field via module | no |
+| **OpenCart** | e-commerce | order | B2C | API / custom module | custom module push or poll | via custom module | no |
+
+**Read-off for the contract:** billing apps slot in with minimal mapping
+(Blesta is the cheapest 2nd source — almost a rename of the WHMCS adapter).
+E-commerce forces the real generalisation: `docNoun='παραγγελία'`, default to
+**ΑΠΥ/receipt** and only emit a **τιμολόγιο** when the order carries an ΑΦΜ,
+no third-party concept, and webhooks usually need our own platform module
+(same HMAC protocol as `ekdosi_bridge`).
+
+## 9. Phase 1 implementation notes
+
+Concrete pickup notes (known now; write the code against *two* sources).
+
+### 9.1 Refactor blast-radius (what moves behind the interface)
+Today these consume WHMCS shapes directly; Phase 1 routes them through
+`BillingSource` + `ExternalDocument`:
+- `app/Services/Whmcs/WhmcsClient.php` (+`WhmcsClientFactory`) — fetch.
+- `app/Services/Whmcs/WhmcsInvoiceIngestor.php` — stage → `pending_*`.
+- `app/Services/Whmcs/WhmcsCustomerMatcher.php` — identity match (see §9.4).
+- `app/Services/WhmcsInbox/WhmcsInvoiceMapper.php` — doc → ekdosi invoice/lines.
+- `app/Services/WhmcsInbox/WhmcsInvoiceFiler.php` — draft/file.
+- `app/Services/Whmcs/WhmcsWritebackService.php` + `WhmcsBridgeClient.php` — MARK write-back.
+- `app/Services/WhmcsInbox/WhmcsInvoiceSplitter.php` — **WHMCS-only** (third-party); stays gated by `supportsThirdParty`.
+- `app/Http/Controllers/Webhooks/Whmcs*Controller.php` + `routes/webhooks.php` — neutral routes (§9.5).
+- `app/Filament/Resources/WhmcsInbox/*` + `app/Models/PendingWhmcsInvoice.php` — inbox UI/model.
+The **legal core** (`Invoice`/`InvoiceLine`/`MyDataSubmitter`/`InvoiceBalance`/
+PDF) is NOT in this list — it must stay source-agnostic.
+
+### 9.2 `companies.whmcs_*` → `billing_connections.config`
+Phase 1 moves per-connection settings off `companies` into the registry row's
+`config` json (a company can have two WHMCS connections with different creds):
+`api_url`, `api_identifier`, `api_secret`, `webhook_secret`, `custom_field_map`,
+`third_party_enabled`, `default_invoice_type_id`, `auto_issue_immediate`,
+`invoice_min_date`, `amount_includes_tax`. Keep reading the `companies.whmcs_*`
+columns as a fallback during the migration (don't break the live tenant), then
+drop them once `config` is populated.
+
+### 9.3 Connection/auth is per-source-type
+The `config` schema must carry a `connection` block whose fields depend on the
+source (see §8): WHMCS/Blesta = `{api_url, identifier/user, secret/key,
+webhook_secret}`; WooCommerce = `{base_url, consumer_key, consumer_secret,
+webhook_secret}`; PrestaShop = `{base_url, ws_key}`. Validate per source in the
+«Γέφυρες» tab form (driven by `capabilities()` / a per-source config schema).
+
+### 9.4 Customer-identity normalisation (the genuinely tricky bit)
+`ExternalDocument` carries a normalised `customer` (name/ΑΦΜ/email/address/
+country). The matcher generalises to: ΑΦΜ (B2B) → email → name. The
+**doc-type intent** also generalises: WHMCS reads `wantsinvoice`/`needsAfm`
+from the custom-field map; an e-shop infers it from "order has an ΑΦΜ field
+filled" → τιμολόγιο, else ΑΠΥ. Keep the existing `needsAfm()` "wants invoice
+but no ΑΦΜ → hold" guard — it's source-agnostic once intent is normalised.
+
+### 9.5 `pending_whmcs_invoices` migration + back-compat
+Add `billing_connection_id` (FK) and a generic `external_invoice_id`
+(`whmcs_invoice_id` becomes its alias/back-fill), then either rename the table
+to `pending_external_invoices` or keep it (the `source` column already
+distinguishes). Keep `/webhooks/whmcs/{slug}/…` as a **permanent alias** of the
+neutral `/webhooks/billing/{slug}/whmcs/…` — the deployed `ekdosi_bridge`
+plugin hardcodes the old path (`Company::WHMCS_BRIDGE_PATH`).
+
+## 10. Locked decisions (do not re-litigate)
+- **Registry, not a column.** Source lives in `billing_connections` (N per
+  company, `is_active` toggle), never a single `companies.billing_source`.
+- **Data methods deferred to Phase 1.** The interface stays identity+capabilities
+  until a 2nd real source exists — finalise the DTO from two shapes.
+- **Never fork.** One core, thin per-source adapters. No "EkdosiWP".
+- **Both inbox variants are valid** (unified-with-filter OR per-source nav);
+  the data model (`source` on each staged row) supports either.
+- **WHMCS-specifics stay WHMCS-specific** (timologia, custom-field map, the
+  `invoiced`/`legacy_id` link) — gated by capabilities, never in the generic
+  contract.
+
+## 11. Files (Phase 0)
 
 | File | Purpose |
 |---|---|
