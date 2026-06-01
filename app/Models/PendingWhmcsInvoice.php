@@ -109,8 +109,15 @@ class PendingWhmcsInvoice extends Model
 
     public const TP_MULTI = 'multi';   // mixes billing parties → held for operator split (T-1c)
 
+    // Phase 0 (Bridges/Connectors): which billing source this staged doc came
+    // from. Only 'whmcs' today; the column lets a future WooCommerce/Blesta
+    // source share this inbox (or drive per-source inboxes). See
+    // docs/bridges-connectors.md.
+    public const SOURCE_WHMCS = 'whmcs';
+
     protected $fillable = [
         'company_id',
+        'source',
         'whmcs_invoice_id',
         'whmcs_userid',
         'customer_id',
