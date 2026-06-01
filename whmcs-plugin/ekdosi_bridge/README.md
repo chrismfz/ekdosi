@@ -68,6 +68,13 @@ SMALLINT. **v0.14.0 activation rolls that back automatically** — it
 inspects `information_schema`, and if `invoiced` is `BIGINT` it:
 
 ```sql
+-- ensure our table exists (no-op if it already does)
+CREATE TABLE IF NOT EXISTS mod_ekdosi_invoice_marks (
+  invoiceid BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  mark VARCHAR(40) NOT NULL,
+  invcode VARCHAR(60) NULL DEFAULT NULL,
+  updated_at DATETIME NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 -- move any MARK out of invoiced into our table
 INSERT INTO mod_ekdosi_invoice_marks (invoiceid, mark, updated_at)
   SELECT id, invoiced, NOW() FROM tblinvoices WHERE invoiced > 65535
@@ -81,9 +88,9 @@ ALTER TABLE tblinvoices MODIFY invoiced SMALLINT(5) NOT NULL DEFAULT 0;
 
 If the WHMCS DB user lacks `ALTER` privilege (some managed hosts),
 activation still succeeds but the message contains a
-`WARNING: could not auto-restore ...` line with the exact SQL above —
-hand it to your DBA. Idempotent: on an already-SMALLINT column it's a
-no-op.
+`WARNING: could not auto-restore ...` line carrying this same SQL
+(table-create included, so it's self-contained) — hand it to your DBA.
+Idempotent: on an already-SMALLINT column it's a no-op.
 
 > **Upgrading from ≤ 0.13?** After replacing the files, **deactivate +
 > reactivate** the addon once so the rollback runs (or run the SQL
