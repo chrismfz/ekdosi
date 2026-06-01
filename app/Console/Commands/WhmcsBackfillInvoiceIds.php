@@ -37,6 +37,9 @@ class WhmcsBackfillInvoiceIds extends Command
 
     protected $description = 'Backfill invoices.whmcs_invoice_id from the legacy tblinvoices.invoiced→legacy_id link (deterministic, historical).';
 
+    /** Pagination safety bound (≈ MAX_PAGES × limit invoices; ample for any tenant). */
+    private const MAX_PAGES = 100000;
+
     public function handle(WhmcsBridgeClientFactory $bridgeFactory): int
     {
         $slug = (string) $this->option('tenant');
@@ -66,6 +69,7 @@ class WhmcsBackfillInvoiceIds extends Command
         $this->info("Tenant: {$tenant->name} (slug={$tenant->slug})".($dryRun ? '  [DRY RUN]' : ''));
 
         $offset = 0;
+        $pages = 0;
         $seenLinks = 0;
         $matched = 0;
         $updated = 0;
@@ -110,8 +114,9 @@ class WhmcsBackfillInvoiceIds extends Command
                     continue;
                 }
                 if (! $dryRun) {
-                    // forceFill: whmcs_invoice_id is an internal link, not in
-                    // $fillable. Update only this column.
+                    // Narrow query-builder update of ONLY whmcs_invoice_id (an
+                    // internal link, not in $fillable) — no model events, no
+                    // money/myDATA cache thrash, nothing else touched.
                     DB::table('invoices')
                         ->where('id', $invoice->id)
                         ->update(['whmcs_invoice_id' => $targetWhmcsId]);
@@ -123,9 +128,15 @@ class WhmcsBackfillInvoiceIds extends Command
             // manually in legacy, or outside this tenant) — informational.
             $unmatched += count($byLegacyId) - $invoices->count();
 
+            // Page until an EMPTY page (top of loop), advancing by what we got.
+            // We deliberately DON'T stop on a "short" page: getLegacyInvoiceLinks
+            // filters client-side, so its count can differ from the server's —
+            // terminating on an empty page is robust either way. Guard against a
+            // misbehaving server (ignored offset → same page forever).
             $offset += count($links);
-            if (count($links) < $limit) {
-                break;   // short page = last page
+            if (++$pages > self::MAX_PAGES) {
+                $this->warn('Stopped after '.self::MAX_PAGES.' pages (safety guard). Re-run to continue if needed.');
+                break;
             }
         }
 
