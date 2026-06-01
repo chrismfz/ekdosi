@@ -20,6 +20,10 @@
  *   op = "invoiced_flags": { "op": "invoiced_flags", "ids": [1,2,3] }
  *                          → { "flags": { "1": 0, "2": 1, ... } } (legacy
  *                            tblinvoices.invoiced per id; READ-ONLY)
+ *   op = "legacy_invoice_links": { "op": "legacy_invoice_links", "offset": 0, "limit": 500 }
+ *                          → { "links": [{"whmcs_id": N, "invoiced": M}, ...] }
+ *                            (invoiced > 0 only — the legacy INVOICE_ID per
+ *                            WHMCS invoice; powers ekdosi's historical backfill)
  *
  * Response shapes + error envelope are unchanged from T-1a (the ekdosi-side
  * ThirdPartyResolution contract): see ThirdPartyStore::resolveInvoice/resellers.
@@ -128,6 +132,39 @@ try {
         exit;
     }
 
+    if ($op === 'legacy_invoice_links') {
+        // READ-ONLY, paginated: (whmcs_id, invoiced) for invoices the LEGACY app
+        // filed — invoiced holds the legacy ekdosi INVOICE_ID (the ETL kept it as
+        // invoices.legacy_id). ekdosi's whmcs:backfill-invoice-ids pages through
+        // this and stamps invoices.whmcs_invoice_id where legacy_id = invoiced.
+        // Only invoiced > 0 (skip the -1000/-333/-1 sentinels and 0=unfiled).
+        $offset = max(0, (int) ($payload['offset'] ?? 0));
+        $limit = (int) ($payload['limit'] ?? 500);
+        if ($limit < 1) {
+            $limit = 500;
+        }
+        if ($limit > 1000) {
+            $limit = 1000;
+        }
+        $rows = Capsule::table('tblinvoices')
+            ->where('invoiced', '>', 0)
+            ->orderBy('id')
+            ->offset($offset)
+            ->limit($limit)
+            ->get(['id', 'invoiced']);
+        $links = [];
+        foreach ($rows as $row) {
+            $links[] = ['whmcs_id' => (int) $row->id, 'invoiced' => (int) $row->invoiced];
+        }
+        echo json_encode([
+            'status' => 'ok',
+            'links' => $links,
+            'offset' => $offset,
+            'count' => count($links),
+        ]);
+        exit;
+    }
+
     if ($op === 'resolve') {
         $invoiceId = (int) ($payload['invoice_id'] ?? 0);
         if ($invoiceId <= 0) {
@@ -146,7 +183,7 @@ try {
     }
 
     http_response_code(400);
-    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers" or "invoiced_flags".']);
+    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags" or "legacy_invoice_links".']);
     exit;
 } catch (\Throwable $e) {
     http_response_code(500);

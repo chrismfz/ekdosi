@@ -3,6 +3,7 @@
 use App\Http\Controllers\Webhooks\WhmcsClientInvoiceMapController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicePaidController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicesByAfmController;
+use App\Http\Controllers\Webhooks\WhmcsInvoicesByLegacyIdController;
 use App\Http\Controllers\Webhooks\WhmcsInvoiceStatesController;
 use App\Http\Controllers\Webhooks\WhmcsInvoiceStatusController;
 use Illuminate\Support\Facades\Route;
@@ -84,3 +85,17 @@ Route::post(
     'whmcs/{slug}/invoice-states',
     WhmcsInvoiceStatesController::class,
 )->middleware('throttle:120,1')->name('whmcs.invoice-states');
+
+/**
+ * Deterministic HISTORICAL lookup, keyed by legacy id. The legacy auto-invoicer
+ * wrote the legacy ekdosi INVOICE_ID into WHMCS tblinvoices.invoiced; the ETL
+ * kept that same id as invoices.legacy_id. So the plugin can send the `invoiced`
+ * values of already-filed WHMCS invoices and get back ΤΠΥ + ΜΑΡΚ for each —
+ * lighting up the ~thousands of imported invoices with NO re-import and NO ΑΦΜ
+ * guessing (exact FK, not heuristic). POST (body carries a legacy-id list);
+ * HMAC over the raw body, same scheme as invoice-states. Read-only.
+ */
+Route::post(
+    'whmcs/{slug}/invoices-by-legacy-id',
+    WhmcsInvoicesByLegacyIdController::class,
+)->middleware('throttle:120,1')->name('whmcs.invoices-by-legacy-id');

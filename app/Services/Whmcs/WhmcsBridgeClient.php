@@ -216,6 +216,39 @@ class WhmcsBridgeClient
     }
 
     /**
+     * Historical backfill: one page of (whmcs_id, invoiced) links for invoices
+     * the LEGACY app filed (invoiced > 0). invoiced holds the legacy ekdosi
+     * INVOICE_ID, which the ETL kept as invoices.legacy_id — so the caller can
+     * stamp invoices.whmcs_invoice_id where legacy_id = invoiced. Paginated;
+     * an empty list signals the end. Throws WhmcsUnreachable / WhmcsApiException
+     * like resolveThirdParty.
+     *
+     * @return list<array{whmcs_id: int, invoiced: int}>
+     */
+    public function getLegacyInvoiceLinks(int $offset, int $limit = 500): array
+    {
+        $data = $this->postResolve(['op' => 'legacy_invoice_links', 'offset' => $offset, 'limit' => $limit]);
+        $links = $data['links'] ?? [];
+        if (! is_array($links)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($links as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $whmcsId = (int) ($row['whmcs_id'] ?? 0);
+            $invoiced = (int) ($row['invoiced'] ?? 0);
+            if ($whmcsId > 0 && $invoiced > 0) {
+                $out[] = ['whmcs_id' => $whmcsId, 'invoiced' => $invoiced];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * POST an HMAC-signed op to the bridge's resolve.php (sibling of
      * inbound.php). Same auth + error handling as setInvoiced(); returns the
      * decoded JSON body.

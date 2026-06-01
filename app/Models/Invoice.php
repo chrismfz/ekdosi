@@ -140,6 +140,7 @@ class Invoice extends Model
             'mailed' => 'boolean',
             'printed' => 'boolean',
             'mydata_sent' => 'boolean',
+            'whmcs_invoice_id' => 'integer',
         ];
     }
 

@@ -185,6 +185,30 @@ class EkdosiClient
     }
 
     /**
+     * POST {base}/webhooks/whmcs/{slug}/invoices-by-legacy-id with
+     *   { legacy_ids: [N, ...] }
+     * HMAC-signed over the RAW body. Deterministic HISTORICAL lookup: the legacy
+     * INVOICE_ID we stored in tblinvoices.invoiced equals ekdosi's
+     * invoices.legacy_id, so this returns ΤΠΥ + ΜΑΡΚ for already-filed (imported)
+     * invoices with no re-import / no ΑΦΜ guessing. data['invoices'] maps
+     * legacy_id → {ekdosi_invcode, mydata_mark, mydata_state, ...} | null.
+     *
+     * @param  list<int>  $legacyIds
+     */
+    public function invoicesByLegacyId(array $legacyIds): array
+    {
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug).'/invoices-by-legacy-id';
+        $body = json_encode(['legacy_ids' => array_values($legacyIds)], JSON_THROW_ON_ERROR);
+        $sig = 'sha256='.hash_hmac('sha256', $body, $this->secret);
+
+        return $this->httpRequest('POST', $url, $body, [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            'X-Webhook-Signature: '.$sig,
+        ]);
+    }
+
+    /**
      * Minimal cURL wrapper. WHMCS hosts vary in what HTTP libraries
      * are available; cURL is the lowest-common-denominator and
      * available on every supported PHP install.
