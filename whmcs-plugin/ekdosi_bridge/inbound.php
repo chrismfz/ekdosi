@@ -13,13 +13,13 @@
  * configured on the addon's module config page (the same secret
  * ekdosi has on its companies.whmcs_webhook_secret column).
  *
- * Effect: sets tblinvoices.invoiced = <mark> for the given invoice
- * id. Mirrors the legacy prepare_for_ekdosi plugin's direct DB
- * write — WHMCS's native UpdateInvoice API doesn't expose the
- * invoiced column.
+ * Effect: stores the MARK in OUR OWN table mod_ekdosi_invoice_marks
+ * (keyed by WHMCS invoice id). We do NOT touch tblinvoices.invoiced —
+ * that is a legacy SMALLINT flag the legacy ekdosi app reads/writes,
+ * and stuffing a 15-digit MARK there (the old behaviour) broke it.
  *
  * Response shape:
- *   200 OK { "status": "ok", "whmcs_invoice_id": N, "invoiced": "<mark>" }
+ *   200 OK { "status": "ok", "whmcs_invoice_id": N, "mark": "<mark>" }
  *   400 { "error": "bad_request", "message": "..." }
  *   401 { "error": "invalid_signature" }
  *   404 { "error": "invoice_not_found" }
@@ -37,13 +37,9 @@
  * ('/modules/addons/ekdosi_bridge/inbound.php') in the ekdosi repo.
  * Don't rename or move without updating that constant.
  *
- * Column-width: WHMCS's tblinvoices.invoiced is SMALLINT(5) by
- * default (range 0..65535); AADE MARKs are 15-digit integers. The
- * addon's activation hook (ekdosi_bridge_activate) auto-widens it to
- * BIGINT, so normally this is handled. If the DB user lacked ALTER
- * privilege at activation, this endpoint returns 500 with the
- * truncation error and the operator must run the ALTER manually
- * (see README troubleshooting).
+ * Storage: the MARK is a 15-digit string kept in our own
+ * mod_ekdosi_invoice_marks table (VARCHAR) — no column-width concerns,
+ * and tblinvoices.invoiced stays the legacy SMALLINT flag.
  */
 
 // Bootstrap WHMCS. This file is hit directly (not via WHMCS's
@@ -56,8 +52,10 @@ if ($bootPath === false || ! file_exists($bootPath)) {
     exit;
 }
 require_once $bootPath;
+require_once __DIR__.'/lib/InvoiceMarkStore.php';
 
 use WHMCS\Database\Capsule;
+use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
 
 header('Content-Type: application/json');
 
@@ -138,21 +136,20 @@ if (! $invoice) {
     exit;
 }
 
-// Idempotent-write guard. tblinvoices.invoiced is the "filed" flag:
-//   0      -> not yet filed
-//   1      -> legacy prepare_for_ekdosi "ready to file" marker
-//   <MARK> -> filed at AADE with this MARK
-//
-// Allowed writes: from 0 (fresh), from 1 (replacing the legacy
-// ready-marker with the real MARK — the expected migration path),
-// or the SAME MARK again (idempotent retry after a transient
-// failure). REFUSED: overwriting an existing MARK with a DIFFERENT
-// one — that would silently erase the original MARK from WHMCS's
-// audit view (double-filing / cancel-and-refile must go through an
-// explicit "Reset to unfiled" first). Returns 409 so the ekdosi
-// side records a distinct, non-retryable failure.
-$current = (string) ($invoice->invoiced ?? '0');
-if ($current !== '0' && $current !== '1' && $current !== $mark) {
+// Idempotent-write guard against OUR mark store (not tblinvoices.invoiced):
+//   none           -> fresh, file it
+//   the SAME MARK  -> idempotent retry after a transient failure, OK
+//   a DIFFERENT MARK -> REFUSE (409): overwriting would silently erase the
+//   original MARK. Cancel-and-refile must go through "Reset to unfiled" first.
+try {
+    InvoiceMarkStore::ensureTable();
+    $current = InvoiceMarkStore::get($whmcsInvoiceId);
+} catch (\Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['error' => 'db_update_failed', 'message' => $e->getMessage()]);
+    exit;
+}
+if ($current !== null && $current !== $mark) {
     http_response_code(409);
     echo json_encode([
         'error'            => 'already_filed_with_different_mark',
@@ -165,15 +162,10 @@ if ($current !== '0' && $current !== '1' && $current !== $mark) {
     exit;
 }
 
-// Persist the MARK as a STRING. Do NOT (int)-cast: AADE MARKs are
-// 15-digit values that overflow PHP's int on 32-bit hosts, and the
-// (widened-to-BIGINT — see README) column stores the numeric string
-// faithfully through Capsule's bound parameter. Casting here would
-// truncate on 32-bit and is unnecessary on 64-bit.
+// Persist the MARK as a STRING in our own table — never touch
+// tblinvoices.invoiced (legacy SMALLINT flag).
 try {
-    Capsule::table('tblinvoices')
-        ->where('id', $whmcsInvoiceId)
-        ->update(['invoiced' => $mark]);
+    InvoiceMarkStore::set($whmcsInvoiceId, $mark);
 } catch (\Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'db_update_failed', 'message' => $e->getMessage()]);
@@ -183,12 +175,12 @@ try {
 // Activity log — operator sees a record of the bridge-driven write
 // in WHMCS's audit trail alongside their own actions.
 if (function_exists('logActivity')) {
-    logActivity("EkdosiBridge: ekdosi filed invoice #{$whmcsInvoiceId} at AADE; set tblinvoices.invoiced={$mark}.");
+    logActivity("EkdosiBridge: ekdosi filed WHMCS invoice #{$whmcsInvoiceId} at AADE; MARK={$mark} (mod_ekdosi_invoice_marks).");
 }
 
 http_response_code(200);
 echo json_encode([
     'status'           => 'ok',
     'whmcs_invoice_id' => $whmcsInvoiceId,
-    'invoiced'         => $mark,
+    'mark'             => $mark,
 ]);

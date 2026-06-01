@@ -11,8 +11,9 @@ use Throwable;
 
 /**
  * The single place that pushes a filed MARK back to WHMCS
- * (tblinvoices.invoiced) via the ekdosi_bridge plugin and records the
- * outcome on the pending row's whmcs_writeback_* columns.
+ * (the bridge's mod_ekdosi_invoice_marks table, NOT the legacy
+ * tblinvoices.invoiced flag) via the ekdosi_bridge plugin and records
+ * the outcome on the pending row's whmcs_writeback_* columns.
  *
  * Extracted from WhmcsInvoiceFiler::writebackInvoicedFlag so BOTH issue
  * paths share one implementation:
@@ -73,9 +74,10 @@ class WhmcsWritebackService
             }
 
             // Only the single-draft path. A multi-party SPLIT row maps one
-            // WHMCS invoice to many ekdosi invoices/MARKs — tblinvoices.invoiced
-            // is a single column, so that write-back needs its own design
-            // (tracked follow-up). Filed/other states: nothing to do.
+            // WHMCS invoice to many ekdosi invoices/MARKs — the bridge keys its
+            // mark store by WHMCS invoice id (one MARK per invoice), so that
+            // write-back needs its own design (tracked follow-up). Filed/other
+            // states: nothing to do.
             if ($pending->status !== PendingWhmcsInvoice::STATUS_DRAFTED) {
                 if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
                     Log::info('WHMCS write-back skipped: split row (one WHMCS invoice → many MARKs is a separate design)', [
@@ -114,10 +116,11 @@ class WhmcsWritebackService
     }
 
     /**
-     * Push the MARK to tblinvoices.invoiced via the bridge plugin and record
-     * the outcome on the pending row's whmcs_writeback_* columns. The pending
-     * row is expected to already be status=filed; only the write-back
-     * bookkeeping columns are touched (allowed past the audit freeze).
+     * Push the MARK to the bridge's mod_ekdosi_invoice_marks table (NOT the
+     * legacy tblinvoices.invoiced flag) via the bridge plugin and record the
+     * outcome on the pending row's whmcs_writeback_* columns. The pending row
+     * is expected to already be status=filed; only the write-back bookkeeping
+     * columns are touched (allowed past the audit freeze).
      *
      * Shared by WhmcsInvoiceFiler::file() (Phase 4) and the lifecycle path.
      */
@@ -163,9 +166,10 @@ class WhmcsWritebackService
                 'mydata_mark' => $mark,
                 'ekdosi_invoice' => $invoice->invcode,
                 'error' => $e->getMessage(),
-                'next_step' => 'Manually set tblinvoices.invoiced='.$mark
-                    .' for WHMCS invoice '.$pending->whmcs_invoice_id
-                    .', or re-trigger the write-back via the bridge plugin admin page.',
+                'next_step' => 'Re-trigger the write-back from the Ekdosi Bridge admin page '
+                    .'for WHMCS invoice '.$pending->whmcs_invoice_id
+                    .' (MARK '.$mark.') — it stores the MARK in mod_ekdosi_invoice_marks, '
+                    .'never in the legacy tblinvoices.invoiced flag.',
             ]);
             $pending->update([
                 'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,

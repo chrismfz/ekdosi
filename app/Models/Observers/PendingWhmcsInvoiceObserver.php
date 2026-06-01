@@ -53,8 +53,8 @@ class PendingWhmcsInvoiceObserver
         //
         // The write-back columns are carved out deliberately: the
         // legal-audit truth is the payload + status + filed_at +
-        // mydata_mark snapshot, NOT whether the downstream WHMCS
-        // tblinvoices.invoiced flag got updated. Stage B-3 runs the
+        // mydata_mark snapshot, NOT whether the downstream WHMCS mark
+        // store (mod_ekdosi_invoice_marks) got updated. Stage B-3 runs the
         // write-back AFTER the status=filed transition and records
         // its outcome (succeeded/failed/pending) on these columns;
         // a future retry-sweep command can re-run a failed write-back

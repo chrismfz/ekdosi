@@ -29,11 +29,12 @@ use Illuminate\Http\Client\Response;
  *    envelope, not the WHMCS API's result=success/error shape)
  *
  * Currently supports ONE operation: setInvoiced() — the write-back
- * after ekdosi files an invoice at AADE. The plugin updates
- * tblinvoices.invoiced for the matching WHMCS invoice id with the
- * MARK value. Stage B-3's scope is intentionally narrow; future
- * bridge-specific operations (mark-as-cancelled, attach-PDF) get
- * added as separate methods here.
+ * after ekdosi files an invoice at AADE. The plugin stores the MARK
+ * in its OWN mod_ekdosi_invoice_marks table (keyed by WHMCS invoice
+ * id), NOT in the legacy tblinvoices.invoiced SMALLINT flag. Stage
+ * B-3's scope is intentionally narrow; future bridge-specific
+ * operations (mark-as-cancelled, attach-PDF) get added as separate
+ * methods here.
  */
 class WhmcsBridgeClient
 {
@@ -54,21 +55,19 @@ class WhmcsBridgeClient
     ) {}
 
     /**
-     * Push the MARK value into tblinvoices.invoiced for the given
-     * WHMCS invoice. The plugin authenticates the request via HMAC
-     * over the raw body using whmcs_webhook_secret; on success it
-     * runs Capsule::table('tblinvoices')->update(['invoiced' => $mark])
-     * and returns 200 OK.
+     * Push the MARK value into the bridge's mod_ekdosi_invoice_marks
+     * table for the given WHMCS invoice. The plugin authenticates the
+     * request via HMAC over the raw body using whmcs_webhook_secret;
+     * on success it upserts the MARK (as a VARCHAR string) keyed by the
+     * WHMCS invoice id and returns 200 OK. It does NOT touch the legacy
+     * tblinvoices.invoiced flag — that stays a SMALLINT the legacy
+     * ekdosi app reads/writes.
      *
      * @param  int  $whmcsInvoiceId  The WHMCS invoice id (tblinvoices.id)
-     * @param  string  $mark  The AADE MARK value as a string.
-     *                        Stored in tblinvoices.invoiced
-     *                        which is a SMALLINT(5) in WHMCS's
-     *                        native schema BUT AADE MARKs are
-     *                        15-digit ints. The plugin handles
-     *                        column-widening on its end (the
-     *                        deploy runbook documents the
-     *                        required ALTER TABLE).
+     * @param  string  $mark  The AADE MARK value as a string (a 15-digit
+     *                        int). Stored verbatim in the bridge's own
+     *                        VARCHAR column, so there are no
+     *                        column-width concerns.
      *
      * Throws:
      *  - WhmcsUnreachable if the WHMCS server is unreachable / TLS handshake fails

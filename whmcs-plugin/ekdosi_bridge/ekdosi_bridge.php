@@ -23,26 +23,25 @@
  *
  *   4. Inbound write-back endpoint (`inbound.php`, NOT this addon's
  *      output handler): ekdosi POSTs the MARK after filing at AADE,
- *      the endpoint authenticates via the same HMAC secret and
- *      writes `tblinvoices.invoiced = <MARK>`. This replaces the
- *      legacy prepare_for_ekdosi manual UI for setting that column.
+ *      the endpoint authenticates via the same HMAC secret and stores
+ *      it in OUR OWN `mod_ekdosi_invoice_marks` table (NOT in
+ *      tblinvoices.invoiced — that stays a legacy SMALLINT flag).
  *
- *   5. "Reset to unfiled": operator-initiated rollback that sets
- *      `tblinvoices.invoiced = 0` (rare path; the legacy
- *      prepare_for_ekdosi plugin's only feature).
+ *   5. "Reset to unfiled": operator-initiated rollback that drops our
+ *      MARK row (rare path; e.g. cancelled at AADE and re-filing).
  *
- * Coexistence with prepare_for_ekdosi: this plugin lives at
- * modules/addons/ekdosi_bridge/ and prepare_for_ekdosi lives at
- * modules/addons/prepare_for_ekdosi/. Both can run side-by-side
- * during the rollout. Once operators verify the bridge works end-
- * to-end, prepare_for_ekdosi can be deactivated (see README for
- * the cutover steps).
+ * Coexistence with the legacy app / prepare_for_ekdosi: we now NEVER
+ * write `tblinvoices.invoiced` — we only READ it (to show "Invoiced in
+ * legacy app"). So the bridge runs safely alongside the legacy ekdosi
+ * app during the dual-run ("test new, keep invoicing from old"): the
+ * legacy side owns `invoiced`, ekdosi owns the MARK in its own table.
  */
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\Admin\AdminDispatcher;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Controller;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Gate;
+use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
 use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
 
 if (! defined('WHMCS')) {
@@ -52,6 +51,7 @@ if (! defined('WHMCS')) {
 require_once __DIR__.'/lib/Admin/AdminDispatcher.php';
 require_once __DIR__.'/lib/Admin/Controller.php';
 require_once __DIR__.'/lib/EkdosiClient.php';
+require_once __DIR__.'/lib/InvoiceMarkStore.php';
 require_once __DIR__.'/lib/ThirdPartyStore.php';
 require_once __DIR__.'/lib/Client/Gate.php';
 require_once __DIR__.'/lib/Client/Controller.php';
@@ -61,7 +61,7 @@ function ekdosi_bridge_config(): array
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.12.0',
+        'version' => '0.14.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [
@@ -102,13 +102,23 @@ function ekdosi_bridge_activate(): array
 {
     $notes = [];
 
-    // 1. Widen tblinvoices.invoiced to BIGINT so it can hold 15-digit
-    //    AADE MARKs. WHMCS ships it as SMALLINT(5) (max 65535) which
-    //    truncates real MARKs. Doing this at activation (instead of a
-    //    manual ALTER the operator might skip) makes the bridge work
-    //    out of the box. Idempotent: re-running on an already-BIGINT
-    //    column is a no-op ALTER.
+    // 1. Keep the AADE MARK in our OWN table (mod_ekdosi_invoice_marks) and
+    //    RESTORE tblinvoices.invoiced to the SMALLINT the legacy ekdosi app
+    //    expects. EARLIER versions of this plugin widened `invoiced` to BIGINT
+    //    to stuff the 15-digit MARK in — that broke the legacy app (it reads
+    //    `invoiced` as a SMALLINT {0,1} "invoiced/processed" flag). We now NEVER
+    //    write `invoiced`; we only READ it (to show "Invoiced in legacy app").
+    //
+    //    This step is idempotent + privilege-safe:
+    //      - ensure mod_ekdosi_invoice_marks exists;
+    //      - if `invoiced` is BIGINT (we widened it): move every MARK out into
+    //        our table, reset those rows to 1 (legacy "filed" flag, SMALLINT-
+    //        safe), NULL→0, then narrow the column back to SMALLINT;
+    //      - if it's already SMALLINT: leave it completely alone.
     try {
+        InvoiceMarkStore::ensureTable();
+        $notes[] = 'Mark table (mod_ekdosi_invoice_marks) ready.';
+
         $col = Capsule::selectOne(
             "SELECT DATA_TYPE FROM information_schema.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE()
@@ -116,41 +126,32 @@ function ekdosi_bridge_activate(): array
                AND COLUMN_NAME = 'invoiced'"
         );
         $type = $col ? strtolower((string) $col->DATA_TYPE) : '';
-        if ($type !== '' && $type !== 'bigint') {
-            Capsule::statement(
-                'ALTER TABLE tblinvoices MODIFY invoiced BIGINT NULL DEFAULT 0'
-            );
-            $notes[] = "Widened tblinvoices.invoiced from {$type} to BIGINT (holds 15-digit AADE MARKs).";
-        } else {
-            $notes[] = 'tblinvoices.invoiced is already BIGINT (or check skipped).';
-        }
-    } catch (Throwable $e) {
-        // Don't fail activation outright — the operator may lack ALTER
-        // privileges (managed hosting). Surface the SQL so a DBA can
-        // run it manually, and let the addon activate so config can
-        // still be entered.
-        $notes[] = 'WARNING: could not auto-widen tblinvoices.invoiced ('
-            .$e->getMessage().'). Run manually before filing real MARKs: '
-            .'ALTER TABLE tblinvoices MODIFY invoiced BIGINT NULL DEFAULT 0;';
-    }
 
-    // 2. Coexistence guard: warn (don't block) if the legacy
-    //    prepare_for_ekdosi addon is still active. Both write to
-    //    tblinvoices.invoiced with conflicting semantics ({0,1} vs
-    //    {0,MARK}); running both invites a silent clobber. We warn
-    //    rather than refuse so the operator can run them side-by-side
-    //    intentionally during the rollout — but they're told.
-    try {
-        $legacyActive = Capsule::table('tbladdonmodules')
-            ->where('module', 'prepare_for_ekdosi')
-            ->exists();
-        if ($legacyActive) {
-            $notes[] = 'WARNING: prepare_for_ekdosi is also active. Both plugins write '
-                .'tblinvoices.invoiced; deactivate prepare_for_ekdosi once you have '
-                .'verified ekdosi_bridge end-to-end to avoid a silent overwrite.';
+        if ($type === 'bigint') {
+            $moved = InvoiceMarkStore::migrateFromInvoicedColumn();
+            // Reset the moved rows to the legacy "filed" flag so they fit
+            // SMALLINT and keep the legacy "this was invoiced" meaning.
+            Capsule::table('tblinvoices')->where('invoiced', '>', 65535)->update(['invoiced' => 1]);
+            Capsule::statement('UPDATE tblinvoices SET invoiced = 0 WHERE invoiced IS NULL');
+            Capsule::statement('ALTER TABLE tblinvoices MODIFY invoiced SMALLINT(5) NOT NULL DEFAULT 0');
+            $notes[] = "Restored tblinvoices.invoiced to SMALLINT (moved {$moved} MARK(s) into "
+                .'mod_ekdosi_invoice_marks; the legacy app reads `invoiced` again).';
+        } elseif ($type === '') {
+            $notes[] = 'tblinvoices.invoiced not found — nothing to restore.';
+        } else {
+            $notes[] = "tblinvoices.invoiced is {$type} (not widened by us) — left untouched.";
         }
     } catch (Throwable $e) {
-        // Non-fatal: the coexistence check is advisory only.
+        // Don't fail activation — the operator may lack ALTER privileges
+        // (managed hosting). Surface the exact manual SQL so a DBA can run it.
+        $notes[] = 'WARNING: could not auto-restore tblinvoices.invoiced ('
+            .$e->getMessage().'). If it is BIGINT, run manually: '
+            .'INSERT INTO mod_ekdosi_invoice_marks (invoiceid, mark, updated_at) '
+            .'SELECT id, invoiced, NOW() FROM tblinvoices WHERE invoiced > 65535 '
+            .'ON DUPLICATE KEY UPDATE mark = VALUES(mark); '
+            .'UPDATE tblinvoices SET invoiced = 1 WHERE invoiced > 65535; '
+            .'UPDATE tblinvoices SET invoiced = 0 WHERE invoiced IS NULL; '
+            .'ALTER TABLE tblinvoices MODIFY invoiced SMALLINT(5) NOT NULL DEFAULT 0;';
     }
 
     // 3. Create the bridge's own third-party-invoicing tables

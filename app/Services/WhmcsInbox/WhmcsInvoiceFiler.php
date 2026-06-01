@@ -209,12 +209,12 @@ class WhmcsInvoiceFiler
         ]);
 
         // Phase 4: write the MARK back to WHMCS via the ekdosi_bridge
-        // plugin so tblinvoices.invoiced flips from 0 to the MARK
-        // value. The plugin runs Capsule::table('tblinvoices')
-        // ->update(['invoiced' => $mark]) on the WHMCS side (the
-        // legacy prepare_for_ekdosi did this via direct DB writes
-        // because WHMCS's native UpdateInvoice API doesn't expose
-        // the invoiced column).
+        // plugin, which upserts it into its OWN mod_ekdosi_invoice_marks
+        // table keyed by WHMCS invoice id. It deliberately does NOT touch
+        // tblinvoices.invoiced — that is the legacy ekdosi app's SMALLINT
+        // flag, and stuffing a 15-digit MARK there (the old behaviour)
+        // broke the legacy app. The MARK lives in the bridge's VARCHAR
+        // column; tblinvoices.invoiced stays read-only legacy state.
         //
         // Runs AFTER the Phase 3 status=filed commit, updating ONLY
         // the whmcs_writeback_* columns (allowed past the audit
@@ -249,8 +249,8 @@ class WhmcsInvoiceFiler
      * Υποβολή), MyDataSubmitter's VALID persist calls
      * WhmcsWritebackService::syncFiledFromLifecycle — which flips this pending
      * row drafted→filed and pushes the MARK back to WHMCS. (Multi-party SPLIT
-     * drafts remain a separate design: one WHMCS invoice → many MARKs, but
-     * tblinvoices.invoiced is a single column.)
+     * drafts remain a separate design: one WHMCS invoice → many MARKs, but the
+     * bridge keys its mark store by WHMCS invoice id — one MARK per invoice.)
      */
     public function createDraft(
         Company $tenant,

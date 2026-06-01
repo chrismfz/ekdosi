@@ -15,10 +15,16 @@ live one.
    rejected / held).
 3. **Inbound write-back** (`inbound.php`): when ekdosi files an
    invoice at AADE, it POSTs the MARK back to this endpoint, which
-   sets `tblinvoices.invoiced = <MARK>`. Replaces the legacy plugin's
-   manual UI.
-4. **Reset to unfiled**: legacy rollback workflow preserved
-   (`tblinvoices.invoiced = 0`) for the rare cancel-at-AADE case.
+   stores it in our own `mod_ekdosi_invoice_marks` table — keyed by
+   WHMCS invoice id. We do **not** touch `tblinvoices.invoiced`.
+4. **Reset to unfiled**: drops our MARK row (rare cancel-at-AADE case).
+
+> **`tblinvoices.invoiced` is the legacy app's column — we never write
+> it.** Earlier versions widened it to BIGINT to stuff the MARK in,
+> which broke the legacy ekdosi app (it reads `invoiced` as a SMALLINT
+> {0,1} flag). v0.14.0 fixes this: the MARK lives in our own table, and
+> activation **restores** `invoiced` to SMALLINT. We only **read**
+> `invoiced` now — to show "Invoiced in legacy app" during the dual-run.
 
 The plugin **never talks to AADE directly** — all AADE communication
 goes through the ekdosi backend.
@@ -36,33 +42,46 @@ Copy this entire `ekdosi_bridge/` directory to the WHMCS server:
 ├── hooks.php
 ├── lib/
 │   ├── EkdosiClient.php
+│   ├── InvoiceMarkStore.php   (our AADE MARK table — mod_ekdosi_invoice_marks)
 │   └── Admin/
 │       ├── AdminDispatcher.php
 │       └── Controller.php
 └── README.md  (this file)
 ```
 
-### 2. Widen `tblinvoices.invoiced` (automatic on activation)
+### 2. MARK storage + `invoiced` rollback (automatic on activation)
 
-AADE MARKs are 15-digit positive integers. WHMCS's default
-`tblinvoices.invoiced` column is `SMALLINT(5)` (max 65535) which
-truncates real MARKs to garbage.
+The 15-digit AADE MARK is kept in our own table
+`mod_ekdosi_invoice_marks` ( `invoiceid` PK, `mark` VARCHAR ). We do
+**not** use `tblinvoices.invoiced` — that is a SMALLINT flag the
+**legacy ekdosi app** owns.
 
-**The addon's activation hook runs this ALTER automatically** —
-you don't normally need to do anything. On activation it inspects
-`information_schema`, and if `invoiced` isn't already `BIGINT` it
-runs:
+**Earlier versions (≤ 0.13) widened `invoiced` to BIGINT** to store the
+MARK there. That broke the legacy app, which expects `invoiced` to be
+SMALLINT. **v0.14.0 activation rolls that back automatically** — it
+inspects `information_schema`, and if `invoiced` is `BIGINT` it:
 
 ```sql
-ALTER TABLE tblinvoices MODIFY invoiced BIGINT NULL DEFAULT 0;
+-- move any MARK out of invoiced into our table
+INSERT INTO mod_ekdosi_invoice_marks (invoiceid, mark, updated_at)
+  SELECT id, invoiced, NOW() FROM tblinvoices WHERE invoiced > 65535
+  ON DUPLICATE KEY UPDATE mark = VALUES(mark);
+-- reset those rows to the legacy "filed" flag (SMALLINT-safe) + NULLs to 0
+UPDATE tblinvoices SET invoiced = 1 WHERE invoiced > 65535;
+UPDATE tblinvoices SET invoiced = 0 WHERE invoiced IS NULL;
+-- restore the original type
+ALTER TABLE tblinvoices MODIFY invoiced SMALLINT(5) NOT NULL DEFAULT 0;
 ```
 
 If the WHMCS DB user lacks `ALTER` privilege (some managed hosts),
-activation still succeeds but the activation message will contain a
-`WARNING: could not auto-widen ...` line with the exact SQL — hand
-it to your DBA and run it before filing real MARKs. The ALTER is
-idempotent and non-destructive (legacy `prepare_for_ekdosi` only
-ever stored 0 or 1).
+activation still succeeds but the message contains a
+`WARNING: could not auto-restore ...` line with the exact SQL above —
+hand it to your DBA. Idempotent: on an already-SMALLINT column it's a
+no-op.
+
+> **Upgrading from ≤ 0.13?** After replacing the files, **deactivate +
+> reactivate** the addon once so the rollback runs (or run the SQL
+> above). The legacy app works again the moment `invoiced` is SMALLINT.
 
 ### 3. Activate + configure
 
@@ -83,7 +102,8 @@ ever stored 0 or 1).
 From the bridge admin page, paste a known invoice id → click
 "Inspect". You should see:
 
-- `tblinvoices.invoiced` value rendered as a badge
+- The ekdosi MARK (from `mod_ekdosi_invoice_marks`) + a read-only
+  "Invoiced in legacy app" line (from `tblinvoices.invoiced`)
 - A live "Ekdosi status" block (will say "no row yet" until you push)
 - Three action buttons
 
@@ -94,28 +114,25 @@ Push a test invoice. Confirm:
   review pending
 
 File it on the ekdosi side. The bridge will receive a POST to
-`inbound.php`, set `tblinvoices.invoiced = <MARK>`, and log to
-WHMCS's activity log.
+`inbound.php`, store the MARK in `mod_ekdosi_invoice_marks`, and log
+to WHMCS's activity log.
 
-### 5. Coexistence with `prepare_for_ekdosi`
+### 5. Coexistence with `prepare_for_ekdosi` / the legacy app
 
-The legacy plugin can stay activated alongside this one during the
-rollout — they use different module names and paths. **But both
-write `tblinvoices.invoiced`**, so the activation hook will emit a
-`WARNING: prepare_for_ekdosi is also active ...` if it detects the
-legacy module. Two safety nets prevent silent clobbering:
+The legacy plugin/app can stay active alongside this one during the
+dual-run — and it is now **safe**, because we never write
+`tblinvoices.invoiced` anymore (the MARK lives in our own table). The
+legacy side owns `invoiced`; we only read it. Safety nets:
 
 1. The bridge's `inbound.php` refuses (409
-   `already_filed_with_different_mark`) to overwrite an existing
-   MARK with a *different* one — it only allows 0, the legacy `1`
-   marker, or an idempotent repeat of the same MARK.
-2. The activation warning reminds you to deactivate
-   `prepare_for_ekdosi` once bridge-driven filings are verified
-   end-to-end.
+   `already_filed_with_different_mark`) to overwrite an existing MARK
+   in our table with a *different* one — only a fresh write or an
+   idempotent repeat of the same MARK is allowed.
+2. We never write `tblinvoices.invoiced`, so the legacy app's flag is
+   never clobbered by the bridge.
 
-Once verified, deactivate `prepare_for_ekdosi` (Addons → Manage →
-deactivate). Don't delete the directory immediately; if you need to
-roll back, just reactivate.
+There is no longer any rush to deactivate `prepare_for_ekdosi` — the
+two no longer collide. Deactivate it only when you finish the cutover.
 
 ## Security model
 
@@ -167,12 +184,13 @@ Different from the HMAC secret — this is the API
 identifier+secret pair on ekdosi's `companies.whmcs_api_identifier`
 and `whmcs_api_secret`. Check those.
 
-**`inbound.php` returns 500 "db_update_failed: ... Out of range value for column 'invoiced'"**
+**`inbound.php` returns 500 "db_update_failed: ..."**
 
-`tblinvoices.invoiced` is still SMALLINT — the auto-widen at
-activation didn't run (usually because the WHMCS DB user lacks
-`ALTER`). Run it manually: `ALTER TABLE tblinvoices MODIFY invoiced
-BIGINT NULL DEFAULT 0;` (see deployment step 2).
+The MARK table couldn't be created/written — usually the WHMCS DB user
+lacks `CREATE`/`INSERT` privilege. Create it manually:
+`CREATE TABLE IF NOT EXISTS mod_ekdosi_invoice_marks (invoiceid BIGINT
+UNSIGNED NOT NULL PRIMARY KEY, mark VARCHAR(40) NOT NULL, updated_at
+DATETIME NULL);` (the addon's activation does this — see step 2).
 
 **`inbound.php` returns 409 "already_filed_with_different_mark"**
 
@@ -260,5 +278,5 @@ distinct from the legacy timologia link during the parallel run.
   date range would be a follow-up addon page.
 - **Cancel-at-AADE from WHMCS**: today operators cancel via the ekdosi
   Filament UI. A "Cancel ekdosi MARK" button could be added here later;
-  for now, the legacy "Reset to unfiled" is the closest workflow
-  (it flips invoiced=0 on the WHMCS side, doesn't touch AADE).
+  for now, "Reset to unfiled" is the closest workflow (it drops our
+  MARK row, doesn't touch AADE or the legacy `invoiced` flag).
