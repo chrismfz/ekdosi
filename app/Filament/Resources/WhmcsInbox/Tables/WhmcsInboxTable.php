@@ -224,22 +224,30 @@ class WhmcsInboxTable
                     ->fontFamily('mono'),
 
                 // Dual-run heads-up: this WHMCS invoice has ALSO been invoiced
-                // in the LEGACY ekdosi app (tblinvoices.invoiced != 0). Warns the
-                // operator not to issue a duplicate παραστατικό here. Quiet "—"
-                // for known-not-invoiced and unknown (no false alarm). Populated
-                // by whmcs:fetch-pending + the «Έλεγχος legacy» header action.
+                // in the LEGACY ekdosi app (tblinvoices.invoiced != 0). Three
+                // visible states so the operator can tell a CHECK ran:
+                //   >0 (red)  «Στην παλιά» — already invoiced in the old app
+                //   0  (gray) «Όχι»        — checked, not invoiced in legacy
+                //   null      «—»          — not checked yet (run «Έλεγχος legacy»)
+                // Populated by whmcs:fetch-pending + the «Έλεγχος legacy» action.
                 TextColumn::make('legacy_invoiced')
                     ->label('Legacy')
                     ->badge()
                     ->placeholder('—')
-                    ->state(fn (PendingWhmcsInvoice $r): ?string => $r->invoicedInLegacy()
-                        ? 'Στην παλιά εφαρμογή'
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match (true) {
+                        $r->invoicedInLegacy() => 'Στην παλιά',
+                        $r->legacy_invoiced === 0 => 'Όχι',
+                        default => null,
+                    })
+                    ->color(fn (PendingWhmcsInvoice $r): string => $r->invoicedInLegacy() ? 'danger' : 'gray')
+                    ->icon(fn (PendingWhmcsInvoice $r): ?string => $r->invoicedInLegacy()
+                        ? 'heroicon-o-exclamation-triangle'
                         : null)
-                    ->color('danger')
-                    ->icon('heroicon-o-exclamation-triangle')
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->invoicedInLegacy()
-                        ? 'Έχει ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi. Μην το ξαναεκδώσεις εδώ — θα γίνει διπλή υποβολή στην ΑΑΔΕ.'
-                        : null),
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match (true) {
+                        $r->invoicedInLegacy() => 'Έχει ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi. Μην το ξαναεκδώσεις εδώ — θα γίνει διπλή υποβολή στην ΑΑΔΕ.',
+                        $r->legacy_invoiced === 0 => 'Ελέγχθηκε — δεν έχει τιμολογηθεί στην παλιά εφαρμογή.',
+                        default => 'Δεν έχει ελεγχθεί ακόμη. Πάτα «Έλεγχος legacy» για να ρωτήσει τη γέφυρα.',
+                    }),
 
                 TextColumn::make('created_at')
                     ->label('Στάλθηκε')
