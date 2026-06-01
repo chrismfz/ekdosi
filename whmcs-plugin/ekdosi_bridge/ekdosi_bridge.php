@@ -149,6 +149,12 @@ function ekdosi_bridge_activate(): array
         // (managed hosting). Surface the exact manual SQL so a DBA can run it.
         $notes[] = 'WARNING: could not auto-restore tblinvoices.invoiced ('
             .$e->getMessage().'). If it is BIGINT, run manually: '
+            // Self-contained: include the CREATE in case ensureTable() itself
+            // failed (no CREATE privilege), so the INSERT below has a target.
+            .'CREATE TABLE IF NOT EXISTS mod_ekdosi_invoice_marks ('
+            .'invoiceid BIGINT UNSIGNED NOT NULL PRIMARY KEY, mark VARCHAR(40) NOT NULL, '
+            .'invcode VARCHAR(60) NULL DEFAULT NULL, updated_at DATETIME NULL DEFAULT NULL) '
+            .'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4; '
             .'INSERT INTO mod_ekdosi_invoice_marks (invoiceid, mark, updated_at) '
             .'SELECT id, invoiced, NOW() FROM tblinvoices WHERE invoiced > 65535 '
             .'ON DUPLICATE KEY UPDATE mark = VALUES(mark); '

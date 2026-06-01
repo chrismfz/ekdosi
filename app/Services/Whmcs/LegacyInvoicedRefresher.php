@@ -82,8 +82,13 @@ class LegacyInvoicedRefresher
             if (! array_key_exists($row->whmcs_invoice_id, $flags)) {
                 continue;
             }
-            $flag = $flags[$row->whmcs_invoice_id];
-            if ((int) $row->legacy_invoiced === $flag && $row->legacy_invoiced !== null) {
+            // Normalise to a 0/1 signal. The raw legacy `invoiced` can still be a
+            // 15-digit MARK during the dual-run (a tenant whose plugin hasn't been
+            // re-activated to roll the column back) — storing it verbatim would
+            // overflow the smallint column. Every consumer only tests "!= 0", so
+            // collapse to a boolean here.
+            $flag = $flags[$row->whmcs_invoice_id] > 0 ? 1 : 0;
+            if ($row->legacy_invoiced !== null && (int) $row->legacy_invoiced === $flag) {
                 continue;
             }
             // update() is safe here: these rows are pending_review/held, so the

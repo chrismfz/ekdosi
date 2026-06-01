@@ -104,7 +104,9 @@ try {
         // invoice ids. ekdosi uses this to show "already invoiced in the legacy
         // app" on its WHMCS inbox during the dual-run. We read the column
         // DIRECTLY (reliable — the WHMCS API doesn't expose this custom column)
-        // and never write it.
+        // and never write it. Real-world values are {0 (prepare_for_ekdosi),
+        // 1 (WHMCS native / our rollback), <15-digit MARK> (old bridge, pre
+        // rollback)} — ekdosi collapses anything > 0 to a boolean.
         $rawIds = $payload['ids'] ?? [];
         if (! is_array($rawIds)) {
             $rawIds = [];

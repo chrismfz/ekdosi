@@ -108,6 +108,26 @@ class LegacyInvoicedRefresherTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_clamps_a_raw_15_digit_mark_to_a_boolean_signal(): void
+    {
+        // Dual-run reality: a tenant whose plugin hasn't been re-activated still
+        // has a 15-digit MARK in tblinvoices.invoiced. It must NOT be stored
+        // verbatim (would overflow the smallint column on real MariaDB) — the
+        // refresher collapses anything > 0 to 1.
+        $tenant = $this->tenant();
+        $row = $this->pending($tenant, 8007, PendingWhmcsInvoice::STATUS_PENDING_REVIEW);
+
+        Http::fake([self::RESOLVE_URL => Http::response([
+            'status' => 'ok', 'flags' => ['8007' => 400001234567890],
+        ], 200)]);
+
+        $changed = $this->refresher()->refresh($tenant);
+
+        $this->assertSame(1, $changed);
+        $this->assertSame(1, $row->fresh()->legacy_invoiced);
+        $this->assertTrue($row->fresh()->invoicedInLegacy());
+    }
+
     public function test_missing_id_in_response_does_not_clobber_known_value(): void
     {
         $tenant = $this->tenant();

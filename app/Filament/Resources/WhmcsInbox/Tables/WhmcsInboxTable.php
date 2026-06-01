@@ -238,7 +238,7 @@ class WhmcsInboxTable
                     ->color('danger')
                     ->icon('heroicon-o-exclamation-triangle')
                     ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->invoicedInLegacy()
-                        ? 'Έχει ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi (invoiced='.$r->legacy_invoiced.'). Μην το ξαναεκδώσεις εδώ — θα γίνει διπλή υποβολή στην ΑΑΔΕ.'
+                        ? 'Έχει ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi. Μην το ξαναεκδώσεις εδώ — θα γίνει διπλή υποβολή στην ΑΑΔΕ.'
                         : null),
 
                 TextColumn::make('created_at')
