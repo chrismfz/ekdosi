@@ -60,4 +60,25 @@ return [
 
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Billing sources (Bridges / Connectors)
+    |--------------------------------------------------------------------------
+    |
+    | Phase 0 seam (docs/bridges-connectors.md): the map of billing-source key →
+    | BillingSource implementation, resolved by BillingSourceRegistry. A tenant
+    | registers which sources it connects to in the `billing_connections` table;
+    | this map says how each source key behaves (label + capabilities today,
+    | fetch/write-back in Phase 1). Add a new source = one line here + one class
+    | (mirrors einvoice provider routing). No core edit.
+    |
+    */
+    'billing' => [
+        'sources' => [
+            'whmcs' => App\Services\Billing\Sources\WhmcsBillingSource::class,
+            // 'woocommerce' => App\Services\Billing\Sources\WooCommerceBillingSource::class,  // Phase 1+
+            // 'blesta'      => App\Services\Billing\Sources\BlestaBillingSource::class,        // Phase 1+
+        ],
+    ],
+
 ];

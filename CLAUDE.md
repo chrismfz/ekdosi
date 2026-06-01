@@ -444,6 +444,20 @@ verified against the restored prod WHMCS):**
   (not legacy ids). **Deploy:** `php artisan migrate` (adds
   `invoices.whmcs_invoice_id`) + deploy plugin v0.16.0, then
   `php artisan whmcs:backfill-invoice-ids --tenant=SLUG` (idempotent, re-runnable).
+- **Bridges / Connectors seam — ✅ Phase 0 DONE.** A tenant can run SEVERAL
+  billing systems at once (WHMCS + a WooCommerce shop, two shops…), so the source
+  is a REGISTRY (`billing_connections`: one row per company×system, each
+  `is_active`-toggleable — the future Company «Γέφυρες» tab), NOT a column on
+  `companies`. `App\Contracts\BillingSource` (identity + `SourceCapabilities`
+  only — the data methods are deferred to avoid baking WHMCS-isms from one
+  example), resolved by `BillingSourceRegistry` (config-driven via
+  `config/ekdosi.php → billing.sources`, mirrors `EInvoiceSubmitterFactory`).
+  `WhmcsBillingSource` is the only impl; `pending_whmcs_invoices.source` stamps
+  each staged doc; existing WHMCS-configured tenants are seeded a `whmcs`
+  connection. **No behaviour change** — the seam sits alongside the live WHMCS
+  pipeline. Phase 1 (a real 2nd source) finalises the `ExternalDocument` DTO +
+  fetch/write-back methods + per-source inbox(es). **Full design + the
+  migration-away-from-WHMCS story: `docs/bridges-connectors.md`.**
 
 ---
 

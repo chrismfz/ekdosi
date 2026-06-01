@@ -101,6 +101,7 @@ class WhmcsInvoiceIngestor
                 try {
                     $row = PendingWhmcsInvoice::create([
                         'company_id' => $tenant->id,
+                        'source' => PendingWhmcsInvoice::SOURCE_WHMCS,
                         'whmcs_invoice_id' => $invoiceId,
                         'whmcs_userid' => $whmcsUserId ?: null,
                         'customer_id' => $customerId,
