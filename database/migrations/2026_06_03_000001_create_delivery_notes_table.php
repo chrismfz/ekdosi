@@ -42,14 +42,20 @@ return new class extends Migration
 
             // Addresses (loading = issuer point, delivery = recipient point) — both
             // mandatory for 9.x / isDeliveryNote per the spec; snapshot at issue.
-            $t->string('loading_address', 120)->nullable();
+            // street/number split to match firebed's Address model (no lossy join).
+            $t->string('loading_street', 120)->nullable();
+            $t->string('loading_number', 20)->nullable();
             $t->string('loading_postcode', 10)->nullable();
             $t->string('loading_city', 60)->nullable();
-            $t->string('delivery_address', 120)->nullable();
+            $t->unsignedInteger('start_shipping_branch')->nullable();    // issuer branch (multi-branch)
+            $t->string('delivery_street', 120)->nullable();
+            $t->string('delivery_number', 20)->nullable();
             $t->string('delivery_postcode', 10)->nullable();
             $t->string('delivery_city', 60)->nullable();
+            $t->unsignedInteger('complete_shipping_branch')->nullable(); // recipient branch
             $t->string('recipient_name', 120)->nullable();
             $t->string('recipient_afm', 20)->nullable();
+            $t->boolean('third_party_collection')->default(false);       // παραλαβή από τρίτο (μεταφορέα)
 
             $t->string('local_status', 20)->default('draft'); // draft / active / cancelled
             $t->boolean('printed')->default(false);
