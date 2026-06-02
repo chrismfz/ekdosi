@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasAttachments;
+use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
 use App\Support\InvoiceScope;
@@ -17,7 +19,8 @@ use Illuminate\Support\Facades\DB;
 class Customer extends Model
 {
     use BelongsToCompany;
-    use HasFactory, HasTags, SoftDeletes, TracksActivity;
+    use HasAttachments;
+    use HasFactory, HasInternalNotes, HasTags, SoftDeletes, TracksActivity;
 
     /**
      * Audited identity/contact/terms columns. See TracksActivity.

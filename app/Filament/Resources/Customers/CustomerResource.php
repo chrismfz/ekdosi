@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\Customers;
 
 use App\Filament\RelationManagers\ActivityLogRelationManager;
+use App\Filament\RelationManagers\AttachmentsRelationManager;
+use App\Filament\RelationManagers\InternalNotesRelationManager;
 use App\Filament\Resources\Customers\Pages\CreateCustomer;
 use App\Filament\Resources\Customers\RelationManagers\ContactsRelationManager;
 use App\Filament\Resources\Customers\Pages\CustomerLedger;
@@ -90,6 +92,8 @@ class CustomerResource extends Resource
     {
         return [
             ContactsRelationManager::class,
+            InternalNotesRelationManager::class,
+            AttachmentsRelationManager::class,
             ActivityLogRelationManager::class,
         ];
     }
