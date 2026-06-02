@@ -100,8 +100,6 @@ class Invoice extends Model
         'gross_total',
         'withhold_amount',
         'withhold_category',
-        'mailed',
-        'printed',
         // Party snapshot at issue time
         'address1',
         'address2',
@@ -113,7 +111,6 @@ class Invoice extends Model
         'vies_vat',
         'occupation',
         'notes',
-        'email_sent',
         // myDATA invoice type snapshot — captured at submit time, NOT
         // edit-time. Source: $invoice->invoiceType->mydata_type at
         // the moment MyDataSubmitter ran. Reading via the relation
@@ -138,8 +135,6 @@ class Invoice extends Model
             'credited_total' => 'decimal:2',
             'withhold_amount' => 'decimal:2',
             'withhold_category' => 'integer',
-            'mailed' => 'boolean',
-            'printed' => 'boolean',
             'mydata_sent' => 'boolean',
             'whmcs_invoice_id' => 'integer',
         ];

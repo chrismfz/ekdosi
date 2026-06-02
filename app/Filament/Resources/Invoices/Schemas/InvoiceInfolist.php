@@ -216,16 +216,6 @@ class InvoiceInfolist
                             ->label('WHMCS #')
                             ->prefix('#')
                             ->visible(fn ($record) => filled($record->whmcs_invoice_id)),
-
-                        IconEntry::make('mailed')
-                            ->boolean(),
-
-                        IconEntry::make('printed')
-                            ->boolean(),
-
-                        TextEntry::make('email_sent')
-                            ->label('Email sent to')
-                            ->placeholder('—'),
                     ])
                     ->columns(3)
                     ->collapsible(),
