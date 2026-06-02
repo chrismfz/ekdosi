@@ -148,19 +148,20 @@ EOF;
             $status = 'Paid';
         }
 
-        // Date window — the «εικόνα μήνα» need: «τι κόψαμε τον τελευταίο μήνα».
-        // Default 1 month; 3 = quarter; 0 = no limit (full history).
-        $months = (int) ($_GET['months'] ?? 1);
-        if (! in_array($months, [1, 3, 0], true)) {
-            $months = 1;
+        // Date window — default «τελευταία εβδομάδα» (η συνηθέστερη ματιά «τι
+        // κόψαμε πρόσφατα»). week / month / quarter / all.
+        $period = (string) ($_GET['period'] ?? 'week');
+        if (! in_array($period, ['week', 'month', 'quarter', 'all'], true)) {
+            $period = 'week';
         }
 
         $q = Capsule::table('tblinvoices')->orderBy('id', 'desc');
         if ($status !== 'All') {
             $q->where('status', $status);
         }
-        if ($months > 0) {
-            $q->where('date', '>=', date('Y-m-d', strtotime("-{$months} months")));
+        $cutoff = self::periodCutoff($period);
+        if ($cutoff !== null) {
+            $q->where('date', '>=', $cutoff);
         }
         $total = (clone $q)->count();
         $invoices = $q->forPage($page, $perPage)->get(['id', 'userid', 'date', 'total', 'status', 'invoiced']);
@@ -279,9 +280,9 @@ EOF;
                 .'</tr>';
         }
 
-        $pager = $this->pager($link, $status, $page, $perPage, $total, $months);
-        $statusTabs = $this->statusTabs($link, $status, $months);
-        $monthTabs = $this->monthTabs($link, $status, $months);
+        $pager = $this->pager($link, $status, $page, $perPage, $total, $period);
+        $statusTabs = $this->statusTabs($link, $status, $period);
+        $monthTabs = $this->periodTabs($link, $status, $period);
         $from = ($page - 1) * $perPage + 1;
         $to = min($page * $perPage, $total);
 
@@ -381,38 +382,49 @@ EOF;
         return '<span class="text-muted" title="Χρέωση στον πελάτη">—</span>';
     }
 
-    /** Status filter tabs for the invoice list (preserves the month window). */
-    private function statusTabs(string $link, string $current, int $months): string
+    /** Earliest `date` to include for a period token, or null for «all». */
+    private static function periodCutoff(string $period): ?string
+    {
+        return match ($period) {
+            'week' => date('Y-m-d', strtotime('-7 days')),
+            'month' => date('Y-m-d', strtotime('-1 month')),
+            'quarter' => date('Y-m-d', strtotime('-3 months')),
+            default => null,   // 'all'
+        };
+    }
+
+    /** Status filter tabs for the invoice list (preserves the period window). */
+    private function statusTabs(string $link, string $current, string $period): string
     {
         $tabs = '';
         foreach (['Paid' => 'Εξοφλημένα', 'Unpaid' => 'Ανεξόφλητα', 'All' => 'Όλα'] as $key => $label) {
             $active = $key === $current ? ' class="btn btn-xs btn-primary"' : ' class="btn btn-xs btn-default"';
-            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$key.'&months='.$months.'">'.$label.'</a> ';
+            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$key.'&period='.$period.'">'.$label.'</a> ';
         }
 
         return '<p>'.$tabs.'</p>';
     }
 
-    /** Date-window tabs: last month / quarter / all (preserves the status). */
-    private function monthTabs(string $link, string $status, int $current): string
+    /** Date-window tabs: last week / month / quarter / all (preserves the status). */
+    private function periodTabs(string $link, string $status, string $current): string
     {
         $tabs = '';
-        foreach ([1 => 'Τελευταίος μήνας', 3 => 'Τρίμηνο', 0 => 'Όλα'] as $key => $label) {
+        foreach (['week' => 'Εβδομάδα', 'month' => 'Μήνας', 'quarter' => 'Τρίμηνο', 'all' => 'Όλα'] as $key => $label) {
             $active = $key === $current ? ' class="btn btn-xs btn-success"' : ' class="btn btn-xs btn-default"';
-            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$status.'&months='.$key.'">'.$label.'</a> ';
+            $tabs .= '<a'.$active.' href="'.$link.'&action=invoices&status='.$status.'&period='.$key.'">'.$label.'</a> ';
         }
 
         return '<p><strong>Περίοδος:</strong> '.$tabs.'</p>';
     }
 
-    /** Prev/next pager for the invoice list (preserves status + month window). */
-    private function pager(string $link, string $status, int $page, int $perPage, int $total, int $months): string
+    /** Prev/next pager for the invoice list (preserves status + period window). */
+    private function pager(string $link, string $status, int $page, int $perPage, int $total, string $period): string
     {
         $pages = (int) ceil($total / $perPage);
         if ($pages <= 1) {
             return '';
         }
-        $base = $link.'&action=invoices&status='.$status.'&months='.$months.'&p=';
+        $base = $link.'&action=invoices&status='.$status.'&period='.$period.'&p=';
         $prev = $page > 1
             ? '<a class="btn btn-default" href="'.$base.($page - 1).'">&larr; Προηγούμενα</a> '
             : '';
