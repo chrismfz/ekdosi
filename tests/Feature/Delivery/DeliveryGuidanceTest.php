@@ -48,4 +48,12 @@ class DeliveryGuidanceTest extends TestCase
         $this->assertNull(DeliveryGuidance::fieldHelp('nonexistent_field'));
         $this->assertNotEmpty(DeliveryGuidance::INTRO);
     }
+
+    public function test_exemptions_are_listed(): void
+    {
+        // The operator must be warned when NO δελτίο is needed (esp. πάγια moves).
+        $this->assertNotEmpty(DeliveryGuidance::EXEMPTIONS);
+        $this->assertGreaterThanOrEqual(4, count(DeliveryGuidance::EXEMPTIONS));
+        $this->assertNotEmpty(DeliveryGuidance::EXEMPTIONS_LEAD);
+    }
 }
