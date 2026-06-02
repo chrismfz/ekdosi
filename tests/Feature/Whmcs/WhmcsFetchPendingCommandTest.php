@@ -129,13 +129,15 @@ class WhmcsFetchPendingCommandTest extends TestCase
             ['id' => 5003, 'userid' => 303, 'date' => '2026-05-12', 'total' => 300, 'currencycode' => 'EUR', 'invoiced' => 0, 'email' => 'stranger@nope.com'],
         ]));
 
+        // ΑΦΜ-only: the email-only row (5002) is now UNMATCHED — only the
+        // linked row (5001) matches. (Preview has no customfields, so even ΑΦΜ
+        // isn't available here; link is the only signal.)
         $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug, '--preview' => true])
             ->expectsOutputToContain('Found 3 paid+unfiled invoice(s)')
             ->expectsOutputToContain('DRY RUN')
             ->expectsOutputToContain('linked')
-            ->expectsOutputToContain('email match')
             ->expectsOutputToContain('no candidate')
-            ->expectsOutputToContain('Summary: 2 matched, 1 unmatched')
+            ->expectsOutputToContain('Summary: 1 matched, 2 unmatched')
             ->expectsOutputToContain('Unmatched rows need a customer link')
             ->assertExitCode(0);
     }
