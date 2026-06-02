@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Customers;
 
 use App\Filament\RelationManagers\ActivityLogRelationManager;
 use App\Filament\Resources\Customers\Pages\CreateCustomer;
+use App\Filament\Resources\Customers\RelationManagers\ContactsRelationManager;
 use App\Filament\Resources\Customers\Pages\CustomerLedger;
 use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Filament\Resources\Customers\Pages\ListCustomers;
@@ -88,6 +89,7 @@ class CustomerResource extends Resource
     public static function getRelations(): array
     {
         return [
+            ContactsRelationManager::class,
             ActivityLogRelationManager::class,
         ];
     }

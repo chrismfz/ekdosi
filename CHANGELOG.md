@@ -17,6 +17,14 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Επαφές πελάτη (Customer contacts).** A customer can now hold multiple named
+  contacts (λογιστήριο, τεχνικός, υπεύθυνος…) — each with ρόλος/τμήμα, τηλέφωνο,
+  email, σημειώσεις, and an optional «Κύρια» flag (single-primary enforced on the
+  model). Managed via a new «Επαφές» tab on the customer Edit page
+  (`ContactsRelationManager`, stamps `company_id` like the other tenant-owned
+  child managers) and surfaced read-only on the Καρτέλα (primary first). New
+  `customer_contacts` table + `App\Models\CustomerContact`. **Deploy:**
+  `php artisan migrate`.
 - **Καρτέλα: «Συχνά προϊόντα/υπηρεσίες» + πλουσιότερο header.** A new panel on the
   customer Καρτέλα lists what the customer buys most (frequency, total qty, net
   spend, last-bought date) — aggregated from their LIVE sales lines (credit notes
