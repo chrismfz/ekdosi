@@ -10,6 +10,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-06-02
+### Changed
+- **Unified per-invoice inspect into the invoice list.** Dropped the standalone
+  «Ή επιθεώρησε ένα συγκεκριμένο τιμολόγιο» form from the addon landing; the
+  invoice list (`action=invoices`) now carries a «Μετάβαση σε τιμολόγιο #…»
+  jump-box that reaches any invoice, including ones outside the current
+  status/period filter. One door to the per-invoice detail (`action=show`) —
+  same target as a row's «Άνοιγμα». Per-invoice badges on the native WHMCS
+  invoice page (`AdminInvoicesControlsOutput` hook) are unchanged.
+
 ## [0.21.0] — 2026-06-02
 ### Added
 - **relid check + «Μηδενισμός relid»** on the admin invoice page: a per-line

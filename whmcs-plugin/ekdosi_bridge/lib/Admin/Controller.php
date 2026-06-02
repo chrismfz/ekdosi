@@ -55,14 +55,6 @@ class Controller
     </a>
 </p>
 <hr>
-<p class="text-muted">Ή επιθεώρησε ένα συγκεκριμένο τιμολόγιο:</p>
-<form action="{$link}&action=show" method="POST">
-    <div class="form-inline">
-        <input class="form-control" name="invoiceid" placeholder="Invoice ID (e.g. 12345)" type="text" required>
-        <button class="btn btn-default" type="submit">Inspect</button>
-    </div>
-</form>
-<hr>
 <h3>Παραστατικά σε τρίτους (timologia v2)</h3>
 <p>Own routing tables: {$tpStatus}</p>
 <p class="text-muted">{$legacyNote}</p>
@@ -287,10 +279,22 @@ EOF;
         $from = ($page - 1) * $perPage + 1;
         $to = min($page * $perPage, $total);
 
+        // Jump-by-ID: reach a specific invoice even when it's outside the current
+        // status/period filter (an old #12345 that doesn't show in «εβδομάδα»).
+        // Same target as a row's «Άνοιγμα» — one door to the per-invoice detail,
+        // so the standalone landing form is no longer needed.
+        $jump = '<form action="'.$link.'&action=show" method="POST" class="form-inline" style="margin:0 0 10px">'
+            .'<div class="input-group" style="max-width:340px">'
+            .'<input class="form-control input-sm" name="invoiceid" placeholder="Μετάβαση σε τιμολόγιο #… (και εκτός φίλτρου)" type="text" required>'
+            .'<span class="input-group-btn"><button class="btn btn-sm btn-default" type="submit">'
+            .'<i class="fa fa-search"></i> Επιθεώρηση</button></span>'
+            .'</div></form>';
+
         return <<<EOF
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <h2>Τιμολόγια WHMCS → Ekdosi</h2>
 {$bridgeWarn}
+{$jump}
 {$periodTabs}
 {$statusTabs}
 <p class="text-muted">Εμφάνιση {$from}–{$to} από {$total}.</p>
