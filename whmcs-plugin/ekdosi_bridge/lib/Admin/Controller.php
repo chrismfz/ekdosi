@@ -224,6 +224,12 @@ EOF;
         // from their WHMCS custom field, per client, in one batch.
         $wantsInvoice = $this->wantsInvoiceByClient($userIds);
 
+        // relid warning per invoice (ONE batch query) — ⚠ N links straight to the
+        // relid manager (relidCheck), the same one Inspect / manage-invoice use.
+        $relidCounts = RelidInspector::activeCountsForInvoices(
+            $invoices->pluck('id')->map(static fn ($i) => (int) $i)->all()
+        );
+
         $token = $this->csrfField();
         $rows = '';
         foreach ($invoices as $inv) {
@@ -267,6 +273,12 @@ EOF;
 
             $kind = $this->kindCell($wantsInvoice[(int) $inv->userid] ?? null);
 
+            $relidN = $relidCounts[$id] ?? 0;
+            $relidCell = $relidN > 0
+                ? '<a href="'.$link.'&action=relidCheck&invoiceid='.$id.'" class="label label-warning" '
+                    .'title="'.$relidN.' γραμμές με ενεργό relid — δες/μηδένισε πριν το Mark Paid">⚠ '.$relidN.'</a>'
+                : '<span class="text-muted">—</span>';
+
             $rows .= '<tr>'
                 .'<td><a href="'.$invHref.'">#'.$id.'</a></td>'
                 .'<td>'.htmlspecialchars((string) $inv->date).'</td>'
@@ -277,6 +289,7 @@ EOF;
                 .'<td>'.$badge.'</td>'
                 .'<td>'.$invcode.'</td>'
                 .'<td>'.$mark.'</td>'
+                .'<td>'.$relidCell.'</td>'
                 .'<td class="text-right">'.$action.'</td>'
                 .'</tr>';
         }
@@ -309,7 +322,7 @@ EOF;
 <table class="table table-striped table-condensed">
   <thead><tr>
     <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th>Τρίτος (δικαιούχος)</th><th>Είδος</th>
-    <th class="text-right">Σύνολο</th><th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th></th>
+    <th class="text-right">Σύνολο</th><th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th>relid</th><th></th>
   </tr></thead>
   <tbody>{$rows}</tbody>
 </table>
@@ -836,6 +849,26 @@ EOF;
         // <input name="token">; check_token() in the handlers below
         // validates it. Without this, a logged-in admin could be
         // tricked (CSRF) into pushing or resetting arbitrary invoices.
+        // relid (third-party auto-renew) — the SAME powerful manager as the
+        // native manage-invoice sidebar, surfaced here so Inspect is the one
+        // unified per-invoice view (ekdosi state + send + legacy + status + relid).
+        $relidItems = RelidInspector::items($invoiceId);
+        $relidActive = RelidInspector::activeCount($relidItems);
+        $relidRenewed = RelidInspector::alreadyRenewedCount($relidItems);
+        $relidLink = htmlspecialchars($link.'&action=relidCheck&invoiceid='.$invoiceId);
+        if ($relidActive > 0) {
+            $cls = $relidRenewed > 0 ? 'danger' : 'warning';
+            $extra = $relidRenewed > 0 ? ' — '.$relidRenewed.' ήδη ανανεωμένες!' : '';
+            $relidBlock = '<p><span class="label label-'.$cls.'" '
+                .'title="Με Mark Paid το WHMCS θα (ξανα)ανανεώσει αυτές τις γραμμές">⚠ '
+                .$relidActive.' γραμμές με relid'.$extra.'</span> '
+                .'<a href="'.$relidLink.'" class="btn btn-default btn-sm">'
+                .'<i class="fa fa-list-ol"></i> Έλεγχος relid</a></p>';
+        } else {
+            $relidBlock = '<p><span class="label label-success" title="Καμία γραμμή με ενεργό relid">relid: καθαρό</span> '
+                .'<a href="'.$relidLink.'" class="btn btn-link btn-sm">λεπτομέρειες</a></p>';
+        }
+
         $token = $this->csrfField();
         $actions = '<form action="'.$link.'&action=push" method="POST" style="display:inline-block; margin-right:8px;">'
             .$token
@@ -856,6 +889,8 @@ EOF;
 <p>ΜΑΡΚ (ekdosi / AADE): {$markLabel}</p>
 <p>Τιμολογήθηκε στη legacy εφαρμογή (tblinvoices.invoiced): {$legacyLabel}</p>
 {$statusBlock}
+<p><strong>relid (αυτόματη ανανέωση WHMCS):</strong></p>
+{$relidBlock}
 <hr>
 <p>{$actions}</p>
 EOF;

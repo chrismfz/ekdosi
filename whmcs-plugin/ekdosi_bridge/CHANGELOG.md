@@ -10,6 +10,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-06-02
+### Added
+- **relid surfaced everywhere — the «unify» pass.**
+  - **Inspect (`action=show`) is now the one rich per-invoice view:** it gained
+    the relid block (⚠ N γραμμές με relid / «καθαρό» + «Έλεγχος relid» link to the
+    relidCheck manager), alongside the ekdosi ΜΑΡΚ/ΤΠΥ state, the legacy-filed
+    resolution, the live ekdosi status, and Send/Reset — i.e. everything the
+    native manage-invoice sidebar shows, in one place.
+  - **Invoice list gained a «relid» column:** ⚠ N (warning) that links straight
+    to the relid manager, «—» when clean. Computed in ONE batch query for the
+    whole page (`RelidInspector::activeCountsForInvoices`) so it's cheap across
+    Εξοφλημένα/Ανεξόφλητα/Όλα.
+
 ## [0.23.0] — 2026-06-02
 ### Added
 - **Self-healing schema guard (`lib/SchemaGuard.php`).** The schema steps that
