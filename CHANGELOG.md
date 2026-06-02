@@ -32,6 +32,20 @@ they merge.
   Λοιπές). Numbering reuses `InvoiceNumberer` unchanged (a delivery series is
   just a 9.x `invoice_types` row). No UI yet (D2 = submit+form, D3 = lifecycle).
   `DeliveryCodesTest` + `DeliveryNoteModelTest`. **Deploy:** `php artisan migrate`.
+- **Ψηφιακή Διακίνηση — myDATA submitter (Phase D2, partial)**:
+  `App\Services\Delivery\DeliveryNoteSubmitter` files a value-less Δελτίο
+  Αποστολής (9.x) via the SAME `SendInvoices` path as invoices —
+  `buildAadeDeliveryNote()` (Issuer + delivery `InvoiceHeader` with
+  `isDeliveryNote=true` / `movePurpose` / dispatch / vehicle /
+  `otherDeliveryNoteHeader` loading+delivery addresses + GR-rule recipient
+  counterpart) + value-less lines (`quantity` + `measurementUnit` + `netValue=0`
+  + `vatCategory=8` + `vatAmount=0`) + an all-zero `InvoiceSummary`;
+  `previewXml()` for dry-run; `submit()` persists the MARK/qrUrl into the note's
+  guarded cache (`mydata_*` + `delivery_state='registered'`) and a
+  `delivery_marks` INSERT audit row, idempotent. Self-contained (the proven
+  invoice submitter is untouched). Line/summary shape grounded in firebed's 9.3
+  reference payload — **flagged for AADE sandbox validation** before go-live.
+  `DeliveryNoteSubmitterTest` (build/previewXml + mock-Guzzle submit happy-path).
 - **Λογαριασμοί (ΕΓΛΣ) + νέο group «Λογιστικά»** — a LIGHT, indicative Greek
   chart-of-accounts layer (`App\Support\Accounting\ChartOfAccounts`): the ΕΓΛΣ
   group accounts we reference + a default `category1_x`/`category2_x → account`
