@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Quotes\Schemas;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Filament\Support\PickerOptions;
 use App\Filament\Support\VatRateOptions;
 use App\Models\VatCategory;
 use Filament\Facades\Filament;
@@ -49,17 +50,10 @@ class QuoteForm
                     Select::make('customer_id')
                         ->label('Πελάτης')
                         ->searchable()
-                        ->preload(false)
-                        ->getSearchResultsUsing(fn (string $search) => Customer::query()
-                            ->where('company_id', Filament::getTenant()?->getKey())
-                            ->where(fn ($q) => $q
-                                ->where('name', 'like', "%{$search}%")
-                                ->orWhere('afm', 'like', "%{$search}%"))
-                            ->orderBy('name')
-                            ->limit(50)
-                            ->get()
-                            ->mapWithKeys(fn ($c) => [$c->id => $c->name.($c->afm ? ' ('.$c->afm.')' : '')])
-                            ->toArray())
+                        // Favourites + most-billed shown on OPEN; typing falls
+                        // through to the search closure (shared with InvoiceForm).
+                        ->options(fn () => PickerOptions::favouriteCustomerOptions())
+                        ->getSearchResultsUsing(fn (string $search) => PickerOptions::searchCustomerOptions($search))
                         ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->find($value))->name)
@@ -128,18 +122,10 @@ class QuoteForm
                             Select::make('product_id')
                                 ->label('Προϊόν / Υπηρεσία')
                                 ->searchable()
-                                ->preload(false)
-                                ->getSearchResultsUsing(fn (string $search) => Product::query()
-                                    ->where('company_id', Filament::getTenant()?->getKey())
-                                    ->where('is_active', true)
-                                    ->where(fn ($q) => $q
-                                        ->where('description_short', 'like', "%{$search}%")
-                                        ->orWhere('sku', 'like', "%{$search}%")
-                                        ->orWhere('barcode', 'like', "%{$search}%"))
-                                    ->orderBy('description_short')
-                                    ->limit(50)
-                                    ->pluck('description_short', 'id')
-                                    ->toArray())
+                                // Favourites + most-sold shown on OPEN; typing
+                                // falls through to the search closure (shared).
+                                ->options(fn () => PickerOptions::favouriteProductOptions())
+                                ->getSearchResultsUsing(fn (string $search) => PickerOptions::searchProductOptions($search))
                                 ->getOptionLabelUsing(fn ($value) => optional(Product::query()
                                     ->where('company_id', Filament::getTenant()?->getKey())
                                     ->find($value))->description_short)

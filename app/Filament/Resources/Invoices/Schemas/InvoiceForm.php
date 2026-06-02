@@ -11,6 +11,7 @@ use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Filament\Support\PickerOptions;
 use App\Filament\Support\VatRateOptions;
 use App\Support\MyData\Codes;
 use App\Support\MyData\ReverseCharge;
@@ -78,7 +79,7 @@ class InvoiceForm
                     Select::make('invoice_type_id')
                         ->label('Είδος Παραστατικού')
                         ->required()
-                        ->options(fn () => static::invoiceTypeOptions())
+                        ->options(fn () => PickerOptions::invoiceTypeOptions())
                         ->searchable()
                         ->preload()
                         ->live()
@@ -125,8 +126,8 @@ class InvoiceForm
                         ->searchable()
                         // Favourites + most-billed shown on OPEN (before typing);
                         // typing falls through to the search closure below.
-                        ->options(fn () => static::favouriteCustomerOptions())
-                        ->getSearchResultsUsing(fn (string $search) => static::searchCustomerOptions($search))
+                        ->options(fn () => PickerOptions::favouriteCustomerOptions())
+                        ->getSearchResultsUsing(fn (string $search) => PickerOptions::searchCustomerOptions($search))
                         ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->find($value))->name)
@@ -238,8 +239,8 @@ class InvoiceForm
                                 ->searchable()
                                 // Favourites + most-sold shown on OPEN; typing
                                 // falls through to the search closure.
-                                ->options(fn () => static::favouriteProductOptions())
-                                ->getSearchResultsUsing(fn (string $search) => static::searchProductOptions($search))
+                                ->options(fn () => PickerOptions::favouriteProductOptions())
+                                ->getSearchResultsUsing(fn (string $search) => PickerOptions::searchProductOptions($search))
                                 ->getOptionLabelUsing(fn ($value) => optional(Product::query()
                                     ->where('company_id', Filament::getTenant()?->getKey())
                                     ->find($value))->description_short)
@@ -411,124 +412,6 @@ class InvoiceForm
                         ->helperText('Υποχρεωτικό όταν υπάρχει ποσό παρακράτησης.'),
                 ]),
         ]);
-    }
-
-    /* ===================== Picker option providers ===================== */
-
-    /**
-     * Invoice-type options for the header picker, favourites first then
-     * most-used (invcount, the per-type running counter, is a good proxy).
-     * Bounded by show_on_menu so retired types stay hidden. A ⭐ prefix
-     * makes the pinned ones obvious.
-     *
-     * @return array<int, string>
-     */
-    public static function invoiceTypeOptions(): array
-    {
-        return InvoiceType::query()
-            ->where('company_id', Filament::getTenant()?->getKey())
-            ->where('show_on_menu', true)
-            ->orderByDesc('is_favorite')
-            ->orderByDesc('invcount')
-            ->orderBy('code')
-            ->get()
-            ->mapWithKeys(fn ($t) => [$t->id => ($t->is_favorite ? '⭐ ' : '').$t->code.' — '.$t->name])
-            ->toArray();
-    }
-
-    /**
-     * Customers shown when the picker opens (no search yet): favourites
-     * first, then the most-billed, capped so we never preload thousands.
-     *
-     * @return array<int, string>
-     */
-    public static function favouriteCustomerOptions(): array
-    {
-        return Customer::query()
-            ->where('company_id', Filament::getTenant()?->getKey())
-            ->withCount('invoices')
-            ->orderByDesc('is_favorite')
-            ->orderByDesc('invoices_count')
-            ->orderBy('name')
-            ->limit(30)
-            ->get()
-            ->mapWithKeys(fn ($c) => [$c->id => static::customerLabel($c)])
-            ->toArray();
-    }
-
-    /**
-     * Customer search-on-type — same name/AFM match as before, but with
-     * favourites biased to the top of the results.
-     *
-     * @return array<int, string>
-     */
-    public static function searchCustomerOptions(string $search): array
-    {
-        return Customer::query()
-            ->where('company_id', Filament::getTenant()?->getKey())
-            ->where(fn ($q) => $q
-                ->where('name', 'like', "%{$search}%")
-                ->orWhere('afm', 'like', "%{$search}%"))
-            ->orderByDesc('is_favorite')
-            ->orderBy('name')
-            ->limit(50)
-            ->get()
-            ->mapWithKeys(fn ($c) => [$c->id => static::customerLabel($c)])
-            ->toArray();
-    }
-
-    private static function customerLabel(Customer $c): string
-    {
-        return ($c->is_favorite ? '⭐ ' : '').$c->name.($c->afm ? ' ('.$c->afm.')' : '');
-    }
-
-    /**
-     * Products/services shown when a line picker opens (no search yet):
-     * favourites first, then most-sold, active only, capped.
-     *
-     * @return array<int, string>
-     */
-    public static function favouriteProductOptions(): array
-    {
-        return Product::query()
-            ->where('company_id', Filament::getTenant()?->getKey())
-            ->where('is_active', true)
-            ->withCount('invoiceLines')
-            ->orderByDesc('is_favorite')
-            ->orderByDesc('invoice_lines_count')
-            ->orderBy('description_short')
-            ->limit(30)
-            ->get()
-            ->mapWithKeys(fn ($p) => [$p->id => static::productLabel($p)])
-            ->toArray();
-    }
-
-    /**
-     * Product search-on-type — same description/sku/barcode match as
-     * before, favourites biased to the top.
-     *
-     * @return array<int, string>
-     */
-    public static function searchProductOptions(string $search): array
-    {
-        return Product::query()
-            ->where('company_id', Filament::getTenant()?->getKey())
-            ->where('is_active', true)
-            ->where(fn ($q) => $q
-                ->where('description_short', 'like', "%{$search}%")
-                ->orWhere('sku', 'like', "%{$search}%")
-                ->orWhere('barcode', 'like', "%{$search}%"))
-            ->orderByDesc('is_favorite')
-            ->orderBy('description_short')
-            ->limit(50)
-            ->get()
-            ->mapWithKeys(fn ($p) => [$p->id => static::productLabel($p)])
-            ->toArray();
-    }
-
-    private static function productLabel(Product $p): string
-    {
-        return ($p->is_favorite ? '⭐ ' : '').$p->description_short;
     }
 
     /* ===================== Inline product create ===================== */

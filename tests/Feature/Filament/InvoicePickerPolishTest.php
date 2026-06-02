@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
 use App\Filament\Resources\Invoices\Schemas\InvoiceForm;
+use App\Filament\Support\PickerOptions;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DistributionAim;
@@ -100,10 +101,10 @@ class InvoicePickerPolishTest extends TestCase
             'invcount' => 50, 'show_on_menu' => false,
         ]);
 
-        $keys = array_keys(InvoiceForm::invoiceTypeOptions());
+        $keys = array_keys(PickerOptions::invoiceTypeOptions());
 
         $this->assertSame([$tim->id, $del->id, $apy->id], $keys);
-        $this->assertStringStartsWith('⭐ ', InvoiceForm::invoiceTypeOptions()[$tim->id]);
+        $this->assertStringStartsWith('⭐ ', PickerOptions::invoiceTypeOptions()[$tim->id]);
     }
 
     public function test_customer_options_favourites_then_most_billed(): void
@@ -121,7 +122,7 @@ class InvoicePickerPolishTest extends TestCase
         $this->makeInvoice($type, $quiet);
         // $fav has zero invoices but is pinned → must still be first.
 
-        $keys = array_keys(InvoiceForm::favouriteCustomerOptions());
+        $keys = array_keys(PickerOptions::favouriteCustomerOptions());
 
         $this->assertSame([$fav->id, $busy->id, $quiet->id], $keys);
     }
@@ -145,7 +146,7 @@ class InvoicePickerPolishTest extends TestCase
         $this->makeLine($invoice, $rare);
         $this->makeLine($invoice, $inactive); // inactive must be excluded anyway
 
-        $keys = array_keys(InvoiceForm::favouriteProductOptions());
+        $keys = array_keys(PickerOptions::favouriteProductOptions());
 
         $this->assertSame([$fav->id, $sold->id, $rare->id], $keys);
         $this->assertNotContains($inactive->id, $keys);
@@ -158,7 +159,7 @@ class InvoicePickerPolishTest extends TestCase
         $fav = $this->makeProduct($cat, 'Beta Hosting', favorite: true);
         $this->makeProduct($cat, 'Gamma Hosting', active: false);
 
-        $keys = array_keys(InvoiceForm::searchProductOptions('Hosting'));
+        $keys = array_keys(PickerOptions::searchProductOptions('Hosting'));
 
         // Favourite first despite alphabetical tie-break; inactive absent.
         $this->assertSame([$fav->id, $plain->id], $keys);
