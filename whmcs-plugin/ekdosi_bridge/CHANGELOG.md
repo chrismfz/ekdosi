@@ -10,6 +10,58 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-06-02
+### Changed
+- **show() reads tblinvoices once** (review NIT). The fetched invoice row is now
+  passed into `ekdosiSummaryCompact()` and the userid into `relidSection()`,
+  instead of each re-querying it — one row read per page render instead of three.
+- **Live status call fails fast** (review NIT). `getInvoiceStatus()` now uses
+  short cURL timeouts (connect 2s / total 6s) instead of the default 20s/5s, so a
+  slow or down ekdosi degrades to the friendly «status query failed» note quickly
+  instead of hanging the unified invoice page. `httpRequest()` gained optional
+  `$timeout`/`$connectTimeout` params (default 20/5 — push/write-back unchanged).
+
+## [0.29.0] — 2026-06-02
+### Changed
+- **SchemaGuard skips DDL on the hot admin path** (review follow-up). `ensureSilently()`
+  now runs a single cheap `information_schema` probe first and only falls through to
+  the `CREATE/ALTER IF NOT EXISTS` steps when a table/column is actually missing (or
+  `tblinvoices.invoiced` is still BIGINT). Previously every admin page load issued ~4
+  DDL statements — which on MySQL/MariaDB implicitly COMMIT any open transaction and
+  add needless load. Common case is now one metadata SELECT, no DDL. `_activate()`
+  still force-runs `ensure()`.
+
+## [0.28.0] — 2026-06-02
+### Added
+- **«Επαναφορά relid» (auto-resolve + preview)** — restore the link on a line
+  whose relid was zeroed by mistake. Zeroed lines now get a checkbox + a preview
+  of the resolved target in the «Σύνδεση» column («→ domain `#id`»), shown ONLY
+  when the line resolves to exactly one of the client's domains/services
+  (`RelidInspector::restoreCandidate`: domain-token-from-description + userid
+  match). The «Επαναφορά relid» button re-resolves server-side (never trusts the
+  client), applies only to still-`relid=0` lines, and skips/report ambiguous
+  ones. Audited. Zeroing stays one form with two buttons (Μηδενισμός / Επαναφορά
+  via `formaction`); select-all toggles only the active (zero) group.
+
+## [0.27.0] — 2026-06-02
+### Added
+- **relid table: «Λήξη (registry)» column** — for domain lines, the real registry
+  `expirydate` next to the renamed «Επόμενη χρέωση (WHMCS)» (`nextduedate`), so
+  the operator sees when a domain actually expires vs what WHMCS will bill (the
+  «already renewed?» judgement). Hosting has no registry expiry → «—».
+  (`RelidInspector::items` now also returns `expiry`.)
+
+## [0.26.0] — 2026-06-02
+### Changed
+- **ONE unified invoice manager (`action=show`).** Folded the separate relid
+  manager into the invoice page: `show` now renders the ekdosi headline
+  (ΜΑΡΚ/ΤΠΥ + «Τιμολογήθηκε στη legacy» + «Αποστολή»), the live ekdosi status,
+  AND the full per-line relid table + «Μηδενισμός relid» — all on one page. No
+  more «Πλήρες Inspect» hop. The relid table body moved to a private
+  `relidSection()`; `relidCheck` is now a thin alias → `show` (old bookmarks
+  still work). Every relid entry point (invoice-list column, manage-invoice
+  «Έλεγχος relid», relidReset back-link) lands on the unified page.
+
 ## [0.25.0] — 2026-06-02
 ### Added
 - **ekdosi headline on the relid manager (`action=relidCheck`).** The relid

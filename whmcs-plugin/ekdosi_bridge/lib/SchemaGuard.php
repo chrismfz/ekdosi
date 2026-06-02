@@ -104,13 +104,60 @@ class SchemaGuard
     /**
      * Page-load entry: heal silently, never let a schema hiccup break the admin
      * page. Notes are dropped here (the activate path surfaces them instead).
+     *
+     * Hot-path cheap: a single information_schema probe runs first; only when
+     * something is actually missing (or tblinvoices.invoiced is still BIGINT) do
+     * we fall through to ensure() and its CREATE/ALTER. So the common case
+     * issues ONE metadata SELECT and NO DDL — important because DDL implicitly
+     * commits any open transaction.
      */
     public static function ensureSilently(): void
     {
         try {
+            if (self::schemaLooksReady()) {
+                return;
+            }
             self::ensure();
         } catch (Throwable $e) {
             // Last-resort guard — ensure() already swallows per-step failures.
+        }
+    }
+
+    /**
+     * Cheap, no-DDL probe: are our three tables + the invcode column present,
+     * and is tblinvoices.invoiced already non-BIGINT? When all true we can skip
+     * ensure() entirely (no CREATE/ALTER, hence no implicit COMMIT on the hot
+     * admin path). Any uncertainty (probe error, missing object, BIGINT column)
+     * → false → ensure() runs (itself idempotent + privilege-safe).
+     */
+    private static function schemaLooksReady(): bool
+    {
+        try {
+            $marks = InvoiceMarkStore::TABLE;
+            $contacts = ThirdPartyStore::CONTACTS;
+            $routing = ThirdPartyStore::ROUTING;
+
+            $row = Capsule::selectOne(
+                'SELECT
+                    (SELECT COUNT(*) FROM information_schema.TABLES
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?)) AS tbls,
+                    (SELECT COUNT(*) FROM information_schema.COLUMNS
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = \'invcode\') AS has_invcode,
+                    (SELECT LOWER(DATA_TYPE) FROM information_schema.COLUMNS
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = \'tblinvoices\' AND COLUMN_NAME = \'invoiced\') AS invoiced_type',
+                [$marks, $contacts, $routing, $marks]
+            );
+            if ($row === null) {
+                return false;
+            }
+
+            // invoiced absent ('' ) is fine — nothing to restore. Only BIGINT
+            // forces the heavy ensure() branch.
+            return (int) $row->tbls === 3
+                && (int) $row->has_invcode === 1
+                && (string) ($row->invoiced_type ?? '') !== 'bigint';
+        } catch (Throwable $e) {
+            return false;
         }
     }
 }

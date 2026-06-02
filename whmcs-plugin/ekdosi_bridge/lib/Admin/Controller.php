@@ -275,7 +275,7 @@ EOF;
 
             $relidN = $relidCounts[$id] ?? 0;
             $relidCell = $relidN > 0
-                ? '<a href="'.$link.'&action=relidCheck&invoiceid='.$id.'" class="label label-warning" '
+                ? '<a href="'.$link.'&action=show&invoiceid='.$id.'" class="label label-warning" '
                     .'title="'.$relidN.' γραμμές με ενεργό relid — δες/μηδένισε πριν το Mark Paid">⚠ '.$relidN.'</a>'
                 : '<span class="text-muted">—</span>';
 
@@ -774,9 +774,16 @@ EOF;
 EOF;
     }
 
+    /**
+     * THE unified per-invoice manager — one page with everything: the ekdosi
+     * headline (ΜΑΡΚ/ΤΠΥ + «Τιμολογήθηκε στη legacy» + «Αποστολή»), the live
+     * ekdosi status, and the full per-line relid manager. Reached from the
+     * landing inspect box, the invoice-list jump-box / «Άνοιγμα» / relid column,
+     * and the native manage-invoice «Άνοιγμα ekdosi» + «Έλεγχος relid» buttons.
+     */
     public function show(array $vars): string
     {
-        $link = htmlspecialchars($vars['modulelink']);
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
         $invoiceId = (int) ($_POST['invoiceid'] ?? $_GET['invoiceid'] ?? 0);
         if ($invoiceId <= 0) {
             return $this->errorPage($link, 'Invalid invoice id.');
@@ -787,112 +794,43 @@ EOF;
             return $this->errorPage($link, "Invoice #{$invoiceId} not found in tblinvoices.");
         }
 
-        // Our AADE MARK (ekdosi) — from our own table, never tblinvoices.invoiced.
-        $mark = InvoiceMarkStore::get($invoiceId);
-        $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
-        if ($mark === null || $mark === '') {
-            $markLabel = '<span class="label label-default">not filed yet</span>';
-        } else {
-            $tpy = ($invcode !== null && $invcode !== '')
-                ? ' ΤΠΥ '.htmlspecialchars($invcode).' ·'
-                : '';
-            $markLabel = '<span class="label label-success">filed ·'.$tpy.' MARK '.htmlspecialchars($mark).'</span>';
-        }
+        $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
 
+        // ekdosi headline (ΜΑΡΚ/ΤΠΥ + «Τιμολογήθηκε στη legacy» + «Αποστολή») —
+        // the single shared renderer; reuses the row we already fetched.
+        $summary = $this->ekdosiSummaryCompact($invoiceId, $link, $invoice);
+
+        // Live ekdosi status. Short timeouts (see getInvoiceStatus) so a slow /
+        // down ekdosi fails fast with a friendly note instead of hanging the page.
         $client = EkdosiClient::fromConfig();
-
-        // Legacy flag — READ-ONLY visibility during the dual-run. When the legacy
-        // app filed it, tblinvoices.invoiced holds the legacy ekdosi INVOICE_ID
-        // (== ekdosi invoices.legacy_id). Resolve it to the actual ΤΠΥ + ΜΑΡΚ
-        // deterministically — works for every imported invoice, no re-import.
-        // (Negative values like -1000/-333 are sentinels, not legacy ids.)
-        $legacyInvoiced = (int) ($invoice->invoiced ?? 0);
-        if ($legacyInvoiced <= 0) {
-            $legacyLabel = '<span class="label label-default">όχι</span>';
-        } else {
-            $legacyLabel = '<span class="label label-info">ναι (legacy INVOICE_ID='.htmlspecialchars((string) $legacyInvoiced).')</span>';
-            if ($client !== null && ($mark === null || $mark === '')) {
-                $resp = $client->invoicesByLegacyId([$legacyInvoiced]);
-                $hit = $resp['data']['invoices'][(string) $legacyInvoiced] ?? null;
-                if (is_array($hit)) {
-                    $hInvcode = (string) ($hit['ekdosi_invcode'] ?? '');
-                    $hMark = (string) ($hit['mydata_mark'] ?? '');
-                    $hState = (string) ($hit['mydata_state'] ?? '');
-                    $bits = [];
-                    if ($hInvcode !== '') {
-                        $bits[] = 'ΤΠΥ '.htmlspecialchars($hInvcode);
-                    }
-                    if ($hMark !== '') {
-                        $bits[] = 'ΜΑΡΚ '.htmlspecialchars($hMark);
-                    }
-                    if ($hState !== '') {
-                        $bits[] = htmlspecialchars($hState);
-                    }
-                    if ($bits !== []) {
-                        $legacyLabel .= ' <span class="label label-success">'.implode(' · ', $bits).' (ekdosi)</span>';
-                    }
-                }
-            }
-        }
-
-        // Pull live status from ekdosi.
-        $statusBlock = '<p class="text-muted">Ekdosi status: <em>not queried</em></p>';
         if ($client !== null) {
-            $statusResp = $client->getInvoiceStatus($invoiceId);
-            $statusBlock = $this->renderStatusBlock($statusResp);
+            $statusBlock = $this->renderStatusBlock($client->getInvoiceStatus($invoiceId));
         } else {
             $statusBlock = '<div class="alert alert-warning">'
                 .'Bridge not configured: set base URL / slug / secret on the module config page.</div>';
         }
 
-        // CSRF token: WHMCS's generate_token('plain') emits a hidden
-        // <input name="token">; check_token() in the handlers below
-        // validates it. Without this, a logged-in admin could be
-        // tricked (CSRF) into pushing or resetting arbitrary invoices.
-        // relid (third-party auto-renew) — the SAME powerful manager as the
-        // native manage-invoice sidebar, surfaced here so Inspect is the one
-        // unified per-invoice view (ekdosi state + send + legacy + status + relid).
-        $relidItems = RelidInspector::items($invoiceId);
-        $relidActive = RelidInspector::activeCount($relidItems);
-        $relidRenewed = RelidInspector::alreadyRenewedCount($relidItems);
-        $relidLink = htmlspecialchars($link.'&action=relidCheck&invoiceid='.$invoiceId);
-        if ($relidActive > 0) {
-            $cls = $relidRenewed > 0 ? 'danger' : 'warning';
-            $extra = $relidRenewed > 0 ? ' — '.$relidRenewed.' ήδη ανανεωμένες!' : '';
-            $relidBlock = '<p><span class="label label-'.$cls.'" '
-                .'title="Με Mark Paid το WHMCS θα (ξανα)ανανεώσει αυτές τις γραμμές">⚠ '
-                .$relidActive.' γραμμές με relid'.$extra.'</span> '
-                .'<a href="'.$relidLink.'" class="btn btn-default btn-sm">'
-                .'<i class="fa fa-list-ol"></i> Έλεγχος relid</a></p>';
-        } else {
-            $relidBlock = '<p><span class="label label-success" title="Καμία γραμμή με ενεργό relid">relid: καθαρό</span> '
-                .'<a href="'.$relidLink.'" class="btn btn-link btn-sm">λεπτομέρειες</a></p>';
-        }
+        // The per-line relid manager, embedded here so this is the ONE page.
+        $relidSection = $this->relidSection($invoiceId, $link, (int) ($invoice->userid ?? 0));
 
-        $token = $this->csrfField();
-        $actions = '<form action="'.$link.'&action=push" method="POST" style="display:inline-block; margin-right:8px;">'
-            .$token
+        // Reset (rare/destructive) — «Αποστολή» lives in the summary header.
+        $reset = '<form action="'.$link.'&action=reset" method="POST" style="display:inline-block;">'
+            .$this->csrfField()
             .'<input type="hidden" name="invoiceid" value="'.$invoiceId.'">'
-            .'<button class="btn btn-primary" type="submit">Send to ekdosi for review</button>'
-            .'</form>'
-            .'<form action="'.$link.'&action=reset" method="POST" style="display:inline-block;">'
-            .$token
-            .'<input type="hidden" name="invoiceid" value="'.$invoiceId.'">'
-            .'<button class="btn btn-warning" type="submit" '
-            .'onclick="return confirm(\'Forget the ekdosi MARK for invoice #'.$invoiceId.'? '
-            .'Use this only after cancelling the AADE filing first.\');">Reset to unfiled</button>'
-            .'</form>';
+            .'<button class="btn btn-warning btn-sm" type="submit" '
+            .'onclick="return confirm(\'Διαγραφή του ekdosi ΜΑΡΚ για το #'.$invoiceId.'; Μόνο αφού ακυρωθεί πρώτα στο AADE.\');">'
+            .'Reset to unfiled</button></form>';
 
         return <<<EOF
-<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
-<h2>Invoice #{$invoiceId}</h2>
-<p>ΜΑΡΚ (ekdosi / AADE): {$markLabel}</p>
-<p>Τιμολογήθηκε στη legacy εφαρμογή (tblinvoices.invoiced): {$legacyLabel}</p>
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a>
+   <a class="btn btn-default" href="{$invHref}">Invoice #{$invoiceId} στο WHMCS</a></p>
+<h2>Διαχείριση τιμολογίου #{$invoiceId}</h2>
+{$summary}
 {$statusBlock}
-<p><strong>relid (αυτόματη ανανέωση WHMCS):</strong></p>
-{$relidBlock}
 <hr>
-<p>{$actions}</p>
+{$relidSection}
+<hr>
+<p>{$reset}</p>
 EOF;
     }
 
@@ -1268,18 +1206,12 @@ EOF;
      * Compact ekdosi headline for one invoice — the same info the native
      * manage-invoice sidebar shows: ΜΑΡΚ/ΤΠΥ (ekdosi/AADE), the legacy-filed
      * resolution, and a «Αποστολή στο ekdosi» button (only while not yet filed
-     * at ekdosi). Surfaced on the relid manager so that page isn't a dead-end —
-     * the operator sees the invoice's ekdosi state right there. Cheap: no
-     * live-status round-trip (that fuller view lives on Inspect / action=show,
-     * linked from here).
+     * at ekdosi). Rendered at the top of the unified invoice page. Cheap: no
+     * live-status round-trip (the fuller status block does that). The caller
+     * passes the already-fetched tblinvoices row to avoid a re-read.
      */
-    private function ekdosiSummaryCompact(int $invoiceId, string $link): string
+    private function ekdosiSummaryCompact(int $invoiceId, string $link, object $invoice): string
     {
-        $invoice = Capsule::table('tblinvoices')->find($invoiceId);
-        if (! $invoice) {
-            return '';
-        }
-
         $mark = InvoiceMarkStore::get($invoiceId);
         $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
         $filed = $mark !== null && $mark !== '';
@@ -1325,71 +1257,86 @@ EOF;
                 .'<button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-paper-plane"></i> Αποστολή στο ekdosi</button>'
                 .'</form>';
         }
-        $showLink = htmlspecialchars($link.'&action=show&invoiceid='.$invoiceId);
-
         return '<div class="well well-sm" style="margin-bottom:12px">'
             .'<strong>Ekdosi / myDATA:</strong> '.$markLabel.$legacyLabel.$send
-            .' <a class="btn btn-default btn-sm" href="'.$showLink.'" style="margin-left:8px">'
-            .'<i class="fa fa-search"></i> Πλήρες Inspect</a>'
             .'</div>';
     }
 
     /**
-     * Per-line relid inspector + «Μηδενισμός relid» — read the items, show
-     * which ones WHMCS would (re)renew at Mark Paid (relid > 0), flag the ones
-     * already renewed (next due in the future = the double-renewal trap), and
-     * let the operator zero the relid on the ones they pick. Reached from the
-     * Manage Invoice «Έλεγχος relid» button, the invoice list, and Inspect.
+     * relid manager — now folded into the unified invoice page (show). Kept as a
+     * thin alias so existing links/bookmarks (&action=relidCheck) still land on
+     * the one page; new links point straight at &action=show.
      */
     public function relidCheck(array $vars): string
     {
-        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
-        $invoiceId = (int) ($_REQUEST['invoiceid'] ?? 0);
-        if ($invoiceId <= 0) {
-            return $this->errorPage($link, 'Invalid invoice id.');
-        }
+        return $this->show($vars);
+    }
 
+    /**
+     * Per-line relid manager body (warning + table + «Μηδενισμός relid»),
+     * embedded in the unified invoice page (show). Read-only except the
+     * CSRF-protected reset form. Shows which lines WHMCS would (re)renew at Mark
+     * Paid (relid > 0) and flags the ones already renewed (next due in the
+     * future = the double-renewal trap). The safe, audited successor to the
+     * legacy relid_remover.
+     */
+    private function relidSection(int $invoiceId, string $link, int $userId): string
+    {
         $items = RelidInspector::items($invoiceId);
-        $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
-        // Same ekdosi headline as manage-invoice (ΜΑΡΚ/ΤΠΥ/legacy/Αποστολή) so the
-        // relid manager carries the invoice's ekdosi context too.
-        $summary = $this->ekdosiSummaryCompact($invoiceId, $link);
-
         if ($items === []) {
-            return <<<EOF
-<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
-<h3>relid ανά γραμμή — Invoice #{$invoiceId}</h3>
-{$summary}
-<div class="alert alert-info">Invoice #{$invoiceId}: καμία γραμμή.</div>
-<p><a class="btn btn-primary" href="{$invHref}">Back to invoice #{$invoiceId}</a></p>
-EOF;
+            return '<h3>relid (αυτόματη ανανέωση WHMCS)</h3>'
+                .'<div class="alert alert-info">Καμία γραμμή στο τιμολόγιο.</div>';
         }
 
         $active = RelidInspector::activeCount($items);
         $alreadyRenewed = RelidInspector::alreadyRenewedCount($items);
         $today = date('Y-m-d');
 
+        // $userId (the invoice's tblclients id, passed in by show()) re-resolves a
+        // zeroed line's would-be relid against the client's own domains/services.
+
         $rowsHtml = '';
+        $restorable = 0;
         foreach ($items as $it) {
-            $cb = $it['active']
-                ? '<input type="checkbox" class="relid-item" name="item_id[]" value="'.$it['item_id'].'" checked>'
-                : '';
             $typeLabel = $it['service_type'] === 'domain'
                 ? 'Domain'
                 : ($it['service_type'] === 'hosting' ? 'Υπηρεσία' : htmlspecialchars($it['type'] !== '' ? $it['type'] : '—'));
-            $linked = $it['linked'] !== null ? htmlspecialchars($it['linked']) : '—';
             $nextDue = $it['next_due'] !== null ? htmlspecialchars($it['next_due']) : '—';
+            $expiry = $it['expiry'] !== null ? htmlspecialchars($it['expiry']) : '—';
             $relidCell = $it['relid'] > 0 ? (string) $it['relid'] : '—';
-            $rowClass = $it['already_renewed'] ? 'danger' : ($it['active'] ? 'warning' : '');
             $dueBadge = $it['already_renewed']
                 ? ' <span class="label label-danger" title="next due '.$nextDue.' > '.$today.'">ήδη ανανεωμένο</span>'
                 : '';
+
+            if ($it['active']) {
+                // relid > 0 → can be ZEROED (item_id[] group).
+                $cb = '<input type="checkbox" class="relid-item" name="item_id[]" value="'.$it['item_id'].'" checked>';
+                $linkedCell = $it['linked'] !== null ? htmlspecialchars($it['linked']) : '—';
+                $rowClass = $it['already_renewed'] ? 'danger' : 'warning';
+            } else {
+                // relid = 0 → offer a preview-confirmed RESTORE if we can resolve
+                // the line to exactly one of the client's domains/services.
+                $cand = RelidInspector::restoreCandidate($userId, $it);
+                if ($cand !== null) {
+                    $restorable++;
+                    $cb = '<input type="checkbox" class="relid-restore" name="restore_item[]" value="'.$it['item_id'].'">';
+                    $linkedCell = '<span class="text-success" title="Η Επαναφορά θα ξανασυνδέσει αυτή τη γραμμή">→ '
+                        .htmlspecialchars($cand['label']).' <code>#'.$cand['relid'].'</code></span>';
+                    $relidCell = '<span class="text-muted">0 → '.$cand['relid'].'</span>';
+                } else {
+                    $cb = '';
+                    $linkedCell = '<span class="text-muted">—</span>';
+                }
+                $rowClass = '';
+            }
+
             $rowsHtml .= '<tr class="'.$rowClass.'">'
                 .'<td>'.$cb.'</td>'
                 .'<td>'.htmlspecialchars($it['description']).'</td>'
                 .'<td>'.$typeLabel.'</td>'
-                .'<td>'.$linked.'</td>'
+                .'<td>'.$linkedCell.'</td>'
                 .'<td>'.$nextDue.$dueBadge.'</td>'
+                .'<td>'.$expiry.'</td>'
                 .'<td>'.$relidCell.'</td>'
                 .'</tr>';
         }
@@ -1405,27 +1352,32 @@ EOF;
 
         $token = $this->csrfField();
         $resetAction = $link.'&action=relidReset';
+        $restoreAction = $link.'&action=relidRestore';
+        // Restore button only when there's at least one resolvable zeroed line.
+        $restoreBtn = $restorable > 0
+            ? '<button type="submit" class="btn btn-success" formaction="'.$restoreAction.'" '
+                .'onclick="return confirm(\'Επαναφορά relid στις επιλεγμένες γραμμές; Θα ξανασυνδεθούν με το domain/service που εμφανίζεται και το WHMCS θα τις ανανεώνει στο Mark Paid.\');">'
+                .'<i class="fa fa-undo"></i> Επαναφορά relid (επιλεγμένες)</button>'
+            : '';
 
         return <<<EOF
-<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
-<h3>relid ανά γραμμή — Invoice #{$invoiceId}</h3>
-{$summary}
+<h3>relid (αυτόματη ανανέωση WHMCS)</h3>
 {$warning}
-<form method="post" action="{$resetAction}" onsubmit="return confirm('Μηδενισμός relid στις επιλεγμένες γραμμές; Το Mark Paid δεν θα τις ανανεώσει.');">
+<form method="post" action="{$resetAction}">
 {$token}
 <input type="hidden" name="invoiceid" value="{$invoiceId}">
 <table class="table table-condensed">
     <thead><tr>
-        <th>Επιλ.</th><th>Περιγραφή</th><th>Είδος</th><th>Σύνδεση</th><th>Επόμενη λήξη</th><th>relid</th>
+        <th>Επιλ.</th><th>Περιγραφή</th><th>Είδος</th><th>Σύνδεση</th><th>Επόμενη χρέωση (WHMCS)</th><th>Λήξη (registry)</th><th>relid</th>
     </tr></thead>
     <tbody>{$rowsHtml}</tbody>
 </table>
-<button type="button" class="btn btn-default btn-sm relid-select-all">Επιλογή όλων</button>
+<button type="button" class="btn btn-default btn-sm relid-select-all">Επιλογή όλων (ενεργά)</button>
 <button type="button" class="btn btn-default btn-sm relid-select-none">Καμία</button>
-<button type="submit" class="btn btn-danger"><i class="fa fa-eraser"></i> Μηδενισμός relid (επιλεγμένες)</button>
-<a class="btn btn-primary" href="{$invHref}">Back to invoice #{$invoiceId}</a>
+<button type="submit" class="btn btn-danger" onclick="return confirm('Μηδενισμός relid στις επιλεγμένες γραμμές; Το Mark Paid δεν θα τις ανανεώσει.');"><i class="fa fa-eraser"></i> Μηδενισμός relid (επιλεγμένες)</button>
+{$restoreBtn}
 </form>
-<p class="text-muted" style="margin-top:8px">Ο μηδενισμός θέτει <code>relid = 0</code> στις επιλεγμένες γραμμές, ώστε το Mark Paid να μην τις ανανεώσει. Καταγράφεται στο WHMCS activity log.</p>
+<p class="text-muted" style="margin-top:8px">Ο <strong>Μηδενισμός</strong> θέτει <code>relid = 0</code> (το Mark Paid δεν τις ανανεώνει). Η <strong>Επαναφορά</strong> ξανασυνδέει γραμμές με μηδενισμένο relid με το domain/service που εμφανίζεται (μόνο όσες ταιριάζουν μονοσήμαντα). Και τα δύο καταγράφονται στο WHMCS activity log.</p>
 <script>
 (function () {
     function setAll(v) { document.querySelectorAll('.relid-item').forEach(function (c) { c.checked = v; }); }
@@ -1471,14 +1423,97 @@ EOF;
             .implode(',', $itemIds).') — prevents double-renewal at Mark Paid.');
 
         $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
-        $backCheck = $link.'&action=relidCheck&invoiceid='.$invoiceId;
+        $backManager = htmlspecialchars($link.'&action=show&invoiceid='.$invoiceId);
 
         return <<<EOF
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <div class="alert alert-success">Invoice #{$invoiceId}: μηδενίστηκε το relid σε {$updated} γραμμή/ές. Το Mark Paid δεν θα τις ανανεώσει.</div>
 <p>
-    <a class="btn btn-default" href="{$backCheck}">Ξανά έλεγχος relid</a>
-    <a class="btn btn-primary" href="{$invHref}">Back to invoice #{$invoiceId}</a>
+    <a class="btn btn-primary" href="{$backManager}">Επιστροφή στη διαχείριση #{$invoiceId}</a>
+    <a class="btn btn-default" href="{$invHref}">Invoice #{$invoiceId} στο WHMCS</a>
+</p>
+EOF;
+    }
+
+    /**
+     * Restore the relid on selected zeroed lines — the inverse of relidReset,
+     * for a link removed by mistake. The would-be relid is RE-RESOLVED here on
+     * the server (never trusted from the client) via RelidInspector::
+     * restoreCandidate, and applied ONLY to a line that is still relid=0 and
+     * resolves to exactly one of the client's domains/services. Ambiguous /
+     * unresolvable lines are skipped and reported. Audited; never touches
+     * ekdosi/AADE.
+     */
+    public function relidRestore(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage($link);
+        }
+        $invoiceId = (int) ($_POST['invoiceid'] ?? 0);
+        $itemIds = array_values(array_unique(array_filter(
+            array_map('intval', (array) ($_POST['restore_item'] ?? [])),
+            static fn ($v) => $v > 0,
+        )));
+        if ($invoiceId <= 0) {
+            return $this->errorPage($link, 'Invalid invoice id.');
+        }
+        if ($itemIds === []) {
+            return $this->errorPage($link, 'Δεν επιλέχθηκαν γραμμές για επαναφορά.');
+        }
+
+        $invoice = Capsule::table('tblinvoices')->find($invoiceId);
+        if (! $invoice) {
+            return $this->errorPage($link, "Invoice #{$invoiceId} not found in tblinvoices.");
+        }
+        $userId = (int) ($invoice->userid ?? 0);
+
+        // Re-resolve each selected line server-side (don't trust client input).
+        $byId = [];
+        foreach (RelidInspector::items($invoiceId) as $it) {
+            $byId[$it['item_id']] = $it;
+        }
+
+        $restored = 0;
+        $skipped = 0;
+        $applied = [];
+        foreach ($itemIds as $iid) {
+            $it = $byId[$iid] ?? null;
+            $cand = $it !== null ? RelidInspector::restoreCandidate($userId, $it) : null;
+            if ($cand === null) {
+                $skipped++;
+
+                continue;
+            }
+            // Scope to relid=0 so a concurrently-set relid is never clobbered.
+            $n = Capsule::table('tblinvoiceitems')
+                ->where('invoiceid', $invoiceId)
+                ->where('id', $iid)
+                ->where('relid', 0)
+                ->update(['relid' => $cand['relid']]);
+            if ($n > 0) {
+                $restored++;
+                $applied[] = "#{$iid}→{$cand['label']}({$cand['relid']})";
+            } else {
+                $skipped++;
+            }
+        }
+
+        $this->logActivity("EkdosiBridge: relid RESTORED on {$restored} item(s) of invoice #{$invoiceId} "
+            .'('.($applied === [] ? '—' : implode(', ', $applied)).") — {$skipped} skipped (ambiguous/unresolved).");
+
+        $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
+        $backManager = htmlspecialchars($link.'&action=show&invoiceid='.$invoiceId);
+        $skipNote = $skipped > 0
+            ? " ({$skipped} παραλείφθηκαν — ασαφής/ανεπίλυτη αντιστοίχιση· κάν' τες χειροκίνητα στο WHMCS.)"
+            : '';
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<div class="alert alert-success">Invoice #{$invoiceId}: επαναφέρθηκε το relid σε {$restored} γραμμή/ές.{$skipNote}</div>
+<p>
+    <a class="btn btn-primary" href="{$backManager}">Επιστροφή στη διαχείριση #{$invoiceId}</a>
+    <a class="btn btn-default" href="{$invHref}">Invoice #{$invoiceId} στο WHMCS</a>
 </p>
 EOF;
     }
