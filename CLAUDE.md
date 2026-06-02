@@ -356,7 +356,7 @@ verified against the restored prod WHMCS):**
   `AadeFormFill::assign($get,$set,$field,$value,$overwrite)` (never blanks on
   empty AADE value).
 - **Addon invoice list** (plugin): consolidated WHMCS→ekdosi list with date
-  window (μήνας/τρίμηνο/όλα), «Είδος» (τιμολόγιο/απόδειξη), «Τρίτος» resolved
+  window (εβδομάδα/μήνας/τρίμηνο/όλα, default εβδομάδα), «Είδος» (τιμολόγιο/απόδειξη), «Τρίτος» resolved
   LOCALLY from `mod_ekdosi_routing` (`ThirdPartyStore::bucketsForInvoices`,
   shows the beneficiary name) — works for every invoice, no ekdosi/inbox
   dependency. Admin third-party routing is now EDITABLE
