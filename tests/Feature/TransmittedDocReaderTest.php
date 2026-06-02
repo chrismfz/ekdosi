@@ -56,6 +56,9 @@ class TransmittedDocReaderTest extends TestCase
         $this->assertSame('ΑΠΥ 999001', $detail['invcode']);
         $this->assertSame('VALID', $detail['state']);
         $this->assertSame('aade', $detail['source']);
+        // The AADE QR URL is captured (drives the detail-page QR + the
+        // «Άντληση από ΑΑΔΕ» backfill onto QR-less imported invoices).
+        $this->assertSame('https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=EXAMPLE', $detail['qrCodeUrl']);
 
         // Totals (string XML → explicit float).
         $this->assertSame(10.0, $detail['netTotal']);

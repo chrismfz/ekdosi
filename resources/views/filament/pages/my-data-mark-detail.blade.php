@@ -92,6 +92,77 @@
             </div>
         </x-filament::section>
 
+        {{-- AADE QR code (from qrCodeUrl). For local invoices this is the stored
+             mydata_url; for imports it appears after «Άντληση/έλεγχος από ΑΑΔΕ». --}}
+        @if (filled($doc['qrCodeUrl'] ?? null))
+            <x-filament::section>
+                <x-slot name="heading">QR ΑΑΔΕ</x-slot>
+                <div class="flex flex-col items-center gap-3 sm:flex-row sm:items-center">
+                    <img src="{{ \App\Support\MyData\QrImage::dataUri($doc['qrCodeUrl']) }}"
+                         alt="QR ΑΑΔΕ" class="h-40 w-40" />
+                    <div class="min-w-0 text-sm">
+                        <div class="text-gray-500 dark:text-gray-400">Σύνδεσμος επισκόπησης ΑΑΔΕ</div>
+                        <a href="{{ $doc['qrCodeUrl'] }}" target="_blank" rel="noopener"
+                           class="font-mono text-xs break-all text-primary-600 hover:underline dark:text-primary-400">
+                            {{ $doc['qrCodeUrl'] }}
+                        </a>
+                    </div>
+                </div>
+            </x-filament::section>
+        @endif
+
+        {{-- Cross-check result (popup-panel) from «Άντληση/έλεγχος από ΑΑΔΕ»:
+             what AGREES (✓) and what DIFFERS (⚠) — read-only, nothing is
+             auto-overwritten on a filed document. --}}
+        @if ($enrichReport)
+            @php
+                $cmp = $enrichReport['comparison'] ?? [];
+                $diffCount = collect($cmp)->where('match', false)->count();
+            @endphp
+            <x-filament::section>
+                <x-slot name="heading">Σύγκριση με ΑΑΔΕ</x-slot>
+                <x-slot name="description">
+                    {{ $diffCount === 0 ? 'Όλα τα πεδία συμφωνούν με το ΑΑΔΕ.' : $diffCount . ' διαφορά/ές — δείτε παρακάτω (δεν αντικαθίστανται αυτόματα).' }}
+                </x-slot>
+
+                @if (($enrichReport['stamped_qr'] ?? false) || ($enrichReport['filled'] ?? []) !== [])
+                    <div class="mb-3 text-sm text-success-700 dark:text-success-400">
+                        @if ($enrichReport['stamped_qr'] ?? false) <div>✓ Συμπληρώθηκε το QR.</div> @endif
+                        @if (($enrichReport['filled'] ?? []) !== [])
+                            <div>✓ Συμπληρώθηκαν: {{ implode(', ', $enrichReport['filled']) }}.</div>
+                        @endif
+                    </div>
+                @endif
+
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500 dark:text-gray-400">
+                            <th class="py-1 pr-4"></th>
+                            <th class="py-1 pr-4">Πεδίο</th>
+                            <th class="py-1 pr-4">Τοπικά</th>
+                            <th class="py-1">ΑΑΔΕ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($cmp as $row)
+                            <tr @class(['border-t border-gray-100 dark:border-white/5', 'text-danger-700 dark:text-danger-400' => ! $row['match']])>
+                                <td class="py-1 pr-4">
+                                    @if ($row['match'])
+                                        <x-filament::icon icon="heroicon-o-check-circle" class="h-4 w-4 text-success-600" />
+                                    @else
+                                        <x-filament::icon icon="heroicon-o-exclamation-triangle" class="h-4 w-4 text-danger-600" />
+                                    @endif
+                                </td>
+                                <td class="py-1 pr-4">{{ $row['label'] }}</td>
+                                <td class="py-1 pr-4 font-mono">{{ $row['local'] ?? '—' }}</td>
+                                <td class="py-1 font-mono">{{ $row['aade'] ?? '—' }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </x-filament::section>
+        @endif
+
         {{-- Parties --}}
         <x-filament::section>
             <x-slot name="heading">Συναλλασσόμενοι</x-slot>

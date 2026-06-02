@@ -94,6 +94,9 @@ final class MarkDetail
             'localStatus' => $invoice->local_status,
             // We always issue our own invoices → outbound (we are the issuer).
             'direction' => 'outbound',
+            // The stored QR URL (null for imports that never had one → the
+            // «Άντληση από ΑΑΔΕ» action backfills it).
+            'qrCodeUrl' => $invoice->mydata_url,
             'lines' => $lines,
             // Audit XML is injected by the page from the mydata_marks row.
             'requestXml' => null,
@@ -164,6 +167,10 @@ final class MarkDetail
             'state' => $cancelled ? 'CANCELLED' : 'VALID',
             'localStatus' => null,
             'direction' => $direction,
+            // The AADE QR URL — present on RequestTransmittedDocs/RequestDocs
+            // responses (spec §qrCodeUrl). Lets the page show/print the QR and
+            // EnrichInvoiceFromAade stamp it onto a QR-less imported invoice.
+            'qrCodeUrl' => $doc->getQrCodeUrl(),
             'lines' => self::aadeLines($doc),
             // No request XML on the inbound side — only AADE's response doc.
             'requestXml' => null,
