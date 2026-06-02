@@ -16,7 +16,6 @@ use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
@@ -112,10 +111,6 @@ class InvoicesTable
                     ->copyable()
                     ->toggleable(),
 
-                IconColumn::make('mailed')
-                    ->boolean()
-                    ->toggleable(isToggledHiddenByDefault: true),
-
                 // Last email attempt at a glance — so a 'failed' send is visible
                 // in the list (filter below) without opening each invoice.
                 TextColumn::make('email_status')
@@ -139,10 +134,6 @@ class InvoicesTable
                         ? $record->latestMailLog->error_message
                         : null)
                     ->toggleable(),
-
-                IconColumn::make('printed')
-                    ->boolean()
-                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('paymentMethod.description')
                     ->label('Payment')

@@ -695,8 +695,10 @@ class MigrateFromFirebird extends Command
                     'net_total' => $r['PRICE'] ?? 0,
                     'gross_total' => $r['PRICEWVAT'] ?? 0,
                     'withhold_amount' => $r['WITHHOLD_AMOUNT'] ?? null,
-                    'mailed' => (bool) ($r['MAILED'] ?? 0),
-                    'printed' => (bool) ($r['PRINTED'] ?? 0),
+                    // Legacy MAILED/PRINTED/EMAIL_SENT deliberately NOT imported:
+                    // the old paper-print + mail flags are inert in the new app
+                    // (email tracking is the mail-log; no print workflow). The
+                    // columns were dropped, so writing them would error — ignore.
                     'address1' => $this->fld($r, 'ADDRESS1'),
                     'address2' => $this->fld($r, 'ADDRESS2'),
                     'city' => $this->fld($r, 'CITY'),
@@ -707,7 +709,6 @@ class MigrateFromFirebird extends Command
                     'vies_vat' => $this->fld($r, 'VIES_VAT'),
                     'occupation' => $this->fld($r, 'OCCUPATION'),
                     'notes' => $this->fld($r, 'NOTES'),
-                    'email_sent' => $this->fld($r, 'EMAIL_SENT'),
                     'mydata_sent' => isset($r['MYDATA_SENT']) ? (bool) $r['MYDATA_SENT'] : null,
                     'mydata_state' => $mydataState,
                     'mydata_mark' => $this->fld($r, 'MYDATA_MARK'),
