@@ -113,4 +113,38 @@ class RelidInspector
     {
         return count(array_filter($items, static fn ($i) => $i['active'] && $i['already_renewed']));
     }
+
+    /**
+     * Cheap page-wide signal for the invoice list: how many lines each invoice
+     * would (re)renew at mark-paid (relid > 0), in ONE query. The richer
+     * "already renewed?" detection needs the per-line domain/hosting date join —
+     * that stays in items() / the relidCheck manager (one invoice at a time).
+     *
+     * @param  int[]  $invoiceIds
+     * @return array<int,int> invoiceId => active-relid line count (only > 0 entries)
+     */
+    public static function activeCountsForInvoices(array $invoiceIds): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $invoiceIds),
+            static fn ($i) => $i > 0
+        )));
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = Capsule::table('tblinvoiceitems')
+            ->whereIn('invoiceid', $ids)
+            ->where('relid', '>', 0)
+            ->groupBy('invoiceid')
+            ->selectRaw('invoiceid, COUNT(*) as c')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(int) $r->invoiceid] = (int) $r->c;
+        }
+
+        return $out;
+    }
 }
