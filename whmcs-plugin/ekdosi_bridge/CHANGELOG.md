@@ -10,6 +10,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-06-02
+### Added
+- **ekdosi headline on the relid manager (`action=relidCheck`).** The relid
+  manager now opens with the same compact ekdosi state the native manage-invoice
+  sidebar shows — ΜΑΡΚ/ΤΠΥ (ekdosi/AADE), the «Τιμολογήθηκε στη legacy»
+  resolution (→ ΤΠΥ/ΜΑΡΚ when known), a «Αποστολή στο ekdosi» button (while
+  unfiled), and a «Πλήρες Inspect» link. So the relid page isn't a dead-end: you
+  see the invoice's ekdosi context right there. Compact + cheap (no live-status
+  round-trip; that stays on Inspect). New private `ekdosiSummaryCompact()`.
+
 ## [0.24.0] — 2026-06-02
 ### Added
 - **relid surfaced everywhere — the «unify» pass.**
