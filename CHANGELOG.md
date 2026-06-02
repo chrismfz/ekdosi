@@ -17,6 +17,20 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Βιβλίο Εσόδων-Εξόδων (απλογραφικά / Β' κατηγορίας)** — new read-only page
+  «Βιβλίο Εσόδων-Εξόδων»: a chronological book of the tenant's invoices (έσοδα)
+  + expenses (έξοδα), classified by the myDATA category we already store
+  (`category1_x`/`category2_x` → Greek label via `Codes::e3CategoryLabel`),
+  with period/book/category filters, per-category subtotals and the period
+  totals (έσοδα, έξοδα, ΦΠΑ εκροών−εισροών). Pure read-model
+  (`App\Services\Accounting\LedgerBook` → `LedgerBookResult`/`LedgerRow`) over
+  the existing tables — no new persistence, no money/myDATA path change. Live
+  scoping follows `InvoiceScope::live()` (sales) + "not AADE-cancelled"
+  (expenses); credit notes are listed with NEGATIVE amounts so period sums are
+  net. Admin-gated on `View:LedgerBook` (run `shield:generate` +
+  `shield:sync-super-admin` after deploy). Full double-entry (γενική λογιστική)
+  stays out — exports feed the accountant's software. `LedgerBookTest` covers
+  signed credit notes / scoping / filters / totals. (Exports = next PR.)
 - **myDATA — «Άντληση/έλεγχος από ΑΑΔΕ» on ΜΑΡΚ detail**: for a local invoice
   imported with a MARK but no AADE QR (Epsilon/legacy), a live pull by MARK
   (`RequestTransmittedDocs`) now stamps the QR (`qrCodeUrl`) onto
