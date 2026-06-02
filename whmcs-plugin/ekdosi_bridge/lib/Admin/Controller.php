@@ -797,10 +797,11 @@ EOF;
         $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
 
         // ekdosi headline (ΜΑΡΚ/ΤΠΥ + «Τιμολογήθηκε στη legacy» + «Αποστολή») —
-        // the single shared renderer, same content as the manage-invoice sidebar.
-        $summary = $this->ekdosiSummaryCompact($invoiceId, $link);
+        // the single shared renderer; reuses the row we already fetched.
+        $summary = $this->ekdosiSummaryCompact($invoiceId, $link, $invoice);
 
-        // Live ekdosi status (one call — this is a single-invoice page).
+        // Live ekdosi status. Short timeouts (see getInvoiceStatus) so a slow /
+        // down ekdosi fails fast with a friendly note instead of hanging the page.
         $client = EkdosiClient::fromConfig();
         if ($client !== null) {
             $statusBlock = $this->renderStatusBlock($client->getInvoiceStatus($invoiceId));
@@ -810,7 +811,7 @@ EOF;
         }
 
         // The per-line relid manager, embedded here so this is the ONE page.
-        $relidSection = $this->relidSection($invoiceId, $link);
+        $relidSection = $this->relidSection($invoiceId, $link, (int) ($invoice->userid ?? 0));
 
         // Reset (rare/destructive) — «Αποστολή» lives in the summary header.
         $reset = '<form action="'.$link.'&action=reset" method="POST" style="display:inline-block;">'
@@ -1205,18 +1206,12 @@ EOF;
      * Compact ekdosi headline for one invoice — the same info the native
      * manage-invoice sidebar shows: ΜΑΡΚ/ΤΠΥ (ekdosi/AADE), the legacy-filed
      * resolution, and a «Αποστολή στο ekdosi» button (only while not yet filed
-     * at ekdosi). Surfaced on the relid manager so that page isn't a dead-end —
-     * the operator sees the invoice's ekdosi state right there. Cheap: no
-     * live-status round-trip (that fuller view lives on Inspect / action=show,
-     * linked from here).
+     * at ekdosi). Rendered at the top of the unified invoice page. Cheap: no
+     * live-status round-trip (the fuller status block does that). The caller
+     * passes the already-fetched tblinvoices row to avoid a re-read.
      */
-    private function ekdosiSummaryCompact(int $invoiceId, string $link): string
+    private function ekdosiSummaryCompact(int $invoiceId, string $link, object $invoice): string
     {
-        $invoice = Capsule::table('tblinvoices')->find($invoiceId);
-        if (! $invoice) {
-            return '';
-        }
-
         $mark = InvoiceMarkStore::get($invoiceId);
         $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
         $filed = $mark !== null && $mark !== '';
@@ -1285,7 +1280,7 @@ EOF;
      * future = the double-renewal trap). The safe, audited successor to the
      * legacy relid_remover.
      */
-    private function relidSection(int $invoiceId, string $link): string
+    private function relidSection(int $invoiceId, string $link, int $userId): string
     {
         $items = RelidInspector::items($invoiceId);
         if ($items === []) {
@@ -1297,9 +1292,8 @@ EOF;
         $alreadyRenewed = RelidInspector::alreadyRenewedCount($items);
         $today = date('Y-m-d');
 
-        // userid of the invoice — needed to re-resolve a zeroed line's would-be
-        // relid (match its domain/service to one the client actually owns).
-        $userId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
+        // $userId (the invoice's tblclients id, passed in by show()) re-resolves a
+        // zeroed line's would-be relid against the client's own domains/services.
 
         $rowsHtml = '';
         $restorable = 0;

@@ -104,10 +104,13 @@ class EkdosiClient
         $canonical = $this->slug.':'.$whmcsInvoiceId;
         $sig = 'sha256='.hash_hmac('sha256', $canonical, $this->secret);
 
+        // Short timeouts: this drives a UI block on the admin invoice page, so a
+        // slow/down ekdosi must fail fast (→ friendly note) instead of hanging
+        // the page for the default 20s.
         $result = $this->httpRequest('GET', $url, null, [
             'Accept: application/json',
             'X-Webhook-Signature: '.$sig,
-        ]);
+        ], 6, 2);
         $result['summary'] = $this->summariseStatus($result);
         return $result;
     }
@@ -213,14 +216,14 @@ class EkdosiClient
      * are available; cURL is the lowest-common-denominator and
      * available on every supported PHP install.
      */
-    private function httpRequest(string $method, string $url, ?string $body, array $headers): array
+    private function httpRequest(string $method, string $url, ?string $body, array $headers, int $timeout = 20, int $connectTimeout = 5): array
     {
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $connectTimeout);
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
         }

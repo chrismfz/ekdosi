@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-06-02
+### Changed
+- **show() reads tblinvoices once** (review NIT). The fetched invoice row is now
+  passed into `ekdosiSummaryCompact()` and the userid into `relidSection()`,
+  instead of each re-querying it — one row read per page render instead of three.
+- **Live status call fails fast** (review NIT). `getInvoiceStatus()` now uses
+  short cURL timeouts (connect 2s / total 6s) instead of the default 20s/5s, so a
+  slow or down ekdosi degrades to the friendly «status query failed» note quickly
+  instead of hanging the unified invoice page. `httpRequest()` gained optional
+  `$timeout`/`$connectTimeout` params (default 20/5 — push/write-back unchanged).
+
 ## [0.29.0] — 2026-06-02
 ### Changed
 - **SchemaGuard skips DDL on the hot admin path** (review follow-up). `ensureSilently()`
