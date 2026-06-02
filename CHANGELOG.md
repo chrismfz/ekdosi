@@ -29,6 +29,13 @@ they merge.
   pages + views — καμία αλλαγή στους reconcilers/δεδομένα. `ReconcileWindowPresetTest`
   + ενημερωμένα console tests.
 ### Added
+- **Καρτέλα: «Συχνά προϊόντα/υπηρεσίες» + πλουσιότερο header.** A new panel on the
+  customer Καρτέλα lists what the customer buys most (frequency, total qty, net
+  spend, last-bought date) — aggregated from their LIVE sales lines (credit notes
+  + cancelled excluded), product-linked or free-text (`App\Services\CustomerLedger\
+  CustomerTopProducts`). The identity header now also surfaces fields we already
+  store but never showed: τηλέφωνο/email, τρόπος πληρωμής, έκπτωση, σημειώσεις, and
+  badges (Άμεση τιμολόγηση / Μεταπωλητής).
 - **Λογαριασμοί (ΕΓΛΣ) + νέο group «Λογιστικά»** — a LIGHT, indicative Greek
   chart-of-accounts layer (`App\Support\Accounting\ChartOfAccounts`): the ΕΓΛΣ
   group accounts we reference + a default `category1_x`/`category2_x → account`
