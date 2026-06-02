@@ -119,6 +119,11 @@ class InvoiceFeed
             // Slice 2: embed the third-party routing (same shape as resolve.php
             // op=resolve) so the ekdosi ingestor builds its ThirdPartyResolution
             // from the payload — no separate HTTP resolve call per invoice.
+            // NOTE: resolveInvoice() re-fetches tblinvoiceitems per invoice (it
+            // needs the full per-line contact[] shape, which the batch
+            // bucketsForInvoices doesn't produce) — N extra single-invoice item
+            // queries per page. Only paid by tenants with whmcs_third_party_enabled;
+            // a batch variant emitting full lines is a future optimisation.
             if ($withRouting) {
                 $entry['third_party'] = ThirdPartyStore::resolveInvoice($inv);
             }

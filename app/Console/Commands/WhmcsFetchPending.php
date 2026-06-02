@@ -85,6 +85,11 @@ class WhmcsFetchPending extends Command
         // toggle; --native forces the native path. (--preview is native-only.)
         $useBridge = ! (bool) $this->option('native')
             && ((bool) $this->option('via-bridge') || (bool) $tenant->whmcs_fetch_via_bridge);
+        if ($useBridge && (bool) $this->option('preview')) {
+            // --preview is a native-API-only diagnostic; don't let a bridge
+            // tenant think the preview reflects the bridge path.
+            $this->warn('--preview uses the native WHMCS API (not the bridge). Drop --preview to fetch via the bridge.');
+        }
         if ($useBridge && ! (bool) $this->option('preview')) {
             return $this->ingestViaBridge($tenant, $ingestor);
         }
