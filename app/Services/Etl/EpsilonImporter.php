@@ -69,9 +69,23 @@ class EpsilonImporter
 
     private ?int $defaultVatId = null;
 
+    /** @var array<string,true> de-duped human-readable warnings surfaced to the operator */
+    private array $warnings = [];
+
     public function __construct(Company $tenant)
     {
         $this->companyId = $tenant->getKey();
+    }
+
+    /** @return list<string> */
+    public function warnings(): array
+    {
+        return array_keys($this->warnings);
+    }
+
+    private function warn(string $message): void
+    {
+        $this->warnings[$message] = true;
     }
 
     /**
@@ -137,9 +151,10 @@ class EpsilonImporter
                     ->first();
 
                 if ($existing !== null) {
-                    // Update legacy-sourced fields; leave operator-managed flags
-                    // (is_active, tags, …) untouched.
-                    $existing->forceFill($values)->save();
+                    // Refresh from source but never blank an operator-entered
+                    // field the export lacks (overwrite non-null only); leave
+                    // operator-managed flags (is_active, tags, …) untouched.
+                    $existing->forceFill(array_filter($values, fn ($v) => $v !== null))->save();
                     $updated++;
                 } else {
                     Customer::create($values + [
@@ -160,6 +175,11 @@ class EpsilonImporter
      * MsntName / AccCategoryName / WhosalePrice / RetailPrice); services just
      * carry the «Υπηρεσία» accounting category.
      *
+     * NATURAL KEY = Name (`description_short`): two Epsilon rows with the same
+     * Name collapse onto one ekdosi product (a within-run repeat is warned).
+     * An UNKNOWN VAT class is NOT guessed — the row is skipped + warned (never
+     * silently billed at 24%).
+     *
      * @param  array<int, array<string,mixed>>  $items
      * @param  array<int, array<string,mixed>>  $services
      * @return array{created:int, updated:int, skipped:int}
@@ -168,8 +188,9 @@ class EpsilonImporter
     {
         $created = $updated = $skipped = 0;
         $rows = array_merge($items, $services);
+        $seen = [];
 
-        DB::transaction(function () use ($rows, &$created, &$updated, &$skipped) {
+        DB::transaction(function () use ($rows, &$created, &$updated, &$skipped, &$seen) {
             foreach ($rows as $row) {
                 $name = $this->clean($row['Name'] ?? null);
                 if ($name === null) {
@@ -178,13 +199,27 @@ class EpsilonImporter
                     continue;
                 }
 
-                $rate = self::VAT_CLASS_RATES[$this->clean($row['VtclName'] ?? '') ?? ''] ?? 24;
+                // Unknown VAT class → skip (don't guess a rate on a tax record).
+                $vtcl = $this->clean($row['VtclName'] ?? null) ?? '';
+                if (! array_key_exists($vtcl, self::VAT_CLASS_RATES)) {
+                    $this->warn("Άγνωστη κλάση ΦΠΑ «{$vtcl}» — το είδος «{$name}» παραλείφθηκε.");
+                    $skipped++;
+
+                    continue;
+                }
+                $rate = self::VAT_CLASS_RATES[$vtcl];
+
+                if (isset($seen[$name])) {
+                    $this->warn("Διπλό όνομα είδους «{$name}» στο αρχείο — οι εγγραφές συγχωνεύονται σε ένα προϊόν.");
+                }
+                $seen[$name] = true;
+
                 // WhosalePrice is the net wholesale price → ekdosi sell_price (net).
                 $sell = round((float) ($row['WhosalePrice'] ?? 0), 2);
 
                 $values = [
                     'product_category_id' => $this->resolveProductCategory($this->clean($row['AccCategoryName'] ?? null)),
-                    'vat_category_id' => $this->resolveVatCategory((int) $rate),
+                    'vat_category_id' => $this->resolveVatCategory($rate),
                     'metric_unit_id' => $this->resolveMetricUnit($this->clean($row['MsntName'] ?? null)),
                     'sell_price' => $sell,
                     'price_wvat' => round($sell * (1 + $rate / 100), 2),
@@ -197,7 +232,9 @@ class EpsilonImporter
                     ->first();
 
                 if ($existing !== null) {
-                    $existing->forceFill($values)->save();
+                    // Refresh from source but never blank a field the source
+                    // lacks (e.g. an operator-set unit) — overwrite non-null only.
+                    $existing->forceFill(array_filter($values, fn ($v) => $v !== null))->save();
                     $updated++;
                 } else {
                     Product::create($values + [
@@ -226,7 +263,10 @@ class EpsilonImporter
             ->where('rate', $rate)
             ->value('id');
 
-        $id ??= $this->defaultVatCategory();
+        if ($id === null) {
+            $this->warn("Δεν υπάρχει κατηγορία ΦΠΑ {$rate}% — χρησιμοποιήθηκε η προεπιλεγμένη. Ρύθμισέ τη στο Setup → Vat Categories.");
+            $id = $this->defaultVatCategory();
+        }
 
         return $this->vatCache[$rate] = (int) $id;
     }

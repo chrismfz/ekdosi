@@ -137,32 +137,54 @@ class CreateFirebirdImportRun extends CreateRecord
             'services' => $data['services_json'] ?? null,
         ]);
 
-        $payload = [];
-        $totalBytes = 0;
-        foreach ($files as $key => $path) {
-            $raw = (string) Storage::disk('local')->get($path);
-            $totalBytes += strlen($raw);
-            $decoded = json_decode($raw, true);
-            if (! is_array($decoded)) {
-                throw new \RuntimeException("Το αρχείο «{$key}» δεν είναι έγκυρο JSON.");
-            }
-            $payload[$key] = $decoded;
-        }
-
-        $counts = (new EpsilonImporter($tenant))->import($payload);
-
-        $run = FirebirdImportRun::create([
+        $baseRow = [
             'company_id'          => $tenant->id,
             'source'              => FirebirdImportRun::SOURCE_EPSILON,
             'uploaded_by_user_id' => auth()->id(),
             'file_name'           => 'Epsilon: '.implode(', ', array_keys($files)),
-            'file_size'           => $totalBytes,
             'file_sha256'         => hash('sha256', implode('|', array_values($files))),
             'source_files_json'   => $files,
-            'status'              => FirebirdImportRun::STATUS_COMPLETED,
             'started_at'          => now(),
-            'finished_at'         => now(),
-            'counts_json'         => $counts,
+        ];
+
+        $importer = new EpsilonImporter($tenant);
+        $totalBytes = 0;
+
+        // Any failure (bad JSON, a throw mid-import) records a FAILED run for the
+        // audit trail and re-throws so the operator sees the error. Re-running is
+        // idempotent, so retrying after a fix is safe.
+        try {
+            $payload = [];
+            foreach ($files as $key => $path) {
+                $raw = (string) Storage::disk('local')->get($path);
+                $totalBytes += strlen($raw);
+                $decoded = json_decode($raw, true);
+                if (! is_array($decoded)) {
+                    throw new \RuntimeException("Το αρχείο «{$key}» δεν είναι έγκυρο JSON.");
+                }
+                $payload[$key] = $decoded;
+            }
+            $counts = $importer->import($payload);
+        } catch (\Throwable $e) {
+            FirebirdImportRun::create($baseRow + [
+                'file_size'     => $totalBytes,
+                'status'        => FirebirdImportRun::STATUS_FAILED,
+                'failed_step'   => 'epsilon',
+                'finished_at'   => now(),
+                'error_message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        $warnings = $importer->warnings();
+
+        $run = FirebirdImportRun::create($baseRow + [
+            'file_size'     => $totalBytes,
+            'status'        => FirebirdImportRun::STATUS_COMPLETED,
+            'finished_at'   => now(),
+            'counts_json'   => $counts,
+            'error_message' => $warnings !== [] ? implode("\n", $warnings) : null,
         ]);
 
         // The JSON uploads are transient — drop them after a successful import.
@@ -173,6 +195,9 @@ class CreateFirebirdImportRun extends CreateRecord
         $summary = collect($counts)
             ->map(fn (array $c, string $k): string => "{$k}: +{$c['created']} νέα · ~{$c['updated']} ενημ. · {$c['skipped']} παράλειψη")
             ->implode(' — ');
+        if ($warnings !== []) {
+            $summary .= ' · ⚠ '.count($warnings).' προειδοποιήσεις (δες το run).';
+        }
 
         Notification::make()
             ->success()

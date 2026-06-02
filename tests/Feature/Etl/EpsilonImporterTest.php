@@ -99,6 +99,37 @@ class EpsilonImporterTest extends TestCase
         );
     }
 
+    public function test_unknown_vat_class_is_skipped_and_warned_not_billed_at_24(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $r = $importer->importProducts([[
+            'Name' => 'Παράξενο Είδος',
+            'VtclName' => 'ΚάτιΆγνωστο',
+            'MsntName' => 'Τεμάχιο',
+            'AccCategoryName' => 'Εμπόρευμα',
+            'WhosalePrice' => 10,
+        ]], []);
+
+        $this->assertSame(0, $r['created']);
+        $this->assertSame(1, $r['skipped']);
+        $this->assertNull(Product::where('company_id', $this->tenant->id)->where('description_short', 'Παράξενο Είδος')->first());
+        $this->assertNotEmpty($importer->warnings());
+    }
+
+    public function test_rerun_does_not_blank_operator_entered_customer_fields(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        // First import sets ΑΦΜ + name; the source has no email here.
+        $importer->importCustomers([['Name' => 'ΑΕ Δοκιμή', 'TIN' => '123456789']]);
+        $c = Customer::where('company_id', $this->tenant->id)->where('afm', '123456789')->first();
+        // Operator later fills the email in ekdosi.
+        $c->forceFill(['email' => 'ops@example.gr'])->save();
+
+        // Re-import (source still lacks email) must NOT blank it.
+        (new EpsilonImporter($this->tenant))->importCustomers([['Name' => 'ΑΕ Δοκιμή', 'TIN' => '123456789']]);
+        $this->assertSame('ops@example.gr', $c->fresh()->email);
+    }
+
     public function test_rerun_is_idempotent(): void
     {
         $importer = new EpsilonImporter($this->tenant);

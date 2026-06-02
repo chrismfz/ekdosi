@@ -151,19 +151,16 @@ class FirebirdImportRunForm
                                         FileUpload::make('customers_json')
                                             ->label('Πελάτες — DataExport-Customers.json')
                                             ->disk('local')->directory('epsilon-imports')->visibility('private')
-                                            ->preserveFilenames()
                                             ->helperText('Match με ΑΦΜ· επωνυμία/ΔΟΥ/διεύθυνση/τηλέφωνο/email/τρόπος πληρωμής.')
                                             ->columnSpanFull(),
                                         FileUpload::make('items_json')
                                             ->label('Είδη — DataExport-Items.json')
                                             ->disk('local')->directory('epsilon-imports')->visibility('private')
-                                            ->preserveFilenames()
                                             ->helperText('Εμπορεύματα → προϊόντα (ΦΠΑ από κλάση, μονάδα, κατηγορία· τιμή = χονδρική ως καθαρή).')
                                             ->columnSpanFull(),
                                         FileUpload::make('services_json')
                                             ->label('Υπηρεσίες — DataExport-Services.json')
                                             ->disk('local')->directory('epsilon-imports')->visibility('private')
-                                            ->preserveFilenames()
                                             ->helperText('Υπηρεσίες → προϊόντα (κατηγορία «Υπηρεσίες»).')
                                             ->columnSpanFull(),
                                     ]),
