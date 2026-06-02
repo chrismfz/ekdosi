@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Products\Tables;
 
+use App\Filament\Support\Tags\TagControls;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -86,6 +87,8 @@ class ProductsTable
                     ->boolean()
                     ->sortable(),
 
+                TagControls::column(),
+
                 TextColumn::make('supplier')
                     ->toggleable(isToggledHiddenByDefault: true),
 
@@ -116,6 +119,8 @@ class ProductsTable
                 TernaryFilter::make('is_favorite')
                     ->label('Αγαπημένα')
                     ->placeholder('Όλα'),
+
+                TagControls::filter(),
 
                 SelectFilter::make('product_category_id')
                     ->label('Category')

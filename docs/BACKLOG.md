@@ -21,8 +21,21 @@ don't get lost in drift. (Per-feature plans live in their own docs:
 > from the line picker, the **Είδος → Σκοπός/τρόπος-πληρωμής/αποστολής
 > auto-fill**, the **«Νέο Παραστατικό» button on the Καρτέλα** (reverse flow,
 > `?customer_id=` preset), and **full Greek labels** on the invoice form.
-> **Still deferred below:** the richer *tags* system + the «Show all / browse
-> beyond search» affordance + applying the same pickers to the **QuoteForm**.
+> **Still deferred below:** the «Show all / browse beyond search» affordance.
+>
+> **UPDATE 2026-06-02 (b) — tags + QuoteForm SHIPPED too.** QuoteForm's
+> customer + product pickers now share the favourites-first providers
+> (`App\Filament\Support\PickerOptions`, used by both Invoice + Quote forms).
+> And the **tags system landed**: tenant-scoped `tags` + `taggables` morph
+> pivot (custom, not spatie), `App\Models\Concerns\HasTags` on Customer /
+> Supplier / Product / Invoice, a `TagResource` (Setup) to manage the
+> vocabulary + pin tags, and one shared `App\Filament\Support\Tags\TagControls`
+> giving every list a **multi-select tag filter** + **Έξοδα-style fast-filter
+> tabs** for *pinned tags that are actually used on that entity* + a badge
+> column, plus a **bulk «Ετικέτες» action** on Invoices (to tag filed
+> invoices that can't be edited via the form). **Deploy:** `php artisan
+> migrate` then `php artisan shield:generate` + `shield:sync-super-admin` so
+> the new `Tag` resource permissions exist and the role maps pick them up.
 
 **Asked for, deferred 2026-05-31.** On the invoice/quote line forms (and the
 header customer picker), the operator wants the dropdowns to surface the

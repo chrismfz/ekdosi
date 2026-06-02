@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Customers\Schemas;
 
 use App\Filament\Support\AadeFormFill;
+use App\Filament\Support\Tags\TagControls;
 use App\Filament\Support\ViesFormFill;
 use App\Models\Customer;
 use App\Models\PaymentMethod;
@@ -212,6 +213,9 @@ class CustomerForm
                                     ->label('WHMCS client ID')
                                     ->numeric()
                                     ->helperText('Set by the WHMCS bridge when it lands. Editable manually for now.'),
+
+                                TagControls::field()
+                                    ->columnSpanFull(),
                             ])
                             ->columns(2),
 

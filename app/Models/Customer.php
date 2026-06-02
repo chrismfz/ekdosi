@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
 use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\DB;
 class Customer extends Model
 {
     use BelongsToCompany;
-    use HasFactory, SoftDeletes, TracksActivity;
+    use HasFactory, HasTags, SoftDeletes, TracksActivity;
 
     /**
      * Audited identity/contact/terms columns. See TracksActivity.

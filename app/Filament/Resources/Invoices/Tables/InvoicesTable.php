@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Invoices\Tables;
 
 use App\Enums\LocalStatus;
 use App\Enums\PaymentStatus;
+use App\Filament\Support\Tags\TagControls;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -147,6 +148,8 @@ class InvoicesTable
                     ->label('Payment')
                     ->toggleable(isToggledHiddenByDefault: true),
 
+                TagControls::column(),
+
                 TextColumn::make('deleted_at')
                     ->dateTime()
                     ->sortable()
@@ -268,6 +271,8 @@ class InvoicesTable
                         return $q->when($from, fn ($q) => $q->whereBetween('issued_at', [$from, $to]));
                     }),
 
+                TagControls::filter(),
+
                 Filter::make('issued_at_range')
                     ->schema([
                         DatePicker::make('from')
@@ -369,6 +374,10 @@ class InvoicesTable
                                 ->send();
                         })
                         ->deselectRecordsAfterCompletion(),
+
+                    // Tag any selection — the way to tag FILED invoices, which
+                    // can't be edited through the form.
+                    TagControls::bulkAttachAction(),
                 ]),
             ])
             ->defaultSort('issued_at', 'desc');

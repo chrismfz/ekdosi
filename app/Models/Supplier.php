@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasTags;
 
 use App\Enums\SupplierSource;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -24,6 +25,7 @@ class Supplier extends Model
     use BelongsToCompany;
 
     use HasFactory;
+    use HasTags;
     use SoftDeletes;
 
     protected $fillable = [

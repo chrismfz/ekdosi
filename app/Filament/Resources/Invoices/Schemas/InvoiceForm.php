@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Filament\Support\PickerOptions;
+use App\Filament\Support\Tags\TagControls;
 use App\Filament\Support\VatRateOptions;
 use App\Support\MyData\Codes;
 use App\Support\MyData\ReverseCharge;
@@ -214,6 +215,9 @@ class InvoiceForm
                         ->default(0)
                         ->suffix('%')
                         ->helperText('Εφαρμόζεται σε όλες τις γραμμές. Πρέπει να είναι < 100.'),
+
+                    TagControls::field()
+                        ->columnSpanFull(),
                 ]),
 
             // ─── Γραμμές (Excel-style) ───

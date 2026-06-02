@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Customers\Tables;
 
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Support\Tags\TagControls;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -131,6 +132,8 @@ class CustomersTable
                     ->tooltip('Δρομολογεί παραστατικά σε τρίτους — έλεγξε ότι τα τιμολόγια είναι όντως δικά του.')
                     ->toggleable(),
 
+                TagControls::column(),
+
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -142,6 +145,8 @@ class CustomersTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
+                TagControls::filter(),
+
                 TernaryFilter::make('is_active')
                     ->label('Active')
                     ->boolean()
