@@ -31,13 +31,18 @@ class FirebirdImportRun extends Model
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_FAILED    = 'failed';
 
+    public const SOURCE_FIREBIRD = 'firebird';
+    public const SOURCE_EPSILON  = 'epsilon';
+
     protected $fillable = [
         'company_id',
+        'source',
         'uploaded_by_user_id',
         'file_name',
         'file_size',
         'file_sha256',
         'uploaded_path',
+        'source_files_json',
         'status',
         'started_at',
         'finished_at',
@@ -54,6 +59,7 @@ class FirebirdImportRun extends Model
             'started_at'  => 'datetime',
             'finished_at' => 'datetime',
             'counts_json' => 'array',
+            'source_files_json' => 'array',
             'file_size'   => 'integer',
         ];
     }

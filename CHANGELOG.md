@@ -16,6 +16,15 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Data Import — Epsilon Smart (JSON)** (Phase 1): the «Firebird Import» screen
+  is renamed «Data Import» and gains a 2nd tab. The Firebird flow is unchanged
+  (its own tab); the new «Epsilon Smart (JSON)» tab imports the Τιμολόγηση
+  exports — **Customers** (match by ΑΦΜ) and **Items/Services → products** (VAT
+  from the Epsilon class, unit, category; WhosalePrice as the net sell price).
+  Re-runnable upsert by natural key; resolves against the standard AADE lookups
+  the seeder installs (`App\Services\Etl\EpsilonImporter`). Runs synchronously
+  (the exports are tiny). Sales→invoices is a planned Phase 2.
 
 ## 2026-06-02
 ### Added

@@ -6,6 +6,8 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Tabs;
+use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
@@ -52,12 +54,19 @@ class FirebirdImportRunForm
 
         return $schema
             ->components([
+                Tabs::make()
+                    ->columnSpanFull()
+                    ->persistTabInQueryString()
+                    ->tabs([
+                        Tab::make('Firebird')
+                            ->icon('heroicon-o-circle-stack')
+                            ->schema([
                 Section::make('Backup file')
                     ->description('Upload either a `.fbk` (gbak backup — the job will restore it first) or a `.fdb` (already-restored Firebird DB — used directly). The file uploads privately to ekdosi\'s storage and is deleted automatically after a successful import.')
                     ->schema([
                         FileUpload::make('upload')
                             ->label('Firebird backup (.fbk) or database (.fdb)')
-                            ->required()
+                            ->required(fn (Get $get): bool => ! self::hasEpsilon($get))
                             ->disk('local')
                             ->directory('firebird-imports')
                             ->visibility('private')
@@ -115,7 +124,7 @@ class FirebirdImportRunForm
                             ->label('Password')
                             ->password()
                             ->revealable()
-                            ->required()
+                            ->required(fn (Get $get): bool => ! self::hasEpsilon($get))
                             ->maxLength(255)
                             ->helperText('Held in-memory only — never stored on the run row. The legacy default is masterkey.')
                             ->columnSpanFull(),
@@ -131,7 +140,39 @@ class FirebirdImportRunForm
                                 'companyId' => $companyIdForArtisan,
                             ]),
                     ]),
+                            ]),
+
+                        Tab::make('Epsilon Smart (JSON)')
+                            ->icon('heroicon-o-document-text')
+                            ->schema([
+                                Section::make('Epsilon Smart — εξαγωγές JSON')
+                                    ->description('Ανέβασε τα JSON από το Epsilon Smart (Τιμολόγηση). Κάθε αρχείο προαιρετικό — εισάγεται ό,τι δώσεις. Πελάτες (ΑΦΜ) + είδη/υπηρεσίες ταιριάζουν με τα στημένα lookups (ΦΠΑ / μονάδες / κατηγορίες). Επαναλήψιμο — upsert, δεν διπλασιάζει. (Οι πωλήσεις/παραστατικά έρχονται σε επόμενη φάση.)')
+                                    ->schema([
+                                        FileUpload::make('customers_json')
+                                            ->label('Πελάτες — DataExport-Customers.json')
+                                            ->disk('local')->directory('epsilon-imports')->visibility('private')
+                                            ->helperText('Match με ΑΦΜ· επωνυμία/ΔΟΥ/διεύθυνση/τηλέφωνο/email/τρόπος πληρωμής.')
+                                            ->columnSpanFull(),
+                                        FileUpload::make('items_json')
+                                            ->label('Είδη — DataExport-Items.json')
+                                            ->disk('local')->directory('epsilon-imports')->visibility('private')
+                                            ->helperText('Εμπορεύματα → προϊόντα (ΦΠΑ από κλάση, μονάδα, κατηγορία· τιμή = χονδρική ως καθαρή).')
+                                            ->columnSpanFull(),
+                                        FileUpload::make('services_json')
+                                            ->label('Υπηρεσίες — DataExport-Services.json')
+                                            ->disk('local')->directory('epsilon-imports')->visibility('private')
+                                            ->helperText('Υπηρεσίες → προϊόντα (κατηγορία «Υπηρεσίες»).')
+                                            ->columnSpanFull(),
+                                    ]),
+                            ]),
+                    ]),
             ]);
+    }
+
+    /** True when any Epsilon JSON file is staged (→ gates the Firebird fields off). */
+    public static function hasEpsilon(Get $get): bool
+    {
+        return filled($get('customers_json')) || filled($get('items_json')) || filled($get('services_json'));
     }
 
     /**
