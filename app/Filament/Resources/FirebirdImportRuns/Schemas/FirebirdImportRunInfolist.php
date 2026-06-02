@@ -101,7 +101,21 @@ class FirebirdImportRunInfolist
                                 }
                                 $lines = [];
                                 foreach ($record->counts_json as $table => $count) {
-                                    $lines[] = sprintf('%-25s %s', $table, number_format($count));
+                                    // Two shapes: the Firebird ETL writes a flat
+                                    // `table => int` (total rows after import); the
+                                    // Epsilon importer writes a nested
+                                    // `entity => ['created','updated','skipped']`.
+                                    if (is_array($count)) {
+                                        $detail = sprintf(
+                                            '+%s νέα · ~%s ενημ. · %s παράλειψη',
+                                            number_format((int) ($count['created'] ?? 0)),
+                                            number_format((int) ($count['updated'] ?? 0)),
+                                            number_format((int) ($count['skipped'] ?? 0)),
+                                        );
+                                    } else {
+                                        $detail = number_format((int) $count);
+                                    }
+                                    $lines[] = sprintf('%-25s %s', $table, $detail);
                                 }
                                 return implode("\n", $lines);
                             })

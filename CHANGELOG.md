@@ -100,6 +100,12 @@ they merge.
   crashing on `Storage::disk('local')->path(null)` (opaque flysystem TypeError).
   It now halts with an actionable Greek notification («Δεν ελήφθη κανένα αρχείο…»)
   and the Epsilon importer checks each staged path exists before reading.
+- **Import View page no longer 500s on Epsilon counts.** The «Imported rows»
+  infolist assumed the flat Firebird `table => int` shape and crashed on
+  `number_format(array)` for the Epsilon importer's nested
+  `entity => ['created','updated','skipped']` — so the View page died right after
+  a successful Epsilon import. It now renders both shapes (nested → «+N νέα · ~N
+  ενημ. · N παράλειψη»).
 
 ## 2026-06-02
 ### Added
