@@ -27,7 +27,9 @@ they merge.
   the existing tables — no new persistence, no money/myDATA path change. Live
   scoping follows `InvoiceScope::live()` (sales) + "not AADE-cancelled"
   (expenses); credit notes are listed with NEGATIVE amounts so period sums are
-  net. Admin-gated on `View:LedgerBook` (run `shield:generate` +
+  net. Never-issued drafts (`local_status='draft'` with no `legacy_id`) are
+  excluded as not-yet-book-entries; legacy-imported drafts (`legacy_id` set, =
+  real historical invoices) are kept. Admin-gated on `View:LedgerBook` (run `shield:generate` +
   `shield:sync-super-admin` after deploy). Full double-entry (γενική λογιστική)
   stays out — exports feed the accountant's software. `LedgerBookTest` covers
   signed credit notes / scoping / filters / totals.

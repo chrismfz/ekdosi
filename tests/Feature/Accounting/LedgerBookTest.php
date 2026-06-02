@@ -149,6 +149,18 @@ class LedgerBookTest extends TestCase
         $this->assertSame(50.0, $result->expenseNet());
     }
 
+    public function test_excludes_pure_drafts_but_keeps_legacy_imported_drafts(): void
+    {
+        $this->invoice('2026-01-10 10:00:00', 100, 124, ['local_status' => 'draft']);                    // pure draft → out
+        $this->invoice('2026-01-11 10:00:00', 50, 62, ['local_status' => 'draft', 'legacy_id' => 5000]); // legacy → kept
+        $this->invoice('2026-01-12 10:00:00', 30, 37);                                                    // active → kept
+
+        $result = $this->book(bk: 'income');
+
+        $this->assertSame(2, count($result->rows));
+        $this->assertSame(80.0, $result->incomeNet());  // 50 (legacy) + 30 (active); the 100 pure draft is excluded
+    }
+
     public function test_book_and_category_filters(): void
     {
         $this->invoice('2026-01-10 10:00:00', 100, 124);   // category1_3

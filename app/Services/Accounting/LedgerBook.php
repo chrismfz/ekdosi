@@ -65,6 +65,13 @@ class LedgerBook
             ->where('company_id', $this->tenant->getKey())
             ->where('issued_at', '>=', $start)
             ->where('issued_at', '<=', $end)
+            // A Β'-κατηγορίας book records ISSUED documents — a never-issued
+            // draft is not a book entry. Legacy imports also backfill
+            // local_status='draft' but ARE real historical invoices (legacy_id
+            // set), so only drafts WITHOUT a legacy_id are dropped.
+            ->where(fn ($q) => $q
+                ->where('local_status', '!=', 'draft')
+                ->orWhereNotNull('legacy_id'))
             ->with([
                 'invoiceType:id,code,mydata_income_class_category',
                 'customer:id,name,afm',
