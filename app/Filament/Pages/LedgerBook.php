@@ -4,13 +4,17 @@ namespace App\Filament\Pages;
 
 use App\Models\Company;
 use App\Services\Accounting\LedgerBook as LedgerBookService;
+use App\Services\Accounting\LedgerBookExporter;
 use App\Services\Accounting\LedgerBookResult;
 use App\Support\MyData\Codes;
 use BackedEnum;
 use Carbon\Carbon;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Facades\Filament;
 use Filament\Pages\Page;
 use Firebed\AadeMyData\Enums\ExpenseClassificationCategory;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use UnitEnum;
 
 /**
@@ -67,6 +71,61 @@ class LedgerBook extends Page
     {
         $this->from ??= now()->startOfMonth()->toDateString();
         $this->to ??= now()->endOfMonth()->toDateString();
+    }
+
+    /**
+     * @return array<Action|ActionGroup>
+     */
+    protected function getHeaderActions(): array
+    {
+        return [
+            ActionGroup::make([
+                Action::make('export_csv')
+                    ->label('CSV')
+                    ->icon('heroicon-o-table-cells')
+                    ->action(fn () => $this->export('csv')),
+                Action::make('export_xlsx')
+                    ->label('Excel (.xlsx)')
+                    ->icon('heroicon-o-document-chart-bar')
+                    ->action(fn () => $this->export('xlsx')),
+                Action::make('export_json')
+                    ->label('JSON')
+                    ->icon('heroicon-o-code-bracket')
+                    ->action(fn () => $this->export('json')),
+            ])
+                ->label('Εξαγωγή')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->button(),
+        ];
+    }
+
+    public function export(string $format): StreamedResponse
+    {
+        $result = $this->getResult();
+        $exporter = app(LedgerBookExporter::class);
+        $name = $exporter->filename($format, $this->from, $this->to);
+
+        return match ($format) {
+            'json' => response()->streamDownload(
+                fn () => print ($exporter->json($result)),
+                $name,
+                ['Content-Type' => 'application/json; charset=UTF-8'],
+            ),
+            'xlsx' => response()->streamDownload(
+                function () use ($exporter, $result): void {
+                    $path = $exporter->xlsxFile($result);
+                    readfile($path);
+                    @unlink($path);
+                },
+                $name,
+                ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+            ),
+            default => response()->streamDownload(
+                fn () => print ($exporter->csv($result)),
+                $name,
+                ['Content-Type' => 'text/csv; charset=UTF-8'],
+            ),
+        };
     }
 
     public function getResult(): LedgerBookResult

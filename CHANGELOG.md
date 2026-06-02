@@ -30,7 +30,16 @@ they merge.
   net. Admin-gated on `View:LedgerBook` (run `shield:generate` +
   `shield:sync-super-admin` after deploy). Full double-entry (γενική λογιστική)
   stays out — exports feed the accountant's software. `LedgerBookTest` covers
-  signed credit notes / scoping / filters / totals. (Exports = next PR.)
+  signed credit notes / scoping / filters / totals.
+- **Βιβλίο Εσόδων-Εξόδων — εξαγωγές (CSV / Excel / JSON)**: header «Εξαγωγή»
+  group on the page renders the current (filtered) period in three formats via
+  `App\Services\Accounting\LedgerBookExporter` — CSV (UTF-8 BOM + ';' + comma
+  decimal, el-GR-Excel-friendly) and JSON are dependency-free; the **.xlsx**
+  uses the already-present `openspout/openspout` (bold header, raw numeric
+  amounts so Excel sums/sorts) — no PhpSpreadsheet/maatwebsite needed. All three
+  emit the same table + a totals trailer (έσοδα/έξοδα/ΦΠΑ balance).
+  `LedgerBookExporterTest` covers CSV/JSON shape + that the xlsx is a real
+  workbook. (The accountant's Union import format — Phase C — still TBD.)
 - **myDATA — «Άντληση/έλεγχος από ΑΑΔΕ» on ΜΑΡΚ detail**: for a local invoice
   imported with a MARK but no AADE QR (Epsilon/legacy), a live pull by MARK
   (`RequestTransmittedDocs`) now stamps the QR (`qrCodeUrl`) onto
