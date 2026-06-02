@@ -1297,27 +1297,50 @@ EOF;
         $alreadyRenewed = RelidInspector::alreadyRenewedCount($items);
         $today = date('Y-m-d');
 
+        // userid of the invoice — needed to re-resolve a zeroed line's would-be
+        // relid (match its domain/service to one the client actually owns).
+        $userId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
+
         $rowsHtml = '';
+        $restorable = 0;
         foreach ($items as $it) {
-            $cb = $it['active']
-                ? '<input type="checkbox" class="relid-item" name="item_id[]" value="'.$it['item_id'].'" checked>'
-                : '';
             $typeLabel = $it['service_type'] === 'domain'
                 ? 'Domain'
                 : ($it['service_type'] === 'hosting' ? 'Υπηρεσία' : htmlspecialchars($it['type'] !== '' ? $it['type'] : '—'));
-            $linked = $it['linked'] !== null ? htmlspecialchars($it['linked']) : '—';
             $nextDue = $it['next_due'] !== null ? htmlspecialchars($it['next_due']) : '—';
             $expiry = $it['expiry'] !== null ? htmlspecialchars($it['expiry']) : '—';
             $relidCell = $it['relid'] > 0 ? (string) $it['relid'] : '—';
-            $rowClass = $it['already_renewed'] ? 'danger' : ($it['active'] ? 'warning' : '');
             $dueBadge = $it['already_renewed']
                 ? ' <span class="label label-danger" title="next due '.$nextDue.' > '.$today.'">ήδη ανανεωμένο</span>'
                 : '';
+
+            if ($it['active']) {
+                // relid > 0 → can be ZEROED (item_id[] group).
+                $cb = '<input type="checkbox" class="relid-item" name="item_id[]" value="'.$it['item_id'].'" checked>';
+                $linkedCell = $it['linked'] !== null ? htmlspecialchars($it['linked']) : '—';
+                $rowClass = $it['already_renewed'] ? 'danger' : 'warning';
+            } else {
+                // relid = 0 → offer a preview-confirmed RESTORE if we can resolve
+                // the line to exactly one of the client's domains/services.
+                $cand = RelidInspector::restoreCandidate($userId, $it);
+                if ($cand !== null) {
+                    $restorable++;
+                    $cb = '<input type="checkbox" class="relid-restore" name="restore_item[]" value="'.$it['item_id'].'">';
+                    $linkedCell = '<span class="text-success" title="Η Επαναφορά θα ξανασυνδέσει αυτή τη γραμμή">→ '
+                        .htmlspecialchars($cand['label']).' <code>#'.$cand['relid'].'</code></span>';
+                    $relidCell = '<span class="text-muted">0 → '.$cand['relid'].'</span>';
+                } else {
+                    $cb = '';
+                    $linkedCell = '<span class="text-muted">—</span>';
+                }
+                $rowClass = '';
+            }
+
             $rowsHtml .= '<tr class="'.$rowClass.'">'
                 .'<td>'.$cb.'</td>'
                 .'<td>'.htmlspecialchars($it['description']).'</td>'
                 .'<td>'.$typeLabel.'</td>'
-                .'<td>'.$linked.'</td>'
+                .'<td>'.$linkedCell.'</td>'
                 .'<td>'.$nextDue.$dueBadge.'</td>'
                 .'<td>'.$expiry.'</td>'
                 .'<td>'.$relidCell.'</td>'
@@ -1335,11 +1358,18 @@ EOF;
 
         $token = $this->csrfField();
         $resetAction = $link.'&action=relidReset';
+        $restoreAction = $link.'&action=relidRestore';
+        // Restore button only when there's at least one resolvable zeroed line.
+        $restoreBtn = $restorable > 0
+            ? '<button type="submit" class="btn btn-success" formaction="'.$restoreAction.'" '
+                .'onclick="return confirm(\'Επαναφορά relid στις επιλεγμένες γραμμές; Θα ξανασυνδεθούν με το domain/service που εμφανίζεται και το WHMCS θα τις ανανεώνει στο Mark Paid.\');">'
+                .'<i class="fa fa-undo"></i> Επαναφορά relid (επιλεγμένες)</button>'
+            : '';
 
         return <<<EOF
 <h3>relid (αυτόματη ανανέωση WHMCS)</h3>
 {$warning}
-<form method="post" action="{$resetAction}" onsubmit="return confirm('Μηδενισμός relid στις επιλεγμένες γραμμές; Το Mark Paid δεν θα τις ανανεώσει.');">
+<form method="post" action="{$resetAction}">
 {$token}
 <input type="hidden" name="invoiceid" value="{$invoiceId}">
 <table class="table table-condensed">
@@ -1348,11 +1378,12 @@ EOF;
     </tr></thead>
     <tbody>{$rowsHtml}</tbody>
 </table>
-<button type="button" class="btn btn-default btn-sm relid-select-all">Επιλογή όλων</button>
+<button type="button" class="btn btn-default btn-sm relid-select-all">Επιλογή όλων (ενεργά)</button>
 <button type="button" class="btn btn-default btn-sm relid-select-none">Καμία</button>
-<button type="submit" class="btn btn-danger"><i class="fa fa-eraser"></i> Μηδενισμός relid (επιλεγμένες)</button>
+<button type="submit" class="btn btn-danger" onclick="return confirm('Μηδενισμός relid στις επιλεγμένες γραμμές; Το Mark Paid δεν θα τις ανανεώσει.');"><i class="fa fa-eraser"></i> Μηδενισμός relid (επιλεγμένες)</button>
+{$restoreBtn}
 </form>
-<p class="text-muted" style="margin-top:8px">Ο μηδενισμός θέτει <code>relid = 0</code> στις επιλεγμένες γραμμές, ώστε το Mark Paid να μην τις ανανεώσει. Καταγράφεται στο WHMCS activity log.</p>
+<p class="text-muted" style="margin-top:8px">Ο <strong>Μηδενισμός</strong> θέτει <code>relid = 0</code> (το Mark Paid δεν τις ανανεώνει). Η <strong>Επαναφορά</strong> ξανασυνδέει γραμμές με μηδενισμένο relid με το domain/service που εμφανίζεται (μόνο όσες ταιριάζουν μονοσήμαντα). Και τα δύο καταγράφονται στο WHMCS activity log.</p>
 <script>
 (function () {
     function setAll(v) { document.querySelectorAll('.relid-item').forEach(function (c) { c.checked = v; }); }
@@ -1403,6 +1434,89 @@ EOF;
         return <<<EOF
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <div class="alert alert-success">Invoice #{$invoiceId}: μηδενίστηκε το relid σε {$updated} γραμμή/ές. Το Mark Paid δεν θα τις ανανεώσει.</div>
+<p>
+    <a class="btn btn-primary" href="{$backManager}">Επιστροφή στη διαχείριση #{$invoiceId}</a>
+    <a class="btn btn-default" href="{$invHref}">Invoice #{$invoiceId} στο WHMCS</a>
+</p>
+EOF;
+    }
+
+    /**
+     * Restore the relid on selected zeroed lines — the inverse of relidReset,
+     * for a link removed by mistake. The would-be relid is RE-RESOLVED here on
+     * the server (never trusted from the client) via RelidInspector::
+     * restoreCandidate, and applied ONLY to a line that is still relid=0 and
+     * resolves to exactly one of the client's domains/services. Ambiguous /
+     * unresolvable lines are skipped and reported. Audited; never touches
+     * ekdosi/AADE.
+     */
+    public function relidRestore(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage($link);
+        }
+        $invoiceId = (int) ($_POST['invoiceid'] ?? 0);
+        $itemIds = array_values(array_unique(array_filter(
+            array_map('intval', (array) ($_POST['restore_item'] ?? [])),
+            static fn ($v) => $v > 0,
+        )));
+        if ($invoiceId <= 0) {
+            return $this->errorPage($link, 'Invalid invoice id.');
+        }
+        if ($itemIds === []) {
+            return $this->errorPage($link, 'Δεν επιλέχθηκαν γραμμές για επαναφορά.');
+        }
+
+        $invoice = Capsule::table('tblinvoices')->find($invoiceId);
+        if (! $invoice) {
+            return $this->errorPage($link, "Invoice #{$invoiceId} not found in tblinvoices.");
+        }
+        $userId = (int) ($invoice->userid ?? 0);
+
+        // Re-resolve each selected line server-side (don't trust client input).
+        $byId = [];
+        foreach (RelidInspector::items($invoiceId) as $it) {
+            $byId[$it['item_id']] = $it;
+        }
+
+        $restored = 0;
+        $skipped = 0;
+        $applied = [];
+        foreach ($itemIds as $iid) {
+            $it = $byId[$iid] ?? null;
+            $cand = $it !== null ? RelidInspector::restoreCandidate($userId, $it) : null;
+            if ($cand === null) {
+                $skipped++;
+
+                continue;
+            }
+            // Scope to relid=0 so a concurrently-set relid is never clobbered.
+            $n = Capsule::table('tblinvoiceitems')
+                ->where('invoiceid', $invoiceId)
+                ->where('id', $iid)
+                ->where('relid', 0)
+                ->update(['relid' => $cand['relid']]);
+            if ($n > 0) {
+                $restored++;
+                $applied[] = "#{$iid}→{$cand['label']}({$cand['relid']})";
+            } else {
+                $skipped++;
+            }
+        }
+
+        $this->logActivity("EkdosiBridge: relid RESTORED on {$restored} item(s) of invoice #{$invoiceId} "
+            .'('.($applied === [] ? '—' : implode(', ', $applied)).") — {$skipped} skipped (ambiguous/unresolved).");
+
+        $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
+        $backManager = htmlspecialchars($link.'&action=show&invoiceid='.$invoiceId);
+        $skipNote = $skipped > 0
+            ? " ({$skipped} παραλείφθηκαν — ασαφής/ανεπίλυτη αντιστοίχιση· κάν' τες χειροκίνητα στο WHMCS.)"
+            : '';
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<div class="alert alert-success">Invoice #{$invoiceId}: επαναφέρθηκε το relid σε {$restored} γραμμή/ές.{$skipNote}</div>
 <p>
     <a class="btn btn-primary" href="{$backManager}">Επιστροφή στη διαχείριση #{$invoiceId}</a>
     <a class="btn btn-default" href="{$invHref}">Invoice #{$invoiceId} στο WHMCS</a>

@@ -10,6 +10,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-06-02
+### Added
+- **«Επαναφορά relid» (auto-resolve + preview)** — restore the link on a line
+  whose relid was zeroed by mistake. Zeroed lines now get a checkbox + a preview
+  of the resolved target in the «Σύνδεση» column («→ domain `#id`»), shown ONLY
+  when the line resolves to exactly one of the client's domains/services
+  (`RelidInspector::restoreCandidate`: domain-token-from-description + userid
+  match). The «Επαναφορά relid» button re-resolves server-side (never trusts the
+  client), applies only to still-`relid=0` lines, and skips/report ambiguous
+  ones. Audited. Zeroing stays one form with two buttons (Μηδενισμός / Επαναφορά
+  via `formaction`); select-all toggles only the active (zero) group.
+
 ## [0.27.0] — 2026-06-02
 ### Added
 - **relid table: «Λήξη (registry)» column** — for domain lines, the real registry

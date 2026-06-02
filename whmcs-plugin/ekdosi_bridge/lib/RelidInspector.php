@@ -154,4 +154,47 @@ class RelidInspector
 
         return $out;
     }
+
+    /**
+     * Best-effort re-resolution of the relid for a line whose relid was zeroed
+     * (by us, by mistake, or by WHMCS after processing): pull the domain-like
+     * token from the line description and match it to EXACTLY ONE of the
+     * client's domains/services. Returns the candidate only when the match is
+     * UNAMBIGUOUS (exactly one row) — callers MUST skip null (0 or >1 matches)
+     * so a wrong relid is never restored (a wrong relid = WHMCS renews the wrong
+     * thing at Mark Paid). Heuristic by design; the UI previews the target and
+     * the operator confirms, and the restore handler re-resolves server-side.
+     *
+     * @param  array{type?:string, service_type?:?string, description?:string}  $item
+     * @return array{relid:int, service_type:string, label:string}|null
+     */
+    public static function restoreCandidate(int $userId, array $item): ?array
+    {
+        if ($userId <= 0) {
+            return null;
+        }
+        $st = $item['service_type'] ?? ThirdPartyStore::serviceType((string) ($item['type'] ?? ''));
+        if ($st !== 'domain' && $st !== 'hosting') {
+            return null;
+        }
+        // A domain-like token (foo.example.gr) from the line description.
+        if (! preg_match('/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)+)/i', (string) ($item['description'] ?? ''), $m)) {
+            return null;
+        }
+        $domain = strtolower($m[1]);
+
+        $table = $st === 'domain' ? 'tbldomains' : 'tblhosting';
+        $matches = Capsule::table($table)
+            ->where('userid', $userId)
+            ->whereRaw('LOWER(domain) = ?', [$domain])
+            ->limit(2)
+            ->get(['id', 'domain']);
+
+        if ($matches->count() !== 1) {
+            return null;   // none or ambiguous → operator handles manually
+        }
+        $row = $matches->first();
+
+        return ['relid' => (int) $row->id, 'service_type' => $st, 'label' => (string) $row->domain];
+    }
 }
