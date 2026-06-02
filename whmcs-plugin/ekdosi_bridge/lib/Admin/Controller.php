@@ -5,6 +5,7 @@ namespace WHMCS\Module\Addon\EkdosiBridge\Admin;
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\EkdosiClient;
 use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
+use WHMCS\Module\Addon\EkdosiBridge\RelidInspector;
 use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
 
 /**
@@ -1213,6 +1214,149 @@ EOF;
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <div class="alert alert-success">Invoice #{$invoiceId}: το ΜΑΡΚ ekdosi διαγράφηκε (unfiled).</div>
 <p><a class="btn btn-primary" href="{$showLink}">Back to invoice</a></p>
+EOF;
+    }
+
+    /**
+     * Per-line relid inspector + «Μηδενισμός relid» — read the items, show
+     * which ones WHMCS would (re)renew at Mark Paid (relid > 0), flag the ones
+     * already renewed (next due in the future = the double-renewal trap), and
+     * let the operator zero the relid on the ones they pick. Reached from the
+     * Manage Invoice «Έλεγχος relid» button.
+     */
+    public function relidCheck(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        $invoiceId = (int) ($_REQUEST['invoiceid'] ?? 0);
+        if ($invoiceId <= 0) {
+            return $this->errorPage($link, 'Invalid invoice id.');
+        }
+
+        $items = RelidInspector::items($invoiceId);
+        $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
+
+        if ($items === []) {
+            return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<div class="alert alert-info">Invoice #{$invoiceId}: καμία γραμμή.</div>
+<p><a class="btn btn-primary" href="{$invHref}">Back to invoice #{$invoiceId}</a></p>
+EOF;
+        }
+
+        $active = RelidInspector::activeCount($items);
+        $alreadyRenewed = RelidInspector::alreadyRenewedCount($items);
+        $today = date('Y-m-d');
+
+        $rowsHtml = '';
+        foreach ($items as $it) {
+            $cb = $it['active']
+                ? '<input type="checkbox" class="relid-item" name="item_id[]" value="'.$it['item_id'].'" checked>'
+                : '';
+            $typeLabel = $it['service_type'] === 'domain'
+                ? 'Domain'
+                : ($it['service_type'] === 'hosting' ? 'Υπηρεσία' : htmlspecialchars($it['type'] !== '' ? $it['type'] : '—'));
+            $linked = $it['linked'] !== null ? htmlspecialchars($it['linked']) : '—';
+            $nextDue = $it['next_due'] !== null ? htmlspecialchars($it['next_due']) : '—';
+            $relidCell = $it['relid'] > 0 ? (string) $it['relid'] : '—';
+            $rowClass = $it['already_renewed'] ? 'danger' : ($it['active'] ? 'warning' : '');
+            $dueBadge = $it['already_renewed']
+                ? ' <span class="label label-danger" title="next due '.$nextDue.' > '.$today.'">ήδη ανανεωμένο</span>'
+                : '';
+            $rowsHtml .= '<tr class="'.$rowClass.'">'
+                .'<td>'.$cb.'</td>'
+                .'<td>'.htmlspecialchars($it['description']).'</td>'
+                .'<td>'.$typeLabel.'</td>'
+                .'<td>'.$linked.'</td>'
+                .'<td>'.$nextDue.$dueBadge.'</td>'
+                .'<td>'.$relidCell.'</td>'
+                .'</tr>';
+        }
+
+        $warning = $active > 0
+            ? '<div class="alert alert-warning"><strong>⚠ '.$active.' γραμμές με ενεργό relid.</strong> '
+                .'Με <strong>Mark Paid</strong> το WHMCS θα (ξανα)ανανεώσει αυτές τις γραμμές.'
+                .($alreadyRenewed > 0
+                    ? ' <span class="label label-danger">'.$alreadyRenewed.' ήδη ανανεωμένες — κίνδυνος διπλής ανανέωσης!</span>'
+                    : '')
+                .'</div>'
+            : '<div class="alert alert-success">Καμία γραμμή με ενεργό relid — ασφαλές για Mark Paid.</div>';
+
+        $token = $this->csrfField();
+        $resetAction = $link.'&action=relidReset';
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<h3>relid ανά γραμμή — Invoice #{$invoiceId}</h3>
+{$warning}
+<form method="post" action="{$resetAction}" onsubmit="return confirm('Μηδενισμός relid στις επιλεγμένες γραμμές; Το Mark Paid δεν θα τις ανανεώσει.');">
+{$token}
+<input type="hidden" name="invoiceid" value="{$invoiceId}">
+<table class="table table-condensed">
+    <thead><tr>
+        <th>Επιλ.</th><th>Περιγραφή</th><th>Είδος</th><th>Σύνδεση</th><th>Επόμενη λήξη</th><th>relid</th>
+    </tr></thead>
+    <tbody>{$rowsHtml}</tbody>
+</table>
+<button type="button" class="btn btn-default btn-sm relid-select-all">Επιλογή όλων</button>
+<button type="button" class="btn btn-default btn-sm relid-select-none">Καμία</button>
+<button type="submit" class="btn btn-danger"><i class="fa fa-eraser"></i> Μηδενισμός relid (επιλεγμένες)</button>
+<a class="btn btn-primary" href="{$invHref}">Back to invoice #{$invoiceId}</a>
+</form>
+<p class="text-muted" style="margin-top:8px">Ο μηδενισμός θέτει <code>relid = 0</code> στις επιλεγμένες γραμμές, ώστε το Mark Paid να μην τις ανανεώσει. Καταγράφεται στο WHMCS activity log.</p>
+<script>
+(function () {
+    function setAll(v) { document.querySelectorAll('.relid-item').forEach(function (c) { c.checked = v; }); }
+    var all = document.querySelector('.relid-select-all');
+    var none = document.querySelector('.relid-select-none');
+    if (all) all.addEventListener('click', function () { setAll(true); });
+    if (none) none.addEventListener('click', function () { setAll(false); });
+})();
+</script>
+EOF;
+    }
+
+    /**
+     * Zero the relid on the selected invoice items (scoped to the invoice).
+     * The safe, audited successor to the legacy relid_remover: prevents WHMCS
+     * from (re)renewing those lines when the invoice is marked paid. Never
+     * touches ekdosi/AADE.
+     */
+    public function relidReset(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage($link);
+        }
+        $invoiceId = (int) ($_POST['invoiceid'] ?? 0);
+        $itemIds = array_values(array_unique(array_filter(
+            array_map('intval', (array) ($_POST['item_id'] ?? [])),
+            static fn ($v) => $v > 0,
+        )));
+        if ($invoiceId <= 0) {
+            return $this->errorPage($link, 'Invalid invoice id.');
+        }
+        if ($itemIds === []) {
+            return $this->errorPage($link, 'Δεν επιλέχθηκαν γραμμές.');
+        }
+
+        $updated = Capsule::table('tblinvoiceitems')
+            ->where('invoiceid', $invoiceId)
+            ->whereIn('id', $itemIds)
+            ->update(['relid' => 0]);
+
+        $this->logActivity("EkdosiBridge: relid set to 0 on {$updated} item(s) of invoice #{$invoiceId} (ids: "
+            .implode(',', $itemIds).') — prevents double-renewal at Mark Paid.');
+
+        $invHref = htmlspecialchars('invoices.php?action=edit&id='.$invoiceId);
+        $backCheck = $link.'&action=relidCheck&invoiceid='.$invoiceId;
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+<div class="alert alert-success">Invoice #{$invoiceId}: μηδενίστηκε το relid σε {$updated} γραμμή/ές. Το Mark Paid δεν θα τις ανανεώσει.</div>
+<p>
+    <a class="btn btn-default" href="{$backCheck}">Ξανά έλεγχος relid</a>
+    <a class="btn btn-primary" href="{$invHref}">Back to invoice #{$invoiceId}</a>
+</p>
 EOF;
     }
 
