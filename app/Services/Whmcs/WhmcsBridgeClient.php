@@ -216,6 +216,37 @@ class WhmcsBridgeClient
     }
 
     /**
+     * Slice 1 of "the bridge is the inbox feed": one page of full invoice
+     * payloads (invoice + client identity + customfields + line items), built
+     * by the plugin's InvoiceFeed — shape-compatible with the native
+     * WhmcsClient::getInvoiceWithClient, so WhmcsInvoiceIngestor consumes each
+     * payload UNCHANGED. Server-side filtered (paid+unfiled by default) and
+     * paginated — one HMAC call replaces the native API's 1+2N round-trips.
+     *
+     * Throws WhmcsUnreachable / WhmcsApiException like resolveThirdParty.
+     *
+     * @return array<int, array<string, mixed>>  the page's payloads (empty = end)
+     */
+    public function fetchPendingInvoices(int $offset, int $limit = 100, ?string $since = null, string $status = 'paid_unfiled'): array
+    {
+        $body = ['op' => 'invoices', 'status' => $status, 'offset' => $offset, 'limit' => $limit];
+        if ($since !== null && $since !== '') {
+            $body['since'] = $since;
+        }
+
+        $data = $this->postResolve($body);
+        $invoices = $data['invoices'] ?? [];
+        if (! is_array($invoices)) {
+            return [];
+        }
+
+        // Keep only well-formed payloads (must carry an invoice id the ingestor
+        // can stage on).
+        return array_values(array_filter($invoices, static fn ($p): bool => is_array($p)
+            && (int) ($p['invoiceid'] ?? $p['id'] ?? 0) > 0));
+    }
+
+    /**
      * Historical backfill: one page of (whmcs_id, invoiced) links for invoices
      * the LEGACY app filed (invoiced > 0). invoiced holds the legacy ekdosi
      * INVOICE_ID, which the ETL kept as invoices.legacy_id — so the caller can

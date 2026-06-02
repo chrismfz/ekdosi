@@ -7,6 +7,7 @@ use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
+use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClient;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
@@ -51,7 +52,8 @@ class WhmcsFetchPending extends Command
         {--tenant= : Company slug. Required.}
         {--limit=100 : Max WHMCS-side rows to fetch (WHMCS caps at 100).}
         {--offset=0 : Offset for paginating through larger result sets.}
-        {--preview : Read-only dry-run; print the table from Stage A, do not stage anything.}';
+        {--preview : Read-only dry-run; print the table from Stage A, do not stage anything.}
+        {--via-bridge : Fetch the invoice payloads from the ekdosi_bridge plugin (resolve.php op=invoices) instead of the native WHMCS API. One paginated HMAC call, server-side filtered, no 1+2N round-trips.}';
 
     protected $description = 'WHMCS bridge: fetch paid+unfiled invoices and stage them in pending_whmcs_invoices for operator review. --preview for the Stage A read-only table.';
 
@@ -73,6 +75,15 @@ class WhmcsFetchPending extends Command
         }
 
         $this->info("Tenant: {$tenant->name} (slug={$tenant->slug})");
+
+        // --via-bridge: the new source-of-truth path. Fetch the full invoice
+        // payloads from our own plugin (resolve.php op=invoices) and feed them to
+        // the SAME ingestor — the payloads are shape-compatible with the native
+        // getInvoiceWithClient, so matching/staging is identical; only the source
+        // changes. (--preview is a native-API-only diagnostic.)
+        if ((bool) $this->option('via-bridge') && ! (bool) $this->option('preview')) {
+            return $this->ingestViaBridge($tenant, $ingestor);
+        }
 
         try {
             $client = $factory->for($tenant);
@@ -234,6 +245,93 @@ class WhmcsFetchPending extends Command
         // grepping output. Code 7 is appended to Stage A's range
         // (0-6) so existing wrappers that only branch on 0 vs nonzero
         // keep working.
+        return $failed > 0 ? 7 : Command::SUCCESS;
+    }
+
+    /**
+     * --via-bridge path: fetch the invoice payloads from our own plugin
+     * (resolve.php op=invoices), paging until an empty page, and feed each to the
+     * SAME ingestor. The payloads are shape-compatible with getInvoiceWithClient,
+     * so staging/matching is identical to the native path — only the source
+     * differs (one paginated HMAC call vs the native API's 1+2N round-trips).
+     */
+    private function ingestViaBridge(Company $tenant, WhmcsInvoiceIngestor $ingestor): int
+    {
+        try {
+            $bridge = app(WhmcsBridgeClientFactory::class)->for($tenant);
+        } catch (WhmcsNotConfigured $e) {
+            $this->error($e->getMessage());
+
+            return 3;
+        }
+
+        $this->info('Source: ekdosi_bridge plugin (resolve.php op=invoices).');
+        $minDate = $tenant->whmcs_invoice_min_date?->format('Y-m-d');
+        $limit = max(1, (int) $this->option('limit'));
+        $offset = max(0, (int) $this->option('offset'));
+
+        $created = 0;
+        $updated = 0;
+        $auditPreserved = 0;
+        $failed = 0;
+        $pages = 0;
+
+        while (true) {
+            try {
+                $payloads = $bridge->fetchPendingInvoices($offset, $limit, $minDate);
+            } catch (WhmcsUnreachable $e) {
+                $this->error("Bridge unreachable: {$e->getMessage()}");
+
+                return 5;
+            } catch (WhmcsApiException $e) {
+                $this->error("Bridge error: {$e->getMessage()}");
+
+                return Command::FAILURE;
+            }
+
+            if ($payloads === []) {
+                break;
+            }
+
+            foreach ($payloads as $payload) {
+                $invoiceId = (int) ($payload['invoiceid'] ?? $payload['id'] ?? 0);
+                try {
+                    $result = $ingestor->ingest($tenant, $payload);
+                    if ($result->created) {
+                        $created++;
+                        $this->line(sprintf('  staged  WHMCS#%d -> pending #%d (match: %s)', $invoiceId, $result->row->id, $result->row->match_reason));
+                    } elseif ($result->auditPreserved) {
+                        $auditPreserved++;
+                        $this->line(sprintf('  frozen  WHMCS#%d -> pending #%d (already filed)', $invoiceId, $result->row->id));
+                    } else {
+                        $updated++;
+                        $this->line(sprintf('  refresh WHMCS#%d -> pending #%d (status: %s)', $invoiceId, $result->row->id, $result->row->status));
+                    }
+                } catch (\Throwable $e) {
+                    $this->warn("WHMCS invoice #{$invoiceId}: ingest failed - {$e->getMessage()}");
+                    $failed++;
+                }
+            }
+
+            $offset += count($payloads);
+            if (++$pages > 10000) {   // safety guard against a misbehaving feed
+                $this->warn('Stopped after 10000 pages (safety guard).');
+                break;
+            }
+        }
+
+        try {
+            $legacyChanged = app(\App\Services\Whmcs\LegacyInvoicedRefresher::class)->refresh($tenant);
+            if ($legacyChanged > 0) {
+                $this->warn(sprintf('Legacy check: %d row(s) are now flagged "already invoiced in the legacy app".', $legacyChanged));
+            }
+        } catch (\Throwable $e) {
+            $this->warn('Legacy-invoiced refresh skipped: '.$e->getMessage());
+        }
+
+        $this->line('');
+        $this->info(sprintf('Summary (via bridge): %d created, %d refreshed, %d audit-frozen, %d failed.', $created, $updated, $auditPreserved, $failed));
+
         return $failed > 0 ? 7 : Command::SUCCESS;
     }
 

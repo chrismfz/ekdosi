@@ -24,6 +24,12 @@
  *                          → { "links": [{"whmcs_id": N, "invoiced": M}, ...] }
  *                            (invoiced > 0 only — the legacy INVOICE_ID per
  *                            WHMCS invoice; powers ekdosi's historical backfill)
+ *   op = "invoices":     { "op": "invoices", "status": "paid_unfiled", "since": "Y-m-d",
+ *                          "offset": 0, "limit": 100 }
+ *                          → { "invoices": [ {full payload}, ... ], offset, count }
+ *                            (the inbox FEED: invoice + client + customfields +
+ *                            line items, shape-compatible with the native
+ *                            getInvoiceWithClient — see InvoiceFeed)
  *
  * Response shapes + error envelope are unchanged from T-1a (the ekdosi-side
  * ThirdPartyResolution contract): see ThirdPartyStore::resolveInvoice/resellers.
@@ -39,8 +45,10 @@ if ($bootPath === false || ! file_exists($bootPath)) {
 }
 require_once $bootPath;
 require_once __DIR__.'/lib/ThirdPartyStore.php';
+require_once __DIR__.'/lib/InvoiceFeed.php';
 
 use WHMCS\Database\Capsule;
+use WHMCS\Module\Addon\EkdosiBridge\InvoiceFeed;
 use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
 
 header('Content-Type: application/json');
@@ -132,6 +140,20 @@ try {
         exit;
     }
 
+    if ($op === 'invoices') {
+        // Slice 1 — the bridge IS the inbox feed: a page of full invoice
+        // payloads (invoice + client identity + customfields + line items),
+        // shape-compatible with the native getInvoiceWithClient so the ekdosi
+        // ingestor consumes it unchanged. Server-side filtered (paid+unfiled by
+        // default) + paginated — replaces the native API's 1+2N round-trips.
+        $status = (string) ($payload['status'] ?? 'paid_unfiled');
+        $since = isset($payload['since']) ? (string) $payload['since'] : null;
+        $offset = (int) ($payload['offset'] ?? 0);
+        $limit = (int) ($payload['limit'] ?? 100);
+        echo json_encode(['status' => 'ok'] + InvoiceFeed::fetch($status, $since, $offset, $limit));
+        exit;
+    }
+
     if ($op === 'legacy_invoice_links') {
         // READ-ONLY, paginated: (whmcs_id, invoiced) for invoices the LEGACY app
         // filed — invoiced holds the legacy ekdosi INVOICE_ID (the ETL kept it as
@@ -183,7 +205,7 @@ try {
     }
 
     http_response_code(400);
-    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags" or "legacy_invoice_links".']);
+    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links" or "invoices".']);
     exit;
 } catch (\Throwable $e) {
     http_response_code(500);
