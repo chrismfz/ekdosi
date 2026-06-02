@@ -92,6 +92,20 @@ they merge.
   Re-runnable upsert by natural key; resolves against the standard AADE lookups
   the seeder installs (`App\Services\Etl\EpsilonImporter`). Runs synchronously
   (the exports are tiny). Sales→invoices is a planned Phase 2.
+### Fixed
+- **Data Import no longer 500s when an upload fails to persist.** If a uploaded
+  file silently vanished before Filament saved it (temp-dir pruning, storage
+  perms, or a request over php.ini's upload/post limits), every file field came
+  back empty and `CreateFirebirdImportRun` fell through to the Firebird branch,
+  crashing on `Storage::disk('local')->path(null)` (opaque flysystem TypeError).
+  It now halts with an actionable Greek notification («Δεν ελήφθη κανένα αρχείο…»)
+  and the Epsilon importer checks each staged path exists before reading.
+- **Import View page no longer 500s on Epsilon counts.** The «Imported rows»
+  infolist assumed the flat Firebird `table => int` shape and crashed on
+  `number_format(array)` for the Epsilon importer's nested
+  `entity => ['created','updated','skipped']` — so the View page died right after
+  a successful Epsilon import. It now renders both shapes (nested → «+N νέα · ~N
+  ενημ. · N παράλειψη»).
 
 ## 2026-06-02
 ### Added
