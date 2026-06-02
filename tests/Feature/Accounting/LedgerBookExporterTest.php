@@ -34,6 +34,8 @@ class LedgerBookExporterTest extends TestCase
                 mydataState: 'VALID',
                 mark: '400001',
                 recordId: 1,
+                accountCode: '73',
+                accountName: 'Πωλήσεις υπηρεσιών',
             ),
             new LedgerRow(
                 book: 'expense',
@@ -51,6 +53,8 @@ class LedgerBookExporterTest extends TestCase
                 mydataState: 'VALID',
                 mark: '400002',
                 recordId: 2,
+                accountCode: '61',
+                accountName: 'Αμοιβές & έξοδα τρίτων',
             ),
         ];
 
@@ -63,12 +67,35 @@ class LedgerBookExporterTest extends TestCase
 
         $this->assertStringStartsWith("\xEF\xBB\xBF", $csv, 'UTF-8 BOM for Excel');
         $this->assertStringContainsString('Παραστατικό;', $csv);
+        $this->assertStringContainsString('Λογαριασμός;', $csv);
         $this->assertStringContainsString('TPY100', $csv);
         $this->assertStringContainsString('Παροχή Υπηρεσιών', $csv);
         // Comma decimal, ';' delimited.
         $this->assertStringContainsString('100,00', $csv);
         $this->assertStringContainsString('Σύνολο εσόδων', $csv);
         $this->assertStringContainsString('ΦΠΑ εκροών − εισροών', $csv);
+
+        // Column-count guard: header, a data row and the totals line must all
+        // parse to 13 fields, so a future column shift can't silently mis-align
+        // the totals trailer (the off-by-one this layout is sensitive to). We
+        // PARSE each line (fputcsv quotes multibyte labels, so a raw prefix
+        // match is unreliable) after stripping the BOM.
+        $body = str_replace("\xEF\xBB\xBF", '', $csv);
+        $rows = array_map(
+            fn ($l) => str_getcsv($l, ';', '"', '\\'),
+            array_filter(explode("\n", trim($body)), fn ($l) => $l !== ''),
+        );
+        $first = fn (string $v) => collect($rows)->first(fn ($r) => ($r[0] ?? null) === $v);
+
+        $this->assertCount(13, $first('Ημ/νία'), 'header has 13 columns');
+
+        $dataRow = $first('2026-01-10');
+        $this->assertCount(13, $dataRow, 'data row has 13 columns');
+        $this->assertSame('73', $dataRow[8], 'account lands in column 9 (idx 8)');
+
+        $totals = $first('Σύνολο εσόδων');
+        $this->assertCount(13, $totals, 'totals row has 13 columns');
+        $this->assertSame('100,00', $totals[10], 'income net lands under Καθαρό (idx 10)');
     }
 
     public function test_json_structure_and_totals(): void
