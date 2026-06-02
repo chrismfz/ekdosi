@@ -86,12 +86,25 @@ class TagControls
      * Fast-filter tabs (Έξοδα-style) for this model: «Όλα» + one tab per
      * PINNED tag that's actually attached to ≥1 record of the model — so a
      * product-only pinned tag never shows up as a noise tab on the Customers
-     * list.
+     * list. Each tab carries a count badge (e.g. «χονδρική (12)»).
      *
      * @param  class-string  $modelClass
      * @return array<string, Tab>
      */
     public static function pinnedTabs(string $modelClass): array
+    {
+        return ['all' => Tab::make('Όλα')] + static::tagTabs($modelClass);
+    }
+
+    /**
+     * Just the pinned-tag tabs (no «Όλα») — so a list that already defines its
+     * own tabs (e.g. Έξοδα's economic buckets) can append the tag tabs after
+     * them. Keyed `tag_{id}`; each carries a count badge.
+     *
+     * @param  class-string  $modelClass
+     * @return array<string, Tab>
+     */
+    public static function tagTabs(string $modelClass): array
     {
         $usedTagIds = DB::table('taggables')
             ->where('taggable_type', $modelClass)
@@ -106,10 +119,17 @@ class TagControls
             ->orderBy('name')
             ->get();
 
-        $tabs = ['all' => Tab::make('Όλα')];
+        $tabs = [];
 
         foreach ($tags as $tag) {
+            // Count badge — non-trashed records carrying this tag. Cheap:
+            // pinned tags are few, so this is a handful of COUNT(*) queries.
+            $count = $modelClass::query()
+                ->whereHas('tags', fn (Builder $q) => $q->whereKey($tag->id))
+                ->count();
+
             $tabs['tag_'.$tag->id] = Tab::make($tag->name)
+                ->badge($count)
                 ->modifyQueryUsing(fn (Builder $query): Builder => $query
                     ->whereHas('tags', fn (Builder $q) => $q->whereKey($tag->id)));
         }

@@ -6,6 +6,7 @@ use App\Filament\Resources\Tags\Pages\CreateTag;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Product;
@@ -60,16 +61,19 @@ class TagSystemTest extends TestCase
         $supplier = Supplier::create(['company_id' => $this->tenant->id, 'name' => 'S', 'afm' => '1']);
         $product = $this->product('P');
         $invoice = $this->invoice($customer);
+        $expense = Expense::create(['company_id' => $this->tenant->id, 'source' => 'manual']);
 
         $customer->tags()->attach($tag);
         $supplier->tags()->attach($tag);
         $product->tags()->attach($tag);
         $invoice->tags()->attach($tag);
+        $expense->tags()->attach($tag);
 
         $this->assertTrue($customer->fresh()->tags->contains($tag));
         $this->assertTrue($supplier->fresh()->tags->contains($tag));
         $this->assertTrue($product->fresh()->tags->contains($tag));
         $this->assertTrue($invoice->fresh()->tags->contains($tag));
+        $this->assertTrue($expense->fresh()->tags->contains($tag));
 
         // Morph type stored as the FQCN (no morphMap configured).
         $this->assertDatabaseHas('taggables', [
@@ -101,6 +105,21 @@ class TagSystemTest extends TestCase
         $this->assertArrayNotHasKey('tag_'.$pinnedUnused->id, $tabs);
         $this->assertArrayNotHasKey('tag_'.$unpinnedUsed->id, $tabs);
         $this->assertArrayNotHasKey('tag_'.$productPinned->id, $tabs);
+    }
+
+    public function test_tag_tabs_carry_count_badges(): void
+    {
+        $tag = $this->tag('Χονδρική', pinned: true);
+        foreach (['A', 'B', 'C'] as $name) {
+            Customer::create(['company_id' => $this->tenant->id, 'name' => $name])
+                ->tags()->attach($tag);
+        }
+        // An untagged customer must not be counted.
+        Customer::create(['company_id' => $this->tenant->id, 'name' => 'D']);
+
+        $tabs = TagControls::pinnedTabs(Customer::class);
+
+        $this->assertEquals(3, $tabs['tag_'.$tag->id]->getBadge());
     }
 
     public function test_tag_filter_predicate_narrows_to_tagged_records(): void
