@@ -21,13 +21,36 @@
                         {{ $cust->address1 }}{{ $cust->city ? ', ' . $cust->city : '' }}{{ $cust->postcode ? ' ' . $cust->postcode : '' }}
                     </div>
                 @endif
+                {{-- Contact + commercial terms we already store but never surfaced --}}
+                @if ($cust->phone1 || $cust->phone2 || $cust->email)
+                    <div class="text-sm fi-color-gray">
+                        @if ($cust->phone1)<span class="font-medium">Τηλ:</span> {{ $cust->phone1 }}@endif
+                        @if ($cust->phone2) &middot; {{ $cust->phone2 }}@endif
+                        @if ($cust->email) &middot; <span class="font-medium">Email:</span> {{ $cust->email }}@endif
+                    </div>
+                @endif
+                @if ($cust->paymentMethod || (float) $cust->discount > 0)
+                    <div class="text-sm fi-color-gray">
+                        @if ($cust->paymentMethod)<span class="font-medium">Τρόπος πληρωμής:</span> {{ $cust->paymentMethod->description }}@endif
+                        @if ((float) $cust->discount > 0) &middot; <span class="font-medium">Έκπτωση:</span> {{ rtrim(rtrim(number_format((float) $cust->discount, 2), '0'), '.') }}%@endif
+                    </div>
+                @endif
+                @if (filled($cust->details))
+                    <div class="text-sm fi-color-gray italic">{{ $cust->details }}</div>
+                @endif
             </div>
 
-            @if ($cust->whmcs_client_id)
-                <x-filament::badge color="info">
-                    WHMCS #{{ $cust->whmcs_client_id }}
-                </x-filament::badge>
-            @endif
+            <div class="flex flex-wrap items-start gap-2">
+                @if ($cust->needs_immediate_invoice)
+                    <x-filament::badge color="warning" icon="heroicon-o-bolt">Άμεση τιμολόγηση</x-filament::badge>
+                @endif
+                @if ((int) $cust->whmcs_reseller_routes > 0)
+                    <x-filament::badge color="success">Μεταπωλητής</x-filament::badge>
+                @endif
+                @if ($cust->whmcs_client_id)
+                    <x-filament::badge color="info">WHMCS #{{ $cust->whmcs_client_id }}</x-filament::badge>
+                @endif
+            </div>
         </div>
     </x-filament::section>
 
@@ -76,6 +99,52 @@
 
             {{ $this->table }}
         </x-filament::section>
+
+        {{-- ============= Συχνά προϊόντα/υπηρεσίες ============= --}}
+        @if (count($this->topProducts) > 0)
+            <x-filament::section>
+                <x-slot name="heading">Συχνά προϊόντα/υπηρεσίες</x-slot>
+                <x-slot name="description">
+                    Τι αγοράζει συχνότερα ο πελάτης (από ζωντανά παραστατικά, χωρίς πιστωτικά).
+                </x-slot>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left fi-color-gray border-b border-gray-200 dark:border-white/10">
+                                <th class="py-2 pr-3 font-medium">Είδος</th>
+                                <th class="py-2 px-3 font-medium text-right">Φορές</th>
+                                <th class="py-2 px-3 font-medium text-right">Ποσότητα</th>
+                                <th class="py-2 px-3 font-medium text-right">Καθαρή αξία</th>
+                                <th class="py-2 pl-3 font-medium whitespace-nowrap">Τελευταία</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($this->topProducts as $row)
+                                <tr class="border-b border-gray-100 dark:border-white/5">
+                                    <td class="py-2 pr-3">
+                                        {{ $row['label'] }}
+                                        @if (! empty($row['sku']))
+                                            <span class="fi-color-gray">· {{ $row['sku'] }}</span>
+                                        @endif
+                                    </td>
+                                    <td class="py-2 px-3 text-right font-mono">{{ $row['times'] }}</td>
+                                    <td class="py-2 px-3 text-right font-mono whitespace-nowrap">
+                                        {{ rtrim(rtrim(number_format($row['qty'], 3), '0'), '.') }}{{ $row['unit'] ? ' ' . $row['unit'] : '' }}
+                                    </td>
+                                    <td class="py-2 px-3 text-right font-mono whitespace-nowrap">
+                                        {{ number_format($row['net'], 2) }} €
+                                    </td>
+                                    <td class="py-2 pl-3 font-mono whitespace-nowrap fi-color-gray">
+                                        {{ $row['last_at'] ? \Illuminate\Support\Carbon::parse($row['last_at'])->format('d/m/Y') : '—' }}
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </x-filament::section>
+        @endif
     @endif
 
     {{-- ============= WHMCS comparison (collapsible) ============= --}}
