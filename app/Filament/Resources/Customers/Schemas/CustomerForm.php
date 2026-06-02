@@ -10,7 +10,6 @@ use App\Models\PaymentMethod;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -230,12 +229,11 @@ class CustomerForm
                                     ->helperText('Estonian companies: their Äriregistri kood formatted as the PEPPOL identifier (e.g. 0007:12345678). Used by the future PEPPOL submitter.'),
                             ]),
 
-                        Tab::make('Notes')
-                            ->schema([
-                                Textarea::make('details')
-                                    ->rows(8)
-                                    ->columnSpanFull(),
-                            ]),
+                        // The old free-text «Σχόλια» (customers.details) tab was
+                        // dropped in favour of the richer «Σημειώσεις (εσωτερικές)»
+                        // relation manager (dated, multi-entry, with author). The
+                        // `details` column is kept (imported remarks from Epsilon/
+                        // legacy still land there and show read-only on the Καρτέλα).
                     ]),
             ]);
     }

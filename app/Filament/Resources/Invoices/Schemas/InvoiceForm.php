@@ -398,12 +398,14 @@ class InvoiceForm
                     TextInput::make('country')->label('Χώρα')->maxLength(60)->helperText('Κατά προτίμηση ISO alpha-2. Κανονικοποιείται κατά την υποβολή.'),
                 ]),
 
-            // ─── Σημειώσεις + παρακράτηση — collapsed ───
-            Section::make('Σημειώσεις & παρακράτηση')
+            // ─── Παρατηρήσεις (εκτύπωσης) + παρακράτηση — collapsed ───
+            Section::make('Παρατηρήσεις (εκτύπωσης) & παρακράτηση')
                 ->columnSpanFull()
                 ->collapsed()
                 ->schema([
-                    Textarea::make('notes')->rows(4)->columnSpanFull()->label('Σημειώσεις (εσωτερικές / εκτύπωσης)'),
+                    Textarea::make('notes')->rows(4)->columnSpanFull()
+                        ->label('Παρατηρήσεις (εκτυπώνονται στο παραστατικό)')
+                        ->helperText('⚠ Εμφανίζονται στο PDF και στο email του πελάτη. Για εσωτερικά σχόλια (π.χ. «κακοπληρωτής») χρησιμοποίησε την καρτέλα «Σημειώσεις (εσωτερικές)».'),
                     TextInput::make('withhold_amount')
                         ->label('Ποσό παρακράτησης (€)')
                         ->numeric()

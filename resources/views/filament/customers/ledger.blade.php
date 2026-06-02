@@ -36,7 +36,7 @@
                     </div>
                 @endif
                 @if (filled($cust->details))
-                    <div class="text-sm fi-color-gray italic">{{ $cust->details }}</div>
+                    <div class="text-sm fi-color-gray italic"><span class="font-medium not-italic">Σχόλιο:</span> {{ $cust->details }}</div>
                 @endif
             </div>
 
