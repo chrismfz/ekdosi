@@ -4,11 +4,16 @@ namespace App\Services\Etl;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
 use App\Models\MetricUnit;
+use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Services\InvoiceBalance;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -67,7 +72,19 @@ class EpsilonImporter
     /** @var array<string,?int> payment-method description → id (memoised) */
     private array $paymentCache = [];
 
+    /** @var array<string,int> invoice-type code → id (memoised) */
+    private array $invoiceTypeCache = [];
+
+    /** @var array<string,int> customer ΑΦΜ → id (memoised) */
+    private array $customerCache = [];
+
+    /** @var array<string,?int> product description_short → id (memoised) */
+    private array $productByNameCache = [];
+
     private ?int $defaultVatId = null;
+
+    /** Marker note on the synthetic settlement payment (idempotent re-runs). */
+    private const IMPORT_PAYMENT_NOTE = 'Εισαγωγή ιστορικού Epsilon — εξοφλημένο κατά την έκδοση';
 
     /** @var array<string,true> de-duped human-readable warnings surfaced to the operator */
     private array $warnings = [];
@@ -106,8 +123,202 @@ class EpsilonImporter
                 $payload['services'] ?? [],
             );
         }
+        if (isset($payload['sales'])) {
+            $out['sales'] = $this->importSales($payload['sales']);
+        }
 
         return $out;
+    }
+
+    /**
+     * Sales → invoices (historical, already filed at AADE). Each Epsilon sale is
+     * a posted ΤΙΜ with a MARK; we land it as an `active` invoice carrying the
+     * VALID myDATA state + MARK (cache columns) and a minimal `mydata_marks`
+     * audit row. The Epsilon document number (DocNum) is preserved as the ΑΑ
+     * (invcode = series+DocNum), and the invoice-type counter is bumped so new
+     * ekdosi invoices continue from there.
+     *
+     * Re-runnable: matched by (company_id, invcode); a re-run refreshes the
+     * header and REPLACES the lines + mark row (they have no natural key).
+     * counterpart customer + invoice type resolve-or-create (warned).
+     *
+     * @param  array<int, array<string,mixed>>  $rows
+     * @return array{created:int, updated:int, skipped:int}
+     */
+    public function importSales(array $rows): array
+    {
+        $created = $updated = $skipped = 0;
+        $counterByType = []; // type id → max DocNum seen (to bump invcount)
+
+        DB::transaction(function () use ($rows, &$created, &$updated, &$skipped, &$counterByType) {
+            $now = now();
+            foreach ($rows as $sale) {
+                $docNum = (int) ($sale['DocNum'] ?? 0);
+                $series = $this->clean($sale['DocSeriesShortcut'] ?? null);
+                if ($docNum <= 0 || $series === null) {
+                    $this->warn('Πώληση χωρίς DocNum/σειρά — παραλείφθηκε.');
+                    $skipped++;
+
+                    continue;
+                }
+
+                $typeId = $this->resolveInvoiceType($series, $this->clean($sale['DocSerie'] ?? null) ?? $series);
+                $customerId = $this->resolveSaleCustomer($sale);
+                $invcode = $series.$docNum;
+                $issuedAt = $this->parseDateTime($sale['CreationTime'] ?? null, $sale['Date'] ?? null);
+                $mark = $this->cleanMark($sale['Mark'] ?? null);
+                $paymentMethodId = $this->resolvePaymentMethod($this->clean($sale['PmtMethod'] ?? null));
+                $gross = round((float) ($sale['TotalVal'] ?? 0), 2);
+
+                $header = [
+                    'invoice_type_id' => $typeId,
+                    'customer_id' => $customerId,
+                    'code' => $docNum,
+                    'issued_at' => $issuedAt,
+                    'payment_method_id' => $paymentMethodId,
+                    'header_discount_percent' => 0,
+                    'net_total' => round((float) ($sale['NetVal'] ?? 0), 2),
+                    'gross_total' => $gross,
+                    // Party snapshot (frozen at issue — exactly how AADE has it).
+                    // Truncated to the column widths: strict mode would abort the
+                    // whole import on an over-length Greek ΑΕ name (already 100ch
+                    // in the sample) rather than skip the row.
+                    'company_name' => $this->cut($this->clean($sale['TraderName'] ?? null), 120),
+                    'vat_no' => $this->cut($this->clean($sale['TraderTIN'] ?? null), 20),
+                    'address1' => $this->cut($this->join([$sale['TraderStreet'] ?? null, $sale['TraderStreetNo'] ?? null]), 60),
+                    'city' => $this->cut($this->clean($sale['TraderCity'] ?? null), 60),
+                    'postcode' => $this->cut($this->clean($sale['TraderZIP'] ?? null), 10),
+                    // Epsilon stores the country as a Greek NAME («Ελλάδα»); the
+                    // sample is all-Greek ΤΙΜ → GR. A non-GR sale would need an
+                    // ISO map (follow-up); default GR for now.
+                    'country' => 'GR',
+                    'local_status' => 'active',
+                    // myDATA cache columns (the denormalised latest-state cache).
+                    'mydata_sent' => true,
+                    'mydata_state' => $mark !== null ? 'VALID' : null,
+                    'mydata_mark' => $mark,
+                    'updated_at' => $now,
+                ];
+
+                // Raw query-builder writes (mirrors MigrateFromFirebird): bypass
+                // the InvoiceLine recompute hook — which would OVERWRITE the
+                // filed net/gross and throw on a zero-qty line, aborting the
+                // batch — and the Invoice observers/activity-log. Stores exactly
+                // what AADE has on file.
+                $invoiceId = DB::table('invoices')
+                    ->where('company_id', $this->companyId)->where('invcode', $invcode)->value('id');
+                if ($invoiceId !== null) {
+                    DB::table('invoices')->where('id', $invoiceId)->update($header);
+                    $updated++;
+                } else {
+                    $invoiceId = DB::table('invoices')->insertGetId($header + [
+                        'company_id' => $this->companyId,
+                        'invcode' => $invcode,
+                        'created_at' => $now,
+                    ]);
+                    $created++;
+                }
+
+                // Replace lines (verbatim filed values — no recompute hook).
+                DB::table('invoice_lines')->where('invoice_id', $invoiceId)->delete();
+                $lineRows = [];
+                foreach (($sale['CommLines'] ?? []) as $line) {
+                    $entity = $this->clean($line['EntityName'] ?? null);
+                    $lineRows[] = [
+                        'company_id' => $this->companyId,
+                        'invoice_id' => $invoiceId,
+                        'product_id' => $this->resolveProductByName($entity),
+                        'qty' => round((float) ($line['Quantity'] ?? 1), 3),
+                        'price_per_item' => round((float) ($line['Price'] ?? 0), 2),
+                        'discount' => round((float) ($line['DiscLinePerc'] ?? 0), 4),
+                        'vat_percent' => round((float) ($line['VATPercent'] ?? 0), 2),
+                        'net_price' => round((float) ($line['NetVal'] ?? 0), 2),
+                        'gross_price' => round((float) ($line['TotalVal'] ?? 0), 2),
+                        'product_descr' => $entity ?? $this->clean($line['PrintingName'] ?? null) ?? '—',
+                        'metric_unit' => $this->clean($line['MsntUnit'] ?? null),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+                if ($lineRows !== []) {
+                    DB::table('invoice_lines')->insert($lineRows);
+                }
+
+                // Replace the myDATA audit mark. action='INSERT' — the codebase
+                // finds the original filing via mydata_action='INSERT' (cancel /
+                // credit-note correlation); 'SEND' would be invisible to them.
+                DB::table('mydata_marks')->where('invoice_id', $invoiceId)->delete();
+                if ($mark !== null) {
+                    DB::table('mydata_marks')->insert([
+                        'company_id' => $this->companyId,
+                        'invoice_id' => $invoiceId,
+                        'mark' => $mark,
+                        'mydata_action' => 'INSERT',
+                        'mark_date' => $issuedAt->toDateString(),
+                        'mark_time' => $issuedAt->format('H:i:s'),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                }
+
+                // These are historical, already-paid documents. Cash-term is
+                // settled at issue by InvoiceBalance; credit-term needs a
+                // settlement payment so it isn't a phantom open receivable.
+                $this->settleImportedSale($invoiceId, $customerId, $paymentMethodId, $gross, $issuedAt);
+
+                $counterByType[$typeId] = max($counterByType[$typeId] ?? 0, $docNum);
+            }
+
+            // Bump each touched type's counter so new ekdosi invoices continue
+            // past the imported Epsilon numbers (next ΑΑ = max DocNum + 1).
+            foreach ($counterByType as $typeId => $maxDocNum) {
+                DB::table('invoice_types')->where('id', $typeId)->where('company_id', $this->companyId)
+                    ->where('invcount', '<', $maxDocNum + 1)
+                    ->update(['invcount' => $maxDocNum + 1]);
+            }
+        });
+
+        return ['created' => $created, 'updated' => $updated, 'skipped' => $skipped];
+    }
+
+    /**
+     * Settle a just-imported historical sale. Cash-term (due_days = 0 or no
+     * payment method) is already "paid at issue" by InvoiceBalance — we just
+     * refresh the money cache. Credit-term gets a full settlement Payment dated
+     * at issue (the PaymentObserver recomputes the cache), so a years-old paid
+     * invoice doesn't surface as an open receivable on the dashboard/Καρτέλα.
+     * Re-runnable: the prior import-payment is force-removed first.
+     */
+    private function settleImportedSale(int $invoiceId, ?int $customerId, ?int $paymentMethodId, float $gross, Carbon $issuedAt): void
+    {
+        Payment::query()->withoutGlobalScopes()
+            ->where('invoice_id', $invoiceId)
+            ->where('notes', self::IMPORT_PAYMENT_NOTE)
+            ->forceDelete();
+
+        $dueDays = $paymentMethodId !== null
+            ? (int) (PaymentMethod::withoutGlobalScopes()->whereKey($paymentMethodId)->value('due_days') ?? 0)
+            : 0;
+
+        if ($dueDays > 0 && $customerId !== null && $gross > 0) {
+            $payment = new Payment;
+            $payment->forceFill([
+                'company_id' => $this->companyId,
+                'customer_id' => $customerId,
+                'invoice_id' => $invoiceId,
+                'payment_method_id' => $paymentMethodId,
+                'pay_date' => $issuedAt->toDateString(),
+                'amount' => $gross,
+                'notes' => self::IMPORT_PAYMENT_NOTE,
+            ])->save(); // PaymentObserver recomputes the money cache.
+
+            return;
+        }
+
+        $invoice = Invoice::withoutGlobalScopes()->find($invoiceId);
+        if ($invoice !== null) {
+            app(InvoiceBalance::class)->recompute($invoice);
+        }
     }
 
     /**
@@ -348,6 +559,125 @@ class EpsilonImporter
             ->value('id');
 
         return $this->paymentCache[$description] = $id !== null ? (int) $id : null;
+    }
+
+    private function resolveInvoiceType(string $code, string $name): int
+    {
+        if (isset($this->invoiceTypeCache[$code])) {
+            return $this->invoiceTypeCache[$code];
+        }
+        $id = InvoiceType::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', $this->companyId)
+            ->where('code', $code)
+            ->value('id');
+        if ($id === null) {
+            // Create a minimal type (no myDATA classification — the operator
+            // completes it in Setup before re-filing anything of this series).
+            $this->warn("Δημιουργήθηκε είδος παραστατικού «{$code}» — συμπλήρωσε την κατηγοριοποίηση myDATA στο Setup.");
+            $id = InvoiceType::create([
+                'company_id' => $this->companyId,
+                'code' => $code,
+                'name' => $name,
+                'invcount' => 1,
+                'show_on_menu' => true,
+            ])->getKey();
+        }
+
+        return $this->invoiceTypeCache[$code] = (int) $id;
+    }
+
+    /** Resolve the sale's counterpart by ΑΦΜ; create a minimal customer if new. */
+    private function resolveSaleCustomer(array $sale): ?int
+    {
+        $afm = $this->clean($sale['TraderTIN'] ?? null);
+        if ($afm === null || $afm === '000000000') {
+            return null;
+        }
+        if (isset($this->customerCache[$afm])) {
+            return $this->customerCache[$afm];
+        }
+        $id = Customer::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', $this->companyId)
+            ->where('afm', $afm)
+            ->value('id');
+        if ($id === null) {
+            $this->warn("Δημιουργήθηκε πελάτης από πώληση (ΑΦΜ {$afm}) — εισήγαγε πρώτα τους πελάτες για πλήρη στοιχεία.");
+            $id = Customer::create([
+                'company_id' => $this->companyId,
+                'afm' => $afm,
+                'name' => $this->clean($sale['TraderName'] ?? null) ?? $afm,
+                'address1' => $this->join([$sale['TraderStreet'] ?? null, $sale['TraderStreetNo'] ?? null]),
+                'city' => $this->clean($sale['TraderCity'] ?? null),
+                'postcode' => $this->clean($sale['TraderZIP'] ?? null),
+                'country' => 'GR',
+                'is_active' => true,
+            ])->getKey();
+        }
+
+        return $this->customerCache[$afm] = (int) $id;
+    }
+
+    private function resolveProductByName(?string $name): ?int
+    {
+        if ($name === null) {
+            return null;
+        }
+        if (array_key_exists($name, $this->productByNameCache)) {
+            return $this->productByNameCache[$name];
+        }
+        $id = Product::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', $this->companyId)
+            ->where('description_short', $name)
+            ->value('id');
+
+        return $this->productByNameCache[$name] = $id !== null ? (int) $id : null;
+    }
+
+    /**
+     * Epsilon date «29/05/2026» + optional time «29/05/2026 08:28:06» → Carbon.
+     * createFromFormat THROWS on a mismatch (it never returns false), so each
+     * attempt is guarded — a malformed value falls through to the next format,
+     * then to now(), instead of aborting the whole import transaction. The
+     * date-only fallback is pinned to startOfDay (createFromFormat would
+     * otherwise inherit the current wall-clock time → a fabricated mark_time).
+     */
+    private function parseDateTime(?string $creationTime, ?string $date): Carbon
+    {
+        foreach ([['d/m/Y H:i:s', $creationTime, false], ['d/m/Y', $date, true]] as [$fmt, $value, $dateOnly]) {
+            $value = $this->clean($value);
+            if ($value !== null) {
+                try {
+                    $parsed = Carbon::createFromFormat($fmt, $value);
+
+                    return $dateOnly ? $parsed->startOfDay() : $parsed;
+                } catch (\Throwable) {
+                    // fall through to the next format / now()
+                }
+            }
+        }
+
+        return Carbon::now();
+    }
+
+    /** Epsilon exports the MARK with a leading apostrophe («'4000…») — strip it. */
+    private function cleanMark(mixed $value): ?string
+    {
+        $v = $this->clean($value);
+        if ($v === null) {
+            return null;
+        }
+        $v = ltrim($v, "'");
+
+        return $v === '' ? null : $v;
+    }
+
+    /** Clamp a snapshot value to its column width (strict-mode safe). */
+    private function cut(?string $value, int $length): ?string
+    {
+        return $value === null ? null : mb_substr($value, 0, $length);
     }
 
     /* ===================== helpers ===================== */

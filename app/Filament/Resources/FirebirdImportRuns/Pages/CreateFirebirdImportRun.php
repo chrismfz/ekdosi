@@ -51,7 +51,8 @@ class CreateFirebirdImportRun extends CreateRecord
         // Epsilon Smart tab: any JSON file staged → run the (fast) JSON import
         // synchronously and record a completed run. No queue worker / gbak
         // needed; the files are tiny so the request handles it inline.
-        if (! empty($data['customers_json']) || ! empty($data['items_json']) || ! empty($data['services_json'])) {
+        if (! empty($data['customers_json']) || ! empty($data['items_json'])
+            || ! empty($data['services_json']) || ! empty($data['sales_json'])) {
             return $this->handleEpsilon($data, $tenant);
         }
 
@@ -135,6 +136,7 @@ class CreateFirebirdImportRun extends CreateRecord
             'customers' => $data['customers_json'] ?? null,
             'items' => $data['items_json'] ?? null,
             'services' => $data['services_json'] ?? null,
+            'sales' => $data['sales_json'] ?? null,
         ]);
 
         $baseRow = [

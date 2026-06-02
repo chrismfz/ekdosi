@@ -35,6 +35,7 @@ class EpsilonImporterTest extends TestCase
         $seeder->seedPaymentMethods($this->tenant);
         $seeder->seedMetricUnits($this->tenant);
         $seeder->seedProductCategories($this->tenant);
+        $seeder->seedInvoiceTypes($this->tenant);
     }
 
     private function load(string $name): array
@@ -128,6 +129,88 @@ class EpsilonImporterTest extends TestCase
         // Re-import (source still lacks email) must NOT blank it.
         (new EpsilonImporter($this->tenant))->importCustomers([['Name' => 'ΑΕ Δοκιμή', 'TIN' => '123456789']]);
         $this->assertSame('ops@example.gr', $c->fresh()->email);
+    }
+
+    public function test_imports_sales_as_filed_invoices_with_mark(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers($this->load('Customers'));
+        $importer->importProducts($this->load('Items'), $this->load('Services'));
+
+        $r = $importer->importSales($this->load('Sales'));
+        $this->assertSame(15, $r['created']);
+
+        $inv = \App\Models\Invoice::where('company_id', $this->tenant->id)->where('invcode', 'ΤΙΜ385')
+            ->with(['lines', 'customer'])->first();
+        $this->assertNotNull($inv);
+        $this->assertSame(385, (int) $inv->code);
+        $this->assertSame('active', $inv->local_status);
+        $this->assertSame('VALID', $inv->mydata_state);
+        $this->assertSame('400013744877362', $inv->mydata_mark, 'leading apostrophe stripped');
+        $this->assertEquals(134.20, (float) $inv->net_total);
+        $this->assertEquals(166.41, (float) $inv->gross_total);
+        // Counterpart matched by ΑΦΜ (TraderTIN 999218818 is in Customers).
+        $this->assertSame('999218818', $inv->customer->afm);
+        $this->assertGreaterThanOrEqual(1, $inv->lines->count());
+
+        // A myDATA audit mark row was recorded with action INSERT (NOT 'SEND' —
+        // cancel / credit-note correlation queries mydata_action='INSERT').
+        $this->assertSame(1, \App\Models\MyDataMark::where('invoice_id', $inv->id)
+            ->where('mark', '400013744877362')->where('mydata_action', 'INSERT')->count());
+
+        // The ΤΙΜ counter advanced past the imported numbers (next ΑΑ = 386).
+        $this->assertSame(386, (int) \App\Models\InvoiceType::where('company_id', $this->tenant->id)->where('code', 'ΤΙΜ')->value('invcount'));
+    }
+
+    public function test_sales_store_filed_line_values_verbatim_not_recomputed(): void
+    {
+        // The 68.40 @24% line: AADE has 84.81; the InvoiceLine recompute hook
+        // would store 84.82. importSales must bypass the hook and keep 84.81.
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers($this->load('Customers'));
+        $importer->importSales($this->load('Sales'));
+
+        $line = \App\Models\InvoiceLine::where('company_id', $this->tenant->id)
+            ->where('price_per_item', 68.40)->where('vat_percent', 24.00)->first();
+        $this->assertNotNull($line, 'the 68.40 @24% line exists');
+        $this->assertEquals(84.81, (float) $line->gross_price, 'filed gross kept verbatim (not recomputed to 84.82)');
+
+        // And the invoice header gross equals the sum of its own lines.
+        $inv = \App\Models\Invoice::find($line->invoice_id);
+        $sumGross = round((float) $inv->lines()->sum('gross_price'), 2);
+        $this->assertEquals((float) $inv->gross_total, $sumGross, 'header gross == Σ line gross');
+    }
+
+    public function test_credit_term_sales_are_settled_not_phantom_receivables(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers($this->load('Customers'));
+        $importer->importSales($this->load('Sales'));
+
+        // Every imported invoice carries a non-null payment_status (cache filled)
+        // and zero outstanding balance — none is a phantom open receivable.
+        $balance = app(\App\Services\InvoiceBalance::class);
+        foreach (\App\Models\Invoice::where('company_id', $this->tenant->id)->get() as $inv) {
+            $this->assertNotNull($inv->payment_status, "payment_status cached for {$inv->invcode}");
+            $this->assertEqualsWithDelta(0.0, $balance->for($inv)->balance, 0.001, "{$inv->invcode} settled");
+        }
+    }
+
+    public function test_sales_rerun_replaces_lines_not_duplicates(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers($this->load('Customers'));
+        $importer->importProducts($this->load('Items'), $this->load('Services'));
+        $importer->importSales($this->load('Sales'));
+
+        $invBefore = \App\Models\Invoice::where('company_id', $this->tenant->id)->count();
+        $linesBefore = \App\Models\InvoiceLine::where('company_id', $this->tenant->id)->count();
+
+        $r2 = (new EpsilonImporter($this->tenant))->importSales($this->load('Sales'));
+        $this->assertSame(0, $r2['created']);
+        $this->assertSame(15, $r2['updated']);
+        $this->assertSame($invBefore, \App\Models\Invoice::where('company_id', $this->tenant->id)->count());
+        $this->assertSame($linesBefore, \App\Models\InvoiceLine::where('company_id', $this->tenant->id)->count(), 'lines replaced, not duplicated');
     }
 
     public function test_rerun_is_idempotent(): void
