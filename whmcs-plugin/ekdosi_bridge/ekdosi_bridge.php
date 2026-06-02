@@ -82,9 +82,9 @@ function ekdosi_bridge_config(): array
             ],
             'webhook_secret' => [
                 'FriendlyName' => 'Shared HMAC secret',
-                'Type' => 'password',
+                'Type' => 'text',
                 'Size' => '64',
-                'Description' => 'Must match companies.whmcs_webhook_secret on the ekdosi side, EXACTLY. Generate a 32+ char random string and paste it on both sides.',
+                'Description' => 'Must match companies.whmcs_webhook_secret on the ekdosi side, EXACTLY. Generate a 32+ char random string and paste it on both sides. Shown in plain text ON PURPOSE — this page is super-admin-only and the value is readable via SQL anyway — so you can copy it back if WHMCS clears the addon settings on a re-activation.',
             ],
             // T-2: hide/reveal the client-area "Παραστατικά σε τρίτους (v2)" page.
             'show_client_v2' => [
