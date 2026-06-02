@@ -72,7 +72,7 @@ class CustomerAttachmentsNotesTest extends TestCase
         Storage::disk('local')->assertExists($att->path);
     }
 
-    public function test_force_delete_removes_the_physical_file(): void
+    public function test_deleting_attachment_removes_the_physical_file(): void
     {
         Storage::fake('local');
         $c = $this->customer();
@@ -83,11 +83,10 @@ class CustomerAttachmentsNotesTest extends TestCase
             'disk' => 'local', 'path' => 'attachments/x.pdf', 'original_name' => 'x.pdf', 'size' => 4,
         ]);
 
-        $att->delete();                              // soft delete keeps the file
-        Storage::disk('local')->assertExists('attachments/x.pdf');
-
-        $att->forceDelete();                         // hard delete drops it
+        // Attachments hard-delete: the row AND the bytes go (no orphaned files).
+        $att->delete();
         Storage::disk('local')->assertMissing('attachments/x.pdf');
+        $this->assertDatabaseMissing('attachments', ['id' => $att->id]);
     }
 
     public function test_internal_note_create_stamps_author_and_tenant(): void
@@ -119,17 +118,33 @@ class CustomerAttachmentsNotesTest extends TestCase
         $this->assertSame('καρφιτσωμένη', $c->internalNotes()->first()->body);
     }
 
-    public function test_kartela_renders_internal_notes_section(): void
+    public function test_kartela_renders_internal_notes_and_attachments_sections(): void
     {
         $c = $this->customer();
         Note::create([
             'company_id' => $this->tenant->id, 'notable_type' => Customer::class, 'notable_id' => $c->id,
             'body' => 'Εσωτερική παρατήρηση', 'author_user_id' => $this->user->id,
         ]);
+        Attachment::create([
+            'company_id' => $this->tenant->id, 'attachable_type' => Customer::class, 'attachable_id' => $c->id,
+            'disk' => 'local', 'path' => 'attachments/z.pdf', 'original_name' => 'συμβόλαιο.pdf', 'size' => 2048,
+        ]);
 
         Livewire::test(CustomerLedger::class, ['record' => $c->id])
             ->assertStatus(200)
             ->assertSee('Σημειώσεις (εσωτερικές)')
-            ->assertSee('Εσωτερική παρατήρηση');
+            ->assertSee('Εσωτερική παρατήρηση')
+            ->assertSee('Συνημμένα')
+            ->assertSee('συμβόλαιο.pdf');
+    }
+
+    public function test_relation_managers_are_viewable_without_a_dedicated_policy(): void
+    {
+        // Guards the strict-authorization 500: no AttachmentPolicy/NotePolicy
+        // exists, so the managers must short-circuit canViewForRecord.
+        $c = $this->customer();
+
+        $this->assertTrue(AttachmentsRelationManager::canViewForRecord($c, EditCustomer::class));
+        $this->assertTrue(InternalNotesRelationManager::canViewForRecord($c, EditCustomer::class));
     }
 }

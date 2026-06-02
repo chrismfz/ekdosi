@@ -25,9 +25,8 @@ return new class extends Migration
             $t->string('title')->nullable();                      // optional operator label
             $t->foreignId('uploaded_by_user_id')->nullable()->constrained('users')->nullOnDelete();
             $t->timestamps();
-            $t->softDeletes();
-
-            $t->index(['company_id', 'attachable_type', 'attachable_id'], 'attachments_company_attachable_idx');
+            // morphs() already indexes (attachable_type, attachable_id); the
+            // CompanyScope just adds a cheap company_id filter on that small set.
         });
     }
 

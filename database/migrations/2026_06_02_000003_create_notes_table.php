@@ -23,8 +23,8 @@ return new class extends Migration
             $t->foreignId('author_user_id')->nullable()->constrained('users')->nullOnDelete();
             $t->timestamps();
             $t->softDeletes();
-
-            $t->index(['company_id', 'notable_type', 'notable_id'], 'notes_company_notable_idx');
+            // morphs() already indexes (notable_type, notable_id); the
+            // CompanyScope just adds a cheap company_id filter on that small set.
         });
     }
 

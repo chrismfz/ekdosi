@@ -15,6 +15,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -32,6 +33,17 @@ class AttachmentsRelationManager extends RelationManager
     protected static ?string $title = 'Συνημμένα';
 
     protected static ?string $recordTitleAttribute = 'original_name';
+
+    /**
+     * Attachments have no dedicated policy, so let the parent page's own
+     * authorization gate access (mirrors ActivityLogRelationManager). Without
+     * this, Filament's default `authorize('viewAny', Attachment)` would throw
+     * under strict authorization (no AttachmentPolicy exists).
+     */
+    public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
+    {
+        return true;
+    }
 
     public function form(Schema $schema): Schema
     {
@@ -84,16 +96,13 @@ class AttachmentsRelationManager extends RelationManager
                     ->mutateDataUsing(function (array $data): array {
                         $path = $data['path'] ?? null;
                         $disk = 'local';
+                        $exists = $path && Storage::disk($disk)->exists($path);
 
                         $data['company_id'] = Filament::getTenant()?->getKey();
                         $data['uploaded_by_user_id'] = auth()->id();
                         $data['disk'] = $disk;
-                        $data['size'] = ($path && Storage::disk($disk)->exists($path))
-                            ? Storage::disk($disk)->size($path)
-                            : null;
-                        $data['mime_type'] = ($path && Storage::disk($disk)->exists($path))
-                            ? Storage::disk($disk)->mimeType($path)
-                            : null;
+                        $data['size'] = $exists ? Storage::disk($disk)->size($path) : null;
+                        $data['mime_type'] = $exists ? Storage::disk($disk)->mimeType($path) : null;
                         // storeFileNamesIn already set original_name; fall back to basename.
                         $data['original_name'] = $data['original_name'] ?? ($path ? basename($path) : 'αρχείο');
 

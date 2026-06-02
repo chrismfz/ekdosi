@@ -16,6 +16,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Σημειώσεις (εσωτερικές) — reusable polymorphic operator-only notes tab.
@@ -31,6 +32,16 @@ class InternalNotesRelationManager extends RelationManager
     protected static ?string $title = 'Σημειώσεις (εσωτερικές)';
 
     protected static ?string $recordTitleAttribute = 'body';
+
+    /**
+     * No dedicated NotePolicy — let the parent page's authorization gate access
+     * (mirrors ActivityLogRelationManager) so strict authorization doesn't throw
+     * on a missing policy.
+     */
+    public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
+    {
+        return true;
+    }
 
     public function form(Schema $schema): Schema
     {

@@ -3,23 +3,26 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Support\Bytes;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Storage;
 
 /**
  * A file attached to a tenant-owned record (customer, invoice, …). The bytes
- * live on a private disk; this row is metadata + audit. When force-deleted the
- * physical file is removed; a soft delete keeps it (recoverable).
+ * live on a private disk; this row is just metadata + uploader audit.
+ *
+ * Hard-deleted on purpose (no SoftDeletes): an attachment is a pointer to a
+ * file, so deleting the row also drops the bytes — soft-deleting would leave
+ * orphaned, unreachable files on the private disk (storage bloat + a GDPR
+ * erasure gap).
  */
 class Attachment extends Model
 {
     use BelongsToCompany;
     use HasFactory;
-    use SoftDeletes;
 
     protected $fillable = [
         'company_id',
@@ -43,9 +46,8 @@ class Attachment extends Model
 
     protected static function booted(): void
     {
-        // Only drop the bytes on a hard delete; a soft delete keeps the file so
-        // the row can be restored.
-        static::forceDeleted(function (self $attachment): void {
+        // Deleting the row drops the bytes too — no orphaned files left behind.
+        static::deleted(function (self $attachment): void {
             if ($attachment->path && Storage::disk($attachment->disk)->exists($attachment->path)) {
                 Storage::disk($attachment->disk)->delete($attachment->path);
             }
@@ -67,16 +69,9 @@ class Attachment extends Model
         return $this->belongsTo(User::class, 'uploaded_by_user_id');
     }
 
-    /** Human-readable file size (e.g. "1.2 MB"). */
+    /** Human-readable file size (e.g. "1.2 MB"; null → "—", real 0-byte → "0 B"). */
     public function humanSize(): string
     {
-        $bytes = (int) $this->size;
-        if ($bytes <= 0) {
-            return '—';
-        }
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $power = min((int) floor(log($bytes, 1024)), count($units) - 1);
-
-        return round($bytes / (1024 ** $power), $power === 0 ? 0 : 1).' '.$units[$power];
+        return Bytes::forHumans($this->size);
     }
 }
