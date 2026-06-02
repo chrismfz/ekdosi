@@ -349,6 +349,19 @@ class CustomerLedger extends Page implements HasTable
     protected function getHeaderActions(): array
     {
         return [
+            // "Reverse" flow: start a new invoice straight from the
+            // customer's account, pre-filled with this customer (+ snapshot).
+            // See CreateInvoice::fillForm(). Hidden when the operator can't
+            // issue invoices.
+            Action::make('new_invoice')
+                ->label('Νέο Παραστατικό')
+                ->icon('heroicon-o-document-plus')
+                ->color('primary')
+                ->visible(fn (): bool => InvoiceResource::canCreate())
+                ->url(fn (): string => InvoiceResource::getUrl('create', [
+                    'customer_id' => $this->record->getKey(),
+                ])),
+
             Action::make('crosscheck_aade')
                 ->label('Διασταύρωση ΑΦΜ με ΑΑΔΕ')
                 ->icon('heroicon-o-shield-check')

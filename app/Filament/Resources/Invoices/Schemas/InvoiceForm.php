@@ -6,8 +6,11 @@ use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\DistributionAim;
 use App\Models\InvoiceType;
+use App\Models\MetricUnit;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Models\ProductCategory;
+use App\Models\VatCategory;
 use App\Filament\Support\VatRateOptions;
 use App\Support\MyData\Codes;
 use App\Support\MyData\ReverseCharge;
@@ -54,6 +57,13 @@ use Filament\Schemas\Schema;
  * 5. myDATA mirror columns (mydata_*) are NOT in this form. They're
  *    written exclusively by the MyDataSubmitter service (forceFill
  *    bypasses fillable). The form layer cannot spoof them.
+ *
+ * 6. Pickers (Είδος / Πελάτης / Προϊόν) surface favourites first, then
+ *    the most-used rows, before falling back to a normal search-on-type.
+ *    See favourite*Options() / order*Search() below. The Είδος carries
+ *    its configured defaults (Σκοπός διακίνησης / τρόπος πληρωμής /
+ *    αποστολής) onto the header when picked, so e.g. ΤΙΜ/ΤΠΥ default to
+ *    "Πώληση" once configured once.
  */
 class InvoiceForm
 {
@@ -66,43 +76,57 @@ class InvoiceForm
                 ->columns(2)
                 ->schema([
                     Select::make('invoice_type_id')
-                        ->label('Invoice type')
+                        ->label('Είδος Παραστατικού')
                         ->required()
-                        ->options(fn () => InvoiceType::query()
-                            ->where('company_id', Filament::getTenant()?->getKey())
-                            ->where('show_on_menu', true)
-                            ->orderBy('code')
-                            ->get()
-                            ->mapWithKeys(fn ($t) => [$t->id => $t->code.' — '.$t->name])
-                            ->toArray())
+                        ->options(fn () => static::invoiceTypeOptions())
                         ->searchable()
                         ->preload()
+                        ->live()
+                        // Pre-fill the header dimensions configured on the
+                        // chosen type (Σκοπός διακίνησης / τρόπος πληρωμής /
+                        // αποστολής). Covers "ΤΙΜ/ΤΠΥ should default to Πώληση"
+                        // without a hardcoded global default — set it once on
+                        // the type. Only writes the fields the type actually
+                        // configures; never blanks an operator's choice.
+                        ->afterStateUpdated(function ($state, callable $set) {
+                            if (! $state) {
+                                return;
+                            }
+                            $type = InvoiceType::query()
+                                ->where('company_id', Filament::getTenant()?->getKey())
+                                ->find($state);
+                            if (! $type) {
+                                return;
+                            }
+                            if ($type->distribution_aim_id) {
+                                $set('distribution_aim_id', $type->distribution_aim_id);
+                            }
+                            if ($type->payment_method_id) {
+                                $set('payment_method_id', $type->payment_method_id);
+                            }
+                            if ($type->delivery_method_id) {
+                                $set('delivery_method_id', $type->delivery_method_id);
+                            }
+                        })
                         // Once issued (mydata_state set) the type is frozen — operator
                         // can't reclassify a filed invoice.
                         ->disabled(fn ($record) => $record && $record->mydata_state !== null),
 
                     DateTimePicker::make('issued_at')
-                        ->label('Issued at')
+                        ->label('Ημερομηνία έκδοσης')
                         ->required()
                         ->default(now())
                         ->seconds(false)
                         ->disabled(fn ($record) => $record && $record->mydata_state !== null),
 
                     Select::make('customer_id')
-                        ->label('Customer')
+                        ->label('Πελάτης')
                         ->required()
                         ->searchable()
-                        ->preload(false)
-                        ->getSearchResultsUsing(fn (string $search) => Customer::query()
-                            ->where('company_id', Filament::getTenant()?->getKey())
-                            ->where(fn ($q) => $q
-                                ->where('name', 'like', "%{$search}%")
-                                ->orWhere('afm', 'like', "%{$search}%"))
-                            ->orderBy('name')
-                            ->limit(50)
-                            ->get()
-                            ->mapWithKeys(fn ($c) => [$c->id => $c->name.($c->afm ? ' ('.$c->afm.')' : '')])
-                            ->toArray())
+                        // Favourites + most-billed shown on OPEN (before typing);
+                        // typing falls through to the search closure below.
+                        ->options(fn () => static::favouriteCustomerOptions())
+                        ->getSearchResultsUsing(fn (string $search) => static::searchCustomerOptions($search))
                         ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->find($value))->name)
@@ -151,7 +175,7 @@ class InvoiceForm
                         ->disabled(fn ($record) => $record && $record->mydata_state !== null),
 
                     Select::make('payment_method_id')
-                        ->label('Payment method')
+                        ->label('Τρόπος πληρωμής')
                         ->options(fn () => PaymentMethod::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->orderBy('description')
@@ -160,7 +184,7 @@ class InvoiceForm
                         ->preload(),
 
                     Select::make('delivery_method_id')
-                        ->label('Delivery method')
+                        ->label('Τρόπος αποστολής')
                         ->options(fn () => DeliveryMethod::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->orderBy('description')
@@ -169,7 +193,7 @@ class InvoiceForm
                         ->preload(),
 
                     Select::make('distribution_aim_id')
-                        ->label('Distribution aim (Σκοπός διακίνησης)')
+                        ->label('Σκοπός διακίνησης')
                         ->options(fn () => DistributionAim::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->orderBy('description')
@@ -178,17 +202,17 @@ class InvoiceForm
                         ->preload(),
 
                     DatePicker::make('delivery_date')
-                        ->label('Delivery date'),
+                        ->label('Ημερομηνία παράδοσης'),
 
                     TextInput::make('header_discount_percent')
-                        ->label('Header discount %')
+                        ->label('Έκπτωση παραστατικού %')
                         ->numeric()
                         ->step('0.01')
                         ->minValue(0)
                         ->maxValue(99.99)
                         ->default(0)
                         ->suffix('%')
-                        ->helperText('Applied across all lines. Must be < 100.'),
+                        ->helperText('Εφαρμόζεται σε όλες τις γραμμές. Πρέπει να είναι < 100.'),
                 ]),
 
             // ─── Γραμμές (Excel-style) ───
@@ -210,23 +234,22 @@ class InvoiceForm
                         ])
                         ->schema([
                             Select::make('product_id')
-                                ->label('Product')
+                                ->label('Προϊόν/Υπηρεσία')
                                 ->searchable()
-                                ->preload(false)
-                                ->getSearchResultsUsing(fn (string $search) => Product::query()
-                                    ->where('company_id', Filament::getTenant()?->getKey())
-                                    ->where('is_active', true)
-                                    ->where(fn ($q) => $q
-                                        ->where('description_short', 'like', "%{$search}%")
-                                        ->orWhere('sku', 'like', "%{$search}%")
-                                        ->orWhere('barcode', 'like', "%{$search}%"))
-                                    ->orderBy('description_short')
-                                    ->limit(50)
-                                    ->pluck('description_short', 'id')
-                                    ->toArray())
+                                // Favourites + most-sold shown on OPEN; typing
+                                // falls through to the search closure.
+                                ->options(fn () => static::favouriteProductOptions())
+                                ->getSearchResultsUsing(fn (string $search) => static::searchProductOptions($search))
                                 ->getOptionLabelUsing(fn ($value) => optional(Product::query()
                                     ->where('company_id', Filament::getTenant()?->getKey())
                                     ->find($value))->description_short)
+                                // Inline-create: make a product/service that
+                                // doesn't exist yet without leaving the invoice.
+                                // createOption fires afterStateUpdated (Filament
+                                // Select.php:269-270), so the new row's price/VAT
+                                // auto-fill just like picking an existing product.
+                                ->createOptionForm(static::inlineProductForm())
+                                ->createOptionUsing(fn (array $data) => static::createInlineProduct($data))
                                 ->live()
                                 ->afterStateUpdated(function ($state, callable $set, Get $get) {
                                     if (! $state) {
@@ -256,11 +279,11 @@ class InvoiceForm
                                 }),
 
                             TextInput::make('product_descr')
-                                ->label('Description (frozen)')
+                                ->label('Περιγραφή')
                                 ->placeholder('Από προϊόν ή ελεύθερο κείμενο'),
 
                             TextInput::make('qty')
-                                ->label('Qty')
+                                ->label('Ποσότητα')
                                 ->required()
                                 ->numeric()
                                 ->step('0.001')
@@ -268,11 +291,11 @@ class InvoiceForm
                                 ->minValue(0.001),
 
                             TextInput::make('metric_unit')
-                                ->label('Unit')
+                                ->label('Μ.Μ.')
                                 ->maxLength(15),
 
                             TextInput::make('price_per_item')
-                                ->label('Unit price (net)')
+                                ->label('Τιμή (καθαρή)')
                                 ->numeric()
                                 ->step('0.01')
                                 ->minValue(0)
@@ -291,7 +314,7 @@ class InvoiceForm
                             // truth; this field is NOT persisted (dehydrated false)
                             // — InvoiceLine::saving recomputes line totals from net.
                             TextInput::make('price_per_item_wvat')
-                                ->label('Unit price (incl. VAT)')
+                                ->label('Τιμή (με ΦΠΑ)')
                                 ->numeric()
                                 ->step('0.01')
                                 ->minValue(0)
@@ -310,7 +333,7 @@ class InvoiceForm
                                 )),
 
                             TextInput::make('discount')
-                                ->label('Discount %')
+                                ->label('Έκπτωση %')
                                 ->numeric()
                                 ->step('0.0001')
                                 ->minValue(0)
@@ -319,7 +342,7 @@ class InvoiceForm
                                 ->suffix('%'),
 
                             Select::make('vat_percent')
-                                ->label('VAT %')
+                                ->label('ΦΠΑ %')
                                 ->required()
                                 ->options(fn () => VatRateOptions::options())
                                 ->default(VatRateOptions::normalize(24))
@@ -335,28 +358,28 @@ class InvoiceForm
                             TextInput::make('notes')
                                 ->label('Σημείωση γραμμής'),
                         ])
-                        ->addActionLabel('+ Add line')
+                        ->addActionLabel('+ Προσθήκη γραμμής')
                         ->reorderable(false)
                         ->disabled(fn ($record) => $record && $record->mydata_state !== null),
                 ]),
 
             // ─── Στοιχεία πελάτη (snapshot) — collapsed ───
-            Section::make('Customer snapshot')
+            Section::make('Στοιχεία πελάτη (στιγμιότυπο)')
                 ->columnSpanFull()
-                ->description('Frozen at issue time. Auto-fills from the customer; you can override before save. Once filed at myDATA, the snapshot is legally locked.')
+                ->description('Παγώνουν κατά την έκδοση. Συμπληρώνονται αυτόματα από τον πελάτη· μπορείτε να τα αλλάξετε πριν την αποθήκευση. Μετά την υποβολή στο myDATA κλειδώνουν νομικά.')
                 ->collapsed()
                 ->columns(2)
                 ->disabled(fn ($record) => $record && $record->mydata_state !== null)
                 ->schema([
-                    TextInput::make('company_name')->label('Name on invoice')->columnSpanFull(),
+                    TextInput::make('company_name')->label('Επωνυμία στο παραστατικό')->columnSpanFull(),
                     TextInput::make('vat_no')->label('ΑΦΜ'),
-                    TextInput::make('vies_vat')->label('VIES VAT'),
+                    TextInput::make('vies_vat')->label('ΦΠΑ VIES'),
                     TextInput::make('occupation')->label('Δραστηριότητα'),
-                    TextInput::make('address1')->label('Address')->columnSpanFull(),
-                    TextInput::make('address2')->label('Address (line 2)')->columnSpanFull(),
-                    TextInput::make('city'),
-                    TextInput::make('postcode'),
-                    TextInput::make('country')->maxLength(60)->helperText('ISO alpha-2 preferred. Normalised at submit time.'),
+                    TextInput::make('address1')->label('Διεύθυνση')->columnSpanFull(),
+                    TextInput::make('address2')->label('Διεύθυνση (γραμμή 2)')->columnSpanFull(),
+                    TextInput::make('city')->label('Πόλη'),
+                    TextInput::make('postcode')->label('Τ.Κ.'),
+                    TextInput::make('country')->label('Χώρα')->maxLength(60)->helperText('Κατά προτίμηση ISO alpha-2. Κανονικοποιείται κατά την υποβολή.'),
                 ]),
 
             // ─── Σημειώσεις + παρακράτηση — collapsed ───
@@ -364,22 +387,22 @@ class InvoiceForm
                 ->columnSpanFull()
                 ->collapsed()
                 ->schema([
-                    Textarea::make('notes')->rows(4)->columnSpanFull()->label('Internal / printed notes'),
+                    Textarea::make('notes')->rows(4)->columnSpanFull()->label('Σημειώσεις (εσωτερικές / εκτύπωσης)'),
                     TextInput::make('withhold_amount')
-                        ->label('Withholding amount (€)')
+                        ->label('Ποσό παρακράτησης (€)')
                         ->numeric()
                         ->step('0.01')
                         ->minValue(0)
                         ->prefix('€')
                         ->live(onBlur: true)
-                        ->helperText('Παρακράτηση φόρου — typically 20% on services. Subtracted from amount payable.'),
+                        ->helperText('Παρακράτηση φόρου — συνήθως 20% στις υπηρεσίες. Αφαιρείται από το πληρωτέο ποσό.'),
 
                     // G1: AADE needs the withholding CATEGORY (§8.4) to
                     // file the taxesTotals block. Required whenever an
                     // amount is set; depends on the service (fees 20%,
                     // technicians 4/10%, lawyers 15%, …).
                     Select::make('withhold_category')
-                        ->label('Withholding category (myDATA §8.4)')
+                        ->label('Κατηγορία παρακράτησης (myDATA §8.4)')
                         ->options(collect(Codes::WITHHOLDING_CATEGORIES)
                             ->mapWithKeys(fn (int $c) => [$c => 'Κατηγορία '.$c])
                             ->all())
@@ -389,6 +412,225 @@ class InvoiceForm
                 ]),
         ]);
     }
+
+    /* ===================== Picker option providers ===================== */
+
+    /**
+     * Invoice-type options for the header picker, favourites first then
+     * most-used (invcount, the per-type running counter, is a good proxy).
+     * Bounded by show_on_menu so retired types stay hidden. A ⭐ prefix
+     * makes the pinned ones obvious.
+     *
+     * @return array<int, string>
+     */
+    public static function invoiceTypeOptions(): array
+    {
+        return InvoiceType::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->where('show_on_menu', true)
+            ->orderByDesc('is_favorite')
+            ->orderByDesc('invcount')
+            ->orderBy('code')
+            ->get()
+            ->mapWithKeys(fn ($t) => [$t->id => ($t->is_favorite ? '⭐ ' : '').$t->code.' — '.$t->name])
+            ->toArray();
+    }
+
+    /**
+     * Customers shown when the picker opens (no search yet): favourites
+     * first, then the most-billed, capped so we never preload thousands.
+     *
+     * @return array<int, string>
+     */
+    public static function favouriteCustomerOptions(): array
+    {
+        return Customer::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->withCount('invoices')
+            ->orderByDesc('is_favorite')
+            ->orderByDesc('invoices_count')
+            ->orderBy('name')
+            ->limit(30)
+            ->get()
+            ->mapWithKeys(fn ($c) => [$c->id => static::customerLabel($c)])
+            ->toArray();
+    }
+
+    /**
+     * Customer search-on-type — same name/AFM match as before, but with
+     * favourites biased to the top of the results.
+     *
+     * @return array<int, string>
+     */
+    public static function searchCustomerOptions(string $search): array
+    {
+        return Customer::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->where(fn ($q) => $q
+                ->where('name', 'like', "%{$search}%")
+                ->orWhere('afm', 'like', "%{$search}%"))
+            ->orderByDesc('is_favorite')
+            ->orderBy('name')
+            ->limit(50)
+            ->get()
+            ->mapWithKeys(fn ($c) => [$c->id => static::customerLabel($c)])
+            ->toArray();
+    }
+
+    private static function customerLabel(Customer $c): string
+    {
+        return ($c->is_favorite ? '⭐ ' : '').$c->name.($c->afm ? ' ('.$c->afm.')' : '');
+    }
+
+    /**
+     * Products/services shown when a line picker opens (no search yet):
+     * favourites first, then most-sold, active only, capped.
+     *
+     * @return array<int, string>
+     */
+    public static function favouriteProductOptions(): array
+    {
+        return Product::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->where('is_active', true)
+            ->withCount('invoiceLines')
+            ->orderByDesc('is_favorite')
+            ->orderByDesc('invoice_lines_count')
+            ->orderBy('description_short')
+            ->limit(30)
+            ->get()
+            ->mapWithKeys(fn ($p) => [$p->id => static::productLabel($p)])
+            ->toArray();
+    }
+
+    /**
+     * Product search-on-type — same description/sku/barcode match as
+     * before, favourites biased to the top.
+     *
+     * @return array<int, string>
+     */
+    public static function searchProductOptions(string $search): array
+    {
+        return Product::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->where('is_active', true)
+            ->where(fn ($q) => $q
+                ->where('description_short', 'like', "%{$search}%")
+                ->orWhere('sku', 'like', "%{$search}%")
+                ->orWhere('barcode', 'like', "%{$search}%"))
+            ->orderByDesc('is_favorite')
+            ->orderBy('description_short')
+            ->limit(50)
+            ->get()
+            ->mapWithKeys(fn ($p) => [$p->id => static::productLabel($p)])
+            ->toArray();
+    }
+
+    private static function productLabel(Product $p): string
+    {
+        return ($p->is_favorite ? '⭐ ' : '').$p->description_short;
+    }
+
+    /* ===================== Inline product create ===================== */
+
+    /**
+     * Minimal "create a product/service on the fly" form for the line
+     * picker — just enough to bill it now (full catalogue fields live in
+     * the Products resource). Net price + VAT category so the new line
+     * fills correctly via the product_id afterStateUpdated.
+     *
+     * @return array<int, \Filament\Forms\Components\Field>
+     */
+    public static function inlineProductForm(): array
+    {
+        $tenant = fn () => Filament::getTenant()?->getKey();
+
+        return [
+            TextInput::make('description_short')
+                ->label('Περιγραφή')
+                ->required()
+                ->maxLength(120),
+
+            Select::make('product_category_id')
+                ->label('Κατηγορία')
+                ->required()
+                ->options(fn () => ProductCategory::query()
+                    ->where('company_id', $tenant())
+                    ->orderBy('description_short')
+                    ->pluck('description_short', 'id'))
+                ->default(fn () => ProductCategory::query()
+                    ->where('company_id', $tenant())
+                    ->orderBy('description_short')
+                    ->value('id'))
+                ->searchable()
+                ->preload(),
+
+            Select::make('vat_category_id')
+                ->label('Κατηγορία ΦΠΑ')
+                ->required()
+                ->options(fn () => VatCategory::query()
+                    ->where('company_id', $tenant())
+                    ->orderBy('rate')
+                    ->get()
+                    ->mapWithKeys(fn ($vc) => [$vc->id => $vc->description.' ('.$vc->rate.'%)'])
+                    ->toArray())
+                ->default(fn () => VatCategory::query()
+                    ->where('company_id', $tenant())
+                    ->where('is_default', true)
+                    ->value('id'))
+                ->searchable()
+                ->preload(),
+
+            TextInput::make('sell_price')
+                ->label('Τιμή (καθαρή)')
+                ->numeric()
+                ->step('0.01')
+                ->minValue(0)
+                ->default(0)
+                ->prefix('€'),
+
+            Select::make('metric_unit_id')
+                ->label('Μ.Μ.')
+                ->options(fn () => MetricUnit::query()
+                    ->where('company_id', $tenant())
+                    ->orderBy('name')
+                    ->pluck('name', 'id'))
+                ->searchable()
+                ->preload(),
+        ];
+    }
+
+    /**
+     * Persist an inline-created product to the catalogue and return its
+     * key (Filament selects it + fires the line's afterStateUpdated).
+     * price_wvat is denormalised here the same way the Products form does.
+     */
+    public static function createInlineProduct(array $data): int
+    {
+        $companyId = Filament::getTenant()?->getKey();
+
+        $rate = (float) (VatCategory::query()
+            ->where('company_id', $companyId)
+            ->whereKey($data['vat_category_id'] ?? null)
+            ->value('rate') ?? 0);
+
+        $sell = (float) ($data['sell_price'] ?? 0);
+
+        $product = Product::create([
+            'company_id' => $companyId,
+            'description_short' => $data['description_short'],
+            'product_category_id' => $data['product_category_id'] ?? null,
+            'vat_category_id' => $data['vat_category_id'] ?? null,
+            'metric_unit_id' => $data['metric_unit_id'] ?? null,
+            'sell_price' => $sell,
+            'price_wvat' => round($sell * (1 + $rate / 100), 2),
+            'is_active' => true,
+        ]);
+
+        return $product->getKey();
+    }
+
+    /* ===================== Numeric / VAT helpers ===================== */
 
     /**
      * G7 gross-price affordance. Convert between the NET unit price

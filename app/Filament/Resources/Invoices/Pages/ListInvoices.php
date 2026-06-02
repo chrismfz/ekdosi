@@ -13,7 +13,7 @@ class ListInvoices extends BaseListRecords
     protected function getHeaderActions(): array
     {
         return [
-            CreateAction::make()->label('+ New invoice'),
+            CreateAction::make()->label('+ Νέο Παραστατικό'),
         ];
     }
 }

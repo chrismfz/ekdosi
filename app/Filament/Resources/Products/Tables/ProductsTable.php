@@ -11,6 +11,7 @@ use Filament\Actions\RestoreBulkAction;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
@@ -42,6 +43,13 @@ class ProductsTable
                     ->searchable()
                     ->sortable()
                     ->wrap(),
+
+                // Pin frequent products/services to the top of the
+                // invoice-line picker. Toggle inline.
+                ToggleColumn::make('is_favorite')
+                    ->label('Αγαπημένο')
+                    ->sortable()
+                    ->toggleable(),
 
                 TextColumn::make('productCategory.description_short')
                     ->label('Category')
@@ -104,6 +112,10 @@ class ProductsTable
                     ->trueLabel('Active only')
                     ->falseLabel('Inactive only')
                     ->placeholder('All'),
+
+                TernaryFilter::make('is_favorite')
+                    ->label('Αγαπημένα')
+                    ->placeholder('Όλα'),
 
                 SelectFilter::make('product_category_id')
                     ->label('Category')

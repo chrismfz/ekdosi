@@ -13,6 +13,7 @@ use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
@@ -49,6 +50,13 @@ class CustomersTable
                     ->searchable()
                     ->sortable()
                     ->wrap(),
+
+                // Pin frequent customers to the top of the new-invoice
+                // picker. Toggle inline.
+                ToggleColumn::make('is_favorite')
+                    ->label('Αγαπημένο')
+                    ->sortable()
+                    ->toggleable(),
 
                 TextColumn::make('afm')
                     ->label('AFM')
@@ -141,6 +149,10 @@ class CustomersTable
                     ->trueLabel('Active only')
                     ->falseLabel('Inactive only')
                     ->placeholder('All'),
+
+                TernaryFilter::make('is_favorite')
+                    ->label('Αγαπημένα')
+                    ->placeholder('Όλοι'),
 
                 TernaryFilter::make('needs_immediate_invoice')
                     ->label('Immediate invoicing')

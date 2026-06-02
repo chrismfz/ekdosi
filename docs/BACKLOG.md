@@ -10,6 +10,20 @@ don't get lost in drift. (Per-feature plans live in their own docs:
 
 ## UX — customer/product pickers: tags + favourites-first dropdown
 
+> **UPDATE 2026-06-02 — favourites-first SHIPPED (boolean, not tags).** After
+> the accountant walkthrough, the core ask landed on the **invoice form**:
+> a per-row `is_favorite` boolean on `invoice_types` / `customers` / `products`
+> (inline ⭐ ToggleColumn + «Αγαπημένα» filter in each list), and the three
+> pickers now show **favourites first, then auto-top (most-used)** on open,
+> before falling through to the normal search-on-type (`InvoiceForm::
+> {invoiceType,favouriteCustomer,favouriteProduct,searchCustomer,searchProduct}
+> Options()`). Also shipped in the same slice: **inline product/service create**
+> from the line picker, the **Είδος → Σκοπός/τρόπος-πληρωμής/αποστολής
+> auto-fill**, the **«Νέο Παραστατικό» button on the Καρτέλα** (reverse flow,
+> `?customer_id=` preset), and **full Greek labels** on the invoice form.
+> **Still deferred below:** the richer *tags* system + the «Show all / browse
+> beyond search» affordance + applying the same pickers to the **QuoteForm**.
+
 **Asked for, deferred 2026-05-31.** On the invoice/quote line forms (and the
 header customer picker), the operator wants the dropdowns to surface the
 common customers/products first instead of only showing results after typing.

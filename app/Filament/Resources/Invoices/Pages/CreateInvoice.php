@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Pages;
 
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
@@ -55,6 +56,44 @@ class CreateInvoice extends CreateRecord
      * the ΑΑ allocation + lines persistence runs once.
      */
     protected bool $shouldSubmitAfterCreate = false;
+
+    /**
+     * Pre-select a customer (and snapshot its details) when arriving from
+     * the Καρτέλα's «Νέο Παραστατικό» button (?customer_id=N). This is the
+     * "reverse" flow the operator asked for — start an invoice straight
+     * from a customer's account. Mirrors the customer_id afterStateUpdated
+     * snapshot fill, since a programmatic fill doesn't trigger it. Scoped
+     * to the tenant; a foreign / unknown id is silently ignored.
+     */
+    protected function fillForm(): void
+    {
+        parent::fillForm();
+
+        $customerId = (int) request()->query('customer_id');
+        if ($customerId <= 0) {
+            return;
+        }
+
+        $customer = Customer::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->find($customerId);
+        if (! $customer) {
+            return;
+        }
+
+        $this->form->fill(array_merge($this->data ?? [], [
+            'customer_id' => $customer->id,
+            'company_name' => $customer->name,
+            'vat_no' => $customer->afm,
+            'vies_vat' => $customer->vat_vies,
+            'occupation' => $customer->occupation,
+            'address1' => $customer->address1,
+            'address2' => $customer->address2,
+            'city' => $customer->city,
+            'postcode' => $customer->postcode,
+            'country' => $customer->country ?: 'GR',
+        ]));
+    }
 
     protected function handleRecordCreation(array $data): Model
     {

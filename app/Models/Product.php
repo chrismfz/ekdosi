@@ -57,6 +57,9 @@ class Product extends Model
         'date_inserted',
         // Forward-looking, no legacy source — operator-populated:
         'is_active',
+        // Operator-feedback polish: pin frequent products/services to the
+        // top of the invoice-line picker (favourites-first + auto-top).
+        'is_favorite',
         'internal_notes',
         'whmcs_product_id',
         'supplier',
@@ -72,6 +75,7 @@ class Product extends Model
             'reserve_secure' => 'decimal:3',
             'date_inserted' => 'date',
             'is_active' => 'boolean',
+            'is_favorite' => 'boolean',
         ];
     }
 
@@ -98,5 +102,15 @@ class Product extends Model
     public function priceTiers(): HasMany
     {
         return $this->hasMany(ProductPriceTier::class);
+    }
+
+    /**
+     * Invoice lines that reference this product. Used (via withCount) to
+     * order the invoice-line picker "most-used first" when no favourite
+     * pins apply.
+     */
+    public function invoiceLines(): HasMany
+    {
+        return $this->hasMany(InvoiceLine::class);
     }
 }
