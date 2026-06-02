@@ -161,10 +161,16 @@ class DeliveryNoteSubmitter
             //   quantity + measurementUnit + netValue=0 + vatCategory=8 + vatAmount=0.
             // measurementUnit defaults to 1 (τεμάχια) when unset — the reference
             // doc always carries it, so we never omit it for a delivery note.
+            // Clamp the unit to a valid §8.13 code (1–7) — an out-of-range value
+            // would be silently dropped by firebed's enum cast (tryFrom → null),
+            // leaving the line with no <measurementUnit>. Default 1 (τεμάχια).
+            $unit = (int) ($line->measurement_unit ?? 1);
+            $unit = ($unit >= 1 && $unit <= 7) ? $unit : 1;
+
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
                 ->setQuantity((float) ($line->qty ?? 0))
-                ->setMeasurementUnit((string) ((int) ($line->measurement_unit ?? 1)))
+                ->setMeasurementUnit((string) $unit)
                 ->setNetValue(0.0)
                 ->setVatCategory('8')   // 8 = Εγγραφές χωρίς ΦΠΑ (no VAT)
                 ->setVatAmount(0.0);
@@ -274,21 +280,26 @@ class DeliveryNoteSubmitter
 
     private function buildDeliveryHeader(DeliveryNote $note): OtherDeliveryNoteHeader
     {
-        // Both loading + delivery addresses are mandatory for 9.x /
-        // isDeliveryNote (spec + OtherDeliveryNoteHeader docblocks). We snapshot
-        // them on the note; fall back to a placeholder rather than emit an empty
-        // element AADE would reject opaquely.
+        // Loading + delivery addresses are MANDATORY for 9.x / isDeliveryNote
+        // (spec + OtherDeliveryNoteHeader docblocks). Hard-fail on a blank one
+        // rather than file a fabricated '00000'/'Άγνωστη' into a legally
+        // significant e-transport record — symmetric with the ΑΑ / move-purpose
+        // / no-lines guards. The D2 form also makes them required; this is the
+        // last line of defence so the submitter is never the sole guarantee.
+        $this->requireAddress($note->invcode, 'φόρτωσης', $note->loading_street, $note->loading_postcode, $note->loading_city);
+        $this->requireAddress($note->invcode, 'παράδοσης', $note->delivery_street, $note->delivery_postcode, $note->delivery_city);
+
         $loading = (new Address)
-            ->setStreet($note->loading_street ?: 'Άγνωστη')
+            ->setStreet($note->loading_street)
             ->setNumber($note->loading_number ?: '0')
-            ->setPostalCode($note->loading_postcode ?: '00000')
-            ->setCity($note->loading_city ?: 'Άγνωστη');
+            ->setPostalCode($note->loading_postcode)
+            ->setCity($note->loading_city);
 
         $delivery = (new Address)
-            ->setStreet($note->delivery_street ?: 'Άγνωστη')
+            ->setStreet($note->delivery_street)
             ->setNumber($note->delivery_number ?: '0')
-            ->setPostalCode($note->delivery_postcode ?: '00000')
-            ->setCity($note->delivery_city ?: 'Άγνωστη');
+            ->setPostalCode($note->delivery_postcode)
+            ->setCity($note->delivery_city);
 
         $header = (new OtherDeliveryNoteHeader)
             ->setLoadingAddress($loading)
@@ -302,6 +313,16 @@ class DeliveryNoteSubmitter
         }
 
         return $header;
+    }
+
+    /** Throw unless a mandatory delivery address has street + postcode + city. */
+    private function requireAddress(string $invcode, string $which, ?string $street, ?string $postcode, ?string $city): void
+    {
+        if (trim((string) $street) === '' || trim((string) $postcode) === '' || trim((string) $city) === '') {
+            throw new RuntimeException(
+                "Delivery note {$invcode}: η διεύθυνση {$which} (οδός + Τ.Κ. + πόλη) είναι υποχρεωτική για δελτίο αποστολής (9.x)."
+            );
+        }
     }
 
     /**

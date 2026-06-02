@@ -182,6 +182,18 @@ class DeliveryNoteSubmitterTest extends TestCase
         (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
     }
 
+    public function test_blank_delivery_address_throws_instead_of_filing_placeholder(): void
+    {
+        // A blank mandatory address must hard-fail, not file '00000'/'Άγνωστη'
+        // into a legal e-transport record.
+        $note = $this->makeNote(['delivery_city' => '']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/διεύθυνση παράδοσης/');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
+    }
+
     public function test_submit_persists_mark_qr_and_delivery_mark_row(): void
     {
         $note = $this->makeNote();
