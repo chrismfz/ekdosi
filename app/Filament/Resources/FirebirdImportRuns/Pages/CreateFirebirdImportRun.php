@@ -12,6 +12,7 @@ use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Filament\Schemas\Schema;
+use Filament\Support\Exceptions\Halt;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 
@@ -51,12 +52,37 @@ class CreateFirebirdImportRun extends CreateRecord
         // Epsilon Smart tab: any JSON file staged → run the (fast) JSON import
         // synchronously and record a completed run. No queue worker / gbak
         // needed; the files are tiny so the request handles it inline.
-        if (! empty($data['customers_json']) || ! empty($data['items_json'])
-            || ! empty($data['services_json']) || ! empty($data['sales_json'])) {
-            return $this->handleEpsilon($data, $tenant);
+        $epsilonFiles = array_filter([
+            'customers' => $data['customers_json'] ?? null,
+            'items'     => $data['items_json'] ?? null,
+            'services'  => $data['services_json'] ?? null,
+            'sales'     => $data['sales_json'] ?? null,
+        ], static fn ($path): bool => filled($path));
+
+        if ($epsilonFiles !== []) {
+            return $this->handleEpsilon($epsilonFiles, $tenant);
         }
 
-        $uploadedPath = $data['upload'];
+        $uploadedPath = $data['upload'] ?? null;
+
+        // Defensive: with no Epsilon file AND no Firebird file, the upload never
+        // landed — FileUpload silently drops a temporary file that vanished
+        // before `saveUploadedFiles()` ran (temp-dir pruning, storage perms, or
+        // a request that blew past php.ini's upload/post limits), leaving the
+        // field empty. Without this guard execution falls through to
+        // `Storage::disk('local')->path(null)` and the operator gets an opaque
+        // flysystem 500 («null given»). Surface an actionable message instead.
+        if (blank($uploadedPath)) {
+            Notification::make()
+                ->danger()
+                ->title('Δεν ελήφθη κανένα αρχείο')
+                ->body('Η μεταφόρτωση δεν ολοκληρώθηκε — το αρχείο δεν αποθηκεύτηκε στον διακομιστή. Δοκίμασε ξανά· αν επιμένει, έλεγξε τα όρια PHP (upload_max_filesize/post_max_size) και τα δικαιώματα εγγραφής στο storage.')
+                ->persistent()
+                ->send();
+
+            throw new Halt;
+        }
+
         $absolutePath = Storage::disk('local')->path($uploadedPath);
 
         if (! is_file($absolutePath)) {
@@ -129,16 +155,11 @@ class CreateFirebirdImportRun extends CreateRecord
      * Epsilon Smart JSON import — synchronous (the exports are tiny). Reads each
      * staged JSON file, runs EpsilonImporter (re-runnable upsert), records a
      * completed run with per-entity counts, and tidies the uploads.
+     *
+     * @param  array<string, string>  $files  entity => stored disk path (already filtered to non-empty)
      */
-    private function handleEpsilon(array $data, Company $tenant): Model
+    private function handleEpsilon(array $files, Company $tenant): Model
     {
-        $files = array_filter([
-            'customers' => $data['customers_json'] ?? null,
-            'items' => $data['items_json'] ?? null,
-            'services' => $data['services_json'] ?? null,
-            'sales' => $data['sales_json'] ?? null,
-        ]);
-
         $baseRow = [
             'company_id'          => $tenant->id,
             'source'              => FirebirdImportRun::SOURCE_EPSILON,
@@ -158,6 +179,9 @@ class CreateFirebirdImportRun extends CreateRecord
         try {
             $payload = [];
             foreach ($files as $key => $path) {
+                if (! Storage::disk('local')->exists($path)) {
+                    throw new \RuntimeException("Το αρχείο «{$key}» δεν βρέθηκε στον χώρο αποθήκευσης — η μεταφόρτωση πιθανώς δεν ολοκληρώθηκε. Δοκίμασε ξανά.");
+                }
                 $raw = (string) Storage::disk('local')->get($path);
                 $totalBytes += strlen($raw);
                 $decoded = json_decode($raw, true);
