@@ -303,6 +303,7 @@ class WhmcsInboxTable
                 self::createDraftAction(),
                 ActionGroup::make([
                     self::openInvoiceAction(),
+                    self::createCustomerAction(),
                     self::splitAction(),
                     self::reResolveThirdPartyAction(),
                     self::holdAction(),
@@ -498,6 +499,55 @@ class WhmcsInboxTable
                         ->danger()
                         ->send();
                 }
+            });
+    }
+
+    /**
+     * Slice 3: create the ekdosi customer from the WHMCS ΑΦΜ when it isn't in
+     * ekdosi yet — official GSIS data wins, WHMCS-typed data is the fallback
+     * (validates the ΑΦΜ in passing), and the new customer is linked to this
+     * row. Visible only on a pending row that carries a WHMCS ΑΦΜ but has no
+     * matched ekdosi customer.
+     */
+    private static function createCustomerAction(): Action
+    {
+        return Action::make('create_customer')
+            ->label('Δημ. πελάτη (ΑΑΔΕ)')
+            ->icon('heroicon-o-user-plus')
+            ->color('success')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW
+                && $r->customer_id === null
+                && filled($r->whmcsAfm()))
+            ->requiresConfirmation()
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δημιουργία πελάτη ekdosi (ΑΦΜ '.$r->whmcsAfm().')')
+            ->modalDescription('Δημιουργείται πελάτης με βάση το ΑΦΜ του WHMCS. Τα στοιχεία αντλούνται από την ΑΑΔΕ (GSIS) όταν το ΑΦΜ είναι έγκυρο· αλλιώς από τα στοιχεία του WHMCS. Συνδέεται αυτόματα με αυτό το τιμολόγιο.')
+            ->modalSubmitActionLabel('Δημιουργία')
+            ->action(function (PendingWhmcsInvoice $r) {
+                $tenant = Filament::getTenant();
+                $result = app(\App\Services\Whmcs\WhmcsCustomerCreator::class)->createForPending($tenant, $r);
+
+                if ($result->customer === null) {
+                    Notification::make()->title('Δεν υπάρχει ΑΦΜ στο WHMCS — δεν δημιουργήθηκε πελάτης')->danger()->send();
+
+                    return;
+                }
+
+                $r->update([
+                    'customer_id' => $result->customer->id,
+                    'match_reason' => PendingWhmcsInvoice::REASON_AFM,
+                ]);
+
+                $title = match ($result->source) {
+                    'aade' => 'Δημιουργήθηκε από ΑΑΔΕ',
+                    'whmcs' => 'Δημιουργήθηκε από στοιχεία WHMCS (ΑΑΔΕ μη διαθέσιμη — έλεγξε τα στοιχεία)',
+                    'existing' => 'Συνδέθηκε με υπάρχοντα πελάτη',
+                    default => 'Δημιουργήθηκε',
+                };
+                Notification::make()
+                    ->title($title.': '.$result->customer->name)
+                    ->{$result->source === 'whmcs' ? 'warning' : 'success'}()
+                    ->send();
             });
     }
 
