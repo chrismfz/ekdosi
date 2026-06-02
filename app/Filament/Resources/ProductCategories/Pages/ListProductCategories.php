@@ -2,9 +2,10 @@
 
 namespace App\Filament\Resources\ProductCategories\Pages;
 
-use App\Filament\Resources\ProductCategories\ProductCategoryResource;
-use Filament\Actions\CreateAction;
 use App\Filament\BaseListRecords;
+use App\Filament\Resources\ProductCategories\ProductCategoryResource;
+use App\Filament\Support\StandardLookupSeedAction;
+use Filament\Actions\CreateAction;
 
 class ListProductCategories extends BaseListRecords
 {
@@ -14,6 +15,13 @@ class ListProductCategories extends BaseListRecords
     {
         return [
             CreateAction::make(),
+
+            StandardLookupSeedAction::make(
+                'seedProductCategories',
+                'Εισαγωγή τυπικών',
+                'Εισαγωγή τυπικών κατηγοριών προϊόντων',
+                'Προστίθενται βασικές κατηγορίες (Υπηρεσίες, Εμπορεύματα, Προϊόντα) με μηδενικό περιθώριο. Υπάρχουσες διατηρούνται — δεν διπλασιάζονται.',
+            ),
         ];
     }
 }
