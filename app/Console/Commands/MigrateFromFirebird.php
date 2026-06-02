@@ -114,23 +114,23 @@ class MigrateFromFirebird extends Command
             $this->copyLookup('PAYMENT_METHOD', 'payment_methods', 'METHOD_ID', fn ($r) => [
                 'description' => $this->fld($r, 'DESCRIPTION'),
                 'due_days' => $r['DUE_DAYS'],
-            ]);
+            ], naturalKey: 'description');
             $this->copyLookup('DELIVERY_METHOD', 'delivery_methods', 'METHOD_ID', fn ($r) => [
                 'description' => $this->fld($r, 'DESCRIPTION'),
-            ]);
+            ], naturalKey: 'description');
             $this->copyLookup('DISTRIBUTION_AIM', 'distribution_aims', 'DISTAIM_ID', fn ($r) => [
                 'description' => $this->fld($r, 'DESCRIPTION'),
-            ]);
+            ], naturalKey: 'description');
             $this->copyLookup('METRIC_UNITS', 'metric_units', 'METRIC_ID', fn ($r) => [
                 'name' => $this->fld($r, 'NAME'),
                 'notes' => $this->fld($r, 'NOTES'),
-            ]);
+            ], naturalKey: 'name');
             $this->copyLookup('VAT_CATEGORY', 'vat_categories', 'VATCAT_ID', fn ($r) => [
                 'rate' => $r['VALUE'],
                 'description' => $this->fld($r, 'DESCRIPTION'),
                 'long_description' => $this->fld($r, 'LONG_DESCRIPTION'),
                 'is_default' => (bool) $r['DEFAULT_CAT'],
-            ]);
+            ], naturalKey: 'rate');
 
             // Legacy schema enforced single-default VAT via the VAT_CATEGORY_AU0
             // trigger (Firebird AFTER UPDATE: demoted every other row when one
@@ -145,7 +145,7 @@ class MigrateFromFirebird extends Command
                 'description_short' => $this->fld($r, 'DESCRIPTION_SHORT'),
                 'description' => $this->fld($r, 'DESCRIPTION'),
                 'markup' => $r['MARKUP'],
-            ]);
+            ], naturalKey: 'description_short');
 
             // --- customers (FK: payment_method) ---
             $this->copyCustomers();
@@ -408,18 +408,71 @@ class MigrateFromFirebird extends Command
         ));
     }
 
-    /** Generic copy for simple lookup tables. Re-run-safe upsert. */
-    private function copyLookup(string $fbTable, string $target, string $pk, callable $row): void
+    /**
+     * Generic copy for simple lookup tables. Re-run-safe upsert on
+     * (company_id, legacy_id).
+     *
+     * $naturalKey, when given, makes the import ADOPT a pre-seeded row (one
+     * created by MyDataLookupSeeder, which has legacy_id = NULL and is matched
+     * by its description/name/rate) instead of inserting a duplicate: before
+     * the legacy_id upsert we stamp the matching seeded row's legacy_id, so the
+     * upsert then UPDATES it. Without this, a fresh install that pre-seeds these
+     * lookups would end up with two "Μετρητά" / "24%" / "ΤΕΜ" rows — one seeded,
+     * one imported. Mirrors how copyInvoiceTypes() already converges by `code`.
+     */
+    private function copyLookup(string $fbTable, string $target, string $pk, callable $row, ?string $naturalKey = null): void
     {
         $this->line("  {$fbTable} -> {$target}");
         foreach ($this->fbAll("SELECT * FROM {$fbTable}") as $r) {
+            $data = $row($r);
+
+            if ($naturalKey !== null) {
+                self::adoptSeededLookupRow($target, $this->companyId, $naturalKey, $data[$naturalKey] ?? null, (int) $r[$pk]);
+            }
+
             $id = $this->upsertGetId(
                 $target,
                 ['company_id' => $this->companyId, 'legacy_id' => $r[$pk]],
-                array_merge($row($r), ['updated_at' => now()]),
+                array_merge($data, ['updated_at' => now()]),
                 ['created_at' => now()],
             );
             $this->map[$target][(int) $r[$pk]] = $id;
+        }
+    }
+
+    /**
+     * Stamp a pre-seeded lookup row (legacy_id = NULL, matched by its natural
+     * key) with the legacy id, so the subsequent upsert-by-legacy_id UPDATES it
+     * instead of inserting a duplicate. No-op when:
+     *   - the value is null (nothing to match on),
+     *   - this legacy_id is already imported (re-run — a seeded same-key row is
+     *     then a genuine extra; stamping it would break unique(company_id,legacy_id)),
+     *   - no unclaimed seeded row matches (genuine new legacy value → plain insert).
+     *
+     * Static + DB-agnostic so it's unit-testable without a Firebird source.
+     */
+    public static function adoptSeededLookupRow(string $target, int $companyId, string $naturalKey, mixed $value, int $legacyId): void
+    {
+        if ($value === null) {
+            return;
+        }
+
+        $alreadyImported = DB::table($target)
+            ->where('company_id', $companyId)
+            ->where('legacy_id', $legacyId)
+            ->exists();
+        if ($alreadyImported) {
+            return;
+        }
+
+        $seededId = DB::table($target)
+            ->where('company_id', $companyId)
+            ->whereNull('legacy_id')
+            ->where($naturalKey, $value)
+            ->value('id');
+
+        if ($seededId !== null) {
+            DB::table($target)->where('id', $seededId)->update(['legacy_id' => $legacyId]);
         }
     }
 
