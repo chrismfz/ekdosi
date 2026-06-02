@@ -10,6 +10,7 @@ use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
+use Firebed\AadeMyData\Enums\IncomeClassificationCategory;
 use Firebed\AadeMyData\Enums\MovePurpose;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
@@ -46,8 +47,9 @@ use Throwable;
  *
  * Deliberately SELF-CONTAINED rather than reusing MyDataSubmitter: the proven
  * invoice path stays untouched, and the delivery payload shape differs enough
- * (zero values, vatCategory=8, delivery header, no payment methods, no income
- * classification by default) that sharing would couple two evolving concerns.
+ * (zero values, vatCategory=8, delivery header, no payment methods, no Ε3 income
+ * classification — but the mandatory «category3 = Διακίνηση» characterization)
+ * that sharing would couple two evolving concerns.
  * The few genuinely-shared idioms (per-tenant initFirebed, GR-counterpart rule,
  * country normalisation, persistResponse audit+cache) are duplicated privately.
  *
@@ -179,6 +181,12 @@ class DeliveryNoteSubmitter
                 $detail->setItemDescr((string) $line->product_descr);
             }
 
+            // «Χαρακτηρισμός Συναλλαγών 3 = Διακίνηση» — MANDATORY on a delivery
+            // note per Α.1123/2024 Άρθρο 5 §5.2.2 (and the firebed 9.3 reference
+            // payload). category3 / amount 0 / NO classificationType (there is
+            // no Ε3 income classification on a value-less δελτίο, §5.4.2).
+            $detail->addIncomeClassification(null, IncomeClassificationCategory::CATEGORY_3, 0.0);
+
             $details[] = $detail;
         }
 
@@ -201,6 +209,10 @@ class DeliveryNoteSubmitter
             ->setTotalDeductionsAmount(0.0)
             ->setTotalGrossValue(0.0);
 
+        // Same «3 = Διακίνηση» characterization aggregated at the summary level
+        // (the 9.3 reference payload carries it on both line and summary).
+        $summary->addIncomeClassification(null, IncomeClassificationCategory::CATEGORY_3, 0.0);
+
         $aade = (new AadeInvoice)
             ->setIssuer($issuer)
             ->setInvoiceHeader($header)
@@ -210,9 +222,7 @@ class DeliveryNoteSubmitter
         // No paymentMethods: a value-less delivery note has nothing to pay
         // ([204]'s "mandatory" applies to monetary invoice types, not 9.x).
 
-        if ($counterpart = $this->buildCounterpart($note)) {
-            $aade->setCounterpart($counterpart);
-        }
+        $aade->setCounterpart($this->buildCounterpart($note));
 
         return $aade;
     }
@@ -328,16 +338,14 @@ class DeliveryNoteSubmitter
     /**
      * The delivery recipient as a Counterpart. REUSES the invoice GR rule:
      * GR party = VAT only, NO name/address ([219]/[220] forbid them); foreign
-     * party = name + address + ISO country. A recipient is optional — an
-     * ενδοδιακίνηση (own-branch move) has no counterpart.
+     * party = name + address + ISO country. The recipient ΑΦΜ is NEVER omitted:
+     * for an ενδοδιακίνηση (own-branch move, no recipient) the law fills it with
+     * nine zeros «000000000» (Α.1123/2024 Παράρτημα ΙΙ §3) — it coincides with
+     * the issuer's own ΑΦΜ.
      */
-    private function buildCounterpart(DeliveryNote $note): ?Counterpart
+    private function buildCounterpart(DeliveryNote $note): Counterpart
     {
-        $afm = $note->recipient_afm ?: $note->customer?->afm;
-        if (empty($afm)) {
-            // No AFM → no counterpart (ενδοδιακίνηση / retail movement).
-            return null;
-        }
+        $afm = $note->recipient_afm ?: $note->customer?->afm ?: '000000000';
 
         $rawCountry = $note->customer?->country ?: 'GR';
         $country = $this->normaliseCountryCode($rawCountry);

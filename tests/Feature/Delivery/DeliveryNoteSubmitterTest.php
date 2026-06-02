@@ -147,8 +147,22 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertStringContainsString('<loadingAddress>', $xml);
         $this->assertStringContainsString('<deliveryAddress>', $xml);
         $this->assertStringContainsString('<vatCategory>8</vatCategory>', $xml);
+        // «Χαρακτηρισμός Συναλλαγών 3 = Διακίνηση» — mandatory per Α.1123/2024 §5.2.2.
+        $this->assertStringContainsString('category3', $xml);
         // Value-less: no payment methods on a delivery note.
         $this->assertStringNotContainsString('<paymentMethods>', $xml);
+    }
+
+    public function test_endodiakinisi_recipient_is_nine_zeros(): void
+    {
+        // No recipient (own-branch move) → recipient ΑΦΜ = 000000000 per the law,
+        // never an omitted counterpart.
+        $note = $this->makeNote(['customer_id' => null, 'recipient_afm' => null, 'recipient_name' => null]);
+
+        $xml = (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
+
+        $this->assertStringContainsString('<counterpart>', $xml);
+        $this->assertStringContainsString('000000000', $xml);
     }
 
     public function test_other_move_purpose_title_required_for_purpose_19(): void
