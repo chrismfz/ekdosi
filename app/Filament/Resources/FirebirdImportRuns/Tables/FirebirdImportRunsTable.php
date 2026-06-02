@@ -18,6 +18,15 @@ class FirebirdImportRunsTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
 
+                TextColumn::make('source')
+                    ->label('Πηγή')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'epsilon' => 'Epsilon JSON',
+                        default => 'Firebird',
+                    })
+                    ->color(fn (?string $state): string => $state === 'epsilon' ? 'info' : 'gray'),
+
                 TextColumn::make('file_name')
                     ->label('Backup file')
                     ->searchable()

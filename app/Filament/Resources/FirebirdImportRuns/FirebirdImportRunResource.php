@@ -36,11 +36,11 @@ class FirebirdImportRunResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Data';
 
-    protected static ?string $navigationLabel = 'Firebird Import';
+    protected static ?string $navigationLabel = 'Data Import';
 
-    protected static ?string $modelLabel = 'Firebird import';
+    protected static ?string $modelLabel = 'data import';
 
-    protected static ?string $pluralModelLabel = 'Firebird imports';
+    protected static ?string $pluralModelLabel = 'Data imports';
 
     protected static ?int $navigationSort = 90;
 

@@ -4,7 +4,9 @@ namespace App\Filament\Resources\FirebirdImportRuns\Pages;
 
 use App\Filament\Resources\FirebirdImportRuns\FirebirdImportRunResource;
 use App\Jobs\RunFirebirdImport;
+use App\Models\Company;
 use App\Models\FirebirdImportRun;
+use App\Services\Etl\EpsilonImporter;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
@@ -46,6 +48,13 @@ class CreateFirebirdImportRun extends CreateRecord
             throw new \RuntimeException('No tenant in context — cannot create import run.');
         }
 
+        // Epsilon Smart tab: any JSON file staged → run the (fast) JSON import
+        // synchronously and record a completed run. No queue worker / gbak
+        // needed; the files are tiny so the request handles it inline.
+        if (! empty($data['customers_json']) || ! empty($data['items_json']) || ! empty($data['services_json'])) {
+            return $this->handleEpsilon($data, $tenant);
+        }
+
         $uploadedPath = $data['upload'];
         $absolutePath = Storage::disk('local')->path($uploadedPath);
 
@@ -59,6 +68,7 @@ class CreateFirebirdImportRun extends CreateRecord
 
         $run = FirebirdImportRun::create([
             'company_id'          => $tenant->id,
+            'source'              => FirebirdImportRun::SOURCE_FIREBIRD,
             'uploaded_by_user_id' => auth()->id(),
             'file_name'           => $fileName,
             'file_size'           => $fileSize,
@@ -109,6 +119,65 @@ class CreateFirebirdImportRun extends CreateRecord
             ->{$priorRun !== null ? 'warning' : 'success'}()
             ->title($priorRun !== null ? 'Import queued (duplicate backup)' : 'Import queued')
             ->body($body)
+            ->send();
+
+        return $run;
+    }
+
+    /**
+     * Epsilon Smart JSON import — synchronous (the exports are tiny). Reads each
+     * staged JSON file, runs EpsilonImporter (re-runnable upsert), records a
+     * completed run with per-entity counts, and tidies the uploads.
+     */
+    private function handleEpsilon(array $data, Company $tenant): Model
+    {
+        $files = array_filter([
+            'customers' => $data['customers_json'] ?? null,
+            'items' => $data['items_json'] ?? null,
+            'services' => $data['services_json'] ?? null,
+        ]);
+
+        $payload = [];
+        $totalBytes = 0;
+        foreach ($files as $key => $path) {
+            $raw = (string) Storage::disk('local')->get($path);
+            $totalBytes += strlen($raw);
+            $decoded = json_decode($raw, true);
+            if (! is_array($decoded)) {
+                throw new \RuntimeException("Το αρχείο «{$key}» δεν είναι έγκυρο JSON.");
+            }
+            $payload[$key] = $decoded;
+        }
+
+        $counts = (new EpsilonImporter($tenant))->import($payload);
+
+        $run = FirebirdImportRun::create([
+            'company_id'          => $tenant->id,
+            'source'              => FirebirdImportRun::SOURCE_EPSILON,
+            'uploaded_by_user_id' => auth()->id(),
+            'file_name'           => 'Epsilon: '.implode(', ', array_keys($files)),
+            'file_size'           => $totalBytes,
+            'file_sha256'         => hash('sha256', implode('|', array_values($files))),
+            'source_files_json'   => $files,
+            'status'              => FirebirdImportRun::STATUS_COMPLETED,
+            'started_at'          => now(),
+            'finished_at'         => now(),
+            'counts_json'         => $counts,
+        ]);
+
+        // The JSON uploads are transient — drop them after a successful import.
+        foreach ($files as $path) {
+            Storage::disk('local')->delete($path);
+        }
+
+        $summary = collect($counts)
+            ->map(fn (array $c, string $k): string => "{$k}: +{$c['created']} νέα · ~{$c['updated']} ενημ. · {$c['skipped']} παράλειψη")
+            ->implode(' — ');
+
+        Notification::make()
+            ->success()
+            ->title('Η εισαγωγή Epsilon ολοκληρώθηκε')
+            ->body($summary !== '' ? $summary : 'Δεν δόθηκαν εγγραφές.')
             ->send();
 
         return $run;
