@@ -107,16 +107,6 @@ class FirebirdImportRunsTable
 
     private static function humanBytes(?int $bytes): string
     {
-        if ($bytes === null) {
-            return '';
-        }
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $i = 0;
-        $size = $bytes;
-        while ($size >= 1024 && $i < count($units) - 1) {
-            $size /= 1024;
-            $i++;
-        }
-        return round($size, 1).' '.$units[$i];
+        return \App\Support\Bytes::forHumans($bytes, '');
     }
 }
