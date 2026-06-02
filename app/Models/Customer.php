@@ -137,6 +137,18 @@ class Customer extends Model
     }
 
     /**
+     * Named people behind this customer (λογιστήριο, τεχνικός, υπεύθυνος…).
+     * Primary first, then by operator sort order, then name.
+     */
+    public function contacts(): HasMany
+    {
+        return $this->hasMany(CustomerContact::class)
+            ->orderByDesc('is_primary')
+            ->orderBy('sort_order')
+            ->orderBy('name');
+    }
+
+    /**
      * Attach an `outstanding_balance` column (and the `cust_owed` /
      * `cust_paid` join aliases it derives from) to a Customer query.
      *
