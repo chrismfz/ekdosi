@@ -105,6 +105,19 @@ after cutover.
 - Money `decimal(14,2)`, qty `decimal(9,3)`, vat% `decimal(5,2)`.
 - Operator-facing UI text is Greek; code identifiers stay English.
 
+## Changelog discipline (keep these current — we were starting to lose track)
+Two **`CHANGELOG.md`** files, [Keep a Changelog](https://keepachangelog.com/)
+format (`Added` / `Changed` / `Fixed` / `Removed`). **Every change updates the
+right one** — it's part of "done", like tests:
+- **`CHANGELOG.md`** (repo root) — the ekdosi **app** (Laravel/Filament). Add a
+  one-liner under `## [Unreleased]`. No SemVer tag yet, so date entries as they
+  merge.
+- **`whmcs-plugin/ekdosi_bridge/CHANGELOG.md`** — the **WHMCS plugin**. A plugin
+  change BOTH adds a line here AND bumps `'version'` in `ekdosi_bridge.php`
+  (move the `[Unreleased]` items under the new `[vX.Y.Z]` heading).
+- Keep entries terse (one line); the deep "why" still goes to
+  `docs/CLAUDE-history.md`. Don't backfill old versions — start from now.
+
 ## Commands
 ```bash
 php artisan migrate

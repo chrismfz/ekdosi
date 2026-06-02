@@ -56,6 +56,7 @@ require_once __DIR__.'/lib/Admin/Controller.php';
 require_once __DIR__.'/lib/EkdosiClient.php';
 require_once __DIR__.'/lib/InvoiceMarkStore.php';
 require_once __DIR__.'/lib/ThirdPartyStore.php';
+require_once __DIR__.'/lib/RelidInspector.php';
 require_once __DIR__.'/lib/Client/Gate.php';
 require_once __DIR__.'/lib/Client/Controller.php';
 
@@ -64,7 +65,7 @@ function ekdosi_bridge_config(): array
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.20.0',
+        'version' => '0.21.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [

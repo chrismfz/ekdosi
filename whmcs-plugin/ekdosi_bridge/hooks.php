@@ -26,6 +26,7 @@
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Gate;
 use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
+use WHMCS\Module\Addon\EkdosiBridge\RelidInspector;
 use WHMCS\View\Menu\Item as MenuItem;
 
 if (! defined('WHMCS')) {
@@ -34,6 +35,7 @@ if (! defined('WHMCS')) {
 
 require_once __DIR__.'/lib/InvoiceMarkStore.php';
 require_once __DIR__.'/lib/ThirdPartyStore.php';
+require_once __DIR__.'/lib/RelidInspector.php';
 require_once __DIR__.'/lib/Client/Gate.php';
 
 /**
@@ -148,6 +150,46 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
             : '<input type="hidden" name="token" value="'.htmlspecialchars($tokenRaw, ENT_QUOTES).'">');
     $pushAction = htmlspecialchars($baseLink.'&action=push');
 
+    // relid visibility — at a glance, how many lines WHMCS would (re)renew when
+    // this invoice is marked PAID (relid > 0), and whether any are ALREADY
+    // renewed (next due in the future = the double-renewal trap). The full
+    // per-line table + «Μηδενισμός relid» live on the addon page (relidCheck),
+    // mirroring the «Άνοιγμα στο Ekdosi Bridge» pattern.
+    $relidBlock = '';
+    try {
+        $relidItems = RelidInspector::items($invoiceId);
+        $relidActive = RelidInspector::activeCount($relidItems);
+        $relidRenewed = RelidInspector::alreadyRenewedCount($relidItems);
+        $relidLink = htmlspecialchars($baseLink.'&action=relidCheck&invoiceid='.$invoiceId);
+        if ($relidActive > 0) {
+            $cls = $relidRenewed > 0 ? 'danger' : 'warning';
+            $extra = $relidRenewed > 0 ? ' — '.$relidRenewed.' ήδη ανανεωμένες!' : '';
+            $relidBlock = <<<EOF
+<div class="form-group">
+    <label>relid (αυτόματη ανανέωση WHMCS)</label>
+    <div>
+        <div style="margin-bottom:6px"><span class="label label-{$cls}" title="Με Mark Paid το WHMCS θα (ξανα)ανανεώσει αυτές τις γραμμές">⚠ {$relidActive} γραμμές με relid{$extra}</span></div>
+        <a href="{$relidLink}" class="btn btn-default btn-sm" title="Δες/μηδένισε το relid ανά γραμμή ώστε να μην γίνει διπλή ανανέωση στο Mark Paid">
+            <i class="fa fa-list-ol"></i> Έλεγχος relid
+        </a>
+    </div>
+</div>
+EOF;
+        } else {
+            $relidBlock = <<<EOF
+<div class="form-group">
+    <label>relid (αυτόματη ανανέωση WHMCS)</label>
+    <div>
+        <span class="label label-success" title="Καμία γραμμή με ενεργό relid">Καθαρό</span>
+        <a href="{$relidLink}" class="btn btn-link btn-sm">λεπτομέρειες</a>
+    </div>
+</div>
+EOF;
+        }
+    } catch (Throwable $e) {
+        $relidBlock = '';
+    }
+
     return <<<EOF
 <div class="form-group">
     <label>Ekdosi / myDATA</label>
@@ -166,6 +208,7 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
         {$clientCardLink}
     </div>
 </div>
+{$relidBlock}
 EOF;
 });
 

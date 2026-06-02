@@ -46,6 +46,21 @@ live one.
 > activation **restores** `invoiced` to SMALLINT. We only **read**
 > `invoiced` now — to show "Invoiced in legacy app" during the dual-run.
 
+7. **relid check / «Μηδενισμός relid»** (v0.21.0) — read-only per-line
+   visibility on the admin invoice page: a badge «⚠ N γραμμές με relid»
+   (red when some are **already renewed** = next due in the future) plus
+   an «Έλεγχος relid» button. It opens a per-line table (description /
+   type / linked domain·service / **next due** / relid) where the
+   operator can **zero the relid** on the lines they pick — the safe,
+   **audited** (WHMCS activity log) successor to the legacy
+   `relid_remover`. Why: WHMCS re-runs renewal/activation for every line
+   with `relid > 0` when an invoice is marked PAID; for a partner who
+   renews domains by hand and pays one accumulated invoice later, that's
+   a **double renewal**. Zeroing the relid before Mark Paid prevents it.
+   Reads `tblinvoiceitems`/`tbldomains`/`tblhosting` only; never touches
+   ekdosi/AADE. Deploy = upload the plugin folder (adds
+   `lib/RelidInspector.php`); **no DB change, no reactivation needed**.
+
 The plugin **never talks to AADE directly** — all AADE communication
 goes through the ekdosi backend.
 

@@ -1,0 +1,116 @@
+<?php
+
+namespace WHMCS\Module\Addon\EkdosiBridge;
+
+use WHMCS\Database\Capsule;
+
+/**
+ * Per-line relid inspector for an admin invoice.
+ *
+ * WHMCS re-runs the renewal/activation flow for every invoice item that still
+ * carries a `relid` (> 0) when the invoice is marked PAID. For a partner who
+ * renews domains by hand and only later marks one accumulated invoice paid,
+ * that means a DOUBLE renewal. This read-only helper surfaces, per line:
+ *   - whether a relid is present (the thing WHMCS acts on),
+ *   - the linked domain/service name + its current nextduedate (a date already
+ *     in the FUTURE is the tell-tale "already renewed" — paying would renew
+ *     it a second time).
+ *
+ * Reuses ThirdPartyStore::serviceType() for the WHMCS-type → domain/hosting
+ * mapping, and the same tblinvoiceitems read the bridge already does for
+ * third-party routing. No writes here — the «Μηδενισμός relid» action lives in
+ * the admin Controller.
+ */
+class RelidInspector
+{
+    /**
+     * @return array<int, array{
+     *     item_id:int, type:string, service_type:?string, relid:int,
+     *     description:string, linked:?string, next_due:?string,
+     *     active:bool, renewable:bool, already_renewed:bool
+     * }>
+     */
+    public static function items(int $invoiceId): array
+    {
+        $rows = Capsule::table('tblinvoiceitems')
+            ->where('invoiceid', $invoiceId)
+            ->orderBy('id')
+            ->get(['id', 'type', 'relid', 'description']);
+
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        // Batch-resolve the linked domain / service (name + next due date) so a
+        // many-line invoice costs two extra queries, not N.
+        $domainIds = [];
+        $hostingIds = [];
+        foreach ($rows as $r) {
+            $relid = (int) ($r->relid ?? 0);
+            if ($relid <= 0) {
+                continue;
+            }
+            $st = ThirdPartyStore::serviceType((string) ($r->type ?? ''));
+            if ($st === 'domain') {
+                $domainIds[$relid] = true;
+            } elseif ($st === 'hosting') {
+                $hostingIds[$relid] = true;
+            }
+        }
+
+        $domains = $domainIds !== []
+            ? Capsule::table('tbldomains')->whereIn('id', array_keys($domainIds))->get(['id', 'domain', 'nextduedate'])->keyBy('id')
+            : collect();
+        $hostings = $hostingIds !== []
+            ? Capsule::table('tblhosting')->whereIn('id', array_keys($hostingIds))->get(['id', 'domain', 'nextduedate'])->keyBy('id')
+            : collect();
+
+        $today = date('Y-m-d');
+        $out = [];
+        foreach ($rows as $r) {
+            $relid = (int) ($r->relid ?? 0);
+            $type = (string) ($r->type ?? '');
+            $st = ThirdPartyStore::serviceType($type);
+
+            $linked = null;
+            $nextDue = null;
+            if ($relid > 0) {
+                if ($st === 'domain' && isset($domains[$relid])) {
+                    $linked = (string) $domains[$relid]->domain;
+                    $nextDue = (string) $domains[$relid]->nextduedate;
+                } elseif ($st === 'hosting' && isset($hostings[$relid])) {
+                    $linked = (string) $hostings[$relid]->domain;
+                    $nextDue = (string) $hostings[$relid]->nextduedate;
+                }
+            }
+            $nextDue = ($nextDue && $nextDue !== '0000-00-00') ? $nextDue : null;
+
+            $out[] = [
+                'item_id' => (int) $r->id,
+                'type' => $type,
+                'service_type' => $st,
+                'relid' => $relid,
+                'description' => (string) ($r->description ?? ''),
+                'linked' => $linked,
+                'next_due' => $nextDue,
+                'active' => $relid > 0,
+                'renewable' => $relid > 0 && $st !== null,
+                'already_renewed' => $nextDue !== null && $nextDue > $today,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** Lines WHMCS would act on at mark-paid (relid > 0). @param array<int,array<string,mixed>> $items */
+    public static function activeCount(array $items): int
+    {
+        return count(array_filter($items, static fn ($i) => $i['active']));
+    }
+
+    /** Active lines whose linked item is ALREADY renewed (next due in the future). */
+    public static function alreadyRenewedCount(array $items): int
+    {
+        return count(array_filter($items, static fn ($i) => $i['active'] && $i['already_renewed']));
+    }
+}
