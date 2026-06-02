@@ -85,8 +85,11 @@ class WhmcsInboxIntentTest extends TestCase
         $this->assertFalse($row->wantsInvoice());
     }
 
-    public function test_inbox_list_renders_with_intent_columns(): void
+    public function test_inbox_list_renders_with_whmcs_client_name(): void
     {
+        // The «Πρόθεση» column was removed (ΑΦΜ-only matching + file-time type
+        // decision); the intent helpers are still covered at the model level
+        // above. Here we just assert the list renders the WHMCS client name.
         $tenant = $this->tenant(['wantsinvoice' => 10, 'vatno' => 13]);
         $row = $this->row($tenant, [
             ['id' => 10, 'value' => 'on'],
@@ -103,8 +106,7 @@ class WhmcsInboxIntentTest extends TestCase
 
         Livewire::test(ListWhmcsInbox::class)
             ->assertOk()
-            ->assertSee('ACME OE')      // WHMCS client name column
-            ->assertSee('Τιμολόγιο');   // intent column
+            ->assertSee('ACME OE');      // WHMCS client name column
     }
 
     public function test_needs_afm_when_wants_invoice_but_no_afm_anywhere(): void
