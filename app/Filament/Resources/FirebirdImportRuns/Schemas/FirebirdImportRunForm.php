@@ -146,7 +146,7 @@ class FirebirdImportRunForm
                             ->icon('heroicon-o-document-text')
                             ->schema([
                                 Section::make('Epsilon Smart — εξαγωγές JSON')
-                                    ->description('Ανέβασε τα JSON από το Epsilon Smart (Τιμολόγηση). Κάθε αρχείο προαιρετικό — εισάγεται ό,τι δώσεις. Πελάτες (ΑΦΜ) + είδη/υπηρεσίες ταιριάζουν με τα στημένα lookups (ΦΠΑ / μονάδες / κατηγορίες). Επαναλήψιμο — upsert, δεν διπλασιάζει. (Οι πωλήσεις/παραστατικά έρχονται σε επόμενη φάση.)')
+                                    ->description('Ανέβασε τα JSON από το Epsilon Smart (Τιμολόγηση). Κάθε αρχείο προαιρετικό — εισάγεται ό,τι δώσεις. Πελάτες (ΑΦΜ), είδη/υπηρεσίες και πωλήσεις (ιστορικά παραστατικά με ΜΑΡΚ) ταιριάζουν με τα στημένα lookups. Επαναλήψιμο — upsert, δεν διπλασιάζει.')
                                     ->schema([
                                         FileUpload::make('customers_json')
                                             ->label('Πελάτες — DataExport-Customers.json')
@@ -163,6 +163,11 @@ class FirebirdImportRunForm
                                             ->disk('local')->directory('epsilon-imports')->visibility('private')
                                             ->helperText('Υπηρεσίες → προϊόντα (κατηγορία «Υπηρεσίες»).')
                                             ->columnSpanFull(),
+                                        FileUpload::make('sales_json')
+                                            ->label('Πωλήσεις — DataExport-Sales.json')
+                                            ->disk('local')->directory('epsilon-imports')->visibility('private')
+                                            ->helperText('Ιστορικά παραστατικά (με ΜΑΡΚ) → invoices (active, VALID). Match πελάτη με ΑΦΜ· κρατά το νούμερο Epsilon. Καλό είναι να εισαχθούν πρώτα Πελάτες + Είδη.')
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
                     ]),
@@ -172,7 +177,8 @@ class FirebirdImportRunForm
     /** True when any Epsilon JSON file is staged (→ gates the Firebird fields off). */
     public static function hasEpsilon(Get $get): bool
     {
-        return filled($get('customers_json')) || filled($get('items_json')) || filled($get('services_json'));
+        return filled($get('customers_json')) || filled($get('items_json'))
+            || filled($get('services_json')) || filled($get('sales_json'));
     }
 
     /**

@@ -17,6 +17,16 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Data Import — Epsilon Smart Sales → invoices** (Phase 2): the «Epsilon
+  Smart (JSON)» tab gains a Πωλήσεις (`DataExport-Sales.json`) slot. Each Epsilon
+  sale lands as a historical, already-filed invoice — `active` + `mydata_state=
+  VALID` + the MARK (leading apostrophe stripped) + a minimal `mydata_marks`
+  audit row. Counterpart resolved by ΑΦΜ (resolve-or-create), lines mapped from
+  CommLines (product matched by name), the Epsilon DocNum kept as the ΑΑ and the
+  invoice-type counter bumped so new ekdosi invoices continue. Re-runnable by
+  `(company_id, invcode)`; a re-run refreshes the header and replaces lines + the
+  mark row (`EpsilonImporter::importSales`).
+### Added
 - **Data Import — Epsilon Smart (JSON)** (Phase 1): the «Firebird Import» screen
   is renamed «Data Import» and gains a 2nd tab. The Firebird flow is unchanged
   (its own tab); the new «Epsilon Smart (JSON)» tab imports the Τιμολόγηση
