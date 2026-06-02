@@ -10,6 +10,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-06-02
+### Added
+- **relid table: «Λήξη (registry)» column** — for domain lines, the real registry
+  `expirydate` next to the renamed «Επόμενη χρέωση (WHMCS)» (`nextduedate`), so
+  the operator sees when a domain actually expires vs what WHMCS will bill (the
+  «already renewed?» judgement). Hosting has no registry expiry → «—».
+  (`RelidInspector::items` now also returns `expiry`.)
+
 ## [0.26.0] — 2026-06-02
 ### Changed
 - **ONE unified invoice manager (`action=show`).** Folded the separate relid

@@ -26,7 +26,7 @@ class RelidInspector
     /**
      * @return array<int, array{
      *     item_id:int, type:string, service_type:?string, relid:int,
-     *     description:string, linked:?string, next_due:?string,
+     *     description:string, linked:?string, next_due:?string, expiry:?string,
      *     active:bool, renewable:bool, already_renewed:bool
      * }>
      */
@@ -58,8 +58,11 @@ class RelidInspector
             }
         }
 
+        // Domains carry BOTH a billing date (nextduedate) and the registry
+        // expiry (expirydate) — showing the latter lets the operator see when it
+        // really expires vs what WHMCS will bill. Hosting has no registry expiry.
         $domains = $domainIds !== []
-            ? Capsule::table('tbldomains')->whereIn('id', array_keys($domainIds))->get(['id', 'domain', 'nextduedate'])->keyBy('id')
+            ? Capsule::table('tbldomains')->whereIn('id', array_keys($domainIds))->get(['id', 'domain', 'nextduedate', 'expirydate'])->keyBy('id')
             : collect();
         $hostings = $hostingIds !== []
             ? Capsule::table('tblhosting')->whereIn('id', array_keys($hostingIds))->get(['id', 'domain', 'nextduedate'])->keyBy('id')
@@ -74,16 +77,19 @@ class RelidInspector
 
             $linked = null;
             $nextDue = null;
+            $expiry = null;
             if ($relid > 0) {
                 if ($st === 'domain' && isset($domains[$relid])) {
                     $linked = (string) $domains[$relid]->domain;
                     $nextDue = (string) $domains[$relid]->nextduedate;
+                    $expiry = (string) ($domains[$relid]->expirydate ?? '');
                 } elseif ($st === 'hosting' && isset($hostings[$relid])) {
                     $linked = (string) $hostings[$relid]->domain;
                     $nextDue = (string) $hostings[$relid]->nextduedate;
                 }
             }
             $nextDue = ($nextDue && $nextDue !== '0000-00-00') ? $nextDue : null;
+            $expiry = ($expiry && $expiry !== '0000-00-00') ? $expiry : null;
 
             $out[] = [
                 'item_id' => (int) $r->id,
@@ -93,6 +99,7 @@ class RelidInspector
                 'description' => (string) ($r->description ?? ''),
                 'linked' => $linked,
                 'next_due' => $nextDue,
+                'expiry' => $expiry,
                 'active' => $relid > 0,
                 'renewable' => $relid > 0 && $st !== null,
                 'already_renewed' => $nextDue !== null && $nextDue > $today,

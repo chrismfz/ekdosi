@@ -1307,6 +1307,7 @@ EOF;
                 : ($it['service_type'] === 'hosting' ? 'Υπηρεσία' : htmlspecialchars($it['type'] !== '' ? $it['type'] : '—'));
             $linked = $it['linked'] !== null ? htmlspecialchars($it['linked']) : '—';
             $nextDue = $it['next_due'] !== null ? htmlspecialchars($it['next_due']) : '—';
+            $expiry = $it['expiry'] !== null ? htmlspecialchars($it['expiry']) : '—';
             $relidCell = $it['relid'] > 0 ? (string) $it['relid'] : '—';
             $rowClass = $it['already_renewed'] ? 'danger' : ($it['active'] ? 'warning' : '');
             $dueBadge = $it['already_renewed']
@@ -1318,6 +1319,7 @@ EOF;
                 .'<td>'.$typeLabel.'</td>'
                 .'<td>'.$linked.'</td>'
                 .'<td>'.$nextDue.$dueBadge.'</td>'
+                .'<td>'.$expiry.'</td>'
                 .'<td>'.$relidCell.'</td>'
                 .'</tr>';
         }
@@ -1342,7 +1344,7 @@ EOF;
 <input type="hidden" name="invoiceid" value="{$invoiceId}">
 <table class="table table-condensed">
     <thead><tr>
-        <th>Επιλ.</th><th>Περιγραφή</th><th>Είδος</th><th>Σύνδεση</th><th>Επόμενη λήξη</th><th>relid</th>
+        <th>Επιλ.</th><th>Περιγραφή</th><th>Είδος</th><th>Σύνδεση</th><th>Επόμενη χρέωση (WHMCS)</th><th>Λήξη (registry)</th><th>relid</th>
     </tr></thead>
     <tbody>{$rowsHtml}</tbody>
 </table>
