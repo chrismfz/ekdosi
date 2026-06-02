@@ -89,6 +89,11 @@ class DatabaseSeeder extends Seeder
         foreach ([$myip, $nixpal] as $company) {
             $lookups->seedVatCategories($company);
             $lookups->seedInvoiceTypes($company);
+            $lookups->seedPaymentMethods($company);
+            $lookups->seedDistributionAims($company);
+            $lookups->seedMetricUnits($company);
+            $lookups->seedDeliveryMethods($company);
+            $lookups->seedProductCategories($company);
         }
 
         // (3) Admin user attached to every tenant

@@ -3,7 +3,12 @@
 namespace App\Services\MyData;
 
 use App\Models\Company;
+use App\Models\DeliveryMethod;
+use App\Models\DistributionAim;
 use App\Models\InvoiceType;
+use App\Models\MetricUnit;
+use App\Models\PaymentMethod;
+use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use Illuminate\Support\Facades\DB;
@@ -163,6 +168,141 @@ class MyDataLookupSeeder
 
         return ['created' => $created, 'skipped' => $skipped, 'filled' => $filled];
     }
+
+    /**
+     * Seed the standard §8.12 payment methods (1–8) with their myDATA type set
+     * and due_days=0 (settled-at-issue; operator sets credit terms per method).
+     * Matched by description. @return array{created:int, skipped:int}
+     */
+    public function seedPaymentMethods(Company $tenant): array
+    {
+        $rows = [];
+        foreach (Codes::PAYMENT_METHODS as $code => $description) {
+            $rows[] = ['description' => $description, 'mydata_payment_type' => $code, 'due_days' => 0];
+        }
+
+        return $this->seedRows(PaymentMethod::class, 'description', $rows, $tenant->getKey());
+    }
+
+    /**
+     * Seed common AADE movePurpose (Σκοπός Διακίνησης) values — «Πώληση» first.
+     * A curated subset of the codified list (the everyday ones); the operator
+     * adds the rest. Matched by description. @return array{created:int, skipped:int}
+     */
+    public function seedDistributionAims(Company $tenant): array
+    {
+        $rows = array_map(fn (string $d) => ['description' => $d], self::DISTRIBUTION_AIM_SEED);
+
+        return $this->seedRows(DistributionAim::class, 'description', $rows, $tenant->getKey());
+    }
+
+    /**
+     * Seed a practical set of metric units (AADE §8.13 quantities + the common
+     * service units ΩΡΑ/ΜΗΝΑΣ/ΕΤΟΣ/ΥΠΗΡΕΣΙΑ). Matched by name.
+     * @return array{created:int, skipped:int}
+     */
+    public function seedMetricUnits(Company $tenant): array
+    {
+        $rows = array_map(fn (string $n) => ['name' => $n], self::METRIC_UNIT_SEED);
+
+        return $this->seedRows(MetricUnit::class, 'name', $rows, $tenant->getKey());
+    }
+
+    /**
+     * Seed common delivery methods. NOT an AADE-codified table — these are
+     * sensible everyday defaults. Matched by description.
+     * @return array{created:int, skipped:int}
+     */
+    public function seedDeliveryMethods(Company $tenant): array
+    {
+        $rows = array_map(fn (string $d) => ['description' => $d], self::DELIVERY_METHOD_SEED);
+
+        return $this->seedRows(DeliveryMethod::class, 'description', $rows, $tenant->getKey());
+    }
+
+    /**
+     * Seed a minimal generic product-category set (aligned with the income
+     * categories: Υπηρεσίες/Εμπορεύματα/Προϊόντα), markup 0. NOT AADE-codified —
+     * business-specific; the operator refines. Matched by description_short.
+     * @return array{created:int, skipped:int}
+     */
+    public function seedProductCategories(Company $tenant): array
+    {
+        $rows = array_map(fn (string $d) => ['description_short' => $d, 'markup' => 0], self::PRODUCT_CATEGORY_SEED);
+
+        return $this->seedRows(ProductCategory::class, 'description_short', $rows, $tenant->getKey());
+    }
+
+    /**
+     * Generic idempotent seeder for the description/name-keyed lookups: create
+     * a row when none matches the natural key, skip otherwise (never overwrite,
+     * never duplicate). company_id is stamped explicitly; the natural-key check
+     * bypasses global scopes so it's authoritative even with an ambient tenant.
+     *
+     * @param  class-string  $modelClass
+     * @param  list<array<string, mixed>>  $rows
+     * @return array{created: int, skipped: int}
+     */
+    private function seedRows(string $modelClass, string $matchColumn, array $rows, int $companyId): array
+    {
+        $created = 0;
+        $skipped = 0;
+
+        DB::transaction(function () use ($modelClass, $matchColumn, $rows, $companyId, &$created, &$skipped) {
+            foreach ($rows as $row) {
+                $exists = $modelClass::query()
+                    ->withoutGlobalScopes()
+                    ->where('company_id', $companyId)
+                    ->where($matchColumn, $row[$matchColumn])
+                    ->exists();
+
+                if ($exists) {
+                    $skipped++;
+
+                    continue;
+                }
+
+                $modelClass::create(['company_id' => $companyId] + $row);
+                $created++;
+            }
+        });
+
+        return ['created' => $created, 'skipped' => $skipped];
+    }
+
+    /** Curated common AADE movePurpose values (Πώληση first = the default). */
+    private const DISTRIBUTION_AIM_SEED = [
+        'Πώληση',
+        'Πώληση για Λογαριασμό Τρίτων',
+        'Δειγματισμός',
+        'Έκθεση',
+        'Επιστροφή',
+        'Ενδοδιακίνηση',
+        'Αγορά',
+    ];
+
+    /** Practical metric units: §8.13 quantities + common service units. */
+    private const METRIC_UNIT_SEED = [
+        'ΤΕΜ', 'ΥΠΗΡΕΣΙΑ', 'ΩΡΑ', 'ΜΗΝΑΣ', 'ΕΤΟΣ',
+        'ΚΙΛΟ', 'ΛΙΤΡΟ', 'ΜΕΤΡΟ', 'Μ²', 'Μ³',
+    ];
+
+    /** Common (non-codified) delivery methods. */
+    private const DELIVERY_METHOD_SEED = [
+        'Παραλαβή από κατάστημα',
+        'Με μεταφορικό μέσο πωλητή',
+        'Με μεταφορικό μέσο αγοραστή',
+        'Courier',
+        'ΕΛΤΑ',
+        'Ηλεκτρονική παράδοση (email)',
+    ];
+
+    /** Minimal generic product categories, aligned with the income categories. */
+    private const PRODUCT_CATEGORY_SEED = [
+        'Υπηρεσίες',
+        'Εμπορεύματα',
+        'Προϊόντα',
+    ];
 
     /**
      * Starter invoice types, pre-classified "by the book" so a fresh tenant can

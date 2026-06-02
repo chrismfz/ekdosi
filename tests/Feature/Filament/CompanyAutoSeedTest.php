@@ -63,6 +63,13 @@ class CompanyAutoSeedTest extends TestCase
         $this->assertSame('2.1', $tpy->mydata_type);
         $this->assertSame('E3_561_001', $tpy->mydata_income_class);
         $this->assertSame('category1_3', $tpy->mydata_income_class_category);
+
+        // The full lookup set is installed too.
+        $this->assertSame(8, DB::table('payment_methods')->where('company_id', $company->id)->count());
+        $this->assertGreaterThan(0, DB::table('distribution_aims')->where('company_id', $company->id)->count());
+        $this->assertGreaterThan(0, DB::table('metric_units')->where('company_id', $company->id)->count());
+        $this->assertGreaterThan(0, DB::table('delivery_methods')->where('company_id', $company->id)->count());
+        $this->assertGreaterThan(0, DB::table('product_categories')->where('company_id', $company->id)->count());
     }
 
     public function test_creating_a_non_gr_tenant_installs_no_greek_lookups(): void
@@ -83,5 +90,7 @@ class CompanyAutoSeedTest extends TestCase
 
         $this->assertSame(0, DB::table('invoice_types')->where('company_id', $company->id)->count());
         $this->assertSame(0, DB::table('vat_categories')->where('company_id', $company->id)->count());
+        $this->assertSame(0, DB::table('payment_methods')->where('company_id', $company->id)->count());
+        $this->assertSame(0, DB::table('metric_units')->where('company_id', $company->id)->count());
     }
 }

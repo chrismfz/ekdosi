@@ -3,7 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\Company;
+use App\Models\DeliveryMethod;
+use App\Models\DistributionAim;
 use App\Models\InvoiceType;
+use App\Models\MetricUnit;
+use App\Models\PaymentMethod;
+use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\MyData\MyDataLookupSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -134,6 +139,49 @@ class MyDataLookupSeederTest extends TestCase
         $this->assertSame('2.1', $row->mydata_type);
         $this->assertSame('E3_561_001', $row->mydata_income_class);
         $this->assertSame('category1_3', $row->mydata_income_class_category);
+    }
+
+    public function test_seeds_payment_methods_with_mydata_types_and_zero_due_days(): void
+    {
+        $tenant = $this->tenant();
+
+        $r = $this->svc()->seedPaymentMethods($tenant);
+        $this->assertSame(8, $r['created']);
+
+        $cash = PaymentMethod::where('company_id', $tenant->id)->where('description', 'Μετρητά')->first();
+        $this->assertSame(3, (int) $cash->mydata_payment_type);   // §8.12 code 3 = Μετρητά
+        $this->assertSame(0, (int) $cash->due_days);
+
+        // Idempotent.
+        $this->assertSame(0, $this->svc()->seedPaymentMethods($tenant)['created']);
+    }
+
+    public function test_seeds_distribution_aims_with_polisi_first(): void
+    {
+        $tenant = $this->tenant();
+
+        $r = $this->svc()->seedDistributionAims($tenant);
+        $this->assertSame(7, $r['created']);
+        $this->assertNotNull(DistributionAim::where('company_id', $tenant->id)->where('description', 'Πώληση')->first());
+    }
+
+    public function test_seeds_metric_units_and_delivery_methods_and_product_categories(): void
+    {
+        $tenant = $this->tenant();
+
+        $this->assertSame(10, $this->svc()->seedMetricUnits($tenant)['created']);
+        $this->assertNotNull(MetricUnit::where('company_id', $tenant->id)->where('name', 'ΥΠΗΡΕΣΙΑ')->first());
+
+        $this->assertSame(6, $this->svc()->seedDeliveryMethods($tenant)['created']);
+        $this->assertNotNull(DeliveryMethod::where('company_id', $tenant->id)->where('description', 'Courier')->first());
+
+        $this->assertSame(3, $this->svc()->seedProductCategories($tenant)['created']);
+        $this->assertNotNull(ProductCategory::where('company_id', $tenant->id)->where('description_short', 'Υπηρεσίες')->first());
+
+        // All three are idempotent on a second run.
+        $this->assertSame(0, $this->svc()->seedMetricUnits($tenant)['created']);
+        $this->assertSame(0, $this->svc()->seedDeliveryMethods($tenant)['created']);
+        $this->assertSame(0, $this->svc()->seedProductCategories($tenant)['created']);
     }
 
     public function test_seed_does_not_impose_income_chain_when_operator_reclassified_the_type(): void
