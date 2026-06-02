@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\MyData\MyDataLookupSeeder;
 use App\Services\TenantRoleProvisioner;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
@@ -78,6 +79,16 @@ class DatabaseSeeder extends Seeder
         $provisioner = app(TenantRoleProvisioner::class);
         foreach ([$myip, $nixpal, $estonian] as $company) {
             $provisioner->ensureStandardRoles($company);
+        }
+
+        // (2c) Pre-install the standard Greek AADE lookups (VAT categories +
+        //      by-the-book classified invoice types) for the GR/myDATA tenants,
+        //      so a fresh install can issue a ΤΠΥ/ΤΙΜ with zero Setup. The
+        //      Estonian tenant is left clean (non-Greek). Idempotent.
+        $lookups = app(MyDataLookupSeeder::class);
+        foreach ([$myip, $nixpal] as $company) {
+            $lookups->seedVatCategories($company);
+            $lookups->seedInvoiceTypes($company);
         }
 
         // (3) Admin user attached to every tenant

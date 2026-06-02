@@ -503,8 +503,18 @@ class MigrateFromFirebird extends Command
             $code = $this->fld($r, 'INVTYPE_ID');
             $existing = DB::table('invoice_types')
                 ->where(['company_id' => $this->companyId, 'code' => $code])
-                ->value('invcount');
-            $invcount = max((int) ($r['INVCOUNT'] ?? 1), (int) ($existing ?? 0));
+                ->first(['invcount', 'mydata_type', 'mydata_income_class', 'mydata_income_class_category']);
+            $invcount = max((int) ($r['INVCOUNT'] ?? 1), (int) ($existing?->invcount ?? 0));
+
+            // myDATA classification: COALESCE(legacy, existing). The legacy DB
+            // mostly has these NULL (its app never classified by-the-book), while
+            // a fresh install SEEDS them correctly (MyDataLookupSeeder). Plain
+            // overwrite would wipe that seed on import — so keep the existing
+            // (seeded / operator-set) value whenever legacy has nothing. Legacy
+            // wins only when it actually carries a value.
+            $mydataType = $this->fld($r, 'MYDATA_TYPE') ?? $existing?->mydata_type ?? null;
+            $incomeClass = $this->fld($r, 'MYDATA_INCOME_CLASS') ?? $existing?->mydata_income_class ?? null;
+            $incomeCat = $this->fld($r, 'MYDATA_INCOME_CLASS_CATEGORY') ?? $existing?->mydata_income_class_category ?? null;
 
             $id = $this->upsertGetId(
                 'invoice_types',
@@ -514,9 +524,9 @@ class MigrateFromFirebird extends Command
                     'invcount' => $invcount,
                     'is_credit' => (bool) ($r['CREDITINVOICE'] ?? 0),
                     'is_return' => (bool) ($r['RETURNINVOICE'] ?? 0),
-                    'mydata_type' => $this->fld($r, 'MYDATA_TYPE'),
-                    'mydata_income_class' => $this->fld($r, 'MYDATA_INCOME_CLASS'),
-                    'mydata_income_class_category' => $this->fld($r, 'MYDATA_INCOME_CLASS_CATEGORY'),
+                    'mydata_type' => $mydataType,
+                    'mydata_income_class' => $incomeClass,
+                    'mydata_income_class_category' => $incomeCat,
                     'distribution_aim_id' => $this->legacyId('distribution_aims', $r['DISTAIM_ID']),
                     'delivery_method_id' => $this->legacyId('delivery_methods', $r['DELIVERYMETHOD_ID']),
                     'payment_method_id' => $this->legacyId('payment_methods', $r['PAYMETH_ID']),

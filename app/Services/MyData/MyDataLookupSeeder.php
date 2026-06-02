@@ -83,11 +83,12 @@ class MyDataLookupSeeder
      * key for an invoice type. `invcount` starts at 1; `show_on_menu` true.
      *
      * For a type that ALREADY exists by code (e.g. ΤΙΜ imported from legacy with
-     * an empty mydata_type), we don't just skip it — we FILL the myDATA
-     * classification when it's missing (`mydata_type` empty → set the §8.1 code,
-     * and turn on `mydata_requires_quantity` for goods). Fill-empty only: a
-     * mydata_type the operator already set is never overwritten. So «Εισαγωγή
-     * τυπικών» also back-fills the AADE category onto pre-existing rows.
+     * an empty classification), we don't just skip it — we FILL each missing
+     * myDATA field (`mydata_type` → §8.1 code + `mydata_requires_quantity` for
+     * goods; `mydata_income_class` → §8.5 E3 type; `mydata_income_class_category`
+     * → §8.6 bucket). Fill-empty per field: a value the operator already set is
+     * never overwritten. So «Εισαγωγή τυπικών» also completes the AADE
+     * classification chain on pre-existing rows.
      *
      * @return array{created: int, skipped: int, filled: int}
      */
@@ -105,13 +106,36 @@ class MyDataLookupSeeder
                     ->first();
 
                 if ($existing !== null) {
-                    // Back-fill the myDATA classification if it's missing, but
-                    // never touch a value the operator already set.
+                    // Back-fill missing myDATA classification, fill-empty only —
+                    // a value the operator already set is NEVER overwritten.
+                    $touched = false;
+
+                    // (1) doc type + goods-quantity flag, when the row has no type.
                     if (blank($existing->mydata_type)) {
                         $existing->mydata_type = $row['mydata_type'];
                         if (($row['goods'] ?? false) && ! $existing->mydata_requires_quantity) {
                             $existing->mydata_requires_quantity = true;
                         }
+                        $touched = true;
+                    }
+
+                    // (2) income classification chain — ONLY when the row's type
+                    // matches THIS seed row's type (just set above, or already
+                    // equal). If the operator reclassified the series to a
+                    // different §8.1 type, the seed's E3/category belong to a
+                    // different document kind, so we must not impose them.
+                    if ($existing->mydata_type === $row['mydata_type']) {
+                        if (blank($existing->mydata_income_class) && ! empty($row['income_class'])) {
+                            $existing->mydata_income_class = $row['income_class'];
+                            $touched = true;
+                        }
+                        if (blank($existing->mydata_income_class_category) && ! empty($row['income_class_category'])) {
+                            $existing->mydata_income_class_category = $row['income_class_category'];
+                            $touched = true;
+                        }
+                    }
+
+                    if ($touched) {
                         $existing->save();
                         $filled++;
                     } else {
@@ -126,6 +150,8 @@ class MyDataLookupSeeder
                     'code' => $row['code'],
                     'name' => $row['name'],
                     'mydata_type' => $row['mydata_type'],
+                    'mydata_income_class' => $row['income_class'] ?? null,
+                    'mydata_income_class_category' => $row['income_class_category'] ?? null,
                     'invcount' => 1,
                     'show_on_menu' => true,
                     'is_credit' => $row['is_credit'] ?? false,
@@ -139,26 +165,47 @@ class MyDataLookupSeeder
     }
 
     /**
-     * Starter invoice types. `code` is the human series prefix (operator-
-     * editable); `mydata_type` is the AADE §8.1 classification (the legal one).
-     * `goods` => mydata_requires_quantity (AADE wants per-line quantity for
-     * goods types — see G5). Labels verbatim from §8.1.
+     * Starter invoice types, pre-classified "by the book" so a fresh tenant can
+     * file the everyday cases with NO operator setup. Each row carries the full
+     * myDATA chain: `mydata_type` (§8.1 doc type), `income_class` (§8.5 E3 line
+     * type) and `income_class_category` (§8.6 per-rate bucket) — the three the
+     * submitter needs to emit a complete income classification.
      *
-     * @var list<array{code: string, name: string, mydata_type: string, is_credit?: bool, goods?: bool}>
+     * `code` is the human series prefix (operator-editable). `goods` =>
+     * mydata_requires_quantity (AADE wants per-line quantity on goods — G5).
+     *
+     * Classification logic (AADE §8.5/§8.6, validated shapes in
+     * mydata-sandbox-validation-2026-05-28.md):
+     *   - B2B invoices (1.1 / 2.1)      → E3_561_001 (Χονδρικές - Επιτηδευματιών)
+     *   - intra-community (1.2)         → E3_561_005 (Εξωτερικού Ενδοκοινοτικές)
+     *   - retail (11.1 / 11.2)          → E3_561_003 (Λιανικές - Ιδιωτική Πελατεία)
+     *   - goods                         → category1_1 (Πώληση Εμπορευμάτων)
+     *   - services                      → category1_3 (Παροχή Υπηρεσιών)
+     *   - delivery note (9.3)           → NONE (a Δελτίο Αποστολής carries no revenue)
+     *
+     * TWO operator/accountant judgement calls (defaults below, flip per business
+     * in Setup → Invoice Types):
+     *   1. Goods category: category1_1 «Εμπορευμάτων» (resale — the common SMB
+     *      case) vs category1_2 «Προϊόντων» (own-manufactured). Default = 1_1.
+     *   2. The credit note (ΠΙΣ) classification mirrors what it reduces; we
+     *      default it to the services chain (this is a services-first tenant),
+     *      adjust if you mostly credit goods invoices.
+     *
+     * @var list<array{code: string, name: string, mydata_type: string, income_class?: string, income_class_category?: string, is_credit?: bool, goods?: bool}>
      */
     private const INVOICE_TYPE_SEED = [
         // Goods — the missing "κόψε εμπόρευμα" case.
-        ['code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο Πώλησης', 'mydata_type' => '1.1', 'goods' => true],
-        ['code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο Πώλησης / Δελτίο Αποστολής', 'mydata_type' => '1.1', 'goods' => true],
-        ['code' => 'ΕΝΔ', 'name' => 'Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις', 'mydata_type' => '1.2', 'goods' => true],
+        ['code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο Πώλησης', 'mydata_type' => '1.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_1', 'goods' => true],
+        ['code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο Πώλησης / Δελτίο Αποστολής', 'mydata_type' => '1.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_1', 'goods' => true],
+        ['code' => 'ΕΝΔ', 'name' => 'Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις', 'mydata_type' => '1.2', 'income_class' => 'E3_561_005', 'income_class_category' => 'category1_1', 'goods' => true],
         // Services.
-        ['code' => 'ΤΠΥ', 'name' => 'Τιμολόγιο Παροχής Υπηρεσιών', 'mydata_type' => '2.1'],
+        ['code' => 'ΤΠΥ', 'name' => 'Τιμολόγιο Παροχής Υπηρεσιών', 'mydata_type' => '2.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_3'],
         // Retail.
-        ['code' => 'ΑΛΠ', 'name' => 'Απόδειξη Λιανικής Πώλησης', 'mydata_type' => '11.1', 'goods' => true],
-        ['code' => 'ΑΠΥ', 'name' => 'Απόδειξη Παροχής Υπηρεσιών', 'mydata_type' => '11.2'],
-        // Credit.
-        ['code' => 'ΠΙΣ', 'name' => 'Πιστωτικό Τιμολόγιο / Συσχετιζόμενο', 'mydata_type' => '5.1', 'is_credit' => true],
-        // Delivery note.
+        ['code' => 'ΑΛΠ', 'name' => 'Απόδειξη Λιανικής Πώλησης', 'mydata_type' => '11.1', 'income_class' => 'E3_561_003', 'income_class_category' => 'category1_1', 'goods' => true],
+        ['code' => 'ΑΠΥ', 'name' => 'Απόδειξη Παροχής Υπηρεσιών', 'mydata_type' => '11.2', 'income_class' => 'E3_561_003', 'income_class_category' => 'category1_3'],
+        // Credit (mirrors the reduced revenue — services default, see docblock).
+        ['code' => 'ΠΙΣ', 'name' => 'Πιστωτικό Τιμολόγιο / Συσχετιζόμενο', 'mydata_type' => '5.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_3', 'is_credit' => true],
+        // Delivery note — NO income classification (no revenue).
         ['code' => 'ΔΑΠ', 'name' => 'Δελτίο Αποστολής', 'mydata_type' => '9.3', 'goods' => true],
     ];
 }

@@ -74,29 +74,83 @@ class MyDataLookupSeederTest extends TestCase
         $this->assertSame(8, $r['created']);
 
         // The "κόψε εμπόρευμα" case exists now: 1.1 Τιμολόγιο Πώλησης, goods.
-        $goods = InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '1.1')->first();
+        $goods = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
         $this->assertNotNull($goods);
         $this->assertTrue((bool) $goods->mydata_requires_quantity);
 
         // Credit type flagged; service type present.
         $this->assertTrue((bool) InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '5.1')->value('is_credit'));
-        $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '2.1')->first());
+        $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->first());
     }
 
-    public function test_invoice_type_seed_is_idempotent_by_code(): void
+    public function test_seeds_invoice_types_pre_classified_by_the_book(): void
     {
         $tenant = $this->tenant();
+        $this->svc()->seedInvoiceTypes($tenant);
+
+        $by = fn (string $code) => InvoiceType::where('company_id', $tenant->id)->where('code', $code)->first();
+
+        // Services B2B (ΤΠΥ): 2.1 → E3_561_001 / category1_3 (παροχή υπηρεσιών).
+        $tpy = $by('ΤΠΥ');
+        $this->assertSame('2.1', $tpy->mydata_type);
+        $this->assertSame('E3_561_001', $tpy->mydata_income_class);
+        $this->assertSame('category1_3', $tpy->mydata_income_class_category);
+
+        // Goods B2B (ΤΙΜ): 1.1 → E3_561_001 / category1_1 (εμπορεύματα).
+        $tim = $by('ΤΙΜ');
+        $this->assertSame('1.1', $tim->mydata_type);
+        $this->assertSame('E3_561_001', $tim->mydata_income_class);
+        $this->assertSame('category1_1', $tim->mydata_income_class_category);
+
+        // Retail services (ΑΠΥ): 11.2 → E3_561_003 (λιανικές) / category1_3.
+        $apy = $by('ΑΠΥ');
+        $this->assertSame('E3_561_003', $apy->mydata_income_class);
+        $this->assertSame('category1_3', $apy->mydata_income_class_category);
+
+        // Intra-community (ΕΝΔ): 1.2 → E3_561_005.
+        $this->assertSame('E3_561_005', $by('ΕΝΔ')->mydata_income_class);
+
+        // Delivery note (ΔΑΠ, 9.3): NO income classification.
+        $dap = $by('ΔΑΠ');
+        $this->assertNull($dap->mydata_income_class);
+        $this->assertNull($dap->mydata_income_class_category);
+    }
+
+    public function test_invoice_type_seed_completes_income_chain_on_matching_type(): void
+    {
+        $tenant = $this->tenant();
+        // Imported ΤΠΥ has the doc type but NO income classification.
         InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΠΥ', 'name' => 'Δικό μου', 'invcount' => 50, 'mydata_type' => '2.1']);
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
         $this->assertSame(7, $r['created']);    // all but ΤΠΥ
-        $this->assertSame(1, $r['skipped']);    // ΤΠΥ already has a mydata_type → skipped, not filled
-        $this->assertSame(0, $r['filled']);
+        $this->assertSame(1, $r['filled']);     // ΤΠΥ income chain back-filled (type matches)
+        $this->assertSame(0, $r['skipped']);
 
-        // Existing ΤΠΥ kept (invcount + mydata_type untouched).
+        // Existing ΤΠΥ kept (invcount + name + type untouched); income completed.
         $row = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->first();
         $this->assertSame(50, (int) $row->invcount);
+        $this->assertSame('Δικό μου', $row->name);
         $this->assertSame('2.1', $row->mydata_type);
+        $this->assertSame('E3_561_001', $row->mydata_income_class);
+        $this->assertSame('category1_3', $row->mydata_income_class_category);
+    }
+
+    public function test_seed_does_not_impose_income_chain_when_operator_reclassified_the_type(): void
+    {
+        $tenant = $this->tenant();
+        // Operator reclassified ΤΙΜ (seed = 1.1 goods) to 1.2 intra-community,
+        // leaving income blank. The seed's 1.1 income chain must NOT be imposed
+        // — it belongs to a different document kind.
+        InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΙΜ', 'name' => 'ΤΙΜ', 'invcount' => 1, 'mydata_type' => '1.2']);
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+        $this->assertSame(0, $r['filled']);
+        $this->assertSame(1, $r['skipped']);
+
+        $tim = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
+        $this->assertSame('1.2', $tim->mydata_type);
+        $this->assertNull($tim->mydata_income_class, 'seed must not impose its 1.1 income class on a 1.2 row');
     }
 
     public function test_seed_backfills_mydata_type_on_existing_row_without_one(): void
