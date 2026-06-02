@@ -203,11 +203,20 @@ realisation of `BillingSource::fetchPending()` → `ExternalDocument`.
   --via-bridge` opt into it. One HMAC call replaces the native API's 1+2N
   round-trips + the limit/offset pagination quirk. The native `WhmcsClient` stays
   for the customer-ledger comparison. (plugin v0.19.0)
-- **Slice 2 — next:** fold the third-party routing + ΑΠΥ/ΤΠΥ kind into the same
-  payload (so the ingestor stops the separate `resolve` call, and «Πρόθεση»→«Είδος»
-  comes correct from the plugin); then flip `--via-bridge` to the default.
+- **Slice 2 — DONE:** the feed is self-contained. `InvoiceFeed` embeds the
+  third-party **routing** per invoice (`with_routing`, requested only when the
+  tenant's `whmcs_third_party_enabled` is on), so `WhmcsInvoiceIngestor` builds
+  its `ThirdPartyResolution` from the payload — **no separate `resolve` call**.
+  Per-tenant `companies.whmcs_fetch_via_bridge` switch (default OFF) makes the
+  scheduled fetch use the bridge; `--via-bridge`/`--native` override for ad-hoc
+  runs. (plugin v0.20.0) The routing block is stripped from the stored payload
+  (kept in `third_party_resolution`) so the snapshot matches the native shape.
 - **Slice 3 — next:** "create the ekdosi customer from the bridge payload" when
   the ΑΦΜ isn't yet in ekdosi (the feed already carries the full party details).
+- **Slice 4 — next:** move the customer-ledger comparison (`CustomerWhmcsLedger`)
+  to a bridge op too — the last native-API consumer — then the native API
+  identifier/secret can be retired (the `whmcs_api_url` stays: it derives the
+  bridge endpoint).
 
 ## 9. Phase 1 implementation notes
 

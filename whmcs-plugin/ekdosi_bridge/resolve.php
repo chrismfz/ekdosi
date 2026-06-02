@@ -150,7 +150,8 @@ try {
         $since = isset($payload['since']) ? (string) $payload['since'] : null;
         $offset = (int) ($payload['offset'] ?? 0);
         $limit = (int) ($payload['limit'] ?? 100);
-        echo json_encode(['status' => 'ok'] + InvoiceFeed::fetch($status, $since, $offset, $limit));
+        $withRouting = (bool) ($payload['with_routing'] ?? false);
+        echo json_encode(['status' => 'ok'] + InvoiceFeed::fetch($status, $since, $offset, $limit, $withRouting));
         exit;
     }
 

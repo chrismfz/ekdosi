@@ -53,7 +53,8 @@ class WhmcsFetchPending extends Command
         {--limit=100 : Max WHMCS-side rows to fetch (WHMCS caps at 100).}
         {--offset=0 : Offset for paginating through larger result sets.}
         {--preview : Read-only dry-run; print the table from Stage A, do not stage anything.}
-        {--via-bridge : Fetch the invoice payloads from the ekdosi_bridge plugin (resolve.php op=invoices) instead of the native WHMCS API. One paginated HMAC call, server-side filtered, no 1+2N round-trips.}';
+        {--via-bridge : Force fetching the invoice payloads from the ekdosi_bridge plugin (resolve.php op=invoices) instead of the native WHMCS API.}
+        {--native : Force the native WHMCS API path even if the tenant has whmcs_fetch_via_bridge on.}';
 
     protected $description = 'WHMCS bridge: fetch paid+unfiled invoices and stage them in pending_whmcs_invoices for operator review. --preview for the Stage A read-only table.';
 
@@ -76,12 +77,15 @@ class WhmcsFetchPending extends Command
 
         $this->info("Tenant: {$tenant->name} (slug={$tenant->slug})");
 
-        // --via-bridge: the new source-of-truth path. Fetch the full invoice
-        // payloads from our own plugin (resolve.php op=invoices) and feed them to
-        // the SAME ingestor — the payloads are shape-compatible with the native
-        // getInvoiceWithClient, so matching/staging is identical; only the source
-        // changes. (--preview is a native-API-only diagnostic.)
-        if ((bool) $this->option('via-bridge') && ! (bool) $this->option('preview')) {
+        // Bridge-fetch path: fetch the full invoice payloads from our own plugin
+        // (resolve.php op=invoices) and feed them to the SAME ingestor — the
+        // payloads are shape-compatible with getInvoiceWithClient, so
+        // matching/staging is identical; only the source changes. Chosen by the
+        // explicit --via-bridge flag OR the per-tenant whmcs_fetch_via_bridge
+        // toggle; --native forces the native path. (--preview is native-only.)
+        $useBridge = ! (bool) $this->option('native')
+            && ((bool) $this->option('via-bridge') || (bool) $tenant->whmcs_fetch_via_bridge);
+        if ($useBridge && ! (bool) $this->option('preview')) {
             return $this->ingestViaBridge($tenant, $ingestor);
         }
 
@@ -278,7 +282,12 @@ class WhmcsFetchPending extends Command
 
         while (true) {
             try {
-                $payloads = $bridge->fetchPendingInvoices($offset, $limit, $minDate);
+                // Ask the plugin to embed third-party routing only when the
+                // tenant has it enabled — non-third-party tenants pay nothing,
+                // and the ingestor then needs no separate resolve call.
+                $payloads = $bridge->fetchPendingInvoices(
+                    $offset, $limit, $minDate, 'paid_unfiled', (bool) $tenant->whmcs_third_party_enabled,
+                );
             } catch (WhmcsUnreachable $e) {
                 $this->error("Bridge unreachable: {$e->getMessage()}");
 

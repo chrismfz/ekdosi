@@ -79,7 +79,17 @@ class WhmcsInvoiceIngestor
         // find-or-create the end-customer Customer — neither should run while
         // holding a row lock. Off (kill-switch / not configured / resolve.php
         // not deployed) → a no-op decision and today's behaviour is unchanged.
-        $tp = $this->thirdPartyDecision($tenant, $invoiceId);
+        // Slice 2: if the payload came from the bridge feed with routing embedded
+        // (with_routing), use it — no extra resolve HTTP call. Absent (native API
+        // path / old plugin) → thirdPartyDecision falls back to the resolve call.
+        $embeddedRouting = is_array($whmcsInvoicePayload['third_party'] ?? null)
+            ? $whmcsInvoicePayload['third_party']
+            : null;
+        // Don't persist the routing block inside the stored payload — it's
+        // transport metadata (kept separately in third_party_resolution), and
+        // dropping it keeps the snapshot identical to the native-API shape.
+        unset($whmcsInvoicePayload['third_party']);
+        $tp = $this->thirdPartyDecision($tenant, $invoiceId, $embeddedRouting);
 
         return DB::transaction(function () use (
             $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp
@@ -230,7 +240,7 @@ class WhmcsInvoiceIngestor
      *
      * @return array{state: ?string, customer_id: ?int, resolution: ?array, hold: bool, note: ?string}
      */
-    private function thirdPartyDecision(Company $tenant, int $invoiceId): array
+    private function thirdPartyDecision(Company $tenant, int $invoiceId, ?array $embeddedRouting = null): array
     {
         $noop = ['state' => null, 'customer_id' => null, 'resolution' => null, 'hold' => false, 'note' => null];
 
@@ -238,18 +248,24 @@ class WhmcsInvoiceIngestor
             return $noop;
         }
 
-        try {
-            $resolution = $this->bridgeFactory->for($tenant)->resolveThirdParty($invoiceId);
-        } catch (WhmcsNotConfigured|WhmcsUnreachable|WhmcsApiException $e) {
-            // Bridge not configured / resolve.php not deployed / unreachable.
-            // Non-fatal: fall back to today's behaviour.
-            Log::info('WHMCS third-party resolve skipped — falling back to client billing.', [
-                'company_id' => $tenant->id,
-                'whmcs_invoice_id' => $invoiceId,
-                'reason' => $e->getMessage(),
-            ]);
+        if (is_array($embeddedRouting)) {
+            // Slice 2: the bridge feed (op=invoices, with_routing) already carries
+            // the routing — build the resolution from it, no separate HTTP call.
+            $resolution = ThirdPartyResolution::fromBridgeResponse($embeddedRouting);
+        } else {
+            try {
+                $resolution = $this->bridgeFactory->for($tenant)->resolveThirdParty($invoiceId);
+            } catch (WhmcsNotConfigured|WhmcsUnreachable|WhmcsApiException $e) {
+                // Bridge not configured / resolve.php not deployed / unreachable.
+                // Non-fatal: fall back to today's behaviour.
+                Log::info('WHMCS third-party resolve skipped — falling back to client billing.', [
+                    'company_id' => $tenant->id,
+                    'whmcs_invoice_id' => $invoiceId,
+                    'reason' => $e->getMessage(),
+                ]);
 
-            return $noop;
+                return $noop;
+            }
         }
 
         $snapshot = $resolution->toArray();

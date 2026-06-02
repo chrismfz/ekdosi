@@ -4,6 +4,8 @@ namespace WHMCS\Module\Addon\EkdosiBridge;
 
 use WHMCS\Database\Capsule;
 
+require_once __DIR__.'/ThirdPartyStore.php';
+
 /**
  * Slice 1 of the "bridge as the source of truth" design
  * (docs/bridges-connectors.md): build, INSIDE WHMCS, the same rich invoice
@@ -29,9 +31,14 @@ class InvoiceFeed
      * One page of normalized invoice payloads.
      *
      * @param  string  $status  'paid_unfiled' (default) | Paid|Unpaid|Cancelled|Refunded|All
+     * @param  bool  $withRouting  also resolve + embed the third-party routing per
+     *                             invoice (so the ekdosi ingestor needs no separate
+     *                             resolve call). Ekdosi requests this only when its
+     *                             whmcs_third_party_enabled is on — non-third-party
+     *                             tenants pay nothing.
      * @return array{invoices: array<int, array<string, mixed>>, offset: int, count: int}
      */
-    public static function fetch(string $status, ?string $since, int $offset, int $limit): array
+    public static function fetch(string $status, ?string $since, int $offset, int $limit, bool $withRouting = false): array
     {
         $offset = max(0, $offset);
         $limit = ($limit < 1) ? 100 : min($limit, 200);
@@ -76,7 +83,7 @@ class InvoiceFeed
             $client = $clients->get($userId);
             $currencyId = $client ? (int) ($client->currency ?? 0) : 0;
 
-            $payloads[] = [
+            $entry = [
                 // Invoice fields (mirror GetInvoice).
                 'invoiceid' => $id,
                 'id' => $id,
@@ -108,6 +115,15 @@ class InvoiceFeed
                 // Line items in the GetInvoice nested shape.
                 'items' => ['item' => $itemsByInvoice[$id] ?? []],
             ];
+
+            // Slice 2: embed the third-party routing (same shape as resolve.php
+            // op=resolve) so the ekdosi ingestor builds its ThirdPartyResolution
+            // from the payload — no separate HTTP resolve call per invoice.
+            if ($withRouting) {
+                $entry['third_party'] = ThirdPartyStore::resolveInvoice($inv);
+            }
+
+            $payloads[] = $entry;
         }
 
         return ['invoices' => $payloads, 'offset' => $offset, 'count' => count($payloads)];

@@ -227,11 +227,16 @@ class WhmcsBridgeClient
      *
      * @return array<int, array<string, mixed>>  the page's payloads (empty = end)
      */
-    public function fetchPendingInvoices(int $offset, int $limit = 100, ?string $since = null, string $status = 'paid_unfiled'): array
+    public function fetchPendingInvoices(int $offset, int $limit = 100, ?string $since = null, string $status = 'paid_unfiled', bool $withRouting = false): array
     {
         $body = ['op' => 'invoices', 'status' => $status, 'offset' => $offset, 'limit' => $limit];
         if ($since !== null && $since !== '') {
             $body['since'] = $since;
+        }
+        if ($withRouting) {
+            // Ask the plugin to embed third-party routing per invoice so the
+            // ingestor needs no separate resolve call (Slice 2).
+            $body['with_routing'] = true;
         }
 
         $data = $this->postResolve($body);
