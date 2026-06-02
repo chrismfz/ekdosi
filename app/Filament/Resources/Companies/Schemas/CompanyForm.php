@@ -875,6 +875,20 @@ class CompanyForm
                                             ->helperText('ADMIN-ONLY — οι πελάτες ΔΕΝ βλέπουν τίποτα από αυτό. Όταν είναι ON, ο ingestor ρωτά τη γέφυρα (resolve.php) ανά τιμολόγιο και γεμίζει τη στήλη «Τρίτος» στο WHMCS Inbox (μονομερή → χρέωση στον δικαιούχο· πολλαπλά → «Διαχωρισμός»). Με OFF η «Τρίτος» μένει «—». Απαιτεί resolve.php εγκατεστημένο + API URL/secret. Η ορατότητα της σελίδας ΠΕΛΑΤΩΝ «Παραστατικά σε τρίτους (v2)» ελέγχεται ΞΕΧΩΡΙΣΤΑ στο WHMCS plugin (ρύθμιση «Show client v2»).'),
                                     ]),
 
+                                // Slice 2: where the inbox feed comes from. With ON, the
+                                // scheduled fetch pulls invoices from the bridge plugin
+                                // (resolve.php op=invoices) instead of WHMCS's native API —
+                                // one paginated HMAC call, routing folded in, no 1+2N
+                                // round-trips. Flip per tenant once validated live.
+                                Section::make('Πηγή λήψης τιμολογίων (inbox)')
+                                    ->description('Από πού τραβά το ekdosi τα τιμολόγια του WHMCS Inbox.')
+                                    ->schema([
+                                        Toggle::make('whmcs_fetch_via_bridge')
+                                            ->label('Λήψη μέσω του bridge plugin (αντί native WHMCS API)')
+                                            ->default(false)
+                                            ->helperText('Με ON, το προγραμματισμένο whmcs:fetch-pending τραβά τα τιμολόγια από το δικό μας plugin (resolve.php op=invoices) — μία σελιδοποιημένη HMAC κλήση, με τη δρομολόγηση τρίτων ήδη μέσα, χωρίς τα 1+2N round-trips του native API. Απαιτεί plugin v0.20.0+. Δοκίμασέ το πρώτα χειροκίνητα: php artisan whmcs:fetch-pending --tenant=SLUG --via-bridge.'),
+                                    ]),
+
                                 Section::make('Custom field mapping')
                                     ->description('Each WHMCS install assigns its own integer IDs to custom fields. Tell us which IDs carry which roles so we can read the right data when matching invoices and (in Stage B) building the myDATA payload.')
                                     ->schema([

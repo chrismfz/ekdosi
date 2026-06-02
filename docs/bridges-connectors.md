@@ -186,6 +186,38 @@ E-commerce forces the real generalisation: `docNoun='παραγγελία'`, def
 no third-party concept, and webhooks usually need our own platform module
 (same HMAC protocol as `ekdosi_bridge`).
 
+## 8b. The bridge IS the inbox feed (in progress)
+
+Decision (locked): the WHMCS source's **own plugin is the source of truth** for
+the inbox feed — ekdosi fetches invoices FROM the plugin, not from WHMCS's native
+API. The plugin already knows the routing (who/whom/which product → which third
+party) and the ΑΠΥ/ΤΠΥ kind; re-deriving that on the ekdosi side (native API +
+the often-unconfigured custom-field map) is strictly worse. This is the concrete
+realisation of `BillingSource::fetchPending()` → `ExternalDocument`.
+
+- **Slice 1 — DONE:** `resolve.php` op `invoices` (`InvoiceFeed`) serves a
+  paginated, server-side-filtered (paid+unfiled) page of FULL payloads
+  (invoice + client identity + customfields + line items), **shape-compatible**
+  with the native `getInvoiceWithClient` so `WhmcsInvoiceIngestor` consumes each
+  UNCHANGED. `WhmcsBridgeClient::fetchPendingInvoices` + `whmcs:fetch-pending
+  --via-bridge` opt into it. One HMAC call replaces the native API's 1+2N
+  round-trips + the limit/offset pagination quirk. The native `WhmcsClient` stays
+  for the customer-ledger comparison. (plugin v0.19.0)
+- **Slice 2 — DONE:** the feed is self-contained. `InvoiceFeed` embeds the
+  third-party **routing** per invoice (`with_routing`, requested only when the
+  tenant's `whmcs_third_party_enabled` is on), so `WhmcsInvoiceIngestor` builds
+  its `ThirdPartyResolution` from the payload — **no separate `resolve` call**.
+  Per-tenant `companies.whmcs_fetch_via_bridge` switch (default OFF) makes the
+  scheduled fetch use the bridge; `--via-bridge`/`--native` override for ad-hoc
+  runs. (plugin v0.20.0) The routing block is stripped from the stored payload
+  (kept in `third_party_resolution`) so the snapshot matches the native shape.
+- **Slice 3 — next:** "create the ekdosi customer from the bridge payload" when
+  the ΑΦΜ isn't yet in ekdosi (the feed already carries the full party details).
+- **Slice 4 — next:** move the customer-ledger comparison (`CustomerWhmcsLedger`)
+  to a bridge op too — the last native-API consumer — then the native API
+  identifier/secret can be retired (the `whmcs_api_url` stays: it derives the
+  bridge endpoint).
+
 ## 9. Phase 1 implementation notes
 
 Concrete pickup notes (known now; write the code against *two* sources).

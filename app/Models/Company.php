@@ -76,6 +76,8 @@ class Company extends Model
         // T-1b: per-tenant backend kill-switch for third-party invoicing
         'whmcs_third_party_enabled',
         'whmcs_amount_includes_tax',
+        // Slice 2: fetch the inbox feed from the bridge plugin (not the native API)
+        'whmcs_fetch_via_bridge',
         // G8 phase 2: γκρινιάρης auto-issue knob + its default invoice type
         'whmcs_auto_issue_immediate',
         'whmcs_default_invoice_type_id',
@@ -94,6 +96,7 @@ class Company extends Model
             'whmcs_invoice_min_date' => 'date',
             'whmcs_third_party_enabled' => 'boolean',
             'whmcs_amount_includes_tax' => 'boolean',
+            'whmcs_fetch_via_bridge' => 'boolean',
             'whmcs_auto_issue_immediate' => 'boolean',
             'auto_email_on_mydata_accept' => 'boolean',
             'auto_email_on_issue' => 'boolean',
