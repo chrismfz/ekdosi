@@ -66,7 +66,7 @@ class WhmcsInboxTable
                     ),
 
                 TextColumn::make('payload.date')
-                    ->label('Ημερομηνία')
+                    ->label('Ημ/νία τιμολ.')
                     ->date('Y-m-d')
                     ->state(fn (PendingWhmcsInvoice $r) => $r->payload['date'] ?? null),
 
@@ -90,34 +90,28 @@ class WhmcsInboxTable
                         ? 'ΑΦΜ '.$r->whmcsAfm()
                         : null),
 
+                // Recipient of the ekdosi invoice — ONE column: the third-party
+                // beneficiary when the WHMCS lines route to one, else the matched
+                // ekdosi customer (ΑΦΜ-only match). «— μη συνδεδεμένος —» = no ΑΦΜ
+                // match → operator links or clicks «Δημ. πελάτη (ΑΑΔΕ)». Replaces
+                // the old split «Πελάτης (ekdosi)» + «Τρίτος» columns.
                 TextColumn::make('customer.name')
-                    ->label('Πελάτης (ekdosi)')
+                    ->label('Παραλήπτης (ekdosi)')
                     ->placeholder('— μη συνδεδεμένος —')
-                    ->description(fn (PendingWhmcsInvoice $r): ?string => $r->customer?->afm
-                        ? 'ΑΦΜ '.$r->customer->afm
-                        : null)
-                    ->searchable(),
-
-                // Right after the ekdosi customer so the operator reads
-                // «WHMCS πελάτης → ekdosi πελάτης → τρίτος δικαιούχος» together.
-                // For a single third-party invoice show WHO it's billed to (the
-                // beneficiary name), not just «Σε τρίτο».
-                TextColumn::make('third_party_state')
-                    ->label('Τρίτος')
-                    ->badge()
-                    ->placeholder('—')
-                    ->color(fn (?string $state): string => match ($state) {
-                        PendingWhmcsInvoice::TP_SINGLE => 'info',
-                        PendingWhmcsInvoice::TP_MULTI => 'warning',
-                        default => 'gray',
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->third_party_state) {
+                        PendingWhmcsInvoice::TP_SINGLE => self::firstBeneficiaryName($r) ?? 'Σε τρίτο',
+                        PendingWhmcsInvoice::TP_MULTI => 'Διαχωρισμός σε δικαιούχους',
+                        default => $r->customer?->name,
                     })
-                    ->formatStateUsing(function (?string $state, PendingWhmcsInvoice $r): string {
-                        return match ($state) {
-                            PendingWhmcsInvoice::TP_SINGLE => self::firstBeneficiaryName($r) ?? 'Σε τρίτο',
-                            PendingWhmcsInvoice::TP_MULTI => 'Διαχωρισμός',
-                            PendingWhmcsInvoice::TP_NONE => 'Όχι',
-                            default => '—',
-                        };
+                    ->color(fn (PendingWhmcsInvoice $r): ?string => match ($r->third_party_state) {
+                        PendingWhmcsInvoice::TP_MULTI => 'warning',
+                        PendingWhmcsInvoice::TP_SINGLE => 'info',
+                        default => null,
+                    })
+                    ->description(fn (PendingWhmcsInvoice $r): ?string => match ($r->third_party_state) {
+                        PendingWhmcsInvoice::TP_SINGLE => 'Τρίτος δικαιούχος',
+                        PendingWhmcsInvoice::TP_MULTI => 'Πολλαπλοί — χρειάζεται διαχωρισμός',
+                        default => $r->customer?->afm ? 'ΑΦΜ '.$r->customer->afm : null,
                     })
                     ->tooltip(function (PendingWhmcsInvoice $r): ?string {
                         $names = self::beneficiaryNames($r);
@@ -129,56 +123,8 @@ class WhmcsInboxTable
                         }
 
                         return null;
-                    }),
-
-                // A: billing intent the customer set in WHMCS — τιμολόγιο vs
-                // απόδειξη. "—" when the tenant hasn't mapped the field (the
-                // operator then decides at file time).
-                TextColumn::make('wants_invoice')
-                    ->label('Πρόθεση')
-                    ->badge()
-                    ->placeholder('—')
-                    ->state(function (PendingWhmcsInvoice $r): ?string {
-                        if ($r->needsAfm()) {
-                            return 'Τιμολόγιο · λείπει ΑΦΜ';
-                        }
-
-                        return match ($r->wantsInvoice()) {
-                            true => 'Τιμολόγιο',
-                            false => 'Απόδειξη',
-                            default => null,
-                        };
                     })
-                    // Color/icon driven by the underlying booleans, NOT the
-                    // rendered Greek label — a wording tweak can't silently
-                    // break the badge styling. (whmcsCustomField is memoised,
-                    // so these extra reads are free.)
-                    ->color(fn (PendingWhmcsInvoice $record): string => match (true) {
-                        $record->needsAfm() => 'danger',
-                        $record->wantsInvoice() === true => 'info',
-                        default => 'gray',
-                    })
-                    ->icon(fn (PendingWhmcsInvoice $record): ?string => $record->needsAfm()
-                        ? 'heroicon-o-exclamation-triangle'
-                        : null)
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match (true) {
-                        $r->needsAfm() => 'Ζήτησε τιμολόγιο αλλά δεν υπάρχει ΑΦΜ (ούτε στο WHMCS ούτε σε πελάτη ekdosi). Βάλ\' το «Σε αναμονή» μέχρι να το δώσει.',
-                        $r->wantsInvoice() === true => 'Ο πελάτης ζήτησε τιμολόγιο στο WHMCS.',
-                        $r->wantsInvoice() === false => 'Δεν ζήτησε τιμολόγιο — μάλλον απόδειξη.',
-                        default => null,
-                    }),
-
-                TextColumn::make('match_reason')
-                    ->label('Match')
-                    ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        PendingWhmcsInvoice::REASON_LINKED => 'success',
-                        PendingWhmcsInvoice::REASON_AFM => 'success',
-                        PendingWhmcsInvoice::REASON_EMAIL => 'info',
-                        PendingWhmcsInvoice::REASON_NAME => 'warning',
-                        PendingWhmcsInvoice::REASON_UNMATCHED => 'danger',
-                        default => 'gray',
-                    }),
+                    ->searchable(),
 
                 // G8 (phase 1): γκρινιάρης / immediate-invoicing heads-up. A
                 // matched customer flagged needs_immediate_invoice wants their
@@ -229,7 +175,10 @@ class WhmcsInboxTable
                     ->label('MARK')
                     ->copyable()
                     ->placeholder('—')
-                    ->fontFamily('mono'),
+                    ->fontFamily('mono')
+                    // Empty for «προς έλεγχο» rows — hidden by default, on demand
+                    // via the column toggle.
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 // Dual-run heads-up: this WHMCS invoice has ALSO been invoiced
                 // in the LEGACY ekdosi app (tblinvoices.invoiced != 0). Three
@@ -255,12 +204,14 @@ class WhmcsInboxTable
                         $r->invoicedInLegacy() => 'Έχει ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi. Μην το ξαναεκδώσεις εδώ — θα γίνει διπλή υποβολή στην ΑΑΔΕ.',
                         $r->legacy_invoiced === 0 => 'Ελέγχθηκε — δεν έχει τιμολογηθεί στην παλιά εφαρμογή.',
                         default => 'Δεν έχει ελεγχθεί ακόμη. Πάτα «Έλεγχος legacy» για να ρωτήσει τη γέφυρα.',
-                    }),
+                    })
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('created_at')
-                    ->label('Στάλθηκε')
+                    ->label('Συγχρ.')
                     ->dateTime('Y-m-d H:i')
-                    ->sortable(),
+                    ->sortable()
+                    ->tooltip('Πότε συγχρονίστηκε στο inbox'),
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
