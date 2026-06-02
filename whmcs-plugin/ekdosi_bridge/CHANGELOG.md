@@ -10,6 +10,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-06-02
+### Added
+- **«Μετάβαση σε τιμολόγιο #…» jump-box on the invoice list** (`action=invoices`):
+  reach any invoice — including ones outside the current status/period filter —
+  without leaving the list. Same target as a row's «Άνοιγμα» (`action=show`).
+### Changed
+- The landing's «Ή επιθεώρησε ένα συγκεκριμένο τιμολόγιο» quick-inspect form is
+  kept (a free, read-only shortcut to `action=show` straight from the landing)
+  and restyled to match the list jump-box. Per-invoice badges + «Έλεγχος relid»
+  on the native WHMCS invoice page (`AdminInvoicesControlsOutput` hook) are
+  unchanged — full ekdosi/relid access stays available per invoice at manage.
+
 ## [0.21.0] — 2026-06-02
 ### Added
 - **relid check + «Μηδενισμός relid»** on the admin invoice page: a per-line
