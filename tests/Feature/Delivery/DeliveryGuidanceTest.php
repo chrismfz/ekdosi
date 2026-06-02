@@ -33,8 +33,10 @@ class DeliveryGuidanceTest extends TestCase
         $this->assertArrayHasKey('internal', $options);
         $this->assertSame(DeliveryGuidance::SCENARIOS['internal']['label'], $options['internal']);
 
-        $internal = DeliveryGuidance::scenario('internal');
-        $this->assertSame(8, $internal['move_purpose']); // Ενδοδιακίνηση (the MYIP server case)
+        $this->assertSame(8, DeliveryGuidance::scenario('internal')['move_purpose']);   // Ενδοδιακίνηση (declared establishment)
+        $this->assertSame(14, DeliveryGuidance::scenario('colocation')['move_purpose']); // Αποθήκευση σε Τρίτους (undeclared colo)
+        $this->assertSame(7, DeliveryGuidance::scenario('repair')['move_purpose']);      // Επεξεργασία (send for service)
+        $this->assertSame(5, DeliveryGuidance::scenario('return')['move_purpose']);      // Επιστροφή
 
         $this->assertNull(DeliveryGuidance::scenario('nonsense'));
     }
