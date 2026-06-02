@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Pages\Concerns\RemembersLastFetch;
+use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Expenses\ExpenseResource;
 use App\Models\Company;
 use App\Models\Supplier;
@@ -14,8 +15,6 @@ use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\Component;
-use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
@@ -41,6 +40,7 @@ use UnitEnum;
 class MyDataConsoleExpenses extends Page
 {
     use RemembersLastFetch;
+    use ResolvesReconcileWindow;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-document-arrow-down';
 
@@ -114,32 +114,25 @@ class MyDataConsoleExpenses extends Page
     protected function getHeaderActions(): array
     {
         return [
-            // Direction 1 — OUR recorded expenses → myDATA.
+            // ONE fetch (RequestDocs), BOTH directions together: «τα δικά μας
+            // έξοδα» (συμφωνούν;) + «αδέσποτα έξοδα» (μας υπέβαλε προμηθευτής
+            // αλλά δεν τα έχουμε). Same ExpenseReconciler call served two ways.
             Action::make('reconcile')
-                ->label('Έλεγχος δικών μας εξόδων στο myDATA')
+                ->label('Έλεγχος myDATA — Έξοδα')
                 ->icon('heroicon-o-clipboard-document-check')
                 ->color('primary')
-                ->modalHeading('Έλεγχος δικών μας εξόδων στο myDATA')
-                ->modalDescription('Παίρνει τα έξοδα που μας υπέβαλαν προμηθευτές και επιβεβαιώνει ότι όσα έχουμε καταχωρίσει τοπικά συμφωνούν με το myDATA.')
+                ->modalHeading('Έλεγχος myDATA — Έξοδα')
+                ->modalDescription('Κατεβάζει ό,τι μας υπέβαλαν προμηθευτές στο διάστημα και δείχνει μαζί: αν τα δικά μας έξοδα συμφωνούν, ΚΑΙ τυχόν «αδέσποτα έξοδα» (στο myDATA αλλά όχι στο ekdosi). Δεν τροποποιεί τίποτα.')
                 ->modalSubmitActionLabel('Έλεγχος')
                 ->schema($this->windowSchema())
-                ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'], 'compare')),
+                ->action(function (array $data): void {
+                    [$from, $to] = $this->resolveWindow($data);
+                    $this->runReconciliation($from, $to);
+                }),
 
-            // Direction 2 — myDATA → US ("αδέσποτα έξοδα").
-            Action::make('find_orphans')
-                ->label('Αδέσποτα έξοδα από myDATA')
-                ->icon('heroicon-o-cloud-arrow-down')
-                ->color('warning')
-                ->modalHeading('Αδέσποτα έξοδα από myDATA')
-                ->modalDescription('Κατεβάζει ό,τι έχει υποβάλει προμηθευτής σε βάρος μας και εντοπίζει έξοδα που υπάρχουν στο myDATA αλλά ΟΧΙ στο ekdosi.')
-                ->modalSubmitActionLabel('Λήψη')
-                ->schema($this->windowSchema())
-                ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'], 'inbound')),
-
-            // Direction 3 — OUR OWN non-income docs (RequestTransmittedDocs):
-            // αποδείξεις (13.x), ενδοκοινοτικά/VIES/ΕΦΚΑ (14.x), μισθοδοσία/
-            // πάγια/τακτοποιήσεις (17.x). One-shot import into Έξοδα; real sales
-            // are filtered out. Idempotent, source='self_declared'.
+            // OUR OWN non-income docs (RequestTransmittedDocs): αποδείξεις (13.x),
+            // ενδοκοινοτικά/VIES/ΕΦΚΑ (14.x), μισθοδοσία/πάγια/τακτοποιήσεις (17.x).
+            // Different endpoint + a WRITE → stays its own action. Idempotent.
             Action::make('import_self_declared')
                 ->label('Λήψη δικών μας εξόδων')
                 ->icon('heroicon-o-inbox-arrow-down')
@@ -148,17 +141,18 @@ class MyDataConsoleExpenses extends Page
                 ->modalDescription('Κατεβάζει ΟΣΑ έχουμε δηλώσει εμείς ΚΑΙ δεν είναι έσοδα — αποδείξεις, ενδοκοινοτικά/VIES, ΕΦΚΑ, μισθοδοσία, πάγια, τακτοποιήσεις — και τα καταχωρίζει στα Έξοδα (με κατηγορία). Οι πωλήσεις αγνοούνται. Ήδη καταχωρημένα παραλείπονται.')
                 ->modalSubmitActionLabel('Λήψη')
                 ->schema($this->windowSchema())
-                ->action(fn (array $data) => $this->importSelfDeclared($data['from'], $data['to'])),
+                ->action(function (array $data): void {
+                    [$from, $to] = $this->resolveWindow($data);
+                    $this->importSelfDeclared($from, $to);
+                }),
 
-            // Import: record every αδέσποτο of the queried window locally.
-            // Visible only after an inbound fetch that found orphans.
+            // Import every αδέσποτο of the queried window locally. Visible only
+            // after a fetch that found orphans.
             Action::make('import_orphans')
                 ->label('Καταχώριση αδέσποτων εξόδων')
                 ->icon('heroicon-o-arrow-down-on-square-stack')
                 ->color('success')
-                ->visible(fn (): bool => $this->ran
-                    && $this->resultMode === 'inbound'
-                    && ! empty($this->result['missingLocally']))
+                ->visible(fn (): bool => $this->ran && ! empty($this->result['missingLocally']))
                 ->requiresConfirmation()
                 ->modalHeading('Καταχώριση αδέσποτων εξόδων')
                 ->modalDescription(fn (): string => 'Θα καταχωριστούν τοπικά τα αδέσποτα έξοδα του διαστήματος '
@@ -169,24 +163,7 @@ class MyDataConsoleExpenses extends Page
         ];
     }
 
-    /**
-     * @return array<int, Component>
-     */
-    private function windowSchema(): array
-    {
-        return [
-            DatePicker::make('from')
-                ->label('Από')
-                ->required()
-                ->default(now()->subMonth()->startOfMonth()),
-            DatePicker::make('to')
-                ->label('Έως')
-                ->required()
-                ->default(now()),
-        ];
-    }
-
-    protected function runReconciliation(string $from, string $to, string $mode = 'compare'): void
+    protected function runReconciliation(string $from, string $to): void
     {
         $tenant = Filament::getTenant();
 
@@ -202,30 +179,25 @@ class MyDataConsoleExpenses extends Page
             );
 
             $this->ran = true;
-            $this->resultMode = $mode;
+            $this->resultMode = 'both';
             $this->result = $this->serialize($result);
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
             $this->rememberFetch();
 
-            if ($mode === 'inbound') {
-                $orphans = count($result->missingLocally);
-                Notification::make()
-                    ->title('Η λήψη από myDATA ολοκληρώθηκε')
-                    ->body($orphans > 0
-                        ? $orphans.' αδέσποτα έξοδα (στο myDATA, όχι στο ekdosi)'
-                        : 'Δεν βρέθηκαν αδέσποτα έξοδα — όλα όσα έχει το myDATA είναι καταχωρημένα.')
-                    ->{$orphans > 0 ? 'warning' : 'success'}()
-                    ->send();
-            } else {
-                Notification::make()
-                    ->title('Ο έλεγχος ολοκληρώθηκε')
-                    ->body($result->hasDiscrepancies()
-                        ? $result->discrepancyCount().' ασυμφωνίες βρέθηκαν'
-                        : 'Όλα συμφωνούν με το AADE')
-                    ->{$result->hasDiscrepancies() ? 'warning' : 'success'}()
-                    ->send();
-            }
+            // One combined toast: our-expense discrepancies + αδέσποτα έξοδα.
+            $discrepancies = $result->discrepancyCount();
+            $orphans = count($result->missingLocally);
+
+            $parts = [];
+            $parts[] = $discrepancies > 0 ? "{$discrepancies} ασυμφωνίες" : 'καμία ασυμφωνία';
+            $parts[] = $orphans > 0 ? "{$orphans} αδέσποτα έξοδα" : 'κανένα αδέσποτο έξοδο';
+
+            Notification::make()
+                ->title('Ο έλεγχος ολοκληρώθηκε')
+                ->body(ucfirst(implode(' · ', $parts)).'.')
+                ->{($discrepancies > 0 || $orphans > 0) ? 'warning' : 'success'}()
+                ->send();
         } catch (RateLimitExceededException $e) {
             $this->error = $this->rateLimitMessage($e->getMessage());
             Notification::make()->title('Προσωρινό όριο myDATA')->body($this->error)->warning()->send();
@@ -295,7 +267,7 @@ class MyDataConsoleExpenses extends Page
 
             // Refresh the worklist so imported docs leave the αδέσποτα list.
             // Pass Y-m-d so runReconciliation's Carbon::parse is unambiguous.
-            $this->runReconciliation($from->format('Y-m-d'), $to->format('Y-m-d'), 'inbound');
+            $this->runReconciliation($from->format('Y-m-d'), $to->format('Y-m-d'));
         } catch (RuntimeException $e) {
             Notification::make()->title('Η καταχώριση απέτυχε')->body($e->getMessage())->danger()->send();
         } catch (Throwable $e) {

@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Pages\Concerns\RemembersLastFetch;
+use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Services\MyData\ReconciliationRow;
@@ -13,8 +14,6 @@ use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\Component;
-use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
@@ -41,6 +40,7 @@ use UnitEnum;
 class MyDataConsole extends Page
 {
     use RemembersLastFetch;
+    use ResolvesReconcileWindow;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cloud-arrow-down';
 
@@ -124,54 +124,26 @@ class MyDataConsole extends Page
     protected function getHeaderActions(): array
     {
         return [
-            // Direction 1 — OUR records → myDATA. "Are the invoices we filed
-            // actually at AADE and in the same state?"
+            // ONE fetch (RequestTransmittedDocs), BOTH directions shown together:
+            // «τα δικά μας» (υπάρχουν/συμφωνούν στο myDATA;) + «αδέσποτα» (το
+            // myDATA έχει για το ΑΦΜ μας χωρίς τοπική εγγραφή). Same SalesReconciler
+            // call served two ways — one button, half the AADE calls.
             Action::make('reconcile')
-                ->label('Έλεγχος δικών μας στο myDATA')
+                ->label('Έλεγχος myDATA')
                 ->icon('heroicon-o-clipboard-document-check')
                 ->color('primary')
-                ->modalHeading('Έλεγχος δικών μας στο myDATA')
-                ->modalDescription('Παίρνει τα παραστατικά που υποβάλαμε εμείς και επιβεβαιώνει ότι υπάρχουν και συμφωνούν (καταστάσεις/ακυρώσεις) στο myDATA. Εντοπίζει ό,τι λείπει από το myDATA ή διαφέρει.')
+                ->modalHeading('Έλεγχος myDATA')
+                ->modalDescription('Κατεβάζει ό,τι έχει το myDATA για το ΑΦΜ μας στο διάστημα και δείχνει μαζί: αν τα δικά μας υπάρχουν/συμφωνούν, ΚΑΙ τυχόν «αδέσποτα» (στο myDATA αλλά όχι στο ekdosi). Δεν τροποποιεί τίποτα.')
                 ->modalSubmitActionLabel('Έλεγχος')
                 ->schema($this->windowSchema())
-                ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'], 'compare')),
-
-            // Direction 2 — myDATA → US. The same RequestTransmittedDocs pull
-            // read the other way: surfaces "αδέσποτα" — docs AADE holds for our
-            // AFM with no local ekdosi record (issued via e-τιμολόγιο or other
-            // software).
-            Action::make('find_orphans')
-                ->label('Αδέσποτα από myDATA')
-                ->icon('heroicon-o-cloud-arrow-down')
-                ->color('warning')
-                ->modalHeading('Αδέσποτα παραστατικά από myDATA')
-                ->modalDescription('Κατεβάζει ό,τι έχει το myDATA για το ΑΦΜ μας και εντοπίζει «αδέσποτα»: παραστατικά που υπάρχουν στο myDATA αλλά ΟΧΙ στο ekdosi (π.χ. εκδόθηκαν από e-τιμολόγιο ΑΑΔΕ ή άλλο πρόγραμμα).')
-                ->modalSubmitActionLabel('Λήψη')
-                ->schema($this->windowSchema())
-                ->action(fn (array $data) => $this->runReconciliation($data['from'], $data['to'], 'inbound')),
+                ->action(function (array $data): void {
+                    [$from, $to] = $this->resolveWindow($data);
+                    $this->runReconciliation($from, $to);
+                }),
         ];
     }
 
-    /**
-     * Shared date-window form for both directions.
-     *
-     * @return array<int, Component>
-     */
-    private function windowSchema(): array
-    {
-        return [
-            DatePicker::make('from')
-                ->label('Από')
-                ->required()
-                ->default(now()->subMonth()->startOfMonth()),
-            DatePicker::make('to')
-                ->label('Έως')
-                ->required()
-                ->default(now()),
-        ];
-    }
-
-    protected function runReconciliation(string $from, string $to, string $mode = 'compare'): void
+    protected function runReconciliation(string $from, string $to): void
     {
         $tenant = Filament::getTenant();
 
@@ -188,7 +160,7 @@ class MyDataConsole extends Page
             );
 
             $this->ran = true;
-            $this->resultMode = $mode;
+            $this->resultMode = 'both';
             $this->windowFrom = $from;
             $this->windowTo = $to;
             $this->result = $this->serialize($result);
@@ -196,39 +168,26 @@ class MyDataConsole extends Page
             $this->toLabel = $result->to;
             $this->rememberFetch();
 
-            if ($mode === 'inbound') {
-                // Bucket the orphans so a €5.000 payroll (17.1) or a Hetzner
-                // expense (14.3) doesn't inflate the "missed sales" alarm.
-                $byBucket = ['income' => 0, 'expense' => 0, 'other' => 0];
-                foreach ($result->missingLocally as $row) {
-                    $byBucket[Codes::transmittedDocBucket($row->invoiceType)]++;
+            // One combined toast covering BOTH directions: our-docs discrepancies
+            // + αδέσποτα πωλήσεων (the actionable income bucket; payroll/expense
+            // orphans are informational, not a "missed sale" alarm).
+            $discrepancies = $result->discrepancyCount();
+            $orphanIncome = 0;
+            foreach ($result->missingLocally as $row) {
+                if (Codes::transmittedDocBucket($row->invoiceType) === 'income') {
+                    $orphanIncome++;
                 }
-                $income = $byBucket['income'];
-                $rest = $byBucket['expense'] + $byBucket['other'];
-
-                $body = $income > 0
-                    ? "{$income} αδέσποτα πωλήσεων (έσοδα χωρίς τοπική εγγραφή)"
-                    : 'Καμία αδέσποτη πώληση.';
-                if ($rest > 0) {
-                    $body .= " — και {$rest} λοιπά (έξοδα/μισθοδοσία/τακτοποιήσεις, ενημερωτικά).";
-                }
-
-                Notification::make()
-                    ->title('Η λήψη από myDATA ολοκληρώθηκε')
-                    ->body($body)
-                    ->{$income > 0 ? 'warning' : 'success'}()
-                    ->send();
-            } else {
-                $msg = $result->hasDiscrepancies()
-                    ? $result->discrepancyCount().' ασυμφωνίες βρέθηκαν'
-                    : 'Όλα συμφωνούν με το AADE';
-
-                Notification::make()
-                    ->title('Ο έλεγχος ολοκληρώθηκε')
-                    ->body($msg)
-                    ->{$result->hasDiscrepancies() ? 'warning' : 'success'}()
-                    ->send();
             }
+
+            $parts = [];
+            $parts[] = $discrepancies > 0 ? "{$discrepancies} ασυμφωνίες" : 'καμία ασυμφωνία';
+            $parts[] = $orphanIncome > 0 ? "{$orphanIncome} αδέσποτα πωλήσεων" : 'κανένα αδέσποτο πώλησης';
+
+            Notification::make()
+                ->title('Ο έλεγχος ολοκληρώθηκε')
+                ->body(ucfirst(implode(' · ', $parts)).'.')
+                ->{($discrepancies > 0 || $orphanIncome > 0) ? 'warning' : 'success'}()
+                ->send();
         } catch (RateLimitExceededException $e) {
             // AADE 429 — keep whatever was on screen (preserved above) and tell
             // the operator when to retry, instead of a scary credentials error.
