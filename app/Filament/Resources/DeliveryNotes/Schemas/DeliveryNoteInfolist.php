@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DeliveryNotes\Schemas;
 
+use App\Services\Delivery\DeliveryLifecycleService;
 use App\Support\MyData\Codes;
 use App\Support\MyData\DeliveryCodes;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -94,7 +95,11 @@ class DeliveryNoteInfolist
                     TextEntry::make('local_status')->label('Τοπική κατάσταση')->badge(),
                     TextEntry::make('mydata_state')->label('myDATA')->badge()->placeholder('—'),
                     TextEntry::make('mydata_mark')->label('MARK')->placeholder('—')->copyable(),
-                    TextEntry::make('delivery_state')->label('Διακίνηση')->placeholder('—'),
+                    TextEntry::make('delivery_state')
+                        ->label('Διακίνηση')
+                        ->badge()
+                        ->formatStateUsing(fn (?string $state) => DeliveryLifecycleService::stateLabel($state) ?? '—')
+                        ->placeholder('—'),
                     TextEntry::make('mydata_url')
                         ->label('QR / σύνδεσμος')
                         ->url(fn ($record) => $record->mydata_url)
