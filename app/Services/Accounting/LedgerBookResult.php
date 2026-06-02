@@ -78,7 +78,8 @@ class LedgerBookResult
     }
 
     /**
-     * Σύνολα ανά λογιστική κατηγορία for one book, oldest-code first. Each entry:
+     * Σύνολα ανά λογιστική κατηγορία for one book, in natural code order
+     * (category1_2 before category1_10). Each entry:
      * ['code', 'label', 'net', 'vat', 'gross', 'count']. Unclassified rows fold
      * into a single null-code bucket so nothing is silently dropped.
      *
@@ -108,7 +109,7 @@ class LedgerBookResult
             $buckets[$key]['count']++;
         }
 
-        ksort($buckets);
+        uksort($buckets, 'strnatcmp');
 
         return array_values(array_map(function (array $b) {
             $b['net'] = round($b['net'], 2);
