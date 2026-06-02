@@ -17,6 +17,21 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Ψηφιακή Διακίνηση / Δελτίο Αποστολής — data model (Phase D1)**: the schema
+  for myDATA e-transport delivery notes. New `delivery_notes` /
+  `delivery_note_lines` / `delivery_marks` tables — value-LESS twins of
+  invoices/lines/marks (no money/VAT, kept in their own tables like quotes so
+  they never touch InvoiceScope or the money services). Models `DeliveryNote` /
+  `DeliveryNoteLine` / `DeliveryMark` (`BelongsToCompany`; the `mydata_*` cache +
+  the lifecycle `*_mark`/`delivery_state` columns are guarded — written only via
+  forceFill by the future submitter/lifecycle service). `App\Support\MyData\
+  DeliveryCodes` wraps the firebed e-transport enums (σκοπός διακίνησης §8.14,
+  τρόπος μεταφοράς, συσκευασία §8.23, κατάσταση §8.22) and bakes the AADE policy
+  that move purposes **6/15/16/17/18 are no longer transmittable** (so 18
+  «Διακίνηση Παγίων» is excluded — own-equipment moves use 8 Ενδοδιακίνηση or 19
+  Λοιπές). Numbering reuses `InvoiceNumberer` unchanged (a delivery series is
+  just a 9.x `invoice_types` row). No UI yet (D2 = submit+form, D3 = lifecycle).
+  `DeliveryCodesTest` + `DeliveryNoteModelTest`. **Deploy:** `php artisan migrate`.
 - **Λογαριασμοί (ΕΓΛΣ) + νέο group «Λογιστικά»** — a LIGHT, indicative Greek
   chart-of-accounts layer (`App\Support\Accounting\ChartOfAccounts`): the ΕΓΛΣ
   group accounts we reference + a default `category1_x`/`category2_x → account`
