@@ -46,6 +46,30 @@ they merge.
   invoice submitter is untouched). Line/summary shape grounded in firebed's 9.3
   reference payload — **flagged for AADE sandbox validation** before go-live.
   `DeliveryNoteSubmitterTest` (build/previewXml + mock-Guzzle submit happy-path).
+- **Ψηφιακή Διακίνηση — Filament resource + issue flow (Phase D2, part 3)**:
+  `DeliveryNoteResource` (new nav group «Ψηφιακή Διακίνηση», truck icon,
+  admin-gated on `View:DeliveryNote` + Company tenant, mirrors Reports/LedgerBook)
+  with List/Create/View/Edit pages. The form wires the operator-guidance helpers
+  end-to-end: a non-blocking exemption notice (`DeliveryGuidance::EXEMPTIONS_LEAD`
+  + `EXEMPTIONS` + `INTRO`), a reactive «Τι θέλω να κάνω;» scenario picker
+  (`scenarioOptions()` → fills `move_purpose` + the «Λοιπές» title; UI-only,
+  `dehydrated(false)`), `move_purpose`/transport/packaging selects from
+  `DeliveryCodes`, per-line measurement-unit from `Codes::QUANTITY_TYPES`, and
+  `fieldHelp()` on every field. **Any-party recipient picker** searches BOTH
+  customers AND suppliers (prefixed `c:`/`s:` keys) — a supplier recipient (e.g. a
+  datacenter) snapshots `recipient_afm`/`recipient_name` and leaves `customer_id`
+  null; a manual ΑΦΜ+name fallback covers parties in neither table; empty recipient
+  = ενδοδιακίνηση. Mandatory addresses (loading + delivery), transport_type,
+  vehicle_number, dispatch_at enforced in-form (last-line submitter guards
+  unchanged). Numbering reuses `InvoiceNumberer` under a row lock in
+  `CreateDeliveryNote` (identical to CreateInvoice); the type's `mydata_type`
+  (9.x, default ΔΑΠ/9.3) is snapshotted at save. The View page's «Έκδοση»
+  header action (draft-only) files via `DeliveryNoteSubmitter`. Edit limited to
+  drafts. Added a `DeliveryNoteLine::saving` hook to auto-stamp `company_id` from
+  the parent note (the Repeater relationship omits it). `DeliveryNoteResourceTest`
+  (Livewire create→ΑΑ/draft/lines, required-field validation, issue-action
+  draft-only visibility, mock-Guzzle submit→VALID+mark, recipient union search).
+  **Deploy:** `php artisan shield:generate` so `View:DeliveryNote` exists.
 - **Λογαριασμοί (ΕΓΛΣ) + νέο group «Λογιστικά»** — a LIGHT, indicative Greek
   chart-of-accounts layer (`App\Support\Accounting\ChartOfAccounts`): the ΕΓΛΣ
   group accounts we reference + a default `category1_x`/`category2_x → account`

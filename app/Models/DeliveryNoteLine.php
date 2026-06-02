@@ -38,6 +38,21 @@ class DeliveryNoteLine extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::saving(function (self $line): void {
+            // Auto-stamp company_id from the parent note. Filament's
+            // Repeater::relationship('lines') calls HasMany::create with only
+            // the form fields (no company_id) — without this hook every form
+            // save hits the NOT NULL constraint. Mirrors InvoiceLine::saving;
+            // only fills when empty.
+            if (empty($line->company_id) && $line->delivery_note_id) {
+                $line->company_id = $line->deliveryNote?->company_id
+                    ?? DeliveryNote::query()->whereKey($line->delivery_note_id)->value('company_id');
+            }
+        });
+    }
+
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
