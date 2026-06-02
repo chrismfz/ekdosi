@@ -17,6 +17,18 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Ψηφιακή Διακίνηση / Δελτίο Αποστολής — εκτυπώσιμο PDF + QR (Phase D2.4)**:
+  `App\Services\Delivery\DeliveryNotePdf` renders a Δελτίο Αποστολής to PDF bytes
+  via DomPDF + `resources/views/delivery-notes/pdf.blade.php` — a value-LESS twin
+  of the invoice PDF (no prices/VAT/totals; same DejaVu-Sans Greek font setup,
+  A4 portrait, per-render ini guard, and `App\Support\MyData\QrImage` for the
+  AADE QR). Εκδότης/Παραλήπτης (or «Ενδοδιακίνηση»), σκοπός/τόπος φόρτωσης→
+  παράδοσης/μεταφορικό μέσο/όχημα/μεταφορέας, and a quantities-only lines table
+  (μονάδα μέτρησης resolved via new `DeliveryCodes::measurementUnitLabel`, §8.13).
+  The MARK + QR footer render only when filed (`mydata_state==='VALID'`); a draft
+  shows «ΠΡΟΧΕΙΡΟ — μη διαβιβασμένο» and no QR. A «Εκτύπωση (PDF)» header action
+  on `ViewDeliveryNote` streams `deltio-<invcode>.pdf` for both draft + filed
+  notes (mirrors ViewInvoice's PDF action).
 - **Ψηφιακή Διακίνηση / Δελτίο Αποστολής — data model (Phase D1)**: the schema
   for myDATA e-transport delivery notes. New `delivery_notes` /
   `delivery_note_lines` / `delivery_marks` tables — value-LESS twins of

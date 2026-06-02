@@ -6,6 +6,7 @@ use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\PackagingType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\TransportType;
 use Firebed\AadeMyData\Enums\MovePurpose;
+use Firebed\AadeMyData\Enums\UnitMeasurement;
 
 /**
  * The myDATA code tables for Παραστατικά Διακίνησης (e-transport): σκοπός
@@ -81,6 +82,17 @@ class DeliveryCodes
     public static function deliveryStatusLabel(?int $code): ?string
     {
         return $code === null ? null : DeliveryStatus::tryFrom($code)?->label();
+    }
+
+    /**
+     * §8.13 — Greek label for a measurement-unit code (1–7), for the PDF/UI.
+     * Returns null for unknown/out-of-range so the caller can fall back to the
+     * raw value (mirrors the submitter's 1–7 clamp without forcing a default
+     * here — display should never invent a unit the operator didn't pick).
+     */
+    public static function measurementUnitLabel(?int $code): ?string
+    {
+        return $code === null ? null : UnitMeasurement::tryFrom($code)?->label();
     }
 
     /**

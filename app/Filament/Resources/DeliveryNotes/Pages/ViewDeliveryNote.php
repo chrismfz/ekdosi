@@ -4,6 +4,7 @@ namespace App\Filament\Resources\DeliveryNotes\Pages;
 
 use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Models\DeliveryNote;
+use App\Services\Delivery\DeliveryNotePdf;
 use App\Services\Delivery\DeliveryNoteSubmitter;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -80,6 +81,28 @@ class ViewDeliveryNote extends ViewRecord
                             ->persistent()
                             ->send();
                     }
+                }),
+
+            // PDF print. Works for any note regardless of state — a draft
+            // prints with the «ΠΡΟΧΕΙΡΟ» marker and no QR; a filed (VALID)
+            // note carries the MARK + QR. Mirrors ViewInvoice::download_pdf:
+            // render UP-FRONT so an error surfaces as a Filament notification
+            // instead of a half-streamed corrupt download.
+            Action::make('print_pdf')
+                ->label('Εκτύπωση (PDF)')
+                ->icon('heroicon-o-document-arrow-down')
+                ->color('gray')
+                ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('view', $record) ?? false)
+                ->action(function (DeliveryNote $record) {
+                    $pdfBytes = app(DeliveryNotePdf::class)->render($record);
+
+                    return response()->streamDownload(
+                        function () use ($pdfBytes): void {
+                            echo $pdfBytes;
+                        },
+                        'deltio-'.$record->invcode.'.pdf',
+                        ['Content-Type' => 'application/pdf'],
+                    );
                 }),
         ];
     }
