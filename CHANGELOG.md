@@ -29,6 +29,26 @@ they merge.
   pages + views — καμία αλλαγή στους reconcilers/δεδομένα. `ReconcileWindowPresetTest`
   + ενημερωμένα console tests.
 ### Added
+- **Συνημμένα + εσωτερικές σημειώσεις (polymorphic).** Two reusable, tenant-safe
+  tabs available on customers AND invoices (and any future model via a trait):
+  - **Συνημμένα** (`attachments` table, `App\Models\Attachment`,
+    `HasAttachments`) — upload files to a private disk with metadata + uploader
+    audit; authenticated streamed download (never publicly served); force-delete
+    removes the bytes, soft-delete keeps them. `AttachmentsRelationManager`.
+  - **Σημειώσεις (εσωτερικές)** (`notes` table, `App\Models\Note`,
+    `HasInternalNotes`) — operator-only notes that are **NEVER printed on the PDF
+    and NEVER sent to AADE** (distinct from the printed `invoices.notes`); pinned
+    notes float to the top; author + timestamp captured. `InternalNotesRelation
+    Manager`. The Καρτέλα surfaces both contacts and pinned/recent internal notes
+    read-only. **Deploy:** `php artisan migrate`.
+- **Επαφές πελάτη (Customer contacts).** A customer can now hold multiple named
+  contacts (λογιστήριο, τεχνικός, υπεύθυνος…) — each with ρόλος/τμήμα, τηλέφωνο,
+  email, σημειώσεις, and an optional «Κύρια» flag (single-primary enforced on the
+  model). Managed via a new «Επαφές» tab on the customer Edit page
+  (`ContactsRelationManager`, stamps `company_id` like the other tenant-owned
+  child managers) and surfaced read-only on the Καρτέλα (primary first). New
+  `customer_contacts` table + `App\Models\CustomerContact`. **Deploy:**
+  `php artisan migrate`.
 - **Καρτέλα: «Συχνά προϊόντα/υπηρεσίες» + πλουσιότερο header.** A new panel on the
   customer Καρτέλα lists what the customer buys most (frequency, total qty, net
   spend, last-bought date) — aggregated from their LIVE sales lines (credit notes

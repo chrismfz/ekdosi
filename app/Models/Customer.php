@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasAttachments;
+use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
 use App\Support\InvoiceScope;
@@ -17,7 +19,8 @@ use Illuminate\Support\Facades\DB;
 class Customer extends Model
 {
     use BelongsToCompany;
-    use HasFactory, HasTags, SoftDeletes, TracksActivity;
+    use HasAttachments;
+    use HasFactory, HasInternalNotes, HasTags, SoftDeletes, TracksActivity;
 
     /**
      * Audited identity/contact/terms columns. See TracksActivity.
@@ -134,6 +137,18 @@ class Customer extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Named people behind this customer (λογιστήριο, τεχνικός, υπεύθυνος…).
+     * Primary first, then by operator sort order, then name.
+     */
+    public function contacts(): HasMany
+    {
+        return $this->hasMany(CustomerContact::class)
+            ->orderByDesc('is_primary')
+            ->orderBy('sort_order')
+            ->orderBy('name');
     }
 
     /**

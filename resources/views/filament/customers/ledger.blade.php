@@ -54,6 +54,94 @@
         </div>
     </x-filament::section>
 
+    {{-- ============= Επαφές ============= --}}
+    @php($contacts = $cust->contacts)
+    @if ($contacts->isNotEmpty())
+        <x-filament::section>
+            <x-slot name="heading">Επαφές</x-slot>
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                @foreach ($contacts as $contact)
+                    <div class="rounded-lg border border-gray-200 dark:border-white/10 p-3 space-y-1">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-medium">{{ $contact->name }}</span>
+                            @if ($contact->is_primary)
+                                <x-filament::badge color="success" size="sm">Κύρια</x-filament::badge>
+                            @endif
+                        </div>
+                        @if ($contact->role)
+                            <div class="text-xs fi-color-gray">{{ $contact->role }}</div>
+                        @endif
+                        @if ($contact->phone)
+                            <div class="text-sm">{{ $contact->phone }}</div>
+                        @endif
+                        @if ($contact->email)
+                            <div class="text-sm">
+                                <a href="mailto:{{ $contact->email }}" class="fi-link">{{ $contact->email }}</a>
+                            </div>
+                        @endif
+                        @if (filled($contact->notes))
+                            <div class="text-xs fi-color-gray italic">{{ $contact->notes }}</div>
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+            <div class="mt-3 text-xs fi-color-gray">
+                Διαχείριση επαφών: από την «Επεξεργασία» του πελάτη → καρτέλα «Επαφές».
+            </div>
+        </x-filament::section>
+    @endif
+
+    {{-- ============= Σημειώσεις (εσωτερικές) ============= --}}
+    @php($internalNotes = $cust->internalNotes)
+    @if ($internalNotes->isNotEmpty())
+        @php($shownNotes = $internalNotes->take(8))
+        <x-filament::section>
+            <x-slot name="heading">Σημειώσεις (εσωτερικές)</x-slot>
+            <x-slot name="description">Δεν εκτυπώνονται και δεν αποστέλλονται στην ΑΑΔΕ.</x-slot>
+            <div class="space-y-2">
+                @foreach ($shownNotes as $note)
+                    <div class="flex items-start gap-2 text-sm">
+                        @if ($note->is_pinned)
+                            <x-filament::icon icon="heroicon-s-bookmark" class="h-4 w-4 mt-0.5 text-amber-500" />
+                        @endif
+                        <div class="space-y-0.5">
+                            <div class="whitespace-pre-line">{{ $note->body }}</div>
+                            <div class="text-xs fi-color-gray">
+                                {{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->created_at?->format('d/m/Y H:i') }}
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+            <div class="mt-3 text-xs fi-color-gray">
+                @if ($internalNotes->count() > $shownNotes->count())
+                    +{{ $internalNotes->count() - $shownNotes->count() }} ακόμη ·
+                @endif
+                Διαχείριση: από την «Επεξεργασία» του πελάτη → καρτέλα «Σημειώσεις (εσωτερικές)».
+            </div>
+        </x-filament::section>
+    @endif
+
+    {{-- ============= Συνημμένα ============= --}}
+    @php($attachments = $cust->attachments)
+    @if ($attachments->isNotEmpty())
+        <x-filament::section>
+            <x-slot name="heading">Συνημμένα ({{ $attachments->count() }})</x-slot>
+            <div class="space-y-1">
+                @foreach ($attachments->take(8) as $att)
+                    <div class="flex items-center gap-2 text-sm">
+                        <x-filament::icon icon="heroicon-o-paper-clip" class="h-4 w-4 fi-color-gray" />
+                        <span>{{ $att->title ?: $att->original_name }}</span>
+                        <span class="text-xs fi-color-gray">{{ $att->humanSize() }}</span>
+                    </div>
+                @endforeach
+            </div>
+            <div class="mt-3 text-xs fi-color-gray">
+                Λήψη/διαχείριση: από την «Επεξεργασία» του πελάτη → καρτέλα «Συνημμένα».
+            </div>
+        </x-filament::section>
+    @endif
+
     @if (! $this->hasActivity())
         <x-filament::section>
             <div class="text-center fi-color-gray py-6">
