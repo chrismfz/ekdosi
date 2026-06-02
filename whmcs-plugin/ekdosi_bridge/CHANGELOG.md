@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-06-02
+### Changed
+- **ONE unified invoice manager (`action=show`).** Folded the separate relid
+  manager into the invoice page: `show` now renders the ekdosi headline
+  (ΜΑΡΚ/ΤΠΥ + «Τιμολογήθηκε στη legacy» + «Αποστολή»), the live ekdosi status,
+  AND the full per-line relid table + «Μηδενισμός relid» — all on one page. No
+  more «Πλήρες Inspect» hop. The relid table body moved to a private
+  `relidSection()`; `relidCheck` is now a thin alias → `show` (old bookmarks
+  still work). Every relid entry point (invoice-list column, manage-invoice
+  «Έλεγχος relid», relidReset back-link) lands on the unified page.
+
 ## [0.25.0] — 2026-06-02
 ### Added
 - **ekdosi headline on the relid manager (`action=relidCheck`).** The relid

@@ -160,7 +160,7 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
         $relidItems = RelidInspector::items($invoiceId);
         $relidActive = RelidInspector::activeCount($relidItems);
         $relidRenewed = RelidInspector::alreadyRenewedCount($relidItems);
-        $relidLink = htmlspecialchars($baseLink.'&action=relidCheck&invoiceid='.$invoiceId);
+        $relidLink = htmlspecialchars($baseLink.'&action=show&invoiceid='.$invoiceId);
         if ($relidActive > 0) {
             $cls = $relidRenewed > 0 ? 'danger' : 'warning';
             $extra = $relidRenewed > 0 ? ' — '.$relidRenewed.' ήδη ανανεωμένες!' : '';
