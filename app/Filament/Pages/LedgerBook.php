@@ -114,8 +114,11 @@ class LedgerBook extends Page
             'xlsx' => response()->streamDownload(
                 function () use ($exporter, $result): void {
                     $path = $exporter->xlsxFile($result);
-                    readfile($path);
-                    @unlink($path);
+                    try {
+                        readfile($path);
+                    } finally {
+                        @unlink($path);
+                    }
                 },
                 $name,
                 ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],

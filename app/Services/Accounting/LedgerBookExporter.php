@@ -67,10 +67,12 @@ class LedgerBookExporter
 
         fputcsv($handle, $this->headers(), ';');
 
+        $safe = fn ($v): string => $this->csvSafe((string) $v);
+
         foreach ($this->records($result) as $rec) {
             fputcsv($handle, [
-                $rec['date'], $rec['book'], $rec['doc'], $rec['docType'], $rec['counterparty'],
-                $rec['afm'], $rec['categoryCode'], $rec['categoryLabel'], $rec['isCredit'],
+                $rec['date'], $rec['book'], $safe($rec['doc']), $safe($rec['docType']), $safe($rec['counterparty']),
+                $safe($rec['afm']), $safe($rec['categoryCode']), $safe($rec['categoryLabel']), $rec['isCredit'],
                 $fmt($rec['net']), $fmt($rec['vat']), $fmt($rec['gross']),
             ], ';');
         }
@@ -113,7 +115,12 @@ class LedgerBookExporter
      */
     public function xlsxFile(LedgerBookResult $result): string
     {
-        $path = tempnam(sys_get_temp_dir(), 'ledger').'.xlsx';
+        // tempnam() creates a real (empty) stub file; openspout writes to the
+        // ".xlsx"-suffixed sibling path. Drop the stub now so it isn't orphaned
+        // in /tmp (the caller only ever sees/deletes the .xlsx).
+        $base = tempnam(sys_get_temp_dir(), 'ledger');
+        $path = $base.'.xlsx';
+        @unlink($base);
 
         $writer = new XlsxWriter();
         $writer->openToFile($path);
@@ -146,6 +153,22 @@ class LedgerBookExporter
         $period = ($from && $to) ? $from.'_'.$to : now()->format('Y-m-d');
 
         return 'vivlio-esodon-exodon-'.$period.'.'.$ext;
+    }
+
+    /**
+     * Neutralise CSV/Excel formula injection: a free-text field (a counterparty
+     * name from operators/GSIS) that starts with = + - @ would execute as a
+     * formula when the CSV is opened in Excel. Prefix a single quote so Excel
+     * treats it as literal text. (Not needed for the .xlsx — openspout writes
+     * inline strings, which Excel never evaluates.)
+     */
+    private function csvSafe(string $v): string
+    {
+        if ($v !== '' && in_array($v[0], ['=', '+', '-', '@'], true)) {
+            return "'".$v;
+        }
+
+        return $v;
     }
 
     /**

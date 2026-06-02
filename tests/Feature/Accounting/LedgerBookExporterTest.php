@@ -84,6 +84,33 @@ class LedgerBookExporterTest extends TestCase
         $this->assertEquals(12.0, $data['totals']['vatBalance']); // 24 − 12
     }
 
+    public function test_csv_neutralises_formula_injection_in_free_text(): void
+    {
+        $rows = [
+            new LedgerRow(
+                book: 'income',
+                date: Carbon::parse('2026-01-10'),
+                docType: 'TPY',
+                doc: 'TPY1',
+                counterparty: '=HYPERLINK("http://evil")',  // would run as a formula in Excel
+                afm: '123456789',
+                categoryCode: 'category1_3',
+                categoryLabel: 'Παροχή Υπηρεσιών',
+                net: 10.0,
+                vat: 2.4,
+                gross: 12.4,
+                isCredit: false,
+                mydataState: 'VALID',
+                mark: null,
+                recordId: 1,
+            ),
+        ];
+        $csv = (new LedgerBookExporter)->csv(new LedgerBookResult($rows, 'x'));
+
+        $this->assertStringContainsString("'=HYPERLINK", $csv, 'leading = must be quote-prefixed');
+        $this->assertStringNotContainsString(';=HYPERLINK', $csv, 'must not appear unprefixed in a cell');
+    }
+
     public function test_xlsx_file_is_a_real_workbook(): void
     {
         $path = (new LedgerBookExporter)->xlsxFile($this->buildResult());
