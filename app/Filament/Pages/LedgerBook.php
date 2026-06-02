@@ -32,7 +32,7 @@ class LedgerBook extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-book-open';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static string|UnitEnum|null $navigationGroup = 'Λογιστικά';
 
     protected static ?int $navigationSort = 95;
 

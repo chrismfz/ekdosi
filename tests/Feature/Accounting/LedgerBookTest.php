@@ -199,9 +199,11 @@ class LedgerBookTest extends TestCase
         $this->assertSame('Πελάτης ΑΕ', $income->counterparty);
         $this->assertSame('123456789', $income->afm);
         $this->assertNotNull($income->categoryLabel, 'category1_3 should map to a Greek label');
+        $this->assertSame('73', $income->accountCode, 'category1_3 → ΕΓΛΣ 73');
 
         $this->assertSame('Προμηθευτής ΑΕ', $expense->counterparty);
         $this->assertSame('987654321', $expense->afm);
         $this->assertNotNull($expense->categoryLabel, 'category2_3 should map to a Greek label');
+        $this->assertSame('61', $expense->accountCode, 'category2_3 → ΕΓΛΣ 61');
     }
 }

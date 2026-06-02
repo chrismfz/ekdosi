@@ -5,6 +5,7 @@ namespace App\Services\Accounting;
 use App\Models\Company;
 use App\Models\Expense;
 use App\Models\Invoice;
+use App\Support\Accounting\ChartOfAccounts;
 use App\Support\InvoiceScope;
 use App\Support\MyData\Codes;
 use Carbon\CarbonInterface;
@@ -85,6 +86,7 @@ class LedgerBook
             $net = $sign * (float) $inv->net_total;
             $gross = $sign * (float) $inv->gross_total;
             $code = $inv->invoiceType?->mydata_income_class_category;
+            $account = ChartOfAccounts::accountFor($code);
 
             return new LedgerRow(
                 book: 'income',
@@ -102,6 +104,8 @@ class LedgerBook
                 mydataState: $inv->mydata_state,
                 mark: $inv->mydata_mark,
                 recordId: $inv->getKey(),
+                accountCode: $account['code'] ?? null,
+                accountName: $account['name'] ?? null,
             );
         })->all();
     }
@@ -124,6 +128,7 @@ class LedgerBook
             $isCredit = in_array($exp->invoice_type, $creditTypes, true);
             $sign = $isCredit ? -1 : 1;
             $code = $exp->classification_category;
+            $account = ChartOfAccounts::accountFor($code);
 
             $doc = trim(($exp->series ?? '').' '.($exp->aa ?? ''));
             if ($doc === '') {
@@ -146,6 +151,8 @@ class LedgerBook
                 mydataState: $exp->mydata_state,
                 mark: $exp->mydata_mark,
                 recordId: $exp->getKey(),
+                accountCode: $account['code'] ?? null,
+                accountName: $account['name'] ?? null,
             );
         })->all();
     }

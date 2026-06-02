@@ -91,6 +91,7 @@
                         <thead>
                             <tr class="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
                                 <th class="py-2 pr-4">Κατηγορία</th>
+                                <th class="py-2 pr-4">Λογαριασμός</th>
                                 <th class="py-2 pr-4 text-right">Πλήθος</th>
                                 <th class="py-2 pr-4 text-right">Καθαρό</th>
                                 <th class="py-2 pr-4 text-right">ΦΠΑ</th>
@@ -106,6 +107,7 @@
                                             <span class="text-xs text-gray-400">({{ $row['code'] }})</span>
                                         @endif
                                     </td>
+                                    <td class="py-2 pr-4">{{ $row['account'] ?? '—' }}</td>
                                     <td class="py-2 pr-4 text-right">{{ $row['count'] }}</td>
                                     <td class="py-2 pr-4 text-right">{{ $money($row['net']) }}</td>
                                     <td class="py-2 pr-4 text-right">{{ $money($row['vat']) }}</td>
@@ -133,6 +135,7 @@
                         <th class="py-2 pr-4">Αντισυμβαλλόμενος</th>
                         <th class="py-2 pr-4">ΑΦΜ</th>
                         <th class="py-2 pr-4">Κατηγορία</th>
+                        <th class="py-2 pr-4">Λογ/σμός</th>
                         <th class="py-2 pr-4 text-right">Καθαρό</th>
                         <th class="py-2 pr-4 text-right">ΦΠΑ</th>
                         <th class="py-2 text-right">Σύνολο</th>
@@ -160,13 +163,14 @@
                                     <span class="text-xs text-gray-400">({{ $row->categoryCode }})</span>
                                 @endif
                             </td>
+                            <td class="py-2 pr-4 whitespace-nowrap" @if ($row->accountName) title="{{ $row->accountName }}" @endif>{{ $row->accountCode ?? '—' }}</td>
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row->net) }}</td>
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row->vat) }}</td>
                             <td class="py-2 text-right whitespace-nowrap font-medium">{{ $money($row->gross) }}</td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="10" class="py-6 text-center text-gray-500 dark:text-gray-400">
+                            <td colspan="11" class="py-6 text-center text-gray-500 dark:text-gray-400">
                                 Καμία εγγραφή στην περίοδο.
                             </td>
                         </tr>

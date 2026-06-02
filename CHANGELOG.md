@@ -17,6 +17,18 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Λογαριασμοί (ΕΓΛΣ) + νέο group «Λογιστικά»** — a LIGHT, indicative Greek
+  chart-of-accounts layer (`App\Support\Accounting\ChartOfAccounts`): the ΕΓΛΣ
+  group accounts we reference + a default `category1_x`/`category2_x → account`
+  map (70/71/73 income, 20/24/60/61/62/64/66/14 expense, 54 ΦΠΑ). The Βιβλίο
+  Εσόδων-Εξόδων now shows a «Λογαριασμός» column (table + per-category subtotals
+  + CSV/JSON/xlsx exports) derived from the myDATA category we already store. A
+  read-only «Λογαριασμοί» page documents the chart + the mapping (clearly
+  flagged INDICATIVE — the accountant's software does the definitive mapping;
+  a per-tenant editable chart is a deferred follow-up). The book + λογαριασμοί
+  now live in a dedicated «Λογιστικά» navigation group. Admin-gated on
+  `View:Accounts` (run `shield:generate` + `shield:sync-super-admin` after
+  deploy). `ChartOfAccountsTest` covers the mapping.
 - **Βιβλίο Εσόδων-Εξόδων (απλογραφικά / Β' κατηγορίας)** — new read-only page
   «Βιβλίο Εσόδων-Εξόδων»: a chronological book of the tenant's invoices (έσοδα)
   + expenses (έξοδα), classified by the myDATA category we already store

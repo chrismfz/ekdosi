@@ -83,7 +83,7 @@ class LedgerBookResult
      * ['code', 'label', 'net', 'vat', 'gross', 'count']. Unclassified rows fold
      * into a single null-code bucket so nothing is silently dropped.
      *
-     * @return list<array{code:?string,label:?string,net:float,vat:float,gross:float,count:int}>
+     * @return list<array{code:?string,label:?string,account:?string,net:float,vat:float,gross:float,count:int}>
      */
     public function categorySubtotals(string $book): array
     {
@@ -97,6 +97,7 @@ class LedgerBookResult
                 $buckets[$key] = [
                     'code' => $row->categoryCode,
                     'label' => $row->categoryLabel,
+                    'account' => $row->accountCode,
                     'net' => 0.0,
                     'vat' => 0.0,
                     'gross' => 0.0,

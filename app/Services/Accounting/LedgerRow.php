@@ -37,5 +37,7 @@ class LedgerRow
         public readonly ?string $mydataState,    // null | VALID | CANCELLED
         public readonly ?string $mark,
         public readonly ?int $recordId = null,
+        public readonly ?string $accountCode = null,   // ΕΓΛΣ default account (indicative)
+        public readonly ?string $accountName = null,
     ) {}
 }
