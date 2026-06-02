@@ -4,7 +4,6 @@ namespace App\Services\Whmcs;
 
 use App\Models\Company;
 use App\Models\Customer;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Match a WHMCS client (or pending-invoice row carrying client fields)
@@ -15,25 +14,25 @@ use Illuminate\Support\Facades\DB;
  *   - The Filament "Link to WHMCS" picker, to suggest candidates
  *     when the operator hasn't picked one manually.
  *
- * Matching strategy, in order of confidence:
+ * Matching strategy — ΑΦΜ-ONLY (deterministic):
  *
  *   1. Direct customers.whmcs_client_id link — operator already
  *      decided. Trust it; no further matching needed.
  *   2. AFM exact match (after digit-only normalisation; legacy
  *      data has WHMCS storing "EL123456789" while ekdosi stores
- *      "123456789"). Strong signal; tax ID uniqueness is
- *      legally enforced.
- *   3. Email exact match (case-insensitive). Reasonable for B2C;
- *      B2B accounts sometimes share an email across roles.
- *   4. Company name exact match (case-insensitive). Last resort,
- *      operator should confirm.
+ *      "123456789"). The ONLY legal-grade identity key; tax-ID
+ *      uniqueness is enforced.
+ *   …otherwise UNMATCHED. Email and name matching were REMOVED —
+ *   they produced false matches (shared/role emails, resellers, common
+ *   names) that pre-filled the WRONG ekdosi customer in the create-draft
+ *   modal (a real risk of invoicing the wrong entity). An unmatched B2B
+ *   row is handled by the operator («Δημ. πελάτη (ΑΑΔΕ)» / manual link);
+ *   a B2C row (no ΑΦΜ) is a receipt and needs no customer link.
  *
  * Returns a MatchResult value object so callers can render the
  * confidence + the match reason in the UI. Crucially: the matcher
  * NEVER writes to customers.whmcs_client_id automatically. Linking
- * is an operator decision — auto-linking via name match would create
- * silent cross-customer mistakes when two businesses share a common
- * name ("Acme Ltd" in Greece vs "Acme Ltd" in Cyprus).
+ * is an operator decision.
  *
  * NOT HANDLED HERE (Stage B / PR #29 scope): the legacy
  * `mod_timologia` plugin (legacy/whmcs/timologia/) lets a WHMCS
@@ -98,112 +97,14 @@ class WhmcsCustomerMatcher
             }
         }
 
-        // 3. Email exact match (case-insensitive). MariaDB's default
-        // utf8mb4_unicode_ci collation case-folds ASCII reliably, so
-        // plain `where('email', ...)` IS case-insensitive in
-        // production. SQLite (the test env) is case-sensitive by
-        // default, so we layer a PHP-side fallback that uses
-        // mb_strtolower (mbstring-aware, unlike SQL LOWER()).
-        //
-        // Previously this used whereRaw('LOWER(email) = ?', ...) —
-        // which works for ASCII on both engines but diverges for
-        // Greek (verified: LOWER('ΑΚΜΕ') is 'ΑΚΜΕ' under SQLite's
-        // built-in, 'ακμε' under MariaDB utf8mb4_unicode_ci). Tests
-        // were passing for "acme@example.com" but a real Greek
-        // operator email would miss in test env yet match in prod —
-        // exactly the divergence test isolation is supposed to
-        // prevent.
-        $email = trim((string) ($whmcsClient['email'] ?? ''));
-        if ($email !== '') {
-            $byEmail = $this->findCustomerByCaseInsensitiveString(
-                $tenant, 'email', $email,
-            );
-            if ($byEmail !== null) {
-                return new MatchResult($byEmail, 'email', $whmcsClientId);
-            }
-        }
-
-        // 4. Company name fallback. Per CLAUDE.md the legacy form
-        // looked at the WHMCS "companyname" field (corporate) and
-        // fell back to firstname+lastname (individual). Both are
-        // realistic depending on tenant — B2B mostly companyname,
-        // B2C mostly the name pair.
-        $candidateName = trim((string) ($whmcsClient['companyname'] ?? ''));
-        if ($candidateName === '') {
-            $first = trim((string) ($whmcsClient['firstname'] ?? ''));
-            $last = trim((string) ($whmcsClient['lastname'] ?? ''));
-            $candidateName = trim($first.' '.$last);
-        }
-
-        if ($candidateName !== '') {
-            // Same MariaDB-collation-aware comparison as email above.
-            // Critical here for Greek customer names ("Ακμε ΑΕ" vs
-            // "ΑΚΜΕ ΑΕ") — SQL LOWER() doesn't fold non-ASCII bytes
-            // in SQLite, mb_strtolower does in PHP.
-            $byName = $this->findCustomerByCaseInsensitiveString(
-                $tenant, 'name', $candidateName,
-            );
-            if ($byName !== null) {
-                return new MatchResult($byName, 'name', $whmcsClientId);
-            }
-        }
-
+        // ΑΦΜ-only matching (deliberate). Email and name matching were REMOVED:
+        // they produced FALSE matches (shared/role emails, resellers, common
+        // names) that pre-filled the WRONG ekdosi customer in the create-draft
+        // modal — a real risk of issuing an invoice to the wrong entity. A B2B
+        // invoice with no ΑΦΜ-match is left UNMATCHED on purpose: the operator
+        // links it or clicks «Δημ. πελάτη (ΑΑΔΕ)»; a B2C invoice (no ΑΦΜ) is a
+        // receipt and needs no customer link. ΑΦΜ is the only legal-grade key.
         return new MatchResult(null, 'unmatched', $whmcsClientId);
-    }
-
-    /**
-     * Find a customer for the given tenant where `$column` matches
-     * `$needle` case-insensitively, working correctly across
-     * MariaDB (default utf8mb4_unicode_ci collation does case-folding
-     * including Greek) AND SQLite (default case-sensitive — we
-     * lowercase both sides via mbstring as a fallback).
-     *
-     * Order:
-     *   1. Native `where()` — case-insensitive under MariaDB; fast
-     *      ASCII path under SQLite.
-     *   2. SQLite-only fallback: load (id, target column) — NOT the
-     *      whole row — PHP-side compare with mb_strtolower, and
-     *      re-fetch the full row only on match. Worst-case memory
-     *      pressure is N pairs of (int, string) for tenant size N,
-     *      not N full Customer models (10× drop in memory pressure
-     *      per missed lookup). Cost is one scan per missed lookup
-     *      per tenant; bounded by tenant size; only paid in test env
-     *      OR if someone misconfigures DB_CONNECTION to sqlite in
-     *      a non-test context.
-     */
-    private function findCustomerByCaseInsensitiveString(
-        Company $tenant,
-        string $column,
-        string $needle,
-    ): ?Customer {
-        $direct = Customer::query()
-            ->where('company_id', $tenant->getKey())
-            ->where($column, $needle)
-            ->first();
-        if ($direct !== null) {
-            return $direct;
-        }
-
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            return null;  // MariaDB's CI collation already handled it
-        }
-
-        // Slim scan: pull only (id, $column) into memory, not the
-        // whole row. For a tenant with 10k customers, this is ~200KB
-        // of (int, short-string) pairs instead of ~2MB of fully-
-        // hydrated Customer models. Match in PHP via mb_strtolower
-        // (mbstring-aware, unlike SQLite's built-in LOWER which
-        // ignores bytes >127). Re-fetch the full row on match so
-        // callers downstream see a fully-hydrated Customer.
-        $lower = mb_strtolower($needle);
-        $matchedId = Customer::query()
-            ->where('company_id', $tenant->getKey())
-            ->select('id', $column)
-            ->get()
-            ->first(fn ($row) => mb_strtolower((string) $row->{$column}) === $lower)
-            ?->id;
-
-        return $matchedId ? Customer::find($matchedId) : null;
     }
 
     /**
