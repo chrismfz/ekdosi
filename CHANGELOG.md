@@ -17,6 +17,43 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Λογαριασμοί (ΕΓΛΣ) + νέο group «Λογιστικά»** — a LIGHT, indicative Greek
+  chart-of-accounts layer (`App\Support\Accounting\ChartOfAccounts`): the ΕΓΛΣ
+  group accounts we reference + a default `category1_x`/`category2_x → account`
+  map (70/71/73 income, 20/24/60/61/62/64/66/14 expense, 54 ΦΠΑ). The Βιβλίο
+  Εσόδων-Εξόδων now shows a «Λογαριασμός» column (table + per-category subtotals
+  + CSV/JSON/xlsx exports) derived from the myDATA category we already store. A
+  read-only «Λογαριασμοί» page documents the chart + the mapping (clearly
+  flagged INDICATIVE — the accountant's software does the definitive mapping;
+  a per-tenant editable chart is a deferred follow-up). The book + λογαριασμοί
+  now live in a dedicated «Λογιστικά» navigation group. Admin-gated on
+  `View:Accounts` (run `shield:generate` + `shield:sync-super-admin` after
+  deploy). `ChartOfAccountsTest` covers the mapping.
+- **Βιβλίο Εσόδων-Εξόδων (απλογραφικά / Β' κατηγορίας)** — new read-only page
+  «Βιβλίο Εσόδων-Εξόδων»: a chronological book of the tenant's invoices (έσοδα)
+  + expenses (έξοδα), classified by the myDATA category we already store
+  (`category1_x`/`category2_x` → Greek label via `Codes::e3CategoryLabel`),
+  with period/book/category filters, per-category subtotals and the period
+  totals (έσοδα, έξοδα, ΦΠΑ εκροών−εισροών). Pure read-model
+  (`App\Services\Accounting\LedgerBook` → `LedgerBookResult`/`LedgerRow`) over
+  the existing tables — no new persistence, no money/myDATA path change. Live
+  scoping follows `InvoiceScope::live()` (sales) + "not AADE-cancelled"
+  (expenses); credit notes are listed with NEGATIVE amounts so period sums are
+  net. Never-issued drafts (`local_status='draft'` with no `legacy_id`) are
+  excluded as not-yet-book-entries; legacy-imported drafts (`legacy_id` set, =
+  real historical invoices) are kept. Admin-gated on `View:LedgerBook` (run `shield:generate` +
+  `shield:sync-super-admin` after deploy). Full double-entry (γενική λογιστική)
+  stays out — exports feed the accountant's software. `LedgerBookTest` covers
+  signed credit notes / scoping / filters / totals.
+- **Βιβλίο Εσόδων-Εξόδων — εξαγωγές (CSV / Excel / JSON)**: header «Εξαγωγή»
+  group on the page renders the current (filtered) period in three formats via
+  `App\Services\Accounting\LedgerBookExporter` — CSV (UTF-8 BOM + ';' + comma
+  decimal, el-GR-Excel-friendly) and JSON are dependency-free; the **.xlsx**
+  uses the already-present `openspout/openspout` (bold header, raw numeric
+  amounts so Excel sums/sorts) — no PhpSpreadsheet/maatwebsite needed. All three
+  emit the same table + a totals trailer (έσοδα/έξοδα/ΦΠΑ balance).
+  `LedgerBookExporterTest` covers CSV/JSON shape + that the xlsx is a real
+  workbook. (The accountant's Union import format — Phase C — still TBD.)
 - **myDATA — «Άντληση/έλεγχος από ΑΑΔΕ» on ΜΑΡΚ detail**: for a local invoice
   imported with a MARK but no AADE QR (Epsilon/legacy), a live pull by MARK
   (`RequestTransmittedDocs`) now stamps the QR (`qrCodeUrl`) onto
