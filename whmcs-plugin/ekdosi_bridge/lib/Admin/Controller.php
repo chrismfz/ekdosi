@@ -55,6 +55,14 @@ class Controller
     </a>
 </p>
 <hr>
+<p class="text-muted">Ή επιθεώρησε ένα συγκεκριμένο τιμολόγιο (και εκτός λίστας):</p>
+<form action="{$link}&action=show" method="POST" class="form-inline" style="margin-bottom:8px">
+    <div class="input-group" style="max-width:340px">
+        <input class="form-control input-sm" name="invoiceid" placeholder="Invoice # (π.χ. 12345)" type="text" required>
+        <span class="input-group-btn"><button class="btn btn-sm btn-default" type="submit"><i class="fa fa-search"></i> Επιθεώρηση</button></span>
+    </div>
+</form>
+<hr>
 <h3>Παραστατικά σε τρίτους (timologia v2)</h3>
 <p>Own routing tables: {$tpStatus}</p>
 <p class="text-muted">{$legacyNote}</p>
