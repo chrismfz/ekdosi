@@ -122,6 +122,25 @@ class TagSystemTest extends TestCase
         $this->assertEquals(3, $tabs['tag_'.$tag->id]->getBadge());
     }
 
+    public function test_tag_tab_count_excludes_soft_deleted_and_hides_when_all_trashed(): void
+    {
+        $tag = $this->tag('Χονδρική', pinned: true);
+        $a = Customer::create(['company_id' => $this->tenant->id, 'name' => 'A']);
+        $b = Customer::create(['company_id' => $this->tenant->id, 'name' => 'B']);
+        $a->tags()->attach($tag);
+        $b->tags()->attach($tag);
+
+        $b->delete(); // soft delete → count drops to 1, tab still shown
+
+        $tabs = TagControls::tagTabs(Customer::class);
+        $this->assertArrayHasKey('tag_'.$tag->id, $tabs);
+        $this->assertEquals(1, $tabs['tag_'.$tag->id]->getBadge());
+
+        $a->delete(); // all live records gone → tab disappears
+
+        $this->assertArrayNotHasKey('tag_'.$tag->id, TagControls::tagTabs(Customer::class));
+    }
+
     public function test_tag_filter_predicate_narrows_to_tagged_records(): void
     {
         $tag = $this->tag('VIP');

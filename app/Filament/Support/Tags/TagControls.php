@@ -14,6 +14,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -106,27 +107,45 @@ class TagControls
      */
     public static function tagTabs(string $modelClass): array
     {
-        $usedTagIds = DB::table('taggables')
-            ->where('taggable_type', $modelClass)
-            ->distinct()
-            ->pluck('tag_id');
-
-        $tags = Tag::query()
+        // The tenant's pinned tags (ordered). We tab only the ones actually
+        // used on this model — determined by the single grouped count below.
+        $pinnedTags = Tag::query()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->where('is_pinned', true)
-            ->whereIn('id', $usedTagIds)
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get();
 
+        if ($pinnedTags->isEmpty()) {
+            return [];
+        }
+
+        $model = new $modelClass;
+        $table = $model->getTable();
+        $usesSoftDeletes = in_array(SoftDeletes::class, class_uses_recursive($modelClass), true);
+
+        // ONE grouped query: non-trashed records of this model type carrying
+        // one of the tenant's pinned tags, counted per tag. Joining taggables→
+        // the model table (and scoping to the tenant pinned-tag ids) keeps it
+        // tenant-safe and avoids the per-tag N+1 + the cross-tenant id pull.
+        $counts = DB::table('taggables')
+            ->join($table, $table.'.id', '=', 'taggables.taggable_id')
+            ->where('taggables.taggable_type', $modelClass)
+            ->whereIn('taggables.tag_id', $pinnedTags->pluck('id'))
+            ->when($usesSoftDeletes, fn ($q) => $q->whereNull($table.'.deleted_at'))
+            ->groupBy('taggables.tag_id')
+            ->selectRaw('taggables.tag_id as tag_id, COUNT(*) as cnt')
+            ->pluck('cnt', 'tag_id');
+
         $tabs = [];
 
-        foreach ($tags as $tag) {
-            // Count badge — non-trashed records carrying this tag. Cheap:
-            // pinned tags are few, so this is a handful of COUNT(*) queries.
-            $count = $modelClass::query()
-                ->whereHas('tags', fn (Builder $q) => $q->whereKey($tag->id))
-                ->count();
+        foreach ($pinnedTags as $tag) {
+            $count = (int) ($counts[$tag->id] ?? 0);
+            // Hide a pinned tag that has no (live) records on this model — a
+            // product-only tag shouldn't show as an empty tab on Customers.
+            if ($count === 0) {
+                continue;
+            }
 
             $tabs['tag_'.$tag->id] = Tab::make($tag->name)
                 ->badge($count)
@@ -153,6 +172,7 @@ class TagControls
                     ->label('Ετικέτες')
                     ->multiple()
                     ->required()
+                    ->searchable()
                     ->options(fn (): array => static::tagOptions())
                     ->createOptionForm(static::createForm())
                     ->createOptionUsing(fn (array $data): int => static::createTag($data)),

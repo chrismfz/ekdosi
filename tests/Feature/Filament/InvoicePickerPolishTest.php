@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
+use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Schemas\InvoiceForm;
 use App\Filament\Support\PickerOptions;
 use App\Models\Company;
@@ -206,6 +207,35 @@ class InvoicePickerPolishTest extends TestCase
             ->assertSet('data.company_name', 'Καρτέλα Πελάτης')
             ->assertSet('data.vat_no', '123456789')
             ->assertSet('data.city', 'Αθήνα');
+    }
+
+    public function test_edit_invoice_resolves_label_for_hidden_type_draft(): void
+    {
+        // H1 regression: a draft whose invoice type is hidden from the menu
+        // must still resolve its label (getOptionLabelUsing) — not render blank.
+        $type = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'HID', 'name' => 'Κρυφός',
+            'invcount' => 1, 'show_on_menu' => false,
+        ]);
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'C']);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'HID1', 'code' => 1,
+            'invoice_type_id' => $type->id,
+            'customer_id' => $customer->id,
+            'issued_at' => now(),
+            'net_total' => 10, 'gross_total' => 12.4,
+            'header_discount_percent' => 0,
+            'local_status' => 'draft',
+            'mydata_sent' => false,
+        ]);
+
+        Livewire::test(EditInvoice::class, ['record' => $invoice->getKey()])
+            ->assertOk()
+            ->assertSet('data.invoice_type_id', $type->id);
+
+        // The label resolver returns the code — name even off-menu.
+        $this->assertArrayNotHasKey($type->id, PickerOptions::invoiceTypeOptions());
     }
 
     public function test_picking_invoice_type_prefills_its_dimensions(): void

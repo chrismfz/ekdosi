@@ -81,6 +81,17 @@ class InvoiceForm
                         ->label('Είδος Παραστατικού')
                         ->required()
                         ->options(fn () => PickerOptions::invoiceTypeOptions())
+                        // Resolve the selected label WITHOUT the show_on_menu
+                        // filter — so editing a draft whose type is hidden from
+                        // the menu still renders its label (and survives save)
+                        // instead of going blank. Mirrors customer/product.
+                        ->getOptionLabelUsing(function ($value) {
+                            $type = InvoiceType::query()
+                                ->where('company_id', Filament::getTenant()?->getKey())
+                                ->find($value);
+
+                            return $type ? $type->code.' — '.$type->name : null;
+                        })
                         ->searchable()
                         ->preload()
                         ->live()
