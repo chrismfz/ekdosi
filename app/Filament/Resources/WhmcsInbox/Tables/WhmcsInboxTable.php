@@ -9,6 +9,9 @@ use App\Models\PendingWhmcsInvoice;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
@@ -20,6 +23,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Throwable;
 
 /**
@@ -293,14 +297,114 @@ class WhmcsInboxTable
                 self::refreshLegacyInvoicedAction(),
             ])
             ->recordActions([
+                // Primary, inline — the one thing you do most.
                 self::createDraftAction(),
                 self::openInvoiceAction(),
-                self::splitAction(),
-                self::reResolveThirdPartyAction(),
-                self::rejectAction(),
-                self::holdAction(),
-                self::reStageAction(),
+                // Everything else collapses into a «…» dropdown so the row
+                // doesn't sprawl across the screen.
+                ActionGroup::make([
+                    self::splitAction(),
+                    self::reResolveThirdPartyAction(),
+                    self::holdAction(),
+                    self::reStageAction(),
+                    self::rejectAction(),
+                    self::deleteRowAction(),
+                ])
+                    ->label('Ενέργειες')
+                    ->icon('heroicon-m-ellipsis-horizontal')
+                    ->button()
+                    ->color('gray'),
+            ])
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    self::deleteSelectedAction(),
+                ]),
             ]);
+    }
+
+    /**
+     * Which rows are safe to HARD-delete: only the disposable ones (test /
+     * internal / accidental pushes). A row is deletable when it's still in a
+     * pre-draft state (pending_review / held / rejected) AND has produced no
+     * ekdosi invoice. Filed rows (legal WHMCS↔MARK link), drafted/split rows
+     * (would orphan their draft invoices), and anything carrying a MARK are
+     * NEVER deletable here — reject those instead.
+     */
+    private static function isDeletable(PendingWhmcsInvoice $r): bool
+    {
+        return $r->invoice_id === null
+            && $r->mydata_mark === null
+            && in_array($r->status, [
+                PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+                PendingWhmcsInvoice::STATUS_HELD,
+                PendingWhmcsInvoice::STATUS_REJECTED,
+            ], true);
+    }
+
+    /**
+     * Per-row hard delete — removes the staged row entirely (frees the
+     * (company_id, whmcs_invoice_id) slot so a re-push re-creates it). The clean
+     * way to clear test / internal / mistaken pushes, and to reset while
+     * validating the bridge→inbox flow. Gated by the Delete policy (admin-level,
+     * not operators) AND isDeletable().
+     */
+    private static function deleteRowAction(): Action
+    {
+        return Action::make('delete_row')
+            ->label('Διαγραφή')
+            ->icon('heroicon-o-trash')
+            ->color('danger')
+            ->authorize('delete')
+            ->visible(fn (PendingWhmcsInvoice $r) => self::isDeletable($r))
+            ->requiresConfirmation()
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Οριστική διαγραφή WHMCS #'.$r->whmcs_invoice_id.';')
+            ->modalDescription('Διαγράφεται οριστικά η εγγραφή από το inbox (όχι από το WHMCS). Χρήσιμο για δοκιμές / εσωτερικά / λάθος τιμολόγια. Αν ξανασταλεί από το WHMCS, θα ξαναεμφανιστεί.')
+            ->modalSubmitActionLabel('Διαγραφή')
+            ->action(function (PendingWhmcsInvoice $r) {
+                if (! self::isDeletable($r)) {
+                    Notification::make()->title('Δεν διαγράφεται (έχει παραστατικό ή MARK)')->danger()->send();
+
+                    return;
+                }
+                $r->delete();
+                Notification::make()->title('Διαγράφηκε')->success()->send();
+            });
+    }
+
+    /**
+     * Bulk hard delete — checkboxes → «Διαγραφή επιλεγμένων». Skips any selected
+     * row that isn't disposable (filed / drafted / split / has a MARK) and
+     * reports the count, so a mixed selection can't nuke a legal record.
+     */
+    private static function deleteSelectedAction(): BulkAction
+    {
+        return BulkAction::make('delete_selected')
+            ->label('Διαγραφή επιλεγμένων')
+            ->icon('heroicon-o-trash')
+            ->color('danger')
+            ->authorize('deleteAny')
+            ->requiresConfirmation()
+            ->modalHeading('Διαγραφή επιλεγμένων εγγραφών inbox')
+            ->modalDescription('Διαγράφονται μόνο οι αναλώσιμες (προς έλεγχο / σε αναμονή / απορριφθείσες, χωρίς παραστατικό ή MARK). Όσες έχουν εκδοθεί/φιλιαριστεί παραλείπονται.')
+            ->modalSubmitActionLabel('Διαγραφή')
+            ->action(function (Collection $records): void {
+                $deleted = 0;
+                $skipped = 0;
+                foreach ($records as $record) {
+                    if (self::isDeletable($record)) {
+                        $record->delete();
+                        $deleted++;
+                    } else {
+                        $skipped++;
+                    }
+                }
+
+                Notification::make()
+                    ->title("Διαγράφηκαν: {$deleted}".($skipped > 0 ? " · Παραλείφθηκαν: {$skipped}" : ''))
+                    ->{$skipped > 0 ? 'warning' : 'success'}()
+                    ->send();
+            })
+            ->deselectRecordsAfterCompletion();
     }
 
     /**
