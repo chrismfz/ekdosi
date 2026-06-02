@@ -40,12 +40,10 @@
  * batch so the ekdosi inbox can warn "already invoiced in the old app".
  */
 
-use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\Admin\AdminDispatcher;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Controller;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Gate;
-use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
-use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
+use WHMCS\Module\Addon\EkdosiBridge\SchemaGuard;
 
 if (! defined('WHMCS')) {
     exit('This file cannot be accessed directly');
@@ -55,6 +53,7 @@ require_once __DIR__.'/lib/Admin/AdminDispatcher.php';
 require_once __DIR__.'/lib/Admin/Controller.php';
 require_once __DIR__.'/lib/EkdosiClient.php';
 require_once __DIR__.'/lib/InvoiceMarkStore.php';
+require_once __DIR__.'/lib/SchemaGuard.php';
 require_once __DIR__.'/lib/ThirdPartyStore.php';
 require_once __DIR__.'/lib/RelidInspector.php';
 require_once __DIR__.'/lib/Client/Gate.php';
@@ -65,7 +64,7 @@ function ekdosi_bridge_config(): array
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.22.0',
+        'version' => '0.23.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [
@@ -104,76 +103,13 @@ function ekdosi_bridge_config(): array
 
 function ekdosi_bridge_activate(): array
 {
-    $notes = [];
-
-    // 1. Keep the AADE MARK in our OWN table (mod_ekdosi_invoice_marks) and
-    //    RESTORE tblinvoices.invoiced to the SMALLINT the legacy ekdosi app
-    //    expects. EARLIER versions of this plugin widened `invoiced` to BIGINT
-    //    to stuff the 15-digit MARK in — that broke the legacy app (it reads
-    //    `invoiced` as a SMALLINT {0,1} "invoiced/processed" flag). We now NEVER
-    //    write `invoiced`; we only READ it (to show "Invoiced in legacy app").
-    //
-    //    This step is idempotent + privilege-safe:
-    //      - ensure mod_ekdosi_invoice_marks exists;
-    //      - if `invoiced` is BIGINT (we widened it): move every MARK out into
-    //        our table, reset those rows to 1 (legacy "filed" flag, SMALLINT-
-    //        safe), NULL→0, then narrow the column back to SMALLINT;
-    //      - if it's already SMALLINT: leave it completely alone.
-    try {
-        InvoiceMarkStore::ensureTable();
-        $notes[] = 'Mark table (mod_ekdosi_invoice_marks) ready.';
-
-        $col = Capsule::selectOne(
-            "SELECT DATA_TYPE FROM information_schema.COLUMNS
-             WHERE TABLE_SCHEMA = DATABASE()
-               AND TABLE_NAME = 'tblinvoices'
-               AND COLUMN_NAME = 'invoiced'"
-        );
-        $type = $col ? strtolower((string) $col->DATA_TYPE) : '';
-
-        if ($type === 'bigint') {
-            $moved = InvoiceMarkStore::migrateFromInvoicedColumn();
-            // Reset the moved rows to the legacy "filed" flag so they fit
-            // SMALLINT and keep the legacy "this was invoiced" meaning.
-            Capsule::table('tblinvoices')->where('invoiced', '>', 65535)->update(['invoiced' => 1]);
-            Capsule::statement('UPDATE tblinvoices SET invoiced = 0 WHERE invoiced IS NULL');
-            Capsule::statement('ALTER TABLE tblinvoices MODIFY invoiced SMALLINT(5) NOT NULL DEFAULT 0');
-            $notes[] = "Restored tblinvoices.invoiced to SMALLINT (moved {$moved} MARK(s) into "
-                .'mod_ekdosi_invoice_marks; the legacy app reads `invoiced` again).';
-        } elseif ($type === '') {
-            $notes[] = 'tblinvoices.invoiced not found — nothing to restore.';
-        } else {
-            $notes[] = "tblinvoices.invoiced is {$type} (not widened by us) — left untouched.";
-        }
-    } catch (Throwable $e) {
-        // Don't fail activation — the operator may lack ALTER privileges
-        // (managed hosting). Surface the exact manual SQL so a DBA can run it.
-        $notes[] = 'WARNING: could not auto-restore tblinvoices.invoiced ('
-            .$e->getMessage().'). If it is BIGINT, run manually: '
-            // Self-contained: include the CREATE in case ensureTable() itself
-            // failed (no CREATE privilege), so the INSERT below has a target.
-            .'CREATE TABLE IF NOT EXISTS mod_ekdosi_invoice_marks ('
-            .'invoiceid BIGINT UNSIGNED NOT NULL PRIMARY KEY, mark VARCHAR(40) NOT NULL, '
-            .'invcode VARCHAR(60) NULL DEFAULT NULL, updated_at DATETIME NULL DEFAULT NULL) '
-            .'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4; '
-            .'INSERT INTO mod_ekdosi_invoice_marks (invoiceid, mark, updated_at) '
-            .'SELECT id, invoiced, NOW() FROM tblinvoices WHERE invoiced > 65535 '
-            .'ON DUPLICATE KEY UPDATE mark = VALUES(mark); '
-            .'UPDATE tblinvoices SET invoiced = 1 WHERE invoiced > 65535; '
-            .'UPDATE tblinvoices SET invoiced = 0 WHERE invoiced IS NULL; '
-            .'ALTER TABLE tblinvoices MODIFY invoiced SMALLINT(5) NOT NULL DEFAULT 0;';
-    }
-
-    // 3. Create the bridge's own third-party-invoicing tables
-    //    (mod_ekdosi_contacts / mod_ekdosi_routing). Idempotent; seeded later
-    //    by the admin "Sync from legacy timologia" action (T-1b-2).
-    try {
-        ThirdPartyStore::ensureTables();
-        $notes[] = 'Third-party tables (mod_ekdosi_contacts / mod_ekdosi_routing) ready.';
-    } catch (Throwable $e) {
-        $notes[] = 'WARNING: could not create mod_ekdosi_* tables ('.$e->getMessage()
-            .'). Use the "Sync from legacy timologia" admin action once DB privileges allow.';
-    }
+    // All the schema work (create our tables, restore tblinvoices.invoiced to
+    // SMALLINT) lives in SchemaGuard so it can ALSO self-heal on every admin
+    // page load (see ekdosi_bridge_output) — meaning a future schema change
+    // needs only a file upload, NOT a deactivate/reactivate (which WHMCS punishes
+    // by wiping the bridge's saved settings). Activation just runs the same
+    // idempotent steps eagerly and reports their notes.
+    $notes = SchemaGuard::ensure();
 
     return [
         'status' => 'success',
@@ -193,6 +129,12 @@ function ekdosi_bridge_deactivate(): array
  */
 function ekdosi_bridge_output($vars): void
 {
+    // Self-heal the schema on every admin page load (idempotent + cheap +
+    // privilege-safe). This is what lets a schema change ship as a plain file
+    // upload — no deactivate/reactivate, so WHMCS never wipes the saved bridge
+    // settings.
+    SchemaGuard::ensureSilently();
+
     $action = isset($_REQUEST['action']) ? (string) $_REQUEST['action'] : '';
     $dispatcher = new AdminDispatcher;
     echo $dispatcher->dispatch($action, $vars);

@@ -10,6 +10,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-06-02
+### Added
+- **Self-healing schema guard (`lib/SchemaGuard.php`).** The schema steps that
+  used to live only in `_activate()` (create `mod_ekdosi_*` tables, restore
+  `tblinvoices.invoiced` to SMALLINT) now ALSO run on every admin page load via
+  `SchemaGuard::ensureSilently()`. Stateless — no stored version to lose — and
+  cheap (CREATE-IF-NOT-EXISTS + one metadata lookup; the BIGINT→SMALLINT
+  narrowing only fires if we ever widened it). Privilege-safe (a missing grant
+  degrades to a note, never a fatal). `_activate()` now just calls
+  `SchemaGuard::ensure()` and reports its notes.
+- **Why it matters:** a future schema change ships as a plain file upload — NO
+  deactivate/reactivate. That ends the cycle where WHMCS wiped the saved bridge
+  settings (URL / slug / secret) on every deactivate. Activate stays available
+  but is no longer required to pick up schema.
+
 ## [0.22.0] — 2026-06-02
 ### Added
 - **«Μετάβαση σε τιμολόγιο #…» jump-box on the invoice list** (`action=invoices`):
