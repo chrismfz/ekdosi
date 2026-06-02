@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\Expenses\Tables;
 
 use App\Enums\ExpenseSource;
+use App\Filament\Support\Tags\TagControls;
+use Filament\Actions\BulkActionGroup;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -88,8 +90,12 @@ class ExpensesTable
                         ? '—'
                         : (\App\Support\MyData\Codes::selfDeclaredVatCategoryLabel($state) ?? $state))
                     ->toggleable(),
+
+                TagControls::column(),
             ])
             ->filters([
+                TagControls::filter(),
+
                 SelectFilter::make('source')
                     ->label('Προέλευση')
                     ->options(ExpenseSource::options()),
@@ -113,6 +119,13 @@ class ExpensesTable
             ])
             ->recordActions([
                 ViewAction::make(),
+            ])
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    // No create/edit form for expenses (read-only import) — the
+                    // bulk action is how you tag them.
+                    TagControls::bulkAttachAction(),
+                ]),
             ])
             ->defaultSort('issue_date', 'desc');
     }

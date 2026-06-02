@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Products\Schemas;
 
+use App\Filament\Support\Tags\TagControls;
 use App\Models\MetricUnit;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
@@ -227,6 +228,9 @@ class ProductForm
                                     ->numeric()
                                     ->minValue(1)
                                     ->helperText('Set by the WHMCS bridge when it lands. Editable manually for now. Unique per tenant.'),
+
+                                TagControls::field()
+                                    ->columnSpanFull(),
                             ])
                             ->columns(2),
                     ]),

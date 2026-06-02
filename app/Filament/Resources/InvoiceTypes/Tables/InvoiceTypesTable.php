@@ -10,6 +10,7 @@ use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
@@ -34,6 +35,12 @@ class InvoiceTypesTable
                     ->searchable()
                     ->sortable()
                     ->wrap(),
+
+                // Pin the types you issue most (ΤΙΜ/ΤΠΥ…) to the top of the
+                // new-invoice picker. Toggle inline.
+                ToggleColumn::make('is_favorite')
+                    ->label('Αγαπημένο')
+                    ->sortable(),
 
                 TextColumn::make('invcount')
                     ->label('Next ΑΑ')
@@ -101,6 +108,10 @@ class InvoiceTypesTable
                     ->label('On menu')
                     ->placeholder('All')
                     ->default(true),
+
+                TernaryFilter::make('is_favorite')
+                    ->label('Αγαπημένα')
+                    ->placeholder('Όλα'),
 
                 TernaryFilter::make('is_credit')
                     ->label('Credit documents')

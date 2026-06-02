@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
 use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\DB;
 class Customer extends Model
 {
     use BelongsToCompany;
-    use HasFactory, SoftDeletes, TracksActivity;
+    use HasFactory, HasTags, SoftDeletes, TracksActivity;
 
     /**
      * Audited identity/contact/terms columns. See TracksActivity.
@@ -65,6 +66,9 @@ class Customer extends Model
         // PR-only additions:
         'needs_immediate_invoice',
         'is_active',
+        // Operator-feedback polish: pin frequent customers to the top of
+        // the invoice-form picker (favourites-first + auto-top).
+        'is_favorite',
         'peppol_endpoint',
         'referred_by_customer_id',
         // T-1b: count of WHMCS third-party routing rows this customer owns
@@ -79,6 +83,7 @@ class Customer extends Model
             'needs_immediate_invoice' => 'boolean',
             'auto_email_invoices' => 'boolean',
             'is_active' => 'boolean',
+            'is_favorite' => 'boolean',
             'whmcs_reseller_routes' => 'integer',
         ];
     }

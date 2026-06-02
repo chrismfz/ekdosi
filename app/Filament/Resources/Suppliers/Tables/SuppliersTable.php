@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Suppliers\Tables;
 
 use App\Enums\SupplierSource;
+use App\Filament\Support\Tags\TagControls;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -60,6 +61,8 @@ class SuppliersTable
                     ->boolean()
                     ->sortable(),
 
+                TagControls::column(),
+
                 TextColumn::make('created_at')
                     ->label('Δημιουργήθηκε')
                     ->dateTime('d/m/Y')
@@ -67,6 +70,8 @@ class SuppliersTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
+                TagControls::filter(),
+
                 TernaryFilter::make('is_active')
                     ->label('Ενεργός')
                     ->boolean()

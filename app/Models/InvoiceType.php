@@ -21,6 +21,7 @@ class InvoiceType extends Model
         'name',
         'invcount',
         'show_on_menu',
+        'is_favorite',
         'is_credit',
         'is_return',
         'mydata_type',
@@ -38,6 +39,7 @@ class InvoiceType extends Model
         return [
             'invcount' => 'integer',
             'show_on_menu' => 'boolean',
+            'is_favorite' => 'boolean',
             'is_credit' => 'boolean',
             'is_return' => 'boolean',
             'mydata_requires_quantity' => 'boolean',

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
@@ -41,7 +42,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Invoice extends Model
 {
     use BelongsToCompany;
-    use HasFactory, SoftDeletes, TracksActivity;
+    use HasFactory, HasTags, SoftDeletes, TracksActivity;
 
     /**
      * Audited columns — lifecycle + money figures + the myDATA state mirror, but

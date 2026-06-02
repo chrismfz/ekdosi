@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Suppliers\Schemas;
 
 use App\Enums\SupplierSource;
 use App\Filament\Support\AadeFormFill;
+use App\Filament\Support\Tags\TagControls;
 use App\Filament\Support\ViesFormFill;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
@@ -110,6 +111,9 @@ class SupplierForm
                         Textarea::make('notes')
                             ->label('Σημειώσεις')
                             ->rows(2)
+                            ->columnSpanFull(),
+
+                        TagControls::field()
                             ->columnSpanFull(),
                     ]),
             ]);

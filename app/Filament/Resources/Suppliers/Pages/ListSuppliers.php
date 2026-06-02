@@ -4,6 +4,8 @@ namespace App\Filament\Resources\Suppliers\Pages;
 
 use App\Filament\BaseListRecords;
 use App\Filament\Resources\Suppliers\SupplierResource;
+use App\Filament\Support\Tags\TagControls;
+use App\Models\Supplier;
 use App\Services\MyData\SupplierSyncFromMyData;
 use Carbon\Carbon;
 use Filament\Actions\Action;
@@ -18,6 +20,11 @@ use Throwable;
 class ListSuppliers extends BaseListRecords
 {
     protected static string $resource = SupplierResource::class;
+
+    public function getTabs(): array
+    {
+        return TagControls::pinnedTabs(Supplier::class);
+    }
 
     protected function getHeaderActions(): array
     {
