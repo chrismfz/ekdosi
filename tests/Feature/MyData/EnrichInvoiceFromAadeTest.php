@@ -108,6 +108,48 @@ class EnrichInvoiceFromAadeTest extends TestCase
         $this->assertSame('123456789', $vatRow['aade']);
     }
 
+    public function test_series_aa_matches_despite_aade_space_separator(): void
+    {
+        // Local invcode is «ΤΙΜ385» (code.aa, no space); AADE joins with a space
+        // («ΤΙΜ 385»). Whitespace-normalised comparison must agree, else every
+        // enrich cries a phantom Σειρά/ΑΑ difference.
+        $report = app(EnrichInvoiceFromAade::class)->enrich($this->invoice->fresh(), $this->aadeDoc());
+
+        $row = collect($report['comparison'])->firstWhere('label', 'Σειρά/ΑΑ');
+        $this->assertNotNull($row);
+        $this->assertTrue($row['match'], '«ΤΙΜ385» vs «ΤΙΜ 385» normalised → match');
+    }
+
+    public function test_blank_local_field_is_filled_not_flagged_as_difference(): void
+    {
+        // vat_no is blank locally; AADE has one → it's a fill, NOT a ⚠ conflict.
+        $report = app(EnrichInvoiceFromAade::class)->enrich($this->invoice->fresh(), $this->aadeDoc());
+
+        $this->assertContains('ΑΦΜ αντισυμβαλλόμενου', $report['filled']);
+        $this->assertSame('123456789', $this->invoice->fresh()->vat_no);
+        $this->assertNull(
+            collect($report['comparison'])->firstWhere('label', 'ΑΦΜ αντισυμβαλλόμενου'),
+            'a blank-then-filled field is not reported as a difference'
+        );
+    }
+
+    public function test_does_not_stamp_qr_when_aade_doc_is_cancelled(): void
+    {
+        $report = app(EnrichInvoiceFromAade::class)->enrich(
+            $this->invoice->fresh(),
+            $this->aadeDoc(['state' => 'CANCELLED'])
+        );
+
+        $this->assertFalse($report['stamped_qr']);
+        $this->assertTrue($report['qr_skipped_cancelled']);
+        $this->assertNull($this->invoice->fresh()->mydata_url, 'no QR onto a cancelled-at-AADE doc');
+
+        // The state divergence (local VALID vs AADE CANCELLED) is surfaced.
+        $stateRow = collect($report['comparison'])->firstWhere('label', 'Κατάσταση');
+        $this->assertNotNull($stateRow);
+        $this->assertFalse($stateRow['match']);
+    }
+
     public function test_comparison_marks_agreement_and_money_mismatch(): void
     {
         $report = app(EnrichInvoiceFromAade::class)->enrich(

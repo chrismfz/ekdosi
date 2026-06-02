@@ -7,9 +7,15 @@
 - `MarkDetail::fromAadeDoc()`/`fromInvoice()` now carry `qrCodeUrl`;
   `TransmittedDocReader` returns it (locked by `TransmittedDocReaderTest`).
 - `App\Support\MyData\QrImage` — shared QR PNG renderer (PDF + page reuse it).
-- `App\Services\MyData\EnrichInvoiceFromAade` — QR always (re)stamped onto
-  `invoices.mydata_url` + `mydata_marks.invoice_url`; everything else
-  **fill-blanks only**; returns a field-by-field `comparison` (✓/⚠).
+- `App\Services\MyData\EnrichInvoiceFromAade` — QR (re)stamped onto
+  `invoices.mydata_url` + the **INSERT** `mydata_marks.invoice_url` (skipped when
+  the AADE doc is CANCELLED); **fill-blanks of HEADER fields only**
+  (`company_name`/`vat_no`/`mydata_type` — NOT `mydata_state`, a critical
+  orthogonal status); returns a field-by-field `comparison` (✓/⚠) computed from
+  a **pre-fill snapshot** (so a just-filled field isn't a trivial match, and a
+  blank field isn't a false ⚠) with whitespace-normalised invcode. **Line / E3
+  backfill is NOT done** — the «Πλήθος γραμμών» row is informational only (see
+  deferred).
 - `MyDataMarkDetail` page: «Άντληση/έλεγχος από ΑΑΔΕ» action (local invoice +
   `View:MyDataConsole`) → live pull by MARK → enrich → toast + on-page
   comparison panel. QR now renders on the page; the invoice PDF carries it.
@@ -22,6 +28,12 @@ a placeholder. Build it to create the local invoice from the AADE doc (reuse the
 Epsilon `importSales` raw-insert pattern: verbatim filed values,
 `mydata_action='INSERT'`, settle-on-import). `MarkDetail::fromAadeDoc()` is
 exactly the parse it needs.
+
+**Line / E3 backfill (also deferred).** Enrich currently fills header fields
+only. When a local invoice has fewer/zero lines than AADE, the «Πλήθος γραμμών»
+comparison row flags it but nothing fixes it. A follow-up could backfill lines
+(net/vat/descr/E3) from `$aade['lines']` when local has none — the AADE doc
+already carries item code + descr + ΦΠΑ% + E3 classification per line.
 
 ---
 
@@ -70,10 +82,10 @@ and "full rebuild" variants were considered and rejected as the default.
    add a print/PDF header action.
 3. **Enrich + cross-check service** (`EnrichInvoiceFromAade` / wire `import_local`):
    - **LOCAL invoice exists** (the common imported case): stamp `qrCodeUrl` →
-     `invoices.mydata_url` (+ `mydata_marks.invoice_url`); fill-blanks for missing
-     lines / E3 classification / counterpart. **Cross-check report**: list every
-     field/line where local ≠ AADE (read-only worklist; don't auto-change populated
-     values). → our PDF now prints **MARK + QR**.
+     `invoices.mydata_url` (+ `mydata_marks.invoice_url`); fill-blanks of HEADER
+     fields. **Cross-check report**: list every field where local ≠ AADE (read-only
+     worklist; don't auto-change populated values). → our PDF now prints **MARK +
+     QR**. (Line/E3 backfill when local has none is a follow-up — see deferred.)
    - **ORPHAN** (no local record): the real `SalesOrphanImporter` — create the local
      invoice from the AADE doc (reuse the Epsilon `importSales` raw-insert pattern:
      verbatim filed values, `mydata_action='INSERT'`, settle-on-import).

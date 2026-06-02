@@ -93,18 +93,31 @@
         </x-filament::section>
 
         {{-- AADE QR code (from qrCodeUrl). For local invoices this is the stored
-             mydata_url; for imports it appears after «Άντληση/έλεγχος από ΑΑΔΕ». --}}
-        @if (filled($doc['qrCodeUrl'] ?? null))
+             mydata_url; for imports it appears after «Άντληση/έλεγχος από ΑΑΔΕ».
+             Only render for a real http(s) URL (mydata_url is operator/ETL-
+             writable → never emit a javascript:/data: scheme as a clickable
+             href); the QR image is rendered guarded (no 500 if endroid throws). --}}
+        @php
+            $qrUrl = $doc['qrCodeUrl'] ?? null;
+            $qrSafe = is_string($qrUrl) && \Illuminate\Support\Str::startsWith($qrUrl, ['http://', 'https://']);
+            $qrImg = $qrSafe ? \App\Support\MyData\QrImage::tryDataUri($qrUrl) : null;
+        @endphp
+        @if ($qrSafe)
             <x-filament::section>
                 <x-slot name="heading">QR ΑΑΔΕ</x-slot>
                 <div class="flex flex-col items-center gap-3 sm:flex-row sm:items-center">
-                    <img src="{{ \App\Support\MyData\QrImage::dataUri($doc['qrCodeUrl']) }}"
-                         alt="QR ΑΑΔΕ" class="h-40 w-40" />
+                    @if ($qrImg)
+                        <img src="{{ $qrImg }}" alt="QR ΑΑΔΕ" class="h-40 w-40" />
+                    @else
+                        <div class="flex h-40 w-40 items-center justify-center rounded border border-dashed border-gray-300 text-xs text-gray-400 dark:border-gray-600">
+                            QR μη διαθέσιμο
+                        </div>
+                    @endif
                     <div class="min-w-0 text-sm">
                         <div class="text-gray-500 dark:text-gray-400">Σύνδεσμος επισκόπησης ΑΑΔΕ</div>
-                        <a href="{{ $doc['qrCodeUrl'] }}" target="_blank" rel="noopener"
+                        <a href="{{ $qrUrl }}" target="_blank" rel="noopener"
                            class="font-mono text-xs break-all text-primary-600 hover:underline dark:text-primary-400">
-                            {{ $doc['qrCodeUrl'] }}
+                            {{ $qrUrl }}
                         </a>
                     </div>
                 </div>

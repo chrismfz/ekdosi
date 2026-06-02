@@ -193,6 +193,9 @@ class MyDataMarkDetail extends Page
     {
         $this->error = null;
         $this->doc = null;
+        // Drop any prior comparison so it can't outlive the document it
+        // described (enrichFromAade re-sets it right after its own load()).
+        $this->enrichReport = null;
 
         $tenant = Filament::getTenant();
         $mark = (string) $this->mark;
@@ -294,7 +297,7 @@ class MyDataMarkDetail extends Page
         }
 
         $invoice = Invoice::query()
-            ->where('company_id', $tenant->getKey())
+            ->where('company_id', $tenant?->getKey())
             ->whereKey($this->invoiceId)
             ->first();
 
@@ -304,7 +307,7 @@ class MyDataMarkDetail extends Page
             return;
         }
 
-        [$from, $to] = $this->resolveWindow();
+        [$from, $to] = $this->windowForInvoice($invoice);
 
         try {
             $detail = (new TransmittedDocReader($tenant))->fetchDetailByMark((string) $this->mark, $from, $to);
@@ -334,8 +337,9 @@ class MyDataMarkDetail extends Page
             return;
         }
 
-        $this->enrichReport = app(EnrichInvoiceFromAade::class)->enrich($invoice, $detail);
-        $this->load(); // re-read the local doc so the freshly-stamped QR shows
+        $report = app(EnrichInvoiceFromAade::class)->enrich($invoice, $detail);
+        $this->load(); // refresh the local doc (QR now shows); clears stale report
+        $this->enrichReport = $report; // set AFTER load(), which nulls it
 
         $diffs = array_values(array_filter($this->enrichReport['comparison'], fn (array $r): bool => ! $r['match']));
         $notification = Notification::make()->title('Σύγκριση με ΑΑΔΕ ολοκληρώθηκε')->persistent();
@@ -344,12 +348,17 @@ class MyDataMarkDetail extends Page
         if ($this->enrichReport['stamped_qr']) {
             $bodyLines[] = '✓ Συμπληρώθηκε το QR.';
         }
+        if ($this->enrichReport['qr_skipped_cancelled'] ?? false) {
+            $bodyLines[] = '⚠ Το παραστατικό είναι ΑΚΥΡΩΜΕΝΟ στο ΑΑΔΕ — δεν τυπώθηκε QR.';
+        }
         if ($this->enrichReport['filled'] !== []) {
             $bodyLines[] = 'Συμπληρώθηκαν: '.implode(', ', $this->enrichReport['filled']).'.';
         }
-        if ($diffs === []) {
+        if ($diffs === [] && ! ($this->enrichReport['qr_skipped_cancelled'] ?? false)) {
             $bodyLines[] = '✓ Όλα τα πεδία συμφωνούν με το ΑΑΔΕ.';
             $notification->success();
+        } elseif ($diffs === []) {
+            $notification->warning();
         } else {
             $bodyLines[] = 'Διαφορές ('.count($diffs).'): '
                 .implode(' · ', array_map(fn (array $r): string => $r['label'], $diffs)).'.';
@@ -357,6 +366,30 @@ class MyDataMarkDetail extends Page
         }
 
         $notification->body(implode(' ', $bodyLines))->send();
+    }
+
+    /**
+     * Lookup window for enriching a LOCAL invoice. An explicit operator window
+     * (from/to) wins; otherwise centre on the invoice's issue date — the ~13
+     * month default would miss old imported invoices, which are the whole point
+     * of this feature.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function windowForInvoice(Invoice $invoice): array
+    {
+        if ($this->from || $this->to) {
+            return $this->resolveWindow();
+        }
+
+        if ($invoice->issued_at !== null) {
+            return [
+                $invoice->issued_at->copy()->subDays(5)->startOfDay(),
+                $invoice->issued_at->copy()->addDays(31)->endOfDay(),
+            ];
+        }
+
+        return $this->resolveWindow();
     }
 
     /**
