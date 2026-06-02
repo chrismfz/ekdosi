@@ -166,7 +166,7 @@ class FirebirdImportRunForm
                                         FileUpload::make('sales_json')
                                             ->label('Πωλήσεις — DataExport-Sales.json')
                                             ->disk('local')->directory('epsilon-imports')->visibility('private')
-                                            ->helperText('Ιστορικά παραστατικά (με ΜΑΡΚ) → invoices (active, VALID). Match πελάτη με ΑΦΜ· κρατά το νούμερο Epsilon. Καλό είναι να εισαχθούν πρώτα Πελάτες + Είδη.')
+                                            ->helperText('Ιστορικά παραστατικά (με ΜΑΡΚ) → invoices (active, VALID, εξοφλημένα). Match πελάτη με ΑΦΜ· κρατά το νούμερο Epsilon. Καλό είναι να εισαχθούν πρώτα Πελάτες + Είδη. (Χωρίς AADE QR στο PDF — το Epsilon δεν εξάγει το URL.)')
                                             ->columnSpanFull(),
                                     ]),
                             ]),

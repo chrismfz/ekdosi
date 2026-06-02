@@ -20,12 +20,21 @@ they merge.
 - **Data Import — Epsilon Smart Sales → invoices** (Phase 2): the «Epsilon
   Smart (JSON)» tab gains a Πωλήσεις (`DataExport-Sales.json`) slot. Each Epsilon
   sale lands as a historical, already-filed invoice — `active` + `mydata_state=
-  VALID` + the MARK (leading apostrophe stripped) + a minimal `mydata_marks`
-  audit row. Counterpart resolved by ΑΦΜ (resolve-or-create), lines mapped from
-  CommLines (product matched by name), the Epsilon DocNum kept as the ΑΑ and the
-  invoice-type counter bumped so new ekdosi invoices continue. Re-runnable by
-  `(company_id, invcode)`; a re-run refreshes the header and replaces lines + the
-  mark row (`EpsilonImporter::importSales`).
+  VALID` + the MARK (leading apostrophe stripped) + a `mydata_marks` audit row
+  (`mydata_action=INSERT`, so cancel/credit-note correlation finds it). Lines,
+  invoice header and the MARK are written via raw query-builder inserts (mirrors
+  the Firebird ETL) so the FILED net/gross values are kept verbatim — the
+  `InvoiceLine` recompute hook is bypassed (it would drift by rounding and throw
+  on zero-qty lines). Counterpart resolved by ΑΦΜ (resolve-or-create), product
+  matched by name, the Epsilon DocNum kept as the ΑΑ, the invoice-type counter
+  bumped so new ekdosi invoices continue. **Settled on import:** credit-term
+  («Επί Πιστώσει») sales get a full settlement Payment dated at issue so the
+  already-paid historical docs aren't phantom receivables; cash-term settle at
+  issue via `InvoiceBalance`. Re-runnable by `(company_id, invcode)`; a re-run
+  refreshes the header and replaces lines + mark + the settlement payment
+  (`EpsilonImporter::importSales`). Known limitations: no AADE QR on the PDF
+  (Epsilon exports the UID but not the QR URL); per-line E3 classification not
+  stored (derived at submit, as elsewhere); non-GR counterpart defaults to GR.
 ### Added
 - **Data Import — Epsilon Smart (JSON)** (Phase 1): the «Firebird Import» screen
   is renamed «Data Import» and gains a 2nd tab. The Firebird flow is unchanged
