@@ -57,7 +57,7 @@ after cutover.
 /                         # Laravel 13 app at repo root
   app/Console/Commands/MigrateFromFirebird.php   # re-runnable ETL, one tenant per run
   app/                                           # models, Filament panels, services, actions
-  database/migrations/                           # 48 migrations
+  database/migrations/                           # 75 migrations
   whmcs-plugin/ekdosi_bridge/                    # OUR WHMCS-side plugin (deployed to tenant's WHMCS)
   myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec
   docs/CLAUDE-history.md                         # archived full project history
