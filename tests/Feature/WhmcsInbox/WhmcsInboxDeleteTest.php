@@ -79,7 +79,8 @@ class WhmcsInboxDeleteTest extends TestCase
 
         // A pending row with a MARK (defensive) is NOT deletable.
         $withMark = $this->row($t, PendingWhmcsInvoice::STATUS_PENDING_REVIEW, mark: '400000000000001');
-        // A drafted/split row (has produced an invoice) is NOT deletable.
+        // drafted/split rows are excluded by the status allowlist (they carry a
+        // draft invoice via whmcs_pending_id that a delete would orphan).
         $drafted = $this->row($t, PendingWhmcsInvoice::STATUS_DRAFTED);
         $split = $this->row($t, PendingWhmcsInvoice::STATUS_SPLIT);
 
@@ -94,5 +95,20 @@ class WhmcsInboxDeleteTest extends TestCase
         $this->assertModelExists($withMark);
         $this->assertModelExists($drafted);
         $this->assertModelExists($split);
+    }
+
+    public function test_delete_is_denied_without_the_delete_permission(): void
+    {
+        $t = $this->tenant();
+        $row = $this->row($t, PendingWhmcsInvoice::STATUS_PENDING_REVIEW);
+
+        // A plain user WITHOUT Delete:PendingWhmcsInvoice — the policy (which the
+        // action's ->authorize('delete') consults) must deny. Operators get only
+        // View/Update on this resource (CLAUDE.md role map), so this mirrors
+        // "an operator can't delete"; only company_admin/super_admin can.
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@e.test', 'password' => bcrypt('x')]);
+
+        $this->assertFalse(Gate::forUser($user)->allows('delete', $row));
+        $this->assertFalse(Gate::forUser($user)->allows('deleteAny', PendingWhmcsInvoice::class));
     }
 }

@@ -282,7 +282,7 @@ EOF;
 
         $pager = $this->pager($link, $status, $page, $perPage, $total, $period);
         $statusTabs = $this->statusTabs($link, $status, $period);
-        $monthTabs = $this->periodTabs($link, $status, $period);
+        $periodTabs = $this->periodTabs($link, $status, $period);
         $from = ($page - 1) * $perPage + 1;
         $to = min($page * $perPage, $total);
 
@@ -290,7 +290,7 @@ EOF;
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <h2>Τιμολόγια WHMCS → Ekdosi</h2>
 {$bridgeWarn}
-{$monthTabs}
+{$periodTabs}
 {$statusTabs}
 <p class="text-muted">Εμφάνιση {$from}–{$to} από {$total}.</p>
 <table class="table table-striped table-condensed">

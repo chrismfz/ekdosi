@@ -297,12 +297,12 @@ class WhmcsInboxTable
                 self::refreshLegacyInvoicedAction(),
             ])
             ->recordActions([
-                // Primary, inline — the one thing you do most.
+                // Only the one action you do most stays inline — «Δημιουργία
+                // Παραστατικού». Everything else (including «Άνοιγμα», kept first)
+                // collapses into a «…» dropdown so the row doesn't sprawl.
                 self::createDraftAction(),
-                self::openInvoiceAction(),
-                // Everything else collapses into a «…» dropdown so the row
-                // doesn't sprawl across the screen.
                 ActionGroup::make([
+                    self::openInvoiceAction(),
                     self::splitAction(),
                     self::reResolveThirdPartyAction(),
                     self::holdAction(),
