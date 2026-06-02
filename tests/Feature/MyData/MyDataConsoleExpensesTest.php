@@ -65,14 +65,17 @@ class MyDataConsoleExpensesTest extends TestCase
         ];
     }
 
-    public function test_console_exposes_both_directions(): void
+    public function test_console_exposes_one_reconcile_plus_the_write_actions(): void
     {
         $this->bootTenantUser();
 
+        // The two read buttons collapsed into one «Έλεγχος»; the writes
+        // (self-declared + orphan import) stay as their own actions.
         Livewire::test(MyDataConsoleExpenses::class)
             ->assertOk()
             ->assertActionExists('reconcile')
-            ->assertActionExists('find_orphans');
+            ->assertActionDoesNotExist('find_orphans')
+            ->assertActionExists('import_self_declared');
     }
 
     public function test_inbound_view_highlights_orphan_expenses_and_offers_import(): void
