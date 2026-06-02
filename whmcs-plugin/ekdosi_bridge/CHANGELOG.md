@@ -10,6 +10,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-06-02
+### Changed
+- **SchemaGuard skips DDL on the hot admin path** (review follow-up). `ensureSilently()`
+  now runs a single cheap `information_schema` probe first and only falls through to
+  the `CREATE/ALTER IF NOT EXISTS` steps when a table/column is actually missing (or
+  `tblinvoices.invoiced` is still BIGINT). Previously every admin page load issued ~4
+  DDL statements — which on MySQL/MariaDB implicitly COMMIT any open transaction and
+  add needless load. Common case is now one metadata SELECT, no DDL. `_activate()`
+  still force-runs `ensure()`.
+
 ## [0.28.0] — 2026-06-02
 ### Added
 - **«Επαναφορά relid» (auto-resolve + preview)** — restore the link on a line
