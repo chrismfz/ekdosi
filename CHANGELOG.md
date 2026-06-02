@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **myDATA — «Άντληση/έλεγχος από ΑΑΔΕ» on ΜΑΡΚ detail**: for a local invoice
+  imported with a MARK but no AADE QR (Epsilon/legacy), a live pull by MARK
+  (`RequestTransmittedDocs`) now stamps the QR (`qrCodeUrl`) onto
+  `invoices.mydata_url` (+ `mydata_marks.invoice_url`) so our reprinted PDF
+  shows MARK **and** QR. The same call drives a field-by-field **comparison**
+  popup/panel — what agrees (✓) and what differs (⚠) vs AADE. Policy: QR always
+  (re)written, everything else **fill-blanks only** (never overwrites a
+  populated value on a filed doc), differences reported not auto-applied
+  (`App\Services\MyData\EnrichInvoiceFromAade`, `App\Support\MyData\QrImage`,
+  `MarkDetail`/`TransmittedDocReader` now carry `qrCodeUrl`). Gated on
+  `View:MyDataConsole` (live AADE call). ORPHAN→create-local still deferred.
 - **Data Import — Epsilon Smart Sales → invoices** (Phase 2): the «Epsilon
   Smart (JSON)» tab gains a Πωλήσεις (`DataExport-Sales.json`) slot. Each Epsilon
   sale lands as a historical, already-filed invoice — `active` + `mydata_state=

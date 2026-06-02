@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Models\Invoice;
+use App\Support\MyData\QrImage;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Endroid\QrCode\Builder\Builder;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -97,18 +97,7 @@ class InvoicePdfRenderer
      */
     private function renderQrDataUri(string $url): string
     {
-        // endroid/qr-code v6: Builder is a final readonly class
-        // constructed with all options, then build() returns a Result.
-        $result = (new Builder(
-            writer: new \Endroid\QrCode\Writer\PngWriter(),
-            data: $url,
-            encoding: new \Endroid\QrCode\Encoding\Encoding('UTF-8'),
-            errorCorrectionLevel: \Endroid\QrCode\ErrorCorrectionLevel::Medium,
-            size: 200,
-            margin: 8,
-        ))->build();
-
-        return $result->getDataUri();
+        return QrImage::dataUri($url);
     }
 
     /**

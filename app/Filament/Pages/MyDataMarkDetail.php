@@ -6,6 +6,7 @@ use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Services\MyData\EnrichInvoiceFromAade;
 use App\Services\MyData\TransmittedDocReader;
 use App\Support\MyData\MarkDetail;
 use BackedEnum;
@@ -13,6 +14,7 @@ use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Url;
@@ -67,6 +69,15 @@ class MyDataMarkDetail extends Page
 
     public ?string $error = null;
 
+    /**
+     * Result of the last «Άντληση/έλεγχος από ΑΑΔΕ» — the field-by-field
+     * comparison (✓/⚠) rendered as a panel under the document. Shape:
+     * {stamped_qr, filled[], comparison: [{label, local, aade, match}]}.
+     *
+     * @var array<string,mixed>|null
+     */
+    public ?array $enrichReport = null;
+
     public static function shouldRegisterNavigation(): bool
     {
         return false;
@@ -118,6 +129,23 @@ class MyDataMarkDetail extends Page
                     'tenant' => Filament::getTenant(),
                 ])),
 
+            // Live pull from AADE by MARK → stamp the QR (+ fill blanks) onto
+            // the local invoice and show a field-by-field comparison. The whole
+            // point for imported invoices (Epsilon/legacy) that have a MARK but
+            // no QR. Gated on the console permission (it's a live, billable AADE
+            // call) and only when a local invoice exists to enrich.
+            Action::make('enrich_from_aade')
+                ->label('Άντληση/έλεγχος από ΑΑΔΕ')
+                ->icon('heroicon-o-qr-code')
+                ->color('success')
+                ->visible(fn (): bool => $this->invoiceId !== null && (bool) auth()->user()?->can('View:MyDataConsole'))
+                ->requiresConfirmation()
+                ->modalIcon('heroicon-o-qr-code')
+                ->modalHeading('Άντληση QR & σύγκριση με ΑΑΔΕ')
+                ->modalDescription('Ζωντανή ανάκτηση του παραστατικού από το myDATA βάσει ΜΑΡΚ: συμπληρώνει το QR (και ό,τι λείπει) στο τοπικό παραστατικό και δείχνει τυχόν διαφορές. Δεν αλλάζει ήδη συμπληρωμένες τιμές.')
+                ->modalSubmitActionLabel('Άντληση')
+                ->action(fn () => $this->enrichFromAade()),
+
             Action::make('change_window')
                 ->label('Αλλαγή διαστήματος')
                 ->icon('heroicon-o-calendar')
@@ -165,6 +193,9 @@ class MyDataMarkDetail extends Page
     {
         $this->error = null;
         $this->doc = null;
+        // Drop any prior comparison so it can't outlive the document it
+        // described (enrichFromAade re-sets it right after its own load()).
+        $this->enrichReport = null;
 
         $tenant = Filament::getTenant();
         $mark = (string) $this->mark;
@@ -244,6 +275,121 @@ class MyDataMarkDetail extends Page
 
             $this->error = 'Η σύνδεση με το AADE απέτυχε. Ελέγξτε τα διαπιστευτήρια και προσπαθήστε ξανά.';
         }
+    }
+
+    /**
+     * Live-pull this MARK from AADE, enrich the local invoice (QR + fill-blanks)
+     * and surface the field-by-field comparison both as a toast and the on-page
+     * panel ($enrichReport). No-op-safe: guards on the console permission and a
+     * resolvable local invoice; AADE/credential failures degrade to a Greek
+     * notification, never a 500.
+     */
+    public function enrichFromAade(): void
+    {
+        $tenant = Filament::getTenant();
+
+        if ($this->invoiceId === null || ! auth()->user()?->can('View:MyDataConsole')) {
+            Notification::make()->title('Μη διαθέσιμο')->danger()
+                ->body('Η άντληση από το ΑΑΔΕ είναι διαθέσιμη μόνο σε διαχειριστές, για τοπικό παραστατικό.')
+                ->send();
+
+            return;
+        }
+
+        $invoice = Invoice::query()
+            ->where('company_id', $tenant?->getKey())
+            ->whereKey($this->invoiceId)
+            ->first();
+
+        if ($invoice === null || blank($invoice->mydata_mark)) {
+            Notification::make()->title('Δεν βρέθηκε παραστατικό με ΜΑΡΚ')->danger()->send();
+
+            return;
+        }
+
+        [$from, $to] = $this->windowForInvoice($invoice);
+
+        try {
+            $detail = (new TransmittedDocReader($tenant))->fetchDetailByMark((string) $this->mark, $from, $to);
+        } catch (RuntimeException $e) {
+            Notification::make()->title('Αποτυχία')->danger()->body($e->getMessage())->send();
+
+            return;
+        } catch (Throwable $e) {
+            Log::warning('myDATA enrich fetch failed', [
+                'company_id' => $tenant?->getKey(),
+                'mark' => $this->mark,
+                'exception' => $e::class,
+            ]);
+            Notification::make()->title('Αποτυχία')->danger()
+                ->body('Η σύνδεση με το AADE απέτυχε. Ελέγξτε τα διαπιστευτήρια και προσπαθήστε ξανά.')
+                ->send();
+
+            return;
+        }
+
+        if ($detail === null) {
+            Notification::make()->title('Δεν βρέθηκε στο myDATA')->warning()
+                ->body('Το ΜΑΡΚ δεν βρέθηκε για το διάστημα '.$from->format('d/m/Y').' – '.$to->format('d/m/Y')
+                    .'. Δοκιμάστε «Αλλαγή διαστήματος».')
+                ->send();
+
+            return;
+        }
+
+        $report = app(EnrichInvoiceFromAade::class)->enrich($invoice, $detail);
+        $this->load(); // refresh the local doc (QR now shows); clears stale report
+        $this->enrichReport = $report; // set AFTER load(), which nulls it
+
+        $diffs = array_values(array_filter($this->enrichReport['comparison'], fn (array $r): bool => ! $r['match']));
+        $notification = Notification::make()->title('Σύγκριση με ΑΑΔΕ ολοκληρώθηκε')->persistent();
+
+        $bodyLines = [];
+        if ($this->enrichReport['stamped_qr']) {
+            $bodyLines[] = '✓ Συμπληρώθηκε το QR.';
+        }
+        if ($this->enrichReport['qr_skipped_cancelled'] ?? false) {
+            $bodyLines[] = '⚠ Το παραστατικό είναι ΑΚΥΡΩΜΕΝΟ στο ΑΑΔΕ — δεν τυπώθηκε QR.';
+        }
+        if ($this->enrichReport['filled'] !== []) {
+            $bodyLines[] = 'Συμπληρώθηκαν: '.implode(', ', $this->enrichReport['filled']).'.';
+        }
+        if ($diffs === [] && ! ($this->enrichReport['qr_skipped_cancelled'] ?? false)) {
+            $bodyLines[] = '✓ Όλα τα πεδία συμφωνούν με το ΑΑΔΕ.';
+            $notification->success();
+        } elseif ($diffs === []) {
+            $notification->warning();
+        } else {
+            $bodyLines[] = 'Διαφορές ('.count($diffs).'): '
+                .implode(' · ', array_map(fn (array $r): string => $r['label'], $diffs)).'.';
+            $notification->warning();
+        }
+
+        $notification->body(implode(' ', $bodyLines))->send();
+    }
+
+    /**
+     * Lookup window for enriching a LOCAL invoice. An explicit operator window
+     * (from/to) wins; otherwise centre on the invoice's issue date — the ~13
+     * month default would miss old imported invoices, which are the whole point
+     * of this feature.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function windowForInvoice(Invoice $invoice): array
+    {
+        if ($this->from || $this->to) {
+            return $this->resolveWindow();
+        }
+
+        if ($invoice->issued_at !== null) {
+            return [
+                $invoice->issued_at->copy()->subDays(5)->startOfDay(),
+                $invoice->issued_at->copy()->addDays(31)->endOfDay(),
+            ];
+        }
+
+        return $this->resolveWindow();
     }
 
     /**
