@@ -135,6 +135,12 @@ class InvoicePaymentsRelationManager extends RelationManager
 
         return $invoice->customer_id !== null
             && $invoice->credited_invoice_id === null
+            // Not a credit note (neither one issued against an original, nor a
+            // standalone credit-TYPE invoice). You don't collect a customer
+            // payment on a πιστωτικό — and recording one would push it into the
+            // receivables owed base while the ledger treats it as a credit
+            // (dashboard ≠ ledger by 2×gross for that doc).
+            && ! ($invoice->invoiceType?->is_credit ?? false)
             && $invoice->mydata_state !== 'CANCELLED';
     }
 
