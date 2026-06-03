@@ -80,9 +80,14 @@ class MyDataPictureStats extends StatsOverviewWidget
                 ->descriptionIcon('heroicon-m-arrow-down-right')
                 ->color('gray'),
 
+            // Card colour follows the headline = the QUARTER (a Stat card has a
+            // single colour). The MONTH figure carries its OWN word so a credit
+            // month inside a payable quarter never reads as an amount owed —
+            // e.g. «Προς απόδοση • μήνας: πίστωση 9,70 €» (net month = εκροών −
+            // εισροών = −9,70 → πίστωση, not 9,70 owed).
             Stat::make('Τρίμηνο — Καθαρό ΦΠΑ', $this->eur(abs($netQuarter)))
                 ->description(($quarter->isPayable() ? 'Προς απόδοση' : 'Πιστωτικό υπόλοιπο')
-                    .' • μήνας '.$this->eur(abs($netMonth)))
+                    .' • μήνας: '.$this->monthVatLabel($netMonth))
                 ->descriptionIcon('heroicon-m-banknotes')
                 ->color($quarter->isPayable() ? 'danger' : 'success'),
         ];
@@ -102,6 +107,21 @@ class MyDataPictureStats extends StatsOverviewWidget
         }
 
         return $stats;
+    }
+
+    /**
+     * Per-period VAT label for the month, judged on ITS OWN sign (not the
+     * quarter's): positive net = προς απόδοση, negative = πίστωση, ~0 = μηδέν.
+     */
+    private function monthVatLabel(float $netMonth): string
+    {
+        if (abs($netMonth) < 0.005) {
+            return $this->eur(0);
+        }
+
+        $word = $netMonth > 0 ? 'προς απόδοση' : 'πίστωση';
+
+        return $word.' '.$this->eur(abs($netMonth));
     }
 
     protected function getDescription(): ?string
