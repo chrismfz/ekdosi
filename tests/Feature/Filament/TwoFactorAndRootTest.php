@@ -42,4 +42,18 @@ class TwoFactorAndRootTest extends TestCase
     {
         $this->get('/')->assertRedirect('/admin');
     }
+
+    public function test_mfa_secrets_are_hidden_from_serialization(): void
+    {
+        $user = User::create([
+            'name' => 'Op', 'email' => 'h-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]);
+        $user->saveAppAuthenticationSecret('SECRET');
+        $user->saveAppAuthenticationRecoveryCodes(['a', 'b']);
+
+        $array = $user->fresh()->toArray();
+        $this->assertArrayNotHasKey('app_authentication_secret', $array);
+        $this->assertArrayNotHasKey('app_authentication_recovery_codes', $array);
+        $this->assertArrayNotHasKey('password', $array);
+    }
 }

@@ -94,6 +94,27 @@ class UsersTable
                             ->success()
                             ->send();
                     }),
+                // Recovery path for a lost authenticator: without this an
+                // enrolled user who loses their device AND recovery codes is
+                // permanently locked out (only a manual DB UPDATE could fix it).
+                Action::make('reset_2fa')
+                    ->label('Επαναφορά 2FA')
+                    ->icon('heroicon-o-shield-exclamation')
+                    ->color('danger')
+                    ->visible(fn ($record): bool => filled($record->app_authentication_secret))
+                    ->requiresConfirmation()
+                    ->modalDescription(fn ($record) => "Θα αφαιρεθεί το 2FA του {$record->email} (TOTP + recovery codes). Θα ξανα-εγγραφεί στο επόμενο login.")
+                    ->action(function ($record): void {
+                        $record->forceFill([
+                            'app_authentication_secret' => null,
+                            'app_authentication_recovery_codes' => null,
+                        ])->save();
+
+                        Notification::make()
+                            ->title("Έγινε επαναφορά 2FA για {$record->email}")
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

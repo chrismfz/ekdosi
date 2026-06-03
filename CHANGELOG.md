@@ -24,7 +24,11 @@ they merge.
   enrollment (QR), τα recovery codes και disable/regenerate ζουν **αυτόματα** στη
   σελίδα προφίλ. **Opt-in** by default· `EKDOSI_REQUIRE_2FA=true` το επιβάλλει σε
   όλους στο επόμενο login (αφού πρώτα εγγραφούν). Το `/` πλέον redirect → `/admin`
-  (δεν υπάρχει public landing). **Deploy:** `php artisan migrate`. `TwoFactorAndRootTest`.
+  (δεν υπάρχει public landing). Οι MFA στήλες είναι `#[Hidden]` (να μην διαρρέουν
+  σε serialization) + admin action **«Επαναφορά 2FA»** στη λίστα Users (recovery
+  για χαμένη συσκευή — αλλιώς μόνιμο κλείδωμα). **Runbook:** μην κάνεις rotate το
+  `APP_KEY` χωρίς να μηδενίσεις πρώτα τις 2 στήλες. **Deploy:** `php artisan migrate`.
+  `TwoFactorAndRootTest`.
 - **Deploy safety net (ρίζα: ένα `migrate:fresh`/test έσβησε κατά λάθος την prod).**
   Τρία επίπεδα ώστε να μην ξανασυμβεί: (1) `DB::prohibitDestructiveCommands()` στον
   `AppServiceProvider` μπλοκάρει `db:wipe`/`migrate:fresh`/`migrate:refresh`
