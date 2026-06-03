@@ -148,6 +148,15 @@ class ConvertQuoteToServiceContractTest extends TestCase
         app(ConvertQuoteToServiceContract::class)($quote->fresh('lines'), $this->type, BillingCycle::Annual, 1200.0);
     }
 
+    public function test_refuses_a_non_accepted_quote(): void
+    {
+        $quote = $this->acceptedQuote();
+        $quote->update(['status' => QuoteStatus::Sent]); // not accepted
+
+        $this->expectException(RuntimeException::class);
+        app(ConvertQuoteToServiceContract::class)($quote->fresh('lines'), $this->type, BillingCycle::Annual, 1200.0);
+    }
+
     public function test_refuses_one_time_cycle_and_zero_amount(): void
     {
         $quote = $this->acceptedQuote();

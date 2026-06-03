@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\BillingCycle;
+use App\Enums\QuoteStatus;
 use App\Enums\ServiceContractStatus;
 use App\Models\InvoiceType;
 use App\Models\Quote;
@@ -49,6 +50,9 @@ class ConvertQuoteToServiceContract
         if ($invoiceType->company_id !== $quote->company_id) {
             throw new RuntimeException('Ο τύπος παραστατικού ανήκει σε άλλη εταιρεία.');
         }
+        if ($quote->status !== QuoteStatus::Accepted) {
+            throw new RuntimeException('Μόνο αποδεκτή προσφορά μετατρέπεται σε υπηρεσία.');
+        }
         if ($recurringAmount <= 0) {
             throw new RuntimeException('Το επαναλαμβανόμενο ποσό πρέπει να είναι θετικό.');
         }
@@ -61,6 +65,18 @@ class ConvertQuoteToServiceContract
         $recurringLine = $quote->firstRecurringLine();
 
         return DB::transaction(function () use ($quote, $invoiceType, $cycle, $recurringAmount, $paymentMethodId, $start, $recurringLine) {
+            // Lock + re-check under the row lock BEFORE creating the contract, so
+            // a concurrent double-submit can't produce two contracts/invoices for
+            // one quote (the loser blocks, then sees the flags set and bails — its
+            // contract never commits). ConvertQuoteToInvoice below re-locks the
+            // same row in this transaction (re-entrant, fine).
+            $locked = Quote::query()->whereKey($quote->id)->lockForUpdate()->first();
+            if ($locked === null
+                || $locked->converted_invoice_id !== null
+                || $locked->converted_service_contract_id !== null) {
+                throw new RuntimeException('Η προσφορά έχει ήδη μετατραπεί.');
+            }
+
             // The contract drives FUTURE renewals (recurring part only). amount is
             // the per-cycle net charge; cursor at start so the first invoice's
             // issue advances it one cycle (period 1 → period 2).

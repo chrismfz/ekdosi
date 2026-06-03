@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Enums\QuoteStatus;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Quote;
@@ -36,13 +37,19 @@ class ConvertQuoteToInvoice
         if ($quote->isConverted()) {
             throw new RuntimeException(
                 'Η προσφορά έχει ήδη μετατραπεί σε παραστατικό (#'
-                . $quote->converted_invoice_id . ').'
+                .$quote->converted_invoice_id.').'
             );
         }
 
         if ($invoiceType->company_id !== $quote->company_id) {
             throw new RuntimeException(
                 'Ο τύπος παραστατικού ανήκει σε άλλη εταιρεία.'
+            );
+        }
+
+        if ($quote->status !== QuoteStatus::Accepted) {
+            throw new RuntimeException(
+                'Μόνο αποδεκτή προσφορά μετατρέπεται σε παραστατικό.'
             );
         }
 
@@ -55,6 +62,14 @@ class ConvertQuoteToInvoice
         }
 
         return DB::transaction(function () use ($quote, $invoiceType) {
+            // Lock + re-check under the row lock: a concurrent double-submit
+            // (two clicks) can't create two invoices for one quote. The losing
+            // writer blocks here, then sees converted_invoice_id set and bails.
+            $locked = Quote::query()->whereKey($quote->id)->lockForUpdate()->first();
+            if ($locked === null || $locked->converted_invoice_id !== null) {
+                throw new RuntimeException('Η προσφορά έχει ήδη μετατραπεί σε παραστατικό.');
+            }
+
             $allocation = $this->numberer->allocate($quote->company, $invoiceType->code);
 
             $invoice = Invoice::create([
