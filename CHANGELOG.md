@@ -40,6 +40,86 @@ they merge.
   pages + views — καμία αλλαγή στους reconcilers/δεδομένα. `ReconcileWindowPresetTest`
   + ενημερωμένα console tests.
 ### Added
+- **Ψηφιακή Διακίνηση / Δελτίο Αποστολής — κύκλος ζωής διακίνησης (Phase D3, Β' φάση)**:
+  `App\Services\Delivery\DeliveryLifecycleService` οδηγεί τον κύκλο ζωής ΠΑΝΩ σε ένα
+  ήδη εκδομένο δελτίο — `registerTransfer` (RegisterTransfer, registered→in_transit,
+  qrUrl-keyed, αποθηκεύει `transfer_mark`), `confirmDelivery` (ConfirmDeliveryOutcome,
+  FULL/PARTIAL/NONE → delivered/partial/failed, `outcome_mark`), `refreshStatus`
+  (RequestDeliveryNoteStatus by MARK + ΑΦΜ εκδότη, read-only §8.22→`delivery_state`
+  reconcile, χωρίς νέα γραμμή mark) και `cancel` (μέσω `CancelInvoice` by issue MARK,
+  όπως τα τιμολόγια — η provider-only CancelDeliveryNote δεν ισχύει στο ERP route).
+  Καθρεφτίζει τον `DeliveryNoteSubmitter` (per-tenant `initFirebed`, MockHandler seam,
+  try/catch→Greek RuntimeException, forceFill των guarded lifecycle στηλών + γραμμή
+  `delivery_marks` σε transaction — actions REGISTER_TRANSFER/CONFIRM_OUTCOME/CANCEL).
+  Header actions στο `ViewDeliveryNote` («Έναρξη διακίνησης» / «Δήλωση παράδοσης» με
+  Select αποτελέσματος / «Έλεγχος κατάστασης (ΑΑΔΕ)» / «Ακύρωση») με visibility gates
+  ανά state + Greek notifications· `delivery_state` badge με Greek label στο infolist.
+  **ΔΕΝ έχει επικυρωθεί στο sandbox** (όπως όλο το 9.x/DGM μονοπάτι).
+- **Ψηφιακή Διακίνηση / Δελτίο Αποστολής — εκτυπώσιμο PDF + QR (Phase D2.4)**:
+  `App\Services\Delivery\DeliveryNotePdf` renders a Δελτίο Αποστολής to PDF bytes
+  via DomPDF + `resources/views/delivery-notes/pdf.blade.php` — a value-LESS twin
+  of the invoice PDF (no prices/VAT/totals; same DejaVu-Sans Greek font setup,
+  A4 portrait, per-render ini guard, and `App\Support\MyData\QrImage` for the
+  AADE QR). Εκδότης/Παραλήπτης (or «Ενδοδιακίνηση»), σκοπός/τόπος φόρτωσης→
+  παράδοσης/μεταφορικό μέσο/όχημα/μεταφορέας, and a quantities-only lines table
+  (μονάδα μέτρησης resolved via new `DeliveryCodes::measurementUnitLabel`, §8.13).
+  The MARK + QR footer render only when filed (`mydata_state==='VALID'`); a draft
+  shows «ΠΡΟΧΕΙΡΟ — μη διαβιβασμένο» and no QR. A «Εκτύπωση (PDF)» header action
+  on `ViewDeliveryNote` streams `deltio-<invcode>.pdf` for both draft + filed
+  notes (mirrors ViewInvoice's PDF action).
+- **Ψηφιακή Διακίνηση / Δελτίο Αποστολής — data model (Phase D1)**: the schema
+  for myDATA e-transport delivery notes. New `delivery_notes` /
+  `delivery_note_lines` / `delivery_marks` tables — value-LESS twins of
+  invoices/lines/marks (no money/VAT, kept in their own tables like quotes so
+  they never touch InvoiceScope or the money services). Models `DeliveryNote` /
+  `DeliveryNoteLine` / `DeliveryMark` (`BelongsToCompany`; the `mydata_*` cache +
+  the lifecycle `*_mark`/`delivery_state` columns are guarded — written only via
+  forceFill by the future submitter/lifecycle service). `App\Support\MyData\
+  DeliveryCodes` wraps the firebed e-transport enums (σκοπός διακίνησης §8.14,
+  τρόπος μεταφοράς, συσκευασία §8.23, κατάσταση §8.22) and bakes the AADE policy
+  that move purposes **6/15/16/17/18 are no longer transmittable** (so 18
+  «Διακίνηση Παγίων» is excluded — own-equipment moves use 8 Ενδοδιακίνηση or 19
+  Λοιπές). Numbering reuses `InvoiceNumberer` unchanged (a delivery series is
+  just a 9.x `invoice_types` row). No UI yet (D2 = submit+form, D3 = lifecycle).
+  `DeliveryCodesTest` + `DeliveryNoteModelTest`. **Deploy:** `php artisan migrate`.
+- **Ψηφιακή Διακίνηση — myDATA submitter (Phase D2, partial)**:
+  `App\Services\Delivery\DeliveryNoteSubmitter` files a value-less Δελτίο
+  Αποστολής (9.x) via the SAME `SendInvoices` path as invoices —
+  `buildAadeDeliveryNote()` (Issuer + delivery `InvoiceHeader` with
+  `isDeliveryNote=true` / `movePurpose` / dispatch / vehicle /
+  `otherDeliveryNoteHeader` loading+delivery addresses + GR-rule recipient
+  counterpart) + value-less lines (`quantity` + `measurementUnit` + `netValue=0`
+  + `vatCategory=8` + `vatAmount=0`) + an all-zero `InvoiceSummary`;
+  `previewXml()` for dry-run; `submit()` persists the MARK/qrUrl into the note's
+  guarded cache (`mydata_*` + `delivery_state='registered'`) and a
+  `delivery_marks` INSERT audit row, idempotent. Self-contained (the proven
+  invoice submitter is untouched). Line/summary shape grounded in firebed's 9.3
+  reference payload — **flagged for AADE sandbox validation** before go-live.
+  `DeliveryNoteSubmitterTest` (build/previewXml + mock-Guzzle submit happy-path).
+- **Ψηφιακή Διακίνηση — Filament resource + issue flow (Phase D2, part 3)**:
+  `DeliveryNoteResource` (new nav group «Ψηφιακή Διακίνηση», truck icon,
+  admin-gated on `View:DeliveryNote` + Company tenant, mirrors Reports/LedgerBook)
+  with List/Create/View/Edit pages. The form wires the operator-guidance helpers
+  end-to-end: a non-blocking exemption notice (`DeliveryGuidance::EXEMPTIONS_LEAD`
+  + `EXEMPTIONS` + `INTRO`), a reactive «Τι θέλω να κάνω;» scenario picker
+  (`scenarioOptions()` → fills `move_purpose` + the «Λοιπές» title; UI-only,
+  `dehydrated(false)`), `move_purpose`/transport/packaging selects from
+  `DeliveryCodes`, per-line measurement-unit from `Codes::QUANTITY_TYPES`, and
+  `fieldHelp()` on every field. **Any-party recipient picker** searches BOTH
+  customers AND suppliers (prefixed `c:`/`s:` keys) — a supplier recipient (e.g. a
+  datacenter) snapshots `recipient_afm`/`recipient_name` and leaves `customer_id`
+  null; a manual ΑΦΜ+name fallback covers parties in neither table; empty recipient
+  = ενδοδιακίνηση. Mandatory addresses (loading + delivery), transport_type,
+  vehicle_number, dispatch_at enforced in-form (last-line submitter guards
+  unchanged). Numbering reuses `InvoiceNumberer` under a row lock in
+  `CreateDeliveryNote` (identical to CreateInvoice); the type's `mydata_type`
+  (9.x, default ΔΑΠ/9.3) is snapshotted at save. The View page's «Έκδοση»
+  header action (draft-only) files via `DeliveryNoteSubmitter`. Edit limited to
+  drafts. Added a `DeliveryNoteLine::saving` hook to auto-stamp `company_id` from
+  the parent note (the Repeater relationship omits it). `DeliveryNoteResourceTest`
+  (Livewire create→ΑΑ/draft/lines, required-field validation, issue-action
+  draft-only visibility, mock-Guzzle submit→VALID+mark, recipient union search).
+  **Deploy:** `php artisan shield:generate` so `View:DeliveryNote` exists.
 - **Συνημμένα + εσωτερικές σημειώσεις (polymorphic).** Two reusable, tenant-safe
   tabs available on customers AND invoices (and any future model via a trait):
   - **Συνημμένα** (`attachments` table, `App\Models\Attachment`,
