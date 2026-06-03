@@ -22,6 +22,10 @@ return new class extends Migration
             $t->boolean('is_recurring')->default(false)->after('is_active');
             $t->string('provisioning_module', 40)->default('none')->after('is_recurring');
             $t->json('module_meta')->nullable()->after('provisioning_module');
+            // Default dunning thresholds for contracts created from this product
+            // (overridable per contract). Schema only — dunning is a later phase.
+            $t->unsignedSmallInteger('default_suspend_after_days')->nullable()->after('module_meta');
+            $t->unsignedSmallInteger('default_terminate_after_days')->nullable()->after('default_suspend_after_days');
         });
     }
 

@@ -69,6 +69,8 @@ class Product extends Model
         'is_recurring',
         'provisioning_module',
         'module_meta',
+        'default_suspend_after_days',
+        'default_terminate_after_days',
     ];
 
     protected function casts(): array

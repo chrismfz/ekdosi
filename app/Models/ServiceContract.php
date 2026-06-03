@@ -48,6 +48,8 @@ class ServiceContract extends Model
         'suspended_at',
         'terminated_at',
         'cancel_reason',
+        'suspend_after_days',
+        'terminate_after_days',
         'domain',
         'provisioning_module',
         'module_meta',

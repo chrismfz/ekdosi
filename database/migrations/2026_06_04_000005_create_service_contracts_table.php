@@ -46,6 +46,12 @@ return new class extends Migration
             $t->dateTime('suspended_at')->nullable();
             $t->dateTime('terminated_at')->nullable();
             $t->string('cancel_reason', 255)->nullable();
+            // Dunning thresholds (override of the product defaults): days a linked
+            // invoice can stay overdue before auto-suspend / auto-terminate. NULL
+            // = use the product default / no auto action. Schema only — the
+            // dunning command is a later phase (uses these + invoice overdue).
+            $t->unsignedSmallInteger('suspend_after_days')->nullable();
+            $t->unsignedSmallInteger('terminate_after_days')->nullable();
 
             $t->string('domain', 190)->nullable();        // hosting/email context
             $t->string('provisioning_module', 40)->default('none');
