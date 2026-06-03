@@ -16,6 +16,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Validation\Rule;
 
@@ -60,7 +61,15 @@ class ProductForm
                                 Toggle::make('track_stock')
                                     ->label('Παρακολούθηση αποθέματος')
                                     ->default(false)
+                                    ->live()
                                     ->helperText('Μέτρα απόθεμα γι\' αυτό το είδος (εμπορεύματα). Άφησέ το κλειστό για υπηρεσίες. Το απόθεμα είναι ενημερωτικό — δεν μπλοκάρει ποτέ πώληση.'),
+
+                                TextInput::make('reorder_level')
+                                    ->label('Όριο αναπαραγγελίας')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->visible(fn (Get $get) => (bool) $get('track_stock'))
+                                    ->helperText('Κάτω από αυτό το απόθεμα → πορτοκαλί «χαμηλό». Κενό = χωρίς ειδοποίηση.'),
 
                                 Placeholder::make('current_stock')
                                     ->label('Τρέχον απόθεμα')

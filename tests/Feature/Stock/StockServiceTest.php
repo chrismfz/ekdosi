@@ -99,6 +99,41 @@ class StockServiceTest extends TestCase
         $this->assertSame(-3.0, $svc->currentStock($product->fresh()));
     }
 
+    public function test_stock_status_filter_sql_runs_and_buckets_correctly(): void
+    {
+        $svc = app(StockService::class);
+
+        $ok = $this->product();        // stock 5, reorder 3 → ok
+        $ok->update(['reorder_level' => 3]);
+        $svc->record($ok, 5, StockMovement::REASON_RECEIPT);
+
+        $low = $this->product();       // stock 2, reorder 3 → low
+        $low->update(['reorder_level' => 3]);
+        $svc->record($low, 2, StockMovement::REASON_RECEIPT);
+
+        $neg = $this->product();       // stock -1 → negative (and low)
+        $svc->record($neg, -1, StockMovement::REASON_ADJUSTMENT);
+
+        $out = $this->product();       // stock 0, no movements → low (out)
+
+        $base = fn () => Product::query()
+            ->where('company_id', $this->tenant->id)
+            ->withSum('stockMovements as stock_on_hand', 'qty_change')
+            ->where('track_stock', true)
+            ->groupBy('products.id');
+
+        $lowIds = $base()->havingRaw(
+            'COALESCE(stock_on_hand, 0) <= 0 OR (reorder_level IS NOT NULL AND reorder_level > 0 AND COALESCE(stock_on_hand, 0) <= reorder_level)'
+        )->pluck('id')->all();
+        sort($lowIds);
+        $expected = [$low->id, $neg->id, $out->id];
+        sort($expected);
+        $this->assertSame($expected, $lowIds); // ok excluded
+
+        $negIds = $base()->havingRaw('COALESCE(stock_on_hand, 0) < 0')->pluck('id')->all();
+        $this->assertSame([$neg->id], $negIds);
+    }
+
     public function test_untracked_product_reports_zero(): void
     {
         $product = $this->product(tracked: false);

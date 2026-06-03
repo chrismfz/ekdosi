@@ -3,12 +3,17 @@
 namespace App\Filament\Resources\Products\Tables;
 
 use App\Filament\Support\Tags\TagControls;
+use App\Models\Product;
+use App\Models\StockMovement;
+use App\Services\Stock\StockService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -84,7 +89,21 @@ class ProductsTable
                     ->state(fn ($record) => $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null)
                     ->numeric(decimalPlaces: 3)
                     ->badge()
-                    ->color(fn ($record) => $record->track_stock && (float) ($record->stock_on_hand ?? 0) < 0 ? 'danger' : 'gray')
+                    ->color(function ($record) {
+                        if (! $record->track_stock) {
+                            return 'gray';
+                        }
+                        $s = (float) ($record->stock_on_hand ?? 0);
+                        if ($s < 0) {
+                            return 'danger';   // backorder
+                        }
+                        $reorder = (float) ($record->reorder_level ?? 0);
+                        if ($s <= 0 || ($reorder > 0 && $s <= $reorder)) {
+                            return 'warning';  // χαμηλό / εξαντλημένο → αναπαραγγελία
+                        }
+
+                        return 'success';
+                    })
                     ->placeholder('—')
                     ->alignRight()
                     ->toggleable(),
@@ -147,10 +166,63 @@ class ProductsTable
                     ->relationship('vatCategory', 'description')
                     ->preload(),
 
+                SelectFilter::make('stock_status')
+                    ->label('Κατάσταση αποθέματος')
+                    ->options([
+                        'low' => 'Χρειάζεται αναπαραγγελία (χαμηλό/εξαντλημένο)',
+                        'negative' => 'Αρνητικό (backorder)',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $v = $data['value'] ?? null;
+                        if (! $v) {
+                            return $query;
+                        }
+                        // groupBy the PK so HAVING on the withSum alias works on
+                        // sqlite too (MySQL tolerates HAVING without GROUP BY).
+                        $query->where('track_stock', true)->groupBy('products.id');
+                        if ($v === 'negative') {
+                            return $query->havingRaw('COALESCE(stock_on_hand, 0) < 0');
+                        }
+
+                        // low/out: ≤0, or ≤ reorder_level when a threshold is set.
+                        return $query->havingRaw(
+                            'COALESCE(stock_on_hand, 0) <= 0 OR (reorder_level IS NOT NULL AND reorder_level > 0 AND COALESCE(stock_on_hand, 0) <= reorder_level)'
+                        );
+                    }),
+
                 TrashedFilter::make(),
             ])
             ->recordActions([
                 EditAction::make(),
+
+                Action::make('receive_stock')
+                    ->label('Παραλαβή')
+                    ->icon('heroicon-o-plus-circle')
+                    ->color('success')
+                    ->visible(fn (Product $record) => $record->track_stock && ! $record->trashed())
+                    ->schema([
+                        TextInput::make('qty')
+                            ->label('Ποσότητα παραλαβής')
+                            ->numeric()
+                            ->minValue(0.001)
+                            ->required(),
+                        Textarea::make('note')
+                            ->label('Σημείωση')
+                            ->rows(2),
+                    ])
+                    ->action(function (Product $record, array $data): void {
+                        app(StockService::class)->record(
+                            product: $record,
+                            qtyChange: (float) $data['qty'],
+                            reason: StockMovement::REASON_RECEIPT,
+                            note: $data['note'] ?? null,
+                        );
+                        Notification::make()
+                            ->success()
+                            ->title('Παραλαβή καταχωρήθηκε: '.$record->description_short)
+                            ->body('Νέο απόθεμα: '.rtrim(rtrim((string) app(StockService::class)->currentStock($record), '0'), '.'))
+                            ->send();
+                    }),
 
                 Action::make('toggle_active')
                     ->authorize('update')

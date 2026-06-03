@@ -63,6 +63,7 @@ class Product extends Model
         'whmcs_product_id',
         'supplier',
         'track_stock',
+        'reorder_level',
     ];
 
     protected function casts(): array
@@ -77,6 +78,7 @@ class Product extends Model
             'is_active' => 'boolean',
             'is_favorite' => 'boolean',
             'track_stock' => 'boolean',
+            'reorder_level' => 'decimal:3',
         ];
     }
 
