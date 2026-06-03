@@ -281,7 +281,14 @@ class ProductForm
                                         Select::make('billing_cycle')
                                             ->label('Κύκλος')
                                             ->options(BillingCycle::options())
-                                            ->required(),
+                                            ->required()
+                                            // Enforce one row per cycle IN-FORM —
+                                            // the table has unique(product_id,
+                                            // billing_cycle); without this a
+                                            // duplicate cycle throws a raw DB error
+                                            // and the whole product save fails.
+                                            ->distinct()
+                                            ->fixIndistinctState(),
                                         TextInput::make('setup_fee')
                                             ->label('Τέλος εγκατάστασης')
                                             ->numeric()

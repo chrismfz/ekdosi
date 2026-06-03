@@ -176,6 +176,12 @@ class ViewServiceContract extends ViewRecord
                     $record->update([
                         'status' => ServiceContractStatus::Active,
                         'cancel_reason' => null,
+                        // Cancel nulled the cursor — reseed it (no surprise
+                        // back-bill) so the revived service bills again from
+                        // here. Mirrors «Ενεργοποίηση».
+                        'next_due_date' => $record->next_due_date
+                            ?? $record->start_date
+                            ?? now()->toDateString(),
                     ]);
                     Notification::make()->title('Η υπηρεσία επανήλθε')->success()->send();
                     $this->redirectToView($record);

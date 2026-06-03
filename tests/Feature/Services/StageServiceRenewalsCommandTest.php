@@ -85,6 +85,13 @@ class StageServiceRenewalsCommandTest extends TestCase
         $this->assertSame(0, Invoice::where('company_id', $this->tenant->id)->count());
     }
 
+    public function test_unknown_tenant_slug_exits_2(): void
+    {
+        $this->artisan('services:stage-renewals', ['--tenant' => 'no-such-slug'])
+            ->assertExitCode(2);
+        $this->assertSame(0, Invoice::where('company_id', $this->tenant->id)->count());
+    }
+
     public function test_a_contract_without_invoice_type_is_skipped_not_crashing(): void
     {
         $this->makeContract(['description' => 'good']);

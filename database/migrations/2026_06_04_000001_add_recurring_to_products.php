@@ -32,7 +32,10 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('products', function (Blueprint $t) {
-            $t->dropColumn(['is_recurring', 'provisioning_module', 'module_meta']);
+            $t->dropColumn([
+                'is_recurring', 'provisioning_module', 'module_meta',
+                'default_suspend_after_days', 'default_terminate_after_days',
+            ]);
         });
     }
 };
