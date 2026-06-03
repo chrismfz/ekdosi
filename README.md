@@ -35,6 +35,12 @@ MariaDB**, multi-tenant and multi-country from day one.
 - **Quotes (προσφορές)** — non-legal sales offers in their own tables (never
   myDATA-filed, never counted in money/ΦΠΑ); accept → **convert to a draft
   invoice** with bidirectional history. PDF + email + send-log.
+- **Recurring services (υπηρεσίες/συμβόλαια)** — WHMCS-style subscriptions adapted
+  to per-invoice myDATA: a product catalogue with a per-cycle price matrix +
+  per-customer contracts; renewals **stage a DRAFT** (operator-gated, never
+  auto-AADE), the billing cursor advances on issue; opt-in per-product **dunning**
+  (auto suspend/terminate + unsuspend-on-payment, default OFF); MRR/upcoming
+  widgets; a native, WHMCS-independent provisioning seam (servers + Null module).
 - **WHMCS bridge** — operator-gated inbox: WHMCS push/poll → webhook →
   review → issue via the normal invoice lifecycle. PHP-to-PHP via the WHMCS API
   (our plugin lives in `whmcs-plugin/ekdosi_bridge/`).
@@ -87,6 +93,6 @@ verified production setup):
 - **`CLAUDE.md`** — architecture, decisions, conventions, current status (read first).
 - **`INSTALL.md`** — production install (RHEL/nginx/php-fpm/MariaDB, systemd, cron).
 - **`docs/Comparison.md`** — legacy → new mapping + what's net-new / deferred.
-- **`docs/services-quotes-roadmap.md`** — Quotes (built) + Services/recurring (planned).
+- **`docs/services-quotes-roadmap.md`** — Quotes + Services/recurring (both built).
 - **`docs/CLAUDE-history.md`** — archived per-PR history and resolved findings.
 - **`myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** — the AADE spec.
