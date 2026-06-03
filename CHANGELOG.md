@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Προσφορές → Υπηρεσία (μετατροπή).** Νέα ενέργεια **«Μετατροπή σε Υπηρεσία»**
+  σε αποδεκτή προσφορά: φτιάχνει **recurring service contract** (για τις
+  μελλοντικές ανανεώσεις) **+** το **πρώτο πρόχειρο παραστατικό** με ΟΛΕΣ τις
+  γραμμές της προσφοράς (εφάπαξ + recurring 1ης περιόδου, με τις πραγματικές
+  περιγραφές — τίποτα δεν ισοπεδώνεται σε γενικό setup). Οι recurring γραμμές
+  (`product.is_recurring`) ορίζουν το ποσό/προϊόν του συμβολαίου· ο cursor ξεκινά
+  στην έναρξη, οπότε η έκδοση του 1ου προχείρου προωθεί έναν κύκλο (period 1 →
+  2)· οι επόμενες ανανεώσεις = μόνο η recurring γραμμή. `ConvertQuoteToServiceContract`
+  (πρότυπο `ConvertQuoteToInvoice`)· `quotes.converted_service_contract_id`
+  provenance + αμφίδρομο ιστορικό· idempotent. **Μηδέν money/AADE** (πρόχειρο +
+  contract). `ConvertQuoteToServiceContractTest`. **Deploy:** `php artisan migrate`.
 - **Υπηρεσίες/Συμβόλαια (recurring) — data model (PR-A, schema only).** Ο WHMCS-
   style διαχωρισμός: το `products` γίνεται κατάλογος (νέα `is_recurring` +
   `provisioning_module` + `module_meta`) με **per-cycle price matrix**
