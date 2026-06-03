@@ -114,10 +114,15 @@ class InvoicePaymentsRelationManager extends RelationManager
             return;
         }
 
-        if ((float) $data['amount'] > $this->balance() + 0.005) {
+        // Overpay = total really recorded now exceeds what's owed
+        // (gross − credited). NOT compared against balance(): for a cash-term
+        // invoice the pre-payment balance is the SYNTHETIC 0 (settled-at-issue),
+        // which would false-warn on the very first (correct) receipt.
+        $owed = round((float) $invoice->gross_total - (float) $invoice->balanceData()->credited, 2);
+        if ($this->paidSoFar() > $owed + 0.005) {
             Notification::make()->warning()
                 ->title('Υπερπληρωμή')
-                ->body('Το ποσό υπερβαίνει το υπόλοιπο — το τιμολόγιο θα εμφανιστεί ως υπερπληρωμένο.')
+                ->body('Το συνολικό ποσό υπερβαίνει την αξία — το τιμολόγιο θα εμφανιστεί ως υπερπληρωμένο.')
                 ->send();
         }
         Notification::make()->success()->title('Η πληρωμή καταχωρίστηκε')->send();
