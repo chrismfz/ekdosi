@@ -34,6 +34,13 @@ they merge.
   CONFIRM_OUTCOME (παράδοση), CANCEL, **REJECTED** — με χρωματιστά badges + modals
   request/response XML ανά γραμμή. Πριν δεν φαινόταν πουθενά στο UI ο κύκλος ζωής.
 ### Fixed
+- **Panel 403 σε production (λανθάνον — ξεσκεπάστηκε με τη διόρθωση του `APP_ENV`).**
+  Το `User` δήλωνε μόνο `HasTenants`, ΟΧΙ το `FilamentUser` contract — οπότε το
+  Filament επέτρεπε το panel μόνο σε `APP_ENV=local` και έβγαζε **403 σε
+  production**. Δούλευε όλον τον καιρό μόνο επειδή το `.env` ήταν (λάθος) `local`·
+  μόλις μπήκε σωστά `production`, 403 για όλους. Το `User` υλοποιεί πλέον
+  `FilamentUser` με ρητό `canAccessPanel()` = «ανήκει σε ≥1 εταιρεία» (operators-only
+  app· tenancy + Shield policies γκρινιάζουν τα υπόλοιπα). `PanelAccessTest`.
 - **Διακίνηση (myDATA) — απορρίψεις ΑΑΔΕ φαίνονται στο UI.** Ο
   `DeliveryNoteSubmitter` γράφει πλέον forensic `delivery_marks` row
   (`mydata_action='REJECTED'`, null mark, με το response) σε απόρριψη, δίδυμο του
