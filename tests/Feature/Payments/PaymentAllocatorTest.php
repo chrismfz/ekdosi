@@ -70,6 +70,20 @@ class PaymentAllocatorTest extends TestCase
         $this->assertDatabaseMissing('payments', ['reference' => $res->reference, 'invoice_id' => null]);
     }
 
+    public function test_draft_invoices_are_not_paid_amount_goes_on_account(): void
+    {
+        // A DRAFT credit-term invoice must NOT receive a receipt (not yet issued).
+        $draft = $this->a;
+        $draft->update(['local_status' => 'draft']); // A is now draft
+        // B stays active (€500).
+
+        $res = app(PaymentAllocator::class)->allocate($this->customer, 1000, now());
+
+        $this->assertSame(1000.0, $this->balance($draft), 'draft stays fully owed');
+        $this->assertSame(0.0, $this->balance($this->b), 'active B settled (€500)');
+        $this->assertSame(500.0, $res->onAccount, 'the €500 that could not land on the draft → on-account');
+    }
+
     public function test_overpayment_settles_all_and_parks_remainder_on_account(): void
     {
         // owes 1500, pays 2000 → both settled + 500 on-account credit.

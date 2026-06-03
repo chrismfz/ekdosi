@@ -37,17 +37,21 @@ class PaymentAllocator
             throw new InvalidArgumentException('Το ποσό της είσπραξης πρέπει να είναι θετικό.');
         }
 
-        $ref = $reference ?: 'ΕΙΣ-'.now()->format('YmdHis');
+        $ref = $reference ?: 'ΕΙΣ-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
 
         return DB::transaction(function () use ($customer, $amount, $date, $paymentMethodId, $ref, $notes) {
             $remaining = $amount;
             $allocations = [];
 
-            // Live (not cancelled / not AADE-cancelled), non-credit-note invoices,
-            // oldest first. Cash-term & already-paid invoices have balance 0 → skipped.
+            // Live (not cancelled / not AADE-cancelled), ISSUED (active — never a
+            // draft: a receipt must not land on a not-yet-issued document), and
+            // non-credit-note invoices, oldest first. Cash-term & already-paid
+            // invoices have balance 0 → skipped below. A draft's amount flows to
+            // the on-account remainder instead.
             $open = InvoiceScope::live(Invoice::query())
                 ->where('company_id', $customer->company_id)
                 ->where('customer_id', $customer->id)
+                ->where('local_status', 'active')
                 ->whereNull('credited_invoice_id')
                 ->orderBy('issued_at')
                 ->orderBy('id')
