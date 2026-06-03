@@ -232,8 +232,9 @@ class CustomerForm
                         // The old free-text «Σχόλια» (customers.details) tab was
                         // dropped in favour of the richer «Σημειώσεις (εσωτερικές)»
                         // relation manager (dated, multi-entry, with author). The
-                        // `details` column is kept (imported remarks from Epsilon/
-                        // legacy still land there and show read-only on the Καρτέλα).
+                        // `details` column itself was migrated into `notes`
+                        // (source='backup') and dropped; imports now sync a backup
+                        // note via App\Services\Etl\BackupNoteSync.
                     ]),
             ]);
     }

@@ -28,6 +28,42 @@ they merge.
   μαρκάρει ένα σχεδόν-άδειο backup ως unhealthy. `MinimumBackupSizeHealthCheckTest`.
   **Προσοχή στο deploy host:** βάλε `APP_ENV=production` + `APP_DEBUG=false` στο
   `.env` και τρέξε `php artisan config:clear && php artisan config:cache`.
+- **Διακίνηση — «Ιστορικό myDATA» στο δελτίο.** Το `DeliveryNoteResource` απέκτησε
+  read-only relation manager (`DeliveryMarksRelationManager`) που δείχνει ΟΛΟΝ τον
+  audit trail του δελτίου — INSERT (έκδοση), REGISTER_TRANSFER (έναρξη),
+  CONFIRM_OUTCOME (παράδοση), CANCEL, **REJECTED** — με χρωματιστά badges + modals
+  request/response XML ανά γραμμή. Πριν δεν φαινόταν πουθενά στο UI ο κύκλος ζωής.
+### Fixed
+- **Διακίνηση (myDATA) — απορρίψεις ΑΑΔΕ φαίνονται στο UI.** Ο
+  `DeliveryNoteSubmitter` γράφει πλέον forensic `delivery_marks` row
+  (`mydata_action='REJECTED'`, null mark, με το response) σε απόρριψη, δίδυμο του
+  invoice `recordRejection` — ώστε η απόρριψη να φαίνεται στο «Ιστορικό myDATA»
+  του δελτίου (πριν surface-αρόταν μόνο στο CLI report του `sandbox-validate`).
+- **Παραστατικά (myDATA) — απορρίψεις ΑΑΔΕ δεν χάνονται πια.** Όταν η ΑΑΔΕ
+  απορρίπτει υποβολή τιμολογίου (status ≠ Success), ο `MyDataSubmitter` πετά
+  πλέον `MyDataRejected` που κουβαλά το request+response XML ΚΑΙ γράφει μια
+  forensic γραμμή `mydata_marks` (`mydata_action='REJECTED'`, χωρίς MARK) — ώστε
+  ο χειριστής να βλέπει ΤΙ στάλθηκε και ΓΙΑΤΙ απορρίφθηκε από το «Ιστορικό
+  myDATA» του παραστατικού, αντί να χάνεται το round-trip στο throw (πριν: bare
+  RuntimeException μόνο με το μήνυμα). Το `mydata:test-submit` τυπώνει το
+  request/response σε απόρριψη. Παράλληλο του `DeliveryNoteRejected` της
+  διακίνησης. (`MyDataRejected`, `MyDataSubmitter::recordRejection`.)
+- **Δελτίο Αποστολής / Ψηφιακή Διακίνηση (9.3) — sandbox-validated end-to-end
+  στο AADE dev (2026-06-03).** Το `DeliveryNoteSubmitter` payload διορθώθηκε με
+  βάση ζωντανές απορρίψεις: για τύπο 9.x η ΑΑΔΕ **απαγορεύει** `<isDeliveryNote>`,
+  `<currency>` και `<thirdPartyCollection>false>` ([205]/[214]) και **απαιτεί**
+  πλήρη ταυτοποίηση issuer + counterpart (name + address, [204]) — αντίθετα με
+  τον κανόνα μονόδρομου τιμολογίου που τα κρύβει για GR. Πλέον περνά καθαρά όλη η
+  αλυσίδα ΕΚΔΟΣΗ→ΕΝΑΡΞΗ→ΠΑΡΑΔΟΣΗ→ΕΛΕΓΧΟΣ (SendInvoices/RegisterTransfer/
+  ConfirmDeliveryOutcome/RequestDeliveryNoteStatus).
+- **`delivery_marks.mark_time` ήταν `timestamp` αντί `time`** (ο δίδυμος
+  `mydata_marks.mark_time` είναι `time`) — έσκαγε το persist του MARK με
+  «Incorrect datetime value '03:36:16'». Διορθώθηκε η migration + ALTER.
+- **Report writer**: σε απόρριψη AADE, ο `DeliveryNoteSubmitter` πετά πλέον
+  `DeliveryNoteRejected` που μεταφέρει request+response XML, ώστε το `.txt`
+  report των `delivery:sandbox-validate`/`delivery:test-submit` να τα καταγράφει
+  (πριν χάνονταν — η απόρριψη συμβαίνει πριν γραφτεί η `delivery_marks` row).
+
 ### Changed
 - **Σαφήνεια «σημειώσεων» (εσωτερικές vs εκτυπώσιμες).** Το πεδίο `invoices.notes`
   (που ΕΚΤΥΠΩΝΕΤΑΙ στο PDF/email) ξαναβαφτίστηκε «Παρατηρήσεις (εκτυπώνονται στο
@@ -36,10 +72,21 @@ they merge.
   infolist ευθυγραμμισμένα στη λέξη «Παρατηρήσεις», όπως ήδη ο τίτλος στο PDF).
   Στον πελάτη, το παλιό «ξερό» free-text tab «Σχόλια» (`customers.details`)
   **αφαιρέθηκε** υπέρ της πλουσιότερης καρτέλας «Σημειώσεις (εσωτερικές)»
-  (χρονολογημένες, πολλαπλές, με συντάκτη). Η στήλη `details` παραμένει: τα
-  εισαγόμενα σχόλια (Epsilon Remarks / legacy DETAILS) εξακολουθούν να γράφονται
-  εκεί από το ETL και να εμφανίζονται **read-only** στην Καρτέλα ως «Σχόλιο:».
-  Καμία αλλαγή σε imports/δεδομένα.
+  (χρονολογημένες, πολλαπλές, με συντάκτη).
+- **`customers.details` → εσωτερικές σημειώσεις (3 φάσεις, idempotent).** Τα
+  εισαγόμενα σχόλια ενοποιήθηκαν στο νέο σύστημα σημειώσεων: το `notes` απέκτησε
+  πεδίο **`source`** (NULL=χειριστής, `backup`=από import)· νέα υπηρεσία
+  `App\Services\Etl\BackupNoteSync` κάνει **upsert μίας** σημείωσης `source='backup'`
+  ανά πελάτη (Epsilon `Remarks` / legacy `DETAILS`) — re-runnable χωρίς διπλότυπα,
+  σβήνει τη σημείωση αν το σχόλιο αδειάσει στην πηγή, δεν αγγίζει τις χειροκίνητες.
+  Μια **data migration** μετέφερε τα υπάρχοντα `details` και μετά η στήλη **έπεσε**
+  (`dropColumn`). Στην Καρτέλα + στο tab οι imported σημειώσεις φέρουν badge «από
+  backup» και είναι **read-only** (τις διαχειρίζεται το import). Ανθεκτικότητα:
+  το sync χειρίζεται soft-deleted backup note (restore αντί για διπλότυπο), η
+  drop migration **αρνείται** να ρίξει τη στήλη αν υπάρχει σχόλιο χωρίς backup note,
+  και το rollback είναι **μη-καταστροφικό** (η `down` ξαναγράφει τα σχόλια στη
+  στήλη πριν σβήσει τις σημειώσεις). **Deploy:** `php artisan migrate` (3 migrations:
+  add `source` → migrate data → drop `details`).
 - **myDATA consoles — ένα κουμπί «Έλεγχος» αντί για δύο** (έσοδα + έξοδα): οι δύο
   «κατευθύνσεις» (τα-δικά-μας vs αδέσποτα) έκαναν την ΙΔΙΑ κλήση
   (`SalesReconciler`/`ExpenseReconciler`) — τώρα ένα κουμπί κάνει ένα fetch και

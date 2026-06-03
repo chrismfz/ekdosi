@@ -76,6 +76,14 @@ class InternalNotesRelationManager extends RelationManager
                     ->limit(200)
                     ->searchable(),
 
+                TextColumn::make('source')
+                    ->label('Πηγή')
+                    ->badge()
+                    ->color('gray')
+                    // Return null for operator notes so no empty gray badge shows.
+                    ->formatStateUsing(fn ($state, Note $record): ?string => $record->sourceLabel())
+                    ->placeholder('—'),
+
                 TextColumn::make('author.name')
                     ->label('Από')
                     ->placeholder('Σύστημα'),
@@ -96,14 +104,20 @@ class InternalNotesRelationManager extends RelationManager
                     }),
             ])
             ->recordActions([
-                EditAction::make(),
-                DeleteAction::make(),
+                // Imported («από backup») notes are managed by the import — the
+                // next run would revert an edit / restore a delete anyway, so
+                // they're read-only here. Operators annotate with their own note.
+                EditAction::make()->visible(fn (Note $record): bool => ! $record->isImported()),
+                DeleteAction::make()->visible(fn (Note $record): bool => ! $record->isImported()),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
             ])
+            // Imported notes can't be (bulk-)selected → the per-row read-only
+            // guard above can't be bypassed via the bulk delete.
+            ->checkIfRecordIsSelectableUsing(fn (Note $record): bool => ! $record->isImported())
             ->defaultSort('is_pinned', 'desc');
     }
 }

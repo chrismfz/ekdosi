@@ -6,6 +6,7 @@ use App\Filament\Resources\DeliveryNotes\Pages\CreateDeliveryNote;
 use App\Filament\Resources\DeliveryNotes\Pages\EditDeliveryNote;
 use App\Filament\Resources\DeliveryNotes\Pages\ListDeliveryNotes;
 use App\Filament\Resources\DeliveryNotes\Pages\ViewDeliveryNote;
+use App\Filament\Resources\DeliveryNotes\RelationManagers\DeliveryMarksRelationManager;
 use App\Filament\Resources\DeliveryNotes\Schemas\DeliveryNoteForm;
 use App\Filament\Resources\DeliveryNotes\Schemas\DeliveryNoteInfolist;
 use App\Filament\Resources\DeliveryNotes\Tables\DeliveryNotesTable;
@@ -97,6 +98,13 @@ class DeliveryNoteResource extends Resource
     public static function table(Table $table): Table
     {
         return DeliveryNotesTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            DeliveryMarksRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

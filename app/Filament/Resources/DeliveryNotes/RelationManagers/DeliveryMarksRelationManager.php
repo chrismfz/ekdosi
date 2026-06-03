@@ -1,10 +1,8 @@
 <?php
 
-namespace App\Filament\Resources\Invoices\RelationManagers;
+namespace App\Filament\Resources\DeliveryNotes\RelationManagers;
 
-use App\Filament\Pages\MyDataMarkDetail;
 use Filament\Actions\Action;
-use Filament\Facades\Filament;
 use Filament\Forms\Components\Textarea;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
@@ -12,27 +10,23 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
 /**
- * Full audit trail of every myDATA INSERT / CANCEL submission for
- * this invoice. Read-only — the rows are written by the future
- * MyDataSubmitter service (PR #7); operators only view them here.
- *
- * Two "View XML" actions surface the raw request and response from
- * AADE in modals — important for legal audit and for diagnosing
- * rejections. The XML is stored verbatim per the schema (request
- * + response mediumText columns).
+ * Read-only audit trail of every myDATA call for this δελτίο — the issue
+ * INSERT, each e-transport lifecycle event (REGISTER_TRANSFER / CONFIRM_OUTCOME
+ * / CANCEL) and any AADE REJECTED attempt. Two "View XML" actions surface the
+ * raw request/response per row (legal audit + diagnosing rejections). The δελτίο
+ * had no history view before; this is the delivery twin of the invoice
+ * MyDataMarksRelationManager.
  */
-class MyDataMarksRelationManager extends RelationManager
+class DeliveryMarksRelationManager extends RelationManager
 {
-    protected static string $relationship = 'mydataMarks';
+    protected static string $relationship = 'marks';
 
-    protected static ?string $title = 'myDATA submission history';
+    protected static ?string $title = 'Ιστορικό myDATA';
 
     protected static ?string $recordTitleAttribute = 'mark';
 
     public function form(Schema $schema): Schema
     {
-        // Read-only RelationManager; form is required by the contract
-        // but never used.
         return $schema->components([]);
     }
 
@@ -41,35 +35,29 @@ class MyDataMarksRelationManager extends RelationManager
         return $table
             ->columns([
                 TextColumn::make('mydata_action')
-                    ->label('Action')
+                    ->label('Ενέργεια')
                     ->badge()
                     ->color(fn (?string $state) => match ($state) {
-                        'INSERT' => 'success',  // real filing, MARK issued
-                        'CANCEL' => 'danger',   // real cancellation, MARK preserved
-                        'REJECTED' => 'danger', // AADE refused the submission (null mark, response XML kept)
-                        'DRY_RUN' => 'info',    // preview from "Preview submission XML"
-                        'SKIPPED', 'SKIPPED_CANCEL' => 'warning',  // NullSubmitter: deliberate non-filing
+                        'INSERT' => 'success',           // έκδοση — MARK εκδόθηκε
+                        'REGISTER_TRANSFER' => 'info',   // έναρξη διακίνησης
+                        'CONFIRM_OUTCOME' => 'success',  // παράδοση
+                        'CANCEL' => 'danger',            // ακύρωση
+                        'REJECTED' => 'danger',          // η ΑΑΔΕ απέρριψε (null mark, κρατήθηκε το response)
                         default => 'gray',
                     }),
 
                 TextColumn::make('mark')
                     ->label('MARK')
-                    ->placeholder('—')  // SKIPPED + DRY_RUN rows have null mark
-                    ->copyable()
-                    // Link the MARK to its full detail page (header + lines +
-                    // XML). Null marks (DRY_RUN / SKIPPED) stay plain text.
-                    ->color(fn ($record) => $record->mark ? 'primary' : null)
-                    ->url(fn ($record) => $record->mark
-                        ? MyDataMarkDetail::getUrl(['mark' => $record->mark, 'tenant' => Filament::getTenant()])
-                        : null),
+                    ->placeholder('—')   // REJECTED rows have null mark
+                    ->copyable(),
 
                 TextColumn::make('mark_date')
-                    ->label('Date')
+                    ->label('Ημ/νία')
                     ->date('d/m/Y')
                     ->placeholder('—'),
 
                 TextColumn::make('mark_time')
-                    ->label('Time')
+                    ->label('Ώρα')
                     ->time('H:i:s')
                     ->placeholder('—'),
 
@@ -91,7 +79,7 @@ class MyDataMarksRelationManager extends RelationManager
                     ->icon('heroicon-o-arrow-up-tray')
                     ->color('gray')
                     ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Close')
+                    ->modalCancelActionLabel('Κλείσιμο')
                     ->schema(fn ($record) => [
                         Textarea::make('request_xml')
                             ->label(false)
@@ -100,14 +88,14 @@ class MyDataMarksRelationManager extends RelationManager
                             ->columnSpanFull()
                             ->readOnly(),
                     ])
-                    ->modalHeading(fn ($record) => 'Request XML — MARK '.$record->mark),
+                    ->modalHeading(fn ($record) => 'Request XML — '.($record->mydata_action ?? '')),
 
                 Action::make('view_response_xml')
                     ->label('Response XML')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('gray')
                     ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Close')
+                    ->modalCancelActionLabel('Κλείσιμο')
                     ->schema(fn ($record) => [
                         Textarea::make('response_xml')
                             ->label(false)
@@ -116,7 +104,7 @@ class MyDataMarksRelationManager extends RelationManager
                             ->columnSpanFull()
                             ->readOnly(),
                     ])
-                    ->modalHeading(fn ($record) => 'Response XML — MARK '.$record->mark),
+                    ->modalHeading(fn ($record) => 'Response XML — '.($record->mydata_action ?? '')),
             ])
             ->headerActions([])
             ->toolbarActions([])
