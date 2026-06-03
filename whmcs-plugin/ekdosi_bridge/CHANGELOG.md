@@ -10,6 +10,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-06-03
+### Added
+- **One-click straight-to-edit on the invoice list** (kills the WHMCS 8.9+
+  view-only «Manage Invoice» extra click). A footer script — LIST page only —
+  repoints each row's invoice link from the view-only target (the new
+  `/billing/invoices/N` path or legacy `invoices.php?action=view|manage&id=N`)
+  to the legacy editable URL `invoices.php?action=edit&id=N`. That page is the
+  ONLY place our `AdminInvoicesControlsOutput` buttons render (the hook fires
+  neither on view-only nor on the new billing URL), so one click now lands on
+  the editable page WITH the ekdosi/relid buttons. Defensive: only rewrites
+  known view-only URL shapes, silently no-ops otherwise (native per-row «Edit»
+  link stays the fallback), all in try/catch.
+
 ## [0.30.0] — 2026-06-02
 ### Changed
 - **show() reads tblinvoices once** (review NIT). The fetched invoice row is now
