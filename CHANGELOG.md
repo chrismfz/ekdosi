@@ -101,6 +101,17 @@ they merge.
   CONFIRM_OUTCOME (παράδοση), CANCEL, **REJECTED** — με χρωματιστά badges + modals
   request/response XML ανά γραμμή. Πριν δεν φαινόταν πουθενά στο UI ο κύκλος ζωής.
 ### Fixed
+- **«Επί Πιστώσει» έδειχνε ΟΛΑ τα τιμολόγια «Εξοφλημένα» χωρίς πληρωμή (root cause
+  του «phantom payment» στο ΤΙΜ385).** Ο `MyDataLookupSeeder` έσπερνε ΟΛΕΣ τις
+  μεθόδους πληρωμής με `due_days=0` — και το «Επί Πιστώσει» (§8.12 κωδ. 5). Με
+  due_days=0 το `InvoiceBalance` τη θεωρεί cash-term → «εξοφλημένο στην έκδοση,
+  paid=owed, balance 0, ΧΩΡΙΣ πληρωμή» (γι' αυτό 0 credit rows στην Καρτέλα· δεν
+  υπήρχε πληρωμή να σβηστεί). Πλέον το seed δίνει στο «Επί Πιστώσει» **due_days=30**
+  (credit term)· οι υπόλοιπες μένουν 0. Το `due_days` helperText έγινε ελληνικό +
+  προειδοποιεί ρητά. **Υπάρχοντες tenants (το seed ΔΕΝ ξαναγράφει υπάρχοντα):**
+  Setup → Payment Methods → «Επί Πιστώσει» → due_days>0, μετά
+  `php artisan invoices:recompute-balances --company=SLUG` για να φρεσκάρει τα
+  cached badges. `PaymentMethodCreditTermSeedTest`.
 - **Εικόνα από myDATA — ΦΠΑ: ο μήνας κρίνεται με το ΔΙΚΟ του πρόσημο.** Στην κάρτα
   «Τρίμηνο — Καθαρό ΦΠΑ» η ένδειξη του μήνα δανειζόταν την ετικέτα/χρώμα του
   τριμήνου (`$quarter->isPayable()`) και δειχνόταν ως `abs()` — έτσι μια

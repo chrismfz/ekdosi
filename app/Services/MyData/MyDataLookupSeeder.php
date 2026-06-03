@@ -170,15 +170,22 @@ class MyDataLookupSeeder
     }
 
     /**
-     * Seed the standard §8.12 payment methods (1–8) with their myDATA type set
-     * and due_days=0 (settled-at-issue; operator sets credit terms per method).
-     * Matched by description. @return array{created:int, skipped:int}
+     * Seed the standard §8.12 payment methods (1–8) with their myDATA type set.
+     * Most are settled-at-issue (due_days=0); «Επί Πιστώσει» is a credit term by
+     * definition and gets due_days=30 (see below). Matched by description.
+     *
+     * @return array{created:int, skipped:int}
      */
     public function seedPaymentMethods(Company $tenant): array
     {
         $rows = [];
         foreach (Codes::PAYMENT_METHODS as $code => $description) {
-            $rows[] = ['description' => $description, 'mydata_payment_type' => $code, 'due_days' => 0];
+            // «Επί Πιστώσει» MUST NOT settle at issue. With due_days=0 InvoiceBalance
+            // treats it as cash and marks every credit-term invoice «Εξοφλημένο»
+            // with no payment (the ΤΙΜ385 phantom-paid bug). Default it to 30;
+            // everything else is genuinely settled-at-issue (0).
+            $dueDays = $description === 'Επί Πιστώσει' ? 30 : 0;
+            $rows[] = ['description' => $description, 'mydata_payment_type' => $code, 'due_days' => $dueDays];
         }
 
         return $this->seedRows(PaymentMethod::class, 'description', $rows, $tenant->getKey());
@@ -199,6 +206,7 @@ class MyDataLookupSeeder
     /**
      * Seed a practical set of metric units (AADE §8.13 quantities + the common
      * service units ΩΡΑ/ΜΗΝΑΣ/ΕΤΟΣ/ΥΠΗΡΕΣΙΑ). Matched by name.
+     *
      * @return array{created:int, skipped:int}
      */
     public function seedMetricUnits(Company $tenant): array
@@ -211,6 +219,7 @@ class MyDataLookupSeeder
     /**
      * Seed common delivery methods. NOT an AADE-codified table — these are
      * sensible everyday defaults. Matched by description.
+     *
      * @return array{created:int, skipped:int}
      */
     public function seedDeliveryMethods(Company $tenant): array
@@ -224,6 +233,7 @@ class MyDataLookupSeeder
      * Seed a minimal generic product-category set (aligned with the income
      * categories: Υπηρεσίες/Εμπορεύματα/Προϊόντα), markup 0. NOT AADE-codified —
      * business-specific; the operator refines. Matched by description_short.
+     *
      * @return array{created:int, skipped:int}
      */
     public function seedProductCategories(Company $tenant): array

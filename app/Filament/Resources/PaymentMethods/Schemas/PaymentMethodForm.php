@@ -19,12 +19,12 @@ class PaymentMethodForm
                     ->columnSpanFull(),
 
                 TextInput::make('due_days')
-                    ->label('Due days')
+                    ->label('Ημέρες πίστωσης (due days)')
                     ->numeric()
                     ->minValue(0)
                     ->default(0)
                     ->required()
-                    ->helperText('0 = cash (does not count toward customer balance). >0 = credit terms; counted in customer balance.'),
+                    ->helperText('0 = εξοφλείται στην έκδοση (ΔΕΝ μετράει στο υπόλοιπο πελάτη). >0 = επί πιστώσει, μετράει ως ανοιχτή οφειλή μέχρι να καταχωριστεί πληρωμή. ⚠ Η «Επί Πιστώσει» πρέπει να έχει >0 — αλλιώς κάθε τιμολόγιο εμφανίζεται «Εξοφλημένο» χωρίς πληρωμή.'),
 
                 // G9: maps this method to an AADE §8.12 payment type so myDATA
                 // filings carry the real type instead of always 3 (cash).
