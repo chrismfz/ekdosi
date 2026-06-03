@@ -132,7 +132,7 @@ class StageServiceRenewal
                 'company_id' => $contract->company_id,
                 'invoice_id' => $invoice->id,
                 'product_id' => $contract->product_id,
-                'qty' => 1,
+                'qty' => $contract->quantity ?: 1,
                 'price_per_item' => $contract->amount,
                 'discount' => 0,
                 'vat_percent' => $contract->vat_percent,

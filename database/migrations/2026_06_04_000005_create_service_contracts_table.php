@@ -40,7 +40,8 @@ return new class extends Migration
 
             $t->string('description', 255)->nullable();
             $t->string('billing_cycle', 20);            // App\Enums\BillingCycle value
-            $t->decimal('amount', 14, 2)->default(0);   // recurring price (snapshot)
+            $t->decimal('quantity', 9, 3)->default(1);  // WHMCS «quantity» — units of the recurring charge
+            $t->decimal('amount', 14, 2)->default(0);   // recurring price per unit (snapshot)
             $t->decimal('setup_fee', 14, 2)->default(0);
             $t->decimal('vat_percent', 5, 2)->default(0);
 

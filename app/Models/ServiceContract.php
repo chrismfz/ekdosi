@@ -38,6 +38,7 @@ class ServiceContract extends Model
         'server_id',
         'description',
         'billing_cycle',
+        'quantity',
         'amount',
         'setup_fee',
         'vat_percent',
@@ -63,6 +64,7 @@ class ServiceContract extends Model
         return [
             'billing_cycle' => BillingCycle::class,
             'status' => ServiceContractStatus::class,
+            'quantity' => 'decimal:3',
             'amount' => 'decimal:2',
             'setup_fee' => 'decimal:2',
             'vat_percent' => 'decimal:2',
