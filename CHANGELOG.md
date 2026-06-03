@@ -16,6 +16,23 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Δελτίο Αποστολής / Ψηφιακή Διακίνηση (9.3) — sandbox-validated end-to-end
+  στο AADE dev (2026-06-03).** Το `DeliveryNoteSubmitter` payload διορθώθηκε με
+  βάση ζωντανές απορρίψεις: για τύπο 9.x η ΑΑΔΕ **απαγορεύει** `<isDeliveryNote>`,
+  `<currency>` και `<thirdPartyCollection>false>` ([205]/[214]) και **απαιτεί**
+  πλήρη ταυτοποίηση issuer + counterpart (name + address, [204]) — αντίθετα με
+  τον κανόνα μονόδρομου τιμολογίου που τα κρύβει για GR. Πλέον περνά καθαρά όλη η
+  αλυσίδα ΕΚΔΟΣΗ→ΕΝΑΡΞΗ→ΠΑΡΑΔΟΣΗ→ΕΛΕΓΧΟΣ (SendInvoices/RegisterTransfer/
+  ConfirmDeliveryOutcome/RequestDeliveryNoteStatus).
+- **`delivery_marks.mark_time` ήταν `timestamp` αντί `time`** (ο δίδυμος
+  `mydata_marks.mark_time` είναι `time`) — έσκαγε το persist του MARK με
+  «Incorrect datetime value '03:36:16'». Διορθώθηκε η migration + ALTER.
+- **Report writer**: σε απόρριψη AADE, ο `DeliveryNoteSubmitter` πετά πλέον
+  `DeliveryNoteRejected` που μεταφέρει request+response XML, ώστε το `.txt`
+  report των `delivery:sandbox-validate`/`delivery:test-submit` να τα καταγράφει
+  (πριν χάνονταν — η απόρριψη συμβαίνει πριν γραφτεί η `delivery_marks` row).
+
 ### Changed
 - **Σαφήνεια «σημειώσεων» (εσωτερικές vs εκτυπώσιμες).** Το πεδίο `invoices.notes`
   (που ΕΚΤΥΠΩΝΕΤΑΙ στο PDF/email) ξαναβαφτίστηκε «Παρατηρήσεις (εκτυπώνονται στο

@@ -112,9 +112,19 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertInstanceOf(AadeInvoice::class, $aade);
 
         $header = $aade->getInvoiceHeader();
-        $this->assertTrue($header->getIsDeliveryNote());
+        // AADE FORBIDS <isDeliveryNote> and <currency> for a 9.x type ([205],
+        // sandbox-proven 2026-06-03) — the 9.x type already marks it a δελτίο.
+        $this->assertNotTrue($header->getIsDeliveryNote());
+        $this->assertNull($header->getCurrency());
         $this->assertSame(8, $header->getMovePurpose()->value);
         $this->assertSame('9.3', $header->getInvoiceType()->value);
+
+        // Issuer + counterpart carry full identification (name + address) —
+        // mandatory for 9.x ([204]), unlike the monetary-invoice GR rule.
+        $this->assertSame('Delivery test', $aade->getIssuer()->getName());
+        $this->assertNotNull($aade->getIssuer()->getAddress());
+        $this->assertSame('Παραλήπτης ΑΕ', $aade->getCounterpart()->getName());
+        $this->assertSame('Παράδοσης', $aade->getCounterpart()->getAddress()->getStreet());
 
         // OtherDeliveryNoteHeader carries both addresses.
         $odh = $header->getOtherDeliveryNoteHeader();
@@ -141,12 +151,18 @@ class DeliveryNoteSubmitterTest extends TestCase
 
         $this->assertNotEmpty($xml);
         $this->assertStringContainsString('<invoiceType>9.3</invoiceType>', $xml);
-        $this->assertStringContainsString('<isDeliveryNote>true</isDeliveryNote>', $xml);
+        // AADE FORBIDS these for a 9.x type ([205]/[214], sandbox-proven 2026-06-03).
+        $this->assertStringNotContainsString('<isDeliveryNote>', $xml);
+        $this->assertStringNotContainsString('<currency>', $xml);
+        $this->assertStringNotContainsString('<thirdPartyCollection>', $xml); // only sent when true
         $this->assertStringContainsString('<movePurpose>8</movePurpose>', $xml);
         $this->assertStringContainsString('<otherDeliveryNoteHeader>', $xml);
         $this->assertStringContainsString('<loadingAddress>', $xml);
         $this->assertStringContainsString('<deliveryAddress>', $xml);
         $this->assertStringContainsString('<vatCategory>8</vatCategory>', $xml);
+        // Full issuer + counterpart identification is mandatory for 9.x ([204]).
+        $this->assertStringContainsString('<name>Delivery test</name>', $xml);   // issuer
+        $this->assertStringContainsString('<name>Παραλήπτης ΑΕ</name>', $xml);    // counterpart
         // «Χαρακτηρισμός Συναλλαγών 3 = Διακίνηση» — mandatory per Α.1123/2024 §5.2.2.
         $this->assertStringContainsString('category3', $xml);
         // Value-less: no payment methods on a delivery note.

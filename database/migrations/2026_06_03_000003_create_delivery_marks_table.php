@@ -31,7 +31,7 @@ return new class extends Migration
             $t->mediumText('request')->nullable();
             $t->mediumText('response')->nullable();
             $t->date('mark_date')->nullable();
-            $t->timestamp('mark_time')->nullable();
+            $t->time('mark_time')->nullable();   // wall-clock of the MARK (twin of mydata_marks.mark_time)
             $t->timestamps();
             $t->unique(['company_id', 'legacy_id']);
             $t->index('delivery_note_id');

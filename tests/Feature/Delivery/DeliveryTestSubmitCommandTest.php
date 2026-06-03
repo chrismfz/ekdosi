@@ -54,7 +54,8 @@ class DeliveryTestSubmitCommandTest extends TestCase
 
         $this->assertSame(0, $code);
         $this->assertStringContainsString('<invoiceType>9.3</invoiceType>', $out);
-        $this->assertStringContainsString('<isDeliveryNote>true</isDeliveryNote>', $out);
+        // 9.x payload: no <isDeliveryNote> ([205]); the 9.3 type marks the δελτίο.
+        $this->assertStringNotContainsString('<isDeliveryNote>', $out);
         $this->assertStringContainsString('category3', $out); // «Διακίνηση» characterization
     }
 
