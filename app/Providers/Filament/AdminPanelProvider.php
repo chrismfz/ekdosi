@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Pages\Dashboard;
 use App\Models\Company;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -29,6 +30,15 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->profile()                       // adds "Edit profile" to the user menu (Filament built-in)
+            // TOTP two-factor (authenticator app) + recovery codes. The setup,
+            // QR enrollment, recovery-code generation and disable/regenerate
+            // all live on the profile page automatically. Opt-in per user by
+            // default; set EKDOSI_REQUIRE_2FA=true to force enrolment on next
+            // login once the whole team is set up.
+            ->multiFactorAuthentication(
+                [AppAuthentication::make()->recoverable()],
+                isRequired: (bool) config('ekdosi.require_2fa', false),
+            )
             ->tenant(Company::class, slugAttribute: 'slug')
             ->colors([
                 'primary' => Color::Amber,
