@@ -17,6 +17,19 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Αποθήκη / απόθεμα — foundation (S1).** Opt-in stock tracking ανά προϊόν
+  (`products.track_stock` — εμπορεύματα ναι, υπηρεσίες όχι· ό,τι δεν είναι tracked
+  το αγνοεί ο μηχανισμός) + signed ledger `stock_movements` (τρέχον on-hand =
+  SUM, **derived ποτέ cached** όπως το InvoiceBalance· auditable/reversible) +
+  `App\Services\Stock\StockService` (current/record, **warn-only — ποτέ δεν
+  μπλοκάρει πώληση**, επιτρέπει αρνητικό). UI: στήλη «Απόθεμα» στα Products
+  (κόκκινο σε αρνητικό· «—» για μη-tracked· το legacy fractional `reserve`
+  ξεχώρισε ως «Reserve (legacy)» για να μη μπερδεύεται) + tab «Κινήσεις
+  αποθέματος» ανά προϊόν με χειροκίνητη «Καταχώριση κίνησης»
+  (Παραλαβή/Αρχική απογραφή/Διόρθωση). Ledger append-only (διορθώνεις με νέα
+  κίνηση). Επόμενα: S2 = auto-έξοδος (τιμολόγιο + ΔΑΠ-Πώληση, whichever-first με
+  link/dedup)· S3 = auto-είσοδος προμηθευτή + αναστροφές ακύρωσης/πιστωτικού.
+  `StockServiceTest`. **Deploy:** `php artisan migrate`.
 - **2FA (TOTP) + root redirect.** Ενεργοποιήθηκε το ενσωματωμένο MFA του Filament:
   `User` υλοποιεί `HasAppAuthentication`(+`Recovery`), νέες encrypted-at-rest στήλες
   `app_authentication_secret`/`_recovery_codes`, και το panel

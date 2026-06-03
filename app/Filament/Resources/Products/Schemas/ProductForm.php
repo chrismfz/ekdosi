@@ -9,8 +9,8 @@ use App\Models\VatCategory;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -54,6 +54,11 @@ class ProductForm
                                     ->label('Active')
                                     ->default(true)
                                     ->helperText('Inactive products stay in the catalogue for invoice history but are hidden from new-invoice pickers.'),
+
+                                Toggle::make('track_stock')
+                                    ->label('Παρακολούθηση αποθέματος')
+                                    ->default(false)
+                                    ->helperText('Μέτρα απόθεμα γι\' αυτό το είδος (εμπορεύματα). Άφησέ το κλειστό για υπηρεσίες. Το απόθεμα είναι ενημερωτικό — δεν μπλοκάρει ποτέ πώληση.'),
 
                                 TextInput::make('sku')
                                     ->label('SKU')
@@ -283,6 +288,7 @@ class ProductForm
         if (! $id) {
             return 0.0;
         }
+
         return (float) (VatCategory::query()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->whereKey($id)

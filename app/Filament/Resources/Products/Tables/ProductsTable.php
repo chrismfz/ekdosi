@@ -17,6 +17,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class ProductsTable
 {
@@ -76,11 +77,23 @@ class ProductsTable
                     ->alignRight()
                     ->toggleable(),
 
-                TextColumn::make('reserve')
-                    ->label('Stock')
+                TextColumn::make('stock_on_hand')
+                    ->label('Απόθεμα')
+                    // Real on-hand from the stock ledger (SUM of movements).
+                    // Only meaningful for track_stock products; others show «—».
+                    ->state(fn ($record) => $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null)
                     ->numeric(decimalPlaces: 3)
+                    ->badge()
+                    ->color(fn ($record) => $record->track_stock && (float) ($record->stock_on_hand ?? 0) < 0 ? 'danger' : 'gray')
+                    ->placeholder('—')
                     ->alignRight()
                     ->toggleable(),
+
+                TextColumn::make('reserve')
+                    ->label('Reserve (legacy)')
+                    ->numeric(decimalPlaces: 3)
+                    ->alignRight()
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 IconColumn::make('is_active')
                     ->label('Active')
@@ -107,6 +120,7 @@ class ProductsTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->modifyQueryUsing(fn (Builder $query) => $query->withSum('stockMovements as stock_on_hand', 'qty_change'))
             ->filters([
                 TernaryFilter::make('is_active')
                     ->label('Active')
