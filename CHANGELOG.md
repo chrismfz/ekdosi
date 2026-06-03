@@ -20,6 +20,15 @@ they merge.
 - **Μενού — οι «Πληρωμές» μετακινήθηκαν** από το τεχνικό group «Data» σε νέο
   group **«Είσπραξη/Πληρωμές»**.
 ### Added
+- **Πληρωμές — Επιστροφές / refunds (#3).** Νέα στήλη `payments.kind`
+  (`payment`|`refund`, default `payment`)· μια επιστροφή αποθηκεύεται με **θετικό**
+  ποσό αλλά **αφαιρείται** από το paid παντού (`Payment::NET_AMOUNT_SQL`):
+  `InvoiceBalance`, dashboard receivables, `Customer::withOutstandingBalance`,
+  Καρτέλα (stats/aging/yearly + **γραμμή DEBIT «Επιστροφή χρημάτων»**). UI:
+  action «Επιστροφή χρημάτων» στο cockpit τιμολογίου (ανά ΤΙΜ) + στην Καρτέλα
+  (customer-level / on-account)· «Τύπος» badge· labels σε ledger/CSV/PDF.
+  Κλείνει τον κύκλο «χρήμα πίσω» (μαζί με ακύρωση/πιστωτικό). `RefundTest`.
+  **Deploy:** `php artisan migrate`.
 - **Πληρωμές — Χρήση πίστωσης (#1) & Χειροκίνητη κατανομή (#2).** Στην Καρτέλα:
   «Χρήση πίστωσης» μετακινεί διαθέσιμη on-account πίστωση πάνω σε ανοιχτό
   τιμολόγιο (re-point των payment rows — **net-zero** στο συνολικό υπόλοιπο,
