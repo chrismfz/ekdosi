@@ -7,6 +7,7 @@ use App\Models\User;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 /**
@@ -26,6 +27,7 @@ class PanelAccessTest extends TestCase
     public function test_panel_access_requires_tenant_membership(): void
     {
         $panel = \Mockery::mock(Panel::class);
+        $panel->shouldReceive('getId')->andReturn('admin');   // used by the deny-path log
 
         $user = User::create([
             'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
@@ -42,5 +44,22 @@ class PanelAccessTest extends TestCase
 
         // Belongs to a tenant → can reach the panel.
         $this->assertTrue($user->fresh()->canAccessPanel($panel));
+    }
+
+    public function test_denied_access_is_logged_so_it_is_never_a_silent_403(): void
+    {
+        $panel = \Mockery::mock(Panel::class);
+        $panel->shouldReceive('getId')->andReturn('admin');
+
+        $user = User::create([
+            'name' => 'Orphan', 'email' => 'orphan-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]);
+
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(fn (string $message, array $ctx): bool => str_contains($message, 'no company')
+                && $ctx['user_id'] === $user->getKey());
+
+        $this->assertFalse($user->canAccessPanel($panel));
     }
 }

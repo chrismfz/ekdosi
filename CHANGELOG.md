@@ -40,7 +40,12 @@ they merge.
   production**. Δούλευε όλον τον καιρό μόνο επειδή το `.env` ήταν (λάθος) `local`·
   μόλις μπήκε σωστά `production`, 403 για όλους. Το `User` υλοποιεί πλέον
   `FilamentUser` με ρητό `canAccessPanel()` = «ανήκει σε ≥1 εταιρεία» (operators-only
-  app· tenancy + Shield policies γκρινιάζουν τα υπόλοιπα). `PanelAccessTest`.
+  app· tenancy + Shield policies γκρινιάζουν τα υπόλοιπα). **Ορατότητα (το γυμνό
+  403 δεν άφηνε ίχνος):** (α) το deny κάνει `Log::warning` με user/email/panel —
+  greppable· (β) custom `errors/403` εξηγεί «δεν έχεις ανατεθεί σε εταιρεία —
+  επικοινώνησε με διαχειριστή» + Αποσύνδεση· (γ) η λίστα Users δείχνει badge
+  «χωρίς εταιρεία» + filter ώστε ο admin να πιάνει τους ορφανούς πριν κλειδωθούν.
+  `PanelAccessTest`.
 - **Διακίνηση (myDATA) — απορρίψεις ΑΑΔΕ φαίνονται στο UI.** Ο
   `DeliveryNoteSubmitter` γράφει πλέον forensic `delivery_marks` row
   (`mydata_action='REJECTED'`, null mark, με το response) σε απόρριψη, δίδυμο του

@@ -40,7 +40,20 @@ class User extends Authenticatable implements FilamentUser, HasTenants
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return $this->companies()->exists();
+        if ($this->companies()->exists()) {
+            return true;
+        }
+
+        // Leave a breadcrumb: a bare 403 with no log is undebuggable months
+        // later. This is the single line that turns "why is this user locked
+        // out?" into a grep.
+        \Illuminate\Support\Facades\Log::warning('Panel access denied — user belongs to no company.', [
+            'user_id' => $this->getKey(),
+            'email' => $this->email,
+            'panel' => $panel->getId(),
+        ]);
+
+        return false;
     }
 
     /**
