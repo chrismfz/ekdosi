@@ -178,9 +178,16 @@ class ViewQuote extends ViewRecord
                     Select::make('billing_cycle')
                         ->label('Κύκλος χρέωσης')
                         ->options(collect(BillingCycle::options())->except(BillingCycle::OneTime->value)->toArray())
-                        ->default(fn (Quote $record) => (
-                            $record->loadMissing('lines.product')->firstRecurringLine()?->product?->default_billing_cycle
-                        ) ?: BillingCycle::Annual->value)
+                        // Default to the recurring product's first ENABLED cycle
+                        // (cycles live in product_billing_prices, not on products);
+                        // else Annual.
+                        ->default(function (Quote $record) {
+                            $cycle = $record->loadMissing('lines.product.billingPrices')
+                                ->firstRecurringLine()?->product?->billingPrices
+                                ->firstWhere('is_enabled', true)?->billing_cycle;
+
+                            return ($cycle instanceof BillingCycle ? $cycle->value : null) ?: BillingCycle::Annual->value;
+                        })
                         ->required(),
                     TextInput::make('recurring_amount')
                         ->label('Επαναλαμβανόμενο ποσό (καθαρό, ανά κύκλο)')
