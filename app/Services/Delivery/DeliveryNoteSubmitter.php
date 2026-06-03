@@ -440,6 +440,33 @@ class DeliveryNoteSubmitter
         return (new InvoicesDocWriter)->asXml(new InvoicesDoc([$payload]));
     }
 
+    /**
+     * Persist a forensic REJECTED audit row (request + response XML, no MARK)
+     * when AADE refuses a delivery note — so the operator sees WHAT was sent and
+     * WHY from the δελτίο's «Ιστορικό myDATA». Best-effort: an audit-write
+     * failure must never mask the real rejection. Twin of MyDataSubmitter::recordRejection.
+     */
+    private function recordRejection(DeliveryNote $note, string $requestXml, string $responseXml): void
+    {
+        try {
+            DB::transaction(fn () => DeliveryMark::create([
+                'company_id' => $note->company_id,
+                'delivery_note_id' => $note->id,
+                'mark' => null,
+                'mydata_action' => 'REJECTED',
+                'request' => $requestXml,
+                'response' => $responseXml,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('myDATA delivery: failed to persist REJECTED audit row', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     private function persistResponse(
         DeliveryNote $note,
         string $xml,
@@ -451,6 +478,10 @@ class DeliveryNoteSubmitter
 
         if ($first === null || $first->getStatusCode() !== 'Success') {
             $errors = $first ? $this->describeResponseErrors($first) : 'no response';
+            // Persist a forensic REJECTED row so the rejection is visible in the
+            // δελτίο's «Ιστορικό myDATA» UI (not only in the CLI report), then
+            // carry the XML on the throw. Mirrors MyDataSubmitter::recordRejection.
+            $this->recordRejection($note, $xml, $responseXml);
             throw new DeliveryNoteRejected(
                 "myDATA rejected the delivery note: {$errors}",
                 $xml,

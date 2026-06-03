@@ -8,6 +8,7 @@ use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteLine;
 use App\Models\InvoiceType;
+use App\Services\Delivery\DeliveryNoteRejected;
 use App\Services\Delivery\DeliveryNoteSubmitter;
 use Firebed\AadeMyData\Models\Invoice as AadeInvoice;
 use GuzzleHttp\Handler\MockHandler;
@@ -255,6 +256,51 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('registered', $fresh->delivery_state);
         $this->assertSame('active', $fresh->local_status);
         $this->assertStringContainsString('TimologioQR', (string) $fresh->mydata_url);
+    }
+
+    public function test_rejected_submission_persists_rejected_row_and_throws(): void
+    {
+        $note = $this->makeNote();
+
+        $mock = new MockHandler([
+            new GuzzleResponse(200, [], $this->validationErrorXml()),
+        ]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+            $this->fail('expected DeliveryNoteRejected on a non-Success response');
+        } catch (DeliveryNoteRejected $e) {
+            $this->assertStringContainsString('rejected', $e->getMessage());
+            $this->assertStringContainsString('<invoiceType>', $e->requestXml);
+            $this->assertStringContainsString('ValidationError', $e->responseXml);
+        }
+
+        // A forensic REJECTED row is persisted (visible in the δελτίο «Ιστορικό»).
+        $this->assertDatabaseHas('delivery_marks', [
+            'delivery_note_id' => $note->id,
+            'mydata_action' => 'REJECTED',
+            'mark' => null,
+        ]);
+        // The note is NOT marked filed.
+        $this->assertNull($note->fresh()->mydata_state);
+    }
+
+    private function validationErrorXml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <statusCode>ValidationError</statusCode>
+        <errors>
+            <error>
+                <message>Test validation error</message>
+                <code>205</code>
+            </error>
+        </errors>
+    </response>
+</ResponseDoc>
+XML;
     }
 
     public function test_submit_refuses_already_filed_note(): void

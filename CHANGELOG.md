@@ -16,7 +16,18 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Διακίνηση — «Ιστορικό myDATA» στο δελτίο.** Το `DeliveryNoteResource` απέκτησε
+  read-only relation manager (`DeliveryMarksRelationManager`) που δείχνει ΟΛΟΝ τον
+  audit trail του δελτίου — INSERT (έκδοση), REGISTER_TRANSFER (έναρξη),
+  CONFIRM_OUTCOME (παράδοση), CANCEL, **REJECTED** — με χρωματιστά badges + modals
+  request/response XML ανά γραμμή. Πριν δεν φαινόταν πουθενά στο UI ο κύκλος ζωής.
 ### Fixed
+- **Διακίνηση (myDATA) — απορρίψεις ΑΑΔΕ φαίνονται στο UI.** Ο
+  `DeliveryNoteSubmitter` γράφει πλέον forensic `delivery_marks` row
+  (`mydata_action='REJECTED'`, null mark, με το response) σε απόρριψη, δίδυμο του
+  invoice `recordRejection` — ώστε η απόρριψη να φαίνεται στο «Ιστορικό myDATA»
+  του δελτίου (πριν surface-αρόταν μόνο στο CLI report του `sandbox-validate`).
 - **Παραστατικά (myDATA) — απορρίψεις ΑΑΔΕ δεν χάνονται πια.** Όταν η ΑΑΔΕ
   απορρίπτει υποβολή τιμολογίου (status ≠ Success), ο `MyDataSubmitter` πετά
   πλέον `MyDataRejected` που κουβαλά το request+response XML ΚΑΙ γράφει μια
