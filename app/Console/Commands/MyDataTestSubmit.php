@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Invoice;
+use App\Services\MyDataRejected;
 use App\Services\MyDataSubmitter;
 use Illuminate\Console\Command;
 use Throwable;
@@ -39,12 +40,14 @@ class MyDataTestSubmit extends Command
         $invoice = Invoice::find($invoiceId);
         if (! $invoice) {
             $this->error("Invoice #{$invoiceId} not found.");
+
             return self::FAILURE;
         }
 
         $tenant = $invoice->company;
         if (! $tenant) {
             $this->error("Invoice #{$invoiceId} has no company association.");
+
             return self::FAILURE;
         }
 
@@ -53,6 +56,7 @@ class MyDataTestSubmit extends Command
 
         if ($execute && $printOnly) {
             $this->error('--execute and --print-only are mutually exclusive.');
+
             return self::FAILURE;
         }
 
@@ -67,6 +71,7 @@ class MyDataTestSubmit extends Command
                 $this->warn('--execute set: posting to AADE. This is a REAL submission.');
                 if (! $this->confirm('Continue?', false)) {
                     $this->line('Aborted.');
+
                     return self::SUCCESS;
                 }
                 $mark = $submitter->submit($invoice);
@@ -91,12 +96,27 @@ class MyDataTestSubmit extends Command
                 $this->line('   SELECT request FROM mydata_marks WHERE id = '.$mark->id);
                 $this->line('Or open the invoice view page; the DRY_RUN row is in the myDATA history.');
             }
+        } catch (MyDataRejected $e) {
+            // AADE rejected the document — surface the round-trip so the
+            // operator can see WHAT was sent and WHY it was refused.
+            $this->error('AADE rejected: '.$e->getMessage());
+            $this->newLine();
+            $this->line('--- REQUEST ---');
+            $this->line($e->requestXml);
+            $this->newLine();
+            $this->line('--- RESPONSE (AADE) ---');
+            $this->line($e->responseXml);
+            $this->newLine();
+            $this->line('A REJECTED row was written to mydata_marks (visible in the invoice myDATA history).');
+
+            return self::FAILURE;
         } catch (Throwable $e) {
             $this->error('Failed: '.$e->getMessage());
             $this->line('Exception class: '.get_class($e));
             if ($prev = $e->getPrevious()) {
                 $this->line('Caused by: '.get_class($prev).' — '.$prev->getMessage());
             }
+
             return self::FAILURE;
         }
 

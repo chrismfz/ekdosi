@@ -17,6 +17,15 @@ they merge.
 
 ## [Unreleased]
 ### Fixed
+- **Παραστατικά (myDATA) — απορρίψεις ΑΑΔΕ δεν χάνονται πια.** Όταν η ΑΑΔΕ
+  απορρίπτει υποβολή τιμολογίου (status ≠ Success), ο `MyDataSubmitter` πετά
+  πλέον `MyDataRejected` που κουβαλά το request+response XML ΚΑΙ γράφει μια
+  forensic γραμμή `mydata_marks` (`mydata_action='REJECTED'`, χωρίς MARK) — ώστε
+  ο χειριστής να βλέπει ΤΙ στάλθηκε και ΓΙΑΤΙ απορρίφθηκε από το «Ιστορικό
+  myDATA» του παραστατικού, αντί να χάνεται το round-trip στο throw (πριν: bare
+  RuntimeException μόνο με το μήνυμα). Το `mydata:test-submit` τυπώνει το
+  request/response σε απόρριψη. Παράλληλο του `DeliveryNoteRejected` της
+  διακίνησης. (`MyDataRejected`, `MyDataSubmitter::recordRejection`.)
 - **Δελτίο Αποστολής / Ψηφιακή Διακίνηση (9.3) — sandbox-validated end-to-end
   στο AADE dev (2026-06-03).** Το `DeliveryNoteSubmitter` payload διορθώθηκε με
   βάση ζωντανές απορρίψεις: για τύπο 9.x η ΑΑΔΕ **απαγορεύει** `<isDeliveryNote>`,
