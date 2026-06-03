@@ -177,6 +177,36 @@ class CustomerLedgerBuilder
     }
 
     /**
+     * Set of invoice ids that carry at least one (non-trashed) payment row, as
+     * an id => true map for O(1) lookup. loadPayments() already excludes trashed.
+     *
+     * @param  Collection<int, object>  $payments
+     * @return array<int, true>
+     */
+    private function paidInvoiceIds(Collection $payments): array
+    {
+        return $payments
+            ->pluck('invoice_id')
+            ->filter()
+            ->mapWithKeys(fn ($id) => [(int) $id => true])
+            ->all();
+    }
+
+    /**
+     * Does this invoice count toward the receivables balance? Credit-term
+     * always; a cash-term invoice ONLY once it carries a recorded payment (the
+     * money-trail exception — then its debit AND its payment both enter the
+     * math, netting to zero). Mirrors InvoiceBalance + the receivables predicate
+     * in DashboardMetrics / Customer, so all surfaces agree.
+     *
+     * @param  array<int, true>  $paidIds
+     */
+    private function isTracked(object $inv, array $paidIds): bool
+    {
+        return ((int) ($inv->due_days ?? 0)) > 0 || isset($paidIds[(int) $inv->id]);
+    }
+
+    /**
      * @return Collection<int, object>
      */
     private function loadPayments(Customer $customer): Collection
@@ -236,12 +266,13 @@ class CustomerLedgerBuilder
         // notes reduce the balance like a payment (creditReductions).
         $creditTermGross = 0.0;
         $creditReductions = 0.0;
+        $paidIds = $this->paidInvoiceIds($payments);
 
         $lastActivity = null;
 
         foreach ($invoices as $inv) {
             $issuedAt = Carbon::parse($inv->issued_at);
-            $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
+            $isCreditTerm = $this->isTracked($inv, $paidIds);
             $isCreditNote = $this->isCreditNote($inv);
             $sign = $isCreditNote ? -1 : 1;
 
@@ -302,7 +333,7 @@ class CustomerLedgerBuilder
                 ->sortBy(fn ($inv) => Carbon::parse($inv->issued_at)->timestamp)
                 ->values();
             foreach ($orderedInvoices as $inv) {
-                $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
+                $isCreditTerm = $this->isTracked($inv, $paidIds);
                 if (! $isCreditTerm || $this->isCreditNote($inv)) {
                     continue;
                 }
@@ -352,9 +383,10 @@ class CustomerLedgerBuilder
             'bucket_61_90' => 0.0,
             'bucket_90_plus' => 0.0,
         ];
+        $paidIds = $this->paidInvoiceIds($payments);
 
         foreach ($invoices as $inv) {
-            $isCreditTerm = ((int) ($inv->due_days ?? 0)) > 0;
+            $isCreditTerm = $this->isTracked($inv, $paidIds);
             if (! $isCreditTerm || $this->isCreditNote($inv)) {
                 continue;
             }
@@ -444,6 +476,7 @@ class CustomerLedgerBuilder
         ?string $paidStatus,
     ): array {
         $events = [];
+        $paidIds = $this->paidInvoiceIds($payments);
         foreach ($invoices as $inv) {
             // A credit note lands in the CREDIT column (reduces running
             // balance); a normal invoice is a debit. is_credit_term is
@@ -464,7 +497,7 @@ class CustomerLedgerBuilder
                 'credit' => $isCreditNote ? $gross : 0.0,
                 'mydata_state' => $inv->mydata_state,
                 'mydata_mark' => $inv->mydata_mark,
-                'is_credit_term' => ! $isCreditNote && ((int) ($inv->due_days ?? 0)) > 0,
+                'is_credit_term' => ! $isCreditNote && $this->isTracked($inv, $paidIds),
                 'is_receipt_group' => false,
                 'allocations' => null,
             ];

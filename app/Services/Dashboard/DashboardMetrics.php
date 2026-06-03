@@ -74,12 +74,24 @@ class DashboardMetrics
      */
     public function outstandingReceivables(): float
     {
+        // Owed base = credit-term invoices PLUS any cash-term invoice that
+        // carries a recorded payment (the money-trail exception — it then nets
+        // to zero against its payment, so the total is unchanged in the common
+        // case but stays consistent with InvoiceBalance + the ledger). LEFT join
+        // so a no-payment-method invoice that has payments still qualifies.
         $base = DB::table('invoices')
-            ->join('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
+            ->leftJoin('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
             ->where('invoices.company_id', $this->tenant->id)
             ->whereNull('invoices.deleted_at')
             ->whereNull('invoices.credited_invoice_id')
-            ->where('payment_methods.due_days', '>', 0);
+            ->where(function ($q) {
+                $q->where('payment_methods.due_days', '>', 0)
+                    ->orWhereExists(function ($s) {
+                        $s->from('payments')
+                            ->whereColumn('payments.invoice_id', 'invoices.id')
+                            ->whereNull('payments.deleted_at');
+                    });
+            });
 
         $row = InvoiceScope::live($base, 'invoices.')
             ->selectRaw('COALESCE(SUM(invoices.gross_total), 0) - COALESCE(SUM(invoices.credited_total), 0) AS net_owed')

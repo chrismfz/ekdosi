@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Changed
+- **Πληρωμές — money trail σε cash-term παραστατικά (model refinement).** Ένα
+  μετρητοίς/άμεσο τιμολόγιο (`due_days=0`) θεωρείται «εξοφλημένο στην έκδοση»
+  **μόνο όσο ΔΕΝ έχει καταγεγραμμένη πληρωμή**. Μόλις ο χειριστής καταχωρίσει
+  πραγματική είσπραξη (π.χ. Stripe/POS receipt + transaction_id/τράπεζα για τα
+  βιβλία), το τιμολόγιο γίνεται **tracked παντού** (cockpit, Καρτέλα, dashboard,
+  receivables) και **κάνει net-to-zero** χρέωση↔πληρωμή — κανένα phantom. Νέο
+  πάντα-διαθέσιμο «Καταχώριση πληρωμής» στο cockpit (ακόμη και σε μηδενικό
+  υπόλοιπο). Ενιαίος κανόνας «tracked = επί-πιστώσει Ή έχει πληρωμή» σε
+  `InvoiceBalance`, `DashboardMetrics`/`Customer` (receivables predicate),
+  `CustomerLedgerBuilder`. Τα ~6.7k imported τιμολόγια αμετάβλητα (legacy
+  πληρωμές = on-account). `CashTermRecordedPaymentTest` + `MoneyStatusConsistencyTest`.
 - **Μενού — οι «Πληρωμές» μετακινήθηκαν** από το τεχνικό group «Data» σε νέο
   group **«Είσπραξη/Πληρωμές»**.
 ### Added
