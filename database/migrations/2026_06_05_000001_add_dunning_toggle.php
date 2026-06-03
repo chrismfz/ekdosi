@@ -31,6 +31,11 @@ return new class extends Migration
         Schema::table('service_contracts', function (Blueprint $t) {
             // Per-contract override of the product flag. NULL = inherit.
             $t->boolean('dunning_enabled')->nullable()->after('terminate_after_days');
+            // Set ONLY when the dunning engine itself suspended the contract.
+            // The auto-unsuspend reactivates ONLY contracts carrying this marker,
+            // so it can never undo a MANUAL «Αναστολή» (abuse/fraud/customer hold)
+            // of a paid-up contract. Cleared on any reactivation.
+            $t->dateTime('dunning_suspended_at')->nullable()->after('suspended_at');
         });
     }
 
@@ -40,7 +45,7 @@ return new class extends Migration
             $t->dropColumn('dunning_enabled');
         });
         Schema::table('service_contracts', function (Blueprint $t) {
-            $t->dropColumn('dunning_enabled');
+            $t->dropColumn(['dunning_enabled', 'dunning_suspended_at']);
         });
     }
 };

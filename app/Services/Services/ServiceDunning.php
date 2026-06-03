@@ -5,6 +5,7 @@ namespace App\Services\Services;
 use App\Enums\ServiceContractStatus;
 use App\Models\Invoice;
 use App\Models\ServiceContract;
+use App\Services\Payments\PaymentAllocator;
 use App\Services\Provisioning\ProvisioningModuleRegistry;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -100,30 +101,19 @@ class ServiceDunning
             return 'suspended';
         }
 
-        // Reactivation: a suspended contract whose renewal is no longer overdue
-        // (the customer paid → overdueDays back to 0) comes back to life.
+        // Reactivation: a contract that DUNNING suspended (marker set) whose
+        // arrears cleared (overdueDays back to 0 → the customer paid) comes back
+        // to life. GUARD on the dunning marker — NOT on overdueDays alone — so we
+        // can never undo a MANUAL «Αναστολή» (abuse/fraud/customer hold) of a
+        // paid-up contract (that has no marker).
         if ($status === ServiceContractStatus::Suspended
+            && $contract->dunning_suspended_at !== null
             && $overdueDays === 0
-            && $this->hasIssuedRenewal($contract)
             && $status->canTransitionTo(ServiceContractStatus::Active)) {
             return 'unsuspended';
         }
 
         return null;
-    }
-
-    /**
-     * Has the contract at least one ISSUED (active) renewal invoice? Guards the
-     * auto-unsuspend so it can't silently undo a MANUAL suspension of a contract
-     * with no billing history (overdueDays trivially 0 because nothing was billed).
-     */
-    private function hasIssuedRenewal(ServiceContract $contract): bool
-    {
-        return Invoice::query()
-            ->where('company_id', $contract->company_id)
-            ->where('service_contract_id', $contract->id)
-            ->where('local_status', 'active')
-            ->exists();
     }
 
     /**
@@ -152,6 +142,7 @@ class ServiceDunning
             ->get();
 
         $max = 0;
+        $overdueBalance = 0.0;
         foreach ($invoices as $invoice) {
             if (! $invoice->isOverdue($asOf)) {
                 continue;
@@ -163,6 +154,20 @@ class ServiceDunning
             // diffInDays gives a positive whole-day count from due → asOf.
             $days = (int) $due->startOfDay()->diffInDays($asOf->copy()->startOfDay());
             $max = max($max, $days);
+            $overdueBalance += (float) $invoice->balanceData()->balance;
+        }
+
+        if ($max === 0) {
+            return 0;
+        }
+
+        // SAFETY (don't cut off a paying customer): if the customer has enough
+        // UNALLOCATED on-account credit to cover the overdue renewal balance,
+        // they've effectively paid — the operator just hasn't allocated it.
+        // Treat as not-in-arrears. Conservative: err toward NOT suspending.
+        $credit = app(PaymentAllocator::class)->availableCredit($contract->customer);
+        if ($credit + 0.005 >= round($overdueBalance, 2)) {
+            return 0;
         }
 
         return $max;
@@ -192,6 +197,9 @@ class ServiceDunning
                 $contract->update([
                     'status' => ServiceContractStatus::Suspended,
                     'suspended_at' => now(),
+                    // Mark as DUNNING-suspended so auto-unsuspend can later
+                    // reactivate it — and ONLY it (never a manual hold).
+                    'dunning_suspended_at' => now(),
                 ]);
                 $this->provision($contract, 'suspend');
                 Log::info('Dunning suspended a service contract.', [
@@ -205,6 +213,7 @@ class ServiceDunning
                 $contract->update([
                     'status' => ServiceContractStatus::Active,
                     'suspended_at' => null,
+                    'dunning_suspended_at' => null,
                 ]);
                 $this->provision($contract, 'unsuspend');
                 Log::info('Dunning reactivated a paid service contract.', [

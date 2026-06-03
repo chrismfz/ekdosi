@@ -268,6 +268,42 @@ class ServiceDunningTest extends TestCase
         $this->assertSame(ServiceContractStatus::Suspended, $contract->fresh()->status);
     }
 
+    public function test_manual_hold_of_a_paid_up_contract_is_not_auto_reactivated(): void
+    {
+        // The HIGH case: operator manually suspends a dunning-enabled, PAID-UP
+        // contract (abuse/fraud/customer hold) — it HAS an issued, non-overdue
+        // renewal. The sweep must NOT reactivate it (no dunning marker).
+        $product = $this->product(['dunning_enabled' => true, 'default_suspend_after_days' => 10]);
+        $contract = $this->contract(['product_id' => $product->id]);
+
+        $invoice = app(StageServiceRenewal::class)($contract);
+        $invoice->update(['local_status' => 'active']); // issued, within term → not overdue
+        // Operator manually suspends (sets suspended_at, NOT dunning_suspended_at).
+        $contract->update(['status' => ServiceContractStatus::Suspended, 'suspended_at' => now()]);
+
+        $this->assertNull($this->dunning()->evaluate($contract->fresh(), Carbon::today()));
+        $this->assertSame(ServiceContractStatus::Suspended, $contract->fresh()->status);
+    }
+
+    public function test_on_account_credit_covering_the_overdue_blocks_suspension(): void
+    {
+        // The MEDIUM case: the customer PAID on-account (not allocated to the
+        // renewal), so the renewal still reads Unpaid/overdue — but they've paid
+        // the company. Dunning must NOT cut them off.
+        $product = $this->product(['dunning_enabled' => true, 'default_suspend_after_days' => 10]);
+        $contract = $this->contract(['product_id' => $product->id]);
+        $this->overdueRenewal($contract, 40); // overdue, balance €124
+
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => null, 'kind' => 'payment', 'amount' => 200, 'pay_date' => Carbon::today(),
+        ]);
+
+        $this->assertNull($this->dunning()->evaluate($contract->fresh(), Carbon::today()),
+            'on-account credit ≥ overdue balance → not in arrears → no suspend');
+        $this->assertSame(ServiceContractStatus::Active, $contract->fresh()->status);
+    }
+
     public function test_current_paid_contract_is_never_suspended(): void
     {
         // Enabled product + a renewal that is NOT overdue (issued recently,

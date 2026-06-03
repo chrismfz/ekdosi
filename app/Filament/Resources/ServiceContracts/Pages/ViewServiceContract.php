@@ -114,6 +114,7 @@ class ViewServiceContract extends ViewRecord
                     $record->update([
                         'status' => ServiceContractStatus::Active,
                         'suspended_at' => null,
+                        'dunning_suspended_at' => null,
                     ]);
                     Notification::make()->title('Η υπηρεσία επανήλθε σε λειτουργία')->success()->send();
                     $this->redirectToView($record);
