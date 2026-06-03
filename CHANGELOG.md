@@ -17,6 +17,18 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Πληρωμές — Ληξιπρόθεσμα / Due (#6).** Ημερομηνία λήξης = `issued_at +
+  payment_method.due_days` (μηδέν για μετρητοίς). Νέα `Invoice::dueDate()` /
+  `isOverdue()` / `scopeOverdue()` (driver-aware date math, EXISTS σε
+  `payment_methods` — μετράει μόνο live, active, μη-πιστωτικά, επί-πιστώσει,
+  ανοιχτά (`payment_status` unpaid/partial) με due date στο παρελθόν· μηδέν
+  αλλαγή money model). Στη **λίστα τιμολογίων**: στήλη «Λήξη» (κόκκινο
+  «Ληξιπρόθεσμο») + filter «Μόνο ληξιπρόθεσμα». **Dashboard**: widget
+  «Ληξιπρόθεσμα τιμολόγια» (παλαιότερα πρώτα, link στο παραστατικό).
+  **Notifications (bell, ΟΧΙ email)**: `invoices:notify-overdue [--tenant]
+  [--dry-run]` — ημερήσιο digest ανά tenant (scheduler flag
+  `EKDOSI_SCHEDULE_OVERDUE_NOTIFICATIONS`, default OFF). `OverdueInvoicesTest`.
+  **Deploy:** `php artisan migrate` (πίνακας `notifications`).
 - **Πληρωμές — Τραπεζικοί Λογαριασμοί (L2).** Νέο lookup `bank_accounts` (ανά
   tenant: τράπεζα, IBAN, δικαιούχος, SWIFT, `is_active`) με δικό του Filament
   resource (Setup → «Τραπεζικοί λογαριασμοί»). Νέο **`payments.bank_account_id`**

@@ -28,13 +28,12 @@
 
 ---
 
-## ⏭️ Επόμενο
-### #6 — Due / Ληξιπρόθεσμα (εγκεκριμένο, κουμπώνει με τα παραπάνω)
-- Due-date = `issued_at + payment_method.due_days` (το `due_days` είναι ήδη ο
-  διαχωρισμός μετρητοίς=0 / επί-πιστώσει>0).
-- Badge «Ληξιπρόθεσμο» + filter στη λίστα τιμολογίων· buckets ηλικίας.
-- **Dunning = ΜΟΝΟ dashboard + notifications** (απόφαση χρήστη) — **όχι email**
-  σε εμάς ή στον πελάτη ακόμη.
+### #6 — Due / Ληξιπρόθεσμα ✅ DONE
+- Due-date = `issued_at + payment_method.due_days`· `Invoice::dueDate/isOverdue/
+  scopeOverdue`. Στήλη «Λήξη» + filter «Μόνο ληξιπρόθεσμα» στη λίστα.
+- Dashboard widget «Ληξιπρόθεσμα τιμολόγια».
+- **Dunning = ΜΟΝΟ dashboard + bell notifications** (`invoices:notify-overdue`,
+  scheduler default OFF) — **όχι email** σε εμάς ή στον πελάτη.
 
 ---
 

@@ -93,6 +93,17 @@ class InvoicesTable
                     })
                     ->toggleable(),
 
+                // Λήξη (due date) — only meaningful for credit-term invoices;
+                // turns red + «Ληξιπρόθεσμο» once past due with an open balance.
+                TextColumn::make('due_date')
+                    ->label('Λήξη')
+                    ->badge()
+                    ->placeholder('—')
+                    ->state(fn (Invoice $record) => $record->dueDate()?->format('d/m/Y'))
+                    ->description(fn (Invoice $record) => $record->isOverdue() ? 'Ληξιπρόθεσμο' : null)
+                    ->color(fn (Invoice $record) => $record->isOverdue() ? 'danger' : 'gray')
+                    ->toggleable(),
+
                 TextColumn::make('mydata_state')
                     ->label('myDATA')
                     ->badge()
@@ -189,6 +200,11 @@ class InvoicesTable
                         ->mapWithKeys(fn (PaymentStatus $s) => [$s->value => $s->label()])
                         ->toArray())
                     ->placeholder('All'),
+
+                Filter::make('overdue')
+                    ->label('Μόνο ληξιπρόθεσμα')
+                    ->toggle()
+                    ->query(fn (Builder $query) => $query->overdue()),
 
                 SelectFilter::make('local_status')
                     ->label('Κατάσταση')
