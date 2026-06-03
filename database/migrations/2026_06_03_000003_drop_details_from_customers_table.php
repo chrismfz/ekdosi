@@ -31,8 +31,10 @@ return new class extends Migration
                     ->from('notes')
                     ->whereColumn('notes.notable_id', 'c.id')
                     ->where('notes.notable_type', self::CUSTOMER_TYPE)
-                    ->where('notes.source', 'backup');
-                // (incl. trashed — matches the Phase-2 / BackupNoteSync contract)
+                    ->where('notes.source', 'backup')
+                    // LIVE only: a soft-deleted note is NOT a safe home for the
+                    // last copy, so a trashed-only note must block the drop.
+                    ->whereNull('notes.deleted_at');
             })
             ->count();
 
@@ -58,10 +60,11 @@ return new class extends Migration
 
         // Restore the remarks from the backup notes so the rollback is
         // non-destructive (the next migration down, 000002, then clears them).
+        // Include TRASHED notes: 000002.down hard-deletes them too, so a
+        // soft-deleted note's body must still come back into `details`.
         DB::table('notes')
             ->where('notable_type', self::CUSTOMER_TYPE)
             ->where('source', 'backup')
-            ->whereNull('deleted_at')
             ->orderBy('id')
             ->chunkById(500, function ($notes): void {
                 foreach ($notes as $n) {

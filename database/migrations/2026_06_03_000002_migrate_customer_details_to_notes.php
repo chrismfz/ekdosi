@@ -65,8 +65,10 @@ return new class extends Migration
                     ];
                 }
 
-                if ($insert !== []) {
-                    DB::table('notes')->insert($insert);
+                // Insert in sub-batches so the bind-param count stays well under
+                // even an ancient sqlite's SQLITE_MAX_VARIABLE_NUMBER (999).
+                foreach (array_chunk($insert, 100) as $batch) {
+                    DB::table('notes')->insert($batch);
                 }
             });
     }

@@ -80,7 +80,8 @@ class InternalNotesRelationManager extends RelationManager
                     ->label('Πηγή')
                     ->badge()
                     ->color('gray')
-                    ->formatStateUsing(fn ($state, Note $record): string => $record->sourceLabel() ?? '—')
+                    // Return null for operator notes so no empty gray badge shows.
+                    ->formatStateUsing(fn ($state, Note $record): ?string => $record->sourceLabel())
                     ->placeholder('—'),
 
                 TextColumn::make('author.name')
@@ -114,6 +115,9 @@ class InternalNotesRelationManager extends RelationManager
                     DeleteBulkAction::make(),
                 ]),
             ])
+            // Imported notes can't be (bulk-)selected → the per-row read-only
+            // guard above can't be bypassed via the bulk delete.
+            ->checkIfRecordIsSelectableUsing(fn (Note $record): bool => ! $record->isImported())
             ->defaultSort('is_pinned', 'desc');
     }
 }

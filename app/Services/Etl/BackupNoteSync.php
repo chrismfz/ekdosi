@@ -14,7 +14,9 @@ use App\Models\Scopes\CompanyScope;
  * (customer × source='backup') instead of appending a new one each run:
  *   - non-empty remark → create, or restore+update the existing (incl. a
  *     soft-deleted) backup note — never a duplicate
- *   - empty/blank remark → remove any backup note (live or trashed)
+ *   - empty/blank remark → NO-OP. We never auto-delete: a tenant can be fed by
+ *     more than one source (legacy Firebird AND Epsilon), and a remark absent
+ *     from one export must not wipe one imported from another source/run.
  *
  * The lookup is `withTrashed()` on purpose: a backup note an operator deleted
  * via the UI is soft-deleted; without this the next import would create a
@@ -39,13 +41,8 @@ class BackupNoteSync
         ];
 
         if ($remark === '') {
-            // Source no longer carries a remark — drop any backup note (live or
-            // trashed) in one statement, no SELECT-first.
-            Note::withTrashed()
-                ->withoutGlobalScope(CompanyScope::class)
-                ->where($match)
-                ->forceDelete();
-
+            // No remark in this source → leave any existing backup note alone
+            // (never auto-delete; see the class docblock).
             return;
         }
 
