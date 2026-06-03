@@ -272,3 +272,51 @@ add_hook('AdminAreaFooterOutput', 1, function ($vars) {
 </script>
 HTML;
 });
+
+/**
+ * Q1 UX — kill the WHMCS 8.9+ "view-only + Manage Invoice" extra click on the
+ * admin invoice LIST.
+ *
+ * Since 8.9 the admin invoice list opens an invoice in a VIEW-ONLY page; you
+ * then have to click "Manage Invoice" to reach the editable page. That editable
+ * page (legacy `invoices.php?action=edit&id=N`) is ALSO the ONLY place our
+ * `AdminInvoicesControlsOutput` buttons render — that hook does NOT fire on the
+ * view-only page nor on the new `admin/billing/invoices/N` URL. So the extra
+ * hop hides BOTH WHMCS's own management actions AND our ekdosi/relid buttons.
+ *
+ * WHMCS ships no setting to default the list to edit mode (the supported path
+ * is the per-row "Edit" link). This footer script — LIST page only — repoints
+ * each row's invoice link straight at the legacy edit URL, so a single click
+ * lands on the editable page with our buttons present.
+ *
+ * Defensive by design: it ONLY rewrites anchors whose href matches a KNOWN
+ * view-only shape (the new `/billing/invoices/N` path, or the legacy
+ * `invoices.php?action=view|manage&id=N`). Any other markup is left untouched,
+ * so on a theme/version we don't recognise it silently no-ops and the native
+ * per-row "Edit" link remains the fallback. All in try/catch.
+ */
+add_hook('AdminAreaFooterOutput', 1, function ($vars) {
+    return <<<'HTML'
+<script>
+(function () {
+  try {
+    if (location.pathname.indexOf('invoices.php') === -1) return;
+    if (/[?&]action=/.test(location.search)) return; // the LIST only, not a single-invoice view
+
+    var anchors = [].slice.call(document.querySelectorAll('a[href]'));
+    anchors.forEach(function (a) {
+      var href = a.getAttribute('href') || '';
+      // new view-only URL: .../billing/invoices/1234  | legacy view-only: invoices.php?action=view|manage&id=1234
+      var m = href.match(/\/billing\/invoices\/(\d+)(?:[\/?#]|$)/)
+           || href.match(/invoices\.php\?action=(?:view|manage)&id=(\d+)/);
+      if (!m) return;
+      a.setAttribute('href', 'invoices.php?action=edit&id=' + m[1]);
+      if (!a.getAttribute('title')) {
+        a.setAttribute('title', 'Άνοιγμα σε επεξεργασία (χωρίς το ενδιάμεσο view-only· εμφανίζει τα κουμπιά ekdosi)');
+      }
+    });
+  } catch (e) {}
+})();
+</script>
+HTML;
+});
