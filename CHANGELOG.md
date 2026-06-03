@@ -24,6 +24,12 @@ they merge.
   instead of the native WHMCS API — so BOTH the inbox pull and the push share one
   HMAC path (the Plugin-API). Native API stays the path for tenants without the
   plugin. A bridge config gap → 422, same as before.
+- **`whmcs:use-bridge --tenant=SLUG [--off]`** — guarded switch for a tenant's
+  invoice SOURCE (Plugin-API vs native WHMCS API). ENABLING probes the deployed
+  plugin for `op=invoice` support first and refuses to flip if it's older than
+  v0.32.0 (closes the deploy-ordering trap that would break the push path);
+  reversible with `--off`. The flag drives both pull and push; plugin-less
+  tenants stay on the native API ("API only when there's no plugin").
 ### Fixed
 - **Scheduler silent multi-day stall — bounded `withoutOverlapping(30)`.** Every
   scheduled task used the default 24h overlap-lock TTL; a run killed mid-flight
