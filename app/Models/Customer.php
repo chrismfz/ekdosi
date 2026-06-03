@@ -53,7 +53,6 @@ class Customer extends Model
         'occupation',
         'tax_office',
         'kad_primary',
-        'details',
         'discount',
         'email',
         'secondary_email',

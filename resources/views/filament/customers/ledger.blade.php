@@ -35,9 +35,6 @@
                         @if ((float) $cust->discount > 0) &middot; <span class="font-medium">Έκπτωση:</span> {{ rtrim(rtrim(number_format((float) $cust->discount, 2), '0'), '.') }}%@endif
                     </div>
                 @endif
-                @if (filled($cust->details))
-                    <div class="text-sm fi-color-gray italic"><span class="font-medium not-italic">Σχόλιο:</span> {{ $cust->details }}</div>
-                @endif
             </div>
 
             <div class="flex flex-wrap items-start gap-2">
@@ -106,8 +103,11 @@
                         @endif
                         <div class="space-y-0.5">
                             <div class="whitespace-pre-line">{{ $note->body }}</div>
-                            <div class="text-xs fi-color-gray">
-                                {{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->created_at?->format('d/m/Y H:i') }}
+                            <div class="text-xs fi-color-gray flex items-center gap-1">
+                                @if ($note->source === 'backup')
+                                    <x-filament::badge color="gray" size="sm">από backup</x-filament::badge>
+                                @endif
+                                <span>{{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->created_at?->format('d/m/Y H:i') }}</span>
                             </div>
                         </div>
                     </div>

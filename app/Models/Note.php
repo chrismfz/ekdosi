@@ -27,6 +27,7 @@ class Note extends Model
         'notable_id',
         'body',
         'is_pinned',
+        'source',
         'author_user_id',
     ];
 

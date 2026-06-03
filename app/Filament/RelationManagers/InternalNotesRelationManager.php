@@ -76,6 +76,13 @@ class InternalNotesRelationManager extends RelationManager
                     ->limit(200)
                     ->searchable(),
 
+                TextColumn::make('source')
+                    ->label('Πηγή')
+                    ->badge()
+                    ->color('gray')
+                    ->formatStateUsing(fn (?string $state): string => $state === 'backup' ? 'από backup' : '—')
+                    ->placeholder('—'),
+
                 TextColumn::make('author.name')
                     ->label('Από')
                     ->placeholder('Σύστημα'),

@@ -351,9 +351,12 @@ class EpsilonImporter
                     'phone1' => $this->clean($row['Phone1'] ?? null),
                     'phone2' => $this->clean($row['Phone2'] ?? null),
                     'discount' => (float) ($row['Discount'] ?? 0),
-                    'details' => $this->clean($row['Remarks'] ?? null),
                     'payment_method_id' => $this->resolvePaymentMethod($this->clean($row['PaymentMethod'] ?? null)),
                 ];
+
+                // Epsilon «Remarks» → a 'backup' internal note (replaces the
+                // dropped customers.details column). Idempotent on re-import.
+                $remark = $this->clean($row['Remarks'] ?? null);
 
                 $existing = Customer::query()
                     ->withoutGlobalScopes()
@@ -366,15 +369,18 @@ class EpsilonImporter
                     // field the export lacks (overwrite non-null only); leave
                     // operator-managed flags (is_active, tags, …) untouched.
                     $existing->forceFill(array_filter($values, fn ($v) => $v !== null))->save();
+                    $customer = $existing;
                     $updated++;
                 } else {
-                    Customer::create($values + [
+                    $customer = Customer::create($values + [
                         'company_id' => $this->companyId,
                         'afm' => $afm,
                         'is_active' => true,
                     ]);
                     $created++;
                 }
+
+                BackupNoteSync::sync($this->companyId, (int) $customer->id, $remark);
             }
         });
 
