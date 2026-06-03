@@ -3,6 +3,7 @@
 namespace WHMCS\Module\Addon\EkdosiBridge\Admin;
 
 use WHMCS\Database\Capsule;
+use WHMCS\Module\Addon\EkdosiBridge\BridgeLogStore;
 use WHMCS\Module\Addon\EkdosiBridge\EkdosiClient;
 use WHMCS\Module\Addon\EkdosiBridge\InvoiceMarkStore;
 use WHMCS\Module\Addon\EkdosiBridge\RelidInspector;
@@ -52,6 +53,9 @@ class Controller
 <p style="margin:12px 0">
     <a class="btn btn-primary" href="{$invoicesLink}">
         <i class="fa fa-list"></i> Λίστα τιμολογίων WHMCS → Ekdosi (ΤΠΥ / ΜΑΡΚ)
+    </a>
+    <a class="btn btn-default" href="{$link}&action=bridgeLog">
+        <i class="fa fa-exchange"></i> Bridge logs (τι ρωτάει το ekdosi)
     </a>
 </p>
 <hr>
@@ -120,14 +124,126 @@ EOF;
                 .$contacts.' επαφές, '.$routes.' δρομολογήσεις';
         }
 
+        // «Τελευταίο ερώτημα ekdosi» — the inbound-poll freshness from the bridge
+        // log. STALE (>60′) or never = the silent-outage signal, shown here on the
+        // landing where the WHMCS admin sees it daily.
+        $lastPoll = BridgeLogStore::lastInboundPollAt();
+        $pollCell = $this->pollFreshnessCell($lastPoll);
+
         return <<<EOF
 <table class="table table-condensed" style="max-width:640px">
     <tr><th style="width:200px">Γέφυρα</th><td>{$configured}</td></tr>
     <tr><th>Ekdosi</th><td>{$target}</td></tr>
     <tr><th>Έκδοση plugin</th><td>{$version}</td></tr>
+    <tr><th>Τελευταίο ερώτημα ekdosi</th><td>{$pollCell}</td></tr>
     <tr><th>Παραστατικά τρίτων</th><td>{$tp}</td></tr>
 </table>
 EOF;
+    }
+
+    /**
+     * «Bridge logs» — the Plugin-API request log: what ekdosi asks resolve.php,
+     * how often, and what fails. Read-only. The freshness banner is the
+     * silent-outage tripwire (no inbound poll in >1h → red), and 401/422 rows
+     * surface a wiped/rotated secret immediately.
+     */
+    public function bridgeLog(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        $summary = BridgeLogStore::summary();
+        $rows = BridgeLogStore::recent(80);
+
+        $banner = $this->pollBanner($summary['last_inbound_poll_at']);
+        $authNote = $summary['last_auth_fail_at'] !== null
+            ? '<div class="alert alert-warning">Τελευταία αποτυχία ταυτοποίησης (401/422): <strong>'
+                .htmlspecialchars((string) $summary['last_auth_fail_at']).'</strong> — έλεγξε ότι το '
+                .'<em>webhook secret</em> εδώ ταιριάζει με αυτό που έχει το ekdosi.</div>'
+            : '';
+
+        $rowsHtml = '';
+        foreach ($rows as $r) {
+            $okBadge = ((int) $r->ok === 1)
+                ? '<span class="label label-success">'.(int) $r->http_status.'</span>'
+                : '<span class="label label-danger">'.(int) $r->http_status.'</span>';
+            $rowsHtml .= '<tr>'
+                .'<td style="white-space:nowrap">'.htmlspecialchars((string) $r->created_at).'</td>'
+                .'<td><code>'.htmlspecialchars((string) $r->op).'</code></td>'
+                .'<td>'.$okBadge.'</td>'
+                .'<td>'.htmlspecialchars((string) $r->result).'</td>'
+                .'<td>'.htmlspecialchars((string) $r->ip).'</td>'
+                .'</tr>';
+        }
+        if ($rowsHtml === '') {
+            $rowsHtml = '<tr><td colspan="5" class="text-muted">Καμία καταγραφή ακόμα. '
+                .'(Ο πίνακας δημιουργείται με την πρώτη επίσκεψη· οι κλήσεις του ekdosi καταγράφονται από εδώ και μπρος.)</td></tr>';
+        }
+
+        $total24 = (int) $summary['total24'];
+        $fail24 = (int) $summary['fail24'];
+
+        return <<<EOF
+<h2>Bridge logs — τι ρωτάει το ekdosi</h2>
+<p><a class="btn btn-default btn-sm" href="{$link}">&larr; Πίσω</a></p>
+{$banner}
+{$authNote}
+<p class="text-muted">Τελευταίο 24ωρο: <strong>{$total24}</strong> αιτήματα, <strong>{$fail24}</strong> αποτυχίες. Κάθε κλήση του ekdosi στο Plugin-API (resolve.php) καταγράφεται εδώ.</p>
+<table class="table table-condensed table-striped">
+    <thead><tr><th>Ώρα</th><th>Op</th><th>HTTP</th><th>Αποτέλεσμα</th><th>IP</th></tr></thead>
+    <tbody>{$rowsHtml}</tbody>
+</table>
+EOF;
+    }
+
+    /** Big freshness banner for the «Bridge logs» page. */
+    private function pollBanner(?string $lastPoll): string
+    {
+        if ($lastPoll === null) {
+            return '<div class="alert alert-warning"><strong>Το ekdosi δεν έχει ζητήσει ποτέ τη feed.</strong> '
+                .'Αν ο sync υποτίθεται ότι τρέχει, έλεγξε ρυθμίσεις/secret· αλλιώς θα εμφανιστεί εδώ με την πρώτη κλήση.</div>';
+        }
+        $age = time() - (int) strtotime($lastPoll);
+        $ago = $this->agoLabel($lastPoll);
+        if ($age > 3600) {
+            return '<div class="alert alert-danger"><strong>⚠ Το ekdosi δεν έχει ρωτήσει εδώ και '.$ago.'</strong> '
+                .'(τελευταίο: '.htmlspecialchars($lastPoll).'). Κανονικά ρωτάει κάθε ~15′ — έλεγξε scheduler/secret στη μεριά του ekdosi.</div>';
+        }
+
+        return '<div class="alert alert-success"><strong>Ενεργό.</strong> Τελευταίο ερώτημα feed: '.$ago
+            .' ('.htmlspecialchars($lastPoll).').</div>';
+    }
+
+    /** Compact freshness label for the landing insights table. */
+    private function pollFreshnessCell(?string $lastPoll): string
+    {
+        if ($lastPoll === null) {
+            return '<span class="label label-warning">ποτέ</span>';
+        }
+        $age = time() - (int) strtotime($lastPoll);
+        $cls = $age > 3600 ? 'label-danger' : 'label-success';
+
+        return '<span class="label '.$cls.'">'.$this->agoLabel($lastPoll).'</span> '
+            .'<span class="text-muted" style="font-size:11px">'.htmlspecialchars($lastPoll).'</span>';
+    }
+
+    /** Human "X πριν" for a stored datetime (server time, same clock as records). */
+    private function agoLabel(string $datetime): string
+    {
+        $ts = strtotime($datetime);
+        if ($ts === false) {
+            return htmlspecialchars($datetime);
+        }
+        $s = max(0, time() - $ts);
+        if ($s < 90) {
+            return $s.'″ πριν';
+        }
+        if ($s < 5400) {
+            return ((int) round($s / 60)).'′ πριν';
+        }
+        if ($s < 129600) {
+            return ((int) round($s / 3600)).' ώρες πριν';
+        }
+
+        return ((int) round($s / 86400)).' μέρες πριν';
     }
 
     /**

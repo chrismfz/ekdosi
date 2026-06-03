@@ -98,6 +98,15 @@ class SchemaGuard
                 .'). Use the "Sync from legacy timologia" admin action once DB privileges allow.';
         }
 
+        // 3. The Plugin-API request log (mod_ekdosi_bridge_log) — visibility for
+        //    what ekdosi asks resolve.php. Idempotent; best-effort.
+        try {
+            BridgeLogStore::ensureTable();
+            $notes[] = 'Bridge log table (mod_ekdosi_bridge_log) ready.';
+        } catch (Throwable $e) {
+            $notes[] = 'WARNING: could not create mod_ekdosi_bridge_log ('.$e->getMessage().').';
+        }
+
         return $notes;
     }
 
@@ -136,16 +145,17 @@ class SchemaGuard
             $marks = InvoiceMarkStore::TABLE;
             $contacts = ThirdPartyStore::CONTACTS;
             $routing = ThirdPartyStore::ROUTING;
+            $bridgeLog = BridgeLogStore::TABLE;
 
             $row = Capsule::selectOne(
                 'SELECT
                     (SELECT COUNT(*) FROM information_schema.TABLES
-                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?)) AS tbls,
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?, ?)) AS tbls,
                     (SELECT COUNT(*) FROM information_schema.COLUMNS
                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = \'invcode\') AS has_invcode,
                     (SELECT LOWER(DATA_TYPE) FROM information_schema.COLUMNS
                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = \'tblinvoices\' AND COLUMN_NAME = \'invoiced\') AS invoiced_type',
-                [$marks, $contacts, $routing, $marks]
+                [$marks, $contacts, $routing, $bridgeLog, $marks]
             );
             if ($row === null) {
                 return false;
@@ -153,7 +163,7 @@ class SchemaGuard
 
             // invoiced absent ('' ) is fine — nothing to restore. Only BIGINT
             // forces the heavy ensure() branch.
-            return (int) $row->tbls === 3
+            return (int) $row->tbls === 4
                 && (int) $row->has_invcode === 1
                 && (string) ($row->invoiced_type ?? '') !== 'bigint';
         } catch (Throwable $e) {

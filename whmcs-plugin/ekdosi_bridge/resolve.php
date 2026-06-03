@@ -50,12 +50,30 @@ if ($bootPath === false || ! file_exists($bootPath)) {
 require_once $bootPath;
 require_once __DIR__.'/lib/ThirdPartyStore.php';
 require_once __DIR__.'/lib/InvoiceFeed.php';
+require_once __DIR__.'/lib/BridgeLogStore.php';
 
 use WHMCS\Database\Capsule;
+use WHMCS\Module\Addon\EkdosiBridge\BridgeLogStore;
 use WHMCS\Module\Addon\EkdosiBridge\InvoiceFeed;
 use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
 
 header('Content-Type: application/json');
+
+// Plugin-API visibility: record EVERY request (success, auth-failure, unknown
+// op, exception) to mod_ekdosi_bridge_log so the WHMCS-side «Bridge logs» tab
+// shows what ekdosi asks, how often, and what fails. A shutdown function logs
+// once at the very end — it fires even after exit(), so it captures the final
+// HTTP status without per-branch plumbing. $bridgeLogOp/$bridgeLogResult are set
+// as the request is dispatched; result detail (count / found / reason) is
+// optional. Best-effort — BridgeLogStore::record never throws into the response.
+$bridgeLogIp = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+$bridgeLogOp = '';
+$bridgeLogResult = '';
+register_shutdown_function(static function () use (&$bridgeLogOp, &$bridgeLogResult, $bridgeLogIp) {
+    $status = http_response_code();
+    $status = is_int($status) ? $status : 200;
+    BridgeLogStore::record($bridgeLogOp, $bridgeLogIp, $status >= 200 && $status < 300, $status, $bridgeLogResult);
+});
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -77,6 +95,8 @@ $secret = (string) (Capsule::table('tbladdonmodules')
     ->where('setting', 'webhook_secret')
     ->value('value') ?? '');
 if ($secret === '') {
+    $bridgeLogOp = '(auth)';
+    $bridgeLogResult = 'secret_not_configured';
     http_response_code(422);
     echo json_encode([
         'error'   => 'secret_not_configured',
@@ -88,6 +108,8 @@ if ($secret === '') {
 // HMAC over the raw body — identical scheme to inbound.php.
 $sigHeader = (string) ($_SERVER['HTTP_X_WEBHOOK_SIGNATURE'] ?? '');
 if (! str_starts_with($sigHeader, 'sha256=')) {
+    $bridgeLogOp = '(auth)';
+    $bridgeLogResult = 'invalid_signature (missing/malformed header)';
     http_response_code(401);
     echo json_encode(['error' => 'invalid_signature', 'message' => 'X-Webhook-Signature header missing or malformed.']);
     exit;
@@ -95,6 +117,8 @@ if (! str_starts_with($sigHeader, 'sha256=')) {
 $sent = substr($sigHeader, strlen('sha256='));
 $expected = hash_hmac('sha256', $rawBody, $secret);
 if (! hash_equals($expected, $sent)) {
+    $bridgeLogOp = '(auth)';
+    $bridgeLogResult = 'invalid_signature (HMAC mismatch)';
     http_response_code(401);
     echo json_encode(['error' => 'invalid_signature']);
     exit;
@@ -108,6 +132,7 @@ if (! is_array($payload)) {
 }
 
 $op = (string) ($payload['op'] ?? '');
+$bridgeLogOp = $op !== '' ? $op : '?';
 
 try {
     if ($op === 'resellers') {
@@ -155,7 +180,9 @@ try {
         $offset = (int) ($payload['offset'] ?? 0);
         $limit = (int) ($payload['limit'] ?? 100);
         $withRouting = (bool) ($payload['with_routing'] ?? false);
-        echo json_encode(['status' => 'ok'] + InvoiceFeed::fetch($status, $since, $offset, $limit, $withRouting));
+        $feed = InvoiceFeed::fetch($status, $since, $offset, $limit, $withRouting);
+        $bridgeLogResult = 'count='.(int) ($feed['count'] ?? 0).' offset='.$offset;
+        echo json_encode(['status' => 'ok'] + $feed);
         exit;
     }
 
@@ -173,7 +200,9 @@ try {
             exit;
         }
         $withRouting = (bool) ($payload['with_routing'] ?? false);
-        echo json_encode(['status' => 'ok', 'invoice' => InvoiceFeed::fetchOne($invoiceId, $withRouting)]);
+        $one = InvoiceFeed::fetchOne($invoiceId, $withRouting);
+        $bridgeLogResult = ($one !== null ? 'found' : 'not_found').' #'.$invoiceId;
+        echo json_encode(['status' => 'ok', 'invoice' => $one]);
         exit;
     }
 
@@ -231,6 +260,7 @@ try {
     echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices" or "invoice".']);
     exit;
 } catch (\Throwable $e) {
+    $bridgeLogResult = 'error: '.$e->getMessage();
     http_response_code(500);
     echo json_encode(['error' => 'query_failed', 'message' => $e->getMessage()]);
     exit;

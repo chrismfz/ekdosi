@@ -10,6 +10,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-06-03
+### Added
+- **«Bridge logs» tab + Plugin-API request log (`mod_ekdosi_bridge_log`).** Every
+  call ekdosi makes to `resolve.php` is recorded (op, IP, HTTP status, short
+  result — count / found / auth-failure reason) via a shutdown-function recorder
+  that fires even on early `exit`, so success, 401/422 auth-failures, unknown ops
+  and exceptions are ALL captured with one chokepoint. New `BridgeLogStore`
+  (created by `SchemaGuard`, no reactivation; best-effort — never throws into a
+  response; ~30-day self-pruning). The admin landing gains a **«Τελευταίο ερώτημα
+  ekdosi»** freshness row + a **«Bridge logs»** button; the tab shows a freshness
+  banner (no inbound poll in >1h → red — the silent-outage tripwire that would
+  have caught the ~1.5-day stall from the WHMCS side), a 401/422 secret-mismatch
+  note, 24h totals, and the recent request table.
+
 ## [0.32.0] — 2026-06-03
 ### Added
 - **Plugin-API `op=invoice` (single-invoice feed)** — the single-id twin of
