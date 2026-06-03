@@ -31,24 +31,28 @@ return new class extends Migration
             ->where('details', '!=', '')
             ->orderBy('id')
             ->chunkById(500, function ($customers) use ($now): void {
+                // One query for the already-migrated set in this chunk (incl.
+                // trashed — a soft-deleted backup note still counts as "present",
+                // matching BackupNoteSync's withTrashed lookup), then a single
+                // bulk insert for the rest. Avoids a SELECT+INSERT per row.
+                $ids = $customers->pluck('id')->all();
+
+                $already = DB::table('notes')
+                    ->where('notable_type', self::CUSTOMER_TYPE)
+                    ->where('source', 'backup')
+                    ->whereIn('notable_id', $ids)
+                    ->pluck('notable_id')
+                    ->all();
+                $already = array_flip($already);
+
+                $insert = [];
                 foreach ($customers as $c) {
                     $body = trim((string) $c->details);
-                    if ($body === '') {
+                    if ($body === '' || isset($already[$c->id])) {
                         continue;
                     }
 
-                    $exists = DB::table('notes')
-                        ->where('company_id', $c->company_id)
-                        ->where('notable_type', self::CUSTOMER_TYPE)
-                        ->where('notable_id', $c->id)
-                        ->where('source', 'backup')
-                        ->exists();
-
-                    if ($exists) {
-                        continue;
-                    }
-
-                    DB::table('notes')->insert([
+                    $insert[] = [
                         'company_id'     => $c->company_id,
                         'notable_type'   => self::CUSTOMER_TYPE,
                         'notable_id'     => $c->id,
@@ -58,14 +62,23 @@ return new class extends Migration
                         'author_user_id' => null,
                         'created_at'     => $now,
                         'updated_at'     => $now,
-                    ]);
+                    ];
+                }
+
+                if ($insert !== []) {
+                    DB::table('notes')->insert($insert);
                 }
             });
     }
 
     public function down(): void
     {
-        // Roll back only the rows this migration could have created.
+        // On a full rollback this runs AFTER 000003.down(), which has already
+        // re-added `customers.details` and copied every backup note's body back
+        // into it — so removing the backup notes here is non-destructive (the
+        // remarks live in `details` again). This deletes ALL customer backup
+        // notes (incl. importer-created ones), which is correct: the column is
+        // the source of truth once restored.
         DB::table('notes')
             ->where('notable_type', self::CUSTOMER_TYPE)
             ->where('source', 'backup')

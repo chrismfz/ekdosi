@@ -21,6 +21,9 @@ class Note extends Model
     use HasFactory;
     use SoftDeletes;
 
+    /** Origin marker for an imported (ETL-synced) note; NULL = operator-authored. */
+    public const SOURCE_BACKUP = 'backup';
+
     protected $fillable = [
         'company_id',
         'notable_type',
@@ -30,6 +33,18 @@ class Note extends Model
         'source',
         'author_user_id',
     ];
+
+    /** Whether the note is import-managed (read-only for operators). */
+    public function isImported(): bool
+    {
+        return $this->source !== null;
+    }
+
+    /** Operator-facing label for the note's origin (null = no badge). */
+    public function sourceLabel(): ?string
+    {
+        return $this->source === self::SOURCE_BACKUP ? 'από backup' : null;
+    }
 
     protected function casts(): array
     {

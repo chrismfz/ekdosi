@@ -80,7 +80,7 @@ class InternalNotesRelationManager extends RelationManager
                     ->label('Πηγή')
                     ->badge()
                     ->color('gray')
-                    ->formatStateUsing(fn (?string $state): string => $state === 'backup' ? 'από backup' : '—')
+                    ->formatStateUsing(fn ($state, Note $record): string => $record->sourceLabel() ?? '—')
                     ->placeholder('—'),
 
                 TextColumn::make('author.name')
@@ -103,8 +103,11 @@ class InternalNotesRelationManager extends RelationManager
                     }),
             ])
             ->recordActions([
-                EditAction::make(),
-                DeleteAction::make(),
+                // Imported («από backup») notes are managed by the import — the
+                // next run would revert an edit / restore a delete anyway, so
+                // they're read-only here. Operators annotate with their own note.
+                EditAction::make()->visible(fn (Note $record): bool => ! $record->isImported()),
+                DeleteAction::make()->visible(fn (Note $record): bool => ! $record->isImported()),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

@@ -104,8 +104,8 @@
                         <div class="space-y-0.5">
                             <div class="whitespace-pre-line">{{ $note->body }}</div>
                             <div class="text-xs fi-color-gray flex items-center gap-1">
-                                @if ($note->source === 'backup')
-                                    <x-filament::badge color="gray" size="sm">από backup</x-filament::badge>
+                                @if ($note->sourceLabel())
+                                    <x-filament::badge color="gray" size="sm">{{ $note->sourceLabel() }}</x-filament::badge>
                                 @endif
                                 <span>{{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->created_at?->format('d/m/Y H:i') }}</span>
                             </div>

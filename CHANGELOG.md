@@ -33,8 +33,12 @@ they merge.
   σβήνει τη σημείωση αν το σχόλιο αδειάσει στην πηγή, δεν αγγίζει τις χειροκίνητες.
   Μια **data migration** μετέφερε τα υπάρχοντα `details` και μετά η στήλη **έπεσε**
   (`dropColumn`). Στην Καρτέλα + στο tab οι imported σημειώσεις φέρουν badge «από
-  backup». **Deploy:** `php artisan migrate` (3 migrations: add `source` → migrate
-  data → drop `details`).
+  backup» και είναι **read-only** (τις διαχειρίζεται το import). Ανθεκτικότητα:
+  το sync χειρίζεται soft-deleted backup note (restore αντί για διπλότυπο), η
+  drop migration **αρνείται** να ρίξει τη στήλη αν υπάρχει σχόλιο χωρίς backup note,
+  και το rollback είναι **μη-καταστροφικό** (η `down` ξαναγράφει τα σχόλια στη
+  στήλη πριν σβήσει τις σημειώσεις). **Deploy:** `php artisan migrate` (3 migrations:
+  add `source` → migrate data → drop `details`).
 - **myDATA consoles — ένα κουμπί «Έλεγχος» αντί για δύο** (έσοδα + έξοδα): οι δύο
   «κατευθύνσεις» (τα-δικά-μας vs αδέσποτα) έκαναν την ΙΔΙΑ κλήση
   (`SalesReconciler`/`ExpenseReconciler`) — τώρα ένα κουμπί κάνει ένα fetch και

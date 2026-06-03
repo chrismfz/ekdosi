@@ -61,6 +61,23 @@ class BackupNoteSyncTest extends TestCase
         $this->assertSame(0, Note::where('notable_id', $c->id)->count());
     }
 
+    public function test_resyncs_a_soft_deleted_backup_note_instead_of_duplicating(): void
+    {
+        $c = $this->customer();
+
+        BackupNoteSync::sync($this->tenant->id, $c->id, 'αρχικό');
+        $note = Note::where('notable_id', $c->id)->first();
+        $note->delete();   // operator soft-deletes it in the UI
+
+        // Re-import: must restore + update the SAME row, not create a 2nd one.
+        BackupNoteSync::sync($this->tenant->id, $c->id, 'ενημερωμένο');
+
+        $all = Note::withTrashed()->where('notable_id', $c->id)->get();
+        $this->assertCount(1, $all, 'A soft-deleted backup note must be reused, not duplicated.');
+        $this->assertFalse($all[0]->trashed());
+        $this->assertSame('ενημερωμένο', $all[0]->body);
+    }
+
     public function test_sync_does_not_touch_operator_notes(): void
     {
         $c = $this->customer();
@@ -122,5 +139,38 @@ class BackupNoteSyncTest extends TestCase
 
         // Blank/whitespace details produce no note.
         $this->assertSame(0, Note::where('notable_id', $blank->id)->count());
+    }
+
+    /**
+     * Phase 3 must refuse to drop the column while a remark has no backup note
+     * (guards against a partial Phase 2 / a hand-marked migration), and its
+     * down() must restore the remarks into a re-added column (non-destructive).
+     */
+    public function test_phase3_guard_refuses_drop_when_unmigrated_and_down_restores(): void
+    {
+        Schema::table('customers', fn ($t) => $t->text('details')->nullable());
+        $c = $this->customer();
+        DB::table('customers')->where('id', $c->id)->update(['details' => 'Δεν μεταφέρθηκε']);
+
+        $drop = require database_path('migrations/2026_06_03_000003_drop_details_from_customers_table.php');
+
+        // Un-migrated remark → guard throws, column stays.
+        try {
+            $drop->up();
+            $this->fail('Expected the drop guard to throw.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Refusing to drop', $e->getMessage());
+        }
+        $this->assertTrue(Schema::hasColumn('customers', 'details'));
+
+        // Migrate, then the drop succeeds.
+        BackupNoteSync::sync($this->tenant->id, $c->id, 'Δεν μεταφέρθηκε');
+        $drop->up();
+        $this->assertFalse(Schema::hasColumn('customers', 'details'));
+
+        // down() re-adds the column and restores the remark from the backup note.
+        $drop->down();
+        $this->assertTrue(Schema::hasColumn('customers', 'details'));
+        $this->assertSame('Δεν μεταφέρθηκε', DB::table('customers')->where('id', $c->id)->value('details'));
     }
 }
