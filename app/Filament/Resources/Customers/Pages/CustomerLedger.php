@@ -9,6 +9,7 @@ use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\BankAccountField;
 use App\Mail\CustomerStatementMail;
 use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\AadeRegistryLookup;
@@ -20,11 +21,13 @@ use App\Services\Payments\PaymentAllocator;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\CustomerWhmcsLedger;
 use App\Services\Whmcs\CustomerWhmcsLedgerResult;
+use App\Support\InvoiceScope;
 use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -386,6 +389,43 @@ class CustomerLedger extends Page implements HasTable
         return Money::eur($value);
     }
 
+    /** This customer's available on-account credit (unallocated money). */
+    private function availableCredit(): float
+    {
+        return app(PaymentAllocator::class)->availableCredit($this->record);
+    }
+
+    /**
+     * The customer's OPEN credit-term invoices as id => «ΤΙΜ123 — υπόλοιπο X€»,
+     * for the apply-credit / manual-allocation pickers. Balance from the cached
+     * money columns (paid_total already nets refunds). Only positive balances.
+     *
+     * @return array<int, string>
+     */
+    private function openInvoiceOptions(): array
+    {
+        $q = Invoice::query()
+            ->join('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
+            ->where('invoices.company_id', $this->record->company_id)
+            ->where('invoices.customer_id', $this->record->getKey())
+            ->whereNull('invoices.deleted_at')
+            ->whereNull('invoices.credited_invoice_id')
+            ->where('invoices.local_status', 'active')
+            ->where('payment_methods.due_days', '>', 0);
+        InvoiceScope::live($q, 'invoices.');
+
+        return $q->orderBy('invoices.issued_at')
+            ->get(['invoices.id', 'invoices.invcode', 'invoices.gross_total', 'invoices.credited_total', 'invoices.paid_total'])
+            ->mapWithKeys(function (Invoice $inv): array {
+                $balance = round((float) $inv->gross_total - (float) $inv->credited_total - (float) $inv->paid_total, 2);
+
+                return $balance > 0.005
+                    ? [$inv->id => $inv->invcode.' — υπόλοιπο '.$this->fmtMoney($balance)]
+                    : [];
+            })
+            ->all();
+    }
+
     /* ===================== Header actions ===================== */
 
     protected function getHeaderActions(): array
@@ -573,6 +613,101 @@ class CustomerLedger extends Page implements HasTable
                         'notes' => $data['notes'] ?? null,
                     ]);
                     Notification::make()->success()->title('Η επιστροφή καταχωρίστηκε')->send();
+                    $this->redirect(static::getUrl(['record' => $this->record]));
+                }),
+
+            // #1 — Εφαρμογή πίστωσης: μετακινεί διαθέσιμη on-account πίστωση πάνω
+            // σε ανοιχτό τιμολόγιο (re-point — net-zero στο συνολικό υπόλοιπο).
+            Action::make('apply_credit')
+                ->label('Χρήση πίστωσης')
+                ->icon('heroicon-o-arrow-right-circle')
+                ->color('info')
+                ->visible(fn () => $this->availableCredit() > 0.005 && $this->openInvoiceOptions() !== [])
+                ->modalHeading('Χρήση διαθέσιμης πίστωσης')
+                ->modalDescription(fn () => 'Διαθέσιμη πίστωση: '.$this->fmtMoney($this->availableCredit()).'. Επιλέξτε τιμολόγιο για να την εφαρμόσετε.')
+                ->modalSubmitActionLabel('Εφαρμογή')
+                ->schema(fn () => [
+                    Select::make('invoice_id')
+                        ->label('Τιμολόγιο')
+                        ->options($this->openInvoiceOptions())
+                        ->searchable()
+                        ->required(),
+                    TextInput::make('amount')
+                        ->label('Ποσό (€)')
+                        ->numeric()->minValue(0.01)->required()
+                        ->default(fn () => number_format($this->availableCredit(), 2, '.', ''))
+                        ->helperText('Δεν μπορεί να ξεπεράσει τη διαθέσιμη πίστωση ή το υπόλοιπο του τιμολογίου.'),
+                ])
+                ->action(function (array $data) {
+                    $invoice = Invoice::query()
+                        ->where('company_id', $this->record->company_id)
+                        ->where('customer_id', $this->record->getKey())
+                        ->findOrFail($data['invoice_id']);
+                    try {
+                        $applied = app(PaymentAllocator::class)->applyCredit($this->record, $invoice, (float) $data['amount']);
+                    } catch (\InvalidArgumentException $e) {
+                        Notification::make()->danger()->title('Δεν έγινε εφαρμογή')->body($e->getMessage())->send();
+
+                        return;
+                    }
+                    Notification::make()->success()->title('Η πίστωση εφαρμόστηκε')
+                        ->body($this->fmtMoney($applied).' στο '.$invoice->invcode)->send();
+                    $this->redirect(static::getUrl(['record' => $this->record]));
+                }),
+
+            // #2 — Χειροκίνητη κατανομή: ο χειριστής ορίζει ποσό ανά τιμολόγιο.
+            Action::make('manual_allocation')
+                ->label('Χειροκίνητη κατανομή')
+                ->icon('heroicon-o-adjustments-horizontal')
+                ->color('success')
+                ->visible(fn () => $this->openInvoiceOptions() !== [])
+                ->modalHeading('Χειροκίνητη κατανομή είσπραξης')
+                ->modalDescription('Ορίστε ΑΚΡΙΒΩΣ πόσα πηγαίνουν σε κάθε τιμολόγιο (αντί για αυτόματη FIFO).')
+                ->modalSubmitActionLabel('Καταχώριση')
+                ->schema([
+                    DatePicker::make('pay_date')->label('Ημερομηνία')->required()->default(now()),
+                    Select::make('payment_method_id')
+                        ->label('Τρόπος πληρωμής')
+                        ->options(fn () => PaymentMethod::query()
+                            ->where('company_id', $this->record->company_id)
+                            ->pluck('description', 'id')),
+                    BankAccountField::make($this->record->company_id),
+                    TextInput::make('transaction_id')->label('Κωδικός συναλλαγής')->maxLength(100),
+                    Repeater::make('lines')
+                        ->label('Κατανομή')
+                        ->schema([
+                            Select::make('invoice_id')
+                                ->label('Τιμολόγιο')
+                                ->options($this->openInvoiceOptions())
+                                ->searchable()
+                                ->required(),
+                            TextInput::make('amount')
+                                ->label('Ποσό (€)')->numeric()->minValue(0.01)->required(),
+                        ])
+                        ->columns(2)
+                        ->minItems(1)
+                        ->addActionLabel('Προσθήκη τιμολογίου'),
+                    Textarea::make('notes')->label('Σημειώσεις')->rows(2),
+                ])
+                ->action(function (array $data) {
+                    try {
+                        $res = app(PaymentAllocator::class)->allocateManual(
+                            $this->record,
+                            $data['lines'] ?? [],
+                            Carbon::parse($data['pay_date']),
+                            $data['payment_method_id'] ?? null,
+                            null,
+                            $data['notes'] ?? null,
+                            $data['transaction_id'] ?? null,
+                            $data['bank_account_id'] ?? null,
+                        );
+                    } catch (\InvalidArgumentException $e) {
+                        Notification::make()->danger()->title('Δεν έγινε κατανομή')->body($e->getMessage())->send();
+
+                        return;
+                    }
+                    Notification::make()->success()->title('Η κατανομή καταχωρίστηκε')
+                        ->body(count($res->allocations).' τιμολόγια ('.$this->fmtMoney($res->allocatedToInvoices()).')')->send();
                     $this->redirect(static::getUrl(['record' => $this->record]));
                 }),
 

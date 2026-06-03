@@ -16,7 +16,16 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Changed
+- **Μενού — οι «Πληρωμές» μετακινήθηκαν** από το τεχνικό group «Data» σε νέο
+  group **«Είσπραξη/Πληρωμές»**.
 ### Added
+- **Πληρωμές — Χρήση πίστωσης (#1) & Χειροκίνητη κατανομή (#2).** Στην Καρτέλα:
+  «Χρήση πίστωσης» μετακινεί διαθέσιμη on-account πίστωση πάνω σε ανοιχτό
+  τιμολόγιο (re-point των payment rows — **net-zero** στο συνολικό υπόλοιπο,
+  capped από υπόλοιπο τιμολογίου & διαθέσιμη πίστωση), «Χειροκίνητη κατανομή»
+  ορίζει **ακριβές ποσό ανά τιμολόγιο** (vs FIFO). `PaymentAllocator::applyCredit`
+  / `allocateManual` / `availableCredit`. `ApplyCreditAndManualAllocationTest`.
 - **Πληρωμές — Ληξιπρόθεσμα / Due (#6).** Ημερομηνία λήξης = `issued_at +
   payment_method.due_days` (μηδέν για μετρητοίς). Νέα `Invoice::dueDate()` /
   `isOverdue()` / `scopeOverdue()` (driver-aware date math, EXISTS σε
