@@ -3,6 +3,7 @@
 namespace App\Services\CustomerLedger;
 
 use App\Models\Customer;
+use App\Support\Filename;
 use Illuminate\Support\Carbon;
 
 /**
@@ -33,10 +34,18 @@ class CustomerStatementCsv
         $rows[] = ['Ημερομηνία', 'Τύπος', 'Αναφορά', 'Χρέωση', 'Πίστωση', 'Υπόλοιπο', 'myDATA'];
 
         foreach ($result->ledger as $row) {
+            // Φ3 — a grouped «έμβασμα/είσπραξη» renders as ONE credit line; its
+            // allocation breakdown is appended to the reference cell so the
+            // statement still shows what was settled (never exploded into sub-rows).
+            $reference = (string) $row['reference'];
+            if (! empty($row['is_receipt_group']) && ! empty($row['allocations'])) {
+                $reference = ReceiptAllocationSummary::describe($reference, $row['allocations'], $fmt);
+            }
+
             $rows[] = [
                 Carbon::parse($row['date'])->format('Y-m-d'),
-                $row['type'] === 'invoice' ? ($row['invoice_type_code'] ?? 'Τιμολόγιο') : 'Πληρωμή',
-                (string) $row['reference'],
+                CustomerLedgerBuilder::eventTypeLabel($row['type'], $row['invoice_type_code'] ?? null),
+                $reference,
                 $row['debit'] > 0 ? $fmt($row['debit']) : '',
                 $row['credit'] > 0 ? $fmt($row['credit']) : '',
                 $fmt($row['running_balance']),
@@ -59,7 +68,7 @@ class CustomerStatementCsv
 
     public function filename(Customer $customer): string
     {
-        $slug = \App\Support\Filename::slug($customer->name, 'customer');
+        $slug = Filename::slug($customer->name, 'customer');
 
         return 'kartela-'.$slug.'-'.now()->format('Ymd').'.csv';
     }

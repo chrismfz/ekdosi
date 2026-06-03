@@ -94,3 +94,12 @@ if (config('ekdosi.schedule.mydata_vat_picture_enabled')) {
         ->name('mydata-vat-picture-all')
         ->withoutOverlapping();
 }
+
+// invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
+// tenant. Read-only, NO email; default OFF (opt-in per deploy).
+if (config('ekdosi.schedule.overdue_notifications_enabled')) {
+    Schedule::command('invoices:notify-overdue')
+        ->dailyAt(config('ekdosi.schedule.overdue_notifications_time', '07:30'))
+        ->name('invoices-notify-overdue')
+        ->withoutOverlapping();
+}

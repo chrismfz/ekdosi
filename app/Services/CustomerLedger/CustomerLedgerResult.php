@@ -60,12 +60,22 @@ final readonly class CustomerLedgerResult implements Wireable
      *     running_balance: float,
      *     mydata_state: ?string,
      *     mydata_mark: ?string,
+     *     is_receipt_group: bool,
+     *     allocations: ?list<array{label: string, amount: float, invoice_id: ?int, invcode: ?string}>,
      * }>  $ledger
      * @param  array{
      *     year: ?int,
      *     invoice_type_id: ?int,
      *     paid_status: ?string,
      * }  $appliedFilters
+     *
+     * Φ3 — a `payment` ledger row with `is_receipt_group: true` is ONE
+     * «έμβασμα/είσπραξη» (a PaymentAllocator batch sharing one
+     * `payments.reference`): its `credit` is the SUM of the batch and
+     * `allocations` drills down to each underlying Payment (per settled
+     * invoice + an optional on-account «Πίστωση / προκαταβολή» line).
+     * Ungrouped payments (NULL reference) keep `is_receipt_group: false`
+     * and `allocations: null`.
      */
     public function __construct(
         public array $stats,
@@ -73,8 +83,7 @@ final readonly class CustomerLedgerResult implements Wireable
         public array $yearly,
         public array $ledger,
         public array $appliedFilters,
-    ) {
-    }
+    ) {}
 
     public function hasAnyActivity(): bool
     {
@@ -95,10 +104,10 @@ final readonly class CustomerLedgerResult implements Wireable
     public function toLivewire(): array
     {
         return [
-            'stats'          => $this->stats,
-            'aging'          => $this->aging,
-            'yearly'         => $this->yearly,
-            'ledger'         => $this->ledger,
+            'stats' => $this->stats,
+            'aging' => $this->aging,
+            'yearly' => $this->yearly,
+            'ledger' => $this->ledger,
             'appliedFilters' => $this->appliedFilters,
         ];
     }
@@ -106,10 +115,10 @@ final readonly class CustomerLedgerResult implements Wireable
     public static function fromLivewire($value): self
     {
         return new self(
-            stats:          $value['stats'],
-            aging:          $value['aging'],
-            yearly:         $value['yearly'],
-            ledger:         $value['ledger'],
+            stats: $value['stats'],
+            aging: $value['aging'],
+            yearly: $value['yearly'],
+            ledger: $value['ledger'],
             appliedFilters: $value['appliedFilters'],
         );
     }

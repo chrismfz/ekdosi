@@ -2,6 +2,10 @@
 
 namespace App\Filament\Resources\Invoices\Schemas;
 
+use App\Filament\Support\BankAccountField;
+use App\Filament\Support\PickerOptions;
+use App\Filament\Support\Tags\TagControls;
+use App\Filament\Support\VatRateOptions;
 use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\DistributionAim;
@@ -11,20 +15,18 @@ use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
-use App\Filament\Support\PickerOptions;
-use App\Filament\Support\Tags\TagControls;
-use App\Filament\Support\VatRateOptions;
 use App\Support\MyData\Codes;
 use App\Support\MyData\ReverseCharge;
 use Filament\Facades\Filament;
-use Filament\Notifications\Notification;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Field;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
@@ -195,6 +197,11 @@ class InvoiceForm
                             ->pluck('description', 'id'))
                         ->searchable()
                         ->preload(),
+
+                    BankAccountField::make(
+                        Filament::getTenant()?->getKey(),
+                        'Λογαριασμός κατάθεσης — τυπώνεται στο παραστατικό για πληρωμή με έμβασμα.',
+                    ),
 
                     Select::make('delivery_method_id')
                         ->label('Τρόπος αποστολής')
@@ -439,7 +446,7 @@ class InvoiceForm
      * the Products resource). Net price + VAT category so the new line
      * fills correctly via the product_id afterStateUpdated.
      *
-     * @return array<int, \Filament\Forms\Components\Field>
+     * @return array<int, Field>
      */
     public static function inlineProductForm(): array
     {

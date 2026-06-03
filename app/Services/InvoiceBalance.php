@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\PaymentStatus;
 use App\Models\Invoice;
+use App\Models\Payment;
 use App\Support\InvoiceScope;
 use Illuminate\Support\Facades\DB;
 
@@ -68,9 +69,9 @@ class InvoiceBalance
         $balance = round($owed - $rawPaid, 2);
         $status = match (true) {
             $rawPaid > $owed + self::EPS => PaymentStatus::Overpaid,
-            abs($balance) <= self::EPS   => PaymentStatus::Paid,
-            $rawPaid > self::EPS         => PaymentStatus::Partial,
-            default                      => PaymentStatus::Unpaid,
+            abs($balance) <= self::EPS => PaymentStatus::Paid,
+            $rawPaid > self::EPS => PaymentStatus::Partial,
+            default => PaymentStatus::Unpaid,
         };
 
         return new InvoiceBalanceData(
@@ -109,7 +110,7 @@ class InvoiceBalance
         $data = $this->for($locked);
 
         $locked->forceFill([
-            'paid_total'     => $data->paid,
+            'paid_total' => $data->paid,
             'credited_total' => $data->credited,
             'payment_status' => $data->status->value,
         ])->save();
@@ -138,9 +139,14 @@ class InvoiceBalance
             return 0.0;
         }
 
-        return (float) DB::table('payments')
+        // Refunds (kind = 'refund') count NEGATIVE — money returned to the
+        // customer reduces what's been paid on this invoice (Payment::NET_AMOUNT_SQL).
+        $row = DB::table('payments')
             ->where('invoice_id', $invoice->getKey())
             ->whereNull('deleted_at')
-            ->sum('amount');
+            ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS net_paid')
+            ->first();
+
+        return (float) ($row->net_paid ?? 0);
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\PaymentStatus;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
@@ -10,6 +11,7 @@ use App\Models\Concerns\TracksActivity;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
+use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -18,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 
 /**
  * Issued invoice (παραστατικό). Mirrors legacy INVOICE.
@@ -92,6 +95,7 @@ class Invoice extends Model
         'distribution_aim_id',
         'delivery_method_id',
         'payment_method_id',
+        'bank_account_id',
         'conv_invoice_id',
         'credited_invoice_id',
         'whmcs_pending_id',
@@ -161,6 +165,11 @@ class Invoice extends Model
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class);
+    }
+
+    public function bankAccount(): BelongsTo
+    {
+        return $this->belongsTo(BankAccount::class);
     }
 
     public function deliveryMethod(): BelongsTo
@@ -275,6 +284,83 @@ class Invoice extends Model
             ->whereIn('status', $statuses)
             ->whereRaw('invoice_mail_log.id = (select max(m2.id) from invoice_mail_log m2 where m2.invoice_id = invoice_mail_log.invoice_id)')
             ->select('invoice_id'));
+    }
+
+    /**
+     * Due date of a credit-term invoice = issued_at + payment_method.due_days.
+     * NULL for cash-term (due_days = 0 / no method) — settled at issue, never
+     * "due" later. A pure date, NOT money: it doesn't touch InvoiceBalance.
+     */
+    public function dueDate(): ?Carbon
+    {
+        $dueDays = (int) ($this->paymentMethod?->due_days ?? 0);
+        if ($dueDays <= 0 || $this->issued_at === null) {
+            return null;
+        }
+
+        return $this->issued_at->copy()->startOfDay()->addDays($dueDays);
+    }
+
+    /**
+     * Ληξιπρόθεσμο: a live, issued (non-draft), non-credit-note, credit-term
+     * invoice whose own balance is still outstanding and whose due date has
+     * passed. Mirrors {@see scopeOverdue} for a single hydrated record.
+     */
+    public function isOverdue(?Carbon $asOf = null): bool
+    {
+        $due = $this->dueDate();
+        if ($due === null) {
+            return false;
+        }
+        if ($this->local_status !== 'active' || $this->credited_invoice_id !== null) {
+            return false;
+        }
+        if ($this->mydata_state === 'CANCELLED') {
+            return false;
+        }
+        if (! in_array((string) $this->payment_status, [
+            PaymentStatus::Unpaid->value,
+            PaymentStatus::Partial->value,
+        ], true)) {
+            return false;
+        }
+
+        return $due->lt($asOf ?? Carbon::today());
+    }
+
+    /**
+     * Overdue receivables: credit-term (due_days > 0), live, issued, non-credit-
+     * note invoices with an outstanding cached payment_status and a due date in
+     * the past. Driver-aware date math (MariaDB in prod, sqlite in tests) via a
+     * correlated EXISTS on payment_methods — no join, so it composes with the
+     * Filament list query and hydrates cleanly. Read-only; no money mutation.
+     */
+    public function scopeOverdue(Builder $query, ?Carbon $asOf = null): Builder
+    {
+        $cutoff = ($asOf ?? Carbon::today())->toDateTimeString();
+        $driver = $query->getConnection()->getDriverName();
+        $dueExpr = match ($driver) {
+            'sqlite' => "datetime(invoices.issued_at, '+' || payment_methods.due_days || ' days')",
+            'pgsql' => "invoices.issued_at + (payment_methods.due_days || ' days')::interval",
+            default => 'DATE_ADD(invoices.issued_at, INTERVAL payment_methods.due_days DAY)', // mysql / mariadb
+        };
+
+        $query
+            ->where('invoices.local_status', 'active')
+            ->whereNull('invoices.credited_invoice_id')
+            ->whereIn('invoices.payment_status', [
+                PaymentStatus::Unpaid->value,
+                PaymentStatus::Partial->value,
+            ])
+            ->whereExists(function ($sub) use ($dueExpr, $cutoff) {
+                $sub->selectRaw('1')
+                    ->from('payment_methods')
+                    ->whereColumn('payment_methods.id', 'invoices.payment_method_id')
+                    ->where('payment_methods.due_days', '>', 0)
+                    ->whereRaw("$dueExpr < ?", [$cutoff]);
+            });
+
+        return InvoiceScope::live($query, 'invoices.');
     }
 
     /**

@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\Billing\Sources\WhmcsBillingSource;
+
 return [
 
     // Force every operator to set up TOTP 2FA on their next login. Default OFF
@@ -63,6 +65,12 @@ return [
         'mydata_vat_picture_enabled' => env('EKDOSI_SCHEDULE_MYDATA_VAT_PICTURE', true),
         'mydata_vat_picture_cron' => env('EKDOSI_MYDATA_VAT_PICTURE_CRON', '0 */4 * * *'),
 
+        // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα per
+        // tenant (NO email). Default OFF so a fresh deploy doesn't surprise
+        // operators with notifications until they opt in. HH:MM (server time).
+        'overdue_notifications_enabled' => env('EKDOSI_SCHEDULE_OVERDUE_NOTIFICATIONS', false),
+        'overdue_notifications_time' => env('EKDOSI_OVERDUE_NOTIFICATIONS_TIME', '07:30'),
+
     ],
 
     /*
@@ -80,7 +88,7 @@ return [
     */
     'billing' => [
         'sources' => [
-            'whmcs' => App\Services\Billing\Sources\WhmcsBillingSource::class,
+            'whmcs' => WhmcsBillingSource::class,
             // 'woocommerce' => App\Services\Billing\Sources\WooCommerceBillingSource::class,  // Phase 1+
             // 'blesta'      => App\Services\Billing\Sources\BlestaBillingSource::class,        // Phase 1+
         ],
