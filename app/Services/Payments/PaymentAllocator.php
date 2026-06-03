@@ -74,6 +74,7 @@ class PaymentAllocator
                     'company_id' => $customer->company_id,
                     'customer_id' => $customer->id,
                     'invoice_id' => $invoice->id,
+                    'kind' => 'payment',
                     'payment_method_id' => $paymentMethodId,
                     'bank_account_id' => $bankAccountId,
                     'pay_date' => $date->toDateString(),
@@ -93,6 +94,7 @@ class PaymentAllocator
                     'company_id' => $customer->company_id,
                     'customer_id' => $customer->id,
                     'invoice_id' => null, // on-account credit / προκαταβολή
+                    'kind' => 'payment',
                     'payment_method_id' => $paymentMethodId,
                     'bank_account_id' => $bankAccountId,
                     'pay_date' => $date->toDateString(),
@@ -197,15 +199,17 @@ class PaymentAllocator
         }
 
         return DB::transaction(function () use ($customer, $target, $amount) {
-            // Lock the on-account pool FIRST so concurrent applies for this
-            // customer serialise — only then read the caps, so they reflect any
-            // prior committed apply (otherwise two operators both read the stale
-            // pre-lock figures and over-apply / misreport the amount).
+            // Lock the WHOLE on-account pool FIRST (payments AND refunds) so
+            // concurrent applies — and concurrent on-account refunds, which
+            // shift the available-credit cap — serialise; only then read the
+            // caps, so they reflect any prior committed apply/refund (otherwise
+            // two writers read stale pre-lock figures and over-apply / misreport).
+            // We still only RE-POINT 'payment' rows below; refund rows are locked
+            // for the cap but never moved.
             $onAccount = Payment::query()
                 ->where('company_id', $customer->company_id)
                 ->where('customer_id', $customer->id)
                 ->whereNull('invoice_id')
-                ->where('kind', 'payment')
                 ->orderBy('pay_date')
                 ->orderBy('id')
                 ->lockForUpdate()
@@ -232,6 +236,9 @@ class PaymentAllocator
             foreach ($onAccount as $payment) {
                 if ($remaining <= 0.005) {
                     break;
+                }
+                if ($payment->kind === 'refund') {
+                    continue; // locked for the cap, never moved
                 }
                 $rowAmount = round((float) $payment->amount, 2);
                 if ($rowAmount <= $remaining + 0.005) {

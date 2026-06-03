@@ -84,6 +84,12 @@ class Payment extends Model
         return $this->kind === 'refund';
     }
 
+    /** Operator-facing label for a payment direction (single source for every UI). */
+    public static function kindLabel(?string $kind): string
+    {
+        return $kind === 'refund' ? 'Επιστροφή' : 'Πληρωμή';
+    }
+
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);

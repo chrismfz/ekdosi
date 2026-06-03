@@ -149,7 +149,7 @@ class InvoicePaymentsRelationManager extends RelationManager
             ->columns([
                 TextColumn::make('pay_date')->label('Ημερομηνία')->date('d/m/Y')->sortable(),
                 TextColumn::make('kind')->label('Τύπος')->badge()
-                    ->formatStateUsing(fn (?string $state) => $state === 'refund' ? 'Επιστροφή' : 'Πληρωμή')
+                    ->formatStateUsing(fn (?string $state) => Payment::kindLabel($state))
                     ->color(fn (?string $state) => $state === 'refund' ? 'warning' : 'success'),
                 TextColumn::make('amount')->label('Ποσό')->money('EUR')->alignRight()->sortable(),
                 TextColumn::make('paymentMethod.description')->label('Τρόπος')->placeholder('—'),

@@ -222,6 +222,7 @@ class ViewInvoice extends ViewRecord
                             'company_id' => $record->company_id,
                             'customer_id' => $record->customer_id,
                             'invoice_id' => $record->id,
+                            'kind' => 'payment',
                             'payment_method_id' => $data['payment_method_id'] ?? null,
                             'bank_account_id' => $data['bank_account_id'] ?? null,
                             'amount' => $data['amount'],

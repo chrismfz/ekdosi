@@ -198,6 +198,20 @@ class CustomerLedgerBuilder
     }
 
     /**
+     * Operator-facing label for a ledger event row — the SINGLE source shared by
+     * the Καρτέλα table column, the CSV export and the PDF statement (was three
+     * identical match() blocks). `invoice` carries the invoice-type code.
+     */
+    public static function eventTypeLabel(string $type, ?string $invoiceTypeCode = null): string
+    {
+        return match ($type) {
+            'invoice' => $invoiceTypeCode ?? 'Τιμολόγιο',
+            'refund' => 'Επιστροφή',
+            default => 'Πληρωμή',
+        };
+    }
+
+    /**
      * Signed contribution of a payment row to the paid total: a refund
      * (money OUT, back to the customer) counts NEGATIVE — it un-pays, so the
      * balance rises again. Mirrors Payment::NET_AMOUNT_SQL on the SQL side.

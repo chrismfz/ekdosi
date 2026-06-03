@@ -225,11 +225,7 @@ class CustomerLedger extends Page implements HasTable
                 TextColumn::make('type')
                     ->label('Τύπος')
                     ->badge()
-                    ->formatStateUsing(fn ($state, array $record): string => match ($state) {
-                        'invoice' => $record['invoice_type_code'] ?? 'Τιμολόγιο',
-                        'refund' => 'Επιστροφή',
-                        default => 'Πληρωμή',
-                    })
+                    ->formatStateUsing(fn ($state, array $record): string => CustomerLedgerBuilder::eventTypeLabel($state, $record['invoice_type_code'] ?? null))
                     ->color(fn ($state): string => match ($state) {
                         'invoice' => 'info',
                         'refund' => 'warning',
@@ -390,21 +386,36 @@ class CustomerLedger extends Page implements HasTable
         return Money::eur($value);
     }
 
-    /** This customer's available on-account credit (unallocated money). */
+    private ?float $availableCreditCache = null;
+
+    /** @var array<int, string>|null */
+    private ?array $openInvoiceOptionsCache = null;
+
+    /**
+     * This customer's available on-account credit (unallocated money). Memoised
+     * per request: the apply-credit action reads it from visible() + the modal
+     * description + the amount default, all in one render (a private prop is not
+     * Livewire-hydrated, so it resets fresh each round-trip — no staleness).
+     */
     private function availableCredit(): float
     {
-        return app(PaymentAllocator::class)->availableCredit($this->record);
+        return $this->availableCreditCache ??= app(PaymentAllocator::class)->availableCredit($this->record);
     }
 
     /**
      * The customer's OPEN credit-term invoices as id => «ΤΙΜ123 — υπόλοιπο X€»,
      * for the apply-credit / manual-allocation pickers. Balance from the cached
      * money columns (paid_total already nets refunds). Only positive balances.
+     * Memoised per request (read from several action closures per render).
      *
      * @return array<int, string>
      */
     private function openInvoiceOptions(): array
     {
+        if ($this->openInvoiceOptionsCache !== null) {
+            return $this->openInvoiceOptionsCache;
+        }
+
         $q = Invoice::query()
             ->join('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
             ->where('invoices.company_id', $this->record->company_id)
@@ -415,7 +426,7 @@ class CustomerLedger extends Page implements HasTable
             ->where('payment_methods.due_days', '>', 0);
         InvoiceScope::live($q, 'invoices.');
 
-        return $q->orderBy('invoices.issued_at')
+        return $this->openInvoiceOptionsCache = $q->orderBy('invoices.issued_at')
             ->get(['invoices.id', 'invoices.invcode', 'invoices.gross_total', 'invoices.credited_total', 'invoices.paid_total'])
             ->mapWithKeys(function (Invoice $inv): array {
                 $balance = round((float) $inv->gross_total - (float) $inv->credited_total - (float) $inv->paid_total, 2);
@@ -424,6 +435,15 @@ class CustomerLedger extends Page implements HasTable
                     ? [$inv->id => $inv->invcode.' — υπόλοιπο '.$this->fmtMoney($balance)]
                     : [];
             })
+            ->all();
+    }
+
+    /** Tenant's payment methods as id => description (shared by the action schemas). */
+    private function paymentMethodOptions(): array
+    {
+        return PaymentMethod::query()
+            ->where('company_id', $this->record->company_id)
+            ->pluck('description', 'id')
             ->all();
     }
 
@@ -494,9 +514,7 @@ class CustomerLedger extends Page implements HasTable
                         ->label('Ημερομηνία')->required()->default(now()),
                     Select::make('payment_method_id')
                         ->label('Τρόπος πληρωμής')
-                        ->options(fn () => PaymentMethod::query()
-                            ->where('company_id', $this->record->company_id)
-                            ->pluck('description', 'id')),
+                        ->options(fn () => $this->paymentMethodOptions()),
                     BankAccountField::make($this->record->company_id),
                     TextInput::make('transaction_id')
                         ->label('Κωδικός συναλλαγής')
@@ -510,6 +528,7 @@ class CustomerLedger extends Page implements HasTable
                         'company_id' => $this->record->company_id,
                         'customer_id' => $this->record->getKey(),
                         'invoice_id' => null,
+                        'kind' => 'payment',
                         'payment_method_id' => $data['payment_method_id'] ?? null,
                         'bank_account_id' => $data['bank_account_id'] ?? null,
                         'amount' => $data['amount'],
@@ -540,9 +559,7 @@ class CustomerLedger extends Page implements HasTable
                         ->label('Ημερομηνία')->required()->default(now()),
                     Select::make('payment_method_id')
                         ->label('Τρόπος πληρωμής')
-                        ->options(fn () => PaymentMethod::query()
-                            ->where('company_id', $this->record->company_id)
-                            ->pluck('description', 'id')),
+                        ->options(fn () => $this->paymentMethodOptions()),
                     BankAccountField::make($this->record->company_id, 'Σε ποιον λογαριασμό μπήκε το έμβασμα. Μπαίνει σε όλες τις γραμμές.'),
                     TextInput::make('transaction_id')
                         ->label('Κωδικός συναλλαγής')
@@ -589,9 +606,7 @@ class CustomerLedger extends Page implements HasTable
                         ->label('Ημερομηνία')->required()->default(now()),
                     Select::make('payment_method_id')
                         ->label('Τρόπος')
-                        ->options(fn () => PaymentMethod::query()
-                            ->where('company_id', $this->record->company_id)
-                            ->pluck('description', 'id')),
+                        ->options(fn () => $this->paymentMethodOptions()),
                     BankAccountField::make($this->record->company_id, 'Από ποιον λογαριασμό επιστράφηκαν τα χρήματα.'),
                     TextInput::make('transaction_id')
                         ->label('Κωδικός συναλλαγής')
@@ -669,9 +684,7 @@ class CustomerLedger extends Page implements HasTable
                     DatePicker::make('pay_date')->label('Ημερομηνία')->required()->default(now()),
                     Select::make('payment_method_id')
                         ->label('Τρόπος πληρωμής')
-                        ->options(fn () => PaymentMethod::query()
-                            ->where('company_id', $this->record->company_id)
-                            ->pluck('description', 'id')),
+                        ->options(fn () => $this->paymentMethodOptions()),
                     BankAccountField::make($this->record->company_id),
                     TextInput::make('transaction_id')->label('Κωδικός συναλλαγής')->maxLength(100),
                     Repeater::make('lines')
@@ -708,17 +721,15 @@ class CustomerLedger extends Page implements HasTable
                         return;
                     }
                     // Warn (don't block) if any target ended up overpaid —
-                    // parity with the single-payment cockpit path.
-                    $overpaid = [];
-                    foreach ($res->allocations as $alloc) {
-                        $inv = Invoice::query()
-                            ->where('company_id', $this->record->company_id)
-                            ->where('invcode', $alloc['invcode'])
-                            ->first();
-                        if ($inv && $inv->balanceData()->status === PaymentStatus::Overpaid) {
-                            $overpaid[] = $alloc['invcode'];
-                        }
-                    }
+                    // parity with the single-payment cockpit path. One fetch for
+                    // all touched invoices (vs a query per allocation line).
+                    $overpaid = Invoice::query()
+                        ->where('company_id', $this->record->company_id)
+                        ->whereIn('invcode', array_column($res->allocations, 'invcode'))
+                        ->get()
+                        ->filter(fn (Invoice $inv) => $inv->balanceData()->status === PaymentStatus::Overpaid)
+                        ->pluck('invcode')
+                        ->all();
                     if ($overpaid !== []) {
                         Notification::make()->warning()->title('Υπερπληρωμή')
                             ->body('Υπερβαίνει το υπόλοιπο: '.implode(', ', $overpaid).'.')->send();

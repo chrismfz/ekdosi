@@ -44,11 +44,7 @@ class CustomerStatementCsv
 
             $rows[] = [
                 Carbon::parse($row['date'])->format('Y-m-d'),
-                match ($row['type']) {
-                    'invoice' => $row['invoice_type_code'] ?? 'Τιμολόγιο',
-                    'refund' => 'Επιστροφή',
-                    default => 'Πληρωμή',
-                },
+                CustomerLedgerBuilder::eventTypeLabel($row['type'], $row['invoice_type_code'] ?? null),
                 $reference,
                 $row['debit'] > 0 ? $fmt($row['debit']) : '',
                 $row['credit'] > 0 ? $fmt($row['credit']) : '',
