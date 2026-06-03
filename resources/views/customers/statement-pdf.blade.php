@@ -114,7 +114,11 @@
             @forelse ($ledger as $row)
                 <tr>
                     <td>{{ \Illuminate\Support\Carbon::parse($row['date'])->format('d/m/Y') }}</td>
-                    <td><span class="badge">{{ $row['type'] === 'invoice' ? ($row['invoice_type_code'] ?? 'Τιμολόγιο') : 'Πληρωμή' }}</span></td>
+                    <td><span class="badge">{{ match ($row['type']) {
+                        'invoice' => $row['invoice_type_code'] ?? 'Τιμολόγιο',
+                        'refund' => 'Επιστροφή',
+                        default => 'Πληρωμή',
+                    } }}</span></td>
                     <td>{{ ! empty($row['is_receipt_group']) && ! empty($row['allocations'])
                         ? \App\Services\CustomerLedger\ReceiptAllocationSummary::describe($row['reference'], $row['allocations'], $fmt)
                         : $row['reference'] }}</td>

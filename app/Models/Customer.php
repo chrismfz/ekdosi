@@ -200,7 +200,8 @@ class Customer extends Model
             ->whereNotNull('customer_id')
             ->groupBy('customer_id')
             ->select('customer_id')
-            ->selectRaw('SUM(amount) as paid');
+            // Refunds (kind = 'refund') count NEGATIVE (Payment::NET_AMOUNT_SQL).
+            ->selectRaw('SUM('.Payment::NET_AMOUNT_SQL.') as paid');
 
         return $query
             ->leftJoinSub($owed, 'cust_owed', 'cust_owed.customer_id', '=', 'customers.id')

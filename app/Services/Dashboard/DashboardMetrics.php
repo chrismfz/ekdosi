@@ -3,8 +3,11 @@
 namespace App\Services\Dashboard;
 
 use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Payment;
 use App\Support\InvoiceScope;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -84,10 +87,12 @@ class DashboardMetrics
 
         $netOwed = (float) ($row->net_owed ?? 0);
 
+        // Refunds count NEGATIVE — money returned raises receivables again.
         $totalPaid = (float) DB::table('payments')
             ->where('company_id', $this->tenant->id)
             ->whereNull('deleted_at')
-            ->sum('amount');
+            ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS net_paid')
+            ->value('net_paid');
 
         return round($netOwed - $totalPaid, 2);
     }
@@ -121,9 +126,9 @@ class DashboardMetrics
      * chart x-axis is continuous.
      *
      * @param  CarbonInterface|null  $end  Anchor the trailing window on
-     *         this month's end instead of "now" — lets the period filter
-     *         shift the 12-month trend. Null = up to the current month
-     *         (the default headline behaviour).
+     *                                     this month's end instead of "now" — lets the period filter
+     *                                     shift the 12-month trend. Null = up to the current month
+     *                                     (the default headline behaviour).
      * @return list<array{key: string, label: string, net: float, vat: float}>
      */
     public function monthlyIncome(int $months = 12, ?CarbonInterface $end = null): array
@@ -151,10 +156,10 @@ class DashboardMetrics
             $net = (float) ($row->net ?? 0);
             $gross = (float) ($row->gross ?? 0);
             $out[] = [
-                'key'   => $key,
+                'key' => $key,
                 'label' => $cursor->format('m/Y'),
-                'net'   => round($net, 2),
-                'vat'   => round($gross - $net, 2),
+                'net' => round($net, 2),
+                'vat' => round($gross - $net, 2),
             ];
             $cursor->addMonth();
         }
@@ -170,7 +175,7 @@ class DashboardMetrics
      * real value rather than dropping to zero, so the YoY lines compare
      * like-for-like up to today.
      *
-     * @return list<float>  12 cumulative values
+     * @return list<float> 12 cumulative values
      */
     public function cumulativeNetByMonth(int $year): array
     {
@@ -203,7 +208,7 @@ class DashboardMetrics
      * Eloquent (not the DB::table aggregate used elsewhere here) because
      * Filament tables require a model query.
      *
-     * @return \Illuminate\Database\Eloquent\Builder<\App\Models\Customer>
+     * @return Builder<Customer>
      */
     public function topCustomersQuery(CarbonInterface $start, CarbonInterface $end, int $limit = 10)
     {
@@ -214,7 +219,7 @@ class DashboardMetrics
             InvoiceScope::live($q);
         };
 
-        return \App\Models\Customer::query()
+        return Customer::query()
             ->where('customers.company_id', $this->tenant->id)
             // whereHas keeps out customers with no invoices in the window:
             // without it, withSum yields NULL gross_ytd for them and they
@@ -235,11 +240,11 @@ class DashboardMetrics
      * with the headline). Returns an Eloquent builder for the Filament
      * TableWidget; tests call ->get().
      *
-     * @return \Illuminate\Database\Eloquent\Builder<\App\Models\Customer>
+     * @return Builder<Customer>
      */
     public function topDebtorsQuery(int $limit = 10)
     {
-        return \App\Models\Customer::query()
+        return Customer::query()
             ->where('customers.company_id', $this->tenant->id)
             ->withOutstandingBalance($this->tenant->id)
             ->onlyDebtors()
@@ -257,7 +262,7 @@ class DashboardMetrics
      */
     public function debtorIds(): array
     {
-        return \App\Models\Customer::query()
+        return Customer::query()
             ->where('customers.company_id', $this->tenant->id)
             ->withOutstandingBalance($this->tenant->id)
             ->onlyDebtors()
@@ -319,8 +324,8 @@ class DashboardMetrics
             $gross = (float) ($rows->get($m)->gross ?? 0);
             $out[] = [
                 'month' => $m,
-                'net'   => round($net, 2),
-                'vat'   => round($gross - $net, 2),
+                'net' => round($net, 2),
+                'vat' => round($gross - $net, 2),
             ];
         }
 
@@ -353,10 +358,10 @@ class DashboardMetrics
             $net = (float) ($rows->get($y)->net ?? 0);
             $gross = (float) ($rows->get($y)->gross ?? 0);
             $out[] = [
-                'year'  => $y,
-                'net'   => round($net, 2),
+                'year' => $y,
+                'net' => round($net, 2),
                 'gross' => round($gross, 2),
-                'vat'   => round($gross - $net, 2),
+                'vat' => round($gross - $net, 2),
                 'count' => (int) ($rows->get($y)->cnt ?? 0),
             ];
         }
@@ -438,21 +443,21 @@ class DashboardMetrics
         $dso = $perDay > 0.005 ? (int) round($receivables / $perDay) : null;
 
         return [
-            'year'             => $year,
-            'net'              => $cur->net,
-            'gross'            => $cur->gross,
-            'vat'              => $cur->vat,
-            'count'            => $cur->count,
-            'priorNet'         => $prior->net,
-            'yoyPct'           => $yoy,
-            'avgMonthlyNet'    => $avgMonthly,
-            'avgInvoiceNet'    => $avgInvoice,
-            'creditRatioPct'   => $creditRatio,
-            'creditGross'      => round($creditGross, 2),
-            'topCustomerName'  => $top?->name,
+            'year' => $year,
+            'net' => $cur->net,
+            'gross' => $cur->gross,
+            'vat' => $cur->vat,
+            'count' => $cur->count,
+            'priorNet' => $prior->net,
+            'yoyPct' => $yoy,
+            'avgMonthlyNet' => $avgMonthly,
+            'avgInvoiceNet' => $avgInvoice,
+            'creditRatioPct' => $creditRatio,
+            'creditGross' => round($creditGross, 2),
+            'topCustomerName' => $top?->name,
             'topCustomerShare' => $topShare,
-            'receivables'      => $receivables,
-            'dsoDays'          => $dso,
+            'receivables' => $receivables,
+            'dsoDays' => $dso,
         ];
     }
 
@@ -542,9 +547,9 @@ class DashboardMetrics
         }
 
         return [
-            'yearsUsed'  => $activeYears,
+            'yearsUsed' => $activeYears,
             'monthlyAvg' => $monthlyAvg,
-            'index'      => $index,
+            'index' => $index,
             'overallAvg' => round($overall, 2),
         ];
     }
@@ -598,12 +603,12 @@ class DashboardMetrics
         }
 
         return [
-            'nextYear'  => $currentYear + 1,
-            'baseYear'  => $baseYear,
+            'nextYear' => $currentYear + 1,
+            'baseYear' => $baseYear,
             'baseTotal' => round($baseTotal, 2),
             'growthPct' => round($growth * 100, 1),
-            'total'     => $total,
-            'monthly'   => $monthly,
+            'total' => $total,
+            'monthly' => $monthly,
             'hasHistory' => $baseTotal > 0.005,
         ];
     }

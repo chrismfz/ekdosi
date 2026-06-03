@@ -91,13 +91,14 @@ class InvoicePaymentsRelationManager extends RelationManager
         ];
     }
 
-    private function createPayment(array $data): void
+    private function createPayment(array $data, string $kind = 'payment'): void
     {
         $invoice = $this->invoice();
         DB::transaction(fn () => Payment::create([
             'company_id' => $invoice->company_id,
             'customer_id' => $invoice->customer_id,
             'invoice_id' => $invoice->id,
+            'kind' => $kind,
             'payment_method_id' => $data['payment_method_id'] ?? null,
             'bank_account_id' => $data['bank_account_id'] ?? null,
             'amount' => $data['amount'],
@@ -105,6 +106,13 @@ class InvoicePaymentsRelationManager extends RelationManager
             'transaction_id' => $data['transaction_id'] ?? null,
             'notes' => $data['notes'] ?? null,
         ]));
+
+        if ($kind === 'refund') {
+            Notification::make()->success()->title('Η επιστροφή καταχωρίστηκε')
+                ->body('Το ποσό αφαιρέθηκε από τις πληρωμές του τιμολογίου.')->send();
+
+            return;
+        }
 
         if ((float) $data['amount'] > $this->balance() + 0.005) {
             Notification::make()->warning()
@@ -115,11 +123,20 @@ class InvoicePaymentsRelationManager extends RelationManager
         Notification::make()->success()->title('Η πληρωμή καταχωρίστηκε')->send();
     }
 
+    /** Money already received on this invoice (the most a refund can return). */
+    private function paidSoFar(): float
+    {
+        return (float) $this->invoice()->balanceData()->paid;
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->columns([
                 TextColumn::make('pay_date')->label('Ημερομηνία')->date('d/m/Y')->sortable(),
+                TextColumn::make('kind')->label('Τύπος')->badge()
+                    ->formatStateUsing(fn (?string $state) => $state === 'refund' ? 'Επιστροφή' : 'Πληρωμή')
+                    ->color(fn (?string $state) => $state === 'refund' ? 'warning' : 'success'),
                 TextColumn::make('amount')->label('Ποσό')->money('EUR')->alignRight()->sortable(),
                 TextColumn::make('paymentMethod.description')->label('Τρόπος')->placeholder('—'),
                 TextColumn::make('bankAccount.bank_name')->label('Τράπεζα')->placeholder('—')->toggleable(),
@@ -154,6 +171,28 @@ class InvoicePaymentsRelationManager extends RelationManager
                     ->visible(fn () => $this->balance() > 0.005)
                     ->schema(fn () => $this->paymentFields(defaultAmount: $this->balance()))
                     ->action(fn (array $data) => $this->createPayment($data)),
+
+                // Επιστροφή χρημάτων (refund) — money OUT, back to the customer.
+                // Reduces this invoice's paid total (kind = 'refund'); useful
+                // after a credit note / cancellation when cash is physically
+                // returned instead of left as on-account credit. Available
+                // whenever something has actually been paid here.
+                Action::make('refund')
+                    ->label('Επιστροφή χρημάτων')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->visible(fn () => $this->paidSoFar() > 0.005)
+                    ->modalDescription(fn () => 'Έχουν εισπραχθεί '.number_format($this->paidSoFar(), 2, ',', '.').' € σε αυτό το τιμολόγιο. Η επιστροφή τα αφαιρεί.')
+                    ->schema(fn () => $this->paymentFields(defaultAmount: $this->paidSoFar()))
+                    ->action(function (array $data) {
+                        if ((float) $data['amount'] > $this->paidSoFar() + 0.005) {
+                            Notification::make()->warning()
+                                ->title('Προσοχή')
+                                ->body('Η επιστροφή υπερβαίνει τα εισπραχθέντα — το τιμολόγιο θα εμφανιστεί με χρεωστικό υπόλοιπο.')
+                                ->send();
+                        }
+                        $this->createPayment($data, 'refund');
+                    }),
 
                 Action::make('mark_unpaid')
                     ->label('Σήμανση ως ανεξόφλητο')

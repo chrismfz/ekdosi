@@ -44,7 +44,7 @@ class Payment extends Model
      */
     protected function loggedAttributes(): array
     {
-        return ['customer_id', 'invoice_id', 'payment_method_id', 'bank_account_id', 'pay_date', 'amount', 'transaction_id', 'notes'];
+        return ['customer_id', 'invoice_id', 'kind', 'payment_method_id', 'bank_account_id', 'pay_date', 'amount', 'transaction_id', 'notes']; // kind: payment|refund
     }
 
     protected $fillable = [
@@ -52,6 +52,7 @@ class Payment extends Model
         'legacy_id',
         'customer_id',
         'invoice_id',
+        'kind',
         'payment_method_id',
         'bank_account_id',
         'pay_date',
@@ -67,6 +68,20 @@ class Payment extends Model
             'pay_date' => 'date',
             'amount' => 'decimal:2',
         ];
+    }
+
+    /**
+     * SQL for the SIGNED contribution of a payment row to a paid total:
+     * a refund counts as NEGATIVE (money went back out). The single place
+     * every money aggregate (InvoiceBalance, DashboardMetrics, Customer
+     * outstanding-balance) borrows so refunds net out identically. Operates
+     * on the `payments` table columns; works on MariaDB + sqlite.
+     */
+    public const NET_AMOUNT_SQL = "CASE WHEN kind = 'refund' THEN -amount ELSE amount END";
+
+    public function isRefund(): bool
+    {
+        return $this->kind === 'refund';
     }
 
     public function company(): BelongsTo

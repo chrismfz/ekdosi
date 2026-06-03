@@ -193,8 +193,18 @@ class CustomerLedgerBuilder
             // reference/invoice_id/notes are needed by the Φ3 grouping in
             // computeLedger() (collapse one «έμβασμα/είσπραξη» into one row).
             // The money math (stats/aging/yearly) ignores them.
-            ->select('id', 'pay_date', 'amount', 'reference', 'invoice_id', 'notes')
+            ->select('id', 'pay_date', 'amount', 'kind', 'reference', 'invoice_id', 'notes')
             ->get();
+    }
+
+    /**
+     * Signed contribution of a payment row to the paid total: a refund
+     * (money OUT, back to the customer) counts NEGATIVE — it un-pays, so the
+     * balance rises again. Mirrors Payment::NET_AMOUNT_SQL on the SQL side.
+     */
+    private function signedAmount(object $p): float
+    {
+        return (($p->kind ?? 'payment') === 'refund' ? -1.0 : 1.0) * (float) $p->amount;
     }
 
     /**
@@ -240,7 +250,8 @@ class CustomerLedgerBuilder
         $totalPaidLifetime = 0.0;
         foreach ($payments as $p) {
             $payDate = $p->pay_date ? Carbon::parse($p->pay_date) : null;
-            $amount = (float) $p->amount;
+            // Refunds count negative — they reduce the paid total.
+            $amount = $this->signedAmount($p);
             $totalPaidLifetime += $amount;
             if ($payDate && $payDate->year === $currentYear) {
                 $ytdPaid += $amount;
@@ -317,8 +328,9 @@ class CustomerLedgerBuilder
     private function computeAging(Collection $invoices, Collection $payments): array
     {
         $now = now();
-        // Credit notes settle receivables FIFO just like payments.
-        $totalPaid = (float) $payments->sum('amount')
+        // Credit notes settle receivables FIFO just like payments; refunds
+        // count negative (signedAmount) — they un-settle.
+        $totalPaid = (float) $payments->sum(fn ($p) => $this->signedAmount($p))
             + (float) $invoices->filter(fn ($inv) => $this->isCreditNote($inv))->sum('gross_total');
         $bucket = [
             'bucket_0_30' => 0.0,
@@ -382,7 +394,8 @@ class CustomerLedgerBuilder
             }
             $year = (int) Carbon::parse($p->pay_date)->year;
             $byYear[$year] ??= ['year' => $year, 'invoice_count' => 0, 'net' => 0.0, 'gross' => 0.0, 'paid' => 0.0];
-            $byYear[$year]['paid'] += (float) $p->amount;
+            // Refunds reduce that year's paid (signedAmount).
+            $byYear[$year]['paid'] += $this->signedAmount($p);
         }
 
         ksort($byYear);
@@ -459,6 +472,32 @@ class CustomerLedgerBuilder
         $referenced = [];   // reference => list<payment row>
         foreach ($payments as $p) {
             if (! $p->pay_date) {
+                continue;
+            }
+
+            // A refund (money OUT, back to the customer) is the reverse of a
+            // payment: a DEBIT that raises the balance again. Always an
+            // individual row — never folded into an έμβασμα group.
+            if (($p->kind ?? 'payment') === 'refund') {
+                $events[] = [
+                    'date_sort' => Carbon::parse($p->pay_date)->timestamp,
+                    'date' => Carbon::parse($p->pay_date)->toDateString(),
+                    'type' => 'refund',
+                    'invoice_id' => $p->invoice_id !== null ? (int) $p->invoice_id : null,
+                    'payment_id' => (int) $p->id,
+                    'code' => null,
+                    'reference' => 'Επιστροφή χρημάτων #'.$p->id,
+                    'invoice_type_id' => null,
+                    'invoice_type_code' => null,
+                    'debit' => (float) $p->amount,
+                    'credit' => 0.0,
+                    'mydata_state' => null,
+                    'mydata_mark' => null,
+                    'is_credit_term' => false,
+                    'is_receipt_group' => false,
+                    'allocations' => null,
+                ];
+
                 continue;
             }
 
@@ -556,6 +595,10 @@ class CustomerLedgerBuilder
             // Payments always reduce the balance regardless of method
             // (legacy doesn't track which invoice a payment settles).
             if ($e['type'] === 'invoice' && $e['is_credit_term']) {
+                $running += $e['debit'];
+            }
+            // A refund is money returned to the customer → raises the balance.
+            if ($e['type'] === 'refund') {
                 $running += $e['debit'];
             }
             $running -= $e['credit'];

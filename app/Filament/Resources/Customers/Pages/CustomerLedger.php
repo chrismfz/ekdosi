@@ -221,10 +221,16 @@ class CustomerLedger extends Page implements HasTable
                 TextColumn::make('type')
                     ->label('Τύπος')
                     ->badge()
-                    ->formatStateUsing(fn ($state, array $record): string => $state === 'invoice'
-                        ? ($record['invoice_type_code'] ?? 'Τιμολόγιο')
-                        : 'Πληρωμή')
-                    ->color(fn ($state): string => $state === 'invoice' ? 'info' : 'success'),
+                    ->formatStateUsing(fn ($state, array $record): string => match ($state) {
+                        'invoice' => $record['invoice_type_code'] ?? 'Τιμολόγιο',
+                        'refund' => 'Επιστροφή',
+                        default => 'Πληρωμή',
+                    })
+                    ->color(fn ($state): string => match ($state) {
+                        'invoice' => 'info',
+                        'refund' => 'warning',
+                        default => 'success',
+                    }),
                 TextColumn::make('reference')
                     ->label('Αναφορά')
                     ->searchable()
@@ -520,6 +526,53 @@ class CustomerLedger extends Page implements HasTable
                         $msg .= ' + '.number_format($res->onAccount, 2, ',', '.').' € πίστωση';
                     }
                     Notification::make()->success()->title('Η είσπραξη καταχωρίστηκε')->body($msg)->send();
+                    $this->redirect(static::getUrl(['record' => $this->record]));
+                }),
+
+            // Επιστροφή χρημάτων (refund) — money OUT, back to the customer, at
+            // the customer level (invoice_id null). Clears an on-account credit
+            // (e.g. left over after a credit note / cancellation) or returns an
+            // overpayment. Recorded as kind='refund' so every money surface
+            // (balance, καρτέλα, dashboard, receivables) nets it out.
+            Action::make('record_refund')
+                ->label('Επιστροφή χρημάτων')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('warning')
+                ->modalHeading('Επιστροφή χρημάτων στον πελάτη')
+                ->modalDescription('Καταγράφει χρήματα που επιστράφηκαν (π.χ. μετά από ακύρωση/πιστωτικό). Αυξάνει το υπόλοιπο/μειώνει την πίστωση του πελάτη.')
+                ->modalSubmitActionLabel('Καταχώριση επιστροφής')
+                ->schema([
+                    TextInput::make('amount')
+                        ->label('Ποσό επιστροφής (€)')->numeric()->minValue(0.01)->required(),
+                    DatePicker::make('pay_date')
+                        ->label('Ημερομηνία')->required()->default(now()),
+                    Select::make('payment_method_id')
+                        ->label('Τρόπος')
+                        ->options(fn () => PaymentMethod::query()
+                            ->where('company_id', $this->record->company_id)
+                            ->pluck('description', 'id')),
+                    BankAccountField::make($this->record->company_id, 'Από ποιον λογαριασμό επιστράφηκαν τα χρήματα.'),
+                    TextInput::make('transaction_id')
+                        ->label('Κωδικός συναλλαγής')
+                        ->maxLength(100)
+                        ->helperText('Προαιρετικό — ref επιστροφής τράπεζας / Stripe-PayPal refund.'),
+                    Textarea::make('notes')
+                        ->label('Σημειώσεις')->rows(2),
+                ])
+                ->action(function (array $data) {
+                    Payment::create([
+                        'company_id' => $this->record->company_id,
+                        'customer_id' => $this->record->getKey(),
+                        'invoice_id' => null,
+                        'kind' => 'refund',
+                        'payment_method_id' => $data['payment_method_id'] ?? null,
+                        'bank_account_id' => $data['bank_account_id'] ?? null,
+                        'amount' => $data['amount'],
+                        'pay_date' => $data['pay_date'],
+                        'transaction_id' => $data['transaction_id'] ?? null,
+                        'notes' => $data['notes'] ?? null,
+                    ]);
+                    Notification::make()->success()->title('Η επιστροφή καταχωρίστηκε')->send();
                     $this->redirect(static::getUrl(['record' => $this->record]));
                 }),
 
