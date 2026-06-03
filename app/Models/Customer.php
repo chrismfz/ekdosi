@@ -179,12 +179,22 @@ class Customer extends Model
     public function scopeWithOutstandingBalance(Builder $query, int $companyId): Builder
     {
         $owed = DB::table('invoices')
-            ->join('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
+            ->leftJoin('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
             ->where('invoices.company_id', $companyId)
             ->whereNull('invoices.deleted_at')
             ->whereNull('invoices.credited_invoice_id')
             ->whereNotNull('invoices.customer_id')
-            ->where('payment_methods.due_days', '>', 0)
+            // Credit-term OR a cash-term invoice with a recorded payment (the
+            // money-trail exception — nets to zero against its payment). Mirrors
+            // DashboardMetrics::outstandingReceivables + InvoiceBalance.
+            ->where(function ($q) {
+                $q->where('payment_methods.due_days', '>', 0)
+                    ->orWhereExists(function ($s) {
+                        $s->from('payments')
+                            ->whereColumn('payments.invoice_id', 'invoices.id')
+                            ->whereNull('payments.deleted_at');
+                    });
+            })
             ->groupBy('invoices.customer_id')
             ->select('invoices.customer_id')
             // COALESCE each SUM separately (NOT SUM(gross - credited)) —

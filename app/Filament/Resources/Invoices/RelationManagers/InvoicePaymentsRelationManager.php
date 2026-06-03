@@ -123,6 +123,30 @@ class InvoicePaymentsRelationManager extends RelationManager
         Notification::make()->success()->title('Η πληρωμή καταχωρίστηκε')->send();
     }
 
+    /** Can a payment be recorded here? Live, has a customer, not a credit note. */
+    private function canRecordPayment(): bool
+    {
+        $invoice = $this->invoice();
+
+        return $invoice->customer_id !== null
+            && $invoice->credited_invoice_id === null
+            && $invoice->mydata_state !== 'CANCELLED';
+    }
+
+    /**
+     * Suggested «record payment» amount = what's left to fully record
+     * (gross − credited − really-paid). For a fresh cash-term invoice that's
+     * the gross (nothing logged yet); for a credit-term invoice it's the
+     * outstanding balance. Never below zero.
+     */
+    private function suggestedAmount(): float
+    {
+        $invoice = $this->invoice();
+        $credited = (float) $invoice->balanceData()->credited;
+
+        return round(max((float) $invoice->gross_total - $credited - $this->paidSoFar(), 0), 2);
+    }
+
     /**
      * Money ACTUALLY received on this invoice (Σ real payment rows, net of any
      * refunds) — the most a refund can return. Deliberately NOT
@@ -179,11 +203,17 @@ class InvoicePaymentsRelationManager extends RelationManager
                     ])
                     ->action(fn (array $data) => $this->createPayment($data + ['amount' => $this->balance()])),
 
-                Action::make('settle_partial')
-                    ->label('Μερική πληρωμή')
+                // Always available (for any live, non-credit-note invoice with a
+                // customer) — incl. cash-term invoices, so the operator can LOG
+                // the real receipt (Stripe/POS/τράπεζα + transaction_id) for the
+                // books. Recording the first payment on a cash-term invoice flips
+                // it from synthetic settled-at-issue to real tracking
+                // (InvoiceBalance), netting to zero — no phantom receivable.
+                Action::make('record_payment')
+                    ->label('Καταχώριση πληρωμής')
                     ->icon('heroicon-o-banknotes')
-                    ->visible(fn () => $this->balance() > 0.005)
-                    ->schema(fn () => $this->paymentFields(defaultAmount: $this->balance()))
+                    ->visible(fn () => $this->canRecordPayment())
+                    ->schema(fn () => $this->paymentFields(defaultAmount: $this->suggestedAmount()))
                     ->action(fn (array $data) => $this->createPayment($data)),
 
                 // Επιστροφή χρημάτων (refund) — money OUT, back to the customer.

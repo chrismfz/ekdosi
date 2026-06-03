@@ -57,7 +57,18 @@ class InvoiceBalance
         // as paid-in-full with a zero balance (the figures must AGREE
         // with the Paid badge — a €X "balance" next to "Εξοφλημένο" is
         // the contradiction this branch's review surfaced).
-        if ($this->isCashTerm($invoice)) {
+        //
+        // EXCEPTION (money-trail): once the operator records an EXPLICIT
+        // payment row on a cash-term invoice (e.g. to log the actual
+        // Stripe/POS receipt for the books), we stop synthesising and track
+        // it from the real rows — exactly like a credit-term invoice. It
+        // then nets to zero (gross owed − recorded paid) and the receivables
+        // predicate (DashboardMetrics / Customer / ledger) includes it
+        // symmetrically, so no phantom credit appears. With NO recorded
+        // payments it stays the synthetic settled-at-issue default, so the
+        // ~6.7k imported invoices (whose legacy payments are on-account) are
+        // unchanged.
+        if ($this->isCashTerm($invoice) && ! $this->hasRecordedPayments($invoice)) {
             return new InvoiceBalanceData(
                 gross: $gross, credited: $credited, paid: $owed,
                 owed: $owed, balance: 0.0,
@@ -65,7 +76,8 @@ class InvoiceBalance
             );
         }
 
-        // Credit-term: a real receivable tracked against recorded payments.
+        // Credit-term (or cash-term WITH recorded payments): a real
+        // receivable tracked against recorded payments.
         $balance = round($owed - $rawPaid, 2);
         $status = match (true) {
             $rawPaid > $owed + self::EPS => PaymentStatus::Overpaid,
@@ -78,6 +90,25 @@ class InvoiceBalance
             gross: $gross, credited: $credited, paid: $rawPaid,
             owed: $owed, balance: $balance, status: $status,
         );
+    }
+
+    /**
+     * Has the operator recorded any explicit payment row (any kind) against
+     * this invoice? Distinguishes a cash-term invoice that's merely
+     * settled-at-issue (no rows) from one where the real receipt was logged
+     * for the money trail. Only queried for cash-term invoices (credit-term
+     * never reaches here), so it adds no cost to the common path.
+     */
+    private function hasRecordedPayments(Invoice $invoice): bool
+    {
+        if (! $invoice->exists) {
+            return false;
+        }
+
+        return DB::table('payments')
+            ->where('invoice_id', $invoice->getKey())
+            ->whereNull('deleted_at')
+            ->exists();
     }
 
     /** Cash-term = due_days 0 OR no payment method (not a receivable). */
