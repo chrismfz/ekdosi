@@ -16,6 +16,21 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Υπηρεσίες/Συμβόλαια (recurring) — data model (PR-A, schema only).** Ο WHMCS-
+  style διαχωρισμός: το `products` γίνεται κατάλογος (νέα `is_recurring` +
+  `provisioning_module` + `module_meta`) με **per-cycle price matrix**
+  (`product_billing_prices`: setup_fee/price/enabled ανά κύκλο), και ο νέος
+  `service_contracts` είναι η **per-customer συνδρομή** (customer/product snapshot
+  amount+cycle+vat, `invoice_type_id` ανανέωσης, status, start/next_due/end dates,
+  domain, server). Νέα enums `BillingCycle` (advance() NoOverflow) +
+  `ServiceContractStatus` (state machine με Suspended). **Πρόβλεψη native/WHMCS-
+  independent provisioning** από τώρα (schema-only): `servers` + `server_groups`
+  (credentials με `encrypted` cast), `service_contracts.server_id`/`module_meta`
+  (license key / cPanel user / mailcow domain). `invoices.service_contract_id`
+  (provenance). **Μηδέν money impact** — isolation test ότι contracts/servers δεν
+  αγγίζουν `InvoiceScope`/receivables. UI + staging σε επόμενα PR (B/C).
+  **Deploy:** `php artisan migrate`.
 ### Changed
 - **Πληρωμές — money trail σε cash-term παραστατικά (model refinement).** Ένα
   μετρητοίς/άμεσο τιμολόγιο (`due_days=0`) θεωρείται «εξοφλημένο στην έκδοση»
