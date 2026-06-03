@@ -17,6 +17,14 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **2FA (TOTP) + root redirect.** Ενεργοποιήθηκε το ενσωματωμένο MFA του Filament:
+  `User` υλοποιεί `HasAppAuthentication`(+`Recovery`), νέες encrypted-at-rest στήλες
+  `app_authentication_secret`/`_recovery_codes`, και το panel
+  `->multiFactorAuthentication([AppAuthentication::make()->recoverable()])`. Το
+  enrollment (QR), τα recovery codes και disable/regenerate ζουν **αυτόματα** στη
+  σελίδα προφίλ. **Opt-in** by default· `EKDOSI_REQUIRE_2FA=true` το επιβάλλει σε
+  όλους στο επόμενο login (αφού πρώτα εγγραφούν). Το `/` πλέον redirect → `/admin`
+  (δεν υπάρχει public landing). **Deploy:** `php artisan migrate`. `TwoFactorAndRootTest`.
 - **Deploy safety net (ρίζα: ένα `migrate:fresh`/test έσβησε κατά λάθος την prod).**
   Τρία επίπεδα ώστε να μην ξανασυμβεί: (1) `DB::prohibitDestructiveCommands()` στον
   `AppServiceProvider` μπλοκάρει `db:wipe`/`migrate:fresh`/`migrate:refresh`

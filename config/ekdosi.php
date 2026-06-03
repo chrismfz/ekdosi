@@ -2,6 +2,11 @@
 
 return [
 
+    // Force every operator to set up TOTP 2FA on their next login. Default OFF
+    // (2FA is opt-in via the profile page) so turning it on can't lock the team
+    // out mid-flight — enrol everyone first, then flip EKDOSI_REQUIRE_2FA=true.
+    'require_2fa' => (bool) env('EKDOSI_REQUIRE_2FA', false),
+
     /*
     |--------------------------------------------------------------------------
     | Scheduled tasks
