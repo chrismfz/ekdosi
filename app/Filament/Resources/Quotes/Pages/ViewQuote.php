@@ -3,19 +3,26 @@
 namespace App\Filament\Resources\Quotes\Pages;
 
 use App\Actions\ConvertQuoteToInvoice;
+use App\Actions\ConvertQuoteToServiceContract;
+use App\Enums\BillingCycle;
 use App\Enums\QuoteStatus;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Resources\Quotes\QuoteResource;
+use App\Filament\Resources\ServiceContracts\ServiceContractResource;
 use App\Jobs\SendQuoteEmail;
 use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\Quote;
 use App\Services\QuotePdfRenderer;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Support\Carbon;
 use Throwable;
 
 class ViewQuote extends ViewRecord
@@ -134,6 +141,91 @@ class ViewQuote extends ViewRecord
 
                         $this->redirect(InvoiceResource::getUrl('view', [
                             'record' => $invoice,
+                            'tenant' => $record->company,
+                        ]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία μετατροπής')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
+                }),
+
+            // Μετατροπή σε Υπηρεσία — accepted + not converted. Creates a recurring
+            // contract (for the future renewals) AND the first draft invoice with
+            // ALL the quote's lines (one-time + the recurring first period).
+            Action::make('convert_to_service')
+                ->label('Μετατροπή σε Υπηρεσία')
+                ->icon('heroicon-o-arrow-path-rounded-square')
+                ->color('primary')
+                ->visible(fn (Quote $record) => $record->status === QuoteStatus::Accepted
+                    && ! $record->isConverted())
+                ->modalHeading('Μετατροπή προσφοράς σε υπηρεσία (συνδρομή)')
+                ->modalDescription('Δημιουργείται συμβόλαιο για τις μελλοντικές ανανεώσεις + ΠΡΟΧΕΙΡΟ πρώτο παραστατικό με ΟΛΕΣ τις γραμμές της προσφοράς. Δεν υποβάλλεται στο myDATA.')
+                ->modalSubmitActionLabel('Δημιουργία υπηρεσίας + προχείρου')
+                ->schema([
+                    Select::make('invoice_type_id')
+                        ->label('Τύπος παραστατικού (πρώτο + ανανεώσεις)')
+                        ->options(fn (Quote $record) => InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->where('show_on_menu', true)
+                            ->orderBy('code')
+                            ->get()
+                            ->mapWithKeys(fn ($t) => [$t->id => $t->code.' — '.$t->name])
+                            ->toArray())
+                        ->searchable()
+                        ->required(),
+                    Select::make('billing_cycle')
+                        ->label('Κύκλος χρέωσης')
+                        ->options(collect(BillingCycle::options())->except(BillingCycle::OneTime->value)->toArray())
+                        ->default(fn (Quote $record) => (
+                            $record->loadMissing('lines.product')->firstRecurringLine()?->product?->default_billing_cycle
+                        ) ?: BillingCycle::Annual->value)
+                        ->required(),
+                    TextInput::make('recurring_amount')
+                        ->label('Επαναλαμβανόμενο ποσό (καθαρό, ανά κύκλο)')
+                        ->numeric()->step('0.01')->minValue(0.01)->required()
+                        ->prefix('€')
+                        ->default(fn (Quote $record) => (function () use ($record) {
+                            $sum = $record->loadMissing('lines.product')->recurringLinesNetTotal();
+
+                            return $sum > 0 ? number_format($sum, 2, '.', '') : null;
+                        })())
+                        ->helperText('Προ-συμπληρώνεται από τις γραμμές με recurring προϊόν· οι υπόλοιπες (εφάπαξ/ελεύθερο κείμενο) μπαίνουν ΜΟΝΟ στο πρώτο παραστατικό.'),
+                    Select::make('payment_method_id')
+                        ->label('Τρόπος πληρωμής (προαιρετικό)')
+                        ->options(fn (Quote $record) => PaymentMethod::query()
+                            ->where('company_id', $record->company_id)
+                            ->orderBy('description')
+                            ->pluck('description', 'id'))
+                        ->helperText('Επί πιστώσει → οι ανανεώσεις μένουν οφειλή/ληξιπρόθεσμες (για dunning).'),
+                    DatePicker::make('start_date')
+                        ->label('Ημερομηνία έναρξης')
+                        ->default(now()),
+                ])
+                ->action(function (Quote $record, array $data) {
+                    try {
+                        $type = InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->whereKey($data['invoice_type_id'])
+                            ->firstOrFail();
+
+                        $contract = app(ConvertQuoteToServiceContract::class)(
+                            $record,
+                            $type,
+                            BillingCycle::from($data['billing_cycle']),
+                            (float) $data['recurring_amount'],
+                            $data['payment_method_id'] ?? null,
+                            ! empty($data['start_date']) ? Carbon::parse($data['start_date']) : null,
+                        );
+
+                        Notification::make()
+                            ->title('Δημιουργήθηκε υπηρεσία + πρόχειρο παραστατικό')
+                            ->body('Εκδώστε το πρώτο παραστατικό από τη σελίδα του· οι ανανεώσεις τρέχουν αυτόματα.')
+                            ->success()->send();
+
+                        $this->redirect(ServiceContractResource::getUrl('view', [
+                            'record' => $contract,
                             'tenant' => $record->company,
                         ]));
                     } catch (Throwable $e) {
