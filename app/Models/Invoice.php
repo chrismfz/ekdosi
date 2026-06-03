@@ -92,6 +92,7 @@ class Invoice extends Model
         'distribution_aim_id',
         'delivery_method_id',
         'payment_method_id',
+        'bank_account_id',
         'conv_invoice_id',
         'credited_invoice_id',
         'whmcs_pending_id',
@@ -161,6 +162,11 @@ class Invoice extends Model
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class);
+    }
+
+    public function bankAccount(): BelongsTo
+    {
+        return $this->belongsTo(BankAccount::class);
     }
 
     public function deliveryMethod(): BelongsTo

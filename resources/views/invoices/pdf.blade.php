@@ -177,6 +177,9 @@
             @if($invoice->paymentMethod && ! $isDelivery)
                 <div class="meta-row"><span class="meta-label">Τρόπος πληρωμής:</span> {{ $invoice->paymentMethod->description }}</div>
             @endif
+            @if(($invoice->bankAccount ?? null) && ! $isDelivery)
+                <div class="meta-row"><span class="meta-label">Λογαριασμός κατάθεσης:</span> {{ $invoice->bankAccount->bank_name }}@if($invoice->bankAccount->iban) — {{ $invoice->bankAccount->iban }}@endif</div>
+            @endif
             @if($invoice->deliveryMethod ?? null)
                 <div class="meta-row"><span class="meta-label">Τρόπος αποστολής:</span> {{ $invoice->deliveryMethod->description }}</div>
             @endif

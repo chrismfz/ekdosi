@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Πληρωμές — Τραπεζικοί Λογαριασμοί (L2).** Νέο lookup `bank_accounts` (ανά
+  tenant: τράπεζα, IBAN, δικαιούχος, SWIFT, `is_active`) με δικό του Filament
+  resource (Setup → «Τραπεζικοί λογαριασμοί»). Νέο **`payments.bank_account_id`**
+  («σε ποιον λογαριασμό μπήκαν τα χρήματα») σε ΚΑΘΕ φόρμα πληρωμής + στο έμβασμα
+  (`PaymentAllocator`, ίδιος σε όλες τις γραμμές) μέσω κοινού `BankAccountField`
+  (εμφανίζεται μόνο αν ο tenant έχει active λογαριασμό). Νέο
+  **`invoices.bank_account_id`** (λογαριασμός κατάθεσης) στη φόρμα παραστατικού →
+  **τυπώνεται στο PDF** («Λογαριασμός κατάθεσης: Τράπεζα — IBAN») για πληρωμή με
+  έμβασμα. Πληροφοριακό — μηδέν αλλαγή στο money model (`InvoiceBalance`).
+  `BankAccountTaggingTest`. **Deploy:** `php artisan migrate` + `shield:generate`
+  (νέο resource permission).
 - **Πληρωμές — κωδικός συναλλαγής (L1, `transaction_id`).** Προαιρετικό πεδίο σε
   ΚΑΘΕ φόρμα πληρωμής (cockpit τιμολογίου, ViewInvoice «Καταχώριση πληρωμής»,
   Καρτέλα «Πληρωμή έναντι λογαριασμού» + «Είσπραξη/Έμβασμα») για Stripe `pi_…` /

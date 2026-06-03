@@ -44,7 +44,7 @@ class Payment extends Model
      */
     protected function loggedAttributes(): array
     {
-        return ['customer_id', 'invoice_id', 'payment_method_id', 'pay_date', 'amount', 'transaction_id', 'notes'];
+        return ['customer_id', 'invoice_id', 'payment_method_id', 'bank_account_id', 'pay_date', 'amount', 'transaction_id', 'notes'];
     }
 
     protected $fillable = [
@@ -53,6 +53,7 @@ class Payment extends Model
         'customer_id',
         'invoice_id',
         'payment_method_id',
+        'bank_account_id',
         'pay_date',
         'amount',
         'notes',
@@ -86,5 +87,10 @@ class Payment extends Model
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class);
+    }
+
+    public function bankAccount(): BelongsTo
+    {
+        return $this->belongsTo(BankAccount::class);
     }
 }

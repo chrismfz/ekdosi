@@ -6,6 +6,7 @@ use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Filament\Support\BankAccountField;
 use App\Mail\CustomerStatementMail;
 use App\Models\Customer;
 use App\Models\Payment;
@@ -449,6 +450,7 @@ class CustomerLedger extends Page implements HasTable
                         ->options(fn () => PaymentMethod::query()
                             ->where('company_id', $this->record->company_id)
                             ->pluck('description', 'id')),
+                    BankAccountField::make($this->record->company_id),
                     TextInput::make('transaction_id')
                         ->label('Κωδικός συναλλαγής')
                         ->maxLength(100)
@@ -462,6 +464,7 @@ class CustomerLedger extends Page implements HasTable
                         'customer_id' => $this->record->getKey(),
                         'invoice_id' => null,
                         'payment_method_id' => $data['payment_method_id'] ?? null,
+                        'bank_account_id' => $data['bank_account_id'] ?? null,
                         'amount' => $data['amount'],
                         'pay_date' => $data['pay_date'],
                         'transaction_id' => $data['transaction_id'] ?? null,
@@ -493,6 +496,7 @@ class CustomerLedger extends Page implements HasTable
                         ->options(fn () => PaymentMethod::query()
                             ->where('company_id', $this->record->company_id)
                             ->pluck('description', 'id')),
+                    BankAccountField::make($this->record->company_id, 'Σε ποιον λογαριασμό μπήκε το έμβασμα. Μπαίνει σε όλες τις γραμμές.'),
                     TextInput::make('transaction_id')
                         ->label('Κωδικός συναλλαγής')
                         ->maxLength(100)
@@ -509,6 +513,7 @@ class CustomerLedger extends Page implements HasTable
                         null,
                         $data['notes'] ?? null,
                         $data['transaction_id'] ?? null,
+                        $data['bank_account_id'] ?? null,
                     );
                     $msg = count($res->allocations).' τιμολόγια ('.number_format($res->allocatedToInvoices(), 2, ',', '.').' €)';
                     if ($res->onAccount > 0.005) {

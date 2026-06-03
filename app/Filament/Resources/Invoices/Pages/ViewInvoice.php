@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Invoices\Pages;
 
 use App\Actions\IssueCreditNote;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Filament\Support\BankAccountField;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
@@ -205,6 +206,8 @@ class ViewInvoice extends ViewRecord
                             ->where('company_id', $record->company_id)
                             ->pluck('description', 'id'))
                         ->default(fn (Invoice $record) => $record->payment_method_id),
+                    BankAccountField::make($this->record->company_id)
+                        ->default(fn (Invoice $record) => $record->bank_account_id),
                     TextInput::make('transaction_id')
                         ->label('Κωδικός συναλλαγής')
                         ->maxLength(100)
@@ -220,6 +223,7 @@ class ViewInvoice extends ViewRecord
                             'customer_id' => $record->customer_id,
                             'invoice_id' => $record->id,
                             'payment_method_id' => $data['payment_method_id'] ?? null,
+                            'bank_account_id' => $data['bank_account_id'] ?? null,
                             'amount' => $data['amount'],
                             'pay_date' => $data['pay_date'],
                             'transaction_id' => $data['transaction_id'] ?? null,
