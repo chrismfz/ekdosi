@@ -17,6 +17,14 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Πληρωμές — Είσπραξη/Έμβασμα (Φ2, allocation).** Νέα action «Είσπραξη (έμβασμα)»
+  στην Καρτέλα: ένα ποσό **κατανέμεται FIFO** (παλαιότερα ανοιχτά τιμολόγια πρώτα),
+  το τελευταίο μπορεί να μείνει μερικώς πληρωμένο, και **ό,τι περισσέψει → on-account
+  πίστωση/προκαταβολή**. `App\Services\Payments\PaymentAllocator` φτιάχνει απλά
+  `Payment` rows (PaymentObserver recompute) με κοινό `payments.reference` (για
+  ομαδοποίηση στη Φ3) — **μηδέν αλλαγή στο `InvoiceBalance`**. Καλύπτει €1200/€1500
+  (μερική) και €2000/€1500 (όλα + €500 πίστωση). `PaymentAllocatorTest`. **Deploy:**
+  `php artisan migrate`.
 - **Πληρωμές — cockpit ανά τιμολόγιο (Φ1).** Νέο tab «Πληρωμές» στο invoice View
   (`InvoicePaymentsRelationManager`): λίστα πληρωμών + **Προσθήκη/Επεξεργασία/
   Διαγραφή**, quick **«Πλήρης εξόφληση»** (προ-συμπληρώνει το υπόλοιπο) + **«Μερική

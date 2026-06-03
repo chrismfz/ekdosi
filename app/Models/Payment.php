@@ -56,6 +56,7 @@ class Payment extends Model
         'pay_date',
         'amount',
         'notes',
+        'reference',
     ];
 
     protected function casts(): array

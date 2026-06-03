@@ -12,9 +12,10 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
-use App\Services\CustomerLedger\CustomerTopProducts;
 use App\Services\CustomerLedger\CustomerStatementCsv;
 use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
+use App\Services\CustomerLedger\CustomerTopProducts;
+use App\Services\Payments\PaymentAllocator;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\CustomerWhmcsLedger;
 use App\Services\Whmcs\CustomerWhmcsLedgerResult;
@@ -445,6 +446,45 @@ class CustomerLedger extends Page implements HasTable
                     // Redirect to self so the KPI widgets + table reflect
                     // the new balance (header widgets are separate Livewire
                     // components mounted with the pre-payment stats).
+                    $this->redirect(static::getUrl(['record' => $this->record]));
+                }),
+
+            // One «έμβασμα/είσπραξη» auto-allocated FIFO across the open invoices
+            // (oldest first), remainder → on-account credit. Mirrors Epsilon.
+            Action::make('record_receipt')
+                ->label('Είσπραξη (έμβασμα)')
+                ->icon('heroicon-o-arrow-down-on-square-stack')
+                ->color('success')
+                ->modalHeading('Είσπραξη / Έμβασμα')
+                ->modalDescription('Το ποσό κατανέμεται αυτόματα στα ανοιχτά τιμολόγια (παλαιότερα πρώτα). Ό,τι περισσέψει μένει ως πίστωση/προκαταβολή στον πελάτη.')
+                ->modalSubmitActionLabel('Καταχώριση')
+                ->schema([
+                    TextInput::make('amount')
+                        ->label('Ποσό είσπραξης (€)')->numeric()->minValue(0.01)->required(),
+                    DatePicker::make('pay_date')
+                        ->label('Ημερομηνία')->required()->default(now()),
+                    Select::make('payment_method_id')
+                        ->label('Τρόπος πληρωμής')
+                        ->options(fn () => PaymentMethod::query()
+                            ->where('company_id', $this->record->company_id)
+                            ->pluck('description', 'id')),
+                    Textarea::make('notes')
+                        ->label('Σημειώσεις')->rows(2),
+                ])
+                ->action(function (array $data) {
+                    $res = app(PaymentAllocator::class)->allocate(
+                        $this->record,
+                        (float) $data['amount'],
+                        Carbon::parse($data['pay_date']),
+                        $data['payment_method_id'] ?? null,
+                        null,
+                        $data['notes'] ?? null,
+                    );
+                    $msg = count($res->allocations).' τιμολόγια ('.number_format($res->allocatedToInvoices(), 2, ',', '.').' €)';
+                    if ($res->onAccount > 0.005) {
+                        $msg .= ' + '.number_format($res->onAccount, 2, ',', '.').' € πίστωση';
+                    }
+                    Notification::make()->success()->title('Η είσπραξη καταχωρίστηκε')->body($msg)->send();
                     $this->redirect(static::getUrl(['record' => $this->record]));
                 }),
 
