@@ -6,6 +6,7 @@ use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
+use App\Services\Stock\StockService;
 use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -508,8 +509,8 @@ class DeliveryNoteSubmitter
             return $existing;
         }
 
-        return DB::transaction(function () use ($note, $xml, $responseXml, $mark, $qrUrl) {
-            $audit = DeliveryMark::create([
+        $audit = DB::transaction(function () use ($note, $xml, $responseXml, $mark, $qrUrl) {
+            $row = DeliveryMark::create([
                 'company_id' => $note->company_id,
                 'delivery_note_id' => $note->id,
                 'mark' => $mark,
@@ -533,8 +534,15 @@ class DeliveryNoteSubmitter
                 'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
             ])->save();
 
-            return $audit;
+            return $row;
         });
+
+        // Stock-OUT for a Πώληση δελτίο (S2). No-ops for any other σκοπός and for
+        // untracked products; idempotent + whichever-first (skips if the linked
+        // invoice already moved). Outside the audit transaction.
+        app(StockService::class)->recordSaleForDeliveryNote($note);
+
+        return $audit;
     }
 
     private function describeResponseErrors($response): string

@@ -34,6 +34,7 @@ class DeliveryNote extends Model
         'code',
         'delivery_type_id',
         'customer_id',
+        'invoice_id',
         'issued_at',
         'mydata_type',
         'move_purpose',
@@ -91,6 +92,12 @@ class DeliveryNote extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /** Optional link to the sale (invoice) this δελτίο dispatches — for stock dedup. */
+    public function invoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class);
     }
 
     public function distributionAim(): BelongsTo

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\DeliveryNotes\Schemas;
 
 use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Product;
 use App\Models\Supplier;
@@ -191,6 +192,20 @@ class DeliveryNoteForm
 
                     // Kept so a customer recipient links the Καρτέλα; hidden field.
                     Hidden::make('customer_id'),
+
+                    // Optional link to the sale this δελτίο dispatches — lets the
+                    // stock engine count the sale ONCE (whichever-first dedup).
+                    Select::make('invoice_id')
+                        ->label('Σχετικό τιμολόγιο (προαιρετικό)')
+                        ->searchable()
+                        ->getSearchResultsUsing(fn (string $search) => Invoice::query()
+                            ->where('company_id', Filament::getTenant()?->getKey())
+                            ->where('invcode', 'like', "%{$search}%")
+                            ->limit(20)
+                            ->pluck('invcode', 'id')
+                            ->all())
+                        ->getOptionLabelUsing(fn ($value) => Invoice::find($value)?->invcode)
+                        ->helperText('Αν το δελτίο αφορά πώληση που τιμολογείς ξεχωριστά, σύνδεσέ το — έτσι το απόθεμα δεν μετριέται δύο φορές.'),
                 ]),
 
             // ─── Διευθύνσεις φόρτωσης / παράδοσης ───

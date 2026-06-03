@@ -17,6 +17,16 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Αποθήκη — auto έξοδος στην πώληση (S2, whichever-first).** Στο απόθεμα
+  μειώνεται **−ποσότητα** αυτόματα όταν ένα τιμολόγιο γίνεται `active`
+  (`InvoiceObserver`, μόνο `track_stock` goods· τα πιστωτικά εξαιρούνται = S3
+  επιστροφή) ΚΑΙ όταν εκδίδεται **ΔΑΠ με σκοπό «Πώληση»** (μόνο move_purpose=1·
+  ενδοδιακίνηση/σέρβις/φύλαξη ΔΕΝ μειώνουν). **Whichever-first dedup:** νέο
+  προαιρετικό link `delivery_notes.invoice_id` («Σχετικό τιμολόγιο» στη φόρμα) —
+  μια πώληση μετριέται ΜΙΑ φορά (αν το linked τιμολόγιο/δελτίο το κίνησε ήδη, το
+  άλλο παραλείπει). Idempotent ανά source-line (re-finalize δεν διπλομετρά).
+  `StockService::recordSaleForInvoice/recordSaleForDeliveryNote`· warn-only.
+  `StockSaleTest`. **Deploy:** `php artisan migrate`.
 - **Αποθήκη / απόθεμα — foundation (S1).** Opt-in stock tracking ανά προϊόν
   (`products.track_stock` — εμπορεύματα ναι, υπηρεσίες όχι· ό,τι δεν είναι tracked
   το αγνοεί ο μηχανισμός) + signed ledger `stock_movements` (τρέχον on-hand =

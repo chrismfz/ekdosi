@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Models\Invoice;
 use App\Services\InvoiceBalance;
+use App\Services\Stock\StockService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -25,6 +26,26 @@ class InvoiceObserver
     public function saved(Invoice $invoice): void
     {
         $this->recomputeOriginal($invoice);
+        $this->applyStockSaleIfActivated($invoice);
+    }
+
+    /**
+     * When an invoice transitions INTO `active` (finalize / issue), decrement
+     * stock for its track_stock goods lines — whichever-first, idempotent (see
+     * StockService). Guarded to the local_status→active change so the many other
+     * saves (recompute, payments, edits) are a cheap no-op. Credit notes are
+     * skipped here (they are a return = stock-IN, S3).
+     */
+    private function applyStockSaleIfActivated(Invoice $invoice): void
+    {
+        if ($invoice->credited_invoice_id !== null) {
+            return;
+        }
+        if (! $invoice->wasChanged('local_status') || $invoice->local_status !== 'active') {
+            return;
+        }
+
+        app(StockService::class)->recordSaleForInvoice($invoice);
     }
 
     public function deleted(Invoice $invoice): void
