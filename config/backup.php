@@ -301,6 +301,9 @@ return [
             'health_checks' => [
                 MaximumAgeInDays::class => 1,
                 MaximumStorageInMegabytes::class => 5000,
+                // Flag an empty/near-empty dump (e.g. the 9.7 KB one a wiped DB
+                // produces) as unhealthy instead of letting it pass as "OK".
+                \App\Support\Backup\MinimumBackupSizeInKilobytes::class => 100,
             ],
         ],
 

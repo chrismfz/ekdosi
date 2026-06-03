@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Support\Tenancy\CompanyContext;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
@@ -19,6 +20,21 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        /*
+         * Hard block on destructive DB commands (db:wipe, migrate:fresh,
+         * migrate:refresh) anywhere EXCEPT the automated test suite.
+         *
+         * Gated on the testing env — deliberately NOT app()->isProduction() —
+         * because the prod box was mislabeled APP_ENV=local, which would have
+         * left this guard (and Laravel's own prompts) OFF exactly when it was
+         * needed: a stray `php artisan test` with cached prod config once ran
+         * RefreshDatabase against the live MariaDB and wiped it. Tying the
+         * guard to "not testing" makes it fire regardless of how APP_ENV is
+         * set, while RefreshDatabase (APP_ENV=testing) still works in CI.
+         * Plain `migrate` is unaffected — deploys keep working.
+         */
+        DB::prohibitDestructiveCommands(! $this->app->environment('testing'));
+
         /*
          * super_admin role bypasses every policy. Combined with Spatie's
          * teams mode (team_foreign_key=company_id), this is a per-tenant
