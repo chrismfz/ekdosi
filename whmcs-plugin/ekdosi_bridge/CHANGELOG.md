@@ -10,6 +10,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-06-03
+### Added
+- **Plugin-API `op=invoice` (single-invoice feed)** — the single-id twin of
+  `op=invoices`. Returns the SAME rich payload (invoice + client + customfields +
+  line items, `with_routing` optional) for ONE invoice id, with NO status filter
+  (the push path targets a specific invoice the operator chose); `invoice: null`
+  when the id is unknown (200, so the client needs no 404 handling). Lets ekdosi's
+  push path («Αποστολή στο Ekdosi» → invoice-paid webhook) fetch the canonical
+  payload from US instead of the native WHMCS API — one HMAC path, the Plugin-API,
+  for both pull (`invoices`) and push (`invoice`). `InvoiceFeed` refactored: the
+  per-invoice payload builder is now shared by `fetch()` and the new `fetchOne()`.
+
 ## [0.31.0] — 2026-06-03
 ### Added
 - **One-click straight-to-edit on the invoice list** (kills the WHMCS 8.9+

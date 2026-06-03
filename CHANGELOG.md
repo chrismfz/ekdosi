@@ -16,6 +16,21 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Plugin-API consolidation — push path fetches via the bridge.** The WHMCS
+  invoice-paid webhook (`WhmcsInvoicePaidController`) now pulls the canonical
+  invoice payload from the ekdosi_bridge plugin (`resolve.php op=invoice`, via the
+  new `WhmcsBridgeClient::fetchInvoice`) for tenants on `whmcs_fetch_via_bridge`,
+  instead of the native WHMCS API — so BOTH the inbox pull and the push share one
+  HMAC path (the Plugin-API). Native API stays the path for tenants without the
+  plugin. A bridge config gap → 422, same as before.
+### Fixed
+- **Scheduler silent multi-day stall — bounded `withoutOverlapping(30)`.** Every
+  scheduled task used the default 24h overlap-lock TTL; a run killed mid-flight
+  (reboot/deploy/OOM) orphaned the cache lock and every later `schedule:run`
+  SILENTLY skipped the task for a full day — how the WHMCS fetch went dark ~1.5
+  days. Now the lock self-heals in ≤30 min (tasks are idempotent, so a rare real
+  overlap is benign).
 ### Changed
 - **Πληρωμές — money trail σε cash-term παραστατικά (model refinement).** Ένα
   μετρητοίς/άμεσο τιμολόγιο (`due_days=0`) θεωρείται «εξοφλημένο στην έκδοση»

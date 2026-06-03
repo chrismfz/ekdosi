@@ -252,6 +252,35 @@ class WhmcsBridgeClient
     }
 
     /**
+     * Plugin-API op=invoice: fetch ONE invoice's full payload (the single-invoice
+     * twin of fetchPendingInvoices), so the push path («Αποστολή» → invoice-paid
+     * webhook) can pull the canonical payload from the bridge instead of the
+     * native WHMCS API. Shape-compatible with getInvoiceWithClient, so the
+     * ingestor consumes it unchanged.
+     *
+     * Returns null when the bridge reports no such invoice (`invoice: null`),
+     * which the caller maps to "not found". Throws WhmcsUnreachable /
+     * WhmcsApiException like the other ops (a genuine transport/auth failure must
+     * surface — never be silently swallowed as "not found").
+     *
+     * @return array<string, mixed>|null
+     */
+    public function fetchInvoice(int $whmcsInvoiceId, bool $withRouting = false): ?array
+    {
+        $body = ['op' => 'invoice', 'invoice_id' => $whmcsInvoiceId];
+        if ($withRouting) {
+            $body['with_routing'] = true;
+        }
+
+        $data = $this->postResolve($body);
+        $invoice = $data['invoice'] ?? null;
+
+        return is_array($invoice) && (int) ($invoice['invoiceid'] ?? $invoice['id'] ?? 0) > 0
+            ? $invoice
+            : null;
+    }
+
+    /**
      * Historical backfill: one page of (whmcs_id, invoiced) links for invoices
      * the LEGACY app filed (invoiced > 0). invoiced holds the legacy ekdosi
      * INVOICE_ID, which the ETL kept as invoices.legacy_id — so the caller can

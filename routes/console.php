@@ -22,13 +22,19 @@ Artisan::command('inspire', function () {
 | DB queries live INSIDE the closures (run-time), never at file load —
 | this file is parsed on every artisan invocation, including migrate.
 |
+| withoutOverlapping(30): BOUNDED lock TTL (minutes). The default is 24h, so a
+| run killed mid-flight (reboot / deploy / OOM) orphans the cache lock and every
+| later schedule:run SILENTLY skips the task for a full day — which is exactly
+| how the WHMCS fetch went dark for ~1.5 days. 30 min lets an orphaned lock
+| self-heal fast; all tasks here are idempotent so a rare real overlap is benign.
+|
 */
 
 // mail-log:sweep-orphans — recover rows stuck by a crashed worker.
 if (config('ekdosi.schedule.mail_sweep_enabled')) {
     Schedule::command('mail-log:sweep-orphans')
         ->everyFifteenMinutes()
-        ->withoutOverlapping();
+        ->withoutOverlapping(30);
 }
 
 // invoices:resend-failed-emails — re-queue invoice emails whose last attempt
@@ -38,7 +44,7 @@ if (config('ekdosi.schedule.resend_failed_emails_enabled')) {
         '--since' => config('ekdosi.schedule.resend_failed_emails_since_days', 3),
     ])
         ->cron(config('ekdosi.schedule.resend_failed_emails_cron', '30 * * * *'))
-        ->withoutOverlapping();
+        ->withoutOverlapping(30);
 }
 
 // whmcs:fetch-pending — stage paid+unfiled WHMCS invoices into the inbox,
@@ -54,7 +60,7 @@ if (config('ekdosi.schedule.whmcs_fetch_enabled')) {
     })
         ->cron(config('ekdosi.schedule.whmcs_fetch_cron', '*/15 * * * *'))
         ->name('whmcs-fetch-all')
-        ->withoutOverlapping();
+        ->withoutOverlapping(30);
 }
 
 // whmcs:auto-issue — auto-FILE paid inbox rows for γκρινιάρης customers on
@@ -66,7 +72,7 @@ if (config('ekdosi.schedule.whmcs_auto_issue_enabled')) {
     Schedule::command('whmcs:auto-issue')
         ->cron(config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'))
         ->name('whmcs-auto-issue-all')
-        ->withoutOverlapping();
+        ->withoutOverlapping(30);
 }
 
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
@@ -82,7 +88,7 @@ if (config('ekdosi.schedule.mydata_reconcile_enabled')) {
     })
         ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))
         ->name('mydata-reconcile-all')
-        ->withoutOverlapping();
+        ->withoutOverlapping(30);
 }
 
 // Refresh the cached dashboard "Εικόνα από myDATA" VAT snapshot (the widget
@@ -92,7 +98,7 @@ if (config('ekdosi.schedule.mydata_vat_picture_enabled')) {
     Schedule::command('mydata:refresh-vat-picture')
         ->cron(config('ekdosi.schedule.mydata_vat_picture_cron', '0 */4 * * *'))
         ->name('mydata-vat-picture-all')
-        ->withoutOverlapping();
+        ->withoutOverlapping(30);
 }
 
 // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
@@ -101,5 +107,5 @@ if (config('ekdosi.schedule.overdue_notifications_enabled')) {
     Schedule::command('invoices:notify-overdue')
         ->dailyAt(config('ekdosi.schedule.overdue_notifications_time', '07:30'))
         ->name('invoices-notify-overdue')
-        ->withoutOverlapping();
+        ->withoutOverlapping(30);
 }

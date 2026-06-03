@@ -7,6 +7,7 @@ use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
+use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use Illuminate\Http\JsonResponse;
@@ -52,6 +53,7 @@ class WhmcsInvoicePaidController
         Request $request,
         string $slug,
         WhmcsClientFactory $factory,
+        WhmcsBridgeClientFactory $bridgeFactory,
         WhmcsInvoiceIngestor $ingestor,
     ): JsonResponse {
         $tenant = Company::query()->where('slug', $slug)->first();
@@ -95,23 +97,36 @@ class WhmcsInvoicePaidController
             ], Response::HTTP_BAD_REQUEST);
         }
 
+        // Source selection (Plugin-API consolidation): tenants on
+        // whmcs_fetch_via_bridge pull the canonical payload from OUR plugin
+        // (resolve.php op=invoice) — same path as the inbox feed — instead of
+        // the native WHMCS API. The bridge returns the identical shape
+        // (invoice + client + customfields + line items), so the ingestor is
+        // unchanged. The native API stays the path for tenants without the
+        // plugin. A bridge config gap surfaces as WhmcsNotConfigured → 422,
+        // same as the API path.
+        $useBridge = (bool) $tenant->whmcs_fetch_via_bridge;
+
         try {
-            $client = $factory->for($tenant);
+            if ($useBridge) {
+                $payload = $bridgeFactory->for($tenant)->fetchInvoice(
+                    $whmcsInvoiceId,
+                    (bool) $tenant->whmcs_third_party_enabled,
+                );
+            } else {
+                // getInvoiceWithClient enriches the invoice payload with
+                // the linked WHMCS client's customfields - load-bearing
+                // for the ingestor's matcher to resolve AFM matches.
+                $payload = $factory->for($tenant)->getInvoiceWithClient($whmcsInvoiceId);
+            }
         } catch (WhmcsNotConfigured $e) {
-            // Tenant has a webhook secret but no API credentials -
-            // we can verify the inbound push but can't fetch the
-            // invoice payload to stage it. Treat as 422.
+            // Tenant has a webhook secret but the chosen source isn't
+            // configured (no API credentials, or no derivable bridge URL/secret)
+            // - we can verify the inbound push but can't fetch the payload. 422.
             return $this->json([
                 'error'   => 'whmcs_api_not_configured',
                 'message' => $e->getMessage(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        try {
-            // getInvoiceWithClient enriches the invoice payload with
-            // the linked WHMCS client's customfields - load-bearing
-            // for the ingestor's matcher to resolve AFM matches.
-            $payload = $client->getInvoiceWithClient($whmcsInvoiceId);
         } catch (WhmcsAuthenticationFailed | WhmcsUnreachable $e) {
             // WHMCS-side transient / config failures. 502 Bad Gateway
             // is the right semantic: WE are reachable, the upstream

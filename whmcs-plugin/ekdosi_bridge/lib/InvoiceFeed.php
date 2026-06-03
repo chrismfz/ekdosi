@@ -59,8 +59,50 @@ class InvoiceFeed
             'id', 'userid', 'date', 'duedate', 'datepaid', 'subtotal',
             'tax', 'taxrate', 'total', 'status', 'invoiced',
         ]);
+
+        $payloads = self::buildPayloads($invoices, $withRouting);
+
+        return ['invoices' => $payloads, 'offset' => $offset, 'count' => count($payloads)];
+    }
+
+    /**
+     * Plugin-API op=invoice: the SAME rich payload for ONE invoice id, with NO
+     * status filter — the push path («Αποστολή στο Ekdosi») targets a specific
+     * invoice the operator chose, and the ekdosi ingestor decides what to do
+     * (incl. audit-preserving an already-filed one). Returns null when the id
+     * doesn't exist. Mirrors the native getInvoiceWithClient(id) it replaces.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function fetchOne(int $invoiceId, bool $withRouting = false): ?array
+    {
+        if ($invoiceId <= 0) {
+            return null;
+        }
+        $invoices = Capsule::table('tblinvoices')
+            ->where('id', $invoiceId)
+            ->get([
+                'id', 'userid', 'date', 'duedate', 'datepaid', 'subtotal',
+                'tax', 'taxrate', 'total', 'status', 'invoiced',
+            ]);
+
+        return self::buildPayloads($invoices, $withRouting)[0] ?? null;
+    }
+
+    /**
+     * Build the normalized payloads for a set of tblinvoices rows (invoice
+     * fields + merged client identity + customfields + line items + optional
+     * third-party routing). Shared by the paginated feed (fetch) and the
+     * single-invoice lookup (fetchOne) so BOTH emit an identical shape — the one
+     * the ekdosi ingestor consumes unchanged.
+     *
+     * @param  \Illuminate\Support\Collection  $invoices
+     * @return array<int, array<string, mixed>>
+     */
+    private static function buildPayloads($invoices, bool $withRouting): array
+    {
         if ($invoices->isEmpty()) {
-            return ['invoices' => [], 'offset' => $offset, 'count' => 0];
+            return [];
         }
 
         $invoiceIds = $invoices->pluck('id')->map(fn ($v) => (int) $v)->all();
@@ -131,7 +173,7 @@ class InvoiceFeed
             $payloads[] = $entry;
         }
 
-        return ['invoices' => $payloads, 'offset' => $offset, 'count' => count($payloads)];
+        return $payloads;
     }
 
     /**

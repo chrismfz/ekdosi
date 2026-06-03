@@ -199,6 +199,51 @@ class WhmcsBridgeClientResolveTest extends TestCase
         Http::assertSent(fn (Request $r) => json_decode($r->body(), true) === ['op' => 'legacy_invoice_links', 'offset' => 0, 'limit' => 500]);
     }
 
+    public function test_fetch_invoice_signs_body_and_returns_payload(): void
+    {
+        Http::fake([self::RESOLVE_URL => Http::response([
+            'status' => 'ok',
+            'invoice' => ['invoiceid' => 555, 'id' => 555, 'userid' => 77, 'total' => '25.00'],
+        ], 200)]);
+
+        $payload = $this->client($this->tenant())->fetchInvoice(555);
+
+        $this->assertIsArray($payload);
+        $this->assertSame(555, $payload['invoiceid']);
+
+        Http::assertSent(function (Request $request) {
+            $body = $request->body();
+            $expectedSig = 'sha256='.hash_hmac('sha256', $body, self::SECRET);
+
+            return $request->url() === self::RESOLVE_URL
+                && $request->method() === 'POST'
+                && $request->hasHeader('X-Webhook-Signature', $expectedSig)
+                && json_decode($body, true) === ['op' => 'invoice', 'invoice_id' => 555];
+        });
+    }
+
+    public function test_fetch_invoice_returns_null_when_bridge_reports_no_invoice(): void
+    {
+        // `invoice: null` (unknown id) must map to null — NOT throw. A genuine
+        // transport/auth failure still throws (covered by the resolve tests,
+        // same postResolve path).
+        Http::fake([self::RESOLVE_URL => Http::response(['status' => 'ok', 'invoice' => null], 200)]);
+
+        $this->assertNull($this->client($this->tenant())->fetchInvoice(999999));
+    }
+
+    public function test_fetch_invoice_adds_with_routing_flag_when_requested(): void
+    {
+        Http::fake([self::RESOLVE_URL => Http::response([
+            'status' => 'ok', 'invoice' => ['id' => 1, 'invoiceid' => 1],
+        ], 200)]);
+
+        $this->client($this->tenant())->fetchInvoice(1, true);
+
+        Http::assertSent(fn (Request $r) => json_decode($r->body(), true)
+            === ['op' => 'invoice', 'invoice_id' => 1, 'with_routing' => true]);
+    }
+
     public function test_non_2xx_becomes_api_exception_with_error_field(): void
     {
         Http::fake([self::RESOLVE_URL => Http::response(['error' => 'invoice_not_found'], 404)]);

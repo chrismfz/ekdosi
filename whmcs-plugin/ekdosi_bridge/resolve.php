@@ -30,6 +30,10 @@
  *                            (the inbox FEED: invoice + client + customfields +
  *                            line items, shape-compatible with the native
  *                            getInvoiceWithClient — see InvoiceFeed)
+ *   op = "invoice":      { "op": "invoice", "invoice_id": 1234, "with_routing": false }
+ *                          → { "invoice": {full payload} | null }
+ *                            (single-invoice twin of "invoices" — the push path
+ *                            fetches one invoice from us instead of the WHMCS API)
  *
  * Response shapes + error envelope are unchanged from T-1a (the ekdosi-side
  * ThirdPartyResolution contract): see ThirdPartyStore::resolveInvoice/resellers.
@@ -155,6 +159,24 @@ try {
         exit;
     }
 
+    if ($op === 'invoice') {
+        // Plugin-API: the single-invoice twin of op=invoices. Returns the SAME
+        // rich payload for ONE id (no status filter — the push path targets a
+        // specific invoice the operator chose), so the ekdosi push controller
+        // fetches it from us instead of the native WHMCS API. `invoice` is null
+        // when the id is unknown (ekdosi maps that to "not found" → 409); we keep
+        // 200 here so the client needs no special 404 handling.
+        $invoiceId = (int) ($payload['invoice_id'] ?? 0);
+        if ($invoiceId <= 0) {
+            http_response_code(400);
+            echo json_encode(['error' => 'bad_request', 'message' => 'invoice requires {"invoice_id": <int>}.']);
+            exit;
+        }
+        $withRouting = (bool) ($payload['with_routing'] ?? false);
+        echo json_encode(['status' => 'ok', 'invoice' => InvoiceFeed::fetchOne($invoiceId, $withRouting)]);
+        exit;
+    }
+
     if ($op === 'legacy_invoice_links') {
         // READ-ONLY, paginated: (whmcs_id, invoiced) for invoices the LEGACY app
         // filed — invoiced holds the legacy ekdosi INVOICE_ID (the ETL kept it as
@@ -206,7 +228,7 @@ try {
     }
 
     http_response_code(400);
-    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links" or "invoices".']);
+    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices" or "invoice".']);
     exit;
 } catch (\Throwable $e) {
     http_response_code(500);
