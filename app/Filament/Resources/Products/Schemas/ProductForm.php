@@ -6,8 +6,10 @@ use App\Filament\Support\Tags\TagControls;
 use App\Models\MetricUnit;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -59,6 +61,17 @@ class ProductForm
                                     ->label('Παρακολούθηση αποθέματος')
                                     ->default(false)
                                     ->helperText('Μέτρα απόθεμα γι\' αυτό το είδος (εμπορεύματα). Άφησέ το κλειστό για υπηρεσίες. Το απόθεμα είναι ενημερωτικό — δεν μπλοκάρει ποτέ πώληση.'),
+
+                                Placeholder::make('current_stock')
+                                    ->label('Τρέχον απόθεμα')
+                                    ->visible(fn ($record) => (bool) $record?->track_stock)
+                                    ->content(function ($record) {
+                                        $n = (float) app(StockService::class)->currentStock($record);
+                                        $txt = rtrim(rtrim(number_format($n, 3, '.', ''), '0'), '.');
+
+                                        return $n < 0 ? "⚠ {$txt} (αρνητικό — backorder)" : $txt;
+                                    })
+                                    ->helperText('Δες αναλυτικά στο tab «Κινήσεις αποθέματος».'),
 
                                 TextInput::make('sku')
                                     ->label('SKU')

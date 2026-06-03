@@ -12,6 +12,7 @@ use App\Models\PaymentMethod;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
+use App\Services\Stock\StockService;
 use App\Support\InvoiceScope;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
@@ -58,6 +59,10 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription('Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
                 ->action(function (Invoice $record) {
                     $record->update(['local_status' => 'active']);
+
+                    // S2.5: non-blocking heads-up if the sale pushed any tracked
+                    // product to negative stock (the issue ALWAYS proceeds).
+                    static::warnIfStockWentNegative($record);
 
                     // G6: auto-email on the non-myDATA issue path. myDATA
                     // tenants get the mail on the VALID response instead;
@@ -529,5 +534,38 @@ class ViewInvoice extends ViewRecord
             ->where('is_credit', true)
             ->orderBy('code')
             ->get();
+    }
+
+    /**
+     * S2.5: after activation, if any tracked product on the invoice is now at
+     * negative stock, show a NON-blocking warning. The issue already proceeded
+     * (warn-only by design) — this is purely a heads-up so the operator knows a
+     * backorder exists.
+     */
+    protected static function warnIfStockWentNegative(Invoice $invoice): void
+    {
+        $stock = app(StockService::class);
+        $negatives = [];
+
+        foreach ($invoice->lines()->with('product')->get() as $line) {
+            $product = $line->product;
+            if (! $product || ! $product->track_stock) {
+                continue;
+            }
+            $level = $stock->currentStock($product);
+            if ($level < 0) {
+                $n = rtrim(rtrim(number_format($level, 3, '.', ''), '0'), '.');
+                $negatives[] = "{$product->description_short} ({$n})";
+            }
+        }
+
+        if ($negatives !== []) {
+            Notification::make()
+                ->warning()
+                ->title('Αρνητικό απόθεμα')
+                ->body('Σε αρνητικό: '.implode(', ', $negatives).'. Η έκδοση προχώρησε κανονικά (backorder).')
+                ->persistent()
+                ->send();
+        }
     }
 }
