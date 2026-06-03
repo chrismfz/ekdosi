@@ -3,6 +3,7 @@
 namespace App\Filament\Support;
 
 use App\Models\BankAccount;
+use Closure;
 use Filament\Forms\Components\Select;
 
 /**
@@ -24,6 +25,20 @@ class BankAccountField
             ->searchable()
             ->placeholder('—')
             ->helperText($helper)
-            ->visible(fn () => $options !== []);
+            ->visible(fn () => $options !== [])
+            // Server-side tenant guard: the dropdown only LISTS this tenant's
+            // accounts, but a crafted request could submit another tenant's id.
+            // Reject anything that isn't an account of $companyId (null is fine —
+            // the field is optional). Closes the cross-tenant IBAN store/print path.
+            ->rules([
+                function (string $attribute, mixed $value, Closure $fail) use ($companyId): void {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+                    if (! BankAccount::belongsToTenant($value, $companyId)) {
+                        $fail('Μη έγκυρος τραπεζικός λογαριασμός.');
+                    }
+                },
+            ]);
     }
 }

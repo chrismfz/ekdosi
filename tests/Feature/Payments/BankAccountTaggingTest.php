@@ -55,6 +55,16 @@ class BankAccountTaggingTest extends TestCase
         $this->assertSame([], BankAccount::activeOptions($this->tenant->id));
     }
 
+    public function test_belongs_to_tenant_guards_cross_tenant_ids(): void
+    {
+        $other = Company::create(['name' => 'Other', 'slug' => 'oth-'.uniqid(), 'country_code' => 'GR']);
+        $foreign = BankAccount::create(['company_id' => $other->id, 'bank_name' => 'Alpha', 'is_active' => true]);
+
+        $this->assertTrue(BankAccount::belongsToTenant($this->account->id, $this->tenant->id));
+        $this->assertFalse(BankAccount::belongsToTenant($foreign->id, $this->tenant->id), 'foreign tenant account rejected');
+        $this->assertFalse(BankAccount::belongsToTenant($this->account->id, null), 'no tenant context rejected');
+    }
+
     public function test_allocator_stamps_bank_account_on_every_row(): void
     {
         $type = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τ', 'invcount' => 1, 'mydata_type' => '1.1']);

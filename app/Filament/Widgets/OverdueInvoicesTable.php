@@ -67,7 +67,7 @@ class OverdueInvoicesTable extends TableWidget
                 TextColumn::make('days_overdue')
                     ->label('Ημέρες')
                     ->alignEnd()
-                    ->state(fn (Invoice $record) => ($d = $record->dueDate()) ? (int) $d->diffInDays(now()) : null)
+                    ->state(fn (Invoice $record) => ($d = $record->dueDate()) ? (int) abs($d->diffInDays(now())) : null)
                     ->color('danger'),
                 TextColumn::make('balance')
                     ->label('Υπόλοιπο')

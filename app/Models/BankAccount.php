@@ -51,6 +51,25 @@ class BankAccount extends Model
     }
 
     /**
+     * Does account $id belong to tenant $companyId? The server-side guard
+     * behind App\Filament\Support\BankAccountField — the dropdown only lists a
+     * tenant's accounts, but a crafted request could submit a foreign id, and
+     * bank_account_id is printed on the invoice PDF. (Includes soft-deleted/
+     * inactive rows: same-tenant is the only thing that matters here.)
+     */
+    public static function belongsToTenant(int|string $id, ?int $companyId): bool
+    {
+        if ($companyId === null) {
+            return false;
+        }
+
+        return static::query()
+            ->where('company_id', $companyId)
+            ->whereKey($id)
+            ->exists();
+    }
+
+    /**
      * Active accounts for a tenant as id => label, for Filament Selects.
      *
      * @return array<int, string>

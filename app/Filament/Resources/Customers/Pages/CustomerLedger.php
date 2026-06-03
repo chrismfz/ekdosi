@@ -442,7 +442,7 @@ class CustomerLedger extends Page implements HasTable
                 ->modalSubmitActionLabel('Καταχώριση')
                 ->schema([
                     TextInput::make('amount')
-                        ->label('Ποσό')->numeric()->required(),
+                        ->label('Ποσό')->numeric()->minValue(0.01)->required(),
                     DatePicker::make('pay_date')
                         ->label('Ημερομηνία')->required()->default(now()),
                     Select::make('payment_method_id')
