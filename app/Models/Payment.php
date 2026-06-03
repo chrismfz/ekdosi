@@ -44,7 +44,7 @@ class Payment extends Model
      */
     protected function loggedAttributes(): array
     {
-        return ['customer_id', 'invoice_id', 'payment_method_id', 'pay_date', 'amount', 'notes'];
+        return ['customer_id', 'invoice_id', 'payment_method_id', 'pay_date', 'amount', 'transaction_id', 'notes'];
     }
 
     protected $fillable = [
@@ -57,6 +57,7 @@ class Payment extends Model
         'amount',
         'notes',
         'reference',
+        'transaction_id',
     ];
 
     protected function casts(): array

@@ -205,6 +205,10 @@ class ViewInvoice extends ViewRecord
                             ->where('company_id', $record->company_id)
                             ->pluck('description', 'id'))
                         ->default(fn (Invoice $record) => $record->payment_method_id),
+                    TextInput::make('transaction_id')
+                        ->label('Κωδικός συναλλαγής')
+                        ->maxLength(100)
+                        ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας.'),
                     Textarea::make('notes')
                         ->label('Σημειώσεις')
                         ->rows(2),
@@ -218,6 +222,7 @@ class ViewInvoice extends ViewRecord
                             'payment_method_id' => $data['payment_method_id'] ?? null,
                             'amount' => $data['amount'],
                             'pay_date' => $data['pay_date'],
+                            'transaction_id' => $data['transaction_id'] ?? null,
                             'notes' => $data['notes'] ?? null,
                         ]);
                     });

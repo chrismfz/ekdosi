@@ -17,6 +17,13 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Πληρωμές — κωδικός συναλλαγής (L1, `transaction_id`).** Προαιρετικό πεδίο σε
+  ΚΑΘΕ φόρμα πληρωμής (cockpit τιμολογίου, ViewInvoice «Καταχώριση πληρωμής»,
+  Καρτέλα «Πληρωμή έναντι λογαριασμού» + «Είσπραξη/Έμβασμα») για Stripe `pi_…` /
+  PayPal txn / ref εμβάσματος τράπεζας. Στο έμβασμα (`PaymentAllocator`) μπαίνει
+  **ίδιος σε όλες τις γραμμές** της ομάδας. Column (copyable) στο cockpit·
+  audited. AR roadmap + deferred αποφάσεις: `docs/payments-ar-roadmap.md`.
+  **Deploy:** `php artisan migrate`.
 - **Πληρωμές — ομαδοποίηση εμβάσματος στην Καρτέλα (Φ3).** Τα `Payment` rows ενός
   εμβάσματος (κοινό `reference`) εμφανίζονται ως **ΜΙΑ γραμμή «Έμβασμα €X»** στην
   Καρτέλα κινήσεων, με **drill-down «Κατανομή»** (modal: ποια τιμολόγια πληρώθηκαν +

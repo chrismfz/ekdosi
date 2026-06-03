@@ -449,6 +449,10 @@ class CustomerLedger extends Page implements HasTable
                         ->options(fn () => PaymentMethod::query()
                             ->where('company_id', $this->record->company_id)
                             ->pluck('description', 'id')),
+                    TextInput::make('transaction_id')
+                        ->label('Κωδικός συναλλαγής')
+                        ->maxLength(100)
+                        ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας.'),
                     Textarea::make('notes')
                         ->label('Σημειώσεις')->rows(2),
                 ])
@@ -460,6 +464,7 @@ class CustomerLedger extends Page implements HasTable
                         'payment_method_id' => $data['payment_method_id'] ?? null,
                         'amount' => $data['amount'],
                         'pay_date' => $data['pay_date'],
+                        'transaction_id' => $data['transaction_id'] ?? null,
                         'notes' => $data['notes'] ?? null,
                     ]);
                     Notification::make()->title('Η πληρωμή καταχωρίστηκε')->success()->send();
@@ -488,6 +493,10 @@ class CustomerLedger extends Page implements HasTable
                         ->options(fn () => PaymentMethod::query()
                             ->where('company_id', $this->record->company_id)
                             ->pluck('description', 'id')),
+                    TextInput::make('transaction_id')
+                        ->label('Κωδικός συναλλαγής')
+                        ->maxLength(100)
+                        ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας. Μπαίνει σε όλες τις γραμμές του εμβάσματος.'),
                     Textarea::make('notes')
                         ->label('Σημειώσεις')->rows(2),
                 ])
@@ -499,6 +508,7 @@ class CustomerLedger extends Page implements HasTable
                         $data['payment_method_id'] ?? null,
                         null,
                         $data['notes'] ?? null,
+                        $data['transaction_id'] ?? null,
                     );
                     $msg = count($res->allocations).' τιμολόγια ('.number_format($res->allocatedToInvoices(), 2, ',', '.').' €)';
                     if ($res->onAccount > 0.005) {

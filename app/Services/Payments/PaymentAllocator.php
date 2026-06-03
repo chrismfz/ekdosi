@@ -31,6 +31,7 @@ class PaymentAllocator
         ?int $paymentMethodId = null,
         ?string $reference = null,
         ?string $notes = null,
+        ?string $transactionId = null,
     ): PaymentAllocationResult {
         $amount = round($amount, 2);
         if ($amount <= 0) {
@@ -39,7 +40,7 @@ class PaymentAllocator
 
         $ref = $reference ?: 'ΕΙΣ-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
 
-        return DB::transaction(function () use ($customer, $amount, $date, $paymentMethodId, $ref, $notes) {
+        return DB::transaction(function () use ($customer, $amount, $date, $paymentMethodId, $ref, $notes, $transactionId) {
             $remaining = $amount;
             $allocations = [];
 
@@ -75,6 +76,7 @@ class PaymentAllocator
                     'pay_date' => $date->toDateString(),
                     'amount' => $pay,
                     'reference' => $ref,
+                    'transaction_id' => $transactionId,
                     'notes' => $notes,
                 ]);
 
@@ -92,6 +94,7 @@ class PaymentAllocator
                     'pay_date' => $date->toDateString(),
                     'amount' => $remaining,
                     'reference' => $ref,
+                    'transaction_id' => $transactionId,
                     'notes' => trim(($notes ? $notes.' · ' : '').'Πίστωση / προκαταβολή (on-account)'),
                 ]);
                 $onAccount = $remaining;

@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\InvoiceBalance;
 use App\Services\Payments\PaymentAllocator;
@@ -82,6 +83,21 @@ class PaymentAllocatorTest extends TestCase
         $this->assertSame(1000.0, $this->balance($draft), 'draft stays fully owed');
         $this->assertSame(0.0, $this->balance($this->b), 'active B settled (€500)');
         $this->assertSame(500.0, $res->onAccount, 'the €500 that could not land on the draft → on-account');
+    }
+
+    public function test_transaction_id_is_stamped_on_every_row_of_the_receipt(): void
+    {
+        // €2000 over €1500 → A + B settled + €500 on-account; the same Stripe/
+        // bank txn id rides on all three rows (group-level identifier).
+        $res = app(PaymentAllocator::class)->allocate(
+            $this->customer, 2000, now(), null, null, null, 'pi_3RxAbC123',
+        );
+
+        $rows = Payment::where('reference', $res->reference)->get();
+        $this->assertCount(3, $rows); // A, B, on-account
+        foreach ($rows as $row) {
+            $this->assertSame('pi_3RxAbC123', $row->transaction_id);
+        }
     }
 
     public function test_overpayment_settles_all_and_parks_remainder_on_account(): void
