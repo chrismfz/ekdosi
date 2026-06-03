@@ -64,15 +64,15 @@ class CustomerTopProducts
 
             if (! isset($buckets[$key])) {
                 $buckets[$key] = [
-                    'key'        => $key,
-                    'label'      => $this->labelFor($line),
+                    'key' => $key,
+                    'label' => $this->labelFor($line),
                     'product_id' => $line->product_id,
-                    'sku'        => $line->product?->sku,
-                    'times'      => 0,
-                    'qty'        => 0.0,
-                    'net'        => 0.0,
-                    'unit'       => $line->metric_unit ?: null,
-                    'last_at'    => null,
+                    'sku' => $line->product?->sku,
+                    'times' => 0,
+                    'qty' => 0.0,
+                    'net' => 0.0,
+                    'unit' => $line->metric_unit ?: null,
+                    'last_at' => null,
                 ];
             }
 

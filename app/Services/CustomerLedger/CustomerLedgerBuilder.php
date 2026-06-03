@@ -72,9 +72,9 @@ class CustomerLedgerBuilder
             yearly: $yearly,
             ledger: $ledger,
             appliedFilters: [
-                'year'            => $year,
+                'year' => $year,
                 'invoice_type_id' => $invoiceTypeId,
-                'paid_status'     => $paidStatus,
+                'paid_status' => $paidStatus,
             ],
         );
     }
@@ -94,8 +94,8 @@ class CustomerLedgerBuilder
         $payments = $this->loadPayments($customer);
 
         return [
-            'stats'  => $this->computeStats($invoices, $payments),
-            'aging'  => $this->computeAging($invoices, $payments),
+            'stats' => $this->computeStats($invoices, $payments),
+            'aging' => $this->computeAging($invoices, $payments),
             'yearly' => $this->computeYearly($invoices, $payments),
         ];
     }
@@ -189,7 +189,11 @@ class CustomerLedgerBuilder
             // keep reducing the balance).
             ->whereNull('deleted_at')
             ->orderBy('pay_date', 'asc')
-            ->select('id', 'pay_date', 'amount')
+            ->orderBy('id', 'asc')
+            // reference/invoice_id/notes are needed by the Φ3 grouping in
+            // computeLedger() (collapse one «έμβασμα/είσπραξη» into one row).
+            // The money math (stats/aging/yearly) ignores them.
+            ->select('id', 'pay_date', 'amount', 'reference', 'invoice_id', 'notes')
             ->get();
     }
 
@@ -280,6 +284,7 @@ class CustomerLedgerBuilder
                 $gross = (float) $inv->gross_total;
                 if ($remainingPaid >= $gross) {
                     $remainingPaid -= $gross;
+
                     continue;
                 }
                 $oldestUnpaidDays = (int) Carbon::parse($inv->issued_at)->diffInDays(now());
@@ -288,12 +293,12 @@ class CustomerLedgerBuilder
         }
 
         return [
-            'ytd_net'                 => round($ytdNet, 2),
-            'ytd_gross'               => round($ytdGross, 2),
-            'ytd_paid'                => round($ytdPaid, 2),
-            'balance'                 => $balance,
-            'oldest_unpaid_days'      => $oldestUnpaidDays,
-            'last_activity_at'        => $lastActivity?->toIso8601String(),
+            'ytd_net' => round($ytdNet, 2),
+            'ytd_gross' => round($ytdGross, 2),
+            'ytd_paid' => round($ytdPaid, 2),
+            'balance' => $balance,
+            'oldest_unpaid_days' => $oldestUnpaidDays,
+            'last_activity_at' => $lastActivity?->toIso8601String(),
             'total_invoices_lifetime' => $invoices->count(),
         ];
     }
@@ -316,9 +321,9 @@ class CustomerLedgerBuilder
         $totalPaid = (float) $payments->sum('amount')
             + (float) $invoices->filter(fn ($inv) => $this->isCreditNote($inv))->sum('gross_total');
         $bucket = [
-            'bucket_0_30'    => 0.0,
-            'bucket_31_60'   => 0.0,
-            'bucket_61_90'   => 0.0,
+            'bucket_0_30' => 0.0,
+            'bucket_31_60' => 0.0,
+            'bucket_61_90' => 0.0,
             'bucket_90_plus' => 0.0,
         ];
 
@@ -331,6 +336,7 @@ class CustomerLedgerBuilder
             $gross = (float) $inv->gross_total;
             if ($totalPaid >= $gross) {
                 $totalPaid -= $gross;
+
                 continue;
             }
             $unpaid = $gross - $totalPaid;
@@ -419,40 +425,125 @@ class CustomerLedgerBuilder
             $gross = (float) $inv->gross_total;
             $events[] = [
                 'date_sort' => Carbon::parse($inv->issued_at)->timestamp,
-                'date'      => Carbon::parse($inv->issued_at)->toDateString(),
-                'type'      => 'invoice',
-                'invoice_id'=> (int) $inv->id,
-                'payment_id'=> null,
-                'code'      => $inv->invcode,
+                'date' => Carbon::parse($inv->issued_at)->toDateString(),
+                'type' => 'invoice',
+                'invoice_id' => (int) $inv->id,
+                'payment_id' => null,
+                'code' => $inv->invcode,
                 'reference' => $inv->invcode ?? ('#'.$inv->id),
-                'invoice_type_id'   => (int) $inv->invoice_type_id,
+                'invoice_type_id' => (int) $inv->invoice_type_id,
                 'invoice_type_code' => $inv->invoice_type_code,
-                'debit'     => $isCreditNote ? 0.0 : $gross,
-                'credit'    => $isCreditNote ? $gross : 0.0,
+                'debit' => $isCreditNote ? 0.0 : $gross,
+                'credit' => $isCreditNote ? $gross : 0.0,
                 'mydata_state' => $inv->mydata_state,
-                'mydata_mark'  => $inv->mydata_mark,
+                'mydata_mark' => $inv->mydata_mark,
                 'is_credit_term' => ! $isCreditNote && ((int) ($inv->due_days ?? 0)) > 0,
+                'is_receipt_group' => false,
+                'allocations' => null,
             ];
         }
+        // Φ3 — payments that share a NON-NULL `reference` (a PaymentAllocator
+        // «έμβασμα/είσπραξη»: N invoice-allocations + maybe one on-account
+        // remainder) collapse into ONE ledger event with the SUM of their
+        // amounts and a drill-down `allocations` list. Payments with a NULL
+        // reference (legacy, manual cockpit single payments, the old
+        // on-account action) stay as individual rows exactly as before.
+        //
+        // Grouping the N credits of total X into one credit of X cannot change
+        // the running balance — each payment is a pure `-= credit` and addition
+        // is associative, so the cumulative figure is byte-identical.
+        $invcodeById = $invoices->mapWithKeys(
+            fn ($inv) => [(int) $inv->id => $inv->invcode],
+        );
+
+        $referenced = [];   // reference => list<payment row>
         foreach ($payments as $p) {
             if (! $p->pay_date) {
                 continue;
             }
+
+            if ($p->reference === null || $p->reference === '') {
+                $events[] = [
+                    'date_sort' => Carbon::parse($p->pay_date)->timestamp,
+                    'date' => Carbon::parse($p->pay_date)->toDateString(),
+                    'type' => 'payment',
+                    'invoice_id' => null,
+                    'payment_id' => (int) $p->id,
+                    'code' => null,
+                    'reference' => 'Πληρωμή #'.$p->id,
+                    'invoice_type_id' => null,
+                    'invoice_type_code' => null,
+                    'debit' => 0.0,
+                    'credit' => (float) $p->amount,
+                    'mydata_state' => null,
+                    'mydata_mark' => null,
+                    'is_credit_term' => false,
+                    'is_receipt_group' => false,
+                    'allocations' => null,
+                ];
+
+                continue;
+            }
+
+            $referenced[$p->reference] ??= [];
+            $referenced[$p->reference][] = $p;
+        }
+
+        foreach ($referenced as $reference => $group) {
+            $earliest = null;
+            $sum = 0.0;
+            $allocations = [];
+            $isReceipt = false; // any allocation against an invoice → «Έμβασμα»
+
+            foreach ($group as $p) {
+                $ts = Carbon::parse($p->pay_date)->timestamp;
+                if ($earliest === null || $ts < $earliest) {
+                    $earliest = $ts;
+                }
+                $amount = (float) $p->amount;
+                $sum += $amount;
+
+                $invoiceId = $p->invoice_id !== null ? (int) $p->invoice_id : null;
+                if ($invoiceId !== null) {
+                    $isReceipt = true;
+                    $invcode = $invcodeById[$invoiceId] ?? ('#'.$invoiceId);
+                    $allocations[] = [
+                        'label' => (string) $invcode,
+                        'amount' => round($amount, 2),
+                        'invoice_id' => $invoiceId,
+                        'invcode' => $invcode !== null ? (string) $invcode : null,
+                    ];
+                } else {
+                    $allocations[] = [
+                        'label' => 'Πίστωση / προκαταβολή',
+                        'amount' => round($amount, 2),
+                        'invoice_id' => null,
+                        'invcode' => null,
+                    ];
+                }
+            }
+
+            $label = $isReceipt
+                ? 'Έμβασμα '.$reference
+                : 'Είσπραξη '.$reference;
+
             $events[] = [
-                'date_sort' => Carbon::parse($p->pay_date)->timestamp,
-                'date'      => Carbon::parse($p->pay_date)->toDateString(),
-                'type'      => 'payment',
-                'invoice_id'=> null,
-                'payment_id'=> (int) $p->id,
-                'code'      => null,
-                'reference' => 'Πληρωμή #'.$p->id,
-                'invoice_type_id'   => null,
+                'date_sort' => $earliest,
+                'date' => Carbon::createFromTimestamp($earliest)->toDateString(),
+                'type' => 'payment',
+                'invoice_id' => null,
+                'payment_id' => null,
+                'code' => null,
+                'reference' => $label,
+                'invoice_type_id' => null,
                 'invoice_type_code' => null,
-                'debit'     => 0.0,
-                'credit'    => (float) $p->amount,
+                'debit' => 0.0,
+                'credit' => round($sum, 2),
                 'mydata_state' => null,
-                'mydata_mark'  => null,
+                'mydata_mark' => null,
                 'is_credit_term' => false,
+                'is_receipt_group' => true,
+                'allocations' => $allocations,
             ];
         }
 

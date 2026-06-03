@@ -268,6 +268,26 @@ class CustomerLedger extends Page implements HasTable
                         'unpaid' => 'Ανεξόφλητα',
                     ]),
             ])
+            ->recordActions([
+                // Φ3 — drill-down on a grouped «έμβασμα/είσπραξη» row: a
+                // read-only modal listing each allocation (settled invoice →
+                // amount + the «Πίστωση/προκαταβολή» remainder), summing to
+                // the row's credit. Visible ONLY on receipt-group rows.
+                Action::make('allocations')
+                    ->label('Κατανομή')
+                    ->icon('heroicon-o-list-bullet')
+                    ->color('success')
+                    ->iconButton()
+                    ->visible(fn (array $record): bool => ! empty($record['is_receipt_group']))
+                    ->modalHeading(fn (array $record): string => 'Κατανομή είσπραξης — '.($record['reference'] ?? ''))
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Κλείσιμο')
+                    ->modalContent(fn (array $record) => view('filament.customers.receipt-allocations-modal', [
+                        'allocations' => $record['allocations'] ?? [],
+                        'total' => (float) ($record['credit'] ?? 0),
+                        'fmtMoney' => fn ($v): string => $this->fmtMoney($v),
+                    ])),
+            ])
             ->recordUrl(fn (array $record): ?string => ($record['type'] === 'invoice' && $record['invoice_id'])
                 ? InvoiceResource::getUrl('view', ['record' => $record['invoice_id']])
                 : null)

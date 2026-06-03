@@ -3,6 +3,7 @@
 namespace App\Services\CustomerLedger;
 
 use App\Models\Customer;
+use App\Support\Filename;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 /**
@@ -47,7 +48,7 @@ class CustomerStatementPdfRenderer
 
     public function filename(Customer $customer): string
     {
-        $slug = \App\Support\Filename::slug($customer->name, 'customer');
+        $slug = Filename::slug($customer->name, 'customer');
 
         return 'kartela-'.$slug.'-'.now()->format('Ymd').'.pdf';
     }
