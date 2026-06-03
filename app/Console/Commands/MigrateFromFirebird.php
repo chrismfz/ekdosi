@@ -502,7 +502,6 @@ class MigrateFromFirebird extends Command
                     'fax' => $this->fld($r, 'FAX'),
                     'occupation' => $this->fld($r, 'OCCUPATION'),
                     'tax_office' => $this->fld($r, 'TAXOFFICE'),
-                    'details' => $this->fld($r, 'DETAILS'),
                     'discount' => $r['DISCOUNT'] ?? 0,
                     'email' => $this->fld($r, 'EMAIL'),
                     'secondary_email' => $this->fld($r, 'SECONDARY_EMAIL'),
@@ -523,6 +522,9 @@ class MigrateFromFirebird extends Command
                 ],
             );
             $this->map['customers'][(int) $r['CUST_ID']] = $id;
+
+            // Legacy DETAILS → a 'backup' internal note (replaces customers.details).
+            \App\Services\Etl\BackupNoteSync::sync($this->companyId, $id, $this->fld($r, 'DETAILS'));
         }
     }
 
