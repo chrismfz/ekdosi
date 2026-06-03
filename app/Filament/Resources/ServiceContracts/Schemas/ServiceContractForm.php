@@ -241,6 +241,20 @@ class ServiceContractForm
                         ->minValue(0)
                         ->helperText('Override της προεπιλογής προϊόντος. Κενό = προεπιλογή/καμία ενέργεια.'),
 
+                    Select::make('dunning_enabled')
+                        ->label('Αυτόματο dunning')
+                        ->options([
+                            '' => 'Κληρονομεί από προϊόν',
+                            '1' => 'Ναι (ενεργό)',
+                            '0' => 'Όχι (ανενεργό)',
+                        ])
+                        // Null = inherit the product's dunning_enabled flag; the
+                        // '1'/'0' strings cast to the nullable boolean column.
+                        ->dehydrateStateUsing(fn ($state) => $state === '' || $state === null ? null : (bool) $state)
+                        ->formatStateUsing(fn ($state) => $state === null ? '' : ($state ? '1' : '0'))
+                        ->default('')
+                        ->helperText('Κληρονομεί τον διακόπτη του προϊόντος, εκτός αν τον εξαναγκάσεις εδώ για αυτή τη σύμβαση.'),
+
                     Textarea::make('notes')
                         ->label('Σημειώσεις')
                         ->rows(3)

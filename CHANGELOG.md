@@ -68,6 +68,34 @@ they merge.
   `ServiceContractsRelationManager` (tab «Υπηρεσίες» στον πελάτη, read-mostly +
   «Άνοιγμα») + `Customer::serviceContracts()`. Form: πεδίο `quantity` (default 1,
   min 0.001) + στήλες ποσότητα/«Σύνολο» (qty×amount) στον πίνακα.
+- **Υπηρεσίες/Συμβόλαια (recurring) — dunning (PR-D).** Αυτόματη
+  **αναστολή/τερματισμός** συμβολαίων με ληξιπρόθεσμη ανανέωση (και
+  **επαναφορά** όταν πληρωθεί), με τον overdue σηματισμό να έρχεται ΑΥΤΟΥΣΙΟΣ από
+  `Invoice::isOverdue()/dueDate()` (καμία επανεφεύρεση μαθηματικών λήξης). Νέος
+  **per-product «διακόπτης»** `products.dunning_enabled` (**DEFAULT OFF** = η
+  ασφάλεια· τίποτα δεν συμβαίνει ώσπου ο χειριστής τον ανοίξει) + nullable
+  `service_contracts.dunning_enabled` override (null = κληρονομεί). Νέα υπηρεσία
+  `App\Services\Services\ServiceDunning` (`evaluate()` αποφασίζει+εφαρμόζει·
+  `wouldDo()` ΑΜΙΓΩΣ read-only για το `--dry-run`): terminate>suspend κατά
+  προτεραιότητα, μόνο αν το κατώφλι ημερών είναι μη-null ΚΑΙ το state machine
+  (`canTransitionTo`) το επιτρέπει· terminate κάνει cascade ακύρωση των
+  μη-εκδομένων πρόχειρων ανανεώσεων (ίδιο predicate με το ViewServiceContract).
+  **Provisioning seam** (Null-only): `App\Contracts\ProvisioningModule` +
+  `NullProvisioningModule` (key 'none', no-op) + `ProvisioningModuleRegistry`
+  (config-driven `config/ekdosi.php → provisioning.modules`, unknown→Null+warn,
+  ποτέ throw) — best-effort κλήση (αποτυχία module δεν κάνει rollback το local
+  status). Νέα εντολή **`services:run-dunning`** (`--tenant`/`--dry-run`):
+  per-tenant loop (explicit `company_id`, όχι BelongsToTenant στη CLI),
+  per-contract try/catch, exit 2 σε άγνωστο tenant, loud `Log::info` ανά ενέργεια.
+  Scheduler block + flags (`service_dunning_enabled` **DEFAULT ON** = ο μηχανισμός
+  «πλυγκαρισμένος», αλλά ο πραγματικός διακόπτης είναι το per-product OFF·
+  `service_dunning_time`) + `.env.example`. **Activity log** στο `ServiceContract`
+  (`TracksActivity`, business πεδία μόνο: status/next_due/amount/suspended_at/
+  terminated_at/cancel_reason/dunning_enabled· «Ιστορικό» tab στο resource) ώστε
+  χειροκίνητο ΚΑΙ αυτόματο suspend/terminate να είναι auditable. Filament:
+  per-product «Αυτόματο dunning» toggle + per-contract «Κληρονομεί/Ναι/Όχι»
+  override. **Μηδέν money impact** (μόνο contract status + provisioning).
+  **Deploy:** `php artisan migrate` + `shield:sync-super-admin`.
 ### Changed
 - **Πληρωμές — money trail σε cash-term παραστατικά (model refinement).** Ένα
   μετρητοίς/άμεσο τιμολόγιο (`due_days=0`) θεωρείται «εξοφλημένο στην έκδοση»

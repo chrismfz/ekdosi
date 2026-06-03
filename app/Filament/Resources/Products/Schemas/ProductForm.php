@@ -257,6 +257,13 @@ class ProductForm
                                     ->visible(fn (Get $get) => (bool) $get('is_recurring'))
                                     ->helperText('Μελλοντικό automation hook (cPanel/mailcow/άδειες). «Κανένα» = χειροκίνητη παροχή.'),
 
+                                Toggle::make('dunning_enabled')
+                                    ->label('Αυτόματο dunning (αναστολή/τερματισμός)')
+                                    ->default(false)
+                                    ->columnSpanFull()
+                                    ->visible(fn (Get $get) => (bool) $get('is_recurring'))
+                                    ->helperText('Προεπιλογή ΑΝΕΝΕΡΓΟ (ασφάλεια). Όταν ενεργό, οι συμβάσεις αυτού του προϊόντος με ληξιπρόθεσμη ανανέωση μπαίνουν αυτόματα σε αναστολή/τερματισμό βάσει των ημερών παρακάτω. Κενό «τερματισμός μετά» = μόνο αναστολή. Πληρωμή → αυτόματη επαναφορά.'),
+
                                 TextInput::make('default_suspend_after_days')
                                     ->label('Προεπιλογή αναστολής μετά (ημέρες)')
                                     ->numeric()

@@ -117,3 +117,15 @@ if (config('ekdosi.schedule.service_renewals_enabled')) {
         ->name('service-renewals')
         ->withoutOverlapping();
 }
+
+// services:run-dunning — auto suspend/terminate overdue contracts (or unsuspend
+// a paid one), once per tenant (the command loops tenants itself). Default ON,
+// BUT the real on/off is the per-product dunning_enabled toggle (default OFF):
+// a fresh deploy acts on nothing until an operator opts a product in. The
+// command does NOT file at AADE — it only flips contract status + provisioning.
+if (config('ekdosi.schedule.service_dunning_enabled')) {
+    Schedule::command('services:run-dunning')
+        ->dailyAt(config('ekdosi.schedule.service_dunning_time', '08:00'))
+        ->name('service-dunning')
+        ->withoutOverlapping();
+}

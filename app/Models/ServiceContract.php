@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\BillingCycle;
 use App\Enums\ServiceContractStatus;
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\TracksActivity;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -26,7 +27,24 @@ use Illuminate\Support\Carbon;
 class ServiceContract extends Model
 {
     use BelongsToCompany;
-    use HasFactory, SoftDeletes;
+    use HasFactory, SoftDeletes, TracksActivity;
+
+    /**
+     * Audited business columns — lifecycle + the snapshot money figure + the
+     * dunning override, so a manual OR automated suspend/terminate is logged
+     * («ποιος/πότε»). NOT the cursor-bookkeeping columns (last_invoiced_at /
+     * last_renewal_invoice_id) which the renewal observer rewrites on every
+     * issue and would spam the trail. See TracksActivity.
+     *
+     * @return list<string>
+     */
+    protected function loggedAttributes(): array
+    {
+        return [
+            'status', 'next_due_date', 'amount', 'suspended_at', 'terminated_at',
+            'cancel_reason', 'dunning_enabled',
+        ];
+    }
 
     protected $fillable = [
         'company_id',
@@ -53,6 +71,8 @@ class ServiceContract extends Model
         'cancel_reason',
         'suspend_after_days',
         'terminate_after_days',
+        // PR-D: per-contract override of the product's dunning flag (null = inherit).
+        'dunning_enabled',
         'domain',
         'provisioning_module',
         'module_meta',
@@ -76,6 +96,7 @@ class ServiceContract extends Model
             'suspended_at' => 'datetime',
             'terminated_at' => 'datetime',
             'module_meta' => 'array',
+            'dunning_enabled' => 'boolean',
         ];
     }
 

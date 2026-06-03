@@ -71,6 +71,8 @@ class Product extends Model
         'module_meta',
         'default_suspend_after_days',
         'default_terminate_after_days',
+        // PR-D: per-product dunning master switch (default OFF).
+        'dunning_enabled',
     ];
 
     protected function casts(): array
@@ -88,6 +90,7 @@ class Product extends Model
             'reorder_level' => 'decimal:3',
             'is_recurring' => 'boolean',
             'module_meta' => 'array',
+            'dunning_enabled' => 'boolean',
         ];
     }
 

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ServiceContracts;
 
 use App\Enums\ServiceContractStatus;
+use App\Filament\RelationManagers\ActivityLogRelationManager;
 use App\Filament\Resources\ServiceContracts\Pages\CreateServiceContract;
 use App\Filament\Resources\ServiceContracts\Pages\EditServiceContract;
 use App\Filament\Resources\ServiceContracts\Pages\ListServiceContracts;
@@ -86,6 +87,15 @@ class ServiceContractResource extends Resource
     public static function table(Table $table): Table
     {
         return ServiceContractsTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            // «Ιστορικό» — the contract's audit trail (manual + automated dunning
+            // suspends/terminates), via the shared read-only relation manager.
+            ActivityLogRelationManager::class,
+        ];
     }
 
     public static function getPages(): array
