@@ -92,6 +92,7 @@ class PickerOptions
             ->where('company_id', Filament::getTenant()?->getKey())
             ->where('is_active', true)
             ->withCount('invoiceLines')
+            ->withSum('stockMovements as stock_on_hand', 'qty_change')
             ->orderByDesc('is_favorite')
             ->orderByDesc('invoice_lines_count')
             ->orderBy('description_short')
@@ -116,6 +117,7 @@ class PickerOptions
                 ->where('description_short', 'like', "%{$search}%")
                 ->orWhere('sku', 'like', "%{$search}%")
                 ->orWhere('barcode', 'like', "%{$search}%"))
+            ->withSum('stockMovements as stock_on_hand', 'qty_change')
             ->orderByDesc('is_favorite')
             ->orderBy('description_short')
             ->limit(50)
@@ -131,6 +133,16 @@ class PickerOptions
 
     private static function productLabel(Product $p): string
     {
-        return ($p->is_favorite ? '⭐ ' : '').$p->description_short;
+        $label = ($p->is_favorite ? '⭐ ' : '').$p->description_short;
+
+        // S2.5: surface on-hand stock at pick time for tracked products, so the
+        // operator sees «(απόθεμα: N)» while invoicing (red-flag a negative).
+        if ($p->track_stock) {
+            $stock = (float) ($p->stock_on_hand ?? 0);
+            $n = rtrim(rtrim(number_format($stock, 3, '.', ''), '0'), '.');
+            $label .= $stock < 0 ? "  ⚠ απόθεμα: {$n}" : "  · απόθεμα: {$n}";
+        }
+
+        return $label;
     }
 }

@@ -17,6 +17,53 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Αποθήκη — αναστροφές ακύρωσης/πιστωτικού (S3).** Κλείνει ο κύκλος: όταν ένα
+  τιμολόγιο **ακυρώνεται** (τοπικά ή myDATA CANCELLED → `local_status='cancelled'`)
+  το stock-OUT της πώλησης **αναστρέφεται** (+ποσότητα πίσω, reason `cancel`,
+  idempotent, μόνο για γραμμές που όντως κίνησε), και όταν ένα **πιστωτικό** γίνεται
+  active καταγράφεται **επιστροφή** (+ποσότητα, reason `return`). Όλα best-effort
+  στον `InvoiceObserver` (η αλλαγή status έχει ήδη γραφτεί — stock hiccup δεν
+  εμφανίζεται ως ψεύτικη αποτυχία). **Supplier auto-είσοδος deferred** — τα expense
+  lines δεν συνδέονται με προϊόντα (free-text)· η χειροκίνητη «Παραλαβή» (S2.6) το
+  καλύπτει μέχρι να μπει βήμα matching. `StockSaleTest` (return + cancel-reverse +
+  idempotent).
+- **Αποθήκη — αναπαραγγελία, backorders, γρήγορη παραλαβή (S2.6).** (1) Per-product
+  **όριο αναπαραγγελίας** (`products.reorder_level`): το badge «Απόθεμα» γίνεται
+  **πορτοκαλί** όταν ≤ όριο/εξαντλημένο (κόκκινο σε αρνητικό), ώστε να ξέρεις τι
+  να παραγγείλεις ΠΡΙΝ μηδενίσεις. (2) Filter **«Κατάσταση αποθέματος»** στη λίστα
+  προϊόντων → «χρειάζεται αναπαραγγελία» / «αρνητικό (backorder)» (what you owe).
+  (3) Row-action **«Παραλαβή»** κατευθείαν στη λίστα — καταχώριση εισόδου χωρίς
+  να μπεις στην καρτέλα. `StockServiceTest` (filter SQL buckets, sqlite-safe via
+  groupBy). **Deploy:** `php artisan migrate`.
+- **Αποθήκη — ορατότητα (S2.5).** Το απόθεμα φαίνεται **τη στιγμή που κόβεις**:
+  (α) στον picker προϊόντος του τιμολογίου → «· απόθεμα: N» (⚠ αν αρνητικό),
+  (β) μη-μπλοκάρον warning στην **Οριστικοποίηση** αν κάποια γραμμή πάει αρνητικό
+  («Σε αρνητικό: X (−1). Η έκδοση προχώρησε κανονικά — backorder»),
+  (γ) μεγάλος αριθμός «Τρέχον απόθεμα» στην καρτέλα προϊόντος (⚠ σε αρνητικό).
+  Read-only UI — ποτέ δεν μπλοκάρει (το −1 = backorder, by design).
+- **Αποθήκη — auto έξοδος στην πώληση (S2, whichever-first).** Στο απόθεμα
+  μειώνεται **−ποσότητα** αυτόματα όταν ένα τιμολόγιο γίνεται `active`
+  (`InvoiceObserver`, μόνο `track_stock` goods· τα πιστωτικά εξαιρούνται = S3
+  επιστροφή) ΚΑΙ όταν εκδίδεται **ΔΑΠ με σκοπό «Πώληση»** (μόνο move_purpose=1·
+  ενδοδιακίνηση/σέρβις/φύλαξη ΔΕΝ μειώνουν). **Whichever-first dedup:** νέο
+  προαιρετικό link `delivery_notes.invoice_id` («Σχετικό τιμολόγιο» στη φόρμα) —
+  μια πώληση μετριέται ΜΙΑ φορά (αν το linked τιμολόγιο/δελτίο το κίνησε ήδη, το
+  άλλο παραλείπει). Idempotent ανά source-line (re-finalize δεν διπλομετρά).
+  `StockService::recordSaleForInvoice/recordSaleForDeliveryNote`· warn-only.
+  `StockSaleTest`. **Deploy:** `php artisan migrate`.
+- **Αποθήκη / απόθεμα — foundation (S1).** Opt-in stock tracking ανά προϊόν
+  (`products.track_stock` — εμπορεύματα ναι, υπηρεσίες όχι· ό,τι δεν είναι tracked
+  το αγνοεί ο μηχανισμός) + signed ledger `stock_movements` (τρέχον on-hand =
+  SUM, **derived ποτέ cached** όπως το InvoiceBalance· auditable/reversible) +
+  `App\Services\Stock\StockService` (current/record, **warn-only — ποτέ δεν
+  μπλοκάρει πώληση**, επιτρέπει αρνητικό). UI: στήλη «Απόθεμα» στα Products
+  (κόκκινο σε αρνητικό· «—» για μη-tracked· το legacy fractional `reserve`
+  ξεχώρισε ως «Reserve (legacy)» για να μη μπερδεύεται) + tab «Κινήσεις
+  αποθέματος» ανά προϊόν με χειροκίνητη «Καταχώριση κίνησης»
+  (Παραλαβή/Αρχική απογραφή/Διόρθωση). Ledger append-only (διορθώνεις με νέα
+  κίνηση). Επόμενα: S2 = auto-έξοδος (τιμολόγιο + ΔΑΠ-Πώληση, whichever-first με
+  link/dedup)· S3 = auto-είσοδος προμηθευτή + αναστροφές ακύρωσης/πιστωτικού.
+  `StockServiceTest`. **Deploy:** `php artisan migrate`.
 - **2FA (TOTP) + root redirect.** Ενεργοποιήθηκε το ενσωματωμένο MFA του Filament:
   `User` υλοποιεί `HasAppAuthentication`(+`Recovery`), νέες encrypted-at-rest στήλες
   `app_authentication_secret`/`_recovery_codes`, και το panel

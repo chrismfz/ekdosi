@@ -6,14 +6,17 @@ use App\Filament\Support\Tags\TagControls;
 use App\Models\MetricUnit;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Validation\Rule;
 
@@ -54,6 +57,30 @@ class ProductForm
                                     ->label('Active')
                                     ->default(true)
                                     ->helperText('Inactive products stay in the catalogue for invoice history but are hidden from new-invoice pickers.'),
+
+                                Toggle::make('track_stock')
+                                    ->label('Παρακολούθηση αποθέματος')
+                                    ->default(false)
+                                    ->live()
+                                    ->helperText('Μέτρα απόθεμα γι\' αυτό το είδος (εμπορεύματα). Άφησέ το κλειστό για υπηρεσίες. Το απόθεμα είναι ενημερωτικό — δεν μπλοκάρει ποτέ πώληση.'),
+
+                                TextInput::make('reorder_level')
+                                    ->label('Όριο αναπαραγγελίας')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->visible(fn (Get $get) => (bool) $get('track_stock'))
+                                    ->helperText('Κάτω από αυτό το απόθεμα → πορτοκαλί «χαμηλό». Κενό = χωρίς ειδοποίηση.'),
+
+                                Placeholder::make('current_stock')
+                                    ->label('Τρέχον απόθεμα')
+                                    ->visible(fn ($record) => (bool) $record?->track_stock)
+                                    ->content(function ($record) {
+                                        $n = (float) app(StockService::class)->currentStock($record);
+                                        $txt = rtrim(rtrim(number_format($n, 3, '.', ''), '0'), '.');
+
+                                        return $n < 0 ? "⚠ {$txt} (αρνητικό — backorder)" : $txt;
+                                    })
+                                    ->helperText('Δες αναλυτικά στο tab «Κινήσεις αποθέματος».'),
 
                                 TextInput::make('sku')
                                     ->label('SKU')
@@ -283,6 +310,7 @@ class ProductForm
         if (! $id) {
             return 0.0;
         }
+
         return (float) (VatCategory::query()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->whereKey($id)

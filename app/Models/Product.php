@@ -4,7 +4,6 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
-
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -37,7 +36,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Product extends Model
 {
     use BelongsToCompany;
-
     use HasFactory, HasTags, SoftDeletes;
 
     protected $fillable = [
@@ -64,6 +62,8 @@ class Product extends Model
         'internal_notes',
         'whmcs_product_id',
         'supplier',
+        'track_stock',
+        'reorder_level',
     ];
 
     protected function casts(): array
@@ -77,12 +77,19 @@ class Product extends Model
             'date_inserted' => 'date',
             'is_active' => 'boolean',
             'is_favorite' => 'boolean',
+            'track_stock' => 'boolean',
+            'reorder_level' => 'decimal:3',
         ];
     }
 
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class);
     }
 
     public function productCategory(): BelongsTo
