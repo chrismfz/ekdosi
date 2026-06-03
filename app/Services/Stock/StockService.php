@@ -120,6 +120,57 @@ class StockService
         }
     }
 
+    /**
+     * Stock-IN for a credit note becoming active (a return). Each line of a
+     * track_stock product → +qty back into stock (credit-note lines are stored
+     * POSITIVE). Idempotent per source line.
+     */
+    public function recordReturnForCreditNote(Invoice $creditNote): void
+    {
+        if ($creditNote->credited_invoice_id === null) {
+            return; // not a credit note
+        }
+
+        foreach ($creditNote->lines()->get() as $line) {
+            $product = $line->product;
+            if (! $product || ! $product->track_stock) {
+                continue;
+            }
+            if ($this->lineHasMovement(InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
+                continue;
+            }
+            $this->record($product, (float) $line->qty, StockMovement::REASON_RETURN, source: $line, occurredAt: $creditNote->issued_at);
+        }
+    }
+
+    /**
+     * Reverse the sale-OUT of a cancelled invoice (goods come back). Only lines
+     * that THIS invoice actually moved as a sale are reversed (+qty,
+     * REASON_CANCEL); idempotent (won't reverse twice). If the linked δελτίο
+     * moved the product instead, this invoice's line has no sale movement → not
+     * reversed here (a δελτίο-cancel reversal is a follow-up).
+     */
+    public function reverseSaleForInvoice(Invoice $invoice): void
+    {
+        if ($invoice->credited_invoice_id !== null) {
+            return; // credit notes never produced a sale-out
+        }
+
+        foreach ($invoice->lines()->get() as $line) {
+            $product = $line->product;
+            if (! $product || ! $product->track_stock) {
+                continue;
+            }
+            if (! $this->lineHasMovement(InvoiceLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
+                continue; // this line never moved (e.g. the linked δελτίο did) — nothing to reverse
+            }
+            if ($this->lineHasMovement(InvoiceLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
+                continue; // already reversed
+            }
+            $this->record($product, (float) $line->qty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης');
+        }
+    }
+
     /** @return list<int> line ids of δελτία linked to this invoice */
     private function linkedDeliveryLineIds(Invoice $invoice): array
     {
@@ -140,8 +191,14 @@ class StockService
     /** Has THIS exact source line already produced a sale movement? (idempotent re-fire) */
     private function lineAlreadyMoved(string $sourceType, int|string $sourceId): bool
     {
+        return $this->lineHasMovement($sourceType, $sourceId, StockMovement::REASON_SALE);
+    }
+
+    /** Has THIS exact source line already produced a movement of the given reason? */
+    private function lineHasMovement(string $sourceType, int|string $sourceId, string $reason): bool
+    {
         return StockMovement::query()
-            ->where('reason', StockMovement::REASON_SALE)
+            ->where('reason', $reason)
             ->where('source_type', $sourceType)
             ->where('source_id', $sourceId)
             ->exists();

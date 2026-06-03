@@ -108,15 +108,35 @@ class StockSaleTest extends TestCase
         $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh())); // −3 once, not −6
     }
 
-    public function test_credit_note_activation_does_not_decrement(): void
+    public function test_credit_note_activation_returns_stock(): void
     {
         $original = $this->draftInvoice();
+        $this->line($original, $this->tracked, 3);
+        $original->update(['local_status' => 'active']);   // sale −3 → 7
+
         $credit = $this->draftInvoice(creditedId: $original->id);
         $this->line($credit, $this->tracked, 3);
+        $credit->update(['local_status' => 'active']);      // return +3 → 10
 
-        $credit->update(['local_status' => 'active']);
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+        $this->assertDatabaseHas('stock_movements', [
+            'product_id' => $this->tracked->id, 'reason' => 'return',
+        ]);
+    }
 
-        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh())); // untouched
+    public function test_invoice_cancel_reverses_the_sale(): void
+    {
+        $inv = $this->draftInvoice();
+        $this->line($inv, $this->tracked, 3);
+        $inv->update(['local_status' => 'active']);    // −3 → 7
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $inv->update(['local_status' => 'cancelled']); // +3 reverse → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        // idempotent: reversing again is a no-op (no double +3).
+        app(StockService::class)->reverseSaleForInvoice($inv->fresh());
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
     }
 
     public function test_sale_delivery_note_decrements_but_non_sale_does_not(): void

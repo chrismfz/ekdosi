@@ -32,28 +32,36 @@ class InvoiceObserver
     }
 
     /**
-     * When an invoice transitions INTO `active` (finalize / issue), decrement
-     * stock for its track_stock goods lines — whichever-first, idempotent (see
-     * StockService). Guarded to the local_status→active change so the many other
-     * saves (recompute, payments, edits) are a cheap no-op. Credit notes are
-     * skipped here (they are a return = stock-IN, S3).
+     * Drive stock on a local_status transition (guarded so the many other saves —
+     * recompute, payments, edits — are a cheap no-op):
+     *   • → active, normal invoice  → sale-OUT  (−qty, whichever-first)
+     *   • → active, credit note     → return-IN (+qty, S3)
+     *   • → cancelled, normal       → reverse the sale-OUT (+qty back, S3)
+     * Best-effort: the status was already persisted, so a stock-write hiccup must
+     * never surface as a false "finalize/cancel failed".
      */
     private function applyStockSaleIfActivated(Invoice $invoice): void
     {
-        if ($invoice->credited_invoice_id !== null) {
-            return;
-        }
-        if (! $invoice->wasChanged('local_status') || $invoice->local_status !== 'active') {
+        if (! $invoice->wasChanged('local_status')) {
             return;
         }
 
-        // Best-effort: the finalize already persisted local_status='active'; a
-        // stock-write hiccup must not surface as a false "finalize failed".
+        $status = $invoice->local_status;
+        $isCreditNote = $invoice->credited_invoice_id !== null;
+
         try {
-            app(StockService::class)->recordSaleForInvoice($invoice);
+            $stock = app(StockService::class);
+            if ($status === 'active') {
+                $isCreditNote
+                    ? $stock->recordReturnForCreditNote($invoice)
+                    : $stock->recordSaleForInvoice($invoice);
+            } elseif ($status === 'cancelled' && ! $isCreditNote) {
+                $stock->reverseSaleForInvoice($invoice);
+            }
         } catch (Throwable $e) {
-            Log::warning('S2 stock-out on invoice activation failed (finalize succeeded)', [
+            Log::warning('Stock movement on invoice status change failed (the status change succeeded)', [
                 'invoice_id' => $invoice->id,
+                'local_status' => $status,
                 'error' => $e->getMessage(),
             ]);
         }
