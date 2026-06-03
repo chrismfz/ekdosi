@@ -130,6 +130,13 @@ class StockService
             : DeliveryNoteLine::whereIn('delivery_note_id', $noteIds)->pluck('id')->all();
     }
 
+    // NOTE: the dedup/idempotency queries match `source_type` against the FQCN
+    // (InvoiceLine::class / DeliveryNoteLine::class) because no morph map is
+    // configured — `record()` stores the FQCN via getMorphClass(). If a
+    // `Relation::enforceMorphMap([...])` is ever added, store + query must use the
+    // SAME alias or these `where('source_type', FQCN)` filters silently stop
+    // matching → double-counting.
+
     /** Has THIS exact source line already produced a sale movement? (idempotent re-fire) */
     private function lineAlreadyMoved(string $sourceType, int|string $sourceId): bool
     {

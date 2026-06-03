@@ -6,6 +6,8 @@ use App\Models\Invoice;
 use App\Services\InvoiceBalance;
 use App\Services\Stock\StockService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * When a credit note (credited_invoice_id set) is created / saved /
@@ -45,7 +47,16 @@ class InvoiceObserver
             return;
         }
 
-        app(StockService::class)->recordSaleForInvoice($invoice);
+        // Best-effort: the finalize already persisted local_status='active'; a
+        // stock-write hiccup must not surface as a false "finalize failed".
+        try {
+            app(StockService::class)->recordSaleForInvoice($invoice);
+        } catch (Throwable $e) {
+            Log::warning('S2 stock-out on invoice activation failed (finalize succeeded)', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     public function deleted(Invoice $invoice): void

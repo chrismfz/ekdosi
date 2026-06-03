@@ -539,8 +539,17 @@ class DeliveryNoteSubmitter
 
         // Stock-OUT for a Πώληση δελτίο (S2). No-ops for any other σκοπός and for
         // untracked products; idempotent + whichever-first (skips if the linked
-        // invoice already moved). Outside the audit transaction.
-        app(StockService::class)->recordSaleForDeliveryNote($note);
+        // invoice already moved). Outside the audit transaction and BEST-EFFORT:
+        // the δελτίο is already filed at AADE (VALID), so a stock-write hiccup must
+        // never surface as a false "issuance failed" — mirrors recordRejection.
+        try {
+            app(StockService::class)->recordSaleForDeliveryNote($note);
+        } catch (Throwable $e) {
+            Log::warning('S2 stock-out after delivery-note filing failed (filing succeeded)', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return $audit;
     }
