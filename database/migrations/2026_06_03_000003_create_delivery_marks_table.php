@@ -20,7 +20,11 @@ return new class extends Migration
             $t->foreignId('company_id')->constrained()->cascadeOnDelete();
             $t->unsignedInteger('legacy_id')->nullable();
             $t->foreignId('delivery_note_id')->nullable()->constrained()->cascadeOnDelete();
-            $t->string('mark', 50);
+            // Nullable: a lifecycle event (REGISTER_TRANSFER/CONFIRM_OUTCOME) is
+            // still worth auditing even in the unlikely case AADE returns Success
+            // without a *Mark element — better the audit row survives than a
+            // NOT-NULL violation drops it. The issue INSERT always carries a mark.
+            $t->string('mark', 50)->nullable();
             // INSERT / REGISTER_TRANSFER / CONFIRM_OUTCOME / REJECT / CANCEL
             $t->string('mydata_action', 30)->nullable();
             $t->string('invoice_url', 1500)->nullable();  // qrUrl from the response

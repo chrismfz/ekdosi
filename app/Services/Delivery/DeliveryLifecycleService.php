@@ -299,7 +299,19 @@ class DeliveryLifecycleService
         $markToCancel = (string) $inserts->first()->mark;
 
         $action = new CancelInvoice;
-        $this->dispatch($note, 'cancel', fn () => $action->handle($markToCancel));
+        $response = $this->dispatch($note, 'cancel', fn () => $action->handle($markToCancel));
+
+        // Assert AADE accepted the cancel BEFORE flipping the note to the
+        // terminal cancelled state. CancelInvoice::handle does not throw on a
+        // business-error body, so without this a rejected cancel (e.g. MARK not
+        // found) would be silently recorded as cancelled — and a wrongly-terminal
+        // delivery_state is hard to recover. register/confirm already assert
+        // Success via firstSuccessful(); keep cancel symmetric.
+        $first = $response->first();
+        if ($first === null || $first->getStatusCode() !== 'Success') {
+            $errors = $first ? $this->describeResponseErrors($first) : 'καμία απάντηση';
+            throw new RuntimeException("Ακύρωση: το myDATA απέρριψε την ενέργεια — {$errors}");
+        }
 
         $responseXml = $action->getResponseXML() ?? '';
 
@@ -469,7 +481,10 @@ class DeliveryLifecycleService
         MyDataRequest::setHandler($this->mockHandler);
     }
 
-    private function describeResponseErrors(DgmResponse $response): string
+    // Accepts either a DGM Response or a standard invoice Response (CancelInvoice
+    // returns the latter) — both expose getStatusCode()/getErrors(), so it's
+    // duck-typed via method_exists below.
+    private function describeResponseErrors(object $response): string
     {
         $errs = $response->getErrors();
         if ($errs === null) {

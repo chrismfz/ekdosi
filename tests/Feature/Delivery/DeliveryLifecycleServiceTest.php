@@ -312,6 +312,26 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->service($this->cancelResponse())->cancel($note);
     }
 
+    public function test_cancel_rejected_by_aade_does_not_mark_cancelled(): void
+    {
+        $note = $this->makeFiledNote();
+
+        try {
+            $this->service($this->cancelRejectedResponse())->cancel($note);
+            $this->fail('cancel should throw when myDATA does not return Success');
+        } catch (RuntimeException $e) {
+            $this->assertMatchesRegularExpression('/απέρριψε/u', $e->getMessage());
+        }
+
+        $fresh = $note->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state, 'must NOT flip to CANCELLED on a rejected cancel');
+        $this->assertNotSame('cancelled', $fresh->delivery_state);
+        $this->assertDatabaseMissing('delivery_marks', [
+            'delivery_note_id' => $note->id,
+            'mydata_action' => 'CANCEL',
+        ]);
+    }
+
     // ---- state label --------------------------------------------------
 
     public function test_state_label_is_greek(): void
@@ -358,6 +378,19 @@ XML;
     <response>
         <cancellationMark>400001234599399</cancellationMark>
         <statusCode>Success</statusCode>
+    </response>
+</ResponseDoc>
+XML;
+    }
+
+    /** A non-Success cancel response — AADE rejected the cancellation. */
+    private function cancelRejectedResponse(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <statusCode>ValidationError</statusCode>
     </response>
 </ResponseDoc>
 XML;
