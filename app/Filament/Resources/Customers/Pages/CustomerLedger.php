@@ -12,6 +12,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\AadeRegistryLookup;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
+use App\Services\CustomerLedger\CustomerTopProducts;
 use App\Services\CustomerLedger\CustomerStatementCsv;
 use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
 use App\Services\TenantMailerFactory;
@@ -91,6 +92,14 @@ class CustomerLedger extends Page implements HasTable
      */
     public ?array $cachedStatsBlock = null;
 
+    /**
+     * «Συχνά προϊόντα/υπηρεσίες» — top items this customer buys, computed once
+     * on mount from their live sales lines (see CustomerTopProducts).
+     *
+     * @var array<int, array{key: string, label: string, product_id: ?int, sku: ?string, times: int, qty: float, net: float, unit: ?string, last_at: ?string}>
+     */
+    public array $topProducts = [];
+
     public ?CustomerWhmcsLedgerResult $whmcsLedger = null;
 
     /**
@@ -138,7 +147,12 @@ class CustomerLedger extends Page implements HasTable
 
         abort_unless(auth()->user()?->can('view', $this->record), 403);
 
+        // Eager-load the Καρτέλα's read-only side panels so the blade doesn't
+        // lazy-load (and N+1 the note authors / attachment uploaders) per render.
+        $this->record->load(['contacts', 'internalNotes.author', 'attachments.uploadedBy']);
+
         $this->cachedStatsBlock = app(CustomerLedgerBuilder::class)->buildStatsBlock($this->record);
+        $this->topProducts = app(CustomerTopProducts::class)->for($this->record);
         $this->loadDimensionLookups();
     }
 

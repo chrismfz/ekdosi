@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\Invoices;
 
 use App\Filament\RelationManagers\ActivityLogRelationManager;
+use App\Filament\RelationManagers\AttachmentsRelationManager;
+use App\Filament\RelationManagers\InternalNotesRelationManager;
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
 use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Pages\ListInvoices;
@@ -118,6 +120,8 @@ class InvoiceResource extends Resource
         return [
             LinesRelationManager::class,
             MyDataMarksRelationManager::class,
+            InternalNotesRelationManager::class,
+            AttachmentsRelationManager::class,
             MailLogRelationManager::class,
             ActivityLogRelationManager::class,
         ];

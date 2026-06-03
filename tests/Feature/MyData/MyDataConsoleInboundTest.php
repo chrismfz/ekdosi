@@ -82,24 +82,28 @@ class MyDataConsoleInboundTest extends TestCase
         ];
     }
 
-    public function test_console_exposes_both_directions(): void
+    public function test_console_exposes_a_single_reconcile_action(): void
     {
         $this->bootTenantUser();
 
+        // The two old read buttons (reconcile + find_orphans) are now ONE — the
+        // same fetch serves both directions on the page.
         Livewire::test(MyDataConsole::class)
             ->assertOk()
             ->assertActionExists('reconcile')
-            ->assertActionExists('find_orphans');
+            ->assertActionDoesNotExist('find_orphans');
     }
 
-    public function test_inbound_view_highlights_orphans(): void
+    public function test_one_render_shows_both_directions(): void
     {
         $this->bootTenantUser();
 
         Livewire::test(MyDataConsole::class)
             ->set('ran', true)
-            ->set('resultMode', 'inbound')
             ->set('result', $this->fakeResult())
+            // Both group headings appear in the SAME render.
+            ->assertSee('Τα δικά μας στο myDATA')
+            ->assertSee('Αδέσποτα από myDATA')
             // Income orphans get the actionable "πωλήσεων" heading + their MARK.
             ->assertSee('Αδέσποτα πωλήσεων')
             ->assertSee('400099999999999')
@@ -108,21 +112,9 @@ class MyDataConsoleInboundTest extends TestCase
             ->assertSee('Λοιπές δικές σου εγγραφές')
             ->assertSee('400088888888888')
             ->assertSee('Μισθοδοσία')
-            ->assertSee('Συνδεδεμένα με τοπικό παραστατικό');
-    }
-
-    public function test_compare_view_points_to_orphans_without_duplicating_the_table(): void
-    {
-        $this->bootTenantUser();
-
-        Livewire::test(MyDataConsole::class)
-            ->set('ran', true)
-            ->set('resultMode', 'compare')
-            ->set('result', $this->fakeResult())
-            // Compare view surfaces a slim pointer (count + reference), not a
-            // second full orphans table. Headlines income orphans.
-            ->assertSee('αδέσποτα πωλήσεων')
-            ->assertSee('Αδέσποτα από myDATA')
+            // The our-docs side still surfaces matched + the Ασυμφωνίες card.
+            ->assertSee('Συμφωνούν')
+            ->assertSee('400011111111111')
             ->assertSee('Ασυμφωνίες');
     }
 }

@@ -220,7 +220,8 @@ class InvoiceInfolist
                     ->columns(3)
                     ->collapsible(),
 
-                Section::make('Notes')
+                Section::make('Παρατηρήσεις (εκτύπωσης)')
+                    ->description('Εμφανίζονται στο PDF/email του πελάτη.')
                     ->schema([
                         TextEntry::make('notes')
                             ->label(false)
