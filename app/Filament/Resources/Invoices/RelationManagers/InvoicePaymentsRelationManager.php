@@ -123,10 +123,24 @@ class InvoicePaymentsRelationManager extends RelationManager
         Notification::make()->success()->title('Η πληρωμή καταχωρίστηκε')->send();
     }
 
-    /** Money already received on this invoice (the most a refund can return). */
+    /**
+     * Money ACTUALLY received on this invoice (Σ real payment rows, net of any
+     * refunds) — the most a refund can return. Deliberately NOT
+     * balanceData()->paid: for a cash-term invoice that figure is the SYNTHETIC
+     * paid = owed (settled-at-issue), with no real payment rows behind it, so a
+     * refund built on it would create a phantom receivable on the dashboard /
+     * customer balance. Querying the rows makes the refund action correctly
+     * hidden when nothing was really collected.
+     */
     private function paidSoFar(): float
     {
-        return (float) $this->invoice()->balanceData()->paid;
+        $row = DB::table('payments')
+            ->where('invoice_id', $this->invoice()->id)
+            ->whereNull('deleted_at')
+            ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS net')
+            ->first();
+
+        return round((float) ($row->net ?? 0), 2);
     }
 
     public function table(Table $table): Table

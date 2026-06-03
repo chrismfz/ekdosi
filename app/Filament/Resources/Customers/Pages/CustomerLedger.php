@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Customers\Pages;
 
+use App\Enums\PaymentStatus;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
@@ -706,6 +707,23 @@ class CustomerLedger extends Page implements HasTable
 
                         return;
                     }
+                    // Warn (don't block) if any target ended up overpaid —
+                    // parity with the single-payment cockpit path.
+                    $overpaid = [];
+                    foreach ($res->allocations as $alloc) {
+                        $inv = Invoice::query()
+                            ->where('company_id', $this->record->company_id)
+                            ->where('invcode', $alloc['invcode'])
+                            ->first();
+                        if ($inv && $inv->balanceData()->status === PaymentStatus::Overpaid) {
+                            $overpaid[] = $alloc['invcode'];
+                        }
+                    }
+                    if ($overpaid !== []) {
+                        Notification::make()->warning()->title('Υπερπληρωμή')
+                            ->body('Υπερβαίνει το υπόλοιπο: '.implode(', ', $overpaid).'.')->send();
+                    }
+
                     Notification::make()->success()->title('Η κατανομή καταχωρίστηκε')
                         ->body(count($res->allocations).' τιμολόγια ('.$this->fmtMoney($res->allocatedToInvoices()).')')->send();
                     $this->redirect(static::getUrl(['record' => $this->record]));

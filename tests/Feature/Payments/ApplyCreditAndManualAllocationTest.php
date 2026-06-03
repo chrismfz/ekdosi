@@ -82,6 +82,22 @@ class ApplyCreditAndManualAllocationTest extends TestCase
         $this->assertSame(500.0, (float) Payment::where('customer_id', $this->customer->id)->sum('amount'));
     }
 
+    public function test_apply_credit_stamps_its_own_reference(): void
+    {
+        $inv = $this->invoice('ΤΙΜ1b', 300);
+        $credit = $this->onAccountCredit(); // €500, reference 'ΕΙΣ-X'
+
+        app(PaymentAllocator::class)->applyCredit($this->customer, $inv, 300);
+
+        // The applied portion (now pointing at the invoice) reads as its OWN
+        // event (ΕΦΑ-…), not folded into the original έμβασμα 'ΕΙΣ-X' group.
+        $applied = Payment::where('invoice_id', $inv->id)->first();
+        $this->assertNotNull($applied);
+        $this->assertStringStartsWith('ΕΦΑ-', (string) $applied->reference);
+        // The leftover on-account row keeps its original έμβασμα reference.
+        $this->assertSame('ΕΙΣ-X', Payment::whereNull('invoice_id')->first()->reference);
+    }
+
     public function test_apply_credit_is_capped_by_invoice_balance(): void
     {
         $inv = $this->invoice('ΤΙΜ2', 120);

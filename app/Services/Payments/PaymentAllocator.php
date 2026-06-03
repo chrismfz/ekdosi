@@ -5,6 +5,7 @@ namespace App\Services\Payments;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Services\InvoiceBalance;
 use App\Support\InvoiceScope;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -196,18 +197,10 @@ class PaymentAllocator
         }
 
         return DB::transaction(function () use ($customer, $target, $amount) {
-            $balance = round((float) $target->balanceData()->balance, 2);
-            if ($balance <= 0.005) {
-                throw new InvalidArgumentException('Το τιμολόγιο δεν έχει ανοιχτό υπόλοιπο.');
-            }
-
-            $available = $this->availableCredit($customer);
-            $toApply = round(min($amount, $balance, $available), 2);
-            if ($toApply <= 0.005) {
-                throw new InvalidArgumentException('Δεν υπάρχει διαθέσιμη πίστωση προς εφαρμογή.');
-            }
-
-            $remaining = $toApply;
+            // Lock the on-account pool FIRST so concurrent applies for this
+            // customer serialise — only then read the caps, so they reflect any
+            // prior committed apply (otherwise two operators both read the stale
+            // pre-lock figures and over-apply / misreport the amount).
             $onAccount = Payment::query()
                 ->where('company_id', $customer->company_id)
                 ->where('customer_id', $customer->id)
@@ -218,6 +211,24 @@ class PaymentAllocator
                 ->lockForUpdate()
                 ->get();
 
+            // Caps read UNDER the lock: invoice balance from a fresh compute
+            // (post any prior move) and available credit net of on-account refunds.
+            $balance = round((float) app(InvoiceBalance::class)->for($target->fresh(['paymentMethod']))->balance, 2);
+            if ($balance <= 0.005) {
+                throw new InvalidArgumentException('Το τιμολόγιο δεν έχει ανοιχτό υπόλοιπο.');
+            }
+            $available = $this->availableCredit($customer);
+            if ($available <= 0.005) {
+                throw new InvalidArgumentException('Δεν υπάρχει διαθέσιμη πίστωση προς εφαρμογή.');
+            }
+
+            // Fresh reference so the applied credit reads as its OWN ledger event
+            // («Είσπραξη ΕΦΑ-…») instead of folding into the original έμβασμα group.
+            $ref = 'ΕΦΑ-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
+
+            $remaining = round(min($amount, $balance, $available), 2);
+            $applied = 0.0;
+
             foreach ($onAccount as $payment) {
                 if ($remaining <= 0.005) {
                     break;
@@ -225,7 +236,8 @@ class PaymentAllocator
                 $rowAmount = round((float) $payment->amount, 2);
                 if ($rowAmount <= $remaining + 0.005) {
                     // Move the whole row onto the invoice (observer recomputes it).
-                    $payment->update(['invoice_id' => $target->id]);
+                    $payment->update(['invoice_id' => $target->id, 'reference' => $ref]);
+                    $applied = round($applied + $rowAmount, 2);
                     $remaining = round($remaining - $rowAmount, 2);
                 } else {
                     // Split: shrink the on-account row, create the applied portion.
@@ -239,15 +251,17 @@ class PaymentAllocator
                         'bank_account_id' => $payment->bank_account_id,
                         'pay_date' => $payment->pay_date,
                         'amount' => $remaining,
-                        'reference' => $payment->reference,
+                        'reference' => $ref,
                         'transaction_id' => $payment->transaction_id,
                         'notes' => trim((string) ($payment->notes ?? '').' · εφαρμογή πίστωσης'),
                     ]);
+                    $applied = round($applied + $remaining, 2);
                     $remaining = 0.0;
                 }
             }
 
-            return $toApply;
+            // Return what was ACTUALLY moved (≤ the caps), not the pre-loop target.
+            return $applied;
         });
     }
 

@@ -91,6 +91,28 @@ class RefundTest extends TestCase
         $this->assertSame(30.0, round((float) $row->outstanding_balance, 2));
     }
 
+    public function test_cash_term_invoice_has_no_real_paid_so_no_phantom_refund(): void
+    {
+        // A cash-term invoice (due_days 0) is settled-at-issue: paid=owed
+        // synthetically, but there are NO real payment rows. The cockpit's
+        // paidSoFar() must read the rows (→ 0), so a refund is never offered
+        // and no phantom receivable can be created.
+        $cash = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΑΠΥ1', 'code' => 1,
+            'invoice_type_id' => $this->typeId, 'customer_id' => $this->customer->id, 'issued_at' => now(),
+            'local_status' => 'active', 'payment_method_id' => $cash->id,
+        ]);
+        $inv->forceFill(['net_total' => 100, 'gross_total' => 100])->save();
+
+        // synthetic paid = owed = 100 …
+        $this->assertSame(100.0, (float) app(InvoiceBalance::class)->for($inv)->paid);
+        // … but no real payment rows behind it.
+        $realPaid = (float) Payment::where('invoice_id', $inv->id)
+            ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS n')->value('n');
+        $this->assertSame(0.0, $realPaid, 'no real payments → refund action hidden, no phantom receivable');
+    }
+
     public function test_refund_appears_as_debit_in_customer_ledger(): void
     {
         $inv = $this->invoice(100);
