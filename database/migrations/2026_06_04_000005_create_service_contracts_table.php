@@ -30,6 +30,12 @@ return new class extends Migration
             $t->foreignId('customer_id')->constrained()->restrictOnDelete();
             $t->foreignId('product_id')->nullable()->constrained()->nullOnDelete();
             $t->foreignId('invoice_type_id')->nullable()->constrained()->nullOnDelete();
+            // Payment method stamped onto each staged renewal draft. CRITICAL:
+            // a credit-term method (due_days>0, e.g. bank deposit) makes the
+            // renewal a real receivable that can go overdue → dunning works;
+            // leaving it null would make every renewal cash-term «settled at
+            // issue». Falls back to the invoice type's default when null.
+            $t->foreignId('payment_method_id')->nullable()->constrained()->nullOnDelete();
             $t->foreignId('server_id')->nullable()->constrained()->nullOnDelete();
 
             $t->string('description', 255)->nullable();

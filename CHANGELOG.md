@@ -31,6 +31,22 @@ they merge.
   (provenance). **Μηδέν money impact** — isolation test ότι contracts/servers δεν
   αγγίζουν `InvoiceScope`/receivables. UI + staging σε επόμενα PR (B/C).
   **Deploy:** `php artisan migrate`.
+- **Υπηρεσίες/Συμβόλαια (recurring) — UI + lifecycle (PR-B).** `StageServiceRenewal`
+  action: για ένα due `ServiceContract`, σε ΕΝΑ `DB::transaction` (mirror του
+  `IssueCreditNote`/`createDraft`) δεσμεύει ΑΑ με `InvoiceNumberer` υπό lock,
+  φτιάχνει **πρόχειρο** παραστατικό (`service_contract_id`, customer snapshot, μία
+  γραμμή από contract.amount=net + vat_percent) → `RecomputeInvoiceTotals`,
+  προωθεί `next_due_date` (`BillingCycle::advance`) + `last_invoiced_at` εντός
+  transaction· **καμία υποβολή AADE/email** (ο χειριστής εκδίδει από το lifecycle).
+  Idempotent ανά περίοδο (cursor + open-draft guard)· LOUD throw χωρίς
+  `invoice_type_id`. Νέο top-level resource **«Υπηρεσίες»** (list/create/edit/view
+  + nav-badge των ενεργών που λήγουν ≤7 ημέρες, φίλτρα status/cycle/«λήγει σε
+  30·60·90»)· lifecycle actions στο ViewServiceContract (Ενεργοποίηση/Αναστολή/
+  Επαναφορά/Ακύρωση/Τερματισμός/Επαναφορά + «Δημιουργία παραστατικού τώρα»), με
+  **cascade ακύρωσης των μη-εκδομένων πρόχειρων ανανεώσεων** (draft + χωρίς ΜΑΡΚ·
+  τα νομικά/MARK'd μένουν άθικτα). Product form: collapsible «Συνδρομή / Recurring»
+  (is_recurring toggle, provisioning_module, default suspend/terminate days,
+  `billingPrices` price-matrix repeater).
 ### Changed
 - **Πληρωμές — money trail σε cash-term παραστατικά (model refinement).** Ένα
   μετρητοίς/άμεσο τιμολόγιο (`due_days=0`) θεωρείται «εξοφλημένο στην έκδοση»

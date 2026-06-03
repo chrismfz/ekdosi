@@ -34,6 +34,7 @@ class ServiceContract extends Model
         'customer_id',
         'product_id',
         'invoice_type_id',
+        'payment_method_id',
         'server_id',
         'description',
         'billing_cycle',
@@ -93,6 +94,11 @@ class ServiceContract extends Model
     public function invoiceType(): BelongsTo
     {
         return $this->belongsTo(InvoiceType::class);
+    }
+
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class);
     }
 
     public function server(): BelongsTo

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Products\Schemas;
 
+use App\Enums\BillingCycle;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\MetricUnit;
 use App\Models\ProductCategory;
@@ -10,6 +11,7 @@ use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -233,6 +235,73 @@ class ProductForm
                                     ->label('Date inserted')
                                     ->helperText('Catalogue entry date. Defaults to today on create.')
                                     ->default(today()),
+                            ])
+                            ->columns(2),
+
+                        Tab::make('Συνδρομή / Recurring')
+                            ->schema([
+                                Toggle::make('is_recurring')
+                                    ->label('Επαναλαμβανόμενη χρέωση (συνδρομή)')
+                                    ->default(false)
+                                    ->live()
+                                    ->columnSpanFull()
+                                    ->helperText('Ενεργοποίησέ το για υπηρεσίες που χρεώνονται περιοδικά (hosting, domains, άδειες). Εμφανίζει τον πίνακα τιμών ανά κύκλο + τις επιλογές παροχής.'),
+
+                                Select::make('provisioning_module')
+                                    ->label('Module παροχής')
+                                    ->options([
+                                        'none' => 'Κανένα (χειροκίνητα)',
+                                        'custom' => 'Custom',
+                                    ])
+                                    ->default('none')
+                                    ->visible(fn (Get $get) => (bool) $get('is_recurring'))
+                                    ->helperText('Μελλοντικό automation hook (cPanel/mailcow/άδειες). «Κανένα» = χειροκίνητη παροχή.'),
+
+                                TextInput::make('default_suspend_after_days')
+                                    ->label('Προεπιλογή αναστολής μετά (ημέρες)')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->visible(fn (Get $get) => (bool) $get('is_recurring'))
+                                    ->helperText('Ημέρες ληξιπρόθεσμου πριν την αυτόματη αναστολή. Κενό = χωρίς αυτόματη ενέργεια.'),
+
+                                TextInput::make('default_terminate_after_days')
+                                    ->label('Προεπιλογή τερματισμού μετά (ημέρες)')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->visible(fn (Get $get) => (bool) $get('is_recurring'))
+                                    ->helperText('Ημέρες ληξιπρόθεσμου πριν τον αυτόματο τερματισμό. Κενό = χωρίς αυτόματη ενέργεια.'),
+
+                                Repeater::make('billingPrices')
+                                    ->relationship('billingPrices')
+                                    ->label('Τιμές ανά κύκλο χρέωσης')
+                                    ->visible(fn (Get $get) => (bool) $get('is_recurring'))
+                                    ->columnSpanFull()
+                                    ->addActionLabel('+ Προσθήκη κύκλου')
+                                    ->schema([
+                                        Select::make('billing_cycle')
+                                            ->label('Κύκλος')
+                                            ->options(BillingCycle::options())
+                                            ->required(),
+                                        TextInput::make('setup_fee')
+                                            ->label('Τέλος εγκατάστασης')
+                                            ->numeric()
+                                            ->step('0.01')
+                                            ->minValue(0)
+                                            ->default(0)
+                                            ->prefix('€'),
+                                        TextInput::make('price')
+                                            ->label('Τιμή (καθαρή)')
+                                            ->numeric()
+                                            ->step('0.01')
+                                            ->minValue(0)
+                                            ->default(0)
+                                            ->prefix('€'),
+                                        Toggle::make('is_enabled')
+                                            ->label('Ενεργό')
+                                            ->default(true),
+                                    ])
+                                    ->columns(4)
+                                    ->helperText('Ένας κύκλος ανά γραμμή (Μηνιαία/Ετήσια…). Κατά τη δημιουργία συμβολαίου ο χειριστής επιλέγει έναν ενεργό κύκλο και η τιμή αντιγράφεται (στιγμιότυπο).'),
                             ])
                             ->columns(2),
 
