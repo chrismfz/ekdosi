@@ -9,6 +9,7 @@ use App\Filament\Resources\Invoices\Pages\CreateInvoice;
 use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Pages\ListInvoices;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
+use App\Filament\Resources\Invoices\RelationManagers\InvoicePaymentsRelationManager;
 use App\Filament\Resources\Invoices\RelationManagers\LinesRelationManager;
 use App\Filament\Resources\Invoices\RelationManagers\MailLogRelationManager;
 use App\Filament\Resources\Invoices\RelationManagers\MyDataMarksRelationManager;
@@ -119,6 +120,7 @@ class InvoiceResource extends Resource
     {
         return [
             LinesRelationManager::class,
+            InvoicePaymentsRelationManager::class,
             MyDataMarksRelationManager::class,
             InternalNotesRelationManager::class,
             AttachmentsRelationManager::class,

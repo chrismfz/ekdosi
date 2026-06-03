@@ -17,6 +17,14 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Πληρωμές — cockpit ανά τιμολόγιο (Φ1).** Νέο tab «Πληρωμές» στο invoice View
+  (`InvoicePaymentsRelationManager`): λίστα πληρωμών + **Προσθήκη/Επεξεργασία/
+  Διαγραφή**, quick **«Πλήρης εξόφληση»** (προ-συμπληρώνει το υπόλοιπο) + **«Μερική
+  πληρωμή»** (warning σε υπερπληρωμή) + **«Σήμανση ως ανεξόφλητο»** (διαγράφει όλες
+  τις πληρωμές → υπόλοιπο στο πλήρες — διορθώνει phantom πληρωμές π.χ. από import,
+  όπως το ΤΙΜ385). Το money cache επανυπολογίζεται μόνο του (PaymentObserver). Μηδέν
+  αλλαγή στο `InvoiceBalance`. Φ2 (έμβασμα σε πολλά τιμολόγια/on-account) ξεχωριστά.
+  `InvoicePaymentsCockpitTest` (partial / overpaid / mark-unpaid).
 - **Αποθήκη — αναστροφές ακύρωσης/πιστωτικού (S3).** Κλείνει ο κύκλος: όταν ένα
   τιμολόγιο **ακυρώνεται** (τοπικά ή myDATA CANCELLED → `local_status='cancelled'`)
   το stock-OUT της πώλησης **αναστρέφεται** (+ποσότητα πίσω, reason `cancel`,
