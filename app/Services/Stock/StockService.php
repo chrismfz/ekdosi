@@ -7,6 +7,7 @@ use App\Models\DeliveryNoteLine;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\Product;
+use App\Models\ReturnInvoiceExtra;
 use App\Models\StockMovement;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
@@ -149,6 +150,18 @@ class StockService
      * REASON_CANCEL); idempotent (won't reverse twice). If the linked δελτίο
      * moved the product instead, this invoice's line has no sale movement → not
      * reversed here (a δελτίο-cancel reversal is a follow-up).
+     *
+     * CRITICAL: reverse only the UN-RETURNED remainder (`qty − qty_returned`). If
+     * a credit note already returned some/all of the line (return-IN recorded +
+     * `return_invoice_extras.qty_returned` set), reversing the full qty on top
+     * would double-count and silently inflate stock (the cancel can come via the
+     * unguarded myDATA path even when a credit note exists). A line already fully
+     * returned reverses nothing.
+     *
+     * KNOWN edge (rare, documented): cancelling the CREDIT NOTE itself does not
+     * void its return movement (qty_returned is a running total IssueCreditNote
+     * never decrements) — a cancel-the-credit-note-then-cancel-the-invoice
+     * sequence can leave stock off; correct manually if it ever happens.
      */
     public function reverseSaleForInvoice(Invoice $invoice): void
     {
@@ -167,7 +180,16 @@ class StockService
             if ($this->lineHasMovement(InvoiceLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
                 continue; // already reversed
             }
-            $this->record($product, (float) $line->qty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης');
+
+            $returned = (float) (ReturnInvoiceExtra::query()
+                ->where('invoice_line_id', $line->getKey())
+                ->value('qty_returned') ?? 0);
+            $reverseQty = (float) $line->qty - $returned;
+            if ($reverseQty <= 0) {
+                continue; // already fully returned via credit note(s) — nothing left to reverse
+            }
+
+            $this->record($product, $reverseQty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης');
         }
     }
 

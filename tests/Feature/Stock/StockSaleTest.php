@@ -11,6 +11,7 @@ use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ReturnInvoiceExtra;
 use App\Models\StockMovement;
 use App\Models\VatCategory;
 use App\Services\Stock\StockService;
@@ -160,6 +161,44 @@ class StockSaleTest extends TestCase
         app(StockService::class)->recordSaleForDeliveryNote($note);
 
         $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh())); // still −3, not −6
+    }
+
+    public function test_full_credit_then_cancel_does_not_double_return(): void
+    {
+        // THE blocker repro: sell 3, fully credit (return +3), then cancel the
+        // invoice — must NOT add another +3 (would inflate 10→13).
+        $inv = $this->draftInvoice();
+        $line = $this->line($inv, $this->tracked, 3);
+        $inv->update(['local_status' => 'active']);                 // sale −3 → 7
+
+        ReturnInvoiceExtra::create([
+            'company_id' => $this->tenant->id,
+            'invoice_line_id' => $line->id,
+            'qty_returned' => 3,                                     // fully credited
+        ]);
+        app(StockService::class)->record($this->tracked, 3, StockMovement::REASON_RETURN); // return +3 → 10
+
+        $inv->update(['local_status' => 'cancelled']);              // remainder 3−3=0 → no reverse
+
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+    }
+
+    public function test_partial_credit_then_cancel_reverses_only_remainder(): void
+    {
+        $inv = $this->draftInvoice();
+        $line = $this->line($inv, $this->tracked, 3);
+        $inv->update(['local_status' => 'active']);                 // sale −3 → 7
+
+        ReturnInvoiceExtra::create([
+            'company_id' => $this->tenant->id,
+            'invoice_line_id' => $line->id,
+            'qty_returned' => 2,                                     // 2 of 3 credited
+        ]);
+        app(StockService::class)->record($this->tracked, 2, StockMovement::REASON_RETURN); // return +2 → 9
+
+        $inv->update(['local_status' => 'cancelled']);              // remainder 3−2=1 → +1 → 10
+
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
     }
 
     private function makeNote(int $movePurpose, float $qty, ?int $invoiceId = null): DeliveryNote
