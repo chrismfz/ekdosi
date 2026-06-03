@@ -4,26 +4,14 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use Illuminate\Foundation\Auth\User as AuthUser;
 use App\Models\Invoice;
 use Illuminate\Auth\Access\HandlesAuthorization;
-use Illuminate\Foundation\Auth\User as AuthUser;
 
-/**
- * Policy generated from the CustomerPolicy template — Shield's seeder
- * couldn't run against the dev sandbox (MariaDB not running locally),
- * but the policy file must exist on disk so the Resource's authorize()
- * checks resolve. Permission rows are inserted at install time by the
- * seeder's shield:generate hook.
- *
- * NOTE: the InvoiceResource is READ-ONLY at this stage. Update / Create /
- * Delete abilities are declared here for forward compatibility (PR #7
- * MyDataSubmitter and PR #8 IssueInvoice will need them) but the UI
- * doesn't expose those actions yet.
- */
 class InvoicePolicy
 {
     use HandlesAuthorization;
-
+    
     public function viewAny(AuthUser $authUser): bool
     {
         return $authUser->can('ViewAny:Invoice');
@@ -83,4 +71,5 @@ class InvoicePolicy
     {
         return $authUser->can('Reorder:Invoice');
     }
+
 }
