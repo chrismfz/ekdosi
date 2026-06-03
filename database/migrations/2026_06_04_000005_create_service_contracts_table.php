@@ -50,6 +50,12 @@ return new class extends Migration
             $t->date('next_due_date')->nullable();
             $t->date('end_date')->nullable();
             $t->dateTime('last_invoiced_at')->nullable();
+            // The renewal invoice that last advanced next_due_date. The cursor
+            // advances ON ISSUE (draft→active) of a contract-linked invoice, NOT
+            // at stage time — so an un-billed/un-paid renewal keeps next_due in
+            // the past (the dunning signal). This guard makes the advance fire
+            // exactly once per invoice (re-finalize is idempotent).
+            $t->foreignId('last_renewal_invoice_id')->nullable()->constrained('invoices')->nullOnDelete();
             $t->dateTime('suspended_at')->nullable();
             $t->dateTime('terminated_at')->nullable();
             $t->string('cancel_reason', 255)->nullable();

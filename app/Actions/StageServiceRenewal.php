@@ -141,18 +141,28 @@ class StageServiceRenewal
                     ?: ('Ανανέωση συνδρομής'),
             ]);
 
+            // Setup fee — ONLY on the very first invoice of the contract (no
+            // renewal ever billed yet). One-time charge at activation, like the
+            // WHMCS «First Payment» that includes setup; subsequent renewals
+            // never carry it.
+            if ((float) $contract->setup_fee > 0 && $contract->last_invoiced_at === null) {
+                InvoiceLine::create([
+                    'company_id' => $contract->company_id,
+                    'invoice_id' => $invoice->id,
+                    'qty' => 1,
+                    'price_per_item' => $contract->setup_fee,
+                    'discount' => 0,
+                    'vat_percent' => $contract->vat_percent,
+                    'product_descr' => 'Τέλος εγκατάστασης',
+                ]);
+            }
+
             app(RecomputeInvoiceTotals::class)($invoice);
 
-            // Advance the billing cursor + stamp the last-billed time INSIDE
-            // the transaction so a rollback un-advances. advance() is null
-            // for One-Time cycles — those don't recur, so we null the cursor
-            // (a one-time contract bills exactly once).
-            $next = $contract->billing_cycle?->advance(Carbon::parse($contract->next_due_date));
-            $contract->forceFill([
-                'next_due_date' => $next?->toDateString(),
-                'last_invoiced_at' => now(),
-            ])->save();
-
+            // NOTE: next_due_date is NOT advanced here. The cursor advances ON
+            // ISSUE (draft→active) of this invoice — see InvoiceObserver — so an
+            // un-billed/un-paid renewal keeps next_due in the past (the dunning
+            // signal) and the open-draft guard above prevents a second draft.
             return $invoice->refresh();
         });
     }

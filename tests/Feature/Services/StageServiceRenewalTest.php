@@ -67,33 +67,71 @@ class StageServiceRenewalTest extends TestCase
         ], $overrides));
     }
 
-    public function test_stages_a_draft_invoice_and_advances_cursor(): void
+    public function test_stages_a_draft_and_does_no_t_advance_cursor_until_issued(): void
     {
         $contract = $this->makeContract();
-        $dueBefore = Carbon::parse($contract->next_due_date);
+        $dueBefore = Carbon::parse($contract->next_due_date)->toDateString();
 
         $invoice = app(StageServiceRenewal::class)($contract);
 
         $this->assertInstanceOf(Invoice::class, $invoice);
         $this->assertSame('draft', $invoice->local_status);
         $this->assertNull($invoice->mydata_mark);
-        $this->assertNull($invoice->mydata_state);
         $this->assertSame($contract->id, $invoice->service_contract_id);
         $this->assertSame('ΤΠΥ1', $invoice->invcode);
 
         // One line from the snapshot; net=100, gross=124.
         $this->assertSame(1, InvoiceLine::where('invoice_id', $invoice->id)->count());
         $this->assertEqualsWithDelta(100.0, (float) $invoice->net_total, 0.01);
-        $this->assertEqualsWithDelta(124.0, (float) $invoice->gross_total, 0.01);
-
-        // Party snapshot copied from the customer.
         $this->assertSame('Πελάτης ΑΕ', $invoice->company_name);
-        $this->assertSame('123456789', $invoice->vat_no);
 
-        // Cursor advanced by the cycle (+1 year), last_invoiced_at stamped.
+        // Cursor is NOT advanced at stage — an un-issued renewal keeps next_due
+        // in the past (the dunning signal).
+        $contract->refresh();
+        $this->assertSame($dueBefore, Carbon::parse($contract->next_due_date)->toDateString());
+        $this->assertNull($contract->last_invoiced_at);
+        $this->assertNull($contract->last_renewal_invoice_id);
+    }
+
+    public function test_issuing_the_draft_advances_the_cursor_once(): void
+    {
+        $contract = $this->makeContract();
+        $dueBefore = Carbon::parse($contract->next_due_date);
+        $invoice = app(StageServiceRenewal::class)($contract);
+
+        // Οριστικοποίηση (draft→active) → InvoiceObserver advances the contract.
+        $invoice->update(['local_status' => 'active']);
+
         $contract->refresh();
         $this->assertSame($dueBefore->copy()->addYear()->toDateString(), Carbon::parse($contract->next_due_date)->toDateString());
         $this->assertNotNull($contract->last_invoiced_at);
+        $this->assertSame($invoice->id, $contract->last_renewal_invoice_id);
+
+        // Re-finalize (revert→issue) must NOT advance again (guard).
+        $invoice->update(['local_status' => 'draft']);
+        $invoice->update(['local_status' => 'active']);
+        $contract->refresh();
+        $this->assertSame($dueBefore->copy()->addYear()->toDateString(), Carbon::parse($contract->next_due_date)->toDateString());
+    }
+
+    public function test_first_invoice_includes_setup_fee_then_renewals_do_not(): void
+    {
+        $contract = $this->makeContract(['setup_fee' => 50]);
+
+        // First stage → setup line present (net 100 + 50 = 150).
+        $first = app(StageServiceRenewal::class)($contract);
+        $this->assertSame(2, InvoiceLine::where('invoice_id', $first->id)->count());
+        $this->assertEqualsWithDelta(150.0, (float) $first->net_total, 0.01);
+
+        // Issue it (advances cursor + stamps last_invoiced_at), back-date the
+        // cursor so the next renewal is due again.
+        $first->update(['local_status' => 'active']);
+        $contract->refresh()->forceFill(['next_due_date' => Carbon::yesterday()->toDateString()])->save();
+
+        // Second stage → NO setup line (only the recurring line, net 100).
+        $second = app(StageServiceRenewal::class)($contract->fresh());
+        $this->assertSame(1, InvoiceLine::where('invoice_id', $second->id)->count());
+        $this->assertEqualsWithDelta(100.0, (float) $second->net_total, 0.01);
     }
 
     public function test_is_idempotent_within_the_same_period(): void

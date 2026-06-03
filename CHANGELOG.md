@@ -35,9 +35,13 @@ they merge.
   action: για ένα due `ServiceContract`, σε ΕΝΑ `DB::transaction` (mirror του
   `IssueCreditNote`/`createDraft`) δεσμεύει ΑΑ με `InvoiceNumberer` υπό lock,
   φτιάχνει **πρόχειρο** παραστατικό (`service_contract_id`, customer snapshot, μία
-  γραμμή από contract.amount=net + vat_percent) → `RecomputeInvoiceTotals`,
-  προωθεί `next_due_date` (`BillingCycle::advance`) + `last_invoiced_at` εντός
-  transaction· **καμία υποβολή AADE/email** (ο χειριστής εκδίδει από το lifecycle).
+  γραμμή από contract.amount=net + vat_percent· **+ γραμμή «Τέλος εγκατάστασης»**
+  μόνο στο ΠΡΩΤΟ τιμολόγιο όταν `setup_fee>0`) → `RecomputeInvoiceTotals`·
+  **καμία υποβολή AADE/email** (ο χειριστής εκδίδει από το lifecycle). **Το
+  `next_due_date` προωθείται στην ΕΚΔΟΣΗ** (draft→active, `InvoiceObserver`, μία
+  φορά ανά τιμολόγιο μέσω `last_renewal_invoice_id`) — ΟΧΙ στο stage· έτσι μια
+  μη-εκδομένη/απλήρωτη ανανέωση κρατά το `next_due_date` στο παρελθόν (το σήμα του
+  dunning) και το open-draft guard κρατά ένα μόνο draft (κανένα pile-up).
   Idempotent ανά περίοδο (cursor + open-draft guard)· LOUD throw χωρίς
   `invoice_type_id`. Νέο top-level resource **«Υπηρεσίες»** (list/create/edit/view
   + nav-badge των ενεργών που λήγουν ≤7 ημέρες, φίλτρα status/cycle/«λήγει σε

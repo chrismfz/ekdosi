@@ -47,6 +47,7 @@ class ServiceContract extends Model
         'next_due_date',
         'end_date',
         'last_invoiced_at',
+        'last_renewal_invoice_id',
         'suspended_at',
         'terminated_at',
         'cancel_reason',
