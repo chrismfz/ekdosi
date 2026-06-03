@@ -139,6 +139,16 @@ class Customer extends Model
     }
 
     /**
+     * Recurring service contracts (Υπηρεσίες / WHMCS «Services») for this
+     * customer. Each stages a draft renewal invoice when it comes due. Surfaced
+     * as a read-mostly tab on the customer view.
+     */
+    public function serviceContracts(): HasMany
+    {
+        return $this->hasMany(ServiceContract::class);
+    }
+
+    /**
      * Named people behind this customer (λογιστήριο, τεχνικός, υπεύθυνος…).
      * Primary first, then by operator sort order, then name.
      */

@@ -28,6 +28,7 @@
 | Reconciliation | Καμία | Τοπικό + ζωντανό (πωλήσεις & έξοδα), ομαδοποίηση αδέσποτων | 🆕 |
 | Έξοδα/Ε3 | Καμία | Προμηθευτές, RequestDocs, classification, ΦΠΑ, Ε3 | 🆕 |
 | Προσφορές (quotes) | Καμία | Μη-νομικό sales offer σε ξεχωριστούς πίνακες + μετατροπή σε παραστατικό | 🆕 |
+| Υπηρεσίες/Συνδρομές (recurring) | Καμία | WHMCS-style: κατάλογος + price matrix + per-customer συμβόλαια· staged draft ανανεώσεων (operator-gated)· dunning (auto suspend/terminate, per-product OFF)· MRR/upcoming· provisioning seam | 🆕 |
 | Πληρωμές/Είσπραξη | Μόνο σε επίπεδο πελάτη, χωρίς σύνδεση με τιμολόγιο | Πλήρης AR: cockpit ανά τιμολόγιο, έμβασμα FIFO, χρήση πίστωσης, χειροκίνητη κατανομή, **επιστροφές**, τραπεζικοί λογ/σμοί, ληξιπρόθεσμα | 🆕 |
 | Έλεγχος ΑΦΜ/ΦΠΑ | Μόνο GR (afm2name) | GR→GSIS native + **EU→VIES** (επαλήθευση/άντληση) + reverse-charge hint | 🆕 |
 | Πολλές χώρες | Όχι (μόνο ΕΛ) | Multi-country από την αρχή (ΕΛ myDATA + ΕΕ PEPPOL stub) | 🆕 |
@@ -208,8 +209,31 @@ paid/credited/balance/status (cache στήλες γράφονται μόνο α�
   παραστατικό** (αμφίδρομο ιστορικό quote↔invoice, χωρίς στήλη στον νόμιμο πίνακα).
 - Δικός counter `ΠΡ-{n}` (`companies.quote_counter`) — **ποτέ** το νόμιμο ΑΑ.
 - **PDF** (fork του invoice renderer, χωρίς QR/MARK) + **email** + **send-log** (queue job).
-- Παρακολούθηση: «ισχύει έως» (λήξη προσφοράς) + «λήξη υπηρεσίας» (χειροκίνητη
-  παρακολούθηση ανανέωσης μέχρι να μπει το recurring engine). **Independent-reviewed.**
+- Παρακολούθηση: «ισχύει έως» (λήξη προσφοράς). **Independent-reviewed.**
+
+---
+
+## 9.6 Υπηρεσίες / Συμβόλαια — recurring (🆕 — δεν υπήρχε)
+WHMCS-style subscriptions, σωστά προσαρμοσμένα στο ελληνικό per-invoice myDATA:
+- **Διαχωρισμός κατάλογος vs instance** (το universal subscription pattern): το
+  `products` γίνεται κατάλογος με **per-cycle price matrix** (`product_billing_prices`),
+  και ο νέος `service_contracts` είναι η **per-customer συνδρομή** (snapshot
+  amount/cycle/vat, status, next_due, quantity, domain, server).
+- **Ανανέωση = staged DRAFT** (προτιμολόγιο), **ποτέ auto-AADE** — ο χειριστής το
+  εκδίδει από το κανονικό lifecycle. Ο cursor `next_due_date` προχωράει **στην
+  έκδοση** (όχι στο stage), οπότε μια απλήρωτη ανανέωση μένει «σε εκκρεμότητα» (το
+  σήμα του dunning). Setup fee στο πρώτο τιμολόγιο. **Μηδέν money-path leak**
+  (τα χρήματα ρέουν μόνο μέσω των invoices/InvoiceBalance).
+- **Dunning** (auto suspend/terminate + unsuspend-on-payment) — **opt-in ανά
+  προϊόν** (`dunning_enabled` default OFF = η ασφάλεια), days ανά προϊόν/συμβόλαιο
+  (terminate κενό = μόνο suspend), σήμα από `Invoice::isOverdue`. Guard ώστε να μη
+  χτυπά πελάτη με on-account πίστωση ή χειροκίνητη αναστολή.
+- **Native, WHMCS-independent provisioning seam**: `servers`/`server_groups`
+  (encrypted creds) + `ProvisioningModule` interface + Null module (πραγματικά
+  cPanel/Mailcow/license modules = επόμενη φάση, χωρίς migration).
+- **Visibility**: dashboard MRR + upcoming renewals· per-customer tab «Υπηρεσίες»·
+  activity-log («ποιος/πότε» suspend/terminate). **4 reviews (money-path + design +
+  dunning), όλα clean.**
 
 ---
 
@@ -242,7 +266,7 @@ paid/credited/balance/status (cache στήλες γράφονται μόνο α�
 
 ## 12. Σε εξέλιξη / planned (🚧)
 - ~~**Έξοδα / Προμηθευτές + ΦΠΑ εισροών–εκροών + Ε3**~~ ✅ **DONE** (E0–E7 + self-declared import + per-line E3)· βλ. `docs/expenses-phase-plan.md`.
-- ~~**Προσφορές / Quotes**~~ ✅ **DONE** (βλ. §9.5)· **Υπηρεσίες/Συμβόλαια (recurring)** σχεδιασμένο, όχι υλοποιημένο.
+- ~~**Προσφορές / Quotes**~~ ✅ **DONE** (βλ. §9.5)· ~~**Υπηρεσίες/Συμβόλαια (recurring)**~~ ✅ **DONE** (βλ. §9.6 — κατάλογος/price-matrix/συμβόλαια/staged renewals/**dunning**/provisioning seam)· επόμενο: πραγματικά provisioning modules (cPanel/Mailcow) + live server APIs.
 - **Διορθώσεις myDATA filing**: ✅ G1 παρακράτηση, ✅ G4 0%/απαλλαγή· 🚧 G3
   tax-inclusive WHMCS, G9 τρόπος πληρωμής→myDATA, G5 ποσότητα για αγαθά,
   G7 gross-edit, G6 auto-email στο non-myDATA path.

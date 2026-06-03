@@ -3,8 +3,10 @@
 namespace App\Observers;
 
 use App\Models\Invoice;
+use App\Models\ServiceContract;
 use App\Services\InvoiceBalance;
 use App\Services\Stock\StockService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -29,6 +31,57 @@ class InvoiceObserver
     {
         $this->recomputeOriginal($invoice);
         $this->applyStockSaleIfActivated($invoice);
+        $this->advanceServiceContractOnIssue($invoice);
+    }
+
+    /**
+     * Recurring services: the billing cursor advances when a contract's renewal
+     * is ISSUED (draft→active) — NOT when StageServiceRenewal merely staged the
+     * draft. So an un-billed/un-paid renewal keeps next_due_date in the past (the
+     * dunning signal), and only an actually-issued renewal moves the clock. The
+     * `last_renewal_invoice_id` guard makes this fire exactly once per invoice
+     * (re-finalize / repeated saves are no-ops). Best-effort: the status change
+     * already persisted, so a hiccup here must never look like a failed issue.
+     */
+    private function advanceServiceContractOnIssue(Invoice $invoice): void
+    {
+        if (! $invoice->wasChanged('local_status') || $invoice->local_status !== 'active') {
+            return;
+        }
+        if ($invoice->service_contract_id === null) {
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($invoice) {
+                $contract = ServiceContract::query()
+                    ->whereKey($invoice->service_contract_id)
+                    ->lockForUpdate()
+                    ->first();
+                if ($contract === null
+                    || (int) $contract->last_renewal_invoice_id === (int) $invoice->id) {
+                    return; // gone, or already advanced by this invoice
+                }
+
+                // Advance one cycle from the current cursor (the billed period).
+                // One-Time → advance() is null → cursor nulled (bills once).
+                $next = $contract->next_due_date
+                    ? $contract->billing_cycle?->advance(Carbon::parse($contract->next_due_date))
+                    : null;
+
+                $contract->forceFill([
+                    'next_due_date' => $next?->toDateString(),
+                    'last_invoiced_at' => now(),
+                    'last_renewal_invoice_id' => $invoice->id,
+                ])->save();
+            });
+        } catch (Throwable $e) {
+            Log::warning('Advancing service contract on renewal issue failed (the issue succeeded)', [
+                'invoice_id' => $invoice->id,
+                'service_contract_id' => $invoice->service_contract_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
