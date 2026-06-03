@@ -37,11 +37,24 @@ class ServiceContractsTable
                     ->badge()
                     ->formatStateUsing(fn (BillingCycle $state) => $state->label()),
 
+                TextColumn::make('quantity')
+                    ->label('Ποσότητα')
+                    ->numeric(decimalPlaces: 3)
+                    ->alignRight()
+                    ->toggleable(),
+
                 TextColumn::make('amount')
                     ->label('Ποσό')
                     ->money('EUR')
                     ->alignRight()
                     ->sortable(),
+
+                TextColumn::make('line_total')
+                    ->label('Σύνολο')
+                    ->money('EUR')
+                    ->alignRight()
+                    ->state(fn ($record) => round((float) $record->amount * (float) ($record->quantity ?: 1), 2))
+                    ->toggleable(),
 
                 TextColumn::make('status')
                     ->label('Κατάσταση')

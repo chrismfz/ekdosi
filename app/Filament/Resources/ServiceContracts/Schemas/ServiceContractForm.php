@@ -131,6 +131,15 @@ class ServiceContractForm
                         ->options(ServiceContractStatus::options())
                         ->default(ServiceContractStatus::Pending->value),
 
+                    TextInput::make('quantity')
+                        ->label('Ποσότητα')
+                        ->numeric()
+                        ->step('0.001')
+                        ->minValue(0.001)
+                        ->default(1)
+                        ->required()
+                        ->helperText('Μονάδες της επαναλαμβανόμενης χρέωσης (συνήθως 1).'),
+
                     TextInput::make('amount')
                         ->label('Ποσό (καθαρό, ανά κύκλο)')
                         ->numeric()

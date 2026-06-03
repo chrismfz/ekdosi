@@ -47,6 +47,23 @@ they merge.
   τα νομικά/MARK'd μένουν άθικτα). Product form: collapsible «Συνδρομή / Recurring»
   (is_recurring toggle, provisioning_module, default suspend/terminate days,
   `billingPrices` price-matrix repeater).
+- **Υπηρεσίες/Συμβόλαια (recurring) — automation + visibility (PR-C).** Νέα
+  εντολή **`services:stage-renewals`** (`--tenant`/`--dry-run`/`--lead-days=N`):
+  per-tenant σάρωση που σταδιάζει **πρόχειρα** παραστατικά ανανέωσης για due
+  συμβόλαια (`scopeDue`) μέσω `StageServiceRenewal` — ποτέ AADE, operator-gated
+  downstream. Tenant-safe (explicit `company_id`, όχι BelongsToTenant στη CLI),
+  per-contract try/catch (ένα κακό συμβόλαιο δεν σταματά το batch), συμβόλαια
+  χωρίς `invoice_type_id` μετριούνται «skipped (no type)» αντί να ρίχνουν.
+  Scheduler block (`routes/console.php`) + flags `config/ekdosi.php`
+  (`service_renewals_enabled` **DEFAULT OFF** — φτιάχνει πραγματικά πρόχειρα·
+  `_time`/`_lead_days`) + `.env.example`. **Dashboard:** `ServiceContractStats`
+  (StatsOverview — ενεργές/σε αναστολή/ανανεώσεις 30 ημερών/**MRR** μηνιαίο
+  επαναλαμβανόμενο έσοδο) + `UpcomingRenewalsTable` (TableWidget — Active με
+  next_due εντός 30 ημερών, link στο ViewServiceContract). MRR sum σε testable
+  `App\Services\ServiceContractInsights`. **Per-customer:** νέος
+  `ServiceContractsRelationManager` (tab «Υπηρεσίες» στον πελάτη, read-mostly +
+  «Άνοιγμα») + `Customer::serviceContracts()`. Form: πεδίο `quantity` (default 1,
+  min 0.001) + στήλες ποσότητα/«Σύνολο» (qty×amount) στον πίνακα.
 ### Changed
 - **Πληρωμές — money trail σε cash-term παραστατικά (model refinement).** Ένα
   μετρητοίς/άμεσο τιμολόγιο (`due_days=0`) θεωρείται «εξοφλημένο στην έκδοση»

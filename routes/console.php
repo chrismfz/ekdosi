@@ -103,3 +103,17 @@ if (config('ekdosi.schedule.overdue_notifications_enabled')) {
         ->name('invoices-notify-overdue')
         ->withoutOverlapping();
 }
+
+// services:stage-renewals — stage DRAFT renewal invoices for due service
+// contracts, once per tenant (the command loops tenants itself). Default OFF:
+// it creates real draft documents. Operator-gated downstream — drafts NEVER
+// auto-file at AADE; they flow through the normal invoice lifecycle. lead_days
+// stages contracts due within the next N days (early billing, default 0).
+if (config('ekdosi.schedule.service_renewals_enabled')) {
+    Schedule::command('services:stage-renewals', [
+        '--lead-days' => config('ekdosi.schedule.service_renewals_lead_days', 0),
+    ])
+        ->dailyAt(config('ekdosi.schedule.service_renewals_time', '07:00'))
+        ->name('service-renewals')
+        ->withoutOverlapping();
+}

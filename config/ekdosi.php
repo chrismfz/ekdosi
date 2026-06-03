@@ -71,6 +71,16 @@ return [
         'overdue_notifications_enabled' => env('EKDOSI_SCHEDULE_OVERDUE_NOTIFICATIONS', false),
         'overdue_notifications_time' => env('EKDOSI_OVERDUE_NOTIFICATIONS_TIME', '07:30'),
 
+        // services:stage-renewals — stage DRAFT renewal invoices for due
+        // service contracts, per tenant. Default OFF: it creates real draft
+        // documents, so enable per deploy once the catalogue + contracts are
+        // set up. Operator-gated downstream (drafts never auto-file at AADE).
+        // lead_days>0 stages contracts due within the next N days (early
+        // billing). HH:MM (server time).
+        'service_renewals_enabled' => env('EKDOSI_SCHEDULE_SERVICE_RENEWALS', false),
+        'service_renewals_time' => env('EKDOSI_SERVICE_RENEWALS_TIME', '07:00'),
+        'service_renewals_lead_days' => (int) env('EKDOSI_SERVICE_RENEWALS_LEAD_DAYS', 0),
+
     ],
 
     /*
