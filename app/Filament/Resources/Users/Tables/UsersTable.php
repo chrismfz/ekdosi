@@ -10,6 +10,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Hash;
@@ -35,6 +36,15 @@ class UsersTable
                     ->counts('companies')
                     ->alignRight()
                     ->numeric(),
+                // A user in no company gets 403 at the panel door — surface the
+                // orphan here so an admin spots it before the user is locked out.
+                TextColumn::make('no_company')
+                    ->label('')
+                    ->state(fn ($record): ?string => ($record->companies_count ?? 0) === 0 ? 'χωρίς εταιρεία' : null)
+                    ->badge()
+                    ->color('danger')
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->placeholder(''),
                 TextColumn::make('roles_count')
                     ->label('Roles')
                     ->counts('roles')
@@ -55,6 +65,9 @@ class UsersTable
                 TernaryFilter::make('email_verified_at')
                     ->label('Verified')
                     ->nullable(),
+                Filter::make('no_company')
+                    ->label('Χωρίς εταιρεία (θα παίρνει 403)')
+                    ->query(fn ($query) => $query->whereDoesntHave('companies')),
             ])
             ->recordActions([
                 EditAction::make(),
