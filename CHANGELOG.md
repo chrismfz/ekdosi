@@ -16,6 +16,18 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Deploy safety net (ρίζα: ένα `migrate:fresh`/test έσβησε κατά λάθος την prod).**
+  Τρία επίπεδα ώστε να μην ξανασυμβεί: (1) `DB::prohibitDestructiveCommands()` στον
+  `AppServiceProvider` μπλοκάρει `db:wipe`/`migrate:fresh`/`migrate:refresh`
+  **παντού εκτός από το testing env** (δεμένο στο `environment('testing')`, ΟΧΙ
+  στο `isProduction()`, γιατί το prod ήταν κατά λάθος `APP_ENV=local` — το απλό
+  `migrate` δεν επηρεάζεται)· (2) `clean.sh` κάνει abort αν το backup είναι
+  ύποπτα μικρό/καταρρέει (άδειο dump = ψεύτικη ασφάλεια· πιάνει σπασμένη βάση ΠΡΙΝ
+  το migrate)· (3) `App\Support\Backup\MinimumBackupSizeInKilobytes` health-check
+  μαρκάρει ένα σχεδόν-άδειο backup ως unhealthy. `MinimumBackupSizeHealthCheckTest`.
+  **Προσοχή στο deploy host:** βάλε `APP_ENV=production` + `APP_DEBUG=false` στο
+  `.env` και τρέξε `php artisan config:clear && php artisan config:cache`.
 ### Changed
 - **Σαφήνεια «σημειώσεων» (εσωτερικές vs εκτυπώσιμες).** Το πεδίο `invoices.notes`
   (που ΕΚΤΥΠΩΝΕΤΑΙ στο PDF/email) ξαναβαφτίστηκε «Παρατηρήσεις (εκτυπώνονται στο
