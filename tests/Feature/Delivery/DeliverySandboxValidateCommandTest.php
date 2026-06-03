@@ -39,7 +39,9 @@ class DeliverySandboxValidateCommandTest extends TestCase
         $out = Artisan::output();
 
         $this->assertSame(0, $code);
-        $this->assertStringContainsString('<isDeliveryNote>true</isDeliveryNote>', $out);
+        // 9.x payload: no <isDeliveryNote> ([205]); the 9.3 type marks the δελτίο.
+        $this->assertStringNotContainsString('<isDeliveryNote>', $out);
+        $this->assertStringContainsString('<invoiceType>9.3</invoiceType>', $out);
         $this->assertStringContainsString('category3', $out);
         // A test δελτίο was created + numbered.
         $this->assertDatabaseHas('delivery_notes', ['company_id' => $tenant->id, 'invcode' => 'ΔΑΠ1']);

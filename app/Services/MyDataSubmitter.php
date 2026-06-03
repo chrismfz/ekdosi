@@ -345,9 +345,9 @@ class MyDataSubmitter implements EInvoiceSubmitter
      * Verify the tenant's credentials against AADE.
      *
      * @param  MyDataMode|null  $environment  Test a SPECIFIC environment's
-     *         credentials (sandbox / production) regardless of the tenant's
-     *         saved mode — lets the Company form offer a "Test" button per
-     *         credential set. Null = the tenant's current mode.
+     *                                        credentials (sandbox / production) regardless of the tenant's
+     *                                        saved mode — lets the Company form offer a "Test" button per
+     *                                        credential set. Null = the tenant's current mode.
      */
     public function testConnection(?MyDataMode $environment = null): bool
     {
@@ -868,6 +868,34 @@ class MyDataSubmitter implements EInvoiceSubmitter
         ]));
     }
 
+    /**
+     * Persist a forensic REJECTED audit row (request + response XML, no MARK)
+     * when AADE refuses a submission — so the operator sees WHAT was sent and
+     * WHY it was refused from the invoice's myDATA «Ιστορικό», instead of the
+     * round-trip vanishing on the throw. Mirrors recordDryRun's null-mark shape.
+     * Never let an audit-write failure mask the real rejection.
+     */
+    private function recordRejection(Invoice $invoice, string $requestXml, string $responseXml): void
+    {
+        try {
+            DB::transaction(fn () => MyDataMark::create([
+                'company_id' => $invoice->company_id,
+                'invoice_id' => $invoice->id,
+                'mark' => null,
+                'mydata_action' => 'REJECTED',
+                'request' => $requestXml,
+                'response' => $responseXml,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('myDATA: failed to persist REJECTED audit row', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     private function persistResponse(
         Invoice $invoice,
         AadeInvoice $payload,
@@ -884,7 +912,12 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         if ($firstResponse === null || $firstResponse->getStatusCode() !== 'Success') {
             $errors = $firstResponse ? $this->describeResponseErrors($firstResponse) : 'no response';
-            throw new RuntimeException("myDATA rejected the submission: {$errors}");
+            // Persist a forensic record + carry the XML on the throw, so a
+            // rejection isn't a dead-end — the round-trip is otherwise lost
+            // (no INSERT row is written on failure). Visible in the invoice's
+            // myDATA history; MyDataRejected is the in-band copy for callers.
+            $this->recordRejection($invoice, $xml, $responseXml);
+            throw new MyDataRejected("myDATA rejected the submission: {$errors}", $xml, $responseXml);
         }
 
         $mark = (string) $firstResponse->getInvoiceMark();

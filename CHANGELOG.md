@@ -16,6 +16,43 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Διακίνηση — «Ιστορικό myDATA» στο δελτίο.** Το `DeliveryNoteResource` απέκτησε
+  read-only relation manager (`DeliveryMarksRelationManager`) που δείχνει ΟΛΟΝ τον
+  audit trail του δελτίου — INSERT (έκδοση), REGISTER_TRANSFER (έναρξη),
+  CONFIRM_OUTCOME (παράδοση), CANCEL, **REJECTED** — με χρωματιστά badges + modals
+  request/response XML ανά γραμμή. Πριν δεν φαινόταν πουθενά στο UI ο κύκλος ζωής.
+### Fixed
+- **Διακίνηση (myDATA) — απορρίψεις ΑΑΔΕ φαίνονται στο UI.** Ο
+  `DeliveryNoteSubmitter` γράφει πλέον forensic `delivery_marks` row
+  (`mydata_action='REJECTED'`, null mark, με το response) σε απόρριψη, δίδυμο του
+  invoice `recordRejection` — ώστε η απόρριψη να φαίνεται στο «Ιστορικό myDATA»
+  του δελτίου (πριν surface-αρόταν μόνο στο CLI report του `sandbox-validate`).
+- **Παραστατικά (myDATA) — απορρίψεις ΑΑΔΕ δεν χάνονται πια.** Όταν η ΑΑΔΕ
+  απορρίπτει υποβολή τιμολογίου (status ≠ Success), ο `MyDataSubmitter` πετά
+  πλέον `MyDataRejected` που κουβαλά το request+response XML ΚΑΙ γράφει μια
+  forensic γραμμή `mydata_marks` (`mydata_action='REJECTED'`, χωρίς MARK) — ώστε
+  ο χειριστής να βλέπει ΤΙ στάλθηκε και ΓΙΑΤΙ απορρίφθηκε από το «Ιστορικό
+  myDATA» του παραστατικού, αντί να χάνεται το round-trip στο throw (πριν: bare
+  RuntimeException μόνο με το μήνυμα). Το `mydata:test-submit` τυπώνει το
+  request/response σε απόρριψη. Παράλληλο του `DeliveryNoteRejected` της
+  διακίνησης. (`MyDataRejected`, `MyDataSubmitter::recordRejection`.)
+- **Δελτίο Αποστολής / Ψηφιακή Διακίνηση (9.3) — sandbox-validated end-to-end
+  στο AADE dev (2026-06-03).** Το `DeliveryNoteSubmitter` payload διορθώθηκε με
+  βάση ζωντανές απορρίψεις: για τύπο 9.x η ΑΑΔΕ **απαγορεύει** `<isDeliveryNote>`,
+  `<currency>` και `<thirdPartyCollection>false>` ([205]/[214]) και **απαιτεί**
+  πλήρη ταυτοποίηση issuer + counterpart (name + address, [204]) — αντίθετα με
+  τον κανόνα μονόδρομου τιμολογίου που τα κρύβει για GR. Πλέον περνά καθαρά όλη η
+  αλυσίδα ΕΚΔΟΣΗ→ΕΝΑΡΞΗ→ΠΑΡΑΔΟΣΗ→ΕΛΕΓΧΟΣ (SendInvoices/RegisterTransfer/
+  ConfirmDeliveryOutcome/RequestDeliveryNoteStatus).
+- **`delivery_marks.mark_time` ήταν `timestamp` αντί `time`** (ο δίδυμος
+  `mydata_marks.mark_time` είναι `time`) — έσκαγε το persist του MARK με
+  «Incorrect datetime value '03:36:16'». Διορθώθηκε η migration + ALTER.
+- **Report writer**: σε απόρριψη AADE, ο `DeliveryNoteSubmitter` πετά πλέον
+  `DeliveryNoteRejected` που μεταφέρει request+response XML, ώστε το `.txt`
+  report των `delivery:sandbox-validate`/`delivery:test-submit` να τα καταγράφει
+  (πριν χάνονταν — η απόρριψη συμβαίνει πριν γραφτεί η `delivery_marks` row).
+
 ### Changed
 - **Σαφήνεια «σημειώσεων» (εσωτερικές vs εκτυπώσιμες).** Το πεδίο `invoices.notes`
   (που ΕΚΤΥΠΩΝΕΤΑΙ στο PDF/email) ξαναβαφτίστηκε «Παρατηρήσεις (εκτυπώνονται στο

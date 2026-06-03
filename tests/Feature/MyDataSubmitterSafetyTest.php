@@ -9,7 +9,10 @@ use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\VatCategory;
+use App\Services\MyDataRejected;
 use App\Services\MyDataSubmitter;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -645,6 +648,57 @@ class MyDataSubmitterSafetyTest extends TestCase
             $mark->request,
             'AADE forbids <correlatedInvoices> on a 5.2 non-correlated credit note',
         );
+    }
+
+    public function test_rejected_submission_throws_mydatarejected_and_records_forensic_row(): void
+    {
+        $invoice = $this->makeInvoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'qty' => 1,
+            'price_per_item' => 10,
+            'vat_percent' => 24,
+            'product_descr' => 'Δοκιμή',
+        ]);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->validationErrorXml())]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->submit($invoice->fresh('lines'));
+            $this->fail('expected MyDataRejected on a non-Success response');
+        } catch (MyDataRejected $e) {
+            $this->assertStringContainsString('myDATA rejected', $e->getMessage());
+            $this->assertStringContainsString('<invoiceType>', $e->requestXml);  // the request we sent
+            $this->assertStringContainsString('ValidationError', $e->responseXml); // the AADE refusal
+        }
+
+        // A forensic REJECTED row is persisted (visible in the invoice myDATA
+        // «Ιστορικό»), carrying the response so the operator sees WHY.
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'REJECTED',
+            'mark' => null,
+        ]);
+        $this->assertNull($invoice->fresh()->mydata_state, 'a rejected submission must NOT mark the invoice VALID');
+    }
+
+    private function validationErrorXml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <statusCode>ValidationError</statusCode>
+        <errors>
+            <error>
+                <message>Test validation error</message>
+                <code>205</code>
+            </error>
+        </errors>
+    </response>
+</ResponseDoc>
+XML;
     }
 
     private function makeInvoice(int $code = 1): Invoice

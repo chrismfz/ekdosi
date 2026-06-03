@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Concerns;
 
 use App\Models\DeliveryNote;
+use App\Services\Delivery\DeliveryNoteRejected;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -55,8 +56,32 @@ trait WritesDeliveryReport
             if ($prev = $e->getPrevious()) {
                 $this->kv('Αιτία', get_class($prev).' — '.$prev->getMessage());
             }
+            // A rejection happens BEFORE any delivery_marks row is persisted, so
+            // appendMarkXml() would find nothing. Capture the request/response
+            // XML straight off the exception chain instead.
+            $this->appendFailureXml($e);
 
             return false;
+        }
+    }
+
+    /** Walk the exception chain for a DeliveryNoteRejected and log its XML. */
+    private function appendFailureXml(Throwable $e): void
+    {
+        for ($cur = $e; $cur !== null; $cur = $cur->getPrevious()) {
+            if (! $cur instanceof DeliveryNoteRejected) {
+                continue;
+            }
+            if ($cur->requestXml !== '') {
+                $this->logLine('--- REQUEST (απορρίφθηκε) ---');
+                $this->logLine($cur->requestXml);
+            }
+            if ($cur->responseXml !== '') {
+                $this->logLine('--- RESPONSE (AADE) ---');
+                $this->logLine($cur->responseXml);
+            }
+
+            return;
         }
     }
 

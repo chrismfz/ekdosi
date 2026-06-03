@@ -9,7 +9,6 @@ use App\Models\DeliveryNote;
 use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
-use Firebed\AadeMyData\Enums\CurrencyCode;
 use Firebed\AadeMyData\Enums\IncomeClassificationCategory;
 use Firebed\AadeMyData\Enums\MovePurpose;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
@@ -117,21 +116,33 @@ class DeliveryNoteSubmitter
             );
         }
 
+        // Unlike a monetary invoice (where [219]/[220] FORBID issuer name/address
+        // for a GR party), a 9.x delivery note REQUIRES the issuer's full
+        // identification — AADE rejects with [204] «issuer Name/address is
+        // mandatory» otherwise (sandbox-proven 2026-06-03; matches the firebed
+        // 9.3 reference payload which carries issuer name + address).
         $issuer = (new Issuer)
             ->setVatNumber($this->tenant->afm ?? throw new RuntimeException('Issuer company has no AFM'))
             ->setCountry(CountryCode::GR)
-            ->setBranch(0);
+            ->setBranch(0)
+            ->setName($this->tenant->name ?? throw new RuntimeException('Issuer company has no name'))
+            ->setAddress($this->buildTenantAddress());
 
+        // NO <currency> and NO <isDeliveryNote> for a 9.x delivery note — AADE
+        // rejects both with [205] «forbidden for this invoice type» (the goods
+        // movement IS the document; the 9.x type already marks it as a δελτίο).
+        // <thirdPartyCollection> is sent ONLY when true ([214] forbids false).
         $header = (new InvoiceHeader)
             ->setSeries($note->deliveryType?->code ?? '0')
             ->setAa((string) $note->code)
             ->setIssueDate(Carbon::parse($note->issued_at)->toDateString())
             ->setInvoiceType($type)
-            ->setCurrency(CurrencyCode::EUR)
-            ->setIsDeliveryNote(true)
             ->setMovePurpose(MovePurpose::from($movePurpose))
-            ->setThirdPartyCollection((bool) $note->third_party_collection)
             ->setOtherDeliveryNoteHeader($this->buildDeliveryHeader($note));
+
+        if ($note->third_party_collection) {
+            $header->setThirdPartyCollection(true);
+        }
 
         // movePurpose=19 (Λοιπές Διακινήσεις) requires the free-text title.
         if ($movePurpose === 19) {
@@ -325,6 +336,16 @@ class DeliveryNoteSubmitter
         return $header;
     }
 
+    /** The tenant's registered seat as an Address (mandatory on the issuer for 9.x). */
+    private function buildTenantAddress(): Address
+    {
+        return (new Address)
+            ->setStreet($this->tenant->address ?: 'Έδρα')
+            ->setNumber((string) ($this->tenant->address_number ?: '0'))
+            ->setPostalCode($this->tenant->postcode ?: '00000')
+            ->setCity($this->tenant->city ?: 'Unknown');
+    }
+
     /** Throw unless a mandatory delivery address has street + postcode + city. */
     private function requireAddress(string $invcode, string $which, ?string $street, ?string $postcode, ?string $city): void
     {
@@ -336,12 +357,15 @@ class DeliveryNoteSubmitter
     }
 
     /**
-     * The delivery recipient as a Counterpart. REUSES the invoice GR rule:
-     * GR party = VAT only, NO name/address ([219]/[220] forbid them); foreign
-     * party = name + address + ISO country. The recipient ΑΦΜ is NEVER omitted:
-     * for an ενδοδιακίνηση (own-branch move, no recipient) the law fills it with
-     * nine zeros «000000000» (Α.1123/2024 Παράρτημα ΙΙ §3) — it coincides with
-     * the issuer's own ΑΦΜ.
+     * The delivery recipient as a Counterpart. Unlike the monetary-invoice GR
+     * rule (where [219]/[220] FORBID a GR counterpart's name/address), a 9.x
+     * delivery note REQUIRES counterpart name + address for ANY country — AADE
+     * rejects with [204] «Counterpart Name/address is mandatory» otherwise
+     * (sandbox-proven 2026-06-03; the firebed 9.3 reference carries them even
+     * for a GR counterpart). The recipient ΑΦΜ is NEVER omitted: for an
+     * ενδοδιακίνηση (own-branch move, no external recipient) the law fills it
+     * with nine zeros «000000000» (Α.1123/2024 Παράρτημα ΙΙ §3) and the
+     * recipient identity falls back to the issuer's own (it IS the issuer).
      */
     private function buildCounterpart(DeliveryNote $note): Counterpart
     {
@@ -350,29 +374,27 @@ class DeliveryNoteSubmitter
         $rawCountry = $note->customer?->country ?: 'GR';
         $country = $this->normaliseCountryCode($rawCountry);
 
-        $counterpart = (new Counterpart)
+        $name = $note->recipient_name
+            ?: $note->customer?->name
+            ?: $this->tenant->name   // ενδοδιακίνηση — recipient is the issuer
+            ?: throw new RuntimeException(
+                "Delivery note {$note->invcode} has no recipient name and the issuer company has none either."
+            );
+
+        // The delivery address is mandatory on the note (buildDeliveryHeader
+        // already guards it), so it's the natural counterpart address.
+        $address = (new Address)
+            ->setStreet($note->delivery_street ?: ($note->customer?->address1 ?: 'Unknown'))
+            ->setNumber($note->delivery_number ?: '0')
+            ->setPostalCode($note->delivery_postcode ?: ($note->customer?->postcode ?: '00000'))
+            ->setCity($note->delivery_city ?: ($note->customer?->city ?: 'Unknown'));
+
+        return (new Counterpart)
             ->setVatNumber($afm)
             ->setCountry($country)
-            ->setBranch(0);
-
-        if ($country !== 'GR') {
-            $counterpart->setName(
-                $note->recipient_name
-                ?: $note->customer?->name
-                ?: throw new RuntimeException(
-                    "Foreign recipient on delivery note {$note->invcode} requires a name (AADE rule)."
-                )
-            );
-            $counterpart->setAddress(
-                (new Address)
-                    ->setStreet($note->delivery_street ?: ($note->customer?->address1 ?: 'Unknown'))
-                    ->setNumber($note->delivery_number ?: '0')
-                    ->setPostalCode($note->delivery_postcode ?: ($note->customer?->postcode ?: '00000'))
-                    ->setCity($note->delivery_city ?: ($note->customer?->city ?: 'Unknown'))
-            );
-        }
-
-        return $counterpart;
+            ->setBranch(0)
+            ->setName($name)
+            ->setAddress($address);
     }
 
     /** ISO-3166-1 alpha-2 normalisation — duplicated from MyDataSubmitter. */
@@ -418,6 +440,33 @@ class DeliveryNoteSubmitter
         return (new InvoicesDocWriter)->asXml(new InvoicesDoc([$payload]));
     }
 
+    /**
+     * Persist a forensic REJECTED audit row (request + response XML, no MARK)
+     * when AADE refuses a delivery note — so the operator sees WHAT was sent and
+     * WHY from the δελτίο's «Ιστορικό myDATA». Best-effort: an audit-write
+     * failure must never mask the real rejection. Twin of MyDataSubmitter::recordRejection.
+     */
+    private function recordRejection(DeliveryNote $note, string $requestXml, string $responseXml): void
+    {
+        try {
+            DB::transaction(fn () => DeliveryMark::create([
+                'company_id' => $note->company_id,
+                'delivery_note_id' => $note->id,
+                'mark' => null,
+                'mydata_action' => 'REJECTED',
+                'request' => $requestXml,
+                'response' => $responseXml,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('myDATA delivery: failed to persist REJECTED audit row', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     private function persistResponse(
         DeliveryNote $note,
         string $xml,
@@ -429,7 +478,15 @@ class DeliveryNoteSubmitter
 
         if ($first === null || $first->getStatusCode() !== 'Success') {
             $errors = $first ? $this->describeResponseErrors($first) : 'no response';
-            throw new RuntimeException("myDATA rejected the delivery note: {$errors}");
+            // Persist a forensic REJECTED row so the rejection is visible in the
+            // δελτίο's «Ιστορικό myDATA» UI (not only in the CLI report), then
+            // carry the XML on the throw. Mirrors MyDataSubmitter::recordRejection.
+            $this->recordRejection($note, $xml, $responseXml);
+            throw new DeliveryNoteRejected(
+                "myDATA rejected the delivery note: {$errors}",
+                $xml,
+                $responseXml,
+            );
         }
 
         $mark = (string) $first->getInvoiceMark();
