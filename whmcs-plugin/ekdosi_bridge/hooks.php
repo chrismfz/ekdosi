@@ -384,12 +384,14 @@ add_hook('ClientAreaPageViewInvoice', 1, function ($vars) {
         if ($ownerId !== $uid) {
             return [];
         }
-        // Don't surface a cancelled («ΑΚΥΡΩΜΕΝΟ») invoice's PDF to the customer —
-        // it's legally void and the public route 404s it anyway.
-        if (InvoiceMarkStore::stateFor($invoiceId) === 'cancelled') {
+        // ONE row read (state + pdf_url together). Don't surface a cancelled
+        // («ΑΚΥΡΩΜΕΝΟ») invoice's PDF to the customer — it's legally void and the
+        // public route 404s it anyway.
+        $markRow = InvoiceMarkStore::row($invoiceId);
+        if ($markRow['state'] === 'cancelled') {
             return [];
         }
-        $url = InvoiceMarkStore::pdfUrlFor($invoiceId);
+        $url = $markRow['pdf_url'];
         if (is_string($url) && $url !== '' && preg_match('#^https?://#i', $url)) {
             $GLOBALS['ekdosi_clientarea_pdf_url'] = $url;
         }

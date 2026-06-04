@@ -137,16 +137,23 @@ class WhmcsWritebackService
             // invoice.whmcs_pending_id (forward), the inbox file() path sets
             // pending.invoice_id (reverse). A cancel can hit either origin, so
             // both must be covered — otherwise a filer-path invoice keeps a stale
-            // green «Στο AADE» badge after an AADE cancellation.
-            $pending = PendingWhmcsInvoice::query()
-                ->where('company_id', $invoice->company_id)
-                ->where(function ($q) use ($invoice): void {
-                    if ($invoice->whmcs_pending_id !== null) {
-                        $q->whereKey($invoice->whmcs_pending_id);
-                    }
-                    $q->orWhere('invoice_id', $invoice->id);
-                })
-                ->first();
+            // green «Στο AADE» badge after an AADE cancellation. Two DETERMINISTIC
+            // lookups (forward first) rather than one OR, so a stale duplicate
+            // that also points here can't make ->first() pick an arbitrary row.
+            $pending = null;
+            if ($invoice->whmcs_pending_id !== null) {
+                $pending = PendingWhmcsInvoice::query()
+                    ->where('company_id', $invoice->company_id)
+                    ->whereKey($invoice->whmcs_pending_id)
+                    ->first();
+            }
+            if ($pending === null) {
+                $pending = PendingWhmcsInvoice::query()
+                    ->where('company_id', $invoice->company_id)
+                    ->where('invoice_id', $invoice->id)
+                    ->orderBy('id')
+                    ->first();
+            }
 
             if ($pending === null || $pending->whmcs_invoice_id === null) {
                 return;

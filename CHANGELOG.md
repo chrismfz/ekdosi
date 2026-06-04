@@ -17,6 +17,13 @@ they merge.
 
 ## [Unreleased]
 ### Fixed
+- **Second independent-review batch** (regressions the first fix-batch added):
+  official-PDF `Content-Disposition` ASCII filename now restricted to a safe
+  charset (an operator invoice-type code with a `"` could break the quoted
+  filename); cancel write-back resolves the pending row via two DETERMINISTIC
+  lookups (forward link first) instead of one OR that could pick an arbitrary
+  duplicate. (Plus plugin-side: column-cache invalidation, pdf_url-reject logging
+  — ekdosi_bridge v0.38.0.)
 - **Independent-review batch (Plugin-API/#4/#5).** (#1) `PublicInvoicePdfController`
   now serves only `Invoice::isPubliclyViewable()` (active + not AADE-cancelled) —
   fail-closed, so a cancelled or unknown-status invoice 404s instead of streaming

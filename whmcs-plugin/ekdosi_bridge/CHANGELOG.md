@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-06-03
+### Fixed
+- **Second-review batch** (regressions the first fix-batch introduced).
+  `InvoiceMarkStore::ensureTable()` now clears the per-request `$columnCache` at
+  the end — a fallback ALTER (on MariaDB without `ADD COLUMN IF NOT EXISTS`) could
+  add a column AFTER `hasColumn()` cached it absent, dropping a same-request
+  `state='cancelled'` write. Client-area PDF hook now uses one `row()` read.
+  `inbound.php` logs a breadcrumb when it rejects a `pdf_url` on host mismatch
+  (no more silent missing link). `row()` is null-safe for invoices with no mark.
+  Stale `lastInboundPollAt()` docblock corrected.
+
 ## [0.37.0] — 2026-06-03
 ### Fixed
 - **Independent-review batch.** (1) Cancelled («ΑΚΥΡΩΜΕΝΟ») invoice no longer

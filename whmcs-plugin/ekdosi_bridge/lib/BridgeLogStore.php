@@ -103,7 +103,7 @@ class BridgeLogStore
         }
     }
 
-    /** When ekdosi last successfully PULLED the feed (op=invoices|invoice). Null = never. */
+    /** When ekdosi last successfully PULLED the bulk feed (op=invoices). Null = never. */
     public static function lastInboundPollAt(): ?string
     {
         try {

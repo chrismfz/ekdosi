@@ -32,8 +32,12 @@ class PublicInvoicePdfController extends Controller
         }
 
         $pdf = $renderer->render($invoice);
+        // ASCII fallback restricted to a SAFE charset: invcode = invoice_type.code
+        // (operator free-text) + aa, so stripping only non-printables would still
+        // let a '"' / '\' / ';' break out of the quoted filename. Keep only
+        // alphanumerics/dot/dash/underscore.
         $ascii = ($invoice->invcode !== null && $invoice->invcode !== '')
-            ? preg_replace('/[^\x20-\x7E]/', '_', (string) $invoice->invcode)
+            ? preg_replace('/[^A-Za-z0-9._-]/', '_', (string) $invoice->invcode)
             : 'invoice-'.$invoice->getKey();
         $utf8 = ($invoice->invcode !== null && $invoice->invcode !== '')
             ? (string) $invoice->invcode

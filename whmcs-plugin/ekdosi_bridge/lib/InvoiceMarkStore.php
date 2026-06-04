@@ -83,6 +83,13 @@ class InvoiceMarkStore
                 }
             }
         }
+
+        // Invalidate the per-request column cache: a fallback ALTER above may have
+        // ADDED a column AFTER hasColumn() already cached it as absent (the
+        // IF-NOT-EXISTS-throws → probe(false) → plain-ALTER-succeeds path). Without
+        // this, a same-request set()/row() would skip the now-existing column
+        // (e.g. drop state='cancelled' on an inbound cancel write-back).
+        self::$columnCache = [];
     }
 
     /** Per-request cache of column-existence probes (information_schema is slow). */

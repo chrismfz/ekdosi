@@ -141,6 +141,13 @@ if ($pdfUrl !== '') {
     $expectedHost = $base !== '' ? (string) (parse_url($base, PHP_URL_HOST) ?? '') : '';
     $host = (string) (parse_url($pdfUrl, PHP_URL_HOST) ?? '');
     if (! $okScheme || ($expectedHost !== '' && strcasecmp($host, $expectedHost) !== 0)) {
+        // Don't drop SILENTLY — a host/www/port drift between APP_URL and
+        // ekdosi_base_url would otherwise make the «Επίσημο παραστατικό» link
+        // vanish with no clue. Leave a breadcrumb in the WHMCS activity log.
+        if (function_exists('logActivity') && $pdfUrl !== '') {
+            logActivity('EkdosiBridge: rejected pdf_url for WHMCS invoice #'.$whmcsInvoiceId
+                .' — host "'.$host.'" != configured ekdosi host "'.$expectedHost.'".');
+        }
         $pdfUrl = '';
     }
 }
