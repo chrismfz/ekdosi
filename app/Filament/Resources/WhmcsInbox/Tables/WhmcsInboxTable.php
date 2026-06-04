@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\WhmcsInbox\Tables;
 
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Filament\Support\PickerOptions;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
@@ -20,6 +21,7 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Illuminate\Support\Facades\Artisan;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -245,6 +247,7 @@ class WhmcsInboxTable
                     }),
             ])
             ->headerActions([
+                self::syncNowAction(),
                 self::refreshLegacyInvoicedAction(),
             ])
             ->recordActions([
@@ -423,6 +426,52 @@ class WhmcsInboxTable
      * before issuing — an invoice the partner already filed from the old app.
      * No-op (and a friendly notice) when the bridge isn't configured/reachable.
      */
+    /**
+     * «Συγχρονισμός τώρα» — pull paid+unfiled WHMCS invoices into the inbox on
+     * demand (the manual twin of the scheduled whmcs:fetch-pending). Handy for
+     * testing without SSH/cron. Delegates to the SAME command, so source
+     * selection (bridge vs native) + legacy refresh are identical.
+     */
+    private static function syncNowAction(): Action
+    {
+        return Action::make('sync_now')
+            ->label('Συγχρονισμός τώρα')
+            ->icon('heroicon-o-arrow-down-tray')
+            ->color('primary')
+            ->authorize('update')
+            ->requiresConfirmation()
+            ->modalHeading('Συγχρονισμός τώρα από το WHMCS;')
+            ->modalDescription('Τραβά τα πληρωμένα/μη-εκδομένα τιμολόγια από το WHMCS και τα στάζει στο inbox (ίδιο με το προγραμματισμένο whmcs:fetch-pending). Idempotent — ασφαλές να ξανατρέξει. Μεγάλος tenant μπορεί να αργήσει λίγο.')
+            ->modalSubmitActionLabel('Συγχρονισμός')
+            ->action(function () {
+                $tenant = Filament::getTenant();
+                if (! $tenant) {
+                    Notification::make()->title('Δεν βρέθηκε tenant')->danger()->send();
+
+                    return;
+                }
+                if (empty($tenant->whmcs_api_url)) {
+                    Notification::make()->title('Δεν έχει ρυθμιστεί WHMCS γι\' αυτόν τον tenant')->warning()->send();
+
+                    return;
+                }
+                try {
+                    $exit = Artisan::call('whmcs:fetch-pending', ['--tenant' => $tenant->slug]);
+                } catch (\Throwable $e) {
+                    Notification::make()->title('Ο συγχρονισμός απέτυχε')->body($e->getMessage())->danger()->persistent()->send();
+
+                    return;
+                }
+                $summary = collect(preg_split('/\r?\n/', trim(Artisan::output())))
+                    ->first(fn ($l) => str_contains((string) $l, 'Summary')) ?: 'Έγινε.';
+                Notification::make()
+                    ->title($exit === 0 ? 'Συγχρονισμός ολοκληρώθηκε' : 'Συγχρονισμός με προειδοποιήσεις (exit '.$exit.')')
+                    ->body((string) $summary)
+                    ->{$exit === 0 ? 'success' : 'warning'}()
+                    ->send();
+            });
+    }
+
     private static function refreshLegacyInvoicedAction(): Action
     {
         return Action::make('refresh_legacy_invoiced')
@@ -640,10 +689,20 @@ class WhmcsInboxTable
 
                 Select::make('invoice_type_id')
                     ->label('Τύπος παραστατικού')
-                    ->options(fn () => InvoiceType::query()
-                        ->where('company_id', Filament::getTenant()?->getKey())
-                        ->orderBy('code')
-                        ->pluck('code', 'id'))
+                    // Same favorites-first (⭐) ordering as the normal invoice form
+                    // (PickerOptions::invoiceTypeOptions) instead of a flat
+                    // alphabetical list — ΤΙΜ/ΤΠΥ surface at the top.
+                    ->options(fn () => PickerOptions::invoiceTypeOptions())
+                    // Resolve the label WITHOUT the show_on_menu filter so a
+                    // pre-selected default that's hidden from the menu still
+                    // renders (mirrors InvoiceForm).
+                    ->getOptionLabelUsing(function ($value) {
+                        $type = InvoiceType::query()
+                            ->where('company_id', Filament::getTenant()?->getKey())
+                            ->find($value);
+
+                        return $type ? (($type->is_favorite ? '⭐ ' : '').$type->code.' — '.$type->name) : null;
+                    })
                     ->required()
                     ->searchable()
                     ->live()
@@ -699,7 +758,16 @@ class WhmcsInboxTable
             ->modalSubmitActionLabel('Δημιουργία προσχεδίου')
             ->modalCancelActionLabel('Άκυρο')
             ->modalWidth('5xl')
-            ->action(function (PendingWhmcsInvoice $r, array $data) {
+            // A second submit button: create the draft AND jump straight to it
+            // (review/issue from the παραστατικό) — vs the plain «Δημιουργία
+            // προσχεδίου» which stays in the inbox for creating several in a row.
+            ->extraModalFooterActions(fn (Action $action): array => [
+                $action->makeModalSubmitAction('create_and_open', arguments: ['redirect' => true])
+                    ->label('Δημιουργία & έλεγχος')
+                    ->icon('heroicon-o-arrow-top-right-on-square')
+                    ->color('success'),
+            ])
+            ->action(function (PendingWhmcsInvoice $r, array $data, array $arguments, \Livewire\Component $livewire) {
                 $tenant = Filament::getTenant();
                 // withTrashed so a soft-deleted matched customer still resolves
                 // (the Select renders it with a "(διαγραμμένος)" suffix); refuse
@@ -732,12 +800,6 @@ class WhmcsInboxTable
                         invoiceType: $invoiceType,
                         createdByUserId: auth()->id(),
                     );
-                    Notification::make()
-                        ->title('Δημιουργήθηκε προσχέδιο '.$invoice->invcode)
-                        ->body('Άνοιξέ το από τα Παραστατικά, έλεγξε/διόρθωσε τις γραμμές και έκδωσέ το (Οριστικοποίηση → Υποβολή στο myDATA).')
-                        ->success()
-                        ->persistent()
-                        ->send();
                 } catch (Throwable $e) {
                     Notification::make()
                         ->title('Η δημιουργία προσχεδίου ΑΠΕΤΥΧΕ')
@@ -745,7 +807,31 @@ class WhmcsInboxTable
                         ->danger()
                         ->persistent()
                         ->send();
+
+                    return;
                 }
+
+                // «Δημιουργία & έλεγχος» → land straight on the new παραστατικό.
+                if ($arguments['redirect'] ?? false) {
+                    Notification::make()
+                        ->title('Δημιουργήθηκε προσχέδιο '.$invoice->invcode)
+                        ->success()
+                        ->send();
+
+                    $livewire->redirect(InvoiceResource::getUrl('view', [
+                        'record' => $invoice->getKey(),
+                        'tenant' => $tenant,
+                    ]));
+
+                    return;
+                }
+
+                Notification::make()
+                    ->title('Δημιουργήθηκε προσχέδιο '.$invoice->invcode)
+                    ->body('Άνοιξέ το από τα Παραστατικά, έλεγξε/διόρθωσε τις γραμμές και έκδωσέ το (Οριστικοποίηση → Υποβολή στο myDATA).')
+                    ->success()
+                    ->persistent()
+                    ->send();
             });
     }
 

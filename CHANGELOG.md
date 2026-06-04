@@ -16,6 +16,15 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **WHMCS Inbox UX.** (1) «Συγχρονισμός τώρα» header action (next to «Έλεγχος
+  legacy») — pulls paid+unfiled invoices on demand via `whmcs:fetch-pending`
+  (handy for testing, no SSH/cron). (2) The «Δημιουργία Παραστατικού» modal's
+  invoice-type picker now shows the tenant's FAVORITE types first (⭐, same
+  `PickerOptions::invoiceTypeOptions` ordering as the normal invoice form) instead
+  of a flat alphabetical list. (3) A second submit button «Δημιουργία & έλεγχος»
+  creates the draft AND redirects straight to the new παραστατικό (the plain
+  «Δημιουργία προσχεδίου» still stays in the inbox for creating several in a row).
 ### Fixed
 - **WHMCS invoice line description was dropped from the παραστατικό.**
   `WhmcsInvoiceMapper` emitted the line text under the key `description`, but the
