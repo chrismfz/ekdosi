@@ -22,8 +22,11 @@ they merge.
   (local invoice or live AADE orphan), and a blank landing prompts for one
   instead of 404-ing. The raw request/response XML panels are expanded by default
   and much taller (rows 26, char counts) for debugging visibility; the page
-  already shows the QR + a clickable «Σύνδεσμος επισκόπησης ΑΑΔΕ». (Clicking a
-  MARK elsewhere in the app to land here is a follow-up linkify pass.)
+  already shows the QR + a clickable «Σύνδεσμος επισκόπησης ΑΑΔΕ».
+- **Clickable MARKs.** The MARK on the invoice LIST (`InvoicesTable`) and the
+  invoice VIEW (`InvoiceInfolist`) now LINK to «Έλεγχος ΜΑΡΚ» instead of just
+  copying themselves. (The myDATA console, submission-history relation manager and
+  latest-invoices widget already linked.)
 - **WHMCS Inbox UX.** (1) «Συγχρονισμός τώρα» header action (next to «Έλεγχος
   legacy») — pulls paid+unfiled invoices on demand via `whmcs:fetch-pending`
   (handy for testing, no SSH/cron). (2) The «Δημιουργία Παραστατικού» modal's

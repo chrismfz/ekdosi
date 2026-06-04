@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use App\Filament\Support\Tags\TagControls;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Customer;
+use App\Filament\Pages\MyDataMarkDetail;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
@@ -119,7 +120,12 @@ class InvoicesTable
                 TextColumn::make('mydata_mark')
                     ->label('MARK')
                     ->placeholder('—')
-                    ->copyable()
+                    // Click the MARK → full «Έλεγχος ΜΑΡΚ» page (was just
+                    // copyable-to-itself, the operator's complaint).
+                    ->color(fn (Invoice $record) => filled($record->mydata_mark) ? 'primary' : null)
+                    ->url(fn (Invoice $record) => filled($record->mydata_mark)
+                        ? MyDataMarkDetail::getUrl(['mark' => $record->mydata_mark, 'tenant' => Filament::getTenant()])
+                        : null)
                     ->toggleable(),
 
                 // Last email attempt at a glance — so a 'failed' send is visible

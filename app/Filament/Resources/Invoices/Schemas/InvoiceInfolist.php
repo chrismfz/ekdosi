@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\Invoices\Schemas;
 
+use App\Filament\Pages\MyDataMarkDetail;
+use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
@@ -183,7 +185,12 @@ class InvoiceInfolist
 
                         TextEntry::make('mydata_mark')
                             ->label('MARK')
-                            ->copyable()
+                            // Click the MARK → full «Έλεγχος ΜΑΡΚ» page (was just
+                            // copyable). Plain text when there's no MARK yet.
+                            ->color(fn ($record) => filled($record?->mydata_mark) ? 'primary' : null)
+                            ->url(fn ($record) => filled($record?->mydata_mark)
+                                ? MyDataMarkDetail::getUrl(['mark' => $record->mydata_mark, 'tenant' => Filament::getTenant()])
+                                : null)
                             ->placeholder('—'),
 
                         TextEntry::make('mydata_url')
