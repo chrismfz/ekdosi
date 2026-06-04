@@ -352,8 +352,8 @@
                                 <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Request</span>
                                 <span class="text-xs text-gray-400">{{ number_format(mb_strlen($requestXml)) }} χαρ.</span>
                             </div>
-                            <textarea readonly rows="26" wrap="off" spellcheck="false"
-                                class="w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3 font-mono text-xs leading-relaxed resize-y">{{ $requestXml }}</textarea>
+                            <textarea readonly rows="26" spellcheck="false" style="width:100%; resize:both;"
+                                class="block w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3 font-mono text-xs leading-relaxed">{{ $requestXml }}</textarea>
                         </div>
                     @endif
                     @if ($responseXml)
@@ -362,8 +362,8 @@
                                 <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Response</span>
                                 <span class="text-xs text-gray-400">{{ number_format(mb_strlen($responseXml)) }} χαρ.</span>
                             </div>
-                            <textarea readonly rows="26" wrap="off" spellcheck="false"
-                                class="w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3 font-mono text-xs leading-relaxed resize-y">{{ $responseXml }}</textarea>
+                            <textarea readonly rows="26" spellcheck="false" style="width:100%; resize:both;"
+                                class="block w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3 font-mono text-xs leading-relaxed">{{ $responseXml }}</textarea>
                         </div>
                     @endif
                 </div>
