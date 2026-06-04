@@ -17,21 +17,24 @@ use Tests\TestCase;
  * myDATA does NOT require the per-line description — the legacy app never sent
  * it (verified against imported legacy MARK XML, which carries only the E3
  * income classification per line). So default OFF keeps the request payload
- * byte-identical to the sandbox-validated shape; a tenant opts in to surface
- * the line text on the AADE QR / RequestTransmittedDocs.
+ * byte-identical to the sandbox-validated shape.
+ *
+ * AADE additionally ACCEPTS itemDescr ONLY for delivery-note / shipping types
+ * (9.x) — it REJECTS it on a plain ΤΠΥ/ΤΙΜ (spec line 1287) — so even with the
+ * knob on, emission is gated by document type and can never cause a rejection.
  */
 class ItemDescrKnobTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function makeInvoice(Company $tenant, string $descr = 'Business20 - nac.gr'): Invoice
+    private function makeInvoice(Company $tenant, string $mydataType = '9.3', string $descr = 'Business20 - nac.gr'): Invoice
     {
         $customer = Customer::create([
             'company_id' => $tenant->id, 'name' => 'Πελάτης ΑΕ', 'afm' => '997073525',
         ]);
         $type = InvoiceType::create([
             'company_id' => $tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ',
-            'invcount' => 1, 'mydata_type' => '2.1',
+            'invcount' => 1, 'mydata_type' => $mydataType,
         ]);
         VatCategory::create([
             'company_id' => $tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true,
@@ -61,45 +64,50 @@ class ItemDescrKnobTest extends TestCase
         ]);
     }
 
-    private function xmlFor(Company $tenant): string
+    private function xmlFor(Company $tenant, string $mydataType = '9.3', string $descr = 'Business20 - nac.gr'): string
     {
         $doc = new AadeInvoiceDocument($tenant);
 
-        return $doc->toXml($doc->build($this->makeInvoice($tenant)));
+        return $doc->toXml($doc->build($this->makeInvoice($tenant, $mydataType, $descr)));
     }
 
     public function test_default_omits_item_descr(): void
     {
-        $xml = $this->xmlFor($this->tenant(false));
+        // Even on an eligible (9.3) type, the knob OFF means no itemDescr.
+        $xml = $this->xmlFor($this->tenant(false), '9.3');
 
         $this->assertStringNotContainsString('<itemDescr>', $xml);
         $this->assertStringNotContainsString('Business20 - nac.gr', $xml);
     }
 
-    public function test_knob_on_emits_item_descr(): void
+    public function test_knob_on_emits_for_delivery_note_type(): void
     {
-        $xml = $this->xmlFor($this->tenant(true));
+        $xml = $this->xmlFor($this->tenant(true), '9.3');
 
         $this->assertStringContainsString('<itemDescr>Business20 - nac.gr</itemDescr>', $xml);
     }
 
-    public function test_knob_on_with_blank_description_omits_item_descr(): void
+    public function test_knob_on_omits_for_plain_invoice_type_aade_would_reject(): void
     {
-        $tenant = $this->tenant(true);
-        $doc = new AadeInvoiceDocument($tenant);
-        $xml = $doc->toXml($doc->build($this->makeInvoice($tenant, '')));
+        // 2.1 (ΤΠΥ) is NOT a delivery-note type → AADE rejects itemDescr there,
+        // so we must NOT emit it even with the knob on.
+        $xml = $this->xmlFor($this->tenant(true), '2.1');
 
         $this->assertStringNotContainsString('<itemDescr>', $xml);
     }
 
-    public function test_knob_on_clamps_long_description_to_300_chars(): void
+    public function test_knob_on_with_blank_description_omits_item_descr(): void
     {
-        $tenant = $this->tenant(true);
-        $long = str_repeat('Α', 400);
-        $doc = new AadeInvoiceDocument($tenant);
-        $xml = $doc->toXml($doc->build($this->makeInvoice($tenant, $long)));
+        $xml = $this->xmlFor($this->tenant(true), '9.3', '');
 
-        $this->assertStringContainsString('<itemDescr>'.str_repeat('Α', 300).'</itemDescr>', $xml);
-        $this->assertStringNotContainsString(str_repeat('Α', 301), $xml);
+        $this->assertStringNotContainsString('<itemDescr>', $xml);
+    }
+
+    public function test_knob_on_clamps_long_description_to_256_chars(): void
+    {
+        $xml = $this->xmlFor($this->tenant(true), '9.3', str_repeat('Α', 400));
+
+        $this->assertStringContainsString('<itemDescr>'.str_repeat('Α', 256).'</itemDescr>', $xml);
+        $this->assertStringNotContainsString(str_repeat('Α', 257), $xml);
     }
 }

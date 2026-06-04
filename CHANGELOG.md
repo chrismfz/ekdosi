@@ -20,11 +20,14 @@ they merge.
 - **Opt-in per-line description to myDATA (`<itemDescr>`).** New
   `companies.mydata_send_item_descr` toggle (myDATA tab, default OFF): when on,
   `AadeInvoiceDocument` emits the line's `product_descr` as `<itemDescr>`
-  (300-char clamp) so the text surfaces on the AADE QR / RequestTransmittedDocs.
-  Default OFF keeps the request byte-identical to the sandbox-validated shape —
-  the legacy app never sent it (verified against imported legacy MARK XML, which
-  carries only the E3 income classification per line). Sandbox-validate before
-  flipping on in production.
+  (256-char clamp). Default OFF keeps the request byte-identical to the sandbox-
+  validated shape — the legacy app never sent it (verified against imported
+  legacy MARK XML, which carries only the E3 income classification per line).
+  AADE accepts `itemDescr` ONLY for delivery-note / shipping types (9.x) and
+  REJECTS it on a plain ΤΠΥ/ΤΙΜ (spec line 1287), so emission is also gated by
+  document type (`Codes::allowsItemDescr`) — the knob can never produce a
+  rejection; on ordinary invoices it's a no-op. Sandbox-validate before flipping
+  on for a goods/delivery-note tenant.
 
 ### Fixed
 - **PDF footer myDATA URL was visually clipped.** The full AADE verification URL

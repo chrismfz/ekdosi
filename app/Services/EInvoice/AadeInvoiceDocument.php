@@ -145,12 +145,15 @@ class AadeInvoiceDocument
             // never sent it — verified against imported legacy MARK XML, which
             // carries only the E3 income classification per line), so default
             // OFF keeps the payload byte-identical to the sandbox-validated
-            // shape. A tenant flips companies.mydata_send_item_descr on to
-            // surface the line text on the AADE QR / RequestTransmittedDocs.
-            // 300-char clamp: the AADE field is unbounded at the XSD level but
-            // we keep it short to avoid bloating the signed request.
-            if ($this->tenant->mydata_send_item_descr && filled($line->product_descr)) {
-                $detail->setItemDescr(mb_substr((string) $line->product_descr, 0, 300));
+            // shape. Even WITH the knob on, AADE ACCEPTS itemDescr only for
+            // delivery-note / shipping types (9.x) — it REJECTS it on a plain
+            // ΤΠΥ/ΤΙΜ (spec line 1287) — so Codes::allowsItemDescr() gates it by
+            // document type; the knob can never produce a rejection. 256-char
+            // clamp matches the product_descr column width (and WhmcsInvoiceMapper).
+            if ($this->tenant->mydata_send_item_descr
+                && Codes::allowsItemDescr((string) $invoice->invoiceType?->mydata_type)
+                && filled($line->product_descr)) {
+                $detail->setItemDescr(mb_substr((string) $line->product_descr, 0, 256));
             }
 
             // G4: a 0% line is filed as vatCategory=7 (exempt) WITH the reason
