@@ -324,6 +324,42 @@ class WhmcsBridgeClient
     }
 
     /**
+     * The WHMCS client custom-field catalogue (id + name + adminonly), so the
+     * operator can MAP role→field via a picker instead of hand-typing integer
+     * ids (which silently break when WHMCS reassigns them — the empty/forgotten
+     * map is exactly what made AFM + invoice-intent vanish from the inbox).
+     * Throws WhmcsUnreachable / WhmcsApiException like the other ops.
+     *
+     * @return list<array{id: int, fieldname: string, adminonly: bool}>
+     */
+    public function listCustomFields(): array
+    {
+        $data = $this->postResolve(['op' => 'custom_fields']);
+        $fields = $data['fields'] ?? [];
+        if (! is_array($fields)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($fields as $f) {
+            if (! is_array($f)) {
+                continue;
+            }
+            $id = (int) ($f['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            $out[] = [
+                'id' => $id,
+                'fieldname' => (string) ($f['fieldname'] ?? ''),
+                'adminonly' => (bool) ($f['adminonly'] ?? false),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * POST an HMAC-signed op to the bridge's resolve.php (sibling of
      * inbound.php). Same auth + error handling as setInvoiced(); returns the
      * decoded JSON body.

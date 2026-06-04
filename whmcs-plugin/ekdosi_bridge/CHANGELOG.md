@@ -10,6 +10,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-06-04
+### Added
+- **`op=custom_fields` (Plugin-API):** read-only catalogue of the WHMCS client
+  custom fields (`id` + `fieldname` + `adminonly`) so ekdosi can MAP role→field
+  via a picker instead of hand-typed integer ids. Powers the new Company-form
+  «Άντληση & αντιστοίχιση πεδίων WHMCS» selector — the fix for the silently-empty
+  `whmcs_custom_field_map` that made AFM + invoice-intent vanish from the inbox.
+
 ## [0.38.0] — 2026-06-03
 ### Fixed
 - **Second-review batch** (regressions the first fix-batch introduced).

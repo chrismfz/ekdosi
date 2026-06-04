@@ -17,6 +17,15 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **WHMCS custom-field mapping picker.** A Company-form action «Άντληση &
+  αντιστοίχιση πεδίων WHMCS» pulls the WHMCS client custom-field catalogue
+  (`WhmcsBridgeClient::listCustomFields` → bridge `op=custom_fields`) and lets the
+  operator map each role (vatno / wantsinvoice / taxoffice / occupation /
+  griniaris) to a field by NAME via dropdowns — instead of hand-typing fragile
+  integer ids. The `whmcs_custom_field_map` KeyValue now shows a ⚠ warning when
+  empty (an empty map silently drops AFM + invoice-vs-receipt intent and leaves
+  the WHMCS customer «μη συνδεδεμένος» — the root cause just diagnosed in prod).
+  Requires ekdosi_bridge v0.39.0.
 - **E-invoice provider submitter (P2):** `App\Services\EInvoice\GrProviderSubmitter`
   — files an invoice through a certified ΥΠΑΗΕΣ provider by reusing the SAME
   `AadeInvoiceDocument` payload and handing the XML to the injected transport.

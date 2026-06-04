@@ -16,6 +16,7 @@ use App\Services\AadeRegistryLookup;
 use App\Services\MailTemplateRenderer;
 use App\Services\MyDataSubmitter;
 use App\Services\TenantMailerFactory;
+use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
 use Illuminate\Support\Facades\Artisan;
@@ -31,6 +32,7 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Support\Facades\Cache;
@@ -816,8 +818,71 @@ class CompanyForm
                                     ]),
 
                                 Section::make('Custom field mapping')
-                                    ->description('Each WHMCS install assigns its own integer IDs to custom fields. Tell us which IDs carry which roles so we can read the right data when matching invoices and (in Stage B) building the myDATA payload.')
+                                    ->description('Each WHMCS install assigns its own integer IDs to custom fields. Map role→field so we read the right data (AFM, invoice-vs-receipt intent, …) when matching + filing. Use «Άντληση & αντιστοίχιση» to PICK the fields from WHMCS instead of typing fragile ids.')
                                     ->schema([
+                                        // Picker: pull the WHMCS client custom-field catalogue (op=custom_fields)
+                                        // and let the operator map each role to a field by NAME — instead of
+                                        // hand-typing integer ids that silently break / get forgotten (the empty
+                                        // map is exactly what made AFM + intent vanish from the inbox). Fills the
+                                        // KeyValue below via $set, so the normal form Save persists it (no
+                                        // direct-DB clobber of unsaved form edits).
+                                        FormAction::make('map_whmcs_custom_fields')
+                                            ->label('Άντληση & αντιστοίχιση πεδίων WHMCS')
+                                            ->icon('heroicon-o-link')
+                                            ->color('primary')
+                                            ->visible(fn (?Company $record) => $record !== null && $record->whmcsBridgeUrl() !== null)
+                                            ->authorize(fn (?Company $record) => $record === null
+                                                ? false
+                                                : (auth()->user()?->can('update', $record) ?? false))
+                                            ->modalHeading('Αντιστοίχιση WHMCS custom fields')
+                                            ->modalSubmitActionLabel('Εφαρμογή')
+                                            ->fillForm(fn (?Company $record) => $record?->whmcs_custom_field_map ?? [])
+                                            ->form(function (?Company $record) {
+                                                $options = [];
+                                                $help = null;
+                                                try {
+                                                    foreach (app(WhmcsBridgeClientFactory::class)->for($record)->listCustomFields() as $f) {
+                                                        $options[(int) $f['id']] = $f['fieldname'].' (#'.$f['id'].')'.($f['adminonly'] ? ' [admin]' : '');
+                                                    }
+                                                    if ($options === []) {
+                                                        $help = 'Δεν βρέθηκαν client custom fields στο WHMCS.';
+                                                    }
+                                                } catch (\Throwable $e) {
+                                                    $help = 'Αδυναμία άντλησης πεδίων από το plugin ('.$e->getMessage()
+                                                        .'). Βάλε ids χειροκίνητα στον πίνακα.';
+                                                }
+                                                $roles = [
+                                                    'vatno' => 'ΑΦΜ (vatno)',
+                                                    'wantsinvoice' => 'Θέλει τιμολόγιο (wantsinvoice)',
+                                                    'taxoffice' => 'ΔΟΥ (taxoffice)',
+                                                    'occupation' => 'Δραστηριότητα (occupation)',
+                                                    'griniaris' => 'Γκρινιάρης / άμεση έκδοση (griniaris)',
+                                                ];
+                                                $schema = [];
+                                                foreach ($roles as $role => $label) {
+                                                    $schema[] = Select::make($role)
+                                                        ->label($label)
+                                                        ->options($options)
+                                                        ->searchable()
+                                                        ->nullable()
+                                                        ->helperText($help);
+                                                }
+
+                                                return $schema;
+                                            })
+                                            ->action(function (array $data, Set $set) {
+                                                $map = [];
+                                                foreach (['vatno', 'wantsinvoice', 'taxoffice', 'occupation', 'griniaris'] as $role) {
+                                                    if (filled($data[$role] ?? null) && (int) $data[$role] > 0) {
+                                                        $map[$role] = (int) $data[$role];
+                                                    }
+                                                }
+                                                $set('whmcs_custom_field_map', $map);
+                                                Notification::make()
+                                                    ->title('Αντιστοιχίστηκαν '.count($map).' πεδία')
+                                                    ->body('Πάτησε «Save» για να αποθηκευτεί η αντιστοίχιση.')
+                                                    ->success()->send();
+                                            }),
                                         KeyValue::make('whmcs_custom_field_map')
                                             ->label(false)
                                             ->keyLabel('Role')
@@ -825,7 +890,10 @@ class CompanyForm
                                             ->addable(true)
                                             ->editableKeys(true)
                                             ->reorderable(false)
-                                            ->helperText('Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), wantsinvoice ("θα ήθελα τιμολόγιο" → invoice vs receipt), toinvoice (alternative billing-name). Leave empty if your WHMCS doesn\'t track a role.'),
+                                            ->helperText(fn (?Company $record) => (empty($record?->whmcs_custom_field_map)
+                                                    ? '⚠ Δεν έχει οριστεί αντιστοίχιση — ΑΦΜ + πρόθεση (τιμολόγιο/απόδειξη) ΔΕΝ διαβάζονται κι ο πελάτης μένει «μη συνδεδεμένος». '
+                                                    : '')
+                                                .'Canonical roles: vatno (AFM), taxoffice (ΔΟΥ), occupation (Δραστηριότητα), griniaris (immediate-invoice flag), wantsinvoice ("θα ήθελα τιμολόγιο" → invoice vs receipt). Leave empty if your WHMCS doesn\'t track a role.'),
                                     ]),
 
                                 // PR #31 (Stage B-1): per-tenant webhook secret. Used by the

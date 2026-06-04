@@ -34,6 +34,10 @@
  *                          → { "invoice": {full payload} | null }
  *                            (single-invoice twin of "invoices" — the push path
  *                            fetches one invoice from us instead of the WHMCS API)
+ *   op = "custom_fields": { "op": "custom_fields" }
+ *                          → { "fields": [{id, fieldname, adminonly}, ...] }
+ *                            (the client custom-field catalogue so ekdosi can map
+ *                            role→field id via a picker, not hand-typed ids)
  *
  * Response shapes + error envelope are unchanged from T-1a (the ekdosi-side
  * ThirdPartyResolution contract): see ThirdPartyStore::resolveInvoice/resellers.
@@ -266,8 +270,29 @@ try {
         exit;
     }
 
+    if ($op === 'custom_fields') {
+        // READ-ONLY catalogue of the WHMCS client custom fields (id + name +
+        // adminonly), so ekdosi can map role→field via a PICKER instead of
+        // hand-typed integer ids that silently break when WHMCS reassigns them.
+        $rows = Capsule::table('tblcustomfields')
+            ->where('type', 'client')
+            ->orderBy('id')
+            ->get(['id', 'fieldname', 'adminonly']);
+        $fields = [];
+        foreach ($rows as $r) {
+            $fields[] = [
+                'id' => (int) $r->id,
+                'fieldname' => (string) $r->fieldname,
+                'adminonly' => ! empty($r->adminonly),
+            ];
+        }
+        $bridgeLogResult = 'count='.count($fields);
+        echo json_encode(['status' => 'ok', 'fields' => $fields]);
+        exit;
+    }
+
     http_response_code(400);
-    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices" or "invoice".']);
+    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices", "invoice" or "custom_fields".']);
     exit;
 } catch (\Throwable $e) {
     $bridgeLogResult = 'error: '.$e->getMessage();

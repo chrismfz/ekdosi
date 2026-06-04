@@ -244,6 +244,35 @@ class WhmcsBridgeClientResolveTest extends TestCase
             === ['op' => 'invoice', 'invoice_id' => 1, 'with_routing' => true]);
     }
 
+    public function test_list_custom_fields_signs_body_and_maps_response(): void
+    {
+        Http::fake([self::RESOLVE_URL => Http::response([
+            'status' => 'ok',
+            'fields' => [
+                ['id' => 13, 'fieldname' => 'ΑΦΜ / Vies Vat No', 'adminonly' => false],
+                ['id' => 338, 'fieldname' => 'Γκρινιάρης', 'adminonly' => true],
+                ['id' => 0, 'fieldname' => 'junk', 'adminonly' => false], // dropped (id<=0)
+                'not-an-array',                                            // dropped
+            ],
+        ], 200)]);
+
+        $fields = $this->client($this->tenant())->listCustomFields();
+
+        $this->assertSame([
+            ['id' => 13, 'fieldname' => 'ΑΦΜ / Vies Vat No', 'adminonly' => false],
+            ['id' => 338, 'fieldname' => 'Γκρινιάρης', 'adminonly' => true],
+        ], $fields);
+
+        Http::assertSent(function (Request $request) {
+            $body = $request->body();
+            $expectedSig = 'sha256='.hash_hmac('sha256', $body, self::SECRET);
+
+            return $request->url() === self::RESOLVE_URL
+                && $request->hasHeader('X-Webhook-Signature', $expectedSig)
+                && json_decode($body, true) === ['op' => 'custom_fields'];
+        });
+    }
+
     public function test_non_2xx_becomes_api_exception_with_error_field(): void
     {
         Http::fake([self::RESOLVE_URL => Http::response(['error' => 'invoice_not_found'], 404)]);
