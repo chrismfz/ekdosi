@@ -73,8 +73,10 @@ The 9 tables the operator explicitly wants preserved:
 `delivery_methods`, `distribution_aims`, `product_categories`,
 `vat_categories` (`rate`, `vat_exemption_category`, `is_default`),
 `metric_units`, `tags`.
-**Ambiguous (⟨DECISION⟩ which bucket):** `billing_connections` (WHMCS/connector
-registry — config-like → lean A/B), `servers` / `server_groups` (WHMCS infra).
+**Also keep (config, ekdosi-native, NOT in Firebird → would be lost on rebuild
+otherwise):** `servers` / `server_groups` (provisioning targets, carry
+`secret_encrypted`) and `billing_connections` (WHMCS/connector registry). Their
+encrypted secrets ride the same passphrase handling as bucket A.
 
 ### C. Transactional (the re-importable / bulk data)
 `customers` (+`customer_contacts`), `suppliers` (+sources), `products`
@@ -262,10 +264,17 @@ and option 5 (passphrase) isn't enough.
 - **✅ DECIDED — Secrets mode:** option 5 (passphrase-protected export) as the
   default, with an explicit `--raw` operator opt-out (unencrypted debug dump,
   blocked for remote destinations). Envelope (option 4) deferred.
-- **⟨DECISION⟩ Bucket for `billing_connections` / `servers` / `server_groups`.**
-- **⟨DECISION⟩** Do we export `activity_log` and the full myDATA request/response
-  XML in the full bundle (legal audit) or treat them as non-portable history?
-- **⟨DECISION⟩** Confirm the "keep" setup list is exactly the 9 tables above.
+- **✅ DECIDED — `servers` / `server_groups` / `billing_connections`:** keep
+  (settings/config bucket) — ekdosi-native, not in Firebird, so a rebuild would
+  lose them otherwise. Encrypted secrets handled like bucket A.
+- **✅ DECIDED — full bundle is full:** includes `activity_log` AND the complete
+  myDATA request/response XML (legal audit). Caveat: `activity_log.causer_id` →
+  panel-global `users` (not tenant-scoped). On import, **remap causer by email**;
+  if no matching user, keep the row + diff but null the causer (renders
+  «Σύστημα»/unknown). Content preserved; only "who" may degrade.
+- **✅ DECIDED — "keep" (bucket B) = the 9 setup tables** listed above
+  (+ the 3 config tables just promoted). "Settings-only export" = bucket A
+  (company row) + bucket B.
 - **⟨DECISION⟩ Destination drivers** for v1 of automated backups (local + email +
   SFTP first? rsync/FTP later?) and **retention** defaults.
 - **⟨DECISION⟩ Encryption-in-transit policy:** force `passphrase` bundles for any
