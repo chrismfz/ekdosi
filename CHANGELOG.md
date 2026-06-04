@@ -24,6 +24,15 @@ they merge.
   «—» for the line while price + VAT came through. The mapper now emits
   `product_descr`; a filer regression test asserts the persisted line carries it.
 ### Added
+- **Πάροχος Console + verification tooling (P4):** a read-only «Πάροχος» Filament
+  page (gr-provider tenants) showing the readiness preflight + recent provider
+  submissions + a reachability «Έλεγχος σύνδεσης». `App\Services\EInvoice\
+  ProviderPreflight` (no-network config audit: provider/transport/creds/AFM/myDATA
+  read-path/invoice-types) drives both the page and two commands —
+  `einvoice:preflight [--tenant=]` (exit 0 ready / 2 has-fail) and
+  `einvoice:provider-test-submit <id> [--execute]` (dry-run prints the exact
+  payload incl. the InvoSign extension; `--execute` is a guarded, non-persisting
+  provider probe). No secrets are rendered (counts only).
 - **InvoSign provider transport (P5):** the first real ΥΠΑΗΕΣ transport —
   `App\Services\EInvoice\Transports\InvoSignTransport` (+ `InvoSignDocument`, which
   DOM-augments the canonical AADE XML with InvoSign's `api_*` line twins +

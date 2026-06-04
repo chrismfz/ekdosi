@@ -279,7 +279,7 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
   CompanySendChannelTest (e2e). _(αρχικό scope:)_ Company form (provider section,
   encrypted config, Test connection) +
   `einvoice:preflight` command.**
-- **P4 — ProviderConsole** (preflight/test-submit/per-invoice audit + myDATA
+- **P4 — Πάροχος Console: ✅ DONE.** Read-only «Πάροχος» page + ProviderPreflight (no-network audit) + einvoice:preflight / einvoice:provider-test-submit commands (dry-run + guarded execute). Per-invoice provider audit via the existing mydata_marks history + the console's recent-submissions list.
   cross-check), reuse `SalesReconciler` για το read leg.
 - **P5 — InvoSign transport: ✅ DONE (mock-HTTP; sandbox-validate pending creds).**
   `InvoSignTransport` + `InvoSignDocument` (AADE XML + DOM-injected `api_*`/
