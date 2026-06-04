@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-06-03
+### Added
+- **Official παραστατικό PDF link (`mod_ekdosi_invoice_marks.pdf_url`).** The
+  write-back now carries a signed public URL to the invoice's PDF (hosted on
+  ekdosi — source of truth, no file copy); `inbound.php` accepts `pdf_url`
+  (http(s)-only) and the **admin manage-invoice** sidebar shows a «Επίσημο
+  παραστατικό (ΑΑΔΕ)» button next to the MARK. New `pdf_url` column (SchemaGuard
+  probe now expects invcode+state+pdf_url; idempotent ALTER, no reactivation);
+  `InvoiceMarkStore::set()` + `pdfUrlFor()`. (Customer-area button is a separate
+  follow-up.)
+
 ## [0.34.0] — 2026-06-03
 ### Added
 - **State in the write-back (`mod_ekdosi_invoice_marks.state`).** `inbound.php`

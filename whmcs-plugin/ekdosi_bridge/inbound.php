@@ -125,6 +125,13 @@ $state = strtolower(trim((string) ($payload['state'] ?? '')));
 if (! in_array($state, ['active', 'cancelled'], true)) {
     $state = '';
 }
+// Optional: signed public URL to the official ekdosi παραστατικό PDF. Only
+// accept http(s) so a malformed value can't become a javascript: link in a
+// rendered <a>. Stored verbatim; the badge renders it htmlspecialchar'd.
+$pdfUrl = trim((string) ($payload['pdf_url'] ?? ''));
+if ($pdfUrl !== '' && ! preg_match('#^https?://#i', $pdfUrl)) {
+    $pdfUrl = '';
+}
 if ($whmcsInvoiceId <= 0 || $mark === '') {
     http_response_code(400);
     echo json_encode([
@@ -176,7 +183,7 @@ if ($current !== null && $current !== $mark) {
 // Persist the MARK as a STRING in our own table — never touch
 // tblinvoices.invoiced (legacy SMALLINT flag).
 try {
-    InvoiceMarkStore::set($whmcsInvoiceId, $mark, $invcode !== '' ? $invcode : null, $state !== '' ? $state : null);
+    InvoiceMarkStore::set($whmcsInvoiceId, $mark, $invcode !== '' ? $invcode : null, $state !== '' ? $state : null, $pdfUrl !== '' ? $pdfUrl : null);
 } catch (\Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'db_update_failed', 'message' => $e->getMessage()]);
@@ -196,4 +203,5 @@ echo json_encode([
     'mark'             => $mark,
     'invcode'          => $invcode !== '' ? $invcode : null,
     'state'            => $state !== '' ? $state : null,
+    'pdf_url'          => $pdfUrl !== '' ? $pdfUrl : null,
 ]);

@@ -82,7 +82,7 @@ class WhmcsBridgeClient
      * message if they need to distinguish (the filer currently
      * treats it as a non-fatal log).
      */
-    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null): void
+    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null, ?string $pdfUrl = null): void
     {
         $bodyData = [
             'whmcs_invoice_id' => $whmcsInvoiceId,
@@ -95,6 +95,11 @@ class WhmcsBridgeClient
         // «ΑΚΥΡΩΜΕΝΟ» after a cancellation. Omitted when null (older flow).
         if ($state !== null && $state !== '') {
             $bodyData['state'] = $state;
+        }
+        // Signed public URL to the official παραστατικό PDF (hosted on ekdosi);
+        // the bridge surfaces it as a link. Omitted when null.
+        if ($pdfUrl !== null && $pdfUrl !== '') {
+            $bodyData['pdf_url'] = $pdfUrl;
         }
         $body = json_encode($bodyData, JSON_THROW_ON_ERROR);
 

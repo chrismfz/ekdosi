@@ -196,8 +196,18 @@ class WhmcsWritebackService
             return;
         }
 
+        // The official παραστατικό PDF lives on ekdosi; hand the bridge a signed
+        // public URL so it can link it (no file copy). Best-effort — a URL build
+        // failure must not block the MARK write-back.
+        $pdfUrl = null;
         try {
-            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state);
+            $pdfUrl = $invoice->publicPdfUrl();
+        } catch (Throwable $e) {
+            // leave null — the MARK/state write-back still proceeds
+        }
+
+        try {
+            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
             Log::info('WHMCS write-back succeeded', [
                 'pending_id' => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,

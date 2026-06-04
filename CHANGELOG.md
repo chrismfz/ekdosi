@@ -17,6 +17,14 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Official invoice PDF — signed public route + write-back (#5a).** New
+  auth-less but `signed` route `GET /invoice/{invoice}/official-pdf`
+  (`PublicInvoicePdfController`, refuses drafts, streams via `InvoicePdfRenderer`)
+  + `Invoice::publicPdfUrl()` (permanent HMAC-signed). The write-back hands the
+  bridge this URL (`WhmcsBridgeClient::setInvoiced(..., $pdfUrl)`), so the WHMCS
+  admin manage-invoice page links the official παραστατικό — PDF stays on ekdosi
+  (source of truth), no copy. Customer-area button is the #5b follow-up
+  (outward-facing — pending explicit go-ahead).
 - **Cancellation write-back to WHMCS (state).** When ekdosi cancels an invoice at
   AADE, `MyDataSubmitter::cancel` now re-pushes the SAME MARK with
   `state='cancelled'` (new `WhmcsWritebackService::syncCancelledFromLifecycle`,

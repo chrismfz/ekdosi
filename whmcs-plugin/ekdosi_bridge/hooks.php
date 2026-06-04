@@ -105,10 +105,17 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     $userId = (int) ($vars['userid'] ?? 0);
     $badge = '<span class="label label-default" title="Καμία επιστροφή ΜΑΡΚ μέσω WHMCS">Όχι στο AADE μέσω WHMCS</span>';
     $legacyBadge = '';
+    $pdfButton = '';
     try {
         $mark = InvoiceMarkStore::get($invoiceId);
         $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
         $state = InvoiceMarkStore::stateFor($invoiceId);
+        $pdfUrl = InvoiceMarkStore::pdfUrlFor($invoiceId);
+        if ($pdfUrl !== null && $pdfUrl !== '') {
+            $pdfButton = '<a href="'.htmlspecialchars($pdfUrl, ENT_QUOTES).'" target="_blank" rel="noopener" '
+                .'class="btn btn-default btn-sm" title="Άνοιγμα του επίσημου παραστατικού (PDF) από το ekdosi">'
+                .'<i class="fa fa-file-pdf-o"></i> Επίσημο παραστατικό (ΑΑΔΕ)</a>';
+        }
         $invoiced = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('invoiced') ?? 0);
         if ($userId <= 0) {
             $userId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
@@ -214,6 +221,7 @@ EOF;
             <i class="fa fa-external-link"></i> Άνοιγμα στο Ekdosi Bridge
         </a>
         {$clientCardLink}
+        {$pdfButton}
     </div>
 </div>
 {$relidBlock}

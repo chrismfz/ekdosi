@@ -30,6 +30,7 @@ class InvoiceMarkStore
                 mark VARCHAR(40) NOT NULL,
                 invcode VARCHAR(60) NULL DEFAULT NULL,
                 state VARCHAR(20) NULL DEFAULT NULL,
+                pdf_url VARCHAR(255) NULL DEFAULT NULL,
                 updated_at DATETIME NULL DEFAULT NULL,
                 PRIMARY KEY (invoiceid)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
@@ -68,6 +69,20 @@ class InvoiceMarkStore
                 }
             }
         }
+
+        // `pdf_url` (signed link to the official ekdosi παραστατικό PDF) added
+        // later still. Same idempotent + privilege-safe ALTER pattern.
+        try {
+            Capsule::statement('ALTER TABLE '.self::TABLE.' ADD COLUMN IF NOT EXISTS pdf_url VARCHAR(255) NULL DEFAULT NULL AFTER state');
+        } catch (\Throwable $e) {
+            if (! self::hasPdfUrlColumn()) {
+                try {
+                    Capsule::statement('ALTER TABLE '.self::TABLE.' ADD COLUMN pdf_url VARCHAR(255) NULL DEFAULT NULL AFTER state');
+                } catch (\Throwable $ignored) {
+                    // set()/pdfUrlFor() guard against absence — MARK still stores.
+                }
+            }
+        }
     }
 
     private static function hasColumn(string $column): bool
@@ -93,6 +108,11 @@ class InvoiceMarkStore
     private static function hasStateColumn(): bool
     {
         return self::hasColumn('state');
+    }
+
+    private static function hasPdfUrlColumn(): bool
+    {
+        return self::hasColumn('pdf_url');
     }
 
     public static function hasTable(): bool
@@ -134,14 +154,25 @@ class InvoiceMarkStore
         return ($v !== null && $v !== '') ? (string) $v : null;
     }
 
+    /** The signed public URL to the official ekdosi παραστατικό PDF, or null. */
+    public static function pdfUrlFor(int $invoiceId): ?string
+    {
+        if (! self::hasPdfUrlColumn()) {
+            return null;
+        }
+        $v = Capsule::table(self::TABLE)->where('invoiceid', $invoiceId)->value('pdf_url');
+
+        return ($v !== null && $v !== '') ? (string) $v : null;
+    }
+
     /**
      * Upsert the MARK for an invoice (string — never int-cast a 15-digit MARK).
-     * Optionally also stores the ekdosi ΤΠΥ (`invcode`, e.g. ΑΠΥ423) shown next
-     * to the MARK, and the AADE `state` ('active'/'cancelled'). Each extra-column
-     * write is guarded so a tenant whose table predates the column (and couldn't
-     * be ALTERed) still stores the MARK.
+     * Optionally also stores the ekdosi ΤΠΥ (`invcode`, e.g. ΑΠΥ423), the AADE
+     * `state` ('active'/'cancelled'), and a signed `pdfUrl` to the official PDF.
+     * Each extra-column write is guarded so a tenant whose table predates the
+     * column (and couldn't be ALTERed) still stores the MARK.
      */
-    public static function set(int $invoiceId, string $mark, ?string $invcode = null, ?string $state = null): void
+    public static function set(int $invoiceId, string $mark, ?string $invcode = null, ?string $state = null, ?string $pdfUrl = null): void
     {
         $values = ['mark' => $mark, 'updated_at' => date('Y-m-d H:i:s')];
         if ($invcode !== null && $invcode !== '' && self::hasInvcodeColumn()) {
@@ -149,6 +180,9 @@ class InvoiceMarkStore
         }
         if ($state !== null && $state !== '' && self::hasStateColumn()) {
             $values['state'] = $state;
+        }
+        if ($pdfUrl !== null && $pdfUrl !== '' && self::hasPdfUrlColumn()) {
+            $values['pdf_url'] = $pdfUrl;
         }
 
         Capsule::table(self::TABLE)->updateOrInsert(
