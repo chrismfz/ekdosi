@@ -302,13 +302,29 @@ class MyDataSubmitter implements EInvoiceSubmitter
         $action = new CancelInvoice;
 
         try {
-            $action->handle($markToCancel);
+            $cancelResponse = $action->handle($markToCancel);
         } catch (Throwable $e) {
             $this->logFailure($invoice, 'cancel', $e);
             throw new RuntimeException('myDATA cancellation failed: '.$e->getMessage(), 0, $e);
         }
 
         $responseXml = $action->getResponseXML() ?? '';
+
+        // AADE returns HTTP 200 even when it REFUSES the cancellation (e.g.
+        // ValidationError [301] "Invoice with ΜΑΡΚ … not found"). firebed does
+        // NOT throw on that — it returns a ResponseDoc carrying the error. So
+        // we must check the status and refuse to mutate local state on a failed
+        // cancel; otherwise a rejected cancel would wrongly flip the invoice to
+        // CANCELLED locally AND push "cancelled" to WHMCS for a cancellation
+        // AADE never performed. (Real incident 2026-06-05: a [301]-rejected
+        // cancel left ΤΠΥ6654 locally cancelled while AADE had no record of the
+        // MARK.) Mirror the INSERT guard (persistResponse): act only on Success.
+        $cancelResult = $cancelResponse->first();
+        if ($cancelResult === null || $cancelResult->getStatusCode() !== 'Success') {
+            $errors = $cancelResult ? $this->describeResponseErrors($cancelResult) : 'no response';
+            $this->recordCancelRejection($invoice, $reason, $responseXml);
+            throw new RuntimeException("myDATA rejected the cancellation: {$errors}");
+        }
 
         $mark = DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel) {
             $mark = MyDataMark::create([
@@ -457,6 +473,34 @@ class MyDataSubmitter implements EInvoiceSubmitter
             ]));
         } catch (Throwable $e) {
             Log::warning('myDATA: failed to persist REJECTED audit row', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Forensic audit row for a REFUSED cancellation (AADE returned a non-Success
+     * status, e.g. [301] "mark not found"). No MARK and NO state change — the
+     * invoice stays in whatever state it was, so the operator sees the failed
+     * attempt in «Ιστορικό» without the invoice being wrongly marked cancelled.
+     * Twin of recordRejection() for the cancel path.
+     */
+    private function recordCancelRejection(Invoice $invoice, string $reason, string $responseXml): void
+    {
+        try {
+            DB::transaction(fn () => MyDataMark::create([
+                'company_id' => $invoice->company_id,
+                'invoice_id' => $invoice->id,
+                'mark' => null,
+                'mydata_action' => 'CANCEL_REJECTED',
+                'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
+                'response' => $responseXml,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('myDATA: failed to persist CANCEL_REJECTED audit row', [
                 'invoice_id' => $invoice->id,
                 'error' => $e->getMessage(),
             ]);

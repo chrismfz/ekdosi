@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
+use App\Models\MyDataMark;
 use App\Models\PaymentMethod;
 use App\Models\VatCategory;
 use App\Services\MyDataRejected;
@@ -681,6 +682,71 @@ class MyDataSubmitterSafetyTest extends TestCase
             'mark' => null,
         ]);
         $this->assertNull($invoice->fresh()->mydata_state, 'a rejected submission must NOT mark the invoice VALID');
+    }
+
+    public function test_rejected_cancellation_does_not_flip_state_and_records_forensic_row(): void
+    {
+        // Regression for the 2026-06-05 incident: AADE returned HTTP 200 +
+        // ValidationError [301] ("mark not found") to a CancelInvoice, yet the
+        // invoice was flipped to CANCELLED locally (and "cancelled" pushed to
+        // WHMCS) because the cancel path didn't check the response status.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_state' => 'VALID',
+            'local_status' => 'active',
+            'mydata_mark' => '400013829677137',
+        ])->save();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400013829677137',
+            'mydata_action' => 'INSERT',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->cancelNotFoundXml())]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->cancel($invoice->fresh(), 'Τεστ');
+            $this->fail('expected RuntimeException on a non-Success cancel response');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('rejected the cancellation', $e->getMessage());
+        }
+
+        // State MUST be untouched — AADE never cancelled anything.
+        $fresh = $invoice->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state, 'a rejected cancel must NOT flip mydata_state');
+        $this->assertSame('active', $fresh->local_status, 'a rejected cancel must NOT flip local_status');
+
+        // A forensic CANCEL_REJECTED row exists; NO successful CANCEL row.
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'CANCEL_REJECTED',
+            'mark' => null,
+        ]);
+        $this->assertDatabaseMissing('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'CANCEL',
+        ]);
+    }
+
+    private function cancelNotFoundXml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <statusCode>ValidationError</statusCode>
+        <errors>
+            <error>
+                <message>Invoice with ΜΑΡΚ 400013829677137 not found for VAT number 800561849</message>
+                <code>301</code>
+            </error>
+        </errors>
+    </response>
+</ResponseDoc>
+XML;
     }
 
     private function validationErrorXml(): string
