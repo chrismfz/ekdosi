@@ -16,6 +16,15 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Changed
+- **E-invoice provider groundwork (P0):** factored the AADE payload builder out
+  of `MyDataSubmitter` into `App\Services\EInvoice\AadeInvoiceDocument` (`build()`
+  + `toXml()`), so the SAME canonical invoicesDoc XML can later feed a provider
+  submitter (ΥΠΑΗΕΣ) — `MyDataSubmitter` now owns only the transport. Pure no-op
+  refactor (byte-identical XML), guarded by the existing myDATA safety/golden
+  tests; `mydata:test-submit --print-only` and the VAT-rate drift test updated to
+  the new class. Design: `docs/paroxos/`.
+
 ### Fixed
 - **Second independent-review batch** (regressions the first fix-batch added):
   official-PDF `Content-Disposition` ASCII filename now restricted to a safe

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Invoice;
+use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\MyDataRejected;
 use App\Services\MyDataSubmitter;
 use Illuminate\Console\Command;
@@ -81,14 +82,12 @@ class MyDataTestSubmit extends Command
                 }
             } elseif ($printOnly) {
                 // Print without persisting an audit row. Useful for
-                // CI / scripted XML diffing against a golden file.
-                $reflection = new \ReflectionClass($submitter);
-                $build = $reflection->getMethod('buildAadeInvoice');
-                $build->setAccessible(true);
-                $toXml = $reflection->getMethod('payloadToXml');
-                $toXml->setAccessible(true);
-                $payload = $build->invoke($submitter, $invoice);
-                $this->line($toXml->invoke($submitter, $payload));
+                // CI / scripted XML diffing against a golden file. Builds
+                // the payload via the same AadeInvoiceDocument the submitter
+                // uses — no reflection needed since the P0 factor-out.
+                $document = new AadeInvoiceDocument($tenant);
+                $payload = $document->build($invoice);
+                $this->line($document->toXml($payload));
             } else {
                 $mark = $submitter->previewXml($invoice);
                 $this->info("Dry-run recorded (mydata_marks row #{$mark->id}).");
