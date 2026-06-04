@@ -35,10 +35,10 @@ use Throwable;
  *     MARK instead of blindly re-filing;
  *   - a duplicate INSERT MARK for the same invoice is de-duped on persist.
  *
- * NOT yet wired here (parity follow-ups, deferred so P2 stays focused & isolated
- * from the live myDATA path): WHMCS write-back and auto-email on VALID — both are
- * best-effort downstream effects MyDataSubmitter does; a provider tenant gets them
- * in a later pass.
+ * WHMCS write-back fires on filing + cancel (parity with MyDataSubmitter, keyed on
+ * whmcs_pending_id — no-op for non-WHMCS). The ONE remaining parity follow-up is
+ * auto-email on VALID (a best-effort UX nicety MyDataSubmitter does); a provider
+ * tenant gets it in a later pass.
  */
 class GrProviderSubmitter implements EInvoiceSubmitter
 {
