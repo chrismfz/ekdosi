@@ -17,15 +17,21 @@ they merge.
 
 ## [Unreleased]
 ### Added
-- **Per-company export — settings + setup (Phase 1, export half).** New
+- **Per-company backup — settings + setup export/import (Phase 1).** New
   `company:export --tenant=SLUG` writes a portable `.zip` (manifest + company
-  settings + the setup/lookup tables + logo) — the per-tenant backup the
-  portability plan (#211) describes, so one company can be restored without a
-  full-DB rollback that would clobber other live tenants. The 7 encrypted
-  columns are **passphrase-sealed** (PBKDF2 + AES-256-GCM via `SecretsCodec`),
-  decoupling at-rest APP_KEY encryption from transport; `--raw` opts into a
-  cleartext debug dump (warned, confirmed). Non-destructive. Import + UI
-  (upload-restore) + full bundle are the next sub-steps.
+  settings + setup/lookup tables + logo) and `company:import --file=… (--new |
+  --into=SLUG)` restores it — the per-tenant backup the portability plan (#211)
+  describes, so one company can be restored without a full-DB rollback that
+  would clobber other live tenants. The 7 encrypted columns are
+  **passphrase-sealed** (PBKDF2 + AES-256-GCM via `SecretsCodec`), decoupling
+  at-rest APP_KEY encryption from transport; `--raw` opts into a cleartext debug
+  dump. Import is **dry-run by default** (`--execute` applies), **idempotent**
+  (setup matched by natural key, updated in place — never delete+insert, so
+  matched ids survive and transactional FKs don't dangle), re-encrypts secrets
+  under the target VM's `APP_KEY`, and rewires intra-setup FKs (invoice-type
+  distribution/delivery, server→group, company default invoice type). README
+  documents usage. UI download/upload-restore + the full (transactional) bundle
+  are the next sub-steps.
 - **«Συγχρονισμός κατάστασης από ΑΑΔΕ» (2-way state sync) on the ΜΑΡΚ page.**
   After «Άντληση/έλεγχος από ΑΑΔΕ» finds a *state* divergence, a new
   admin-gated, confirmed action applies AADE's truth to the local invoice:

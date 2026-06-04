@@ -88,9 +88,44 @@ verified production setup):
   **without the worker nothing in the queue executes**.
 - On every deploy: `php artisan queue:restart` so the worker picks up new code.
 
+## Backup / restore (per company)
+
+Per-tenant settings backup — restore **one** company without a full-DB rollback
+that would clobber other live tenants. Exports the `companies` row (myDATA
+dev+prod credentials, GSIS, mail, PDF, WHMCS bridge…), all setup/lookup tables
+(invoice types **with their myDATA income-class mapping**, VAT categories,
+payment methods, bank accounts, delivery/distribution, product categories,
+metric units, tags, server groups, billing connections) and the logo — to a
+portable `.zip`. The Firebird ETL never touches settings, so the usual reset is
+*wipe transactional → re-import from Firebird*; this protects the hand-entered
+config around it.
+
+```bash
+# Export (settings + setup). Secrets are passphrase-encrypted by default.
+php artisan company:export --tenant=myip                 # prompts for a passphrase
+php artisan company:export --tenant=myip --out=/backups/myip.zip
+php artisan company:export --tenant=myip --raw           # cleartext — debug only
+
+# Restore. Dry-run by default (prints the per-table plan); --execute applies.
+php artisan company:import --file=myip.zip --new                    # create a fresh company
+php artisan company:import --file=myip.zip --into=myip --execute    # restore into an existing one
+```
+
+- **Secrets**: the 7 encrypted columns are sealed under your **passphrase**
+  (PBKDF2 + AES-256-GCM), so the bundle opens on another VM regardless of its
+  `APP_KEY`; the same passphrase is required to import. `--raw` stores them in
+  clear text (warned) for a same-box debug dump.
+- **Idempotent**: setup rows are matched by a natural key and **updated in
+  place** (never delete + insert), so a re-import converges and matched rows
+  keep their id — transactional data that references them never dangles.
+- **Non-destructive**: import never removes rows absent from the bundle.
+- Full per-company bundle (incl. transactional data) + a UI download/upload-
+  restore are the next phases — see `docs/company-portability-plan.md`.
+
 ## Documentation
 
 - **`CLAUDE.md`** — architecture, decisions, conventions, current status (read first).
+- **`docs/company-portability-plan.md`** — per-company backup/export/import + wipe plan.
 - **`INSTALL.md`** — production install (RHEL/nginx/php-fpm/MariaDB, systemd, cron).
 - **`docs/Comparison.md`** — legacy → new mapping + what's net-new / deferred.
 - **`docs/services-quotes-roadmap.md`** — Quotes + Services/recurring (both built).
