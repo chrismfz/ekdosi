@@ -116,6 +116,15 @@ class WhmcsInvoiceFilerTest extends TestCase
         $this->assertSame('ΤΠΥ1', $result->invoice->invcode);
         $this->assertSame(1, InvoiceLine::where('invoice_id', $result->invoice->id)->count());
 
+        // Regression: the WHMCS line description must reach the persisted line's
+        // product_descr column (the mapper used to emit the non-fillable key
+        // 'description' → it was silently dropped, so the παραστατικό/PDF showed
+        // «—» while price/VAT survived).
+        $this->assertSame(
+            'Domain ekdosi.gr 1y',
+            InvoiceLine::where('invoice_id', $result->invoice->id)->value('product_descr'),
+        );
+
         // Totals recomputed from persisted lines.
         $this->assertEqualsWithDelta(100.0, (float) $result->invoice->net_total, 0.01);
         $this->assertEqualsWithDelta(124.0, (float) $result->invoice->gross_total, 0.01);

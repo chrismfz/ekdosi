@@ -16,6 +16,13 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **WHMCS invoice line description was dropped from the παραστατικό.**
+  `WhmcsInvoiceMapper` emitted the line text under the key `description`, but the
+  `invoice_lines` column is `product_descr` — so `InvoiceLine::create` (mass
+  assignment) silently discarded it (not fillable). The filed invoice/PDF showed
+  «—» for the line while price + VAT came through. The mapper now emits
+  `product_descr`; a filer regression test asserts the persisted line carries it.
 ### Added
 - **InvoSign provider transport (P5):** the first real ΥΠΑΗΕΣ transport —
   `App\Services\EInvoice\Transports\InvoSignTransport` (+ `InvoSignDocument`, which

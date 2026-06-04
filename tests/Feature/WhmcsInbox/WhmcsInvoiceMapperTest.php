@@ -112,7 +112,7 @@ class WhmcsInvoiceMapperTest extends TestCase
 
         $this->assertCount(1, $result['lines']);
         $line = $result['lines'][0];
-        $this->assertSame('Domain ekdosi.gr 1 έτος', $line['description']);
+        $this->assertSame('Domain ekdosi.gr 1 έτος', $line['product_descr']);
         $this->assertSame(100.0, $line['price_per_item']);       // 124 / 1.24
         $this->assertSame(100.0, $line['net_price']);
         $this->assertSame(124.0, $line['gross_price']);
@@ -295,7 +295,7 @@ class WhmcsInvoiceMapperTest extends TestCase
             ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'];
 
         $this->assertCount(1, $lines);
-        $this->assertSame('Only one', $lines[0]['description']);
+        $this->assertSame('Only one', $lines[0]['product_descr']);
     }
 
     public function test_mixed_taxed_and_untaxed_lines_produce_split_vat_breakdown(): void
@@ -339,7 +339,7 @@ class WhmcsInvoiceMapperTest extends TestCase
             ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'];
 
         $this->assertCount(1, $lines);
-        $this->assertSame('Real', $lines[0]['description']);
+        $this->assertSame('Real', $lines[0]['product_descr']);
     }
 
     public function test_rejects_cross_tenant_customer(): void

@@ -50,7 +50,7 @@
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                     @foreach ($preview->lines as $line)
                         <tr>
-                            <td class="px-3 py-2">{{ $line['description'] }}</td>
+                            <td class="px-3 py-2">{{ $line['product_descr'] ?? '' }}</td>
                             <td class="px-3 py-2 text-right">{{ number_format((float) $line['qty'], 3, ',', '.') }}</td>
                             <td class="px-3 py-2 text-right font-mono">{{ $fmt($line['price_per_item']) }}</td>
                             <td class="px-3 py-2 text-right">{{ number_format((float) $line['vat_percent'], 2, ',', '.') }}%</td>
