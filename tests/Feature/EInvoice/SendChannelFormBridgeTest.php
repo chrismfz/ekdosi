@@ -85,4 +85,65 @@ class SendChannelFormBridgeTest extends TestCase
         $data = SendChannelFormBridge::hydrate([], null);
         $this->assertSame('mydata-off', $data['send_channel']);
     }
+
+    public function test_injected_columns_are_overridden_by_the_channel(): void
+    {
+        // Security guard: a crafted payload trying to set a LIVE column directly must
+        // lose to the channel-derived value (the channel decides, not the raw input).
+        $data = SendChannelFormBridge::dehydrate([
+            'send_channel' => 'mydata-off',
+            'einvoice_provider' => 'gr-mydata',
+            'mydata_mode' => 'production',          // injected "live"
+            'einvoice_provider_mode' => 'production',
+        ], null);
+
+        $this->assertSame('off', $data['mydata_mode']);             // channel wins → not live
+        $this->assertSame('off', $data['einvoice_provider_mode']);
+    }
+
+    public function test_omitted_channel_falls_back_to_pdf_only(): void
+    {
+        $data = SendChannelFormBridge::dehydrate([
+            'einvoice_provider' => 'gr-mydata',
+            'mydata_mode' => 'production', // injected, no send_channel at all
+        ], null);
+
+        $this->assertSame('gr-mydata', $data['einvoice_provider']);
+        $this->assertSame('off', $data['mydata_mode']); // fail-safe, not the injected 'production'
+    }
+
+    public function test_switching_provider_clears_the_previous_secret(): void
+    {
+        $record = Company::create([
+            'name' => 't', 'slug' => 't-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox',
+            'einvoice_provider_config' => ['base_url' => 'https://invo', 'token' => 'INVO-SECRET'],
+        ]);
+
+        // Operator switches invosign → sbz.
+        $data = SendChannelFormBridge::dehydrate([
+            'send_channel' => 'sbz-production',
+            'cfg_sbz_base_url' => 'https://sbz',
+            'cfg_sbz_api_key' => 'SBZ-KEY',
+        ], $record);
+
+        $this->assertSame('sbz', $data['einvoice_provider_key']);
+        $this->assertSame('SBZ-KEY', $data['einvoice_provider_config']['api_key']);
+        $this->assertSame('https://sbz', $data['einvoice_provider_config']['base_url']);
+        // The old provider's secret must NOT linger.
+        $this->assertArrayNotHasKey('token', $data['einvoice_provider_config']);
+    }
+
+    public function test_provider_label_and_field_maps_are_consistent(): void
+    {
+        // Every selectable provider (provider_labels) must have credential fields
+        // (provider_fields), and vice-versa — else a provider is pickable with no
+        // inputs, or has dead config it can never reach.
+        $labels = array_keys(config('ekdosi.einvoice.provider_labels', []));
+        $fields = array_keys(config('ekdosi.einvoice.provider_fields', []));
+        sort($labels);
+        sort($fields);
+        $this->assertSame($labels, $fields, 'provider_labels and provider_fields keys must match');
+    }
 }

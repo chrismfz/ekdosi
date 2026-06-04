@@ -45,9 +45,13 @@ class SendChannelFormBridge
 
         $providerKey = $data['einvoice_provider_key'] ?? null;
         if ($providerKey !== null) {
-            // Start from the EXISTING config so an unchanged (blank-submitted) secret
-            // is preserved rather than wiped.
-            $config = is_array($record?->einvoice_provider_config) ? $record->einvoice_provider_config : [];
+            // Seed from the EXISTING config ONLY when staying on the SAME provider —
+            // that's what preserves a blank-submitted secret. Switching to a DIFFERENT
+            // provider starts clean, so the previous provider's encrypted secret does
+            // not linger in the blob (secret hygiene on rotation).
+            $sameProvider = ($record?->einvoice_provider_key === $providerKey);
+            $existing = is_array($record?->einvoice_provider_config) ? $record->einvoice_provider_config : [];
+            $config = $sameProvider ? $existing : [];
             foreach (self::fieldMap()[$providerKey] ?? [] as $field => $meta) {
                 $value = $data["cfg_{$providerKey}_{$field}"] ?? null;
                 if (self::isSecret($meta) && ($value === null || $value === '')) {

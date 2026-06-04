@@ -61,6 +61,14 @@ class SendChannelTest extends TestCase
         $this->assertSame('off', SendChannel::fromColumns('none', 'off', null, 'off'));
     }
 
+    public function test_provider_row_without_a_key_falls_back(): void
+    {
+        // Out-of-band data (gr-provider but no key) must not yield a non-existent
+        // 'none-sandbox' option — it maps to the fail-safe channel.
+        $this->assertSame('mydata-off', SendChannel::fromColumns('gr-provider', 'off', null, 'sandbox'));
+        $this->assertSame('mydata-off', SendChannel::fromColumns('gr-provider', 'off', '', 'production'));
+    }
+
     public function test_round_trip_is_stable_for_every_channel(): void
     {
         $channels = array_keys(SendChannel::options(['invosign' => 'InvoSign', 'sbz' => 'SBZ']));

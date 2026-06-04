@@ -47,7 +47,12 @@ final class SendChannel
     public static function fromColumns(?string $provider, ?string $mydataMode, ?string $providerKey, ?string $providerMode): string
     {
         return match ($provider ?: 'gr-mydata') {
-            'gr-provider' => ($providerKey ?: 'none').'-'.(($providerMode ?: 'sandbox') === 'production' ? 'production' : 'sandbox'),
+            // A gr-provider row with no key is out-of-band (legacy/partial import) —
+            // map it back to the fail-safe channel so the edit form never renders a
+            // non-existent option (which would silently drop the selection).
+            'gr-provider' => $providerKey
+                ? $providerKey.'-'.(($providerMode ?: 'sandbox') === 'production' ? 'production' : 'sandbox')
+                : self::FALLBACK,
             'ee-peppol' => 'peppol',
             'none' => 'off',
             default => 'mydata-'.match ($mydataMode) {
