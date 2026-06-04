@@ -122,12 +122,18 @@ class InvoiceMarkStore
             }
         }
         $r = Capsule::table(self::TABLE)->where('invoiceid', $invoiceId)->first($select);
+        $empty = ['mark' => null, 'invcode' => null, 'state' => null, 'pdf_url' => null];
+        if ($r === null) {
+            return $empty;   // no ekdosi mark for this invoice — the common case
+        }
+
+        $val = static fn ($v) => ($v !== null && $v !== '') ? (string) $v : null;
 
         return [
-            'mark' => ($r->mark ?? null) !== null && $r->mark !== '' ? (string) $r->mark : null,
-            'invcode' => ($r->invcode ?? null) !== null && $r->invcode !== '' ? (string) $r->invcode : null,
-            'state' => ($r->state ?? null) !== null && $r->state !== '' ? (string) $r->state : null,
-            'pdf_url' => ($r->pdf_url ?? null) !== null && $r->pdf_url !== '' ? (string) $r->pdf_url : null,
+            'mark' => $val($r->mark ?? null),
+            'invcode' => $val($r->invcode ?? null),
+            'state' => $val($r->state ?? null),
+            'pdf_url' => $val($r->pdf_url ?? null),
         ];
     }
 
