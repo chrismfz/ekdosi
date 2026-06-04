@@ -62,10 +62,13 @@ builds. **Provider-only additions** (top of `AadeBookInvoiceType`):
 ⇒ The mapping work for a GR provider is **small**: reuse `buildAadeInvoice`, add
 `authenticationCode` + (rare) `transmissionFailure`, change only the *transport*.
 
-> Note the version drift: the provider XSD is `v0.6.1`, our committed myDATA
-> spec is `v2.0.0`. Element names match; **diff the enums** (e.g. this XSD caps
-> `VatExemptionType` at 23, `InvoiceType` list differs) before trusting a shared
-> serializer — pin to whichever the provider/AADE endpoint demands.
+> **⚠ STALE XSD (corrected 2026-06):** the committed `aade-provider-invoicesDoc-
+> v0.6.1.xsd` is a very early draft. **AADE is now at provider v1.0.9–v1.0.12**
+> (the provider `InvoicesDoc` carries `ProviderSignatureType`,
+> `EndToEndReferenceID`, `invoiceDeliveryStatus` — and `firebed/aade-mydata`
+> v5.10.4 **already models these**, see implementation-plan §2.1). **Re-pull the
+> current provider XSD** from the AADE technical-specs hub before building; diff
+> enums and pin to what the provider/AADE endpoint demands.
 
 ---
 
@@ -106,21 +109,26 @@ the rest is **regulatory** (certification), not code.
 
 ---
 
-## 4. Becoming a provider — Α.1112/2025 (from the certification forms)
-Three **Άδειες Καταλληλότητας**: **[1] Χονδρικές/Λιανικές, [2] Χονδρικές,
-[3] Λιανικές**. Submitted **electronically, digitally signed**.
+## 4. Becoming a provider — Α.1112/2025
 
-### 🔑 Ιδιοπάροχος (self-provider) — answers "πάροχος μόνο για τον εαυτό μου"
-There is a **separate, lighter form**: *«Αίτημα Αδειοδότησης λογισμικού
-**Ιδιοπαρόχου** ΥΠΑΗΕΣ»*. Key facts:
-- It is **for issuing your OWN documents** — **no customers required**. "Μόνο
-  εγώ / χωρίς πελάτες" is exactly this category, fully legitimate. No client
-  threshold.
-- It is **Χονδρικές-only** (the form fixes «Είδος Άδειας = Χονδρικές
-  Συναλλαγές»). For your OWN **retail** you'd need the full provider with retail
-  (which adds the cash-system-interconnection requirement, Α.1155/2023).
-- It **drops** the retail/ταμειακό-interface dossier item that the full provider
-  form requires.
+> **⚠ Corrected 2026-06 — see `research/aade-regulatory-update.md` for sources.**
+> The earlier "three license tiers" reading below was **WRONG** and is struck out.
+> A.1112/2025 (ΦΕΚ Β' 4206/1.8.2025, **replaces A.1035/2020**) establishes a
+> **single ΥΠΑΗΕΣ suitability license**. The only categorical split is **Πάροχος**
+> (serves third parties) vs **Ιδιοπάροχος** (self-provider, own B2B only).
+> Requirements: **ISO 27001** (or equivalent), **5-year** license, **≥99% uptime/
+> quarter**, 5-member Suitability Committee, penalty-points (100 → revocation),
+> **no παράβολο/εγγυητική amount specified**.
+
+~~Three **Άδειες Καταλληλότητας**: [1] Χονδρικές/Λιανικές, [2] Χονδρικές,
+[3] Λιανικές.~~ *(struck — no such tiers; single license.)*
+
+### 🔑 Ιδιοπάροχος (self-provider) — "πάροχος μόνο για τον εαυτό μου"
+- For issuing your **OWN** documents — **own wholesale (B2B) only**.
+- **⚠ Hard bar: ≥ €50,000,000 gross income** (last fiscal year) + permanent
+  establishment in Greece. → **Not realistic for Nexon/MyIP**; the strategy is
+  unambiguously **bridge to an external certified provider** (implementation-plan §8),
+  NOT becoming a provider. The ιδιοπάροχος application form stays as reference only.
 
 ### Dossier (Παράρτημα Α1 + Άρθρο 4 παρ.2) — both provider & ιδιοπάροχος
 - Καταστατικό οντότητας.

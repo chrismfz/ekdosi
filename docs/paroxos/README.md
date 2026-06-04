@@ -12,7 +12,8 @@ B2B από Οκτ. 2026· B2G ήδη μέσω PEPPOL) σε έναν φάκελο
 | `reference/A.1258-2020-declarations-decision.pdf` | ΑΑΔΕ απόφαση: οι **δηλώσεις opt-in** (Αποκλειστικής Έκδοσης μέσω Παρόχου / Αποδοχής Λήψης / Ανάκλησης). |
 | `reference/manual-paroxoi-2020-12-17.pdf` | ΑΑΔΕ εγχειρίδιο: υποβολή των δηλώσεων στο bookkeeper-web (εξουσιοδότηση Παρόχου). |
 | `reference/aade-A.1112.2025-provider-application-form.docx` | Αίτηση άδειας πλήρους παρόχου ([1] Χονδρ./Λιαν., [2] Χονδρ., [3] Λιαν.). |
-| `reference/aade-A.1112.2025-self-provider-idioparochos-application-form.docx` | Αίτηση **ιδιοπαρόχου** (δικά μας παραστατικά, χονδρική-only). |
+| `reference/aade-A.1112.2025-self-provider-idioparochos-application-form.docx` | Αίτηση **ιδιοπαρόχου** (δικά μας παραστατικά, B2B-only — bar €50M, μη ρεαλιστικό). |
+| **`research/`** | Έρευνα 2026-06 με πηγές: `invosign-api-reference.md`, `providers-survey.md` (6 πάροχοι), `peppol-b2g-reference.md`, `aade-regulatory-update.md` (διορθώσεις κανονιστικού + timeline). |
 
 ## Η μία γραμμή
 Με πάροχο, **στέλνεις** το τιμολόγιο στον πάροχο (γυρίζει ΜΑΡΚ+auth+QR)· τα

@@ -333,11 +333,26 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
 - `app/Services/MyDataSubmitter.php` — `buildAadeInvoice` (το P0 factor-out source).
 - `app/Services/SalesReconciler.php` + `MyDataConsole` — ο read path που ξαναχρησιμοποιείται.
 - `reference/A.1258-2020-declarations-decision.pdf` + `reference/manual-paroxoi-2020-12-17.pdf`
-  — η ΑΑΔΕ διαδικασία opt-in δηλώσεων (§11).
+  — η ΑΑΔΕ διαδικασία opt-in δηλώσεων (§11· A.1258 ιστορική — βλ. A.1129/2025).
+- **`research/`** (έρευνα 2026-06, με πηγές):
+  `invosign-api-reference.md` (ακριβές request/response schema),
+  `providers-survey.md` (6 πάροχοι — §13),
+  `peppol-b2g-reference.md` (PEPPOL/ΚΕΔ/Εσθονία — §7),
+  `aade-regulatory-update.md` (διορθώσεις: license, timeline, stale XSD).
 
 ---
 
 ## 11. Out-of-band προϋπόθεση: οι δηλώσεις ΑΑΔΕ (A.1258/2020)
+
+> **⚠ Ενημέρωση 2026-06 (`research/aade-regulatory-update.md`):** η A.1258/2020
+> **καταργήθηκε από 31/10/2025**· το καθεστώς δηλώσεων μεταφέρθηκε στην
+> **A.1129/2025** (άρθρο 71Θ ν.4172/2013). Ο *μηχανισμός* παρακάτω ισχύει — απλώς
+> cite **A.1129/2025** ως τρέχουσα (το A.1258 PDF μένει ιστορική αναφορά).
+>
+> **Timeline υποχρεωτικού B2B (A.1128/2025, ΦΕΚ Β' 4937/16-09-2025 + ν.5193/2025 +
+> Council Impl. Dec. (EU) 2025/502):** Φάση Α **2/2/2026** (τζίρος 2023 > €1M) ·
+> Φάση Β **1/10/2026** (όλοι οι υπόλοιποι). Κανάλι: πιστοποιημένος **Πάροχος** Ή το
+> δωρεάν **«timologio»** της ΑΑΔΕ (άρα ένας `none` tenant έχει fallback).
 
 **Κρίσιμο που έλειπε από το αρχικό σχέδιο** (το φέρνουν τα δύο PDF του χρήστη).
 Πριν εκδώσεις **έστω ένα** τιμολόγιο μέσω παρόχου, ο tenant κάνει χειροκίνητα,
@@ -407,12 +422,14 @@ fallback — ακριβώς το «retry» σενάριο που προβλέψ�
 - PEPPOL Access Point / B2G: **δεν τεκμηριώνεται δημόσια** — άρα InvoSign καλύπτει
   το **B2B leg**, όχι (αποδεδειγμένα) το Δημόσιο. Το PEPPOL leg (§7) μένει χωριστό.
 
-**⚠ Η μία διόρθωση στο σχέδιο (σημαντική):** η InvoSign **ΔΕΝ** δέχεται το raw AADE
-`invoicesDoc` XML — θέλει **δικό της bespoke XML** (`API_InvoiceDetails`/
-`API_Issuer`/`API_Counterpart`, fields `api_lineDescription`/`api_UnitPrice`/
-`api_vatCategoryPercent`/`api_quantity`/…). Άρα ο άξονας «ΤΙ» (§2.1) **δεν είναι
-ένας κοινός serializer** — **κάποιοι πάροχοι θέλουν δικό τους schema**. Σωστό
-μοντέλο:
+**⚠ Διόρθωση μετά το deep-dive (`research/invosign-api-reference.md`):** η InvoSign
+**ΔΕΝ** είναι fully-bespoke — δέχεται το **πλήρες, αμετάβλητο AADE `InvoicesDoc`**
+και απλώς **προσθέτει** ένα `<API_InvoiceDetails>` block + per-line `api_*` twins
+(printout fields). Άρα ο serializer της = **firebed `InvoicesDocWriter` + appended
+extension** (thin decorator), όχι ξαναγράψιμο. Όμως το γενικό συμπέρασμα μένει —
+**ο άξονας «ΤΙ» δεν είναι ΕΝΑΣ κοινός serializer**: το providers-survey δείχνει ότι
+άλλοι θέλουν **proprietary JSON** (SoftOne/IMPACT), **proprietary XML** (Entersoft),
+**AADE-XML passthrough** (SBZ), ή **PEPPOL UBL** (B2G). Σωστό μοντέλο:
 
 ```
 canonical ekdosi invoice (DTO)
@@ -432,4 +449,40 @@ mappings· αλλάζει μόνο η τελική σειριοποίηση). Α
 **Πρακτικό:** ο InvoSign είναι **εξαιρετικός πρώτος πραγματικός transport** (P5) —
 δημόσιο doc, sandbox, καθαρό response με ΜΑΡΚ+auth+QR. Ξεκινάμε απ' αυτόν, sandbox-
 validated όπως το myDATA 2026-05-28, και είναι το **reference impl** που αποδεικνύει
-ότι το seam δέχεται «δικό schema» πάροχο χωρίς να αγγίξει lifecycle/reconciliation.
+ότι το seam δέχεται πάροχο με δικό serializer χωρίς να αγγίξει lifecycle/reconciliation.
+
+---
+
+## 13. Validated architecture (από το `research/providers-survey.md`)
+
+Έρευνα 6 παρόχων (+ baseline AADE spec) **επιβεβαιώνει το design**:
+
+**(α) Το request format ΔΙΑΦΕΡΕΙ ανά πάροχο** → per-provider serializer + transport
++ auth είναι αναγκαίο, όχι over-engineering:
+| Format | Πάροχοι | Adapter |
+|---|---|---|
+| AADE `InvoicesDoc` XML passthrough | SBZ, AADE baseline | firebed writer + POST |
+| AADE-XML **+ extension** | InvoSign | firebed writer + appended block |
+| Proprietary JSON | SoftOne, IMPACT/ECOS | bespoke JSON builder |
+| Proprietary XML | Entersoft | bespoke XML builder |
+| Mixed JSON+XML | Primer | είτε/είτε |
+| PEPPOL UBL | B2G (IMPACT AP→ΚΕΔ) | UBL serializer (§7) |
+
+**(β) Το auth ΔΙΑΦΕΡΕΙ** (session-clientID / `API-KEY` header / `aade-user-id`+sub-key
+/ token) → ζει στο `ProviderCredentials` + στο transport, ποτέ hardcoded.
+
+**(γ) Το response είναι ΟΜΟΙΟΜΟΡΦΟ** — όλοι γυρίζουν `mark`+`authenticationCode`/
+signature+`uid`+`qrUrl`+errors → **το `ProviderResult` DTO (§2.2) είναι ρεαλιστικά
+κοινό** για όλους. Αυτό είναι το σταθερό σημείο πάνω στο οποίο κουμπώνει το
+`GrProviderSubmitter`.
+
+**Πρακτικές παρατηρήσεις:**
+- **SoftOne ECOS ≡ IMPACT backend** (`einvoiceapi.impact.gr`) → ένα JSON adapter
+  πιθανότατα καλύπτει **και τους δύο**.
+- **IMPACT τρέχει δικό του PEPPOL Access Point** → φυσικός υποψήφιος για το **B2G** leg.
+- **Epsilon Net + ILYDA: μηδέν public spec** → το interface πρέπει να ανέχεται
+  «spec-on-request» παρόχους· **μην bake-άρεις** public field names πάνω τους.
+- **firebed v5.10.4 ήδη μοντελοποιεί** `ProviderSignature`/`TransmissionFailure`/
+  `invoiceDeliveryStatus` (§2.1) — ο AADE-XML πυρήνας είναι σχεδόν δωρεάν· **όμως ο
+  committed XSD είναι v0.6.1, stale** — re-pull v1.0.9–v1.0.12 πριν το build
+  (`research/aade-regulatory-update.md`).
