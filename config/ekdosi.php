@@ -152,6 +152,36 @@ return [
             // 'invosign' => App\Services\EInvoice\Transports\InvoSignTransport::class,  // P5
             // 'sbz'      => App\Services\EInvoice\Transports\SbzTransport::class,        // P5
         ],
+
+        /*
+        | Human labels for the operator "Τρόπος αποστολής" dropdown (P3). Each key
+        | yields a "<label> — Δοκιμαστικό" + "<label> — Παραγωγή" pair. Listed here
+        | so a provider is SELECTABLE (and its credentials enterable) before the
+        | transport class is wired above — until then «Έλεγχος σύνδεσης»/filing
+        | fail loudly via the Null transport (never silently). Add/remove a line to
+        | show/hide a provider in the dropdown.
+        */
+        'provider_labels' => [
+            'invosign' => 'InvoSign',
+            'sbz' => 'SBZ',
+        ],
+
+        /*
+        | Per-provider credential field schema for the operator form (P3): the
+        | labeled inputs shown when that provider is selected (no raw JSON). Each
+        | entry: key => ['label' => …, 'secret' => bool]. Stored into the encrypted
+        | einvoice_provider_config blob. Tweak per provider's real API.
+        */
+        'provider_fields' => [
+            'invosign' => [
+                'base_url' => ['label' => 'Base URL', 'secret' => false],
+                'token' => ['label' => 'Token', 'secret' => true],
+            ],
+            'sbz' => [
+                'base_url' => ['label' => 'Base URL', 'secret' => false],
+                'api_key' => ['label' => 'API Key', 'secret' => true],
+            ],
+        ],
     ],
 
 ];

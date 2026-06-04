@@ -272,7 +272,12 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
   `GrProviderSubmitterTest` (fake transport — success/reject/guard/recover/cancel/
   ping) + factory routing. **Deferred parity:** WHMCS write-back + auto-email on
   VALID (best-effort downstream, follow-up).
-- **P3 — Company form (provider section, encrypted config, Test connection) +
+- **P3 — Company form: ✅ DONE.** Flat «Τρόπος αποστολής» dropdown (SendChannel +
+  SendChannelFormBridge), conditional «Πάροχος» tab με labeled creds + «Έλεγχος
+  σύνδεσης», myDATA creds visible και για provider tenants (read path). Operator-
+  friendly, χωρίς JSON. Tests: SendChannelTest + SendChannelFormBridgeTest +
+  CompanySendChannelTest (e2e). _(αρχικό scope:)_ Company form (provider section,
+  encrypted config, Test connection) +
   `einvoice:preflight` command.**
 - **P4 — ProviderConsole** (preflight/test-submit/per-invoice audit + myDATA
   cross-check), reuse `SalesReconciler` για το read leg.

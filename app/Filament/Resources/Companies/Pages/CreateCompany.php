@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Companies\Pages;
 
 use App\Filament\Resources\Companies\CompanyResource;
+use App\Filament\Support\SendChannelFormBridge;
 use App\Services\MyData\MyDataLookupSeeder;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
@@ -10,6 +11,15 @@ use Filament\Resources\Pages\CreateRecord;
 class CreateCompany extends CreateRecord
 {
     protected static string $resource = CompanyResource::class;
+
+    /**
+     * Decompose the flat «Τρόπος αποστολής» + labeled provider creds into the real
+     * columns (+ encrypted config) before the record is created (P3).
+     */
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        return SendChannelFormBridge::dehydrate($data, null);
+    }
 
     /**
      * Fresh-install convenience: a brand-new Greek/myDATA tenant gets the
@@ -24,7 +34,8 @@ class CreateCompany extends CreateRecord
      */
     protected function afterCreate(): void
     {
-        if ($this->record->einvoice_provider !== 'gr-mydata') {
+        // Greek lookups for any Greek filing tenant — direct myDATA OR via a provider.
+        if (! in_array($this->record->einvoice_provider, ['gr-mydata', 'gr-provider'], true)) {
             return;
         }
 

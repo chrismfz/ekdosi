@@ -13,13 +13,16 @@ use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Services\AadeRegistryLookup;
+use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Services\EInvoice\Transports\NullProviderTransport;
 use App\Services\MailTemplateRenderer;
 use App\Services\MyDataSubmitter;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
-use Illuminate\Support\Facades\Artisan;
+use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\SendChannel;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -35,6 +38,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Mail\Mailables\Address;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
@@ -77,28 +81,32 @@ class CompanyForm
                                     ->default('GR')
                                     ->live()
                                     ->afterStateUpdated(function (string $state, callable $set) {
-                                        // Sync the e-invoice provider with the country choice
-                                        $set('einvoice_provider', match ($state) {
-                                            'GR' => 'gr-mydata',
-                                            'EE' => 'ee-peppol',
-                                            default => 'none',
+                                        // Reset the send-channel to a safe default for the country.
+                                        $set('send_channel', match ($state) {
+                                            'GR' => 'mydata-off',
+                                            'EE' => 'peppol',
+                                            default => 'off',
                                         });
                                     }),
 
-                                Select::make('einvoice_provider')
+                                // The flat operator control: ONE dropdown that drives the
+                                // underlying columns (einvoice_provider / mydata_mode /
+                                // einvoice_provider_key / einvoice_provider_mode) via the
+                                // page hooks + SendChannelFormBridge. No raw columns/JSON.
+                                Select::make('send_channel')
+                                    ->label('Τρόπος αποστολής παραστατικών')
+                                    ->options(SendChannel::options(config('ekdosi.einvoice.provider_labels', [])))
+                                    ->default(SendChannel::FALLBACK)
                                     ->required()
-                                    ->options([
-                                        'gr-mydata' => 'Greek myDATA (AADE)',
-                                        'ee-peppol' => 'Estonian PEPPOL',
-                                        'none' => 'None (PDF only)',
-                                    ])
-                                    ->default('gr-mydata')
-                                    // ->live() so the dependent myDATA-submission tab's
-                                    // ->visible() check re-evaluates on direct edits, not
-                                    // only when country_code's afterStateUpdated indirectly
-                                    // sets the provider.
                                     ->live()
-                                    ->helperText('Which submitter the IssueInvoice action routes through.'),
+                                    ->native(false)
+                                    ->helperText(new HtmlString(
+                                        'Πώς φεύγουν τα παραστατικά στην ΑΑΔΕ. '
+                                        .'<strong>myDATA — Παραγωγή/Δοκιμαστικό</strong>: απευθείας (διαπιστευτήρια στην καρτέλα «myDATA»). '
+                                        .'<strong>Καθόλου</strong>: μόνο PDF, καμία αποστολή. '
+                                        .'<strong>Πάροχος</strong> (π.χ. InvoSign): μέσω παρόχου — στοιχεία στην καρτέλα «Πάροχος». '
+                                        .'<br>Τα διαπιστευτήρια myDATA μένουν πάντα — χρησιμοποιούνται για ελέγχους/συμφωνία/έξοδα ακόμη κι όταν στέλνεις μέσω παρόχου.'
+                                    )),
 
                                 TextInput::make('afm')
                                     ->label('AFM / VAT number')
@@ -209,47 +217,18 @@ class CompanyForm
                             ])
                             ->columns(2),
 
-                        Tab::make('myDATA submission')
-                            // Only relevant for the Greek myDATA submitter.
-                            ->visible(fn (callable $get) => $get('einvoice_provider') === 'gr-mydata')
+                        Tab::make('myDATA')
+                            // Shown for BOTH direct-myDATA and provider channels: a provider
+                            // tenant still needs myDATA credentials for the READ path
+                            // (reconciliation / έξοδα). Hidden only for PEPPOL / «none».
+                            ->visible(fn (callable $get) => in_array(
+                                SendChannel::decompose((string) $get('send_channel'))['einvoice_provider'],
+                                ['gr-mydata', 'gr-provider'],
+                                true,
+                            ))
                             ->schema([
-                                // The mode picks WHICH credential set below is
-                                // actually used at submission time. Both sets are
-                                // stored permanently, so switching environments is
-                                // just changing this dropdown — no re-keying.
-                                Section::make('Περιβάλλον υποβολής')
-                                    ->description('Διάλεξε ποιο περιβάλλον AADE χρησιμοποιείται. Τα διαπιστευτήρια Sandbox και Production αποθηκεύονται χωριστά πιο κάτω — δεν χρειάζεται να τα ξαναβάζεις κάθε φορά, μόνο να αλλάζεις το mode.')
-                                    ->schema([
-                                        Select::make('mydata_mode')
-                                            ->label('Submission mode')
-                                            ->options(MyDataMode::options())
-                                            ->default(MyDataMode::Off->value)
-                                            ->required()
-                                            ->live()
-                                            ->helperText(new HtmlString(
-                                                '<strong>Off</strong> = no AADE call (PDFs only, safe for testing). '
-                                                .'<strong>Sandbox</strong> = AADE test endpoint (synthetic MARKs), uses the Sandbox credentials. '
-                                                .'<strong>Production</strong> = LIVE submissions affecting real tax records, uses the Production credentials. '
-                                                .'<br><strong>⚠ Switching to/from Production:</strong> the change takes effect '
-                                                .'on save. Verify credentials via "Test … connection" before going Live; '
-                                                .'switching back to Off/Sandbox stops legally-required filings.'
-                                            )),
-                                        // Note: a Notification-on-afterStateUpdated approach
-                                        // was tried and removed — it fired on every form
-                                        // state change (including immediate undos), creating
-                                        // toast spam that trained operators to ignore the
-                                        // warnings. The safer pattern is to surface the
-                                        // mode-change semantic in helperText + a real
-                                        // confirm modal on the EditCompany page's save
-                                        // action when mydata_mode transitions involve
-                                        // Production. That belongs on the page class, not
-                                        // the form schema — tracked in CLAUDE.md as a
-                                        // deferred follow-up since it requires touching
-                                        // EditCompany.php and a custom save action.
-                                    ]),
-
                                 Section::make('Sandbox / Developer credentials')
-                                    ->description('REST credentials for the AADE test endpoint (synthetic MARKs). Stored encrypted at rest. Leave the key blank on edit to keep the existing value.')
+                                    ->description('Το περιβάλλον (Παραγωγή/Δοκιμαστικό/Καθόλου) επιλέγεται από το «Τρόπος αποστολής» στην καρτέλα Στοιχεία — εδώ μπαίνουν μόνο τα διαπιστευτήρια. REST credentials για το test endpoint της ΑΑΔΕ (synthetic MARKs). Κρυπτογραφημένα. Άφησε το key κενό στην επεξεργασία για να κρατηθεί το υπάρχον. ⚠ Πριν πας σε Παραγωγή, δοκίμασε με «Test Sandbox connection».')
                                     ->schema([
                                         TextInput::make('mydata_aade_id_sandbox')
                                             ->label('SANDBOX — AADE user ID (aade-user-id header)')
@@ -290,6 +269,18 @@ class CompanyForm
                                             'Test Production connection',
                                             MyDataMode::Production,
                                         ),
+                                    ]),
+                            ]),
+
+                        Tab::make('Πάροχος (ΥΠΑΗΕΣ)')
+                            // Shown only when «Τρόπος αποστολής» is a provider channel.
+                            ->visible(fn (callable $get) => SendChannel::isProvider((string) $get('send_channel')))
+                            ->schema([
+                                Section::make('Στοιχεία παρόχου')
+                                    ->description('Συμπληρώνονται όταν στέλνεις μέσω παρόχου. Αποθηκεύονται κρυπτογραφημένα. Άφησε τον μυστικό κωδικό κενό στην επεξεργασία για να κρατηθεί ο υπάρχων. Όταν ολοκληρωθεί η τεχνική σύνδεση με τον πάροχο, το «Έλεγχος σύνδεσης» θα επιβεβαιώνει τα στοιχεία.')
+                                    ->schema(self::providerCredentialFields())
+                                    ->footerActions([
+                                        self::providerTestAction(),
                                     ]),
                             ]),
 
@@ -934,6 +925,75 @@ class CompanyForm
      * credentials must be saved first (the action reads $record, not the
      * live form state) — same caveat as every other "Test" button here.
      */
+    /**
+     * Labeled credential inputs for every configured provider (P3). Each is visible
+     * only when its provider is the selected channel; secret fields are masked and
+     * follow "blank = keep stored". State paths are the synthetic cfg_<key>_<field>
+     * the SendChannelFormBridge assembles into the encrypted config blob.
+     *
+     * @return array<int, TextInput>
+     */
+    private static function providerCredentialFields(): array
+    {
+        $fields = [];
+        foreach (config('ekdosi.einvoice.provider_fields', []) as $key => $defs) {
+            foreach ((array) $defs as $name => $meta) {
+                $input = TextInput::make("cfg_{$key}_{$name}")
+                    ->label($meta['label'] ?? $name)
+                    ->maxLength(255)
+                    ->visible(fn (callable $get) => SendChannel::providerKey((string) $get('send_channel')) === $key);
+
+                if ($meta['secret'] ?? false) {
+                    $input->password()
+                        ->revealable()
+                        ->dehydrated(fn (?string $state): bool => filled($state));
+                }
+
+                $fields[] = $input;
+            }
+        }
+
+        return $fields;
+    }
+
+    private static function providerTestAction(): FormAction
+    {
+        return FormAction::make('test_provider')
+            ->label('Έλεγχος σύνδεσης')
+            ->icon('heroicon-o-bolt')
+            ->action(function (?Company $record) {
+                if (! $record) {
+                    Notification::make()->title('Αποθήκευσε πρώτα την εταιρεία, μετά δοκίμασε.')->warning()->send();
+
+                    return;
+                }
+
+                $key = (string) $record->einvoice_provider_key;
+                $transport = app(ProviderTransportRegistry::class)->for($key);
+
+                if ($transport instanceof NullProviderTransport) {
+                    Notification::make()
+                        ->title('Ο πάροχος δεν έχει ενεργοποιηθεί ακόμη')
+                        ->body('Η τεχνική σύνδεση με τον πάροχο «'.($key ?: '—').'» ενεργοποιείται σε επόμενη έκδοση. Τα στοιχεία αποθηκεύονται κανονικά στο μεταξύ.')
+                        ->warning()->send();
+
+                    return;
+                }
+
+                try {
+                    $ok = $transport->ping(ProviderCredentials::fromCompany($record));
+                } catch (\Throwable $e) {
+                    Notification::make()->title('Αποτυχία σύνδεσης με τον πάροχο')->body($e->getMessage())->warning()->send();
+
+                    return;
+                }
+
+                $ok
+                    ? Notification::make()->title('Επιτυχής σύνδεση με τον πάροχο')->success()->send()
+                    : Notification::make()->title('Ο πάροχος απέρριψε τα στοιχεία')->body('Έλεγξε τα διαπιστευτήρια του παρόχου.')->danger()->send();
+            });
+    }
+
     private static function mydataTestAction(string $name, string $label, MyDataMode $environment): FormAction
     {
         return FormAction::make($name)
