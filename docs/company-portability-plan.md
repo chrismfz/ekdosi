@@ -101,12 +101,21 @@ phase 1."* Portability goal is right; here's the honest tradeoff so we pick a
 | **4. Envelope encryption (RECOMMENDED)** | ✅ | ✅ | Per-company random `data_key`; the 7 secret columns are encrypted with `data_key`; `data_key` itself is stored **wrapped by APP_KEY**. Migration = re-wrap **one** small key on the target VM; columns untouched. |
 | **5. Passphrase-protected export (no schema change)** | ✅ | ✅ | Keep option 1 at rest; at **export** time decrypt + re-encrypt the bundle under an operator passphrase; on **import** the passphrase decrypts and re-encrypts under the new VM's APP_KEY. Zero plaintext at rest, zero schema change. |
 
-**Recommendation:** **Option 5 now** (smallest, no migration, unblocks
-everything) and treat **Option 4** as the longer-term "fully portable" target
-the operator described — it makes future moves trivial (re-wrap one key) while
-keeping at-rest security. **Avoid 2 & 3** — they store credentials effectively
-in clear. (Dual-use note: these are live tax-authority + billing-provider
-credentials; plaintext-at-rest is the one thing we shouldn't ship.)
+**DECISION (locked): Option 5 — passphrase-protected export.** Smallest,
+no schema change, works today, zero plaintext at rest. The bundle's secrets are
+encrypted under an operator-supplied **passphrase** at export and re-encrypted
+under the target VM's APP_KEY at import. Option 4 (envelope) stays the optional
+longer-term upgrade if cross-VM volume ever justifies it. Options 2 & 3 are
+**rejected** (they store credentials effectively in clear).
+
+**Operator escape-hatch (explicit opt-out):** if the operator deliberately
+wants **no** passphrase — e.g. a raw data dump for debugging on a trusted box —
+a `--raw` / "χωρίς κρυπτογράφηση" toggle produces an **unencrypted** bundle.
+This is **off by default**, requires an explicit confirm, stamps
+`secrets_mode: raw` in the manifest, and shows a clear "secrets are in clear
+text" warning. It's a conscious human choice, never the silent default, and is
+**blocked for remote destinations** (see Automated backups) — raw bundles only
+ever land on local/explicitly-confirmed targets.
 
 Either way the **same-VM rebuild** (need #2 / tomorrow) needs *no* re-keying at
 all: carry the encrypted blobs verbatim, same APP_KEY, they just work.
@@ -196,9 +205,10 @@ Buckets **A + B**. `company:export --tenant=SLUG [--out=file]` and
 `company:import --file=… [--into=SLUG|--new]`, plus a Filament action on the
 Company resource ("Εξαγωγή ρυθμίσεων" / "Εισαγωγή ρυθμίσεων") — **download** the
 bundle and **upload-to-restore** (dry-run preview → import) from the UI, not
-CLI-only. Secrets via the chosen mode (default: same-VM verbatim; `--passphrase`
-for option 5). Carries the logo file. Idempotent by natural keys. **This is the
-piece the operator's chosen tomorrow-route depends on.**
+CLI-only. Secrets: **passphrase by default** (option 5; same passphrase needed
+to restore), with the explicit `--raw` opt-out for an unencrypted debug dump.
+Carries the logo file. Idempotent by natural keys. **This is the piece the
+operator's chosen tomorrow-route depends on.**
 
 ### Phase 2 — Full company export/import
 Add bucket **C** + FK rewiring + the `files/` (attachments) payload. Big-bundle
@@ -249,9 +259,9 @@ and option 5 (passphrase) isn't enough.
 ---
 
 ## Open decisions (need operator sign-off before Phase 1 code)
-- **⟨DECISION⟩ Secrets mode for Phase 1:** option 5 (passphrase) vs verbatim
-  same-VM only vs commit to option 4 envelope now. (Recommend: verbatim default
-  + `--passphrase` opt-in; envelope later.)
+- **✅ DECIDED — Secrets mode:** option 5 (passphrase-protected export) as the
+  default, with an explicit `--raw` operator opt-out (unencrypted debug dump,
+  blocked for remote destinations). Envelope (option 4) deferred.
 - **⟨DECISION⟩ Bucket for `billing_connections` / `servers` / `server_groups`.**
 - **⟨DECISION⟩** Do we export `activity_log` and the full myDATA request/response
   XML in the full bundle (legal audit) or treat them as non-portable history?
