@@ -10,6 +10,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-06-03
+### Added
+- **#5b — official PDF in the CLIENT AREA, behind a knob.** New addon config
+  switch **«Show official PDF to customers»** (`show_pdf_client_area`, default
+  OFF — admin-only). When ON, a «Επίσημο παραστατικό (ΑΑΔΕ)» button is injected
+  on the client-area invoice view page (next to WHMCS's Download link) via two
+  cooperating hooks (`ClientAreaPageViewInvoice` resolves the signed ekdosi PDF
+  URL + re-checks ownership; `ClientAreaFooterOutput` injects the button) — no
+  theme edit. Customers only ever see their own invoices' link.
+
 ## [0.35.0] — 2026-06-03
 ### Added
 - **Official παραστατικό PDF link (`mod_ekdosi_invoice_marks.pdf_url`).** The

@@ -23,8 +23,9 @@ they merge.
   + `Invoice::publicPdfUrl()` (permanent HMAC-signed). The write-back hands the
   bridge this URL (`WhmcsBridgeClient::setInvoiced(..., $pdfUrl)`), so the WHMCS
   admin manage-invoice page links the official παραστατικό — PDF stays on ekdosi
-  (source of truth), no copy. Customer-area button is the #5b follow-up
-  (outward-facing — pending explicit go-ahead).
+  (source of truth), no copy. **#5b:** the same link can be shown on the WHMCS
+  CLIENT-AREA invoice page too, behind the plugin's «Show official PDF to
+  customers» switch (default OFF — admin-only until flipped on for testing).
 - **Cancellation write-back to WHMCS (state).** When ekdosi cancels an invoice at
   AADE, `MyDataSubmitter::cancel` now re-pushes the SAME MARK with
   `state='cancelled'` (new `WhmcsWritebackService::syncCancelledFromLifecycle`,

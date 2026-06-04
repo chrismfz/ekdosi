@@ -65,7 +65,7 @@ function ekdosi_bridge_config(): array
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.35.0',
+        'version' => '0.36.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [
@@ -97,6 +97,14 @@ function ekdosi_bridge_config(): array
                 'Type' => 'text',
                 'Size' => '40',
                 'Description' => 'Optional. Comma-separated WHMCS client IDs. When set, ONLY these clients see/use v2 (everyone else sees nothing, even with the switch on). Leave blank for all clients.',
+            ],
+            // #5b: show the official ekdosi PDF link on the CLIENT-AREA invoice
+            // page (customers). OFF by default — admin-only until flipped on for
+            // testing. The link is the same signed ekdosi URL the admin badge uses.
+            'show_pdf_client_area' => [
+                'FriendlyName' => 'Show official PDF to customers',
+                'Type' => 'yesno',
+                'Description' => 'Show a «Επίσημο παραστατικό (ΑΑΔΕ)» button on the client-area invoice view page. OFF by default (admin-only). Flip on to let customers open the official ekdosi PDF (signed link, only their own invoices).',
             ],
         ],
     ];
