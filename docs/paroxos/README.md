@@ -8,6 +8,7 @@ B2B από Οκτ. 2026· B2G ήδη μέσω PEPPOL) σε έναν φάκελο
 |---|---|
 | **`implementation-plan.md`** | **Το σχέδιο υλοποίησης** — *πώς* το χτίζουμε: transport-adapter abstraction (πολλοί πάροχοι, ο καθένας με δικό του API), per-tenant provider+credentials κρατώντας τα myDATA creds, «Πάροχος Console», B2G/PEPPOL, οι δηλώσεις A.1258/2020, πρώτος transport (InvoSign). **Ξεκίνα από εδώ.** |
 | `regulatory-blueprint.md` | Το *γιατί/κανονιστικό* — ο ρόλος του παρόχου πέρα από myDATA, το AADE provider XSD field-by-field, Α.1112/2025 πιστοποίηση, ιδιοπάροχος, PEPPOL/ViDA. |
+| **`provider-integration-checklist.md`** | **Τι ζητάμε από κάθε πάροχο** (email template + τι κάνουμε με τα sandbox creds). Shortlist: **SBZ Systems + InvoSign**. |
 | `reference/aade-provider-invoicesDoc-v0.6.1.xsd` | Το AADE **provider** invoice schema (`InvoicesDoc`/`AadeBookInvoiceType` + `authenticationCode`/`transmissionFailure`). |
 | `reference/A.1258-2020-declarations-decision.pdf` | ΑΑΔΕ απόφαση: οι **δηλώσεις opt-in** (Αποκλειστικής Έκδοσης μέσω Παρόχου / Αποδοχής Λήψης / Ανάκλησης). |
 | `reference/manual-paroxoi-2020-12-17.pdf` | ΑΑΔΕ εγχειρίδιο: υποβολή των δηλώσεων στο bookkeeper-web (εξουσιοδότηση Παρόχου). |

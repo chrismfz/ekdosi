@@ -305,6 +305,22 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
 δικά τους credentials. Αν ποτέ χρειαστεί ιδιοπάροχος, ο **ίδιος** `AadeInvoiceDocument`
 + ένα «mint our own authenticationCode» transport το καλύπτει — το seam δεν αλλάζει.
 
+### ✅ Απόφαση (2026-06): shortlist = **SBZ Systems + InvoSign**
+Επιλέχθηκαν οι **δύο πιο φιλικοί σε third-party ERP** (δημόσιο doc + sandbox + AADE-XML
+βάση + απλό auth — `research/providers-survey.md`). Και οι δύο **χτίζονται πάνω στο P0**
+(`AadeInvoiceDocument`) που ήδη παράγει το AADE InvoicesDoc XML:
+- **SBZ Systems** — **καθαρό AADE InvoicesDoc XML passthrough** (`API-KEY` header,
+  ρητά sandbox/production endpoints). **Μηδέν νέος serializer** — το `toXml()` του P0
+  πάει σχεδόν αυτούσιο. = ο **πρώτος/ευκολότερος transport**, αποδεικνύει το seam.
+- **InvoSign** — AADE XML **+ thin `<API_InvoiceDetails>` decorator** (token auth,
+  demo env). Αποδεικνύει ότι το seam δέχεται provider-extension χωρίς να αγγίξει
+  lifecycle. (Sandbox creds ζητήθηκαν με email.)
+- Όποιος δώσει sandbox πρώτος → το **P5 reference impl**. Και οι δύο AADE-XML → κοινός
+  κορμός, αλλάζει μόνο `{transport, auth, (InvoSign) extension}`. Checklist για τα
+  emails: `provider-integration-checklist.md`.
+- **Επιφύλαξη:** «εύκολο API» ≠ εμπορική επιλογή. Για **B2G/Δημόσιο** ο **IMPACT**
+  είναι ο μόνος επιβεβαιωμένος PEPPOL Access Point — ξεχωριστή ματιά αν μπει Δημόσιο.
+
 ---
 
 ## 9. Risks / invariants
