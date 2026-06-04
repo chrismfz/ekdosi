@@ -870,16 +870,23 @@ class CompanyForm
 
                                                 return $schema;
                                             })
-                                            ->action(function (array $data, Set $set) {
-                                                $map = [];
+                                            ->action(function (array $data, ?Company $record, Set $set) {
+                                                // MERGE into the existing map — only set/unset the picker's
+                                                // OWN roles, so a role outside the picker (e.g. a hand-entered
+                                                // toinvoice) is never silently wiped by applying the picker.
+                                                $map = (array) ($record?->whmcs_custom_field_map ?? []);
+                                                $applied = 0;
                                                 foreach (['vatno', 'wantsinvoice', 'taxoffice', 'occupation', 'griniaris'] as $role) {
                                                     if (filled($data[$role] ?? null) && (int) $data[$role] > 0) {
                                                         $map[$role] = (int) $data[$role];
+                                                        $applied++;
+                                                    } else {
+                                                        unset($map[$role]);   // cleared in the picker → drop it
                                                     }
                                                 }
                                                 $set('whmcs_custom_field_map', $map);
                                                 Notification::make()
-                                                    ->title('Αντιστοιχίστηκαν '.count($map).' πεδία')
+                                                    ->title('Αντιστοιχίστηκαν '.$applied.' πεδία')
                                                     ->body('Πάτησε «Save» για να αποθηκευτεί η αντιστοίχιση.')
                                                     ->success()->send();
                                             }),
