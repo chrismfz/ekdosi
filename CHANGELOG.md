@@ -17,6 +17,19 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **E-invoice provider operator UI (P3):** the Company form gets ONE flat
+  «Τρόπος αποστολής παραστατικών» dropdown — `myDATA — Παραγωγή/Δοκιμαστικό`,
+  `Καθόλου (μόνο PDF)`, and per-provider `InvoiceSign/SBZ — Δοκιμαστικό/Παραγωγή`
+  (from `config ekdosi.einvoice.provider_labels`). It drives the four underlying
+  columns + the encrypted provider-config blob via `SendChannel` (pure, tested
+  channel↔columns brain) + `SendChannelFormBridge` (page-hook hydrate/dehydrate;
+  secrets follow "blank = keep stored"). A conditional «Πάροχος» tab shows labeled
+  credential inputs (no raw JSON) + «Έλεγχος σύνδεσης» (→ transport ping; clear
+  "δεν έχει ενεργοποιηθεί ακόμη" notice until the transport is wired). The myDATA
+  tab now shows for provider tenants too (myDATA creds = the read/reconciliation
+  path). Operator-friendly Greek helper text throughout. New-GR-tenant lookup
+  seeding now covers `gr-provider` too. No behaviour change to filing. **Deploy:**
+  `php artisan migrate` already covered the columns (P1).
 - **E-invoice provider submitter (P2):** `App\Services\EInvoice\GrProviderSubmitter`
   — files an invoice through a certified ΥΠΑΗΕΣ provider by reusing the SAME
   `AadeInvoiceDocument` payload and handing the XML to the injected transport.

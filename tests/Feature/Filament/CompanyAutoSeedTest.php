@@ -47,7 +47,7 @@ class CompanyAutoSeedTest extends TestCase
                 'name' => 'Νέα ΑΕ',
                 'slug' => $slug,
                 'country_code' => 'GR',
-                'einvoice_provider' => 'gr-mydata',
+                'send_channel' => 'mydata-off',
             ])
             ->call('create')
             ->assertHasNoFormErrors();
@@ -81,7 +81,7 @@ class CompanyAutoSeedTest extends TestCase
                 'name' => 'EE OÜ',
                 'slug' => $slug,
                 'country_code' => 'EE',
-                'einvoice_provider' => 'ee-peppol',
+                'send_channel' => 'peppol',
             ])
             ->call('create')
             ->assertHasNoFormErrors();
