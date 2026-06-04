@@ -30,6 +30,12 @@ they merge.
   v0.32.0 (closes the deploy-ordering trap that would break the push path);
   reversible with `--off`. The flag drives both pull and push; plugin-less
   tenants stay on the native API ("API only when there's no plugin").
+- **Company «Fetch pending» button → Plugin-API for bridge tenants.** The admin
+  Company form's manual fetch now delegates to `whmcs:fetch-pending` for tenants
+  on `whmcs_fetch_via_bridge` (same source + legacy-invoiced refresh as the
+  scheduler), instead of its own native-API loop — closing the last spot that
+  still hit the WHMCS API on the happy path. Plugin-less tenants keep the native
+  loop.
 ### Fixed
 - **Scheduler silent multi-day stall — bounded `withoutOverlapping(30)`.** Every
   scheduled task used the default 24h overlap-lock TTL; a run killed mid-flight

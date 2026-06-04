@@ -19,6 +19,7 @@ use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
+use Illuminate\Support\Facades\Artisan;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -734,6 +735,31 @@ class CompanyForm
 
                                                     return;
                                                 }
+
+                                                // Plugin-API tenants: delegate to whmcs:fetch-pending so this
+                                                // button uses the SAME source (resolve.php op=invoices) and
+                                                // legacy-invoiced refresh as the scheduler/CLI — no native
+                                                // WHMCS API here. Non-bridge tenants fall through to the
+                                                // native loop below (correct for a plugin-less WHMCS).
+                                                if ((bool) $record->whmcs_fetch_via_bridge) {
+                                                    try {
+                                                        $exit = Artisan::call('whmcs:fetch-pending', ['--tenant' => $record->slug]);
+                                                    } catch (\Throwable $e) {
+                                                        Notification::make()->title('Fetch failed')->body($e->getMessage())->danger()->persistent()->send();
+
+                                                        return;
+                                                    }
+                                                    $summary = collect(preg_split('/\r?\n/', trim(Artisan::output())))
+                                                        ->first(fn ($l) => str_contains((string) $l, 'Summary')) ?: 'Done.';
+                                                    Notification::make()
+                                                        ->title($exit === 0 ? "Fetched into inbox: {$record->name}" : 'Fetched with issues (exit '.$exit.')')
+                                                        ->body((string) $summary.' · via Plugin-API (bridge)')
+                                                        ->{$exit === 0 ? 'success' : 'warning'}()
+                                                        ->persistent()->send();
+
+                                                    return;
+                                                }
+
                                                 try {
                                                     $client = app(WhmcsClientFactory::class)->for($record);
                                                     $ingestor = app(WhmcsInvoiceIngestor::class);
