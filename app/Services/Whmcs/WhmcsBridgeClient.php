@@ -82,7 +82,7 @@ class WhmcsBridgeClient
      * message if they need to distinguish (the filer currently
      * treats it as a non-fatal log).
      */
-    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null): void
+    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null, ?string $pdfUrl = null): void
     {
         $bodyData = [
             'whmcs_invoice_id' => $whmcsInvoiceId,
@@ -90,6 +90,16 @@ class WhmcsBridgeClient
         ];
         if ($invcode !== null && $invcode !== '') {
             $bodyData['invcode'] = $invcode;
+        }
+        // AADE state ('active'/'cancelled') so the WHMCS badge can show
+        // «ΑΚΥΡΩΜΕΝΟ» after a cancellation. Omitted when null (older flow).
+        if ($state !== null && $state !== '') {
+            $bodyData['state'] = $state;
+        }
+        // Signed public URL to the official παραστατικό PDF (hosted on ekdosi);
+        // the bridge surfaces it as a link. Omitted when null.
+        if ($pdfUrl !== null && $pdfUrl !== '') {
+            $bodyData['pdf_url'] = $pdfUrl;
         }
         $body = json_encode($bodyData, JSON_THROW_ON_ERROR);
 
@@ -249,6 +259,35 @@ class WhmcsBridgeClient
         // can stage on).
         return array_values(array_filter($invoices, static fn ($p): bool => is_array($p)
             && (int) ($p['invoiceid'] ?? $p['id'] ?? 0) > 0));
+    }
+
+    /**
+     * Plugin-API op=invoice: fetch ONE invoice's full payload (the single-invoice
+     * twin of fetchPendingInvoices), so the push path («Αποστολή» → invoice-paid
+     * webhook) can pull the canonical payload from the bridge instead of the
+     * native WHMCS API. Shape-compatible with getInvoiceWithClient, so the
+     * ingestor consumes it unchanged.
+     *
+     * Returns null when the bridge reports no such invoice (`invoice: null`),
+     * which the caller maps to "not found". Throws WhmcsUnreachable /
+     * WhmcsApiException like the other ops (a genuine transport/auth failure must
+     * surface — never be silently swallowed as "not found").
+     *
+     * @return array<string, mixed>|null
+     */
+    public function fetchInvoice(int $whmcsInvoiceId, bool $withRouting = false): ?array
+    {
+        $body = ['op' => 'invoice', 'invoice_id' => $whmcsInvoiceId];
+        if ($withRouting) {
+            $body['with_routing'] = true;
+        }
+
+        $data = $this->postResolve($body);
+        $invoice = $data['invoice'] ?? null;
+
+        return is_array($invoice) && (int) ($invoice['invoiceid'] ?? $invoice['id'] ?? 0) > 0
+            ? $invoice
+            : null;
     }
 
     /**

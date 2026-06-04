@@ -118,6 +118,39 @@ $mark = (string) ($payload['mark'] ?? '');
 // Optional: the ekdosi ΤΠΥ (e.g. ΑΠΥ423), shown next to the MARK on the admin
 // badges. Absent on older ekdosi versions → stored as null, no behaviour change.
 $invcode = trim((string) ($payload['invcode'] ?? ''));
+// Optional: the AADE state ('active'/'cancelled'). When ekdosi cancels at AADE
+// it re-pushes the SAME mark with state='cancelled' so the badge can show
+// «ΑΚΥΡΩΜΕΝΟ». Absent on older ekdosi → null, badge falls back to "filed".
+$state = strtolower(trim((string) ($payload['state'] ?? '')));
+if (! in_array($state, ['active', 'cancelled'], true)) {
+    $state = '';
+}
+// Optional: signed public URL to the official ekdosi παραστατικό PDF. Accept
+// ONLY http(s) AND only when the host matches the tenant's configured
+// `ekdosi_base_url` — so even a caller holding the webhook secret can't store a
+// trusted-looking «Επίσημο παραστατικό» link pointing at a phishing host. When
+// no base URL is configured we fall back to scheme-only. Stored verbatim; the
+// badge renders it htmlspecialchar'd.
+$pdfUrl = trim((string) ($payload['pdf_url'] ?? ''));
+if ($pdfUrl !== '') {
+    $okScheme = (bool) preg_match('#^https?://#i', $pdfUrl);
+    $base = (string) (Capsule::table('tbladdonmodules')
+        ->where('module', 'ekdosi_bridge')
+        ->where('setting', 'ekdosi_base_url')
+        ->value('value') ?? '');
+    $expectedHost = $base !== '' ? (string) (parse_url($base, PHP_URL_HOST) ?? '') : '';
+    $host = (string) (parse_url($pdfUrl, PHP_URL_HOST) ?? '');
+    if (! $okScheme || ($expectedHost !== '' && strcasecmp($host, $expectedHost) !== 0)) {
+        // Don't drop SILENTLY — a host/www/port drift between APP_URL and
+        // ekdosi_base_url would otherwise make the «Επίσημο παραστατικό» link
+        // vanish with no clue. Leave a breadcrumb in the WHMCS activity log.
+        if (function_exists('logActivity') && $pdfUrl !== '') {
+            logActivity('EkdosiBridge: rejected pdf_url for WHMCS invoice #'.$whmcsInvoiceId
+                .' — host "'.$host.'" != configured ekdosi host "'.$expectedHost.'".');
+        }
+        $pdfUrl = '';
+    }
+}
 if ($whmcsInvoiceId <= 0 || $mark === '') {
     http_response_code(400);
     echo json_encode([
@@ -169,7 +202,7 @@ if ($current !== null && $current !== $mark) {
 // Persist the MARK as a STRING in our own table — never touch
 // tblinvoices.invoiced (legacy SMALLINT flag).
 try {
-    InvoiceMarkStore::set($whmcsInvoiceId, $mark, $invcode !== '' ? $invcode : null);
+    InvoiceMarkStore::set($whmcsInvoiceId, $mark, $invcode !== '' ? $invcode : null, $state !== '' ? $state : null, $pdfUrl !== '' ? $pdfUrl : null);
 } catch (\Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'db_update_failed', 'message' => $e->getMessage()]);
@@ -188,4 +221,6 @@ echo json_encode([
     'whmcs_invoice_id' => $whmcsInvoiceId,
     'mark'             => $mark,
     'invcode'          => $invcode !== '' ? $invcode : null,
+    'state'            => $state !== '' ? $state : null,
+    'pdf_url'          => $pdfUrl !== '' ? $pdfUrl : null,
 ]);

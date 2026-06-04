@@ -236,6 +236,36 @@ class WhmcsInvoicePaidWebhookTest extends TestCase
         $this->assertSame(1, PendingWhmcsInvoice::count());
     }
 
+    public function test_fetches_payload_via_bridge_when_tenant_uses_fetch_via_bridge(): void
+    {
+        // Plugin-API path: a tenant on whmcs_fetch_via_bridge pulls the canonical
+        // payload from OUR plugin (resolve.php op=invoice), NOT the native WHMCS
+        // API. Same staging result; the native api.php must never be hit.
+        $tenant = $this->configuredTenant();
+        $tenant->update(['whmcs_fetch_via_bridge' => true]);
+
+        Http::fake([
+            '*resolve.php' => Http::response([
+                'status'  => 'ok',
+                'invoice' => ['invoiceid' => 777, 'id' => 777, 'userid' => 88, 'total' => '40.00'],
+            ], 200),
+        ]);
+
+        $response = $this->postSigned($tenant->slug, ['whmcs_invoice_id' => 777]);
+
+        $response->assertStatus(202)->assertJson([
+            'whmcs_invoice_id' => 777,
+            'created'          => true,
+        ]);
+        $this->assertSame(1, PendingWhmcsInvoice::count());
+        $this->assertSame(777, PendingWhmcsInvoice::first()->whmcs_invoice_id);
+
+        Http::assertSent(fn (\Illuminate\Http\Client\Request $r) => str_contains($r->url(), 'resolve.php')
+            && (json_decode($r->body(), true)['op'] ?? null) === 'invoice'
+            && (json_decode($r->body(), true)['invoice_id'] ?? null) === 777);
+        Http::assertNotSent(fn (\Illuminate\Http\Client\Request $r) => str_contains($r->url(), 'api.php'));
+    }
+
     // ===================== Fix #4: audit logging for rejections =====================
 
     public function test_logs_warning_when_signature_invalid(): void

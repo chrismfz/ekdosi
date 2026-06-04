@@ -18,7 +18,7 @@ use App\Services\MyDataSubmitter;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
-use App\Services\Whmcs\WhmcsInvoiceIngestor;
+use Illuminate\Support\Facades\Artisan;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -734,103 +734,29 @@ class CompanyForm
 
                                                     return;
                                                 }
+
+                                                // ONE source path: delegate to whmcs:fetch-pending, which itself
+                                                // picks bridge (Plugin-API) vs native WHMCS API per the tenant's
+                                                // whmcs_fetch_via_bridge flag AND runs the legacy-invoiced refresh.
+                                                // The button no longer re-implements the native ingest loop, so
+                                                // source-selection + legacy-refresh behaviour can't drift between
+                                                // this button and the scheduler/CLI. (Runs synchronously; a very
+                                                // large tenant could approach the request timeout — the scheduled
+                                                // task is the bulk path.)
                                                 try {
-                                                    $client = app(WhmcsClientFactory::class)->for($record);
-                                                    $ingestor = app(WhmcsInvoiceIngestor::class);
-                                                    $minDate = $record->whmcs_invoice_min_date?->format('Y-m-d');
-                                                    $list = $client->getPendingInvoices(limit: 100, minDate: $minDate);
-                                                } catch (WhmcsNotConfigured $e) {
-                                                    Notification::make()->title('WHMCS not configured')->body($e->getMessage())->warning()->send();
-
-                                                    return;
-                                                } catch (WhmcsAuthenticationFailed $e) {
-                                                    Notification::make()->title('WHMCS credentials rejected')->body($e->getMessage())->danger()->persistent()->send();
-
-                                                    return;
-                                                } catch (WhmcsUnreachable $e) {
-                                                    Notification::make()->title('WHMCS unreachable')->body($e->getMessage())->danger()->persistent()->send();
-
-                                                    return;
-                                                } catch (WhmcsApiException $e) {
-                                                    Notification::make()->title('WHMCS error')->body($e->getMessage())->danger()->persistent()->send();
+                                                    $exit = Artisan::call('whmcs:fetch-pending', ['--tenant' => $record->slug]);
+                                                } catch (\Throwable $e) {
+                                                    Notification::make()->title('Fetch failed')->body($e->getMessage())->danger()->persistent()->send();
 
                                                     return;
                                                 }
-
-                                                if (empty($list)) {
-                                                    Notification::make()
-                                                        ->title('Nothing to stage')
-                                                        ->body('WHMCS returned no paid+unfiled invoices.')
-                                                        ->success()->send();
-
-                                                    return;
-                                                }
-
-                                                $created = 0;
-                                                $updated = 0;
-                                                $frozen = 0;
-                                                $failed = 0;
-                                                $abortReason = null;
-
-                                                foreach ($list as $listRow) {
-                                                    $invoiceId = (int) ($listRow['id'] ?? 0);
-                                                    if ($invoiceId <= 0) {
-                                                        $failed++;
-
-                                                        continue;
-                                                    }
-                                                    try {
-                                                        $payload = $client->getInvoiceWithClient($invoiceId);
-                                                        if ($payload === null) {
-                                                            $failed++;
-
-                                                            continue;
-                                                        }
-                                                        $result = $ingestor->ingest($record, $payload);
-                                                        if ($result->created) {
-                                                            $created++;
-                                                        } elseif ($result->auditPreserved) {
-                                                            $frozen++;
-                                                        } else {
-                                                            $updated++;
-                                                        }
-                                                    } catch (WhmcsAuthenticationFailed $e) {
-                                                        // Tenant-fatal: same logic as the artisan
-                                                        // command. Abort the loop and surface the
-                                                        // partial result.
-                                                        $abortReason = 'WHMCS authentication failed: '.$e->getMessage();
-                                                        break;
-                                                    } catch (WhmcsUnreachable $e) {
-                                                        $abortReason = 'WHMCS unreachable: '.$e->getMessage();
-                                                        break;
-                                                    } catch (WhmcsApiException $e) {
-                                                        $failed++;
-                                                    } catch (\Throwable $e) {
-                                                        $failed++;
-                                                    }
-                                                }
-
-                                                $summary = sprintf(
-                                                    '%d new · %d refreshed · %d audit-frozen · %d failed',
-                                                    $created, $updated, $frozen, $failed,
-                                                );
-
-                                                if ($abortReason !== null) {
-                                                    Notification::make()
-                                                        ->title('Aborted: '.$abortReason)
-                                                        ->body('Partial result: '.$summary)
-                                                        ->danger()->persistent()->send();
-                                                } elseif ($failed > 0) {
-                                                    Notification::make()
-                                                        ->title('Fetched with partial failures')
-                                                        ->body($summary)
-                                                        ->warning()->persistent()->send();
-                                                } else {
-                                                    Notification::make()
-                                                        ->title('Fetched into inbox')
-                                                        ->body($summary.'. Open the WHMCS Inbox (coming in PR #32) to review and file.')
-                                                        ->success()->send();
-                                                }
+                                                $summary = collect(preg_split('/\r?\n/', trim(Artisan::output())))
+                                                    ->first(fn ($l) => str_contains((string) $l, 'Summary')) ?: 'Done.';
+                                                Notification::make()
+                                                    ->title($exit === 0 ? "Fetched into inbox: {$record->name}" : 'Fetched with issues (exit '.$exit.')')
+                                                    ->body((string) $summary)
+                                                    ->{$exit === 0 ? 'success' : 'warning'}()
+                                                    ->persistent()->send();
                                             }),
                                     ]),
 

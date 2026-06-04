@@ -16,6 +16,69 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Second independent-review batch** (regressions the first fix-batch added):
+  official-PDF `Content-Disposition` ASCII filename now restricted to a safe
+  charset (an operator invoice-type code with a `"` could break the quoted
+  filename); cancel write-back resolves the pending row via two DETERMINISTIC
+  lookups (forward link first) instead of one OR that could pick an arbitrary
+  duplicate. (Plus plugin-side: column-cache invalidation, pdf_url-reject logging
+  — ekdosi_bridge v0.38.0.)
+- **Independent-review batch (Plugin-API/#4/#5).** (#1) `PublicInvoicePdfController`
+  now serves only `Invoice::isPubliclyViewable()` (active + not AADE-cancelled) —
+  fail-closed, so a cancelled or unknown-status invoice 404s instead of streaming
+  as a valid παραστατικό; the bridge hides its PDF button too. (#7) the cancel
+  write-back resolves the pending row by EITHER link (invoice.whmcs_pending_id OR
+  pending.invoice_id) so filer-path invoices also flip to «ΑΚΥΡΩΜΕΝΟ». (#6) the
+  Company «Fetch pending» button always delegates to `whmcs:fetch-pending` (one
+  source-selection + legacy-refresh path; removed the duplicated native loop).
+  (#10) official-PDF `Content-Disposition` uses RFC 5987 `filename*` so a Greek
+  invcode survives strict proxies. Plus plugin-side fixes (banner aliasing, log
+  hygiene, pdf_url host validation, JS escaping, query batching) in
+  ekdosi_bridge v0.37.0.
+### Added
+- **Official invoice PDF — signed public route + write-back (#5a).** New
+  auth-less but `signed` route `GET /invoice/{invoice}/official-pdf`
+  (`PublicInvoicePdfController`, refuses drafts, streams via `InvoicePdfRenderer`)
+  + `Invoice::publicPdfUrl()` (permanent HMAC-signed). The write-back hands the
+  bridge this URL (`WhmcsBridgeClient::setInvoiced(..., $pdfUrl)`), so the WHMCS
+  admin manage-invoice page links the official παραστατικό — PDF stays on ekdosi
+  (source of truth), no copy. **#5b:** the same link can be shown on the WHMCS
+  CLIENT-AREA invoice page too, behind the plugin's «Show official PDF to
+  customers» switch (default OFF — admin-only until flipped on for testing).
+- **Cancellation write-back to WHMCS (state).** When ekdosi cancels an invoice at
+  AADE, `MyDataSubmitter::cancel` now re-pushes the SAME MARK with
+  `state='cancelled'` (new `WhmcsWritebackService::syncCancelledFromLifecycle`,
+  `WhmcsBridgeClient::setInvoiced(..., $state)`), so the WHMCS bridge badge shows
+  «ΑΚΥΡΩΜΕΝΟ» instead of a stale valid MARK. Best-effort + outside the DB
+  transaction; no-ops for non-WHMCS / split / never-filed invoices. The VALID
+  path now stamps `state='active'`.
+- **Plugin-API consolidation — push path fetches via the bridge.** The WHMCS
+  invoice-paid webhook (`WhmcsInvoicePaidController`) now pulls the canonical
+  invoice payload from the ekdosi_bridge plugin (`resolve.php op=invoice`, via the
+  new `WhmcsBridgeClient::fetchInvoice`) for tenants on `whmcs_fetch_via_bridge`,
+  instead of the native WHMCS API — so BOTH the inbox pull and the push share one
+  HMAC path (the Plugin-API). Native API stays the path for tenants without the
+  plugin. A bridge config gap → 422, same as before.
+- **`whmcs:use-bridge --tenant=SLUG [--off]`** — guarded switch for a tenant's
+  invoice SOURCE (Plugin-API vs native WHMCS API). ENABLING probes the deployed
+  plugin for `op=invoice` support first and refuses to flip if it's older than
+  v0.32.0 (closes the deploy-ordering trap that would break the push path);
+  reversible with `--off`. The flag drives both pull and push; plugin-less
+  tenants stay on the native API ("API only when there's no plugin").
+- **Company «Fetch pending» button → Plugin-API for bridge tenants.** The admin
+  Company form's manual fetch now delegates to `whmcs:fetch-pending` for tenants
+  on `whmcs_fetch_via_bridge` (same source + legacy-invoiced refresh as the
+  scheduler), instead of its own native-API loop — closing the last spot that
+  still hit the WHMCS API on the happy path. Plugin-less tenants keep the native
+  loop.
+### Fixed
+- **Scheduler silent multi-day stall — bounded `withoutOverlapping(30)`.** Every
+  scheduled task used the default 24h overlap-lock TTL; a run killed mid-flight
+  (reboot/deploy/OOM) orphaned the cache lock and every later `schedule:run`
+  SILENTLY skipped the task for a full day — how the WHMCS fetch went dark ~1.5
+  days. Now the lock self-heals in ≤30 min (tasks are idempotent, so a rare real
+  overlap is benign).
 ### Added
 - **Προσφορές → Υπηρεσία (μετατροπή).** Νέα ενέργεια **«Μετατροπή σε Υπηρεσία»**
   σε αποδεκτή προσφορά: φτιάχνει **recurring service contract** (για τις

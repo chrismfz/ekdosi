@@ -457,6 +457,27 @@ verified against the restored prod WHMCS):**
   (not legacy ids). **Deploy:** `php artisan migrate` (adds
   `invoices.whmcs_invoice_id`) + deploy plugin v0.16.0, then
   `php artisan whmcs:backfill-invoice-ids --tenant=SLUG` (idempotent, re-runnable).
+- **Plugin-API consolidation — ✅ DONE (plugin v0.32.0–v0.33.0).** ekdosi talks
+  to WHMCS through ONE path: the bridge plugin's `resolve.php` (HMAC), the
+  "Plugin-API". `resolve.php` now serves **`op=invoice`** (single-invoice twin of
+  `op=invoices` — same rich payload, no status filter, `invoice:null` when
+  unknown), so BOTH the inbox **pull** (`whmcs:fetch-pending`) AND the **push**
+  webhook (`WhmcsInvoicePaidController`, via `WhmcsBridgeClient::fetchInvoice`)
+  fetch from the plugin instead of the native WHMCS API. The native `WhmcsClient`
+  stays the path for **plugin-less tenants only** (no derivable bridge URL/secret
+  → e.g. a future non-WHMCS tenant); a bridge config gap → 422. Source is per
+  tenant: `companies.whmcs_fetch_via_bridge`, flipped by the **guarded**
+  `whmcs:use-bridge --tenant=SLUG [--off]` (probes the deployed plugin for
+  `op=invoice` FIRST — refuses on a pre-v0.32 plugin, closing the deploy-ordering
+  trap). **Visibility:** every `resolve.php` call is logged to
+  `mod_ekdosi_bridge_log` (`BridgeLogStore`, created by `SchemaGuard`) and shown
+  in the WHMCS admin **«Bridge logs»** tab — op / status / result / IP, a
+  «last inbound poll» freshness banner (>1h → red), and 401/422 rows that surface
+  a wiped/rotated secret. This is the tripwire for the failure that hid the inbox
+  for ~1.5 days. **Deploy:** upload plugin v0.33.0 (schema self-heals via
+  SchemaGuard — no reactivation), THEN `php artisan whmcs:use-bridge --tenant=SLUG`.
+  Root cause of that outage was unrelated (a `withoutOverlapping` 24h lock that
+  orphaned on a killed run → now bounded to 30 min in `routes/console.php`).
 - **Bridges / Connectors seam — ✅ Phase 0 DONE.** A tenant can run SEVERAL
   billing systems at once (WHMCS + a WooCommerce shop, two shops…), so the source
   is a REGISTRY (`billing_connections`: one row per company×system, each

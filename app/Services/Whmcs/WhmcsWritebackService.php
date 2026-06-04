@@ -116,6 +116,68 @@ class WhmcsWritebackService
     }
 
     /**
+     * Entry point for the CANCEL path: ekdosi just cancelled an invoice at AADE.
+     * Re-push the SAME MARK with state='cancelled' so the WHMCS badge shows
+     * «ΑΚΥΡΩΜΕΝΟ» instead of a stale "valid" MARK. Same MARK keeps inbound.php's
+     * idempotent guard happy (it only refuses a DIFFERENT mark).
+     *
+     * No-ops for non-WHMCS invoices, a missing pending row, a split row, or when
+     * there's no MARK to flag. Never throws — a write-back hiccup must not mask
+     * the completed AADE cancellation.
+     */
+    public function syncCancelledFromLifecycle(Invoice $invoice): void
+    {
+        try {
+            $tenant = $invoice->company;
+            if ($tenant === null) {
+                return;
+            }
+
+            // Resolve the pending row by EITHER link: the draft path sets
+            // invoice.whmcs_pending_id (forward), the inbox file() path sets
+            // pending.invoice_id (reverse). A cancel can hit either origin, so
+            // both must be covered — otherwise a filer-path invoice keeps a stale
+            // green «Στο AADE» badge after an AADE cancellation. Two DETERMINISTIC
+            // lookups (forward first) rather than one OR, so a stale duplicate
+            // that also points here can't make ->first() pick an arbitrary row.
+            $pending = null;
+            if ($invoice->whmcs_pending_id !== null) {
+                $pending = PendingWhmcsInvoice::query()
+                    ->where('company_id', $invoice->company_id)
+                    ->whereKey($invoice->whmcs_pending_id)
+                    ->first();
+            }
+            if ($pending === null) {
+                $pending = PendingWhmcsInvoice::query()
+                    ->where('company_id', $invoice->company_id)
+                    ->where('invoice_id', $invoice->id)
+                    ->orderBy('id')
+                    ->first();
+            }
+
+            if ($pending === null || $pending->whmcs_invoice_id === null) {
+                return;
+            }
+            if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
+                return;   // one WHMCS invoice → many MARKs: separate design
+            }
+
+            $mark = (string) ($invoice->mydata_mark ?? $pending->mydata_mark ?? '');
+            if ($mark === '') {
+                return;   // never filed at AADE → nothing to flag cancelled
+            }
+
+            $this->pushMark($tenant, $pending, $invoice, $mark, 'cancelled');
+        } catch (Throwable $e) {
+            Log::error('WHMCS cancel write-back failed (AADE cancellation already complete)', [
+                'invoice_id' => $invoice->id,
+                'whmcs_pending_id' => $invoice->whmcs_pending_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Push the MARK to the bridge's mod_ekdosi_invoice_marks table (NOT the
      * legacy tblinvoices.invoiced flag) via the bridge plugin and record the
      * outcome on the pending row's whmcs_writeback_* columns. The pending row
@@ -129,6 +191,7 @@ class WhmcsWritebackService
         PendingWhmcsInvoice $pending,
         Invoice $invoice,
         string $mark,
+        string $state = 'active',
     ): void {
         try {
             $client = $this->bridgeFactory->for($tenant);
@@ -147,13 +210,24 @@ class WhmcsWritebackService
             return;
         }
 
+        // The official παραστατικό PDF lives on ekdosi; hand the bridge a signed
+        // public URL so it can link it (no file copy). Best-effort — a URL build
+        // failure must not block the MARK write-back.
+        $pdfUrl = null;
         try {
-            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode);
+            $pdfUrl = $invoice->publicPdfUrl();
+        } catch (Throwable $e) {
+            // leave null — the MARK/state write-back still proceeds
+        }
+
+        try {
+            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
             Log::info('WHMCS write-back succeeded', [
                 'pending_id' => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
                 'mydata_mark' => $mark,
                 'ekdosi_invoice' => $invoice->invcode,
+                'state' => $state,
             ]);
             $pending->update([
                 'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,

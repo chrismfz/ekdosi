@@ -98,6 +98,15 @@ class SchemaGuard
                 .'). Use the "Sync from legacy timologia" admin action once DB privileges allow.';
         }
 
+        // 3. The Plugin-API request log (mod_ekdosi_bridge_log) — visibility for
+        //    what ekdosi asks resolve.php. Idempotent; best-effort.
+        try {
+            BridgeLogStore::ensureTable();
+            $notes[] = 'Bridge log table (mod_ekdosi_bridge_log) ready.';
+        } catch (Throwable $e) {
+            $notes[] = 'WARNING: could not create mod_ekdosi_bridge_log ('.$e->getMessage().').';
+        }
+
         return $notes;
     }
 
@@ -113,6 +122,18 @@ class SchemaGuard
      */
     public static function ensureSilently(): void
     {
+        // Run the heavy path at most ONCE per request. On a privilege-limited
+        // host that can't ALTER in a new column, schemaLooksReady() stays false
+        // forever — without this guard every ensureSilently() call in the same
+        // request would re-run the full ensure() (info_schema probes + failing
+        // ALTERs). (Cross-request repetition is inherent to the stateless,
+        // version-less self-heal design — see the class docblock.)
+        static $ranThisRequest = false;
+        if ($ranThisRequest) {
+            return;
+        }
+        $ranThisRequest = true;
+
         try {
             if (self::schemaLooksReady()) {
                 return;
@@ -136,25 +157,28 @@ class SchemaGuard
             $marks = InvoiceMarkStore::TABLE;
             $contacts = ThirdPartyStore::CONTACTS;
             $routing = ThirdPartyStore::ROUTING;
+            $bridgeLog = BridgeLogStore::TABLE;
 
             $row = Capsule::selectOne(
                 'SELECT
                     (SELECT COUNT(*) FROM information_schema.TABLES
-                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?)) AS tbls,
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?, ?)) AS tbls,
                     (SELECT COUNT(*) FROM information_schema.COLUMNS
-                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = \'invcode\') AS has_invcode,
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME IN (\'invcode\', \'state\', \'pdf_url\')) AS mark_cols,
                     (SELECT LOWER(DATA_TYPE) FROM information_schema.COLUMNS
                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = \'tblinvoices\' AND COLUMN_NAME = \'invoiced\') AS invoiced_type',
-                [$marks, $contacts, $routing, $marks]
+                [$marks, $contacts, $routing, $bridgeLog, $marks]
             );
             if ($row === null) {
                 return false;
             }
 
             // invoiced absent ('' ) is fine — nothing to restore. Only BIGINT
-            // forces the heavy ensure() branch.
-            return (int) $row->tbls === 3
-                && (int) $row->has_invcode === 1
+            // forces the heavy ensure() branch. mark_cols must be 3 (invcode +
+            // state + pdf_url) so a pre-upgrade table still triggers ensure() to
+            // ALTER the missing column(s) in.
+            return (int) $row->tbls === 4
+                && (int) $row->mark_cols === 3
                 && (string) ($row->invoiced_type ?? '') !== 'bigint';
         } catch (Throwable $e) {
             return false;

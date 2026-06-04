@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\URL;
 
 /**
  * Issued invoice (παραστατικό). Mirrors legacy INVOICE.
@@ -49,6 +50,31 @@ class Invoice extends Model
     use BelongsToCompany;
     use HasAttachments;
     use HasFactory, HasInternalNotes, HasTags, SoftDeletes, TracksActivity;
+
+    /**
+     * A permanent, unforgeable (HMAC-signed with APP_KEY) public URL to this
+     * invoice's official PDF — handed to the WHMCS bridge so a παραστατικό can be
+     * linked without copying the file. The PDF stays here (source of truth). No
+     * expiry: the customer/operator may open it any time; the signature alone
+     * gates access and the controller refuses drafts.
+     */
+    public function publicPdfUrl(): string
+    {
+        return URL::signedRoute('public.invoice.pdf', ['invoice' => $this->getKey()]);
+    }
+
+    /**
+     * May this invoice's PDF be served on the PUBLIC (signed, customer-facing)
+     * route? FAIL-CLOSED allow-list: only an issued, non-AADE-cancelled document
+     * is a valid «official παραστατικό». Drafts (not issued) and CANCELLED docs
+     * (legally void) are hidden; any future/unknown local_status is hidden until
+     * explicitly opted in here — never leaked by omission.
+     */
+    public function isPubliclyViewable(): bool
+    {
+        return $this->local_status === 'active'
+            && $this->mydata_state !== 'CANCELLED';
+    }
 
     /**
      * Audited columns — lifecycle + money figures + the myDATA state mirror, but

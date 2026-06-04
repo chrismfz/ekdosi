@@ -105,9 +105,23 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     $userId = (int) ($vars['userid'] ?? 0);
     $badge = '<span class="label label-default" title="Καμία επιστροφή ΜΑΡΚ μέσω WHMCS">Όχι στο AADE μέσω WHMCS</span>';
     $legacyBadge = '';
+    $pdfButton = '';
     try {
-        $mark = InvoiceMarkStore::get($invoiceId);
-        $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
+        // ONE row read for all stored columns (was 4 single-column queries + 3
+        // column probes).
+        $markRow = InvoiceMarkStore::row($invoiceId);
+        $mark = $markRow['mark'];
+        $invcode = $markRow['invcode'];
+        $state = $markRow['state'];
+        $pdfUrl = $markRow['pdf_url'];
+        // Hide the official-PDF link once cancelled at AADE — the public route
+        // refuses it (404) and the badge already says ΑΚΥΡΩΜΕΝΟ; a 404ing button
+        // would only confuse.
+        if ($pdfUrl !== null && $pdfUrl !== '' && $state !== 'cancelled') {
+            $pdfButton = '<a href="'.htmlspecialchars($pdfUrl, ENT_QUOTES).'" target="_blank" rel="noopener" '
+                .'class="btn btn-default btn-sm" title="Άνοιγμα του επίσημου παραστατικού (PDF) από το ekdosi">'
+                .'<i class="fa fa-file-pdf-o"></i> Επίσημο παραστατικό (ΑΑΔΕ)</a>';
+        }
         $invoiced = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('invoiced') ?? 0);
         if ($userId <= 0) {
             $userId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
@@ -116,8 +130,15 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
             $tpy = ($invcode !== null && $invcode !== '')
                 ? 'ΤΠΥ '.htmlspecialchars($invcode).' · '
                 : '';
-            $badge = '<span class="label label-success" title="ekdosi / AADE">Στο AADE · '
-                .$tpy.'ΜΑΡΚ '.htmlspecialchars($mark).'</span>';
+            if ($state === 'cancelled') {
+                // Filed THEN cancelled at AADE — keep the MARK for audit but make
+                // the badge unmistakably "no longer valid".
+                $badge = '<span class="label label-danger" title="ekdosi / AADE — ακυρωμένο">Στο AADE · '
+                    .$tpy.'ΜΑΡΚ '.htmlspecialchars($mark).' · ΑΚΥΡΩΜΕΝΟ</span>';
+            } else {
+                $badge = '<span class="label label-success" title="ekdosi / AADE">Στο AADE · '
+                    .$tpy.'ΜΑΡΚ '.htmlspecialchars($mark).'</span>';
+            }
         }
         if ($invoiced !== 0) {
             $legacyBadge = ' <span class="label label-info" title="tblinvoices.invoiced != 0">Τιμολογήθηκε στη legacy</span>';
@@ -206,6 +227,7 @@ EOF;
             <i class="fa fa-external-link"></i> Άνοιγμα στο Ekdosi Bridge
         </a>
         {$clientCardLink}
+        {$pdfButton}
     </div>
 </div>
 {$relidBlock}
@@ -315,6 +337,99 @@ add_hook('AdminAreaFooterOutput', 1, function ($vars) {
         a.setAttribute('title', 'Άνοιγμα σε επεξεργασία (χωρίς το ενδιάμεσο view-only· εμφανίζει τα κουμπιά ekdosi)');
       }
     });
+  } catch (e) {}
+})();
+</script>
+HTML;
+});
+
+/**
+ * #5b — official ekdosi PDF on the CLIENT-AREA invoice page (CUSTOMER-facing),
+ * gated by the addon's «Show official PDF to customers» switch (default OFF, so
+ * by default only the admin sees the PDF link). No theme edit needed — mirrors
+ * the admin footer-JS pattern with two cooperating hooks:
+ *   - ClientAreaPageViewInvoice resolves THIS invoice's signed ekdosi PDF URL
+ *     server-side (re-checking ownership defensively, though WHMCS already gates
+ *     the page to the invoice's owner) and stashes it for the footer hook;
+ *   - ClientAreaFooterOutput injects a button next to WHMCS's own Download link.
+ * The URL is the same signed, unforgeable ekdosi link the admin badge uses.
+ */
+if (! function_exists('ekdosi_bridge_client_pdf_enabled')) {
+    function ekdosi_bridge_client_pdf_enabled(): bool
+    {
+        try {
+            return (string) Capsule::table('tbladdonmodules')
+                ->where('module', 'ekdosi_bridge')
+                ->where('setting', 'show_pdf_client_area')
+                ->value('value') === 'on';
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+}
+
+add_hook('ClientAreaPageViewInvoice', 1, function ($vars) {
+    $GLOBALS['ekdosi_clientarea_pdf_url'] = null;
+    try {
+        if (! ekdosi_bridge_client_pdf_enabled()) {
+            return [];
+        }
+        $invoiceId = (int) ($vars['invoiceid'] ?? $vars['invoicenum'] ?? $vars['id'] ?? 0);
+        $uid = (int) ($_SESSION['uid'] ?? 0);
+        if ($invoiceId <= 0 || $uid <= 0) {
+            return [];
+        }
+        // Defensive ownership re-check (WHMCS already 403s a non-owner here).
+        $ownerId = (int) (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('userid') ?? 0);
+        if ($ownerId !== $uid) {
+            return [];
+        }
+        // ONE row read (state + pdf_url together). Don't surface a cancelled
+        // («ΑΚΥΡΩΜΕΝΟ») invoice's PDF to the customer — it's legally void and the
+        // public route 404s it anyway.
+        $markRow = InvoiceMarkStore::row($invoiceId);
+        if ($markRow['state'] === 'cancelled') {
+            return [];
+        }
+        $url = $markRow['pdf_url'];
+        if (is_string($url) && $url !== '' && preg_match('#^https?://#i', $url)) {
+            $GLOBALS['ekdosi_clientarea_pdf_url'] = $url;
+        }
+    } catch (Throwable $e) {
+        // best-effort — never break the client invoice page
+    }
+
+    return [];
+});
+
+add_hook('ClientAreaFooterOutput', 1, function ($vars) {
+    $url = $GLOBALS['ekdosi_clientarea_pdf_url'] ?? null;
+    if (! is_string($url) || $url === '') {
+        return '';
+    }
+    // Emit the URL as a JS string via json_encode (correct context for a <script>
+    // body) — NOT htmlspecialchars, which is HTML-attribute escaping and would
+    // mangle a second query param's '&' (→ '&amp;') if the signed URL ever grew
+    // one. JSON_HEX_TAG guards against a '</script>' breakout.
+    $jsUrl = json_encode($url, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES);
+
+    return <<<HTML
+<script>
+(function () {
+  try {
+    var url = {$jsUrl};
+    if (!url || document.querySelector('.ekdosi-official-pdf')) return;
+    var a = document.createElement('a');
+    a.className = 'btn btn-default ekdosi-official-pdf';
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    a.style.marginLeft = '6px';
+    a.innerHTML = '<i class="fas fa-file-pdf"></i> Επίσημο παραστατικό (ΑΑΔΕ)';
+    // Prefer right after WHMCS's own invoice Download link; otherwise drop it
+    // at the top of the invoice container.
+    var anchor = document.querySelector('a[href*="dl.php?type=i"], a[href*="dl.php?type=invoice"]');
+    if (anchor && anchor.parentNode) { anchor.parentNode.insertBefore(a, anchor.nextSibling); return; }
+    var box = document.querySelector('.invoice-container, #main-body .card-body, #main-body');
+    if (box) { a.style.marginLeft = '0'; box.insertBefore(a, box.firstChild); }
   } catch (e) {}
 })();
 </script>

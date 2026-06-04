@@ -82,6 +82,94 @@ class WhmcsLifecycleWritebackTest extends TestCase
             && $req['mark'] === '400001234567890');
     }
 
+    public function test_lifecycle_valid_pushes_active_state(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true], 200)]);
+
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_DRAFTED);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);
+
+        app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, '400001234567890');
+
+        Http::assertSent(fn ($req) => str_contains($req->url(), 'inbound.php')
+            && ($req['state'] ?? null) === 'active');
+    }
+
+    public function test_cancel_repushes_same_mark_with_cancelled_state(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true], 200)]);
+
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_FILED);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);
+        $invoice->forceFill(['mydata_mark' => '400001234567890'])->save();
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        Http::assertSent(fn ($req) => str_contains($req->url(), 'inbound.php')
+            && $req['whmcs_invoice_id'] === 4242
+            && $req['mark'] === '400001234567890'
+            && ($req['state'] ?? null) === 'cancelled');
+    }
+
+    public function test_cancel_works_via_reverse_link_for_filer_path_invoices(): void
+    {
+        // file()-path invoices link via pending.invoice_id (reverse), NOT
+        // invoice.whmcs_pending_id. The cancel write-back must still find them.
+        Http::fake(['*' => Http::response(['ok' => true], 200)]);
+
+        $tenant = $this->tenant();
+        $type = InvoiceType::create(['company_id' => $tenant->id, 'code' => 'F', 'name' => 'F', 'invcount' => 3]);
+        $invoice = Invoice::create([
+            'company_id' => $tenant->id, 'invoice_type_id' => $type->id,
+            'code' => 3, 'invcode' => 'F3', 'issued_at' => now(), 'local_status' => 'cancelled',
+            // NO whmcs_pending_id — this is the filer path
+        ]);
+        $invoice->forceFill(['mydata_mark' => '400001234567890'])->save();
+        // Filer path: the pending row is created already linked via invoice_id
+        // (reverse link), in filed state — set at creation, before the freeze.
+        PendingWhmcsInvoice::create([
+            'company_id' => $tenant->id,
+            'whmcs_invoice_id' => 4242,
+            'invoice_id' => $invoice->id,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
+            'match_reason' => 'test',
+            'payload' => ['whmcs_invoice_id' => 4242],
+        ]);
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        Http::assertSent(fn ($req) => str_contains($req->url(), 'inbound.php')
+            && $req['whmcs_invoice_id'] === 4242
+            && ($req['state'] ?? null) === 'cancelled');
+    }
+
+    public function test_cancel_no_op_when_invoice_never_filed(): void
+    {
+        Http::fake();
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_FILED);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);   // no mydata_mark
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_cancel_skips_split_rows(): void
+    {
+        Http::fake();
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_SPLIT);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);
+        $invoice->forceFill(['mydata_mark' => '400000000000009'])->save();
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        Http::assertNothingSent();
+    }
+
     public function test_no_op_for_non_whmcs_invoice(): void
     {
         Http::fake();

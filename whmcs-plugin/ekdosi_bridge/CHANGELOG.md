@@ -10,6 +10,91 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-06-03
+### Fixed
+- **Second-review batch** (regressions the first fix-batch introduced).
+  `InvoiceMarkStore::ensureTable()` now clears the per-request `$columnCache` at
+  the end — a fallback ALTER (on MariaDB without `ADD COLUMN IF NOT EXISTS`) could
+  add a column AFTER `hasColumn()` cached it absent, dropping a same-request
+  `state='cancelled'` write. Client-area PDF hook now uses one `row()` read.
+  `inbound.php` logs a breadcrumb when it rejects a `pdf_url` on host mismatch
+  (no more silent missing link). `row()` is null-safe for invoices with no mark.
+  Stale `lastInboundPollAt()` docblock corrected.
+
+## [0.37.0] — 2026-06-03
+### Fixed
+- **Independent-review batch.** (1) Cancelled («ΑΚΥΡΩΜΕΝΟ») invoice no longer
+  shows the «Επίσημο παραστατικό» button (admin + client-area) — the public route
+  also 404s it. (2) The «last inbound poll» freshness banner now counts ONLY the
+  bulk `op=invoices` feed — a one-off push/`use-bridge` probe (`op=invoice`) can't
+  falsely turn it green during a real outage. (3) `resolve.php` only logs a
+  bridge-log row for a plausible bridge call (POST+body); a scanner GET / empty
+  probe no longer writes rows (auth-failures 401/422 still log). (4) `pdf_url`
+  write-back is host-validated against `ekdosi_base_url` (not just scheme) —
+  blocks a trusted-looking phishing link. (5) client-area PDF URL is emitted via
+  `json_encode` (correct JS-string context). (6) `InvoiceMarkStore`: per-request
+  column-probe cache + single-row `row()` read (admin badge was 4 queries + 3
+  probes → 1+cached). (7) `SchemaGuard::ensureSilently` runs the heavy path at
+  most once per request.
+
+## [0.36.0] — 2026-06-03
+### Added
+- **#5b — official PDF in the CLIENT AREA, behind a knob.** New addon config
+  switch **«Show official PDF to customers»** (`show_pdf_client_area`, default
+  OFF — admin-only). When ON, a «Επίσημο παραστατικό (ΑΑΔΕ)» button is injected
+  on the client-area invoice view page (next to WHMCS's Download link) via two
+  cooperating hooks (`ClientAreaPageViewInvoice` resolves the signed ekdosi PDF
+  URL + re-checks ownership; `ClientAreaFooterOutput` injects the button) — no
+  theme edit. Customers only ever see their own invoices' link.
+
+## [0.35.0] — 2026-06-03
+### Added
+- **Official παραστατικό PDF link (`mod_ekdosi_invoice_marks.pdf_url`).** The
+  write-back now carries a signed public URL to the invoice's PDF (hosted on
+  ekdosi — source of truth, no file copy); `inbound.php` accepts `pdf_url`
+  (http(s)-only) and the **admin manage-invoice** sidebar shows a «Επίσημο
+  παραστατικό (ΑΑΔΕ)» button next to the MARK. New `pdf_url` column (SchemaGuard
+  probe now expects invcode+state+pdf_url; idempotent ALTER, no reactivation);
+  `InvoiceMarkStore::set()` + `pdfUrlFor()`. (Customer-area button is a separate
+  follow-up.)
+
+## [0.34.0] — 2026-06-03
+### Added
+- **State in the write-back (`mod_ekdosi_invoice_marks.state`).** `inbound.php`
+  now accepts an optional `state` ('active'/'cancelled') alongside the MARK, and
+  the manage-invoice badge shows **«… · ΑΚΥΡΩΜΕΝΟ»** (red) when ekdosi cancels at
+  AADE — instead of a stale "valid" MARK. New `state` column (added by
+  `InvoiceMarkStore::ensureTable` + the SchemaGuard probe, idempotent &
+  privilege-safe, no reactivation); `InvoiceMarkStore::set()` gains the param and
+  `stateFor()` reads it. The idempotent guard is unchanged — cancel re-pushes the
+  SAME mark (only `state` differs), so it's never a 409.
+
+## [0.33.0] — 2026-06-03
+### Added
+- **«Bridge logs» tab + Plugin-API request log (`mod_ekdosi_bridge_log`).** Every
+  call ekdosi makes to `resolve.php` is recorded (op, IP, HTTP status, short
+  result — count / found / auth-failure reason) via a shutdown-function recorder
+  that fires even on early `exit`, so success, 401/422 auth-failures, unknown ops
+  and exceptions are ALL captured with one chokepoint. New `BridgeLogStore`
+  (created by `SchemaGuard`, no reactivation; best-effort — never throws into a
+  response; ~30-day self-pruning). The admin landing gains a **«Τελευταίο ερώτημα
+  ekdosi»** freshness row + a **«Bridge logs»** button; the tab shows a freshness
+  banner (no inbound poll in >1h → red — the silent-outage tripwire that would
+  have caught the ~1.5-day stall from the WHMCS side), a 401/422 secret-mismatch
+  note, 24h totals, and the recent request table.
+
+## [0.32.0] — 2026-06-03
+### Added
+- **Plugin-API `op=invoice` (single-invoice feed)** — the single-id twin of
+  `op=invoices`. Returns the SAME rich payload (invoice + client + customfields +
+  line items, `with_routing` optional) for ONE invoice id, with NO status filter
+  (the push path targets a specific invoice the operator chose); `invoice: null`
+  when the id is unknown (200, so the client needs no 404 handling). Lets ekdosi's
+  push path («Αποστολή στο Ekdosi» → invoice-paid webhook) fetch the canonical
+  payload from US instead of the native WHMCS API — one HMAC path, the Plugin-API,
+  for both pull (`invoices`) and push (`invoice`). `InvoiceFeed` refactored: the
+  per-invoice payload builder is now shared by `fetch()` and the new `fetchOne()`.
+
 ## [0.31.0] — 2026-06-03
 ### Added
 - **One-click straight-to-edit on the invoice list** (kills the WHMCS 8.9+
