@@ -87,6 +87,18 @@ class SyncInvoiceStateFromAadeTest extends TestCase
         $this->assertSame('active', $invoice->fresh()->local_status);
     }
 
+    public function test_valid_uncancels_even_when_mydata_state_already_valid(): void
+    {
+        // Odd combo: mydata_state already VALID but local_status wrongly cancelled
+        // → must still fix local_status (not early-return as a no-op on state).
+        $invoice = $this->invoice('VALID', 'cancelled');
+
+        $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, 'VALID');
+
+        $this->assertTrue($result['changed']);
+        $this->assertSame('active', $invoice->fresh()->local_status);
+    }
+
     public function test_no_op_when_already_in_sync(): void
     {
         $invoice = $this->invoice('VALID', 'active');

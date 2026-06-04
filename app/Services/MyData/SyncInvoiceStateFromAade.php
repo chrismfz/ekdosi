@@ -45,15 +45,18 @@ class SyncInvoiceStateFromAade
         $fromState = $invoice->mydata_state;
         $fromLocal = $invoice->local_status;
 
-        if ($fromState === $aadeState) {
-            return ['changed' => false, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $fromLocal];
-        }
-
         $toLocal = match ($aadeState) {
             'CANCELLED' => 'cancelled',
             // Un-cancel a wrongly-cancelled doc; otherwise leave business intent.
             'VALID' => $fromLocal === 'cancelled' ? 'active' : $fromLocal,
         };
+
+        // No-op only when BOTH columns already match the target — the job is
+        // "make local match AADE", not just the mydata_state (so a VALID-at-AADE
+        // doc that's still wrongly local-cancelled is fixed, not skipped).
+        if ($fromState === $aadeState && $fromLocal === $toLocal) {
+            return ['changed' => false, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $fromLocal];
+        }
 
         DB::transaction(function () use ($invoice, $aadeState, $toLocal, $fromState, $fromLocal): void {
             $invoice->forceFill([
@@ -85,9 +88,12 @@ class SyncInvoiceStateFromAade
 
         // Reflect a cancellation on the WHMCS side (best-effort, never throws;
         // no-op for non-WHMCS invoices). There's no "un-cancel" write-back, so
-        // the VALID direction touches local state only.
+        // the VALID direction touches local state only. Pass the in-memory model
+        // (already carries the just-saved state) — NOT fresh(), whose nullable
+        // return would TypeError at this non-nullable boundary, outside the
+        // method's own try/catch, after the state is already committed.
         if ($aadeState === 'CANCELLED') {
-            app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice->fresh());
+            app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
         }
 
         return ['changed' => true, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $toLocal];
