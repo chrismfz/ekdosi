@@ -16,6 +16,19 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **E-invoice provider seam (P1):** generic, no-op infrastructure for filing via a
+  ΥΠΑΗΕΣ provider — `App\Contracts\EInvoiceProviderTransport` (+ `ProviderResult` /
+  `ProviderCredentials` DTOs) and a config-driven `ProviderTransportRegistry`
+  (mirrors the billing/provisioning registries; unknown/empty key →
+  `NullProviderTransport`, which throws on send so a misconfig never silently
+  not-files). New per-tenant columns `companies.einvoice_provider_key` /
+  `einvoice_provider_config` (encrypted JSON, KEEPING the myDATA creds untouched) /
+  `einvoice_provider_mode`, and provider audit columns on `mydata_marks`
+  (`provider_key` / `authentication_code` / `delivery_state`). No provider wired
+  yet (InvoSign / SBZ land at P5) and no behaviour change — `gr-provider` stays
+  inert (PDF-only) until `GrProviderSubmitter` (P2). **Deploy:** `php artisan migrate`.
+
 ### Changed
 - **E-invoice provider groundwork (P0):** factored the AADE payload builder out
   of `MyDataSubmitter` into `App\Services\EInvoice\AadeInvoiceDocument` (`build()`

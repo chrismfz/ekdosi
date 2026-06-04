@@ -133,4 +133,25 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | E-invoice provider transports (ΥΠΑΗΕΣ)
+    |--------------------------------------------------------------------------
+    |
+    | Map of provider key → EInvoiceProviderTransport implementation, resolved by
+    | ProviderTransportRegistry. A tenant's companies.einvoice_provider_key selects
+    | the transport a GrProviderSubmitter (P2) will POST the AADE document to.
+    | EMPTY by default — every key (incl. 'none'/unknown) falls back to
+    | NullProviderTransport (throws on send → never silently not-files). A real
+    | provider (InvoSign / SBZ) drops in here with one line + one class once its
+    | sandbox creds arrive (P5). No core edit. (Mirrors billing/provisioning.)
+    |
+    */
+    'einvoice' => [
+        'providers' => [
+            // 'invosign' => App\Services\EInvoice\Transports\InvoSignTransport::class,  // P5
+            // 'sbz'      => App\Services\EInvoice\Transports\SbzTransport::class,        // P5
+        ],
+    ],
+
 ];

@@ -253,11 +253,15 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
 - **P0 — factor-out (μηδενική αλλαγή συμπεριφοράς):** `AadeInvoiceDocument` βγαίνει
   από τον `MyDataSubmitter`· ο submitter τον καλεί. Golden tests πράσινα
   (byte-ίδιο XML). *Καθαρό refactor, αυτο-ασφαλές.*
-- **P1 — seam + config:** `EInvoiceProviderTransport` interface + `ProviderResult`/
-  `ProviderCredentials` DTOs + `ProviderTransportRegistry` (config-driven, **μόνο
-  ένα Null/echo transport wired**) + migration (`einvoice_provider_key`/`_config`/
-  `_mode`) + `mydata_marks` provider columns + factory routing για `gr-provider`.
-  **Κανένας πραγματικός πάροχος** — η υποδομή στέκει δίπλα στο live myDATA, no-op.
+- **P1 — seam + config: ✅ DONE.** `EInvoiceProviderTransport` interface +
+  `ProviderResult`/`ProviderCredentials` DTOs + `ProviderTransportRegistry`
+  (config-driven `ekdosi.einvoice.providers`, **μόνο `NullProviderTransport` wired**
+  — throws on send) + migrations (`companies.einvoice_provider_key`/`_config`
+  [encrypted:array]/`_mode`, `mydata_marks.provider_key`/`authentication_code`/
+  `delivery_state`) + `gr-provider` reserved-inert στο factory (comment, no logic
+  change — falls through σε NullSubmitter ώσπου να έρθει το P2). Tests:
+  `ProviderTransportRegistryTest` + `EInvoiceProviderConfigTest`. **Κανένας
+  πραγματικός πάροχος** — no-op δίπλα στο live myDATA.
 - **P2 — `GrProviderSubmitter`** πάνω στο seam + double-filing guard + unit tests
   (mock transport → ΜΑΡΚ persist + cache sync + lifecycle).
 - **P3 — Company form (provider section, encrypted config, Test connection) +
