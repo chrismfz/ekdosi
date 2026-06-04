@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Log;
@@ -48,6 +49,8 @@ class MyDataMarkDetail extends Page
 
     protected static string|UnitEnum|null $navigationGroup = 'Data';
 
+    protected static ?string $navigationLabel = 'Έλεγχος ΜΑΡΚ';
+
     protected string $view = 'filament.pages.my-data-mark-detail';
 
     #[Url]
@@ -80,7 +83,10 @@ class MyDataMarkDetail extends Page
 
     public static function shouldRegisterNavigation(): bool
     {
-        return false;
+        // Now a first-class menu page («Έλεγχος ΜΑΡΚ») — gated by canAccess()
+        // (live myDATA tenant + View:MyDataMarkDetail). Reached either from the
+        // menu (blank → lookup prompt) or by clicking a MARK anywhere (?mark=).
+        return true;
     }
 
     /**
@@ -109,8 +115,10 @@ class MyDataMarkDetail extends Page
     {
         abort_unless(static::canAccess(), 403);
 
+        // Blank = menu landing → show the lookup prompt (header «Αναζήτηση ΜΑΡΚ»),
+        // don't 404. A ?mark= (menu typed it, or a clicked MARK) loads the detail.
         if (blank($this->mark)) {
-            abort(404);
+            return;
         }
 
         $this->load();
@@ -119,6 +127,26 @@ class MyDataMarkDetail extends Page
     protected function getHeaderActions(): array
     {
         return [
+            // Lookup ANY MARK from the menu landing (or to jump to a different
+            // one). Sets ?mark= and reloads — local invoice or live AADE orphan.
+            Action::make('lookup_mark')
+                ->label('Αναζήτηση ΜΑΡΚ')
+                ->icon('heroicon-o-magnifying-glass')
+                ->color('primary')
+                ->modalHeading('Έλεγχος ΜΑΡΚ')
+                ->modalSubmitActionLabel('Έλεγχος')
+                ->schema([
+                    TextInput::make('mark')
+                        ->label('ΜΑΡΚ')
+                        ->required()
+                        ->default(fn () => $this->mark)
+                        ->helperText('Ο κωδικός ΜΑΡΚ από το myDATA (π.χ. 400013829677137).'),
+                ])
+                ->action(function (array $data): void {
+                    $this->mark = trim((string) $data['mark']);
+                    $this->load();
+                }),
+
             Action::make('open_invoice')
                 ->label('Άνοιγμα παραστατικού')
                 ->icon('heroicon-o-document-text')

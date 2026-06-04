@@ -27,6 +27,26 @@
         </x-filament::section>
     @endif
 
+    {{-- Menu landing / no MARK yet → prompt to look one up. --}}
+    @if (! $doc && ! $error)
+        <x-filament::section>
+            <div class="flex items-start gap-3 text-sm text-gray-600 dark:text-gray-300">
+                <x-filament::icon icon="heroicon-o-qr-code" class="mt-0.5 h-6 w-6 text-gray-400" />
+                <div>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">Έλεγχος ΜΑΡΚ</p>
+                    <p class="mt-1">
+                        Πάτησε <strong>«Αναζήτηση ΜΑΡΚ»</strong> πάνω δεξιά και δώσε έναν κωδικό ΜΑΡΚ
+                        για να δεις τον πλήρη έλεγχο: στοιχεία παραστατικού, <strong>QR + σύνδεσμο επαλήθευσης ΑΑΔΕ</strong>,
+                        συναλλασσόμενους, γραμμές, σύνολα και το ακατέργαστο XML (request/response).
+                    </p>
+                    <p class="mt-1 text-gray-500 dark:text-gray-400">
+                        Μπορείς επίσης να φτάσεις εδώ πατώντας οποιοδήποτε ΜΑΡΚ μέσα στην εφαρμογή.
+                    </p>
+                </div>
+            </div>
+        </x-filament::section>
+    @endif
+
     @if ($doc)
         {{-- Origin banner --}}
         @if ($isOrphan)
@@ -312,7 +332,8 @@
             $responseXml = $doc['responseXml'] ?? null;
         @endphp
         @if ($requestXml || $responseXml)
-            <x-filament::section :collapsible="true" :collapsed="true">
+            {{-- Expanded by default + tall panels for debugging visibility. --}}
+            <x-filament::section :collapsible="true" :collapsed="false">
                 <x-slot name="heading">
                     <span class="flex items-center gap-2">
                         <x-filament::icon icon="heroicon-o-code-bracket" class="h-5 w-5 text-gray-400" />
@@ -321,21 +342,28 @@
                 </x-slot>
                 <x-slot name="description">
                     Διατηρείται αυτούσιο για νομικό έλεγχο. {{ $isOrphan ? 'Απόκριση από myDATA.' : 'Από τη βάση (mydata_marks).' }}
+                    Πάτησε μέσα στο πλαίσιο και Ctrl/Cmd+A → αντιγραφή.
                 </x-slot>
 
                 <div class="space-y-4">
                     @if ($requestXml)
                         <div>
-                            <div class="mb-1 text-sm font-medium text-gray-600 dark:text-gray-300">Request</div>
-                            <textarea readonly rows="12"
-                                class="w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-2 font-mono text-xs">{{ $requestXml }}</textarea>
+                            <div class="mb-1 flex items-center justify-between">
+                                <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Request</span>
+                                <span class="text-xs text-gray-400">{{ number_format(mb_strlen($requestXml)) }} χαρ.</span>
+                            </div>
+                            <textarea readonly rows="26" wrap="off" spellcheck="false"
+                                class="w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3 font-mono text-xs leading-relaxed resize-y">{{ $requestXml }}</textarea>
                         </div>
                     @endif
                     @if ($responseXml)
                         <div>
-                            <div class="mb-1 text-sm font-medium text-gray-600 dark:text-gray-300">Response</div>
-                            <textarea readonly rows="12"
-                                class="w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-2 font-mono text-xs">{{ $responseXml }}</textarea>
+                            <div class="mb-1 flex items-center justify-between">
+                                <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Response</span>
+                                <span class="text-xs text-gray-400">{{ number_format(mb_strlen($responseXml)) }} χαρ.</span>
+                            </div>
+                            <textarea readonly rows="26" wrap="off" spellcheck="false"
+                                class="w-full rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-3 font-mono text-xs leading-relaxed resize-y">{{ $responseXml }}</textarea>
                         </div>
                     @endif
                 </div>
