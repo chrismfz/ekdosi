@@ -29,6 +29,15 @@ they merge.
   Transport::send()` now also receives the `Invoice`. Grounded in the captured API
   reference; **sandbox-validate the exact field/price semantics before go-live.**
   Mock-HTTP tested end-to-end (factory → submitter → InvoSign → PROVIDER_INSERT).
+- **WHMCS custom-field mapping picker.** A Company-form action «Άντληση &
+  αντιστοίχιση πεδίων WHMCS» pulls the WHMCS client custom-field catalogue
+  (`WhmcsBridgeClient::listCustomFields` → bridge `op=custom_fields`) and lets the
+  operator map each role (vatno / wantsinvoice / taxoffice / occupation /
+  griniaris) to a field by NAME via dropdowns — instead of hand-typing fragile
+  integer ids. The `whmcs_custom_field_map` KeyValue now shows a ⚠ warning when
+  empty (an empty map silently drops AFM + invoice-vs-receipt intent and leaves
+  the WHMCS customer «μη συνδεδεμένος» — the root cause just diagnosed in prod).
+  Requires ekdosi_bridge v0.39.0.
 - **E-invoice provider operator UI (P3):** the Company form gets ONE flat
   «Τρόπος αποστολής παραστατικών» dropdown — `myDATA — Παραγωγή/Δοκιμαστικό`,
   `Καθόλου (μόνο PDF)`, and per-provider `InvoiceSign/SBZ — Δοκιμαστικό/Παραγωγή`
