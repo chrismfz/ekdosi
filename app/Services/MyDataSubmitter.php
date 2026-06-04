@@ -320,17 +320,22 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // cancel left ΤΠΥ6654 locally cancelled while AADE had no record of the
         // MARK.) Mirror the INSERT guard (persistResponse): act only on Success.
         $cancelResult = $cancelResponse->first();
-        if ($cancelResult === null || $cancelResult->getStatusCode() !== 'Success') {
+        if ($cancelResult === null || ! $cancelResult->isSuccessful()) {
             $errors = $cancelResult ? $this->describeResponseErrors($cancelResult) : 'no response';
             $this->recordCancelRejection($invoice, $reason, $responseXml);
             throw new RuntimeException("myDATA rejected the cancellation: {$errors}");
         }
 
-        $mark = DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel) {
+        // A successful cancellation gets its OWN mark (distinct from the original
+        // invoice MARK). Capture it for the audit row — the cancel act itself.
+        $cancellationMark = $cancelResult->getCancellationMark();
+
+        $mark = DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel, $cancellationMark) {
             $mark = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
                 'mark' => $markToCancel,
+                'cancellation_mark' => $cancellationMark,
                 'mydata_action' => 'CANCEL',
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
                 'response' => $responseXml,
@@ -521,7 +526,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         /** @var Response|null $firstResponse */
         $firstResponse = $response->first();
 
-        if ($firstResponse === null || $firstResponse->getStatusCode() !== 'Success') {
+        if ($firstResponse === null || ! $firstResponse->isSuccessful()) {
             $errors = $firstResponse ? $this->describeResponseErrors($firstResponse) : 'no response';
             // Persist a forensic record + carry the XML on the throw, so a
             // rejection isn't a dead-end — the round-trip is otherwise lost

@@ -35,6 +35,7 @@ class MyDataMark extends Model
         'legacy_id',
         'invoice_id',
         'mark',
+        'cancellation_mark',
         'mydata_action',
         // Provider-side audit (P1; filled by GrProviderSubmitter in P2, null for
         // direct myDATA filings). See docs/paroxos/implementation-plan.md §5.

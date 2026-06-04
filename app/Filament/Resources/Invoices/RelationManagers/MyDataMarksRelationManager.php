@@ -49,6 +49,7 @@ class MyDataMarksRelationManager extends RelationManager
                         'REJECTED' => 'danger', // AADE refused the submission (null mark, response XML kept)
                         'CANCEL_REJECTED' => 'danger', // AADE refused the cancellation (null mark, response kept; state NOT flipped)
                         'DRY_RUN' => 'info',    // preview from "Preview submission XML"
+                        'STATE_SYNC' => 'warning',  // operator synced local state from AADE truth
                         'SKIPPED', 'SKIPPED_CANCEL' => 'warning',  // NullSubmitter: deliberate non-filing
                         default => 'gray',
                     }),

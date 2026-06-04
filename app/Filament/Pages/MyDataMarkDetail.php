@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\MyData\EnrichInvoiceFromAade;
+use App\Services\MyData\SyncInvoiceStateFromAade;
 use App\Services\MyData\TransmittedDocReader;
 use App\Support\MyData\MarkDetail;
 use BackedEnum;
@@ -80,6 +81,13 @@ class MyDataMarkDetail extends Page
      * @var array<string,mixed>|null
      */
     public ?array $enrichReport = null;
+
+    /**
+     * Live AADE state ('VALID'|'CANCELLED') captured by the last enrich, so the
+     * «Συγχρονισμός κατάστασης» action can apply AADE's truth to the invoice.
+     * Reset on every load() (must not outlive the document it described).
+     */
+    public ?string $aadeState = null;
 
     public static function shouldRegisterNavigation(): bool
     {
@@ -174,6 +182,23 @@ class MyDataMarkDetail extends Page
                 ->modalSubmitActionLabel('Άντληση')
                 ->action(fn () => $this->enrichFromAade()),
 
+            // Apply AADE's live state to the local invoice (2-way: mirrors a
+            // myDATA-portal cancellation back as cancelled; un-cancels a doc
+            // that's VALID at AADE but wrongly cancelled locally). Only shown
+            // when the last «Άντληση» found a STATE divergence — we sync the
+            // freshly-fetched AADE truth, never a stale value.
+            Action::make('sync_state_from_aade')
+                ->label('Συγχρονισμός κατάστασης από ΑΑΔΕ')
+                ->icon('heroicon-o-arrows-right-left')
+                ->color('warning')
+                ->visible(fn (): bool => $this->canSyncState())
+                ->requiresConfirmation()
+                ->modalIcon('heroicon-o-arrows-right-left')
+                ->modalHeading('Συγχρονισμός κατάστασης από ΑΑΔΕ')
+                ->modalDescription(fn (): string => $this->syncStateDescription())
+                ->modalSubmitActionLabel('Συγχρονισμός')
+                ->action(fn () => $this->syncStateFromAade()),
+
             Action::make('change_window')
                 ->label('Αλλαγή διαστήματος')
                 ->icon('heroicon-o-calendar')
@@ -224,6 +249,7 @@ class MyDataMarkDetail extends Page
         // Drop any prior comparison so it can't outlive the document it
         // described (enrichFromAade re-sets it right after its own load()).
         $this->enrichReport = null;
+        $this->aadeState = null;
 
         $tenant = Filament::getTenant();
         $mark = (string) $this->mark;
@@ -366,8 +392,10 @@ class MyDataMarkDetail extends Page
         }
 
         $report = app(EnrichInvoiceFromAade::class)->enrich($invoice, $detail);
+        $aadeState = is_string($detail['state'] ?? null) ? $detail['state'] : null;
         $this->load(); // refresh the local doc (QR now shows); clears stale report
         $this->enrichReport = $report; // set AFTER load(), which nulls it
+        $this->aadeState = $aadeState; // ditto — enables «Συγχρονισμός κατάστασης»
 
         $diffs = array_values(array_filter($this->enrichReport['comparison'], fn (array $r): bool => ! $r['match']));
         $notification = Notification::make()->title('Σύγκριση με ΑΑΔΕ ολοκληρώθηκε')->persistent();
@@ -394,6 +422,90 @@ class MyDataMarkDetail extends Page
         }
 
         $notification->body(implode(' ', $bodyLines))->send();
+    }
+
+    /**
+     * The «Κατάσταση» row of the last enrich comparison, IF it diverges
+     * (match === false). Null when there's no enrich yet or the states agree.
+     *
+     * @return array{label:string, local:?string, aade:?string, match:bool}|null
+     */
+    private function stateDiffRow(): ?array
+    {
+        foreach ($this->enrichReport['comparison'] ?? [] as $row) {
+            if (($row['label'] ?? null) === 'Κατάσταση' && ($row['match'] ?? true) === false) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The «Συγχρονισμός κατάστασης» action is offered only when the last live
+     * pull found a STATE divergence (admin-gated, local invoice present).
+     */
+    public function canSyncState(): bool
+    {
+        return $this->invoiceId !== null
+            && $this->aadeState !== null
+            && (bool) auth()->user()?->can('View:MyDataConsole')
+            && $this->stateDiffRow() !== null;
+    }
+
+    private function syncStateDescription(): string
+    {
+        $local = $this->stateDiffRow()['local'] ?? '—';
+
+        return "Τοπική κατάσταση «{$local}» → ΑΑΔΕ «{$this->aadeState}». "
+            .'Η ΑΑΔΕ είναι η πηγή αλήθειας· η τοπική κατάσταση του παραστατικού θα ενημερωθεί ανάλογα.';
+    }
+
+    /**
+     * Apply AADE's live state (captured by the last enrich) to the local
+     * invoice via SyncInvoiceStateFromAade, then reload. Admin-gated; failures
+     * degrade to a Greek notification.
+     */
+    public function syncStateFromAade(): void
+    {
+        $tenant = Filament::getTenant();
+
+        if (! $this->canSyncState()) {
+            Notification::make()->title('Μη διαθέσιμο')->danger()
+                ->body('Ο συγχρονισμός κατάστασης απαιτεί πρόσφατη άντληση από ΑΑΔΕ με διαφορά κατάστασης (διαχειριστής).')
+                ->send();
+
+            return;
+        }
+
+        $invoice = Invoice::query()
+            ->where('company_id', $tenant?->getKey())
+            ->whereKey($this->invoiceId)
+            ->first();
+
+        if ($invoice === null) {
+            Notification::make()->title('Δεν βρέθηκε παραστατικό')->danger()->send();
+
+            return;
+        }
+
+        try {
+            $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, (string) $this->aadeState);
+        } catch (Throwable $e) {
+            Notification::make()->title('Αποτυχία συγχρονισμού')->danger()->body($e->getMessage())->send();
+
+            return;
+        }
+
+        $this->load(); // refresh the local doc + hide the action (divergence resolved)
+
+        if ($result['changed']) {
+            Notification::make()->title('Η κατάσταση συγχρονίστηκε με την ΑΑΔΕ')->success()
+                ->body("Κατάσταση myDATA: {$result['from']} → {$result['to']}.")->send();
+        } else {
+            Notification::make()->title('Καμία αλλαγή')->info()
+                ->body('Η τοπική κατάσταση ήταν ήδη ίδια με την ΑΑΔΕ.')->send();
+        }
     }
 
     /**
