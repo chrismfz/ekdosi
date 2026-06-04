@@ -36,13 +36,18 @@ final class QrImage
     {
         // endroid/qr-code v6: Builder is a final readonly class constructed
         // with all options, then build() returns a Result.
+        //
+        // The AADE qrUrl is ~150 chars → a dense QR (version ~8, 49×49 modules).
+        // The margin (quiet zone) scales with the requested size so a high-res
+        // render for print keeps a real ≈4-module white border; an 8px fixed
+        // margin at size 600 was ~0.5 modules → phones misread the printed code.
         return (new Builder(
             writer: new PngWriter(),
             data: $url,
             encoding: new Encoding('UTF-8'),
             errorCorrectionLevel: ErrorCorrectionLevel::Medium,
             size: $size,
-            margin: 8,
+            margin: max(10, intdiv($size, 20)),
         ))->build()->getDataUri();
     }
 }
