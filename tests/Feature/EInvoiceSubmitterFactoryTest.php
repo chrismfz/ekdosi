@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
+use App\Services\EInvoice\GrProviderSubmitter;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\MyDataSubmitter;
 use App\Services\NullSubmitter;
@@ -27,7 +28,8 @@ use Tests\TestCase;
  *   gr-mydata + production → MyDataSubmitter
  *   gr-mydata + off        → NullSubmitter
  *   ee-peppol              → NullSubmitter (until PeppolSubmitter lands)
- *   gr-provider            → NullSubmitter (RESERVED; inert until GrProviderSubmitter, P2)
+ *   gr-provider + mode≠off → GrProviderSubmitter (P2; transport from the registry)
+ *   gr-provider + mode off → NullSubmitter (staged, not filing)
  *   none                   → NullSubmitter
  */
 class EInvoiceSubmitterFactoryTest extends TestCase
@@ -71,18 +73,34 @@ class EInvoiceSubmitterFactoryTest extends TestCase
         $this->assertInstanceOf(NullSubmitter::class, app(EInvoiceSubmitterFactory::class)->for($tenant));
     }
 
-    public function test_factory_returns_null_submitter_for_gr_provider_until_p2(): void
+    public function test_factory_returns_gr_provider_submitter_when_mode_active(): void
     {
-        // P1 no-op lock: a 'gr-provider' tenant is RESERVED but inert — it must
-        // route to NullSubmitter (PDF-only), never silently file the wrong way,
-        // until GrProviderSubmitter lands in P2. Guards the no-op claim for future PRs.
+        // P2: a 'gr-provider' tenant with a non-off mode files via the provider
+        // path. The transport is resolved from the registry (Null here, since no
+        // real provider is registered) — but the submitter type is the routing claim.
         $tenant = Company::create([
-            'name' => 'Provider Reserved',
+            'name' => 'Provider Active',
             'slug' => 'gr-provider-'.uniqid(),
             'country_code' => 'GR',
             'einvoice_provider' => 'gr-provider',
             'einvoice_provider_key' => 'invosign',
             'einvoice_provider_mode' => 'sandbox',
+            'mydata_mode' => 'off',
+        ]);
+
+        $this->assertInstanceOf(GrProviderSubmitter::class, app(EInvoiceSubmitterFactory::class)->for($tenant));
+    }
+
+    public function test_factory_returns_null_submitter_for_staged_gr_provider(): void
+    {
+        // mode 'off' = staged, not filing (twin of gr-mydata Off) → NullSubmitter.
+        $tenant = Company::create([
+            'name' => 'Provider Staged',
+            'slug' => 'gr-provider-off-'.uniqid(),
+            'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'off',
             'mydata_mode' => 'off',
         ]);
 

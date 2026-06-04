@@ -2,6 +2,7 @@
 
 namespace App\Contracts;
 
+use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
 
@@ -34,11 +35,15 @@ interface EInvoiceProviderTransport
     public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult;
 
     /**
-     * Re-fetch the state of a document (by MARK) — the idempotency guard for the
-     * ambiguous "timeout after send" case (§14.4): query before any retry so a
-     * filing that actually succeeded is adopted, not duplicated.
+     * Re-fetch the state of a document by its INVOICE COORDINATES (issuer / series /
+     * AA / issueDate / type) — NOT by MARK, because the case this exists for is
+     * "send() timed out and I never got a MARK back" (§14.4). The transport reads
+     * whatever coordinates it needs off the Invoice (e.g. InvoSign's
+     * invoice_status.php takes issuer_vatNumber/series/aa/issueDate/invoiceType).
+     * A successful result carries the MARK so GrProviderSubmitter can ADOPT it
+     * instead of blindly re-filing (which would double-issue).
      */
-    public function status(string $mark, ProviderCredentials $credentials): ProviderResult;
+    public function status(Invoice $invoice, ProviderCredentials $credentials): ProviderResult;
 
     /** Smoke-test credentials + reachability (the Company "Test connection" action). */
     public function ping(ProviderCredentials $credentials): bool;

@@ -262,8 +262,16 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
   change — falls through σε NullSubmitter ώσπου να έρθει το P2). Tests:
   `ProviderTransportRegistryTest` + `EInvoiceProviderConfigTest`. **Κανένας
   πραγματικός πάροχος** — no-op δίπλα στο live myDATA.
-- **P2 — `GrProviderSubmitter`** πάνω στο seam + double-filing guard + unit tests
-  (mock transport → ΜΑΡΚ persist + cache sync + lifecycle).
+- **P2 — `GrProviderSubmitter`: ✅ DONE.** Πάνω στο seam: build via
+  `AadeInvoiceDocument` → inject transport → persist `PROVIDER_INSERT` (+ provider
+  audit cols) + mirror sync (VALID/active) · `PROVIDER_CANCEL` · `PROVIDER_REJECTED`
+  forensic row. State guards (VALID/CANCELLED/unknown) + **§14.4 status-check
+  idempotency** (ambiguous send → adopt existing MARK, never double-file). Factory
+  `gr-provider` + mode≠off → GrProviderSubmitter (mode off = staged). `status()`
+  refined to coordinate-lookup (`Invoice`, not by-MARK). Tests:
+  `GrProviderSubmitterTest` (fake transport — success/reject/guard/recover/cancel/
+  ping) + factory routing. **Deferred parity:** WHMCS write-back + auto-email on
+  VALID (best-effort downstream, follow-up).
 - **P3 — Company form (provider section, encrypted config, Test connection) +
   `einvoice:preflight` command.**
 - **P4 — ProviderConsole** (preflight/test-submit/per-invoice audit + myDATA

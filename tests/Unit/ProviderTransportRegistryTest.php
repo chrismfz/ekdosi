@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Contracts\EInvoiceProviderTransport;
+use App\Models\Invoice;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\NullProviderTransport;
 use App\Support\EInvoice\ProviderCredentials;
@@ -91,9 +92,9 @@ class FakeProviderTransport implements EInvoiceProviderTransport
         return ProviderResult::ok(cancellationMark: '400000000000002');
     }
 
-    public function status(string $mark, ProviderCredentials $credentials): ProviderResult
+    public function status(Invoice $invoice, ProviderCredentials $credentials): ProviderResult
     {
-        return ProviderResult::ok(mark: $mark);
+        return ProviderResult::ok(mark: '400000000000001');
     }
 
     public function ping(ProviderCredentials $credentials): bool
