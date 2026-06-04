@@ -50,6 +50,8 @@ class Company extends Model
         'mydata_aade_id_production',
         'mydata_subscription_key_production',
         'mydata_mode',
+        // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
+        'mydata_send_item_descr',
         'gsis_username',
         'gsis_password',
         // PR #27: branding + outbound mail config
@@ -104,6 +106,7 @@ class Company extends Model
             'whmcs_amount_includes_tax' => 'boolean',
             'whmcs_fetch_via_bridge' => 'boolean',
             'whmcs_auto_issue_immediate' => 'boolean',
+            'mydata_send_item_descr' => 'boolean',
             'auto_email_on_mydata_accept' => 'boolean',
             'auto_email_on_issue' => 'boolean',
             'mail_smtp_port' => 'integer',

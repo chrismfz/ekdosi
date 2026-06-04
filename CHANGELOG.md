@@ -16,6 +16,16 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Opt-in per-line description to myDATA (`<itemDescr>`).** New
+  `companies.mydata_send_item_descr` toggle (myDATA tab, default OFF): when on,
+  `AadeInvoiceDocument` emits the line's `product_descr` as `<itemDescr>`
+  (300-char clamp) so the text surfaces on the AADE QR / RequestTransmittedDocs.
+  Default OFF keeps the request byte-identical to the sandbox-validated shape —
+  the legacy app never sent it (verified against imported legacy MARK XML, which
+  carries only the E3 income classification per line). Sandbox-validate before
+  flipping on in production.
+
 ### Fixed
 - **PDF footer myDATA URL was visually clipped.** The full AADE verification URL
   (one ~150-char token) overflowed the fixed footer and got cut on both sides —

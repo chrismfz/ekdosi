@@ -141,6 +141,18 @@ class AadeInvoiceDocument
                 $detail->setQuantity((float) $line->qty);
             }
 
+            // Opt-in <itemDescr>: myDATA does NOT require it (the legacy app
+            // never sent it — verified against imported legacy MARK XML, which
+            // carries only the E3 income classification per line), so default
+            // OFF keeps the payload byte-identical to the sandbox-validated
+            // shape. A tenant flips companies.mydata_send_item_descr on to
+            // surface the line text on the AADE QR / RequestTransmittedDocs.
+            // 300-char clamp: the AADE field is unbounded at the XSD level but
+            // we keep it short to avoid bloating the signed request.
+            if ($this->tenant->mydata_send_item_descr && filled($line->product_descr)) {
+                $detail->setItemDescr(mb_substr((string) $line->product_descr, 0, 300));
+            }
+
             // G4: a 0% line is filed as vatCategory=7 (exempt) WITH the reason
             // code AADE requires ([217] forbids category 7 without it). The
             // reason lives on the tenant's 0%-rate VatCategory; resolve once.
