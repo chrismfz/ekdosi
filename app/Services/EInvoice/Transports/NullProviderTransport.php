@@ -3,6 +3,7 @@
 namespace App\Services\EInvoice\Transports;
 
 use App\Contracts\EInvoiceProviderTransport;
+use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
 use RuntimeException;
@@ -33,7 +34,7 @@ class NullProviderTransport implements EInvoiceProviderTransport
         throw $this->notConfigured();
     }
 
-    public function status(string $mark, ProviderCredentials $credentials): ProviderResult
+    public function status(Invoice $invoice, ProviderCredentials $credentials): ProviderResult
     {
         throw $this->notConfigured();
     }

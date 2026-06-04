@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Contracts\EInvoiceSubmitter;
 use App\Enums\MyDataMode;
 use App\Models\Company;
+use App\Services\EInvoice\GrProviderSubmitter;
+use App\Services\EInvoice\ProviderTransportRegistry;
 
 /**
  * Resolves the right EInvoiceSubmitter implementation for a tenant.
@@ -42,17 +44,27 @@ class EInvoiceSubmitterFactory
             return new MyDataSubmitter($tenant);
         }
 
+        // ΥΠΑΗΕΣ provider path (P2): file through a certified provider. The
+        // transport is resolved from the registry by the tenant's provider key —
+        // an unconfigured/unknown key yields the Null transport, so a misconfig
+        // fails LOUDLY at submit-time, never silently nor against the wrong path.
+        // Gated by einvoice_provider_mode != 'off' so a provider tenant can be
+        // STAGED (off) without filing — the twin of gr-mydata's Off gate.
+        if (
+            $tenant->einvoice_provider === 'gr-provider'
+            && ($tenant->einvoice_provider_mode ?? 'off') !== 'off'
+        ) {
+            $transport = app(ProviderTransportRegistry::class)->for((string) $tenant->einvoice_provider_key);
+
+            return new GrProviderSubmitter($tenant, $transport);
+        }
+
         // Everything else routes to the no-op submitter:
         //   - mydata_mode = Off (Greek tenant deliberately not filing)
         //   - einvoice_provider = 'none' (PDF-only tenant)
         //   - einvoice_provider = 'ee-peppol' (Estonian — PeppolSubmitter
         //     lands later; NullSubmitter is the safe default until then)
-        //   - einvoice_provider = 'gr-provider' (ΥΠΑΗΕΣ — RESERVED, inert in P1:
-        //     the provider seam exists (EInvoiceProviderTransport + registry +
-        //     companies.einvoice_provider_* columns) but GrProviderSubmitter lands
-        //     in P2, which will add the `gr-provider → GrProviderSubmitter` branch
-        //     here. Until then a 'gr-provider' tenant is PDF-only — never silently
-        //     filed the wrong way. See docs/paroxos/implementation-plan.md §2.4.
+        //   - einvoice_provider = 'gr-provider' WITH mode 'off' (staged, not filing)
         return new NullSubmitter;
     }
 }
