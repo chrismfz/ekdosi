@@ -16,6 +16,13 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **myDATA QR unscannable / misread on the printed PDF.** The ~150-char AADE
+  qrUrl produced a dense (v8, 49×49) QR rendered at only 200px with an 8px quiet
+  zone, then scaled to 28mm — phones misread it (truncated / wrong host on scan).
+  The PDF now renders the QR at 600px with a size-proportional (~4-module) quiet
+  zone and prints it at 32mm. Stored data was always correct (the MARK-detail QR
+  and the printed URL text were right); this is purely render scannability.
 ### Added
 - **WHMCS Inbox UX.** (1) «Συγχρονισμός τώρα» header action (next to «Έλεγχος
   legacy») — pulls paid+unfiled invoices on demand via `whmcs:fetch-pending`

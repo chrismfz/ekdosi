@@ -97,7 +97,11 @@ class InvoicePdfRenderer
      */
     private function renderQrDataUri(string $url): string
     {
-        return QrImage::dataUri($url);
+        // Render at high resolution (vs the 200px screen default) so the QR
+        // stays crisp when dompdf scales the PNG down to ~32mm in print — a
+        // low-res render of the dense ~150-char AADE URL rasterised fuzzy and
+        // phones misread it (truncated/wrong host on scan).
+        return QrImage::dataUri($url, 600);
     }
 
     /**

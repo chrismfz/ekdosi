@@ -49,9 +49,9 @@
 
         /* QR block floats over the meta strip on filed invoices */
         .qr-block { float: right; text-align: center; margin: 0 0 3mm 4mm; padding: 2mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; }
-        .qr-block img { width: 28mm; height: 28mm; display: block; }
+        .qr-block img { width: 32mm; height: 32mm; display: block; }
         .qr-block .qr-label { font-size: 7pt; color: #6b7280; margin: 1mm 0 0 0; }
-        .qr-block .qr-mark  { font-size: 7pt; color: #374151; word-break: break-all; max-width: 28mm; }
+        .qr-block .qr-mark  { font-size: 7pt; color: #374151; word-break: break-all; max-width: 32mm; }
 
         /* Lines table */
         .lines-wrap { page-break-inside: auto; }
