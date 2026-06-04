@@ -17,6 +17,13 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Cancellation write-back to WHMCS (state).** When ekdosi cancels an invoice at
+  AADE, `MyDataSubmitter::cancel` now re-pushes the SAME MARK with
+  `state='cancelled'` (new `WhmcsWritebackService::syncCancelledFromLifecycle`,
+  `WhmcsBridgeClient::setInvoiced(..., $state)`), so the WHMCS bridge badge shows
+  «ΑΚΥΡΩΜΕΝΟ» instead of a stale valid MARK. Best-effort + outside the DB
+  transaction; no-ops for non-WHMCS / split / never-filed invoices. The VALID
+  path now stamps `state='active'`.
 - **Plugin-API consolidation — push path fetches via the bridge.** The WHMCS
   invoice-paid webhook (`WhmcsInvoicePaidController`) now pulls the canonical
   invoice payload from the ekdosi_bridge plugin (`resolve.php op=invoice`, via the

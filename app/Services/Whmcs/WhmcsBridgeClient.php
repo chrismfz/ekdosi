@@ -82,7 +82,7 @@ class WhmcsBridgeClient
      * message if they need to distinguish (the filer currently
      * treats it as a non-fatal log).
      */
-    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null): void
+    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null): void
     {
         $bodyData = [
             'whmcs_invoice_id' => $whmcsInvoiceId,
@@ -90,6 +90,11 @@ class WhmcsBridgeClient
         ];
         if ($invcode !== null && $invcode !== '') {
             $bodyData['invcode'] = $invcode;
+        }
+        // AADE state ('active'/'cancelled') so the WHMCS badge can show
+        // «ΑΚΥΡΩΜΕΝΟ» after a cancellation. Omitted when null (older flow).
+        if ($state !== null && $state !== '') {
+            $bodyData['state'] = $state;
         }
         $body = json_encode($bodyData, JSON_THROW_ON_ERROR);
 

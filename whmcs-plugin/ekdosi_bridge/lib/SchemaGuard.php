@@ -152,7 +152,7 @@ class SchemaGuard
                     (SELECT COUNT(*) FROM information_schema.TABLES
                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?, ?, ?)) AS tbls,
                     (SELECT COUNT(*) FROM information_schema.COLUMNS
-                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = \'invcode\') AS has_invcode,
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME IN (\'invcode\', \'state\')) AS mark_cols,
                     (SELECT LOWER(DATA_TYPE) FROM information_schema.COLUMNS
                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = \'tblinvoices\' AND COLUMN_NAME = \'invoiced\') AS invoiced_type',
                 [$marks, $contacts, $routing, $bridgeLog, $marks]
@@ -162,9 +162,10 @@ class SchemaGuard
             }
 
             // invoiced absent ('' ) is fine — nothing to restore. Only BIGINT
-            // forces the heavy ensure() branch.
+            // forces the heavy ensure() branch. mark_cols must be 2 (invcode +
+            // state) so a pre-state table still triggers ensure() to ALTER it in.
             return (int) $row->tbls === 4
-                && (int) $row->has_invcode === 1
+                && (int) $row->mark_cols === 2
                 && (string) ($row->invoiced_type ?? '') !== 'bigint';
         } catch (Throwable $e) {
             return false;

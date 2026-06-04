@@ -82,6 +82,62 @@ class WhmcsLifecycleWritebackTest extends TestCase
             && $req['mark'] === '400001234567890');
     }
 
+    public function test_lifecycle_valid_pushes_active_state(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true], 200)]);
+
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_DRAFTED);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);
+
+        app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, '400001234567890');
+
+        Http::assertSent(fn ($req) => str_contains($req->url(), 'inbound.php')
+            && ($req['state'] ?? null) === 'active');
+    }
+
+    public function test_cancel_repushes_same_mark_with_cancelled_state(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true], 200)]);
+
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_FILED);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);
+        $invoice->forceFill(['mydata_mark' => '400001234567890'])->save();
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        Http::assertSent(fn ($req) => str_contains($req->url(), 'inbound.php')
+            && $req['whmcs_invoice_id'] === 4242
+            && $req['mark'] === '400001234567890'
+            && ($req['state'] ?? null) === 'cancelled');
+    }
+
+    public function test_cancel_no_op_when_invoice_never_filed(): void
+    {
+        Http::fake();
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_FILED);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);   // no mydata_mark
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_cancel_skips_split_rows(): void
+    {
+        Http::fake();
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, PendingWhmcsInvoice::STATUS_SPLIT);
+        $invoice = $this->draftInvoiceLinkedToPending($tenant, $pending);
+        $invoice->forceFill(['mydata_mark' => '400000000000009'])->save();
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        Http::assertNothingSent();
+    }
+
     public function test_no_op_for_non_whmcs_invoice(): void
     {
         Http::fake();

@@ -118,6 +118,13 @@ $mark = (string) ($payload['mark'] ?? '');
 // Optional: the ekdosi ΤΠΥ (e.g. ΑΠΥ423), shown next to the MARK on the admin
 // badges. Absent on older ekdosi versions → stored as null, no behaviour change.
 $invcode = trim((string) ($payload['invcode'] ?? ''));
+// Optional: the AADE state ('active'/'cancelled'). When ekdosi cancels at AADE
+// it re-pushes the SAME mark with state='cancelled' so the badge can show
+// «ΑΚΥΡΩΜΕΝΟ». Absent on older ekdosi → null, badge falls back to "filed".
+$state = strtolower(trim((string) ($payload['state'] ?? '')));
+if (! in_array($state, ['active', 'cancelled'], true)) {
+    $state = '';
+}
 if ($whmcsInvoiceId <= 0 || $mark === '') {
     http_response_code(400);
     echo json_encode([
@@ -169,7 +176,7 @@ if ($current !== null && $current !== $mark) {
 // Persist the MARK as a STRING in our own table — never touch
 // tblinvoices.invoiced (legacy SMALLINT flag).
 try {
-    InvoiceMarkStore::set($whmcsInvoiceId, $mark, $invcode !== '' ? $invcode : null);
+    InvoiceMarkStore::set($whmcsInvoiceId, $mark, $invcode !== '' ? $invcode : null, $state !== '' ? $state : null);
 } catch (\Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'db_update_failed', 'message' => $e->getMessage()]);
@@ -188,4 +195,5 @@ echo json_encode([
     'whmcs_invoice_id' => $whmcsInvoiceId,
     'mark'             => $mark,
     'invcode'          => $invcode !== '' ? $invcode : null,
+    'state'            => $state !== '' ? $state : null,
 ]);

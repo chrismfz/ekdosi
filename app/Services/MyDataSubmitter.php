@@ -316,7 +316,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         $responseXml = $action->getResponseXML() ?? '';
 
-        return DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel) {
+        $mark = DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel) {
             $mark = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
@@ -339,6 +339,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
             return $mark;
         });
+
+        // Reflect the cancellation on the WHMCS side (best-effort, never throws)
+        // so the bridge badge shows «ΑΚΥΡΩΜΕΝΟ». OUTSIDE the transaction — it's a
+        // network call and must not hold a DB lock. No-ops for non-WHMCS invoices.
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        return $mark;
     }
 
     /**

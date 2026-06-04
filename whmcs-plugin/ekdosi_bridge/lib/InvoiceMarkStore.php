@@ -29,6 +29,7 @@ class InvoiceMarkStore
                 invoiceid BIGINT UNSIGNED NOT NULL,
                 mark VARCHAR(40) NOT NULL,
                 invcode VARCHAR(60) NULL DEFAULT NULL,
+                state VARCHAR(20) NULL DEFAULT NULL,
                 updated_at DATETIME NULL DEFAULT NULL,
                 PRIMARY KEY (invoiceid)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
@@ -52,21 +53,46 @@ class InvoiceMarkStore
                 }
             }
         }
+
+        // `state` (active/cancelled) added later still — lets the WHMCS badges
+        // show «ΑΚΥΡΩΜΕΝΟ» after ekdosi cancels at AADE. Same idempotent +
+        // privilege-safe ALTER pattern as invcode.
+        try {
+            Capsule::statement('ALTER TABLE '.self::TABLE.' ADD COLUMN IF NOT EXISTS state VARCHAR(20) NULL DEFAULT NULL AFTER invcode');
+        } catch (\Throwable $e) {
+            if (! self::hasStateColumn()) {
+                try {
+                    Capsule::statement('ALTER TABLE '.self::TABLE.' ADD COLUMN state VARCHAR(20) NULL DEFAULT NULL AFTER invcode');
+                } catch (\Throwable $ignored) {
+                    // set()/stateFor() guard against absence — MARK still stores.
+                }
+            }
+        }
     }
 
-    private static function hasInvcodeColumn(): bool
+    private static function hasColumn(string $column): bool
     {
         try {
             $col = Capsule::selectOne(
                 "SELECT COLUMN_NAME FROM information_schema.COLUMNS
-                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'invcode'",
-                [self::TABLE]
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                [self::TABLE, $column]
             );
 
             return $col !== null;
         } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    private static function hasInvcodeColumn(): bool
+    {
+        return self::hasColumn('invcode');
+    }
+
+    private static function hasStateColumn(): bool
+    {
+        return self::hasColumn('state');
     }
 
     public static function hasTable(): bool
@@ -97,17 +123,32 @@ class InvoiceMarkStore
         return ($v !== null && $v !== '') ? (string) $v : null;
     }
 
+    /** The AADE state ekdosi last wrote for this WHMCS invoice ('active'/'cancelled'), or null. */
+    public static function stateFor(int $invoiceId): ?string
+    {
+        if (! self::hasStateColumn()) {
+            return null;
+        }
+        $v = Capsule::table(self::TABLE)->where('invoiceid', $invoiceId)->value('state');
+
+        return ($v !== null && $v !== '') ? (string) $v : null;
+    }
+
     /**
      * Upsert the MARK for an invoice (string — never int-cast a 15-digit MARK).
      * Optionally also stores the ekdosi ΤΠΥ (`invcode`, e.g. ΑΠΥ423) shown next
-     * to the MARK. The invcode write is guarded so a tenant whose table predates
-     * the column (and couldn't be ALTERed) still stores the MARK.
+     * to the MARK, and the AADE `state` ('active'/'cancelled'). Each extra-column
+     * write is guarded so a tenant whose table predates the column (and couldn't
+     * be ALTERed) still stores the MARK.
      */
-    public static function set(int $invoiceId, string $mark, ?string $invcode = null): void
+    public static function set(int $invoiceId, string $mark, ?string $invcode = null, ?string $state = null): void
     {
         $values = ['mark' => $mark, 'updated_at' => date('Y-m-d H:i:s')];
         if ($invcode !== null && $invcode !== '' && self::hasInvcodeColumn()) {
             $values['invcode'] = $invcode;
+        }
+        if ($state !== null && $state !== '' && self::hasStateColumn()) {
+            $values['state'] = $state;
         }
 
         Capsule::table(self::TABLE)->updateOrInsert(

@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-06-03
+### Added
+- **State in the write-back (`mod_ekdosi_invoice_marks.state`).** `inbound.php`
+  now accepts an optional `state` ('active'/'cancelled') alongside the MARK, and
+  the manage-invoice badge shows **«… · ΑΚΥΡΩΜΕΝΟ»** (red) when ekdosi cancels at
+  AADE — instead of a stale "valid" MARK. New `state` column (added by
+  `InvoiceMarkStore::ensureTable` + the SchemaGuard probe, idempotent &
+  privilege-safe, no reactivation); `InvoiceMarkStore::set()` gains the param and
+  `stateFor()` reads it. The idempotent guard is unchanged — cancel re-pushes the
+  SAME mark (only `state` differs), so it's never a 409.
+
 ## [0.33.0] — 2026-06-03
 ### Added
 - **«Bridge logs» tab + Plugin-API request log (`mod_ekdosi_bridge_log`).** Every
