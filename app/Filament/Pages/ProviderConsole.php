@@ -52,9 +52,12 @@ class ProviderConsole extends Page
     {
         $tenant = Filament::getTenant();
 
+        // Admin-only, like MyDataConsole — canAccess() is the route-level guard, so
+        // a non-permitted user can't reach it by hand-typing the URL either. Uses
+        // Gate::can (→ false on a missing permission, never a 404-storm throw).
         return $tenant instanceof Company
             && $tenant->einvoice_provider === 'gr-provider'
-            && (bool) auth()->check();
+            && (bool) auth()->user()?->can('View:ProviderConsole');
     }
 
     protected function getHeaderActions(): array

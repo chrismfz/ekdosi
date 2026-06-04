@@ -50,18 +50,27 @@ class ProviderPreflight
             ? ['status' => 'warn', 'label' => 'Περιβάλλον', 'detail' => 'mode=off — σε αναμονή (staged), δεν φιλάρει ακόμη.']
             : ['status' => 'ok', 'label' => 'Περιβάλλον', 'detail' => $mode];
 
-        // Provider credentials present (any of the provider's configured fields).
-        $fields = (array) config("ekdosi.einvoice.provider_fields.{$key}", []);
+        // Provider credentials present — for the ACTIVE environment only. Where a
+        // provider splits sandbox vs production creds with a `demo_` prefix (InvoSign:
+        // demo_base_url/demo_token vs base_url/token), check the set the current mode
+        // actually uses (same split as InvoSignTransport::resolve), so a production
+        // tenant with only sandbox creds filled fails the preflight instead of a
+        // misleading green. Providers with no split (e.g. SBZ) check all fields.
+        $fields = array_keys((array) config("ekdosi.einvoice.provider_fields.{$key}", []));
         $config = is_array($tenant->einvoice_provider_config) ? $tenant->einvoice_provider_config : [];
-        $filled = 0;
-        foreach (array_keys($fields) as $field) {
-            if (($config[$field] ?? '') !== '') {
-                $filled++;
-            }
+        $sandbox = ($tenant->einvoice_provider_mode ?? 'off') !== 'production';
+        $hasDemoSplit = (bool) array_filter($fields, fn ($f) => str_starts_with($f, 'demo_'));
+        $relevant = $hasDemoSplit
+            ? array_values(array_filter($fields, fn ($f) => str_starts_with($f, 'demo_') === $sandbox))
+            : $fields;
+        $missing = array_values(array_filter($relevant, fn ($f) => ($config[$f] ?? '') === ''));
+        $env = $sandbox ? 'δοκιμαστικού' : 'παραγωγής';
+
+        if ($relevant !== [] && $missing === []) {
+            $checks[] = ['status' => 'ok', 'label' => 'Στοιχεία παρόχου', 'detail' => "Συμπληρωμένα για το περιβάλλον {$env}."];
+        } else {
+            $checks[] = ['status' => 'fail', 'label' => 'Στοιχεία παρόχου', 'detail' => "Λείπουν στοιχεία του περιβάλλοντος {$env}: ".(implode(', ', $missing) ?: '—').'.'];
         }
-        $checks[] = $filled === 0
-            ? ['status' => 'fail', 'label' => 'Στοιχεία παρόχου', 'detail' => 'Δεν έχουν συμπληρωθεί διαπιστευτήρια παρόχου.']
-            : ['status' => 'ok', 'label' => 'Στοιχεία παρόχου', 'detail' => "{$filled} πεδία συμπληρωμένα (επιβεβαίωσε αυτά του ενεργού περιβάλλοντος)."];
 
         // Issuer AFM (the AADE payload needs it).
         $checks[] = ($tenant->afm ?? '') !== ''

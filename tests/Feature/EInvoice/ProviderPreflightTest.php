@@ -63,6 +63,23 @@ class ProviderPreflightTest extends TestCase
         $this->assertFalse(app(ProviderPreflight::class)->isReady($c));
     }
 
+    public function test_credential_check_is_mode_aware(): void
+    {
+        // Production mode but only the SANDBOX (demo_*) creds are filled → fail.
+        $c = $this->readyTenant([
+            'einvoice_provider_mode' => 'production',
+            'einvoice_provider_config' => ['demo_base_url' => 'https://demo', 'demo_token' => 'T'],
+        ]);
+        $this->assertFalse(app(ProviderPreflight::class)->isReady($c));
+
+        // Fill the production pair too → ready.
+        $c->update(['einvoice_provider_config' => [
+            'demo_base_url' => 'https://demo', 'demo_token' => 'T',
+            'base_url' => 'https://live', 'token' => 'L',
+        ]]);
+        $this->assertTrue(app(ProviderPreflight::class)->isReady($c->fresh()));
+    }
+
     public function test_non_provider_tenant_returns_single_warn(): void
     {
         $c = Company::create(['name' => 'md', 'slug' => 'md-'.uniqid(), 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata']);
@@ -85,7 +102,7 @@ class ProviderPreflightTest extends TestCase
 
     public function test_test_submit_dry_run_prints_payload_without_network(): void
     {
-        $c = $this->readyTenant();
+        $c = $this->readyTenant(['einvoice_provider_config' => ['demo_base_url' => 'https://demo', 'demo_token' => 'SENTINEL-TOKEN']]);
         $customer = Customer::create(['company_id' => $c->id, 'name' => 'Π', 'afm' => '997073525']);
         VatCategory::create(['company_id' => $c->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
         $type = InvoiceType::where('company_id', $c->id)->first();
@@ -97,6 +114,7 @@ class ProviderPreflightTest extends TestCase
 
         $this->artisan('einvoice:provider-test-submit', ['invoice' => $invoice->id])
             ->expectsOutputToContain('API_InvoiceDetails')
+            ->doesntExpectOutputToContain('SENTINEL-TOKEN') // the token must NEVER be in the payload
             ->assertExitCode(0);
     }
 }
