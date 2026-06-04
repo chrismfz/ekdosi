@@ -295,7 +295,10 @@ class WhmcsInvoiceMapper
             : null;
         $out = [];
         foreach ($items as $item) {
-            $description = trim((string) ($item['description'] ?? ''));
+            // Clamp to the invoice_lines.product_descr column length (VARCHAR 256).
+            // Now that we actually persist it, a verbose WHMCS description would
+            // otherwise abort the whole file() INSERT under strict SQL mode.
+            $description = mb_substr(trim((string) ($item['description'] ?? '')), 0, 256);
             if ($description === '') {
                 continue;
             }
