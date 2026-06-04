@@ -626,9 +626,9 @@ expense-classification AADE submit, RequestVatInfo/E3 cross-checks,
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see
 the latent-items section.) **E-invoicing-via-provider (GR ΥΠΑΗΕΣ) +
-PEPPOL blueprint: `docs/einvoice-provider-bridge.md`** (deferred; the
+PEPPOL blueprint: `docs/paroxos/regulatory-blueprint.md`** (deferred; the
 `EInvoiceSubmitter` factory already has the slot — a `gr-provider`/`PeppolSubmitter`
-drops in. Provider schema reference: `docs/reference/aade-provider-invoicesDoc-v0.6.1.xsd`).
+drops in. Provider schema reference: `docs/paroxos/reference/aade-provider-invoicesDoc-v0.6.1.xsd`).
 
 **Suggested order:** (1)✅ sandbox myDATA. (2)✅ scheduler. (3)✅ timologia v2
 (T-1+T-2). (4)✅ **G1 withholding + G4 exempt** (merged, PR #68). (5)✅ **G3

@@ -4,7 +4,7 @@
 > is a known quantity if/when Greek e-invoicing **μέσω παρόχου** (Υ.ΠΑ.Η.Ε.Σ.)
 > becomes mandatory, or we decide to issue via a provider, or Estonia (Nixpal
 > OÜ) needs PEPPOL. Grounded in the AADE provider schema committed alongside
-> (`docs/reference/aade-provider-invoicesDoc-v0.6.1.xsd`), the **Α.1112/2025**
+> (`reference/aade-provider-invoicesDoc-v0.6.1.xsd`), the **Α.1112/2025**
 > certification forms, and **PEPPOL BIS Billing 3.0** (Nov 2025 release,
 > https://docs.peppol.eu/poacc/billing/3.0/).
 
@@ -46,7 +46,7 @@ replacement + delivery + incentives** are the added value.
 ---
 
 ## 2. The AADE provider schema vs what we already emit
-`docs/reference/aade-provider-invoicesDoc-v0.6.1.xsd` (`InvoicesDoc` →
+`reference/aade-provider-invoicesDoc-v0.6.1.xsd` (`InvoicesDoc` →
 `AadeBookInvoiceType`). It is the **same shape** as our myDATA submit payload —
 `issuer` / `counterpart` / `invoiceHeader` / `invoiceDetails` (per-line net /
 vatCategory / vatAmount / vatExemptionCategory / income+expense classification) /
@@ -62,10 +62,14 @@ builds. **Provider-only additions** (top of `AadeBookInvoiceType`):
 ⇒ The mapping work for a GR provider is **small**: reuse `buildAadeInvoice`, add
 `authenticationCode` + (rare) `transmissionFailure`, change only the *transport*.
 
-> Note the version drift: the provider XSD is `v0.6.1`, our committed myDATA
-> spec is `v2.0.0`. Element names match; **diff the enums** (e.g. this XSD caps
-> `VatExemptionType` at 23, `InvoiceType` list differs) before trusting a shared
-> serializer — pin to whichever the provider/AADE endpoint demands.
+> **⚠ STALE XSD (corrected 2026-06):** the committed `aade-provider-invoicesDoc-
+> v0.6.1.xsd` is an **obsolete standalone draft**. Mind two distinct version
+> numbers: the **Providers API *doc*** is v1.0.9–v1.0.12, while the **InvoicesDoc
+> *XSD*** is **v2.0.1** — and `firebed/aade-mydata` v5.10.4 **already targets
+> v2.0.1** with `ProvidersSignature` on its `Invoice` model. So rely on firebed's
+> current-version output; the v0.6.1 file is reference-only. (Couldn't auto-pull —
+> aade.gr 403s this host; browser-download if a byte-exact schema is needed.)
+> Details: `research/aade-regulatory-update.md` §5.
 
 ---
 
@@ -106,21 +110,26 @@ the rest is **regulatory** (certification), not code.
 
 ---
 
-## 4. Becoming a provider — Α.1112/2025 (from the certification forms)
-Three **Άδειες Καταλληλότητας**: **[1] Χονδρικές/Λιανικές, [2] Χονδρικές,
-[3] Λιανικές**. Submitted **electronically, digitally signed**.
+## 4. Becoming a provider — Α.1112/2025
 
-### 🔑 Ιδιοπάροχος (self-provider) — answers "πάροχος μόνο για τον εαυτό μου"
-There is a **separate, lighter form**: *«Αίτημα Αδειοδότησης λογισμικού
-**Ιδιοπαρόχου** ΥΠΑΗΕΣ»*. Key facts:
-- It is **for issuing your OWN documents** — **no customers required**. "Μόνο
-  εγώ / χωρίς πελάτες" is exactly this category, fully legitimate. No client
-  threshold.
-- It is **Χονδρικές-only** (the form fixes «Είδος Άδειας = Χονδρικές
-  Συναλλαγές»). For your OWN **retail** you'd need the full provider with retail
-  (which adds the cash-system-interconnection requirement, Α.1155/2023).
-- It **drops** the retail/ταμειακό-interface dossier item that the full provider
-  form requires.
+> **⚠ Corrected 2026-06 — see `research/aade-regulatory-update.md` for sources.**
+> The earlier "three license tiers" reading below was **WRONG** and is struck out.
+> A.1112/2025 (ΦΕΚ Β' 4206/1.8.2025, **replaces A.1035/2020**) establishes a
+> **single ΥΠΑΗΕΣ suitability license**. The only categorical split is **Πάροχος**
+> (serves third parties) vs **Ιδιοπάροχος** (self-provider, own B2B only).
+> Requirements: **ISO 27001** (or equivalent), **5-year** license, **≥99% uptime/
+> quarter**, 5-member Suitability Committee, penalty-points (100 → revocation),
+> **no παράβολο/εγγυητική amount specified**.
+
+~~Three **Άδειες Καταλληλότητας**: [1] Χονδρικές/Λιανικές, [2] Χονδρικές,
+[3] Λιανικές.~~ *(struck — no such tiers; single license.)*
+
+### 🔑 Ιδιοπάροχος (self-provider) — "πάροχος μόνο για τον εαυτό μου"
+- For issuing your **OWN** documents — **own wholesale (B2B) only**.
+- **⚠ Hard bar: ≥ €50,000,000 gross income** (last fiscal year) + permanent
+  establishment in Greece. → **Not realistic for Nexon/MyIP**; the strategy is
+  unambiguously **bridge to an external certified provider** (implementation-plan §8),
+  NOT becoming a provider. The ιδιοπάροχος application form stays as reference only.
 
 ### Dossier (Παράρτημα Α1 + Άρθρο 4 παρ.2) — both provider & ιδιοπάροχος
 - Καταστατικό οντότητας.
@@ -165,7 +174,7 @@ feature backlog.
 
 ---
 
-## Reference files (committed under `docs/reference/`)
+## Reference files (committed under `reference/`)
 - `aade-provider-invoicesDoc-v0.6.1.xsd` — the AADE **provider** invoice schema
   (`InvoicesDoc` / `AadeBookInvoiceType`; carries `authenticationCode` +
   `transmissionFailure`).
@@ -173,6 +182,12 @@ feature backlog.
   application (Άδεια [1]/[2]/[3]).
 - `aade-A.1112.2025-self-provider-idioparochos-application-form.docx` —
   **ιδιοπάροχος** application (own docs, wholesale-only).
+- `A.1258-2020-declarations-decision.pdf` — the AADE decision defining the
+  **opt-in declarations** (Δήλωση Αποκλειστικής Έκδοσης μέσω Παρόχου / Αποδοχής
+  Λήψης / Ανάκλησης) an entity files to issue via provider — see the
+  implementation plan §11 (out-of-band prerequisite).
+- `manual-paroxoi-2020-12-17.pdf` — AADE user manual for filing those
+  declarations in **bookkeeper-web** (TAXISnet login; authorize-provider flow).
 - NOT committed: the main Α.1112/2025 decision PDF (the AADE copy is **corrupt**
   — won't open anywhere; re-add when AADE publishes a valid one) and the 2.6 MB
   annex-templates zip (binary boilerplate, not needed for the blueprint).

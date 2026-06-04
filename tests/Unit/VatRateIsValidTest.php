@@ -2,12 +2,13 @@
 
 namespace Tests\Unit;
 
+use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Support\MyData\Codes;
 use PHPUnit\Framework\TestCase;
 
 /**
  * The §8.2 rate-validity rule used by the ETL post-import warning, the
- * VatCategories table flag, and (semantically) MyDataSubmitter::vatCategoryFor.
+ * VatCategories table flag, and (semantically) AadeInvoiceDocument::vatCategoryFor.
  * Pure logic — no DB.
  */
 class VatRateIsValidTest extends TestCase
@@ -35,7 +36,7 @@ class VatRateIsValidTest extends TestCase
     public function test_3pct_is_not_fileable_yet(): void
     {
         // Codes::VAT_CATEGORY_RATES lists code 9 = 3% (ν.5057/2023), but
-        // MyDataSubmitter::vatCategoryFor has no 3% arm → it would throw at
+        // AadeInvoiceDocument::vatCategoryFor has no 3% arm → it would throw at
         // filing. So the validity check must REJECT 3% to stay honest with
         // what actually files (the bug the review caught). If a 3% arm is
         // ever added to vatCategoryFor + FILEABLE_VAT_RATES, flip this.
@@ -48,18 +49,18 @@ class VatRateIsValidTest extends TestCase
         // without throwing, and a non-fileable rate (3%) must throw. Uses
         // reflection since vatCategoryFor is private — this is the lock that
         // keeps Codes::FILEABLE_VAT_RATES and the submitter in sync.
-        $submitter = (new \ReflectionClass(\App\Services\MyDataSubmitter::class))
+        $document = (new \ReflectionClass(AadeInvoiceDocument::class))
             ->newInstanceWithoutConstructor();
-        $m = new \ReflectionMethod($submitter, 'vatCategoryFor');
+        $m = new \ReflectionMethod($document, 'vatCategoryFor');
         $m->setAccessible(true);
 
         foreach (Codes::FILEABLE_VAT_RATES as $rate) {
-            $cat = $m->invoke($submitter, $rate);
+            $cat = $m->invoke($document, $rate);
             $this->assertIsInt($cat, "rate {$rate}% should map to an AADE vatCategory");
         }
 
         $this->expectException(\RuntimeException::class);
-        $m->invoke($submitter, 3.0);   // not in FILEABLE_VAT_RATES → must throw
+        $m->invoke($document, 3.0);   // not in FILEABLE_VAT_RATES → must throw
     }
 
     public function test_null_or_empty_is_invalid(): void

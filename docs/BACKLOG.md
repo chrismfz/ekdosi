@@ -3,7 +3,7 @@
 Cross-cutting TODOs that are **deliberately not built yet**. Captured so they
 don't get lost in drift. (Per-feature plans live in their own docs:
 `services-quotes-roadmap.md`, `expenses-phase-plan.md`,
-`einvoice-provider-bridge.md`. The myDATA-filing gaps + tech-debt list live in
+`paroxos/` (regulatory-blueprint.md + implementation-plan.md). The myDATA-filing gaps + tech-debt list live in
 `CLAUDE.md`.)
 
 ---
