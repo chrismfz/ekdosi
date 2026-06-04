@@ -63,12 +63,13 @@ builds. **Provider-only additions** (top of `AadeBookInvoiceType`):
 `authenticationCode` + (rare) `transmissionFailure`, change only the *transport*.
 
 > **⚠ STALE XSD (corrected 2026-06):** the committed `aade-provider-invoicesDoc-
-> v0.6.1.xsd` is a very early draft. **AADE is now at provider v1.0.9–v1.0.12**
-> (the provider `InvoicesDoc` carries `ProviderSignatureType`,
-> `EndToEndReferenceID`, `invoiceDeliveryStatus` — and `firebed/aade-mydata`
-> v5.10.4 **already models these**, see implementation-plan §2.1). **Re-pull the
-> current provider XSD** from the AADE technical-specs hub before building; diff
-> enums and pin to what the provider/AADE endpoint demands.
+> v0.6.1.xsd` is an **obsolete standalone draft**. Mind two distinct version
+> numbers: the **Providers API *doc*** is v1.0.9–v1.0.12, while the **InvoicesDoc
+> *XSD*** is **v2.0.1** — and `firebed/aade-mydata` v5.10.4 **already targets
+> v2.0.1** with `ProvidersSignature` on its `Invoice` model. So rely on firebed's
+> current-version output; the v0.6.1 file is reference-only. (Couldn't auto-pull —
+> aade.gr 403s this host; browser-download if a byte-exact schema is needed.)
+> Details: `research/aade-regulatory-update.md` §5.
 
 ---
 

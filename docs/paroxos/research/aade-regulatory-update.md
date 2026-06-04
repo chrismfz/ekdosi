@@ -20,11 +20,20 @@
    ν.4172/2013). So implementation-plan §11's *mechanism* still holds (you declare
    exclusive issuance via provider), but cite **A.1129/2025**, not A.1258/2020, as
    current. A.1258 PDF stays as historical reference.
-5. **Provider XSD is stale.** Repo has `aade-provider-invoicesDoc-v0.6.1.xsd` — a
-   very early draft. **AADE is at provider/myDATA v1.0.9–v1.0.12** (the provider
-   `InvoicesDoc` carries `ProviderSignatureType`, `EndToEndReferenceID`,
-   `invoiceDeliveryStatus` — and firebed v5.10.4 already models these). **Re-pull
-   the current provider XSD** from the AADE technical-specs hub before building.
+5. **Provider XSD is stale — but two different version numbers were conflated.**
+   - **Providers API *documentation* version = v1.0.9–v1.0.12** (the PDF that
+     describes the provider endpoints/fields). NOT a schema version.
+   - **InvoicesDoc *XSD* version = v2.0.1** (the actual invoice schema). **firebed
+     v5.10.4 already targets `InvoicesDoc-v2.0.1.xsd`** (`Invoice::VERSION='v2.0.1'`)
+     and its `Invoice` model carries `ProvidersSignature` — so the current-version
+     XML with provider-signature support is **already emittable from the library**.
+   - The committed `aade-provider-invoicesDoc-v0.6.1.xsd` is an **obsolete
+     standalone provider draft** — provider fields are now folded into the main
+     v2.0.x InvoicesDoc. **Treat v0.6.1 as obsolete reference only;** rely on
+     firebed's v2.0.1 target, and (couldn't auto-fetch — aade.gr WAF-blocks this
+     host with 403) **manually download the current Providers API doc v1.0.12 + the
+     v2.0.x InvoicesDoc XSD from the AADE technical-specs hub in a browser** if a
+     byte-exact schema is needed before go-live.
 
 ## A.1112/2025 — verified facts (provider licensing & obligations)
 - **ΦΕΚ Β' 4206 / 1.8.2025.** Title: «Υποχρεώσεις Παρόχων Υπηρεσιών Ηλεκτρονικής
