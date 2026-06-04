@@ -2,6 +2,11 @@
 
 namespace App\Support\MyData;
 
+use Firebed\AadeMyData\Enums\ExpenseClassificationCategory;
+use Firebed\AadeMyData\Enums\ExpenseClassificationType;
+use Firebed\AadeMyData\Enums\IncomeClassificationCategory;
+use Firebed\AadeMyData\Enums\IncomeClassificationType;
+
 /**
  * AADE myDATA code tables (the Παράρτημα / Appendix §8 of the official
  * "myDATA API Documentation v2.0.0"). The full doc lives in the repo
@@ -532,12 +537,12 @@ final class Codes
      */
     public static function isValidExpenseClassType(string $code): bool
     {
-        return \Firebed\AadeMyData\Enums\ExpenseClassificationType::tryFrom($code) !== null;
+        return ExpenseClassificationType::tryFrom($code) !== null;
     }
 
     public static function isValidExpenseClassCategory(string $code): bool
     {
-        return \Firebed\AadeMyData\Enums\ExpenseClassificationCategory::tryFrom($code) !== null;
+        return ExpenseClassificationCategory::tryFrom($code) !== null;
     }
 
     /**
@@ -548,15 +553,15 @@ final class Codes
      */
     public static function e3TypeLabel(string $code): ?string
     {
-        return \Firebed\AadeMyData\Enums\IncomeClassificationType::tryFrom($code)?->label()
-            ?? \Firebed\AadeMyData\Enums\ExpenseClassificationType::tryFrom($code)?->label();
+        return IncomeClassificationType::tryFrom($code)?->label()
+            ?? ExpenseClassificationType::tryFrom($code)?->label();
     }
 
     /** Greek label for an E3 classification category (income or expense). */
     public static function e3CategoryLabel(string $code): ?string
     {
-        return \Firebed\AadeMyData\Enums\IncomeClassificationCategory::tryFrom($code)?->label()
-            ?? \Firebed\AadeMyData\Enums\ExpenseClassificationCategory::tryFrom($code)?->label();
+        return IncomeClassificationCategory::tryFrom($code)?->label()
+            ?? ExpenseClassificationCategory::tryFrom($code)?->label();
     }
 
     /**
@@ -568,10 +573,10 @@ final class Codes
      */
     public static function e3Direction(string $code): string
     {
-        if (\Firebed\AadeMyData\Enums\IncomeClassificationType::tryFrom($code) !== null) {
+        if (IncomeClassificationType::tryFrom($code) !== null) {
             return 'income';
         }
-        if (\Firebed\AadeMyData\Enums\ExpenseClassificationType::tryFrom($code) !== null) {
+        if (ExpenseClassificationType::tryFrom($code) !== null) {
             return 'expense';
         }
 
@@ -586,7 +591,7 @@ final class Codes
     public static function expenseClassTypeOptions(): array
     {
         $out = [];
-        foreach (\Firebed\AadeMyData\Enums\ExpenseClassificationType::cases() as $c) {
+        foreach (ExpenseClassificationType::cases() as $c) {
             $out[$c->value] = $c->value.' — '.$c->label();
         }
 
@@ -599,7 +604,7 @@ final class Codes
     public static function expenseClassCategoryOptions(): array
     {
         $out = [];
-        foreach (\Firebed\AadeMyData\Enums\ExpenseClassificationCategory::cases() as $c) {
+        foreach (ExpenseClassificationCategory::cases() as $c) {
             $out[$c->value] = $c->value.' — '.$c->label();
         }
 
@@ -615,6 +620,22 @@ final class Codes
     public static function isNonCorrelatedCreditType(string $code): bool
     {
         return in_array($code, self::NON_CORRELATED_CREDIT_TYPES, true);
+    }
+
+    /**
+     * Does AADE ACCEPT a per-line <itemDescr> for this document type?
+     *
+     * The spec (§ itemDescr, doc line 1287) restricts it to «tax free ή που
+     * είναι τιμολόγια και δελτία αποστολής ή απλά δελτία διακίνησης (π.χ 9.3)»
+     * — i.e. delivery notes / shipping documents (and tax-free / isDeliveryNote
+     * invoices). For a plain ΤΠΥ/ΤΙΜ (2.1, 1.1, 11.x …) AADE REJECTS it, so the
+     * opt-in itemDescr knob must never emit it there. We only have the document
+     * type as a deterministic signal (no isDeliveryNote / tax-free columns on
+     * Invoice), so we gate on the 9.x δελτία-διακίνησης types.
+     */
+    public static function allowsItemDescr(?string $code): bool
+    {
+        return in_array($code, ['9.1', '9.2', '9.3'], true);
     }
 
     public static function vatExemptionExists(int $code): bool

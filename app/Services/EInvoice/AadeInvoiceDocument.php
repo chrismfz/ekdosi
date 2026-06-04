@@ -141,6 +141,21 @@ class AadeInvoiceDocument
                 $detail->setQuantity((float) $line->qty);
             }
 
+            // Opt-in <itemDescr>: myDATA does NOT require it (the legacy app
+            // never sent it — verified against imported legacy MARK XML, which
+            // carries only the E3 income classification per line), so default
+            // OFF keeps the payload byte-identical to the sandbox-validated
+            // shape. Even WITH the knob on, AADE ACCEPTS itemDescr only for
+            // delivery-note / shipping types (9.x) — it REJECTS it on a plain
+            // ΤΠΥ/ΤΙΜ (spec line 1287) — so Codes::allowsItemDescr() gates it by
+            // document type; the knob can never produce a rejection. 256-char
+            // clamp matches the product_descr column width (and WhmcsInvoiceMapper).
+            if ($this->tenant->mydata_send_item_descr
+                && Codes::allowsItemDescr((string) $invoice->invoiceType?->mydata_type)
+                && filled($line->product_descr)) {
+                $detail->setItemDescr(mb_substr((string) $line->product_descr, 0, 256));
+            }
+
             // G4: a 0% line is filed as vatCategory=7 (exempt) WITH the reason
             // code AADE requires ([217] forbids category 7 without it). The
             // reason lives on the tenant's 0%-rate VatCategory; resolve once.
