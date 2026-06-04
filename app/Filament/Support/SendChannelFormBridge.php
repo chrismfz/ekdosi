@@ -52,12 +52,14 @@ class SendChannelFormBridge
             $sameProvider = ($record?->einvoice_provider_key === $providerKey);
             $existing = is_array($record?->einvoice_provider_config) ? $record->einvoice_provider_config : [];
             $config = $sameProvider ? $existing : [];
-            foreach (self::fieldMap()[$providerKey] ?? [] as $field => $meta) {
+            foreach (array_keys(self::fieldMap()[$providerKey] ?? []) as $field) {
                 $value = $data["cfg_{$providerKey}_{$field}"] ?? null;
-                if (self::isSecret($meta) && ($value === null || $value === '')) {
-                    continue; // keep the stored secret
+                // Blank → keep the stored value (no null/empty noise in the blob). This
+                // is the "leave blank to keep" rule for secrets, applied uniformly:
+                // credentials are changed, not cleared, via this form.
+                if ($value !== null && $value !== '') {
+                    $config[$field] = $value;
                 }
-                $config[$field] = $value;
             }
             $data['einvoice_provider_config'] = $config;
         }

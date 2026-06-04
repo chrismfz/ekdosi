@@ -57,7 +57,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 
         try {
-            $result = $this->transport->send($xml, $credentials);
+            $result = $this->transport->send($invoice, $xml, $credentials);
         } catch (Throwable $e) {
             // Ambiguous: the provider may or may not have filed. NEVER blind-retry
             // (§14.4) — status-check by invoice coordinates first and adopt a MARK
@@ -264,6 +264,16 @@ class GrProviderSubmitter implements EInvoiceSubmitter
     private function persistSuccess(Invoice $invoice, string $xml, ProviderResult $result, bool $viaRecovery = false): MyDataMark
     {
         $mark = (string) $result->mark;
+
+        // Defense in depth (any transport): never flip an invoice to VALID without a
+        // real MARK — a "success" with no MARK is not a filing. Refuse loudly so the
+        // operator sees it and the document stays re-fileable.
+        if ($mark === '') {
+            throw new RuntimeException(
+                "E-invoice provider reported success but returned no MARK for invoice {$invoice->invcode}. ".
+                'Refusing to mark VALID — investigate the provider response.'
+            );
+        }
 
         $existing = MyDataMark::query()
             ->where('invoice_id', $invoice->id)

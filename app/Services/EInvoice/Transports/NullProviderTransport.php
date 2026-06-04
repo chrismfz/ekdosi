@@ -24,7 +24,7 @@ class NullProviderTransport implements EInvoiceProviderTransport
         return 'none';
     }
 
-    public function send(string $documentXml, ProviderCredentials $credentials): ProviderResult
+    public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
     {
         throw $this->notConfigured();
     }

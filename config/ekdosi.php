@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Billing\Sources\WhmcsBillingSource;
+use App\Services\EInvoice\Transports\InvoSignTransport;
 
 return [
 
@@ -149,8 +150,8 @@ return [
     */
     'einvoice' => [
         'providers' => [
-            // 'invosign' => App\Services\EInvoice\Transports\InvoSignTransport::class,  // P5
-            // 'sbz'      => App\Services\EInvoice\Transports\SbzTransport::class,        // P5
+            'invosign' => InvoSignTransport::class,
+            // 'sbz'   => App\Services\EInvoice\Transports\SbzTransport::class,           // P5+
         ],
 
         /*
@@ -174,8 +175,12 @@ return [
         */
         'provider_fields' => [
             'invosign' => [
-                'base_url' => ['label' => 'Base URL', 'secret' => false],
-                'token' => ['label' => 'Token', 'secret' => true],
+                // Production (the «Παραγωγή» channel uses these).
+                'base_url' => ['label' => 'Base URL (Παραγωγή)', 'secret' => false],
+                'token' => ['label' => 'Token (Παραγωγή)', 'secret' => true],
+                // Sandbox / demo (the «Δοκιμαστικό» channel uses these).
+                'demo_base_url' => ['label' => 'Base URL (Δοκιμαστικό)', 'secret' => false],
+                'demo_token' => ['label' => 'Token (Δοκιμαστικό)', 'secret' => true],
             ],
             'sbz' => [
                 'base_url' => ['label' => 'Base URL', 'secret' => false],

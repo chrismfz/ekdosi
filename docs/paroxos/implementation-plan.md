@@ -281,7 +281,12 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
   `einvoice:preflight` command.**
 - **P4 — ProviderConsole** (preflight/test-submit/per-invoice audit + myDATA
   cross-check), reuse `SalesReconciler` για το read leg.
-- **P5 — πρώτος πραγματικός transport** (ο πάροχος που έχει tenant — Epsilon ή
+- **P5 — InvoSign transport: ✅ DONE (mock-HTTP; sandbox-validate pending creds).**
+  `InvoSignTransport` + `InvoSignDocument` (AADE XML + DOM-injected `api_*`/
+  `API_InvoiceDetails` extension), send/cancel/status/ping, ResponseDoc→ProviderResult,
+  sandbox/prod creds, registered in config → factory routes invosign live. send()
+  gains the Invoice. e2e mock-HTTP test. **Αύριο:** creds στο P3 UI + sandbox-validate.
+- **P5 (αρχικό) — πρώτος πραγματικός transport** (ο πάροχος που έχει tenant — Epsilon ή
   SoftOne κατά περίπτωση), sandbox-validated όπως το myDATA 2026-05-28.
 - **P6 (παράλληλα/αργότερα) — PEPPOL:** `PeppolUblDocument` + Access-Point
   transport για **B2G/Δημόσιο** + Nixpal OÜ. Ίδιο seam· διαφορετικός serializer +

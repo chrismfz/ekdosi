@@ -70,7 +70,7 @@ class ProviderTransportRegistryTest extends TestCase
 
         $this->assertFalse($null->ping($creds));
         $this->expectException(RuntimeException::class);
-        $null->send('<xml/>', $creds);
+        $null->send(new Invoice, '<xml/>', $creds);
     }
 }
 
@@ -82,7 +82,7 @@ class FakeProviderTransport implements EInvoiceProviderTransport
         return 'fake';
     }
 
-    public function send(string $documentXml, ProviderCredentials $credentials): ProviderResult
+    public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
     {
         return ProviderResult::ok(mark: '400000000000001', authenticationCode: 'ABC', qrUrl: 'https://x/y');
     }
