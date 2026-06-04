@@ -125,6 +125,7 @@ class Invoice extends Model
         'conv_invoice_id',
         'credited_invoice_id',
         'whmcs_pending_id',
+        'service_contract_id',
         'local_status',
         'cancel_reason',
         'delivery_date',
@@ -196,6 +197,12 @@ class Invoice extends Model
     public function bankAccount(): BelongsTo
     {
         return $this->belongsTo(BankAccount::class);
+    }
+
+    /** The service contract this invoice was staged from (renewal), if any. */
+    public function serviceContract(): BelongsTo
+    {
+        return $this->belongsTo(ServiceContract::class);
     }
 
     public function deliveryMethod(): BelongsTo

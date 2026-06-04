@@ -79,6 +79,97 @@ they merge.
   SILENTLY skipped the task for a full day — how the WHMCS fetch went dark ~1.5
   days. Now the lock self-heals in ≤30 min (tasks are idempotent, so a rare real
   overlap is benign).
+### Added
+- **Προσφορές → Υπηρεσία (μετατροπή).** Νέα ενέργεια **«Μετατροπή σε Υπηρεσία»**
+  σε αποδεκτή προσφορά: φτιάχνει **recurring service contract** (για τις
+  μελλοντικές ανανεώσεις) **+** το **πρώτο πρόχειρο παραστατικό** με ΟΛΕΣ τις
+  γραμμές της προσφοράς (εφάπαξ + recurring 1ης περιόδου, με τις πραγματικές
+  περιγραφές — τίποτα δεν ισοπεδώνεται σε γενικό setup). Οι recurring γραμμές
+  (`product.is_recurring`) ορίζουν το ποσό/προϊόν του συμβολαίου· ο cursor ξεκινά
+  στην έναρξη, οπότε η έκδοση του 1ου προχείρου προωθεί έναν κύκλο (period 1 →
+  2)· οι επόμενες ανανεώσεις = μόνο η recurring γραμμή. `ConvertQuoteToServiceContract`
+  (πρότυπο `ConvertQuoteToInvoice`)· `quotes.converted_service_contract_id`
+  provenance + αμφίδρομο ιστορικό· idempotent. **Μηδέν money/AADE** (πρόχειρο +
+  contract). `ConvertQuoteToServiceContractTest`. **Deploy:** `php artisan migrate`.
+- **Υπηρεσίες/Συμβόλαια (recurring) — data model (PR-A, schema only).** Ο WHMCS-
+  style διαχωρισμός: το `products` γίνεται κατάλογος (νέα `is_recurring` +
+  `provisioning_module` + `module_meta`) με **per-cycle price matrix**
+  (`product_billing_prices`: setup_fee/price/enabled ανά κύκλο), και ο νέος
+  `service_contracts` είναι η **per-customer συνδρομή** (customer/product snapshot
+  amount+cycle+vat, `invoice_type_id` ανανέωσης, status, start/next_due/end dates,
+  domain, server). Νέα enums `BillingCycle` (advance() NoOverflow) +
+  `ServiceContractStatus` (state machine με Suspended). **Πρόβλεψη native/WHMCS-
+  independent provisioning** από τώρα (schema-only): `servers` + `server_groups`
+  (credentials με `encrypted` cast), `service_contracts.server_id`/`module_meta`
+  (license key / cPanel user / mailcow domain). `invoices.service_contract_id`
+  (provenance). **Μηδέν money impact** — isolation test ότι contracts/servers δεν
+  αγγίζουν `InvoiceScope`/receivables. UI + staging σε επόμενα PR (B/C).
+  **Deploy:** `php artisan migrate`.
+- **Υπηρεσίες/Συμβόλαια (recurring) — UI + lifecycle (PR-B).** `StageServiceRenewal`
+  action: για ένα due `ServiceContract`, σε ΕΝΑ `DB::transaction` (mirror του
+  `IssueCreditNote`/`createDraft`) δεσμεύει ΑΑ με `InvoiceNumberer` υπό lock,
+  φτιάχνει **πρόχειρο** παραστατικό (`service_contract_id`, customer snapshot, μία
+  γραμμή από contract.amount=net + vat_percent· **+ γραμμή «Τέλος εγκατάστασης»**
+  μόνο στο ΠΡΩΤΟ τιμολόγιο όταν `setup_fee>0`) → `RecomputeInvoiceTotals`·
+  **καμία υποβολή AADE/email** (ο χειριστής εκδίδει από το lifecycle). **Το
+  `next_due_date` προωθείται στην ΕΚΔΟΣΗ** (draft→active, `InvoiceObserver`, μία
+  φορά ανά τιμολόγιο μέσω `last_renewal_invoice_id`) — ΟΧΙ στο stage· έτσι μια
+  μη-εκδομένη/απλήρωτη ανανέωση κρατά το `next_due_date` στο παρελθόν (το σήμα του
+  dunning) και το open-draft guard κρατά ένα μόνο draft (κανένα pile-up).
+  Idempotent ανά περίοδο (cursor + open-draft guard)· LOUD throw χωρίς
+  `invoice_type_id`. Νέο top-level resource **«Υπηρεσίες»** (list/create/edit/view
+  + nav-badge των ενεργών που λήγουν ≤7 ημέρες, φίλτρα status/cycle/«λήγει σε
+  30·60·90»)· lifecycle actions στο ViewServiceContract (Ενεργοποίηση/Αναστολή/
+  Επαναφορά/Ακύρωση/Τερματισμός/Επαναφορά + «Δημιουργία παραστατικού τώρα»), με
+  **cascade ακύρωσης των μη-εκδομένων πρόχειρων ανανεώσεων** (draft + χωρίς ΜΑΡΚ·
+  τα νομικά/MARK'd μένουν άθικτα). Product form: collapsible «Συνδρομή / Recurring»
+  (is_recurring toggle, provisioning_module, default suspend/terminate days,
+  `billingPrices` price-matrix repeater).
+- **Υπηρεσίες/Συμβόλαια (recurring) — automation + visibility (PR-C).** Νέα
+  εντολή **`services:stage-renewals`** (`--tenant`/`--dry-run`/`--lead-days=N`):
+  per-tenant σάρωση που σταδιάζει **πρόχειρα** παραστατικά ανανέωσης για due
+  συμβόλαια (`scopeDue`) μέσω `StageServiceRenewal` — ποτέ AADE, operator-gated
+  downstream. Tenant-safe (explicit `company_id`, όχι BelongsToTenant στη CLI),
+  per-contract try/catch (ένα κακό συμβόλαιο δεν σταματά το batch), συμβόλαια
+  χωρίς `invoice_type_id` μετριούνται «skipped (no type)» αντί να ρίχνουν.
+  Scheduler block (`routes/console.php`) + flags `config/ekdosi.php`
+  (`service_renewals_enabled` **DEFAULT OFF** — φτιάχνει πραγματικά πρόχειρα·
+  `_time`/`_lead_days`) + `.env.example`. **Dashboard:** `ServiceContractStats`
+  (StatsOverview — ενεργές/σε αναστολή/ανανεώσεις 30 ημερών/**MRR** μηνιαίο
+  επαναλαμβανόμενο έσοδο) + `UpcomingRenewalsTable` (TableWidget — Active με
+  next_due εντός 30 ημερών, link στο ViewServiceContract). MRR sum σε testable
+  `App\Services\ServiceContractInsights`. **Per-customer:** νέος
+  `ServiceContractsRelationManager` (tab «Υπηρεσίες» στον πελάτη, read-mostly +
+  «Άνοιγμα») + `Customer::serviceContracts()`. Form: πεδίο `quantity` (default 1,
+  min 0.001) + στήλες ποσότητα/«Σύνολο» (qty×amount) στον πίνακα.
+- **Υπηρεσίες/Συμβόλαια (recurring) — dunning (PR-D).** Αυτόματη
+  **αναστολή/τερματισμός** συμβολαίων με ληξιπρόθεσμη ανανέωση (και
+  **επαναφορά** όταν πληρωθεί), με τον overdue σηματισμό να έρχεται ΑΥΤΟΥΣΙΟΣ από
+  `Invoice::isOverdue()/dueDate()` (καμία επανεφεύρεση μαθηματικών λήξης). Νέος
+  **per-product «διακόπτης»** `products.dunning_enabled` (**DEFAULT OFF** = η
+  ασφάλεια· τίποτα δεν συμβαίνει ώσπου ο χειριστής τον ανοίξει) + nullable
+  `service_contracts.dunning_enabled` override (null = κληρονομεί). Νέα υπηρεσία
+  `App\Services\Services\ServiceDunning` (`evaluate()` αποφασίζει+εφαρμόζει·
+  `wouldDo()` ΑΜΙΓΩΣ read-only για το `--dry-run`): terminate>suspend κατά
+  προτεραιότητα, μόνο αν το κατώφλι ημερών είναι μη-null ΚΑΙ το state machine
+  (`canTransitionTo`) το επιτρέπει· terminate κάνει cascade ακύρωση των
+  μη-εκδομένων πρόχειρων ανανεώσεων (ίδιο predicate με το ViewServiceContract).
+  **Provisioning seam** (Null-only): `App\Contracts\ProvisioningModule` +
+  `NullProvisioningModule` (key 'none', no-op) + `ProvisioningModuleRegistry`
+  (config-driven `config/ekdosi.php → provisioning.modules`, unknown→Null+warn,
+  ποτέ throw) — best-effort κλήση (αποτυχία module δεν κάνει rollback το local
+  status). Νέα εντολή **`services:run-dunning`** (`--tenant`/`--dry-run`):
+  per-tenant loop (explicit `company_id`, όχι BelongsToTenant στη CLI),
+  per-contract try/catch, exit 2 σε άγνωστο tenant, loud `Log::info` ανά ενέργεια.
+  Scheduler block + flags (`service_dunning_enabled` **DEFAULT ON** = ο μηχανισμός
+  «πλυγκαρισμένος», αλλά ο πραγματικός διακόπτης είναι το per-product OFF·
+  `service_dunning_time`) + `.env.example`. **Activity log** στο `ServiceContract`
+  (`TracksActivity`, business πεδία μόνο: status/next_due/amount/suspended_at/
+  terminated_at/cancel_reason/dunning_enabled· «Ιστορικό» tab στο resource) ώστε
+  χειροκίνητο ΚΑΙ αυτόματο suspend/terminate να είναι auditable. Filament:
+  per-product «Αυτόματο dunning» toggle + per-contract «Κληρονομεί/Ναι/Όχι»
+  override. **Μηδέν money impact** (μόνο contract status + provisioning).
+  **Deploy:** `php artisan migrate` + `shield:sync-super-admin`.
 ### Changed
 - **Πληρωμές — money trail σε cash-term παραστατικά (model refinement).** Ένα
   μετρητοίς/άμεσο τιμολόγιο (`due_days=0`) θεωρείται «εξοφλημένο στην έκδοση»

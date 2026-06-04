@@ -109,3 +109,29 @@ if (config('ekdosi.schedule.overdue_notifications_enabled')) {
         ->name('invoices-notify-overdue')
         ->withoutOverlapping(30);
 }
+
+// services:stage-renewals — stage DRAFT renewal invoices for due service
+// contracts, once per tenant (the command loops tenants itself). Default OFF:
+// it creates real draft documents. Operator-gated downstream — drafts NEVER
+// auto-file at AADE; they flow through the normal invoice lifecycle. lead_days
+// stages contracts due within the next N days (early billing, default 0).
+if (config('ekdosi.schedule.service_renewals_enabled')) {
+    Schedule::command('services:stage-renewals', [
+        '--lead-days' => config('ekdosi.schedule.service_renewals_lead_days', 0),
+    ])
+        ->dailyAt(config('ekdosi.schedule.service_renewals_time', '07:00'))
+        ->name('service-renewals')
+        ->withoutOverlapping();
+}
+
+// services:run-dunning — auto suspend/terminate overdue contracts (or unsuspend
+// a paid one), once per tenant (the command loops tenants itself). Default ON,
+// BUT the real on/off is the per-product dunning_enabled toggle (default OFF):
+// a fresh deploy acts on nothing until an operator opts a product in. The
+// command does NOT file at AADE — it only flips contract status + provisioning.
+if (config('ekdosi.schedule.service_dunning_enabled')) {
+    Schedule::command('services:run-dunning')
+        ->dailyAt(config('ekdosi.schedule.service_dunning_time', '08:00'))
+        ->name('service-dunning')
+        ->withoutOverlapping();
+}

@@ -55,6 +55,7 @@ class Quote extends Model
         'customer_notes',
         'admin_notes',
         'converted_invoice_id',
+        'converted_service_contract_id',
     ];
 
     protected function casts(): array
@@ -101,5 +102,35 @@ class Quote extends Model
     public function isConverted(): bool
     {
         return $this->converted_invoice_id !== null;
+    }
+
+    /** The recurring service contract produced by «Μετατροπή σε Υπηρεσία», if any. */
+    public function convertedServiceContract(): BelongsTo
+    {
+        return $this->belongsTo(ServiceContract::class, 'converted_service_contract_id');
+    }
+
+    public function isConvertedToService(): bool
+    {
+        return $this->converted_service_contract_id !== null;
+    }
+
+    /**
+     * Net total of the quote lines whose product is RECURRING — the default
+     * «recurring amount» of the contract a «Μετατροπή σε Υπηρεσία» would create.
+     * Free-text / one-time-product lines are excluded (they're the first
+     * invoice's one-off lines, not part of the renewal).
+     */
+    public function recurringLinesNetTotal(): float
+    {
+        return round((float) $this->lines
+            ->filter(fn (QuoteLine $l) => (bool) ($l->product?->is_recurring))
+            ->sum('net_price'), 2);
+    }
+
+    /** First recurring product line (drives the contract's product/vat/cycle defaults). */
+    public function firstRecurringLine(): ?QuoteLine
+    {
+        return $this->lines->first(fn (QuoteLine $l) => (bool) ($l->product?->is_recurring));
     }
 }

@@ -64,6 +64,15 @@ class Product extends Model
         'supplier',
         'track_stock',
         'reorder_level',
+        // Recurring / provisioning catalogue metadata (per-cycle prices live in
+        // product_billing_prices). provisioning_module is a free-form key.
+        'is_recurring',
+        'provisioning_module',
+        'module_meta',
+        'default_suspend_after_days',
+        'default_terminate_after_days',
+        // PR-D: per-product dunning master switch (default OFF).
+        'dunning_enabled',
     ];
 
     protected function casts(): array
@@ -79,6 +88,9 @@ class Product extends Model
             'is_favorite' => 'boolean',
             'track_stock' => 'boolean',
             'reorder_level' => 'decimal:3',
+            'is_recurring' => 'boolean',
+            'module_meta' => 'array',
+            'dunning_enabled' => 'boolean',
         ];
     }
 
@@ -110,6 +122,12 @@ class Product extends Model
     public function priceTiers(): HasMany
     {
         return $this->hasMany(ProductPriceTier::class);
+    }
+
+    /** Per-cycle recurring price matrix (WHMCS-style). */
+    public function billingPrices(): HasMany
+    {
+        return $this->hasMany(ProductBillingPrice::class);
     }
 
     /**

@@ -71,6 +71,24 @@ return [
         'overdue_notifications_enabled' => env('EKDOSI_SCHEDULE_OVERDUE_NOTIFICATIONS', false),
         'overdue_notifications_time' => env('EKDOSI_OVERDUE_NOTIFICATIONS_TIME', '07:30'),
 
+        // services:stage-renewals — stage DRAFT renewal invoices for due
+        // service contracts, per tenant. Default OFF: it creates real draft
+        // documents, so enable per deploy once the catalogue + contracts are
+        // set up. Operator-gated downstream (drafts never auto-file at AADE).
+        // lead_days>0 stages contracts due within the next N days (early
+        // billing). HH:MM (server time).
+        'service_renewals_enabled' => env('EKDOSI_SCHEDULE_SERVICE_RENEWALS', false),
+        'service_renewals_time' => env('EKDOSI_SERVICE_RENEWALS_TIME', '07:00'),
+        'service_renewals_lead_days' => (int) env('EKDOSI_SERVICE_RENEWALS_LEAD_DAYS', 0),
+
+        // services:run-dunning — auto suspend/terminate contracts whose renewals
+        // went overdue (or unsuspend a paid one), per tenant. Default ON: the
+        // engine is "plugged in", BUT the REAL on/off is the per-product
+        // dunning_enabled toggle (default OFF) — so a fresh deploy is a no-op
+        // until an operator opts a product into dunning. HH:MM (server time).
+        'service_dunning_enabled' => env('EKDOSI_SCHEDULE_SERVICE_DUNNING', true),
+        'service_dunning_time' => env('EKDOSI_SERVICE_DUNNING_TIME', '08:00'),
+
     ],
 
     /*
@@ -91,6 +109,27 @@ return [
             'whmcs' => WhmcsBillingSource::class,
             // 'woocommerce' => App\Services\Billing\Sources\WooCommerceBillingSource::class,  // Phase 1+
             // 'blesta'      => App\Services\Billing\Sources\BlestaBillingSource::class,        // Phase 1+
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Provisioning modules (recurring-services automation hooks)
+    |--------------------------------------------------------------------------
+    |
+    | Map of provisioning-module key → ProvisioningModule implementation,
+    | resolved by ProvisioningModuleRegistry. A contract's `provisioning_module`
+    | key selects the module the dunning engine calls on suspend/unsuspend/
+    | terminate. EMPTY by default — every key (incl. 'none'/'custom'/unknown)
+    | falls back to NullProvisioningModule (local state only, no remote action).
+    | A real cPanel/Mailcow/license-server module drops in here with one line +
+    | one class (mirrors einvoice/billing registries). No core edit.
+    |
+    */
+    'provisioning' => [
+        'modules' => [
+            // 'cpanel'  => App\Services\Provisioning\CpanelProvisioningModule::class,   // future
+            // 'mailcow' => App\Services\Provisioning\MailcowProvisioningModule::class,  // future
         ],
     ],
 
