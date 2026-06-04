@@ -34,6 +34,9 @@ class Company extends Model
         'slug',
         'country_code',
         'einvoice_provider',
+        'einvoice_provider_key',
+        'einvoice_provider_config',
+        'einvoice_provider_mode',
         'afm',
         'tax_office',
         'kad_primary',
@@ -88,6 +91,9 @@ class Company extends Model
         return [
             'mydata_subscription_key_sandbox' => 'encrypted',
             'mydata_subscription_key_production' => 'encrypted',
+            // Provider credential blob — encrypted JSON (api key / token / endpoint /
+            // provider AFM + ΥΠΑΗΕΣ licence no.). Same at-rest pattern as the keys above.
+            'einvoice_provider_config' => 'encrypted:array',
             'gsis_password' => 'encrypted',
             'mail_smtp_password' => 'encrypted',
             'whmcs_api_secret' => 'encrypted',

@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -27,7 +26,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class MyDataMark extends Model
 {
     use BelongsToCompany;
-
     use HasFactory;
 
     protected $table = 'mydata_marks';
@@ -38,6 +36,11 @@ class MyDataMark extends Model
         'invoice_id',
         'mark',
         'mydata_action',
+        // Provider-side audit (P1; filled by GrProviderSubmitter in P2, null for
+        // direct myDATA filings). See docs/paroxos/implementation-plan.md §5.
+        'provider_key',
+        'authentication_code',
+        'delivery_state',
         'invoice_url',
         'request',
         'response',
