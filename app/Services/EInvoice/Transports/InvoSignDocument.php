@@ -30,7 +30,7 @@ class InvoSignDocument
 
         $dom = new DOMDocument('1.0', 'utf-8');
         $dom->preserveWhiteSpace = false;
-        if (! @$dom->loadXML($aadeXml)) {
+        if (! @$dom->loadXML($aadeXml, LIBXML_NONET)) {
             throw new RuntimeException('InvoSign: could not parse the AADE InvoicesDoc XML to augment.');
         }
 

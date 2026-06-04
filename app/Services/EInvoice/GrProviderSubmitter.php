@@ -265,6 +265,16 @@ class GrProviderSubmitter implements EInvoiceSubmitter
     {
         $mark = (string) $result->mark;
 
+        // Defense in depth (any transport): never flip an invoice to VALID without a
+        // real MARK — a "success" with no MARK is not a filing. Refuse loudly so the
+        // operator sees it and the document stays re-fileable.
+        if ($mark === '') {
+            throw new RuntimeException(
+                "E-invoice provider reported success but returned no MARK for invoice {$invoice->invcode}. ".
+                'Refusing to mark VALID — investigate the provider response.'
+            );
+        }
+
         $existing = MyDataMark::query()
             ->where('invoice_id', $invoice->id)
             ->where('mark', $mark)

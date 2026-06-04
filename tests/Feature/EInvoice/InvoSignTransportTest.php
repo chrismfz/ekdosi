@@ -107,6 +107,71 @@ class InvoSignTransportTest extends TestCase
         $this->assertStringContainsString('[238]', $result->errorMessage());
     }
 
+    public function test_success_without_mark_is_treated_as_failure_and_does_not_file(): void
+    {
+        // B1: a 'Success' with an empty <invoiceMark> must NOT mark the invoice VALID.
+        $xml = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<invoiceMark></invoiceMark><statusCode>Success</statusCode></response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($xml, 200)]);
+        $invoice = $this->makeInvoice();
+
+        $submitter = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh());
+
+        try {
+            $submitter->submit($invoice);
+            $this->fail('Expected a failure for Success-without-MARK.');
+        } catch (\Throwable $e) {
+            // MyDataRejected (transport returned failed) — either way, NOT filed.
+        }
+
+        $this->assertNull($invoice->fresh()->mydata_state);
+        $this->assertSame(0, MyDataMark::where('invoice_id', $invoice->id)->where('mydata_action', 'PROVIDER_INSERT')->count());
+    }
+
+    public function test_http_error_throws_and_does_not_file(): void
+    {
+        // A 500 (and the recovery status-check also 500) → throw, invoice stays unfiled.
+        Http::fake([self::DEMO.'/*' => Http::response('upstream boom', 500)]);
+        $invoice = $this->makeInvoice();
+
+        $submitter = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh());
+
+        $this->expectException(RuntimeException::class);
+        try {
+            $submitter->submit($invoice);
+        } finally {
+            $this->assertNull($invoice->fresh()->mydata_state);
+        }
+    }
+
+    public function test_production_mode_uses_production_base_and_token(): void
+    {
+        $prod = Company::create([
+            'name' => 'Prod ΑΕ', 'slug' => 'prod-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'production', 'afm' => '800561849',
+            'einvoice_provider_config' => [
+                'base_url' => 'https://live.invosign.test', 'token' => 'LIVE-TOKEN',
+                'demo_base_url' => self::DEMO, 'demo_token' => 'DEMO-TOKEN',
+            ],
+        ]);
+        $customer = Customer::create(['company_id' => $prod->id, 'name' => 'Π', 'afm' => '997073525']);
+        $type = InvoiceType::create(['company_id' => $prod->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1, 'mydata_type' => '2.1']);
+        VatCategory::create(['company_id' => $prod->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+        $invoice = Invoice::create([
+            'company_id' => $prod->id, 'invcode' => 'TPY1', 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $customer->id, 'issued_at' => now(),
+            'company_name' => 'Π', 'vat_no' => '997073525',
+        ]);
+        $invoice->lines()->create(['company_id' => $prod->id, 'product_descr' => 'Υ', 'qty' => 1, 'price_per_item' => 50, 'vat_percent' => 24]);
+
+        Http::fake(['https://live.invosign.test/*' => Http::response($this->successXml(), 200)]);
+
+        (new InvoSignTransport)->send($invoice->fresh('lines'), '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><invoice></invoice></InvoicesDoc>', ProviderCredentials::fromCompany($prod));
+
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'live.invosign.test') && $r['token'] === 'LIVE-TOKEN');
+    }
+
     public function test_cancel_parses_cancellation_mark(): void
     {
         Http::fake([self::DEMO.'/*' => Http::response($this->cancelXml(), 200)]);

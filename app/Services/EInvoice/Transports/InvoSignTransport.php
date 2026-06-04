@@ -133,7 +133,9 @@ class InvoSignTransport implements EInvoiceProviderTransport
 
     private function parse(string $xml, bool $cancel = false): ProviderResult
     {
-        $sx = @simplexml_load_string($xml);
+        // LIBXML_NONET: never resolve external entities/network from a third-party
+        // provider's response (XXE hardening on a money path).
+        $sx = @simplexml_load_string($xml, \SimpleXMLElement::class, LIBXML_NONET);
         if ($sx === false) {
             return ProviderResult::failed(['InvoSign: μη αναγνώσιμη απάντηση'], $xml);
         }
@@ -164,8 +166,17 @@ class InvoSignTransport implements EInvoiceProviderTransport
             );
         }
 
+        // B1: a 'Success' WITHOUT a MARK is a malformed response — treat it as a
+        // failure, never a filing. Otherwise the invoice would be flipped to VALID
+        // with an empty MARK (legally filed, no proof, un-re-fileable). Returning
+        // failed() also lets §14.4 recovery status-check before any retry.
+        $mark = ((string) ($resp->invoiceMark ?? '')) ?: null;
+        if ($mark === null) {
+            return ProviderResult::failed(['InvoSign: «Success» χωρίς ΜΑΡΚ — μη έγκυρη απάντηση'], $xml);
+        }
+
         return ProviderResult::ok(
-            mark: ((string) ($resp->invoiceMark ?? '')) ?: null,
+            mark: $mark,
             uid: ((string) ($resp->invoiceUid ?? '')) ?: null,
             authenticationCode: ((string) ($resp->authenticationCode ?? '')) ?: null,
             qrUrl: ((string) ($resp->qrUrl ?? '')) ?: null,
