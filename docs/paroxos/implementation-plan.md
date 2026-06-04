@@ -486,3 +486,60 @@ signature+`uid`+`qrUrl`+errors → **το `ProviderResult` DTO (§2.2) είνα�
   `invoiceDeliveryStatus` (§2.1) — ο AADE-XML πυρήνας είναι σχεδόν δωρεάν· **όμως ο
   committed XSD είναι v0.6.1, stale** — re-pull v1.0.9–v1.0.12 πριν το build
   (`research/aade-regulatory-update.md`).
+
+---
+
+## 14. Fallbacks / ανθεκτικότητα (πάροχος down, timeouts) — η ερώτηση του χρήστη
+
+**Σύντομη απάντηση: ναι σε όλα** — ίδια κουμπιά, ίδια «καλούδια», γιατί ο πάροχος
+περνά από το **ίδιο `EInvoiceSubmitter` seam** και γράφει την **ίδια `mydata_marks`
+row**. Άρα κληρονομεί ό,τι έχουμε σήμερα για το myDATA + προσθέτουμε provider-ειδικά.
+
+### 14.1 Τι κρατάμε ήδη ανά παραστατικό (debugging — υπάρχει σήμερα)
+`mydata_marks`: `request` (πλήρες XML που στάλθηκε), `response` (πλήρης απάντηση),
+`mark`, `mydata_action`, `invoice_url` (QR). → **Per-invoice request/response body,
+σωστό ή με error, παραμένει** για τον πάροχο· προσθέτουμε `authentication_code`,
+`provider_key`, `delivery_state`, και `mydata_action ∈ {PROVIDER_INSERT,
+PROVIDER_CANCEL}`. Τα `<errors>` του παρόχου (message+code) τα παρσάρει ο δίδυμος
+του `describeResponseErrors()` → φαίνονται στο UI, όπως τώρα.
+
+### 14.2 Τα κουμπιά
+- **«Οριστικοποίηση»** (draft→active) → καλεί `GrProviderSubmitter` αντί
+  `MyDataSubmitter` (το factory αποφασίζει· καμία αλλαγή στο UI flow).
+- **«Επανυποβολή σε Πάροχο»** (retry) — όπως η σημερινή re-submit για myDATA, αλλά
+  **status-check-guarded** (14.4). Visible όταν η τελευταία mark row είναι failed.
+- **«Test connection»** (Company form) → `transport->ping()` στο sandbox.
+
+### 14.3 Οι περιπτώσεις αποτυχίας & τι γίνεται
+| Σενάριο | Τι κάνει το ekdosi |
+|---|---|
+| Provider **ValidationError** (λάθος δεδομένα) | mark row με `statusCode`+`<errors>`· παραστατικό μένει **draft/ανυπόβλητο**· operator διορθώνει & ξαναστέλνει (όπως myDATA σήμερα) |
+| Provider **down / connection refused** | submission fails, καταγράφεται failed attempt, παραστατικό ανυπόβλητο, **retry** (auto + manual) |
+| **Timeout ΜΕΤΑ την αποστολή** (αμφίσημο: ίσως υποβλήθηκε) | ⚠ **ΠΟΤΕ blind-retry** → κίνδυνος διπλο-filing· πρώτα **status-check** (14.4) |
+| ekdosi↔provider ή provider↔myDATA down (regulated) | `transmissionFailure` offline-issuance (14.5) — **deferred v1**, fail→retry προς το παρόν |
+
+### 14.4 Idempotency guard (το κρίσιμο για timeouts)
+Το επικίνδυνο δεν είναι το «καθαρό down» — είναι το **timeout αφού στάλθηκε**: μπορεί
+ο πάροχος να πήρε ΜΑΡΚ αλλά εμείς να μην είδαμε την απάντηση. **Πριν από κάθε retry,
+status-check** (π.χ. InvoSign `invoice_status.php` με issuer/series/aa/date — η
+απάντηση είναι ίδια με του submit): αν **υπάρχει ήδη ΜΑΡΚ → το υιοθετούμε** (δεν
+ξαναστέλνουμε)· αλλιώς **ξαναστέλνουμε**. Ζει μέσα στον `GrProviderSubmitter`.
+Δεύτερο δίχτυ: η **reconciliation** (myDATA read path) θα δείξει αν όντως
+προσγειώθηκε — πιάνει ό,τι ξεφύγει.
+
+### 14.5 Queue + offline issuance
+- **Queued submission job** με bounded retries + exponential backoff (πρότυπο:
+  `SendInvoiceEmail`) → παροδικό blip αυτο-θεραπεύεται· επίμονο outage → failed row
+  για τον άνθρωπο. (Χρειάζεται ο queue worker — ήδη τρέχει.)
+- **Provider Console health banner** (τελευταία επιτυχής κλήση / error rate) — το
+  tripwire, όπως τα WHMCS «Bridge logs».
+- **`transmissionFailure` (1–4, offline issuance):** ο **θεσμοθετημένος** fallback —
+  όταν ο πάροχος δεν φτάνει το myDATA (ή το ERP τον πάροχο), ο νόμος επιτρέπει έκδοση
+  offline με τη σημαία αυτή και reconcile αργότερα. firebed το μοντελοποιεί ήδη·
+  **v1: deferred** (κρατάμε το πεδίο, υλοποιούμε όταν χρειαστεί).
+
+### 14.6 ⚠ Ο νομικός περιορισμός (μην το χάσουμε)
+Μόλις κατατεθεί η **«Δήλωση Αποκλειστικής Έκδοσης μέσω Παρόχου»** (§11), **ΔΕΝ**
+επιτρέπεται fallback σε **απευθείας myDATA** — το κανάλι έκλεισε νομικά. Άρα ο
+fallback είναι **retry / queue / offline-mode**, **όχι** «στείλ' το στο myDATA αντ'
+αυτού». (Πριν τη δήλωση, σε transition/dual-run, μπορείς ακόμη να έχεις και τα δύο.)
