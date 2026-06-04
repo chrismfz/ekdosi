@@ -61,7 +61,7 @@ class WhmcsInvoiceMapper
      *   'lines' => [
      *     [
      *       'product_id'      => null,
-     *       'description'     => string,
+     *       'product_descr'   => string (the invoice_lines column — NOT 'description')
      *       'qty'             => float,
      *       'unit_price'      => float (net per unit),
      *       'vat_category_id' => int,
@@ -352,7 +352,12 @@ class WhmcsInvoiceMapper
             // preview modal which doesn't trigger the hook.
             $out[] = [
                 'product_id' => null,
-                'description' => $description,
+                // The invoice_lines COLUMN is `product_descr` — emit that exact
+                // key so InvoiceLine::create (mass-assignment, array_merge in the
+                // filer) actually persists it. Emitting 'description' (the WHMCS
+                // field name) silently dropped it (not fillable) → the line text
+                // never reached the παραστατικό/PDF, while price/VAT survived.
+                'product_descr' => $description,
                 'qty' => 1.0,
                 'price_per_item' => $lineNet,           // net per unit (qty=1, so net == unit)
                 'discount' => 0.0,
@@ -428,7 +433,7 @@ class WhmcsInvoiceMapper
         $out = [];
         foreach ($lines as $line) {
             if ((float) $line['vat_percent'] === 0.0) {
-                $out[] = (string) $line['description'];
+                $out[] = (string) $line['product_descr'];
             }
         }
 
