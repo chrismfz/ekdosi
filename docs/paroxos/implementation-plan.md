@@ -83,6 +83,15 @@ Primer/Orian/… + **PEPPOL Access Point** για το Δημόσιο) σημα�
   provider-only πεδία όταν χρειάζονται (`authenticationCode`,
   `transmissionFailure` — §2 του blueprint). **Καμία αλλαγή σημασιολογίας** — ο
   `MyDataSubmitter` συνεχίζει να το χρησιμοποιεί για το άμεσο myDATA path.
+
+  > **De-risk (verified in-repo):** το `firebed/aade-mydata` v5.10.4 που ήδη
+  > χρησιμοποιούμε **ήδη μοντελοποιεί** τα provider πεδία — `Models\
+  > ProvidersSignature` (`SigningAuthor` = αριθμός Άδειας ΥΠΑΗΕΣ Παρόχου,
+  > `Signature`, `EndToEndReferenceID`), `Enums\TransmissionFailure` (1–4, πιο
+  > πλούσιο από τα 2 του XSD v0.6.1), και `Xml\InvoicesDocWriter`. Άρα για
+  > παρόχους που δέχονται **AADE invoicesDoc**, ο serializer είναι **σχεδόν
+  > έτοιμος** — προσθέτεις `ProvidersSignature`/`transmissionFailure` στο
+  > υπάρχον `Invoice` model, δεν γράφεις XML από το μηδέν.
 - **`App\Services\EInvoice\PeppolUblDocument`** (νέο, για PEPPOL/B2G + Nixpal):
   canonical invoice → **UBL 2.1 / EN 16931**. Ξεχωριστός serializer, ίδιο input.
 
