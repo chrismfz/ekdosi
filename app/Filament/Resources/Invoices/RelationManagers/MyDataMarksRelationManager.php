@@ -47,6 +47,7 @@ class MyDataMarksRelationManager extends RelationManager
                         'INSERT' => 'success',  // real filing, MARK issued
                         'CANCEL' => 'danger',   // real cancellation, MARK preserved
                         'REJECTED' => 'danger', // AADE refused the submission (null mark, response XML kept)
+                        'CANCEL_REJECTED' => 'danger', // AADE refused the cancellation (null mark, response kept; state NOT flipped)
                         'DRY_RUN' => 'info',    // preview from "Preview submission XML"
                         'SKIPPED', 'SKIPPED_CANCEL' => 'warning',  // NullSubmitter: deliberate non-filing
                         default => 'gray',

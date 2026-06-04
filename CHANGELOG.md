@@ -30,6 +30,16 @@ they merge.
   on for a goods/delivery-note tenant.
 
 ### Fixed
+- **Rejected myDATA cancellation wrongly marked the invoice CANCELLED.** AADE
+  returns HTTP 200 + `ValidationError` (e.g. `[301]` "mark not found") for a
+  refused `CancelInvoice`, and firebed does NOT throw on that — so the cancel
+  path flipped `mydata_state`/`local_status` to cancelled AND pushed "cancelled"
+  to WHMCS for a cancellation AADE never performed (2026-06-05 incident: a
+  301-rejected cancel left ΤΠΥ6654 locally cancelled while AADE had no record).
+  `MyDataSubmitter::cancel` now checks the response `statusCode === 'Success'`
+  (mirroring the INSERT guard); on refusal it records a forensic
+  `CANCEL_REJECTED` audit row (no MARK, response XML kept) and throws **without**
+  mutating state or touching WHMCS.
 - **PDF footer myDATA URL was visually clipped.** The full AADE verification URL
   (one ~150-char token) overflowed the fixed footer and got cut on both sides —
   it READ like a truncated/wrong URL (the real source of the «λάθος URL»
