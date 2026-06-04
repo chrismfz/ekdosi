@@ -133,6 +133,56 @@ class GrProviderSubmitterTest extends TestCase
         }
     }
 
+    public function test_status_check_is_not_consulted_when_send_succeeds(): void
+    {
+        // N1: a successful send must never call status() — guards against a future
+        // refactor that always status-checks. The fake throws on status(); a clean
+        // send='ok' must still succeed.
+        $invoice = $this->makeInvoice();
+        $submitter = new GrProviderSubmitter($this->tenant, new FakeGrTransport(send: 'ok', status: 'throw'));
+
+        $mark = $submitter->submit($invoice);
+
+        $this->assertSame('PROVIDER_INSERT', $mark->mydata_action);
+        $this->assertSame('VALID', $invoice->fresh()->mydata_state);
+    }
+
+    public function test_persist_is_idempotent_on_invoice_and_mark(): void
+    {
+        // N2: if a PROVIDER_INSERT row for (invoice, mark) already exists (e.g. a
+        // prior attempt persisted then the response was lost), filing the same MARK
+        // again adopts the existing row — no duplicate audit, no second filing.
+        $invoice = $this->makeInvoice();
+        $existing = MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400000000000123', // == FakeGrTransport's mark
+            'mydata_action' => 'PROVIDER_INSERT',
+            'provider_key' => 'fake',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        $mark = (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice);
+
+        $this->assertSame($existing->id, $mark->id);
+        $this->assertSame(1, MyDataMark::where('invoice_id', $invoice->id)->where('mydata_action', 'PROVIDER_INSERT')->count());
+    }
+
+    public function test_recovery_does_not_null_out_existing_qr_and_flags_adopted(): void
+    {
+        // M2: a lighter status response (mark only) must not wipe the QR; the
+        // adopted row is flagged delivery_state='ADOPTED'.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['mydata_url' => 'https://existing/qr'])->save();
+        $submitter = new GrProviderSubmitter($this->tenant, new FakeGrTransport(send: 'throw', status: 'mark-only'));
+
+        $mark = $submitter->submit($invoice);
+
+        $this->assertSame('ADOPTED', $mark->delivery_state);
+        $this->assertSame('https://existing/qr', $invoice->fresh()->mydata_url); // not nulled
+    }
+
     public function test_cancel_records_provider_cancel_and_flips_state(): void
     {
         $invoice = $this->makeInvoice();
@@ -214,6 +264,8 @@ class FakeGrTransport implements EInvoiceProviderTransport
         return match ($mode) {
             'throw' => throw new RuntimeException('simulated provider timeout'),
             'fail' => ProviderResult::failed(['[101] simulated validation error'], '<error/>'),
+            // A lighter status response — only the MARK came back (no QR/auth).
+            'mark-only' => ProviderResult::ok(mark: '400000000000123'),
             default => ProviderResult::ok(
                 mark: '400000000000123',
                 uid: 'UID-1',

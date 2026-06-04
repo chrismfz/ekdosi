@@ -27,9 +27,12 @@ they merge.
   idempotency**: an ambiguous send failure (timeout) status-checks by invoice
   coordinates and ADOPTS an existing MARK instead of double-filing. The factory
   routes `gr-provider` + mode≠off → `GrProviderSubmitter` (transport from the
-  registry; mode=off stays staged/NullSubmitter). Still no real provider wired
-  (InvoSign/SBZ = P5); no behaviour change for existing tenants. `EInvoiceProvider
-  Transport::status()` now takes an `Invoice` (coordinate lookup, not by-MARK).
+  registry; mode=off stays staged/NullSubmitter). WHMCS write-back fires on a
+  provider filing/cancel too (parity with the direct path — keyed on
+  `whmcs_pending_id`, no-op for non-WHMCS); auto-email stays a follow-up. Still no
+  real provider wired (InvoSign/SBZ = P5); no behaviour change for existing
+  tenants. `EInvoiceProviderTransport::status()` takes an `Invoice` (coordinate
+  lookup, not by-MARK).
 - **E-invoice provider seam (P1):** generic, no-op infrastructure for filing via a
   ΥΠΑΗΕΣ provider — `App\Contracts\EInvoiceProviderTransport` (+ `ProviderResult` /
   `ProviderCredentials` DTOs) and a config-driven `ProviderTransportRegistry`

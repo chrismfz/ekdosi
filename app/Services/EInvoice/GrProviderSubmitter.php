@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\MyDataRejected;
+use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
 use Illuminate\Support\Facades\DB;
@@ -63,6 +64,8 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             // if one exists, otherwise record the failure and surface it.
             $adopted = $this->recoverViaStatusCheck($invoice, $xml, $credentials, $e);
             if ($adopted !== null) {
+                $this->syncWhmcsFiled($invoice, $adopted);
+
                 return $adopted;
             }
 
@@ -83,7 +86,23 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             );
         }
 
-        return $this->persistSuccess($invoice, $xml, $result);
+        $mark = $this->persistSuccess($invoice, $xml, $result);
+        $this->syncWhmcsFiled($invoice, $mark);
+
+        return $mark;
+    }
+
+    /**
+     * Parity with MyDataSubmitter (H1): close the WHMCS-inbox loop on a provider
+     * filing too. Write-back is keyed on invoices.whmcs_pending_id — INDEPENDENT
+     * of the e-invoice provider — so a provider tenant that staged an invoice from
+     * the WHMCS inbox must still flip the pending row drafted→filed and push the
+     * MARK back to the bridge. No-op for non-WHMCS invoices; never throws (a
+     * write-back hiccup must not mask a successful filing).
+     */
+    private function syncWhmcsFiled(Invoice $invoice, MyDataMark $mark): void
+    {
+        app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, $mark->mark);
     }
 
     public function cancel(Invoice $invoice, string $reason = ''): MyDataMark
@@ -94,18 +113,36 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             );
         }
 
-        $mark = MyDataMark::query()
+        // Read the MARK from the audit history, not the mirror column (same
+        // reasoning as MyDataSubmitter::cancel). Accept both PROVIDER_INSERT and a
+        // legacy direct INSERT — a tenant migrated gr-mydata→gr-provider mid-life
+        // may cancel a directly-filed document through the provider (deliberate).
+        $inserts = MyDataMark::query()
             ->where('invoice_id', $invoice->id)
             ->whereIn('mydata_action', ['PROVIDER_INSERT', 'INSERT'])
             ->whereNotNull('mark')
             ->orderByDesc('id')
-            ->value('mark');
+            ->get();
 
-        if (! $mark) {
+        if ($inserts->isEmpty()) {
             throw new RuntimeException(
                 "Cannot cancel invoice {$invoice->invcode} — no INSERT MARK on file (never filed via the provider)."
             );
         }
+
+        // M1: the §14.4 recovery can, in a partial-failure window, leave more than
+        // one INSERT MARK for an invoice. Cancel the latest but surface the others
+        // — they may be orphan filings needing manual reconciliation.
+        if ($inserts->count() > 1) {
+            Log::warning('Provider cancel: multiple INSERT MARKs found — cancelling latest only', [
+                'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
+                'marks' => $inserts->pluck('mark')->all(),
+                'note' => 'Earlier MARKs may be orphan filings. Manual reconciliation required.',
+            ]);
+        }
+
+        $mark = $inserts->first()->mark;
 
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 
@@ -120,7 +157,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             throw new RuntimeException('E-invoice provider rejected the cancellation: '.$result->errorMessage());
         }
 
-        return DB::transaction(function () use ($invoice, $mark, $reason, $result) {
+        $audit = DB::transaction(function () use ($invoice, $mark, $reason, $result) {
             $audit = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
@@ -140,6 +177,13 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
             return $audit;
         });
+
+        // Reflect the cancellation on the WHMCS side (parity with MyDataSubmitter).
+        // OUTSIDE the transaction — network call, must not hold a DB lock. No-op for
+        // non-WHMCS invoices; never throws.
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        return $audit;
     }
 
     public function testConnection(): bool
@@ -209,7 +253,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             'mark' => $status->mark,
         ]);
 
-        return $this->persistSuccess($invoice, $xml, $status);
+        return $this->persistSuccess($invoice, $xml, $status, viaRecovery: true);
     }
 
     /**
@@ -217,7 +261,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
      * (with provider audit columns) + the invoice mirror-column sync. Idempotent
      * on (invoice, mark): a duplicate adopts the existing row.
      */
-    private function persistSuccess(Invoice $invoice, string $xml, ProviderResult $result): MyDataMark
+    private function persistSuccess(Invoice $invoice, string $xml, ProviderResult $result, bool $viaRecovery = false): MyDataMark
     {
         $mark = (string) $result->mark;
 
@@ -230,7 +274,13 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             return $existing;
         }
 
-        return DB::transaction(function () use ($invoice, $xml, $result, $mark) {
+        // M2: a status-check (recovery) response is lighter than a send response —
+        // it may carry only the MARK, not the QR/auth code. Never NULL-out a mirror
+        // column we can't refresh; flag the adopted row so an operator knows the
+        // audit is partial and a reconciliation pass should backfill it.
+        $deliveryState = $result->deliveryState ?? ($viaRecovery ? 'ADOPTED' : null);
+
+        return DB::transaction(function () use ($invoice, $xml, $result, $mark, $deliveryState) {
             $audit = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
@@ -238,7 +288,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'mydata_action' => 'PROVIDER_INSERT',
                 'provider_key' => $this->transport->key(),
                 'authentication_code' => $result->authenticationCode,
-                'delivery_state' => $result->deliveryState,
+                'delivery_state' => $deliveryState,
                 'invoice_url' => $result->qrUrl,
                 'request' => $xml,
                 'response' => $result->raw,
@@ -248,13 +298,14 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
             // MARK_AI0 trigger replacement — same mirror-column sync as the direct
             // path (forceFill: the submitter is the only legitimate writer). A
-            // filed invoice is a live document → promote a draft to active.
+            // filed invoice is a live document → promote a draft to active. Coalesce
+            // mydata_url so a lighter recovery response can't wipe an existing QR.
             $invoice->forceFill([
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
                 'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
                 'mydata_mark' => $mark,
-                'mydata_url' => $result->qrUrl,
+                'mydata_url' => $result->qrUrl ?? $invoice->mydata_url,
                 'mydata_type' => $invoice->invoiceType?->mydata_type,
             ])->save();
 
