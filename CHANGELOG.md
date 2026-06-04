@@ -17,6 +17,18 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **InvoSign provider transport (P5):** the first real ΥΠΑΗΕΣ transport —
+  `App\Services\EInvoice\Transports\InvoSignTransport` (+ `InvoSignDocument`, which
+  DOM-augments the canonical AADE XML with InvoSign's `api_*` line twins +
+  `<API_InvoiceDetails>` extension, never touching the AADE core). send/cancel/
+  status/ping over the documented form-POST API, parsing the `<ResponseDoc>` into a
+  `ProviderResult` (ΜΑΡΚ + authentication code + QR). Sandbox/production creds
+  (`demo_base_url`/`demo_token` vs `base_url`/`token`) selected by the channel mode.
+  Registered in `config ekdosi.einvoice.providers`, so the factory now routes
+  `gr-provider` + `invosign` + non-off → a live InvoSign filing. `EInvoiceProvider
+  Transport::send()` now also receives the `Invoice`. Grounded in the captured API
+  reference; **sandbox-validate the exact field/price semantics before go-live.**
+  Mock-HTTP tested end-to-end (factory → submitter → InvoSign → PROVIDER_INSERT).
 - **E-invoice provider operator UI (P3):** the Company form gets ONE flat
   «Τρόπος αποστολής παραστατικών» dropdown — `myDATA — Παραγωγή/Δοκιμαστικό`,
   `Καθόλου (μόνο PDF)`, and per-provider `InvoiceSign/SBZ — Δοκιμαστικό/Παραγωγή`

@@ -239,7 +239,7 @@ class FakeGrTransport implements EInvoiceProviderTransport
         return 'fake';
     }
 
-    public function send(string $documentXml, ProviderCredentials $credentials): ProviderResult
+    public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
     {
         return $this->behave($this->send);
     }

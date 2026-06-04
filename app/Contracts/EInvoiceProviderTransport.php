@@ -25,11 +25,14 @@ interface EInvoiceProviderTransport
     public function key(): string;
 
     /**
-     * Submit a built document for filing. $documentXml is whatever the provider
-     * accepts — usually the AADE InvoicesDoc XML from AadeInvoiceDocument::toXml()
-     * (SBZ passthrough), optionally wrapped with a provider extension (InvoSign).
+     * Submit a built document for filing. $documentXml is the canonical AADE
+     * InvoicesDoc XML from AadeInvoiceDocument::toXml() — an AADE-passthrough
+     * provider (e.g. SBZ) POSTs it as-is. The $invoice is ALSO passed so a provider
+     * that needs more than the AADE core (e.g. InvoSign appends an extension block
+     * built from issuer/counterpart/line data) can read it; such transports may
+     * ignore $documentXml and build their own payload.
      */
-    public function send(string $documentXml, ProviderCredentials $credentials): ProviderResult;
+    public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult;
 
     /** Cancel a previously-filed document by its MARK. */
     public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult;

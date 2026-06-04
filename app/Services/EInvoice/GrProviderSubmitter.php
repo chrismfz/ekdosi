@@ -57,7 +57,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 
         try {
-            $result = $this->transport->send($xml, $credentials);
+            $result = $this->transport->send($invoice, $xml, $credentials);
         } catch (Throwable $e) {
             // Ambiguous: the provider may or may not have filed. NEVER blind-retry
             // (§14.4) — status-check by invoice coordinates first and adopt a MARK

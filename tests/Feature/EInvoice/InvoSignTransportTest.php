@@ -1,0 +1,192 @@
+<?php
+
+namespace Tests\Feature\EInvoice;
+
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
+use App\Models\MyDataMark;
+use App\Models\VatCategory;
+use App\Services\EInvoice\AadeInvoiceDocument;
+use App\Services\EInvoice\GrProviderSubmitter;
+use App\Services\EInvoice\Transports\InvoSignDocument;
+use App\Services\EInvoice\Transports\InvoSignTransport;
+use App\Services\EInvoiceSubmitterFactory;
+use App\Support\EInvoice\ProviderCredentials;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use RuntimeException;
+use Tests\TestCase;
+
+/**
+ * P5: the InvoSign transport — builds the xml_arxeio (AADE InvoicesDoc + InvoSign
+ * extension), POSTs it, and parses the ResponseDoc into a ProviderResult. HTTP is
+ * faked (no network, no real creds). The end-to-end test drives the full chain
+ * factory → GrProviderSubmitter → InvoSignTransport → parse → PROVIDER_INSERT.
+ */
+class InvoSignTransportTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private const DEMO = 'https://demo.invosign.test';
+
+    private Company $tenant;
+
+    private Customer $customer;
+
+    private InvoiceType $type;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->tenant = Company::create([
+            'name' => 'ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ ΟΕ', 'slug' => 'invo-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'afm' => '800561849',
+            'tax_office' => 'ΚΕΦΟΔΕ', 'address' => 'ΑΔΡΙΑΝΟΥ 16', 'city' => 'ΑΘΗΝΑ', 'postcode' => '14121',
+            'einvoice_provider_config' => ['demo_base_url' => self::DEMO, 'demo_token' => 'DEMO-TOKEN'],
+        ]);
+        $this->customer = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Πελάτης ΑΕ', 'afm' => '997073525',
+        ]);
+        $this->type = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'Τιμολόγιο',
+            'invcount' => 1, 'mydata_type' => '2.1',
+        ]);
+        VatCategory::create([
+            'company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true,
+        ]);
+    }
+
+    public function test_document_augments_aade_xml_with_extension(): void
+    {
+        $invoice = $this->makeInvoice();
+        $aade = (new AadeInvoiceDocument($this->tenant))->toXml((new AadeInvoiceDocument($this->tenant))->build($invoice));
+
+        $xml = InvoSignDocument::augment($aade, $invoice);
+
+        // AADE core preserved + InvoSign extension appended.
+        $this->assertStringContainsString('<invoiceDetails>', $xml);
+        $this->assertStringContainsString('api_lineDescription', $xml);
+        $this->assertStringContainsString('Υπηρεσία', $xml);
+        $this->assertStringContainsString('API_InvoiceDetails', $xml);
+        $this->assertStringContainsString('<IssuerName>ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ ΟΕ</IssuerName>', $xml);
+        $this->assertStringContainsString('<CounterpartVat>997073525</CounterpartVat>', $xml);
+        // Still valid XML.
+        $this->assertNotFalse(simplexml_load_string($xml));
+    }
+
+    public function test_send_success_parses_mark_and_uses_sandbox_creds(): void
+    {
+        Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
+        $invoice = $this->makeInvoice();
+
+        $result = (new InvoSignTransport)->send($invoice, '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><invoice></invoice></InvoicesDoc>', ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertTrue($result->success);
+        $this->assertSame('400001957061986', $result->mark);
+        $this->assertSame('AUTH-XYZ', $result->authenticationCode);
+        $this->assertSame('https://invosign.gr/viewinvoice.php?uid=UID1', $result->qrUrl);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/iNVOSign_Api.php')
+                && $request['token'] === 'DEMO-TOKEN'
+                && str_contains((string) $request['xml_arxeio'], 'API_InvoiceDetails');
+        });
+    }
+
+    public function test_send_validation_error_becomes_failed_result(): void
+    {
+        Http::fake([self::DEMO.'/*' => Http::response($this->errorXml(), 200)]);
+        $invoice = $this->makeInvoice();
+
+        $result = (new InvoSignTransport)->send($invoice, '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><invoice></invoice></InvoicesDoc>', ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertFalse($result->success);
+        $this->assertStringContainsString('[238]', $result->errorMessage());
+    }
+
+    public function test_cancel_parses_cancellation_mark(): void
+    {
+        Http::fake([self::DEMO.'/*' => Http::response($this->cancelXml(), 200)]);
+
+        $result = (new InvoSignTransport)->cancel('400001957061986', ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertTrue($result->success);
+        $this->assertSame('400001957363715', $result->cancellationMark);
+    }
+
+    public function test_missing_creds_throws(): void
+    {
+        $bare = Company::create([
+            'name' => 'x', 'slug' => 'x-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox',
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        (new InvoSignTransport)->cancel('400', ProviderCredentials::fromCompany($bare));
+    }
+
+    public function test_end_to_end_factory_submitter_invosign(): void
+    {
+        Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
+        $invoice = $this->makeInvoice();
+
+        // The factory routes gr-provider+invosign+sandbox → GrProviderSubmitter with
+        // the real InvoSignTransport.
+        $submitter = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh());
+        $this->assertInstanceOf(GrProviderSubmitter::class, $submitter);
+
+        $mark = $submitter->submit($invoice);
+
+        $this->assertSame('PROVIDER_INSERT', $mark->mydata_action);
+        $this->assertSame('400001957061986', $mark->mark);
+        $this->assertSame('invosign', $mark->provider_key);
+        $this->assertSame('AUTH-XYZ', $mark->authentication_code);
+        $this->assertSame('VALID', $invoice->fresh()->mydata_state);
+        $this->assertSame(1, MyDataMark::where('invoice_id', $invoice->id)->count());
+    }
+
+    private function makeInvoice(): Invoice
+    {
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'TPY1', 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+            'company_name' => 'Πελάτης ΑΕ', 'vat_no' => '997073525',
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Υπηρεσία',
+            'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24,
+        ]);
+
+        return $invoice->fresh('lines');
+    }
+
+    private function successXml(): string
+    {
+        return '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<index>1</index><invoiceUid>UID1</invoiceUid><invoiceMark>400001957061986</invoiceMark>'
+            .'<authenticationCode>AUTH-XYZ</authenticationCode>'
+            .'<qrUrl>https://invosign.gr/viewinvoice.php?uid=UID1</qrUrl>'
+            .'<statusCode>Success</statusCode><remaining_invoices>2985</remaining_invoices>'
+            .'</response></ResponseDoc>';
+    }
+
+    private function errorXml(): string
+    {
+        return '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<index>1</index><statusCode>ValidationError</statusCode><errors><error>'
+            .'<message>IssueDate is invalid, it must be equal with current date</message><code>238</code>'
+            .'</error></errors></response></ResponseDoc>';
+    }
+
+    private function cancelXml(): string
+    {
+        return '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<cancellationMark>400001957363715</cancellationMark><statusCode>Success</statusCode>'
+            .'</response></ResponseDoc>';
+    }
+}
