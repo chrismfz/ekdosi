@@ -27,6 +27,7 @@ use Tests\TestCase;
  *   gr-mydata + production → MyDataSubmitter
  *   gr-mydata + off        → NullSubmitter
  *   ee-peppol              → NullSubmitter (until PeppolSubmitter lands)
+ *   gr-provider            → NullSubmitter (RESERVED; inert until GrProviderSubmitter, P2)
  *   none                   → NullSubmitter
  */
 class EInvoiceSubmitterFactoryTest extends TestCase
@@ -70,11 +71,29 @@ class EInvoiceSubmitterFactoryTest extends TestCase
         $this->assertInstanceOf(NullSubmitter::class, app(EInvoiceSubmitterFactory::class)->for($tenant));
     }
 
+    public function test_factory_returns_null_submitter_for_gr_provider_until_p2(): void
+    {
+        // P1 no-op lock: a 'gr-provider' tenant is RESERVED but inert — it must
+        // route to NullSubmitter (PDF-only), never silently file the wrong way,
+        // until GrProviderSubmitter lands in P2. Guards the no-op claim for future PRs.
+        $tenant = Company::create([
+            'name' => 'Provider Reserved',
+            'slug' => 'gr-provider-'.uniqid(),
+            'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox',
+            'mydata_mode' => 'off',
+        ]);
+
+        $this->assertInstanceOf(NullSubmitter::class, app(EInvoiceSubmitterFactory::class)->for($tenant));
+    }
+
     public function test_null_submitter_records_skipped_audit_row(): void
     {
         $invoice = $this->makeInvoice();
 
-        $mark = (new NullSubmitter())->submit($invoice);
+        $mark = (new NullSubmitter)->submit($invoice);
 
         $this->assertInstanceOf(MyDataMark::class, $mark);
         $this->assertSame('SKIPPED', $mark->mydata_action);
@@ -89,7 +108,7 @@ class EInvoiceSubmitterFactoryTest extends TestCase
     {
         $invoice = $this->makeInvoice();
 
-        $mark = (new NullSubmitter())->cancel($invoice, 'Test cancel');
+        $mark = (new NullSubmitter)->cancel($invoice, 'Test cancel');
 
         $this->assertSame('SKIPPED_CANCEL', $mark->mydata_action);
         $this->assertStringContainsString('Test cancel', $mark->request);
@@ -97,7 +116,7 @@ class EInvoiceSubmitterFactoryTest extends TestCase
 
     public function test_null_submitter_test_connection_returns_true(): void
     {
-        $this->assertTrue((new NullSubmitter())->testConnection());
+        $this->assertTrue((new NullSubmitter)->testConnection());
     }
 
     public function test_mydata_mode_enum_accessor_returns_typed_value(): void
@@ -149,6 +168,7 @@ class EInvoiceSubmitterFactoryTest extends TestCase
             'company_id' => $tenant->id,
             'name' => 'Test customer',
         ]);
+
         return Invoice::create([
             'company_id' => $tenant->id,
             'invcode' => 'APY1',

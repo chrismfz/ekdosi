@@ -39,6 +39,10 @@ final class ProviderCredentials
 
         return new self(
             config: $config,
+            // Fail-safe direction: ONLY an explicit 'production' hits the live
+            // endpoint. 'off' / 'sandbox' / any typo ('prod', …) → sandbox, so a
+            // bad mode value can never accidentally file against production.
+            // (P2 may promote this to a MyDataMode-style enum cast.)
             sandbox: ($tenant->einvoice_provider_mode ?? 'off') !== 'production',
         );
     }
