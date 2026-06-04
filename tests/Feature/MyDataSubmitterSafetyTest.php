@@ -731,6 +731,53 @@ class MyDataSubmitterSafetyTest extends TestCase
         ]);
     }
 
+    public function test_successful_cancellation_flips_state_and_stores_cancellation_mark(): void
+    {
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_state' => 'VALID',
+            'local_status' => 'active',
+            'mydata_mark' => '400013829677137',
+        ])->save();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400013829677137',
+            'mydata_action' => 'INSERT',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->cancelSuccessXml())]);
+
+        (new MyDataSubmitter($this->tenant, $mock))->cancel($invoice->fresh(), 'Δοκιμή');
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('CANCELLED', $fresh->mydata_state);
+        $this->assertSame('cancelled', $fresh->local_status);
+
+        // The CANCEL row keeps the original MARK and now also the cancellation mark.
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'CANCEL',
+            'mark' => '400013829677137',
+            'cancellation_mark' => '400099999999999',
+        ]);
+    }
+
+    private function cancelSuccessXml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <statusCode>Success</statusCode>
+        <cancellationMark>400099999999999</cancellationMark>
+    </response>
+</ResponseDoc>
+XML;
+    }
+
     private function cancelNotFoundXml(): string
     {
         return <<<'XML'

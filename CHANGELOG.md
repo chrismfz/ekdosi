@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **«Συγχρονισμός κατάστασης από ΑΑΔΕ» (2-way state sync) on the ΜΑΡΚ page.**
+  After «Άντληση/έλεγχος από ΑΑΔΕ» finds a *state* divergence, a new
+  admin-gated, confirmed action applies AADE's truth to the local invoice:
+  AADE `CANCELLED` → local cancelled (mirrors a myDATA-portal cancellation back,
+  incl. best-effort WHMCS write-back); AADE `VALID` → local `VALID` and a
+  wrongly-`cancelled` `local_status` is un-cancelled to `active`. New
+  `SyncInvoiceStateFromAade` service writes a `STATE_SYNC` forensic audit row
+  (from→to). `EnrichInvoiceFromAade` stays report-only (never auto-applies state).
+- **Cancellation mark captured.** A successful `CancelInvoice` returns its own
+  «Μοναδικός Αριθμός Ακύρωσης»; it's now stored in the new
+  `mydata_marks.cancellation_mark` (the CANCEL row still keeps the original MARK).
 - **Opt-in per-line description to myDATA (`<itemDescr>`).** New
   `companies.mydata_send_item_descr` toggle (myDATA tab, default OFF): when on,
   `AadeInvoiceDocument` emits the line's `product_descr` as `<itemDescr>`
