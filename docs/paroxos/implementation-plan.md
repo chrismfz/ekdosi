@@ -1,7 +1,7 @@
 # E-invoicing Providers (ΥΠΑΗΕΣ) — implementation plan
 
 > **Status: PLAN / design-locked, no code yet.** The *why/regulatory* reference
-> stays in **`docs/einvoice-provider-bridge.md`** (provider role beyond myDATA,
+> stays in **`regulatory-blueprint.md`** (provider role beyond myDATA,
 > the AADE provider XSD, Α.1112/2025 certification, ιδιοπάροχος). This doc is the
 > *how we build it* — it answers the three operator questions directly:
 > **(α)** πολλούς παρόχους, ο καθένας με δικό του API· **(β)** per-company
@@ -316,12 +316,111 @@ XML· ο πάροχος απλώς γεμίζει μερικά πεδία παρ
 
 ## 10. Reference
 
-- `docs/einvoice-provider-bridge.md` — regulatory/why (Α.1112/2025, ιδιοπάροχος,
+- `regulatory-blueprint.md` — regulatory/why (Α.1112/2025, ιδιοπάροχος,
   provider role beyond myDATA, AADE provider XSD field-by-field).
-- `docs/reference/aade-provider-invoicesDoc-v0.6.1.xsd` — provider invoice schema.
+- `reference/aade-provider-invoicesDoc-v0.6.1.xsd` — provider invoice schema.
 - `app/Contracts/EInvoiceSubmitter.php` + `app/Services/EInvoiceSubmitterFactory.php`
   — το seam που επεκτείνουμε.
 - `app/Services/MyDataSubmitter.php` — `buildAadeInvoice` (το P0 factor-out source).
 - `app/Services/SalesReconciler.php` + `MyDataConsole` — ο read path που ξαναχρησιμοποιείται.
-</content>
-</invoke>
+- `reference/A.1258-2020-declarations-decision.pdf` + `reference/manual-paroxoi-2020-12-17.pdf`
+  — η ΑΑΔΕ διαδικασία opt-in δηλώσεων (§11).
+
+---
+
+## 11. Out-of-band προϋπόθεση: οι δηλώσεις ΑΑΔΕ (A.1258/2020)
+
+**Κρίσιμο που έλειπε από το αρχικό σχέδιο** (το φέρνουν τα δύο PDF του χρήστη).
+Πριν εκδώσεις **έστω ένα** τιμολόγιο μέσω παρόχου, ο tenant κάνει χειροκίνητα,
+**εκτός ekdosi**, στο **bookkeeper-web** (`https://www1.aade.gr/saadeapps2/
+bookkeeper-web`, login TAXISnet):
+
+1. **Εξουσιοδότηση Παρόχου** — η Οντότητα-Εκδότης εξουσιοδοτεί τον Πάροχο· ο
+   Πάροχος **αποδέχεται** την εξουσιοδότηση (manual §p3).
+2. **«Δήλωση Αποκλειστικής Έκδοσης Στοιχείων μέσω Παρόχου»** (A.1258/2020, αρ.1–2)
+   — δηλώνεις ΑΦΜ/επωνυμία οντότητας, **ΑΦΜ + επωνυμία + αριθμό Άδειας Παρόχου**,
+   ημ/νία σύμβασης, χονδρική/λιανική. Καλύπτει **όλα** τα παραστατικά· ξεκλειδώνει
+   τα ευεργετήματα του άρθρου 71ΣΤ' ν.4172/2013. Ανακαλείται με «Δήλωση
+   Ανάκλησης».
+3. (Ως λήπτης) **«Δήλωση Αποδοχής Λήψης Ηλεκτρονικών Τιμολογίων»** — προαιρετικό
+   για το issue path· σχετικό όταν λαμβάνουμε e-invoices (έξοδα).
+
+**Συνέπειες για το ekdosi (όχι κώδικας — ρύθμιση/δεδομένα):**
+- Το `einvoice_provider_config` (§3) πρέπει να κρατά **ΑΦΜ Παρόχου + αριθμό
+  Άδειας** — όχι μόνο API creds — γιατί αυτά είναι που δηλώθηκαν στην ΑΑΔΕ και
+  πρέπει να ταιριάζουν.
+- Το **preflight (§5)** αποκτά ένα **μη-τεχνικό checklist item**: «έχει υποβληθεί
+  η Δήλωση Αποκλειστικής Έκδοσης;» (ναι/όχι/ημερομηνία — operator-confirmed flag,
+  π.χ. `companies.einvoice_provider_declared_at`). Δεν μπορούμε να το ελέγξουμε
+  αυτόματα, αλλά το **κιτρινίζουμε** ώσπου ο operator το επιβεβαιώσει — αλλιώς
+  «αποκλειστική έκδοση» χωρίς δήλωση = μη-συμμόρφωση.
+- **Αποκλειστικότητα = kill-switch λογική:** όταν δηλωθεί «αποκλειστική έκδοση
+  μέσω Παρόχου», ο άμεσος `MyDataSubmitter` δεν επιτρέπεται καθόλου γι' αυτόν τον
+  tenant — που είναι ήδη το double-filing guard του §4/§9, απλώς τώρα έχει και
+  **νομικό** λόγο, όχι μόνο τεχνικό.
+
+---
+
+## 12. Πρώτος υποψήφιος transport — InvoSign (grounding του P5)
+
+**InvoSign = ΕΝΑΣ από πολλούς** που θα υποστηρίξουμε — απλώς έχει εύκολο δημόσιο
+documentation, οπότε τον παίρνουμε ως **δείγμα / reference impl** για να κλειδώσει
+το abstraction. Οι υπόλοιποι (SoftOne, Epsilon, Entersoft/Retail Link, ILYDA,
+Primer/Orian…) μπαίνουν ο καθένας ως **άλλο ένα transport adapter + μία γραμμή
+registry** (§2.3), χωρίς να αλλάξει τίποτα στο `GrProviderSubmitter`/lifecycle.
+
+InvoSign (`https://invosign.gr/site/help_site/`, API Guide v1.0.1) — αδειοδοτημένος
+GR πάροχος με Online + δημόσιο REST API. Διασταυρώθηκε· χρήσιμο γιατί **επιβεβαιώνει
+ΚΑΙ διορθώνει** το σχέδιο:
+
+**Τι ταιριάζει απόλυτα** — η απάντηση έκδοσης γυρίζει **ακριβώς** τα πεδία που
+σχεδιάσαμε για το `ProviderResult` (§2.2):
+| `ProviderResult` πεδίο | InvoSign response |
+|---|---|
+| `mark` | `invoiceMark` (το myDATA ΜΑΡΚ) ✅ |
+| `authenticationCode` | `authenticationCode` (σφραγίδα παρόχου) ✅ |
+| `qrUrl` | `qrUrl` ✅ |
+| `uid` | `invoiceUid` ✅ |
+| status re-fetch | `invoice_status.php` (ανακτάς ΜΑΡΚ μετά από lost connection) ✅ |
+
+⇒ Επιβεβαιώνει τον §0: **το ΜΑΡΚ έρχεται από τον πάροχο**, με status-refetch
+fallback — ακριβώς το «retry» σενάριο που προβλέψαμε στο §4.
+
+**Transport specifics** (γεμίζουν το `EpsilonTransport`-στυλ adapter, εδώ
+`InvoSignTransport`):
+- Auth = **plain `token`** ως form field (όχι header/OAuth) → `ProviderCredentials`
+  κρατά απλώς `{base_url, token, demo_base_url, demo_token}`.
+- `POST application/x-www-form-urlencoded`, `xml_arxeio=<XML>` + `token`.
+- Endpoints: issue `iNVOSign_Api.php`, cancel `iNVOSign_CancelDeliveryNote.php`
+  (`mark`+`token`), status `invoice_status.php`. **Per-client base URL** (ιδιωτικό).
+- **Sandbox: ναι** (`demo_base_url`+`demo_token`) → δένει με το
+  `einvoice_provider_mode=sandbox` του §3.
+- PEPPOL Access Point / B2G: **δεν τεκμηριώνεται δημόσια** — άρα InvoSign καλύπτει
+  το **B2B leg**, όχι (αποδεδειγμένα) το Δημόσιο. Το PEPPOL leg (§7) μένει χωριστό.
+
+**⚠ Η μία διόρθωση στο σχέδιο (σημαντική):** η InvoSign **ΔΕΝ** δέχεται το raw AADE
+`invoicesDoc` XML — θέλει **δικό της bespoke XML** (`API_InvoiceDetails`/
+`API_Issuer`/`API_Counterpart`, fields `api_lineDescription`/`api_UnitPrice`/
+`api_vatCategoryPercent`/`api_quantity`/…). Άρα ο άξονας «ΤΙ» (§2.1) **δεν είναι
+ένας κοινός serializer** — **κάποιοι πάροχοι θέλουν δικό τους schema**. Σωστό
+μοντέλο:
+
+```
+canonical ekdosi invoice (DTO)
+        │
+        ├─ AadeInvoiceDocument   → AADE invoicesDoc XML   (πάροχοι που το δέχονται)
+        ├─ InvoSignDocument      → InvoSign bespoke XML    (InvoSign)
+        └─ PeppolUblDocument     → UBL/EN16931             (B2G + EU)
+```
+
+Δηλαδή **κάθε transport adapter δηλώνει ποιον serializer θέλει** (ο περισσότερος
+κώδικας μοιράζεται — το canonical DTO + τα `Codes`/VAT/income-classification
+mappings· αλλάζει μόνο η τελική σειριοποίηση). Αυτό **ενισχύει** το split «ΤΙ/ΠΩΣ»
+αντί να το σπάει: ο registry του §2.3 δίνει `{serializer, http-client}` ζευγάρι ανά
+πάροχο. Το `GrProviderSubmitter` μένει ένας — απλώς ζητά από το adapter «σειριοποίησε
++ στείλε», χωρίς να ξέρει το schema.
+
+**Πρακτικό:** ο InvoSign είναι **εξαιρετικός πρώτος πραγματικός transport** (P5) —
+δημόσιο doc, sandbox, καθαρό response με ΜΑΡΚ+auth+QR. Ξεκινάμε απ' αυτόν, sandbox-
+validated όπως το myDATA 2026-05-28, και είναι το **reference impl** που αποδεικνύει
+ότι το seam δέχεται «δικό schema» πάροχο χωρίς να αγγίξει lifecycle/reconciliation.

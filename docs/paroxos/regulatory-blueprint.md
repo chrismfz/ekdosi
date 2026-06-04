@@ -4,7 +4,7 @@
 > is a known quantity if/when Greek e-invoicing **μέσω παρόχου** (Υ.ΠΑ.Η.Ε.Σ.)
 > becomes mandatory, or we decide to issue via a provider, or Estonia (Nixpal
 > OÜ) needs PEPPOL. Grounded in the AADE provider schema committed alongside
-> (`docs/reference/aade-provider-invoicesDoc-v0.6.1.xsd`), the **Α.1112/2025**
+> (`reference/aade-provider-invoicesDoc-v0.6.1.xsd`), the **Α.1112/2025**
 > certification forms, and **PEPPOL BIS Billing 3.0** (Nov 2025 release,
 > https://docs.peppol.eu/poacc/billing/3.0/).
 
@@ -46,7 +46,7 @@ replacement + delivery + incentives** are the added value.
 ---
 
 ## 2. The AADE provider schema vs what we already emit
-`docs/reference/aade-provider-invoicesDoc-v0.6.1.xsd` (`InvoicesDoc` →
+`reference/aade-provider-invoicesDoc-v0.6.1.xsd` (`InvoicesDoc` →
 `AadeBookInvoiceType`). It is the **same shape** as our myDATA submit payload —
 `issuer` / `counterpart` / `invoiceHeader` / `invoiceDetails` (per-line net /
 vatCategory / vatAmount / vatExemptionCategory / income+expense classification) /
@@ -165,7 +165,7 @@ feature backlog.
 
 ---
 
-## Reference files (committed under `docs/reference/`)
+## Reference files (committed under `reference/`)
 - `aade-provider-invoicesDoc-v0.6.1.xsd` — the AADE **provider** invoice schema
   (`InvoicesDoc` / `AadeBookInvoiceType`; carries `authenticationCode` +
   `transmissionFailure`).
@@ -173,6 +173,12 @@ feature backlog.
   application (Άδεια [1]/[2]/[3]).
 - `aade-A.1112.2025-self-provider-idioparochos-application-form.docx` —
   **ιδιοπάροχος** application (own docs, wholesale-only).
+- `A.1258-2020-declarations-decision.pdf` — the AADE decision defining the
+  **opt-in declarations** (Δήλωση Αποκλειστικής Έκδοσης μέσω Παρόχου / Αποδοχής
+  Λήψης / Ανάκλησης) an entity files to issue via provider — see the
+  implementation plan §11 (out-of-band prerequisite).
+- `manual-paroxoi-2020-12-17.pdf` — AADE user manual for filing those
+  declarations in **bookkeeper-web** (TAXISnet login; authorize-provider flow).
 - NOT committed: the main Α.1112/2025 decision PDF (the AADE copy is **corrupt**
   — won't open anywhere; re-add when AADE publishes a valid one) and the 2.6 MB
   annex-templates zip (binary boilerplate, not needed for the blueprint).
