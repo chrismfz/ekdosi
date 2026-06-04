@@ -10,6 +10,7 @@ use App\Models\VatCategory;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -90,6 +91,41 @@ class CompanyImportTest extends TestCase
         $this->assertSame(1, VatCategory::where('company_id', $source->id)->count());
         $this->assertSame(1, PaymentMethod::where('company_id', $source->id)->count());
         $this->assertSame(1, DistributionAim::where('company_id', $source->id)->count());
+    }
+
+    public function test_multiple_billing_connections_same_source_survive(): void
+    {
+        $source = $this->sourceCompany();
+        // Two connections of the SAME source, disambiguated by label.
+        DB::table('billing_connections')->insert([
+            ['company_id' => $source->id, 'source' => 'whmcs', 'label' => 'Shop A', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['company_id' => $source->id, 'source' => 'whmcs', 'label' => 'Shop B', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        $bundle = $this->bundle($source->fresh());
+
+        // Re-import into the same company twice → both rows kept, not collapsed.
+        $importer = app(CompanyImporter::class);
+        $importer->run($bundle, ['into' => 'src', 'execute' => true, 'passphrase' => 'p@ss']);
+        $importer->run($bundle, ['into' => 'src', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $this->assertSame(2, DB::table('billing_connections')->where('company_id', $source->id)->count());
+    }
+
+    public function test_key_less_row_does_not_duplicate_on_reimport(): void
+    {
+        $source = $this->sourceCompany();
+        // A lookup row with a NULL natural key (no name) → signature fallback.
+        DB::table('metric_units')->insert([
+            'company_id' => $source->id, 'name' => null, 'notes' => 'kg',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $bundle = $this->bundle($source->fresh());
+
+        $importer = app(CompanyImporter::class);
+        $importer->run($bundle, ['into' => 'src', 'execute' => true, 'passphrase' => 'p@ss']);
+        $importer->run($bundle, ['into' => 'src', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $this->assertSame(1, DB::table('metric_units')->where('company_id', $source->id)->count());
     }
 
     public function test_dry_run_writes_nothing(): void

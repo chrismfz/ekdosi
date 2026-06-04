@@ -36,7 +36,9 @@ class CompanyImporter
         'metric_units' => ['name'],
         'tags' => ['name'],
         'server_groups' => ['name'],
-        'billing_connections' => ['source'],
+        // Composite: a tenant may have TWO connections of the same source (two
+        // shops) disambiguated by label — keying on source alone wrong-merges them.
+        'billing_connections' => ['source', 'label'],
         'invoice_types' => ['code'],
         'servers' => ['name'],
     ];
@@ -132,8 +134,7 @@ class CompanyImporter
             $insert = 0;
             $update = 0;
             foreach ($rows as $row) {
-                $key = $this->naturalKey($table, $row);
-                ($key !== null && isset($index[$key])) ? $update++ : $insert++;
+                isset($index[$this->naturalKey($table, $row)]) ? $update++ : $insert++;
             }
             $plan[$table] = ['insert' => $insert, 'update' => $update];
         }
@@ -158,7 +159,7 @@ class CompanyImporter
             $data = $this->rowData($table, $row, $companyId, $maps);
             $key = $this->naturalKey($table, $row);
 
-            if ($key !== null && isset($index[$key])) {
+            if (isset($index[$key])) {
                 $id = $index[$key];
                 DB::table($table)->where('id', $id)->update($data);
             } else {
@@ -203,29 +204,49 @@ class CompanyImporter
     {
         $index = [];
         foreach (DB::table($table)->where('company_id', $companyId)->get() as $row) {
-            $key = $this->naturalKey($table, (array) $row);
-            if ($key !== null) {
-                $index[$key] = $row->id;
-            }
+            $index[$this->naturalKey($table, (array) $row)] = $row->id;
         }
 
         return $index;
     }
 
     /**
-     * First non-empty natural-key column value (lets bank_accounts fall back
-     * from iban → account_name). Null when none present → always inserts.
+     * Natural key for idempotent matching: the COMPOSITE of every non-empty
+     * key column (so two billing_connections of the same source disambiguate by
+     * label, and bank_accounts still effectively fall back iban→account_name
+     * since an empty column is skipped). When no key column is populated, fall
+     * back to a content signature so even a key-less lookup row converges on
+     * re-import instead of duplicating.
      */
-    private function naturalKey(string $table, array $row): ?string
+    private function naturalKey(string $table, array $row): string
     {
+        $parts = [];
         foreach (self::KEYS[$table] ?? [] as $col) {
             $value = $row[$col] ?? null;
             if ($value !== null && $value !== '') {
-                return $col.'='.$value;
+                $parts[] = $col.'='.$value;
             }
         }
 
-        return null;
+        if ($parts !== []) {
+            return implode('|', $parts);
+        }
+
+        return 'sig='.$this->rowSignature($row);
+    }
+
+    /**
+     * Stable hash of a row's content columns (id/company_id/timestamps/legacy_id
+     * stripped) — the fallback identity for rows with no populated natural key.
+     */
+    private function rowSignature(array $row): string
+    {
+        foreach ([...self::DROP_COLUMNS, 'legacy_id'] as $col) {
+            unset($row[$col]);
+        }
+        ksort($row);
+
+        return md5((string) json_encode($row, JSON_UNESCAPED_UNICODE));
     }
 
     /**

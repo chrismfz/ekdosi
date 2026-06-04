@@ -19,17 +19,6 @@ class CompanyExporter
 {
     public const SCHEMA_VERSION = 1;
 
-    /** The 7 APP_KEY-encrypted columns — sealed under the passphrase instead. */
-    private const SECRET_COLUMNS = [
-        'mydata_subscription_key_sandbox',
-        'mydata_subscription_key_production',
-        'gsis_password',
-        'mail_smtp_password',
-        'whmcs_api_secret',
-        'whmcs_webhook_secret',
-        'einvoice_provider_config',
-    ];
-
     /**
      * Bucket B — setup/lookup tables kept on a rebuild (the operator-curated
      * config), incl. the 3 ekdosi-native config tables that aren't in Firebird.
@@ -67,10 +56,12 @@ class CompanyExporter
         // attributesToArray() applies casts → the encrypted columns decrypt to
         // plaintext; we pull those into the sealed secrets and strip them from
         // the company payload so no secret is ever written in the clear there.
+        // The secret set is DERIVED from the model's `encrypted*` casts (not a
+        // hand-kept list) so a future encrypted column can't silently leak.
         $companyData = $company->attributesToArray();
 
         $secrets = [];
-        foreach (self::SECRET_COLUMNS as $col) {
+        foreach ($this->secretColumns($company) as $col) {
             $secrets[$col] = $company->{$col};
             unset($companyData[$col]);
         }
@@ -122,6 +113,24 @@ class CompanyExporter
             'setup' => $setup,
             'files' => $files,
         ];
+    }
+
+    /**
+     * Columns the model encrypts at rest (`encrypted` / `encrypted:array` …) —
+     * the exact set to seal under the passphrase instead of writing in the clear.
+     *
+     * @return list<string>
+     */
+    private function secretColumns(Company $company): array
+    {
+        $cols = [];
+        foreach ($company->getCasts() as $column => $cast) {
+            if ($cast === 'encrypted' || str_starts_with((string) $cast, 'encrypted:')) {
+                $cols[] = $column;
+            }
+        }
+
+        return $cols;
     }
 
     /**

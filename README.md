@@ -119,6 +119,9 @@ php artisan company:import --file=myip.zip --into=myip --execute    # restore in
   place** (never delete + insert), so a re-import converges and matched rows
   keep their id — transactional data that references them never dangles.
 - **Non-destructive**: import never removes rows absent from the bundle.
+- **Limitation (v1)**: server / server-group provisioning secrets
+  (`secret_encrypted`) export as raw APP_KEY ciphertext — portable only within
+  the **same** `APP_KEY`; re-enter them after a cross-VM restore.
 - Full per-company bundle (incl. transactional data) + a UI download/upload-
   restore are the next phases — see `docs/company-portability-plan.md`.
 

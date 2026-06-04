@@ -94,6 +94,31 @@ class CompanyExportTest extends TestCase
         $this->assertSame(5, $type['invcount']);
     }
 
+    public function test_no_encrypted_column_leaks_into_company_payload(): void
+    {
+        $company = Company::create([
+            'name' => 'Sec OE', 'slug' => 'sec-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'afm' => '800561849',
+            'mydata_subscription_key_production' => 'K1',
+            'mydata_subscription_key_sandbox' => 'K2',
+            'gsis_password' => 'gp', 'mail_smtp_password' => 'mp',
+            'whmcs_api_secret' => 'ws', 'whmcs_webhook_secret' => 'wb',
+        ]);
+
+        $bundle = app(CompanyExporter::class)->build($company, 'passphrase', 'p@ss');
+
+        // EVERY encrypted-cast column must be sealed out of company.json — derived
+        // from the casts so a future encrypted column can't silently leak.
+        $encrypted = 0;
+        foreach ($company->getCasts() as $col => $cast) {
+            if ($cast === 'encrypted' || str_starts_with((string) $cast, 'encrypted:')) {
+                $encrypted++;
+                $this->assertArrayNotHasKey($col, $bundle['company'], "secret {$col} leaked into company.json");
+            }
+        }
+        $this->assertGreaterThanOrEqual(7, $encrypted, 'expected the encrypted-cast columns to be present');
+    }
+
     public function test_command_writes_a_readable_zip(): void
     {
         $company = Company::create([
