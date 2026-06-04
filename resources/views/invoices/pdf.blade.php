@@ -91,7 +91,7 @@
            bottom-margin block by DomPDF via the page-bottom margin. */
         .footer { position: fixed; left: 0; right: 0; bottom: -16mm; text-align: center; font-size: 7.5pt; color: #6b7280; padding: 0 14mm; }
         .footer .mydata-line { margin-bottom: 1mm; color: #374151; }
-        .footer .mydata-url { word-break: break-all; font-size: 7pt; color: #6b7280; }
+        .footer .mydata-url { word-break: break-all; overflow-wrap: anywhere; font-size: 7pt; color: #6b7280; }
         .footer .tenant-text { margin-top: 1mm; font-style: italic; }
         .pager:after { content: counter(page); }
         .pager-total:after { content: counter(pages); }
@@ -301,7 +301,12 @@
         <div class="mydata-line">
             Πιστοποιημένο στη myDATA — επαληθεύστε σαρώνοντας το QR ή στη διεύθυνση:
         </div>
-        <div class="mydata-url">{{ $invoice->mydata_url }}</div>
+        {{-- The AADE qrUrl is one long ~150-char token with no spaces. DomPDF
+             won't break it in the fixed footer (it overflowed and got clipped on
+             both sides → looked like a truncated/wrong URL). Insert zero-width
+             break opportunities (U+200B) so it WRAPS across lines; invisible, so
+             it still reads as the exact URL. The value itself is unchanged. --}}
+        <div class="mydata-url">{{ implode("\u{200B}", mb_str_split($invoice->mydata_url, 8)) }}</div>
     @endif
     @if(! empty($tenant->pdf_footer_text))
         <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>

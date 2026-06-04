@@ -17,6 +17,11 @@ they merge.
 
 ## [Unreleased]
 ### Fixed
+- **PDF footer myDATA URL was visually clipped.** The full AADE verification URL
+  (one ~150-char token) overflowed the fixed footer and got cut on both sides —
+  it READ like a truncated/wrong URL (the real source of the «λάθος URL»
+  confusion; the stored value was always correct). Now wraps across lines via
+  zero-width break opportunities + overflow-wrap; the value is unchanged.
 - **myDATA QR unscannable / misread on the printed PDF.** The ~150-char AADE
   qrUrl produced a dense (v8, 49×49) QR rendered at only 200px with an 8px quiet
   zone, then scaled to 28mm — phones misread it (truncated / wrong host on scan).
