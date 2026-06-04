@@ -125,12 +125,24 @@ $state = strtolower(trim((string) ($payload['state'] ?? '')));
 if (! in_array($state, ['active', 'cancelled'], true)) {
     $state = '';
 }
-// Optional: signed public URL to the official ekdosi παραστατικό PDF. Only
-// accept http(s) so a malformed value can't become a javascript: link in a
-// rendered <a>. Stored verbatim; the badge renders it htmlspecialchar'd.
+// Optional: signed public URL to the official ekdosi παραστατικό PDF. Accept
+// ONLY http(s) AND only when the host matches the tenant's configured
+// `ekdosi_base_url` — so even a caller holding the webhook secret can't store a
+// trusted-looking «Επίσημο παραστατικό» link pointing at a phishing host. When
+// no base URL is configured we fall back to scheme-only. Stored verbatim; the
+// badge renders it htmlspecialchar'd.
 $pdfUrl = trim((string) ($payload['pdf_url'] ?? ''));
-if ($pdfUrl !== '' && ! preg_match('#^https?://#i', $pdfUrl)) {
-    $pdfUrl = '';
+if ($pdfUrl !== '') {
+    $okScheme = (bool) preg_match('#^https?://#i', $pdfUrl);
+    $base = (string) (Capsule::table('tbladdonmodules')
+        ->where('module', 'ekdosi_bridge')
+        ->where('setting', 'ekdosi_base_url')
+        ->value('value') ?? '');
+    $expectedHost = $base !== '' ? (string) (parse_url($base, PHP_URL_HOST) ?? '') : '';
+    $host = (string) (parse_url($pdfUrl, PHP_URL_HOST) ?? '');
+    if (! $okScheme || ($expectedHost !== '' && strcasecmp($host, $expectedHost) !== 0)) {
+        $pdfUrl = '';
+    }
 }
 if ($whmcsInvoiceId <= 0 || $mark === '') {
     http_response_code(400);

@@ -65,7 +65,7 @@ function ekdosi_bridge_config(): array
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.36.0',
+        'version' => '0.37.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [

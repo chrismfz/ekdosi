@@ -69,7 +69,16 @@ header('Content-Type: application/json');
 $bridgeLogIp = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
 $bridgeLogOp = '';
 $bridgeLogResult = '';
-register_shutdown_function(static function () use (&$bridgeLogOp, &$bridgeLogResult, $bridgeLogIp) {
+// Only record a row once the request is a PLAUSIBLE bridge call (POST + body) —
+// so a random scanner GET / empty probe can't write unbounded rows to
+// mod_ekdosi_bridge_log (storage amplification) nor pollute the freshness
+// tripwire. Auth FAILURES (401/422) are past this gate and DO log — that's the
+// secret-mismatch visibility we want.
+$bridgeLogShouldRecord = false;
+register_shutdown_function(static function () use (&$bridgeLogOp, &$bridgeLogResult, &$bridgeLogShouldRecord, $bridgeLogIp) {
+    if (! $bridgeLogShouldRecord) {
+        return;
+    }
     $status = http_response_code();
     $status = is_int($status) ? $status : 200;
     BridgeLogStore::record($bridgeLogOp, $bridgeLogIp, $status >= 200 && $status < 300, $status, $bridgeLogResult);
@@ -87,6 +96,7 @@ if ($rawBody === false || $rawBody === '') {
     echo json_encode(['error' => 'empty_body']);
     exit;
 }
+$bridgeLogShouldRecord = true;   // POST with a body → a real bridge call attempt
 
 // Shared secret from tbladdonmodules (same row inbound.php uses). 422 ==
 // "configured to exist but not yet set up" (distinct from 401 bad sig).

@@ -24,20 +24,28 @@ class PublicInvoicePdfController extends Controller
 {
     public function __invoke(Request $request, Invoice $invoice, InvoicePdfRenderer $renderer): Response
     {
-        // Never serve a draft — only issued (active/cancelled) documents have a
-        // legal παραστατικό to show.
-        if ($invoice->local_status === 'draft') {
+        // FAIL-CLOSED: only an issued, non-cancelled document is a valid public
+        // παραστατικό. Drafts AND cancelled (legally void) AND any unknown status
+        // are refused — see Invoice::isPubliclyViewable().
+        if (! $invoice->isPubliclyViewable()) {
             abort(Response::HTTP_NOT_FOUND);
         }
 
         $pdf = $renderer->render($invoice);
-        $filename = ($invoice->invcode !== null && $invoice->invcode !== '')
-            ? $invoice->invcode.'.pdf'
-            : 'invoice-'.$invoice->getKey().'.pdf';
+        $ascii = ($invoice->invcode !== null && $invoice->invcode !== '')
+            ? preg_replace('/[^\x20-\x7E]/', '_', (string) $invoice->invcode)
+            : 'invoice-'.$invoice->getKey();
+        $utf8 = ($invoice->invcode !== null && $invoice->invcode !== '')
+            ? (string) $invoice->invcode
+            : 'invoice-'.$invoice->getKey();
 
+        // RFC 5987: an ASCII `filename` fallback + a UTF-8 `filename*` so a Greek
+        // invcode (ΑΠΥ423) survives strict proxies/servers instead of corrupting
+        // the header or showing mojibake.
         return response($pdf, Response::HTTP_OK, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="'.$filename.'"',
+            'Content-Disposition' => 'inline; filename="'.$ascii.'.pdf"; '
+                ."filename*=UTF-8''".rawurlencode($utf8).'.pdf',
         ]);
     }
 }

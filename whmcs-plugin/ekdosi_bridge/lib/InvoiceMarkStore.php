@@ -85,8 +85,14 @@ class InvoiceMarkStore
         }
     }
 
+    /** Per-request cache of column-existence probes (information_schema is slow). */
+    private static array $columnCache = [];
+
     private static function hasColumn(string $column): bool
     {
+        if (array_key_exists($column, self::$columnCache)) {
+            return self::$columnCache[$column];
+        }
         try {
             $col = Capsule::selectOne(
                 "SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -94,10 +100,35 @@ class InvoiceMarkStore
                 [self::TABLE, $column]
             );
 
-            return $col !== null;
+            return self::$columnCache[$column] = ($col !== null);
         } catch (\Throwable $e) {
-            return false;
+            return false;   // don't cache a transient failure
         }
+    }
+
+    /**
+     * All stored columns for one invoice in a SINGLE query (vs four separate
+     * get()/invcodeFor()/stateFor()/pdfUrlFor() round-trips). Absent optional
+     * columns come back null. Returns null mark when there's no row.
+     *
+     * @return array{mark:?string, invcode:?string, state:?string, pdf_url:?string}
+     */
+    public static function row(int $invoiceId): array
+    {
+        $select = ['mark'];
+        foreach (['invcode', 'state', 'pdf_url'] as $c) {
+            if (self::hasColumn($c)) {
+                $select[] = $c;
+            }
+        }
+        $r = Capsule::table(self::TABLE)->where('invoiceid', $invoiceId)->first($select);
+
+        return [
+            'mark' => ($r->mark ?? null) !== null && $r->mark !== '' ? (string) $r->mark : null,
+            'invcode' => ($r->invcode ?? null) !== null && $r->invcode !== '' ? (string) $r->invcode : null,
+            'state' => ($r->state ?? null) !== null && $r->state !== '' ? (string) $r->state : null,
+            'pdf_url' => ($r->pdf_url ?? null) !== null && $r->pdf_url !== '' ? (string) $r->pdf_url : null,
+        ];
     }
 
     private static function hasInvcodeColumn(): bool

@@ -64,6 +64,19 @@ class Invoice extends Model
     }
 
     /**
+     * May this invoice's PDF be served on the PUBLIC (signed, customer-facing)
+     * route? FAIL-CLOSED allow-list: only an issued, non-AADE-cancelled document
+     * is a valid «official παραστατικό». Drafts (not issued) and CANCELLED docs
+     * (legally void) are hidden; any future/unknown local_status is hidden until
+     * explicitly opted in here — never leaked by omission.
+     */
+    public function isPubliclyViewable(): bool
+    {
+        return $this->local_status === 'active'
+            && $this->mydata_state !== 'CANCELLED';
+    }
+
+    /**
      * Audited columns — lifecycle + money figures + the myDATA state mirror, but
      * NOT the money cache (paid_total / credited_total / payment_status), which
      * InvoiceBalance rewrites on every payment recompute. See TracksActivity.

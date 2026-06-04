@@ -74,4 +74,15 @@ class PublicInvoicePdfRouteTest extends TestCase
         $invoice = $this->invoice('draft');
         $this->get($invoice->publicPdfUrl())->assertStatus(404);
     }
+
+    public function test_cancelled_invoice_is_404_even_when_active_status(): void
+    {
+        // Defensive AND in isPubliclyViewable(): an AADE-cancelled doc must not
+        // be served publicly even if local_status somehow reads 'active'.
+        $this->mock(InvoicePdfRenderer::class)->shouldNotReceive('render');
+
+        $invoice = $this->invoice('active');
+        $invoice->forceFill(['mydata_state' => 'CANCELLED'])->save();
+        $this->get($invoice->publicPdfUrl())->assertStatus(404);
+    }
 }

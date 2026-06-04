@@ -29,10 +29,14 @@ class BridgeLogStore
     public const TABLE = 'mod_ekdosi_bridge_log';
 
     /**
-     * Ops that represent ekdosi PULLING the inbox feed — their absence over time
-     * is the outage signal the «last inbound poll» banner watches.
+     * The op that represents ekdosi's SCHEDULED bulk inbox poll — its absence
+     * over time is the outage signal the «last inbound poll» banner watches.
+     * Deliberately ONLY 'invoices' (the every-15-min feed): 'invoice' is the
+     * single-fetch push/probe path, which a one-off «Αποστολή» or a
+     * `whmcs:use-bridge` probe would otherwise use to falsely refresh the banner
+     * while the real scheduled feed is dead — masking the very outage it detects.
      */
-    private const INBOUND_POLL_OPS = ['invoices', 'invoice'];
+    private const INBOUND_POLL_OPS = ['invoices'];
 
     /** Retain ~30 days; pruned probabilistically on insert to keep it bounded. */
     private const RETENTION_DAYS = 30;

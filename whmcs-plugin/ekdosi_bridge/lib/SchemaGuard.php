@@ -122,6 +122,18 @@ class SchemaGuard
      */
     public static function ensureSilently(): void
     {
+        // Run the heavy path at most ONCE per request. On a privilege-limited
+        // host that can't ALTER in a new column, schemaLooksReady() stays false
+        // forever — without this guard every ensureSilently() call in the same
+        // request would re-run the full ensure() (info_schema probes + failing
+        // ALTERs). (Cross-request repetition is inherent to the stateless,
+        // version-less self-heal design — see the class docblock.)
+        static $ranThisRequest = false;
+        if ($ranThisRequest) {
+            return;
+        }
+        $ranThisRequest = true;
+
         try {
             if (self::schemaLooksReady()) {
                 return;

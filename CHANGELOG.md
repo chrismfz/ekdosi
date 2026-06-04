@@ -16,6 +16,19 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Independent-review batch (Plugin-API/#4/#5).** (#1) `PublicInvoicePdfController`
+  now serves only `Invoice::isPubliclyViewable()` (active + not AADE-cancelled) —
+  fail-closed, so a cancelled or unknown-status invoice 404s instead of streaming
+  as a valid παραστατικό; the bridge hides its PDF button too. (#7) the cancel
+  write-back resolves the pending row by EITHER link (invoice.whmcs_pending_id OR
+  pending.invoice_id) so filer-path invoices also flip to «ΑΚΥΡΩΜΕΝΟ». (#6) the
+  Company «Fetch pending» button always delegates to `whmcs:fetch-pending` (one
+  source-selection + legacy-refresh path; removed the duplicated native loop).
+  (#10) official-PDF `Content-Disposition` uses RFC 5987 `filename*` so a Greek
+  invcode survives strict proxies. Plus plugin-side fixes (banner aliasing, log
+  hygiene, pdf_url host validation, JS escaping, query batching) in
+  ekdosi_bridge v0.37.0.
 ### Added
 - **Official invoice PDF — signed public route + write-back (#5a).** New
   auth-less but `signed` route `GET /invoice/{invoice}/official-pdf`

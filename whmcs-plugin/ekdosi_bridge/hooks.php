@@ -107,11 +107,17 @@ add_hook('AdminInvoicesControlsOutput', 1, function ($vars) {
     $legacyBadge = '';
     $pdfButton = '';
     try {
-        $mark = InvoiceMarkStore::get($invoiceId);
-        $invcode = InvoiceMarkStore::invcodeFor($invoiceId);
-        $state = InvoiceMarkStore::stateFor($invoiceId);
-        $pdfUrl = InvoiceMarkStore::pdfUrlFor($invoiceId);
-        if ($pdfUrl !== null && $pdfUrl !== '') {
+        // ONE row read for all stored columns (was 4 single-column queries + 3
+        // column probes).
+        $markRow = InvoiceMarkStore::row($invoiceId);
+        $mark = $markRow['mark'];
+        $invcode = $markRow['invcode'];
+        $state = $markRow['state'];
+        $pdfUrl = $markRow['pdf_url'];
+        // Hide the official-PDF link once cancelled at AADE — the public route
+        // refuses it (404) and the badge already says ΑΚΥΡΩΜΕΝΟ; a 404ing button
+        // would only confuse.
+        if ($pdfUrl !== null && $pdfUrl !== '' && $state !== 'cancelled') {
             $pdfButton = '<a href="'.htmlspecialchars($pdfUrl, ENT_QUOTES).'" target="_blank" rel="noopener" '
                 .'class="btn btn-default btn-sm" title="Άνοιγμα του επίσημου παραστατικού (PDF) από το ekdosi">'
                 .'<i class="fa fa-file-pdf-o"></i> Επίσημο παραστατικό (ΑΑΔΕ)</a>';
@@ -378,6 +384,11 @@ add_hook('ClientAreaPageViewInvoice', 1, function ($vars) {
         if ($ownerId !== $uid) {
             return [];
         }
+        // Don't surface a cancelled («ΑΚΥΡΩΜΕΝΟ») invoice's PDF to the customer —
+        // it's legally void and the public route 404s it anyway.
+        if (InvoiceMarkStore::stateFor($invoiceId) === 'cancelled') {
+            return [];
+        }
         $url = InvoiceMarkStore::pdfUrlFor($invoiceId);
         if (is_string($url) && $url !== '' && preg_match('#^https?://#i', $url)) {
             $GLOBALS['ekdosi_clientarea_pdf_url'] = $url;
@@ -394,13 +405,17 @@ add_hook('ClientAreaFooterOutput', 1, function ($vars) {
     if (! is_string($url) || $url === '') {
         return '';
     }
-    $safe = htmlspecialchars($url, ENT_QUOTES);
+    // Emit the URL as a JS string via json_encode (correct context for a <script>
+    // body) — NOT htmlspecialchars, which is HTML-attribute escaping and would
+    // mangle a second query param's '&' (→ '&amp;') if the signed URL ever grew
+    // one. JSON_HEX_TAG guards against a '</script>' breakout.
+    $jsUrl = json_encode($url, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES);
 
     return <<<HTML
 <script>
 (function () {
   try {
-    var url = "{$safe}";
+    var url = {$jsUrl};
     if (!url || document.querySelector('.ekdosi-official-pdf')) return;
     var a = document.createElement('a');
     a.className = 'btn btn-default ekdosi-official-pdf';

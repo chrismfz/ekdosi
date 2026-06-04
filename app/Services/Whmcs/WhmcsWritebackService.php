@@ -128,17 +128,24 @@ class WhmcsWritebackService
     public function syncCancelledFromLifecycle(Invoice $invoice): void
     {
         try {
-            if ($invoice->whmcs_pending_id === null) {
-                return;
-            }
             $tenant = $invoice->company;
             if ($tenant === null) {
                 return;
             }
 
+            // Resolve the pending row by EITHER link: the draft path sets
+            // invoice.whmcs_pending_id (forward), the inbox file() path sets
+            // pending.invoice_id (reverse). A cancel can hit either origin, so
+            // both must be covered — otherwise a filer-path invoice keeps a stale
+            // green «Στο AADE» badge after an AADE cancellation.
             $pending = PendingWhmcsInvoice::query()
                 ->where('company_id', $invoice->company_id)
-                ->whereKey($invoice->whmcs_pending_id)
+                ->where(function ($q) use ($invoice): void {
+                    if ($invoice->whmcs_pending_id !== null) {
+                        $q->whereKey($invoice->whmcs_pending_id);
+                    }
+                    $q->orWhere('invoice_id', $invoice->id);
+                })
                 ->first();
 
             if ($pending === null || $pending->whmcs_invoice_id === null) {

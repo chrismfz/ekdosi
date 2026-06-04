@@ -10,6 +10,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-06-03
+### Fixed
+- **Independent-review batch.** (1) Cancelled («ΑΚΥΡΩΜΕΝΟ») invoice no longer
+  shows the «Επίσημο παραστατικό» button (admin + client-area) — the public route
+  also 404s it. (2) The «last inbound poll» freshness banner now counts ONLY the
+  bulk `op=invoices` feed — a one-off push/`use-bridge` probe (`op=invoice`) can't
+  falsely turn it green during a real outage. (3) `resolve.php` only logs a
+  bridge-log row for a plausible bridge call (POST+body); a scanner GET / empty
+  probe no longer writes rows (auth-failures 401/422 still log). (4) `pdf_url`
+  write-back is host-validated against `ekdosi_base_url` (not just scheme) —
+  blocks a trusted-looking phishing link. (5) client-area PDF URL is emitted via
+  `json_encode` (correct JS-string context). (6) `InvoiceMarkStore`: per-request
+  column-probe cache + single-row `row()` read (admin badge was 4 queries + 3
+  probes → 1+cached). (7) `SchemaGuard::ensureSilently` runs the heavy path at
+  most once per request.
+
 ## [0.36.0] — 2026-06-03
 ### Added
 - **#5b — official PDF in the CLIENT AREA, behind a knob.** New addon config
