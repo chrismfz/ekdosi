@@ -17,6 +17,15 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Per-company export — settings + setup (Phase 1, export half).** New
+  `company:export --tenant=SLUG` writes a portable `.zip` (manifest + company
+  settings + the setup/lookup tables + logo) — the per-tenant backup the
+  portability plan (#211) describes, so one company can be restored without a
+  full-DB rollback that would clobber other live tenants. The 7 encrypted
+  columns are **passphrase-sealed** (PBKDF2 + AES-256-GCM via `SecretsCodec`),
+  decoupling at-rest APP_KEY encryption from transport; `--raw` opts into a
+  cleartext debug dump (warned, confirmed). Non-destructive. Import + UI
+  (upload-restore) + full bundle are the next sub-steps.
 - **«Συγχρονισμός κατάστασης από ΑΑΔΕ» (2-way state sync) on the ΜΑΡΚ page.**
   After «Άντληση/έλεγχος από ΑΑΔΕ» finds a *state* divergence, a new
   admin-gated, confirmed action applies AADE's truth to the local invoice:
