@@ -374,9 +374,12 @@ class ViewInvoice extends ViewRecord
                         $submitter = app(EInvoiceSubmitterFactory::class)->for($record->company);
                         $mark = $submitter->submit($record);
                         // local_status draft→active is synced inside the
-                        // submitter (single choke-point).
+                        // submitter (single choke-point). Derive the channel from
+                        // $record->company (the closure can't see the page-scope
+                        // $isProviderChannel — and the company is the source of truth).
+                        $viaProvider = (bool) $record->company->isLiveProviderTenant();
                         Notification::make()
-                            ->title($isProviderChannel ? 'Εκδόθηκε μέσω παρόχου' : 'Filed at myDATA')
+                            ->title($viaProvider ? 'Εκδόθηκε μέσω παρόχου' : 'Filed at myDATA')
                             ->body('ΜΑΡΚ: '.($mark->mark ?? 'pending'))
                             ->success()->send();
                         // Bounce to a fresh view so mydata_state /

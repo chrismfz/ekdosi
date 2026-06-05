@@ -78,7 +78,12 @@ class InvoiceProviderActionTest extends TestCase
         Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
             ->assertActionVisible('submit_to_mydata')
             ->callAction('submit_to_mydata')
-            ->assertHasNoActionErrors();
+            ->assertHasNoActionErrors()
+            // The success path ends in a redirect — it only runs if the success
+            // notification didn't throw (guards the «Undefined variable» class of
+            // bug, where filing succeeded but the closure referenced a page-scope
+            // var it couldn't see, so the catch reported a false "failed").
+            ->assertRedirect();
 
         $fresh = $invoice->fresh();
         $this->assertSame('VALID', $fresh->mydata_state);
