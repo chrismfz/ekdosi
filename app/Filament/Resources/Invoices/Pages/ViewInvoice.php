@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Pages;
 
 use App\Actions\IssueCreditNote;
+use App\Actions\ReissueInvoiceAsDraft;
 use App\Actions\StornoAndReissue;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\BankAccountField;
@@ -258,6 +259,7 @@ class ViewInvoice extends ViewRecord
                 ->color('warning')
                 ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
                     && $record->mydata_state !== 'CANCELLED'
+                    && ! $record->isFullyCredited()
                     && self::creditTypes($record)->isNotEmpty())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Έκδοση πιστωτικού τιμολογίου')
@@ -485,6 +487,7 @@ class ViewInvoice extends ViewRecord
                 ->visible(fn (Invoice $record) => $isProviderChannel
                     && $record->mydata_state === 'VALID'
                     && $record->credited_invoice_id === null
+                    && ! $record->isFullyCredited()
                     && $record->invoiceType?->mydata_type !== '9.3')
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Ακύρωση μέσω πιστωτικού')
@@ -567,6 +570,7 @@ class ViewInvoice extends ViewRecord
                 ->visible(fn (Invoice $record) => $isProviderChannel
                     && $record->mydata_state === 'VALID'
                     && $record->credited_invoice_id === null
+                    && ! $record->isFullyCredited()
                     && $record->invoiceType?->mydata_type !== '9.3'
                     && self::creditTypes($record)->isNotEmpty())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
@@ -619,6 +623,36 @@ class ViewInvoice extends ViewRecord
                     } catch (Throwable $e) {
                         Notification::make()
                             ->title('Αποτυχία ακύρωσης & επανέκδοσης')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
+                }),
+
+            // Already reversed by a credit note (fully credited) → the credit/cancel
+            // actions are gone (nothing left to reverse). This is the only action
+            // that makes sense now: re-bill via a fresh draft copy. Universal — a
+            // fully-credited invoice on any channel can be re-issued.
+            Action::make('reissue_only')
+                ->label('Επανέκδοση')
+                ->icon('heroicon-o-document-duplicate')
+                ->color('warning')
+                ->visible(fn (Invoice $record) => $record->isFullyCredited())
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Επανέκδοση παραστατικού')
+                ->modalDescription('Το παραστατικό έχει ακυρωθεί με πιστωτικό. Δημιουργείται νέο ΠΡΟΧΕΙΡΟ αντίγραφο (ίδιος πελάτης/γραμμές) για να το επανεκδώσετε διορθωμένο — δεν εκδίδεται άλλο πιστωτικό.')
+                ->modalSubmitActionLabel('Επανέκδοση')
+                ->action(function (Invoice $record) {
+                    try {
+                        $reissue = app(ReissueInvoiceAsDraft::class)($record);
+                        Notification::make()
+                            ->title('Δημιουργήθηκε νέο πρόχειρο')
+                            ->body('Νέο πρόχειρο: '.$reissue->invcode.' — διορθώστε & εκδώστε το.')
+                            ->success()->send();
+                        $this->redirect(static::getResource()::getUrl('edit', ['record' => $reissue, 'tenant' => $record->company]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία επανέκδοσης')
                             ->body($e->getMessage())
                             ->danger()->persistent()->send();
                     }

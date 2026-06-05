@@ -28,6 +28,14 @@ they merge.
   stays for the reissue case. The local-only «Ακύρωση» is now hidden on a
   provider-filed (VALID) invoice — it would desync from AADE; the credit note is
   the only correct reversal there (direct-myDATA keeps it).
+- **Fully-credited invoice now reads as cancelled + offers only «Επανέκδοση».**
+  When an original's `credited_total` reaches its gross (`Invoice::isFullyCredited()`),
+  the View page shows an «Ακυρώθηκε με πιστωτικό» badge (the credit-note equivalent
+  of a myDATA CANCELLED state — without flipping `local_status`, which would double-
+  remove it from the ledger), HIDES the now-moot credit/cancel actions («Έκδοση
+  πιστωτικού» / «Ακύρωση μέσω πιστωτικού» / «Ακύρωση & επανέκδοση»), and shows a
+  single «Επανέκδοση» action that re-bills via a fresh draft copy (`App\Actions\
+  ReissueInvoiceAsDraft`, also now the shared reissue half of `StornoAndReissue`).
 - **Provider correction flow on a MARKed invoice (no cancel via πάροχο).** A
   MARKed invoice transmitted through a Provider (ΥΠΑΗΕΣ) can NOT be cancelled —
   only a credit note reverses it (general ΥΠΑΗΕΣ rule). ViewInvoice now: gates

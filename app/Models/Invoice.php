@@ -261,6 +261,21 @@ class Invoice extends Model
         return $this->belongsTo(self::class, 'credited_invoice_id');
     }
 
+    /**
+     * Fully reversed by credit note(s): an original (not itself a credit) whose
+     * credited_total has reached its gross. This is the «ακυρώθηκε με πιστωτικό»
+     * state — the credit note is the legal reversal, so we DON'T flip
+     * local_status to cancelled (that would double-remove it from the ledger);
+     * instead the UI reads this derived flag to badge it and hide the now-moot
+     * credit/cancel actions (leaving «Επανέκδοση»). Reads the money caches.
+     */
+    public function isFullyCredited(): bool
+    {
+        return $this->credited_invoice_id === null
+            && (float) $this->gross_total > 0
+            && (float) $this->credited_total >= (float) $this->gross_total - 0.005;
+    }
+
     private ?InvoiceBalanceData $balanceDataCache = null;
 
     /**
