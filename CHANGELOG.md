@@ -25,6 +25,12 @@ they merge.
   CancelDeliveryNote is 9.3-only, so a 2.1 invoice can't be cancelled that way) now
   writes a forensic `PROVIDER_CANCEL_REJECTED` row (request + response) and leaves
   the invoice VALID, instead of throwing with no trace.
+- **InvoSign sandbox rejection «[88-004] Missing or wrong xmlns:n1»:** firebed emits
+  the income/expense classification namespaces as `icls`/`ecls`, but InvoSign's parser
+  is prefix-strict and requires `n1`/`n2` (its API sample). `InvoSignDocument` now
+  renames the prefixes (URIs unchanged) for the InvoSign payload ONLY — the direct
+  myDATA path is untouched (AADE matches by URI). Also aligned `api_quantity` to the
+  documented 4-decimal sample (`1.0000`).
 
 ### Fixed
 - **Invoice lifecycle is provider-aware (the missing last mile):** a `gr-provider`
