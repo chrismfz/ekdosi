@@ -112,8 +112,14 @@ class ViewInvoice extends ViewRecord
                 ->label('Ακύρωση')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
+                // Hidden on a provider-filed (VALID) invoice: a local-only cancel
+                // there desyncs from AADE (the doc stays VALID at the provider) —
+                // the rule is to reverse it with a credit note («Ακύρωση μέσω
+                // πιστωτικού»), not flip it locally. Direct-myDATA keeps it (the
+                // intended local-cancel-then-«Ακύρωση μέσω myDATA» flow).
                 ->visible(fn (Invoice $record) => in_array($record->local_status, ['draft', 'active'], true)
-                    && $record->credited_invoice_id === null)
+                    && $record->credited_invoice_id === null
+                    && ! ($isProviderChannel && $record->mydata_state === 'VALID'))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Ακύρωση παραστατικού')

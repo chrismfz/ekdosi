@@ -25,7 +25,9 @@ they merge.
   documents now show their relationship under a new ViewInvoice «Σχετικά
   παραστατικά» section (original → its credit note(s); credit note → the invoice it
   reverses), driven by the existing `credited_invoice_id`. «Ακύρωση & επανέκδοση»
-  stays for the reissue case.
+  stays for the reissue case. The local-only «Ακύρωση» is now hidden on a
+  provider-filed (VALID) invoice — it would desync from AADE; the credit note is
+  the only correct reversal there (direct-myDATA keeps it).
 - **Provider correction flow on a MARKed invoice (no cancel via πάροχο).** A
   MARKed invoice transmitted through a Provider (ΥΠΑΗΕΣ) can NOT be cancelled —
   only a credit note reverses it (general ΥΠΑΗΕΣ rule). ViewInvoice now: gates
