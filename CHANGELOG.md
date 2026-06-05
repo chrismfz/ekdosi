@@ -44,6 +44,16 @@ they merge.
   company to its own VM. Deferred (v1): delivery notes, service contracts, stock
   movements, WHMCS inbox, activity log, notes/attachments (polymorphic /
   re-derivable). Round-trip test asserts the rewiring + self-ref.
+- **Per-company transactional wipe (the clean slate).** `company:wipe
+  --tenant=SLUG` (+ «Διαγραφή δεδομένων» in the «Αντίγραφα» menu) deletes a
+  tenant's transactional data (invoices/payments/customers/…) while **keeping**
+  the company row + settings + the setup/lookups — the safe reset before a
+  Firebird re-import. Dry-run by default (`--execute` applies); `--keep-parties`
+  preserves customers/suppliers/products, `--reset-counter` rolls ΑΑ counters to
+  1; FK order handled via `Schema::withoutForeignKeyConstraints`; **`--force`
+  required** when invoices are filed at AADE (a local wipe doesn't cancel them
+  there). `CompanyDataWiper` + tests (wipe keeps settings/setup, keep-parties,
+  reset-counter, the AADE-filed guard, read-only plan).
 - **«Συγχρονισμός κατάστασης από ΑΑΔΕ» (2-way state sync) on the ΜΑΡΚ page.**
   After «Άντληση/έλεγχος από ΑΑΔΕ» finds a *state* divergence, a new
   admin-gated, confirmed action applies AADE's truth to the local invoice:

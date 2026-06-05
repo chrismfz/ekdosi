@@ -89,6 +89,7 @@ class CompaniesTable
                 ActionGroup::make([
                     CompanyBackupActions::export(),
                     CompanyBackupActions::importInto(),
+                    CompanyBackupActions::wipe(),
                 ])
                     ->label('Αντίγραφα')
                     ->icon('heroicon-o-archive-box')

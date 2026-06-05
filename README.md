@@ -113,8 +113,24 @@ php artisan company:import --file=myip.zip --new                    # create a f
 php artisan company:import --file=myip.zip --into=myip --execute    # restore into an existing one
 ```
 
-Both are also in the panel: Companies → «Αντίγραφα» (export with a «Πλήρες» toggle
-+ upload-restore) and a toolbar «Εισαγωγή εταιρίας από αρχείο».
+```bash
+# Wipe a tenant's transactional data (keep company + settings + setup) — the
+# clean slate before a Firebird re-import. Dry-run by default; --execute applies.
+php artisan company:wipe --tenant=myip                        # preview what would go
+php artisan company:wipe --tenant=myip --execute --force      # apply (--force past AADE-filed)
+php artisan company:wipe --tenant=myip --keep-parties --execute   # keep customers/suppliers/products
+php artisan company:wipe --tenant=myip --reset-counter --execute  # also roll ΑΑ counters → 1
+```
+
+Both are also in the panel: Companies → «Αντίγραφα» (export with a «Πλήρες»
+toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a toolbar «Εισαγωγή
+εταιρίας από αρχείο».
+
+- **Wipe** keeps the company row + settings + the 9 setup/lookup tables; it only
+  removes transactional data (invoices, payments, customers, …). FK order is
+  handled automatically. **Take a backup first** (it lives in the same menu for
+  exactly that reason). `--force` is required when invoices are filed at AADE —
+  a local wipe does **not** cancel them there.
 
 - **Secrets**: the 7 encrypted columns are sealed under your **passphrase**
   (PBKDF2 + AES-256-GCM), so the bundle opens on another VM regardless of its
