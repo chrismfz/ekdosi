@@ -83,6 +83,7 @@ Two long-running pieces must both be live (see **`INSTALL.md`** for the full,
 verified production setup):
 
 - **Scheduler** — one cron line: `* * * * * cd /path && php artisan schedule:run`
+- **Operator health** — run `php artisan ops:health` (or `--json`) for queue, scheduler, backup, mail, WHMCS, myDATA, and disk checks; see `docs/operator-health.md`.
 - **Queue worker** — `php artisan queue:work` under systemd/supervisor
   (`ekdosi-queue.service`). Email, PDF, and import run as queued jobs, so
   **without the worker nothing in the queue executes**.
