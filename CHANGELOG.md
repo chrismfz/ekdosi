@@ -16,6 +16,18 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Provider correction flow on a MARKed invoice (no cancel via πάροχο).** A
+  MARKed invoice transmitted through a Provider (ΥΠΑΗΕΣ) can NOT be cancelled —
+  only a credit note reverses it (general ΥΠΑΗΕΣ rule). ViewInvoice now: gates
+  «Ακύρωση μέσω παρόχου» to 9.3 δελτία αποστολής (the lone cancellable type);
+  shows an informational «Ακύρωση μέσω παρόχου;» popup explaining WHY there's no
+  cancel + routing to the right action; and adds a one-click «Ακύρωση &
+  επανέκδοση» (`App\Actions\StornoAndReissue`) that issues a FULL credit note
+  (opt-in myDATA filing) AND opens a fresh draft copy of the original to fix and
+  re-issue. Direct-myDATA tenants are unchanged (AADE's CancelInvoice still
+  cancels a 2.1).
+
 ### Fixed
 - **Provider submission history now shows what we ACTUALLY sent + a failed cancel:**
   the «Ιστορικό υποβολών» stored the AADE-core XML (pre-augment) as the request, not
