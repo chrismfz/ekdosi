@@ -41,19 +41,68 @@ class CompanyImporter
         'billing_connections' => ['source', 'label'],
         'invoice_types' => ['code'],
         'servers' => ['name'],
+        // Transactional: legacy_id where present (unique per company) for
+        // idempotent re-import; the rest fall back to a content signature.
+        'customers' => ['legacy_id'],
+        'products' => ['legacy_id'],
+        'product_price_tiers' => ['legacy_id'],
+        'invoices' => ['legacy_id'],
+        'invoice_lines' => ['legacy_id'],
+        'mydata_marks' => ['legacy_id'],
+        'payments' => ['legacy_id'],
+        'quotes' => ['legacy_id'],
     ];
 
-    /** Import order: independent tables first, then ones with intra-setup FKs. */
+    /** Import order for setup (bucket B): independent first, then intra-setup FKs. */
     private const ORDER = [
         'distribution_aims', 'delivery_methods', 'vat_categories', 'payment_methods',
         'bank_accounts', 'product_categories', 'metric_units', 'tags',
         'server_groups', 'billing_connections', 'invoice_types', 'servers',
     ];
 
-    /** FK columns to rewire via the imported old-id → new-id maps. */
+    /** Import order for transactional (bucket C, --full): parents before children. */
+    private const ORDER_TRANSACTIONAL = [
+        'customers', 'customer_contacts', 'suppliers',
+        'products', 'product_price_tiers', 'product_billing_prices',
+        'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
+        'payments',
+        'quotes', 'quote_lines', 'quote_mail_logs',
+        'expenses', 'expense_lines', 'expense_marks',
+    ];
+
+    /** Invoice self-reference columns — nulled on insert, patched after the pass. */
+    private const INVOICE_SELF_REFS = ['credited_invoice_id', 'conv_invoice_id'];
+
+    /**
+     * FK columns to rewire via the imported old-id → new-id maps. A source of
+     * 'users' has no map (users are panel-global, not in the bundle) → the
+     * column is nulled, dropping the cross-tenant reference.
+     */
     private const FK_REWIRES = [
         'invoice_types' => ['distribution_aim_id' => 'distribution_aims', 'delivery_method_id' => 'delivery_methods'],
         'servers' => ['server_group_id' => 'server_groups'],
+        'customers' => ['payment_method_id' => 'payment_methods'],
+        'customer_contacts' => ['customer_id' => 'customers'],
+        'products' => ['product_category_id' => 'product_categories', 'vat_category_id' => 'vat_categories', 'metric_unit_id' => 'metric_units'],
+        'product_price_tiers' => ['product_id' => 'products'],
+        'product_billing_prices' => ['product_id' => 'products'],
+        'invoices' => [
+            'invoice_type_id' => 'invoice_types', 'customer_id' => 'customers',
+            'distribution_aim_id' => 'distribution_aims', 'delivery_method_id' => 'delivery_methods',
+            'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts',
+            'credited_invoice_id' => 'invoices', 'conv_invoice_id' => 'invoices',
+        ],
+        'invoice_lines' => ['invoice_id' => 'invoices', 'product_id' => 'products'],
+        'mydata_marks' => ['invoice_id' => 'invoices'],
+        'return_invoice_extras' => ['invoice_line_id' => 'invoice_lines'],
+        'invoice_mail_log' => ['invoice_id' => 'invoices', 'triggered_by_user_id' => 'users'],
+        'payments' => ['customer_id' => 'customers', 'invoice_id' => 'invoices', 'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts'],
+        'quotes' => ['customer_id' => 'customers', 'converted_invoice_id' => 'invoices'],
+        'quote_lines' => ['quote_id' => 'quotes', 'product_id' => 'products'],
+        'quote_mail_logs' => ['quote_id' => 'quotes', 'triggered_by_user_id' => 'users'],
+        'expenses' => ['supplier_id' => 'suppliers'],
+        'expense_lines' => ['expense_id' => 'expenses'],
+        'expense_marks' => ['expense_id' => 'expenses'],
     ];
 
     private const DROP_COLUMNS = ['id', 'company_id', 'created_at', 'updated_at', 'deleted_at'];
@@ -112,9 +161,45 @@ class CompanyImporter
             if ($whmcsTypeOld !== null && isset($maps['invoice_types'][$whmcsTypeOld])) {
                 $company->forceFill(['whmcs_default_invoice_type_id' => $maps['invoice_types'][$whmcsTypeOld]])->save();
             }
+
+            // Bucket C (full bundle): transactional, parents before children.
+            foreach (self::ORDER_TRANSACTIONAL as $table) {
+                $maps[$table] = $this->importTable($table, $bundle['data'][$table] ?? [], $company->id, $maps);
+            }
+            $this->patchInvoiceSelfRefs($bundle['data']['invoices'] ?? [], $maps);
         });
 
         return $summary;
+    }
+
+    /**
+     * Patch invoice self-references after the whole invoices pass: a credit note
+     * (or ΣΔΕΠ conversion) may point at an original imported later in iteration,
+     * so they're nulled on insert (FK_REWIRES → 'invoices' isn't yet mapped
+     * mid-pass) and resolved here against the complete invoices map.
+     *
+     * @param  list<array<string,mixed>>  $invoiceRows
+     * @param  array<string, array<int|string,int>>  $maps
+     */
+    private function patchInvoiceSelfRefs(array $invoiceRows, array $maps): void
+    {
+        $invoiceMap = $maps['invoices'] ?? [];
+        foreach ($invoiceRows as $row) {
+            $oldId = $row['id'] ?? null;
+            if ($oldId === null || ! isset($invoiceMap[$oldId])) {
+                continue;
+            }
+            $patch = [];
+            foreach (self::INVOICE_SELF_REFS as $col) {
+                $oldRef = $row[$col] ?? null;
+                if ($oldRef !== null && isset($invoiceMap[$oldRef])) {
+                    $patch[$col] = $invoiceMap[$oldRef];
+                }
+            }
+            if ($patch !== []) {
+                DB::table('invoices')->where('id', $invoiceMap[$oldId])->update($patch);
+            }
+        }
     }
 
     /**
@@ -125,8 +210,15 @@ class CompanyImporter
     private function plan(array $bundle, ?Company $existing): array
     {
         $plan = [];
-        foreach (self::ORDER as $table) {
-            $rows = $bundle['setup'][$table] ?? [];
+        $sections = [];
+        foreach (self::ORDER as $t) {
+            $sections[$t] = $bundle['setup'][$t] ?? [];
+        }
+        foreach (self::ORDER_TRANSACTIONAL as $t) {
+            $sections[$t] = $bundle['data'][$t] ?? [];
+        }
+
+        foreach ($sections as $table => $rows) {
             if ($rows === [] || ! Schema::hasTable($table)) {
                 continue;
             }

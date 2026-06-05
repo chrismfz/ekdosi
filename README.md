@@ -101,15 +101,20 @@ portable `.zip`. The Firebird ETL never touches settings, so the usual reset is
 config around it.
 
 ```bash
-# Export (settings + setup). Secrets are passphrase-encrypted by default.
-php artisan company:export --tenant=myip                 # prompts for a passphrase
-php artisan company:export --tenant=myip --out=/backups/myip.zip
+# Export. Secrets are passphrase-encrypted by default. --full also includes
+# the transactional data (customers/invoices/payments…) for a complete snapshot.
+php artisan company:export --tenant=myip                 # settings + setup, prompts passphrase
+php artisan company:export --tenant=myip --full          # + transactional data
 php artisan company:export --tenant=myip --raw           # cleartext — debug only
 
 # Restore. Dry-run by default (prints the per-table plan); --execute applies.
+# A --full bundle restores its data too (FK-rewired); --new is the clean target.
 php artisan company:import --file=myip.zip --new                    # create a fresh company
 php artisan company:import --file=myip.zip --into=myip --execute    # restore into an existing one
 ```
+
+Both are also in the panel: Companies → «Αντίγραφα» (export with a «Πλήρες» toggle
++ upload-restore) and a toolbar «Εισαγωγή εταιρίας από αρχείο».
 
 - **Secrets**: the 7 encrypted columns are sealed under your **passphrase**
   (PBKDF2 + AES-256-GCM), so the bundle opens on another VM regardless of its
@@ -119,11 +124,14 @@ php artisan company:import --file=myip.zip --into=myip --execute    # restore in
   place** (never delete + insert), so a re-import converges and matched rows
   keep their id — transactional data that references them never dangles.
 - **Non-destructive**: import never removes rows absent from the bundle.
+- **`--full`** also carries transactional data (customers, suppliers, products,
+  invoices + lines + MARKs, payments, quotes, expenses), restored with every FK
+  rewired to the new ids (incl. the credit-note self-reference). Deferred (v1):
+  delivery notes, service contracts, stock movements, the WHMCS inbox, activity
+  log, notes/attachments — see `docs/company-portability-plan.md`.
 - **Limitation (v1)**: server / server-group provisioning secrets
   (`secret_encrypted`) export as raw APP_KEY ciphertext — portable only within
   the **same** `APP_KEY`; re-enter them after a cross-VM restore.
-- Full per-company bundle (incl. transactional data) + a UI download/upload-
-  restore are the next phases — see `docs/company-portability-plan.md`.
 
 ## Documentation
 

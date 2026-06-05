@@ -34,7 +34,16 @@ they merge.
   («Εξαγωγή ρυθμίσεων» download + «Εισαγωγή ρυθμίσεων» upload-restore with
   dry-run preview) and a toolbar «Εισαγωγή εταιρίας από αρχείο» (create-new) —
   same passphrase flow as the CLI, via the shared `BundleArchive` zip
-  reader/writer. The full (transactional) bundle is the next sub-step.
+  reader/writer.
+- **Full (`--full`) bundle — transactional data too (Phase 2).** `company:export
+  --full` (+ a «Πλήρες» toggle in the UI) adds customers/suppliers/products/
+  invoices(+lines/MARKs/extras/mail-logs)/payments/quotes/expenses; the importer
+  restores them with every FK rewired to the new ids — incl. the invoice
+  credit-note self-reference (nulled on insert, patched after the pass) — and
+  drops cross-tenant user refs. A complete per-tenant snapshot for moving a
+  company to its own VM. Deferred (v1): delivery notes, service contracts, stock
+  movements, WHMCS inbox, activity log, notes/attachments (polymorphic /
+  re-derivable). Round-trip test asserts the rewiring + self-ref.
 - **«Συγχρονισμός κατάστασης από ΑΑΔΕ» (2-way state sync) on the ΜΑΡΚ page.**
   After «Άντληση/έλεγχος από ΑΑΔΕ» finds a *state* divergence, a new
   admin-gated, confirmed action applies AADE's truth to the local invoice:

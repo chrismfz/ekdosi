@@ -40,6 +40,23 @@ class CompanyExporter
         'billing_connections',
     ];
 
+    /**
+     * Bucket C — transactional data (only in a `--full` bundle). Dumped as-is;
+     * the importer rewires FKs. Deferred (v1): delivery notes, service contracts,
+     * stock movements, pending WHMCS inbox, activity log, notes, attachments,
+     * tag pivots — polymorphic / re-derivable, see docs/company-portability-plan.md.
+     *
+     * @var list<string>
+     */
+    public const TRANSACTIONAL_TABLES = [
+        'customers', 'customer_contacts', 'suppliers',
+        'products', 'product_price_tiers', 'product_billing_prices',
+        'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
+        'payments',
+        'quotes', 'quote_lines', 'quote_mail_logs',
+        'expenses', 'expense_lines', 'expense_marks',
+    ];
+
     public function __construct(private readonly SecretsCodec $codec) {}
 
     /**
@@ -48,10 +65,11 @@ class CompanyExporter
      *     company: array<string,mixed>,
      *     secrets: array{mode:string, salt?:string, values:array<string,?string>},
      *     setup: array<string, list<array<string,mixed>>>,
+     *     data: array<string, list<array<string,mixed>>>,
      *     files: array<string,string>
      * }
      */
-    public function build(Company $company, string $secretsMode, ?string $passphrase): array
+    public function build(Company $company, string $secretsMode, ?string $passphrase, bool $full = false): array
     {
         // attributesToArray() applies casts → the encrypted columns decrypt to
         // plaintext; we pull those into the sealed secrets and strip them from
@@ -71,20 +89,9 @@ class CompanyExporter
 
         $sealed = $this->codec->seal($secrets, $secretsMode, $passphrase);
 
-        $setup = [];
         $counts = [];
-        foreach (self::SETUP_TABLES as $table) {
-            if (! Schema::hasTable($table)) {
-                continue;
-            }
-            $rows = DB::table($table)
-                ->where('company_id', $company->id)
-                ->get()
-                ->map(fn ($row): array => (array) $row)
-                ->all();
-            $setup[$table] = $rows;
-            $counts[$table] = count($rows);
-        }
+        $setup = $this->dump(self::SETUP_TABLES, $company->id, $counts);
+        $data = $full ? $this->dump(self::TRANSACTIONAL_TABLES, $company->id, $counts) : [];
 
         $files = [];
         if (($logo = $this->logo($company)) !== null) {
@@ -95,7 +102,7 @@ class CompanyExporter
         $manifest = [
             'schema_version' => self::SCHEMA_VERSION,
             'app' => 'ekdosi',
-            'kind' => 'company-settings-setup',
+            'kind' => $full ? 'company-full' : 'company-settings-setup',
             'exported_at' => now()->toIso8601String(),
             'company' => [
                 'slug' => $company->slug,
@@ -111,8 +118,35 @@ class CompanyExporter
             'company' => $companyData,
             'secrets' => $sealed,
             'setup' => $setup,
+            'data' => $data,
             'files' => $files,
         ];
+    }
+
+    /**
+     * Dump the given company-scoped tables to row arrays, accumulating counts.
+     *
+     * @param  list<string>  $tables
+     * @param  array<string,int>  $counts
+     * @return array<string, list<array<string,mixed>>>
+     */
+    private function dump(array $tables, int $companyId, array &$counts): array
+    {
+        $out = [];
+        foreach ($tables as $table) {
+            if (! Schema::hasTable($table)) {
+                continue;
+            }
+            $rows = DB::table($table)
+                ->where('company_id', $companyId)
+                ->get()
+                ->map(fn ($row): array => (array) $row)
+                ->all();
+            $out[$table] = $rows;
+            $counts[$table] = count($rows);
+        }
+
+        return $out;
     }
 
     /**

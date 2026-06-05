@@ -24,18 +24,12 @@ class CompanyExport extends Command
         {--out= : Output .zip path (default: storage/app/exports/…)}
         {--passphrase= : Encrypt secrets with this passphrase (else prompted)}
         {--raw : Store secrets in CLEAR TEXT — debug only}
-        {--full : Include transactional data (Phase 2 — not yet)}';
+        {--full : Include transactional data (customers/invoices/payments…)}';
 
-    protected $description = 'Export a company\'s settings + setup to a portable .zip (Phase 1)';
+    protected $description = 'Export a company\'s settings + setup (+ --full data) to a portable .zip';
 
     public function handle(CompanyExporter $exporter): int
     {
-        if ($this->option('full')) {
-            $this->error('Το πλήρες αντίγραφο (με συναλλακτικά δεδομένα) δεν υλοποιήθηκε ακόμη (Phase 2).');
-
-            return self::FAILURE;
-        }
-
         $slug = (string) $this->option('tenant');
         if ($slug === '') {
             $this->error('Δώσε --tenant=SLUG.');
@@ -58,7 +52,7 @@ class CompanyExport extends Command
             return self::FAILURE;
         }
 
-        $bundle = $exporter->build($company, $mode, $passphrase);
+        $bundle = $exporter->build($company, $mode, $passphrase, (bool) $this->option('full'));
 
         $out = (string) ($this->option('out')
             ?: storage_path('app/exports/'.$slug.'-settings-'.now()->format('Ymd-His').'.zip'));

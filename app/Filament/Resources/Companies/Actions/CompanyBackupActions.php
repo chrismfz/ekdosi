@@ -37,10 +37,17 @@ class CompanyBackupActions
                 TextInput::make('passphrase')
                     ->label('Συνθηματικό κρυπτογράφησης')
                     ->password()->revealable()->required()->minLength(4),
+                Toggle::make('full')
+                    ->label('Πλήρες αντίγραφο (με δεδομένα: πελάτες/παραστατικά/πληρωμές…)')
+                    ->helperText('Κλειστό = μόνο ρυθμίσεις + setup.')
+                    ->default(false),
             ])
             ->action(function (array $data, Company $record) {
-                $bundle = app(CompanyExporter::class)->build($record, 'passphrase', (string) $data['passphrase']);
-                $path = storage_path('app/exports/'.$record->slug.'-settings-'.now()->format('Ymd-His').'.zip');
+                $bundle = app(CompanyExporter::class)->build(
+                    $record, 'passphrase', (string) $data['passphrase'], (bool) ($data['full'] ?? false)
+                );
+                $suffix = ($data['full'] ?? false) ? 'full' : 'settings';
+                $path = storage_path('app/exports/'.$record->slug.'-'.$suffix.'-'.now()->format('Ymd-His').'.zip');
                 app(BundleArchive::class)->write($path, $bundle);
 
                 return response()->download($path, basename($path))->deleteFileAfterSend();
