@@ -177,6 +177,17 @@ class InvoiceInfolist
                     ->visible(fn ($record) => $record->credited_invoice_id !== null
                         || $record->creditNotes()->exists())
                     ->schema([
+                        // Prominent «cancelled» badge for a fully-reversed original
+                        // (credited_total reached gross) — the credit-note equivalent
+                        // of a myDATA CANCELLED state, without flipping local_status.
+                        TextEntry::make('reversal_status')
+                            ->label('Κατάσταση παραστατικού')
+                            ->state('Ακυρώθηκε με πιστωτικό')
+                            ->badge()
+                            ->color('danger')
+                            ->columnSpanFull()
+                            ->visible(fn ($record) => $record->isFullyCredited()),
+
                         // Credit-note side → the invoice it reverses.
                         TextEntry::make('credited_for')
                             ->label('Πιστωτικό — αντιστρέφει το παραστατικό')

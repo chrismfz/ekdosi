@@ -149,6 +149,9 @@ class InvoiceProviderActionTest extends TestCase
         $invoice->forceFill([
             'local_status' => 'active', 'mydata_state' => 'VALID', 'mydata_mark' => '400000000000001',
         ])->save();
+        // Populate the money caches (gross_total etc.) like a real issued invoice —
+        // isFullyCredited() reads gross_total.
+        app(\App\Services\RecomputeInvoiceTotals::class)($invoice);
 
         return $invoice->fresh('lines');
     }
@@ -224,6 +227,56 @@ class InvoiceProviderActionTest extends TestCase
         Livewire::test(ViewInvoice::class, ['record' => $credit->getRouteKey()])
             ->assertSee('Σχετικά παραστατικά')
             ->assertSee($invoice->invcode);           // credit note → the invoice it reverses
+    }
+
+    public function test_fully_credited_original_reads_as_cancelled_and_only_offers_reissue(): void
+    {
+        // After a full credit the original is reversed: badge «Ακυρώθηκε με
+        // πιστωτικό», the credit/cancel actions are gone (nothing to reverse),
+        // and only «Επανέκδοση» remains.
+        $tenant = $this->providerTenant();
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->callAction('cancel_via_credit', data: ['credit_type_id' => $creditType->id, 'submit_now' => false]);
+
+        $this->assertTrue($invoice->fresh()->isFullyCredited());
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertSee('Ακυρώθηκε με πιστωτικό')          // the badge
+            ->assertActionVisible('reissue_only')
+            ->assertActionHidden('cancel_via_credit')
+            ->assertActionHidden('storno_and_reissue')
+            ->assertActionHidden('issue_credit_note');
+    }
+
+    public function test_reissue_only_creates_a_fresh_draft_copy(): void
+    {
+        $tenant = $this->providerTenant();
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->callAction('cancel_via_credit', data: ['credit_type_id' => $creditType->id, 'submit_now' => false]);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->fresh()->getRouteKey()])
+            ->callAction('reissue_only')
+            ->assertHasNoActionErrors()
+            ->assertRedirect();
+
+        // A fresh draft copy — new id, no credit link, draft, same lines.
+        $reissue = Invoice::where('company_id', $tenant->id)
+            ->whereNull('credited_invoice_id')
+            ->where('id', '!=', $invoice->id)
+            ->where('local_status', 'draft')
+            ->first();
+        $this->assertNotNull($reissue);
+        $this->assertNull($reissue->mydata_state);
+        $this->assertSame($invoice->invoice_type_id, $reissue->invoice_type_id);
+        $this->assertCount(1, $reissue->lines);
     }
 
     public function test_provider_delivery_note_keeps_the_real_cancel(): void
