@@ -128,6 +128,59 @@ Greek; it must cite the numbers the tool returned, not invent them.
 - **Token-spend cap** per conversation via `max_tokens` + optionally Task Budgets;
   per-tenant monthly ceiling enforced in `AssistantRunner`.
 
+## Credentials topology & why isolation is NOT the API key
+
+**The single most important point: the leak question has nothing to do with the
+Anthropic API key.** The key is *transport + billing* — which Anthropic account
+pays for the call. It knows nothing about ekdosi companies. Data isolation is
+enforced one layer down, in the tool harness, **independently of the key**.
+
+Walk the worry through — `operator@nexon` asks *«ποια τα έσοδα της myip;»*:
+
+1. The chat page is tenant-bound like every Filament page: `AssistantRunner` reads
+   the tenant from the **session** (`Filament::getTenant()` = nexon), **never** from
+   anything the user types.
+2. The model may decide to call `compare_income_expense` / `count_sales`. **None of
+   these tools has a `company` parameter** — they operate on the *ambient* tenant
+   only, via `CompanyContext::actAs($sessionTenant, …)`. "myip" in the sentence
+   maps to no argument; it's just text.
+3. So the tool physically returns **nexon's** numbers, or — per the system rule
+   below — the model answers *«βλέπω μόνο την τρέχουσα εταιρεία (nexon)· δεν έχω
+   πρόσβαση στα δεδομένα της myip.»*
+
+The cross-tenant read is **structurally impossible**, not policy-dependent: there
+is no code path, with or without a per-company key, that lets a nexon-bound session
+read myip rows. The company is server-side ambient state, not a model-controllable
+input. (Same guarantee for a `super_admin`: the assistant's scope is *whichever
+tenant they've switched the panel to* — start a fresh conversation on tenant
+switch so prior context doesn't carry over.)
+
+A per-company API key would **not** add isolation, because each request's payload
+already contains only the bound tenant's data (the tools never return anyone else's).
+nexon's request carries nexon's data regardless of which key signs it.
+
+### So which topology? — recommend **one global key + per-tenant config**
+
+| Option | Verdict |
+|---|---|
+| **One global Anthropic key** (recommended) | Simplest ops, one bill, best prompt-cache sharing of the frozen system prompt + tool defs. Isolation handled by the tool layer. Key in env / `config/services.php`, never committed. |
+| **A key per company** | No isolation benefit. Only worth it for **billing attribution** (a tenant pays their own Anthropic bill) or **compliance** (a tenant contractually wants their own account/DPA). Support as an *override*, not the default. |
+| **Global key + per-tenant rights by who's asking** | This is what you get for free — "rights" = the Shield permissions of the asking user, applied per tool. The key is global; the *capability* is per-user. |
+
+Make it a per-tenant **config**, mirroring how `companies` already holds myDATA /
+WHMCS settings — not necessarily a per-tenant key:
+
+- `companies.ai_assistant_enabled` (default off) — kill-switch per tenant.
+- `companies.ai_model` (nullable → global default `claude-opus-4-8`).
+- `companies.ai_monthly_token_cap` (spend ceiling enforced in `AssistantRunner`).
+- `companies.ai_api_key` (**nullable**) — only for the billing/compliance case;
+  falls back to the global env key. A resolver picks per-tenant-or-global, exactly
+  like `EInvoiceSubmitterFactory` / the per-tenant WHMCS creds pattern.
+
+Bottom line: **one global key, isolation by the tool layer, per-tenant *config* for
+model/cap/on-off, and a nullable per-tenant key escape hatch** for the rare tenant
+that wants its own Anthropic account.
+
 ## PHP specifics
 
 - SDK: `composer require anthropic-ai/sdk` (official; supports `BetaRunnableTool` +
