@@ -109,8 +109,12 @@ class MyDataMarkDetail extends Page
     {
         $tenant = Filament::getTenant();
 
+        // Any electronic-filing tenant (direct myDATA OR via a provider) can view a
+        // MARK's detail for their own filed invoices — a provider-filed MARK resolves
+        // locally (invoices.mydata_mark). The LIVE-AADE orphan lookup inside load()
+        // is separately gated on isLiveMyDataTenant() + the console permission.
         return $tenant instanceof Company
-            && $tenant->isLiveMyDataTenant()
+            && $tenant->submitsElectronically()
             && (bool) auth()->user()?->can('View:MyDataMarkDetail');
     }
 
@@ -295,9 +299,11 @@ class MyDataMarkDetail extends Page
         // admin territory, same as the consoles. Operators reach this page (for
         // their own filed invoices) via View:MyDataMarkDetail, but must NOT be
         // able to trigger billable/rate-limited live AADE calls for arbitrary
-        // hand-typed MARKs. Gate the live branch on the console permission.
-        if (! auth()->user()?->can('View:MyDataConsole')) {
-            $this->error = 'Το ΜΑΡΚ δεν αντιστοιχεί σε τοπικό παραστατικό. Η αναζήτηση στο myDATA είναι διαθέσιμη μόνο σε διαχειριστές.';
+        // hand-typed MARKs. Gate the live branch on the console permission AND on
+        // the tenant having a live myDATA endpoint (a provider-only tenant with
+        // mydata_mode=off can't make the call — its own marks resolve locally above).
+        if (! $tenant->isLiveMyDataTenant() || ! auth()->user()?->can('View:MyDataConsole')) {
+            $this->error = 'Το ΜΑΡΚ δεν αντιστοιχεί σε τοπικό παραστατικό. Η ζωντανή αναζήτηση στο myDATA απαιτεί ενεργό myDATA περιβάλλον + δικαιώματα διαχειριστή.';
 
             return;
         }

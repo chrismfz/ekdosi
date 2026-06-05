@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Models\Company;
 use App\Models\Customer;
@@ -94,5 +95,40 @@ class InvoiceProviderActionTest extends TestCase
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
             ->assertActionHidden('submit_to_mydata');
+    }
+
+    public function test_mydata_tenant_still_sees_the_submit_action(): void
+    {
+        // Regression guard: the gate change (mydata_mode → submitsElectronically)
+        // must NOT hide the submit on a direct-myDATA tenant.
+        $tenant = Company::create([
+            'name' => 'myDATA ΑΕ', 'slug' => 'md-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '800561849',
+        ]);
+        Filament::setTenant($tenant);
+        $invoice = $this->draftInvoice($tenant);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionVisible('submit_to_mydata')
+            ->assertActionHidden('preview_provider_payload'); // provider-only
+    }
+
+    public function test_provider_tenant_sees_the_payload_preview(): void
+    {
+        $tenant = $this->providerTenant();
+        Filament::setTenant($tenant);
+        $invoice = $this->draftInvoice($tenant);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionVisible('preview_provider_payload');
+    }
+
+    public function test_mark_detail_page_is_accessible_for_a_provider_tenant(): void
+    {
+        // The MARK→detail link must not 403 for a provider tenant (parity).
+        $tenant = $this->providerTenant();
+        Filament::setTenant($tenant);
+
+        $this->assertTrue(MyDataMarkDetail::canAccess());
     }
 }
