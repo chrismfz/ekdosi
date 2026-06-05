@@ -7,11 +7,13 @@ use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
+use App\Services\Whmcs\LegacyInvoicedRefresher;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClient;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
+use App\Support\OperatorHealth\HealthRecorder;
 use Illuminate\Console\Command;
 
 /**
@@ -66,12 +68,14 @@ class WhmcsFetchPending extends Command
         $slug = (string) $this->option('tenant');
         if ($slug === '') {
             $this->error('--tenant=SLUG is required.');
+
             return Command::INVALID;
         }
 
         $tenant = Company::query()->where('slug', $slug)->first();
         if ($tenant === null) {
             $this->error("No tenant with slug='{$slug}'.");
+
             return 6;
         }
 
@@ -91,14 +95,15 @@ class WhmcsFetchPending extends Command
             $this->warn('--preview uses the native WHMCS API (not the bridge). Drop --preview to fetch via the bridge.');
         }
         if ($useBridge && ! (bool) $this->option('preview')) {
-            return $this->ingestViaBridge($tenant, $ingestor);
+            return $this->recordHealthAndReturn($tenant, $this->ingestViaBridge($tenant, $ingestor));
         }
 
         try {
             $client = $factory->for($tenant);
         } catch (WhmcsNotConfigured $e) {
             $this->error($e->getMessage());
-            return 3;
+
+            return $this->recordHealthAndReturn($tenant, 3);
         }
 
         try {
@@ -114,25 +119,36 @@ class WhmcsFetchPending extends Command
         } catch (WhmcsAuthenticationFailed $e) {
             $this->error("WHMCS authentication failed: {$e->getMessage()}");
             $this->line('Check Setup → Staff Management → API Credentials on the WHMCS side.');
-            return 4;
+
+            return $this->recordHealthAndReturn($tenant, 4);
         } catch (WhmcsUnreachable $e) {
             $this->error("WHMCS unreachable: {$e->getMessage()}");
-            return 5;
+
+            return $this->recordHealthAndReturn($tenant, 5);
         } catch (WhmcsApiException $e) {
             $this->error("WHMCS error: {$e->getMessage()}");
-            return Command::FAILURE;
+
+            return $this->recordHealthAndReturn($tenant, Command::FAILURE);
         }
 
         if (empty($invoices)) {
             $this->info('No paid+unfiled invoices pending for this tenant. Nothing to do.');
-            return Command::SUCCESS;
+
+            return $this->recordHealthAndReturn($tenant, Command::SUCCESS);
         }
 
         if ((bool) $this->option('preview')) {
-            return $this->renderPreviewTable($tenant, $matcher, $invoices);
+            return $this->recordHealthAndReturn($tenant, $this->renderPreviewTable($tenant, $matcher, $invoices));
         }
 
-        return $this->ingestAll($tenant, $client, $ingestor, $invoices);
+        return $this->recordHealthAndReturn($tenant, $this->ingestAll($tenant, $client, $ingestor, $invoices));
+    }
+
+    private function recordHealthAndReturn(Company $tenant, int $exitCode): int
+    {
+        app(HealthRecorder::class)->recordWhmcsFetch($tenant, $exitCode);
+
+        return $exitCode;
     }
 
     /**
@@ -163,6 +179,7 @@ class WhmcsFetchPending extends Command
             if ($invoiceId <= 0) {
                 $this->warn('Skipped row with no id.');
                 $failed++;
+
                 continue;
             }
 
@@ -175,6 +192,7 @@ class WhmcsFetchPending extends Command
                 if ($payload === null) {
                     $this->warn("WHMCS invoice #{$invoiceId}: not found on GetInvoice (deleted since GetInvoices?).");
                     $failed++;
+
                     continue;
                 }
 
@@ -214,12 +232,14 @@ class WhmcsFetchPending extends Command
                 $this->error("Aborting batch: WHMCS authentication failed mid-loop - {$e->getMessage()}");
                 $this->line('Check Setup → Staff Management → API Credentials on the WHMCS side, plus the IP allowlist.');
                 $this->line(sprintf('Partial result: %d created, %d refreshed, %d audit-frozen, %d failed before abort.', $created, $updated, $auditPreserved, $failed));
+
                 return 4;
             } catch (WhmcsUnreachable $e) {
                 // Tenant-fatal: WHMCS host unreachable. Same reasoning -
                 // the rest of the batch cannot succeed.
                 $this->error("Aborting batch: WHMCS unreachable mid-loop - {$e->getMessage()}");
                 $this->line(sprintf('Partial result: %d created, %d refreshed, %d audit-frozen, %d failed before abort.', $created, $updated, $auditPreserved, $failed));
+
                 return 5;
             } catch (WhmcsApiException $e) {
                 $this->warn("WHMCS invoice #{$invoiceId}: API error - {$e->getMessage()}");
@@ -235,7 +255,7 @@ class WhmcsFetchPending extends Command
         // app AFTER they were staged here). Non-fatal — a bridge hiccup must not
         // fail the fetch.
         try {
-            $legacyChanged = app(\App\Services\Whmcs\LegacyInvoicedRefresher::class)->refresh($tenant);
+            $legacyChanged = app(LegacyInvoicedRefresher::class)->refresh($tenant);
             if ($legacyChanged > 0) {
                 $this->warn(sprintf('Legacy check: %d row(s) are now flagged "already invoiced in the legacy app".', $legacyChanged));
             }
@@ -335,7 +355,7 @@ class WhmcsFetchPending extends Command
         }
 
         try {
-            $legacyChanged = app(\App\Services\Whmcs\LegacyInvoicedRefresher::class)->refresh($tenant);
+            $legacyChanged = app(LegacyInvoicedRefresher::class)->refresh($tenant);
             if ($legacyChanged > 0) {
                 $this->warn(sprintf('Legacy check: %d row(s) are now flagged "already invoiced in the legacy app".', $legacyChanged));
             }
@@ -372,11 +392,11 @@ class WhmcsFetchPending extends Command
         foreach ($invoices as $inv) {
             $whmcsClientId = (int) ($inv['userid'] ?? 0);
             $match = $matcher->match($tenant, [
-                'id'          => $whmcsClientId,
-                'userid'      => $whmcsClientId,
-                'email'       => $inv['email'] ?? null,
-                'firstname'   => $inv['firstname'] ?? null,
-                'lastname'    => $inv['lastname'] ?? null,
+                'id' => $whmcsClientId,
+                'userid' => $whmcsClientId,
+                'email' => $inv['email'] ?? null,
+                'firstname' => $inv['firstname'] ?? null,
+                'lastname' => $inv['lastname'] ?? null,
                 'companyname' => $inv['companyname'] ?? null,
             ]);
 

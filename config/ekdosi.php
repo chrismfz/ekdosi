@@ -34,6 +34,10 @@ return [
         'mail_sweep_enabled' => env('EKDOSI_SCHEDULE_MAIL_SWEEP', true),
         'mail_sweep_threshold_minutes' => (int) env('EKDOSI_MAIL_SWEEP_THRESHOLD', 15),
 
+        // queue-worker heartbeat — scheduled dispatch of a tiny queued job.
+        // The worker is considered healthy only after the job is handled.
+        'queue_heartbeat_enabled' => env('EKDOSI_SCHEDULE_QUEUE_HEARTBEAT', true),
+
         // invoices:resend-failed-emails — re-queue invoice emails whose last
         // send attempt failed. Default OFF: a systemic mail outage would
         // otherwise re-queue en masse every run; enable once SMTP is healthy.
@@ -65,6 +69,16 @@ return [
         // run every few hours so the widget reads a fresh-enough cache.
         'mydata_vat_picture_enabled' => env('EKDOSI_SCHEDULE_MYDATA_VAT_PICTURE', true),
         'mydata_vat_picture_cron' => env('EKDOSI_MYDATA_VAT_PICTURE_CRON', '0 */4 * * *'),
+
+        // spatie/laravel-backup tasks. Enable these when the Laravel scheduler
+        // owns backups for the deployment; leave disabled if system cron/systemd
+        // runs the backup commands separately.
+        'backup_run_enabled' => env('EKDOSI_SCHEDULE_BACKUP_RUN', false),
+        'backup_run_cron' => env('EKDOSI_BACKUP_RUN_CRON', '0 2 * * *'),
+        'backup_cleanup_enabled' => env('EKDOSI_SCHEDULE_BACKUP_CLEANUP', false),
+        'backup_cleanup_cron' => env('EKDOSI_BACKUP_CLEANUP_CRON', '30 2 * * *'),
+        'backup_monitor_enabled' => env('EKDOSI_SCHEDULE_BACKUP_MONITOR', false),
+        'backup_monitor_cron' => env('EKDOSI_BACKUP_MONITOR_CRON', '0 8 * * *'),
 
         // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα per
         // tenant (NO email). Default OFF so a fresh deploy doesn't surprise

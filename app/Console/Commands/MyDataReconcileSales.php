@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Company;
 use App\Services\MyData\SalesReconciler;
+use App\Support\OperatorHealth\HealthRecorder;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Throwable;
@@ -66,7 +67,7 @@ class MyDataReconcileSales extends Command
         } catch (Throwable $e) {
             $this->error('Invalid --from/--to date (expected Y-m-d): '.$e->getMessage());
 
-            return self::FAILURE;
+            return $this->recordHealthAndReturn($tenant, self::FAILURE);
         }
 
         $this->line("Tenant : {$tenant->name} (#{$tenant->id})");
@@ -78,7 +79,7 @@ class MyDataReconcileSales extends Command
             } catch (Throwable $e) {
                 $this->error('Raw fetch failed: '.$e->getMessage());
 
-                return self::FAILURE;
+                return $this->recordHealthAndReturn($tenant, self::FAILURE);
             }
 
             $this->newLine();
@@ -89,7 +90,7 @@ class MyDataReconcileSales extends Command
                 $this->line($xml);
             }
 
-            return self::SUCCESS;
+            return $this->recordHealthAndReturn($tenant, self::SUCCESS);
         }
 
         try {
@@ -97,7 +98,7 @@ class MyDataReconcileSales extends Command
         } catch (Throwable $e) {
             $this->error('Reconciliation failed: '.$e->getMessage());
 
-            return self::FAILURE;
+            return $this->recordHealthAndReturn($tenant, self::FAILURE);
         }
 
         $this->newLine();
@@ -136,12 +137,19 @@ class MyDataReconcileSales extends Command
             $this->newLine();
             $this->warn($result->discrepancyCount().' discrepancies found.');
 
-            return 2;
+            return $this->recordHealthAndReturn($tenant, 2, $result->discrepancyCount());
         }
 
         $this->newLine();
         $this->info('All local invoices agree with AADE.');
 
-        return self::SUCCESS;
+        return $this->recordHealthAndReturn($tenant, self::SUCCESS, 0);
+    }
+
+    private function recordHealthAndReturn(Company $tenant, int $exitCode, int $discrepancies = 0): int
+    {
+        app(HealthRecorder::class)->recordMyDataReconcile($tenant, $exitCode, $discrepancies);
+
+        return $exitCode;
     }
 }
