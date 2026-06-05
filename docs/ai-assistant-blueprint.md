@@ -159,27 +159,56 @@ A per-company API key would **not** add isolation, because each request's payloa
 already contains only the bound tenant's data (the tools never return anyone else's).
 nexon's request carries nexon's data regardless of which key signs it.
 
-### So which topology? — recommend **one global key + per-tenant config**
+### So which topology? — recommend **one global key + per-tenant metering**
+
+The reason you'd reach for per-company keys is **billing attribution** — but you
+get that *better* from **token metering**, without the per-key ops burden. Every
+Messages API response carries a `usage` block (`input_tokens`, `output_tokens`,
+`cache_read_input_tokens`, `cache_creation_input_tokens`). Log it stamped with
+`company_id` after every call, `SUM` per tenant at month-end → you know exactly who
+to bill. One global key, full per-tenant attribution, and you keep cross-tenant
+prompt-cache sharing (cheaper than isolated per-key caches).
+
+```
+ai_usage_log
+  company_id, user_id?, conversation_id?, model,
+  input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+  cost_estimate, created_at
+```
+
+`AssistantRunner` writes one row per API turn from `$response->usage`, computing
+`cost_estimate` from a per-model price map in `config/ekdosi.php` (e.g. Opus 4.8
+$5/$25 per 1M in/out; cache read ~0.1×, cache write ~1.25×). Token counts are
+authoritative (straight from the response); the **cost is your own calculation** —
+reconcile the monthly sum against the single Anthropic invoice as a sanity check.
+
+Why metering beats per-company keys:
+
+- **One key** to manage/rotate, not N.
+- **Cross-tenant prompt caching** stays shared (lower total cost).
+- **Finer granularity** — per *user*, per *conversation*, per *tool*, not just per
+  company. ("Who burned the budget?" → a name, not just a tenant.)
+- **In-app caps** — enforce `companies.ai_monthly_token_cap` by summing the log
+  *before* each call and refusing politely when over; no dependency on Anthropic's
+  per-key console totals.
 
 | Option | Verdict |
 |---|---|
-| **One global Anthropic key** (recommended) | Simplest ops, one bill, best prompt-cache sharing of the frozen system prompt + tool defs. Isolation handled by the tool layer. Key in env / `config/services.php`, never committed. |
-| **A key per company** | No isolation benefit. Only worth it for **billing attribution** (a tenant pays their own Anthropic bill) or **compliance** (a tenant contractually wants their own account/DPA). Support as an *override*, not the default. |
-| **Global key + per-tenant rights by who's asking** | This is what you get for free — "rights" = the Shield permissions of the asking user, applied per tool. The key is global; the *capability* is per-user. |
+| **One global key + `ai_usage_log` metering** (recommended) | Simplest ops, shared cache, *and* exact per-tenant (per-user) billing. |
+| **A key per company** | Per-key billing totals, but no isolation benefit, more ops, lost cache sharing, coarser than metering. Keep only for a tenant that contractually wants its own Anthropic account/DPA. |
 
-Make it a per-tenant **config**, mirroring how `companies` already holds myDATA /
-WHMCS settings — not necessarily a per-tenant key:
+Keep the per-tenant **config** either way:
 
 - `companies.ai_assistant_enabled` (default off) — kill-switch per tenant.
 - `companies.ai_model` (nullable → global default `claude-opus-4-8`).
-- `companies.ai_monthly_token_cap` (spend ceiling enforced in `AssistantRunner`).
-- `companies.ai_api_key` (**nullable**) — only for the billing/compliance case;
-  falls back to the global env key. A resolver picks per-tenant-or-global, exactly
-  like `EInvoiceSubmitterFactory` / the per-tenant WHMCS creds pattern.
+- `companies.ai_monthly_token_cap` (enforced from `ai_usage_log` in `AssistantRunner`).
+- `companies.ai_api_key` (**nullable**) — escape hatch for the billing/compliance
+  case only; falls back to the global env key. Resolver mirrors
+  `EInvoiceSubmitterFactory` / per-tenant WHMCS creds.
 
-Bottom line: **one global key, isolation by the tool layer, per-tenant *config* for
-model/cap/on-off, and a nullable per-tenant key escape hatch** for the rare tenant
-that wants its own Anthropic account.
+Bottom line: **one global key, isolation by the tool layer, billing by per-tenant
+token metering, per-tenant config for model/cap/on-off**, and a nullable per-tenant
+key only for the rare own-account tenant.
 
 ## PHP specifics
 
