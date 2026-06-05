@@ -25,7 +25,7 @@ class MyDataMarksRelationManager extends RelationManager
 {
     protected static string $relationship = 'mydataMarks';
 
-    protected static ?string $title = 'myDATA submission history';
+    protected static ?string $title = 'Ιστορικό υποβολών (myDATA / Πάροχος)';
 
     protected static ?string $recordTitleAttribute = 'mark';
 
@@ -44,15 +44,26 @@ class MyDataMarksRelationManager extends RelationManager
                     ->label('Action')
                     ->badge()
                     ->color(fn (?string $state) => match ($state) {
-                        'INSERT' => 'success',  // real filing, MARK issued
-                        'CANCEL' => 'danger',   // real cancellation, MARK preserved
-                        'REJECTED' => 'danger', // AADE refused the submission (null mark, response XML kept)
+                        'INSERT', 'PROVIDER_INSERT' => 'success',  // real filing, MARK issued (direct or via provider)
+                        'CANCEL', 'PROVIDER_CANCEL' => 'danger',   // real cancellation, MARK preserved
+                        'REJECTED', 'PROVIDER_REJECTED' => 'danger', // refused (null mark, response XML kept)
                         'CANCEL_REJECTED' => 'danger', // AADE refused the cancellation (null mark, response kept; state NOT flipped)
                         'DRY_RUN' => 'info',    // preview from "Preview submission XML"
                         'STATE_SYNC' => 'warning',  // operator synced local state from AADE truth
                         'SKIPPED', 'SKIPPED_CANCEL' => 'warning',  // NullSubmitter: deliberate non-filing
                         default => 'gray',
                     }),
+
+                TextColumn::make('provider_key')
+                    ->label('Πάροχος')
+                    ->placeholder('—')  // null for direct myDATA filings
+                    ->toggleable(),
+
+                TextColumn::make('authentication_code')
+                    ->label('Auth code')
+                    ->limit(12)
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('mark')
                     ->label('MARK')

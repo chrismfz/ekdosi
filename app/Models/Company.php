@@ -322,6 +322,32 @@ class Company extends Model
             && $this->mydata_mode_enum !== MyDataMode::Off;
     }
 
+    /** True when this tenant files through a certified ΥΠΑΗΕΣ provider (mode ≠ off). */
+    public function isLiveProviderTenant(): bool
+    {
+        return $this->einvoice_provider === 'gr-provider'
+            && ($this->einvoice_provider_mode ?? 'off') !== 'off';
+    }
+
+    /** True when the tenant files electronically through ANY channel (direct myDATA OR a provider). */
+    public function submitsElectronically(): bool
+    {
+        return $this->isLiveMyDataTenant() || $this->isLiveProviderTenant();
+    }
+
+    /** Short human label for the active e-invoice channel — for invoice action labels. */
+    public function einvoiceChannelLabel(): string
+    {
+        if ($this->isLiveProviderTenant()) {
+            $labels = (array) config('ekdosi.einvoice.provider_labels', []);
+            $name = $labels[$this->einvoice_provider_key] ?? ($this->einvoice_provider_key ?: 'Πάροχο');
+
+            return 'Πάροχο ('.$name.')';
+        }
+
+        return 'myDATA';
+    }
+
     /**
      * Operators with access to this tenant.
      */

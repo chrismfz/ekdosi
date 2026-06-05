@@ -10,6 +10,8 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
+use App\Services\EInvoice\AadeInvoiceDocument;
+use App\Services\EInvoice\Transports\InvoSignDocument;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
@@ -39,11 +41,13 @@ class ViewInvoice extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        $tenantSupportsMyData = in_array(
-            Filament::getTenant()?->mydata_mode,
-            ['sandbox', 'production'],
-            true,
-        );
+        // The tenant files electronically through SOME channel — direct myDATA OR a
+        // certified provider (ΥΠΑΗΕΣ). The submit/cancel actions are the SAME (the
+        // factory routes to the right submitter); only the label/wording differs.
+        $tenant = Filament::getTenant();
+        $tenantSupportsMyData = (bool) $tenant?->submitsElectronically();
+        $isProviderChannel = (bool) $tenant?->isLiveProviderTenant();
+        $channelLabel = $tenant?->einvoiceChannelLabel() ?? 'myDATA';
 
         return [
             // --- Local lifecycle: Πρόχειρο → Ενεργό → Ακυρωμένο.
@@ -342,17 +346,20 @@ class ViewInvoice extends ViewRecord
             // (no mydata_state) on tenants in sandbox/production mode.
             // Off-mode + non-Greek tenants get no submission UI here.
             Action::make('submit_to_mydata')
-                ->label('Submit to myDATA')
+                ->label($isProviderChannel ? 'Αποστολή στον Πάροχο' : 'Υποβολή στο myDATA')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('success')
                 ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === null)
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
-                ->modalHeading('File this invoice with AADE myDATA')
-                ->modalDescription(fn () => Filament::getTenant()?->mydata_mode === 'production'
-                    ? '⚠ Production mode — REAL filing. Legally binding MARK returned. Cannot be edited after; only cancelled + reissued.'
-                    : 'Sandbox mode — files to AADE\'s test endpoint. Synthetic MARK.')
-                ->modalSubmitActionLabel('Confirm submission')
+                ->modalHeading('Αποστολή παραστατικού — '.$channelLabel)
+                ->modalDescription(fn () => $isProviderChannel
+                    ? ('Αποστολή μέσω '.$channelLabel.'. Ο πάροχος υποβάλλει στο myDATA και επιστρέφει το ΜΑΡΚ + QR. '
+                        .(($tenant?->einvoice_provider_mode === 'production') ? '⚠ ΠΑΡΑΓΩΓΗ — πραγματική, νομικά δεσμευτική έκδοση.' : 'Δοκιμαστικό περιβάλλον.'))
+                    : (($tenant?->mydata_mode === 'production')
+                        ? '⚠ Production mode — REAL filing. Legally binding MARK returned. Cannot be edited after; only cancelled + reissued.'
+                        : 'Sandbox mode — files to AADE\'s test endpoint. Synthetic MARK.'))
+                ->modalSubmitActionLabel('Επιβεβαίωση αποστολής')
                 ->action(function (Invoice $record) {
                     try {
                         // Resolve the tenant from the record's own
@@ -369,8 +376,8 @@ class ViewInvoice extends ViewRecord
                         // local_status draft→active is synced inside the
                         // submitter (single choke-point).
                         Notification::make()
-                            ->title('Filed at myDATA')
-                            ->body('MARK: '.($mark->mark ?? 'pending'))
+                            ->title($isProviderChannel ? 'Εκδόθηκε μέσω παρόχου' : 'Filed at myDATA')
+                            ->body('ΜΑΡΚ: '.($mark->mark ?? 'pending'))
                             ->success()->send();
                         // Bounce to a fresh view so mydata_state /
                         // mydata_mark + the audit-history relation
@@ -394,7 +401,7 @@ class ViewInvoice extends ViewRecord
             // invoices on myDATA-capable tenants. Confirmation modal
             // mandatory — cancellation is legally significant.
             Action::make('cancel_at_mydata')
-                ->label('Ακύρωση μέσω myDATA')
+                ->label('Ακύρωση μέσω '.$channelLabel)
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
                 ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID')
@@ -475,6 +482,35 @@ class ViewInvoice extends ViewRecord
                             ->danger()->send();
                     }
                 }),
+
+            // Provider tenants: show the EXACT payload that would be sent to the
+            // provider (AADE InvoicesDoc + the InvoSign extension), read-only, with
+            // NO network call and NO persistence. The token is NOT part of the
+            // payload (it's a separate field at send time), so nothing secret leaks.
+            Action::make('preview_provider_payload')
+                ->label('Προεπισκόπηση παρόχου (XML)')
+                ->icon('heroicon-o-eye')
+                ->color('gray')
+                ->visible(fn () => $isProviderChannel)
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
+                ->modalHeading('Τι θα σταλεί στον Πάροχο')
+                ->modalDescription('Το ακριβές περιεχόμενο που θα φύγει — χωρίς αποστολή/δίκτυο. Ο μυστικός κωδικός (token) ΔΕΝ περιλαμβάνεται· στέλνεται ξεχωριστά.')
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Κλείσιμο')
+                ->fillForm(function (Invoice $record): array {
+                    try {
+                        $doc = new AadeInvoiceDocument($record->company);
+                        $aade = $doc->toXml($doc->build($record));
+                        $key = (string) $record->company->einvoice_provider_key;
+
+                        return ['payload' => $key === 'invosign' ? InvoSignDocument::augment($aade, $record) : $aade];
+                    } catch (Throwable $e) {
+                        return ['payload' => 'Σφάλμα δημιουργίας payload: '.$e->getMessage()];
+                    }
+                })
+                ->schema([
+                    Textarea::make('payload')->label(false)->rows(22)->columnSpanFull()->readOnly(),
+                ]),
 
             // Manual "resend email" — for invoices that already filed
             // but the customer didn't get the mail (typo on email,
