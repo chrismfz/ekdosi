@@ -4,6 +4,7 @@ namespace App\Services\EInvoice;
 
 use App\Contracts\EInvoiceProviderTransport;
 use App\Contracts\EInvoiceSubmitter;
+use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
@@ -70,6 +71,15 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             }
 
             $this->logFailure($invoice, 'transport', $e);
+            // Forensic trail even on a hard transport failure: the doc may have filed
+            // despite the lost response, so record WHAT WE TRIED TO SEND (the exact
+            // augmented payload when the transport reports it, else the AADE core) +
+            // the error — so an operator can find/cancel it manually.
+            $attempted = ($e instanceof ProviderTransportException && $e->attemptedPayload !== null)
+                ? $e->attemptedPayload
+                : $xml;
+            $this->recordTransportFailure($invoice, 'PROVIDER_FAILED', $attempted, $e->getMessage());
+
             throw new RuntimeException(
                 'E-invoice provider unreachable / submission failed: '.$e->getMessage(),
                 0,
@@ -150,10 +160,19 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             $result = $this->transport->cancel((string) $mark, $credentials, $reason);
         } catch (Throwable $e) {
             $this->logFailure($invoice, 'cancel', $e);
+            $this->recordTransportFailure(
+                $invoice, 'PROVIDER_CANCEL_FAILED',
+                'Cancel MARK '.$mark.($reason !== '' ? " — reason: {$reason}" : ''),
+                $e->getMessage(), (string) $mark,
+            );
             throw new RuntimeException('E-invoice provider cancellation failed: '.$e->getMessage(), 0, $e);
         }
 
         if (! $result->success) {
+            // Record a forensic PROVIDER_CANCEL_REJECTED row so the rejection (what
+            // we asked + what the provider returned) is visible in the history —
+            // otherwise a failed cancel leaves NO trace to debug.
+            $this->recordCancelRejection($invoice, (string) $mark, $reason, $result);
             throw new RuntimeException('E-invoice provider rejected the cancellation: '.$result->errorMessage());
         }
 
@@ -300,7 +319,11 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'authentication_code' => $result->authenticationCode,
                 'delivery_state' => $deliveryState,
                 'invoice_url' => $result->qrUrl,
-                'request' => $xml,
+                // Store the ACTUAL payload the transport sent (e.g. InvoSign's
+                // augmented xml_arxeio), falling back to the AADE core if the
+                // transport didn't report one — so the history shows what the
+                // provider really received, not just the pre-augment XML.
+                'request' => $result->requestPayload ?? $xml,
                 'response' => $result->raw,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
@@ -332,13 +355,64 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'mark' => null,
                 'mydata_action' => 'PROVIDER_REJECTED',
                 'provider_key' => $this->transport->key(),
-                'request' => $xml,
+                // The ACTUAL sent payload (augmented), not just the AADE core.
+                'request' => $result->requestPayload ?? $xml,
                 'response' => $result->raw,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
             ]));
         } catch (Throwable $e) {
             Log::warning('Provider: failed to persist PROVIDER_REJECTED audit row', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Forensic row for a TRANSPORT failure (timeout / non-2xx) on submit or cancel —
+     * so the attempt (what we tried to send + the error) is in the history even when
+     * no provider response came back. Never throws (best-effort audit).
+     */
+    private function recordTransportFailure(Invoice $invoice, string $action, string $request, string $error, ?string $mark = null): void
+    {
+        try {
+            DB::transaction(fn () => MyDataMark::create([
+                'company_id' => $invoice->company_id,
+                'invoice_id' => $invoice->id,
+                'mark' => $mark,
+                'mydata_action' => $action,
+                'provider_key' => $this->transport->key(),
+                'request' => $request,
+                'response' => 'Transport error: '.$error,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('Provider: failed to persist '.$action.' audit row', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /** Forensic row for a REJECTED cancellation — so the failed cancel is debuggable. */
+    private function recordCancelRejection(Invoice $invoice, string $mark, string $reason, ProviderResult $result): void
+    {
+        try {
+            DB::transaction(fn () => MyDataMark::create([
+                'company_id' => $invoice->company_id,
+                'invoice_id' => $invoice->id,
+                'mark' => $mark,
+                'mydata_action' => 'PROVIDER_CANCEL_REJECTED',
+                'provider_key' => $this->transport->key(),
+                'request' => 'Cancel MARK '.$mark.($reason !== '' ? " — reason: {$reason}" : ''),
+                'response' => $result->raw,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('Provider: failed to persist PROVIDER_CANCEL_REJECTED audit row', [
                 'invoice_id' => $invoice->id,
                 'error' => $e->getMessage(),
             ]);

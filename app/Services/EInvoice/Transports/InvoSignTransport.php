@@ -3,12 +3,14 @@
 namespace App\Services\EInvoice\Transports;
 
 use App\Contracts\EInvoiceProviderTransport;
+use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 /**
  * InvoSign (iNVOSign / GVSolutions) ΥΠΑΗΕΣ transport. Form-encoded POSTs of the
@@ -40,12 +42,21 @@ class InvoSignTransport implements EInvoiceProviderTransport
         [$base, $token] = $this->resolve($credentials);
         $xmlArxeio = InvoSignDocument::augment($documentXml, $invoice);
 
-        $body = $this->post("{$base}/iNVOSign_Api.php", [
-            'xml_arxeio' => $xmlArxeio,
-            'token' => $token,
-        ]);
+        try {
+            $body = $this->post("{$base}/iNVOSign_Api.php", [
+                'xml_arxeio' => $xmlArxeio,
+                'token' => $token,
+            ]);
+        } catch (Throwable $e) {
+            // A transport failure (timeout / non-2xx) — attach the EXACT payload we
+            // tried to send so the submitter can record it forensically (the doc may
+            // have filed despite the lost response).
+            throw new ProviderTransportException($e->getMessage(), $xmlArxeio, $e);
+        }
 
-        return $this->parse($body);
+        // Carry the ACTUAL sent payload so it's stored as the mark's request
+        // (the augmented xml_arxeio InvoSign received, not just the AADE core).
+        return $this->parse($body, requestPayload: $xmlArxeio);
     }
 
     public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult
@@ -131,13 +142,13 @@ class InvoSignTransport implements EInvoiceProviderTransport
         return $response->body();
     }
 
-    private function parse(string $xml, bool $cancel = false): ProviderResult
+    private function parse(string $xml, bool $cancel = false, ?string $requestPayload = null): ProviderResult
     {
         // LIBXML_NONET: never resolve external entities/network from a third-party
         // provider's response (XXE hardening on a money path).
         $sx = @simplexml_load_string($xml, \SimpleXMLElement::class, LIBXML_NONET);
         if ($sx === false) {
-            return ProviderResult::failed(['InvoSign: μη αναγνώσιμη απάντηση'], $xml);
+            return ProviderResult::failed(['InvoSign: μη αναγνώσιμη απάντηση'], $xml, $requestPayload);
         }
 
         $resp = $sx->response ?? $sx;
@@ -156,13 +167,14 @@ class InvoSignTransport implements EInvoiceProviderTransport
                 $errors[] = $status !== '' ? $status : 'unknown InvoSign error';
             }
 
-            return ProviderResult::failed($errors, $xml);
+            return ProviderResult::failed($errors, $xml, $requestPayload);
         }
 
         if ($cancel) {
             return ProviderResult::ok(
                 cancellationMark: ((string) ($resp->cancellationMark ?? '')) ?: null,
                 raw: $xml,
+                requestPayload: $requestPayload,
             );
         }
 
@@ -172,11 +184,12 @@ class InvoSignTransport implements EInvoiceProviderTransport
         // failed() also lets §14.4 recovery status-check before any retry.
         $mark = ((string) ($resp->invoiceMark ?? '')) ?: null;
         if ($mark === null) {
-            return ProviderResult::failed(['InvoSign: «Success» χωρίς ΜΑΡΚ — μη έγκυρη απάντηση'], $xml);
+            return ProviderResult::failed(['InvoSign: «Success» χωρίς ΜΑΡΚ — μη έγκυρη απάντηση'], $xml, $requestPayload);
         }
 
         return ProviderResult::ok(
             mark: $mark,
+            requestPayload: $requestPayload,
             uid: ((string) ($resp->invoiceUid ?? '')) ?: null,
             authenticationCode: ((string) ($resp->authenticationCode ?? '')) ?: null,
             qrUrl: ((string) ($resp->qrUrl ?? '')) ?: null,

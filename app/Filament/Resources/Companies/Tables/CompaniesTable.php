@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\Companies\Tables;
 
 use App\Filament\Resources\Companies\Actions\CompanyBackupActions;
+use App\Models\Company;
+use App\Support\EInvoice\SendChannel;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -33,27 +35,33 @@ class CompaniesTable
                         default => 'gray',
                     }),
                 TextColumn::make('einvoice_provider')
-                    ->label('e-invoice')
+                    ->label('Τρόπος αποστολής')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'gr-mydata' => 'myDATA',
-                        'ee-peppol' => 'PEPPOL',
-                        'none' => 'PDF only',
-                        default => $state,
-                    }),
+                    ->color(fn (Company $record) => $record->isLiveProviderTenant() ? 'info' : 'gray')
+                    // Show the FULL channel (provider + env), e.g. «InvoSign — Δοκιμαστικό»
+                    // / «myDATA — Παραγωγή» — not the raw column value.
+                    ->state(fn (Company $record): string => SendChannel::options(config('ekdosi.einvoice.provider_labels', []))[SendChannel::fromCompany($record)]
+                        ?? match ($record->einvoice_provider) {
+                            'ee-peppol' => 'PEPPOL',
+                            'none' => 'PDF only',
+                            default => (string) $record->einvoice_provider,
+                        }),
                 TextColumn::make('mydata_mode')
                     ->label('myDATA')
                     ->badge()
-                    ->color(fn (?string $state) => match ($state) {
-                        'production' => 'danger',  // 🔴 LIVE — red
-                        'sandbox' => 'warning',    // 🟡 test — yellow
-                        'off' => 'gray',           // ⚪ off — gray
+                    ->color(fn (?string $state, Company $record) => match (true) {
+                        $record->einvoice_provider === 'gr-provider' => 'info', // present for reads
+                        $state === 'production' => 'danger',  // 🔴 LIVE
+                        $state === 'sandbox' => 'warning',    // 🟡 test
                         default => 'gray',
                     })
-                    ->formatStateUsing(fn (?string $state) => match ($state) {
-                        'production' => 'LIVE',
-                        'sandbox' => 'sandbox',
-                        'off' => 'off',
+                    // For a provider tenant myDATA is the READ path (console / Ε3 /
+                    // MARK check), not a filing mode — show «ανάγνωση», not a bare «off».
+                    ->formatStateUsing(fn (?string $state, Company $record) => match (true) {
+                        $record->einvoice_provider === 'gr-provider' => (filled($record->mydata_aade_id_sandbox) || filled($record->mydata_aade_id_production)) ? 'ανάγνωση' : '—',
+                        $state === 'production' => 'LIVE',
+                        $state === 'sandbox' => 'sandbox',
+                        $state === 'off' => 'off',
                         default => '—',
                     }),
                 TextColumn::make('users_count')
