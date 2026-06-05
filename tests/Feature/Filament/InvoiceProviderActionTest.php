@@ -136,4 +136,108 @@ class InvoiceProviderActionTest extends TestCase
 
         $this->assertTrue(MyDataMarkDetail::canAccess());
     }
+
+    /** A VALID (filed) invoice of the given myDATA type, on the given tenant. */
+    private function validInvoice(Company $tenant, string $mydataType = '2.1'): Invoice
+    {
+        $invoice = $this->draftInvoice($tenant);
+        // Original is #1; advance the counter so a reissue allocates #2 (not a
+        // collision with the manually-created TPY1).
+        $invoice->invoiceType->update(['mydata_type' => $mydataType, 'invcount' => 2]);
+        // mydata_state/mydata_mark are guarded (written via forceFill by the
+        // submitter), so a plain update() would silently drop them.
+        $invoice->forceFill([
+            'local_status' => 'active', 'mydata_state' => 'VALID', 'mydata_mark' => '400000000000001',
+        ])->save();
+
+        return $invoice->fresh('lines');
+    }
+
+    private function creditType(Company $tenant): InvoiceType
+    {
+        return InvoiceType::create([
+            'company_id' => $tenant->id, 'code' => 'PT', 'name' => 'Πιστωτικό',
+            'invcount' => 1, 'is_credit' => true, 'mydata_type' => '5.1',
+        ]);
+    }
+
+    public function test_provider_marked_invoice_hides_cancel_and_offers_credit_path(): void
+    {
+        // The locked ΥΠΑΗΕΣ rule: a MARKed 2.1 can't be cancelled via the
+        // provider — the cancel button is gone, the explainer + storno take over.
+        $tenant = $this->providerTenant();
+        $this->creditType($tenant);                 // makes storno visible
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionHidden('cancel_at_mydata')
+            ->assertActionVisible('cancel_not_supported')
+            ->assertActionVisible('storno_and_reissue')
+            ->assertActionVisible('issue_credit_note');
+    }
+
+    public function test_provider_delivery_note_keeps_the_real_cancel(): void
+    {
+        // 9.3 δελτίο αποστολής IS cancellable via the provider — the real
+        // cancel stays, the explainer/storno do NOT show.
+        $tenant = $this->providerTenant();
+        $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '9.3');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionVisible('cancel_at_mydata')
+            ->assertActionHidden('cancel_not_supported')
+            ->assertActionHidden('storno_and_reissue');
+    }
+
+    public function test_storno_and_reissue_creates_credit_plus_draft_and_redirects_to_edit(): void
+    {
+        $tenant = $this->providerTenant();
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        // Default path: submit_now OFF → no provider HTTP call (no Http::fake needed).
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->callAction('storno_and_reissue', data: ['credit_type_id' => $creditType->id, 'submit_now' => false])
+            ->assertHasNoActionErrors()
+            ->assertRedirect();
+
+        // Full credit note against the original (positive lines, draft).
+        $credit = Invoice::where('credited_invoice_id', $invoice->id)->first();
+        $this->assertNotNull($credit);
+        $this->assertSame('draft', $credit->local_status);
+
+        // A fresh draft copy of the original — new id, no MARK, not a credit.
+        $reissue = Invoice::where('company_id', $tenant->id)
+            ->whereNull('credited_invoice_id')
+            ->where('id', '!=', $invoice->id)
+            ->where('local_status', 'draft')
+            ->first();
+        $this->assertNotNull($reissue);
+        $this->assertNull($reissue->mydata_state);
+        $this->assertSame($invoice->invoice_type_id, $reissue->invoice_type_id);
+        $this->assertCount(1, $reissue->lines);
+    }
+
+    public function test_mydata_tenant_keeps_the_real_cancel_on_a_marked_invoice(): void
+    {
+        // Regression: the 9.3 gate is PROVIDER-only. A direct-myDATA tenant
+        // (AADE CancelInvoice cancels a 2.1) must still see the real cancel and
+        // NOT the provider explainer/storno.
+        $tenant = Company::create([
+            'name' => 'myDATA ΑΕ', 'slug' => 'md-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '800561849',
+        ]);
+        $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionVisible('cancel_at_mydata')
+            ->assertActionHidden('cancel_not_supported')
+            ->assertActionHidden('storno_and_reissue');
+    }
 }

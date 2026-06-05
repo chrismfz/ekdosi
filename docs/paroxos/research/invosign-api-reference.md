@@ -119,6 +119,16 @@ connection / `TransmissionFailure=2` is recoverable: re-query to fetch the ΜΑ�
 POST `mark` + `token` → success `<cancellationMark>` + `statusCode=Success`.
 Cancel **error** shape NOT documented (assume mirrors `<errors>`).
 
+**⚠ General ΥΠΑΗΕΣ rule (not InvoSign-specific):** «Για τη διαβίβαση μέσω
+Παρόχου Ηλεκτρονικής Τιμολόγησης δεν είναι προς το παρόν εφικτή η ακύρωση
+παραστατικών που έχουν λάβει ΜΑΡΚ παρά μόνο η έκδοση Πιστωτικού Τιμολογίου.»
+(confirmed against another provider's docs). I.e. a MARKed **invoice** (2.1/11.x…)
+can NOT be cancelled via any provider — reverse it with a credit note (5.1, its
+own correlated MARK). `CancelDeliveryNote` works ONLY for **9.3 δελτία αποστολής**
+(διακίνηση docs, not invoices) — InvoSign returns **[283]** for anything else.
+ekdosi gates «Ακύρωση μέσω παρόχου» to 9.3-only on every provider channel
+(`ViewInvoice::cancel_at_mydata`); 2.1/11.x → «Έκδοση πιστωτικού».
+
 ## 6. POS (out of scope for invoicing, noted)
 `iNVOSign_GetPayment.php` (+ deferred `iNVOSign_Payment.php`) — **JSON** bodies
 (not XML). Concurrent: get `paymentToken` then submit; deferred: for an invoice

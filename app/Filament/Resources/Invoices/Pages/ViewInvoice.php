@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Pages;
 
 use App\Actions\IssueCreditNote;
+use App\Actions\StornoAndReissue;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\BankAccountField;
 use App\Jobs\SendInvoiceEmail;
@@ -254,7 +255,9 @@ class ViewInvoice extends ViewRecord
                     && self::creditTypes($record)->isNotEmpty())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Έκδοση πιστωτικού τιμολογίου')
-                ->modalDescription('Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
+                ->modalDescription(fn (Invoice $record) => ($isProviderChannel && $record->mydata_state === 'VALID')
+                    ? 'Επιλέξτε τύπο πιστωτικού και ποσότητες ανά γραμμή (0 = εξαίρεση). Το εκδοθέν τιμολόγιο ΔΕΝ ακυρώνεται στον πάροχο — το πιστωτικό (5.1) είναι ο τρόπος αναστροφής: παίρνει δικό του ΜΑΡΚ, συσχετισμένο με το αρχικό, και το μηδενίζει λογιστικά. Αν ο πελάτης ζητήσει επιστροφή χρημάτων, καταχωρίστε «Πληρωμή» τύπου επιστροφής μετά την έκδοση.'
+                    : 'Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
                 ->modalSubmitActionLabel('Έκδοση')
                 ->schema([
                     Select::make('credit_type_id')
@@ -403,11 +406,23 @@ class ViewInvoice extends ViewRecord
             // Cancel a previously-filed invoice. Visible only for VALID
             // invoices on myDATA-capable tenants. Confirmation modal
             // mandatory — cancellation is legally significant.
+            //
+            // PROVIDER caveat (general ΥΠΑΗΕΣ rule, NOT InvoSign-specific):
+            // «Για τη διαβίβαση μέσω Παρόχου Ηλεκτρονικής Τιμολόγησης δεν είναι
+            // προς το παρόν εφικτή η ακύρωση παραστατικών που έχουν λάβει ΜΑΡΚ
+            // παρά μόνο η έκδοση Πιστωτικού Τιμολογίου.» So a MARKed invoice
+            // (2.1/11.x) is reversed by a credit note, never cancelled — every
+            // provider rejects the cancel (InvoSign returns [283]). The lone
+            // exception is a 9.3 δελτίο αποστολής, which is a διακίνηση doc, not
+            // an invoice, and IS cancellable (InvoSign: CancelDeliveryNote). So
+            // on ANY provider channel we offer this button for 9.3 only. Direct
+            // myDATA keeps it for everything (AADE's CancelInvoice cancels a 2.1).
             Action::make('cancel_at_mydata')
                 ->label('Ακύρωση μέσω '.$channelLabel)
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
-                ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID')
+                ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID'
+                    && (! $isProviderChannel || $record->invoiceType?->mydata_type === '9.3'))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Ακύρωση παραστατικού στην ΑΑΔΕ')
@@ -443,6 +458,96 @@ class ViewInvoice extends ViewRecord
                     } catch (Throwable $e) {
                         Notification::make()
                             ->title('Η ακύρωση απέτυχε')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
+                }),
+
+            // PROVIDER, MARKed invoice (2.1/11.x…): there is NO cancel — only a
+            // credit note reverses it. The familiar «Ακύρωση μέσω παρόχου» button
+            // is absent here (gated to 9.3 above), so this info action sits in its
+            // place to explain WHY and route the operator to the right buttons.
+            // Informational only (no submit). Not shown for 9.3 (real cancel) or
+            // credit notes.
+            Action::make('cancel_not_supported')
+                ->label('Ακύρωση; (δεν υποστηρίζεται)')
+                ->icon('heroicon-o-information-circle')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $isProviderChannel
+                    && $record->mydata_state === 'VALID'
+                    && $record->credited_invoice_id === null
+                    && $record->invoiceType?->mydata_type !== '9.3')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
+                ->modalHeading('Δεν υποστηρίζεται ακύρωση μέσω παρόχου')
+                ->modalDescription('Για τη διαβίβαση μέσω Παρόχου Ηλεκτρονικής Τιμολόγησης ΔΕΝ είναι εφικτή η ακύρωση παραστατικού που έχει λάβει ΜΑΡΚ — μόνο η έκδοση Πιστωτικού Τιμολογίου. Έτσι μένουν σωστά τα έσοδα/ΦΠΑ (το αρχικό +X μένει, το πιστωτικό −X το μηδενίζει). Για λάθος: «Έκδοση πιστωτικού» (μερική/ολική διόρθωση) ή «Ακύρωση & επανέκδοση» (ολικό πιστωτικό + νέο πρόχειρο). Αν ο πελάτης ζητήσει επιστροφή χρημάτων, καταχωρίστε «Πληρωμή» τύπου επιστροφής. (9.3 δελτία αποστολής ΑΚΥΡΩΝΟΝΤΑΙ κανονικά.)')
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Κατάλαβα'),
+
+            // PROVIDER storno & reissue: the one-click correction for a MARKed
+            // invoice. Issues a FULL credit note (reversal) AND opens a fresh
+            // draft copy to fix — saves doing the two steps by hand. Same gate as
+            // the info action; needs a credit invoice type configured. Filing the
+            // credit note now is opt-in (mirrors «Έκδοση πιστωτικού»); the
+            // corrected reissue is filed later via the normal lifecycle.
+            Action::make('storno_and_reissue')
+                ->label('Ακύρωση & επανέκδοση')
+                ->icon('heroicon-o-arrow-path-rounded-square')
+                ->color('danger')
+                ->visible(fn (Invoice $record) => $isProviderChannel
+                    && $record->mydata_state === 'VALID'
+                    && $record->credited_invoice_id === null
+                    && $record->invoiceType?->mydata_type !== '9.3'
+                    && self::creditTypes($record)->isNotEmpty())
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Ακύρωση & επανέκδοση')
+                ->modalDescription('Εκδίδεται ΟΛΙΚΟ πιστωτικό (αναστρέφει το αρχικό) και δημιουργείται νέο ΠΡΟΧΕΙΡΟ αντίγραφο για διόρθωση. Διορθώστε το πρόχειρο και εκδώστε το κανονικά.')
+                ->modalSubmitActionLabel('Ακύρωση & επανέκδοση')
+                ->schema([
+                    Select::make('credit_type_id')
+                        ->label('Τύπος πιστωτικού')
+                        ->options(fn (Invoice $record) => self::creditTypes($record)
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name]))
+                        ->required(),
+                    Toggle::make('submit_now')
+                        ->label('Υποβολή πιστωτικού στο myDATA τώρα')
+                        ->helperText('Αν είναι ανενεργό, το πιστωτικό μένει πρόχειρο και υποβάλλεται αργότερα χειροκίνητα.')
+                        ->default(false)
+                        ->visible($tenantSupportsMyData),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    try {
+                        $creditType = InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->whereKey($data['credit_type_id'])
+                            ->firstOrFail();
+
+                        $result = app(StornoAndReissue::class)($record, $creditType);
+
+                        // Opt-in filing of the credit note — runs AFTER the
+                        // StornoAndReissue transaction committed (same post-commit
+                        // submit pattern as «Έκδοση πιστωτικού»).
+                        if ($data['submit_now'] ?? false) {
+                            try {
+                                app(EInvoiceSubmitterFactory::class)->for($record->company)->submit($result['credit']);
+                            } catch (Throwable $e) {
+                                Notification::make()
+                                    ->title('Δημιουργήθηκαν, αλλά η υποβολή του πιστωτικού απέτυχε')
+                                    ->body($e->getMessage().' Υποβάλετέ το ξανά από τη σελίδα του πιστωτικού.')
+                                    ->danger()->persistent()->send();
+                            }
+                        }
+
+                        Notification::make()
+                            ->title('Έγινε ακύρωση & επανέκδοση')
+                            ->body('Πιστωτικό: '.$result['credit']->invcode.' · Νέο πρόχειρο: '.$result['reissue']->invcode.' — διορθώστε & εκδώστε το.')
+                            ->success()->send();
+
+                        // Land on the new draft so the operator fixes it right away.
+                        $this->redirect(static::getResource()::getUrl('edit', ['record' => $result['reissue'], 'tenant' => $record->company]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία ακύρωσης & επανέκδοσης')
                             ->body($e->getMessage())
                             ->danger()->persistent()->send();
                     }
