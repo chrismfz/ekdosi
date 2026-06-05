@@ -16,6 +16,20 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Invoice lifecycle is provider-aware (the missing last mile):** a `gr-provider`
+  tenant now actually sees a working **«Αποστολή στον Πάροχο»** action on the invoice
+  (and «Ακύρωση μέσω Πάροχο (…)») — previously the submit/cancel actions were gated
+  on `mydata_mode`, which is `off` for a provider tenant, so nothing showed and "it
+  didn't send". The gate now uses `Company::submitsElectronically()` (direct myDATA
+  OR provider, non-off); the action body was already factory-routed
+  (→ GrProviderSubmitter → InvoSign), so the engine was ready. Labels/headings/
+  notifications are channel-aware (show the provider name). Added a read-only
+  **«Προεπισκόπηση παρόχου (XML)»** action (exactly what would be sent — no network,
+  no token), and the submission-history tab now badges PROVIDER_INSERT/CANCEL/REJECTED
+  + shows the provider + authentication code. So "τι στείλαμε / τι γύρισε ο πάροχος"
+  is visible per invoice. No change to the direct-myDATA behaviour.
+
 ### Added
 - **Per-company backup — settings + setup export/import (Phase 1).** New
   `company:export --tenant=SLUG` writes a portable `.zip` (manifest + company
