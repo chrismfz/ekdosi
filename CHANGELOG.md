@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **«Ακύρωση μέσω πιστωτικού» + visible ΤΠΥ↔ΠΙΣ binding.** On a provider-filed
+  (VALID, non-9.3) invoice the «δεν υποστηρίζεται» info popup became an actionable
+  button: its modal explains *why* there's no provider cancel (the help text) and,
+  when a credit type is configured, issues a FULL credit note that reverses the
+  original in one click (info-only when no credit type — points to Setup). Both
+  documents now show their relationship under a new ViewInvoice «Σχετικά
+  παραστατικά» section (original → its credit note(s); credit note → the invoice it
+  reverses), driven by the existing `credited_invoice_id`. «Ακύρωση & επανέκδοση»
+  stays for the reissue case. The local-only «Ακύρωση» is now hidden on a
+  provider-filed (VALID) invoice — it would desync from AADE; the credit note is
+  the only correct reversal there (direct-myDATA keeps it).
 - **Provider correction flow on a MARKed invoice (no cancel via πάροχο).** A
   MARKed invoice transmitted through a Provider (ΥΠΑΗΕΣ) can NOT be cancelled —
   only a credit note reverses it (general ΥΠΑΗΕΣ rule). ViewInvoice now: gates

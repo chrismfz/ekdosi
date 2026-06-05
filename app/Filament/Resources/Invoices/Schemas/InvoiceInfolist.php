@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Schemas;
 
 use App\Filament\Pages\MyDataMarkDetail;
+use App\Filament\Resources\Invoices\InvoiceResource;
 use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -164,6 +165,52 @@ class InvoiceInfolist
                             ->color(fn ($record) => $record->balanceData()->status->color()),
                     ])
                     ->columns(5),
+
+                // Bidirectional credit-note binding. The data is the
+                // credited_invoice_id FK we already store — surfaced here so an
+                // «Ακύρωση μέσω πιστωτικού» has a visible audit trail on BOTH
+                // documents: the original shows the credit note(s) that reversed
+                // it; the credit note shows the invoice it reverses. Hidden when
+                // there's no relationship (a plain invoice).
+                Section::make('Σχετικά παραστατικά')
+                    ->icon('heroicon-o-link')
+                    ->visible(fn ($record) => $record->credited_invoice_id !== null
+                        || $record->creditNotes()->exists())
+                    ->schema([
+                        // Credit-note side → the invoice it reverses.
+                        TextEntry::make('credited_for')
+                            ->label('Πιστωτικό — αντιστρέφει το παραστατικό')
+                            ->state(fn ($record) => $record->creditedInvoice?->invcode)
+                            ->url(fn ($record) => $record->creditedInvoice
+                                ? InvoiceResource::getUrl('view', [
+                                    'record' => $record->creditedInvoice,
+                                    'tenant' => $record->company,
+                                ])
+                                : null)
+                            ->color('primary')
+                            ->weight('bold')
+                            ->helperText('Αυτό το πιστωτικό εκδόθηκε για να ακυρώσει/διορθώσει το παραπάνω παραστατικό.')
+                            ->visible(fn ($record) => $record->credited_invoice_id !== null),
+
+                        // Original side → the credit note(s) that reversed it.
+                        TextEntry::make('cancelled_by')
+                            ->label('Ακυρώθηκε / πιστώθηκε με')
+                            ->state(fn ($record) => $record->creditNotes->pluck('invcode')->all())
+                            ->listWithLineBreaks()
+                            ->bulleted()
+                            // Single credit note (the full-cancel case) → clickable;
+                            // multiple partials are listed (open each from the list).
+                            ->url(fn ($record) => $record->creditNotes->count() === 1
+                                ? InvoiceResource::getUrl('view', [
+                                    'record' => $record->creditNotes->first(),
+                                    'tenant' => $record->company,
+                                ])
+                                : null)
+                            ->color('primary')
+                            ->helperText('Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.')
+                            ->visible(fn ($record) => $record->creditNotes()->exists()),
+                    ])
+                    ->columns(2),
 
                 Section::make('myDATA / Πάροχος')
                     ->description('Κατάσταση τελευταίας υποβολής (άμεσα ή μέσω παρόχου). Πλήρες ιστορικό + Request/Response XML στην καρτέλα «Ιστορικό υποβολών».')

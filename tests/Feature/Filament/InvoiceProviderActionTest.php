@@ -172,9 +172,58 @@ class InvoiceProviderActionTest extends TestCase
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
             ->assertActionHidden('cancel_at_mydata')
-            ->assertActionVisible('cancel_not_supported')
+            // The local-only «Ακύρωση» is hidden here — on a provider VALID invoice
+            // it would desync from AADE; credit note is the only reversal.
+            ->assertActionHidden('cancel_local')
+            ->assertActionVisible('cancel_via_credit')
             ->assertActionVisible('storno_and_reissue')
             ->assertActionVisible('issue_credit_note');
+    }
+
+    public function test_cancel_via_credit_is_info_only_without_a_credit_type(): void
+    {
+        // No credit type configured → the button still shows (to surface the help),
+        // but the modal is info-only: nothing can be issued.
+        $tenant = $this->providerTenant();   // deliberately NO creditType()
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionVisible('cancel_via_credit');
+
+        $this->assertSame(0, Invoice::where('credited_invoice_id', $invoice->id)->count());
+    }
+
+    public function test_cancel_via_credit_issues_a_full_credit_bound_to_the_original(): void
+    {
+        // The popup-turned-action: one click issues a FULL credit note that
+        // reverses the original and binds the two via credited_invoice_id.
+        $tenant = $this->providerTenant();
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->callAction('cancel_via_credit', data: ['credit_type_id' => $creditType->id, 'submit_now' => false])
+            ->assertHasNoActionErrors()
+            ->assertRedirect();
+
+        $credit = Invoice::where('credited_invoice_id', $invoice->id)->first();
+        $this->assertNotNull($credit);
+        $this->assertSame('draft', $credit->local_status);
+        // Full reversal: the original's credited_total equals the credit's gross.
+        $this->assertGreaterThan(0, (float) $credit->gross_total);
+        $this->assertEqualsWithDelta((float) $credit->gross_total, (float) $invoice->fresh()->credited_total, 0.01);
+
+        // Bidirectional binding is rendered on BOTH ViewInvoice pages, inside the
+        // «Σχετικά παραστατικά» section (assert the section label too, so the code
+        // appearing elsewhere can't false-pass).
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertSee('Σχετικά παραστατικά')
+            ->assertSee($credit->invcode);            // original → its credit note
+        Livewire::test(ViewInvoice::class, ['record' => $credit->getRouteKey()])
+            ->assertSee('Σχετικά παραστατικά')
+            ->assertSee($invoice->invcode);           // credit note → the invoice it reverses
     }
 
     public function test_provider_delivery_note_keeps_the_real_cancel(): void
@@ -188,7 +237,7 @@ class InvoiceProviderActionTest extends TestCase
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
             ->assertActionVisible('cancel_at_mydata')
-            ->assertActionHidden('cancel_not_supported')
+            ->assertActionHidden('cancel_via_credit')
             ->assertActionHidden('storno_and_reissue');
     }
 
@@ -237,7 +286,9 @@ class InvoiceProviderActionTest extends TestCase
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
             ->assertActionVisible('cancel_at_mydata')
-            ->assertActionHidden('cancel_not_supported')
+            // Direct-myDATA keeps the local-only «Ακύρωση» (provider-only gate).
+            ->assertActionVisible('cancel_local')
+            ->assertActionHidden('cancel_via_credit')
             ->assertActionHidden('storno_and_reissue');
     }
 }
