@@ -17,6 +17,16 @@ they merge.
 
 ## [Unreleased]
 ### Fixed
+- **Provider submission history now shows what we ACTUALLY sent + a failed cancel:**
+  the «Ιστορικό υποβολών» stored the AADE-core XML (pre-augment) as the request, not
+  the real payload the provider received — `ProviderResult` now carries the sent
+  payload (InvoSign's augmented `xml_arxeio`) and it's stored on the PROVIDER_INSERT/
+  PROVIDER_REJECTED mark. And a REJECTED cancellation (e.g. InvoSign [283] — its
+  CancelDeliveryNote is 9.3-only, so a 2.1 invoice can't be cancelled that way) now
+  writes a forensic `PROVIDER_CANCEL_REJECTED` row (request + response) and leaves
+  the invoice VALID, instead of throwing with no trace.
+
+### Fixed
 - **Invoice lifecycle is provider-aware (the missing last mile):** a `gr-provider`
   tenant now actually sees a working **«Αποστολή στον Πάροχο»** action on the invoice
   (and «Ακύρωση μέσω Πάροχο (…)») — previously the submit/cancel actions were gated

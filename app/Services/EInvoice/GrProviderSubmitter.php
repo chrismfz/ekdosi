@@ -154,6 +154,10 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         }
 
         if (! $result->success) {
+            // Record a forensic PROVIDER_CANCEL_REJECTED row so the rejection (what
+            // we asked + what the provider returned) is visible in the history —
+            // otherwise a failed cancel leaves NO trace to debug.
+            $this->recordCancelRejection($invoice, (string) $mark, $reason, $result);
             throw new RuntimeException('E-invoice provider rejected the cancellation: '.$result->errorMessage());
         }
 
@@ -300,7 +304,11 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'authentication_code' => $result->authenticationCode,
                 'delivery_state' => $deliveryState,
                 'invoice_url' => $result->qrUrl,
-                'request' => $xml,
+                // Store the ACTUAL payload the transport sent (e.g. InvoSign's
+                // augmented xml_arxeio), falling back to the AADE core if the
+                // transport didn't report one — so the history shows what the
+                // provider really received, not just the pre-augment XML.
+                'request' => $result->requestPayload ?? $xml,
                 'response' => $result->raw,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
@@ -332,13 +340,37 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'mark' => null,
                 'mydata_action' => 'PROVIDER_REJECTED',
                 'provider_key' => $this->transport->key(),
-                'request' => $xml,
+                // The ACTUAL sent payload (augmented), not just the AADE core.
+                'request' => $result->requestPayload ?? $xml,
                 'response' => $result->raw,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
             ]));
         } catch (Throwable $e) {
             Log::warning('Provider: failed to persist PROVIDER_REJECTED audit row', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /** Forensic row for a REJECTED cancellation — so the failed cancel is debuggable. */
+    private function recordCancelRejection(Invoice $invoice, string $mark, string $reason, ProviderResult $result): void
+    {
+        try {
+            DB::transaction(fn () => MyDataMark::create([
+                'company_id' => $invoice->company_id,
+                'invoice_id' => $invoice->id,
+                'mark' => $mark,
+                'mydata_action' => 'PROVIDER_CANCEL_REJECTED',
+                'provider_key' => $this->transport->key(),
+                'request' => 'Cancel MARK '.$mark.($reason !== '' ? " — reason: {$reason}" : ''),
+                'response' => $result->raw,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('Provider: failed to persist PROVIDER_CANCEL_REJECTED audit row', [
                 'invoice_id' => $invoice->id,
                 'error' => $e->getMessage(),
             ]);

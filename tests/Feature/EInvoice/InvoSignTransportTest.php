@@ -212,6 +212,38 @@ class InvoSignTransportTest extends TestCase
         $this->assertSame('AUTH-XYZ', $mark->authentication_code);
         $this->assertSame('VALID', $invoice->fresh()->mydata_state);
         $this->assertSame(1, MyDataMark::where('invoice_id', $invoice->id)->count());
+        // The stored request is the ACTUAL sent payload (augmented), not the AADE core.
+        $this->assertStringContainsString('API_InvoiceDetails', (string) $mark->request);
+        $this->assertStringContainsString('statusCode', (string) $mark->response); // what came back
+    }
+
+    public function test_failed_cancel_records_a_forensic_row_and_keeps_state(): void
+    {
+        // InvoSign [283]: CancelDeliveryNote is 9.3-only — a 2.1 invoice cancel is
+        // rejected. The failed cancel must be recorded (so it's debuggable) and the
+        // invoice must STAY VALID (not flipped to CANCELLED).
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400001964594701'])->save();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001964594701', 'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'invosign',
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+
+        $errorXml = '<?xml version="1.0"?><ResponseDoc><response><statusCode>ValidationError</statusCode>'
+            .'<errors><error><message>only 9.3 invoice type can be cancelled</message><code>283</code></error></errors>'
+            .'</response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($errorXml, 200)]);
+
+        try {
+            app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->cancel($invoice->fresh());
+            $this->fail('Expected the cancellation to be rejected.');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsString('[283]', $e->getMessage());
+        }
+
+        $this->assertSame(1, MyDataMark::where('invoice_id', $invoice->id)->where('mydata_action', 'PROVIDER_CANCEL_REJECTED')->count());
+        $this->assertSame('VALID', $invoice->fresh()->mydata_state); // not flipped
     }
 
     private function makeInvoice(): Invoice

@@ -27,6 +27,8 @@ final class ProviderResult
         public readonly ?string $deliveryState = null,
         public readonly array $errors = [],
         public readonly ?string $raw = null,
+        /** The exact payload the transport SENT (e.g. InvoSign's augmented xml_arxeio) — stored as the mark's request for debugging. */
+        public readonly ?string $requestPayload = null,
     ) {}
 
     public static function ok(
@@ -37,6 +39,7 @@ final class ProviderResult
         ?string $cancellationMark = null,
         ?string $deliveryState = null,
         ?string $raw = null,
+        ?string $requestPayload = null,
     ): self {
         return new self(
             success: true,
@@ -47,15 +50,16 @@ final class ProviderResult
             cancellationMark: $cancellationMark,
             deliveryState: $deliveryState,
             raw: $raw,
+            requestPayload: $requestPayload,
         );
     }
 
     /**
      * @param  list<string>  $errors
      */
-    public static function failed(array $errors = [], ?string $raw = null): self
+    public static function failed(array $errors = [], ?string $raw = null, ?string $requestPayload = null): self
     {
-        return new self(success: false, errors: $errors, raw: $raw);
+        return new self(success: false, errors: $errors, raw: $raw, requestPayload: $requestPayload);
     }
 
     /** Joined error string for logs / exception messages. */
