@@ -470,7 +470,7 @@ class ViewInvoice extends ViewRecord
             // Informational only (no submit). Not shown for 9.3 (real cancel) or
             // credit notes.
             Action::make('cancel_not_supported')
-                ->label('Ακύρωση μέσω '.$channelLabel.';')
+                ->label('Ακύρωση; (δεν υποστηρίζεται)')
                 ->icon('heroicon-o-information-circle')
                 ->color('gray')
                 ->visible(fn (Invoice $record) => $isProviderChannel

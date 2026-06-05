@@ -78,7 +78,11 @@ class StornoAndReissue
                 'invcode' => $allocation->invcode,
                 'local_status' => 'draft',
                 'header_discount_percent' => $original->header_discount_percent,
+                // Withholding is operator-entered (NOT recomputed) — copy BOTH
+                // the amount and its category, else the reissue comes back with
+                // a category but amount 0 (the invalid combo the form guards).
                 'withhold_category' => $original->withhold_category,
+                'withhold_amount' => $original->withhold_amount,
                 'notes' => $original->notes,
                 // Party snapshot — same counterparty as the original.
                 'company_name' => $original->company_name,

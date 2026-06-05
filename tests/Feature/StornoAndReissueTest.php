@@ -112,4 +112,28 @@ class StornoAndReissueTest extends TestCase
         $this->expectException(RuntimeException::class);
         app(StornoAndReissue::class)($result['credit'], $this->creditType);
     }
+
+    public function test_storno_carries_withholding_amount_and_category_to_the_reissue(): void
+    {
+        $original = $this->originalWithLines();
+        // Withholding is operator-entered, not recomputed — the reissue must
+        // keep BOTH so it isn't left with a category and a zero amount.
+        $original->forceFill(['withhold_category' => 3, 'withhold_amount' => 25.60])->save();
+
+        $reissue = app(StornoAndReissue::class)($original->fresh(), $this->creditType)['reissue'];
+
+        $this->assertSame(3, (int) $reissue->withhold_category);
+        $this->assertEqualsWithDelta(25.60, (float) $reissue->withhold_amount, 0.001);
+    }
+
+    public function test_storno_on_an_already_fully_credited_invoice_throws(): void
+    {
+        $original = $this->originalWithLines();
+        app(StornoAndReissue::class)($original, $this->creditType);   // fully credited
+
+        // A second storno would over-credit the lines → IssueCreditNote's
+        // remaining-qty guard fires (caught & surfaced by the Filament action).
+        $this->expectException(RuntimeException::class);
+        app(StornoAndReissue::class)($original->fresh(), $this->creditType);
+    }
 }
