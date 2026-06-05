@@ -406,13 +406,16 @@ class ViewInvoice extends ViewRecord
             // invoices on myDATA-capable tenants. Confirmation modal
             // mandatory — cancellation is legally significant.
             //
-            // PROVIDER caveat: InvoSign's only cancel method is
-            // CancelDeliveryNote, which AADE restricts to 9.3 δελτία
-            // αποστολής ([283] on anything else). A filed 2.1/11.x is
-            // reversed by a credit note (πιστωτικό), NOT a cancel — so on a
-            // provider channel we only offer this button for 9.3 documents.
-            // Direct myDATA keeps it for everything (AADE's CancelInvoice
-            // DOES cancel a 2.1).
+            // PROVIDER caveat (general ΥΠΑΗΕΣ rule, NOT InvoSign-specific):
+            // «Για τη διαβίβαση μέσω Παρόχου Ηλεκτρονικής Τιμολόγησης δεν είναι
+            // προς το παρόν εφικτή η ακύρωση παραστατικών που έχουν λάβει ΜΑΡΚ
+            // παρά μόνο η έκδοση Πιστωτικού Τιμολογίου.» So a MARKed invoice
+            // (2.1/11.x) is reversed by a credit note, never cancelled — every
+            // provider rejects the cancel (InvoSign returns [283]). The lone
+            // exception is a 9.3 δελτίο αποστολής, which is a διακίνηση doc, not
+            // an invoice, and IS cancellable (InvoSign: CancelDeliveryNote). So
+            // on ANY provider channel we offer this button for 9.3 only. Direct
+            // myDATA keeps it for everything (AADE's CancelInvoice cancels a 2.1).
             Action::make('cancel_at_mydata')
                 ->label('Ακύρωση μέσω '.$channelLabel)
                 ->icon('heroicon-o-x-circle')
