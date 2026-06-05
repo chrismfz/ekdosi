@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Actions\IssueCreditNote;
 use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Models\Company;
@@ -11,6 +12,7 @@ use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Models\User;
 use App\Models\VatCategory;
+use App\Services\RecomputeInvoiceTotals;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
@@ -151,7 +153,7 @@ class InvoiceProviderActionTest extends TestCase
         ])->save();
         // Populate the money caches (gross_total etc.) like a real issued invoice —
         // isFullyCredited() reads gross_total.
-        app(\App\Services\RecomputeInvoiceTotals::class)($invoice);
+        app(RecomputeInvoiceTotals::class)($invoice);
 
         return $invoice->fresh('lines');
     }
@@ -180,7 +182,53 @@ class InvoiceProviderActionTest extends TestCase
             ->assertActionHidden('cancel_local')
             ->assertActionVisible('cancel_via_credit')
             ->assertActionVisible('storno_and_reissue')
-            ->assertActionVisible('issue_credit_note');
+            ->assertActionVisible('issue_credit_note')
+            // Not yet credited → no «Επανέκδοση».
+            ->assertActionHidden('reissue_only');
+    }
+
+    public function test_partial_credit_keeps_the_credit_and_cancel_actions(): void
+    {
+        // A PARTIAL credit (credited < gross) is not a cancellation — the actions
+        // must remain so the operator can credit/cancel the rest.
+        $tenant = $this->providerTenant();
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        // Credit half of the single line (qty 1 → 0.5).
+        app(IssueCreditNote::class)($invoice, $creditType, [
+            ['line_id' => $invoice->lines->first()->id, 'qty' => 0.5],
+        ]);
+
+        $this->assertFalse($invoice->fresh()->isFullyCredited());
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->fresh()->getRouteKey()])
+            ->assertActionVisible('cancel_via_credit')
+            ->assertActionVisible('issue_credit_note')
+            ->assertActionHidden('reissue_only');
+    }
+
+    public function test_direct_mydata_fully_credited_also_offers_reissue(): void
+    {
+        // «Επανέκδοση» is universal: a fully-credited invoice on a direct-myDATA
+        // tenant (not a provider) shows it too.
+        $tenant = Company::create([
+            'name' => 'myDATA ΑΕ', 'slug' => 'md-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '800561849',
+        ]);
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        app(IssueCreditNote::class)($invoice, $creditType, [
+            ['line_id' => $invoice->lines->first()->id, 'qty' => 1],
+        ]);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->fresh()->getRouteKey()])
+            ->assertActionVisible('reissue_only')
+            ->assertActionHidden('issue_credit_note')   // nothing left to credit
+            ->assertActionHidden('cancel_via_credit');   // provider-only anyway
     }
 
     public function test_cancel_via_credit_is_info_only_without_a_credit_type(): void
