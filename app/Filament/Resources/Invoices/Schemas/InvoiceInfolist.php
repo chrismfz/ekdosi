@@ -165,8 +165,8 @@ class InvoiceInfolist
                     ])
                     ->columns(5),
 
-                Section::make('myDATA')
-                    ->description('Mirror columns reflecting the latest mydata_marks submission. Full audit trail below.')
+                Section::make('myDATA / Πάροχος')
+                    ->description('Κατάσταση τελευταίας υποβολής (άμεσα ή μέσω παρόχου). Πλήρες ιστορικό + Request/Response XML στην καρτέλα «Ιστορικό υποβολών».')
                     ->schema([
                         IconEntry::make('mydata_sent')
                             ->label('Submitted')
@@ -194,11 +194,25 @@ class InvoiceInfolist
                             ->placeholder('—'),
 
                         TextEntry::make('mydata_url')
-                            ->label('AADE QR URL')
+                            ->label('QR / URL επαλήθευσης')
                             ->url(fn (?string $state) => $state)
                             ->openUrlInNewTab()
                             ->placeholder('—')
                             ->limit(60),
+
+                        // Provider-only (null for direct myDATA filings): which provider
+                        // + its authentication seal, read from the latest provider mark.
+                        TextEntry::make('provider_key')
+                            ->label('Πάροχος')
+                            ->state(fn ($record) => $record->mydataMarks()->whereNotNull('provider_key')->latest('id')->value('provider_key'))
+                            ->visible(fn ($record) => filled($record->mydataMarks()->whereNotNull('provider_key')->latest('id')->value('provider_key'))),
+
+                        TextEntry::make('authentication_code')
+                            ->label('Authentication code')
+                            ->state(fn ($record) => $record->mydataMarks()->whereNotNull('authentication_code')->latest('id')->value('authentication_code'))
+                            ->visible(fn ($record) => filled($record->mydataMarks()->whereNotNull('authentication_code')->latest('id')->value('authentication_code')))
+                            ->copyable()
+                            ->limit(40),
                     ])
                     ->columns(4),
 
