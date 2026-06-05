@@ -53,6 +53,7 @@ class InvoSignTransportTest extends TestCase
         $this->type = InvoiceType::create([
             'company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'Τιμολόγιο',
             'invcount' => 1, 'mydata_type' => '2.1',
+            'mydata_income_class' => 'E3_561_001', 'mydata_income_class_category' => 'category1_3',
         ]);
         VatCategory::create([
             'company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true,
@@ -73,6 +74,14 @@ class InvoSignTransportTest extends TestCase
         $this->assertStringContainsString('API_InvoiceDetails', $xml);
         $this->assertStringContainsString('<IssuerName>ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ ΟΕ</IssuerName>', $xml);
         $this->assertStringContainsString('<CounterpartVat>997073525</CounterpartVat>', $xml);
+
+        // [88-004]: InvoSign needs the n1/n2 classification prefixes (firebed emits
+        // icls/ecls). After augment the InvoSign payload must use n1/n2 only.
+        $this->assertStringContainsString('xmlns:n1=', $xml);
+        $this->assertStringContainsString('<n1:classificationType>', $xml);
+        $this->assertStringNotContainsString('icls:', $xml);
+        $this->assertStringNotContainsString('xmlns:icls', $xml);
+
         // Still valid XML.
         $this->assertNotFalse(simplexml_load_string($xml));
     }
