@@ -136,12 +136,43 @@ class InvoSignTransportTest extends TestCase
 
         $submitter = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh());
 
-        $this->expectException(RuntimeException::class);
         try {
             $submitter->submit($invoice);
-        } finally {
-            $this->assertNull($invoice->fresh()->mydata_state);
+            $this->fail('Expected a transport failure.');
+        } catch (RuntimeException $e) {
+            // expected
         }
+
+        $this->assertNull($invoice->fresh()->mydata_state); // not filed
+        // Forensic trail even on a hard transport failure: WHAT WE TRIED TO SEND
+        // (the augmented payload) + the error are recorded so it's debuggable.
+        $failed = MyDataMark::where('invoice_id', $invoice->id)->where('mydata_action', 'PROVIDER_FAILED')->first();
+        $this->assertNotNull($failed);
+        $this->assertStringContainsString('API_InvoiceDetails', (string) $failed->request);
+        $this->assertStringContainsString('Transport error', (string) $failed->response);
+    }
+
+    public function test_cancel_transport_failure_records_a_forensic_row_and_keeps_state(): void
+    {
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400001964594701'])->save();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001964594701', 'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'invosign',
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+
+        Http::fake([self::DEMO.'/*' => Http::response('upstream boom', 500)]);
+
+        try {
+            app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->cancel($invoice->fresh());
+            $this->fail('Expected the cancellation to fail at transport.');
+        } catch (RuntimeException $e) {
+            // expected
+        }
+
+        $this->assertSame(1, MyDataMark::where('invoice_id', $invoice->id)->where('mydata_action', 'PROVIDER_CANCEL_FAILED')->count());
+        $this->assertSame('VALID', $invoice->fresh()->mydata_state); // not flipped
     }
 
     public function test_production_mode_uses_production_base_and_token(): void

@@ -3,12 +3,14 @@
 namespace App\Services\EInvoice\Transports;
 
 use App\Contracts\EInvoiceProviderTransport;
+use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 /**
  * InvoSign (iNVOSign / GVSolutions) ΥΠΑΗΕΣ transport. Form-encoded POSTs of the
@@ -40,10 +42,17 @@ class InvoSignTransport implements EInvoiceProviderTransport
         [$base, $token] = $this->resolve($credentials);
         $xmlArxeio = InvoSignDocument::augment($documentXml, $invoice);
 
-        $body = $this->post("{$base}/iNVOSign_Api.php", [
-            'xml_arxeio' => $xmlArxeio,
-            'token' => $token,
-        ]);
+        try {
+            $body = $this->post("{$base}/iNVOSign_Api.php", [
+                'xml_arxeio' => $xmlArxeio,
+                'token' => $token,
+            ]);
+        } catch (Throwable $e) {
+            // A transport failure (timeout / non-2xx) — attach the EXACT payload we
+            // tried to send so the submitter can record it forensically (the doc may
+            // have filed despite the lost response).
+            throw new ProviderTransportException($e->getMessage(), $xmlArxeio, $e);
+        }
 
         // Carry the ACTUAL sent payload so it's stored as the mark's request
         // (the augmented xml_arxeio InvoSign received, not just the AADE core).

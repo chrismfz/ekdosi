@@ -48,6 +48,7 @@ class MyDataMarksRelationManager extends RelationManager
                         'CANCEL', 'PROVIDER_CANCEL' => 'danger',   // real cancellation, MARK preserved
                         'REJECTED', 'PROVIDER_REJECTED' => 'danger', // refused (null mark, response XML kept)
                         'CANCEL_REJECTED', 'PROVIDER_CANCEL_REJECTED' => 'danger', // refused cancellation (response kept; state NOT flipped)
+                        'PROVIDER_FAILED', 'PROVIDER_CANCEL_FAILED' => 'warning', // transport failure — attempt recorded, outcome unknown
                         'DRY_RUN' => 'info',    // preview from "Preview submission XML"
                         'STATE_SYNC' => 'warning',  // operator synced local state from AADE truth
                         'SKIPPED', 'SKIPPED_CANCEL' => 'warning',  // NullSubmitter: deliberate non-filing
