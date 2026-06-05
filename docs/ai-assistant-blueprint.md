@@ -4,6 +4,30 @@
 > for: how hard is an in-app chat assistant for operators, and how would it be
 > tenant- and permission-safe. Read alongside `CLAUDE.md` (tenancy + service layer).
 
+## Decision (locked)
+
+- **ONE global Anthropic key**, set by a `super_admin` (env / a single Setup field
+  — not per company).
+- **Isolation** is enforced by the tool layer (`Gate` + `CompanyContext::actAs`),
+  NOT by the key — a per-company key adds nothing for security.
+- **Billing/limits are per company**: `ai_usage_log` meters tokens stamped with
+  `company_id`; `companies.ai_monthly_token_cap` stops a tenant overdoing it.
+- Per-company `ai_api_key` stays a **nullable escape hatch** only (a tenant that
+  contractually wants its own Anthropic account); default is the global key.
+
+### Cap behaviour («για να μην το παρακάνουν»)
+
+Enforced in `AssistantRunner`, summing the month's `ai_usage_log` for the tenant
+*before* each call:
+
+- **Soft warn** at ~80% of `ai_monthly_token_cap` — a banner in the chat
+  («πλησιάζετε το μηνιαίο όριο»), assistant keeps working.
+- **Hard stop** at 100% — refuse politely («εξαντλήθηκε το μηνιαίο όριο AI για τον
+  μήνα· επικοινωνήστε με τον διαχειριστή»); a `super_admin` can raise the cap.
+- **Global backstop cap** across all tenants (config) — a runaway-loop safety net
+  independent of any single tenant's cap.
+- Per-user sub-limits are a later refinement (the log already carries `user_id`).
+
 ## TL;DR — how hard?
 
 **Moderate, and most of the hard part is already done.** The genuinely difficult
