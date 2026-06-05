@@ -18,10 +18,16 @@ use RuntimeException;
  * Secrets are opened with the passphrase and written back through Eloquent, so
  * they are re-encrypted under the TARGET VM's APP_KEY on save.
  *
- * Known v1 limitation: servers/server_groups carry their own APP_KEY-encrypted
- * `secret_encrypted`, exported as raw ciphertext — portable only within the
- * same APP_KEY. Cross-VM those server secrets must be re-entered. (Follow-up:
- * passphrase-seal them too.)
+ * Known v1 limitations:
+ *  - servers/server_groups carry their own APP_KEY-encrypted `secret_encrypted`,
+ *    exported as raw ciphertext — portable only within the same APP_KEY.
+ *  - A `--full` bundle targets a FRESH company (`--new`). Re-importing one INTO a
+ *    company that already holds its data converges only for legacy_id-bearing
+ *    rows (the ETL'd majority); Filament-created rows (legacy_id null) fall to a
+ *    content signature whose FK columns still hold the OLD ids, so they may
+ *    re-insert (over-create, never wrong-merge). Invariant: the customer set is
+ *    complete (payments.customer_id is NOT NULL — a payment to an absent customer
+ *    would fail the insert rather than silently null).
  */
 class CompanyImporter
 {
@@ -79,7 +85,13 @@ class CompanyImporter
      * column is nulled, dropping the cross-tenant reference.
      */
     private const FK_REWIRES = [
-        'invoice_types' => ['distribution_aim_id' => 'distribution_aims', 'delivery_method_id' => 'delivery_methods'],
+        'invoice_types' => [
+            'distribution_aim_id' => 'distribution_aims', 'delivery_method_id' => 'delivery_methods',
+            'payment_method_id' => 'payment_methods',
+            // customers are imported AFTER setup → nulled here, patched by
+            // patchInvoiceTypeDefaults() once the customers map exists.
+            'default_customer_id' => 'customers',
+        ],
         'servers' => ['server_group_id' => 'server_groups'],
         'customers' => ['payment_method_id' => 'payment_methods'],
         'customer_contacts' => ['customer_id' => 'customers'],
@@ -91,13 +103,19 @@ class CompanyImporter
             'distribution_aim_id' => 'distribution_aims', 'delivery_method_id' => 'delivery_methods',
             'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts',
             'credited_invoice_id' => 'invoices', 'conv_invoice_id' => 'invoices',
+            // FKs to DEFERRED tables (not in the bundle) → nulled via the
+            // never-populated map, else the source id would violate the FK.
+            'whmcs_pending_id' => 'pending_whmcs_invoices', 'service_contract_id' => 'service_contracts',
         ],
         'invoice_lines' => ['invoice_id' => 'invoices', 'product_id' => 'products'],
         'mydata_marks' => ['invoice_id' => 'invoices'],
         'return_invoice_extras' => ['invoice_line_id' => 'invoice_lines'],
         'invoice_mail_log' => ['invoice_id' => 'invoices', 'triggered_by_user_id' => 'users'],
         'payments' => ['customer_id' => 'customers', 'invoice_id' => 'invoices', 'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts'],
-        'quotes' => ['customer_id' => 'customers', 'converted_invoice_id' => 'invoices'],
+        'quotes' => [
+            'customer_id' => 'customers', 'converted_invoice_id' => 'invoices',
+            'converted_service_contract_id' => 'service_contracts', // deferred → nulled
+        ],
         'quote_lines' => ['quote_id' => 'quotes', 'product_id' => 'products'],
         'quote_mail_logs' => ['quote_id' => 'quotes', 'triggered_by_user_id' => 'users'],
         'expenses' => ['supplier_id' => 'suppliers'],
@@ -167,6 +185,8 @@ class CompanyImporter
                 $maps[$table] = $this->importTable($table, $bundle['data'][$table] ?? [], $company->id, $maps);
             }
             $this->patchInvoiceSelfRefs($bundle['data']['invoices'] ?? [], $maps);
+            // invoice_types.default_customer_id → customers (imported just now).
+            $this->patchInvoiceTypeDefaults($bundle['setup']['invoice_types'] ?? [], $maps);
         });
 
         return $summary;
@@ -199,6 +219,31 @@ class CompanyImporter
             if ($patch !== []) {
                 DB::table('invoices')->where('id', $invoiceMap[$oldId])->update($patch);
             }
+        }
+    }
+
+    /**
+     * Restore invoice_types.default_customer_id (a setup→transactional FK that
+     * couldn't be rewired at setup time, since customers import later). No-op for
+     * a settings-only bundle (no customers map → the column stays null).
+     *
+     * @param  list<array<string,mixed>>  $invoiceTypeRows
+     * @param  array<string, array<int|string,int>>  $maps
+     */
+    private function patchInvoiceTypeDefaults(array $invoiceTypeRows, array $maps): void
+    {
+        $typeMap = $maps['invoice_types'] ?? [];
+        $custMap = $maps['customers'] ?? [];
+        if ($custMap === []) {
+            return;
+        }
+        foreach ($invoiceTypeRows as $row) {
+            $oldId = $row['id'] ?? null;
+            $oldCust = $row['default_customer_id'] ?? null;
+            if ($oldId === null || $oldCust === null || ! isset($typeMap[$oldId], $custMap[$oldCust])) {
+                continue;
+            }
+            DB::table('invoice_types')->where('id', $typeMap[$oldId])->update(['default_customer_id' => $custMap[$oldCust]]);
         }
     }
 

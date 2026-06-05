@@ -12,6 +12,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ServiceContract;
 use App\Models\VatCategory;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
@@ -46,6 +47,12 @@ class CompanyFullBundleTest extends TestCase
             'invoice_type_id' => $type->id, 'customer_id' => $cust->id, 'payment_method_id' => $pm->id,
             'issued_at' => now(), 'header_discount_percent' => 0,
         ]);
+        // A FK to a DEFERRED table (service_contracts) — must be nulled on import,
+        // not crash. And a setup→transactional FK (default_customer_id) to restore.
+        $sc = ServiceContract::create(['company_id' => $src->id, 'customer_id' => $cust->id, 'billing_cycle' => 'monthly']);
+        $inv->forceFill(['service_contract_id' => $sc->id])->save();
+        $type->forceFill(['default_customer_id' => $cust->id])->save();
+
         $line = InvoiceLine::create([
             'company_id' => $src->id, 'invoice_id' => $inv->id, 'product_id' => $prod->id,
             'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24, 'product_descr' => 'Hosting',
@@ -96,5 +103,12 @@ class CompanyFullBundleTest extends TestCase
 
         // The credit note's self-reference resolves to the NEW original invoice id.
         $this->assertSame($newInv->id, $newCredit->credited_invoice_id);
+
+        // FK to a DEFERRED table is nulled (not a dangling/violating source id).
+        $this->assertNull($newInv->service_contract_id);
+
+        // invoice_types.default_customer_id (setup→transactional) restored post-pass.
+        $newType = InvoiceType::where('company_id', $company->id)->where('code', 'TPY')->firstOrFail();
+        $this->assertSame($newCust->id, $newType->default_customer_id);
     }
 }
