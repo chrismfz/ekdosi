@@ -53,7 +53,29 @@ class InvoSignDocument
         // 2) Invoice-level <API_InvoiceDetails> block, after <invoiceSummary>.
         $invoiceNode->appendChild(self::buildApiInvoiceDetails($dom, $invoice));
 
-        return $dom->saveXML() ?: $aadeXml;
+        return self::useN1N2Prefixes($dom->saveXML() ?: $aadeXml);
+    }
+
+    /**
+     * InvoSign's parser is namespace-PREFIX-strict: it requires the income/expense
+     * classification namespaces to use the prefixes n1/n2 (as in its API sample),
+     * whereas firebed's InvoicesDocWriter emits icls/ecls. AADE itself matches by
+     * URI (so the DIRECT myDATA path via firebed is unaffected), but InvoSign
+     * rejects with "[88-004] Missing or wrong xmlns:n1". Rename the prefixes
+     * (the namespace URIs are unchanged) for the InvoSign payload only. icls/ecls
+     * are distinctive tokens that appear ONLY as the xmlns declaration + element
+     * prefixes (never in values), so a string rename is safe.
+     */
+    private static function useN1N2Prefixes(string $xml): string
+    {
+        return strtr($xml, [
+            'xmlns:icls=' => 'xmlns:n1=',
+            'xmlns:ecls=' => 'xmlns:n2=',
+            '<icls:' => '<n1:',
+            '</icls:' => '</n1:',
+            '<ecls:' => '<n2:',
+            '</ecls:' => '</n2:',
+        ]);
     }
 
     private static function appendLineFields(DOMDocument $dom, DOMElement $detail, $line): void
@@ -73,7 +95,8 @@ class InvoSignDocument
             'api_UnitPrice' => self::money($unitAfter),
             'api_DiscountValue' => self::money($discountValue),
             'api_vatCategoryPercent' => self::money((float) $line->vat_percent),
-            'api_quantity' => rtrim(rtrim(number_format($qty, 4, '.', ''), '0'), '.') ?: '0',
+            // 4 decimals to match InvoSign's documented sample (<api_quantity>1.0000).
+            'api_quantity' => number_format($qty, 4, '.', ''),
             'api_mm' => (string) ($line->metric_unit ?: 'Τμχ'),
         ];
 
