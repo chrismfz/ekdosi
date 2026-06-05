@@ -3,8 +3,12 @@
 namespace App\Services\Portability;
 
 use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\Product;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 
 /**
  * Wipes a tenant's TRANSACTIONAL data while keeping the company row + all
@@ -22,7 +26,7 @@ class CompanyDataWiper
 {
     /** Documents + their children + audit/inbox — always wiped. */
     public const DOC_TABLES = [
-        'return_invoice_extras', 'invoice_mail_log', 'mydata_marks', 'payments', 'invoice_lines',
+        'return_invoice_extras', 'invoice_mail_log', 'whmcs_invoice_log', 'mydata_marks', 'payments', 'invoice_lines',
         'quote_mail_logs', 'quote_lines', 'expense_marks', 'expense_lines',
         'delivery_marks', 'delivery_note_lines', 'stock_movements', 'service_contracts',
         'pending_whmcs_invoices', 'delivery_notes', 'quotes', 'expenses', 'invoices',
@@ -63,14 +67,24 @@ class CompanyDataWiper
     }
 
     /**
+     * @param  bool  $force  required when invoices are filed at AADE (VALID).
      * @return array<string,int> per-table deleted counts
      */
-    public function wipe(Company $company, bool $keepParties, bool $resetCounter): array
+    public function wipe(Company $company, bool $keepParties, bool $resetCounter, bool $force = false): array
     {
+        // Safe-by-default: even a programmatic caller can't blow away docs that
+        // are live at AADE without opting in (the command/UI also guard).
+        if (! $force && $this->filedAtAadeCount($company) > 0) {
+            throw new RuntimeException('Υπάρχουν παραστατικά υποβλημένα στην ΑΑΔΕ (VALID)· χρειάζεται force.');
+        }
+
         $deleted = [];
 
         Schema::withoutForeignKeyConstraints(function () use ($company, $keepParties, $resetCounter, &$deleted): void {
             DB::transaction(function () use ($company, $keepParties, $resetCounter, &$deleted): void {
+                // Morph-pivot tag links (no company_id) for the subjects we wipe.
+                $this->wipeTaggables($company->id, $keepParties);
+
                 foreach ($this->tables($keepParties) as $table) {
                     $n = DB::table($table)->where('company_id', $company->id)->delete();
                     if ($n > 0) {
@@ -85,6 +99,30 @@ class CompanyDataWiper
         });
 
         return $deleted;
+    }
+
+    /**
+     * Drop `taggables` rows (the HasTags morph pivot — no company_id) linking
+     * this tenant's tags to the subjects being wiped: always Invoice, plus
+     * Customer/Product unless --keep-parties. The tag vocabulary itself is kept
+     * (setup); only the links to deleted records die.
+     */
+    private function wipeTaggables(int $companyId, bool $keepParties): void
+    {
+        if (! Schema::hasTable('taggables')) {
+            return;
+        }
+
+        $morphTypes = [(new Invoice)->getMorphClass()];
+        if (! $keepParties) {
+            $morphTypes[] = (new Customer)->getMorphClass();
+            $morphTypes[] = (new Product)->getMorphClass();
+        }
+
+        DB::table('taggables')
+            ->whereIn('tag_id', DB::table('tags')->where('company_id', $companyId)->select('id'))
+            ->whereIn('taggable_type', $morphTypes)
+            ->delete();
     }
 
     /**

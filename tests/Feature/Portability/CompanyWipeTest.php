@@ -10,10 +10,12 @@ use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
+use App\Models\Tag;
 use App\Models\VatCategory;
 use App\Services\Portability\CompanyDataWiper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use Tests\TestCase;
 
 class CompanyWipeTest extends TestCase
@@ -77,6 +79,39 @@ class CompanyWipeTest extends TestCase
         app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: true);
 
         $this->assertSame(1, InvoiceType::where('company_id', $c->id)->value('invcount'));
+    }
+
+    public function test_wipe_refuses_filed_at_aade_without_force(): void
+    {
+        $c = $this->seedCompany();
+        DB::table('invoices')->where('company_id', $c->id)->update(['mydata_state' => 'VALID']);
+
+        $wiper = app(CompanyDataWiper::class);
+
+        try {
+            $wiper->wipe($c, keepParties: false, resetCounter: false);
+            $this->fail('expected a force guard');
+        } catch (RuntimeException) {
+            $this->assertSame(1, Invoice::where('company_id', $c->id)->count(), 'nothing deleted without force');
+        }
+
+        $wiper->wipe($c, keepParties: false, resetCounter: false, force: true);
+        $this->assertSame(0, Invoice::where('company_id', $c->id)->count());
+    }
+
+    public function test_taggables_links_are_removed(): void
+    {
+        $c = $this->seedCompany();
+        $inv = Invoice::where('company_id', $c->id)->firstOrFail();
+        $tag = Tag::create(['company_id' => $c->id, 'name' => 'VIP']);
+        DB::table('taggables')->insert([
+            'tag_id' => $tag->id, 'taggable_type' => $inv->getMorphClass(), 'taggable_id' => $inv->id,
+        ]);
+
+        app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: false);
+
+        $this->assertSame(0, DB::table('taggables')->where('tag_id', $tag->id)->count());
+        $this->assertNotNull(Tag::find($tag->id)); // the tag vocabulary itself is kept (setup)
     }
 
     public function test_filed_at_aade_count_and_plan(): void

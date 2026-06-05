@@ -126,11 +126,15 @@ Both are also in the panel: Companies → «Αντίγραφα» (export with a 
 toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a toolbar «Εισαγωγή
 εταιρίας από αρχείο».
 
-- **Wipe** keeps the company row + settings + the 9 setup/lookup tables; it only
+- **Wipe** keeps the company row + settings + the setup/lookup tables; it only
   removes transactional data (invoices, payments, customers, …). FK order is
   handled automatically. **Take a backup first** (it lives in the same menu for
   exactly that reason). `--force` is required when invoices are filed at AADE —
   a local wipe does **not** cancel them there.
+- **`--reset-counter`** (ΑΑ → 1) is safe only **before a Firebird import** (the
+  ETL bumps it back to `max(legacy, current)`). If you reset and then issue
+  invoices manually *without* importing, the next ΑΑ can collide with a number
+  already filed at AADE under that series.
 
 - **Secrets**: the 7 encrypted columns are sealed under your **passphrase**
   (PBKDF2 + AES-256-GCM), so the bundle opens on another VM regardless of its

@@ -97,7 +97,9 @@ class CompanyBackupActions
                 Toggle::make('keep_parties')
                     ->label('Κράτα πελάτες/προμηθευτές/προϊόντα')->default(false),
                 Toggle::make('reset_counter')
-                    ->label('Μηδενισμός μετρητή ΑΑ (invcount → 1)')->default(false),
+                    ->label('Μηδενισμός μετρητή ΑΑ (invcount → 1)')
+                    ->helperText('⚠ Μόνο πριν από Firebird import — αλλιώς το επόμενο ΑΑ μπορεί να συγκρουστεί με ήδη υποβλημένο στην ΑΑΔΕ.')
+                    ->default(false),
                 Toggle::make('force')
                     ->label('Διαγραφή ακόμη κι αν υπάρχουν υποβλημένα στην ΑΑΔΕ (VALID)')->default(false),
                 Toggle::make('execute')
@@ -132,7 +134,7 @@ class CompanyBackupActions
                     return;
                 }
 
-                $deleted = $wiper->wipe($record, $keepParties, (bool) ($data['reset_counter'] ?? false));
+                $deleted = $wiper->wipe($record, $keepParties, (bool) ($data['reset_counter'] ?? false), (bool) ($data['force'] ?? false));
                 Notification::make()->title('Η διαγραφή ολοκληρώθηκε')->success()
                     ->body('Διαγράφηκαν '.array_sum($deleted).' γραμμές σε '.count($deleted).' πίνακες.')
                     ->send();

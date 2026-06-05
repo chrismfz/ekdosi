@@ -67,7 +67,7 @@ class CompanyWipe extends Command
             return self::SUCCESS;
         }
 
-        $deleted = $wiper->wipe($company, $keepParties, (bool) $this->option('reset-counter'));
+        $deleted = $wiper->wipe($company, $keepParties, (bool) $this->option('reset-counter'), (bool) $this->option('force'));
         $this->info('Διαγράφηκαν '.array_sum($deleted).' γραμμές σε '.count($deleted).' πίνακες.'
             .($this->option('reset-counter') ? ' Ο counter μηδενίστηκε.' : ''));
 
