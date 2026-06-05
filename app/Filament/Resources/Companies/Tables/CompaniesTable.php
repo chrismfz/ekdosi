@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\Companies\Tables;
 
+use App\Filament\Resources\Companies\Actions\CompanyBackupActions;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -84,8 +86,18 @@ class CompaniesTable
             ])
             ->recordActions([
                 EditAction::make(),
+                ActionGroup::make([
+                    CompanyBackupActions::export(),
+                    CompanyBackupActions::importInto(),
+                    CompanyBackupActions::wipe(),
+                ])
+                    ->label('Αντίγραφα')
+                    ->icon('heroicon-o-archive-box')
+                    ->color('gray')
+                    ->button(),
             ])
             ->toolbarActions([
+                CompanyBackupActions::importNew(),
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

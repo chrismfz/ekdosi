@@ -17,6 +17,43 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Per-company backup — settings + setup export/import (Phase 1).** New
+  `company:export --tenant=SLUG` writes a portable `.zip` (manifest + company
+  settings + setup/lookup tables + logo) and `company:import --file=… (--new |
+  --into=SLUG)` restores it — the per-tenant backup the portability plan (#211)
+  describes, so one company can be restored without a full-DB rollback that
+  would clobber other live tenants. The 7 encrypted columns are
+  **passphrase-sealed** (PBKDF2 + AES-256-GCM via `SecretsCodec`), decoupling
+  at-rest APP_KEY encryption from transport; `--raw` opts into a cleartext debug
+  dump. Import is **dry-run by default** (`--execute` applies), **idempotent**
+  (setup matched by natural key, updated in place — never delete+insert, so
+  matched ids survive and transactional FKs don't dangle), re-encrypts secrets
+  under the target VM's `APP_KEY`, and rewires intra-setup FKs (invoice-type
+  distribution/delivery, server→group, company default invoice type). README
+  documents usage. **UI:** the Companies table now has an «Αντίγραφα» group
+  («Εξαγωγή ρυθμίσεων» download + «Εισαγωγή ρυθμίσεων» upload-restore with
+  dry-run preview) and a toolbar «Εισαγωγή εταιρίας από αρχείο» (create-new) —
+  same passphrase flow as the CLI, via the shared `BundleArchive` zip
+  reader/writer.
+- **Full (`--full`) bundle — transactional data too (Phase 2).** `company:export
+  --full` (+ a «Πλήρες» toggle in the UI) adds customers/suppliers/products/
+  invoices(+lines/MARKs/extras/mail-logs)/payments/quotes/expenses; the importer
+  restores them with every FK rewired to the new ids — incl. the invoice
+  credit-note self-reference (nulled on insert, patched after the pass) — and
+  drops cross-tenant user refs. A complete per-tenant snapshot for moving a
+  company to its own VM. Deferred (v1): delivery notes, service contracts, stock
+  movements, WHMCS inbox, activity log, notes/attachments (polymorphic /
+  re-derivable). Round-trip test asserts the rewiring + self-ref.
+- **Per-company transactional wipe (the clean slate).** `company:wipe
+  --tenant=SLUG` (+ «Διαγραφή δεδομένων» in the «Αντίγραφα» menu) deletes a
+  tenant's transactional data (invoices/payments/customers/…) while **keeping**
+  the company row + settings + the setup/lookups — the safe reset before a
+  Firebird re-import. Dry-run by default (`--execute` applies); `--keep-parties`
+  preserves customers/suppliers/products, `--reset-counter` rolls ΑΑ counters to
+  1; FK order handled via `Schema::withoutForeignKeyConstraints`; **`--force`
+  required** when invoices are filed at AADE (a local wipe doesn't cancel them
+  there). `CompanyDataWiper` + tests (wipe keeps settings/setup, keep-parties,
+  reset-counter, the AADE-filed guard, read-only plan).
 - **«Συγχρονισμός κατάστασης από ΑΑΔΕ» (2-way state sync) on the ΜΑΡΚ page.**
   After «Άντληση/έλεγχος από ΑΑΔΕ» finds a *state* divergence, a new
   admin-gated, confirmed action applies AADE's truth to the local invoice:

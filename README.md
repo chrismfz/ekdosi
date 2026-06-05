@@ -88,9 +88,75 @@ verified production setup):
   **without the worker nothing in the queue executes**.
 - On every deploy: `php artisan queue:restart` so the worker picks up new code.
 
+## Backup / restore (per company)
+
+Per-tenant settings backup — restore **one** company without a full-DB rollback
+that would clobber other live tenants. Exports the `companies` row (myDATA
+dev+prod credentials, GSIS, mail, PDF, WHMCS bridge…), all setup/lookup tables
+(invoice types **with their myDATA income-class mapping**, VAT categories,
+payment methods, bank accounts, delivery/distribution, product categories,
+metric units, tags, server groups, billing connections) and the logo — to a
+portable `.zip`. The Firebird ETL never touches settings, so the usual reset is
+*wipe transactional → re-import from Firebird*; this protects the hand-entered
+config around it.
+
+```bash
+# Export. Secrets are passphrase-encrypted by default. --full also includes
+# the transactional data (customers/invoices/payments…) for a complete snapshot.
+php artisan company:export --tenant=myip                 # settings + setup, prompts passphrase
+php artisan company:export --tenant=myip --full          # + transactional data
+php artisan company:export --tenant=myip --raw           # cleartext — debug only
+
+# Restore. Dry-run by default (prints the per-table plan); --execute applies.
+# A --full bundle restores its data too (FK-rewired); --new is the clean target.
+php artisan company:import --file=myip.zip --new                    # create a fresh company
+php artisan company:import --file=myip.zip --into=myip --execute    # restore into an existing one
+```
+
+```bash
+# Wipe a tenant's transactional data (keep company + settings + setup) — the
+# clean slate before a Firebird re-import. Dry-run by default; --execute applies.
+php artisan company:wipe --tenant=myip                        # preview what would go
+php artisan company:wipe --tenant=myip --execute --force      # apply (--force past AADE-filed)
+php artisan company:wipe --tenant=myip --keep-parties --execute   # keep customers/suppliers/products
+php artisan company:wipe --tenant=myip --reset-counter --execute  # also roll ΑΑ counters → 1
+```
+
+Both are also in the panel: Companies → «Αντίγραφα» (export with a «Πλήρες»
+toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a toolbar «Εισαγωγή
+εταιρίας από αρχείο».
+
+- **Wipe** keeps the company row + settings + the setup/lookup tables; it only
+  removes transactional data (invoices, payments, customers, …). FK order is
+  handled automatically. **Take a backup first** (it lives in the same menu for
+  exactly that reason). `--force` is required when invoices are filed at AADE —
+  a local wipe does **not** cancel them there.
+- **`--reset-counter`** (ΑΑ → 1) is safe only **before a Firebird import** (the
+  ETL bumps it back to `max(legacy, current)`). If you reset and then issue
+  invoices manually *without* importing, the next ΑΑ can collide with a number
+  already filed at AADE under that series.
+
+- **Secrets**: the 7 encrypted columns are sealed under your **passphrase**
+  (PBKDF2 + AES-256-GCM), so the bundle opens on another VM regardless of its
+  `APP_KEY`; the same passphrase is required to import. `--raw` stores them in
+  clear text (warned) for a same-box debug dump.
+- **Idempotent**: setup rows are matched by a natural key and **updated in
+  place** (never delete + insert), so a re-import converges and matched rows
+  keep their id — transactional data that references them never dangles.
+- **Non-destructive**: import never removes rows absent from the bundle.
+- **`--full`** also carries transactional data (customers, suppliers, products,
+  invoices + lines + MARKs, payments, quotes, expenses), restored with every FK
+  rewired to the new ids (incl. the credit-note self-reference). Deferred (v1):
+  delivery notes, service contracts, stock movements, the WHMCS inbox, activity
+  log, notes/attachments — see `docs/company-portability-plan.md`.
+- **Limitation (v1)**: server / server-group provisioning secrets
+  (`secret_encrypted`) export as raw APP_KEY ciphertext — portable only within
+  the **same** `APP_KEY`; re-enter them after a cross-VM restore.
+
 ## Documentation
 
 - **`CLAUDE.md`** — architecture, decisions, conventions, current status (read first).
+- **`docs/company-portability-plan.md`** — per-company backup/export/import + wipe plan.
 - **`INSTALL.md`** — production install (RHEL/nginx/php-fpm/MariaDB, systemd, cron).
 - **`docs/Comparison.md`** — legacy → new mapping + what's net-new / deferred.
 - **`docs/services-quotes-roadmap.md`** — Quotes + Services/recurring (both built).
