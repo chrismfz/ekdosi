@@ -5,6 +5,7 @@ namespace Tests\Feature\Portability;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Models\VatCategory;
+use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\SecretsCodec;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -151,5 +152,29 @@ class CompanyExportTest extends TestCase
         $zip->close();
 
         @unlink($out);
+    }
+
+    public function test_bundle_archive_round_trips(): void
+    {
+        $company = Company::create([
+            'name' => 'RT OE', 'slug' => 'rt-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'afm' => '800561849',
+            'mydata_subscription_key_production' => 'PRODKEY',
+        ]);
+        InvoiceType::create(['company_id' => $company->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 3, 'mydata_type' => '2.1']);
+
+        $bundle = app(CompanyExporter::class)->build($company, 'passphrase', 'p@ss');
+        $archive = app(BundleArchive::class);
+        $path = storage_path('app/exports/rt-'.uniqid().'.zip');
+
+        $archive->write($path, $bundle);
+        $read = $archive->read($path);
+
+        $this->assertSame($bundle['manifest']['company']['slug'], $read['manifest']['company']['slug']);
+        $this->assertSame($bundle['company']['afm'], $read['company']['afm']);
+        $this->assertSame('TPY', $read['setup']['invoice_types'][0]['code']);
+        $this->assertSame($bundle['secrets']['mode'], $read['secrets']['mode']);
+
+        @unlink($path);
     }
 }

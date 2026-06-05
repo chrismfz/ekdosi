@@ -30,8 +30,11 @@ they merge.
   matched ids survive and transactional FKs don't dangle), re-encrypts secrets
   under the target VM's `APP_KEY`, and rewires intra-setup FKs (invoice-type
   distribution/delivery, server→group, company default invoice type). README
-  documents usage. UI download/upload-restore + the full (transactional) bundle
-  are the next sub-steps.
+  documents usage. **UI:** the Companies table now has an «Αντίγραφα» group
+  («Εξαγωγή ρυθμίσεων» download + «Εισαγωγή ρυθμίσεων» upload-restore with
+  dry-run preview) and a toolbar «Εισαγωγή εταιρίας από αρχείο» (create-new) —
+  same passphrase flow as the CLI, via the shared `BundleArchive` zip
+  reader/writer. The full (transactional) bundle is the next sub-step.
 - **«Συγχρονισμός κατάστασης από ΑΑΔΕ» (2-way state sync) on the ΜΑΡΚ page.**
   After «Άντληση/έλεγχος από ΑΑΔΕ» finds a *state* divergence, a new
   admin-gated, confirmed action applies AADE's truth to the local invoice:

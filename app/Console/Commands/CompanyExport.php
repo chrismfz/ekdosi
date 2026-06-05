@@ -3,10 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Models\Company;
+use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyExporter;
 use Illuminate\Console\Command;
 use RuntimeException;
-use ZipArchive;
 
 /**
  * Phase 1 (docs/company-portability-plan.md) — export a tenant's SETTINGS +
@@ -64,7 +64,7 @@ class CompanyExport extends Command
             ?: storage_path('app/exports/'.$slug.'-settings-'.now()->format('Ymd-His').'.zip'));
 
         try {
-            $this->writeZip($out, $bundle);
+            app(BundleArchive::class)->write($out, $bundle);
         } catch (RuntimeException $e) {
             $this->error($e->getMessage());
 
@@ -109,36 +109,5 @@ class CompanyExport extends Command
         }
 
         return ['passphrase', $passphrase];
-    }
-
-    /**
-     * @param  array<string,mixed>  $bundle
-     */
-    private function writeZip(string $path, array $bundle): void
-    {
-        if (! is_dir($dir = dirname($path)) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
-            throw new RuntimeException("Αδυναμία δημιουργίας φακέλου: {$dir}");
-        }
-
-        $zip = new ZipArchive;
-        if ($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            throw new RuntimeException("Αδυναμία εγγραφής zip: {$path}");
-        }
-
-        $json = static fn (array $data): string => (string) json_encode(
-            $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-        );
-
-        $zip->addFromString('manifest.json', $json($bundle['manifest']));
-        $zip->addFromString('company.json', $json($bundle['company']));
-        $zip->addFromString('secrets.json', $json($bundle['secrets']));
-        foreach ($bundle['setup'] as $table => $rows) {
-            $zip->addFromString("setup/{$table}.json", $json($rows));
-        }
-        foreach ($bundle['files'] as $name => $bytes) {
-            $zip->addFromString($name, $bytes);
-        }
-
-        $zip->close();
     }
 }

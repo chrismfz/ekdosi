@@ -2,10 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyImporter;
 use Illuminate\Console\Command;
 use RuntimeException;
-use ZipArchive;
 
 /**
  * Phase 1 (import half) — restore a company settings+setup .zip produced by
@@ -44,7 +44,7 @@ class CompanyImport extends Command
         }
 
         try {
-            $bundle = $this->readZip($file);
+            $bundle = app(BundleArchive::class)->read($file);
         } catch (RuntimeException $e) {
             $this->error($e->getMessage());
 
@@ -93,45 +93,5 @@ class CompanyImport extends Command
         }
 
         return $passphrase;
-    }
-
-    /**
-     * @return array<string,mixed> CompanyExporter::build() shape
-     */
-    private function readZip(string $path): array
-    {
-        $zip = new ZipArchive;
-        if ($zip->open($path) !== true) {
-            throw new RuntimeException("Αδυναμία ανάγνωσης zip: {$path}");
-        }
-
-        $read = static function (string $name) use ($zip): ?array {
-            $raw = $zip->getFromName($name);
-
-            return $raw === false ? null : json_decode($raw, true);
-        };
-
-        $manifest = $read('manifest.json');
-        $company = $read('company.json');
-        $secrets = $read('secrets.json');
-        if ($manifest === null || $company === null || $secrets === null) {
-            $zip->close();
-            throw new RuntimeException('Μη έγκυρο αρχείο: λείπει manifest/company/secrets.');
-        }
-
-        $setup = [];
-        $files = [];
-        for ($i = 0; $i < $zip->numFiles; $i++) {
-            $name = (string) $zip->getNameIndex($i);
-            if (str_starts_with($name, 'setup/') && str_ends_with($name, '.json')) {
-                $table = substr($name, strlen('setup/'), -strlen('.json'));
-                $setup[$table] = json_decode((string) $zip->getFromName($name), true) ?? [];
-            } elseif (str_starts_with($name, 'files/')) {
-                $files[$name] = (string) $zip->getFromName($name);
-            }
-        }
-        $zip->close();
-
-        return compact('manifest', 'company', 'secrets', 'setup', 'files');
     }
 }
