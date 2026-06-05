@@ -254,7 +254,9 @@ class ViewInvoice extends ViewRecord
                     && self::creditTypes($record)->isNotEmpty())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Έκδοση πιστωτικού τιμολογίου')
-                ->modalDescription('Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
+                ->modalDescription(fn (Invoice $record) => ($isProviderChannel && $record->mydata_state === 'VALID')
+                    ? 'Επιλέξτε τύπο πιστωτικού και ποσότητες ανά γραμμή (0 = εξαίρεση). Το εκδοθέν τιμολόγιο ΔΕΝ ακυρώνεται στον πάροχο — το πιστωτικό (5.1) είναι ο τρόπος αναστροφής: παίρνει δικό του ΜΑΡΚ, συσχετισμένο με το αρχικό, και το μηδενίζει λογιστικά. Αν ο πελάτης ζητήσει επιστροφή χρημάτων, καταχωρίστε «Πληρωμή» τύπου επιστροφής μετά την έκδοση.'
+                    : 'Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
                 ->modalSubmitActionLabel('Έκδοση')
                 ->schema([
                     Select::make('credit_type_id')
@@ -403,11 +405,20 @@ class ViewInvoice extends ViewRecord
             // Cancel a previously-filed invoice. Visible only for VALID
             // invoices on myDATA-capable tenants. Confirmation modal
             // mandatory — cancellation is legally significant.
+            //
+            // PROVIDER caveat: InvoSign's only cancel method is
+            // CancelDeliveryNote, which AADE restricts to 9.3 δελτία
+            // αποστολής ([283] on anything else). A filed 2.1/11.x is
+            // reversed by a credit note (πιστωτικό), NOT a cancel — so on a
+            // provider channel we only offer this button for 9.3 documents.
+            // Direct myDATA keeps it for everything (AADE's CancelInvoice
+            // DOES cancel a 2.1).
             Action::make('cancel_at_mydata')
                 ->label('Ακύρωση μέσω '.$channelLabel)
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
-                ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID')
+                ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === 'VALID'
+                    && (! $isProviderChannel || $record->invoiceType?->mydata_type === '9.3'))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Ακύρωση παραστατικού στην ΑΑΔΕ')
