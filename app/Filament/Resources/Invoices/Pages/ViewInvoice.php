@@ -463,25 +463,90 @@ class ViewInvoice extends ViewRecord
                     }
                 }),
 
-            // PROVIDER, MARKed invoice (2.1/11.x…): there is NO cancel — only a
-            // credit note reverses it. The familiar «Ακύρωση μέσω παρόχου» button
-            // is absent here (gated to 9.3 above), so this info action sits in its
-            // place to explain WHY and route the operator to the right buttons.
-            // Informational only (no submit). Not shown for 9.3 (real cancel) or
-            // credit notes.
-            Action::make('cancel_not_supported')
-                ->label('Ακύρωση; (δεν υποστηρίζεται)')
-                ->icon('heroicon-o-information-circle')
-                ->color('gray')
+            // PROVIDER, MARKed invoice (2.1/11.x…): there is NO cancel via the
+            // provider — only a credit note reverses it. This button sits exactly
+            // where the operator looks for «Ακύρωση»: its modal EXPLAINS why (the
+            // help text), and — when a credit type is configured — ISSUES a full
+            // credit note that reverses the original in one step. The two documents
+            // are bound via credited_invoice_id and shown on both under «Σχετικά
+            // παραστατικά». When no credit type exists the modal is info-only (no
+            // submit) and points to Setup. Gated to non-9.3 provider invoices; 9.3
+            // keeps the real «Ακύρωση μέσω παρόχου».
+            Action::make('cancel_via_credit')
+                ->label('Ακύρωση μέσω πιστωτικού')
+                ->icon('heroicon-o-receipt-refund')
+                ->color('danger')
                 ->visible(fn (Invoice $record) => $isProviderChannel
                     && $record->mydata_state === 'VALID'
                     && $record->credited_invoice_id === null
                     && $record->invoiceType?->mydata_type !== '9.3')
-                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
-                ->modalHeading('Δεν υποστηρίζεται ακύρωση μέσω παρόχου')
-                ->modalDescription('Για τη διαβίβαση μέσω Παρόχου Ηλεκτρονικής Τιμολόγησης ΔΕΝ είναι εφικτή η ακύρωση παραστατικού που έχει λάβει ΜΑΡΚ — μόνο η έκδοση Πιστωτικού Τιμολογίου. Έτσι μένουν σωστά τα έσοδα/ΦΠΑ (το αρχικό +X μένει, το πιστωτικό −X το μηδενίζει). Για λάθος: «Έκδοση πιστωτικού» (μερική/ολική διόρθωση) ή «Ακύρωση & επανέκδοση» (ολικό πιστωτικό + νέο πρόχειρο). Αν ο πελάτης ζητήσει επιστροφή χρημάτων, καταχωρίστε «Πληρωμή» τύπου επιστροφής. (9.3 δελτία αποστολής ΑΚΥΡΩΝΟΝΤΑΙ κανονικά.)')
-                ->modalSubmitAction(false)
-                ->modalCancelActionLabel('Κατάλαβα'),
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Ακύρωση μέσω πιστωτικού')
+                ->modalDescription(fn (Invoice $record) => 'Για διαβίβαση μέσω Παρόχου ΔΕΝ ακυρώνεται παραστατικό που έχει λάβει ΜΑΡΚ — η ακύρωση γίνεται με ΟΛΙΚΟ πιστωτικό. Έτσι μένουν σωστά έσοδα/ΦΠΑ: το αρχικό μένει VALID στην ΑΑΔΕ, το πιστωτικό το μηδενίζει. Τα δύο παραστατικά δένονται μεταξύ τους (βλ. «Σχετικά παραστατικά»). '
+                    .(self::creditTypes($record)->isEmpty()
+                        ? '⚠ Δεν υπάρχει ρυθμισμένος τύπος πιστωτικού — ρυθμίστε έναν στο Setup → Τύποι Παραστατικών (is_credit) και ξαναδοκιμάστε.'
+                        : 'Για ταυτόχρονη επανέκδοση διορθωμένου, χρησιμοποιήστε «Ακύρωση & επανέκδοση». Αν ο πελάτης ζητήσει επιστροφή χρημάτων, καταχωρίστε «Πληρωμή» τύπου επιστροφής μετά.'))
+                // No credit type → info-only modal (hide the submit button).
+                ->modalSubmitAction(fn (Invoice $record) => self::creditTypes($record)->isEmpty() ? false : null)
+                ->modalSubmitActionLabel('Έκδοση πιστωτικού ακύρωσης')
+                ->modalCancelActionLabel('Κλείσιμο')
+                ->schema(fn (Invoice $record) => self::creditTypes($record)->isEmpty() ? [] : [
+                    Select::make('credit_type_id')
+                        ->label('Τύπος πιστωτικού')
+                        ->options(fn (Invoice $record) => self::creditTypes($record)
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name]))
+                        ->required(),
+                    Toggle::make('submit_now')
+                        ->label('Υποβολή πιστωτικού στον πάροχο τώρα')
+                        ->helperText('Αν είναι ανενεργό, το πιστωτικό μένει πρόχειρο και υποβάλλεται αργότερα χειροκίνητα.')
+                        ->default(false)
+                        ->visible($tenantSupportsMyData),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    // No credit type → the modal was info-only; nothing to do.
+                    if (empty($data['credit_type_id'])) {
+                        return;
+                    }
+                    try {
+                        $creditType = InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->whereKey($data['credit_type_id'])
+                            ->firstOrFail();
+
+                        // Full credit: every line at full qty → reverses the
+                        // original. IssueCreditNote writes credited_invoice_id (the
+                        // bind shown under «Σχετικά παραστατικά» on both records).
+                        $selections = $record->lines
+                            ->map(fn ($l) => ['line_id' => $l->id, 'qty' => (float) $l->qty])
+                            ->all();
+
+                        $credit = app(IssueCreditNote::class)($record, $creditType, $selections);
+
+                        if ($data['submit_now'] ?? false) {
+                            try {
+                                app(EInvoiceSubmitterFactory::class)->for($record->company)->submit($credit);
+                            } catch (Throwable $e) {
+                                Notification::make()
+                                    ->title('Το πιστωτικό δημιουργήθηκε, αλλά η υποβολή απέτυχε')
+                                    ->body($e->getMessage().' Υποβάλετέ το ξανά από τη σελίδα του πιστωτικού.')
+                                    ->danger()->persistent()->send();
+                            }
+                        }
+
+                        Notification::make()
+                            ->title('Εκδόθηκε πιστωτικό ακύρωσης')
+                            ->body('Πιστωτικό '.$credit->invcode.' — αντιστρέφει το '.$record->invcode.'.'
+                                .(($data['submit_now'] ?? false) ? '' : ' (πρόχειρο — δεν υποβλήθηκε)'))
+                            ->success()->send();
+
+                        $this->redirect(static::getResource()::getUrl('view', ['record' => $credit, 'tenant' => $record->company]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία ακύρωσης μέσω πιστωτικού')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
+                }),
 
             // PROVIDER storno & reissue: the one-click correction for a MARKed
             // invoice. Issues a FULL credit note (reversal) AND opens a fresh
