@@ -5,6 +5,7 @@ namespace Tests\Feature\EInvoice;
 use App\Contracts\EInvoiceProviderTransport;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
@@ -240,6 +241,11 @@ class FakeGrTransport implements EInvoiceProviderTransport
     }
 
     public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        return $this->behave($this->send);
+    }
+
+    public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult
     {
         return $this->behave($this->send);
     }

@@ -4,6 +4,7 @@ namespace App\Services\EInvoice\Transports;
 
 use App\Contracts\EInvoiceProviderTransport;
 use App\Exceptions\EInvoice\ProviderTransportException;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
@@ -57,6 +58,22 @@ class InvoSignTransport implements EInvoiceProviderTransport
         // Carry the ACTUAL sent payload so it's stored as the mark's request
         // (the augmented xml_arxeio InvoSign received, not just the AADE core).
         return $this->parse($body, requestPayload: $xmlArxeio);
+    }
+
+    public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        [$base, $token] = $this->resolve($credentials);
+
+        try {
+            $body = $this->post("{$base}/iNVOSign_Api.php", [
+                'xml_arxeio' => $documentXml,
+                'token' => $token,
+            ]);
+        } catch (Throwable $e) {
+            throw new ProviderTransportException($e->getMessage(), $documentXml, $e);
+        }
+
+        return $this->parse($body, requestPayload: $documentXml);
     }
 
     public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult

@@ -3,10 +3,14 @@
 namespace App\Services\Delivery;
 
 use App\Enums\MyDataMode;
+use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
+use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\Stock\StockService;
+use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderResult;
 use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -246,8 +250,9 @@ class DeliveryNoteSubmitter
     }
 
     /**
-     * File the delivery note at myDATA and persist the resulting MARK +
-     * delivery_marks audit row + the note's mydata/delivery cache.
+     * File the delivery note through the tenant's electronic channel (direct
+     * myDATA or ΥΠΑΗΕΣ provider) and persist the resulting MARK + delivery_marks
+     * audit row + the note's mydata/delivery cache.
      */
     public function submit(DeliveryNote $note): DeliveryMark
     {
@@ -273,6 +278,10 @@ class DeliveryNoteSubmitter
         $payload = $this->buildAadeDeliveryNote($note);
         $xml = $this->payloadToXml($payload);
 
+        if ($this->tenant->isLiveProviderTenant()) {
+            return $this->submitViaProvider($note, $xml);
+        }
+
         $this->initFirebed();
 
         $action = new SendInvoices;
@@ -296,6 +305,135 @@ class DeliveryNoteSubmitter
         $responseXml = $action->getResponseXML() ?? '';
 
         return $this->persistResponse($note, $xml, $response, $responseXml);
+    }
+
+    /** Submit the same canonical 9.x AADE XML through the tenant's ΥΠΑΗΕΣ provider. */
+    private function submitViaProvider(DeliveryNote $note, string $xml): DeliveryMark
+    {
+        $transport = app(ProviderTransportRegistry::class)->for((string) $this->tenant->einvoice_provider_key);
+        $credentials = ProviderCredentials::fromCompany($this->tenant);
+
+        try {
+            $result = $transport->sendDelivery($note, $xml, $credentials);
+        } catch (Throwable $e) {
+            $attempted = ($e instanceof ProviderTransportException && $e->attemptedPayload !== null)
+                ? $e->attemptedPayload
+                : $xml;
+            $this->recordProviderFailure($note, $transport->key(), $attempted, $e->getMessage());
+
+            throw new RuntimeException('E-invoice provider delivery-note submission failed: '.$e->getMessage(), 0, $e);
+        }
+
+        if (! $result->success) {
+            $this->recordProviderRejection($note, $transport->key(), $xml, $result);
+            throw new DeliveryNoteRejected(
+                'E-invoice provider rejected the delivery note: '.$result->errorMessage(),
+                $xml,
+                $result->raw ?? ''
+            );
+        }
+
+        return $this->persistProviderSuccess($note, $transport->key(), $xml, $result);
+    }
+
+    private function recordProviderFailure(DeliveryNote $note, string $providerKey, string $requestXml, string $error): void
+    {
+        try {
+            DB::transaction(fn () => DeliveryMark::create([
+                'company_id' => $note->company_id,
+                'delivery_note_id' => $note->id,
+                'mark' => null,
+                'mydata_action' => 'PROVIDER_FAILED',
+                'provider_key' => $providerKey,
+                'request' => $requestXml,
+                'response' => 'Transport error: '.$error,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('Provider delivery: failed to persist failure audit row', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function recordProviderRejection(DeliveryNote $note, string $providerKey, string $requestXml, ProviderResult $result): void
+    {
+        try {
+            DB::transaction(fn () => DeliveryMark::create([
+                'company_id' => $note->company_id,
+                'delivery_note_id' => $note->id,
+                'mark' => null,
+                'mydata_action' => 'PROVIDER_REJECTED',
+                'provider_key' => $providerKey,
+                'request' => $result->requestPayload ?? $requestXml,
+                'response' => $result->raw,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]));
+        } catch (Throwable $e) {
+            Log::warning('Provider delivery: failed to persist rejection audit row', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function persistProviderSuccess(DeliveryNote $note, string $providerKey, string $xml, ProviderResult $result): DeliveryMark
+    {
+        $mark = (string) $result->mark;
+        if ($mark === '') {
+            throw new RuntimeException("E-invoice provider reported success but returned no MARK for delivery note {$note->invcode}.");
+        }
+
+        $existing = DeliveryMark::query()
+            ->where('delivery_note_id', $note->id)
+            ->where('mark', $mark)
+            ->where('mydata_action', 'PROVIDER_INSERT')
+            ->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        $audit = DB::transaction(function () use ($note, $providerKey, $xml, $result, $mark) {
+            $row = DeliveryMark::create([
+                'company_id' => $note->company_id,
+                'delivery_note_id' => $note->id,
+                'mark' => $mark,
+                'mydata_action' => 'PROVIDER_INSERT',
+                'provider_key' => $providerKey,
+                'authentication_code' => $result->authenticationCode,
+                'provider_delivery_state' => $result->deliveryState,
+                'invoice_url' => $result->qrUrl,
+                'request' => $result->requestPayload ?? $xml,
+                'response' => $result->raw,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]);
+
+            $note->forceFill([
+                'mydata_sent' => true,
+                'mydata_state' => 'VALID',
+                'mydata_mark' => $mark,
+                'mydata_url' => $result->qrUrl ?? $note->mydata_url,
+                'delivery_state' => 'registered',
+                'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
+            ])->save();
+
+            return $row;
+        });
+
+        try {
+            app(StockService::class)->recordSaleForDeliveryNote($note);
+        } catch (Throwable $e) {
+            Log::warning('S2 stock-out after provider delivery-note filing failed (filing succeeded)', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $audit;
     }
 
     // ---- internals ------------------------------------------------------
