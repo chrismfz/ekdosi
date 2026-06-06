@@ -2,6 +2,7 @@
 
 namespace App\Contracts;
 
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
@@ -33,6 +34,14 @@ interface EInvoiceProviderTransport
      * ignore $documentXml and build their own payload.
      */
     public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult;
+
+    /**
+     * Submit a value-less Ψηφιακή Διακίνηση document (9.x, usually 9.3) through
+     * the same provider channel. Delivery notes live in their own table, so the
+     * provider receives the canonical AADE XML plus the DeliveryNote model for
+     * transports that need coordinates/metadata.
+     */
+    public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult;
 
     /** Cancel a previously-filed document by its MARK. */
     public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult;

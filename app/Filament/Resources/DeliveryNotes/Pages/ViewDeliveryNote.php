@@ -8,6 +8,7 @@ use App\Services\Delivery\DeliveryLifecycleService;
 use App\Services\Delivery\DeliveryNotePdf;
 use App\Services\Delivery\DeliveryNoteSubmitter;
 use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
@@ -19,8 +20,9 @@ use Throwable;
  * View a Δελτίο Αποστολής + its lines + the myDATA / delivery state, with the
  * issue action.
  *
- * «Έκδοση (διαβίβαση στο myDATA)» files a DRAFT note via DeliveryNoteSubmitter
- * (SendInvoices, 9.x type). Visible only while local_status === 'draft' and the
+ * «Έκδοση» files a DRAFT note via DeliveryNoteSubmitter through the tenant's
+ * electronic channel (direct myDATA or certified provider, 9.x type). Visible
+ * only while local_status === 'draft' and the
  * note has not yet been filed (mydata_state is null). On success it shows the
  * MARK + QR URL; on RuntimeException the submitter's (Greek) message surfaces as
  * a danger notification.
@@ -38,20 +40,29 @@ class ViewDeliveryNote extends ViewRecord
 
     protected function getHeaderActions(): array
     {
+        $tenant = Filament::getTenant();
+        $tenantSupportsElectronic = (bool) $tenant?->submitsElectronically();
+        $isProviderChannel = (bool) $tenant?->isLiveProviderTenant();
+        $channelLabel = $tenant?->einvoiceChannelLabel() ?? 'myDATA';
+
         return [
             Action::make('issue')
-                ->label('Έκδοση (διαβίβαση στο myDATA)')
+                ->label($isProviderChannel ? 'Έκδοση μέσω Παρόχου' : 'Έκδοση (διαβίβαση στο myDATA)')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('success')
                 // Draft + never-filed only. The submitter also hard-guards an
                 // already-filed/cancelled note, but visibility keeps the button
                 // off the screen entirely once it's done.
-                ->visible(fn (DeliveryNote $record) => $record->local_status === 'draft'
+                ->visible(fn (DeliveryNote $record) => $tenantSupportsElectronic
+                    && $record->local_status === 'draft'
                     && $record->mydata_state === null)
                 ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
-                ->modalHeading('Διαβίβαση δελτίου στο myDATA')
-                ->modalDescription('Το δελτίο αποστέλλεται στην ΑΑΔΕ (Παραστατικό Διακίνησης 9.x). Επιστρέφεται MARK· μετά την έκδοση το δελτίο κλειδώνει για επεξεργασία.')
+                ->modalHeading('Αποστολή δελτίου — '.$channelLabel)
+                ->modalDescription(fn () => $isProviderChannel
+                    ? ('Αποστολή μέσω '.$channelLabel.'. Ο πάροχος υποβάλλει το παραστατικό διακίνησης στο myDATA και επιστρέφει MARK + QR. '
+                        .(($tenant?->einvoice_provider_mode === 'production') ? '⚠ ΠΑΡΑΓΩΓΗ — πραγματική, νομικά δεσμευτική έκδοση.' : 'Δοκιμαστικό περιβάλλον.'))
+                    : 'Το δελτίο αποστέλλεται στην ΑΑΔΕ (Παραστατικό Διακίνησης 9.x). Επιστρέφεται MARK· μετά την έκδοση το δελτίο κλειδώνει για επεξεργασία.')
                 ->modalSubmitActionLabel('Έκδοση')
                 ->action(function (DeliveryNote $record) {
                     try {
@@ -63,7 +74,7 @@ class ViewDeliveryNote extends ViewRecord
                         $mark = $submitter->submit($record);
 
                         Notification::make()
-                            ->title('Το δελτίο εκδόθηκε στο myDATA')
+                            ->title($record->company->isLiveProviderTenant() ? 'Το δελτίο εκδόθηκε μέσω παρόχου' : 'Το δελτίο εκδόθηκε στο myDATA')
                             ->body('MARK: '.($mark->mark ?? 'pending')
                                 .($record->fresh()->mydata_url ? ' — δες το QR στη σελίδα.' : ''))
                             ->success()

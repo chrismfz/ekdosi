@@ -2,14 +2,18 @@
 
 namespace Tests\Feature\Delivery;
 
+use App\Contracts\EInvoiceProviderTransport;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteLine;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\Delivery\DeliveryNoteRejected;
 use App\Services\Delivery\DeliveryNoteSubmitter;
+use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderResult;
 use Firebed\AadeMyData\Models\Invoice as AadeInvoice;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
@@ -258,6 +262,35 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertStringContainsString('TimologioQR', (string) $fresh->mydata_url);
     }
 
+    public function test_provider_tenant_files_delivery_note_through_provider_transport(): void
+    {
+        config()->set('ekdosi.einvoice.providers.fake-delivery', FakeDeliveryProviderTransport::class);
+
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'fake-delivery',
+            'einvoice_provider_mode' => 'sandbox',
+            'einvoice_provider_config' => ['demo_base_url' => 'https://provider.test', 'demo_token' => 'tok'],
+            'mydata_mode' => 'off',
+        ])->save();
+
+        $note = $this->makeNote();
+
+        $mark = (new DeliveryNoteSubmitter($this->tenant->fresh()))->submit($note);
+
+        $this->assertSame('PROVIDER_INSERT', $mark->mydata_action);
+        $this->assertSame('fake-delivery', $mark->provider_key);
+        $this->assertSame('400000000000777', $mark->mark);
+        $this->assertSame('AUTH-DELIVERY', $mark->authentication_code);
+        $this->assertStringContainsString('<invoiceType>9.3</invoiceType>', (string) $mark->request);
+
+        $fresh = $note->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertSame('400000000000777', $fresh->mydata_mark);
+        $this->assertSame('registered', $fresh->delivery_state);
+        $this->assertSame('active', $fresh->local_status);
+    }
+
     public function test_rejected_submission_persists_rejected_row_and_throws(): void
     {
         $note = $this->makeNote();
@@ -329,5 +362,46 @@ XML;
     </response>
 </ResponseDoc>
 XML;
+    }
+}
+
+/** Provider transport fake for delivery-note submitter coverage — no network. */
+class FakeDeliveryProviderTransport implements EInvoiceProviderTransport
+{
+    public function key(): string
+    {
+        return 'fake-delivery';
+    }
+
+    public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        return ProviderResult::failed(['not used in this delivery test']);
+    }
+
+    public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        return ProviderResult::ok(
+            mark: '400000000000777',
+            uid: 'DELIVERY-UID',
+            authenticationCode: 'AUTH-DELIVERY',
+            qrUrl: 'https://provider.test/qr/777',
+            raw: '<provider-response/>',
+            requestPayload: $documentXml,
+        );
+    }
+
+    public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult
+    {
+        return ProviderResult::ok(cancellationMark: '400000000000778');
+    }
+
+    public function status(Invoice $invoice, ProviderCredentials $credentials): ProviderResult
+    {
+        return ProviderResult::ok(mark: '400000000000777');
+    }
+
+    public function ping(ProviderCredentials $credentials): bool
+    {
+        return true;
     }
 }
