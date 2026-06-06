@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Contracts\EInvoiceProviderTransport;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\NullProviderTransport;
@@ -83,6 +84,11 @@ class FakeProviderTransport implements EInvoiceProviderTransport
     }
 
     public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        return ProviderResult::ok(mark: '400000000000001', authenticationCode: 'ABC', qrUrl: 'https://x/y');
+    }
+
+    public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult
     {
         return ProviderResult::ok(mark: '400000000000001', authenticationCode: 'ABC', qrUrl: 'https://x/y');
     }

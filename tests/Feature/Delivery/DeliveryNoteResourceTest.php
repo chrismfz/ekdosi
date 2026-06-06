@@ -182,6 +182,23 @@ class DeliveryNoteResourceTest extends TestCase
         $this->assertSame(0, DeliveryNote::query()->where('company_id', $this->tenant->id)->count());
     }
 
+    public function test_issue_action_uses_provider_label_for_provider_tenant(): void
+    {
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox',
+            'mydata_mode' => 'off',
+        ])->save();
+        Filament::setTenant($this->tenant->fresh());
+
+        $draft = $this->makeDraft();
+
+        Livewire::test(ViewDeliveryNote::class, ['record' => $draft->getKey()])
+            ->assertActionVisible('issue')
+            ->assertSee('Έκδοση μέσω Παρόχου');
+    }
+
     public function test_issue_action_exists_and_is_draft_only(): void
     {
         $draft = $this->makeDraft();

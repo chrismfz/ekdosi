@@ -3,6 +3,7 @@
 namespace App\Services\EInvoice\Transports;
 
 use App\Contracts\EInvoiceProviderTransport;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderResult;
@@ -25,6 +26,11 @@ class NullProviderTransport implements EInvoiceProviderTransport
     }
 
     public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        throw $this->notConfigured();
+    }
+
+    public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult
     {
         throw $this->notConfigured();
     }

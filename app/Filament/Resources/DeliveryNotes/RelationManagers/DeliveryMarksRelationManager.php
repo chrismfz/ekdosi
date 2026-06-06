@@ -38,11 +38,11 @@ class DeliveryMarksRelationManager extends RelationManager
                     ->label('Ενέργεια')
                     ->badge()
                     ->color(fn (?string $state) => match ($state) {
-                        'INSERT' => 'success',           // έκδοση — MARK εκδόθηκε
+                        'INSERT', 'PROVIDER_INSERT' => 'success',           // έκδοση — MARK εκδόθηκε
                         'REGISTER_TRANSFER' => 'info',   // έναρξη διακίνησης
                         'CONFIRM_OUTCOME' => 'success',  // παράδοση
                         'CANCEL' => 'danger',            // ακύρωση
-                        'REJECTED' => 'danger',          // η ΑΑΔΕ απέρριψε (null mark, κρατήθηκε το response)
+                        'REJECTED', 'PROVIDER_REJECTED', 'PROVIDER_FAILED' => 'danger',          // αποτυχία με request/response forensic row
                         default => 'gray',
                     }),
 
@@ -50,6 +50,17 @@ class DeliveryMarksRelationManager extends RelationManager
                     ->label('MARK')
                     ->placeholder('—')   // REJECTED rows have null mark
                     ->copyable(),
+
+                TextColumn::make('provider_key')
+                    ->label('Πάροχος')
+                    ->placeholder('—')
+                    ->toggleable(),
+
+                TextColumn::make('response')
+                    ->label('Σημειώσεις / Απόκριση')
+                    ->limit(90)
+                    ->placeholder('—')
+                    ->toggleable(),
 
                 TextColumn::make('mark_date')
                     ->label('Ημ/νία')
