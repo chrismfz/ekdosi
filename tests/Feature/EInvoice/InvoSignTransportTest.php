@@ -4,6 +4,7 @@ namespace Tests\Feature\EInvoice;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
@@ -103,6 +104,25 @@ class InvoSignTransportTest extends TestCase
                 && $request['token'] === 'DEMO-TOKEN'
                 && str_contains((string) $request['xml_arxeio'], 'API_InvoiceDetails');
         });
+    }
+
+    public function test_send_delivery_normalises_classification_prefixes_before_posting(): void
+    {
+        Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
+        $note = new DeliveryNote(['company_id' => $this->tenant->id, 'invcode' => 'ΔΑΠ1']);
+        $xml = '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0">'
+            .'<invoice><invoiceDetails><icls:incomeClassification><icls:classificationType>category3</icls:classificationType></icls:incomeClassification></invoiceDetails></invoice></InvoicesDoc>';
+
+        $result = (new InvoSignTransport)->sendDelivery($note, $xml, ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertTrue($result->success);
+        $this->assertStringContainsString('xmlns:n1=', (string) $result->requestPayload);
+        $this->assertStringContainsString('<n1:classificationType>', (string) $result->requestPayload);
+        $this->assertStringNotContainsString('icls:', (string) $result->requestPayload);
+
+        Http::assertSent(fn ($request) => str_contains((string) $request['xml_arxeio'], 'xmlns:n1=')
+            && str_contains((string) $request['xml_arxeio'], '<n1:classificationType>')
+            && ! str_contains((string) $request['xml_arxeio'], 'icls:'));
     }
 
     public function test_send_validation_error_becomes_failed_result(): void

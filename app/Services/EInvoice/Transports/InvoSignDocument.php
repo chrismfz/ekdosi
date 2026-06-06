@@ -53,7 +53,7 @@ class InvoSignDocument
         // 2) Invoice-level <API_InvoiceDetails> block, after <invoiceSummary>.
         $invoiceNode->appendChild(self::buildApiInvoiceDetails($dom, $invoice));
 
-        return self::useN1N2Prefixes($dom->saveXML() ?: $aadeXml);
+        return self::normaliseClassificationPrefixes($dom->saveXML() ?: $aadeXml);
     }
 
     /**
@@ -66,7 +66,7 @@ class InvoSignDocument
      * are distinctive tokens that appear ONLY as the xmlns declaration + element
      * prefixes (never in values), so a string rename is safe.
      */
-    private static function useN1N2Prefixes(string $xml): string
+    public static function normaliseClassificationPrefixes(string $xml): string
     {
         return strtr($xml, [
             'xmlns:icls=' => 'xmlns:n1=',

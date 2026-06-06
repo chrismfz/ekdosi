@@ -37,6 +37,7 @@ use Firebed\AadeMyData\Xml\InvoicesDocWriter;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 use Throwable;
 
@@ -339,7 +340,7 @@ class DeliveryNoteSubmitter
     private function recordProviderFailure(DeliveryNote $note, string $providerKey, string $requestXml, string $error): void
     {
         try {
-            DB::transaction(fn () => DeliveryMark::create([
+            DB::transaction(fn () => DeliveryMark::create($this->deliveryMarkPayload([
                 'company_id' => $note->company_id,
                 'delivery_note_id' => $note->id,
                 'mark' => null,
@@ -349,7 +350,7 @@ class DeliveryNoteSubmitter
                 'response' => 'Transport error: '.$error,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
-            ]));
+            ])));
         } catch (Throwable $e) {
             Log::warning('Provider delivery: failed to persist failure audit row', [
                 'delivery_note_id' => $note->id,
@@ -361,7 +362,7 @@ class DeliveryNoteSubmitter
     private function recordProviderRejection(DeliveryNote $note, string $providerKey, string $requestXml, ProviderResult $result): void
     {
         try {
-            DB::transaction(fn () => DeliveryMark::create([
+            DB::transaction(fn () => DeliveryMark::create($this->deliveryMarkPayload([
                 'company_id' => $note->company_id,
                 'delivery_note_id' => $note->id,
                 'mark' => null,
@@ -371,7 +372,7 @@ class DeliveryNoteSubmitter
                 'response' => $result->raw,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
-            ]));
+            ])));
         } catch (Throwable $e) {
             Log::warning('Provider delivery: failed to persist rejection audit row', [
                 'delivery_note_id' => $note->id,
@@ -397,7 +398,7 @@ class DeliveryNoteSubmitter
         }
 
         $audit = DB::transaction(function () use ($note, $providerKey, $xml, $result, $mark) {
-            $row = DeliveryMark::create([
+            $row = DeliveryMark::create($this->deliveryMarkPayload([
                 'company_id' => $note->company_id,
                 'delivery_note_id' => $note->id,
                 'mark' => $mark,
@@ -410,7 +411,7 @@ class DeliveryNoteSubmitter
                 'response' => $result->raw,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
-            ]);
+            ]));
 
             $note->forceFill([
                 'mydata_sent' => true,
@@ -434,6 +435,25 @@ class DeliveryNoteSubmitter
         }
 
         return $audit;
+    }
+
+    /**
+     * Filter provider audit payloads to columns that exist in the currently-migrated
+     * schema. This keeps the request/response forensic row visible during deploys
+     * where code reaches the server before the additive provider-column migration.
+     * Once migrated, provider_key/authentication_code/provider_delivery_state are
+     * kept as normal.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function deliveryMarkPayload(array $payload): array
+    {
+        static $columns = null;
+
+        $columns ??= array_flip(Schema::getColumnListing('delivery_marks'));
+
+        return array_intersect_key($payload, $columns);
     }
 
     // ---- internals ------------------------------------------------------

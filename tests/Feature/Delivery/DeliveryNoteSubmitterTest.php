@@ -291,6 +291,35 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('active', $fresh->local_status);
     }
 
+    public function test_provider_rejection_is_visible_in_delivery_history_with_request_and_response(): void
+    {
+        config()->set('ekdosi.einvoice.providers.fake-rejecting-delivery', FakeRejectingDeliveryProviderTransport::class);
+
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'fake-rejecting-delivery',
+            'einvoice_provider_mode' => 'sandbox',
+            'einvoice_provider_config' => ['demo_base_url' => 'https://provider.test', 'demo_token' => 'tok'],
+            'mydata_mode' => 'off',
+        ])->save();
+
+        $note = $this->makeNote();
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant->fresh()))->submit($note);
+            $this->fail('expected provider rejection');
+        } catch (DeliveryNoteRejected $e) {
+            $this->assertStringContainsString('[88-004]', $e->getMessage());
+        }
+
+        $row = DeliveryMark::where('delivery_note_id', $note->id)->where('mydata_action', 'PROVIDER_REJECTED')->first();
+        $this->assertNotNull($row);
+        $this->assertSame('fake-rejecting-delivery', $row->provider_key);
+        $this->assertStringContainsString('<invoiceType>9.3</invoiceType>', (string) $row->request);
+        $this->assertStringContainsString('Missing or wrong xmlns:n1', (string) $row->response);
+        $this->assertNull($note->fresh()->mydata_state);
+    }
+
     public function test_rejected_submission_persists_rejected_row_and_throws(): void
     {
         $note = $this->makeNote();
@@ -393,6 +422,44 @@ class FakeDeliveryProviderTransport implements EInvoiceProviderTransport
     public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult
     {
         return ProviderResult::ok(cancellationMark: '400000000000778');
+    }
+
+    public function status(Invoice $invoice, ProviderCredentials $credentials): ProviderResult
+    {
+        return ProviderResult::ok(mark: '400000000000777');
+    }
+
+    public function ping(ProviderCredentials $credentials): bool
+    {
+        return true;
+    }
+}
+
+/** Rejecting provider fake for delivery-note history/debugging coverage. */
+class FakeRejectingDeliveryProviderTransport implements EInvoiceProviderTransport
+{
+    public function key(): string
+    {
+        return 'fake-rejecting-delivery';
+    }
+
+    public function send(Invoice $invoice, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        return ProviderResult::failed(['not used in this delivery test']);
+    }
+
+    public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult
+    {
+        return ProviderResult::failed(
+            ['[88-004] Missing or wrong xmlns:n1'],
+            '<ResponseDoc><response><statusCode>ValidationError</statusCode><errors><error><code>88-004</code><message>Missing or wrong xmlns:n1</message></error></errors></response></ResponseDoc>',
+            $documentXml,
+        );
+    }
+
+    public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult
+    {
+        return ProviderResult::ok(cancellationMark: '400000000000779');
     }
 
     public function status(Invoice $invoice, ProviderCredentials $credentials): ProviderResult
