@@ -6,6 +6,8 @@ use App\Filament\Pages\ActivityFeed;
 use App\Models\Activity;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\DeliveryNote;
+use App\Models\InvoiceType;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
 use Filament\Facades\Filament;
@@ -67,6 +69,36 @@ class ActivityFeedTest extends TestCase
             ->call('loadTable') // the page defers loading (wire:init="loadTable")
             ->assertCanSeeTableRecords(Activity::where('company_id', $a->id)->get())
             ->assertCanNotSeeTableRecords(Activity::where('company_id', $b->id)->get());
+    }
+
+    public function test_feed_includes_delivery_notes_with_greek_label(): void
+    {
+        Gate::before(fn () => true);
+        $company = $this->company('dn-feed');
+        $this->actingAs(User::create(['name' => 'U', 'email' => 'u-'.uniqid().'@t.local', 'password' => bcrypt('x')]));
+        Filament::setTenant($company);
+
+        $type = InvoiceType::create([
+            'company_id' => $company->id, 'code' => 'ΔΑΠ', 'name' => 'Δελτίο Αποστολής',
+            'mydata_type' => '9.3', 'invcount' => 1,
+        ]);
+        DeliveryNote::create([
+            'company_id' => $company->id, 'invcode' => 'ΔΑΠ1', 'code' => 1,
+            'delivery_type_id' => $type->id, 'issued_at' => now(), 'mydata_type' => '9.3',
+            'move_purpose' => 8, 'local_status' => 'draft',
+            'recipient_name' => 'Παραλήπτης', 'recipient_afm' => '123456789',
+        ]);
+
+        // The created delivery note produced an audit row with the Greek label.
+        $activity = Activity::query()->where('subject_type', DeliveryNote::class)->latest('id')->first();
+        $this->assertNotNull($activity);
+        $this->assertSame('Δελτίο Αποστολής', $activity->subjectLabel());
+
+        Livewire::test(ActivityFeed::class)
+            ->assertSuccessful()
+            ->call('loadTable')
+            ->assertCanSeeTableRecords(Activity::where('company_id', $company->id)->get())
+            ->assertSee('Δελτίο Αποστολής');
     }
 
     public function test_access_is_admin_gated(): void

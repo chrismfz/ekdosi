@@ -34,10 +34,13 @@ class DeliveryNote extends Model
     use TracksActivity;
 
     /**
-     * Business columns worth auditing — never the money-less doc's churn. The
-     * lifecycle/myDATA state columns ARE logged (delivery_state / mydata_state /
-     * mydata_mark): each transition is a meaningful event, and logOnlyDirty +
-     * dontLogEmptyChanges keep cache-only/no-op writes out of the trail.
+     * Business columns worth auditing — never the money-less doc's churn. We log
+     * mydata_state/mydata_mark (set once on issue/cancel — meaningful events, as
+     * on Invoice) but NOT delivery_state: that column is re-forceFilled on every
+     * AADE status poll (DeliveryLifecycleService::refreshStatus), so logging it
+     * would spam «Ιστορικό» with sync flips — exactly the cache-column churn the
+     * TracksActivity house rule excludes. Each lifecycle transition is already
+     * captured as its own DeliveryMark row.
      *
      * @return list<string>
      */
@@ -46,7 +49,6 @@ class DeliveryNote extends Model
         return [
             'code', 'customer_id', 'delivery_type_id', 'invoice_id', 'issued_at',
             'move_purpose', 'local_status', 'mydata_state', 'mydata_mark',
-            'delivery_state',
         ];
     }
 

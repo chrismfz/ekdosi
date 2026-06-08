@@ -28,7 +28,10 @@ they merge.
   document binding**: a δελτίο shows «Σχετιζόμενα → αφορά την πώληση (ΤΠΥxxxx)» and
   the invoice shows «Δελτία αποστολής → ΔΑΠy» (via the existing
   `delivery_notes.invoice_id`), the delivery analogue of the credit-note↔invoice
-  link. (Lifecycle completeness — Reject, event-history timeline — and the
+  link. Delivery-note changes also surface in the tenant «Δραστηριότητα» feed
+  (Greek label + link + filter); `delivery_state` is intentionally NOT audited
+  (poll-churned cache column). (Lifecycle completeness — Reject, event-history
+  timeline — and the
   correlated/aggregate/quantitative types 9.1/9.2/10.x are separate phases pending
   sandbox + the AADE Ψηφιακό-ΔΑ spec.)
 - **Invoice-type classification: smarter hint + one-click apply.** The

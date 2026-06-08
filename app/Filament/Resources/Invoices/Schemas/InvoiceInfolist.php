@@ -238,7 +238,7 @@ class InvoiceInfolist
                                 : null)
                             ->color('primary')
                             ->helperText('Η διακίνηση των ειδών αυτού του παραστατικού.')
-                            ->visible(fn ($record) => $record->deliveryNotes()->exists()),
+                            ->visible(fn ($record) => $record->deliveryNotes->isNotEmpty()),
                     ])
                     ->columns(2),
 

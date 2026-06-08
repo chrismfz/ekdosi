@@ -53,6 +53,7 @@ class Activity extends SpatieActivity
             Customer::class => 'Πελάτης',
             Payment::class => 'Πληρωμή',
             ServiceContract::class => 'Υπηρεσία',
+            DeliveryNote::class => 'Δελτίο Αποστολής',
             default => class_basename((string) $this->subject_type),
         };
     }
