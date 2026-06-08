@@ -76,7 +76,16 @@ class MyDataLookupSeederTest extends TestCase
         $tenant = $this->tenant();
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(8, $r['created']);
+        $this->assertSame(15, $r['created']);
+
+        // Cross-border SERVICES twins exist (2.2/2.3) — not just the goods ones.
+        $eny = InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '2.2')->first();
+        $this->assertNotNull($eny);
+        $this->assertSame('E3_561_005', $eny->mydata_income_class);
+        $this->assertSame('category1_3', $eny->mydata_income_class_category);
+        // Correlated + aggregate delivery notes exist (9.1/9.2), no income class.
+        $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '9.1')->first());
+        $this->assertNull(InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '9.2')->value('mydata_income_class'));
 
         // The "κόψε εμπόρευμα" case exists now: 1.1 Τιμολόγιο Πώλησης, goods.
         $goods = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
@@ -128,7 +137,7 @@ class MyDataLookupSeederTest extends TestCase
         InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΠΥ', 'name' => 'Δικό μου', 'invcount' => 50, 'mydata_type' => '2.1']);
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(7, $r['created']);    // all but ΤΠΥ
+        $this->assertSame(14, $r['created']);    // all but the existing ΤΠΥ
         $this->assertSame(1, $r['filled']);     // ΤΠΥ income chain back-filled (type matches)
         $this->assertSame(0, $r['skipped']);
 
@@ -210,8 +219,8 @@ class MyDataLookupSeederTest extends TestCase
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
 
-        // ΤΙΜ was filled (not skipped); the other 7 are created.
-        $this->assertSame(7, $r['created']);
+        // ΤΙΜ was filled (not skipped); the other 14 are created.
+        $this->assertSame(14, $r['created']);
         $this->assertSame(1, $r['filled']);
         $this->assertSame(0, $r['skipped']);
 

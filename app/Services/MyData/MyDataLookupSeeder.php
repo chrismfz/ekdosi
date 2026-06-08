@@ -348,14 +348,26 @@ class MyDataLookupSeeder
         ['code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο Πώλησης', 'mydata_type' => '1.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_1', 'goods' => true],
         ['code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο Πώλησης / Δελτίο Αποστολής', 'mydata_type' => '1.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_1', 'goods' => true],
         ['code' => 'ΕΝΔ', 'name' => 'Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις', 'mydata_type' => '1.2', 'income_class' => 'E3_561_005', 'income_class_category' => 'category1_1', 'goods' => true],
+        // Goods export to third countries (the non-EU twin of ΕΝΔ).
+        ['code' => 'ΕΞΑ', 'name' => 'Τιμολόγιο Πώλησης / Παραδόσεις Τρίτων Χωρών', 'mydata_type' => '1.3', 'income_class' => 'E3_561_005', 'income_class_category' => 'category1_1', 'goods' => true],
         // Services.
         ['code' => 'ΤΠΥ', 'name' => 'Τιμολόγιο Παροχής Υπηρεσιών', 'mydata_type' => '2.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_3'],
+        // Cross-border services — the SERVICES twins of ΕΝΔ/ΕΞΑ (reverse-charge;
+        // E3_561_005 = εξωτερικού, category1_3 = παροχή υπηρεσιών).
+        ['code' => 'ΕΝΥ', 'name' => 'Τιμολόγιο Παροχής / Ενδοκοινοτική Παροχή Υπηρεσιών', 'mydata_type' => '2.2', 'income_class' => 'E3_561_005', 'income_class_category' => 'category1_3'],
+        ['code' => 'ΥΤΧ', 'name' => 'Τιμολόγιο Παροχής / Παροχή σε λήπτη Τρίτης Χώρας', 'mydata_type' => '2.3', 'income_class' => 'E3_561_005', 'income_class_category' => 'category1_3'],
         // Retail.
         ['code' => 'ΑΛΠ', 'name' => 'Απόδειξη Λιανικής Πώλησης', 'mydata_type' => '11.1', 'income_class' => 'E3_561_003', 'income_class_category' => 'category1_1', 'goods' => true],
         ['code' => 'ΑΠΥ', 'name' => 'Απόδειξη Παροχής Υπηρεσιών', 'mydata_type' => '11.2', 'income_class' => 'E3_561_003', 'income_class_category' => 'category1_3'],
         // Credit (mirrors the reduced revenue — services default, see docblock).
         ['code' => 'ΠΙΣ', 'name' => 'Πιστωτικό Τιμολόγιο / Συσχετιζόμενο', 'mydata_type' => '5.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_3', 'is_credit' => true],
-        // Delivery note — NO income classification (no revenue).
+        ['code' => 'ΠΙΜ', 'name' => 'Πιστωτικό Τιμολόγιο / Μη Συσχετιζόμενο', 'mydata_type' => '5.2', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_3', 'is_credit' => true],
+        // Retail credit note (reduces λιανικές — E3_561_003).
+        ['code' => 'ΠΙΛ', 'name' => 'Πιστωτικό Στοιχείο Λιανικής', 'mydata_type' => '11.4', 'income_class' => 'E3_561_003', 'income_class_category' => 'category1_3', 'is_credit' => true],
+        // Delivery notes — NO income classification (no revenue). 9.3 standalone,
+        // 9.1 correlated (links to an invoice), 9.2 aggregate.
         ['code' => 'ΔΑΠ', 'name' => 'Δελτίο Αποστολής', 'mydata_type' => '9.3', 'goods' => true],
+        ['code' => 'ΔΑΣ', 'name' => 'Δελτίο Αποστολής Συσχετιζόμενο', 'mydata_type' => '9.1', 'goods' => true],
+        ['code' => 'ΣΔΑ', 'name' => 'Συγκεντρωτικό Δελτίο Αποστολής', 'mydata_type' => '9.2', 'goods' => true],
     ];
 }

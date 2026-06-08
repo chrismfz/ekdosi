@@ -17,6 +17,18 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Invoice-type starter seed extended (7 new §8.1 series).** `MyDataLookupSeeder`
+  now also seeds the cross-border SERVICES twins of the goods series it already
+  had — **2.2** (ΕΝΥ, ενδοκοινοτική παροχή υπηρεσιών) + **2.3** (ΥΤΧ, παροχή σε
+  τρίτη χώρα), both `E3_561_005`/`category1_3` reverse-charge — plus **1.3** (ΕΞΑ,
+  εξαγωγή αγαθών γ’ χωρών), **5.2** (ΠΙΜ, μη συσχετιζόμενο πιστωτικό), **11.4**
+  (ΠΙΛ, πιστωτικό λιανικής), and the two missing delivery-note kinds **9.1** (ΔΑΣ,
+  συσχετιζόμενο) + **9.2** (ΣΔΑ, συγκεντρωτικό). Closes the gap where only the
+  goods side of EU/foreign sales had a ready series. Idempotent fill-empty —
+  existing tenants get them by re-running the «Δημιουργία τυπικών σειρών» action
+  in Setup → Invoice Types (operator edits/counters untouched). The §8.1 code
+  table + the form dropdown already knew every type; this only pre-creates the
+  common ones.
 - **«Ακύρωση μέσω πιστωτικού» + visible ΤΠΥ↔ΠΙΣ binding.** On a provider-filed
   (VALID, non-9.3) invoice the «δεν υποστηρίζεται» info popup became an actionable
   button: its modal explains *why* there's no provider cancel (the help text) and,
