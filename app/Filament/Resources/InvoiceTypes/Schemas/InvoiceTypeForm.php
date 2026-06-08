@@ -13,6 +13,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
@@ -117,6 +118,23 @@ class InvoiceTypeForm
                                                 if ($s['income_class_category'] !== null && blank($get('mydata_income_class_category'))) {
                                                     $set('mydata_income_class_category', $s['income_class_category']);
                                                 }
+                                                // Goods types carry a per-line quantity at filing (G5/[205]) —
+                                                // match what the seeder sets, so a code created via one-click
+                                                // behaves the same as the seeded series.
+                                                if ($s['goods']) {
+                                                    $set('mydata_requires_quantity', true);
+                                                }
+
+                                                // Cue the operator when the type has no safe income default
+                                                // (delivery notes, τίτλος κτήσης, ενοίκια…) so a blank income
+                                                // line doesn't slip through to a rejection at filing.
+                                                Notification::make()
+                                                    ->title('Εφαρμόστηκε ο τύπος '.$s['code'])
+                                                    ->body($s['income_class'] === null
+                                                        ? 'Ορίστε χειροκίνητα την κατηγορία εσόδου (δεν υπάρχει ασφαλής προεπιλογή για αυτόν τον τύπο).'
+                                                        : 'Συμπληρώθηκε και η κατηγορία εσόδου.')
+                                                    ->success()
+                                                    ->send();
                                             }),
                                     ),
 

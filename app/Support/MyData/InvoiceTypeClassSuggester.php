@@ -17,33 +17,7 @@ namespace App\Support\MyData;
 final class InvoiceTypeClassSuggester
 {
     /**
-     * Canonical income-classification chain (E3 type + per-rate category) per
-     * §8.1 code, for the issuing types where a single default is unambiguous —
-     * matches MyDataLookupSeeder's by-the-book seed so a suggestion and the
-     * starter seed never disagree. Types with no safe default (delivery notes,
-     * τίτλος κτήσης, αυτοπαράδοση, ενοίκια/συμβόλαια — specialised E3 lines) are
-     * absent → the suggestion carries the TYPE only and the operator picks the
-     * income line.
-     *
-     * @var array<string, array{0: string, 1: string}>
-     */
-    private const INCOME_CHAIN = [
-        '1.1' => ['E3_561_001', 'category1_1'],
-        '1.2' => ['E3_561_005', 'category1_1'],
-        '1.3' => ['E3_561_005', 'category1_1'],
-        '2.1' => ['E3_561_001', 'category1_3'],
-        '2.2' => ['E3_561_005', 'category1_3'],
-        '2.3' => ['E3_561_005', 'category1_3'],
-        '5.1' => ['E3_561_001', 'category1_3'],
-        '5.2' => ['E3_561_001', 'category1_3'],
-        '11.1' => ['E3_561_003', 'category1_1'],
-        '11.2' => ['E3_561_003', 'category1_3'],
-        '11.3' => ['E3_561_003', 'category1_3'],
-        '11.4' => ['E3_561_003', 'category1_3'],
-    ];
-
-    /**
-     * @return array{code: string, label: string, income_class: ?string, income_class_category: ?string}|null
+     * @return array{code: string, label: string, income_class: ?string, income_class_category: ?string, goods: bool}|null
      */
     public static function suggest(string $name, bool $isCredit = false, bool $isReturn = false): ?array
     {
@@ -146,17 +120,21 @@ final class InvoiceTypeClassSuggester
     }
 
     /**
-     * @return array{code: string, label: string, income_class: ?string, income_class_category: ?string}
+     * @return array{code: string, label: string, income_class: ?string, income_class_category: ?string, goods: bool}
      */
     private static function hit(string $code): array
     {
-        [$incomeClass, $incomeCategory] = self::INCOME_CHAIN[$code] ?? [null, null];
+        // Classification defaults come from the ONE canonical source (Codes),
+        // shared with the seeder — the suggestion and the starter seed can't
+        // disagree on what a code means.
+        $defaults = Codes::typeDefaults($code);
 
         return [
             'code' => $code,
             'label' => Codes::INVOICE_TYPES[$code] ?? $code,
-            'income_class' => $incomeClass,
-            'income_class_category' => $incomeCategory,
+            'income_class' => $defaults['income'],
+            'income_class_category' => $defaults['category'],
+            'goods' => $defaults['goods'],
         ];
     }
 

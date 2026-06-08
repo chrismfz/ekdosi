@@ -57,6 +57,22 @@ class InvoiceTypeSuggestionActionTest extends TestCase
             ]);
     }
 
+    public function test_one_click_sets_goods_quantity_flag(): void
+    {
+        $this->boot();
+
+        // A goods type (1.1) created via one-click must carry the G5 per-line
+        // quantity flag, same as the seeded series — else the goods invoice
+        // files with no <quantity> and AADE rejects it ([205]).
+        Livewire::test(CreateInvoiceType::class)
+            ->fillForm(['name' => 'Τιμολόγιο πώλησης εμπορευμάτων'])
+            ->callFormComponentAction('mydata_type', 'applyTypeSuggestion')
+            ->assertFormSet([
+                'mydata_type' => '1.1',
+                'mydata_requires_quantity' => true,
+            ]);
+    }
+
     public function test_one_click_does_not_overwrite_operator_income_pick(): void
     {
         $this->boot();

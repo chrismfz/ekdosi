@@ -79,6 +79,14 @@ class InvoiceTypeClassSuggesterTest extends TestCase
         $this->assertSame('10.1', InvoiceTypeClassSuggester::suggest('Δελτίο Ποσοτικής Παραλαβής Συσχετιζόμενο')['code']);
     }
 
+    public function test_goods_flag_is_carried(): void
+    {
+        // Goods types (G5/[205] per-line quantity) vs services / delivery.
+        $this->assertTrue(InvoiceTypeClassSuggester::suggest('Τιμολόγιο πώλησης')['goods']);        // 1.1
+        $this->assertTrue(InvoiceTypeClassSuggester::suggest('Δελτίο Αποστολής')['goods']);          // 9.3
+        $this->assertFalse(InvoiceTypeClassSuggester::suggest('Τιμολόγιο Παροχής Υπηρεσιών')['goods']); // 2.1
+    }
+
     public function test_income_chain_is_carried_for_classifiable_types(): void
     {
         // Cross-border services twin → εξωτερικού + υπηρεσίες, matching the seed.

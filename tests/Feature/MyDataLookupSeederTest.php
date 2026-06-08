@@ -11,6 +11,7 @@ use App\Models\PaymentMethod;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\MyData\MyDataLookupSeeder;
+use App\Support\MyData\Codes;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -95,6 +96,22 @@ class MyDataLookupSeederTest extends TestCase
         // Credit type flagged; service type present.
         $this->assertTrue((bool) InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '5.1')->value('is_credit'));
         $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->first());
+    }
+
+    public function test_seeded_rows_match_the_canonical_type_defaults(): void
+    {
+        // Guards the single-source wiring: every seeded series' classification
+        // must equal Codes::typeDefaults() for its §8.1 type, so the seeder and
+        // the suggester's one-click apply can never drift.
+        $tenant = $this->tenant();
+        $this->svc()->seedInvoiceTypes($tenant);
+
+        foreach (InvoiceType::where('company_id', $tenant->id)->get() as $it) {
+            $d = Codes::typeDefaults((string) $it->mydata_type);
+            $this->assertSame($d['income'], $it->mydata_income_class, "income for {$it->code} ({$it->mydata_type})");
+            $this->assertSame($d['category'], $it->mydata_income_class_category, "category for {$it->code}");
+            $this->assertSame($d['goods'], (bool) $it->mydata_requires_quantity, "goods flag for {$it->code}");
+        }
     }
 
     public function test_seeds_invoice_types_pre_classified_by_the_book(): void

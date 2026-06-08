@@ -85,6 +85,56 @@ final class Codes
     ];
 
     /**
+     * Recommended default classification per §8.1 ISSUING type — the SINGLE
+     * source consumed by BOTH the by-the-book starter seed
+     * (MyDataLookupSeeder::seedInvoiceTypes) AND the name-based one-click apply
+     * (InvoiceTypeClassSuggester), so the two write paths can never disagree on
+     * what a code means (a divergence would be a silent legal-filing bug).
+     *
+     * Per code: the income-classification chain (E3 type + per-rate category;
+     * null where there is no single safe default — delivery notes carry no
+     * revenue, and τίτλος κτήσης / αυτοπαράδοση / ενοίκια / συμβόλαια use
+     * specialised E3 lines the operator picks) and `goods` (= the §8.1 type
+     * carries a per-line quantity at filing, G5 / error [205]).
+     *
+     * @var array<string, array{income: ?string, category: ?string, goods: bool}>
+     */
+    public const TYPE_DEFAULTS = [
+        '1.1' => ['income' => 'E3_561_001', 'category' => 'category1_1', 'goods' => true],
+        '1.2' => ['income' => 'E3_561_005', 'category' => 'category1_1', 'goods' => true],
+        '1.3' => ['income' => 'E3_561_005', 'category' => 'category1_1', 'goods' => true],
+        '2.1' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
+        '2.2' => ['income' => 'E3_561_005', 'category' => 'category1_3', 'goods' => false],
+        '2.3' => ['income' => 'E3_561_005', 'category' => 'category1_3', 'goods' => false],
+        '3.1' => ['income' => null, 'category' => null, 'goods' => false],
+        '5.1' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
+        '5.2' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
+        '6.1' => ['income' => null, 'category' => null, 'goods' => false],
+        '6.2' => ['income' => null, 'category' => null, 'goods' => false],
+        '7.1' => ['income' => null, 'category' => null, 'goods' => false],
+        '8.1' => ['income' => null, 'category' => null, 'goods' => false],
+        '9.1' => ['income' => null, 'category' => null, 'goods' => true],
+        '9.2' => ['income' => null, 'category' => null, 'goods' => true],
+        '9.3' => ['income' => null, 'category' => null, 'goods' => true],
+        '10.1' => ['income' => null, 'category' => null, 'goods' => true],
+        '10.2' => ['income' => null, 'category' => null, 'goods' => true],
+        '11.1' => ['income' => 'E3_561_003', 'category' => 'category1_1', 'goods' => true],
+        '11.2' => ['income' => 'E3_561_003', 'category' => 'category1_3', 'goods' => false],
+        '11.3' => ['income' => 'E3_561_003', 'category' => 'category1_3', 'goods' => false],
+        '11.4' => ['income' => 'E3_561_003', 'category' => 'category1_3', 'goods' => false],
+    ];
+
+    /**
+     * Default classification for a §8.1 code (all-null / not-goods when unknown).
+     *
+     * @return array{income: ?string, category: ?string, goods: bool}
+     */
+    public static function typeDefaults(string $code): array
+    {
+        return self::TYPE_DEFAULTS[$code] ?? ['income' => null, 'category' => null, 'goods' => false];
+    }
+
+    /**
      * Invoice-type prefixes that an issuing entity files as INCOME and
      * which therefore require an income classification (errors [230]).
      * Expense/receiver types (13.x, 14.x, 15.x, 16.x) and settlement
