@@ -4,11 +4,14 @@ namespace Tests\Feature\Delivery;
 
 use App\Filament\Resources\DeliveryNotes\Pages\CreateDeliveryNote;
 use App\Filament\Resources\DeliveryNotes\Pages\ViewDeliveryNote;
+use App\Filament\Resources\DeliveryNotes\RelationManagers\LinesRelationManager;
 use App\Filament\Resources\DeliveryNotes\Schemas\DeliveryNoteForm;
+use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Supplier;
 use App\Models\User;
@@ -215,6 +218,69 @@ class DeliveryNoteResourceTest extends TestCase
 
         Livewire::test(ViewDeliveryNote::class, ['record' => $draft->fresh()->getKey()])
             ->assertActionHidden('issue');
+    }
+
+    public function test_view_page_renders_with_invoice_parity_sections(): void
+    {
+        $draft = $this->makeDraft();
+
+        Livewire::test(ViewDeliveryNote::class, ['record' => $draft->getKey()])
+            ->assertSuccessful()
+            ->assertSee('myDATA / Πάροχος')
+            ->assertSee('Κατάσταση διακίνησης (lifecycle)')
+            ->assertSee('Παρατηρήσεις (εκτύπωσης)');
+    }
+
+    public function test_lines_relation_manager_is_editable_only_while_draft(): void
+    {
+        $draft = $this->makeDraft();
+
+        // Draft → operator can add lines (the create header action shows).
+        Livewire::test(LinesRelationManager::class, [
+            'ownerRecord' => $draft,
+            'pageClass' => ViewDeliveryNote::class,
+        ])->assertTableActionVisible('create');
+
+        // Filed (frozen on the MARK) → editing actions hide.
+        $draft->forceFill([
+            'mydata_state' => 'VALID',
+            'mydata_mark' => '480301204040191',
+            'local_status' => 'active',
+        ])->save();
+
+        Livewire::test(LinesRelationManager::class, [
+            'ownerRecord' => $draft->fresh(),
+            'pageClass' => ViewDeliveryNote::class,
+        ])->assertTableActionHidden('create');
+    }
+
+    public function test_delivery_note_binds_to_its_sale_invoice_on_both_sides(): void
+    {
+        $saleType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΤΠΥ', 'name' => 'Τιμολόγιο Παροχής',
+            'mydata_type' => '2.1', 'invcount' => 1,
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->recipient->id,
+            'invoice_type_id' => $saleType->id, 'invcode' => 'ΤΠΥ7', 'code' => 7,
+            'issued_at' => now(), 'net_total' => 100, 'gross_total' => 124,
+            'local_status' => 'active',
+        ]);
+
+        $note = $this->makeDraft();
+        $note->forceFill(['invoice_id' => $invoice->id])->save();
+
+        // Delivery side shows the linked sale invoice.
+        Livewire::test(ViewDeliveryNote::class, ['record' => $note->getKey()])
+            ->assertSuccessful()
+            ->assertSee('Σχετιζόμενα παραστατικά')
+            ->assertSee('ΤΠΥ7');
+
+        // Invoice side shows the delivery note that dispatches it.
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getKey()])
+            ->assertSuccessful()
+            ->assertSee('Δελτία αποστολής')
+            ->assertSee('ΔΑΠ1');
     }
 
     public function test_submit_flips_draft_to_valid_and_writes_delivery_mark(): void

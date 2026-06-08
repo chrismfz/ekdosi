@@ -17,6 +17,20 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Παραστατικά Διακίνησης — invoice-grade View + end-to-end binding (Φάση 1+2).**
+  The delivery-note view now mirrors the invoice: a «myDATA / Πάροχος» card (state/
+  MARK/QR + provider key & authentication code), a delivery «Lifecycle» card (§8.22
+  state + the RegisterTransfer/ConfirmDeliveryOutcome/Reject marks), print remarks,
+  and the bottom relation-manager tabs — **Γραμμές** (now an editable-while-draft
+  RelationManager), **Ιστορικό υποβολών** (DeliveryMarks), **Σημειώσεις**,
+  **Συνημμένα**, **Ιστορικό** — wired by giving `DeliveryNote` the polymorphic
+  `HasInternalNotes`/`HasAttachments`/`TracksActivity` concerns. **Two-way related-
+  document binding**: a δελτίο shows «Σχετιζόμενα → αφορά την πώληση (ΤΠΥxxxx)» and
+  the invoice shows «Δελτία αποστολής → ΔΑΠy» (via the existing
+  `delivery_notes.invoice_id`), the delivery analogue of the credit-note↔invoice
+  link. (Lifecycle completeness — Reject, event-history timeline — and the
+  correlated/aggregate/quantitative types 9.1/9.2/10.x are separate phases pending
+  sandbox + the AADE Ψηφιακό-ΔΑ spec.)
 - **Invoice-type classification: smarter hint + one-click apply.** The
   `InvoiceTypeClassSuggester` (the name-based §8.1 guess shown as the list badge +
   form helper) now covers the long tail it missed — 5.2 (μη συσχετιζόμενο),

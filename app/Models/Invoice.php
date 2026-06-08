@@ -261,6 +261,12 @@ class Invoice extends Model
         return $this->belongsTo(self::class, 'credited_invoice_id');
     }
 
+    /** Delivery notes (δελτία αποστολής) that dispatch this sale (delivery_notes.invoice_id → this). */
+    public function deliveryNotes(): HasMany
+    {
+        return $this->hasMany(DeliveryNote::class, 'invoice_id');
+    }
+
     /**
      * Fully reversed by credit note(s): an original (not itself a credit) whose
      * credited_total has reached its gross. This is the «ακυρώθηκε με πιστωτικό»

@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasAttachments;
+use App\Models\Concerns\HasInternalNotes;
+use App\Models\Concerns\TracksActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -24,8 +27,28 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class DeliveryNote extends Model
 {
     use BelongsToCompany;
+    use HasAttachments;
     use HasFactory;
+    use HasInternalNotes;
     use SoftDeletes;
+    use TracksActivity;
+
+    /**
+     * Business columns worth auditing — never the money-less doc's churn. The
+     * lifecycle/myDATA state columns ARE logged (delivery_state / mydata_state /
+     * mydata_mark): each transition is a meaningful event, and logOnlyDirty +
+     * dontLogEmptyChanges keep cache-only/no-op writes out of the trail.
+     *
+     * @return list<string>
+     */
+    protected function loggedAttributes(): array
+    {
+        return [
+            'code', 'customer_id', 'delivery_type_id', 'invoice_id', 'issued_at',
+            'move_purpose', 'local_status', 'mydata_state', 'mydata_mark',
+            'delivery_state',
+        ];
+    }
 
     protected $fillable = [
         'company_id',

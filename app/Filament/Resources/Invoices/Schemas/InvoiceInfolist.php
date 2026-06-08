@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Schemas;
 
 use App\Filament\Pages\MyDataMarkDetail;
+use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
@@ -175,7 +176,8 @@ class InvoiceInfolist
                 Section::make('Σχετικά παραστατικά')
                     ->icon('heroicon-o-link')
                     ->visible(fn ($record) => $record->credited_invoice_id !== null
-                        || $record->creditNotes()->exists())
+                        || $record->creditNotes()->exists()
+                        || $record->deliveryNotes()->exists())
                     ->schema([
                         // Prominent «cancelled» badge for a fully-reversed original
                         // (credited_total reached gross) — the credit-note equivalent
@@ -220,6 +222,23 @@ class InvoiceInfolist
                             ->color('primary')
                             ->helperText('Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.')
                             ->visible(fn ($record) => $record->creditNotes()->exists()),
+
+                        // The delivery side of the end-to-end link: δελτία αποστολής
+                        // that dispatch this sale (delivery_notes.invoice_id → this).
+                        TextEntry::make('delivery_notes')
+                            ->label('Δελτία αποστολής')
+                            ->state(fn ($record) => $record->deliveryNotes->pluck('invcode')->all())
+                            ->listWithLineBreaks()
+                            ->bulleted()
+                            ->url(fn ($record) => $record->deliveryNotes->count() === 1
+                                ? DeliveryNoteResource::getUrl('view', [
+                                    'record' => $record->deliveryNotes->first(),
+                                    'tenant' => $record->company,
+                                ])
+                                : null)
+                            ->color('primary')
+                            ->helperText('Η διακίνηση των ειδών αυτού του παραστατικού.')
+                            ->visible(fn ($record) => $record->deliveryNotes()->exists()),
                     ])
                     ->columns(2),
 
