@@ -100,15 +100,13 @@ if (config('ekdosi.schedule.whmcs_auto_issue_enabled')) {
 }
 
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
-// per Greek / non-Off tenant. Discrepancies surface in the command output
-// (exit 2); pipe schedule output to a log for alerting.
+// per myDATA-readable tenant (direct gr-mydata OR a provider reading its own
+// AADE picture back). Discrepancies surface in the command output (exit 2);
+// pipe schedule output to a log for alerting.
 if (config('ekdosi.schedule.mydata_reconcile_enabled')) {
     $trackSchedule(
         Schedule::call(function () {
-            Company::query()
-                ->where('einvoice_provider', 'gr-mydata')
-                ->where('mydata_mode', '!=', 'off')
-                ->get()
+            Company::myDataReadable()
                 ->each(fn (Company $c) => Artisan::call('mydata:reconcile-sales', ['--tenant' => $c->slug]));
         })
             ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))

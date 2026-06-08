@@ -30,22 +30,35 @@ class FirebedCredentials
      */
     public static function init(Company $tenant, callable|object|null $handler = null): void
     {
-        if ($tenant->einvoice_provider !== 'gr-mydata') {
+        // READ access: both direct-myDATA (gr-mydata) AND provider (gr-provider)
+        // tenants read their own picture from AADE — the provider only changes
+        // who SUBMITS, not who can read the tenant's own ΑΦΜ documents back.
+        // (Submission stays gr-mydata-only via the EInvoiceSubmitter factory +
+        // MyDataSubmitter, which prime firebed's credentials directly — not here.)
+        // mydataReadMode() resolves the right environment for either channel:
+        // for gr-mydata it's the submission mode; for a provider (whose
+        // mydata_mode is 'off') it's the populated credential slot.
+        if (! in_array($tenant->einvoice_provider, ['gr-mydata', 'gr-provider'], true)) {
             throw new RuntimeException(
-                'Η λειτουργία myDATA είναι διαθέσιμη μόνο για ελληνικούς (gr-mydata) μισθωτές.'
+                'Η ανάγνωση από myDATA είναι διαθέσιμη μόνο για ελληνικούς μισθωτές (gr-mydata ή πάροχος).'
             );
         }
 
-        if ($tenant->mydata_mode_enum === MyDataMode::Off) {
+        $mode = $tenant->mydataReadMode();
+
+        if ($mode === null) {
+            // gr-mydata with mode Off, or a provider with no read credentials.
             throw new RuntimeException(
-                'Η λειτουργία myDATA είναι απενεργοποιημένη (Off) για αυτόν τον μισθωτή.'
+                $tenant->einvoice_provider === 'gr-mydata'
+                    ? 'Η λειτουργία myDATA είναι απενεργοποιημένη (Off) για αυτόν τον μισθωτή.'
+                    : 'Δεν έχουν οριστεί διαπιστευτήρια ανάγνωσης myDATA για αυτόν τον πάροχο-μισθωτή.'
             );
         }
 
         try {
-            // Credentials for the tenant's CURRENT mode (sandbox vs
+            // Credentials for the resolved READ environment (sandbox vs
             // production slot); the subscription key is decrypted by cast.
-            [$aadeId, $subKey] = $tenant->mydataCredentials();
+            [$aadeId, $subKey] = $tenant->mydataCredentials($mode);
         } catch (DecryptException) {
             throw new RuntimeException(
                 'Αδυναμία αποκρυπτογράφησης των διαπιστευτηρίων myDATA (πιθανή εναλλαγή APP_KEY).'
@@ -55,11 +68,11 @@ class FirebedCredentials
         if (empty($aadeId) || empty($subKey)) {
             throw new RuntimeException(
                 'Δεν έχουν οριστεί διαπιστευτήρια myDATA για αυτόν τον μισθωτή '.
-                'στο περιβάλλον '.$tenant->mydata_mode_enum->value.'.'
+                'στο περιβάλλον '.$mode->value.'.'
             );
         }
 
-        $env = $tenant->mydata_mode_enum === MyDataMode::Production ? 'prod' : 'dev';
+        $env = $mode === MyDataMode::Production ? 'prod' : 'dev';
 
         MyDataRequest::init($aadeId, $subKey, $env);
         MyDataRequest::setHandler($handler);

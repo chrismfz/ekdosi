@@ -21,7 +21,9 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
  * load. Until the first refresh the cards prompt to sync. The "ενημερώθηκε…"
  * line surfaces snapshot staleness.
  *
- * gr-mydata tenants only.
+ * Any tenant that can READ from myDATA — direct gr-mydata OR a gr-provider
+ * tenant reading its own AADE picture with its own subscription (the provider
+ * only files; the documents are still the tenant's).
  */
 class MyDataPictureStats extends StatsOverviewWidget
 {
@@ -33,7 +35,7 @@ class MyDataPictureStats extends StatsOverviewWidget
 
     public static function canView(): bool
     {
-        return Filament::getTenant()?->einvoice_provider === 'gr-mydata';
+        return (bool) Filament::getTenant()?->canReadMyData();
     }
 
     protected function getStats(): array

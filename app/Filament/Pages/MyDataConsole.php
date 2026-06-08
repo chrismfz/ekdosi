@@ -110,14 +110,15 @@ class MyDataConsole extends Page
      * territory: gated on View:MyDataConsole, which company_admin (all perms) and
      * super_admin (Gate::before) hold but operators don't. Gate::can is
      * 404-storm-safe (missing permission → false, not a throw). The tenant must
-     * still be a live (Greek, non-Off) myDATA tenant.
+     * be able to READ from myDATA (direct gr-mydata OR a gr-provider tenant with
+     * its own read credentials — the provider only changes who submits).
      */
     public static function canAccess(): bool
     {
         $tenant = Filament::getTenant();
 
         return $tenant instanceof Company
-            && $tenant->isLiveMyDataTenant()
+            && $tenant->canReadMyData()
             && (bool) auth()->user()?->can('View:MyDataConsole');
     }
 
