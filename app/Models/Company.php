@@ -335,6 +335,53 @@ class Company extends Model
         return $this->isLiveMyDataTenant() || $this->isLiveProviderTenant();
     }
 
+    /**
+     * Which myDATA environment do we READ from, or null when this tenant can't
+     * read from myDATA at all. ORTHOGONAL to submission (see canReadMyData()).
+     *
+     * - gr-mydata: the submission mode IS the read mode; Off → null (no endpoint).
+     * - gr-provider: the provider does the SUBMITTING, but the tenant still reads
+     *   its OWN ΑΦΜ documents back with its own myDATA subscription. mydata_mode
+     *   is 'off' for providers (the channel form clears it), so the read
+     *   environment is inferred from whichever credential slot is populated,
+     *   preferring production (a live company's real subscription). Checks only
+     *   the plain aade-id columns — no key decryption here, so navigation never
+     *   crashes on a rotated APP_KEY; the key is validated at call time
+     *   (FirebedCredentials::init) with a friendly message.
+     */
+    public function mydataReadMode(): ?MyDataMode
+    {
+        if ($this->einvoice_provider === 'gr-mydata') {
+            return $this->mydata_mode_enum === MyDataMode::Off
+                ? null
+                : $this->mydata_mode_enum;
+        }
+
+        if ($this->einvoice_provider === 'gr-provider') {
+            if (filled($this->mydata_aade_id_production)) {
+                return MyDataMode::Production;
+            }
+            if (filled($this->mydata_aade_id_sandbox)) {
+                return MyDataMode::Sandbox;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Can this tenant READ its own picture from myDATA (RequestTransmittedDocs /
+     * RequestDocs / RequestE3Info)? The single home for the "can this tenant
+     * reach AADE for READS" predicate that the read-only consoles + widgets gate
+     * on (vs `isLiveMyDataTenant()`, which is the submit-side gate). A provider
+     * tenant keeps it because the documents are still its own — it just doesn't
+     * file them directly.
+     */
+    public function canReadMyData(): bool
+    {
+        return $this->mydataReadMode() !== null;
+    }
+
     /** Short human label for the active e-invoice channel — for invoice action labels. */
     public function einvoiceChannelLabel(): string
     {

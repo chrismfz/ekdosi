@@ -102,8 +102,8 @@ class MyDataMarkDetail extends Page
      * the operator role holds View:MyDataMarkDetail directly (see
      * TenantRoleProvisioner::OPERATOR_PERMISSION_MAP), so no piggy-backing on
      * View:Invoice. The live-AADE orphan lookup inside load() is separately
-     * gated on View:MyDataConsole (admin-only). Gate::can is 404-storm-safe; the
-     * tenant must still be a live myDATA tenant (the page hits AADE).
+     * gated on View:MyDataConsole (admin-only) + canReadMyData(). Gate::can is
+     * 404-storm-safe.
      */
     public static function canAccess(): bool
     {
@@ -112,7 +112,7 @@ class MyDataMarkDetail extends Page
         // Any electronic-filing tenant (direct myDATA OR via a provider) can view a
         // MARK's detail for their own filed invoices — a provider-filed MARK resolves
         // locally (invoices.mydata_mark). The LIVE-AADE orphan lookup inside load()
-        // is separately gated on isLiveMyDataTenant() + the console permission.
+        // is separately gated on canReadMyData() + the console permission.
         return $tenant instanceof Company
             && $tenant->submitsElectronically()
             && (bool) auth()->user()?->can('View:MyDataMarkDetail');
@@ -302,7 +302,10 @@ class MyDataMarkDetail extends Page
         // hand-typed MARKs. Gate the live branch on the console permission AND on
         // the tenant having a live myDATA endpoint (a provider-only tenant with
         // mydata_mode=off can't make the call — its own marks resolve locally above).
-        if (! $tenant->isLiveMyDataTenant() || ! auth()->user()?->can('View:MyDataConsole')) {
+        // A gr-provider tenant with its own read credentials CAN do the live
+        // lookup (canReadMyData) — it reads its own AADE picture, it just doesn't
+        // submit directly.
+        if (! $tenant->canReadMyData() || ! auth()->user()?->can('View:MyDataConsole')) {
             $this->error = 'Το ΜΑΡΚ δεν αντιστοιχεί σε τοπικό παραστατικό. Η ζωντανή αναζήτηση στο myDATA απαιτεί ενεργό myDATA περιβάλλον + δικαιώματα διαχειριστή.';
 
             return;

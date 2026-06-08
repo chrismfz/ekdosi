@@ -158,10 +158,10 @@ class OperatorHealthReport
     private function mydata(): array
     {
         return $this->safeValue(fn () => Company::query()
-            ->where('einvoice_provider', 'gr-mydata')
-            ->where('mydata_mode', '!=', 'off')
+            ->whereIn('einvoice_provider', ['gr-mydata', 'gr-provider'])
             ->orderBy('slug')
             ->get()
+            ->filter(fn (Company $tenant) => $tenant->canReadMyData())
             ->map(function (Company $tenant): array {
                 $cached = $this->cacheGet(HealthKeys::myDataReconcile((int) $tenant->id), []);
                 $latestMark = $this->safeValue(fn () => MyDataMark::query()->where('company_id', $tenant->id)->latest('created_at')->first());

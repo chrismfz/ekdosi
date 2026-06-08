@@ -100,14 +100,15 @@ class MyDataConsoleExpenses extends Page
     /**
      * Admin-only like the sales console — gated on View:MyDataConsoleExpenses
      * (company_admin + super_admin; operators excluded). Gate::can is
-     * 404-storm-safe; the tenant must be a live myDATA tenant.
+     * 404-storm-safe; the tenant must be able to READ from myDATA (direct
+     * gr-mydata OR a gr-provider tenant with its own read credentials).
      */
     public static function canAccess(): bool
     {
         $tenant = Filament::getTenant();
 
         return $tenant instanceof Company
-            && $tenant->isLiveMyDataTenant()
+            && $tenant->canReadMyData()
             && (bool) auth()->user()?->can('View:MyDataConsoleExpenses');
     }
 

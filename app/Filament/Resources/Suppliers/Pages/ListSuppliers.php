@@ -33,12 +33,13 @@ class ListSuppliers extends BaseListRecords
 
             // Bulk "sync" provenance: pull RequestDocs issuer AFMs and create
             // any supplier we don't have yet (GSIS-enriched). Only meaningful
-            // for GR/myDATA tenants — hidden otherwise.
+            // for tenants that can READ from myDATA (direct gr-mydata OR a
+            // gr-provider tenant with its own read credentials) — hidden otherwise.
             Action::make('syncFromMyData')
                 ->label('Συγχρονισμός από myDATA')
                 ->icon('heroicon-o-cloud-arrow-down')
                 ->color('warning')
-                ->visible(fn (): bool => Filament::getTenant()?->einvoice_provider === 'gr-mydata')
+                ->visible(fn (): bool => (bool) Filament::getTenant()?->canReadMyData())
                 ->modalHeading('Συγχρονισμός προμηθευτών από myDATA')
                 ->modalDescription('Σαρώνει τα παραστατικά εξόδων (RequestDocs) για το διάστημα και δημιουργεί προμηθευτές για όσα ΑΦΜ δεν υπάρχουν ήδη. Για ελληνικά ΑΦΜ αντλεί στοιχεία από το μητρώο ΑΑΔΕ (GSIS).')
                 ->modalSubmitActionLabel('Συγχρονισμός')

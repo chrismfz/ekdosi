@@ -37,7 +37,7 @@ class RefreshVatPicture extends Command
     {
         $tenants = $this->resolveTenants();
         if ($tenants->isEmpty()) {
-            $this->warn('No matching gr-mydata tenant.');
+            $this->warn('No matching myDATA-readable tenant (gr-mydata or gr-provider).');
 
             return self::SUCCESS;
         }
@@ -139,9 +139,15 @@ class RefreshVatPicture extends Command
             return $tenant ? collect([$tenant]) : collect();
         }
 
+        // Both direct-myDATA and provider tenants read their own AADE picture
+        // (a provider only changes who SUBMITS). Filter in PHP via canReadMyData()
+        // so the scheduler set matches the dashboard widget's gate exactly — a
+        // provider's mydata_mode is 'off', so it can't be a SQL predicate. The
+        // tenant count is tiny (a handful), so the full scan is irrelevant.
         return Company::query()
-            ->where('einvoice_provider', 'gr-mydata')
-            ->where('mydata_mode', '!=', 'off')
-            ->get();
+            ->whereIn('einvoice_provider', ['gr-mydata', 'gr-provider'])
+            ->get()
+            ->filter(fn (Company $c) => $c->canReadMyData())
+            ->values();
     }
 }

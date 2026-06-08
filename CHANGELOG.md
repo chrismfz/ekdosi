@@ -48,6 +48,19 @@ they merge.
   cancels a 2.1).
 
 ### Fixed
+- **Provider tenants no longer lose the myDATA read surfaces.** Switching a
+  company to a ΥΠΑΗΕΣ provider (`gr-provider`) wrongly hid the dashboard «Εικόνα
+  από myDATA — ΦΠΑ», the myDATA consoles (έσοδα/έξοδα), the Ε3 overview, the
+  live ΜΑΡΚ orphan lookup and the supplier «Συγχρονισμός από myDATA» — even
+  though the documents still sit at AADE under the tenant's own ΑΦΜ and are read
+  with its own subscription. Split the gate: a new `Company::canReadMyData()` /
+  `mydataReadMode()` predicate (read access = has myDATA read credentials, on the
+  env of the populated slot — a provider's `mydata_mode` is `off`) now drives all
+  read-only surfaces, while SUBMISSION stays `gr-mydata`-only. `FirebedCredentials`
+  resolves the provider's read environment; the `mydata:refresh-vat-picture` +
+  scheduled `mydata:reconcile-sales` + OperatorHealth now include readable
+  providers. Submit-side gates (dry-run preview, submitter factory, preflight)
+  are untouched.
 - **Provider submission history now shows what we ACTUALLY sent + a failed cancel:**
   the «Ιστορικό υποβολών» stored the AADE-core XML (pre-augment) as the request, not
   the real payload the provider received — `ProviderResult` now carries the sent
