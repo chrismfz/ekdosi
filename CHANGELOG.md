@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Invoice-type classification: smarter hint + one-click apply.** The
+  `InvoiceTypeClassSuggester` (the name-based §8.1 guess shown as the list badge +
+  form helper) now covers the long tail it missed — 5.2 (μη συσχετιζόμενο),
+  9.1/10.1 (συσχετιζόμενα δελτία), 11.3 (απλοποιημένο), 3.1 (τίτλος κτήσης),
+  6.1/6.2 (αυτοπαράδοση/ιδιοχρησιμοποίηση), 7.1/8.1 (συμβόλαια/ενοίκια εσόδων) —
+  and it now also returns the income-classification chain (E3 + category) for the
+  unambiguous types, matching the seed. New **«Χρήση πρότασης: X.Y»** hint-action
+  on the myDATA-type field applies the suggested type AND back-fills the income
+  class/category in one click (only the empty fields — never overwrites an
+  operator pick). Display-only stays the rule (the operator confirms a legal
+  classification).
 - **Invoice-type starter seed extended (7 new §8.1 series).** `MyDataLookupSeeder`
   now also seeds the cross-border SERVICES twins of the goods series it already
   had — **2.2** (ΕΝΥ, ενδοκοινοτική παροχή υπηρεσιών) + **2.3** (ΥΤΧ, παροχή σε

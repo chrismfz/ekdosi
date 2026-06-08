@@ -17,7 +17,33 @@ namespace App\Support\MyData;
 final class InvoiceTypeClassSuggester
 {
     /**
-     * @return array{code: string, label: string}|null
+     * Canonical income-classification chain (E3 type + per-rate category) per
+     * §8.1 code, for the issuing types where a single default is unambiguous —
+     * matches MyDataLookupSeeder's by-the-book seed so a suggestion and the
+     * starter seed never disagree. Types with no safe default (delivery notes,
+     * τίτλος κτήσης, αυτοπαράδοση, ενοίκια/συμβόλαια — specialised E3 lines) are
+     * absent → the suggestion carries the TYPE only and the operator picks the
+     * income line.
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    private const INCOME_CHAIN = [
+        '1.1' => ['E3_561_001', 'category1_1'],
+        '1.2' => ['E3_561_005', 'category1_1'],
+        '1.3' => ['E3_561_005', 'category1_1'],
+        '2.1' => ['E3_561_001', 'category1_3'],
+        '2.2' => ['E3_561_005', 'category1_3'],
+        '2.3' => ['E3_561_005', 'category1_3'],
+        '5.1' => ['E3_561_001', 'category1_3'],
+        '5.2' => ['E3_561_001', 'category1_3'],
+        '11.1' => ['E3_561_003', 'category1_1'],
+        '11.2' => ['E3_561_003', 'category1_3'],
+        '11.3' => ['E3_561_003', 'category1_3'],
+        '11.4' => ['E3_561_003', 'category1_3'],
+    ];
+
+    /**
+     * @return array{code: string, label: string, income_class: ?string, income_class_category: ?string}|null
      */
     public static function suggest(string $name, bool $isCredit = false, bool $isReturn = false): ?array
     {
@@ -33,8 +59,29 @@ final class InvoiceTypeClassSuggester
             if (str_contains($n, 'λιανικ')) {
                 return self::hit('11.4'); // retail credit note
             }
+            if (str_contains($n, 'μη συσχετ') || str_contains($n, 'ασυσχετ')) {
+                return self::hit('5.2'); // non-correlated credit
+            }
 
-            return self::hit('5.1'); // correlated; operator switches to 5.2 if not
+            return self::hit('5.1'); // correlated (default); operator switches to 5.2 if not
+        }
+
+        // Τίτλος Κτήσης (self-billing a non-obligated counterparty).
+        if (str_contains($n, 'τιτλοσ κτησ') || str_contains($n, 'τιτλου κτησ') || str_contains($n, 'τιτλ κτησ')) {
+            return self::hit('3.1');
+        }
+
+        // Self-supply / own-use.
+        if (str_contains($n, 'αυτοπαραδοσ')) {
+            return self::hit('6.1');
+        }
+        if (str_contains($n, 'ιδιοχρησιμοποι')) {
+            return self::hit('6.2');
+        }
+
+        // Simplified invoice — contains "τιμολόγιο", so MUST precede the goods block.
+        if (str_contains($n, 'απλοποιημ')) {
+            return self::hit('11.3');
         }
 
         // Retail (λιανική): ΑΛΠ goods vs ΑΠΥ services.
@@ -71,26 +118,46 @@ final class InvoiceTypeClassSuggester
         }
 
         // Pure delivery / receipt notes (δελτίο αποστολής / παραλαβής).
+        // Correlated (συσχετιζόμενο) vs aggregate (συγκεντρωτικό) vs standalone.
         if (str_contains($n, 'δελτιο')) {
+            if (str_contains($n, 'παραλαβ')) {
+                return self::hit(str_contains($n, 'συσχετιζ') ? '10.1' : '10.2');
+            }
             if (str_contains($n, 'συγκεντρωτικ')) {
                 return self::hit('9.2');
             }
-            if (str_contains($n, 'παραλαβ')) {
-                return self::hit('10.2');
+            if (str_contains($n, 'συσχετιζ')) {
+                return self::hit('9.1');
             }
 
             return self::hit('9.3');
+        }
+
+        // Income from contracts / rents (issuing side: 7.1 / 8.1, not the
+        // expense twins 15.1 / 16.1 — those aren't issued as series).
+        if (str_contains($n, 'συμβολαι')) {
+            return self::hit('7.1');
+        }
+        if (str_contains($n, 'ενοικι') || str_contains($n, 'μισθωμ')) {
+            return self::hit('8.1');
         }
 
         return null;
     }
 
     /**
-     * @return array{code: string, label: string}
+     * @return array{code: string, label: string, income_class: ?string, income_class_category: ?string}
      */
     private static function hit(string $code): array
     {
-        return ['code' => $code, 'label' => Codes::INVOICE_TYPES[$code] ?? $code];
+        [$incomeClass, $incomeCategory] = self::INCOME_CHAIN[$code] ?? [null, null];
+
+        return [
+            'code' => $code,
+            'label' => Codes::INVOICE_TYPES[$code] ?? $code,
+            'income_class' => $incomeClass,
+            'income_class_category' => $incomeCategory,
+        ];
     }
 
     /**
