@@ -54,13 +54,16 @@ they merge.
   live ΜΑΡΚ orphan lookup and the supplier «Συγχρονισμός από myDATA» — even
   though the documents still sit at AADE under the tenant's own ΑΦΜ and are read
   with its own subscription. Split the gate: a new `Company::canReadMyData()` /
-  `mydataReadMode()` predicate (read access = has myDATA read credentials, on the
-  env of the populated slot — a provider's `mydata_mode` is `off`) now drives all
-  read-only surfaces, while SUBMISSION stays `gr-mydata`-only. `FirebedCredentials`
-  resolves the provider's read environment; the `mydata:refresh-vat-picture` +
-  scheduled `mydata:reconcile-sales` + OperatorHealth now include readable
-  providers. Submit-side gates (dry-run preview, submitter factory, preflight)
-  are untouched.
+  `mydataReadMode()` predicate (read access = has myDATA read credentials; for a
+  provider the read environment follows `einvoice_provider_mode` — the same
+  sandbox/production twin the rest of the provider stack keys off — so reads land
+  on the same env the tenant submits to, with a fallback to the other populated
+  slot since a read never writes to AADE) now drives all read-only surfaces,
+  while SUBMISSION stays `gr-mydata`-only. `FirebedCredentials` resolves the
+  provider's read environment; a shared `Company::myDataReadable()` set feeds the
+  `mydata:refresh-vat-picture` + scheduled `mydata:reconcile-sales` +
+  OperatorHealth so they never drift from the widget's gate. Submit-side gates
+  (dry-run preview, submitter factory, preflight) are untouched.
 - **Provider submission history now shows what we ACTUALLY sent + a failed cancel:**
   the «Ιστορικό υποβολών» stored the AADE-core XML (pre-augment) as the request, not
   the real payload the provider received — `ProviderResult` now carries the sent

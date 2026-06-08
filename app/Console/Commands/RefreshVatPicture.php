@@ -140,14 +140,8 @@ class RefreshVatPicture extends Command
         }
 
         // Both direct-myDATA and provider tenants read their own AADE picture
-        // (a provider only changes who SUBMITS). Filter in PHP via canReadMyData()
-        // so the scheduler set matches the dashboard widget's gate exactly — a
-        // provider's mydata_mode is 'off', so it can't be a SQL predicate. The
-        // tenant count is tiny (a handful), so the full scan is irrelevant.
-        return Company::query()
-            ->whereIn('einvoice_provider', ['gr-mydata', 'gr-provider'])
-            ->get()
-            ->filter(fn (Company $c) => $c->canReadMyData())
-            ->values();
+        // (a provider only changes who SUBMITS). Shared gate so the scheduler set
+        // matches the dashboard widget exactly.
+        return Company::myDataReadable();
     }
 }

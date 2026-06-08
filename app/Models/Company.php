@@ -343,11 +343,20 @@ class Company extends Model
      * - gr-provider: the provider does the SUBMITTING, but the tenant still reads
      *   its OWN ΑΦΜ documents back with its own myDATA subscription. mydata_mode
      *   is 'off' for providers (the channel form clears it), so the read
-     *   environment is inferred from whichever credential slot is populated,
-     *   preferring production (a live company's real subscription). Checks only
-     *   the plain aade-id columns — no key decryption here, so navigation never
-     *   crashes on a rotated APP_KEY; the key is validated at call time
-     *   (FirebedCredentials::init) with a friendly message.
+     *   environment follows `einvoice_provider_mode` — the sandbox/production
+     *   twin the whole provider stack keys off (ProviderCredentials::fromCompany,
+     *   EInvoiceSubmitterFactory) — so reads land on the SAME environment the
+     *   tenant submits to, never split-brain. Only an explicit 'production'
+     *   prefers the live read subscription. Unlike SUBMISSION (which fail-safes
+     *   to sandbox to never accidentally file against production), a READ never
+     *   writes to AADE, so when the preferred slot is empty we fall back to the
+     *   other populated slot — a tenant mid-migration (provider in sandbox but
+     *   only its old production read subscription set) still sees its real
+     *   picture rather than losing it.
+     *
+     * Checks only the plain aade-id columns — no key decryption here, so
+     * navigation never crashes on a rotated APP_KEY; the key is validated at
+     * call time (FirebedCredentials::init) with a friendly message.
      */
     public function mydataReadMode(): ?MyDataMode
     {
@@ -358,11 +367,18 @@ class Company extends Model
         }
 
         if ($this->einvoice_provider === 'gr-provider') {
-            if (filled($this->mydata_aade_id_production)) {
-                return MyDataMode::Production;
-            }
-            if (filled($this->mydata_aade_id_sandbox)) {
-                return MyDataMode::Sandbox;
+            $order = ($this->einvoice_provider_mode ?? 'off') === 'production'
+                ? [MyDataMode::Production, MyDataMode::Sandbox]
+                : [MyDataMode::Sandbox, MyDataMode::Production];
+
+            foreach ($order as $mode) {
+                $idColumn = $mode === MyDataMode::Production
+                    ? 'mydata_aade_id_production'
+                    : 'mydata_aade_id_sandbox';
+
+                if (filled($this->{$idColumn})) {
+                    return $mode;
+                }
             }
         }
 
@@ -380,6 +396,26 @@ class Company extends Model
     public function canReadMyData(): bool
     {
         return $this->mydataReadMode() !== null;
+    }
+
+    /**
+     * All tenants that can READ from myDATA, as a Collection. Read-eligibility
+     * (canReadMyData) depends on a populated credential slot, which isn't a
+     * clean SQL predicate (a provider's mydata_mode is 'off'), so we narrow to
+     * the two Greek channels in SQL and filter in PHP. The single source for the
+     * scheduled myDATA read jobs (refresh-vat-picture, reconcile-sales) +
+     * OperatorHealth, so they never drift from the dashboard widget's gate. The
+     * tenant count is a handful, so the full scan is irrelevant.
+     *
+     * @return \Illuminate\Support\Collection<int, static>
+     */
+    public static function myDataReadable(): \Illuminate\Support\Collection
+    {
+        return static::query()
+            ->whereIn('einvoice_provider', ['gr-mydata', 'gr-provider'])
+            ->get()
+            ->filter(fn (self $c) => $c->canReadMyData())
+            ->values();
     }
 
     /** Short human label for the active e-invoice channel — for invoice action labels. */

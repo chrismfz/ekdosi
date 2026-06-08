@@ -67,6 +67,43 @@ class ProviderReadAccessTest extends TestCase
         $this->assertTrue($prov->canReadMyData());
     }
 
+    public function test_provider_read_env_follows_provider_mode_not_slot_preference(): void
+    {
+        // BOTH credential slots populated. The read environment must follow
+        // einvoice_provider_mode (the provider stack's sandbox/production twin),
+        // NOT blindly prefer production — otherwise a sandbox-testing provider
+        // would read LIVE production data while it submits to sandbox.
+        $sandboxProvider = $this->company([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'mydata_mode' => 'off',
+            'mydata_aade_id_sandbox' => 'SBX', 'mydata_subscription_key_sandbox' => 'SK',
+            'mydata_aade_id_production' => 'PROD', 'mydata_subscription_key_production' => 'PK',
+        ]);
+        $this->assertSame(MyDataMode::Sandbox, $sandboxProvider->mydataReadMode());
+
+        $prodProvider = $this->company([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'production', 'mydata_mode' => 'off',
+            'mydata_aade_id_sandbox' => 'SBX', 'mydata_subscription_key_sandbox' => 'SK',
+            'mydata_aade_id_production' => 'PROD', 'mydata_subscription_key_production' => 'PK',
+        ]);
+        $this->assertSame(MyDataMode::Production, $prodProvider->mydataReadMode());
+    }
+
+    public function test_provider_falls_back_to_other_slot_when_preferred_is_empty(): void
+    {
+        // Mid-migration: provider set to sandbox but only its OLD production read
+        // subscription survives. A read never writes to AADE, so we fall back to
+        // the populated slot rather than hide the picture entirely.
+        $prov = $this->company([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'mydata_mode' => 'off',
+            'mydata_aade_id_production' => 'PROD', 'mydata_subscription_key_production' => 'PK',
+        ]);
+        $this->assertSame(MyDataMode::Production, $prov->mydataReadMode());
+        $this->assertTrue($prov->canReadMyData());
+    }
+
     public function test_provider_with_only_sandbox_credentials_reads_sandbox(): void
     {
         $prov = $this->company([

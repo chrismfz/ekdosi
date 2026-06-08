@@ -106,10 +106,7 @@ if (config('ekdosi.schedule.whmcs_auto_issue_enabled')) {
 if (config('ekdosi.schedule.mydata_reconcile_enabled')) {
     $trackSchedule(
         Schedule::call(function () {
-            Company::query()
-                ->whereIn('einvoice_provider', ['gr-mydata', 'gr-provider'])
-                ->get()
-                ->filter(fn (Company $c) => $c->canReadMyData())
+            Company::myDataReadable()
                 ->each(fn (Company $c) => Artisan::call('mydata:reconcile-sales', ['--tenant' => $c->slug]));
         })
             ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))
