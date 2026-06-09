@@ -145,6 +145,46 @@ class InvoSignTransportTest extends TestCase
             && ! str_contains((string) $request['xml_arxeio'], 'icls:'));
     }
 
+    public function test_send_delivery_endodiakinisi_fills_counterpart_fallback_and_per_line_api_fields(): void
+    {
+        // Sandbox-found (2026-06-09): for an ενδοδιακίνηση (no external recipient)
+        // InvoSign rejects an empty <CounterpartName> ([88-001]) AND a missing
+        // per-line <api_lineDescription> ([88-001]). Lock both fixes.
+        Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
+
+        $deliveryType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'DA', 'name' => 'ΔΑ',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+        $note = DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DA1', 'code' => 1,
+            'delivery_type_id' => $deliveryType->id, 'issued_at' => now(), 'mydata_type' => '9.3',
+            'move_purpose' => 8, 'local_status' => 'draft', // NO recipient → ενδοδιακίνηση
+        ]);
+        $note->lines()->create([
+            'company_id' => $this->tenant->id, 'qty' => 2, 'measurement_unit' => 1,
+            'product_descr' => 'Κιβώτια δοκιμής',
+        ]);
+
+        $xml = '<?xml version="1.0" encoding="utf-8"?>'
+            .'<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0">'
+            .'<invoice><invoiceDetails><lineNumber>1</lineNumber><itemDescr>Κιβώτια δοκιμής</itemDescr>'
+            .'<icls:incomeClassification><icls:classificationType>category3</icls:classificationType></icls:incomeClassification>'
+            .'</invoiceDetails></invoice></InvoicesDoc>';
+
+        $payload = (string) (new InvoSignTransport)
+            ->sendDelivery($note->fresh('lines'), $xml, ProviderCredentials::fromCompany($this->tenant))
+            ->requestPayload;
+
+        // [88-001] CounterpartName/Vat fall back to the issuer (it IS the recipient) + 000000000.
+        $this->assertStringContainsString('<CounterpartName>ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ ΟΕ</CounterpartName>', $payload);
+        $this->assertStringContainsString('<CounterpartVat>000000000</CounterpartVat>', $payload);
+        // [88-001] per-line api_* twins present (monetary fields 0.00 for a delivery line).
+        $this->assertStringContainsString('<api_lineDescription>Κιβώτια δοκιμής</api_lineDescription>', $payload);
+        $this->assertStringContainsString('<api_quantity>2.0000</api_quantity>', $payload);
+        $this->assertStringContainsString('<api_NetPriceBeforeDiscount>0.00</api_NetPriceBeforeDiscount>', $payload);
+    }
+
     public function test_send_validation_error_becomes_failed_result(): void
     {
         Http::fake([self::DEMO.'/*' => Http::response($this->errorXml(), 200)]);
