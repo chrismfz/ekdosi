@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[ObservedBy(CompanyObserver::class)]
 class Company extends Model
@@ -446,5 +448,17 @@ class Company extends Model
     public function defaultWhmcsInvoiceType(): BelongsTo
     {
         return $this->belongsTo(InvoiceType::class, 'whmcs_default_invoice_type_id');
+    }
+
+    /** Phase 4: this company's automated-backup policy (one row). */
+    public function backupSetting(): HasOne
+    {
+        return $this->hasOne(CompanyBackupSetting::class);
+    }
+
+    /** Phase 4: the company's backup-run audit log (newest first). */
+    public function backupRuns(): HasMany
+    {
+        return $this->hasMany(CompanyBackupRun::class)->latest('started_at');
     }
 }

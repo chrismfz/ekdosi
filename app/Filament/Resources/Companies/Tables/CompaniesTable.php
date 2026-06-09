@@ -95,6 +95,8 @@ class CompaniesTable
             ->recordActions([
                 EditAction::make(),
                 ActionGroup::make([
+                    CompanyBackupActions::scheduleSettings(),
+                    CompanyBackupActions::runNow(),
                     CompanyBackupActions::export(),
                     CompanyBackupActions::importInto(),
                     CompanyBackupActions::wipe(),

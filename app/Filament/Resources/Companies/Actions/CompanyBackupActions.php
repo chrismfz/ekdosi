@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\Companies\Actions;
 
 use App\Models\Company;
+use App\Models\CompanyBackupSetting;
+use App\Services\Backup\CompanyBackupRunner;
 use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyDataWiper;
 use App\Services\Portability\CompanyExporter;
@@ -10,6 +12,7 @@ use App\Services\Portability\CompanyImporter;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Component;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -81,6 +84,74 @@ class CompanyBackupActions
             ->modalSubmitActionLabel('Συνέχεια')
             ->schema(self::importFields())
             ->action(fn (array $data) => self::runImport($data, ['new' => true]));
+    }
+
+    /** Per-row: configure the automated-backup policy (Phase 4). */
+    public static function scheduleSettings(): Action
+    {
+        return Action::make('backup_schedule')
+            ->label('Αυτόματα αντίγραφα')
+            ->icon('heroicon-o-clock')
+            ->color('gray')
+            ->modalHeading('Ρυθμίσεις αυτόματων αντιγράφων')
+            ->modalDescription('Πρόγραμμα + κρυπτογράφηση + διατήρηση. Προς το παρόν ο προορισμός είναι Τοπικά (λήψη από το panel)· SFTP/FTP/S3 έρχονται.')
+            ->modalSubmitActionLabel('Αποθήκευση')
+            ->fillForm(fn (Company $record) => ($s = $record->backupSetting) ? [
+                'enabled' => $s->enabled, 'frequency' => $s->frequency, 'run_at_time' => $s->run_at_time,
+                'bucket' => $s->bucket, 'secrets_mode' => $s->secrets_mode, 'passphrase' => $s->passphrase,
+                'retention_keep' => $s->retention_keep, 'retention_days' => $s->retention_days,
+            ] : ['frequency' => 'off', 'bucket' => 'settings_setup', 'secrets_mode' => 'passphrase', 'run_at_time' => '02:00', 'retention_keep' => 7])
+            ->schema([
+                Toggle::make('enabled')->label('Ενεργό')->default(false),
+                Select::make('frequency')->label('Συχνότητα')
+                    ->options(['off' => 'Ανενεργό', 'daily' => 'Καθημερινά', 'weekly' => 'Εβδομαδιαία', 'monthly' => 'Μηνιαία'])
+                    ->default('off')->required(),
+                TextInput::make('run_at_time')->label('Ώρα (HH:MM)')->default('02:00')
+                    ->rule('date_format:H:i')->required(),
+                Select::make('bucket')->label('Περιεχόμενο')
+                    ->options(['settings' => 'Μόνο ρυθμίσεις', 'settings_setup' => 'Ρυθμίσεις + setup', 'full' => 'Πλήρες (με δεδομένα)'])
+                    ->default('settings_setup')->required(),
+                Select::make('secrets_mode')->label('Μυστικά')
+                    ->options(['passphrase' => 'Κρυπτογραφημένα (συνθηματικό)', 'raw' => 'Χωρίς κρυπτογράφηση (μόνο τοπικά!)'])
+                    ->default('passphrase')->live()->required(),
+                TextInput::make('passphrase')->label('Συνθηματικό')
+                    ->password()->revealable()
+                    ->requiredIf('secrets_mode', 'passphrase')
+                    ->helperText('Χρειάζεται για επαναφορά — κράτησέ το ασφαλές.'),
+                TextInput::make('retention_keep')->label('Διατήρηση (πλήθος)')->numeric()->default(7)->minValue(0),
+                TextInput::make('retention_days')->label('…ή ημέρες (προαιρετικό)')->numeric()->nullable()->minValue(1),
+            ])
+            ->action(function (array $data, Company $record): void {
+                CompanyBackupSetting::updateOrCreate(['company_id' => $record->id], $data);
+                Notification::make()->title('Αποθηκεύτηκαν οι ρυθμίσεις αντιγράφων')->success()->send();
+            });
+    }
+
+    /** Per-row: run a backup right now via the saved policy (writes a run row). */
+    public static function runNow(): Action
+    {
+        return Action::make('backup_run_now')
+            ->label('Αντίγραφο τώρα')
+            ->icon('heroicon-o-play')
+            ->color('success')
+            ->requiresConfirmation()
+            ->modalDescription('Τρέχει ένα αντίγραφο τώρα με τις αποθηκευμένες ρυθμίσεις (πρόγραμμα/μυστικά/προορισμοί).')
+            ->action(function (Company $record): void {
+                $settings = $record->backupSetting;
+                if ($settings === null) {
+                    Notification::make()->title('Ρύθμισε πρώτα τα «Αυτόματα αντίγραφα»')->warning()
+                        ->body('Χρειάζεται μια πολιτική (συνθηματικό / περιεχόμενο / διατήρηση) πριν το χειροκίνητο τρέξιμο.')->send();
+
+                    return;
+                }
+
+                $run = app(CompanyBackupRunner::class)->run($record, $settings, 'manual');
+
+                $n = Notification::make()->title('Αντίγραφο: '.$run->status)
+                    ->body($run->message ?? ('Μέγεθος: '.number_format(((int) $run->bytes) / 1024, 1).' KB'));
+                $run->status === 'ok' ? $n->success() : ($run->status === 'failed' ? $n->danger() : $n->warning());
+                $n->send();
+            });
     }
 
     /** Per-row: wipe transactional data (keep settings+setup). Dry-run unless «Εκτέλεση». */

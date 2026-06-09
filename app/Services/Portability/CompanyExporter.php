@@ -57,6 +57,34 @@ class CompanyExporter
         'expenses', 'expense_lines', 'expense_marks',
     ];
 
+    /**
+     * Tenant-owned tables (BelongsToCompany) DELIBERATELY left out of the bundle —
+     * each with a reason. `CompanyExportCoverageTest` enforces that EVERY
+     * BelongsToCompany model's table is in SETUP_TABLES ∪ TRANSACTIONAL_TABLES ∪
+     * this list, so a NEW tenant table added later cannot silently fall out of
+     * backup/export: the test fails until it is classified here or in a bucket.
+     *
+     * @var list<string>
+     */
+    public const INTENTIONALLY_EXCLUDED = [
+        // Polymorphic / re-attachable on the OTHER subject — exported with their
+        // owner when full-bundle attachment support lands (Phase 2 follow-up).
+        'attachments',
+        'notes',
+        // Ψηφιακό ΔΑ (delivery) — its own re-issuable lifecycle; not part of the
+        // accounting dataset a tenant carries across VMs (deferred bucket-C set).
+        'delivery_notes', 'delivery_note_lines', 'delivery_note_events', 'delivery_marks',
+        // Re-derivable / operational, not source-of-truth tenant data.
+        'pending_whmcs_invoices',  // WHMCS inbox — re-fetched from the bridge.
+        'stock_movements',         // re-derived from invoices/delivery notes.
+        'service_contracts',       // deferred bucket-C (recurring-billing layer).
+        'firebird_import_runs',    // ETL run log — operational, not portable data.
+        // Backup config + run log are VM-specific (destinations/paths/passphrase
+        // are reconfigured on the target VM) — never travel inside a bundle.
+        'company_backup_settings',
+        'company_backup_runs',
+    ];
+
     public function __construct(private readonly SecretsCodec $codec) {}
 
     /**
