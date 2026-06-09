@@ -56,12 +56,16 @@ class CommonTaxPresets
     }
 
     /**
-     * Net base from the live lines-repeater state (Σ qty × price × (1 − discount%)).
-     * Mirrors InvoiceLine's per-line computation; used to auto-fill a %-based amount.
+     * Net base from the live lines-repeater state: Σ qty × price × (1 − line-disc%),
+     * THEN the invoice-level header discount — matching the base the submitter files
+     * (InvoiceVatBreakdown::totalNet, which applies the header discount too). Used to
+     * auto-fill a %-based amount. NB: a convenience preview value computed at pick-
+     * time — the authoritative net (per-line-rounded, grouped per VAT rate) is
+     * recomputed server-side on save, so expect ±€0.01 on multi-line invoices.
      *
      * @param  array<int,array<string,mixed>>  $lines
      */
-    public static function netFromLines(array $lines): float
+    public static function netFromLines(array $lines, float $headerDiscountPercent = 0): float
     {
         $net = 0.0;
         foreach ($lines as $line) {
@@ -71,7 +75,7 @@ class CommonTaxPresets
             $net += $qty * $price * (1 - $discount / 100);
         }
 
-        return round($net, 2);
+        return round($net * (1 - $headerDiscountPercent / 100), 2);
     }
 
     /** Computed amount for a preset given the net, or null for a flat (operator-entered) one. */

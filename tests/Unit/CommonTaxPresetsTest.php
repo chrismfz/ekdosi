@@ -26,6 +26,17 @@ class CommonTaxPresetsTest extends TestCase
         $this->assertSame(290.0, $net);
     }
 
+    public function test_net_from_lines_applies_header_discount(): void
+    {
+        // 200 line-net − 10% header discount = 180 (matches the filed totalNet base).
+        $net = CommonTaxPresets::netFromLines(
+            [['qty' => 2, 'price_per_item' => 100, 'discount' => 0]],
+            10,
+        );
+
+        $this->assertSame(180.0, $net);
+    }
+
     public function test_percentage_preset_computes_amount_from_net(): void
     {
         $stamp = CommonTaxPresets::find('stamp_3_6');

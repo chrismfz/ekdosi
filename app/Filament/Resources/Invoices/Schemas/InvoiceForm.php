@@ -430,7 +430,8 @@ class InvoiceForm
                         ->live()
                         ->columnSpanFull()
                         ->helperText('Διάλεξε ένα τυπικό τέλος/φόρο: συμπληρώνει την κατηγορία· '
-                            .'για ποσοστιαία υπολογίζει αυτόματα το ποσό από την καθαρή αξία των γραμμών.')
+                            .'για ποσοστιαία υπολογίζει αυτόματα το ποσό από την καθαρή αξία των γραμμών. '
+                            .'⚠ Το ποσό υπολογίζεται τη στιγμή της επιλογής — αν αλλάξεις γραμμές/έκπτωση, ξαναδιάλεξέ το (ή διόρθωσε το ποσό).')
                         ->afterStateUpdated(function ($state, callable $set, callable $get) {
                             $preset = CommonTaxPresets::find($state);
                             if (! $preset) {
@@ -438,10 +439,12 @@ class InvoiceForm
                             }
                             [$amountCol, $categoryCol] = CommonTaxPresets::columnsFor($preset);
                             $set($categoryCol, $preset['category']);
-                            $amount = CommonTaxPresets::amountFor(
-                                $preset,
-                                CommonTaxPresets::netFromLines((array) $get('lines'))
+                            // Apply the header discount too, so the base matches the filed net.
+                            $net = CommonTaxPresets::netFromLines(
+                                (array) $get('lines'),
+                                (float) ($get('header_discount_percent') ?? 0)
                             );
+                            $amount = CommonTaxPresets::amountFor($preset, $net);
                             if ($amount !== null) {
                                 $set($amountCol, $amount);
                             }
