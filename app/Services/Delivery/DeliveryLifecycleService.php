@@ -7,6 +7,8 @@ use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteEvent;
+use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Support\EInvoice\ProviderCredentials;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\TransportType;
@@ -361,7 +363,7 @@ class DeliveryLifecycleService
         // MARK while the mirror reflects only the latest).
         $inserts = DeliveryMark::query()
             ->where('delivery_note_id', $note->id)
-            ->where('mydata_action', 'INSERT')
+            ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT']) // provider issuance writes PROVIDER_INSERT
             ->whereNotNull('mark')
             ->orderByDesc('id')
             ->get();
@@ -381,6 +383,14 @@ class DeliveryLifecycleService
 
         $markToCancel = (string) $inserts->first()->mark;
 
+        // Ακύρωση μέσω παρόχου: ο InvoSign εκθέτει iNVOSign_CancelDeliveryNote, οπότε
+        // για provider tenant η ακύρωση πάει στο ΙΔΙΟ κανάλι με την έκδοση (όπως
+        // GrProviderSubmitter::cancel για τα τιμολόγια). Η έναρξη/παράδοση/έλεγχος
+        // ΔΕΝ προσφέρονται από τον πάροχο → μένουν απευθείας myDATA.
+        if ($this->tenant->isLiveProviderTenant()) {
+            return $this->cancelViaProvider($note, $markToCancel, $reason);
+        }
+
         $action = new CancelInvoice;
         $response = $this->dispatch($note, 'cancel', fn () => $action->handle($markToCancel));
 
@@ -398,17 +408,65 @@ class DeliveryLifecycleService
 
         $responseXml = $action->getResponseXML() ?? '';
 
-        return DB::transaction(function () use ($note, $responseXml, $reason, $markToCancel) {
-            $audit = DeliveryMark::create([
+        return $this->persistCancellation($note, $markToCancel, $reason, $responseXml);
+    }
+
+    /**
+     * Ακύρωση δελτίου μέσω του ΥΠΑΗΕΣ παρόχου (InvoSign iNVOSign_CancelDeliveryNote).
+     * Twin of GrProviderSubmitter::cancel: POST the issue MARK to the provider, and
+     * only on a Success result flip the note to the terminal cancelled state +
+     * write the CANCEL audit row. A provider rejection/exception throws (no false
+     * cancel), mirroring the direct path (which logs via logFailure too).
+     */
+    private function cancelViaProvider(DeliveryNote $note, string $markToCancel, string $reason): DeliveryMark
+    {
+        $transport = app(ProviderTransportRegistry::class)->for((string) $this->tenant->einvoice_provider_key);
+        $credentials = ProviderCredentials::fromCompany($this->tenant);
+
+        try {
+            $result = $transport->cancel($markToCancel, $credentials, $reason);
+        } catch (Throwable $e) {
+            $this->logFailure($note, 'provider-cancel', $e);
+            throw new RuntimeException('Ακύρωση μέσω παρόχου απέτυχε: '.$e->getMessage(), 0, $e);
+        }
+
+        if (! $result->success) {
+            throw new RuntimeException('Ακύρωση: ο πάροχος απέρριψε την ενέργεια — '.$result->errorMessage());
+        }
+
+        return $this->persistCancellation(
+            $note,
+            $result->cancellationMark ?? $markToCancel,
+            $reason,
+            $result->raw,
+            $transport->key(),
+        );
+    }
+
+    /**
+     * Persist the terminal cancelled state — shared by the direct-myDATA and the
+     * provider cancel paths so both leave an IDENTICAL CANCEL audit row + cache
+     * flip (only mark / response / provider_key differ).
+     */
+    private function persistCancellation(
+        DeliveryNote $note,
+        string $mark,
+        string $reason,
+        ?string $responseXml,
+        ?string $providerKey = null,
+    ): DeliveryMark {
+        return DB::transaction(function () use ($note, $mark, $reason, $responseXml, $providerKey) {
+            $audit = DeliveryMark::create(array_filter([
                 'company_id' => $note->company_id,
                 'delivery_note_id' => $note->id,
-                'mark' => $markToCancel,
+                'mark' => $mark,
                 'mydata_action' => 'CANCEL',
+                'provider_key' => $providerKey,
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
                 'response' => $responseXml,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
-            ]);
+            ], static fn ($v) => $v !== null));
 
             $note->forceFill([
                 'mydata_state' => 'CANCELLED',

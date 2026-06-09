@@ -2,7 +2,10 @@
 
 namespace App\Services\EInvoice\Transports;
 
+use App\Models\Company;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
+use App\Support\MyData\DeliveryCodes;
 use DOMDocument;
 use DOMElement;
 use RuntimeException;
@@ -51,9 +54,70 @@ class InvoSignDocument
         }
 
         // 2) Invoice-level <API_InvoiceDetails> block, after <invoiceSummary>.
-        $invoiceNode->appendChild(self::buildApiInvoiceDetails($dom, $invoice));
+        $invoiceNode->appendChild(self::buildApiInvoiceDetails(
+            $dom,
+            self::issuerFields($invoice->company),
+            self::invoiceCounterpartFields($invoice),
+            [
+                'DocumentLabel' => (string) ($invoice->invoiceType?->name ?? ''),
+                'DocumentComments' => (string) ($invoice->notes ?? ''),
+                'DocumentPaymentMethodLabel' => (string) ($invoice->paymentMethod?->description ?? ''),
+            ],
+        ));
 
         return self::normaliseClassificationPrefixes($dom->saveXML() ?: $aadeXml);
+    }
+
+    /**
+     * Delivery-note twin of augment(): InvoSign treats the invoice-level
+     * <API_InvoiceDetails> (issuer + counterpart) as MANDATORY even for 9.x
+     * delivery notes and rejects its absence with "[88-006] Λείπει το
+     * υποχρεωτικό node: API_InvoiceDetails". So we append THAT block — built from
+     * the DeliveryNote (recipient as counterpart) — but NOT the per-line api_*
+     * printout twins, which delivery notes don't carry. (Whether InvoSign also
+     * wants per-line api_* for goods 9.x is to be confirmed on the sandbox.)
+     */
+    public static function augmentDelivery(string $aadeXml, DeliveryNote $note): string
+    {
+        $note->loadMissing(['company', 'customer', 'deliveryType']);
+
+        $dom = new DOMDocument('1.0', 'utf-8');
+        $dom->preserveWhiteSpace = false;
+        if (! @$dom->loadXML($aadeXml, LIBXML_NONET)) {
+            throw new RuntimeException('InvoSign: could not parse the AADE delivery-note XML to augment.');
+        }
+
+        $invoiceNode = $dom->getElementsByTagNameNS(self::AADE_NS, 'invoice')->item(0);
+        if (! $invoiceNode instanceof DOMElement) {
+            throw new RuntimeException('InvoSign: <invoice> element not found in the delivery-note XML.');
+        }
+
+        $invoiceNode->appendChild(self::buildApiInvoiceDetails(
+            $dom,
+            self::issuerFields($note->company),
+            self::deliveryCounterpartFields($note),
+            // Field order + names mirror InvoSign's own delivery-note example
+            // (incl. the `DocumentMovePursposeLabel` typo, which IS their schema
+            // field name, and DispatchFrom/To = the loading/delivery addresses).
+            [
+                'DocumentLabel' => (string) ($note->deliveryType?->name ?? ''),
+                'DocumentMovePursposeLabel' => (string) (DeliveryCodes::movePurposeLabel($note->move_purpose) ?? ''),
+                'DocumentDispatchFrom' => self::addressLine($note->loading_street, $note->loading_number, $note->loading_city, $note->loading_postcode),
+                'DocumentDispatchTo' => self::addressLine($note->delivery_street, $note->delivery_number, $note->delivery_city, $note->delivery_postcode),
+                'DocumentComments' => (string) ($note->notes ?? ''),
+                'DocumentPaymentMethodLabel' => '',
+            ],
+        ));
+
+        return self::normaliseClassificationPrefixes($dom->saveXML() ?: $aadeXml);
+    }
+
+    /** "street number, city, postcode" — InvoSign's DocumentDispatchFrom/To shape, empties dropped. */
+    private static function addressLine(?string $street, ?string $number, ?string $city, ?string $postcode): string
+    {
+        $streetPart = trim((string) $street.' '.(string) $number);
+
+        return implode(', ', array_filter([$streetPart, (string) $city, (string) $postcode], static fn ($p) => trim((string) $p) !== ''));
     }
 
     /**
@@ -66,7 +130,7 @@ class InvoSignDocument
      * are distinctive tokens that appear ONLY as the xmlns declaration + element
      * prefixes (never in values), so a string rename is safe.
      */
-    public static function normaliseClassificationPrefixes(string $xml): string
+    private static function normaliseClassificationPrefixes(string $xml): string
     {
         return strtr($xml, [
             'xmlns:icls=' => 'xmlns:n1=',
@@ -105,15 +169,39 @@ class InvoSignDocument
         }
     }
 
-    private static function buildApiInvoiceDetails(DOMDocument $dom, Invoice $invoice): DOMElement
+    /**
+     * Build the shared <API_InvoiceDetails> wrapper (API_Issuer / API_Counterpart
+     * / API_Additionals) from already-prepared field maps — so the invoice and
+     * delivery-note paths emit an IDENTICAL block shape and only differ in how the
+     * field maps are sourced.
+     *
+     * @param  array<string, string>  $issuer
+     * @param  array<string, string>  $counterpart
+     * @param  array<string, string>  $additionals
+     */
+    private static function buildApiInvoiceDetails(DOMDocument $dom, array $issuer, array $counterpart, array $additionals): DOMElement
     {
-        $company = $invoice->company;
-        $customer = $invoice->customer;
-
         $wrap = $dom->createElementNS(self::AADE_NS, 'API_InvoiceDetails');
 
-        $issuer = $dom->createElementNS(self::AADE_NS, 'API_Issuer');
-        self::appendAll($dom, $issuer, [
+        $issuerEl = $dom->createElementNS(self::AADE_NS, 'API_Issuer');
+        self::appendAll($dom, $issuerEl, $issuer);
+        $wrap->appendChild($issuerEl);
+
+        $cpEl = $dom->createElementNS(self::AADE_NS, 'API_Counterpart');
+        self::appendAll($dom, $cpEl, $counterpart);
+        $wrap->appendChild($cpEl);
+
+        $addEl = $dom->createElementNS(self::AADE_NS, 'API_Additionals');
+        self::appendAll($dom, $addEl, $additionals);
+        $wrap->appendChild($addEl);
+
+        return $wrap;
+    }
+
+    /** @return array<string, string> */
+    private static function issuerFields(?Company $company): array
+    {
+        return [
             'IssuerName' => (string) ($company?->name ?? ''),
             'IssuerProfession' => (string) ($company?->kad_primary ?? ''),
             'IssuerTaxOffice' => (string) ($company?->tax_office ?? ''),
@@ -122,11 +210,15 @@ class InvoSignDocument
             'IssuerAddressCity' => (string) ($company?->city ?? ''),
             'IssuerPhone' => (string) ($company?->phone ?? ''),
             'IssuerEmail' => (string) ($company?->email ?? ''),
-        ]);
-        $wrap->appendChild($issuer);
+        ];
+    }
 
-        $cp = $dom->createElementNS(self::AADE_NS, 'API_Counterpart');
-        self::appendAll($dom, $cp, [
+    /** @return array<string, string> */
+    private static function invoiceCounterpartFields(Invoice $invoice): array
+    {
+        $customer = $invoice->customer;
+
+        return [
             'CounterpartName' => (string) ($invoice->company_name ?: $customer?->name ?? ''),
             'CounterpartVat' => (string) ($invoice->vat_no ?: $customer?->afm ?? ''),
             'CounterpartProfession' => (string) ($invoice->occupation ?: $customer?->occupation ?? ''),
@@ -136,18 +228,25 @@ class InvoSignDocument
             'CounterpartAddressCity' => (string) ($invoice->city ?: $customer?->city ?? ''),
             'CounterpartPhone' => (string) ($customer?->phone ?? ''),
             'CounterpartEmail' => (string) ($customer?->email ?? ''),
-        ]);
-        $wrap->appendChild($cp);
+        ];
+    }
 
-        $add = $dom->createElementNS(self::AADE_NS, 'API_Additionals');
-        self::appendAll($dom, $add, [
-            'DocumentLabel' => (string) ($invoice->invoiceType?->name ?? ''),
-            'DocumentComments' => (string) ($invoice->notes ?? ''),
-            'DocumentPaymentMethodLabel' => (string) ($invoice->paymentMethod?->description ?? ''),
-        ]);
-        $wrap->appendChild($add);
+    /** @return array<string, string> */
+    private static function deliveryCounterpartFields(DeliveryNote $note): array
+    {
+        $customer = $note->customer;
 
-        return $wrap;
+        return [
+            'CounterpartName' => (string) ($note->recipient_name ?: $customer?->name ?? ''),
+            'CounterpartVat' => (string) ($note->recipient_afm ?: $customer?->afm ?? ''),
+            'CounterpartProfession' => (string) ($customer?->occupation ?? ''),
+            'CounterpartTaxOffice' => (string) ($customer?->tax_office ?? ''),
+            'CounterpartAddressStreet' => (string) ($note->delivery_street ?: $customer?->address1 ?? ''),
+            'CounterpartAddressPostalCode' => (string) ($note->delivery_postcode ?: $customer?->postcode ?? ''),
+            'CounterpartAddressCity' => (string) ($note->delivery_city ?: $customer?->city ?? ''),
+            'CounterpartPhone' => (string) ($customer?->phone ?? ''),
+            'CounterpartEmail' => (string) ($customer?->email ?? ''),
+        ];
     }
 
     /** @param  array<string, string>  $fields */

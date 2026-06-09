@@ -681,6 +681,25 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   `RejectDeliveryNote` (recipient-only, §6.2/803 — only if a tenant acts as
   recipient), Group QR (3.2.5/6, batch transport). **Deploy:** `php artisan
   migrate` (adds `delivery_note_events`).
+- **✅ Έκδοση δελτίου μέσω παρόχου — `[88-006]` fixed (this branch).**
+  `InvoSignTransport::sendDelivery` now calls `InvoSignDocument::augmentDelivery`
+  (appends the mandatory `<API_InvoiceDetails>`: issuer + recipient-as-counterpart
+  from the `DeliveryNote`), instead of only prefix-normalising — InvoSign rejects
+  a δελτίο without that block. `buildApiInvoiceDetails` was generalised to array
+  inputs so invoice & delivery share it.
+- **✅ provider-channel lifecycle — RESOLVED (full model).** The InvoSign
+  reference confirmed the πάροχος exposes ONLY issue + cancel-delivery-note (no
+  RegisterTransfer/ConfirmOutcome; its status is transmission-status, not §7.1
+  movement). So the natural split was implemented: **issue + cancel → provider**
+  (`DeliveryNoteSubmitter::submitViaProvider`, `DeliveryLifecycleService::
+  cancelViaProvider` → `iNVOSign_CancelDeliveryNote`; cancel's INSERT-MARK lookup
+  now also matches `PROVIDER_INSERT`), **έναρξη/παράδοση/έλεγχος/history → direct
+  myDATA** for everyone (the interim guard was REMOVED; the existing `initFirebed`
+  creds-check gates a provider tenant lacking myDATA creds with a clear message).
+  All 4 UI actions show again for provider tenants. **Confirmed in writing by
+  InvoSign (B. Karinos):** the ΔΑ Β' φάση (movement lifecycle) is the ERP's job
+  directly to myDATA, not the provider's — exactly this model. No open items.
+  Full analysis: **`docs/delivery-provider-split-brain.md`**.
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see

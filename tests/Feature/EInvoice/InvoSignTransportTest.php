@@ -106,22 +106,42 @@ class InvoSignTransportTest extends TestCase
         });
     }
 
-    public function test_send_delivery_normalises_classification_prefixes_before_posting(): void
+    public function test_send_delivery_augments_with_api_invoice_details_and_normalises_prefixes(): void
     {
         Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
-        $note = new DeliveryNote(['company_id' => $this->tenant->id, 'invcode' => 'ΔΑΠ1']);
-        $xml = '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0">'
+        $note = new DeliveryNote([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'ΔΑΠ1',
+            'recipient_name' => 'Παραλήπτης ΑΕ',
+            'recipient_afm' => '123456789',
+            'delivery_city' => 'Θεσσαλονίκη',
+        ]);
+        $xml = '<?xml version="1.0" encoding="utf-8"?>'
+            .'<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0">'
             .'<invoice><invoiceDetails><icls:incomeClassification><icls:classificationType>category3</icls:classificationType></icls:incomeClassification></invoiceDetails></invoice></InvoicesDoc>';
 
         $result = (new InvoSignTransport)->sendDelivery($note, $xml, ProviderCredentials::fromCompany($this->tenant));
 
         $this->assertTrue($result->success);
-        $this->assertStringContainsString('xmlns:n1=', (string) $result->requestPayload);
-        $this->assertStringContainsString('<n1:classificationType>', (string) $result->requestPayload);
-        $this->assertStringNotContainsString('icls:', (string) $result->requestPayload);
 
-        Http::assertSent(fn ($request) => str_contains((string) $request['xml_arxeio'], 'xmlns:n1=')
-            && str_contains((string) $request['xml_arxeio'], '<n1:classificationType>')
+        // [88-006]: the mandatory <API_InvoiceDetails> (issuer + recipient as
+        // counterpart) is now appended for delivery notes too.
+        $payload = (string) $result->requestPayload;
+        $this->assertStringContainsString('API_InvoiceDetails', $payload);
+        $this->assertStringContainsString('<IssuerName>ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ ΟΕ</IssuerName>', $payload);
+        $this->assertStringContainsString('<CounterpartName>Παραλήπτης ΑΕ</CounterpartName>', $payload);
+        $this->assertStringContainsString('<CounterpartVat>123456789</CounterpartVat>', $payload);
+        // Delivery-specific Additionals from the provider's own ΔΑ example.
+        $this->assertStringContainsString('<DocumentDispatchTo>Θεσσαλονίκη</DocumentDispatchTo>', $payload);
+
+        // [88-004]: prefix normalisation still applied, and still valid XML.
+        $this->assertStringContainsString('xmlns:n1=', $payload);
+        $this->assertStringContainsString('<n1:classificationType>', $payload);
+        $this->assertStringNotContainsString('icls:', $payload);
+        $this->assertNotFalse(simplexml_load_string($payload));
+
+        Http::assertSent(fn ($request) => str_contains((string) $request['xml_arxeio'], 'API_InvoiceDetails')
+            && str_contains((string) $request['xml_arxeio'], 'xmlns:n1=')
             && ! str_contains((string) $request['xml_arxeio'], 'icls:'));
     }
 

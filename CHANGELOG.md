@@ -105,6 +105,26 @@ they merge.
   cancels a 2.1).
 
 ### Fixed
+- **Παραστατικά Διακίνησης μέσω παρόχου — `[88-006] Λείπει το API_InvoiceDetails`.**
+  `InvoSignTransport::sendDelivery` skipped `InvoSignDocument::augment` (on the
+  wrong assumption that delivery notes need no printout extension), so the
+  provider-issued δελτίο carried no `<API_InvoiceDetails>` and InvoSign rejected
+  it. New `InvoSignDocument::augmentDelivery` appends the mandatory invoice-level
+  block (issuer + recipient-as-counterpart, built from the `DeliveryNote`) and
+  applies the same icls/ecls→n1/n2 normalisation; the shared `buildApiInvoiceDetails`
+  was generalised so invoice & delivery emit an identical block shape. (Per-line
+  `api_*` twins stay invoice-only — to be confirmed for goods 9.x on the InvoSign
+  sandbox.) **NB:** distinct from the `mark_time` drift below (a DB write on the
+  direct-myDATA path) — this is the provider issue path.
+- **Παραστατικά Διακίνησης — provider-channel lifecycle resolved (full model).**
+  The InvoSign reference confirmed the πάροχος exposes only issue + cancel-DN, so:
+  **ακύρωση → μέσω παρόχου** for `gr-provider` tenants (`DeliveryLifecycleService::
+  cancelViaProvider` → `iNVOSign_CancelDeliveryNote`; the INSERT-MARK lookup now
+  also matches `PROVIDER_INSERT`), **έναρξη/παράδοση/έλεγχος/history → απευθείας
+  myDATA** for all (the earlier interim guard was removed; `initFirebed`'s creds
+  check gates a provider tenant without myDATA creds). ΔΑ provider payload also
+  gained `DocumentDispatchFrom/To` + `DocumentMovePursposeLabel` per InvoSign's ΔΑ
+  example. See `docs/delivery-provider-split-brain.md`.
 - **Παραστατικά Διακίνησης — `delivery_marks.mark_time` schema drift.** The live
   column had drifted to `TIMESTAMP` (migrated before the create migration's source
   was corrected to `TIME`), so the MARK persist — which writes `now()->toTimeString()`

@@ -13,6 +13,7 @@ use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -396,6 +397,68 @@ class DeliveryLifecycleServiceTest extends TestCase
             'delivery_note_id' => $note->id,
             'mydata_action' => 'CANCEL',
         ]);
+    }
+
+    // ---- provider channel: cancel routes via the provider -------------
+
+    public function test_provider_tenant_cancel_routes_via_provider(): void
+    {
+        // InvoSign exposes iNVOSign_CancelDeliveryNote, so a provider tenant's
+        // ΔΑ cancel must go through the SAME channel as its issuance — not direct
+        // myDATA. (Έναρξη/παράδοση/έλεγχος stay direct: the provider has no such
+        // endpoints; that path is the unchanged firebed one.)
+        Http::fake(['*iNVOSign_CancelDeliveryNote*' => Http::response($this->providerCancelXml(), 200)]);
+
+        $provider = Company::create([
+            'name' => 'Provider tenant', 'slug' => 'prov-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'afm' => '800561849',
+            'einvoice_provider_config' => ['demo_base_url' => 'https://demo.invosign.test', 'demo_token' => 'DEMO-TOKEN'],
+        ]);
+        $type = InvoiceType::create([
+            'company_id' => $provider->id, 'code' => 'DA', 'name' => 'ΔΑ', 'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+        $note = DeliveryNote::create([
+            'company_id' => $provider->id, 'invcode' => 'DA1', 'code' => 1,
+            'delivery_type_id' => $type->id, 'issued_at' => now(), 'mydata_type' => '9.3', 'local_status' => 'active',
+        ]);
+        $note->forceFill([
+            'mydata_sent' => true, 'mydata_state' => 'VALID',
+            'mydata_mark' => '400001964635819', 'delivery_state' => 'registered',
+        ])->save();
+        // Provider issuance writes PROVIDER_INSERT (not INSERT) — cancel must find it.
+        DeliveryMark::create([
+            'company_id' => $provider->id, 'delivery_note_id' => $note->id,
+            'mark' => '400001964635819', 'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'invosign',
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+
+        $audit = (new DeliveryLifecycleService($provider))->cancel($note, 'λάθος παραλήπτης');
+
+        $this->assertSame('CANCEL', $audit->mydata_action);
+        $this->assertSame('invosign', $audit->provider_key);
+        $this->assertSame('400001957363715', $audit->mark); // cancellationMark from the provider
+
+        $fresh = $note->fresh();
+        $this->assertSame('CANCELLED', $fresh->mydata_state);
+        $this->assertSame('cancelled', $fresh->delivery_state);
+        $this->assertSame('cancelled', $fresh->local_status);
+
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'iNVOSign_CancelDeliveryNote')
+            && $r['mark'] === '400001964635819');
+    }
+
+    private function providerCancelXml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <cancellationMark>400001957363715</cancellationMark>
+        <statusCode>Success</statusCode>
+    </response>
+</ResponseDoc>
+XML;
     }
 
     // ---- state label --------------------------------------------------
