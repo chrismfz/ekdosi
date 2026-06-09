@@ -1,8 +1,12 @@
 # Διακίνηση μέσω παρόχου — το split-brain του lifecycle (blueprint)
 
-> Status: **διερεύνηση / απόφαση εκκρεμεί.** Κανένας κώδικας lifecycle-via-provider
-> δεν έχει γραφτεί ακόμα. Συνοδεύει το fix του `[88-006]` (έκδοση δελτίου μέσω
-> παρόχου — βλ. `InvoSignDocument::augmentDelivery`).
+> Status: **✅ ΛΥΘΗΚΕ (πλήρες μοντέλο υλοποιημένο).** Μετά το InvoSign reference
+> (invosign.gr/site/help_site) ξεκαθάρισε ότι ο πάροχος κάνει ΜΟΝΟ έκδοση +
+> ακύρωση δελτίου· η κίνηση είναι myDATA-native. Υλοποιήθηκε αναλόγως:
+> **έκδοση + ακύρωση → πάροχος· έναρξη/παράδοση/έλεγχος/history → απευθείας myDATA**
+> (gated στα myDATA creds). Δεν υπάρχει πλέον split-brain ούτε blanket guard.
+> Εκκρεμεί μόνο η **γραπτή επιβεβαίωση του παρόχου** ότι δεν υπάρχουν άλλα
+> lifecycle endpoints (ερώτημα εστάλη).
 
 ## Το πρόβλημα σε μία πρόταση
 Για tenant παρόχου (`einvoice_provider='gr-provider'`, π.χ. `myip`/InvoSign) η
@@ -89,20 +93,24 @@ preflight check).
 - **Ρίσκο:** εξαρτάται από κανονιστική επιβεβαίωση· πιθανώς δεν ισχύει για καθαρό
   πάροχο χωρίς myDATA subscription.
 
-### C) Interim guard  *(✅ ΥΛΟΠΟΙΗΘΗΚΕ)*
-Ο `DeliveryLifecycleService` αποτρέπει ρητά κάθε direct-myDATA lifecycle κλήση για
-tenant παρόχου: ο guard ζει στο **single choke-point `initFirebed()`** (απ' όπου
-περνούν register/confirm/status/cancel — και κάθε μελλοντική), ρίχνει σαφές
-ελληνικό μήνυμα αντί για σιωπηλό split-brain. Στο UI (`ViewDeliveryNote`) τα 4
-lifecycle actions είναι **κρυμμένα** για provider tenants (`! $isProviderChannel`).
-Η **έκδοση** μέσω παρόχου ΔΕΝ επηρεάζεται. Αναστρέψιμο: μόλις κριθεί A ή B, αφαιρείς
-τον guard (ή τον κάνεις conditional). Test: `DeliveryLifecycleServiceTest::
-test_provider_tenant_is_blocked_from_every_direct_lifecycle_call`.
+### ✅ ΥΛΟΠΟΙΗΜΕΝΟ μοντέλο (μετά το InvoSign reference)
+Το reference απέκλεισε το A (ο InvoSign δεν έχει register/confirm/movement-status
+endpoints). Υλοποιήθηκε ο φυσικός συνδυασμός:
+- **Έκδοση → πάροχος** (`DeliveryNoteSubmitter::submitViaProvider`).
+- **Ακύρωση → πάροχος** (`DeliveryLifecycleService::cancelViaProvider` →
+  `iNVOSign_CancelDeliveryNote`), για provider tenants· direct `CancelInvoice` για
+  gr-mydata. Η INSERT-MARK αναζήτηση καλύπτει πλέον και `PROVIDER_INSERT`.
+- **Έναρξη / Παράδοση / Έλεγχος / History → απευθείας myDATA** (firebed), για
+  ΟΛΟΥΣ. Ο interim guard **αφαιρέθηκε**· το gating το κάνει ο υπάρχων έλεγχος
+  creds στο `initFirebed()` (provider tenant χωρίς myDATA creds → σαφές μήνυμα).
+- UI: και τα 4 actions ξανα-εμφανίζονται για provider tenants.
+- Test: `DeliveryLifecycleServiceTest::test_provider_tenant_cancel_routes_via_provider`.
 
-## Σύσταση
-**C έγινε** (κλείνει το ρίσκο άμεσα). Επόμενο: **ερώτημα στον πάροχο/ΑΑΔΕ** που
-ξεκλειδώνει A ή B. Μη γράψεις A/B πριν την απάντηση — και τα δύο εξαρτώνται από
-εξωτερικά άγνωστα (endpoints του InvoSign / κανονιστική θέση της ΑΑΔΕ).
+## Εκκρεμεί μόνο
+Γραπτή επιβεβαίωση του InvoSign ότι **δεν** υπάρχουν endpoints για Έναρξη/
+Παράδοση/Έλεγχος-κίνησης (άρα αυτά πάνε σωστά απευθείας myDATA). Ερώτημα εστάλη.
+Αν προκύψουν endpoints, προστίθενται στον `EInvoiceProviderTransport` πίσω από τον
+ίδιο `isLiveProviderTenant()` έλεγχο, όπως η ακύρωση.
 
 ## Ανοιχτά ερωτήματα (για πάροχο/ΑΑΔΕ)
 1. Εκθέτει ο InvoSign endpoints για RegisterTransfer / ConfirmDeliveryOutcome /

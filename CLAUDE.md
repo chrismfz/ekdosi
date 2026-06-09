@@ -687,18 +687,18 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   from the `DeliveryNote`), instead of only prefix-normalising — InvoSign rejects
   a δελτίο without that block. `buildApiInvoiceDetails` was generalised to array
   inputs so invoice & delivery share it.
-- **⚠ provider-channel split-brain (lifecycle) — interim guard ✅, decision OPEN.**
-  For a `gr-provider` tenant the δελτίο is ISSUED via the provider but the whole
-  lifecycle (RegisterTransfer/ConfirmOutcome/Status/Cancel) would go DIRECTLY to
-  myDATA — two channels for one document. The sandbox e2e only passed because
-  `myip` was temporarily flipped to direct-myDATA, so the **provider lifecycle
-  path is UNVALIDATED**. **Interim guard now in place (option C):** the channel
-  check lives at the single choke-point `DeliveryLifecycleService::initFirebed()`
-  and refuses every direct lifecycle call for provider tenants (+ the 4 UI actions
-  are hidden) — no more silent split-brain. The real fix (A: provider implements
-  lifecycle endpoints / B: direct-myDATA lifecycle allowed for provider tenants)
-  is still OPEN, pending provider/AADE answers. Full analysis + open questions:
-  **`docs/delivery-provider-split-brain.md`**.
+- **✅ provider-channel lifecycle — RESOLVED (full model).** The InvoSign
+  reference confirmed the πάροχος exposes ONLY issue + cancel-delivery-note (no
+  RegisterTransfer/ConfirmOutcome; its status is transmission-status, not §7.1
+  movement). So the natural split was implemented: **issue + cancel → provider**
+  (`DeliveryNoteSubmitter::submitViaProvider`, `DeliveryLifecycleService::
+  cancelViaProvider` → `iNVOSign_CancelDeliveryNote`; cancel's INSERT-MARK lookup
+  now also matches `PROVIDER_INSERT`), **έναρξη/παράδοση/έλεγχος/history → direct
+  myDATA** for everyone (the interim guard was REMOVED; the existing `initFirebed`
+  creds-check gates a provider tenant lacking myDATA creds with a clear message).
+  All 4 UI actions show again for provider tenants. Only OPEN item: a written
+  InvoSign confirmation that no movement endpoints exist (question sent). Full
+  analysis: **`docs/delivery-provider-split-brain.md`**.
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see

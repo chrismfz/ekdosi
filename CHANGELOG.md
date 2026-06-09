@@ -116,13 +116,15 @@ they merge.
   `api_*` twins stay invoice-only — to be confirmed for goods 9.x on the InvoSign
   sandbox.) **NB:** distinct from the `mark_time` drift below (a DB write on the
   direct-myDATA path) — this is the provider issue path.
-- **Παραστατικά Διακίνησης — interim guard κατά του provider-channel split-brain.**
-  A `gr-provider` tenant ISSUES the δελτίο via the provider, but the lifecycle
-  (έναρξη/παράδοση/έλεγχος/ακύρωση) would go DIRECTLY to myDATA. The guard now
-  lives at the single choke-point `DeliveryLifecycleService::initFirebed()` and
-  refuses every direct lifecycle call for provider tenants (the 4 `ViewDeliveryNote`
-  actions are also hidden) — no silent cross-channel. The real fix is pending
-  provider/AADE answers; see `docs/delivery-provider-split-brain.md`.
+- **Παραστατικά Διακίνησης — provider-channel lifecycle resolved (full model).**
+  The InvoSign reference confirmed the πάροχος exposes only issue + cancel-DN, so:
+  **ακύρωση → μέσω παρόχου** for `gr-provider` tenants (`DeliveryLifecycleService::
+  cancelViaProvider` → `iNVOSign_CancelDeliveryNote`; the INSERT-MARK lookup now
+  also matches `PROVIDER_INSERT`), **έναρξη/παράδοση/έλεγχος/history → απευθείας
+  myDATA** for all (the earlier interim guard was removed; `initFirebed`'s creds
+  check gates a provider tenant without myDATA creds). ΔΑ provider payload also
+  gained `DocumentDispatchFrom/To` + `DocumentMovePursposeLabel` per InvoSign's ΔΑ
+  example. See `docs/delivery-provider-split-brain.md`.
 - **Παραστατικά Διακίνησης — `delivery_marks.mark_time` schema drift.** The live
   column had drifted to `TIMESTAMP` (migrated before the create migration's source
   was corrected to `TIME`), so the MARK persist — which writes `now()->toTimeString()`

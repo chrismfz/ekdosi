@@ -7,6 +7,8 @@ use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteEvent;
+use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Support\EInvoice\ProviderCredentials;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\TransportType;
@@ -361,7 +363,7 @@ class DeliveryLifecycleService
         // MARK while the mirror reflects only the latest).
         $inserts = DeliveryMark::query()
             ->where('delivery_note_id', $note->id)
-            ->where('mydata_action', 'INSERT')
+            ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT']) // provider issuance writes PROVIDER_INSERT
             ->whereNotNull('mark')
             ->orderByDesc('id')
             ->get();
@@ -380,6 +382,14 @@ class DeliveryLifecycleService
         }
 
         $markToCancel = (string) $inserts->first()->mark;
+
+        // Ακύρωση μέσω παρόχου: ο InvoSign εκθέτει iNVOSign_CancelDeliveryNote, οπότε
+        // για provider tenant η ακύρωση πάει στο ΙΔΙΟ κανάλι με την έκδοση (όπως
+        // GrProviderSubmitter::cancel για τα τιμολόγια). Η έναρξη/παράδοση/έλεγχος
+        // ΔΕΝ προσφέρονται από τον πάροχο → μένουν απευθείας myDATA.
+        if ($this->tenant->isLiveProviderTenant()) {
+            return $this->cancelViaProvider($note, $markToCancel, $reason);
+        }
 
         $action = new CancelInvoice;
         $response = $this->dispatch($note, 'cancel', fn () => $action->handle($markToCancel));
@@ -406,6 +416,53 @@ class DeliveryLifecycleService
                 'mydata_action' => 'CANCEL',
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
                 'response' => $responseXml,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]);
+
+            $note->forceFill([
+                'mydata_state' => 'CANCELLED',
+                'delivery_state' => 'cancelled',
+                'local_status' => 'cancelled',
+            ])->save();
+
+            return $audit;
+        });
+    }
+
+    /**
+     * Ακύρωση δελτίου μέσω του ΥΠΑΗΕΣ παρόχου (InvoSign iNVOSign_CancelDeliveryNote).
+     * Twin of GrProviderSubmitter::cancel: POST the issue MARK to the provider, and
+     * only on a Success result flip the note to the terminal cancelled state +
+     * write the CANCEL audit row. A provider rejection/exception throws (no false
+     * cancel), mirroring the direct path.
+     */
+    private function cancelViaProvider(DeliveryNote $note, string $markToCancel, string $reason): DeliveryMark
+    {
+        $transport = app(ProviderTransportRegistry::class)->for((string) $this->tenant->einvoice_provider_key);
+        $credentials = ProviderCredentials::fromCompany($this->tenant);
+
+        try {
+            $result = $transport->cancel($markToCancel, $credentials, $reason);
+        } catch (Throwable $e) {
+            throw new RuntimeException('Ακύρωση μέσω παρόχου απέτυχε: '.$e->getMessage(), 0, $e);
+        }
+
+        if (! $result->success) {
+            throw new RuntimeException('Ακύρωση: ο πάροχος απέρριψε την ενέργεια — '.$result->errorMessage());
+        }
+
+        $cancellationMark = $result->cancellationMark ?? $markToCancel;
+
+        return DB::transaction(function () use ($note, $result, $reason, $cancellationMark, $transport) {
+            $audit = DeliveryMark::create([
+                'company_id' => $note->company_id,
+                'delivery_note_id' => $note->id,
+                'mark' => $cancellationMark,
+                'mydata_action' => 'CANCEL',
+                'provider_key' => $transport->key(),
+                'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
+                'response' => $result->raw,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
             ]);
@@ -548,21 +605,6 @@ class DeliveryLifecycleService
 
     private function initFirebed(?MyDataMode $environment = null): void
     {
-        // Interim guard against the provider-channel split-brain, placed at THE
-        // single choke-point through which every direct-myDATA lifecycle call
-        // (register/confirm/status/cancel, and any future one) passes: a
-        // gr-provider tenant ISSUES the δελτίο via the provider, so its lifecycle
-        // must not silently cross to direct myDATA. Refuse it until the channel is
-        // decided (docs/delivery-provider-split-brain.md). gr-mydata tenants (the
-        // validated path) are unaffected.
-        if ($this->tenant->isLiveProviderTenant()) {
-            throw new RuntimeException(
-                'Η διακίνηση μέσω παρόχου δεν υποστηρίζεται ακόμα: ο κύκλος ζωής του δελτίου '
-                .'(έναρξη/παράδοση/έλεγχος/ακύρωση) θα πήγαινε απευθείας στο myDATA ενώ η έκδοση '
-                .'έγινε μέσω παρόχου. Εκκρεμεί επιβεβαίωση καναλιού (βλ. docs/delivery-provider-split-brain.md).'
-            );
-        }
-
         $mode = $environment ?? $this->tenant->mydata_mode_enum;
 
         [$aadeId, $subKey] = $this->tenant->mydataCredentials($mode);
