@@ -96,13 +96,13 @@
         .pager:after { content: counter(page); }
         .pager-total:after { content: counter(pages); }
 
-        /* Ιστορικό (audit trail), printed when present */
-        .history { margin-top: 6mm; page-break-inside: auto; }
-        .history h3 { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
-        table.hist { width: 100%; border-collapse: collapse; }
-        table.hist th { background: #f3f4f6; border-bottom: 1pt solid #cbd5e1; padding: 1.2mm 2mm; font-size: 7.5pt; text-align: left; color: #374151; font-weight: bold; }
-        table.hist td { padding: 1.2mm 2mm; border-bottom: 0.5pt solid #eee; font-size: 8pt; vertical-align: top; color: #1f2937; }
-        table.hist td .chg { display: block; font-size: 7pt; color: #6b7280; }
+        /* Related documents (credit-note / delivery links), printed when present */
+        .related { margin-top: 6mm; padding: 3mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; page-break-inside: avoid; }
+        .related h3 { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
+        .related .rel-row { font-size: 9pt; color: #1f2937; margin: 0.8mm 0; }
+        .related .rel-label { color: #6b7280; }
+        .related .rel-badge { font-weight: bold; color: #7f1d1d; }
+        .related .rel-note { font-size: 7.5pt; color: #6b7280; margin: 0.3mm 0 1.5mm; }
     </style>
 </head>
 <body>
@@ -303,43 +303,46 @@
     </div>
 @endif
 
-{{-- ====================== Ιστορικό (audit trail) ======================
-     `$detailed` (operator download only) adds Χρήστης + Μεταβολές. The
-     customer-facing copy (auto-email / public URL) stays redacted to Πότε/Ενέργεια
-     so the operator name + internal field-level diff never leave the building. --}}
-@php($histActivities = $activities ?? collect())
-@php($detailed = $historyDetailed ?? false)
-@if($histActivities->isNotEmpty())
-    <div class="history">
-        <h3>Ιστορικό</h3>
-        <table class="hist">
-            <thead>
-                <tr>
-                    <th style="width:{{ $detailed ? '22' : '40' }}%">Ημ/νία</th>
-                    <th style="width:{{ $detailed ? '20' : '60' }}%">Ενέργεια</th>
-                    @if($detailed)
-                        <th style="width:22%">Χρήστης</th>
-                        <th style="width:36%">Μεταβολές</th>
-                    @endif
-                </tr>
-            </thead>
-            <tbody>
-                @foreach($histActivities as $a)
-                    <tr>
-                        <td>{{ optional($a->created_at)->format('d/m/Y H:i') }}</td>
-                        <td>{{ $a->description }}</td>
-                        @if($detailed)
-                            <td>{{ optional($a->causer)->name ?: 'Σύστημα' }}</td>
-                            <td>
-                                @foreach($a->changeLines() as $line)
-                                    <span class="chg">{{ $line }}</span>
-                                @endforeach
-                            </td>
-                        @endif
-                    </tr>
-                @endforeach
-            </tbody>
-        </table>
+{{-- ====================== Σχετικά παραστατικά ======================
+     The customer-meaningful links (cancellation ↔ credit note(s), delivery
+     notes) — mirrors the «Σχετικά παραστατικά» panel in Filament. Safe for the
+     customer copy (no operator names / internal diffs). Printed only when there
+     IS a relation. --}}
+@php($relCredits = $invoice->creditNotes ?? collect())
+@php($relDeliveries = $invoice->deliveryNotes ?? collect())
+@if($invoice->credited_invoice_id !== null || $relCredits->isNotEmpty() || $relDeliveries->isNotEmpty())
+    <div class="related">
+        <h3>Σχετικά παραστατικά</h3>
+
+        @if($invoice->isFullyCredited())
+            <div class="rel-row">
+                <span class="rel-label">Κατάσταση παραστατικού:</span>
+                <span class="rel-badge">Ακυρώθηκε με πιστωτικό</span>
+            </div>
+        @endif
+
+        @if($invoice->credited_invoice_id !== null && $invoice->creditedInvoice)
+            <div class="rel-row">
+                <span class="rel-label">Πιστωτικό — αντιστρέφει το παραστατικό:</span>
+                <strong>{{ $invoice->creditedInvoice->invcode }}</strong>
+            </div>
+            <div class="rel-note">Αυτό το πιστωτικό εκδόθηκε για να ακυρώσει/διορθώσει το παραπάνω παραστατικό.</div>
+        @endif
+
+        @if($relCredits->isNotEmpty())
+            <div class="rel-row">
+                <span class="rel-label">Ακυρώθηκε / πιστώθηκε με:</span>
+                <strong>{{ $relCredits->pluck('invcode')->implode(', ') }}</strong>
+            </div>
+            <div class="rel-note">Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.</div>
+        @endif
+
+        @if($relDeliveries->isNotEmpty())
+            <div class="rel-row">
+                <span class="rel-label">Δελτία αποστολής:</span>
+                <strong>{{ $relDeliveries->pluck('invcode')->implode(', ') }}</strong>
+            </div>
+        @endif
     </div>
 @endif
 

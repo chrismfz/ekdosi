@@ -22,15 +22,15 @@ they merge.
   edge — DomPDF won't break it. Now a zero-width space is injected every 8 chars so
   it wraps, same fix already applied to the invoice PDF footer.
 ### Added
-- **Printable history on PDFs.** The delivery-note PDF prints an «Ιστορικό»
-  section (when present): movement lifecycle events (`delivery_note_events`) +
-  myDATA submission marks (`delivery_marks`). The invoice PDF prints an
-  «Ιστορικό» from `activitiesAsSubject`, **audience-aware**: the operator
-  «Download PDF» shows the full table (Πότε/Ενέργεια/Χρήστης/Μεταβολές), while the
-  customer-facing copies (auto-email + public signed URL) are **redacted to
-  Πότε/Ενέργεια** — the operator name and the internal field-level diff never
-  leave the building (`InvoicePdfRenderer::render($invoice, internal:)`, default
-  redacted). Both render only when rows exist.
+- **Printable history / links on PDFs.** The delivery-note PDF prints an
+  «Ιστορικό» section (when present): movement lifecycle events
+  (`delivery_note_events`) + myDATA submission marks (`delivery_marks`). The
+  invoice PDF prints a **«Σχετικά παραστατικά»** block mirroring the Filament
+  panel — cancellation↔credit-note links («Ακυρώθηκε με πιστωτικό» + the credit
+  note's code, the original it reverses, linked delivery notes) — so the customer
+  can tie a cancelled invoice to its credit note. Customer-safe by design (no
+  operator names / internal field diffs; the full audit «Ιστορικό» stays in the
+  panel). Each renders only when the relation/rows exist.
 - **Backup failure alerting.** A SCHEDULED per-company backup that ends
   failed/partial now emails ops (`ScheduledBackupFailed` notification, queued) and
   is always `Log::error`'d — previously a nightly failure was silent. Recipients:

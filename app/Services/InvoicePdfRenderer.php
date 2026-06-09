@@ -46,16 +46,13 @@ class InvoicePdfRenderer
 
     private const RENDER_TIME_LIMIT_SECONDS = 60;
 
-    /**
-     * @param  bool  $internal  Operator-facing render (ViewInvoice «Download PDF»).
-     *                          Customer-facing paths (auto-email, public signed URL)
-     *                          MUST leave this false so the «Ιστορικό» is REDACTED —
-     *                          only Πότε/Ενέργεια, never the operator (causer) or the
-     *                          internal field-level diff (changeLines).
-     */
-    public function render(Invoice $invoice, bool $internal = false): string
+    public function render(Invoice $invoice): string
     {
-        $invoice->loadMissing(['lines', 'invoiceType', 'customer', 'company', 'paymentMethod']);
+        $invoice->loadMissing([
+            'lines', 'invoiceType', 'customer', 'company', 'paymentMethod',
+            // For the «Σχετικά παραστατικά» block (credit-note / delivery links).
+            'creditNotes', 'creditedInvoice', 'deliveryNotes',
+        ]);
 
         // Tenant-relation siblings the template references that aren't
         // always relations on Invoice. Defensive lazy-load via
@@ -87,11 +84,6 @@ class InvoicePdfRenderer
                 'qrDataUri'   => $qrDataUri,
                 'logoDataUri' => $logoDataUri,
                 'totals'      => $this->totalsView($invoice),
-                // Audit trail («Ιστορικό»), chronological — printed when present.
-                // Χρήστης + Μεταβολές columns render only on the internal (operator)
-                // variant; the customer-facing copy stays redacted to Πότε/Ενέργεια.
-                'activities'      => $invoice->activitiesAsSubject()->with('causer')->oldest()->get(),
-                'historyDetailed' => $internal,
             ])
                 ->setPaper('A4', 'portrait')
                 ->output();
