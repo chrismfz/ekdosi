@@ -22,6 +22,12 @@ class GreekText
     /** Uppercase + drop the τόνος (accent-less ALL-CAPS, the correct Greek form). */
     public static function upper(?string $text): string
     {
-        return strtr(mb_strtoupper((string) $text, 'UTF-8'), self::ACCENTED_CAPS);
+        $upper = strtr(mb_strtoupper((string) $text, 'UTF-8'), self::ACCENTED_CAPS);
+
+        // ΐ/ΰ (tonos+dialytika) uppercase to a base letter + combining diaeresis +
+        // combining tonos, which the precomposed map above can't reach. Drop the
+        // leftover combining tonos (U+0301) — the diaeresis (U+0308) stays, valid
+        // on Greek capitals.
+        return str_replace("\u{0301}", '', $upper);
     }
 }

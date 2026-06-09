@@ -27,4 +27,13 @@ class GreekTextTest extends TestCase
         // Dialytika ARE valid on Greek capitals — only the tonos is dropped.
         $this->assertSame('ΠΡΟΪΟΝ', GreekText::upper('προϊόν'));
     }
+
+    public function test_upper_strips_tonos_on_dialytika_plus_tonos_letters(): void
+    {
+        // ΐ/ΰ carry BOTH dialytika and tonos; uppercasing must drop only the tonos.
+        $out = GreekText::upper('πρωτεΐνη');
+        $this->assertStringNotContainsString("\u{0301}", $out); // no combining tonos left
+        $this->assertStringContainsString('ΠΡΩΤΕ', $out);
+        $this->assertStringContainsString('ΝΗ', $out);
+    }
 }
