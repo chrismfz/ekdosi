@@ -49,7 +49,12 @@ class InvoicePdfRelatedDocsTest extends TestCase
 
     private function renderHtml(Invoice $invoice): string
     {
-        $invoice->loadMissing(['lines', 'invoiceType', 'customer', 'company', 'creditNotes', 'creditedInvoice', 'deliveryNotes']);
+        // Mirror InvoicePdfRenderer's constrained load (issued credit notes only).
+        $invoice->loadMissing([
+            'lines', 'invoiceType', 'customer', 'company',
+            'creditNotes' => fn ($q) => $q->where('local_status', 'active'),
+            'creditedInvoice', 'deliveryNotes',
+        ]);
         $renderer = app(InvoicePdfRenderer::class);
         $totals = (fn (Invoice $i) => $this->totalsView($i))->call($renderer, $invoice);
 
@@ -68,14 +73,45 @@ class InvoicePdfRelatedDocsTest extends TestCase
         // Create the credit note FIRST (its creation may recompute the original's
         // credited_total), then set the caches LAST so isFullyCredited() holds.
         $this->invoice(['code' => 10, 'invcode' => 'ΠΙΣ10', 'credited_invoice_id' => $original->id]);
-        $original->forceFill(['gross_total' => 100, 'credited_total' => 100])->save();
+        // mydata_state VALID so the «παραμένει VALID στην ΑΑΔΕ» note is allowed to show.
+        $original->forceFill(['gross_total' => 100, 'credited_total' => 100, 'mydata_state' => 'VALID'])->save();
 
         $html = $this->renderHtml($original);
 
         $this->assertStringContainsString('Ακυρώθηκε με πιστωτικό', $html);     // the reversal badge
         $this->assertStringContainsString('Ακυρώθηκε / πιστώθηκε με', $html);
         $this->assertStringContainsString('ΠΙΣ10', $html);                      // the credit note code
-        $this->assertStringContainsString('παραμένει VALID στην ΑΑΔΕ', $html);  // the helper note
+        $this->assertStringContainsString('παραμένει VALID στην ΑΑΔΕ', $html);  // VALID → note shown
+    }
+
+    public function test_partial_credit_uses_softer_wording_and_no_valid_claim(): void
+    {
+        // A partial credit on a non-myDATA (state-less) invoice that is still owed.
+        $original = $this->invoice();
+        $this->invoice(['code' => 11, 'invcode' => 'ΠΙΣ11', 'credited_invoice_id' => $original->id]);
+        $original->forceFill(['gross_total' => 100, 'credited_total' => 30])->save(); // not fully credited
+
+        $html = $this->renderHtml($original);
+
+        $this->assertStringContainsString('Πιστώθηκε (μερικώς) με', $html);        // softened label
+        $this->assertStringContainsString('ΠΙΣ11', $html);
+        $this->assertStringNotContainsString('Ακυρώθηκε με πιστωτικό', $html);      // no full-cancel badge
+        $this->assertStringNotContainsString('παραμένει VALID στην ΑΑΔΕ', $html);   // no AADE claim (state null)
+    }
+
+    public function test_draft_credit_note_is_not_shown_to_the_customer(): void
+    {
+        // A draft (not-yet-issued) credit note must NOT appear on the customer PDF —
+        // it would assert a reversal that isn't legally filed yet.
+        $original = $this->invoice();
+        $this->invoice(['code' => 10, 'invcode' => 'ΠΙΣΕΝΕΡΓΟ', 'credited_invoice_id' => $original->id, 'local_status' => 'active']);
+        $this->invoice(['code' => 11, 'invcode' => 'ΠΙΣΠΡΟΧΕΙΡΟ', 'credited_invoice_id' => $original->id, 'local_status' => 'draft']);
+        $original->forceFill(['gross_total' => 100, 'credited_total' => 50])->save();
+
+        $html = $this->renderHtml($original);
+
+        $this->assertStringContainsString('ΠΙΣΕΝΕΡΓΟ', $html);       // issued → shown
+        $this->assertStringNotContainsString('ΠΙΣΠΡΟΧΕΙΡΟ', $html);  // draft → hidden
     }
 
     public function test_credit_note_shows_the_invoice_it_reverses(): void

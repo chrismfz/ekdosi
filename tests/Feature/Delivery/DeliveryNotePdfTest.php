@@ -178,14 +178,7 @@ class DeliveryNotePdfTest extends TestCase
             'mydata_action' => 'INSERT',
         ]);
 
-        $html = view('delivery-notes.pdf', [
-            'note' => $note,
-            'tenant' => $note->company,
-            'qrDataUri' => null,
-            'logoDataUri' => null,
-            'events' => $note->events()->orderBy('event_timestamp')->get(),
-            'marks' => $note->marks()->oldest()->get(),
-        ])->render();
+        $html = $this->renderDeliveryHtml($note);
 
         $this->assertStringContainsString('Ιστορικό', $html);
         $this->assertStringContainsString('Διακίνηση', $html);
@@ -193,6 +186,46 @@ class DeliveryNotePdfTest extends TestCase
         $this->assertStringContainsString('Υποβολές myDATA', $html);
         $this->assertStringContainsString('Καταχώρηση', $html);          // INSERT → Greek
         $this->assertStringContainsString('400001234567890', $html);     // the mark
+    }
+
+    public function test_submissions_table_excludes_lifecycle_and_failed_marks(): void
+    {
+        // delivery_marks also stores lifecycle (REGISTER_TRANSFER/CONFIRM_OUTCOME)
+        // and failed attempts (PROVIDER_FAILED, no MARK). «Υποβολές myDATA» must
+        // show only real submissions (INSERT/PROVIDER_INSERT/CANCEL).
+        $note = $this->fileNote($this->makeNote(), '400001234567890');
+
+        foreach ([
+            ['mark' => '400001234567890', 'mydata_action' => 'INSERT'],
+            ['mark' => null, 'mydata_action' => 'REGISTER_TRANSFER'],
+            ['mark' => null, 'mydata_action' => 'PROVIDER_FAILED'],
+        ] as $row) {
+            \App\Models\DeliveryMark::create($row + [
+                'company_id' => $this->tenant->id,
+                'delivery_note_id' => $note->id,
+            ]);
+        }
+
+        $html = $this->renderDeliveryHtml($note);
+
+        $this->assertStringContainsString('Καταχώρηση', $html);              // INSERT shown
+        $this->assertStringNotContainsString('REGISTER_TRANSFER', $html);    // lifecycle excluded
+        $this->assertStringNotContainsString('PROVIDER_FAILED', $html);      // failed attempt excluded
+    }
+
+    /** Render the delivery PDF blade to HTML the way DeliveryNotePdf::render does (filtered marks). */
+    private function renderDeliveryHtml(DeliveryNote $note): string
+    {
+        return view('delivery-notes.pdf', [
+            'note' => $note,
+            'tenant' => $note->company,
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+            'events' => $note->events()->get(),
+            'marks' => $note->marks()
+                ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT', 'CANCEL'])
+                ->oldest()->get(),
+        ])->render();
     }
 
     public function test_history_section_absent_when_no_events_or_marks(): void

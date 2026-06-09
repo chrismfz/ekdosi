@@ -50,4 +50,15 @@ class DeliveryMark extends Model
     {
         return $this->belongsTo(DeliveryNote::class);
     }
+
+    /** Greek label for the submission action (falls back to the raw value). */
+    public function actionLabel(): string
+    {
+        return match ($this->mydata_action) {
+            'INSERT' => 'Καταχώρηση',
+            'PROVIDER_INSERT' => 'Καταχώρηση (πάροχος)',
+            'CANCEL' => 'Ακύρωση',
+            default => (string) $this->mydata_action,
+        };
+    }
 }

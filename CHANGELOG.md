@@ -17,6 +17,15 @@ they merge.
 
 ## [Unreleased]
 ### Fixed
+- **Invoice/ΔΑ PDF «Σχετικά παραστατικά» review hardening.** The «παραμένει VALID
+  στην ΑΑΔΕ» note now shows only when `mydata_state === 'VALID'` (no false claim on
+  a cancelled/non-myDATA invoice); a PARTIAL credit reads «Πιστώθηκε (μερικώς) με»
+  (not «Ακυρώθηκε»); only ISSUED credit notes appear on the customer PDF (drafts
+  hidden); the empty «Σχετικά» box no longer renders when a credit note's original
+  was deleted; and the ΔΑ «Υποβολές myDATA» table now lists only real submissions
+  (INSERT/PROVIDER_INSERT/CANCEL), excluding lifecycle/failed marks. `DeliveryMark::actionLabel()`
+  replaces the inline label map.
+### Fixed
 - **Delivery-note PDF clipped the myDATA/provider verification URL.** The long
   space-less qrUrl (AADE or InvoSign `viewinvoice.php?…`) overflowed past the page
   edge — DomPDF won't break it. Now a zero-width space is injected every 8 chars so

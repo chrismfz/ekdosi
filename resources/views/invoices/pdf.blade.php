@@ -310,7 +310,8 @@
      IS a relation. --}}
 @php($relCredits = $invoice->creditNotes ?? collect())
 @php($relDeliveries = $invoice->deliveryNotes ?? collect())
-@if($invoice->credited_invoice_id !== null || $relCredits->isNotEmpty() || $relDeliveries->isNotEmpty())
+@php($showCreditedFor = $invoice->credited_invoice_id !== null && $invoice->creditedInvoice)
+@if($invoice->isFullyCredited() || $showCreditedFor || $relCredits->isNotEmpty() || $relDeliveries->isNotEmpty())
     <div class="related">
         <h3>Σχετικά παραστατικά</h3>
 
@@ -321,7 +322,7 @@
             </div>
         @endif
 
-        @if($invoice->credited_invoice_id !== null && $invoice->creditedInvoice)
+        @if($showCreditedFor)
             <div class="rel-row">
                 <span class="rel-label">Πιστωτικό — αντιστρέφει το παραστατικό:</span>
                 <strong>{{ $invoice->creditedInvoice->invcode }}</strong>
@@ -331,10 +332,17 @@
 
         @if($relCredits->isNotEmpty())
             <div class="rel-row">
-                <span class="rel-label">Ακυρώθηκε / πιστώθηκε με:</span>
+                {{-- Full cancel vs partial credit: «Ακυρώθηκε» only when the credit
+                     notes fully reverse the invoice — else it would mislead a customer
+                     who still owes a balance. --}}
+                <span class="rel-label">{{ $invoice->isFullyCredited() ? 'Ακυρώθηκε / πιστώθηκε με:' : 'Πιστώθηκε (μερικώς) με:' }}</span>
                 <strong>{{ $relCredits->pluck('invcode')->implode(', ') }}</strong>
             </div>
-            <div class="rel-note">Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.</div>
+            {{-- Only assert the AADE status when it's actually VALID — never on a
+                 cancelled-at-AADE or non-myDATA invoice (would be a false claim). --}}
+            @if($invoice->mydata_state === 'VALID')
+                <div class="rel-note">Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.</div>
+            @endif
         @endif
 
         @if($relDeliveries->isNotEmpty())
@@ -357,7 +365,7 @@
              both sides → looked like a truncated/wrong URL). Insert zero-width
              break opportunities (U+200B) so it WRAPS across lines; invisible, so
              it still reads as the exact URL. The value itself is unchanged. --}}
-        <div class="mydata-url">{{ implode("\u{200B}", mb_str_split($invoice->mydata_url, 8)) }}</div>
+        <div class="mydata-url">{{ implode("\u{200B}", mb_str_split((string) $invoice->mydata_url, 8)) }}</div>
     @endif
     @if(! empty($tenant->pdf_footer_text))
         <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>

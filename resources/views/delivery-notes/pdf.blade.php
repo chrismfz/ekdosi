@@ -324,7 +324,7 @@
                     @foreach($histMarks as $m)
                         <tr>
                             <td>{{ optional($m->created_at)->format('d/m/Y H:i') }}</td>
-                            <td>{{ ['INSERT' => 'Καταχώρηση', 'PROVIDER_INSERT' => 'Καταχώρηση (πάροχος)', 'CANCEL' => 'Ακύρωση'][$m->mydata_action] ?? $m->mydata_action }}</td>
+                            <td>{{ $m->actionLabel() }}</td>
                             <td class="mono">{{ $m->mark ?: '—' }}</td>
                         </tr>
                     @endforeach
