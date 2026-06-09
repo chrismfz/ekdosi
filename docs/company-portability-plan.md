@@ -1,7 +1,43 @@
 # Company portability — backup / export / import (plan)
 
-> **Status: PLAN ONLY.** No code yet. This documents the target design so we
-> build it in safe, reviewable phases. Decisions still open are marked **⟨DECISION⟩**.
+> **Status (refreshed 2026-06-09): Phases 1–2 + targeted-wipe + import UI are
+> BUILT & tested; the automated-backups layer (Phase 4) is NOT.** The design
+> below is largely realised — see «Πού στεκόμαστε σήμερα» right under here for the
+> built-vs-remaining map. Decisions still open are marked **⟨DECISION⟩**.
+
+## Πού στεκόμαστε σήμερα (built vs remaining)
+
+**✅ BUILT (25 portability/backup tests green):**
+- **Export** — `company:export` + `App\Services\Portability\CompanyExporter`:
+  buckets A (companies row) + B (`SETUP_TABLES`) by default, **+C
+  (`TRANSACTIONAL_TABLES`) with `--full`**. Zip via `BundleArchive`; logo carried.
+- **Secrets** — `SecretsCodec` = the locked **option 5** (passphrase-sealed by
+  default; `--raw` cleartext opt-out). Tested: round-trip, wrong-passphrase, no
+  plaintext leak into `company.json`.
+- **Import** — `company:import` + `CompanyImporter`: `--new` / `--into=SLUG`,
+  **dry-run by default** (`--execute`), idempotent by natural keys, **FK rewiring**
+  (legacy_id/code → new id) for the full bundle. Tested incl. multi
+  `billing_connections`, key-less rows, dry-run-writes-nothing.
+- **Targeted wipe** — `CompanyDataWiper` (`company:wipe`-style via UI): plan +
+  execute, `keep_parties`, `reset_counter` (invcount→1), **refuses rows filed at
+  AADE (VALID) without `force`**. This is the tomorrow-runbook tool.
+- **Filament UI** — `Companies/Actions/CompanyBackupActions`: «Εξαγωγή ρυθμίσεων»
+  (+full toggle + passphrase), «Εισαγωγή ρυθμίσεων» (into) / «Εισαγωγή εταιρίας
+  από αρχείο» (new) via **FileUpload + dry-run preview**, «Διαγραφή δεδομένων»
+  (wipe, dry-run default). Admin-only.
+- **Data-Import UI** (separate, `FirebirdImportRunResource`, nav «Data»): upload a
+  `.fbk`/`.fdb` (or copy the artisan line) → runs `migrate:firebird`; **PLUS an
+  Epsilon Smart JSON import** (customers/items/services/sales `DataExport-*.json`).
+
+**❌ NOT built yet:**
+- **Phase 4 — automated/scheduled backups + destinations** (`company:run-scheduled-backups`,
+  per-company cadence/retention settings, `BackupDestination` drivers
+  local/email/SFTP/FTP/rsync, backup-run log, «Αντίγραφα ασφαλείας» tab with
+  run-now/history/download). Only `spatie/laravel-backup` (whole-DB) + a
+  `MinimumBackupSize` health-check exist.
+- **Phase 3 selective per-table Firebird pull** (checkbox «τι να τραβήξω») and
+  per-entity CSV export — the upload-and-run UI exists, the *selective* form does not.
+- **Phase 5 — envelope-key** (option 4) — deferred (option 5 covers cross-VM today).
 
 ## Why
 
@@ -202,7 +238,7 @@ Requires the OS cron + queue worker already documented in CLAUDE.md "Env-prep".
 
 ## Phased plan
 
-### Phase 1 — Settings + setup export/import  ← unblocks tomorrow
+### Phase 1 — Settings + setup export/import  — ✅ DONE
 Buckets **A + B**. `company:export --tenant=SLUG [--out=file]` and
 `company:import --file=… [--into=SLUG|--new]`, plus a Filament action on the
 Company resource ("Εξαγωγή ρυθμίσεων" / "Εισαγωγή ρυθμίσεων") — **download** the
@@ -212,26 +248,26 @@ to restore), with the explicit `--raw` opt-out for an unencrypted debug dump.
 Carries the logo file. Idempotent by natural keys. **This is the piece the
 operator's chosen tomorrow-route depends on.**
 
-### Phase 2 — Full company export/import
+### Phase 2 — Full company export/import  — ✅ DONE (`--full` + FK rewiring + tests)
 Add bucket **C** + FK rewiring + the `files/` (attachments) payload. Big-bundle
 streaming, memory guard. Enables need #1 (lift a company onto its own VM),
 paired with option 4/5 for the cross-VM secrets.
 
-### Phase 3 — Per-entity selective export/import + selective Firebird web form
+### Phase 3 — Per-entity selective export/import + selective Firebird web form  — 🚧 PARTIAL (upload-and-run + Epsilon JSON done; selective checkboxes + per-entity CSV not)
 - Per-entity CSV/JSON export+import: customers, suppliers, products, invoices.
 - **Selective Firebird import UI**: the operator's idea — a web form on top of
   `migrate:firebird` to **choose what to pull** (e.g. customers + invoices only,
   skip invoice types / VAT). Backed by the ETL's existing per-table copy
   methods, gated by checkboxes.
 
-### Phase 4 — Automated backups + destinations + UI restore
+### Phase 4 — Automated backups + destinations + UI restore  — ❌ NOT built (the main remaining piece)
 Build the "Automated backups" layer above: per-company config, the
 `BackupDestination` driver registry (local / email / SFTP / FTP / rsync /
 cloud), the scheduled `company:run-scheduled-backups`, retention pruning, the
 backup-run log, and the Company «Αντίγραφα ασφαλείας» tab (run-now + history +
 download + upload-restore). Depends on Phase 1 (and Phase 2 for full bundles).
 
-### Phase 5 (optional) — Envelope-key migration (secrets option 4)
+### Phase 5 (optional) — Envelope-key migration (secrets option 4)  — ❌ deferred
 Introduce per-company `data_key` (wrapped by APP_KEY), migrate the 7 columns,
 make cross-VM moves a one-key re-wrap. Only if cross-VM friction proves real
 and option 5 (passphrase) isn't enough.
