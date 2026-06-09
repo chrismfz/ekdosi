@@ -25,6 +25,17 @@ they merge.
   `full` backup bucket.)
 
 ### Added
+- **Company backups — Phase 4b (remote destinations + one-click download).**
+  **SFTP / FTP(S) / S3-compatible** `BackupDestination` drivers (B2 / MinIO /
+  Spaces via S3), on a shared `DiskBackupDestination` base — each builds a Laravel
+  disk on the fly (`Storage::build`) from per-company config in
+  `company_backup_settings.destinations` (flat per entry; no `filesystems.php`).
+  The «Αυτόματα αντίγραφα» modal gains a **destinations Repeater** (driver-
+  conditional fields), «Τοπικά» always implied; **raw secrets to a remote target
+  need an explicit acknowledgement** (not forced encryption). New **«Λήψη
+  αντιγράφου τώρα»** action runs the policy and streams the zip immediately.
+  **Deploy:** `composer install` (adds `league/flysystem-sftp-v3` / `-ftp` /
+  `-aws-s3-v3`).
 - **Company backups — Phase 4a (automated local backups + coverage guard).**
   Per-company backup policy (`company_backup_settings`: cadence / bucket / secrets
   mode / retention / destinations) + a run log (`company_backup_runs`).

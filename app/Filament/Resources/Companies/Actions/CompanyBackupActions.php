@@ -10,12 +10,16 @@ use App\Services\Portability\CompanyDataWiper;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Component;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Throwable;
 
 /**
@@ -94,7 +98,7 @@ class CompanyBackupActions
             ->icon('heroicon-o-clock')
             ->color('gray')
             ->modalHeading('Ρυθμίσεις αυτόματων αντιγράφων')
-            ->modalDescription('Πρόγραμμα + κρυπτογράφηση + διατήρηση. Προς το παρόν ο προορισμός είναι Τοπικά (λήψη από το panel)· SFTP/FTP/S3 έρχονται.')
+            ->modalDescription('Πρόγραμμα + κρυπτογράφηση + διατήρηση + προορισμοί (Τοπικά / SFTP / FTP / S3). Τα «Τοπικά» περιλαμβάνονται πάντα για λήψη από το panel.')
             ->modalSubmitActionLabel('Αποθήκευση')
             // Drive the form straight off the model's attributes (form components
             // ignore keys without a matching field) so a new setting column added
@@ -123,11 +127,81 @@ class CompanyBackupActions
                     ->helperText('Χρειάζεται για επαναφορά — κράτησέ το ασφαλές.'),
                 TextInput::make('retention_keep')->label('Διατήρηση (πλήθος)')->numeric()->default(7)->minValue(0),
                 TextInput::make('retention_days')->label('…ή ημέρες (προαιρετικό)')->numeric()->nullable()->minValue(1),
+
+                Repeater::make('destinations')
+                    ->label('Προορισμοί')
+                    ->helperText('Τα «Τοπικά» περιλαμβάνονται πάντα. Πρόσθεσε απομακρυσμένους για αντίγραφο εκτός του VM.')
+                    ->addActionLabel('Προσθήκη προορισμού')
+                    ->default([])
+                    ->columns(2)
+                    ->itemLabel(fn (array $state): string => strtoupper((string) ($state['driver'] ?? '—'))
+                        .(($state['host'] ?? $state['bucket'] ?? '') !== '' ? ' · '.($state['host'] ?? $state['bucket']) : ''))
+                    ->schema(self::destinationFields()),
+
+                // The escape hatch: raw secrets to a REMOTE target is allowed, but
+                // only behind an explicit acknowledgement (decision: not forced
+                // passphrase). Hidden unless it actually applies.
+                Checkbox::make('confirm_raw_remote')
+                    ->label('Καταλαβαίνω ότι τα μυστικά θα φύγουν ΧΩΡΙΣ κρυπτογράφηση σε απομακρυσμένο προορισμό.')
+                    ->visible(fn (Get $get) => $get('secrets_mode') === 'raw' && self::formHasRemote($get('destinations')))
+                    ->accepted()
+                    ->dehydrated(false)
+                    ->validationMessages(['accepted' => 'Πρέπει να επιβεβαιώσεις την αποστολή χωρίς κρυπτογράφηση, ή να επιλέξεις «Κρυπτογραφημένα».']),
             ])
             ->action(function (array $data, Company $record): void {
                 CompanyBackupSetting::updateOrCreate(['company_id' => $record->id], $data);
                 Notification::make()->title('Αποθηκεύτηκαν οι ρυθμίσεις αντιγράφων')->success()->send();
             });
+    }
+
+    /**
+     * The per-destination config fields (driver-conditional). Stored FLAT in each
+     * repeater item; the matching BackupDestination reads the keys it needs.
+     *
+     * @return list<Component>
+     */
+    private static function destinationFields(): array
+    {
+        $isSftpOrFtp = fn (Get $get) => in_array($get('driver'), ['sftp', 'ftp'], true);
+        $is = fn (string $driver) => fn (Get $get) => $get('driver') === $driver;
+
+        return [
+            Select::make('driver')->label('Τύπος')
+                ->options(['local' => 'Τοπικά', 'sftp' => 'SFTP', 'ftp' => 'FTP / FTPS', 's3' => 'S3 / συμβατό'])
+                ->default('sftp')->required()->live()->columnSpanFull(),
+
+            TextInput::make('host')->label('Host')->visible($isSftpOrFtp)->requiredIf('driver', ['sftp', 'ftp']),
+            TextInput::make('port')->label('Port')->numeric()->visible($isSftpOrFtp)
+                ->placeholder(fn (Get $get) => $get('driver') === 'ftp' ? '21' : '22'),
+            TextInput::make('username')->label('Χρήστης')->visible($isSftpOrFtp),
+            TextInput::make('password')->label('Κωδικός')->password()->revealable()->visible($isSftpOrFtp),
+            Textarea::make('private_key')->label('Private key (SFTP, εναλλακτικά του κωδικού)')->rows(3)
+                ->visible($is('sftp'))->columnSpanFull(),
+            TextInput::make('key_passphrase')->label('Passphrase ιδιωτικού κλειδιού')->password()->visible($is('sftp')),
+            Toggle::make('ssl')->label('FTPS (SSL)')->visible($is('ftp')),
+            Toggle::make('passive')->label('Passive mode')->default(true)->visible($is('ftp')),
+
+            TextInput::make('bucket')->label('Bucket')->visible($is('s3'))->requiredIf('driver', 's3'),
+            TextInput::make('region')->label('Region')->placeholder('us-east-1')->visible($is('s3')),
+            TextInput::make('key')->label('Access key')->visible($is('s3')),
+            TextInput::make('secret')->label('Secret key')->password()->visible($is('s3')),
+            TextInput::make('endpoint')->label('Endpoint (B2 / MinIO / Spaces)')->visible($is('s3')),
+            Toggle::make('path_style')->label('Path-style endpoint')->visible($is('s3')),
+
+            TextInput::make('path')->label('Φάκελος / prefix')->placeholder('company-backups')
+                ->visible(fn (Get $get) => $get('driver') !== 'local'),
+        ];
+    }
+
+    private static function formHasRemote(mixed $destinations): bool
+    {
+        foreach ((array) $destinations as $d) {
+            if (is_array($d) && ($d['driver'] ?? 'local') !== 'local') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Per-row: run a backup right now via the saved policy (writes a run row). */
@@ -154,6 +228,37 @@ class CompanyBackupActions
                     ->body($run->message ?? ('Μέγεθος: '.number_format(((int) $run->bytes) / 1024, 1).' KB'))
                     ->color($run->statusColor())
                     ->send();
+            });
+    }
+
+    /** Per-row: run a backup via the saved policy AND stream the zip to the browser. */
+    public static function downloadNow(): Action
+    {
+        return Action::make('backup_download_now')
+            ->label('Λήψη αντιγράφου τώρα')
+            ->icon('heroicon-o-arrow-down-on-square')
+            ->color('success')
+            ->requiresConfirmation()
+            ->modalDescription('Δημιουργεί αντίγραφο με την αποθηκευμένη πολιτική (καταγράφεται + στέλνεται στους προορισμούς) και το κατεβάζει αμέσως εδώ.')
+            ->action(function (Company $record) {
+                $settings = $record->backupSetting;
+                if ($settings === null) {
+                    Notification::make()->title('Ρύθμισε πρώτα τα «Αυτόματα αντίγραφα»')->warning()
+                        ->body('Χρειάζεται μια πολιτική (περιεχόμενο / μυστικά / διατήρηση) για το αντίγραφο.')->send();
+
+                    return null;
+                }
+
+                $run = app(CompanyBackupRunner::class)->run($record, $settings, 'manual');
+
+                if (! $run->isDownloadable()) {
+                    Notification::make()->title('Αποτυχία: '.$run->status)
+                        ->body($run->message ?? 'Δεν δημιουργήθηκε τοπικό αρχείο για λήψη.')->danger()->send();
+
+                    return null;
+                }
+
+                return response()->download($run->bundle_path);
             });
     }
 

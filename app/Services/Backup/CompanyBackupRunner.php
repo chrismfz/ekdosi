@@ -50,7 +50,9 @@ class CompanyBackupRunner
             $localPath = null;
             foreach ($settings->destinationList() as $entry) {
                 $key = (string) $entry['driver'];
-                $config = (array) ($entry['config'] ?? []);
+                // The whole entry IS the config (flat: host/port/bucket/path…);
+                // drivers read the keys they need and ignore the rest.
+                $config = $entry;
                 try {
                     $dest = $this->registry->for($key);
                     $location = $dest->push($tmp, $company->slug, $config);

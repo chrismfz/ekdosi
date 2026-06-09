@@ -49,8 +49,10 @@ class CompanyBackupSetting extends Model
     /**
      * The configured destinations with `local` GUARANTEED present (the Download
      * source + retention target) — the single home of the "local always" rule.
+     * Each entry is flat: a `driver` key plus that driver's config (host, port,
+     * bucket, path…), passed as-is to the BackupDestination.
      *
-     * @return list<array{driver:string, config?:array<string,mixed>}>
+     * @return list<array{driver:string}&array<string,mixed>>
      */
     public function destinationList(): array
     {

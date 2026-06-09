@@ -1,6 +1,9 @@
 <?php
 
+use App\Services\Backup\Destinations\FtpBackupDestination;
 use App\Services\Backup\Destinations\LocalBackupDestination;
+use App\Services\Backup\Destinations\S3BackupDestination;
+use App\Services\Backup\Destinations\SftpBackupDestination;
 use App\Services\Billing\Sources\WhmcsBillingSource;
 use App\Services\EInvoice\Transports\InvoSignTransport;
 
@@ -153,9 +156,9 @@ return [
         'local_disk' => env('EKDOSI_BACKUP_LOCAL_DISK', 'local'),
         'destinations' => [
             'local' => LocalBackupDestination::class,
-            // 'sftp' => App\Services\Backup\Destinations\SftpBackupDestination::class,  // Slice 4b
-            // 'ftp'  => App\Services\Backup\Destinations\FtpBackupDestination::class,   // Slice 4b
-            // 's3'   => App\Services\Backup\Destinations\S3BackupDestination::class,    // Slice 4b
+            'sftp' => SftpBackupDestination::class,
+            'ftp' => FtpBackupDestination::class,
+            's3' => S3BackupDestination::class,
         ],
     ],
 
