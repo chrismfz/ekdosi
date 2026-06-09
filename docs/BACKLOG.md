@@ -161,3 +161,32 @@ read-only:
 - **Queue:** pending + failed jobs count, with a «retry/clear» action (admin).
 - Ties into the settings-in-UI item above: one «Σύστημα» area = toggles (audited) +
   health + run history, so an operator sees at a glance what's on, what ran, and what's stuck.
+
+### 🆕 Onboarding / operator productivity (asked 2026-06-10)
+Operator-pasted ideas. (The big-feature / tech-debt / PDF lists from the same day
+are already captured in the sections above — these are the new ones.)
+
+- **Artisan actions → buttons.** Surface the operator-facing commands as Filament
+  buttons/actions, no terminal: `mydata:vat-picture` refresh, `mydata:reconcile-sales`,
+  `whmcs:fetch-pending`, `invoices:resend-failed-emails`, `mydata:preflight`, the
+  sandbox/test-submit dry-runs, etc. — each as a guarded admin action with a result
+  notification. (Pairs with the «Health / observability» + «Settings-in-the-UI» items:
+  one «Σύστημα» area = status + toggles + run-now buttons, all audited.)
+- **DEMO company seeder — «full demo mode».** A `DemoCompanySeeder` that builds ONE
+  self-contained «DEMO Α.Ε.»: 2-3 products + 2-3 services (one with withholding, one
+  with a bound fee), 2-3 customers, 2-3 issued invoices, 2-3 delivery notes — so a
+  fresh install / a reviewer sees a working tenant immediately. Replaces the
+  nexon/nixpal/myip dev fixtures for demos (keep those for real ETL/dev).
+- **Fresh-install wizard.** From-zero onboarding: if NO admin user exists, a guided
+  «create the first super_admin + first company» wizard; if one already exists, a
+  safeguard (refuse / require auth) so it can't be re-run to mint an admin. Make
+  install-from-scratch turnkey (today it's artisan + manual seeding per INSTALL.md).
+- **Seeders for from-zero installs.** We have great `VatCategory` / `InvoiceType`
+  (+ income-class, payment-methods, units) seeders — make sure they're wired into the
+  install path (a `php artisan ekdosi:bootstrap-company <slug>` or the wizard) so a
+  new tenant gets the §8 lookups without copy-paste. Audit which lookups still need a
+  from-zero seeder.
+- **SMTP test button.** Per-company «Δοκιμή SMTP» (send a test email to a typed
+  address) on the Company → PDF & Email tab, using `TenantMailerFactory`; and a
+  super_admin-only «test the global .env mailer» so the ops-alert / fallback path can
+  be verified from the UI (ties into the mailer-health hint in «Health»).

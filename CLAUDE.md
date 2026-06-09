@@ -237,6 +237,17 @@ it clears):
 11.2, 5.1, + a CANCEL; reconciliation matched all. Report:
 `docs/mydata-sandbox-validation-2026-05-28.md`.
 
+**Sandbox round 2 — ✅ 2026-06-10 (`sandbox-results.txt`):** the new taxTypes
+(χαρτόσημο 3,6% · fees · product-linked per-unit fees), the **4% override → cat 10**,
+and the full **ΔΑ lifecycle** (issue/register/confirm) all AADE-accepted (real MARKs).
+Two learnings, both fixed/expected:
+- **[208]** — withholding **DOES reduce** `totalGrossValue` (and the paymentMethod
+  amount): gross = net+vat + fees + stamp + otherTaxes − deductions − withheld,
+  EXCEPT the informational §8.4 categories 8/9/10 (via
+  `WithheldPercentCategory::affectsTotalGrossValue()`). The earlier «withholding
+  doesn't change gross» assumption was WRONG — corrected in `AadeInvoiceDocument`.
+- **[801]** — a **Completed** delivery note can't be cancelled (by design, not a bug).
+
 **OPEN OPERATOR DECISION:** myip's ΠΙΣ maps to **5.2** (non-correlated) but the
 new `IssueCreditNote` flow always issues *from* an original, so **5.1**
 (correlated) is the natural choice and is sandbox-proven. Set the ΠΙΣ
@@ -249,8 +260,8 @@ helpers — the single source to refresh on spec changes.
 `php artisan mydata:preflight` audits each tenant's invoice-type / VAT config
 against them (read-only) and flags what AADE would reject. Exit 0/1/2.
 
-**Submitter payload follow-ups — ✅ ALL DONE (were deferred; none hit the original
-4 validated types, so re-confirm against the AADE sandbox before relying on them):**
+**Submitter payload follow-ups — ✅ ALL DONE + sandbox-validated 2026-06-10 (see
+«Sandbox round 2» above; the withholding-gross [208] case was the one fix it found):**
 - **0% / exempt** → ✅ G4: `vatCategory=7` + `vatExemptionCategory` (§8.3) from the
   tenant's 0%-rate VatCategory.
 - **4% ambiguity** (cat 6 island vs 10 ν.5057/2023, 3%→9) → ✅ optional
@@ -675,9 +686,9 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   - `delivery_state` is OUR string cache (registered/in_transit/delivered/failed/
     rejected/cancelled), mapped from firebed `DeliveryStatus` in
     `deliveryStateFromAade()` — deliberately NOT the raw int.
-  - **STATUS:** validated only against firebed stubs; **NOT yet round-tripped on
-    the AADE sandbox** → run `php artisan delivery:sandbox-validate --tenant=SLUG
-    --execute [--cancel]` on the VM (sandbox mode + dev creds).
+  - **STATUS: ✅ sandbox round-tripped 2026-06-10** (`delivery:sandbox-validate
+    --execute`): issue → έναρξη → παράδοση all accepted with real MARKs; cancel of a
+    Completed ΔΑ is rejected with **[801]** (by design). `sandbox-results.txt`.
 - **✅ lifecycleHistory timeline (this branch).** `refreshStatus` no longer
   discards the §4.1 `lifecycleHistory` — `syncLifecycleHistory()` persists the
   carrier/recipient events (RegisterTransfer/ConfirmOutcome/Rejection, each with
