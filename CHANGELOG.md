@@ -16,6 +16,11 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Delivery-note PDF clipped the myDATA/provider verification URL.** The long
+  space-less qrUrl (AADE or InvoSign `viewinvoice.php?…`) overflowed past the page
+  edge — DomPDF won't break it. Now a zero-width space is injected every 8 chars so
+  it wraps, same fix already applied to the invoice PDF footer.
 ### Added
 - **Backup failure alerting.** A SCHEDULED per-company backup that ends
   failed/partial now emails ops (`ScheduledBackupFailed` notification, queued) and

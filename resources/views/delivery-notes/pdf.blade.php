@@ -78,7 +78,7 @@
         .mydata-qr .qr-label { font-size: 7pt; color: #6b7280; margin: 1mm 0 0 0; }
         .mydata-info { display: table-cell; vertical-align: top; padding-left: 3mm; font-size: 8.5pt; color: #374151; }
         .mydata-info .mark { font-weight: bold; word-break: break-all; }
-        .mydata-info .url  { word-break: break-all; font-size: 7.5pt; color: #6b7280; margin-top: 1mm; }
+        .mydata-info .url  { word-break: break-all; overflow-wrap: anywhere; font-size: 7.5pt; color: #6b7280; margin-top: 1mm; }
         .draft-foot { margin-top: 6mm; padding: 3mm; text-align: center; border: 1pt dashed #9a3412; border-radius: 1mm; color: #9a3412; font-size: 9pt; font-weight: bold; }
 
         /* Page-bottom footer */
@@ -259,7 +259,11 @@
             @if($note->mydata_mark)
                 <div class="mark">ΜΑΡΚ: {{ $note->mydata_mark }}</div>
             @endif
-            <div class="url">{{ $note->mydata_url }}</div>
+            {{-- The verification URL is one long token with no spaces (AADE qrUrl or
+                 the provider's viewinvoice.php?…). DomPDF won't break it and it
+                 overflowed/clipped at the page edge — inject a zero-width space every
+                 8 chars so it wraps. Same fix as the invoice PDF footer. --}}
+            <div class="url">{{ implode("\u{200B}", mb_str_split((string) $note->mydata_url, 8)) }}</div>
         </div>
     </div>
 @else

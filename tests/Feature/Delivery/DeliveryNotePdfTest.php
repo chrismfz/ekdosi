@@ -136,6 +136,27 @@ class DeliveryNotePdfTest extends TestCase
         $this->assertStringNotContainsString('ΜΗ ΔΙΑΒΙΒΑΣΜΕΝΟ', $html);
     }
 
+    public function test_long_verification_url_is_zero_width_broken_to_wrap(): void
+    {
+        // A provider qrUrl is one long space-less token; DomPDF won't break it and
+        // it clipped at the page edge. The footer injects a ZWSP every 8 chars.
+        $url = 'https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=MwAAAAAA&gvsig=abcdef0123456789';
+        $note = $this->fileNote($this->makeNote(), '400001964649167');
+        $note->forceFill(['mydata_url' => $url])->save();
+
+        $html = view('delivery-notes.pdf', [
+            'note' => $note->fresh('lines'),
+            'tenant' => $note->company,
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+        ])->render();
+
+        // The wrapped (zero-width-broken) form is present; the unbroken token is not.
+        // e() because Blade HTML-escapes the value (& → &amp;) after the ZWSP split.
+        $this->assertStringContainsString(e(implode("\u{200B}", mb_str_split($url, 8))), $html);
+        $this->assertStringNotContainsString($url, $html);
+    }
+
     public function test_draft_note_shows_proxeiro_marker_and_no_qr(): void
     {
         $note = $this->makeNote(); // draft: mydata_state null, no mydata_url
