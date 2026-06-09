@@ -449,71 +449,47 @@ class InvoiceForm
 
                     // Optional explicit %-rates. When set, the amount is recomputed
                     // server-side (rate × net) on save by RecomputeInvoiceTaxes.
-                    TextInput::make('withhold_rate')->label('Παρακράτηση — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
-                    TextInput::make('stamp_duty_rate')->label('Χαρτόσημο — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
-                    TextInput::make('fees_rate')->label('Τέλη — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
-                    TextInput::make('other_taxes_rate')->label('Λοιποί φόροι — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
-                    TextInput::make('deductions_rate')->label('Κρατήσεις — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
-                    TextInput::make('withhold_amount')
-                        ->label('Ποσό παρακράτησης (€)')
-                        ->numeric()
-                        ->step('0.01')
-                        ->minValue(0)
-                        ->prefix('€')
-                        ->live(onBlur: true)
-                        ->helperText('Παρακράτηση φόρου — συνήθως 20% στις υπηρεσίες. Αφαιρείται από το πληρωτέο ποσό.'),
-
-                    // G1: AADE needs the withholding CATEGORY (§8.4) to
-                    // file the taxesTotals block. Required whenever an
-                    // amount is set; depends on the service (fees 20%,
-                    // technicians 4/10%, lawyers 15%, …).
+                    // Τέλη/φόροι: ορίζεις ΠΟΣΟΣΤΟ (+ κατηγορία) ή τα δένεις σε προϊόν
+                    // (ποσό/μονάδα). Το ΠΟΣΟ υπολογίζεται αυτόματα στον server κατά την
+                    // αποθήκευση (RecomputeInvoiceTaxes): ποσοστό × καθαρή αξία, ή Σ
+                    // ποσότητα × ποσό/μονάδα από τα δεμένα προϊόντα. Δεν γράφεις ποσό εδώ.
+                    TextInput::make('withhold_rate')->label('Παρακράτηση — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%')
+                        ->helperText('π.χ. 20% στις υπηρεσίες. Το ποσό = ποσοστό × καθαρή αξία (auto).'),
                     Select::make('withhold_category')
-                        ->label('Κατηγορία παρακράτησης (myDATA §8.4)')
+                        ->label('Κατηγορία παρακράτησης (§8.4)')
                         ->options(collect(Codes::WITHHOLDING_CATEGORIES)
                             ->mapWithKeys(fn (int $c) => [$c => $c.' — '.(WithheldPercentCategory::tryFrom($c)?->label() ?? 'Κατηγορία '.$c)])
                             ->all())
                         ->searchable()
-                        ->required(fn (Get $get) => (float) ($get('withhold_amount') ?? 0) > 0)
-                        ->helperText('Υποχρεωτικό όταν υπάρχει ποσό παρακράτησης.'),
+                        ->required(fn (Get $get) => (float) ($get('withhold_rate') ?? 0) > 0),
 
-                    // #3c: the other taxesTotals taxTypes (fees/otherTaxes/stamp/
-                    // deductions). Each amount, when > 0, files a taxesTotals block +
-                    // sets its summary total; the category is then required. Rare for
-                    // service tenants — left blank, standard invoices are unaffected.
-                    TextInput::make('fees_amount')
-                        ->label('Τέλη — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
-                        ->helperText('π.χ. τέλος ανθεκτικότητας/διαμονής (myDATA taxType 2).'),
-                    Select::make('fees_category')
-                        ->label('Κατηγορία τελών (§8.5)')
-                        ->options(collect(FeesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
-                        ->searchable()
-                        ->required(fn (Get $get) => (float) ($get('fees_amount') ?? 0) > 0),
-
-                    TextInput::make('other_taxes_amount')
-                        ->label('Λοιποί φόροι — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
-                        ->helperText('myDATA taxType 3.'),
-                    Select::make('other_taxes_category')
-                        ->label('Κατηγορία λοιπών φόρων (§8.6)')
-                        ->options(collect(OtherTaxesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
-                        ->searchable()
-                        ->required(fn (Get $get) => (float) ($get('other_taxes_amount') ?? 0) > 0),
-
-                    TextInput::make('stamp_duty_amount')
-                        ->label('Χαρτόσημο — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
-                        ->helperText('myDATA taxType 4.'),
+                    TextInput::make('stamp_duty_rate')->label('Χαρτόσημο — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
                     Select::make('stamp_duty_category')
                         ->label('Κατηγορία χαρτοσήμου (§8.7)')
                         ->options(collect(StampCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
                         ->searchable()
-                        ->required(fn (Get $get) => (float) ($get('stamp_duty_amount') ?? 0) > 0),
+                        ->required(fn (Get $get) => (float) ($get('stamp_duty_rate') ?? 0) > 0),
 
-                    TextInput::make('deductions_amount')
-                        ->label('Κρατήσεις — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
-                        ->helperText('myDATA taxType 5.'),
+                    TextInput::make('fees_rate')->label('Τέλη — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%')
+                        ->helperText('Τα κατά μονάδα τέλη (σακούλα, διανυκτέρευση) δένονται στο ΠΡΟΪΟΝ.'),
+                    Select::make('fees_category')
+                        ->label('Κατηγορία τελών (§8.5)')
+                        ->options(collect(FeesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
+                        ->searchable()
+                        ->required(fn (Get $get) => (float) ($get('fees_rate') ?? 0) > 0),
+
+                    TextInput::make('other_taxes_rate')->label('Λοιποί φόροι — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
+                    Select::make('other_taxes_category')
+                        ->label('Κατηγορία λοιπών φόρων (§8.6)')
+                        ->options(collect(OtherTaxesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
+                        ->searchable()
+                        ->required(fn (Get $get) => (float) ($get('other_taxes_rate') ?? 0) > 0),
+
+                    TextInput::make('deductions_rate')->label('Κρατήσεις — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
                     TextInput::make('deductions_category')
                         ->label('Κατηγορία κρατήσεων (§8.8)')->numeric()->minValue(1)
-                        ->required(fn (Get $get) => (float) ($get('deductions_amount') ?? 0) > 0)
-                        ->helperText('Κωδικός §8.8 (δεν υπάρχει enum στη βιβλιοθήκη — εισάγετε τον αριθμό).'),
+                        ->required(fn (Get $get) => (float) ($get('deductions_rate') ?? 0) > 0)
+                        ->helperText('Κωδικός §8.8 (δεν υπάρχει enum — εισάγετε τον αριθμό).'),
                 ]),
         ]);
     }

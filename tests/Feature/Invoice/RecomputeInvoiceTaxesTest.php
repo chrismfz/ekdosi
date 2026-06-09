@@ -83,12 +83,30 @@ class RecomputeInvoiceTaxesTest extends TestCase
     public function test_rate_driven_amount_is_recomputed_from_net(): void
     {
         $inv = $this->invoice();
-        $this->line($inv, null, qty: 1, price: 1000); // net_total 1000 after totals recompute
-        $inv->forceFill(['net_total' => 1000, 'stamp_duty_rate' => 3.6, 'stamp_duty_category' => 3])->save();
+        $this->line($inv, null, qty: 1, price: 1000); // line net 1000 → InvoiceVatBreakdown::totalNet
+        $inv->forceFill(['stamp_duty_rate' => 3.6, 'stamp_duty_category' => 3])->save();
 
         $inv = app(RecomputeInvoiceTaxes::class)($inv);
 
         $this->assertSame('36.00', (string) $inv->stamp_duty_amount); // 3.6% × 1000
+    }
+
+    public function test_removing_the_driver_clears_the_stale_amount(): void
+    {
+        // Phantom-fee guard: a product fee is written, then the product line is
+        // removed → the next recompute must CLEAR the amount, not file a ghost levy.
+        $bag = $this->product(['mydata_tax_type' => 2, 'mydata_tax_category' => 1, 'mydata_tax_per_unit' => 0.07]);
+        $inv = $this->invoice();
+        $this->line($inv, $bag, qty: 10);
+        $inv = app(RecomputeInvoiceTaxes::class)($inv);
+        $this->assertSame('0.70', (string) $inv->fees_amount);
+
+        // Remove the fee-bearing line, recompute again.
+        $inv->lines()->delete();
+        $inv = app(RecomputeInvoiceTaxes::class)($inv);
+
+        $this->assertSame('0.00', (string) $inv->fees_amount);
+        $this->assertNull($inv->fees_category);
     }
 
     public function test_conflicting_product_categories_for_one_tax_type_throw(): void
@@ -100,19 +118,22 @@ class RecomputeInvoiceTaxesTest extends TestCase
         $this->line($inv, $b, qty: 1);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/multiple myDATA categories/');
+        $this->expectExceptionMessageMatches('/ΔΙΑΦΟΡΕΤΙΚΕΣ κατηγορίες/u');
 
         app(RecomputeInvoiceTaxes::class)($inv);
     }
 
-    public function test_manual_flat_amount_is_left_untouched(): void
+    public function test_amount_with_no_product_and_no_rate_is_cleared(): void
     {
+        // No driver (no product, no rate) → the recompute OWNS the column and clears
+        // it, so a leftover value can never be filed as a phantom.
         $inv = $this->invoice();
         $this->line($inv, null, qty: 1);
         $inv->forceFill(['fees_amount' => 12.50, 'fees_category' => 4])->save();
 
         $inv = app(RecomputeInvoiceTaxes::class)($inv);
 
-        $this->assertSame('12.50', (string) $inv->fees_amount); // no product, no rate → untouched
+        $this->assertSame('0.00', (string) $inv->fees_amount); // no product, no rate → cleared
+        $this->assertNull($inv->fees_category);
     }
 }

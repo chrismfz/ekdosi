@@ -113,17 +113,19 @@ class StornoAndReissueTest extends TestCase
         app(StornoAndReissue::class)($result['credit'], $this->creditType);
     }
 
-    public function test_storno_carries_withholding_amount_and_category_to_the_reissue(): void
+    public function test_storno_carries_withholding_rate_and_category_to_the_reissue(): void
     {
         $original = $this->originalWithLines();
-        // Withholding is operator-entered, not recomputed — the reissue must
-        // keep BOTH so it isn't left with a category and a zero amount.
-        $original->forceFill(['withhold_category' => 3, 'withhold_amount' => 25.60])->save();
+        // Withholding is now rate-driven: carry the RATE + category; the reissue's
+        // amount is recomputed from its own net (RecomputeInvoiceTaxes).
+        $original->forceFill(['withhold_rate' => 20, 'withhold_category' => 3])->save();
 
         $reissue = app(StornoAndReissue::class)($original->fresh(), $this->creditType)['reissue'];
 
+        $this->assertEqualsWithDelta(20.0, (float) $reissue->withhold_rate, 0.001);
         $this->assertSame(3, (int) $reissue->withhold_category);
-        $this->assertEqualsWithDelta(25.60, (float) $reissue->withhold_amount, 0.001);
+        // 20% × the reissue's net → a non-zero amount, recomputed on save.
+        $this->assertGreaterThan(0, (float) $reissue->withhold_amount);
     }
 
     public function test_storno_on_an_already_fully_credited_invoice_throws(): void

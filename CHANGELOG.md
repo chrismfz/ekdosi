@@ -27,6 +27,10 @@ they merge.
   so it's never stale (closes the preview's #2/#3). One category per taxType per invoice
   (Phase-1; conflicting products throw — the `invoice_taxes` table is the Phase-2 fix).
   Product form gains a «Δεμένο τέλος/φόρος myDATA» group with a helper explaining it.
+  The recompute OWNS the tax columns (product → Σ qty×per_unit, rate → rate×totalNet,
+  else → cleared), so removing a driver can't leave a stale «phantom» fee; the rate
+  base is `InvoiceVatBreakdown::totalNet` (the submitter's underlyingValue). The
+  invoice form now takes a %-rate (+ category) per tax type — no hand-typed amount.
   **Deploy:** `php artisan migrate`.
 ### Added
 - **«Τυπικά τέλη/φόροι» quick-fill (preview).** A curated picker on the invoice form

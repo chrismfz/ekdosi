@@ -55,11 +55,19 @@ class ReissueInvoiceAsDraft
                 'invcode' => $allocation->invcode,
                 'local_status' => 'draft',
                 'header_discount_percent' => $original->header_discount_percent,
-                // Withholding is operator-entered (NOT recomputed) — copy BOTH the
-                // amount and its category, else the reissue comes back with a
-                // category but amount 0 (the invalid combo the form guards).
+                // Taxes are recompute-owned (RecomputeInvoiceTaxes): carry the RATES +
+                // categories; the amounts rebuild from the reissue's own net on save.
+                // (Product-linked per-unit fees carry via the copied lines → products.)
+                'withhold_rate' => $original->withhold_rate,
                 'withhold_category' => $original->withhold_category,
-                'withhold_amount' => $original->withhold_amount,
+                'fees_rate' => $original->fees_rate,
+                'fees_category' => $original->fees_category,
+                'other_taxes_rate' => $original->other_taxes_rate,
+                'other_taxes_category' => $original->other_taxes_category,
+                'stamp_duty_rate' => $original->stamp_duty_rate,
+                'stamp_duty_category' => $original->stamp_duty_category,
+                'deductions_rate' => $original->deductions_rate,
+                'deductions_category' => $original->deductions_category,
                 'notes' => $original->notes,
                 // Party snapshot — same counterparty as the original.
                 'company_name' => $original->company_name,
