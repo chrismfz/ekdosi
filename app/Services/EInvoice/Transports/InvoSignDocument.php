@@ -5,6 +5,7 @@ namespace App\Services\EInvoice\Transports;
 use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
+use App\Support\MyData\DeliveryCodes;
 use DOMDocument;
 use DOMElement;
 use RuntimeException;
@@ -95,14 +96,28 @@ class InvoSignDocument
             $dom,
             self::issuerFields($note->company),
             self::deliveryCounterpartFields($note),
+            // Field order + names mirror InvoSign's own delivery-note example
+            // (incl. the `DocumentMovePursposeLabel` typo, which IS their schema
+            // field name, and DispatchFrom/To = the loading/delivery addresses).
             [
                 'DocumentLabel' => (string) ($note->deliveryType?->name ?? ''),
+                'DocumentMovePursposeLabel' => (string) (DeliveryCodes::movePurposeLabel($note->move_purpose) ?? ''),
+                'DocumentDispatchFrom' => self::addressLine($note->loading_street, $note->loading_number, $note->loading_city, $note->loading_postcode),
+                'DocumentDispatchTo' => self::addressLine($note->delivery_street, $note->delivery_number, $note->delivery_city, $note->delivery_postcode),
                 'DocumentComments' => (string) ($note->notes ?? ''),
                 'DocumentPaymentMethodLabel' => '',
             ],
         ));
 
         return self::normaliseClassificationPrefixes($dom->saveXML() ?: $aadeXml);
+    }
+
+    /** "street number, city, postcode" — InvoSign's DocumentDispatchFrom/To shape, empties dropped. */
+    private static function addressLine(?string $street, ?string $number, ?string $city, ?string $postcode): string
+    {
+        $streetPart = trim((string) $street.' '.(string) $number);
+
+        return implode(', ', array_filter([$streetPart, (string) $city, (string) $postcode], static fn ($p) => trim((string) $p) !== ''));
     }
 
     /**

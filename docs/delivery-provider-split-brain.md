@@ -47,6 +47,30 @@ RegisterTransfer/ConfirmOutcome/Status.
 και το `lifecycleHistory` feature — γιατί το sandbox test έτρεξε όλο από myDATA.
 **Τι ΔΕΝ έχει επικυρωθεί:** το μονοπάτι παρόχου (έκδοση **και** lifecycle).
 
+## ⓘ Τι εκθέτει ΟΝΤΩΣ ο InvoSign (από το επίσημο reference, invosign.gr/site/help_site)
+| myDATA DGM ενέργεια | InvoSign endpoint |
+|---|---|
+| Υποβολή (έκδοση ΔΑ, `isDeliveryNote=1`) | ✅ `iNVOSign_Api.php` |
+| Ακύρωση ΔΑ | ✅ `iNVOSign_CancelDeliveryNote.php` (by MARK → cancellationMark) |
+| Έλεγχος κατάστασης | ⚠️ `invoice_status.php` — επιστρέφει **transmission status** (invoiceMark/statusCode), ΟΧΙ την §7.1 κίνηση ούτε lifecycleHistory |
+| RegisterTransfer (έναρξη) | ❌ δεν υπάρχει |
+| ConfirmDeliveryOutcome (παράδοση) | ❌ δεν υπάρχει |
+
+**Συνέπεια:** option A (πλήρες lifecycle μέσω παρόχου) **ΑΔΥΝΑΤΟ** — ο InvoSign δεν
+έχει endpoints έναρξης/παράδοσης/κίνησης. Η **κίνηση είναι myDATA-native** (ο
+εκδότης/μεταφορέας τη δηλώνει απευθείας στο myDATA· ο πάροχος κάνει μόνο έκδοση +
+ακύρωση). Άρα το ρεαλιστικό μοντέλο:
+- **Έκδοση → πάροχος** (έγινε).
+- **Ακύρωση → μπορεί μέσω παρόχου** (`iNVOSign_CancelDeliveryNote.php`) → να γίνει
+  channel-aware (όπως `GrProviderSubmitter::cancel` για τα τιμολόγια).
+- **Έναρξη/Παράδοση/Έλεγχος-κίνησης/History → myDATA-only** (απευθείας), εφόσον ο
+  tenant έχει myDATA creds. Αυτό ΔΕΝ είναι «split-brain» — είναι η σχεδίαση του
+  myDATA (έκδοση μέσω παρόχου, tracking απευθείας). Μένει η επιβεβαίωση creds/ΑΑΔΕ.
+
+Η σχηματική απεικόνιση + τα προαιρετικά πεδία `API_Additionals`
+(`DocumentDispatchFrom/To`, `DocumentMovePursposeLabel`) που στέλνουμε πλέον στη ΔΑ
+ταιριάζουν 1:1 με το delivery example του παρόχου.
+
 ## Επιλογές
 ### A) Ο πάροχος αναλαμβάνει και το lifecycle  *(πλήρες, μακροπρόθεσμο)*
 Επέκταση του `EInvoiceProviderTransport` με `registerTransfer / confirmOutcome /

@@ -131,6 +131,8 @@ class InvoSignTransportTest extends TestCase
         $this->assertStringContainsString('<IssuerName>ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ ΟΕ</IssuerName>', $payload);
         $this->assertStringContainsString('<CounterpartName>Παραλήπτης ΑΕ</CounterpartName>', $payload);
         $this->assertStringContainsString('<CounterpartVat>123456789</CounterpartVat>', $payload);
+        // Delivery-specific Additionals from the provider's own ΔΑ example.
+        $this->assertStringContainsString('<DocumentDispatchTo>Θεσσαλονίκη</DocumentDispatchTo>', $payload);
 
         // [88-004]: prefix normalisation still applied, and still valid XML.
         $this->assertStringContainsString('xmlns:n1=', $payload);
