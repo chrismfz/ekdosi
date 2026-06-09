@@ -108,7 +108,8 @@ class ViewDeliveryNote extends ViewRecord
                 ->label('Έναρξη διακίνησης')
                 ->icon('heroicon-o-truck')
                 ->color('primary')
-                ->visible(fn (DeliveryNote $record) => $record->mydata_state === 'VALID'
+                ->visible(fn (DeliveryNote $record) => ! $isProviderChannel
+                    && $record->mydata_state === 'VALID'
                     && $record->delivery_state === 'registered')
                 ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
@@ -126,7 +127,8 @@ class ViewDeliveryNote extends ViewRecord
                 ->label('Δήλωση παράδοσης')
                 ->icon('heroicon-o-check-badge')
                 ->color('success')
-                ->visible(fn (DeliveryNote $record) => $record->delivery_state === 'in_transit')
+                ->visible(fn (DeliveryNote $record) => ! $isProviderChannel
+                    && $record->delivery_state === 'in_transit')
                 ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Δήλωση αποτελέσματος παράδοσης (myDATA)')
                 ->modalSubmitActionLabel('Δήλωση')
@@ -152,7 +154,8 @@ class ViewDeliveryNote extends ViewRecord
                 ->label('Έλεγχος κατάστασης (ΑΑΔΕ)')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
-                ->visible(fn (DeliveryNote $record) => ! empty($record->mydata_mark))
+                ->visible(fn (DeliveryNote $record) => ! $isProviderChannel
+                    && ! empty($record->mydata_mark))
                 ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('view', $record) ?? false)
                 ->action(function (DeliveryNote $record) {
                     try {
@@ -183,7 +186,8 @@ class ViewDeliveryNote extends ViewRecord
                 ->label('Ακύρωση')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
-                ->visible(fn (DeliveryNote $record) => ! empty($record->mydata_mark)
+                ->visible(fn (DeliveryNote $record) => ! $isProviderChannel
+                    && ! empty($record->mydata_mark)
                     && $record->mydata_state !== 'CANCELLED')
                 ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()

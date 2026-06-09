@@ -687,15 +687,17 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   from the `DeliveryNote`), instead of only prefix-normalising — InvoSign rejects
   a δελτίο without that block. `buildApiInvoiceDetails` was generalised to array
   inputs so invoice & delivery share it.
-- **⚠ OPEN — provider-channel split-brain (lifecycle).** For a `gr-provider`
-  tenant the δελτίο is ISSUED via the provider but the whole lifecycle
-  (RegisterTransfer/ConfirmOutcome/Status/Cancel in `DeliveryLifecycleService`)
-  still goes DIRECTLY to myDATA (`initFirebed`, no `isLiveProviderTenant` check) —
-  two channels for one document. The sandbox e2e only passed because `myip` was
-  temporarily flipped to direct-myDATA, so the **provider lifecycle path is
-  UNVALIDATED**. Decision + options (A: provider implements lifecycle endpoints /
-  B: direct-myDATA lifecycle allowed for provider tenants / C: interim guard —
-  recommended now) and the open questions for the provider/AADE:
+- **⚠ provider-channel split-brain (lifecycle) — interim guard ✅, decision OPEN.**
+  For a `gr-provider` tenant the δελτίο is ISSUED via the provider but the whole
+  lifecycle (RegisterTransfer/ConfirmOutcome/Status/Cancel) would go DIRECTLY to
+  myDATA — two channels for one document. The sandbox e2e only passed because
+  `myip` was temporarily flipped to direct-myDATA, so the **provider lifecycle
+  path is UNVALIDATED**. **Interim guard now in place (option C):** the channel
+  check lives at the single choke-point `DeliveryLifecycleService::initFirebed()`
+  and refuses every direct lifecycle call for provider tenants (+ the 4 UI actions
+  are hidden) — no more silent split-brain. The real fix (A: provider implements
+  lifecycle endpoints / B: direct-myDATA lifecycle allowed for provider tenants)
+  is still OPEN, pending provider/AADE answers. Full analysis + open questions:
   **`docs/delivery-provider-split-brain.md`**.
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.

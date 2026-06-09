@@ -398,6 +398,38 @@ class DeliveryLifecycleServiceTest extends TestCase
         ]);
     }
 
+    // ---- provider-channel guard (split-brain) -------------------------
+
+    public function test_provider_tenant_is_blocked_from_every_direct_lifecycle_call(): void
+    {
+        // Flip the tenant to a live ΥΠΑΗΕΣ provider: it ISSUES via the provider, so
+        // the direct-myDATA lifecycle must be refused (not silently cross channels).
+        $this->tenant->update([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_mode' => 'sandbox',
+        ]);
+        $note = $this->makeFiledNote();
+        $svc = new DeliveryLifecycleService($this->tenant);
+
+        // Each call must REACH the direct-myDATA choke-point (initFirebed), where
+        // the channel guard lives — so the block is the channel refusal, not a
+        // state error. The single note is stepped through the matching states.
+        $assertBlocked = function (string $name, callable $call): void {
+            try {
+                $call();
+                $this->fail("provider tenant must be blocked from {$name}()");
+            } catch (RuntimeException $e) {
+                $this->assertMatchesRegularExpression('/παρόχου/u', $e->getMessage(), $name);
+            }
+        };
+
+        $assertBlocked('registerTransfer', fn () => $svc->registerTransfer($note)); // registered
+        $note->forceFill(['delivery_state' => 'in_transit'])->save();
+        $assertBlocked('confirmDelivery', fn () => $svc->confirmDelivery($note, 'FULL'));
+        $assertBlocked('refreshStatus', fn () => $svc->refreshStatus($note));       // has mydata_mark
+        $assertBlocked('cancel', fn () => $svc->cancel($note, 'x'));                // VALID + mark
+    }
+
     // ---- state label --------------------------------------------------
 
     public function test_state_label_is_greek(): void

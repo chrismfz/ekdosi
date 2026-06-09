@@ -65,17 +65,20 @@ preflight check).
 - **Ρίσκο:** εξαρτάται από κανονιστική επιβεβαίωση· πιθανώς δεν ισχύει για καθαρό
   πάροχο χωρίς myDATA subscription.
 
-### C) Interim guard  *(ασφαλές, ΤΩΡΑ — συνιστάται ανεξάρτητα)*
-Μέχρι να κριθεί A ή B: ο `DeliveryLifecycleService` (ή τα header actions του
-`ViewDeliveryNote`) να **αποτρέπει ρητά** lifecycle ενέργειες όταν
-`isLiveProviderTenant()`, με σαφές μήνυμα («Η διακίνηση μέσω παρόχου δεν
-υποστηρίζεται ακόμα — εκκρεμεί επιβεβαίωση καναλιού»), αντί για σιωπηλό
-split-brain. Φθηνό, αναστρέψιμο, κλείνει το «σιωπηλή αστοχία» ρίσκο.
+### C) Interim guard  *(✅ ΥΛΟΠΟΙΗΘΗΚΕ)*
+Ο `DeliveryLifecycleService` αποτρέπει ρητά κάθε direct-myDATA lifecycle κλήση για
+tenant παρόχου: ο guard ζει στο **single choke-point `initFirebed()`** (απ' όπου
+περνούν register/confirm/status/cancel — και κάθε μελλοντική), ρίχνει σαφές
+ελληνικό μήνυμα αντί για σιωπηλό split-brain. Στο UI (`ViewDeliveryNote`) τα 4
+lifecycle actions είναι **κρυμμένα** για provider tenants (`! $isProviderChannel`).
+Η **έκδοση** μέσω παρόχου ΔΕΝ επηρεάζεται. Αναστρέψιμο: μόλις κριθεί A ή B, αφαιρείς
+τον guard (ή τον κάνεις conditional). Test: `DeliveryLifecycleServiceTest::
+test_provider_tenant_is_blocked_from_every_direct_lifecycle_call`.
 
 ## Σύσταση
-**C τώρα** (κλείνει το ρίσκο άμεσα) + **ερώτημα στον πάροχο/ΑΑΔΕ** που ξεκλειδώνει
-A ή B. Μη γράψεις A/B πριν την απάντηση — και τα δύο εξαρτώνται από εξωτερικά
-άγνωστα (endpoints του InvoSign / κανονιστική θέση της ΑΑΔΕ).
+**C έγινε** (κλείνει το ρίσκο άμεσα). Επόμενο: **ερώτημα στον πάροχο/ΑΑΔΕ** που
+ξεκλειδώνει A ή B. Μη γράψεις A/B πριν την απάντηση — και τα δύο εξαρτώνται από
+εξωτερικά άγνωστα (endpoints του InvoSign / κανονιστική θέση της ΑΑΔΕ).
 
 ## Ανοιχτά ερωτήματα (για πάροχο/ΑΑΔΕ)
 1. Εκθέτει ο InvoSign endpoints για RegisterTransfer / ConfirmDeliveryOutcome /

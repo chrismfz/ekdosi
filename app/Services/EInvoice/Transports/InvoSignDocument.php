@@ -115,7 +115,7 @@ class InvoSignDocument
      * are distinctive tokens that appear ONLY as the xmlns declaration + element
      * prefixes (never in values), so a string rename is safe.
      */
-    public static function normaliseClassificationPrefixes(string $xml): string
+    private static function normaliseClassificationPrefixes(string $xml): string
     {
         return strtr($xml, [
             'xmlns:icls=' => 'xmlns:n1=',

@@ -548,6 +548,21 @@ class DeliveryLifecycleService
 
     private function initFirebed(?MyDataMode $environment = null): void
     {
+        // Interim guard against the provider-channel split-brain, placed at THE
+        // single choke-point through which every direct-myDATA lifecycle call
+        // (register/confirm/status/cancel, and any future one) passes: a
+        // gr-provider tenant ISSUES the δελτίο via the provider, so its lifecycle
+        // must not silently cross to direct myDATA. Refuse it until the channel is
+        // decided (docs/delivery-provider-split-brain.md). gr-mydata tenants (the
+        // validated path) are unaffected.
+        if ($this->tenant->isLiveProviderTenant()) {
+            throw new RuntimeException(
+                'Η διακίνηση μέσω παρόχου δεν υποστηρίζεται ακόμα: ο κύκλος ζωής του δελτίου '
+                .'(έναρξη/παράδοση/έλεγχος/ακύρωση) θα πήγαινε απευθείας στο myDATA ενώ η έκδοση '
+                .'έγινε μέσω παρόχου. Εκκρεμεί επιβεβαίωση καναλιού (βλ. docs/delivery-provider-split-brain.md).'
+            );
+        }
+
         $mode = $environment ?? $this->tenant->mydata_mode_enum;
 
         [$aadeId, $subKey] = $this->tenant->mydataCredentials($mode);
