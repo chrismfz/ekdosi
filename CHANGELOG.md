@@ -24,10 +24,13 @@ they merge.
 ### Added
 - **Printable history on PDFs.** The delivery-note PDF prints an «Ιστορικό»
   section (when present): movement lifecycle events (`delivery_note_events`) +
-  myDATA submission marks (`delivery_marks`). The invoice PDF prints the
-  activity-log «Ιστορικό» (Πότε/Ενέργεια/Χρήστης/Μεταβολές from `activitiesAsSubject`).
-  Both render only when rows exist. ⚠ The invoice PDF is customer-facing
-  (auto-email), so the audit trail now appears on it too.
+  myDATA submission marks (`delivery_marks`). The invoice PDF prints an
+  «Ιστορικό» from `activitiesAsSubject`, **audience-aware**: the operator
+  «Download PDF» shows the full table (Πότε/Ενέργεια/Χρήστης/Μεταβολές), while the
+  customer-facing copies (auto-email + public signed URL) are **redacted to
+  Πότε/Ενέργεια** — the operator name and the internal field-level diff never
+  leave the building (`InvoicePdfRenderer::render($invoice, internal:)`, default
+  redacted). Both render only when rows exist.
 - **Backup failure alerting.** A SCHEDULED per-company backup that ends
   failed/partial now emails ops (`ScheduledBackupFailed` notification, queued) and
   is always `Log::error`'d — previously a nightly failure was silent. Recipients:

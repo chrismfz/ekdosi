@@ -303,18 +303,24 @@
     </div>
 @endif
 
-{{-- ====================== Ιστορικό (audit trail) ====================== --}}
+{{-- ====================== Ιστορικό (audit trail) ======================
+     `$detailed` (operator download only) adds Χρήστης + Μεταβολές. The
+     customer-facing copy (auto-email / public URL) stays redacted to Πότε/Ενέργεια
+     so the operator name + internal field-level diff never leave the building. --}}
 @php($histActivities = $activities ?? collect())
+@php($detailed = $historyDetailed ?? false)
 @if($histActivities->isNotEmpty())
     <div class="history">
         <h3>Ιστορικό</h3>
         <table class="hist">
             <thead>
                 <tr>
-                    <th style="width:22%">Ημ/νία</th>
-                    <th style="width:20%">Ενέργεια</th>
-                    <th style="width:22%">Χρήστης</th>
-                    <th style="width:36%">Μεταβολές</th>
+                    <th style="width:{{ $detailed ? '22' : '40' }}%">Ημ/νία</th>
+                    <th style="width:{{ $detailed ? '20' : '60' }}%">Ενέργεια</th>
+                    @if($detailed)
+                        <th style="width:22%">Χρήστης</th>
+                        <th style="width:36%">Μεταβολές</th>
+                    @endif
                 </tr>
             </thead>
             <tbody>
@@ -322,12 +328,14 @@
                     <tr>
                         <td>{{ optional($a->created_at)->format('d/m/Y H:i') }}</td>
                         <td>{{ $a->description }}</td>
-                        <td>{{ optional($a->causer)->name ?: 'Σύστημα' }}</td>
-                        <td>
-                            @foreach($a->changeLines() as $line)
-                                <span class="chg">{{ $line }}</span>
-                            @endforeach
-                        </td>
+                        @if($detailed)
+                            <td>{{ optional($a->causer)->name ?: 'Σύστημα' }}</td>
+                            <td>
+                                @foreach($a->changeLines() as $line)
+                                    <span class="chg">{{ $line }}</span>
+                                @endforeach
+                            </td>
+                        @endif
                     </tr>
                 @endforeach
             </tbody>

@@ -56,8 +56,9 @@ class DeliveryNotePdf
                 'qrDataUri' => $qrDataUri,
                 'logoDataUri' => $logoDataUri,
                 // Two audit trails, printed when present: the movement lifecycle
-                // (carrier/recipient events) + the myDATA submission marks.
-                'events' => $note->events()->orderBy('event_timestamp')->get(),
+                // (carrier/recipient events; events() already orders oldest→newest)
+                // + the myDATA submission marks.
+                'events' => $note->events()->get(),
                 'marks' => $note->marks()->oldest()->get(),
             ])
                 ->setPaper('A4', 'portrait')

@@ -54,27 +54,59 @@ class InvoicePdfHistoryTest extends TestCase
         $this->assertStringStartsWith('%PDF', $pdf);
     }
 
-    public function test_history_section_renders_in_html(): void
+    /** @return array<string,mixed> the renderer's own totals shape, to stay decoupled. */
+    private function totalsFor(Invoice $invoice): array
     {
-        $invoice = $this->invoiceWithHistory();
+        $renderer = app(InvoicePdfRenderer::class);
+
+        return (fn (Invoice $i) => $this->totalsView($i))->call($renderer, $invoice);
+    }
+
+    private function renderHtml(Invoice $invoice, bool $detailed): string
+    {
         $invoice->loadMissing(['lines', 'invoiceType', 'customer', 'company']);
 
-        // Real totals shape via the renderer's own (private) builder, so the test
-        // isn't coupled to the totals array's exact keys.
-        $renderer = app(InvoicePdfRenderer::class);
-        $totals = (fn (Invoice $i) => $this->totalsView($i))->call($renderer, $invoice);
-
-        $html = view('invoices.pdf', [
+        return view('invoices.pdf', [
             'invoice' => $invoice,
             'tenant' => $invoice->company,
             'qrDataUri' => null,
             'logoDataUri' => null,
-            'totals' => $totals,
+            'totals' => $this->totalsFor($invoice),
             'activities' => $invoice->activitiesAsSubject()->with('causer')->oldest()->get(),
+            'historyDetailed' => $detailed,
         ])->render();
+    }
+
+    public function test_operator_variant_shows_full_history(): void
+    {
+        $html = $this->renderHtml($this->invoiceWithHistory(), detailed: true);
 
         $this->assertStringContainsString('Ιστορικό', $html);
-        $this->assertStringContainsString('Τροποποίηση', $html);     // the updated event
-        $this->assertStringContainsString('local_status', $html);    // the change line
+        $this->assertStringContainsString('Τροποποίηση', $html);   // the updated event
+        $this->assertStringContainsString('Χρήστης', $html);       // detail column header
+        $this->assertStringContainsString('local_status', $html);  // the change line (Μεταβολές)
+    }
+
+    public function test_customer_variant_redacts_user_and_changes(): void
+    {
+        // The default (customer/public) render must NOT leak the operator name or
+        // the internal field-level diff — only Πότε/Ενέργεια.
+        $html = $this->renderHtml($this->invoiceWithHistory(), detailed: false);
+
+        $this->assertStringContainsString('Ιστορικό', $html);
+        $this->assertStringContainsString('Τροποποίηση', $html);       // action kept
+        $this->assertStringNotContainsString('Χρήστης', $html);        // user column gone
+        $this->assertStringNotContainsString('Μεταβολές', $html);      // changes column gone
+        $this->assertStringNotContainsString('local_status', $html);   // no internal diff
+    }
+
+    public function test_renderer_defaults_to_the_redacted_variant(): void
+    {
+        // render() without internal:true (the email + public-URL callers) → redacted.
+        $invoice = $this->invoiceWithHistory();
+        $renderer = app(InvoicePdfRenderer::class);
+
+        $this->assertStringStartsWith('%PDF', $renderer->render($invoice));
+        $this->assertStringStartsWith('%PDF', $renderer->render($invoice, internal: true));
     }
 }

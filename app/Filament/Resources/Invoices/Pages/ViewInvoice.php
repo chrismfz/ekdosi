@@ -772,7 +772,9 @@ class ViewInvoice extends ViewRecord
                     // `print` also coerces the PDF byte-string through
                     // PHP's bool return semantics; safe in practice but
                     // `echo` is the idiomatic stream emitter.
-                    $pdfBytes = app(InvoicePdfRenderer::class)->render($record);
+                    // Operator download → full «Ιστορικό» (incl. Χρήστης + Μεταβολές);
+                    // the customer email / public URL render the redacted variant.
+                    $pdfBytes = app(InvoicePdfRenderer::class)->render($record, internal: true);
 
                     return response()->streamDownload(
                         function () use ($pdfBytes): void {
