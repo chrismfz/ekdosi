@@ -125,6 +125,7 @@ right one** — it's part of "done", like tests:
 
 ## Commands
 ```bash
+php artisan ops:health [--json]                         # one-shot deploy check: queue/scheduler/backup/mail/WHMCS/myDATA/disk
 php artisan migrate
 php artisan shield:generate                              # (re)sync resource permissions after new resources
 
@@ -794,6 +795,14 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
   (`InvoiceNumberer`, `InvoiceBalance::recompute`) are real on MariaDB only.
 
 ## Env-prep gotchas (deploy host)
+> **Don't re-derive deploy state by hand.** Run **`php artisan ops:health`**
+> (`--json` for machine output) — it checks queue worker, scheduler, backups,
+> mail, WHMCS, myDATA and disk in one shot (`OperatorHealth`, see
+> `docs/operator-health.md`). The full provisioning lives in **`INSTALL.md`**
+> (AlmaLinux: php-fpm, MariaDB, the systemd queue unit `ekdosi-queue.service`,
+> the scheduler + backup cron lines) and **`README.md` §Deploy notes**. **Deploy
+> routine after `git pull`:** `php artisan migrate` → `php artisan queue:restart`
+> (worker picks up new code) → `shield:sync-super-admin` when permissions changed.
 - **Scheduler + queue worker — PROVISIONED on prod (systemd + cron).** The wired
   schedule (`routes/console.php`) IS live on the production host: a cron line runs
   `php artisan schedule:run` every minute, and a **systemd service** keeps a
