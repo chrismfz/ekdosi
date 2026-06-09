@@ -55,7 +55,10 @@ class InvoicePdfRenderer
             // draft, which would assert a reversal on the customer PDF before it
             // legally exists. The Filament panel (operator) still shows all.
             'creditNotes' => fn ($q) => $q->where('local_status', 'active'),
-            'creditedInvoice', 'deliveryNotes',
+            'creditedInvoice',
+            // Same rule for linked delivery notes — only ISSUED ones (active), not a
+            // draft or a cancelled δελτίο, on the customer-facing copy.
+            'deliveryNotes' => fn ($q) => $q->where('local_status', 'active'),
         ]);
 
         // Tenant-relation siblings the template references that aren't

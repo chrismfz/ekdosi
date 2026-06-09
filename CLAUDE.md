@@ -125,6 +125,7 @@ right one** — it's part of "done", like tests:
 
 ## Commands
 ```bash
+php artisan ops:health [--json]                         # one-shot deploy check: queue/scheduler/backup/mail/WHMCS/myDATA/disk
 php artisan migrate
 php artisan shield:generate                              # (re)sync resource permissions after new resources
 
@@ -248,16 +249,23 @@ helpers — the single source to refresh on spec changes.
 `php artisan mydata:preflight` audits each tenant's invoice-type / VAT config
 against them (read-only) and flags what AADE would reject. Exit 0/1/2.
 
-**Submitter payload follow-ups (deferred; none hit by the 4 validated types):**
-- **0% / exempt** → emit `vatCategory=7` + a `vatExemptionCategory` (§8.3,
-  1–31); `vatCategoryFor()` currently THROWS on 0% (`[217]`/`[271]`).
-- **4% ambiguity** — AADE category 6 (pre-existing island) vs 10 (ν.5057/2023);
-  regime-dependent.
-- **Conditional per-line `<quantity>`** for goods invoice types.
-- **`taxesTotals`** for withholding / fees / stamp-duty invoices.
-- **PaymentMethod → myDATA payment-type map** (currently all type 3 cash).
-- **SendInvoices mock-Guzzle integration test** — now feasible from the
-  captured live success XML.
+**Submitter payload follow-ups — ✅ ALL DONE (were deferred; none hit the original
+4 validated types, so re-confirm against the AADE sandbox before relying on them):**
+- **0% / exempt** → ✅ G4: `vatCategory=7` + `vatExemptionCategory` (§8.3) from the
+  tenant's 0%-rate VatCategory.
+- **4% ambiguity** (cat 6 island vs 10 ν.5057/2023, 3%→9) → ✅ optional
+  `vat_categories.mydata_vat_category` override, scoped to the 3%/4% rates
+  (`AadeInvoiceDocument::mydataCategoryOverride`).
+- **Conditional per-line `<quantity>`** → ✅ G5 (`invoice_types.mydata_requires_quantity`).
+- **`taxesTotals`** for withholding/fees/stamp/otherTaxes/deductions → ✅ G1
+  (withholding) + #3c (the other four): amount + §8.x category per type, gross +
+  payment adjusted (`AadeInvoiceDocument::addAdditionalTaxes`). The invoice form has
+  a **«Τυπικά τέλη/φόροι» quick-fill** (`CommonTaxPresets`) over the raw fields.
+- **PaymentMethod → myDATA payment-type map** → ✅ G9 (`payment_methods.mydata_payment_type`).
+- **SendInvoices mock-Guzzle integration test** → ✅ (`MyDataSubmitterSafetyTest`,
+  full `submit()` round-trip against firebed's success stub).
+- **Still open:** auto-calc of percentage amounts (the preset helper does it on pick;
+  a live/on-save recompute from net is the next step) + curated-preset expansion.
 
 ### Reconciliation
 - **Phase 1 — local** (`MyDataReconciliation` page): cross-checks our two
@@ -794,6 +802,14 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
   (`InvoiceNumberer`, `InvoiceBalance::recompute`) are real on MariaDB only.
 
 ## Env-prep gotchas (deploy host)
+> **Don't re-derive deploy state by hand.** Run **`php artisan ops:health`**
+> (`--json` for machine output) — it checks queue worker, scheduler, backups,
+> mail, WHMCS, myDATA and disk in one shot (`OperatorHealth`, see
+> `docs/operator-health.md`). The full provisioning lives in **`INSTALL.md`**
+> (AlmaLinux: php-fpm, MariaDB, the systemd queue unit `ekdosi-queue.service`,
+> the scheduler + backup cron lines) and **`README.md` §Deploy notes**. **Deploy
+> routine after `git pull`:** `php artisan migrate` → `php artisan queue:restart`
+> (worker picks up new code) → `shield:sync-super-admin` when permissions changed.
 - **Scheduler + queue worker — PROVISIONED on prod (systemd + cron).** The wired
   schedule (`routes/console.php`) IS live on the production host: a cron line runs
   `php artisan schedule:run` every minute, and a **systemd service** keeps a

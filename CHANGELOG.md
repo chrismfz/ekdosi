@@ -17,6 +17,19 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **«Τυπικά τέλη/φόροι» quick-fill (preview).** A curated picker on the invoice form
+  (`App\Support\MyData\CommonTaxPresets`) — Χαρτόσημο 1,2/2,4/3,6%, Τέλος διαμονής
+  παρεπιδημούντων, Παρακράτηση 20% — that sets the right §8.x category and, for
+  percentage-based ones, auto-computes the amount from the line net (header discount
+  applied, matching the filed base). Synthetic (not persisted); the underlying
+  amount/category fields stay editable, with a «recomputed at pick-time» warning.
+  Also: the fees/taxes/withholding category selects now show the AADE descriptions
+  (firebed `->label()`) instead of «Κατηγορία N».
+### Fixed
+- **Invoice PDF «Σχετικά παραστατικά» links only ISSUED delivery notes** (local_status
+  active) — a draft/cancelled δελτίο no longer shows on the customer copy (same rule
+  as credit notes).
+### Added
 - **Full myDATA taxesTotals (fees / other taxes / stamp duty / deductions).** Beyond
   withholding (G1, taxType 1), invoices can now carry a fees (2, §8.5 — e.g. τέλος
   ανθεκτικότητας), other-taxes (3, §8.6), stamp-duty (4, §8.7) and deductions (5, §8.8)
