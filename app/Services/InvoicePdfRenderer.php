@@ -48,7 +48,15 @@ class InvoicePdfRenderer
 
     public function render(Invoice $invoice): string
     {
-        $invoice->loadMissing(['lines', 'invoiceType', 'customer', 'company', 'paymentMethod']);
+        $invoice->loadMissing([
+            'lines', 'invoiceType', 'customer', 'company', 'paymentMethod',
+            // For the «Σχετικά παραστατικά» block (credit-note / delivery links).
+            // Only ISSUED credit notes (local_status active) — never a not-yet-issued
+            // draft, which would assert a reversal on the customer PDF before it
+            // legally exists. The Filament panel (operator) still shows all.
+            'creditNotes' => fn ($q) => $q->where('local_status', 'active'),
+            'creditedInvoice', 'deliveryNotes',
+        ]);
 
         // Tenant-relation siblings the template references that aren't
         // always relations on Invoice. Defensive lazy-load via

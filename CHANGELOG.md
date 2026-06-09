@@ -16,7 +16,30 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Invoice/ΔΑ PDF «Σχετικά παραστατικά» review hardening.** The «παραμένει VALID
+  στην ΑΑΔΕ» note now shows only when `mydata_state === 'VALID'` (no false claim on
+  a cancelled/non-myDATA invoice); a PARTIAL credit reads «Πιστώθηκε (μερικώς) με»
+  (not «Ακυρώθηκε»); only ISSUED credit notes appear on the customer PDF (drafts
+  hidden); the empty «Σχετικά» box no longer renders when a credit note's original
+  was deleted; and the ΔΑ «Υποβολές myDATA» table now lists only real submissions
+  (INSERT/PROVIDER_INSERT/CANCEL), excluding lifecycle/failed marks. `DeliveryMark::actionLabel()`
+  replaces the inline label map.
+### Fixed
+- **Delivery-note PDF clipped the myDATA/provider verification URL.** The long
+  space-less qrUrl (AADE or InvoSign `viewinvoice.php?…`) overflowed past the page
+  edge — DomPDF won't break it. Now a zero-width space is injected every 8 chars so
+  it wraps, same fix already applied to the invoice PDF footer.
 ### Added
+- **Printable history / links on PDFs.** The delivery-note PDF prints an
+  «Ιστορικό» section (when present): movement lifecycle events
+  (`delivery_note_events`) + myDATA submission marks (`delivery_marks`). The
+  invoice PDF prints a **«Σχετικά παραστατικά»** block mirroring the Filament
+  panel — cancellation↔credit-note links («Ακυρώθηκε με πιστωτικό» + the credit
+  note's code, the original it reverses, linked delivery notes) — so the customer
+  can tie a cancelled invoice to its credit note. Customer-safe by design (no
+  operator names / internal field diffs; the full audit «Ιστορικό» stays in the
+  panel). Each renders only when the relation/rows exist.
 - **Provider-tab credential UX (Company form).** Provider (π.χ. InvoSign) token
   fields are now pre-filled + `revealable` for copy-paste — parity with the myDATA
   subscription-key inputs (they were blank, so reveal showed nothing). `SendChannelFormBridge::hydrate`

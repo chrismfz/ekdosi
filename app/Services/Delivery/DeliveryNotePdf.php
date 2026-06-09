@@ -55,6 +55,16 @@ class DeliveryNotePdf
                 'tenant' => $note->company,
                 'qrDataUri' => $qrDataUri,
                 'logoDataUri' => $logoDataUri,
+                // Two audit trails, printed when present: the movement lifecycle
+                // (carrier/recipient events; events() already orders oldest→newest)
+                // + the myDATA SUBMISSION marks only. delivery_marks also stores
+                // lifecycle (REGISTER_TRANSFER/CONFIRM_OUTCOME → shown in «Διακίνηση»)
+                // and failed attempts (PROVIDER_FAILED/REJECTED, no MARK) — exclude
+                // both so «Υποβολές myDATA» isn't duplicated/noisy.
+                'events' => $note->events()->get(),
+                'marks' => $note->marks()
+                    ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT', 'CANCEL'])
+                    ->oldest()->get(),
             ])
                 ->setPaper('A4', 'portrait')
                 ->output();

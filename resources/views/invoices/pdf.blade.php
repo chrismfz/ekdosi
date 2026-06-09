@@ -95,6 +95,14 @@
         .footer .tenant-text { margin-top: 1mm; font-style: italic; }
         .pager:after { content: counter(page); }
         .pager-total:after { content: counter(pages); }
+
+        /* Related documents (credit-note / delivery links), printed when present */
+        .related { margin-top: 6mm; padding: 3mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; page-break-inside: avoid; }
+        .related h3 { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
+        .related .rel-row { font-size: 9pt; color: #1f2937; margin: 0.8mm 0; }
+        .related .rel-label { color: #6b7280; }
+        .related .rel-badge { font-weight: bold; color: #7f1d1d; }
+        .related .rel-note { font-size: 7.5pt; color: #6b7280; margin: 0.3mm 0 1.5mm; }
     </style>
 </head>
 <body>
@@ -295,6 +303,57 @@
     </div>
 @endif
 
+{{-- ====================== Σχετικά παραστατικά ======================
+     The customer-meaningful links (cancellation ↔ credit note(s), delivery
+     notes) — mirrors the «Σχετικά παραστατικά» panel in Filament. Safe for the
+     customer copy (no operator names / internal diffs). Printed only when there
+     IS a relation. --}}
+@php($relCredits = $invoice->creditNotes ?? collect())
+@php($relDeliveries = $invoice->deliveryNotes ?? collect())
+@php($showCreditedFor = $invoice->credited_invoice_id !== null && $invoice->creditedInvoice)
+@if($invoice->isFullyCredited() || $showCreditedFor || $relCredits->isNotEmpty() || $relDeliveries->isNotEmpty())
+    <div class="related">
+        <h3>Σχετικά παραστατικά</h3>
+
+        @if($invoice->isFullyCredited())
+            <div class="rel-row">
+                <span class="rel-label">Κατάσταση παραστατικού:</span>
+                <span class="rel-badge">Ακυρώθηκε με πιστωτικό</span>
+            </div>
+        @endif
+
+        @if($showCreditedFor)
+            <div class="rel-row">
+                <span class="rel-label">Πιστωτικό — αντιστρέφει το παραστατικό:</span>
+                <strong>{{ $invoice->creditedInvoice->invcode }}</strong>
+            </div>
+            <div class="rel-note">Αυτό το πιστωτικό εκδόθηκε για να ακυρώσει/διορθώσει το παραπάνω παραστατικό.</div>
+        @endif
+
+        @if($relCredits->isNotEmpty())
+            <div class="rel-row">
+                {{-- Full cancel vs partial credit: «Ακυρώθηκε» only when the credit
+                     notes fully reverse the invoice — else it would mislead a customer
+                     who still owes a balance. --}}
+                <span class="rel-label">{{ $invoice->isFullyCredited() ? 'Ακυρώθηκε / πιστώθηκε με:' : 'Πιστώθηκε (μερικώς) με:' }}</span>
+                <strong>{{ $relCredits->pluck('invcode')->implode(', ') }}</strong>
+            </div>
+            {{-- Only assert the AADE status when it's actually VALID — never on a
+                 cancelled-at-AADE or non-myDATA invoice (would be a false claim). --}}
+            @if($invoice->mydata_state === 'VALID')
+                <div class="rel-note">Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.</div>
+            @endif
+        @endif
+
+        @if($relDeliveries->isNotEmpty())
+            <div class="rel-row">
+                <span class="rel-label">Δελτία αποστολής:</span>
+                <strong>{{ $relDeliveries->pluck('invcode')->implode(', ') }}</strong>
+            </div>
+        @endif
+    </div>
+@endif
+
 {{-- ====================== Footer (myDATA verification + per-tenant text + pagination) ====================== --}}
 <div class="footer">
     @if($invoice->mydata_url)
@@ -306,7 +365,7 @@
              both sides → looked like a truncated/wrong URL). Insert zero-width
              break opportunities (U+200B) so it WRAPS across lines; invisible, so
              it still reads as the exact URL. The value itself is unchanged. --}}
-        <div class="mydata-url">{{ implode("\u{200B}", mb_str_split($invoice->mydata_url, 8)) }}</div>
+        <div class="mydata-url">{{ implode("\u{200B}", mb_str_split((string) $invoice->mydata_url, 8)) }}</div>
     @endif
     @if(! empty($tenant->pdf_footer_text))
         <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>

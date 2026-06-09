@@ -136,6 +136,114 @@ class DeliveryNotePdfTest extends TestCase
         $this->assertStringNotContainsString('ΜΗ ΔΙΑΒΙΒΑΣΜΕΝΟ', $html);
     }
 
+    public function test_long_verification_url_is_zero_width_broken_to_wrap(): void
+    {
+        // A provider qrUrl is one long space-less token; DomPDF won't break it and
+        // it clipped at the page edge. The footer injects a ZWSP every 8 chars.
+        $url = 'https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=MwAAAAAA&gvsig=abcdef0123456789';
+        $note = $this->fileNote($this->makeNote(), '400001964649167');
+        $note->forceFill(['mydata_url' => $url])->save();
+
+        $html = view('delivery-notes.pdf', [
+            'note' => $note->fresh('lines'),
+            'tenant' => $note->company,
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+        ])->render();
+
+        // The wrapped (zero-width-broken) form is present; the unbroken token is not.
+        // e() because Blade HTML-escapes the value (& → &amp;) after the ZWSP split.
+        $this->assertStringContainsString(e(implode("\u{200B}", mb_str_split($url, 8))), $html);
+        $this->assertStringNotContainsString($url, $html);
+    }
+
+    public function test_history_section_prints_movement_events_and_submissions(): void
+    {
+        $note = $this->fileNote($this->makeNote(), '400001234567890');
+
+        \App\Models\DeliveryNoteEvent::create([
+            'company_id' => $this->tenant->id,
+            'delivery_note_id' => $note->id,
+            'event_type' => \Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType::REGISTER_TRANSFER->value,
+            'event_timestamp' => now(),
+            'actor_vat' => '800561849',
+            'details' => ['transport_type' => 1, 'vehicle_number' => 'ΙΑΒ1234'],
+            'dedup_key' => 'evt-1',
+        ]);
+
+        \App\Models\DeliveryMark::create([
+            'company_id' => $this->tenant->id,
+            'delivery_note_id' => $note->id,
+            'mark' => '400001234567890',
+            'mydata_action' => 'INSERT',
+        ]);
+
+        $html = $this->renderDeliveryHtml($note);
+
+        $this->assertStringContainsString('Ιστορικό', $html);
+        $this->assertStringContainsString('Διακίνηση', $html);
+        $this->assertStringContainsString('Έναρξη διακίνησης', $html);   // event typeLabel
+        $this->assertStringContainsString('Υποβολές myDATA', $html);
+        $this->assertStringContainsString('Καταχώρηση', $html);          // INSERT → Greek
+        $this->assertStringContainsString('400001234567890', $html);     // the mark
+    }
+
+    public function test_submissions_table_excludes_lifecycle_and_failed_marks(): void
+    {
+        // delivery_marks also stores lifecycle (REGISTER_TRANSFER/CONFIRM_OUTCOME)
+        // and failed attempts (PROVIDER_FAILED, no MARK). «Υποβολές myDATA» must
+        // show only real submissions (INSERT/PROVIDER_INSERT/CANCEL).
+        $note = $this->fileNote($this->makeNote(), '400001234567890');
+
+        foreach ([
+            ['mark' => '400001234567890', 'mydata_action' => 'INSERT'],
+            ['mark' => null, 'mydata_action' => 'REGISTER_TRANSFER'],
+            ['mark' => null, 'mydata_action' => 'PROVIDER_FAILED'],
+        ] as $row) {
+            \App\Models\DeliveryMark::create($row + [
+                'company_id' => $this->tenant->id,
+                'delivery_note_id' => $note->id,
+            ]);
+        }
+
+        $html = $this->renderDeliveryHtml($note);
+
+        $this->assertStringContainsString('Καταχώρηση', $html);              // INSERT shown
+        $this->assertStringNotContainsString('REGISTER_TRANSFER', $html);    // lifecycle excluded
+        $this->assertStringNotContainsString('PROVIDER_FAILED', $html);      // failed attempt excluded
+    }
+
+    /** Render the delivery PDF blade to HTML the way DeliveryNotePdf::render does (filtered marks). */
+    private function renderDeliveryHtml(DeliveryNote $note): string
+    {
+        return view('delivery-notes.pdf', [
+            'note' => $note,
+            'tenant' => $note->company,
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+            'events' => $note->events()->get(),
+            'marks' => $note->marks()
+                ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT', 'CANCEL'])
+                ->oldest()->get(),
+        ])->render();
+    }
+
+    public function test_history_section_absent_when_no_events_or_marks(): void
+    {
+        $note = $this->fileNote($this->makeNote(), '400009999999999');
+
+        $html = view('delivery-notes.pdf', [
+            'note' => $note,
+            'tenant' => $note->company,
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+            'events' => collect(),
+            'marks' => collect(),
+        ])->render();
+
+        $this->assertStringNotContainsString('Υποβολές myDATA', $html);
+    }
+
     public function test_draft_note_shows_proxeiro_marker_and_no_qr(): void
     {
         $note = $this->makeNote(); // draft: mydata_state null, no mydata_url
