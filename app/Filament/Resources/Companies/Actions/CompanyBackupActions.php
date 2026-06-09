@@ -108,8 +108,11 @@ class CompanyBackupActions
                     ->default('off')->required(),
                 TextInput::make('run_at_time')->label('Ώρα (HH:MM)')->default('02:00')
                     ->rule('date_format:H:i')->required(),
+                // Only two distinct behaviours exist: the exporter ALWAYS dumps
+                // setup; --full adds transactional. (A settings-only-without-setup
+                // bundle isn't implemented, so it's not offered — see plan doc.)
                 Select::make('bucket')->label('Περιεχόμενο')
-                    ->options(['settings' => 'Μόνο ρυθμίσεις', 'settings_setup' => 'Ρυθμίσεις + setup', 'full' => 'Πλήρες (με δεδομένα)'])
+                    ->options(['settings_setup' => 'Ρυθμίσεις + setup', 'full' => 'Πλήρες (με δεδομένα)'])
                     ->default('settings_setup')->required(),
                 Select::make('secrets_mode')->label('Μυστικά')
                     ->options(['passphrase' => 'Κρυπτογραφημένα (συνθηματικό)', 'raw' => 'Χωρίς κρυπτογράφηση (μόνο τοπικά!)'])

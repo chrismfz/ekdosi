@@ -6,7 +6,6 @@ use App\Models\CompanyBackupRun;
 use App\Models\CompanyBackupSetting;
 use App\Services\Backup\CompanyBackupRunner;
 use App\Support\Tenancy\CompanyContext;
-use Carbon\CarbonInterface;
 use Illuminate\Console\Command;
 
 /**
@@ -40,7 +39,12 @@ class RunScheduledCompanyBackups extends Command
             if ($s->company === null) {
                 continue;
             }
-            if (! $this->option('force') && ! $this->isDue($s, $now)) {
+            // Last ATTEMPT (any status) gates the cadence — see isDue() docblock.
+            $lastRunAt = CompanyBackupRun::query()
+                ->where('company_id', $s->company_id)
+                ->latest('started_at')
+                ->value('started_at');
+            if (! $this->option('force') && ! $s->isDue($lastRunAt, $now)) {
                 continue;
             }
 
@@ -54,30 +58,5 @@ class RunScheduledCompanyBackups extends Command
         $this->info("Έτρεξαν {$ran} αντίγραφα.");
 
         return self::SUCCESS;
-    }
-
-    private function isDue(CompanyBackupSetting $s, CarbonInterface $now): bool
-    {
-        [$h, $m] = array_pad(explode(':', $s->run_at_time ?: '02:00'), 2, '0');
-        if ($now->lt($now->copy()->setTime((int) $h, (int) $m, 0))) {
-            return false; // not yet at today's configured run time
-        }
-
-        $last = CompanyBackupRun::query()
-            ->where('company_id', $s->company_id)
-            ->where('status', '!=', 'failed')
-            ->latest('started_at')
-            ->first();
-
-        if ($last?->started_at === null) {
-            return true; // never run successfully
-        }
-
-        return match ($s->frequency) {
-            'daily' => $last->started_at->lt($now->copy()->startOfDay()),
-            'weekly' => $last->started_at->lt($now->copy()->startOfWeek()),
-            'monthly' => $last->started_at->lt($now->copy()->startOfMonth()),
-            default => false,
-        };
     }
 }

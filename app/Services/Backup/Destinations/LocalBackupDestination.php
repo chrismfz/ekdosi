@@ -41,8 +41,10 @@ class LocalBackupDestination implements BackupDestination
 
         $files = collect($disk->files($dir))
             ->filter(static fn (string $p) => str_ends_with($p, '.zip'))
-            // newest first
-            ->sortByDesc(static fn (string $p) => $disk->lastModified($p))
+            // Newest first, with the filename as a DETERMINISTIC tie-break so two
+            // bundles written in the same second never order arbitrarily (which
+            // could otherwise prune a still-current bundle at keep=1).
+            ->sortByDesc(static fn (string $p) => sprintf('%020d|%s', $disk->lastModified($p), $p))
             ->values();
 
         $cutoff = $days !== null ? CarbonImmutable::now()->subDays($days)->getTimestamp() : null;

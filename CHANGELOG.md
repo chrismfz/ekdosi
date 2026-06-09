@@ -16,6 +16,14 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Full company bundle silently dropped ALL transactional data.** `BundleArchive`
+  serialised only `setup/` — never `data/` — so a `--full` export / full backup
+  produced a settings-only zip while reporting success (the array round-trip was
+  tested, the ZIP path wasn't). `write()`/`read()` now carry `data/<table>.json`;
+  a zip-roundtrip regression test guards it. (Found by review of the Phase-4a
+  `full` backup bucket.)
+
 ### Added
 - **Company backups — Phase 4a (automated local backups + coverage guard).**
   Per-company backup policy (`company_backup_settings`: cadence / bucket / secrets

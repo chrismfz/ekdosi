@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -79,5 +80,35 @@ class CompanyBackupSetting extends Model
         }
 
         return false;
+    }
+
+    /**
+     * Is a backup due now, given the timestamp of the LAST run (any status)?
+     * Hourly cron → fires once per period at/after run_at_time. `$lastRunAt` is
+     * the last ATTEMPT regardless of ok/failed: a failed attempt still counts as
+     * "ran this period" so a misconfigured tenant is NOT re-dumped every hour —
+     * the operator sees the failed run and fixes it / re-runs manually.
+     */
+    public function isDue(?CarbonInterface $lastRunAt, CarbonInterface $now): bool
+    {
+        if (! in_array($this->frequency, ['daily', 'weekly', 'monthly'], true)) {
+            return false; // 'off' / unknown → never scheduled
+        }
+
+        [$h, $m] = array_pad(explode(':', $this->run_at_time ?: '02:00'), 2, '0');
+        if ($now->lt($now->copy()->setTime((int) $h, (int) $m, 0))) {
+            return false; // not yet at today's configured run time
+        }
+
+        if ($lastRunAt === null) {
+            return true; // never attempted
+        }
+
+        return match ($this->frequency) {
+            'daily' => $lastRunAt->lt($now->copy()->startOfDay()),
+            'weekly' => $lastRunAt->lt($now->copy()->startOfWeek()),
+            'monthly' => $lastRunAt->lt($now->copy()->startOfMonth()),
+            default => false,
+        };
     }
 }

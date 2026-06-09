@@ -10,7 +10,7 @@ use ZipArchive;
  * Filament UI share one reader/writer instead of duplicating ZipArchive glue.
  *
  * Layout: manifest.json + company.json + secrets.json + setup/<table>.json +
- * files/<name>.
+ * data/<table>.json (full bundle only) + files/<name>.
  */
 class BundleArchive
 {
@@ -37,6 +37,11 @@ class BundleArchive
         $zip->addFromString('secrets.json', $json($bundle['secrets']));
         foreach ($bundle['setup'] as $table => $rows) {
             $zip->addFromString("setup/{$table}.json", $json($rows));
+        }
+        // Transactional rows — only present in a `--full` bundle. MUST be written
+        // too, else a "full" backup silently ships zero transactional data.
+        foreach (($bundle['data'] ?? []) as $table => $rows) {
+            $zip->addFromString("data/{$table}.json", $json($rows));
         }
         foreach ($bundle['files'] as $name => $bytes) {
             $zip->addFromString($name, $bytes);
@@ -70,18 +75,22 @@ class BundleArchive
         }
 
         $setup = [];
+        $data = [];
         $files = [];
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $name = (string) $zip->getNameIndex($i);
             if (str_starts_with($name, 'setup/') && str_ends_with($name, '.json')) {
                 $table = substr($name, strlen('setup/'), -strlen('.json'));
                 $setup[$table] = json_decode((string) $zip->getFromName($name), true) ?? [];
+            } elseif (str_starts_with($name, 'data/') && str_ends_with($name, '.json')) {
+                $table = substr($name, strlen('data/'), -strlen('.json'));
+                $data[$table] = json_decode((string) $zip->getFromName($name), true) ?? [];
             } elseif (str_starts_with($name, 'files/')) {
                 $files[$name] = (string) $zip->getFromName($name);
             }
         }
         $zip->close();
 
-        return compact('manifest', 'company', 'secrets', 'setup', 'files');
+        return compact('manifest', 'company', 'secrets', 'setup', 'data', 'files');
     }
 }
