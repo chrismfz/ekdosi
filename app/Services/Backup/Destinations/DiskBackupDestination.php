@@ -5,6 +5,7 @@ namespace App\Services\Backup\Destinations;
 use App\Contracts\BackupDestination;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\File\File;
 
 /**
@@ -36,7 +37,17 @@ abstract class DiskBackupDestination implements BackupDestination
     {
         $disk = $this->disk($config);
         $dir = $this->dir($config, $slug);
-        $disk->putFileAs($dir, new File($bundlePath), basename($bundlePath));
+
+        // putFileAs returns FALSE (not throws) on failure unless the disk is
+        // configured `throw=true` — the local disk and any disk we don't force
+        // aren't. Without this check a failed upload (bad SFTP creds, host down,
+        // S3 permission denied) would be silently recorded as a successful
+        // backup by the runner, which only treats THROWN errors as failures.
+        if ($disk->putFileAs($dir, new File($bundlePath), basename($bundlePath)) === false) {
+            throw new RuntimeException(sprintf(
+                'Backup upload to «%s» failed (%s).', $this->label(), $dir
+            ));
+        }
 
         return $this->locationLabel($disk, $dir, basename($bundlePath), $config);
     }

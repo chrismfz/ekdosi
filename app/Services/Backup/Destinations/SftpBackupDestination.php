@@ -24,7 +24,7 @@ class SftpBackupDestination extends FlysystemBackupDestination
         return array_filter([
             'driver' => 'sftp',
             'host' => $config['host'] ?? null,
-            'port' => (int) ($config['port'] ?? 22),
+            'port' => filled($config['port'] ?? null) ? (int) $config['port'] : 22,
             'username' => $config['username'] ?? null,
             'password' => $config['password'] ?? null,
             'privateKey' => $config['private_key'] ?? null,

@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Per-company automated-backup policy (Phase 4). The passphrase is encrypted at
- * rest. `destinations` is a list of `{driver, config}` resolved by
- * BackupDestinationRegistry. NOT exported with the company — backup config is
- * VM-specific (see CompanyExporter::INTENTIONALLY_EXCLUDED).
+ * rest. `destinations` is a list of FLAT entries (`{driver, ...config}`: host,
+ * port, bucket, path…) resolved by BackupDestinationRegistry. NOT exported with
+ * the company — backup config is VM-specific (see
+ * CompanyExporter::INTENTIONALLY_EXCLUDED).
  */
 class CompanyBackupSetting extends Model
 {

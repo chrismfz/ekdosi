@@ -33,9 +33,13 @@ they merge.
   The «Αυτόματα αντίγραφα» modal gains a **destinations Repeater** (driver-
   conditional fields), «Τοπικά» always implied; **raw secrets to a remote target
   need an explicit acknowledgement** (not forced encryption). New **«Λήψη
-  αντιγράφου τώρα»** action runs the policy and streams the zip immediately.
-  **Deploy:** `composer install` (adds `league/flysystem-sftp-v3` / `-ftp` /
-  `-aws-s3-v3`).
+  αντιγράφου τώρα»** action runs the policy and hands a short-lived **signed
+  download link** (auth + `signed`, `View:Company`); the bundle streams from disk
+  via a route (`CompanyBackupDownloadController`) instead of being buffered in
+  memory by Livewire — the runs-history «Λήψη» uses the same link. A failed
+  remote upload now **throws** (`putFileAs`→false would otherwise be logged as a
+  successful backup). **Deploy:** `composer install` (adds
+  `league/flysystem-sftp-v3` / `-ftp` / `-aws-s3-v3`).
 - **Company backups — Phase 4a (automated local backups + coverage guard).**
   Per-company backup policy (`company_backup_settings`: cadence / bucket / secrets
   mode / retention / destinations) + a run log (`company_backup_runs`).

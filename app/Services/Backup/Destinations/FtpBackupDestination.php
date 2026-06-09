@@ -23,7 +23,7 @@ class FtpBackupDestination extends FlysystemBackupDestination
         return array_filter([
             'driver' => 'ftp',
             'host' => $config['host'] ?? null,
-            'port' => (int) ($config['port'] ?? 21),
+            'port' => filled($config['port'] ?? null) ? (int) $config['port'] : 21,
             'username' => $config['username'] ?? null,
             'password' => $config['password'] ?? null,
             'ssl' => (bool) ($config['ssl'] ?? false),

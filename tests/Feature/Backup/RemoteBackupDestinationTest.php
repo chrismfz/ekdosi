@@ -8,8 +8,10 @@ use App\Services\Backup\Destinations\S3BackupDestination;
 use App\Services\Backup\Destinations\SftpBackupDestination;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use ReflectionMethod;
+use RuntimeException;
 use Tests\TestCase;
 
 class RemoteBackupDestinationTest extends TestCase
@@ -98,6 +100,27 @@ class RemoteBackupDestinationTest extends TestCase
 
         @unlink($older);
         @unlink($newer);
+    }
+
+    #[Test]
+    public function push_throws_when_the_disk_reports_a_failed_write(): void
+    {
+        // putFileAs returns FALSE (not throws) on a disk without throw=true; the
+        // shared base must surface that as an exception so the runner records the
+        // destination as FAILED instead of silently «ok» (the off-site-backup trap).
+        $disk = Mockery::mock(Filesystem::class);
+        $disk->shouldReceive('putFileAs')->once()->andReturn(false);
+
+        $tmp = tempnam(sys_get_temp_dir(), 'bk').'.zip';
+        file_put_contents($tmp, 'zip-bytes');
+
+        $this->expectException(RuntimeException::class);
+
+        try {
+            $this->fakeRemote($disk)->push($tmp, 'acme', ['path' => 'offsite']);
+        } finally {
+            @unlink($tmp);
+        }
     }
 
     private function fakeRemote(Filesystem $disk): FlysystemBackupDestination

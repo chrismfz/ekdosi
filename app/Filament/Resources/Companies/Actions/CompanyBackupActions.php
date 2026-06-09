@@ -18,8 +18,10 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Actions\Action as NotificationAction;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\Facades\URL;
 use Throwable;
 
 /**
@@ -231,7 +233,12 @@ class CompanyBackupActions
             });
     }
 
-    /** Per-row: run a backup via the saved policy AND stream the zip to the browser. */
+    /**
+     * Per-row: run a backup via the saved policy, then hand the operator a
+     * short-lived signed download link. We DON'T return the file from the action
+     * (Livewire buffers a returned download fully in memory + base64) — the link
+     * points at a route that streams it from disk (CompanyBackupDownloadController).
+     */
     public static function downloadNow(): Action
     {
         return Action::make('backup_download_now')
@@ -239,14 +246,14 @@ class CompanyBackupActions
             ->icon('heroicon-o-arrow-down-on-square')
             ->color('success')
             ->requiresConfirmation()
-            ->modalDescription('Δημιουργεί αντίγραφο με την αποθηκευμένη πολιτική (καταγράφεται + στέλνεται στους προορισμούς) και το κατεβάζει αμέσως εδώ.')
-            ->action(function (Company $record) {
+            ->modalDescription('Δημιουργεί αντίγραφο με την αποθηκευμένη πολιτική (καταγράφεται + στέλνεται στους προορισμούς) και δίνει σύνδεσμο λήψης.')
+            ->action(function (Company $record): void {
                 $settings = $record->backupSetting;
                 if ($settings === null) {
                     Notification::make()->title('Ρύθμισε πρώτα τα «Αυτόματα αντίγραφα»')->warning()
                         ->body('Χρειάζεται μια πολιτική (περιεχόμενο / μυστικά / διατήρηση) για το αντίγραφο.')->send();
 
-                    return null;
+                    return;
                 }
 
                 $run = app(CompanyBackupRunner::class)->run($record, $settings, 'manual');
@@ -255,11 +262,30 @@ class CompanyBackupActions
                     Notification::make()->title('Αποτυχία: '.$run->status)
                         ->body($run->message ?? 'Δεν δημιουργήθηκε τοπικό αρχείο για λήψη.')->danger()->send();
 
-                    return null;
+                    return;
                 }
 
-                return response()->download($run->bundle_path);
+                Notification::make()
+                    ->title('Το αντίγραφο είναι έτοιμο')
+                    ->body('Κατάσταση: '.$run->status.' · Μέγεθος: '.number_format(((int) $run->bytes) / 1024, 1).' KB'
+                        .($run->status === 'partial' ? ' — κάποιοι απομακρυσμένοι προορισμοί απέτυχαν (δες «Αντίγραφα ασφαλείας»).' : ''))
+                    ->color($run->statusColor())
+                    ->persistent()
+                    ->actions([
+                        NotificationAction::make('download')
+                            ->label('Λήψη')
+                            ->icon('heroicon-o-arrow-down-tray')
+                            ->url(self::downloadUrl($run), shouldOpenInNewTab: true)
+                            ->button(),
+                    ])
+                    ->send();
             });
+    }
+
+    /** Short-lived signed URL to stream a finished bundle (see the download route). */
+    private static function downloadUrl(\App\Models\CompanyBackupRun $run): string
+    {
+        return URL::temporarySignedRoute('company-backups.download', now()->addMinutes(15), ['run' => $run->getKey()]);
     }
 
     /** Per-row: wipe transactional data (keep settings+setup). Dry-run unless «Εκτέλεση». */
