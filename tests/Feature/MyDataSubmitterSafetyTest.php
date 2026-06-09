@@ -72,6 +72,38 @@ class MyDataSubmitterSafetyTest extends TestCase
         ]);
     }
 
+    public function test_submit_files_and_persists_the_mark_from_a_successful_response(): void
+    {
+        // Full SendInvoices round-trip against a MOCKED AADE success response —
+        // the integration coverage the submitter lacked (previewXml only tested
+        // request-building; the other tests cover refusal guards). Uses firebed's
+        // own success stub so the parsed MARK + qrUrl persist path runs end-to-end.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+
+        $xml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $mock = new MockHandler([new GuzzleResponse(200, [], $xml)]);
+
+        $mark = (new MyDataSubmitter($this->tenant, $mock))->submit($inv->fresh('lines'));
+
+        // Returned mark row.
+        $this->assertSame('480301204040191', $mark->mark);
+        $this->assertSame('INSERT', $mark->mydata_action);
+
+        // Invoice cache flipped to VALID with the MARK + qrUrl.
+        $inv->refresh();
+        $this->assertSame('VALID', $inv->mydata_state);
+        $this->assertSame('480301204040191', $inv->mydata_mark);
+        $this->assertNotEmpty($inv->mydata_url);
+
+        // Audit row persisted.
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $inv->id,
+            'mark' => '480301204040191',
+            'mydata_action' => 'INSERT',
+        ]);
+    }
+
     public function test_submit_refuses_already_valid_invoice(): void
     {
         // The ETL-cutover safety: imported legacy invoices have
@@ -303,6 +335,39 @@ class MyDataSubmitterSafetyTest extends TestCase
 
         $this->assertStringContainsString('<vatCategory>7</vatCategory>', $xml);
         $this->assertStringContainsString('<vatExemptionCategory>5</vatExemptionCategory>', $xml);
+    }
+
+    public function test_four_percent_rate_defaults_to_category_6(): void
+    {
+        // No override configured → the rate-derived §8.2 code (4% → 6, islands).
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 4, 'net_price' => 100, 'gross_price' => 104,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatCategory>6</vatCategory>', $xml);
+    }
+
+    public function test_four_percent_rate_uses_the_configured_override(): void
+    {
+        // ν.5057/2023 regime: the tenant's 4% VatCategory pins category 10.
+        VatCategory::create([
+            'company_id' => $this->tenant->id, 'description' => '4% ν.5057',
+            'rate' => 4, 'mydata_vat_category' => 10,
+        ]);
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 4, 'net_price' => 100, 'gross_price' => 104,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatCategory>10</vatCategory>', $xml);
+        $this->assertStringNotContainsString('<vatCategory>6</vatCategory>', $xml);
     }
 
     public function test_zero_percent_vat_throws_when_exemption_reason_ambiguous(): void

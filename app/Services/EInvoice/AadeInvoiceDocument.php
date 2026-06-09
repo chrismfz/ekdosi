@@ -12,6 +12,7 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
 use Firebed\AadeMyData\Enums\TaxType;
+use Firebed\AadeMyData\Enums\VatCategory as AadeVatCategory;
 use Firebed\AadeMyData\Enums\VatExemption;
 use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Firebed\AadeMyData\Models\Address;
@@ -132,7 +133,7 @@ class AadeInvoiceDocument
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
                 ->setNetValue((float) $line->net_price)
-                ->setVatCategory($this->vatCategoryFor($rate))
+                ->setVatCategory($this->resolveVatCategoryCode($rate))
                 ->setVatAmount(round((float) $line->gross_price - (float) $line->net_price, 2));
 
             if ($emitQuantity) {
@@ -423,6 +424,63 @@ class AadeInvoiceDocument
      * resolved from the tenant's 0%-rate VatCategory (resolveVatExemptionCategory).
      * That resolution is what guards against filing an unexplained exempt line.
      */
+    /** @var array<string,?int> memoised per-rate myDATA category override */
+    private array $mydataCategoryOverrideCache = [];
+
+    /**
+     * The AADE §8.2 vatCategory code for a line rate: the tenant's explicit
+     * override if set on the matching VatCategory, else derived from the rate.
+     * Resolves the 4%→6-vs-10 (and 3%→9) ν.5057 ambiguity without guessing.
+     */
+    private function resolveVatCategoryCode(float $rate): int
+    {
+        return $this->mydataCategoryOverride($rate) ?? $this->vatCategoryFor($rate);
+    }
+
+    /**
+     * Explicit §8.2 override on the tenant's VatCategory at this rate, or null to
+     * fall back to rate-derivation. Throws if two same-rate categories disagree
+     * (the rate alone can't pick) or the stored code isn't a valid §8.2 category —
+     * symmetric with resolveVatExemptionCategory().
+     */
+    private function mydataCategoryOverride(float $rate): ?int
+    {
+        $key = number_format($rate, 2, '.', '');
+        if (array_key_exists($key, $this->mydataCategoryOverrideCache)) {
+            return $this->mydataCategoryOverrideCache[$key];
+        }
+
+        $codes = VatCategory::query()
+            ->where('company_id', $this->tenant->id)
+            ->whereBetween('rate', [$rate - 0.01, $rate + 0.01])
+            ->whereNotNull('mydata_vat_category')
+            ->pluck('mydata_vat_category')
+            ->map(fn ($c) => (int) $c)
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return $this->mydataCategoryOverrideCache[$key] = null;
+        }
+        if ($codes->count() > 1) {
+            throw new RuntimeException(
+                'Multiple '.$key.'%-rate VAT categories set different myDATA category overrides ('.
+                $codes->implode(', ').'). Lines store only the rate, so the correct §8.2 code is '.
+                'ambiguous — keep one override per rate (Setup → VAT Categories).'
+            );
+        }
+
+        $code = (int) $codes->first();
+        if (AadeVatCategory::tryFrom($code) === null) {
+            throw new RuntimeException(
+                'A '.$key.'%-rate VAT category has mydata_vat_category='.$code.', which is not a '.
+                'valid AADE §8.2 vatCategory (1–10). Fix it in Setup → VAT Categories.'
+            );
+        }
+
+        return $this->mydataCategoryOverrideCache[$key] = $code;
+    }
+
     private function vatCategoryFor(float $rate): int
     {
         return match (true) {

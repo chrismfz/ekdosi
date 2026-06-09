@@ -16,6 +16,20 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **4% VAT category override (ν.5057/2023 ambiguity).** A 4% rate maps to AADE
+  §8.2 category 6 (pre-existing island) OR 10 (αρ.31 ν.5057/2023); 3%→9. New
+  optional `vat_categories.mydata_vat_category` override (Setup → VAT Categories,
+  shown for 3%/4%) — the submitter prefers it, else derives from the rate (4%→6).
+  Resolver throws on a same-rate disagreement or an invalid §8.2 code. **Deploy:**
+  `php artisan migrate`.
+
+### Testing
+- **SendInvoices mock-Guzzle integration test** — the submitter's full `submit()`
+  round-trip is now covered against a mocked AADE success response (firebed's stub):
+  asserts the parsed MARK/qrUrl persist, `mydata_state=VALID`, and the INSERT
+  `mydata_marks` row. Closes the gap where only `previewXml` (request-building) and
+  the refusal guards were tested.
 ### Fixed
 - **Invoice/ΔΑ PDF «Σχετικά παραστατικά» review hardening.** The «παραμένει VALID
   στην ΑΑΔΕ» note now shows only when `mydata_state === 'VALID'` (no false claim on
