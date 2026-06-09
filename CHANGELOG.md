@@ -16,6 +16,18 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **ΔΑ μέσω παρόχου (InvoSign) — έκδοση 9.x.** Live InvoSign-sandbox round-trip
+  (myip, gr-provider) surfaced two more mandatory-field rejections beyond the
+  already-fixed `[88-006]`: the delivery `API_Counterpart` left
+  `CounterpartName`/`CounterpartVat` empty for an ενδοδιακίνηση (`[88-001]`), and
+  the per-line `api_*` printout twins were omitted entirely (`[88-001]
+  api_lineDescription`). `InvoSignDocument::deliveryCounterpartFields` now mirrors
+  `DeliveryNoteSubmitter::buildCounterpart`'s fallback chain (issuer name + ΑΦΜ
+  `000000000` when no external recipient), and `augmentDelivery` now appends the
+  per-line `api_*` fields (monetary fields 0.00, since delivery lines carry no
+  value). Full lifecycle (issue → register → confirm → status → provider-cancel)
+  now PASSes on the InvoSign sandbox.
 ### Added
 - **Παραστατικά Διακίνησης — ιστορικό διακίνησης (lifecycleHistory timeline).**
   «Έλεγχος κατάστασης (ΑΑΔΕ)» now also captures the §4.1 event history (what the

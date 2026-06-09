@@ -72,14 +72,15 @@ class InvoSignDocument
      * Delivery-note twin of augment(): InvoSign treats the invoice-level
      * <API_InvoiceDetails> (issuer + counterpart) as MANDATORY even for 9.x
      * delivery notes and rejects its absence with "[88-006] Λείπει το
-     * υποχρεωτικό node: API_InvoiceDetails". So we append THAT block — built from
-     * the DeliveryNote (recipient as counterpart) — but NOT the per-line api_*
-     * printout twins, which delivery notes don't carry. (Whether InvoSign also
-     * wants per-line api_* for goods 9.x is to be confirmed on the sandbox.)
+     * υποχρεωτικό node: API_InvoiceDetails". Sandbox-confirmed (2026-06-09) that
+     * it ALSO requires the per-line api_* printout twins for delivery notes —
+     * an absent `api_lineDescription` is rejected with "[88-001]" — so we append
+     * BOTH, just like augment(). Delivery lines carry no prices/VAT, so the
+     * monetary api_* fields go out as 0.00.
      */
     public static function augmentDelivery(string $aadeXml, DeliveryNote $note): string
     {
-        $note->loadMissing(['company', 'customer', 'deliveryType']);
+        $note->loadMissing(['company', 'customer', 'deliveryType', 'lines.product']);
 
         $dom = new DOMDocument('1.0', 'utf-8');
         $dom->preserveWhiteSpace = false;
@@ -92,6 +93,18 @@ class InvoSignDocument
             throw new RuntimeException('InvoSign: <invoice> element not found in the delivery-note XML.');
         }
 
+        // 1) Per-line api_* twins — matched to <invoiceDetails> in document order.
+        $details = $invoiceNode->getElementsByTagNameNS(self::AADE_NS, 'invoiceDetails');
+        $lines = $note->lines->values();
+        for ($i = 0; $i < $details->length; $i++) {
+            $node = $details->item($i);
+            $line = $lines[$i] ?? null;
+            if ($node instanceof DOMElement && $line !== null) {
+                self::appendDeliveryLineFields($dom, $node, $line);
+            }
+        }
+
+        // 2) Invoice-level <API_InvoiceDetails> block, after <invoiceSummary>.
         $invoiceNode->appendChild(self::buildApiInvoiceDetails(
             $dom,
             self::issuerFields($note->company),
@@ -170,6 +183,32 @@ class InvoSignDocument
     }
 
     /**
+     * Per-line api_* twins for a DELIVERY-note line. Same field set/order as
+     * appendLineFields (InvoSign marks them all mandatory) but a delivery line
+     * carries no monetary values, so prices/discount/VAT-percent go out as 0.00.
+     */
+    private static function appendDeliveryLineFields(DOMDocument $dom, DOMElement $detail, $line): void
+    {
+        $qty = (float) $line->qty;
+
+        $fields = [
+            'api_serial' => (string) ($line->product?->code ?? ''),
+            'api_lineDescription' => (string) ($line->product_descr ?? ''),
+            'api_NetPriceBeforeDiscount' => self::money(0),
+            'api_UnitPrice' => self::money(0),
+            'api_DiscountValue' => self::money(0),
+            'api_vatCategoryPercent' => self::money(0),
+            // 4 decimals to match InvoSign's documented sample (<api_quantity>1.0000).
+            'api_quantity' => number_format($qty, 4, '.', ''),
+            'api_mm' => (string) ($line->metric_unit ?: 'Τμχ'),
+        ];
+
+        foreach ($fields as $name => $value) {
+            $detail->appendChild(self::el($dom, $name, $value));
+        }
+    }
+
+    /**
      * Build the shared <API_InvoiceDetails> wrapper (API_Issuer / API_Counterpart
      * / API_Additionals) from already-prepared field maps — so the invoice and
      * delivery-note paths emit an IDENTICAL block shape and only differ in how the
@@ -236,9 +275,15 @@ class InvoSignDocument
     {
         $customer = $note->customer;
 
+        // Mirror DeliveryNoteSubmitter::buildCounterpart's fallback chain so the
+        // InvoSign API_Counterpart matches the AADE <counterpart> exactly: for an
+        // ενδοδιακίνηση (no external recipient) the name falls back to the issuer
+        // (it IS the recipient) and the ΑΦΜ to nine zeros — otherwise InvoSign
+        // rejects the empty CounterpartName with "[88-001] Λείπει το υποχρεωτικό
+        // πεδίο: CounterpartName".
         return [
-            'CounterpartName' => (string) ($note->recipient_name ?: $customer?->name ?? ''),
-            'CounterpartVat' => (string) ($note->recipient_afm ?: $customer?->afm ?? ''),
+            'CounterpartName' => (string) ($note->recipient_name ?: $customer?->name ?: $note->company?->name ?? ''),
+            'CounterpartVat' => (string) ($note->recipient_afm ?: $customer?->afm ?: '000000000'),
             'CounterpartProfession' => (string) ($customer?->occupation ?? ''),
             'CounterpartTaxOffice' => (string) ($customer?->tax_office ?? ''),
             'CounterpartAddressStreet' => (string) ($note->delivery_street ?: $customer?->address1 ?? ''),
