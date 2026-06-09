@@ -8,10 +8,12 @@ use App\Models\DistributionAim;
 use App\Models\PaymentMethod;
 use App\Support\MyData\InvoiceTypeClassSuggester;
 use App\Support\MyDataOptions;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
@@ -87,7 +89,54 @@ class InvoiceTypeForm
                                         return $s
                                             ? new HtmlString('<span class="fi-color-warning-600">Προτεινόμενη βάσει ονόματος: <strong>'.e($s['code']).'</strong> — '.e($s['label']).'</span> · '.$base)
                                             : $base;
-                                    }),
+                                    })
+                                    // One-click apply: sets the suggested §8.1 type AND back-fills
+                                    // the income chain (only the empty fields) so the operator
+                                    // doesn't re-pick by hand. Shown only while the type is empty
+                                    // and the name yields a confident guess.
+                                    ->hintAction(
+                                        Action::make('applyTypeSuggestion')
+                                            ->label(function ($get): ?string {
+                                                $s = InvoiceTypeClassSuggester::suggest((string) $get('name'), (bool) $get('is_credit'), (bool) $get('is_return'));
+
+                                                return $s ? 'Χρήση πρότασης: '.$s['code'] : null;
+                                            })
+                                            ->icon('heroicon-m-sparkles')
+                                            ->visible(function ($state, $get): bool {
+                                                return blank($state)
+                                                    && InvoiceTypeClassSuggester::suggest((string) $get('name'), (bool) $get('is_credit'), (bool) $get('is_return')) !== null;
+                                            })
+                                            ->action(function ($get, $set): void {
+                                                $s = InvoiceTypeClassSuggester::suggest((string) $get('name'), (bool) $get('is_credit'), (bool) $get('is_return'));
+                                                if ($s === null) {
+                                                    return;
+                                                }
+                                                $set('mydata_type', $s['code']);
+                                                if ($s['income_class'] !== null && blank($get('mydata_income_class'))) {
+                                                    $set('mydata_income_class', $s['income_class']);
+                                                }
+                                                if ($s['income_class_category'] !== null && blank($get('mydata_income_class_category'))) {
+                                                    $set('mydata_income_class_category', $s['income_class_category']);
+                                                }
+                                                // Goods types carry a per-line quantity at filing (G5/[205]) —
+                                                // match what the seeder sets, so a code created via one-click
+                                                // behaves the same as the seeded series.
+                                                if ($s['goods']) {
+                                                    $set('mydata_requires_quantity', true);
+                                                }
+
+                                                // Cue the operator when the type has no safe income default
+                                                // (delivery notes, τίτλος κτήσης, ενοίκια…) so a blank income
+                                                // line doesn't slip through to a rejection at filing.
+                                                Notification::make()
+                                                    ->title('Εφαρμόστηκε ο τύπος '.$s['code'])
+                                                    ->body($s['income_class'] === null
+                                                        ? 'Ορίστε χειροκίνητα την κατηγορία εσόδου (δεν υπάρχει ασφαλής προεπιλογή για αυτόν τον τύπο).'
+                                                        : 'Συμπληρώθηκε και η κατηγορία εσόδου.')
+                                                    ->success()
+                                                    ->send();
+                                            }),
+                                    ),
 
                                 Select::make('mydata_income_class')
                                     ->label('Income classification')

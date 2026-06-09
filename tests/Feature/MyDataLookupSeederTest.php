@@ -11,6 +11,7 @@ use App\Models\PaymentMethod;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\MyData\MyDataLookupSeeder;
+use App\Support\MyData\Codes;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -76,7 +77,16 @@ class MyDataLookupSeederTest extends TestCase
         $tenant = $this->tenant();
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(8, $r['created']);
+        $this->assertSame(15, $r['created']);
+
+        // Cross-border SERVICES twins exist (2.2/2.3) — not just the goods ones.
+        $eny = InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '2.2')->first();
+        $this->assertNotNull($eny);
+        $this->assertSame('E3_561_005', $eny->mydata_income_class);
+        $this->assertSame('category1_3', $eny->mydata_income_class_category);
+        // Correlated + aggregate delivery notes exist (9.1/9.2), no income class.
+        $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '9.1')->first());
+        $this->assertNull(InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '9.2')->value('mydata_income_class'));
 
         // The "κόψε εμπόρευμα" case exists now: 1.1 Τιμολόγιο Πώλησης, goods.
         $goods = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
@@ -86,6 +96,22 @@ class MyDataLookupSeederTest extends TestCase
         // Credit type flagged; service type present.
         $this->assertTrue((bool) InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '5.1')->value('is_credit'));
         $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->first());
+    }
+
+    public function test_seeded_rows_match_the_canonical_type_defaults(): void
+    {
+        // Guards the single-source wiring: every seeded series' classification
+        // must equal Codes::typeDefaults() for its §8.1 type, so the seeder and
+        // the suggester's one-click apply can never drift.
+        $tenant = $this->tenant();
+        $this->svc()->seedInvoiceTypes($tenant);
+
+        foreach (InvoiceType::where('company_id', $tenant->id)->get() as $it) {
+            $d = Codes::typeDefaults((string) $it->mydata_type);
+            $this->assertSame($d['income'], $it->mydata_income_class, "income for {$it->code} ({$it->mydata_type})");
+            $this->assertSame($d['category'], $it->mydata_income_class_category, "category for {$it->code}");
+            $this->assertSame($d['goods'], (bool) $it->mydata_requires_quantity, "goods flag for {$it->code}");
+        }
     }
 
     public function test_seeds_invoice_types_pre_classified_by_the_book(): void
@@ -128,7 +154,7 @@ class MyDataLookupSeederTest extends TestCase
         InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΠΥ', 'name' => 'Δικό μου', 'invcount' => 50, 'mydata_type' => '2.1']);
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(7, $r['created']);    // all but ΤΠΥ
+        $this->assertSame(14, $r['created']);    // all but the existing ΤΠΥ
         $this->assertSame(1, $r['filled']);     // ΤΠΥ income chain back-filled (type matches)
         $this->assertSame(0, $r['skipped']);
 
@@ -210,8 +236,8 @@ class MyDataLookupSeederTest extends TestCase
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
 
-        // ΤΙΜ was filled (not skipped); the other 7 are created.
-        $this->assertSame(7, $r['created']);
+        // ΤΙΜ was filled (not skipped); the other 14 are created.
+        $this->assertSame(14, $r['created']);
         $this->assertSame(1, $r['filled']);
         $this->assertSame(0, $r['skipped']);
 

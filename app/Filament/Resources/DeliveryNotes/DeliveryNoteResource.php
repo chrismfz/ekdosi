@@ -6,7 +6,11 @@ use App\Filament\Resources\DeliveryNotes\Pages\CreateDeliveryNote;
 use App\Filament\Resources\DeliveryNotes\Pages\EditDeliveryNote;
 use App\Filament\Resources\DeliveryNotes\Pages\ListDeliveryNotes;
 use App\Filament\Resources\DeliveryNotes\Pages\ViewDeliveryNote;
+use App\Filament\RelationManagers\ActivityLogRelationManager;
+use App\Filament\RelationManagers\AttachmentsRelationManager;
+use App\Filament\RelationManagers\InternalNotesRelationManager;
 use App\Filament\Resources\DeliveryNotes\RelationManagers\DeliveryMarksRelationManager;
+use App\Filament\Resources\DeliveryNotes\RelationManagers\LinesRelationManager;
 use App\Filament\Resources\DeliveryNotes\Schemas\DeliveryNoteForm;
 use App\Filament\Resources\DeliveryNotes\Schemas\DeliveryNoteInfolist;
 use App\Filament\Resources\DeliveryNotes\Tables\DeliveryNotesTable;
@@ -103,7 +107,11 @@ class DeliveryNoteResource extends Resource
     public static function getRelations(): array
     {
         return [
+            LinesRelationManager::class,
             DeliveryMarksRelationManager::class,
+            InternalNotesRelationManager::class,
+            AttachmentsRelationManager::class,
+            ActivityLogRelationManager::class,
         ];
     }
 

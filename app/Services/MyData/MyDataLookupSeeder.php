@@ -105,6 +105,10 @@ class MyDataLookupSeeder
 
         DB::transaction(function () use ($tenant, &$created, &$skipped, &$filled) {
             foreach (self::INVOICE_TYPE_SEED as $row) {
+                // Income chain + goods-quantity come from the ONE canonical
+                // source (Codes::typeDefaults), shared with the suggester.
+                $defaults = Codes::typeDefaults($row['mydata_type']);
+
                 $existing = InvoiceType::query()
                     ->where('company_id', $tenant->getKey())
                     ->where('code', $row['code'])
@@ -118,7 +122,7 @@ class MyDataLookupSeeder
                     // (1) doc type + goods-quantity flag, when the row has no type.
                     if (blank($existing->mydata_type)) {
                         $existing->mydata_type = $row['mydata_type'];
-                        if (($row['goods'] ?? false) && ! $existing->mydata_requires_quantity) {
+                        if ($defaults['goods'] && ! $existing->mydata_requires_quantity) {
                             $existing->mydata_requires_quantity = true;
                         }
                         $touched = true;
@@ -130,12 +134,12 @@ class MyDataLookupSeeder
                     // different §8.1 type, the seed's E3/category belong to a
                     // different document kind, so we must not impose them.
                     if ($existing->mydata_type === $row['mydata_type']) {
-                        if (blank($existing->mydata_income_class) && ! empty($row['income_class'])) {
-                            $existing->mydata_income_class = $row['income_class'];
+                        if (blank($existing->mydata_income_class) && $defaults['income'] !== null) {
+                            $existing->mydata_income_class = $defaults['income'];
                             $touched = true;
                         }
-                        if (blank($existing->mydata_income_class_category) && ! empty($row['income_class_category'])) {
-                            $existing->mydata_income_class_category = $row['income_class_category'];
+                        if (blank($existing->mydata_income_class_category) && $defaults['category'] !== null) {
+                            $existing->mydata_income_class_category = $defaults['category'];
                             $touched = true;
                         }
                     }
@@ -155,12 +159,12 @@ class MyDataLookupSeeder
                     'code' => $row['code'],
                     'name' => $row['name'],
                     'mydata_type' => $row['mydata_type'],
-                    'mydata_income_class' => $row['income_class'] ?? null,
-                    'mydata_income_class_category' => $row['income_class_category'] ?? null,
+                    'mydata_income_class' => $defaults['income'],
+                    'mydata_income_class_category' => $defaults['category'],
                     'invcount' => 1,
                     'show_on_menu' => true,
                     'is_credit' => $row['is_credit'] ?? false,
-                    'mydata_requires_quantity' => $row['goods'] ?? false,
+                    'mydata_requires_quantity' => $defaults['goods'],
                 ]);
                 $created++;
             }
@@ -345,17 +349,32 @@ class MyDataLookupSeeder
      */
     private const INVOICE_TYPE_SEED = [
         // Goods — the missing "κόψε εμπόρευμα" case.
-        ['code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο Πώλησης', 'mydata_type' => '1.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_1', 'goods' => true],
-        ['code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο Πώλησης / Δελτίο Αποστολής', 'mydata_type' => '1.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_1', 'goods' => true],
-        ['code' => 'ΕΝΔ', 'name' => 'Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις', 'mydata_type' => '1.2', 'income_class' => 'E3_561_005', 'income_class_category' => 'category1_1', 'goods' => true],
+        // Income classification + goods-quantity per row are NOT repeated here —
+        // they are derived from Codes::typeDefaults($mydata_type), the single
+        // source shared with the suggester's one-click apply. Each row only
+        // carries what is series-specific: the tenant code, name, §8.1 type and
+        // (for clarity) the credit flag.
+        ['code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο Πώλησης', 'mydata_type' => '1.1'],
+        ['code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο Πώλησης / Δελτίο Αποστολής', 'mydata_type' => '1.1'],
+        ['code' => 'ΕΝΔ', 'name' => 'Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις', 'mydata_type' => '1.2'],
+        // Goods export to third countries (the non-EU twin of ΕΝΔ).
+        ['code' => 'ΕΞΑ', 'name' => 'Τιμολόγιο Πώλησης / Παραδόσεις Τρίτων Χωρών', 'mydata_type' => '1.3'],
         // Services.
-        ['code' => 'ΤΠΥ', 'name' => 'Τιμολόγιο Παροχής Υπηρεσιών', 'mydata_type' => '2.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_3'],
+        ['code' => 'ΤΠΥ', 'name' => 'Τιμολόγιο Παροχής Υπηρεσιών', 'mydata_type' => '2.1'],
+        // Cross-border services — the SERVICES twins of ΕΝΔ/ΕΞΑ (reverse-charge).
+        ['code' => 'ΕΝΥ', 'name' => 'Τιμολόγιο Παροχής / Ενδοκοινοτική Παροχή Υπηρεσιών', 'mydata_type' => '2.2'],
+        ['code' => 'ΥΤΧ', 'name' => 'Τιμολόγιο Παροχής / Παροχή σε λήπτη Τρίτης Χώρας', 'mydata_type' => '2.3'],
         // Retail.
-        ['code' => 'ΑΛΠ', 'name' => 'Απόδειξη Λιανικής Πώλησης', 'mydata_type' => '11.1', 'income_class' => 'E3_561_003', 'income_class_category' => 'category1_1', 'goods' => true],
-        ['code' => 'ΑΠΥ', 'name' => 'Απόδειξη Παροχής Υπηρεσιών', 'mydata_type' => '11.2', 'income_class' => 'E3_561_003', 'income_class_category' => 'category1_3'],
-        // Credit (mirrors the reduced revenue — services default, see docblock).
-        ['code' => 'ΠΙΣ', 'name' => 'Πιστωτικό Τιμολόγιο / Συσχετιζόμενο', 'mydata_type' => '5.1', 'income_class' => 'E3_561_001', 'income_class_category' => 'category1_3', 'is_credit' => true],
-        // Delivery note — NO income classification (no revenue).
-        ['code' => 'ΔΑΠ', 'name' => 'Δελτίο Αποστολής', 'mydata_type' => '9.3', 'goods' => true],
+        ['code' => 'ΑΛΠ', 'name' => 'Απόδειξη Λιανικής Πώλησης', 'mydata_type' => '11.1'],
+        ['code' => 'ΑΠΥ', 'name' => 'Απόδειξη Παροχής Υπηρεσιών', 'mydata_type' => '11.2'],
+        // Credit.
+        ['code' => 'ΠΙΣ', 'name' => 'Πιστωτικό Τιμολόγιο / Συσχετιζόμενο', 'mydata_type' => '5.1', 'is_credit' => true],
+        ['code' => 'ΠΙΜ', 'name' => 'Πιστωτικό Τιμολόγιο / Μη Συσχετιζόμενο', 'mydata_type' => '5.2', 'is_credit' => true],
+        ['code' => 'ΠΙΛ', 'name' => 'Πιστωτικό Στοιχείο Λιανικής', 'mydata_type' => '11.4', 'is_credit' => true],
+        // Delivery notes — NO income classification (no revenue). 9.3 standalone,
+        // 9.1 correlated (links to an invoice), 9.2 aggregate.
+        ['code' => 'ΔΑΠ', 'name' => 'Δελτίο Αποστολής', 'mydata_type' => '9.3'],
+        ['code' => 'ΔΑΣ', 'name' => 'Δελτίο Αποστολής Συσχετιζόμενο', 'mydata_type' => '9.1'],
+        ['code' => 'ΣΔΑ', 'name' => 'Συγκεντρωτικό Δελτίο Αποστολής', 'mydata_type' => '9.2'],
     ];
 }

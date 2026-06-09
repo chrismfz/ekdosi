@@ -17,6 +17,49 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Παραστατικά Διακίνησης — invoice-grade View + end-to-end binding (Φάση 1+2).**
+  The delivery-note view now mirrors the invoice: a «myDATA / Πάροχος» card (state/
+  MARK/QR + provider key & authentication code), a delivery «Lifecycle» card (§8.22
+  state + the RegisterTransfer/ConfirmDeliveryOutcome/Reject marks), print remarks,
+  and the bottom relation-manager tabs — **Γραμμές** (now an editable-while-draft
+  RelationManager), **Ιστορικό υποβολών** (DeliveryMarks), **Σημειώσεις**,
+  **Συνημμένα**, **Ιστορικό** — wired by giving `DeliveryNote` the polymorphic
+  `HasInternalNotes`/`HasAttachments`/`TracksActivity` concerns. **Two-way related-
+  document binding**: a δελτίο shows «Σχετιζόμενα → αφορά την πώληση (ΤΠΥxxxx)» and
+  the invoice shows «Δελτία αποστολής → ΔΑΠy» (via the existing
+  `delivery_notes.invoice_id`), the delivery analogue of the credit-note↔invoice
+  link. Delivery-note changes also surface in the tenant «Δραστηριότητα» feed
+  (Greek label + link + filter); `delivery_state` is intentionally NOT audited
+  (poll-churned cache column). (Lifecycle completeness — Reject, event-history
+  timeline — and the
+  correlated/aggregate/quantitative types 9.1/9.2/10.x are separate phases pending
+  sandbox + the AADE Ψηφιακό-ΔΑ spec.)
+- **Invoice-type classification: smarter hint + one-click apply.** The
+  `InvoiceTypeClassSuggester` (the name-based §8.1 guess shown as the list badge +
+  form helper) now covers the long tail it missed — 5.2 (μη συσχετιζόμενο),
+  9.1/10.1 (συσχετιζόμενα δελτία), 11.3 (απλοποιημένο), 3.1 (τίτλος κτήσης),
+  6.1/6.2 (αυτοπαράδοση/ιδιοχρησιμοποίηση), 7.1/8.1 (συμβόλαια/ενοίκια εσόδων).
+  New **«Χρήση πρότασης: X.Y»** hint-action on the myDATA-type field applies the
+  suggested type in one click AND back-fills the income class/category + the
+  goods per-line-quantity flag (G5) — only the empty fields, never overwriting an
+  operator pick — with a notification that cues «ορίστε χειροκίνητα την κατηγορία
+  εσόδου» for types with no safe default. Display-only stays the rule (the
+  operator confirms a legal classification). The classification defaults now live
+  in ONE canonical source (`Codes::TYPE_DEFAULTS`, §8.1 code → income/category/
+  goods) consumed by BOTH the starter seed and the one-click, so the two write
+  paths can never disagree.
+- **Invoice-type starter seed extended (7 new §8.1 series).** `MyDataLookupSeeder`
+  now also seeds the cross-border SERVICES twins of the goods series it already
+  had — **2.2** (ΕΝΥ, ενδοκοινοτική παροχή υπηρεσιών) + **2.3** (ΥΤΧ, παροχή σε
+  τρίτη χώρα), both `E3_561_005`/`category1_3` reverse-charge — plus **1.3** (ΕΞΑ,
+  εξαγωγή αγαθών γ’ χωρών), **5.2** (ΠΙΜ, μη συσχετιζόμενο πιστωτικό), **11.4**
+  (ΠΙΛ, πιστωτικό λιανικής), and the two missing delivery-note kinds **9.1** (ΔΑΣ,
+  συσχετιζόμενο) + **9.2** (ΣΔΑ, συγκεντρωτικό). Closes the gap where only the
+  goods side of EU/foreign sales had a ready series. Idempotent fill-empty —
+  existing tenants get them by re-running the «Δημιουργία τυπικών σειρών» action
+  in Setup → Invoice Types (operator edits/counters untouched). The §8.1 code
+  table + the form dropdown already knew every type; this only pre-creates the
+  common ones.
 - **«Ακύρωση μέσω πιστωτικού» + visible ΤΠΥ↔ΠΙΣ binding.** On a provider-filed
   (VALID, non-9.3) invoice the «δεν υποστηρίζεται» info popup became an actionable
   button: its modal explains *why* there's no provider cancel (the help text) and,

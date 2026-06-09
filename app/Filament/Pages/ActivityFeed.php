@@ -3,11 +3,13 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Resources\Payments\PaymentResource;
 use App\Models\Activity;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\Payment;
 use BackedEnum;
@@ -115,6 +117,7 @@ class ActivityFeed extends Page implements HasTable
                         Invoice::class => 'Τιμολόγια',
                         Customer::class => 'Πελάτες',
                         Payment::class => 'Πληρωμές',
+                        DeliveryNote::class => 'Δελτία αποστολής',
                     ]),
                 SelectFilter::make('event')
                     ->label('Ενέργεια')
@@ -135,6 +138,7 @@ class ActivityFeed extends Page implements HasTable
 
         return match ($record->subject_type) {
             Invoice::class => $subject?->invcode ?? '#'.$record->subject_id,
+            DeliveryNote::class => $subject?->invcode ?? '#'.$record->subject_id,
             Customer::class => $subject?->name ?? '#'.$record->subject_id,
             Payment::class => 'Πληρωμή #'.$record->subject_id,
             default => '#'.$record->subject_id,
@@ -152,6 +156,7 @@ class ActivityFeed extends Page implements HasTable
 
         return match ($record->subject_type) {
             Invoice::class => InvoiceResource::getUrl('view', ['record' => $subject, 'tenant' => $tenant]),
+            DeliveryNote::class => DeliveryNoteResource::getUrl('view', ['record' => $subject, 'tenant' => $tenant]),
             Customer::class => CustomerResource::getUrl('edit', ['record' => $subject, 'tenant' => $tenant]),
             Payment::class => PaymentResource::getUrl('edit', ['record' => $subject, 'tenant' => $tenant]),
             default => null,

@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasAttachments;
+use App\Models\Concerns\HasInternalNotes;
+use App\Models\Concerns\TracksActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -24,8 +27,30 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class DeliveryNote extends Model
 {
     use BelongsToCompany;
+    use HasAttachments;
     use HasFactory;
+    use HasInternalNotes;
     use SoftDeletes;
+    use TracksActivity;
+
+    /**
+     * Business columns worth auditing — never the money-less doc's churn. We log
+     * mydata_state/mydata_mark (set once on issue/cancel — meaningful events, as
+     * on Invoice) but NOT delivery_state: that column is re-forceFilled on every
+     * AADE status poll (DeliveryLifecycleService::refreshStatus), so logging it
+     * would spam «Ιστορικό» with sync flips — exactly the cache-column churn the
+     * TracksActivity house rule excludes. Each lifecycle transition is already
+     * captured as its own DeliveryMark row.
+     *
+     * @return list<string>
+     */
+    protected function loggedAttributes(): array
+    {
+        return [
+            'code', 'customer_id', 'delivery_type_id', 'invoice_id', 'issued_at',
+            'move_purpose', 'local_status', 'mydata_state', 'mydata_mark',
+        ];
+    }
 
     protected $fillable = [
         'company_id',

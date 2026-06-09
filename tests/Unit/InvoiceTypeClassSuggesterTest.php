@@ -43,11 +43,62 @@ class InvoiceTypeClassSuggesterTest extends TestCase
         $this->assertSame('11.4', InvoiceTypeClassSuggester::suggest('Πιστωτικό λιανικής')['code']);
     }
 
+    public function test_non_correlated_credit_maps_to_5_2(): void
+    {
+        $this->assertSame('5.2', InvoiceTypeClassSuggester::suggest('Πιστωτικό Τιμολόγιο / Μη Συσχετιζόμενο')['code']);
+        // Plain / correlated credit still defaults to 5.1.
+        $this->assertSame('5.1', InvoiceTypeClassSuggester::suggest('Πιστωτικό Τιμολόγιο / Συσχετιζόμενο')['code']);
+    }
+
+    public function test_simplified_invoice_maps_to_11_3_not_goods(): void
+    {
+        // Contains "Τιμολόγιο" but must NOT fall through to 1.1.
+        $this->assertSame('11.3', InvoiceTypeClassSuggester::suggest('Απλοποιημένο Τιμολόγιο')['code']);
+    }
+
+    public function test_title_of_acquisition_and_self_supply(): void
+    {
+        $this->assertSame('3.1', InvoiceTypeClassSuggester::suggest('Τίτλος Κτήσης')['code']);
+        $this->assertSame('6.1', InvoiceTypeClassSuggester::suggest('Στοιχείο Αυτοπαράδοσης')['code']);
+        $this->assertSame('6.2', InvoiceTypeClassSuggester::suggest('Στοιχείο Ιδιοχρησιμοποίησης')['code']);
+    }
+
+    public function test_contracts_and_rents_income(): void
+    {
+        $this->assertSame('7.1', InvoiceTypeClassSuggester::suggest('Συμβόλαιο Έσοδο')['code']);
+        $this->assertSame('8.1', InvoiceTypeClassSuggester::suggest('Ενοίκια Έσοδο')['code']);
+    }
+
     public function test_delivery_notes(): void
     {
         $this->assertSame('9.3', InvoiceTypeClassSuggester::suggest('Δελτίο Αποστολής')['code']);
         $this->assertSame('9.2', InvoiceTypeClassSuggester::suggest('Συγκεντρωτικό Δελτίο Αποστολής')['code']);
+        // Correlated delivery / receipt notes (συσχετιζόμενο).
+        $this->assertSame('9.1', InvoiceTypeClassSuggester::suggest('Δελτίο Αποστολής Συσχετιζόμενο')['code']);
         $this->assertSame('10.2', InvoiceTypeClassSuggester::suggest('Δελτίο Παραλαβής')['code']);
+        $this->assertSame('10.1', InvoiceTypeClassSuggester::suggest('Δελτίο Ποσοτικής Παραλαβής Συσχετιζόμενο')['code']);
+    }
+
+    public function test_goods_flag_is_carried(): void
+    {
+        // Goods types (G5/[205] per-line quantity) vs services / delivery.
+        $this->assertTrue(InvoiceTypeClassSuggester::suggest('Τιμολόγιο πώλησης')['goods']);        // 1.1
+        $this->assertTrue(InvoiceTypeClassSuggester::suggest('Δελτίο Αποστολής')['goods']);          // 9.3
+        $this->assertFalse(InvoiceTypeClassSuggester::suggest('Τιμολόγιο Παροχής Υπηρεσιών')['goods']); // 2.1
+    }
+
+    public function test_income_chain_is_carried_for_classifiable_types(): void
+    {
+        // Cross-border services twin → εξωτερικού + υπηρεσίες, matching the seed.
+        $s = InvoiceTypeClassSuggester::suggest('Τιμολόγιο Παροχής / Ενδοκοινοτική Παροχή Υπηρεσιών');
+        $this->assertSame('2.2', $s['code']);
+        $this->assertSame('E3_561_005', $s['income_class']);
+        $this->assertSame('category1_3', $s['income_class_category']);
+
+        // Delivery notes carry NO income chain.
+        $dn = InvoiceTypeClassSuggester::suggest('Δελτίο Αποστολής');
+        $this->assertNull($dn['income_class']);
+        $this->assertNull($dn['income_class_category']);
     }
 
     public function test_unknown_name_returns_null(): void
