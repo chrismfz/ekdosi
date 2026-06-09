@@ -143,7 +143,7 @@
         </p>
     </div>
     <div class="hdr-right">
-        <p class="doc-type">Δελτίο Αποστολής</p>
+        <p class="doc-type">@gup('Δελτίο Αποστολής')</p>
         <p class="doc-code">{{ $note->invcode }}</p>
         <p class="doc-date">{{ optional($note->issued_at)->format('d/m/Y H:i') }}</p>
         @if($mydataType)
@@ -155,7 +155,7 @@
 {{-- ====================== Εκδότης / Παραλήπτης ====================== --}}
 <div class="meta">
     <div class="meta-cell">
-        <h3>Εκδότης</h3>
+        <h3>@gup('Εκδότης')</h3>
         <div class="name">{{ $tenant->name ?? '—' }}</div>
         <div class="meta-row">
             @if($tenant->address) {{ $tenant->address }}<br> @endif
@@ -164,7 +164,7 @@
         </div>
     </div>
     <div class="meta-cell">
-        <h3>Παραλήπτης</h3>
+        <h3>@gup('Παραλήπτης')</h3>
         @if($isInternal)
             <div class="name">Ενδοδιακίνηση</div>
             <div class="meta-row meta-label">Διακίνηση εντός της επιχείρησης</div>
@@ -177,7 +177,7 @@
 
 {{-- ====================== Στοιχεία διακίνησης ====================== --}}
 <div class="move">
-    <h3>Στοιχεία Διακίνησης</h3>
+    <h3>@gup('Στοιχεία Διακίνησης')</h3>
     <div class="move-grid">
         <div class="move-col">
             @if($movePurposeLabel)
@@ -216,10 +216,10 @@
     <table class="lines">
         <thead>
             <tr>
-                <th class="center" style="width: 8%">Α/Α</th>
-                <th style="width: 62%">Είδος</th>
-                <th class="num" style="width: 15%">Ποσότητα</th>
-                <th class="center" style="width: 15%">Μονάδα</th>
+                <th class="center" style="width: 8%">@gup('Α/Α')</th>
+                <th style="width: 62%">@gup('Είδος')</th>
+                <th class="num" style="width: 15%">@gup('Ποσότητα')</th>
+                <th class="center" style="width: 15%">@gup('Μονάδα')</th>
             </tr>
         </thead>
         <tbody>
@@ -249,7 +249,7 @@
 {{-- ====================== Παρατηρήσεις ====================== --}}
 @if($note->notes)
     <div class="notes-box">
-        <h3>Παρατηρήσεις</h3>
+        <h3>@gup('Παρατηρήσεις')</h3>
         {!! nl2br(e($note->notes)) !!}
     </div>
 @endif
@@ -284,7 +284,7 @@
 @php($histMarks = $marks ?? collect())
 @if($histEvents->isNotEmpty() || $histMarks->isNotEmpty())
     <div class="history">
-        <h3>Ιστορικό</h3>
+        <h3>@gup('Ιστορικό')</h3>
 
         @if($histEvents->isNotEmpty())
             <div class="hist-sub">Διακίνηση</div>

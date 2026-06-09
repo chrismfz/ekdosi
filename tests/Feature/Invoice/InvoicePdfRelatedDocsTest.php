@@ -125,6 +125,17 @@ class InvoicePdfRelatedDocsTest extends TestCase
         $this->assertStringContainsString('TPY6656', $html);
     }
 
+    public function test_uppercase_greek_labels_render_without_tonos(): void
+    {
+        $html = $this->renderHtml($this->invoice()->fresh());
+
+        // @gup deaccents the ALL-CAPS labels (Greek convention) before DomPDF.
+        $this->assertStringContainsString('ΣΤΟΙΧΕΙΑ ΠΕΛΑΤΗ', $html);
+        $this->assertStringContainsString('ΠΟΣΟΤΗΤΑ', $html);
+        $this->assertStringNotContainsString('ΣΤΟΙΧΕΊΑ', $html);   // no accented caps
+        $this->assertStringNotContainsString('ΠΟΣΌΤΗΤΑ', $html);
+    }
+
     public function test_no_related_section_for_a_plain_invoice(): void
     {
         $html = $this->renderHtml($this->invoice()->fresh());

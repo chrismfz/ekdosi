@@ -17,6 +17,12 @@ they merge.
 
 ## [Unreleased]
 ### Fixed
+- **Greek ALL-CAPS in PDFs kept the τόνος (ΠΟΣΌΤΗΤΑ) — wrong + ugly in DomPDF.**
+  New `App\Support\GreekText::upper()` + Blade `@gup(...)` deaccent ALL-CAPS labels
+  (the Greek convention: ΠΟΣΟΤΗΤΑ, ΤΙΜΟΛΟΓΙΟ), applied across the invoice, delivery-note,
+  quote and statement PDFs (dialytika kept). Also: the credit-note doc-type no longer
+  wraps around the floated QR (`clear: right`) — «ΠΙΣΤΩΤΙΚΟ»/«ΤΙΜΟΛΟΓΙΟ» split fixed.
+### Fixed
 - **Invoice/ΔΑ PDF «Σχετικά παραστατικά» review hardening.** The «παραμένει VALID
   στην ΑΑΔΕ» note now shows only when `mydata_state === 'VALID'` (no false claim on
   a cancelled/non-myDATA invoice); a PARTIAL credit reads «Πιστώθηκε (μερικώς) με»
