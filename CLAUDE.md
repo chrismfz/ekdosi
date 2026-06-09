@@ -8,6 +8,10 @@ Working guide for this repo. Read this first.
 > **AADE spec** is committed at the repo root:
 > **`myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (§8 = code tables,
 > §7.2 = the 101–280 business-error list).
+> The **Digital Delivery-Note lifecycle spec** (tracking layer, Jan 2026) is
+> alongside it: **`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`**
+> (§7.1 = InvoiceDeliveryStatus codes, §7.2 = event types, §6.2 = 800–824
+> business errors). Feeds Delivery Phase 3/4 — see the Delivery-notes section.
 
 ## What this project is
 Porting a legacy **C++Builder (VCL) + Firebird** invoicing app ("ekdosi") to
@@ -59,7 +63,8 @@ after cutover.
   app/                                           # models, Filament panels, services, actions
   database/migrations/                           # 75 migrations
   whmcs-plugin/ekdosi_bridge/                    # OUR WHMCS-side plugin (deployed to tenant's WHMCS)
-  myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec
+  myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec (submission)
+  myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md  # ΔΑ lifecycle/tracking spec
   docs/CLAUDE-history.md                         # archived full project history
 /legacy/                  # read-only reference (do NOT build)
   ekdosi-schema.sql                              # isql -x dump (WIN1253 DB; ASCII DDL is clean)
@@ -622,6 +627,43 @@ The supplier/inbound mirror of the sales side, end-to-end:
 **Full story + remaining-polish list: `docs/expenses-phase-plan.md`.** Deferred:
 expense-classification AADE submit, RequestVatInfo/E3 cross-checks,
 `RequestMyExpenses`, manual expense entry, per-row import, supplier CSV import.
+
+### Παραστατικά Διακίνησης / Delivery notes (myDATA Ψηφιακό ΔΑ)
+The shipping-document side, mirroring the invoice surfaces. Two specs apply:
+the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
+`SendInvoices` doc with `isDeliveryNote=true` — confirmed by delivery-error
+**805**); the **post-issuance lifecycle/tracking** API is the separate
+`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`.
+
+- **✅ Phase 1+2 (merged, PR #228):** invoice-grade `DeliveryNoteResource` —
+  rich View (myDATA/πάροχος card, lifecycle card, lines RM editable-while-draft,
+  Ιστορικό υποβολών / Σημειώσεις / Συνημμένα / Ιστορικό tabs via the polymorphic
+  concerns), two-way binding δελτίο↔τιμολόγιο (`delivery_notes.invoice_id` ↔
+  `Invoice::deliveryNotes()`), tenant `ActivityFeed` parity. Columns:
+  `delivery_state` + `transfer_mark`/`outcome_mark`/`reject_mark`;
+  `delivery_marks` carries provider key/auth/state.
+- **firebed ALREADY implements the whole v2.0.x tracking API** — no protocol
+  work needed, only wiring: `Firebed\AadeMyData\Enums\DigitalGoodsMovement\`
+  `DeliveryStatus` (= §7.1 EXACTLY: 1 REGISTERED, 2 CANCELLED, 3 IN_TRANSIT,
+  4 REJECTED, 5 DELIVERED_BY_CARRIER, **7** FAILED_DELIVERY, 8 COMPLETED —
+  **no 6**, with Greek labels) + `DeliveryEventType` (= §7.2); writers
+  `TransportWriter`/`DeliveryOutcomeWriter`/`DeliveryRejectionWriter`/`GroupQr*`,
+  `DeliveryNoteStatusResponseReader`, `ResponseDocReader`, and
+  `Http\CancelDeliveryNote`.
+- **🚧 Phase 3 (now) — track + cancel (the ISSUER's post-issue role):** our
+  tenants are **εκδότες**, so the active surface is **GetDeliveryNoteStatus**
+  (poll → refresh `delivery_state` cache + render the `lifecycleHistory` as a
+  timeline/stepper, event types §7.2) and **CancelDeliveryNote** (only before
+  InTransit; error 801 guards it). Map our `delivery_state` (today `string(30)`)
+  onto firebed's int-backed `DeliveryStatus` (1,2,3,4,5,7,8). Delivery-side
+  `describeResponseErrors` over the **800–824** §6.2 table.
+  **RegisterTransfer/ConfirmDeliveryOutcome/RejectDeliveryNote are
+  carrier/recipient roles** (RegisterTransfer=μεταφορέας, Confirm=μεταφορέας/
+  λήπτης, Reject=**μόνο λήπτης**, error 803) — build only if a tenant also acts
+  as carrier/recipient (deferred decision).
+- **❌ Phase 4 — submission + correlation:** issue the ΔΑ at AADE (types 9.x/10.x
+  via `SendInvoices`+`isDeliveryNote`), correlate to the eventual invoice, reverse.
+  All sandbox-validated on the VM. Group QR (3.2.5/6) is a separate batch feature.
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see

@@ -17,6 +17,11 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Digital Delivery-Note lifecycle spec committed** at repo root
+  (`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`) + CLAUDE.md
+  Delivery-notes section with the Phase 3/4 mapping (firebed already ships the
+  whole `DigitalGoodsMovement` tracking API; Phase 3 = GetDeliveryNoteStatus +
+  CancelDeliveryNote for the issuer role).
 - **Παραστατικά Διακίνησης — invoice-grade View + end-to-end binding (Φάση 1+2).**
   The delivery-note view now mirrors the invoice: a «myDATA / Πάροχος» card (state/
   MARK/QR + provider key & authentication code), a delivery «Lifecycle» card (§8.22
