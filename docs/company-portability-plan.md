@@ -260,7 +260,20 @@ paired with option 4/5 for the cross-VM secrets.
   skip invoice types / VAT). Backed by the ETL's existing per-table copy
   methods, gated by checkboxes.
 
-### Phase 4 — Automated backups + destinations + UI restore  — ❌ NOT built (the main remaining piece)
+### Phase 4 — Automated backups + destinations + UI restore  — 🚧 4a DONE (local), 4b (remote) pending
+
+**✅ Slice 4a (built):** `company_backup_settings` + `company_backup_runs`,
+`CompanyBackupRunner`, `App\Contracts\BackupDestination` + `BackupDestinationRegistry`
+(config `ekdosi.backup.destinations`), the **Local** driver, the scheduled
+`company:run-scheduled-backups` (gated `EKDOSI_SCHEDULE_COMPANY_BACKUPS`), the
+Filament policy form / run-now / runs-history-with-Download, **and the
+`CompanyExportCoverageTest` guard**. Decisions locked: **drivers v1 = Local +
+SFTP + FTP/S3** (no email/rsync for now); **in-transit secrets = raw ALLOWED on
+remote behind an explicit confirm** (NOT forced passphrase — supersedes the
+earlier "blocked for remote" stance).
+
+**❌ Slice 4b (remaining):** the SFTP / FTP / S3 destination drivers + their config
+forms in the «Αυτόματα αντίγραφα» modal + the explicit raw-to-remote confirm.
 Build the "Automated backups" layer above: per-company config, the
 `BackupDestination` driver registry (local / email / SFTP / FTP / rsync /
 cloud), the scheduled `company:run-scheduled-backups`, retention pruning, the

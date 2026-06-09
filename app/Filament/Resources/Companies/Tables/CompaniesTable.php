@@ -95,6 +95,8 @@ class CompaniesTable
             ->recordActions([
                 EditAction::make(),
                 ActionGroup::make([
+                    CompanyBackupActions::scheduleSettings(),
+                    CompanyBackupActions::runNow(),
                     CompanyBackupActions::export(),
                     CompanyBackupActions::importInto(),
                     CompanyBackupActions::wipe(),
@@ -105,7 +107,8 @@ class CompaniesTable
                     ->button(),
             ])
             ->toolbarActions([
-                CompanyBackupActions::importNew(),
+                // «Εισαγωγή εταιρίας από αρχείο» moved to the page header, next to
+                // «New company» (its natural twin) — see ListCompanies.
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

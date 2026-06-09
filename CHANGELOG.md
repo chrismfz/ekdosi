@@ -17,6 +17,30 @@ they merge.
 
 ## [Unreleased]
 ### Fixed
+- **Full company bundle silently dropped ALL transactional data.** `BundleArchive`
+  serialised only `setup/` — never `data/` — so a `--full` export / full backup
+  produced a settings-only zip while reporting success (the array round-trip was
+  tested, the ZIP path wasn't). `write()`/`read()` now carry `data/<table>.json`;
+  a zip-roundtrip regression test guards it. (Found by review of the Phase-4a
+  `full` backup bucket.)
+
+### Added
+- **Company backups — Phase 4a (automated local backups + coverage guard).**
+  Per-company backup policy (`company_backup_settings`: cadence / bucket / secrets
+  mode / retention / destinations) + a run log (`company_backup_runs`).
+  `CompanyBackupRunner` builds the bundle (CompanyExporter), fans it out to a
+  pluggable `BackupDestination` registry (**Local** driver — the Download source;
+  SFTP/FTP/S3 are Slice 4b), prunes per retention, and logs the run; `local` is
+  always included so a Download always exists. Scheduled
+  `company:run-scheduled-backups` (gated `EKDOSI_SCHEDULE_COMPANY_BACKUPS`, hourly,
+  fires each tenant on its own daily/weekly/monthly cadence). Filament (Company
+  «Αντίγραφα» group): «Αυτόματα αντίγραφα» (policy form), «Αντίγραφο τώρα», and a
+  read-only **«Αντίγραφα ασφαλείας»** runs history with per-row Download.
+  **PLUS `CompanyExportCoverageTest`** — fails if ANY `BelongsToCompany` table is
+  not classified for export (bucket or `CompanyExporter::INTENTIONALLY_EXCLUDED`),
+  so a future tenant table can't silently fall out of backup. Run `php artisan migrate`.
+
+### Fixed
 - **ΔΑ μέσω παρόχου (InvoSign) — έκδοση 9.x.** Live InvoSign-sandbox round-trip
   (myip, gr-provider) surfaced two more mandatory-field rejections beyond the
   already-fixed `[88-006]`: the delivery `API_Counterpart` left

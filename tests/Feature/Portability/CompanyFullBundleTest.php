@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ServiceContract;
 use App\Models\VatCategory;
+use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -110,5 +111,41 @@ class CompanyFullBundleTest extends TestCase
         // invoice_types.default_customer_id (setup→transactional) restored post-pass.
         $newType = InvoiceType::where('company_id', $company->id)->where('code', 'TPY')->firstOrFail();
         $this->assertSame($newCust->id, $newType->default_customer_id);
+    }
+
+    /**
+     * Regression: the full bundle's transactional data MUST survive the .zip
+     * write→read (BundleArchive once serialized only `setup/`, so a "full" backup
+     * silently shipped zero invoices/payments). The other test exercises the
+     * in-memory array; this one goes through the archive — the real backup path.
+     */
+    public function test_full_bundle_transactional_data_survives_the_zip_roundtrip(): void
+    {
+        $src = Company::create(['name' => 'Zip OE', 'slug' => 'zip', 'country_code' => 'GR', 'afm' => '800561849']);
+        $type = InvoiceType::create(['company_id' => $src->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1, 'mydata_type' => '2.1']);
+        $cust = Customer::create(['company_id' => $src->id, 'name' => 'NEXON OE', 'afm' => '801280908']);
+        Invoice::create([
+            'company_id' => $src->id, 'invcode' => 'TPY1', 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $cust->id, 'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+
+        $bundle = app(CompanyExporter::class)->build($src, 'raw', null, true);
+        $this->assertNotEmpty($bundle['data']['invoices'] ?? [], 'precondition: build produced transactional data');
+
+        $path = storage_path('app/tmp/zip-roundtrip-'.uniqid().'.zip');
+        app(BundleArchive::class)->write($path, $bundle);
+        $read = app(BundleArchive::class)->read($path);
+        @unlink($path);
+
+        // THE regression assertion: data/ round-trips through the zip.
+        $this->assertArrayHasKey('data', $read);
+        $this->assertCount(count($bundle['data']['invoices']), $read['data']['invoices'] ?? []);
+
+        // …and it imports from the READ-BACK bundle into a fresh company.
+        Company::where('slug', 'zip')->update(['slug' => 'zip-src', 'afm' => '000000000']);
+        app(CompanyImporter::class)->run($read, ['new' => true, 'execute' => true, 'passphrase' => null]);
+
+        $company = Company::where('slug', 'zip')->firstOrFail();
+        $this->assertSame(1, Invoice::where('company_id', $company->id)->where('invcode', 'TPY1')->count());
     }
 }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\Backup\Destinations\LocalBackupDestination;
 use App\Services\Billing\Sources\WhmcsBillingSource;
 use App\Services\EInvoice\Transports\InvoSignTransport;
 
@@ -80,6 +81,14 @@ return [
         'backup_monitor_enabled' => env('EKDOSI_SCHEDULE_BACKUP_MONITOR', false),
         'backup_monitor_cron' => env('EKDOSI_BACKUP_MONITOR_CRON', '0 8 * * *'),
 
+        // company:run-scheduled-backups — per-TENANT backup pipeline (Phase 4),
+        // distinct from the spatie whole-DB tasks above. Runs hourly and fires
+        // each company whose own cadence (company_backup_settings) is due.
+        // Default OFF (a fresh deploy shouldn't start writing bundles until an
+        // operator configures destinations + retention per company).
+        'company_backups_enabled' => env('EKDOSI_SCHEDULE_COMPANY_BACKUPS', false),
+        'company_backups_cron' => env('EKDOSI_COMPANY_BACKUPS_CRON', '0 * * * *'),
+
         // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα per
         // tenant (NO email). Default OFF so a fresh deploy doesn't surprise
         // operators with notifications until they opt in. HH:MM (server time).
@@ -124,6 +133,29 @@ return [
             'whmcs' => WhmcsBillingSource::class,
             // 'woocommerce' => App\Services\Billing\Sources\WooCommerceBillingSource::class,  // Phase 1+
             // 'blesta'      => App\Services\Billing\Sources\BlestaBillingSource::class,        // Phase 1+
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Company backups (Phase 4) — per-tenant backup destinations
+    |--------------------------------------------------------------------------
+    |
+    | The map of destination key → BackupDestination implementation, resolved by
+    | BackupDestinationRegistry (mirrors the billing/einvoice registries). A
+    | company picks one or more of these in its company_backup_settings. `local`
+    | is always available (the Download source + retention target); SFTP / FTP /
+    | S3 land in Slice 4b — add a line here + one class, no core edit.
+    | `local_disk` is the Laravel filesystem disk the local artifacts live on.
+    |
+    */
+    'backup' => [
+        'local_disk' => env('EKDOSI_BACKUP_LOCAL_DISK', 'local'),
+        'destinations' => [
+            'local' => LocalBackupDestination::class,
+            // 'sftp' => App\Services\Backup\Destinations\SftpBackupDestination::class,  // Slice 4b
+            // 'ftp'  => App\Services\Backup\Destinations\FtpBackupDestination::class,   // Slice 4b
+            // 's3'   => App\Services\Backup\Destinations\S3BackupDestination::class,    // Slice 4b
         ],
     ],
 

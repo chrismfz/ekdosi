@@ -197,3 +197,13 @@ if (config('ekdosi.schedule.backup_monitor_enabled')) {
         'backup_monitor'
     );
 }
+
+// company:run-scheduled-backups — per-TENANT backups (Phase 4), distinct from
+// the spatie whole-DB tasks above. Fires hourly; each company runs once per its
+// own cadence (daily/weekly/monthly) at/after its configured time. Default OFF.
+if (config('ekdosi.schedule.company_backups_enabled')) {
+    Schedule::command('company:run-scheduled-backups')
+        ->cron(config('ekdosi.schedule.company_backups_cron', '0 * * * *'))
+        ->name('company-backups')
+        ->withoutOverlapping(60);
+}
