@@ -157,6 +157,60 @@ class DeliveryNotePdfTest extends TestCase
         $this->assertStringNotContainsString($url, $html);
     }
 
+    public function test_history_section_prints_movement_events_and_submissions(): void
+    {
+        $note = $this->fileNote($this->makeNote(), '400001234567890');
+
+        \App\Models\DeliveryNoteEvent::create([
+            'company_id' => $this->tenant->id,
+            'delivery_note_id' => $note->id,
+            'event_type' => \Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType::REGISTER_TRANSFER->value,
+            'event_timestamp' => now(),
+            'actor_vat' => '800561849',
+            'details' => ['transport_type' => 1, 'vehicle_number' => 'ΙΑΒ1234'],
+            'dedup_key' => 'evt-1',
+        ]);
+
+        \App\Models\DeliveryMark::create([
+            'company_id' => $this->tenant->id,
+            'delivery_note_id' => $note->id,
+            'mark' => '400001234567890',
+            'mydata_action' => 'INSERT',
+        ]);
+
+        $html = view('delivery-notes.pdf', [
+            'note' => $note,
+            'tenant' => $note->company,
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+            'events' => $note->events()->orderBy('event_timestamp')->get(),
+            'marks' => $note->marks()->oldest()->get(),
+        ])->render();
+
+        $this->assertStringContainsString('Ιστορικό', $html);
+        $this->assertStringContainsString('Διακίνηση', $html);
+        $this->assertStringContainsString('Έναρξη διακίνησης', $html);   // event typeLabel
+        $this->assertStringContainsString('Υποβολές myDATA', $html);
+        $this->assertStringContainsString('Καταχώρηση', $html);          // INSERT → Greek
+        $this->assertStringContainsString('400001234567890', $html);     // the mark
+    }
+
+    public function test_history_section_absent_when_no_events_or_marks(): void
+    {
+        $note = $this->fileNote($this->makeNote(), '400009999999999');
+
+        $html = view('delivery-notes.pdf', [
+            'note' => $note,
+            'tenant' => $note->company,
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+            'events' => collect(),
+            'marks' => collect(),
+        ])->render();
+
+        $this->assertStringNotContainsString('Υποβολές myDATA', $html);
+    }
+
     public function test_draft_note_shows_proxeiro_marker_and_no_qr(): void
     {
         $note = $this->makeNote(); // draft: mydata_state null, no mydata_url

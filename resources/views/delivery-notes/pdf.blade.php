@@ -81,6 +81,15 @@
         .mydata-info .url  { word-break: break-all; overflow-wrap: anywhere; font-size: 7.5pt; color: #6b7280; margin-top: 1mm; }
         .draft-foot { margin-top: 6mm; padding: 3mm; text-align: center; border: 1pt dashed #9a3412; border-radius: 1mm; color: #9a3412; font-size: 9pt; font-weight: bold; }
 
+        /* Ιστορικό (movement lifecycle + myDATA submissions), printed when present */
+        .history { margin-top: 6mm; page-break-inside: auto; }
+        .history h3 { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
+        .history .hist-sub { font-size: 8pt; font-weight: bold; color: #374151; margin: 2mm 0 1mm; }
+        table.hist { width: 100%; border-collapse: collapse; }
+        table.hist th { background: #f3f4f6; border-bottom: 1pt solid #cbd5e1; padding: 1.2mm 2mm; font-size: 7.5pt; text-align: left; color: #374151; font-weight: bold; }
+        table.hist td { padding: 1.2mm 2mm; border-bottom: 0.5pt solid #eee; font-size: 8pt; vertical-align: top; color: #1f2937; }
+        table.hist td.mono { word-break: break-all; }
+
         /* Page-bottom footer */
         .footer { position: fixed; left: 0; right: 0; bottom: -16mm; text-align: center; font-size: 7.5pt; color: #6b7280; padding: 0 14mm; }
         .footer .tenant-text { font-style: italic; }
@@ -268,6 +277,61 @@
     </div>
 @else
     <div class="draft-foot">ΠΡΟΧΕΙΡΟ — δεν έχει διαβιβαστεί στη myDATA (χωρίς ΜΑΡΚ/QR)</div>
+@endif
+
+{{-- ====================== Ιστορικό (διακίνηση + υποβολές myDATA) ====================== --}}
+@php($histEvents = $events ?? collect())
+@php($histMarks = $marks ?? collect())
+@if($histEvents->isNotEmpty() || $histMarks->isNotEmpty())
+    <div class="history">
+        <h3>Ιστορικό</h3>
+
+        @if($histEvents->isNotEmpty())
+            <div class="hist-sub">Διακίνηση</div>
+            <table class="hist">
+                <thead>
+                    <tr>
+                        <th style="width:24%">Ημ/νία</th>
+                        <th style="width:26%">Γεγονός</th>
+                        <th style="width:34%">Λεπτομέρειες</th>
+                        <th style="width:16%">Από</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($histEvents as $e)
+                        <tr>
+                            <td>{{ optional($e->event_timestamp)->format('d/m/Y H:i') }}</td>
+                            <td>{{ $e->typeLabel() }}</td>
+                            <td>{{ $e->summary() }}</td>
+                            <td>{{ $e->actor_vat ?: '—' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+
+        @if($histMarks->isNotEmpty())
+            <div class="hist-sub">Υποβολές myDATA</div>
+            <table class="hist">
+                <thead>
+                    <tr>
+                        <th style="width:24%">Ημ/νία</th>
+                        <th style="width:26%">Ενέργεια</th>
+                        <th style="width:50%">ΜΑΡΚ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($histMarks as $m)
+                        <tr>
+                            <td>{{ optional($m->created_at)->format('d/m/Y H:i') }}</td>
+                            <td>{{ ['INSERT' => 'Καταχώρηση', 'PROVIDER_INSERT' => 'Καταχώρηση (πάροχος)', 'CANCEL' => 'Ακύρωση'][$m->mydata_action] ?? $m->mydata_action }}</td>
+                            <td class="mono">{{ $m->mark ?: '—' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+    </div>
 @endif
 
 {{-- ====================== Page footer ====================== --}}

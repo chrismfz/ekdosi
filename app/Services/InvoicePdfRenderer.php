@@ -80,6 +80,8 @@ class InvoicePdfRenderer
                 'qrDataUri'   => $qrDataUri,
                 'logoDataUri' => $logoDataUri,
                 'totals'      => $this->totalsView($invoice),
+                // Audit trail («Ιστορικό»), chronological — printed when present.
+                'activities'  => $invoice->activitiesAsSubject()->with('causer')->oldest()->get(),
             ])
                 ->setPaper('A4', 'portrait')
                 ->output();

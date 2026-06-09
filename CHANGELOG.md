@@ -22,6 +22,12 @@ they merge.
   edge — DomPDF won't break it. Now a zero-width space is injected every 8 chars so
   it wraps, same fix already applied to the invoice PDF footer.
 ### Added
+- **Printable history on PDFs.** The delivery-note PDF prints an «Ιστορικό»
+  section (when present): movement lifecycle events (`delivery_note_events`) +
+  myDATA submission marks (`delivery_marks`). The invoice PDF prints the
+  activity-log «Ιστορικό» (Πότε/Ενέργεια/Χρήστης/Μεταβολές from `activitiesAsSubject`).
+  Both render only when rows exist. ⚠ The invoice PDF is customer-facing
+  (auto-email), so the audit trail now appears on it too.
 - **Backup failure alerting.** A SCHEDULED per-company backup that ends
   failed/partial now emails ops (`ScheduledBackupFailed` notification, queued) and
   is always `Log::error`'d — previously a nightly failure was silent. Recipients:
