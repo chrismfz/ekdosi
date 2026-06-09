@@ -45,6 +45,11 @@ class RecomputeInvoiceTotals
         $fresh->gross_total = round($rawGross * $discountFactor, 2);
         $fresh->save();
 
+        // myDATA taxesTotals: product-linked fees (Σ qty × per_unit) + rate-driven
+        // amounts (rate × net_total). net_total is saved, so the rate base is
+        // authoritative. Runs everywhere totals recompute (create/edit/convert).
+        $fresh = app(RecomputeInvoiceTaxes::class)($fresh);
+
         // Gross just changed → the money-status cache (owed/balance/
         // payment_status) is stale. Refresh it here so a header-discount
         // or line edit can't leave a wrong badge until the next payment

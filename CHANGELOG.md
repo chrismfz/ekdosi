@@ -17,6 +17,22 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Product-linked myDATA taxes + server-side recompute (closes the «δέσιμο» + «productionise»).**
+  A product/service can carry a default fee (`products.mydata_tax_type` + `_category`
+  + `_per_unit`, e.g. πλαστική σακούλα €0,07/τεμ, διανυκτέρευση €X/βραδιά). On every
+  invoice save `RecomputeInvoiceTaxes` (run from `RecomputeInvoiceTotals`) aggregates
+  Σ qty × per_unit per (taxType, category) into the invoice taxesTotals columns — auto,
+  always from the real lines. Invoice-level %-taxes now store a `*_rate` (the «Τυπικά
+  τέλη/φόροι» preset sets it) and the amount is recomputed as rate × net_total on save,
+  so it's never stale (closes the preview's #2/#3). One category per taxType per invoice
+  (Phase-1; conflicting products throw — the `invoice_taxes` table is the Phase-2 fix).
+  Product form gains a «Δεμένο τέλος/φόρος myDATA» group with a helper explaining it.
+  The recompute OWNS the tax columns (product → Σ qty×per_unit, rate → rate×totalNet,
+  else → cleared), so removing a driver can't leave a stale «phantom» fee; the rate
+  base is `InvoiceVatBreakdown::totalNet` (the submitter's underlyingValue). The
+  invoice form now takes a %-rate (+ category) per tax type — no hand-typed amount.
+  **Deploy:** `php artisan migrate`.
+### Added
 - **«Τυπικά τέλη/φόροι» quick-fill (preview).** A curated picker on the invoice form
   (`App\Support\MyData\CommonTaxPresets`) — Χαρτόσημο 1,2/2,4/3,6%, Τέλος διαμονής
   παρεπιδημούντων, Παρακράτηση 20% — that sets the right §8.x category and, for

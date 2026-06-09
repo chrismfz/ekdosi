@@ -12,6 +12,9 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
+use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
+use Firebed\AadeMyData\Enums\StampCategory;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -144,6 +147,39 @@ class ProductForm
                                     ->label('Supplier')
                                     ->maxLength(120)
                                     ->helperText('Free-text. For resold items: "cPanel", "Namecheap", etc. Not a foreign key.'),
+
+                                // ─── Δεμένο τέλος/φόρος myDATA (προαιρετικό) ───
+                                Select::make('mydata_tax_type')
+                                    ->label('Δεμένο τέλος/φόρος myDATA')
+                                    ->options([
+                                        2 => 'Τέλη (§8.5) — π.χ. τέλος διαμονής',
+                                        3 => 'Λοιποί φόροι (§8.6)',
+                                        4 => 'Χαρτόσημο (§8.7)',
+                                    ])
+                                    ->live()
+                                    ->helperText('Δέσε ένα τυπικό τέλος/φόρο σε αυτό το προϊόν/υπηρεσία: '
+                                        .'κάθε φορά που το βάζεις σε παραστατικό, το τέλος υπολογίζεται ΑΥΤΟΜΑΤΑ '
+                                        .'(ποσό ανά μονάδα × ποσότητα) και υποβάλλεται στη myDATA — δεν το γράφεις χειροκίνητα. '
+                                        .'Π.χ. «πλαστική σακούλα» 0,07 €/τεμ, «διανυκτέρευση» X €/βραδιά. Άφησέ το κενό για κανονικό προϊόν.'),
+
+                                Select::make('mydata_tax_category')
+                                    ->label('Κατηγορία')
+                                    ->options(fn (Get $get) => match ((int) $get('mydata_tax_type')) {
+                                        2 => collect(FeesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all(),
+                                        3 => collect(OtherTaxesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all(),
+                                        4 => collect(StampCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all(),
+                                        default => [],
+                                    })
+                                    ->searchable()
+                                    ->visible(fn (Get $get) => (int) $get('mydata_tax_type') > 0)
+                                    ->required(fn (Get $get) => (int) $get('mydata_tax_type') > 0),
+
+                                TextInput::make('mydata_tax_per_unit')
+                                    ->label('Ποσό ανά μονάδα (€)')
+                                    ->numeric()->step('0.0001')->minValue(0)->prefix('€')
+                                    ->visible(fn (Get $get) => (int) $get('mydata_tax_type') > 0)
+                                    ->required(fn (Get $get) => (int) $get('mydata_tax_type') > 0)
+                                    ->helperText('Το τέλος ανά τεμάχιο/μονάδα. Πολλαπλασιάζεται με την ποσότητα της γραμμής.'),
                             ])
                             ->columns(2),
 
