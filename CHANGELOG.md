@@ -16,6 +16,14 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Changed
+- **Repo tidy + docs.** Moved the AADE spec docs to `docs/aade/`, the sample +
+  validation report under `docs/` (`docs/samples/`, `docs/`), and one-off
+  notes to `docs/archive/` (references updated). New
+  `docs/sandbox-validation-runbook.md` (one place to validate ΔΑ + the new
+  taxTypes + product-linked + 4% on the AADE sandbox). `docs/BACKLOG.md` now
+  carries the full open-items roadmap snapshot. `.env.example` gains a documented
+  `EKDOSI_*` block (schedules + backup alerting) + prod notes.
 ### Added
 - **Full myDATA taxesTotals (fees / other taxes / stamp duty / deductions).** Beyond
   withholding (G1, taxType 1), invoices can now carry a fees (2, §8.5 — e.g. τέλος
@@ -149,7 +157,7 @@ they merge.
   (Closes the gap left after PR #179, where `refreshStatus` discarded the
   history.) Run `php artisan migrate`.
 - **Digital Delivery-Note lifecycle spec committed** at repo root
-  (`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`) + CLAUDE.md
+  (`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`) + CLAUDE.md
   Delivery-notes section: records that the full ΔΑ lifecycle (submit + register
   + confirm + status + cancel) is ALREADY built (PR #179), code-complete and
   pending only a live AADE-sandbox round-trip; the one genuine remaining gap is

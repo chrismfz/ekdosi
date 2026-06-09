@@ -50,7 +50,7 @@ returns the full official record — flag **what's missing/differs locally vs AA
 - **The QR URL is retrievable from AADE**, keyed by MARK. `RequestTransmittedDocs`
   (and `RequestDocs`) responses carry `<qrCodeUrl>https://mydatapi.aade.gr/myDATA/
   TimologioQR/QRInfo?q=…</qrCodeUrl>` per `<invoice>` (see committed
-  `requestdocs-sample.xml`). It is the same URL AADE returns on submission as
+  `docs/samples/requestdocs-sample.xml`). It is the same URL AADE returns on submission as
   `qrUrl`. firebed parses it: **`Invoice::getQrCodeUrl()`**.
 - **The live lookup already runs.** `App\Filament\Pages\MyDataMarkDetail` resolves
   a MARK to LOCAL (`invoices.mydata_mark`) or ORPHAN (live AADE via the reconciler

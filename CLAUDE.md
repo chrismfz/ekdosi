@@ -5,11 +5,11 @@ Working guide for this repo. Read this first.
 > **Full history** (dated inspection notes, per-PR review logs, resolved
 > deferred-findings) lives in **`docs/CLAUDE-history.md`** — not auto-loaded,
 > consult it when you need the "why" behind a past decision.
-> **AADE spec** is committed at the repo root:
-> **`myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (§8 = code tables,
+> **AADE spec** lives under `docs/aade/`:
+> **`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (§8 = code tables,
 > §7.2 = the 101–280 business-error list).
 > The **Digital Delivery-Note lifecycle spec** (tracking layer, Jan 2026) is
-> alongside it: **`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`**
+> alongside it: **`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`**
 > (§7.1 = InvoiceDeliveryStatus codes, §7.2 = event types, §6.2 = 800–824
 > business errors). Feeds Delivery Phase 3/4 — see the Delivery-notes section.
 
@@ -63,8 +63,8 @@ after cutover.
   app/                                           # models, Filament panels, services, actions
   database/migrations/                           # 75 migrations
   whmcs-plugin/ekdosi_bridge/                    # OUR WHMCS-side plugin (deployed to tenant's WHMCS)
-  myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec (submission)
-  myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md  # ΔΑ lifecycle/tracking spec
+  docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec (submission)
+  docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md  # ΔΑ lifecycle/tracking spec
   docs/CLAUDE-history.md                         # archived full project history
 /legacy/                  # read-only reference (do NOT build)
   ekdosi-schema.sql                              # isql -x dump (WIN1253 DB; ASCII DDL is clean)
@@ -234,7 +234,7 @@ it clears):
 
 **Sandbox-validated types (zero rejections, no payload changes):** 1.1, 2.1,
 11.2, 5.1, + a CANCEL; reconciliation matched all. Report:
-`mydata-sandbox-validation-2026-05-28.md`.
+`docs/mydata-sandbox-validation-2026-05-28.md`.
 
 **OPEN OPERATOR DECISION:** myip's ΠΙΣ maps to **5.2** (non-correlated) but the
 new `IssueCreditNote` flow always issues *from* an original, so **5.1**
@@ -635,7 +635,7 @@ The shipping-document side, mirroring the invoice surfaces. Two specs apply:
 the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
 `SendInvoices` doc with `isDeliveryNote=true` — confirmed by delivery-error
 **805**); the **post-issuance lifecycle/tracking** API is the separate
-`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`.
+`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`.
 
 - **✅ Phase 1+2 (merged, PR #228):** invoice-grade `DeliveryNoteResource` —
   rich View (myDATA/πάροχος card, lifecycle card, lines RM editable-while-draft,

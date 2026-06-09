@@ -83,7 +83,7 @@ These lock several open questions:
   (firebed `getCancelledInvoices()`) — fold it like the sales reconciler folds
   cancellations.
 
-### Larger sample (full 24-doc dump, committed `requestdocs-sample.xml`)
+### Larger sample (full 24-doc dump, committed `docs/samples/requestdocs-sample.xml`)
 - **Invoice types**: 1.1 ×17, 2.1 ×6, **9.3 ×1** (self-accounting entry; still
   carries our counterpart AFM). All docs in this window have a counterpart.
 - **🔑 Zero-VAT comes in TWO distinct shapes — both must be accepted as-is:**

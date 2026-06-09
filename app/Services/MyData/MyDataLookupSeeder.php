@@ -329,7 +329,7 @@ class MyDataLookupSeeder
      * mydata_requires_quantity (AADE wants per-line quantity on goods — G5).
      *
      * Classification logic (AADE §8.5/§8.6, validated shapes in
-     * mydata-sandbox-validation-2026-05-28.md):
+     * docs/mydata-sandbox-validation-2026-05-28.md):
      *   - B2B invoices (1.1 / 2.1)      → E3_561_001 (Χονδρικές - Επιτηδευματιών)
      *   - intra-community (1.2)         → E3_561_005 (Εξωτερικού Ενδοκοινοτικές)
      *   - retail (11.1 / 11.2)          → E3_561_003 (Λιανικές - Ιδιωτική Πελατεία)

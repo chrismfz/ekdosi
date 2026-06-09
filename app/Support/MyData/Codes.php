@@ -10,7 +10,7 @@ use Firebed\AadeMyData\Enums\IncomeClassificationType;
 /**
  * AADE myDATA code tables (the Παράρτημα / Appendix §8 of the official
  * "myDATA API Documentation v2.0.0"). The full doc lives in the repo
- * root: myDATA_API_Documentation_v2.0.0_preofficial_erp.md.
+ * root: docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md.
  *
  * These are the authoritative value sets the SendInvoices payload is
  * validated against by AADE. Centralised here so `mydata:preflight`,
