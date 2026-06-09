@@ -599,7 +599,9 @@ code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
   if unset. Tenant-safe (explicit `company_id` scope, no `BelongsToTenant` in
   CLI). Loud audit: `Log::info` per filing + `Αυτόματη έκδοση (γκρινιάρης)` in
   the row notes (filer gained an optional `$auditNote`). `WhmcsAutoIssueCommandTest`
-  covers the gate. **Inert until the scheduler + queue worker run.**
+  covers the gate. **The scheduler runs on prod (systemd + cron), so this fires
+  once its two flags are on** (`EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE` +
+  `companies.whmcs_auto_issue_immediate`, both default OFF).
 
 **❌ NOT YET (lower / confirm-usage-first):** stock movements & ΣΔΕΠ (dead in
 legacy — see corrections); `invoiced=-333/-1000` WHMCS sentinel states;
@@ -792,15 +794,19 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
   (`InvoiceNumberer`, `InvoiceBalance::recompute`) are real on MariaDB only.
 
 ## Env-prep gotchas (deploy host)
-- **Scheduler + queue worker** — the wired schedule (`routes/console.php`) is
-  inert until BOTH are live: one cron line `* * * * * cd /path && php artisan
-  schedule:run >> /dev/null 2>&1`, and a running worker
-  (`php artisan queue:work` / Horizon / supervisord) for the mail + import
-  jobs. Toggle individual tasks via `config/ekdosi.php` env flags
-  (`EKDOSI_SCHEDULE_*`). `withoutOverlapping` uses the cache-lock store, so
-  the cache driver must work (DB driver needs the `cache` tables migrated).
-  After editing `config/ekdosi.php` on a deploy that caches config, run
-  `php artisan config:clear`/`optimize`.
+- **Scheduler + queue worker — PROVISIONED on prod (systemd + cron).** The wired
+  schedule (`routes/console.php`) IS live on the production host: a cron line runs
+  `php artisan schedule:run` every minute, and a **systemd service** keeps a
+  `php artisan queue:work` worker up for the mail + import jobs. So the scheduled
+  features (per-company backups + the failure alerting, auto-email, myDATA
+  reconcile, WHMCS fetch/auto-issue, VAT picture) DO fire — each still gated by its
+  `config/ekdosi.php` env flag (`EKDOSI_SCHEDULE_*`), so flipping a flag is how you
+  enable/disable an individual task. `withoutOverlapping` uses the cache-lock store,
+  so the cache driver must work (DB driver needs the `cache` tables migrated). After
+  editing `config/ekdosi.php` on a deploy that caches config, run
+  `php artisan config:clear`/`optimize`. (Local/CI or a fresh box without the cron +
+  worker stays inert until both are started — `schedule:run` via cron + a running
+  `queue:work`/supervisord/systemd worker.)
 - **`pdo_firebird`** — only the ETL/artisan host needs it (lives in the
   `ondrej/php` PPA, or build from `firebird-dev`). Blocks `migrate:firebird`.
 - **`ext-soap`** — needed for the GSIS lookup (`AadeRegistryLookup`) only; if
