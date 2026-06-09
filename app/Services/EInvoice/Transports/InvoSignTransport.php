@@ -63,10 +63,11 @@ class InvoSignTransport implements EInvoiceProviderTransport
     public function sendDelivery(DeliveryNote $note, string $documentXml, ProviderCredentials $credentials): ProviderResult
     {
         [$base, $token] = $this->resolve($credentials);
-        // Delivery-note XML does not need InvoSign's invoice printout extension,
-        // but it DOES need the same prefix normalisation as invoices: InvoSign is
-        // prefix-strict and rejects firebed's icls/ecls prefixes with [88-004].
-        $xmlArxeio = InvoSignDocument::normaliseClassificationPrefixes($documentXml);
+        // Delivery notes skip the per-line api_* printout twins, but InvoSign still
+        // demands the invoice-level <API_InvoiceDetails> (issuer + counterpart) —
+        // its absence is rejected with [88-006]. augmentDelivery() appends exactly
+        // that block AND applies the icls/ecls→n1/n2 prefix normalisation ([88-004]).
+        $xmlArxeio = InvoSignDocument::augmentDelivery($documentXml, $note);
 
         try {
             $body = $this->post("{$base}/iNVOSign_Api.php", [

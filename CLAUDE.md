@@ -681,6 +681,22 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   `RejectDeliveryNote` (recipient-only, §6.2/803 — only if a tenant acts as
   recipient), Group QR (3.2.5/6, batch transport). **Deploy:** `php artisan
   migrate` (adds `delivery_note_events`).
+- **✅ Έκδοση δελτίου μέσω παρόχου — `[88-006]` fixed (this branch).**
+  `InvoSignTransport::sendDelivery` now calls `InvoSignDocument::augmentDelivery`
+  (appends the mandatory `<API_InvoiceDetails>`: issuer + recipient-as-counterpart
+  from the `DeliveryNote`), instead of only prefix-normalising — InvoSign rejects
+  a δελτίο without that block. `buildApiInvoiceDetails` was generalised to array
+  inputs so invoice & delivery share it.
+- **⚠ OPEN — provider-channel split-brain (lifecycle).** For a `gr-provider`
+  tenant the δελτίο is ISSUED via the provider but the whole lifecycle
+  (RegisterTransfer/ConfirmOutcome/Status/Cancel in `DeliveryLifecycleService`)
+  still goes DIRECTLY to myDATA (`initFirebed`, no `isLiveProviderTenant` check) —
+  two channels for one document. The sandbox e2e only passed because `myip` was
+  temporarily flipped to direct-myDATA, so the **provider lifecycle path is
+  UNVALIDATED**. Decision + options (A: provider implements lifecycle endpoints /
+  B: direct-myDATA lifecycle allowed for provider tenants / C: interim guard —
+  recommended now) and the open questions for the provider/AADE:
+  **`docs/delivery-provider-split-brain.md`**.
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see
