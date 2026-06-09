@@ -16,6 +16,16 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Fixed
+- **Withholding now reduces `totalGrossValue` (AADE `[208]`).** `AadeInvoiceDocument`
+  filed gross = net+vat with the withheld amount *not* subtracted, which the AADE
+  sandbox rejected with `[208]` (line-gross sum ≠ total gross) for a category-3
+  («Αμοιβές Συμβούλων 20%») invoice. Gross (and the matching paymentMethod amount)
+  now subtract withholding for every §8.4 category EXCEPT the informational
+  prepaid-tax ones 8/9/10 (architects/engineers/lawyers), mirroring firebed's
+  `WithheldPercentCategory::affectsTotalGrossValue()`. Sandbox-confirmed on myip
+  2026-06-10 (re-filed → accepted). The 8/9/10 informational path is coded but not
+  yet sandbox-round-tripped.
 ### Changed
 - **Repo tidy + docs.** Moved the AADE spec docs to `docs/aade/`, the sample +
   validation report under `docs/` (`docs/samples/`, `docs/`), and one-off

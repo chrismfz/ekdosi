@@ -192,20 +192,35 @@ class AadeInvoiceDocument
         // legacy app sent them as 0.00 (verified against an imported
         // legacy MARK request). Withheld comes from the invoice if set.
         // Tax totals (rounded to match the per-block taxAmounts so a sum-check
-        // like [226]/[101] can't trip). Withholding is informational — it does NOT
-        // change totalGrossValue (matches the G1-validated behaviour + AADE: the
-        // payer withholds, the document gross is unchanged). Fees / stamp duty /
-        // other taxes INCREASE the gross; deductions DECREASE it — exactly firebed's
-        // SummarizesInvoiceTaxes::getTotalTaxes() (minus the withheld term). So both
-        // totalGrossValue AND the paymentMethod amount must carry this adjustment,
-        // else AADE sees a gross that doesn't equal net+vat+(extra taxes).
+        // like [226]/[101] can't trip).
+        //
+        // Gross adjustment per AADE's [208] reconciliation: totalGrossValue must
+        // equal Σ(line gross) + fees + stampDuty + otherTaxes − deductions − withheld.
+        // Fees / stamp duty / other taxes INCREASE the gross; deductions DECREASE it;
+        // and WITHHOLDING decreases it too — EXCEPT the "informational" prepaid-tax
+        // categories §8.4 8/9/10 (architects/engineers/lawyers), which AADE reports
+        // but does NOT deduct from gross. This mirrors firebed's SummarizesInvoiceTaxes
+        // (getTotalTaxes() subtracts withholding; WithheldPercentCategory::
+        // affectsTotalGrossValue() is false only for 8/9/10). Both totalGrossValue AND
+        // the paymentMethod amount carry the adjustment, else AADE rejects with [208].
+        // (The earlier code NEVER deducted withholding — sandbox-confirmed wrong on
+        // 2026-06-10 with category 3 «Αμοιβές Συμβούλων 20%», AADE error [208].)
         $withheld = round((float) ($invoice->withhold_amount ?? 0), 2);
         $fees = round((float) ($invoice->fees_amount ?? 0), 2);
         $stampDuty = round((float) ($invoice->stamp_duty_amount ?? 0), 2);
         $otherTaxes = round((float) ($invoice->other_taxes_amount ?? 0), 2);
         $deductions = round((float) ($invoice->deductions_amount ?? 0), 2);
 
-        $grossValue = round($vatBreakdown->totalGross() + $fees + $stampDuty + $otherTaxes - $deductions, 2);
+        // Withholding reduces the gross unless its §8.4 category is informational (8/9/10).
+        $withheldReducesGross = $withheld > 0
+            && ($withheldCat = $invoice->withhold_category) !== null
+            && WithheldPercentCategory::tryFrom((int) $withheldCat)?->affectsTotalGrossValue() === true;
+        $withheldGrossAdjust = $withheldReducesGross ? $withheld : 0.0;
+
+        $grossValue = round(
+            $vatBreakdown->totalGross() + $fees + $stampDuty + $otherTaxes - $deductions - $withheldGrossAdjust,
+            2,
+        );
 
         $summary = (new InvoiceSummary)
             ->setTotalNetValue($vatBreakdown->totalNet())

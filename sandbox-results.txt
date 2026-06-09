@@ -1,0 +1,360 @@
+===== sandbox-results.txt — Wed Jun 10 01:45:13 EEST 2026 =====
+
+### A0) mydata:preflight --tenant=myip
+
+
+Tenant: MyIP Networks OE (#4)
+ provider is 'gr-provider', not gr-mydata — myDATA filing won't run
+ mydata_mode is Off — no submissions will be attempted
+
+Invoice types (24):
+ [INV] Invoice
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΑΚΑΠΥ] Ακυρωτική απόδειξη παροχής υπηρεσιών
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΑΚΤΔΑ] Ακυρωτικό τιμολόγιο - δελτίο αποστολής
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΑΚΤΠΥ] Ακυρωτικό τιμολόγιο παροχής υπηρεσιών
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ ✓ [ΑΛΠ] Απόδειξη λιανικής πώλησης
+ ✓ [ΑΠΥ] Απόδειξη παροχής υπηρεσιών
+ ✓ [ΔΑΠ] Δελτίο αποστολής
+ ✓ [ΔΑΣ] Δελτίο Αποστολής Συσχετιζόμενο
+ [ΔΠΡ] Δελτιο Παραλαβής
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ ✓ [ΕΝΔ] Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις
+ ✓ [ΕΝΥ] Τιμολόγιο Παροχής / Ενδοκοινοτική Παροχή Υπηρεσιών
+ ✓ [ΕΞΑ] Τιμολόγιο Πώλησης / Παραδόσεις Τρίτων Χωρών
+ ✓ [ΠΙΛ] Πιστωτικό Στοιχείο Λιανικής
+ ✓ [ΠΙΜ] Πιστωτικό Τιμολόγιο / Μη Συσχετιζόμενο
+ ✓ [ΠΙΣ] Πιστωτικό τιμολόγιο
+ ✓ [ΣΔΑ] Συγκεντρωτικό Δελτίο Αποστολής
+ [ΣΔΑΠ] Συγκεντρωτικό Δελτίο Αποστολής
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΣΔΕΠ] Συγκεντρωτικό δελτίο επιστροφης
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ ✓ [ΤΔΑ] Τιμολόγιο Δελτίο Αποστολής
+ ✓ [ΤΙΜ] Τιμολόγιο πώλησης
+ ✓ [ΤΠΒ] Τιμολόγιο Παροχής υπηρεσιών (Σειρά 2)
+ ✓ [ΤΠΥ] Τιμολόγιο παροχής υπηρεσιών
+ ✓ [ΤΠΧ] ΤΠΧ Τιμολόγιο Παροχής υπηρεσίων
+ ✓ [ΥΤΧ] Τιμολόγιο Παροχής / Παροχή σε λήπτη Τρίτης Χώρας
+
+VAT categories (7):
+ 0% — Άνευ ΦΠΑ 0%
+ WARN 0% AADE category 7 needs a vatExemptionCategory ([217]); submitter throws on 0% today
+ 4% — ΦΠΑ νήσων 4%
+ WARN rate 4% is ambiguous — AADE categories 6/10; confirm which regime applies
+ ✓ 6% — Υπερμειωμένος ΦΠΑ 6%
+ ✓ 9% — ΦΠΑ νήσων 9%
+ ✓ 13% — Μειωμένος ΦΠΑ 13%
+ ✓ 17% — ΦΠΑ νήσων 17%
+ ✓ 24% — Κανονικός ΦΠΑ 24%
+
+
+Summary: 0 error(s), 11 warning(s).
+
+### A1) delivery:sandbox-validate --tenant=myip (DRY-RUN)
+
+ΨΗΦΙΑΚΗ ΔΙΑΚΙΝΗΣΗ — Sandbox validation
+Tenant: MyIP Networks OE (#4, ΑΦΜ 800561849)
+myDATA mode: off
+Λειτουργία:DRY-RUN — μόνο XML, καμία κλήση
+Ημ/νία: 2026-06-10 01:46:14
+Τύπος: ΔΑΠ / 9.3
+Δοκιμαστικό δελτίο:ΔΑΠ18 (#10)
+
+DRY-RUN — XML έκδοσης (δεν στάλθηκε)
+<?xml version="1.0" encoding="utf-8"?>
+<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0" xmlns:ecls="https://www.aade.gr/myDATA/expensesClassificaton/v1.0">
+ <invoice>
+ <issuer>
+ <vatNumber>800561849</vatNumber>
+ <country>GR</country>
+ <branch>0</branch>
+ <name>MyIP Networks OE</name>
+ <address>
+ <street>Κανάρη 5</street>
+ <number>0</number>
+ <postalCode>67100</postalCode>
+ <city>Ξάνθη</city>
+ </address>
+ </issuer>
+ <counterpart>
+ <vatNumber>000000000</vatNumber>
+ <country>GR</country>
+ <branch>0</branch>
+ <name>MyIP Networks OE</name>
+ <address>
+ <street>Αποθήκη δοκιμής</street>
+ <number>0</number>
+ <postalCode>67100</postalCode>
+ <city>Ξάνθη</city>
+ </address>
+ </counterpart>
+ <invoiceHeader>
+ <series>ΔΑΠ</series>
+ <aa>18</aa>
+ <issueDate>2026-06-10</issueDate>
+ <invoiceType>9.3</invoiceType>
+ <vehicleNumber>ΔΟΚ1234</vehicleNumber>
+ <movePurpose>8</movePurpose>
+ <otherDeliveryNoteHeader>
+ <loadingAddress>
+ <street>Κανάρη 5</street>
+ <number>0</number>
+ <postalCode>67100</postalCode>
+ <city>Ξάνθη</city>
+ </loadingAddress>
+ <deliveryAddress>
+ <street>Αποθήκη δοκιμής</street>
+ <number>0</number>
+ <postalCode>67100</postalCode>
+ <city>Ξάνθη</city>
+ </deliveryAddress>
+ </otherDeliveryNoteHeader>
+ </invoiceHeader>
+ <invoiceDetails>
+ <lineNumber>1</lineNumber>
+ <itemDescr>Δοκιμαστικό είδος (sandbox)</itemDescr>
+ <quantity>1</quantity>
+ <measurementUnit>1</measurementUnit>
+ <netValue>0</netValue>
+ <vatCategory>8</vatCategory>
+ <vatAmount>0</vatAmount>
+ <incomeClassification>
+ <icls:classificationCategory>category3</icls:classificationCategory>
+ <icls:amount>0</icls:amount>
+ </incomeClassification>
+ </invoiceDetails>
+ <invoiceSummary>
+ <totalNetValue>0</totalNetValue>
+ <totalVatAmount>0</totalVatAmount>
+ <totalWithheldAmount>0</totalWithheldAmount>
+ <totalFeesAmount>0</totalFeesAmount>
+ <totalStampDutyAmount>0</totalStampDutyAmount>
+ <totalOtherTaxesAmount>0</totalOtherTaxesAmount>
+ <totalDeductionsAmount>0</totalDeductionsAmount>
+ <totalGrossValue>0</totalGrossValue>
+ <incomeClassification>
+ <icls:classificationCategory>category3</icls:classificationCategory>
+ <icls:amount>0</icls:amount>
+ </incomeClassification>
+ </invoiceSummary>
+ </invoice>
+</InvoicesDoc>
+
+
+Dry-run μόνο. Ξανατρέξε με --execute (σε host με dev creds + πρόσβαση AADE) για πραγματικό round-trip.
+Report: /var/www/ekdosi/storage/app/private/delivery-sandbox-20260610-014614.txt
+
+### A2) delivery:sandbox-validate --tenant=myip --execute --cancel (LIVE round-trip)
+
+ΨΗΦΙΑΚΗ ΔΙΑΚΙΝΗΣΗ — Sandbox validation
+Tenant: MyIP Networks OE (#4, ΑΦΜ 800561849)
+myDATA mode: off
+Λειτουργία:EXECUTE — πραγματικές κλήσεις AADE
+Ημ/νία: 2026-06-10 01:47:27
+Τύπος: ΔΑΠ / 9.3
+Δοκιμαστικό δελτίο:ΔΑΠ19 (#11)
+
+ΕΚΔΟΣΗ (SendInvoices)
+ΑΠΟΤΕΛΕΣΜΑ:OK ✓
+MARK: 400001964659653
+delivery_state: registered
+
+ΕΝΑΡΞΗ ΔΙΑΚΙΝΗΣΗΣ (RegisterTransfer)
+ΑΠΟΤΕΛΕΣΜΑ:OK ✓
+MARK: 400001964659654
+delivery_state: in_transit
+
+ΠΑΡΑΔΟΣΗ (ConfirmDeliveryOutcome / FULL)
+ΑΠΟΤΕΛΕΣΜΑ:OK ✓
+MARK: 400001964659655
+delivery_state: delivered
+
+ΕΛΕΓΧΟΣ ΚΑΤΑΣΤΑΣΗΣ (RequestDeliveryNoteStatus)
+ΑΠΟΤΕΛΕΣΜΑ:OK ✓
+delivery_state: delivered
+
+ΑΚΥΡΩΣΗ (CancelInvoice)
+ΑΠΟΤΕΛΕΣΜΑ:FAIL ✗
+Σφάλμα: Ακύρωση: ο πάροχος απέρριψε την ενέργεια — [801] Invoice with MARK: 400001964659653 cannot be cancelled because of its current delivery state: Completed
+
+ΙΣΤΟΡΙΚΟ ΔΙΑΚΙΝΗΣΗΣ — lifecycleHistory (§4.1)
+
+[Έναρξη διακίνησης] 2026-06-09 22:47:28 · actor=800561849 · MARK=400001964659654
+ Λοιπά Μεταφορικά Μέσα · Όχημα ΔΟΚ1234 · Μεταφορέας 800561849
+
+[Επιβεβαίωση παραλαβής] 2026-06-09 22:47:29 · actor=800561849 · MARK=400001964659655
+ Πλήρης Παράδοση
+
+AUDIT — delivery_marks (request/response XML)
+
+[PROVIDER_INSERT] MARK=400001964659653 url=https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=Ng&gvsenc=20a0c63a31b7253e33baa753a369a07e
+--- REQUEST ---
+<?xml version="1.0" encoding="utf-8"?>
+<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:n1="https://www.aade.gr/myDATA/incomeClassificaton/v1.0" xmlns:n2="https://www.aade.gr/myDATA/expensesClassificaton/v1.0"><invoice><issuer><vatNumber>800561849</vatNumber><country>GR</country><branch>0</branch><name>MyIP Networks OE</name><address><street>Κανάρη 5</street><number>0</number><postalCode>67100</postalCode><city>Ξάνθη</city></address></issuer><counterpart><vatNumber>000000000</vatNumber><country>GR</country><branch>0</branch><name>MyIP Networks OE</name><address><street>Αποθήκη δοκιμής</street><number>0</number><postalCode>67100</postalCode><city>Ξάνθη</city></address></counterpart><invoiceHeader><series>ΔΑΠ</series><aa>19</aa><issueDate>2026-06-10</issueDate><invoiceType>9.3</invoiceType><vehicleNumber>ΔΟΚ1234</vehicleNumber><movePurpose>8</movePurpose><otherDeliveryNoteHeader><loadingAddress><street>Κανάρη 5</street><number>0</number><postalCode>67100</postalCode><city>Ξάνθη</city></loadingAddress><deliveryAddress><street>Αποθήκη δοκιμής</street><number>0</number><postalCode>67100</postalCode><city>Ξάνθη</city></deliveryAddress></otherDeliveryNoteHeader></invoiceHeader><invoiceDetails><lineNumber>1</lineNumber><itemDescr>Δοκιμαστικό είδος (sandbox)</itemDescr><quantity>1</quantity><measurementUnit>1</measurementUnit><netValue>0</netValue><vatCategory>8</vatCategory><vatAmount>0</vatAmount><incomeClassification><n1:classificationCategory>category3</n1:classificationCategory><n1:amount>0</n1:amount></incomeClassification><api_serial></api_serial><api_lineDescription>Δοκιμαστικό είδος (sandbox)</api_lineDescription><api_NetPriceBeforeDiscount>0.00</api_NetPriceBeforeDiscount><api_UnitPrice>0.00</api_UnitPrice><api_DiscountValue>0.00</api_DiscountValue><api_vatCategoryPercent>0.00</api_vatCategoryPercent><api_quantity>1.0000</api_quantity><api_mm>Τμχ</api_mm></invoiceDetails><invoiceSummary><totalNetValue>0</totalNetValue><totalVatAmount>0</totalVatAmount><totalWithheldAmount>0</totalWithheldAmount><totalFeesAmount>0</totalFeesAmount><totalStampDutyAmount>0</totalStampDutyAmount><totalOtherTaxesAmount>0</totalOtherTaxesAmount><totalDeductionsAmount>0</totalDeductionsAmount><totalGrossValue>0</totalGrossValue><incomeClassification><n1:classificationCategory>category3</n1:classificationCategory><n1:amount>0</n1:amount></incomeClassification></invoiceSummary><API_InvoiceDetails><API_Issuer><IssuerName>MyIP Networks OE</IssuerName><IssuerProfession>Υπηρεσίες Διαδικτύου</IssuerProfession><IssuerTaxOffice>Ξάνθης</IssuerTaxOffice><IssuerAddressStreet>Κανάρη 5</IssuerAddressStreet><IssuerAddressPostalCode>67100</IssuerAddressPostalCode><IssuerAddressCity>Ξάνθη</IssuerAddressCity><IssuerPhone>215 215 4722</IssuerPhone><IssuerEmail>chris@myip.gr</IssuerEmail></API_Issuer><API_Counterpart><CounterpartName>MyIP Networks OE</CounterpartName><CounterpartVat>000000000</CounterpartVat><CounterpartProfession></CounterpartProfession><CounterpartTaxOffice></CounterpartTaxOffice><CounterpartAddressStreet>Αποθήκη δοκιμής</CounterpartAddressStreet><CounterpartAddressPostalCode>67100</CounterpartAddressPostalCode><CounterpartAddressCity>Ξάνθη</CounterpartAddressCity><CounterpartPhone></CounterpartPhone><CounterpartEmail></CounterpartEmail></API_Counterpart><API_Additionals><DocumentLabel>Δελτίο αποστολής</DocumentLabel><DocumentMovePursposeLabel>Ενδοδιακίνηση</DocumentMovePursposeLabel><DocumentDispatchFrom>Κανάρη 5, Ξάνθη, 67100</DocumentDispatchFrom><DocumentDispatchTo>Αποθήκη δοκιμής, Ξάνθη, 67100</DocumentDispatchTo><DocumentComments>SANDBOX VALIDATION — δοκιμαστικό δελτίο (διαγράψτε ελεύθερα)</DocumentComments><DocumentPaymentMethodLabel></DocumentPaymentMethodLabel></API_Additionals></API_InvoiceDetails></invoice></InvoicesDoc>
+
+--- RESPONSE ---
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+ <response>
+<index>1</index>
+<invoiceUid>4674E466D8C8B89340B0286C0D344E418FFCC426</invoiceUid>
+<invoiceMark>400001964659653</invoiceMark>
+<authenticationCode>91615A5198BF22C1ABC6C2C4F5FC950E85B63DB8</authenticationCode>
+<qrUrl>https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&amp;file=Ng&amp;gvsenc=20a0c63a31b7253e33baa753a369a07e</qrUrl>
+<statusCode>Success</statusCode>
+<receptionEmails></receptionEmails>
+<remaining_invoices>994</remaining_invoices>
+ </response>
+</ResponseDoc>
+
+[REGISTER_TRANSFER] MARK=400001964659654 url=https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=Ng&gvsenc=20a0c63a31b7253e33baa753a369a07e
+--- REQUEST ---
+<?xml version="1.0" encoding="utf-8"?>
+<Transport>
+ <qrUrl>https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&amp;file=Ng&amp;gvsenc=20a0c63a31b7253e33baa753a369a07e</qrUrl>
+ <transportDetail>
+ <vehicleNumber>ΔΟΚ1234</vehicleNumber>
+ <transportType>6</transportType>
+ <carrierVatNumber>800561849</carrierVatNumber>
+ </transportDetail>
+</Transport>
+
+--- RESPONSE ---
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+ <response>
+ <transferMark>400001964659654</transferMark>
+ <statusCode>Success</statusCode>
+ </response>
+</ResponseDoc>
+
+
+[CONFIRM_OUTCOME] MARK=400001964659655 url=https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=Ng&gvsenc=20a0c63a31b7253e33baa753a369a07e
+--- REQUEST ---
+<?xml version="1.0" encoding="utf-8"?>
+<ConfirmDeliveryOutcomeRequest>
+ <qrUrl>https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&amp;file=Ng&amp;gvsenc=20a0c63a31b7253e33baa753a369a07e</qrUrl>
+ <outcome>FULL</outcome>
+</ConfirmDeliveryOutcomeRequest>
+
+--- RESPONSE ---
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+ <response>
+ <deliveryOutcomeMark>400001964659655</deliveryOutcomeMark>
+ <statusCode>Success</statusCode>
+ </response>
+</ResponseDoc>
+
+
+ΣΥΝΟΨΗ
+ΑΠΟΤΕΛΕΣΜΑ:FAIL ✗ — δες τα σφάλματα παραπάνω
+
+Report: /var/www/ekdosi/storage/app/private/delivery-sandbox-20260610-014730.txt
+
+### B0) probe: mydata:test-submit 6761 (existing draft, DRY-RUN — path check)
+Tenant : MyIP Networks OE (#4) — mode=off
+Invoice: ΤΠΥ6651 (#6761)
+
+Dry-run recorded (mydata_marks row #1332).
+Inspect the XML via:
+ SELECT request FROM mydata_marks WHERE id = 1332
+Or open the invoice view page; the DRY_RUN row is in the myDATA history.
+
+### DRY-RUN mydata:test-submit 6783
+Dry-run recorded (mydata_marks row #1333).
+
+### DRY-RUN mydata:test-submit 6784
+Dry-run recorded (mydata_marks row #1334).
+
+### DRY-RUN mydata:test-submit 6785
+Dry-run recorded (mydata_marks row #1335).
+
+### DRY-RUN mydata:test-submit 6786
+Dry-run recorded (mydata_marks row #1336).
+
+### B1) EXECUTE einvoice:provider-test-submit 6783 (stamp 3.6%)
+Tenant : MyIP Networks OE — provider=invosign mode=sandbox
+Invoice: ΤΠΥ6656 (#6783)
+
+--execute: POSTing to the provider. This is a REAL call (sandbox or production per the tenant mode).
+
+ Continue? (yes/no) [no]:
+ > 
+Provider rejected: [238] IssueDate is invalid, it must be equal with current date
+
+### EXECUTE provider-test-submit 6783 — B1 stamp 3.6%
+Tenant : MyIP Networks OE — provider=invosign mode=sandbox
+Invoice: ΤΠΥ6656 (#6783)
+
+
+Provider accepted. ΜΑΡΚ=400001964659659
+Auth code: 4C28B2169BCBF31D3E2576873374275D484FBB16
+QR: https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=OA&gvsenc=20a0c63a31b7253e33baa753a369a07e
+
+NOTE: nothing was persisted — issue via the invoice lifecycle for a real filing.
+-----
+
+### EXECUTE provider-test-submit 6784 — B2 withhold 20%
+Tenant : MyIP Networks OE — provider=invosign mode=sandbox
+Invoice: ΤΠΥ6657 (#6784)
+
+
+Provider rejected: [208] The sum of gross values of the invoice lines doesn't match with total gross value of the invoice
+-----
+
+### EXECUTE provider-test-submit 6785 — B3 product-linked fee
+Tenant : MyIP Networks OE — provider=invosign mode=sandbox
+Invoice: ΤΠΥ6658 (#6785)
+
+
+Provider accepted. ΜΑΡΚ=400001964659660
+Auth code: 85A1F0A10726F9135700259B0C19455BD2C16B04
+QR: https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=MTA&gvsenc=20a0c63a31b7253e33baa753a369a07e
+
+NOTE: nothing was persisted — issue via the invoice lifecycle for a real filing.
+-----
+
+### EXECUTE provider-test-submit 6786 — Γ 4% override→10
+Tenant : MyIP Networks OE — provider=invosign mode=sandbox
+Invoice: ΤΠΥ6659 (#6786)
+
+
+Provider accepted. ΜΑΡΚ=400001964659661
+Auth code: 24AFA218529C9D67EA9E1FC1D9D792D2B02F4DB4
+QR: https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=MTE&gvsenc=20a0c63a31b7253e33baa753a369a07e
+
+NOTE: nothing was persisted — issue via the invoice lifecycle for a real filing.
+-----
+
+### B2 RE-RUN after fix — provider-test-submit 6784 (withhold 20%, cat 3)
+Tenant : MyIP Networks OE — provider=invosign mode=sandbox
+Invoice: ΤΠΥ6657 (#6784)
+
+
+Provider accepted. ΜΑΡΚ=400001964659664
+Auth code: 76A7A8EAC8ADBE89961801151F706E15F2E2E64B
+QR: https://demo.invosign.gr/viewinvoice.php?afm=EL800561849&file=MTI&gvsenc=20a0c63a31b7253e33baa753a369a07e
+
+NOTE: nothing was persisted — issue via the invoice lifecycle for a real filing.
+
+========================================================================
+SUMMARY — 2026-06-10
+========================================================================
+A) Delivery ΔΑ 9.3 lifecycle (provider/InvoSign): issue→transfer→outcome→status ALL OK.
+   Cancel FAILED [801] — EXPECTED (note was fully delivered/Completed; cancel only
+   works while still 'registered'). MARKs 400001964659653/654/655.
+B/Γ) Invoice taxTypes (via einvoice:provider-test-submit --execute, InvoSign sandbox):
+   B1 χαρτόσημο 3,6%      → Success, MARK 400001964659659
+   B2 παρακράτηση 20%     → REJECTED [208] first; FIXED (gross now subtracts withholding)
+                            → re-filed Success, MARK 400001964659664
+   B3 product-linked τέλος→ Success, MARK 400001964659660
+   Γ  4% override→cat10   → Success, MARK 400001964659661  (<vatCategory>10 confirmed)
+FIX: AadeInvoiceDocument now subtracts withholding from totalGrossValue + payment amount
+     (except informational §8.4 cats 8/9/10). Tests updated, suite green.
+NOTE: myip 4% = «ΦΠΑ νήσων» → cat 6, not 10; the Γ override was reverted to null.
+Test drafts left on myip: #6783-6786 (ΤΠΥ6656-6659), product #518.

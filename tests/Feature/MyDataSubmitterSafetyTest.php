@@ -455,9 +455,12 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<amount>1330', $xml);
     }
 
-    public function test_withholding_does_not_change_gross(): void
+    public function test_withholding_reduces_gross_for_an_affecting_category(): void
     {
-        // Withholding is informational — the document gross stays net+vat.
+        // Withholding category 3 («Αμοιβές Συμβούλων 20%») DOES affect gross: AADE's
+        // [208] reconciliation requires totalGrossValue = net+vat − withheld. Filing
+        // gross=1240 with withheld=200 unsubtracted was sandbox-REJECTED [208] on
+        // 2026-06-10; the correct gross is 1040 (and the payment amount must match).
         $inv = $this->makeInvoice();
         InvoiceLine::create([ // net 1000, gross 1240
             'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
@@ -467,6 +470,28 @@ class MyDataSubmitterSafetyTest extends TestCase
 
         $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
 
+        $this->assertStringContainsString('<totalWithheldAmount>200', $xml);
+        $this->assertStringContainsString('<totalGrossValue>1040', $xml);
+        $this->assertStringContainsString('<amount>1040', $xml);
+    }
+
+    public function test_informational_withholding_does_not_change_gross(): void
+    {
+        // The "informational" prepaid-tax categories §8.4 8/9/10 (architects /
+        // engineers / lawyers) are reported but do NOT reduce gross — firebed's
+        // WithheldPercentCategory::affectsTotalGrossValue() is false only for them,
+        // so gross stays net+vat. (Untested on the AADE sandbox — only cat 3 was
+        // round-tripped 2026-06-10; revisit if a tenant files an 8/9/10 withholding.)
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([ // net 1000, gross 1240
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 1000, 'vat_percent' => 24,
+        ]);
+        $inv->forceFill(['withhold_amount' => 200, 'withhold_category' => 9])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<totalWithheldAmount>200', $xml);
         $this->assertStringContainsString('<totalGrossValue>1240', $xml);
         $this->assertStringContainsString('<amount>1240', $xml);
     }
