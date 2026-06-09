@@ -143,3 +143,21 @@ on/off, when).
   system/cross-tenant ones to super_admin; the operator-relevant ones visible to operators.
 - Migrate the existing scattered env flags + the per-company toggles under this one
   consistent, audited surface over time (not a big-bang rewrite).
+
+### 🆕 Health / observability — in the web UI, not just `artisan` (asked 2026-06-10)
+Not everyone on the team has terminal access, so `php artisan ops:health` must also
+be a **web page**. An admin/super_admin Filament Page «Υγεία συστήματος» that shows,
+read-only:
+- **Liveness:** is the queue worker (systemd) up? did the cron `schedule:run` fire
+  recently? cache/DB/Redis reachable? mailer (global vs per-tenant) configured?
+  disk space. → wrap the existing `OperatorHealth` service (reuse its checks; the
+  command and the page render the same source).
+- **«Τι έτρεξε / πότε / πόσο»:** per scheduled task — last run, duration, success/fail,
+  last error. Needs a unified `scheduled_task_runs` log (task, started_at, finished_at,
+  status, summary) written via the scheduler's `->onSuccess()/->onFailure()` hooks in
+  `routes/console.php` (today only some tasks record state: CompanyBackupRun,
+  VatPictureCache «last fetch», mydata reconcile). Surface e.g. «ΦΠΑ τελευταία λήψη:
+  …», «WHMCS fetch: …», «Backup: …».
+- **Queue:** pending + failed jobs count, with a «retry/clear» action (admin).
+- Ties into the settings-in-UI item above: one «Σύστημα» area = toggles (audited) +
+  health + run history, so an operator sees at a glance what's on, what ran, and what's stuck.
