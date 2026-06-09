@@ -260,7 +260,7 @@ paired with option 4/5 for the cross-VM secrets.
   skip invoice types / VAT). Backed by the ETL's existing per-table copy
   methods, gated by checkboxes.
 
-### Phase 4 — Automated backups + destinations + UI restore  — 🚧 4a DONE (local), 4b (remote) pending
+### Phase 4 — Automated backups + destinations + UI restore  — ✅ 4a + 4b DONE
 
 **✅ Slice 4a (built):** `company_backup_settings` + `company_backup_runs`,
 `CompanyBackupRunner`, `App\Contracts\BackupDestination` + `BackupDestinationRegistry`
@@ -272,8 +272,19 @@ SFTP + FTP/S3** (no email/rsync for now); **in-transit secrets = raw ALLOWED on
 remote behind an explicit confirm** (NOT forced passphrase — supersedes the
 earlier "blocked for remote" stance).
 
-**❌ Slice 4b (remaining):** the SFTP / FTP / S3 destination drivers + their config
-forms in the «Αυτόματα αντίγραφα» modal + the explicit raw-to-remote confirm.
+**✅ Slice 4b (built):** the **SFTP / FTP(S) / S3-compatible** destination drivers
+(`Sftp/Ftp/S3BackupDestination`) on a shared `DiskBackupDestination` base — each
+builds a Laravel disk on the fly via `Storage::build()` from the per-company
+config (no `filesystems.php` entry; creds live in
+`company_backup_settings.destinations`, flat per entry). The «Αυτόματα αντίγραφα»
+modal gained a **destinations Repeater** (driver-conditional fields), with
+«Τοπικά» always implied (Download + retention target); **raw secrets to a remote
+target require an explicit acknowledgement** checkbox (not forced encryption).
+New **«Λήψη αντιγράφου τώρα»** action runs the policy AND streams the zip to the
+browser in one click. **Deploy:** `composer install` (pulls
+`league/flysystem-sftp-v3` + `-ftp` + `-aws-s3-v3`). **Note:** drivers are
+unit-tested via a faked disk + config-mapping asserts; a live SFTP/S3 round-trip
+is not exercised in CI (no server) — verify against a real target on first use.
 Build the "Automated backups" layer above: per-company config, the
 `BackupDestination` driver registry (local / email / SFTP / FTP / rsync /
 cloud), the scheduled `company:run-scheduled-backups`, retention pruning, the

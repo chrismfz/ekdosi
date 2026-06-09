@@ -8,6 +8,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\URL;
 
 /**
  * Read-only history of the company's backup runs (Phase 4) with a per-row
@@ -47,11 +48,15 @@ class CompanyBackupRunsRelationManager extends RelationManager
                 TextColumn::make('message')->label('Σημείωση')->placeholder('—')->limit(60)->toggleable(),
             ])
             ->recordActions([
+                // A signed link to the streaming download route (not an action
+                // returning the file — that buffers the whole bundle in memory).
                 Action::make('download')
                     ->label('Λήψη')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->visible(fn (CompanyBackupRun $record) => $record->isDownloadable())
-                    ->action(fn (CompanyBackupRun $record) => response()->download($record->bundle_path)),
+                    ->url(fn (CompanyBackupRun $record) => URL::temporarySignedRoute(
+                        'company-backups.download', now()->addMinutes(15), ['run' => $record->getKey()],
+                    ), shouldOpenInNewTab: true),
             ]);
     }
 }

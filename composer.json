@@ -15,6 +15,9 @@
         "firebed/aade-mydata": "^5.10",
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0",
+        "league/flysystem-aws-s3-v3": "^3.34",
+        "league/flysystem-ftp": "^3.31",
+        "league/flysystem-sftp-v3": "^3.33",
         "spatie/laravel-activitylog": "^5.0",
         "spatie/laravel-backup": "^10.2",
         "spatie/laravel-permission": "^7.4"

@@ -97,6 +97,7 @@ class CompaniesTable
                 ActionGroup::make([
                     CompanyBackupActions::scheduleSettings(),
                     CompanyBackupActions::runNow(),
+                    CompanyBackupActions::downloadNow(),
                     CompanyBackupActions::export(),
                     CompanyBackupActions::importInto(),
                     CompanyBackupActions::wipe(),
