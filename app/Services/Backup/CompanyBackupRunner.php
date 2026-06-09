@@ -48,7 +48,7 @@ class CompanyBackupRunner
 
             $results = [];
             $localPath = null;
-            foreach ($this->destinations($settings) as $entry) {
+            foreach ($settings->destinationList() as $entry) {
                 $key = (string) $entry['driver'];
                 $config = (array) ($entry['config'] ?? []);
                 try {
@@ -87,22 +87,6 @@ class CompanyBackupRunner
         $run->save();
 
         return $run;
-    }
-
-    /**
-     * The destination list, with `local` guaranteed present (Download + retention
-     * target) even if the operator only configured remotes.
-     *
-     * @return list<array{driver:string, config?:array<string,mixed>}>
-     */
-    private function destinations(CompanyBackupSetting $settings): array
-    {
-        $list = $settings->destinationList();
-        if (! in_array('local', array_column($list, 'driver'), true)) {
-            array_unshift($list, ['driver' => 'local']);
-        }
-
-        return $list;
     }
 
     /** @return array{0:string, 1:?string} [mode, passphrase] */

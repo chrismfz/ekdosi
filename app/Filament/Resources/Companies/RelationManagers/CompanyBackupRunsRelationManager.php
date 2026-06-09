@@ -41,9 +41,7 @@ class CompanyBackupRunsRelationManager extends RelationManager
                         'settings' => 'Ρυθμίσεις', 'full' => 'Πλήρες', default => 'Ρυθμίσεις+setup',
                     }),
                 TextColumn::make('status')->label('Κατάσταση')->badge()
-                    ->color(fn (?string $s) => match ($s) {
-                        'ok' => 'success', 'partial' => 'warning', 'failed' => 'danger', default => 'gray',
-                    }),
+                    ->color(fn (CompanyBackupRun $record) => $record->statusColor()),
                 TextColumn::make('bytes')->label('Μέγεθος')
                     ->formatStateUsing(fn (?int $b) => $b ? number_format($b / 1024, 1).' KB' : '—'),
                 TextColumn::make('message')->label('Σημείωση')->placeholder('—')->limit(60)->toggleable(),

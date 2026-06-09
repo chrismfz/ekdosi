@@ -48,4 +48,15 @@ class CompanyBackupRun extends Model
     {
         return $this->bundle_path !== null && is_file($this->bundle_path);
     }
+
+    /** Single source for the run-status → Filament colour mapping (badge + toasts). */
+    public function statusColor(): string
+    {
+        return match ($this->status) {
+            'ok' => 'success',
+            'partial' => 'warning',
+            'failed' => 'danger',
+            default => 'gray',
+        };
+    }
 }

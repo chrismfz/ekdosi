@@ -96,11 +96,11 @@ class CompanyBackupActions
             ->modalHeading('Ρυθμίσεις αυτόματων αντιγράφων')
             ->modalDescription('Πρόγραμμα + κρυπτογράφηση + διατήρηση. Προς το παρόν ο προορισμός είναι Τοπικά (λήψη από το panel)· SFTP/FTP/S3 έρχονται.')
             ->modalSubmitActionLabel('Αποθήκευση')
-            ->fillForm(fn (Company $record) => ($s = $record->backupSetting) ? [
-                'enabled' => $s->enabled, 'frequency' => $s->frequency, 'run_at_time' => $s->run_at_time,
-                'bucket' => $s->bucket, 'secrets_mode' => $s->secrets_mode, 'passphrase' => $s->passphrase,
-                'retention_keep' => $s->retention_keep, 'retention_days' => $s->retention_days,
-            ] : ['frequency' => 'off', 'bucket' => 'settings_setup', 'secrets_mode' => 'passphrase', 'run_at_time' => '02:00', 'retention_keep' => 7])
+            // Drive the form straight off the model's attributes (form components
+            // ignore keys without a matching field) so a new setting column added
+            // in Slice 4b can't be silently dropped from the edit form.
+            ->fillForm(fn (Company $record) => $record->backupSetting?->attributesToArray()
+                ?? ['frequency' => 'off', 'bucket' => 'settings_setup', 'secrets_mode' => 'passphrase', 'run_at_time' => '02:00', 'retention_keep' => 7])
             ->schema([
                 Toggle::make('enabled')->label('Ενεργό')->default(false),
                 Select::make('frequency')->label('Συχνότητα')
@@ -147,10 +147,10 @@ class CompanyBackupActions
 
                 $run = app(CompanyBackupRunner::class)->run($record, $settings, 'manual');
 
-                $n = Notification::make()->title('Αντίγραφο: '.$run->status)
-                    ->body($run->message ?? ('Μέγεθος: '.number_format(((int) $run->bytes) / 1024, 1).' KB'));
-                $run->status === 'ok' ? $n->success() : ($run->status === 'failed' ? $n->danger() : $n->warning());
-                $n->send();
+                Notification::make()->title('Αντίγραφο: '.$run->status)
+                    ->body($run->message ?? ('Μέγεθος: '.number_format(((int) $run->bytes) / 1024, 1).' KB'))
+                    ->color($run->statusColor())
+                    ->send();
             });
     }
 

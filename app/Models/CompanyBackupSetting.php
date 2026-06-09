@@ -45,12 +45,24 @@ class CompanyBackupSetting extends Model
         return $this->belongsTo(Company::class);
     }
 
-    /** @return list<array{driver:string, config?:array<string,mixed>}> */
+    /**
+     * The configured destinations with `local` GUARANTEED present (the Download
+     * source + retention target) — the single home of the "local always" rule.
+     *
+     * @return list<array{driver:string, config?:array<string,mixed>}>
+     */
     public function destinationList(): array
     {
-        $list = $this->destinations ?: [['driver' => 'local']];
+        $list = array_values(array_filter(
+            (array) $this->destinations,
+            static fn ($d) => is_array($d) && ! empty($d['driver']),
+        ));
 
-        return array_values(array_filter($list, static fn ($d) => is_array($d) && ! empty($d['driver'])));
+        if (! in_array('local', array_column($list, 'driver'), true)) {
+            array_unshift($list, ['driver' => 'local']);
+        }
+
+        return $list;
     }
 
     public function wantsFull(): bool

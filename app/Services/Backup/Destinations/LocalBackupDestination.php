@@ -6,7 +6,6 @@ use App\Contracts\BackupDestination;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
-use SplFileInfo;
 use Symfony\Component\HttpFoundation\File\File;
 
 /**
