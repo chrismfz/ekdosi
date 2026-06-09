@@ -16,6 +16,15 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Δοκιμή global SMTP (.env).** A super-admin-only header action on the Companies
+  list sends a probe through the app-wide `MAIL_MAILER` mailer (tenant-independent)
+  — the counterpart to the existing per-company «Send a test email». Surfaces the
+  active mailer + from-address (and warns when `MAIL_MAILER=log`, the common «δεν
+  φεύγει τίποτα» case), with the full SMTP error on failure. Lets the operator
+  verify `.env` mail works at all, which is what every tenant without its own SMTP
+  falls back to.
+
 ### Fixed
 - **Withholding now reduces `totalGrossValue` (AADE `[208]`).** `AadeInvoiceDocument`
   filed gross = net+vat with the withheld amount *not* subtracted, which the AADE
