@@ -6,6 +6,7 @@ use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
+use App\Models\DeliveryNoteEvent;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\TransportType;
@@ -18,6 +19,7 @@ use Firebed\AadeMyData\Http\DigitalGoodsMovement\ConfirmDeliveryOutcome;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RegisterTransfer;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RequestDeliveryNoteStatus;
 use Firebed\AadeMyData\Http\MyDataRequest;
+use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryEvent;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryNoteStatusResponse;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryOutcome;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\Response as DgmResponse;
@@ -244,12 +246,94 @@ class DeliveryLifecycleService
             $changed = true;
         }
 
+        $eventsSynced = $this->syncLifecycleHistory($note, $response->getLifecycleHistory());
+
         return [
             'aade_status' => $aadeStatus,
             'aade_label' => $aadeStatus?->label(),
             'mapped_state' => $mappedState,
             'changed' => $changed,
+            'events_synced' => $eventsSynced,
         ];
+    }
+
+    /**
+     * Persist the §4.1 lifecycleHistory (the carrier/recipient timeline) into
+     * `delivery_note_events`, idempotent on `dedup_key`. Discarding it was the
+     * one gap left after PR #179: the issuer could see the CURRENT status but
+     * not WHAT the carrier & recipient did. Re-running refreshStatus upserts
+     * (never duplicates). Returns the number of events seen in this response.
+     *
+     * @param  DeliveryEvent[]|null  $events
+     */
+    public function syncLifecycleHistory(DeliveryNote $note, ?array $events): int
+    {
+        if (empty($events)) {
+            return 0;
+        }
+
+        DB::transaction(function () use ($note, $events) {
+            foreach ($events as $event) {
+                if (! $event instanceof DeliveryEvent) {
+                    continue;
+                }
+
+                $type = $event->getEventType()?->value ?? 'Unknown';
+                $timestamp = $event->getEventTimestamp();
+                $actor = $event->getActorVat();
+                $mark = $event->getMark();
+
+                $dedupKey = $mark !== null
+                    ? (string) $mark
+                    : substr(hash('sha256', $type.'|'.($timestamp ?? '').'|'.($actor ?? '')), 0, 64);
+
+                DeliveryNoteEvent::updateOrCreate(
+                    ['delivery_note_id' => $note->id, 'dedup_key' => $dedupKey],
+                    [
+                        'company_id' => $note->company_id,
+                        'event_mark' => $mark,
+                        'event_type' => $type,
+                        'event_timestamp' => $timestamp,
+                        'actor_vat' => $actor,
+                        'details' => $this->eventDetails($event),
+                    ],
+                );
+            }
+        });
+
+        return count($events);
+    }
+
+    /** Flatten the populated transport/outcome/rejection block into a JSON array. */
+    private function eventDetails(DeliveryEvent $event): ?array
+    {
+        if ($transport = $event->getTransportDetails()) {
+            $transportType = $transport->getTransportType();
+
+            return array_filter([
+                'vehicle_number' => $transport->getVehicleNumber(),
+                'carrier_vat' => $transport->getCarrierVatNumber(),
+                'transport_type' => $transportType?->value,
+                'transport_label' => $transportType?->label(),
+                'timestamp' => $transport->getTimestamp(),
+            ], static fn ($v) => $v !== null);
+        }
+
+        if ($outcome = $event->getOutcomeDetails()) {
+            $outcomeType = $outcome->getOutcome();
+
+            return array_filter([
+                'outcome' => $outcomeType?->value,
+                'outcome_label' => $outcomeType?->label(),
+                'delivered_without_recipient' => $outcome->getDeliveredWithoutRecipient(),
+            ], static fn ($v) => $v !== null);
+        }
+
+        if ($rejection = $event->getRejectionDetails()) {
+            return array_filter(['reason' => $rejection->getReason()], static fn ($v) => $v !== null);
+        }
+
+        return null;
     }
 
     // ---- 4. Cancel (ακύρωση) ------------------------------------------

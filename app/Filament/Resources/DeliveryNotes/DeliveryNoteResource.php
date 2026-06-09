@@ -9,6 +9,7 @@ use App\Filament\Resources\DeliveryNotes\Pages\ViewDeliveryNote;
 use App\Filament\RelationManagers\ActivityLogRelationManager;
 use App\Filament\RelationManagers\AttachmentsRelationManager;
 use App\Filament\RelationManagers\InternalNotesRelationManager;
+use App\Filament\Resources\DeliveryNotes\RelationManagers\DeliveryEventsRelationManager;
 use App\Filament\Resources\DeliveryNotes\RelationManagers\DeliveryMarksRelationManager;
 use App\Filament\Resources\DeliveryNotes\RelationManagers\LinesRelationManager;
 use App\Filament\Resources\DeliveryNotes\Schemas\DeliveryNoteForm;
@@ -108,6 +109,7 @@ class DeliveryNoteResource extends Resource
     {
         return [
             LinesRelationManager::class,
+            DeliveryEventsRelationManager::class,
             DeliveryMarksRelationManager::class,
             InternalNotesRelationManager::class,
             AttachmentsRelationManager::class,

@@ -17,6 +17,14 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Παραστατικά Διακίνησης — ιστορικό διακίνησης (lifecycleHistory timeline).**
+  «Έλεγχος κατάστασης (ΑΑΔΕ)» now also captures the §4.1 event history (what the
+  carrier & recipient did: RegisterTransfer/ConfirmOutcome/Rejection, with
+  timestamp/ΑΦΜ/MARK + transport/outcome/rejection details) into the new
+  `delivery_note_events` table, idempotent on re-poll, and shows it as a
+  chronological read-only «Ιστορικό διακίνησης» tab on the delivery-note view.
+  (Closes the gap left after PR #179, where `refreshStatus` discarded the
+  history.) Run `php artisan migrate`.
 - **Digital Delivery-Note lifecycle spec committed** at repo root
   (`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`) + CLAUDE.md
   Delivery-notes section: records that the full ΔΑ lifecycle (submit + register

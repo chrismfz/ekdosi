@@ -145,6 +145,16 @@ class DeliveryNote extends Model
         return $this->hasMany(DeliveryMark::class);
     }
 
+    /**
+     * AADE-reported lifecycle history (§4.1) — the carrier/recipient timeline,
+     * synced by DeliveryLifecycleService::syncLifecycleHistory on refreshStatus.
+     * Ordered oldest→newest so the View reads as a timeline.
+     */
+    public function events(): HasMany
+    {
+        return $this->hasMany(DeliveryNoteEvent::class)->orderBy('event_timestamp');
+    }
+
     public function latestMark(): HasOne
     {
         return $this->hasOne(DeliveryMark::class)->latestOfMany();

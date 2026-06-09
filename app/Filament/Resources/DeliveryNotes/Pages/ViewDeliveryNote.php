@@ -159,11 +159,16 @@ class ViewDeliveryNote extends ViewRecord
                         $svc = app(DeliveryLifecycleService::class, ['tenant' => $record->company]);
                         $result = $svc->refreshStatus($record);
 
+                        $stateLine = $result['changed']
+                            ? 'Η τοπική κατάσταση ενημερώθηκε.'
+                            : 'Καμία αλλαγή — η τοπική κατάσταση συμφωνεί με την ΑΑΔΕ.';
+                        $eventsLine = ($result['events_synced'] ?? 0) > 0
+                            ? ' Ιστορικό διακίνησης: '.$result['events_synced'].' γεγονότα.'
+                            : '';
+
                         Notification::make()
                             ->title('Κατάσταση ΑΑΔΕ: '.($result['aade_label'] ?? '—'))
-                            ->body($result['changed']
-                                ? 'Η τοπική κατάσταση ενημερώθηκε.'
-                                : 'Καμία αλλαγή — η τοπική κατάσταση συμφωνεί με την ΑΑΔΕ.')
+                            ->body($stateLine.$eventsLine)
                             ->success()
                             ->send();
 

@@ -668,14 +668,19 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   - **STATUS:** validated only against firebed stubs; **NOT yet round-tripped on
     the AADE sandbox** → run `php artisan delivery:sandbox-validate --tenant=SLUG
     --execute [--cancel]` on the VM (sandbox mode + dev creds).
-- **🚧 Genuinely remaining (buildable WITHOUT the sandbox): lifecycleHistory
-  timeline.** `refreshStatus` reads `DeliveryNoteStatusResponse` but uses only
-  `getStatus()` — it **discards** the §4.1 `lifecycleHistory` (the carrier/
-  recipient events: RegisterTransfer/ConfirmOutcome/Rejection, each with
-  `eventTimestamp`/`actorVat`/`mark`). Capture + render a timeline/stepper so the
-  issuer sees what the carrier & recipient did to the shipment. **Deferred:**
+- **✅ lifecycleHistory timeline (this branch).** `refreshStatus` no longer
+  discards the §4.1 `lifecycleHistory` — `syncLifecycleHistory()` persists the
+  carrier/recipient events (RegisterTransfer/ConfirmOutcome/Rejection, each with
+  `eventTimestamp`/`actorVat`/`mark` + flattened transport/outcome/rejection
+  `details`) into `delivery_note_events` (model `DeliveryNoteEvent`,
+  `DeliveryNote::events()`), idempotent on `dedup_key` (event MARK, else a
+  type|ts|actor hash) so a re-poll never duplicates. Surfaced read-only as the
+  «Ιστορικό διακίνησης» tab (`DeliveryEventsRelationManager`, chronological,
+  actor shown as «Εσείς (εκδότης)» vs the carrier/recipient ΑΦΜ); the «Έλεγχος
+  κατάστασης» notification reports how many events were synced. **Deferred:**
   `RejectDeliveryNote` (recipient-only, §6.2/803 — only if a tenant acts as
-  recipient), Group QR (3.2.5/6, batch transport).
+  recipient), Group QR (3.2.5/6, batch transport). **Deploy:** `php artisan
+  migrate` (adds `delivery_note_events`).
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see
