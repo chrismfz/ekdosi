@@ -16,6 +16,17 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **«Εργαλεία» maintenance page (commands → buttons).** A new admin page (Setup
+  group, gated on `View:MaintenanceTools`) surfaces safe, re-runnable artisan
+  commands as one-click per-tenant buttons — Ανανέωση εικόνας ΦΠΑ
+  (`mydata:refresh-vat-picture`), Επανυπολογισμός υπολοίπων
+  (`invoices:recompute-balances`), Έλεγχος ρυθμίσεων myDATA (`mydata:preflight`)
+  — each scoped to the current company, with the captured command output shown on
+  the page. No terminal needed for routine upkeep; only read-only / idempotent
+  commands are exposed. **Deploy:** `shield:generate` + `shield:sync-super-admin`
+  so the page permission exists.
+
 ### Fixed
 - **Withholding now reduces `totalGrossValue` (AADE `[208]`).** `AadeInvoiceDocument`
   filed gross = net+vat with the withheld amount *not* subtracted, which the AADE
