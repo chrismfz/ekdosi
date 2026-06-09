@@ -2,6 +2,7 @@
 
 namespace App\Support\MyData;
 
+use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\PackagingType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\TransportType;
@@ -59,6 +60,12 @@ class DeliveryCodes
     public static function transportTypeLabel(?int $code): ?string
     {
         return $code === null ? null : TransportType::tryFrom($code)?->label();
+    }
+
+    /** Greek label for a §4.1 delivery-outcome code (FULL/PARTIAL/NONE). */
+    public static function outcomeLabel(?string $code): ?string
+    {
+        return $code === null ? null : DeliveryOutcomeType::tryFrom($code)?->label();
     }
 
     /** @return array<int, string> */

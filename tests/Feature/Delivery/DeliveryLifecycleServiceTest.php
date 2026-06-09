@@ -130,7 +130,16 @@ class DeliveryLifecycleServiceTest extends TestCase
 
     private function service(string $responseXml): DeliveryLifecycleService
     {
-        $mock = new MockHandler([new GuzzleResponse(200, [], $responseXml)]);
+        return $this->serviceWith([$responseXml]);
+    }
+
+    /** @param string[] $responseXmls one queued response per upcoming AADE call */
+    private function serviceWith(array $responseXmls): DeliveryLifecycleService
+    {
+        $mock = new MockHandler(array_map(
+            fn (string $xml) => new GuzzleResponse(200, [], $xml),
+            $responseXmls,
+        ));
 
         return new DeliveryLifecycleService($this->tenant, $mock);
     }
@@ -269,6 +278,63 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->service($this->statusResponse('REGISTERED'))->refreshStatus($note);
     }
 
+    // ---- lifecycleHistory (§4.1 timeline) -----------------------------
+
+    public function test_refresh_status_syncs_lifecycle_history(): void
+    {
+        $note = $this->makeFiledNote();
+
+        $result = $this->service($this->statusResponseWithHistory())->refreshStatus($note);
+
+        // COMPLETED → delivered, and 3 history events captured.
+        $this->assertSame('delivered', $note->fresh()->delivery_state);
+        $this->assertSame(3, $result['events_synced']);
+        $this->assertCount(3, $note->fresh('events')->events);
+
+        // The carrier's RegisterTransfer, with transport details flattened.
+        $this->assertDatabaseHas('delivery_note_events', [
+            'delivery_note_id' => $note->id,
+            'event_type' => 'RegisterTransfer',
+            'actor_vat' => '777777777',
+            'event_mark' => 222222222222222,
+        ]);
+
+        $transfer = $note->events()->where('event_type', 'RegisterTransfer')->first();
+        $this->assertSame('AHN0011', $transfer->details['vehicle_number']);
+        $this->assertSame('777777777', $transfer->details['carrier_vat']);
+        $this->assertSame(2, $transfer->details['transport_type']);   // code stored, NOT the label
+        $this->assertArrayNotHasKey('transport_label', $transfer->details);
+        $this->assertStringContainsString('Έναρξη διακίνησης', $transfer->typeLabel());
+        $this->assertStringContainsString('Όχημα AHN0011', $transfer->summary()); // label rendered live
+
+        // A ConfirmOutcome with PARTIAL outcome.
+        $outcome = $note->events()->where('event_type', 'ConfirmOutcome')->first();
+        $this->assertSame('PARTIAL', $outcome->details['outcome']);
+        $this->assertStringContainsString('Μερική', $outcome->summary());
+    }
+
+    public function test_lifecycle_history_sync_is_idempotent(): void
+    {
+        $note = $this->makeFiledNote();
+
+        // Two identical polls → still 3 rows (updateOrCreate on dedup_key).
+        $svc = $this->serviceWith([$this->statusResponseWithHistory(), $this->statusResponseWithHistory()]);
+        $svc->refreshStatus($note);
+        $svc->refreshStatus($note);
+
+        $this->assertCount(3, $note->fresh('events')->events);
+    }
+
+    public function test_refresh_status_without_history_syncs_no_events(): void
+    {
+        $note = $this->makeFiledNote();
+
+        $result = $this->service($this->statusResponse('IN_TRANSIT'))->refreshStatus($note);
+
+        $this->assertSame(0, $result['events_synced']);
+        $this->assertDatabaseMissing('delivery_note_events', ['delivery_note_id' => $note->id]);
+    }
+
     // ---- cancel -------------------------------------------------------
 
     public function test_cancel_marks_note_cancelled_and_writes_audit(): void
@@ -403,6 +469,55 @@ XML;
 <GetDeliveryNoteStatusResponse xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <invoiceMark>480301204040191</invoiceMark>
     <status>{$status}</status>
+</GetDeliveryNoteStatusResponse>
+XML;
+    }
+
+    /**
+     * Status COMPLETED with the §4.1 lifecycleHistory — mirrors firebed's
+     * stub request-delivery-note-status-response-completed.xml (carrier
+     * RegisterTransfer + two ConfirmOutcome events).
+     */
+    private function statusResponseWithHistory(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<GetDeliveryNoteStatusResponse xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <invoiceMark>480301204040191</invoiceMark>
+    <status>COMPLETED</status>
+    <dispatchTimestamp>2026-02-07T10:00:00Z</dispatchTimestamp>
+    <lifecycleHistory>
+        <eventType>RegisterTransfer</eventType>
+        <eventTimestamp>2026-02-07T10:00:00Z</eventTimestamp>
+        <actorVat>777777777</actorVat>
+        <mark>222222222222222</mark>
+        <transportDetails>
+            <vehicleNumber>AHN0011</vehicleNumber>
+            <transportType>2</transportType>
+            <timeStamp>2026-02-07T10:00:00Z</timeStamp>
+            <carrierVatNumber>777777777</carrierVatNumber>
+        </transportDetails>
+    </lifecycleHistory>
+    <lifecycleHistory>
+        <eventType>ConfirmOutcome</eventType>
+        <eventTimestamp>2026-02-07T11:00:00Z</eventTimestamp>
+        <actorVat>777777777</actorVat>
+        <mark>333333333333333</mark>
+        <outcomeDetails>
+            <outcome>PARTIAL</outcome>
+            <deliveredWithoutRecipient>false</deliveredWithoutRecipient>
+        </outcomeDetails>
+    </lifecycleHistory>
+    <lifecycleHistory>
+        <eventType>ConfirmOutcome</eventType>
+        <eventTimestamp>2026-02-07T12:00:00Z</eventTimestamp>
+        <actorVat>888888888</actorVat>
+        <mark>444444444444444</mark>
+        <outcomeDetails>
+            <outcome>FULL</outcome>
+            <deliveredWithoutRecipient>true</deliveredWithoutRecipient>
+        </outcomeDetails>
+    </lifecycleHistory>
 </GetDeliveryNoteStatusResponse>
 XML;
     }

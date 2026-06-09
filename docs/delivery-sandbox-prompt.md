@@ -24,10 +24,27 @@ mode με dev myDATA credentials. Θέλω να επικυρώσω **end-to-end*
    report `.txt` στο `storage/app/`.
 
 4. **Δείξε μου το report:** το path το τυπώνει το command — κάνε `cat <path>`
-   και βάλ' το ολόκληρο εδώ (περιέχει τα request/response XML κάθε βήματος).
+   και βάλ' το ολόκληρο εδώ (περιέχει τα request/response XML κάθε βήματος **και
+   το νέο section «ΙΣΤΟΡΙΚΟ ΔΙΑΚΙΝΗΣΗΣ — lifecycleHistory»** με τα γεγονότα που
+   επέστρεψε η ΑΑΔΕ στο RequestDeliveryNoteStatus).
 
-5. Αν κάποιο βήμα βγάλει **FAIL / σφάλμα ΑΑΔΕ**, ξεχώρισε το ακριβές μήνυμα +
-   το αντίστοιχο request/response XML, ώστε να διορθώσουμε το payload.
+5. **Ειδικά για το lifecycleHistory (το νέο feature):** στο section «ΙΣΤΟΡΙΚΟ
+   ΔΙΑΚΙΝΗΣΗΣ» του report, επιβεβαίωσε ότι το dev της ΑΑΔΕ **όντως επιστρέφει**
+   `lifecycleHistory` και ότι το parser-άρισμα είναι σωστό:
+   - οι τύποι γεγονότων (RegisterTransfer/ConfirmOutcome/Rejection) εμφανίζονται
+     με σωστή ελληνική ετικέτα·
+   - το `actorVat` / `eventTimestamp` / `MARK` γεγονότος γεμίζουν·
+   - το summary (όχημα/μεταφορέας ή outcome FULL/PARTIAL/NONE) βγάζει νόημα.
+   Αν το section λέει «κανένα γεγονός», σημείωσέ το — μπορεί το dev να μην
+   επιστρέφει history άμεσα μετά την έκδοση· σ' αυτή την περίπτωση ξανατρέξε
+   λίγο αργότερα `php artisan delivery:test-lifecycle <id> --execute` (το status
+   step ξανα-συγχρονίζει το history, idempotent).
+
+6. Αν κάποιο βήμα βγάλει **FAIL / σφάλμα ΑΑΔΕ**, ξεχώρισε το ακριβές μήνυμα +
+   το αντίστοιχο request/response XML, ώστε να διορθώσουμε το payload. **Αν το
+   live XML του `lifecycleHistory` διαφέρει** από τα firebed stubs (διαφορετικά
+   tag names/nesting), δώσε μου το raw RESPONSE XML του status βήματος ώστε να
+   προσαρμόσουμε το `syncLifecycleHistory()`.
 
 Μην σβήσεις το δοκιμαστικό δελτίο· μην αλλάξεις τίποτα άλλο στη ρύθμιση.
 

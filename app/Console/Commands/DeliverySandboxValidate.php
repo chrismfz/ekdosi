@@ -100,6 +100,7 @@ class DeliverySandboxValidate extends Command
             $this->kv('Διακοπή', 'Η έκδοση δεν επέστρεψε VALID — ο κύκλος ζωής παραλείφθηκε.');
         }
 
+        $this->appendLifecycleHistory($note->fresh());
         $this->appendMarkXml($note->fresh());
 
         $this->section('ΣΥΝΟΨΗ');

@@ -8,6 +8,10 @@ Working guide for this repo. Read this first.
 > **AADE spec** is committed at the repo root:
 > **`myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (§8 = code tables,
 > §7.2 = the 101–280 business-error list).
+> The **Digital Delivery-Note lifecycle spec** (tracking layer, Jan 2026) is
+> alongside it: **`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`**
+> (§7.1 = InvoiceDeliveryStatus codes, §7.2 = event types, §6.2 = 800–824
+> business errors). Feeds Delivery Phase 3/4 — see the Delivery-notes section.
 
 ## What this project is
 Porting a legacy **C++Builder (VCL) + Firebird** invoicing app ("ekdosi") to
@@ -59,7 +63,8 @@ after cutover.
   app/                                           # models, Filament panels, services, actions
   database/migrations/                           # 75 migrations
   whmcs-plugin/ekdosi_bridge/                    # OUR WHMCS-side plugin (deployed to tenant's WHMCS)
-  myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec
+  myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec (submission)
+  myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md  # ΔΑ lifecycle/tracking spec
   docs/CLAUDE-history.md                         # archived full project history
 /legacy/                  # read-only reference (do NOT build)
   ekdosi-schema.sql                              # isql -x dump (WIN1253 DB; ASCII DDL is clean)
@@ -622,6 +627,60 @@ The supplier/inbound mirror of the sales side, end-to-end:
 **Full story + remaining-polish list: `docs/expenses-phase-plan.md`.** Deferred:
 expense-classification AADE submit, RequestVatInfo/E3 cross-checks,
 `RequestMyExpenses`, manual expense entry, per-row import, supplier CSV import.
+
+### Παραστατικά Διακίνησης / Delivery notes (myDATA Ψηφιακό ΔΑ)
+The shipping-document side, mirroring the invoice surfaces. Two specs apply:
+the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
+`SendInvoices` doc with `isDeliveryNote=true` — confirmed by delivery-error
+**805**); the **post-issuance lifecycle/tracking** API is the separate
+`myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`.
+
+- **✅ Phase 1+2 (merged, PR #228):** invoice-grade `DeliveryNoteResource` —
+  rich View (myDATA/πάροχος card, lifecycle card, lines RM editable-while-draft,
+  Ιστορικό υποβολών / Σημειώσεις / Συνημμένα / Ιστορικό tabs via the polymorphic
+  concerns), two-way binding δελτίο↔τιμολόγιο (`delivery_notes.invoice_id` ↔
+  `Invoice::deliveryNotes()`), tenant `ActivityFeed` parity. Columns:
+  `delivery_state` + `transfer_mark`/`outcome_mark`/`reject_mark`;
+  `delivery_marks` carries provider key/auth/state.
+- **firebed ALREADY implements the whole v2.0.x tracking API** — no protocol
+  work needed, only wiring: `Firebed\AadeMyData\Enums\DigitalGoodsMovement\`
+  `DeliveryStatus` (= §7.1 EXACTLY: 1 REGISTERED, 2 CANCELLED, 3 IN_TRANSIT,
+  4 REJECTED, 5 DELIVERED_BY_CARRIER, **7** FAILED_DELIVERY, 8 COMPLETED —
+  **no 6**, with Greek labels) + `DeliveryEventType` (= §7.2); writers
+  `TransportWriter`/`DeliveryOutcomeWriter`/`DeliveryRejectionWriter`/`GroupQr*`,
+  `DeliveryNoteStatusResponseReader`, `ResponseDocReader`, and
+  `Http\CancelDeliveryNote`.
+- **✅ Phase 3+4 ALREADY BUILT (PR #179, `claude/diakinisi-sandbox-tooling`) —
+  code-complete, pending live sandbox round-trip.** Don't re-port:
+  - `Services\Delivery\DeliveryNoteSubmitter` — issues the ΔΑ via the SAME
+    `SendInvoices` path (provider channel too) → MARK + QR + `delivery_state`.
+  - `Services\Delivery\DeliveryLifecycleService` — `registerTransfer` (→in_transit),
+    `confirmDelivery` (FULL/PARTIAL/NONE), `refreshStatus` (RequestDeliveryNoteStatus
+    → maps §7.1 status to our cache), `cancel` (CancelInvoice by the issue MARK;
+    the provider-only CancelDeliveryNote is NOT the route), `describeResponseErrors`.
+  - `ViewDeliveryNote` header actions (state-guarded): issue / Έναρξη διακίνησης /
+    Δήλωση παράδοσης / Έλεγχος κατάστασης / Ακύρωση / PDF.
+  - Commands: `delivery:sandbox-validate`, `delivery:test-lifecycle`,
+    `delivery:test-submit`.
+  - `delivery_state` is OUR string cache (registered/in_transit/delivered/failed/
+    rejected/cancelled), mapped from firebed `DeliveryStatus` in
+    `deliveryStateFromAade()` — deliberately NOT the raw int.
+  - **STATUS:** validated only against firebed stubs; **NOT yet round-tripped on
+    the AADE sandbox** → run `php artisan delivery:sandbox-validate --tenant=SLUG
+    --execute [--cancel]` on the VM (sandbox mode + dev creds).
+- **✅ lifecycleHistory timeline (this branch).** `refreshStatus` no longer
+  discards the §4.1 `lifecycleHistory` — `syncLifecycleHistory()` persists the
+  carrier/recipient events (RegisterTransfer/ConfirmOutcome/Rejection, each with
+  `eventTimestamp`/`actorVat`/`mark` + flattened transport/outcome/rejection
+  `details`) into `delivery_note_events` (model `DeliveryNoteEvent`,
+  `DeliveryNote::events()`), idempotent on `dedup_key` (event MARK, else a
+  type|ts|actor hash) so a re-poll never duplicates. Surfaced read-only as the
+  «Ιστορικό διακίνησης» tab (`DeliveryEventsRelationManager`, chronological,
+  actor shown as «Εσείς (εκδότης)» vs the carrier/recipient ΑΦΜ); the «Έλεγχος
+  κατάστασης» notification reports how many events were synced. **Deferred:**
+  `RejectDeliveryNote` (recipient-only, §6.2/803 — only if a tenant acts as
+  recipient), Group QR (3.2.5/6, batch transport). **Deploy:** `php artisan
+  migrate` (adds `delivery_note_events`).
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see

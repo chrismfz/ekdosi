@@ -99,6 +99,28 @@ trait WritesDeliveryReport
         }
     }
 
+    /** Append the AADE-reported lifecycle history (§4.1) synced on refreshStatus. */
+    private function appendLifecycleHistory(DeliveryNote $note): void
+    {
+        $events = $note->events()->get();
+
+        $this->section('ΙΣΤΟΡΙΚΟ ΔΙΑΚΙΝΗΣΗΣ — lifecycleHistory (§4.1)');
+        if ($events->isEmpty()) {
+            $this->logLine('(κανένα γεγονός — η ΑΑΔΕ δεν επέστρεψε lifecycleHistory)');
+
+            return;
+        }
+
+        foreach ($events as $event) {
+            $ts = optional($event->event_timestamp)->toDateTimeString() ?? '—';
+            $this->logLine();
+            $this->logLine("[{$event->typeLabel()}] {$ts} · actor={$event->actor_vat} · MARK={$event->event_mark}");
+            if ($summary = $event->summary()) {
+                $this->logLine('  '.$summary);
+            }
+        }
+    }
+
     /** Write the buffered report to a file; returns the absolute path. */
     private function writeReport(?string $path): string
     {
