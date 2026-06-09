@@ -16,7 +16,21 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Backup failure alerting.** A SCHEDULED per-company backup that ends
+  failed/partial now emails ops (`ScheduledBackupFailed` notification, queued) and
+  is always `Log::error`'d — previously a nightly failure was silent. Recipients:
+  `ekdosi.backup.alert_email` (CSV, `EKDOSI_BACKUP_ALERT_EMAIL`), else the
+  super_admin users; toggle with `EKDOSI_BACKUP_ALERT_ON_FAILURE` (default on).
+  Manual/download runs already surface status in the panel, so only the
+  unattended path alerts.
+
 ### Fixed
+- **Scheduled backups crashed the moment cron ran them.**
+  `RunScheduledCompanyBackups` called `CompanyContext::actAs()` statically, but
+  it's an instance method on the singleton — a fatal Error on every real run
+  (untested in 4a: only `isDue()` had coverage, not the run loop). Now
+  `app(CompanyContext::class)->actAs(...)`; the new alert tests exercise the loop.
 - **Full company bundle silently dropped ALL transactional data.** `BundleArchive`
   serialised only `setup/` — never `data/` — so a `--full` export / full backup
   produced a settings-only zip while reporting success (the array round-trip was

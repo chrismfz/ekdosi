@@ -135,7 +135,7 @@ phase 1."* Portability goal is right; here's the honest tradeoff so we pick a
 |---|---|---|---|
 | **1. Status quo — Laravel `encrypted` (APP_KEY)** | ❌ (other VM has a different APP_KEY → blobs won't decrypt) | ✅ | What we have now. |
 | **2. Per-company key stored *in the DB row*** | ✅ | ❌ **NO** | The key travels with the ciphertext → a DB dump leaks everything. Equivalent to plaintext for anyone with DB read. |
-| **3. Plaintext in DB (phase-1 idea)** | ✅ | ❌ **NO** | mydata keys / GSIS / SMTP / WHMCS secrets readable in any dump or `select *`. A real regression. |
+| **3. Plaintext in DB (phase-1 idea)** | ✅ | ❌ **NO** | mydata keys / GSIS / SMTP / WHMCS secrets readable in any dump or `select *`. A real regression — BUT see **Phase 6 (deferred)**: revisited as a deliberate DR choice so a plain `mysqldump` survives APP_KEY loss. |
 | **4. Envelope encryption (RECOMMENDED)** | ✅ | ✅ | Per-company random `data_key`; the 7 secret columns are encrypted with `data_key`; `data_key` itself is stored **wrapped by APP_KEY**. Migration = re-wrap **one** small key on the target VM; columns untouched. |
 | **5. Passphrase-protected export (no schema change)** | ✅ | ✅ | Keep option 1 at rest; at **export** time decrypt + re-encrypt the bundle under an operator passphrase; on **import** the passphrase decrypts and re-encrypts under the new VM's APP_KEY. Zero plaintext at rest, zero schema change. |
 
@@ -295,6 +295,27 @@ download + upload-restore). Depends on Phase 1 (and Phase 2 for full bundles).
 Introduce per-company `data_key` (wrapped by APP_KEY), migrate the 7 columns,
 make cross-VM moves a one-key re-wrap. Only if cross-VM friction proves real
 and option 5 (passphrase) isn't enough.
+
+### Phase 6 (deferred) — No encryption at rest, so a plain DB dump survives APP_KEY loss  — ❌ deferred
+**Operator TODO (2026-06-09): «κάποια στιγμή να δουλεύει χωρίς APP_KEY».**
+DR scenario that motivates it: `public_html` is lost (→ `.env` → **APP_KEY**
+gone) but a plain **mysqldump** of the DB exists. Today the 7 creds columns on
+`companies` use Laravel `encrypted` casts → keyed to APP_KEY, so restoring that
+dump to a fresh VM with a **new** APP_KEY decrypts them to **garbage** (the
+customer/invoice data is fine — only the ~7 creds are lost, re-enterable but
+annoying). I.e. **a bare DB dump is not self-sufficient today.**
+
+This is **distinct from the *bundle* path**, which already survives APP_KEY loss
+(it seals at export + re-encrypts under the target VM's APP_KEY at import —
+option 5). The gap is *only* the raw `mysqldump`-outside-our-tooling route.
+
+The fix = drop the `encrypted` casts on the creds columns (this is rejected
+**option 3** above, now **consciously revisited as a deliberate DR choice**):
+creds live plaintext in the DB → any dump is fully portable, **needs no .env
+key**. **Tradeoff accepted by the operator:** creds readable by anyone with DB
+or dump access → security then rests on DB access-control + protecting the dumps
+(fine on a single trusted self-hosted VM). Off until we deliberately flip it;
+note it would also make the bundle's `secrets_mode` moot for those columns.
 
 ---
 
