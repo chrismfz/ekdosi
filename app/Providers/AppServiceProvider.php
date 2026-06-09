@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Support\Tenancy\CompanyContext;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -34,6 +35,13 @@ class AppServiceProvider extends ServiceProvider
          * Plain `migrate` is unaffected — deploys keep working.
          */
         DB::prohibitDestructiveCommands(! $this->app->environment('testing'));
+
+        /*
+         * @gup('Κείμενο') — Greek ALL-CAPS without τόνος, for PDF/print labels.
+         * CSS text-transform:uppercase keeps the accent (wrong in Greek + ugly in
+         * DomPDF); this echoes App\Support\GreekText::upper() instead.
+         */
+        Blade::directive('gup', fn (string $expr) => "<?php echo e(\App\Support\GreekText::upper($expr)); ?>");
 
         /*
          * super_admin role bypasses every policy. Combined with Spatie's

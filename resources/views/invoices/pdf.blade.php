@@ -34,7 +34,9 @@
         .hdr-logo  { max-height: 22mm; max-width: 60mm; margin-bottom: 2mm; }
         .tenant-name { font-size: 13pt; font-weight: bold; margin: 0 0 1mm 0; }
         .tenant-info { font-size: 8.5pt; color: #4b5563; }
-        .doc-type    { font-size: 14pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; }
+        /* clear:right so the (possibly multi-word) type name sits BELOW the floated
+           QR instead of wrapping around it — fixes «ΠΙΣΤΩΤΙΚΟ» / «ΤΙΜΟΛΟΓΙΟ» splitting. */
+        .doc-type    { font-size: 14pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; clear: right; }
         .doc-code    { font-size: 12pt; color: #111827; margin: 1mm 0; }
         .doc-date    { font-size: 9pt; color: #4b5563; }
 
@@ -152,7 +154,7 @@
                 @endif
             </div>
         @endif
-        <p class="doc-type">{{ $invoice->invoiceType?->name ?? 'Παραστατικό' }}</p>
+        <p class="doc-type">@gup($invoice->invoiceType?->name ?? 'Παραστατικό')</p>
         <p class="doc-code">{{ $invoice->invcode }}</p>
         <p class="doc-date">
             {{ optional($invoice->issued_at)->format('d/m/Y H:i') }}
@@ -168,7 +170,7 @@
 @if(! $isRetail || $invoice->vat_no)
     <div class="meta">
         <div class="meta-cell">
-            <h3>Στοιχεία Πελάτη</h3>
+            <h3>@gup('Στοιχεία Πελάτη')</h3>
             <div class="name">{{ $invoice->company_name ?: '—' }}</div>
             <div class="meta-row">
                 @if($invoice->occupation) {{ $invoice->occupation }}<br> @endif
@@ -181,7 +183,7 @@
             </div>
         </div>
         <div class="meta-cell">
-            <h3>Όροι Παραστατικού</h3>
+            <h3>@gup('Όροι Παραστατικού')</h3>
             @if($invoice->paymentMethod && ! $isDelivery)
                 <div class="meta-row"><span class="meta-label">Τρόπος πληρωμής:</span> {{ $invoice->paymentMethod->description }}</div>
             @endif
@@ -209,18 +211,18 @@
     <table class="lines">
         <thead>
             <tr>
-                <th style="width: 38%">Περιγραφή</th>
-                <th class="center" style="width: 8%">ΜΜ</th>
-                <th class="num" style="width: 10%">Ποσότητα</th>
+                <th style="width: 38%">@gup('Περιγραφή')</th>
+                <th class="center" style="width: 8%">@gup('ΜΜ')</th>
+                <th class="num" style="width: 10%">@gup('Ποσότητα')</th>
                 @if(! $isDelivery)
-                    <th class="num" style="width: 12%">Τιμή μον.</th>
+                    <th class="num" style="width: 12%">@gup('Τιμή μον.')</th>
                     @php $anyDiscount = $invoice->lines->contains(fn($l) => (float)$l->discount > 0); @endphp
                     @if($anyDiscount)
-                        <th class="num" style="width: 7%">Έκπτ.%</th>
+                        <th class="num" style="width: 7%">@gup('Έκπτ.%')</th>
                     @endif
-                    <th class="num" style="width: 7%">ΦΠΑ%</th>
-                    <th class="num" style="width: 11%">Καθαρή</th>
-                    <th class="num" style="width: 12%">Με ΦΠΑ</th>
+                    <th class="num" style="width: 7%">@gup('ΦΠΑ%')</th>
+                    <th class="num" style="width: 11%">@gup('Καθαρή')</th>
+                    <th class="num" style="width: 12%">@gup('Με ΦΠΑ')</th>
                 @endif
             </tr>
         </thead>
@@ -298,7 +300,7 @@
 {{-- ====================== Notes ====================== --}}
 @if($invoice->notes)
     <div class="notes-box">
-        <h3>Παρατηρήσεις</h3>
+        <h3>@gup('Παρατηρήσεις')</h3>
         {!! nl2br(e($invoice->notes)) !!}
     </div>
 @endif
@@ -313,7 +315,7 @@
 @php($showCreditedFor = $invoice->credited_invoice_id !== null && $invoice->creditedInvoice)
 @if($invoice->isFullyCredited() || $showCreditedFor || $relCredits->isNotEmpty() || $relDeliveries->isNotEmpty())
     <div class="related">
-        <h3>Σχετικά παραστατικά</h3>
+        <h3>@gup('Σχετικά παραστατικά')</h3>
 
         @if($invoice->isFullyCredited())
             <div class="rel-row">

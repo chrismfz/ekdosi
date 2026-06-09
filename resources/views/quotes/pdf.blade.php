@@ -67,7 +67,7 @@
                 </div>
             </td>
             <td style="width: 40%;" class="doc-box">
-                <div class="doc-title">Προσφορά</div>
+                <div class="doc-title">@gup('Προσφορά')</div>
                 <div class="doc-meta">
                     <strong>{{ $quote->code }}</strong><br>
                     @if ($quote->subject){{ $quote->subject }}<br>@endif
@@ -88,7 +88,7 @@
         <tr>
             <td>
                 <div class="party-card">
-                    <div class="party-label">Προς</div>
+                    <div class="party-label">@gup('Προς')</div>
                     <div class="party-name">{{ $quote->company_name ?: ($quote->customer?->name ?: '—') }}</div>
                     <div class="party-meta">
                         @if ($quote->vat_no)ΑΦΜ: {{ $quote->vat_no }}@endif
@@ -108,11 +108,11 @@
         <thead>
             <tr>
                 <th style="width: 38px;">#</th>
-                <th>Περιγραφή</th>
-                <th style="width: 60px;" class="num">Ποσότ.</th>
-                <th style="width: 75px;" class="num">Τιμή μον.</th>
-                <th style="width: 45px;" class="num">ΦΠΑ%</th>
-                <th style="width: 80px;" class="num">Αξία</th>
+                <th>@gup('Περιγραφή')</th>
+                <th style="width: 60px;" class="num">@gup('Ποσότ.')</th>
+                <th style="width: 75px;" class="num">@gup('Τιμή μον.')</th>
+                <th style="width: 45px;" class="num">@gup('ΦΠΑ%')</th>
+                <th style="width: 80px;" class="num">@gup('Αξία')</th>
             </tr>
         </thead>
         <tbody>
@@ -132,8 +132,8 @@
     {{-- VAT breakdown --}}
     <table class="vat-break">
         <tr>
-            <th>Καθαρή αξία</th>
-            <th>ΦΠΑ</th>
+            <th>@gup('Καθαρή αξία')</th>
+            <th>@gup('ΦΠΑ')</th>
         </tr>
         @foreach ($totals['rows'] as $row)
             <tr>

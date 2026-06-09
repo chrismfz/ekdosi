@@ -74,12 +74,12 @@
         <table class="data">
             <thead>
                 <tr>
-                    <th>Έτος</th>
-                    <th class="right">Τιμολόγια</th>
-                    <th class="right">Καθαρή αξία</th>
-                    <th class="right">Με ΦΠΑ</th>
-                    <th class="right">Πληρωμές</th>
-                    <th class="right">Υπόλοιπο τέλους έτους</th>
+                    <th>@gup('Έτος')</th>
+                    <th class="right">@gup('Τιμολόγια')</th>
+                    <th class="right">@gup('Καθαρή αξία')</th>
+                    <th class="right">@gup('Με ΦΠΑ')</th>
+                    <th class="right">@gup('Πληρωμές')</th>
+                    <th class="right">@gup('Υπόλοιπο τέλους έτους')</th>
                 </tr>
             </thead>
             <tbody>
@@ -101,12 +101,12 @@
     <table class="data">
         <thead>
             <tr>
-                <th>Ημερομηνία</th>
-                <th>Τύπος</th>
-                <th>Αναφορά</th>
-                <th class="right">Χρέωση</th>
-                <th class="right">Πίστωση</th>
-                <th class="right">Υπόλοιπο</th>
+                <th>@gup('Ημερομηνία')</th>
+                <th>@gup('Τύπος')</th>
+                <th>@gup('Αναφορά')</th>
+                <th class="right">@gup('Χρέωση')</th>
+                <th class="right">@gup('Πίστωση')</th>
+                <th class="right">@gup('Υπόλοιπο')</th>
                 <th>myDATA</th>
             </tr>
         </thead>
