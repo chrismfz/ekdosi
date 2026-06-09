@@ -650,20 +650,32 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   `TransportWriter`/`DeliveryOutcomeWriter`/`DeliveryRejectionWriter`/`GroupQr*`,
   `DeliveryNoteStatusResponseReader`, `ResponseDocReader`, and
   `Http\CancelDeliveryNote`.
-- **🚧 Phase 3 (now) — track + cancel (the ISSUER's post-issue role):** our
-  tenants are **εκδότες**, so the active surface is **GetDeliveryNoteStatus**
-  (poll → refresh `delivery_state` cache + render the `lifecycleHistory` as a
-  timeline/stepper, event types §7.2) and **CancelDeliveryNote** (only before
-  InTransit; error 801 guards it). Map our `delivery_state` (today `string(30)`)
-  onto firebed's int-backed `DeliveryStatus` (1,2,3,4,5,7,8). Delivery-side
-  `describeResponseErrors` over the **800–824** §6.2 table.
-  **RegisterTransfer/ConfirmDeliveryOutcome/RejectDeliveryNote are
-  carrier/recipient roles** (RegisterTransfer=μεταφορέας, Confirm=μεταφορέας/
-  λήπτης, Reject=**μόνο λήπτης**, error 803) — build only if a tenant also acts
-  as carrier/recipient (deferred decision).
-- **❌ Phase 4 — submission + correlation:** issue the ΔΑ at AADE (types 9.x/10.x
-  via `SendInvoices`+`isDeliveryNote`), correlate to the eventual invoice, reverse.
-  All sandbox-validated on the VM. Group QR (3.2.5/6) is a separate batch feature.
+- **✅ Phase 3+4 ALREADY BUILT (PR #179, `claude/diakinisi-sandbox-tooling`) —
+  code-complete, pending live sandbox round-trip.** Don't re-port:
+  - `Services\Delivery\DeliveryNoteSubmitter` — issues the ΔΑ via the SAME
+    `SendInvoices` path (provider channel too) → MARK + QR + `delivery_state`.
+  - `Services\Delivery\DeliveryLifecycleService` — `registerTransfer` (→in_transit),
+    `confirmDelivery` (FULL/PARTIAL/NONE), `refreshStatus` (RequestDeliveryNoteStatus
+    → maps §7.1 status to our cache), `cancel` (CancelInvoice by the issue MARK;
+    the provider-only CancelDeliveryNote is NOT the route), `describeResponseErrors`.
+  - `ViewDeliveryNote` header actions (state-guarded): issue / Έναρξη διακίνησης /
+    Δήλωση παράδοσης / Έλεγχος κατάστασης / Ακύρωση / PDF.
+  - Commands: `delivery:sandbox-validate`, `delivery:test-lifecycle`,
+    `delivery:test-submit`.
+  - `delivery_state` is OUR string cache (registered/in_transit/delivered/failed/
+    rejected/cancelled), mapped from firebed `DeliveryStatus` in
+    `deliveryStateFromAade()` — deliberately NOT the raw int.
+  - **STATUS:** validated only against firebed stubs; **NOT yet round-tripped on
+    the AADE sandbox** → run `php artisan delivery:sandbox-validate --tenant=SLUG
+    --execute [--cancel]` on the VM (sandbox mode + dev creds).
+- **🚧 Genuinely remaining (buildable WITHOUT the sandbox): lifecycleHistory
+  timeline.** `refreshStatus` reads `DeliveryNoteStatusResponse` but uses only
+  `getStatus()` — it **discards** the §4.1 `lifecycleHistory` (the carrier/
+  recipient events: RegisterTransfer/ConfirmOutcome/Rejection, each with
+  `eventTimestamp`/`actorVat`/`mark`). Capture + render a timeline/stepper so the
+  issuer sees what the carrier & recipient did to the shipment. **Deferred:**
+  `RejectDeliveryNote` (recipient-only, §6.2/803 — only if a tenant acts as
+  recipient), Group QR (3.2.5/6, batch transport).
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see
