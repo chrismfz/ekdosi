@@ -119,12 +119,27 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 - **`clear:right` on single-word doc-types** (PDF review flag) — refine if the QR-then-type
   layout is undesired for short names.
 
-### 🆕 Operator UX — Scheduler/system toggles in the Filament UI (asked 2026-06-10)
-The `EKDOSI_SCHEDULE_*` flags (and the system mailer note) should be **UI knobs**,
-not `.env` edits: an admin-only «Χρονοπρογραμματιστής / Ρυθμίσεις συστήματος» page
-with a Toggle + helperText per task (keep the ⚠ warnings, e.g. resend-failed during
-a mail outage). Store in a `system_settings` (key→value) table / singleton; have
-`routes/console.php` read the DB setting with the env flag as the default — so a
-flip takes effect next `schedule:run` (~1 min), no `config:clear`. `whmcs_auto_issue`
-stays two-key (UI + `companies.whmcs_auto_issue_immediate`); per-company backups
-already have a UI. Also surface a «mailer health» hint (global vs per-tenant SMTP).
+### 🆕 Settings-in-the-UI — single source of truth, visible + audited (asked 2026-06-10)
+**Principle:** NO runtime setting lives only in `.env`/`config` where it can be
+silently left off and forgotten («θα φταίμε»). Every operator-facing knob —
+**admin / super_admin / operator** — is set AND **visible** from the web UI, and
+each change is **recorded in the activity log** (win-win audit: who turned what
+on/off, when).
+
+**Concretely:**
+- A `system_settings` (key→value, typed) store + a settings model that uses our
+  existing `TracksActivity`/`LogsActivity` → toggle changes land in the activity
+  log automatically (causer = the user) and show in `ActivityFeed`.
+- Admin-only Filament Page(s): **«Χρονοπρογραμματιστής»** (the `EKDOSI_SCHEDULE_*`
+  flags as Toggles + helperText + ⚠ for the dangerous ones, e.g. resend-failed
+  during a mail outage) and a wider **«Ρυθμίσεις συστήματος»** (mailer health
+  hint: global vs per-tenant SMTP; cache/queue/cron status via `ops:health`).
+- `routes/console.php` (and any code reading these) reads the DB setting with the
+  env flag as the DEFAULT — a flip takes effect next `schedule:run` (~1 min), no
+  `config:clear`. `.env` stays the deploy-time default/override only.
+- **Visibility first:** a read-only «what's on/off right now» panel so nothing is
+  silently disabled. `whmcs_auto_issue` stays two-key (UI + `companies.whmcs_auto_issue_immediate`).
+- Role-scope: per-company knobs (backups, billing, email) gated to company_admin;
+  system/cross-tenant ones to super_admin; the operator-relevant ones visible to operators.
+- Migrate the existing scattered env flags + the per-company toggles under this one
+  consistent, audited surface over time (not a big-bang rewrite).
