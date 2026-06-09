@@ -302,8 +302,10 @@ class DeliveryLifecycleServiceTest extends TestCase
         $transfer = $note->events()->where('event_type', 'RegisterTransfer')->first();
         $this->assertSame('AHN0011', $transfer->details['vehicle_number']);
         $this->assertSame('777777777', $transfer->details['carrier_vat']);
-        $this->assertNotEmpty($transfer->details['transport_label']);
+        $this->assertSame(2, $transfer->details['transport_type']);   // code stored, NOT the label
+        $this->assertArrayNotHasKey('transport_label', $transfer->details);
         $this->assertStringContainsString('Έναρξη διακίνησης', $transfer->typeLabel());
+        $this->assertStringContainsString('Όχημα AHN0011', $transfer->summary()); // label rendered live
 
         // A ConfirmOutcome with PARTIAL outcome.
         $outcome = $note->events()->where('event_type', 'ConfirmOutcome')->first();

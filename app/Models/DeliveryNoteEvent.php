@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Support\MyData\DeliveryCodes;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -63,12 +64,12 @@ class DeliveryNoteEvent extends Model
 
         return match ($this->event_type) {
             DeliveryEventType::REGISTER_TRANSFER->value => trim(implode(' · ', array_filter([
-                $d['transport_label'] ?? null,
+                DeliveryCodes::transportTypeLabel($d['transport_type'] ?? null),
                 isset($d['vehicle_number']) ? 'Όχημα '.$d['vehicle_number'] : null,
                 isset($d['carrier_vat']) ? 'Μεταφορέας '.$d['carrier_vat'] : null,
             ]))),
             DeliveryEventType::CONFIRM_OUTCOME->value => trim(implode(' · ', array_filter([
-                $d['outcome_label'] ?? null,
+                DeliveryCodes::outcomeLabel($d['outcome'] ?? null),
                 ($d['delivered_without_recipient'] ?? false) ? 'χωρίς παρουσία παραλήπτη' : null,
             ]))),
             DeliveryEventType::REJECTION->value => $d['reason'] ?? 'Απόρριψη',

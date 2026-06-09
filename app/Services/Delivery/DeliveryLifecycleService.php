@@ -304,27 +304,26 @@ class DeliveryLifecycleService
         return count($events);
     }
 
-    /** Flatten the populated transport/outcome/rejection block into a JSON array. */
+    /**
+     * Flatten the populated transport/outcome/rejection block into a JSON array.
+     * Stores CODES only (transport_type int, outcome string) — Greek labels are
+     * rendered at display time via DeliveryCodes in DeliveryNoteEvent::summary(),
+     * so historical rows never freeze a stale label.
+     */
     private function eventDetails(DeliveryEvent $event): ?array
     {
         if ($transport = $event->getTransportDetails()) {
-            $transportType = $transport->getTransportType();
-
             return array_filter([
                 'vehicle_number' => $transport->getVehicleNumber(),
                 'carrier_vat' => $transport->getCarrierVatNumber(),
-                'transport_type' => $transportType?->value,
-                'transport_label' => $transportType?->label(),
+                'transport_type' => $transport->getTransportType()?->value,
                 'timestamp' => $transport->getTimestamp(),
             ], static fn ($v) => $v !== null);
         }
 
         if ($outcome = $event->getOutcomeDetails()) {
-            $outcomeType = $outcome->getOutcome();
-
             return array_filter([
-                'outcome' => $outcomeType?->value,
-                'outcome_label' => $outcomeType?->label(),
+                'outcome' => $outcome->getOutcome()?->value,
                 'delivered_without_recipient' => $outcome->getDeliveredWithoutRecipient(),
             ], static fn ($v) => $v !== null);
         }
