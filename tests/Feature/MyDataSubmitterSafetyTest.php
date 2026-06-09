@@ -72,6 +72,38 @@ class MyDataSubmitterSafetyTest extends TestCase
         ]);
     }
 
+    public function test_submit_files_and_persists_the_mark_from_a_successful_response(): void
+    {
+        // Full SendInvoices round-trip against a MOCKED AADE success response —
+        // the integration coverage the submitter lacked (previewXml only tested
+        // request-building; the other tests cover refusal guards). Uses firebed's
+        // own success stub so the parsed MARK + qrUrl persist path runs end-to-end.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+
+        $xml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $mock = new MockHandler([new GuzzleResponse(200, [], $xml)]);
+
+        $mark = (new MyDataSubmitter($this->tenant, $mock))->submit($inv->fresh('lines'));
+
+        // Returned mark row.
+        $this->assertSame('480301204040191', $mark->mark);
+        $this->assertSame('INSERT', $mark->mydata_action);
+
+        // Invoice cache flipped to VALID with the MARK + qrUrl.
+        $inv->refresh();
+        $this->assertSame('VALID', $inv->mydata_state);
+        $this->assertSame('480301204040191', $inv->mydata_mark);
+        $this->assertNotEmpty($inv->mydata_url);
+
+        // Audit row persisted.
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $inv->id,
+            'mark' => '480301204040191',
+            'mydata_action' => 'INSERT',
+        ]);
+    }
+
     public function test_submit_refuses_already_valid_invoice(): void
     {
         // The ETL-cutover safety: imported legacy invoices have
@@ -305,6 +337,39 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<vatExemptionCategory>5</vatExemptionCategory>', $xml);
     }
 
+    public function test_four_percent_rate_defaults_to_category_6(): void
+    {
+        // No override configured → the rate-derived §8.2 code (4% → 6, islands).
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 4, 'net_price' => 100, 'gross_price' => 104,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatCategory>6</vatCategory>', $xml);
+    }
+
+    public function test_four_percent_rate_uses_the_configured_override(): void
+    {
+        // ν.5057/2023 regime: the tenant's 4% VatCategory pins category 10.
+        VatCategory::create([
+            'company_id' => $this->tenant->id, 'description' => '4% ν.5057',
+            'rate' => 4, 'mydata_vat_category' => 10,
+        ]);
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 4, 'net_price' => 100, 'gross_price' => 104,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatCategory>10</vatCategory>', $xml);
+        $this->assertStringNotContainsString('<vatCategory>6</vatCategory>', $xml);
+    }
+
     public function test_zero_percent_vat_throws_when_exemption_reason_ambiguous(): void
     {
         // Two 0%-rate categories with different reasons → the line can't say
@@ -341,6 +406,108 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<taxType>1</taxType>', $xml);
         $this->assertStringContainsString('<taxAmount>200', $xml);
         $this->assertStringContainsString('<totalWithheldAmount>200', $xml);
+    }
+
+    public function test_all_additional_tax_types_emit_blocks_and_totals(): void
+    {
+        // #3c: fees (2) / otherTaxes (3) / stampDuty (4) / deductions (5) each emit a
+        // taxesTotals block + set the matching summary total when an amount is present.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill([
+            'fees_amount' => 30, 'fees_category' => 1,
+            'other_taxes_amount' => 20, 'other_taxes_category' => 1,
+            'stamp_duty_amount' => 50, 'stamp_duty_category' => 1,
+            'deductions_amount' => 10, 'deductions_category' => 1,
+        ])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        foreach (['2', '3', '4', '5'] as $taxType) {
+            $this->assertStringContainsString("<taxType>{$taxType}</taxType>", $xml);
+        }
+        $this->assertStringContainsString('<totalFeesAmount>30', $xml);
+        $this->assertStringContainsString('<totalOtherTaxesAmount>20', $xml);
+        $this->assertStringContainsString('<totalStampDutyAmount>50', $xml);
+        $this->assertStringContainsString('<totalDeductionsAmount>10', $xml);
+    }
+
+    public function test_additional_taxes_adjust_gross_and_payment(): void
+    {
+        // gross = net+vat + fees + stamp + otherTaxes − deductions (firebed's
+        // getTotalTaxes, withheld excluded); the paymentMethod amount must match it.
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([ // net 1000, gross 1240 (price_per_item drives the computed net)
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 1000, 'vat_percent' => 24,
+        ]);
+        $inv->forceFill([
+            'fees_amount' => 30, 'fees_category' => 1,
+            'stamp_duty_amount' => 50, 'stamp_duty_category' => 1,
+            'other_taxes_amount' => 20, 'other_taxes_category' => 1,
+            'deductions_amount' => 10, 'deductions_category' => 1,
+        ])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        // 1240 + 30 + 50 + 20 − 10 = 1330
+        $this->assertStringContainsString('<totalGrossValue>1330', $xml);
+        $this->assertStringContainsString('<amount>1330', $xml);
+    }
+
+    public function test_withholding_does_not_change_gross(): void
+    {
+        // Withholding is informational — the document gross stays net+vat.
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([ // net 1000, gross 1240
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 1000, 'vat_percent' => 24,
+        ]);
+        $inv->forceFill(['withhold_amount' => 200, 'withhold_category' => 3])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<totalGrossValue>1240', $xml);
+        $this->assertStringContainsString('<amount>1240', $xml);
+    }
+
+    public function test_vat_category_override_is_ignored_on_a_non_ambiguous_rate(): void
+    {
+        // A 24% category with a mis-set override (e.g. bad ETL) must NOT hijack the
+        // unambiguous 24% → 1 mapping.
+        $this->vat->forceFill(['mydata_vat_category' => 6])->save();
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv); // 24%
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatCategory>1</vatCategory>', $xml);
+        $this->assertStringNotContainsString('<vatCategory>6</vatCategory>', $xml);
+    }
+
+    public function test_additional_tax_amount_without_category_throws(): void
+    {
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill(['fees_amount' => 30, 'fees_category' => null])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/no valid category/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
+    }
+
+    public function test_invalid_additional_tax_category_throws(): void
+    {
+        // 999 is not a valid §8.5 fees category → loud-fail, don't file garbage.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill(['fees_amount' => 30, 'fees_category' => 999])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/no valid category/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
     }
 
     public function test_withholding_amount_without_category_throws(): void

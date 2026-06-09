@@ -48,6 +48,23 @@ class VatCategoryForm
                         .'Για ΕΝΔΟΚΟΙΝΟΤΙΚΗ παράδοση / reverse charge επιλέξτε «16 — άρθρο 45» '
                         .'(πρώην 39α). Για εξαγωγή εκτός ΕΕ: «15 — άρθρο 44».'),
 
+                // myDATA §8.2 ambiguity: a 4% rate maps to category 6 (pre-existing
+                // island) OR 10 (αρ.31 ν.5057/2023); 3% → 9 (ν.5057). The submitter
+                // derives 4%→6 by default; set this override to file 10 (or 9) on the
+                // ν.5057 regime. Only shown for the ambiguous rates; null = derive.
+                Select::make('mydata_vat_category')
+                    ->label('Κατηγορία ΦΠΑ myDATA (override)')
+                    ->options([
+                        6 => '6 — 4% (νησιωτικός, προϋπάρχον)',
+                        10 => '10 — 4% (αρ.31 ν.5057/2023)',
+                        9 => '9 — 3% (αρ.31 ν.5057/2023)',
+                    ])
+                    // EXACT 3% / 4% only — round() would pull 3.5%→4 into the 4%
+                    // picker and let an operator set a 4%-regime code on a 3.5% rate.
+                    ->visible(fn (Get $get) => abs((float) $get('rate') - 3) < 0.01 || abs((float) $get('rate') - 4) < 0.01)
+                    ->helperText('Προαιρετικό. Αφήστε κενό για αυτόματη αντιστοίχιση (4%→6). '
+                        .'Ορίστε το μόνο αν είστε στο καθεστώς ν.5057/2023 (4%→10, 3%→9).'),
+
                 Toggle::make('is_default')
                     ->label('Default for new products')
                     ->helperText('Only one default per tenant — saving with this on will demote any other default automatically.'),

@@ -16,6 +16,28 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **Full myDATA taxesTotals (fees / other taxes / stamp duty / deductions).** Beyond
+  withholding (G1, taxType 1), invoices can now carry a fees (2, §8.5 — e.g. τέλος
+  ανθεκτικότητας), other-taxes (3, §8.6), stamp-duty (4, §8.7) and deductions (5, §8.8)
+  amount + category. The submitter emits a `taxesTotals` block per type with an amount
+  and sets the matching `invoiceSummary` total (was hardcoded 0); the category is
+  validated against the firebed enum (deductions has none → a positive int) and throws
+  when an amount lacks a valid one. New invoice columns + InvoiceForm fields. **Deploy:**
+  `php artisan migrate`.
+- **4% VAT category override (ν.5057/2023 ambiguity).** A 4% rate maps to AADE
+  §8.2 category 6 (pre-existing island) OR 10 (αρ.31 ν.5057/2023); 3%→9. New
+  optional `vat_categories.mydata_vat_category` override (Setup → VAT Categories,
+  shown for 3%/4%) — the submitter prefers it, else derives from the rate (4%→6).
+  Resolver throws on a same-rate disagreement or an invalid §8.2 code. **Deploy:**
+  `php artisan migrate`.
+
+### Testing
+- **SendInvoices mock-Guzzle integration test** — the submitter's full `submit()`
+  round-trip is now covered against a mocked AADE success response (firebed's stub):
+  asserts the parsed MARK/qrUrl persist, `mydata_state=VALID`, and the INSERT
+  `mydata_marks` row. Closes the gap where only `previewXml` (request-building) and
+  the refusal guards were tested.
 ### Fixed
 - **Greek ALL-CAPS in PDFs kept the τόνος (ΠΟΣΌΤΗΤΑ) — wrong + ugly in DomPDF.**
   New `App\Support\GreekText::upper()` + Blade `@gup(...)` deaccent ALL-CAPS labels

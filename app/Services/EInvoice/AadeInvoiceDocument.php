@@ -11,7 +11,11 @@ use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
+use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
+use Firebed\AadeMyData\Enums\StampCategory;
 use Firebed\AadeMyData\Enums\TaxType;
+use Firebed\AadeMyData\Enums\VatCategory as AadeVatCategory;
 use Firebed\AadeMyData\Enums\VatExemption;
 use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Firebed\AadeMyData\Models\Address;
@@ -132,7 +136,7 @@ class AadeInvoiceDocument
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
                 ->setNetValue((float) $line->net_price)
-                ->setVatCategory($this->vatCategoryFor($rate))
+                ->setVatCategory($this->resolveVatCategoryCode($rate))
                 ->setVatAmount(round((float) $line->gross_price - (float) $line->net_price, 2));
 
             if ($emitQuantity) {
@@ -187,15 +191,31 @@ class AadeInvoiceDocument
         // 'totalGrossValue' ... expected 'totalWithheldAmount'". The
         // legacy app sent them as 0.00 (verified against an imported
         // legacy MARK request). Withheld comes from the invoice if set.
+        // Tax totals (rounded to match the per-block taxAmounts so a sum-check
+        // like [226]/[101] can't trip). Withholding is informational — it does NOT
+        // change totalGrossValue (matches the G1-validated behaviour + AADE: the
+        // payer withholds, the document gross is unchanged). Fees / stamp duty /
+        // other taxes INCREASE the gross; deductions DECREASE it — exactly firebed's
+        // SummarizesInvoiceTaxes::getTotalTaxes() (minus the withheld term). So both
+        // totalGrossValue AND the paymentMethod amount must carry this adjustment,
+        // else AADE sees a gross that doesn't equal net+vat+(extra taxes).
+        $withheld = round((float) ($invoice->withhold_amount ?? 0), 2);
+        $fees = round((float) ($invoice->fees_amount ?? 0), 2);
+        $stampDuty = round((float) ($invoice->stamp_duty_amount ?? 0), 2);
+        $otherTaxes = round((float) ($invoice->other_taxes_amount ?? 0), 2);
+        $deductions = round((float) ($invoice->deductions_amount ?? 0), 2);
+
+        $grossValue = round($vatBreakdown->totalGross() + $fees + $stampDuty + $otherTaxes - $deductions, 2);
+
         $summary = (new InvoiceSummary)
             ->setTotalNetValue($vatBreakdown->totalNet())
             ->setTotalVatAmount($vatBreakdown->totalVat())
-            ->setTotalWithheldAmount((float) ($invoice->withhold_amount ?? 0))
-            ->setTotalFeesAmount(0.0)
-            ->setTotalStampDutyAmount(0.0)
-            ->setTotalOtherTaxesAmount(0.0)
-            ->setTotalDeductionsAmount(0.0)
-            ->setTotalGrossValue($vatBreakdown->totalGross());
+            ->setTotalWithheldAmount($withheld)
+            ->setTotalFeesAmount($fees)
+            ->setTotalStampDutyAmount($stampDuty)
+            ->setTotalOtherTaxesAmount($otherTaxes)
+            ->setTotalDeductionsAmount($deductions)
+            ->setTotalGrossValue($grossValue);
 
         // Summary-level income classification = aggregate of the per-line
         // classifications (single class per invoice type → total net).
@@ -217,7 +237,9 @@ class AadeInvoiceDocument
             ->addPaymentMethod(
                 (new PaymentMethodDetail)
                     ->setType($this->paymentMethodTypeFor($invoice))
-                    ->setAmount($vatBreakdown->totalGross())
+                    // Must equal totalGrossValue ([451] payment sum = gross),
+                    // including the fees/stamp/otherTaxes/deductions adjustment.
+                    ->setAmount($grossValue)
             );
 
         // G1: withholding (παρακράτηση). When the invoice carries a withheld
@@ -245,6 +267,11 @@ class AadeInvoiceDocument
                     ->setTaxAmount($withhold)
             );
         }
+
+        // #3c: the remaining taxesTotals taxTypes (fees/otherTaxes/stamp/deductions).
+        // Each mirrors withholding: an amount + a §8.x category, emitted only when the
+        // amount is > 0, with the matching summary total set above.
+        $this->addAdditionalTaxes($aade, $invoice, $vatBreakdown->totalNet());
 
         if ($counterpart) {
             $aade->setCounterpart($counterpart);
@@ -423,6 +450,119 @@ class AadeInvoiceDocument
      * resolved from the tenant's 0%-rate VatCategory (resolveVatExemptionCategory).
      * That resolution is what guards against filing an unexplained exempt line.
      */
+    /**
+     * Emit taxesTotals[taxType=2..5] (fees / otherTaxes / stampDuty / deductions)
+     * for any that carry an amount. Mirrors the withholding block: amount + a §8.x
+     * category (validated against the firebed enum where one exists; deductions has
+     * none → a positive int is required). The summary totals are set from the same
+     * columns. Throws — never guesses a category — when an amount lacks a valid one.
+     */
+    private function addAdditionalTaxes(AadeInvoice $aade, Invoice $invoice, float $underlyingValue): void
+    {
+        // [amount col, category col, TaxType, enum class|null (null = deductions, no
+        //  firebed enum → int>0), human §ref for the error message]
+        $taxes = [
+            ['fees_amount', 'fees_category', TaxType::TYPE_2, FeesPercentCategory::class, 'τελών (§8.5)'],
+            ['other_taxes_amount', 'other_taxes_category', TaxType::TYPE_3, OtherTaxesPercentCategory::class, 'λοιπών φόρων (§8.6)'],
+            ['stamp_duty_amount', 'stamp_duty_category', TaxType::TYPE_4, StampCategory::class, 'χαρτοσήμου (§8.7)'],
+            ['deductions_amount', 'deductions_category', TaxType::TYPE_5, null, 'κρατήσεων (§8.8)'],
+        ];
+
+        foreach ($taxes as [$amountCol, $categoryCol, $taxType, $enum, $ref]) {
+            $amount = round((float) ($invoice->{$amountCol} ?? 0), 2);
+            if ($amount <= 0) {
+                continue;
+            }
+
+            $category = $invoice->{$categoryCol};
+            $valid = $category !== null
+                && ($enum === null ? (int) $category > 0 : $enum::tryFrom((int) $category) !== null);
+
+            if (! $valid) {
+                throw new RuntimeException(
+                    'Invoice '.$invoice->invcode.' has a '.$ref.' amount ('.$amount.') but no valid '.
+                    'category in '.$categoryCol.'. AADE needs the category to file the taxesTotals block; '.
+                    'it cannot be guessed.'
+                );
+            }
+
+            $aade->addTaxesTotals(
+                (new TaxTotals)
+                    ->setTaxType($taxType)
+                    ->setTaxCategory((int) $category)
+                    ->setUnderlyingValue($underlyingValue)
+                    ->setTaxAmount($amount)
+            );
+        }
+    }
+
+    /** @var array<string,?int> memoised per-rate myDATA category override */
+    private array $mydataCategoryOverrideCache = [];
+
+    /**
+     * The AADE §8.2 vatCategory code for a line rate: the tenant's explicit
+     * override if set on the matching VatCategory, else derived from the rate.
+     * Resolves the 4%→6-vs-10 (and 3%→9) ν.5057 ambiguity without guessing.
+     */
+    private function resolveVatCategoryCode(float $rate): int
+    {
+        return $this->mydataCategoryOverride($rate) ?? $this->vatCategoryFor($rate);
+    }
+
+    /**
+     * Explicit §8.2 override on the tenant's VatCategory at this rate, or null to
+     * fall back to rate-derivation. Throws if two same-rate categories disagree
+     * (the rate alone can't pick) or the stored code isn't a valid §8.2 category —
+     * symmetric with resolveVatExemptionCategory().
+     *
+     * Scoped to the ONLY ambiguous rates (3% → 9, 4% → 6/10, ν.5057/2023). For every
+     * other rate the §8.2 code is unambiguous, so a stray override (mis-mapped ETL
+     * import, direct-DB write) must NOT hijack it — e.g. an override left on a 0%
+     * row would replace category 7 (+ its exemption reason → AADE [217]), or one on
+     * a 24% row would file it as 4%. Outside 3%/4% we ignore overrides entirely.
+     */
+    private function mydataCategoryOverride(float $rate): ?int
+    {
+        if (abs($rate - 3) >= 0.01 && abs($rate - 4) >= 0.01) {
+            return null;
+        }
+
+        $key = number_format($rate, 2, '.', '');
+        if (array_key_exists($key, $this->mydataCategoryOverrideCache)) {
+            return $this->mydataCategoryOverrideCache[$key];
+        }
+
+        $codes = VatCategory::query()
+            ->where('company_id', $this->tenant->id)
+            ->whereBetween('rate', [$rate - 0.01, $rate + 0.01])
+            ->whereNotNull('mydata_vat_category')
+            ->pluck('mydata_vat_category')
+            ->map(fn ($c) => (int) $c)
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return $this->mydataCategoryOverrideCache[$key] = null;
+        }
+        if ($codes->count() > 1) {
+            throw new RuntimeException(
+                'Multiple '.$key.'%-rate VAT categories set different myDATA category overrides ('.
+                $codes->implode(', ').'). Lines store only the rate, so the correct §8.2 code is '.
+                'ambiguous — keep one override per rate (Setup → VAT Categories).'
+            );
+        }
+
+        $code = (int) $codes->first();
+        if (AadeVatCategory::tryFrom($code) === null) {
+            throw new RuntimeException(
+                'A '.$key.'%-rate VAT category has mydata_vat_category='.$code.', which is not a '.
+                'valid AADE §8.2 vatCategory (1–10). Fix it in Setup → VAT Categories.'
+            );
+        }
+
+        return $this->mydataCategoryOverrideCache[$key] = $code;
+    }
+
     private function vatCategoryFor(float $rate): int
     {
         return match (true) {

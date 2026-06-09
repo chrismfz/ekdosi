@@ -24,6 +24,7 @@ class VatCategory extends Model
         'description',
         'rate',
         'vat_exemption_category',
+        'mydata_vat_category',
         'long_description',
         'is_default',
     ];
@@ -34,6 +35,7 @@ class VatCategory extends Model
             'rate' => 'decimal:2',
             'is_default' => 'boolean',
             'vat_exemption_category' => 'integer',
+            'mydata_vat_category' => 'integer',
         ];
     }
 

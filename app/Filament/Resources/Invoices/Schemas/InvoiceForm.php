@@ -16,6 +16,9 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
+use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
+use Firebed\AadeMyData\Enums\StampCategory;
 use App\Support\MyData\ReverseCharge;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -434,6 +437,44 @@ class InvoiceForm
                         ->searchable()
                         ->required(fn (Get $get) => (float) ($get('withhold_amount') ?? 0) > 0)
                         ->helperText('Υποχρεωτικό όταν υπάρχει ποσό παρακράτησης.'),
+
+                    // #3c: the other taxesTotals taxTypes (fees/otherTaxes/stamp/
+                    // deductions). Each amount, when > 0, files a taxesTotals block +
+                    // sets its summary total; the category is then required. Rare for
+                    // service tenants — left blank, standard invoices are unaffected.
+                    TextInput::make('fees_amount')
+                        ->label('Τέλη — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
+                        ->helperText('π.χ. τέλος ανθεκτικότητας/διαμονής (myDATA taxType 2).'),
+                    Select::make('fees_category')
+                        ->label('Κατηγορία τελών (§8.5)')
+                        ->options(collect(FeesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => 'Κατηγορία '.$c->value])->all())
+                        ->searchable()
+                        ->required(fn (Get $get) => (float) ($get('fees_amount') ?? 0) > 0),
+
+                    TextInput::make('other_taxes_amount')
+                        ->label('Λοιποί φόροι — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
+                        ->helperText('myDATA taxType 3.'),
+                    Select::make('other_taxes_category')
+                        ->label('Κατηγορία λοιπών φόρων (§8.6)')
+                        ->options(collect(OtherTaxesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => 'Κατηγορία '.$c->value])->all())
+                        ->searchable()
+                        ->required(fn (Get $get) => (float) ($get('other_taxes_amount') ?? 0) > 0),
+
+                    TextInput::make('stamp_duty_amount')
+                        ->label('Χαρτόσημο — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
+                        ->helperText('myDATA taxType 4.'),
+                    Select::make('stamp_duty_category')
+                        ->label('Κατηγορία χαρτοσήμου (§8.7)')
+                        ->options(collect(StampCategory::cases())->mapWithKeys(fn ($c) => [$c->value => 'Κατηγορία '.$c->value])->all())
+                        ->required(fn (Get $get) => (float) ($get('stamp_duty_amount') ?? 0) > 0),
+
+                    TextInput::make('deductions_amount')
+                        ->label('Κρατήσεις — ποσό (€)')->numeric()->step('0.01')->minValue(0)->prefix('€')->live(onBlur: true)
+                        ->helperText('myDATA taxType 5.'),
+                    TextInput::make('deductions_category')
+                        ->label('Κατηγορία κρατήσεων (§8.8)')->numeric()->minValue(1)
+                        ->required(fn (Get $get) => (float) ($get('deductions_amount') ?? 0) > 0)
+                        ->helperText('Κωδικός §8.8 (δεν υπάρχει enum στη βιβλιοθήκη — εισάγετε τον αριθμό).'),
                 ]),
         ]);
     }
