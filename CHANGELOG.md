@@ -105,6 +105,15 @@ they merge.
   cancels a 2.1).
 
 ### Fixed
+- **Παραστατικά Διακίνησης — `delivery_marks.mark_time` schema drift.** The live
+  column had drifted to `TIMESTAMP` (migrated before the create migration's source
+  was corrected to `TIME`), so the MARK persist — which writes `now()->toTimeString()`
+  (`'HH:MM:SS'`) — failed under MariaDB `STRICT_TRANS_TABLES` (SQLSTATE 22007 / 1292),
+  rolled back the issue INSERT, and left the δελτίο never reaching `VALID` (lifecycle
+  skipped). New migration realigns it to `TIME`, the twin of the invoice-side
+  `mydata_marks` fix. Surfaced by the first live AADE-dev delivery round-trip
+  (`delivery:sandbox-validate --execute`), which then passed end-to-end (ΕΚΔΟΣΗ →
+  ΕΝΑΡΞΗ → ΠΑΡΑΔΟΣΗ → ΕΛΕΓΧΟΣ, lifecycleHistory parsed). Run `php artisan migrate`.
 - **Provider tenants no longer lose the myDATA read surfaces.** Switching a
   company to a ΥΠΑΗΕΣ provider (`gr-provider`) wrongly hid the dashboard «Εικόνα
   από myDATA — ΦΠΑ», the myDATA consoles (έσοδα/έξοδα), the Ε3 overview, the
