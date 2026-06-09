@@ -118,3 +118,13 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 - **Tags on invoice/quote lines** + **«Show all / browse» picker** (above, deferred).
 - **`clear:right` on single-word doc-types** (PDF review flag) — refine if the QR-then-type
   layout is undesired for short names.
+
+### 🆕 Operator UX — Scheduler/system toggles in the Filament UI (asked 2026-06-10)
+The `EKDOSI_SCHEDULE_*` flags (and the system mailer note) should be **UI knobs**,
+not `.env` edits: an admin-only «Χρονοπρογραμματιστής / Ρυθμίσεις συστήματος» page
+with a Toggle + helperText per task (keep the ⚠ warnings, e.g. resend-failed during
+a mail outage). Store in a `system_settings` (key→value) table / singleton; have
+`routes/console.php` read the DB setting with the env flag as the default — so a
+flip takes effect next `schedule:run` (~1 min), no `config:clear`. `whmcs_auto_issue`
+stays two-key (UI + `companies.whmcs_auto_issue_immediate`); per-company backups
+already have a UI. Also surface a «mailer health» hint (global vs per-tenant SMTP).
