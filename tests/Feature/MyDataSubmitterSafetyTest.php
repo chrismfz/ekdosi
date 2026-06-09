@@ -432,6 +432,59 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<totalDeductionsAmount>10', $xml);
     }
 
+    public function test_additional_taxes_adjust_gross_and_payment(): void
+    {
+        // gross = net+vat + fees + stamp + otherTaxes − deductions (firebed's
+        // getTotalTaxes, withheld excluded); the paymentMethod amount must match it.
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([ // net 1000, gross 1240 (price_per_item drives the computed net)
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 1000, 'vat_percent' => 24,
+        ]);
+        $inv->forceFill([
+            'fees_amount' => 30, 'fees_category' => 1,
+            'stamp_duty_amount' => 50, 'stamp_duty_category' => 1,
+            'other_taxes_amount' => 20, 'other_taxes_category' => 1,
+            'deductions_amount' => 10, 'deductions_category' => 1,
+        ])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        // 1240 + 30 + 50 + 20 − 10 = 1330
+        $this->assertStringContainsString('<totalGrossValue>1330', $xml);
+        $this->assertStringContainsString('<amount>1330', $xml);
+    }
+
+    public function test_withholding_does_not_change_gross(): void
+    {
+        // Withholding is informational — the document gross stays net+vat.
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([ // net 1000, gross 1240
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 1000, 'vat_percent' => 24,
+        ]);
+        $inv->forceFill(['withhold_amount' => 200, 'withhold_category' => 3])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<totalGrossValue>1240', $xml);
+        $this->assertStringContainsString('<amount>1240', $xml);
+    }
+
+    public function test_vat_category_override_is_ignored_on_a_non_ambiguous_rate(): void
+    {
+        // A 24% category with a mis-set override (e.g. bad ETL) must NOT hijack the
+        // unambiguous 24% → 1 mapping.
+        $this->vat->forceFill(['mydata_vat_category' => 6])->save();
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv); // 24%
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatCategory>1</vatCategory>', $xml);
+        $this->assertStringNotContainsString('<vatCategory>6</vatCategory>', $xml);
+    }
+
     public function test_additional_tax_amount_without_category_throws(): void
     {
         $inv = $this->makeInvoice();

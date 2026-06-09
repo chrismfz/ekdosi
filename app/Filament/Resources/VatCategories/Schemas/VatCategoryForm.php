@@ -59,7 +59,9 @@ class VatCategoryForm
                         10 => '10 — 4% (αρ.31 ν.5057/2023)',
                         9 => '9 — 3% (αρ.31 ν.5057/2023)',
                     ])
-                    ->visible(fn (Get $get) => in_array(round((float) $get('rate')), [3, 4], true))
+                    // EXACT 3% / 4% only — round() would pull 3.5%→4 into the 4%
+                    // picker and let an operator set a 4%-regime code on a 3.5% rate.
+                    ->visible(fn (Get $get) => abs((float) $get('rate') - 3) < 0.01 || abs((float) $get('rate') - 4) < 0.01)
                     ->helperText('Προαιρετικό. Αφήστε κενό για αυτόματη αντιστοίχιση (4%→6). '
                         .'Ορίστε το μόνο αν είστε στο καθεστώς ν.5057/2023 (4%→10, 3%→9).'),
 
