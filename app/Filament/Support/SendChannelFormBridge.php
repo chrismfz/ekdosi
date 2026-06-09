@@ -27,10 +27,14 @@ class SendChannelFormBridge
 
         $config = is_array($record?->einvoice_provider_config) ? $record->einvoice_provider_config : [];
         foreach (self::fieldMap() as $key => $fields) {
-            foreach ($fields as $field => $meta) {
-                // Secrets are NEVER pre-filled into the form — a blank submit then
-                // means "keep the stored value" (same pattern as the myDATA keys).
-                $data["cfg_{$key}_{$field}"] = self::isSecret($meta) ? null : ($config[$field] ?? null);
+            foreach (array_keys($fields) as $field) {
+                // Pre-fill EVERY field (incl. secrets) with the stored value so the
+                // operator can reveal + copy-paste a token — same UX as the myDATA
+                // subscription-key inputs (which map to decrypted `encrypted` columns
+                // and are ->revealable()). The provider inputs stay
+                // ->password()->revealable(); a blank submit still means "keep the
+                // stored value" via the ->dehydrated(filled) rule in dehydrate().
+                $data["cfg_{$key}_{$field}"] = $config[$field] ?? null;
             }
         }
 
@@ -83,10 +87,5 @@ class SendChannelFormBridge
         $map = config('ekdosi.einvoice.provider_fields', []);
 
         return is_array($map) ? $map : [];
-    }
-
-    private static function isSecret(mixed $meta): bool
-    {
-        return is_array($meta) && ($meta['secret'] ?? false) === true;
     }
 }

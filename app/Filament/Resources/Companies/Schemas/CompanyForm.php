@@ -27,6 +27,7 @@ use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\KeyValue;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -227,6 +228,24 @@ class CompanyForm
                                 true,
                             ))
                             ->schema([
+                                // Provider tenants: explain that the myDATA READ environment is
+                                // NOT a separate switch — it follows the «Τρόπος αποστολής» mode
+                                // (InvoSign Δοκιμαστικό → reads Sandbox, Παραγωγή → reads Production).
+                                // This is the in-UI home for the coupling so it isn't forgotten.
+                                Placeholder::make('mydata_read_env_notice')
+                                    ->hiddenLabel()
+                                    ->visible(fn (callable $get) => SendChannel::isProvider((string) $get('send_channel')))
+                                    ->content(new HtmlString(
+                                        '<div class="text-sm rounded-lg bg-warning-50 dark:bg-warning-400/10 p-3 space-y-1">'
+                                        .'<p class="font-semibold">ℹ️ Ανάγνωση myDATA & πάροχος</p>'
+                                        .'<p>Στέλνεις μέσω παρόχου, αλλά οι έλεγχοι/συμφωνία/έξοδα διαβάζουν '
+                                        .'<strong>απευθείας από την ΑΑΔΕ</strong> με τα δικά σου διαπιστευτήρια myDATA — όχι από τον πάροχο.</p>'
+                                        .'<p>Το <strong>περιβάλλον ανάγνωσης ακολουθεί τον «Τρόπο αποστολής»</strong>: '
+                                        .'<em>Δοκιμαστικό</em> → διαβάζει από Sandbox · <em>Παραγωγή</em> → από Production. '
+                                        .'Γι\' αυτό σε δοκιμαστικό βλέπεις μόνο τα λίγα test παραστατικά του sandbox.</p>'
+                                        .'</div>'
+                                    )),
+
                                 Section::make('Sandbox / Developer credentials')
                                     ->description('Το περιβάλλον (Παραγωγή/Δοκιμαστικό/Καθόλου) επιλέγεται από το «Τρόπος αποστολής» στην καρτέλα Στοιχεία — εδώ μπαίνουν μόνο τα διαπιστευτήρια. REST credentials για το test endpoint της ΑΑΔΕ (synthetic MARKs). Κρυπτογραφημένα. Άφησε το key κενό στην επεξεργασία για να κρατηθεί το υπάρχον. ⚠ Πριν πας σε Παραγωγή, δοκίμασε με «Test Sandbox connection».')
                                     ->schema([
