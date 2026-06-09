@@ -1,12 +1,17 @@
 # Διακίνηση μέσω παρόχου — το split-brain του lifecycle (blueprint)
 
-> Status: **✅ ΛΥΘΗΚΕ (πλήρες μοντέλο υλοποιημένο).** Μετά το InvoSign reference
+> Status: **✅ ΛΥΘΗΚΕ & ΕΠΙΒΕΒΑΙΩΘΗΚΕ ΓΡΑΠΤΩΣ.** Μετά το InvoSign reference
 > (invosign.gr/site/help_site) ξεκαθάρισε ότι ο πάροχος κάνει ΜΟΝΟ έκδοση +
 > ακύρωση δελτίου· η κίνηση είναι myDATA-native. Υλοποιήθηκε αναλόγως:
 > **έκδοση + ακύρωση → πάροχος· έναρξη/παράδοση/έλεγχος/history → απευθείας myDATA**
 > (gated στα myDATA creds). Δεν υπάρχει πλέον split-brain ούτε blanket guard.
-> Εκκρεμεί μόνο η **γραπτή επιβεβαίωση του παρόχου** ότι δεν υπάρχουν άλλα
-> lifecycle endpoints (ερώτημα εστάλη).
+>
+> **Επιβεβαίωση παρόχου (Β. Καρίνος, InvoSign, email):** «τα endpoints του παρόχου
+> είναι αυτά που βλέπετε στο API guide … η **Β' φάση** του ψηφιακού δελτίου
+> αποστολής αναφέρεται στα **ERP** όχι στον πάροχο». Δηλαδή η Β' φάση (= ο κύκλος
+> κίνησης: RegisterTransfer/ConfirmDeliveryOutcome/RequestDeliveryNoteStatus) είναι
+> ευθύνη του ERP απευθείας προς myDATA — ΑΚΡΙΒΩΣ το μοντέλο που υλοποιήσαμε. Το
+> open item κλείνει· καμία περαιτέρω ενέργεια.
 
 ## Το πρόβλημα σε μία πρόταση
 Για tenant παρόχου (`einvoice_provider='gr-provider'`, π.χ. `myip`/InvoSign) η
@@ -106,11 +111,10 @@ endpoints). Υλοποιήθηκε ο φυσικός συνδυασμός:
 - UI: και τα 4 actions ξανα-εμφανίζονται για provider tenants.
 - Test: `DeliveryLifecycleServiceTest::test_provider_tenant_cancel_routes_via_provider`.
 
-## Εκκρεμεί μόνο
-Γραπτή επιβεβαίωση του InvoSign ότι **δεν** υπάρχουν endpoints για Έναρξη/
-Παράδοση/Έλεγχος-κίνησης (άρα αυτά πάνε σωστά απευθείας myDATA). Ερώτημα εστάλη.
-Αν προκύψουν endpoints, προστίθενται στον `EInvoiceProviderTransport` πίσω από τον
-ίδιο `isLiveProviderTenant()` έλεγχο, όπως η ακύρωση.
+## Εκκρεμεί
+Τίποτα. Ο πάροχος επιβεβαίωσε γραπτώς (βλ. Status) ότι η Β' φάση (κίνηση) είναι
+ευθύνη του ERP απευθείας προς myDATA — δεν υπάρχουν provider endpoints γι' αυτήν.
+Το υλοποιημένο μοντέλο είναι το οριστικό.
 
 ## Ανοιχτά ερωτήματα (για πάροχο/ΑΑΔΕ)
 1. Εκθέτει ο InvoSign endpoints για RegisterTransfer / ConfirmDeliveryOutcome /

@@ -696,9 +696,10 @@ the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
   now also matches `PROVIDER_INSERT`), **έναρξη/παράδοση/έλεγχος/history → direct
   myDATA** for everyone (the interim guard was REMOVED; the existing `initFirebed`
   creds-check gates a provider tenant lacking myDATA creds with a clear message).
-  All 4 UI actions show again for provider tenants. Only OPEN item: a written
-  InvoSign confirmation that no movement endpoints exist (question sent). Full
-  analysis: **`docs/delivery-provider-split-brain.md`**.
+  All 4 UI actions show again for provider tenants. **Confirmed in writing by
+  InvoSign (B. Karinos):** the ΔΑ Β' φάση (movement lifecycle) is the ERP's job
+  directly to myDATA, not the provider's — exactly this model. No open items.
+  Full analysis: **`docs/delivery-provider-split-brain.md`**.
 
 Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
 (Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see
