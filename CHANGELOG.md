@@ -17,6 +17,13 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Provider-tab credential UX (Company form).** Provider (π.χ. InvoSign) token
+  fields are now pre-filled + `revealable` for copy-paste — parity with the myDATA
+  subscription-key inputs (they were blank, so reveal showed nothing). `SendChannelFormBridge::hydrate`
+  pre-fills secrets too; blank-submit-keeps still holds via `dehydrated(filled)`.
+  Also a notice box on the myDATA tab for provider tenants explaining that the
+  **myDATA read environment follows the «Τρόπος αποστολής» mode** (Δοκιμαστικό →
+  reads Sandbox, Παραγωγή → Production) — so the coupling isn't a surprise.
 - **Backup failure alerting.** A SCHEDULED per-company backup that ends
   failed/partial now emails ops (`ScheduledBackupFailed` notification, queued) and
   is always `Log::error`'d — previously a nightly failure was silent. Recipients:

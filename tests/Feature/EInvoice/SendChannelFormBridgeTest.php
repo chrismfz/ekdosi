@@ -64,7 +64,7 @@ class SendChannelFormBridgeTest extends TestCase
         $this->assertSame('OLD-SECRET', $data['einvoice_provider_config']['token']); // preserved
     }
 
-    public function test_hydrate_round_trips_channel_and_nonsecret_fields_only(): void
+    public function test_hydrate_round_trips_channel_and_credential_fields(): void
     {
         $record = Company::create([
             'name' => 't', 'slug' => 't-'.uniqid(), 'country_code' => 'GR',
@@ -77,7 +77,7 @@ class SendChannelFormBridgeTest extends TestCase
 
         $this->assertSame('invosign-production', $data['send_channel']);
         $this->assertSame('https://x', $data['cfg_invosign_base_url']); // non-secret pre-filled
-        $this->assertNull($data['cfg_invosign_token']);                  // secret NOT pre-filled
+        $this->assertSame('SECRET', $data['cfg_invosign_token']);        // secret pre-filled too (revealable copy-paste, like the myDATA keys)
     }
 
     public function test_hydrate_defaults_for_a_new_record(): void
