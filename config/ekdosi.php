@@ -154,6 +154,12 @@ return [
     */
     'backup' => [
         'local_disk' => env('EKDOSI_BACKUP_LOCAL_DISK', 'local'),
+        // Email an ops address when a SCHEDULED per-company backup ends
+        // failed/partial (the unattended path — manual runs surface status in the
+        // UI). Comma-separated; if empty we fall back to the super_admin users,
+        // and always Log::error regardless. Toggle the whole thing off here.
+        'alert_on_failure' => env('EKDOSI_BACKUP_ALERT_ON_FAILURE', true),
+        'alert_email' => env('EKDOSI_BACKUP_ALERT_EMAIL'),
         'destinations' => [
             'local' => LocalBackupDestination::class,
             'sftp' => SftpBackupDestination::class,
