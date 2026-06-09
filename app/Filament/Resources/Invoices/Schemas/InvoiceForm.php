@@ -19,6 +19,7 @@ use App\Support\MyData\Codes;
 use Firebed\AadeMyData\Enums\FeesPercentCategory;
 use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
 use Firebed\AadeMyData\Enums\StampCategory;
+use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use App\Support\MyData\ReverseCharge;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -432,7 +433,7 @@ class InvoiceForm
                     Select::make('withhold_category')
                         ->label('Κατηγορία παρακράτησης (myDATA §8.4)')
                         ->options(collect(Codes::WITHHOLDING_CATEGORIES)
-                            ->mapWithKeys(fn (int $c) => [$c => 'Κατηγορία '.$c])
+                            ->mapWithKeys(fn (int $c) => [$c => $c.' — '.(WithheldPercentCategory::tryFrom($c)?->label() ?? 'Κατηγορία '.$c)])
                             ->all())
                         ->searchable()
                         ->required(fn (Get $get) => (float) ($get('withhold_amount') ?? 0) > 0)
@@ -447,7 +448,7 @@ class InvoiceForm
                         ->helperText('π.χ. τέλος ανθεκτικότητας/διαμονής (myDATA taxType 2).'),
                     Select::make('fees_category')
                         ->label('Κατηγορία τελών (§8.5)')
-                        ->options(collect(FeesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => 'Κατηγορία '.$c->value])->all())
+                        ->options(collect(FeesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
                         ->searchable()
                         ->required(fn (Get $get) => (float) ($get('fees_amount') ?? 0) > 0),
 
@@ -456,7 +457,7 @@ class InvoiceForm
                         ->helperText('myDATA taxType 3.'),
                     Select::make('other_taxes_category')
                         ->label('Κατηγορία λοιπών φόρων (§8.6)')
-                        ->options(collect(OtherTaxesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => 'Κατηγορία '.$c->value])->all())
+                        ->options(collect(OtherTaxesPercentCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
                         ->searchable()
                         ->required(fn (Get $get) => (float) ($get('other_taxes_amount') ?? 0) > 0),
 
@@ -465,7 +466,8 @@ class InvoiceForm
                         ->helperText('myDATA taxType 4.'),
                     Select::make('stamp_duty_category')
                         ->label('Κατηγορία χαρτοσήμου (§8.7)')
-                        ->options(collect(StampCategory::cases())->mapWithKeys(fn ($c) => [$c->value => 'Κατηγορία '.$c->value])->all())
+                        ->options(collect(StampCategory::cases())->mapWithKeys(fn ($c) => [$c->value => $c->value.' — '.$c->label()])->all())
+                        ->searchable()
                         ->required(fn (Get $get) => (float) ($get('stamp_duty_amount') ?? 0) > 0),
 
                     TextInput::make('deductions_amount')
