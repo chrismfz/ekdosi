@@ -1,0 +1,350 @@
+myDATA διαγνωστικό ΤΠΥ6654 — 2026-06-04 22:29:06 EEST
+ΜΑΡΚ 400013829677137 / tenant=myip / READ-ONLY
+======================================================================
+
+=== STEP 1: invoice row for ΤΠΥ6654 ===
+company: id=4 slug=myip name=MyIP Networks OE
+--- invoice ---
+  id             = 6779
+  company_id     = 4
+  invcode        = 'ΤΠΥ6654'
+  code           = 6654
+  mydata_state   = 'VALID'
+  local_status   = 'active'
+  mydata_mark    = '400013829677137'
+  mydata_url     = 'https://mydatapi.aade.gr/myDATA/TimologioQR/QRInfo?q=m4ZWUqko%2fImON5rqEJQgDl4taJHI2CAMbgddMItWgN4FdTmZ%2fa9KpqaSVElN8Ilb3OINX309ogzg1uc%2f74xFirilmgqMSg8VGc7JPLQWv%2bI%3d'
+  issued_at      = '2026-06-04 20:29:24'
+  created_at     = '2026-06-04 20:29:24'
+invoice ids matched: 6779
+
+
+=== STEP 1b: mydata_marks rows for invoice 6779 ===
+mydata_marks columns: id, company_id, legacy_id, invoice_id, mark, mydata_action, provider_key, authentication_code, delivery_state, invoice_url, request, response, mark_date, mark_time, created_at, updated_at
+row count: 2
+
+----- mark row id=1323 -----
+  id                   = 1323
+  company_id           = 4
+  legacy_id            = NULL
+  invoice_id           = 6779
+  mark                 = 400013829677137
+  mydata_action        = INSERT
+  provider_key         = NULL
+  authentication_code  = NULL
+  delivery_state       = NULL
+  invoice_url          = https://mydatapi.aade.gr/myDATA/TimologioQR/QRInfo?q=m4ZWUqko%2fImON5rqEJQgDl4taJHI2CAMbgddMItWgN4FdTmZ%2fa9KpqaSVElN8Ilb3OINX309ogzg1uc%2f74xFirilmgqMSg8VGc7JPLQWv%2bI%3d
+  mark_date            = 2026-06-04
+  mark_time            = 20:29:54
+  created_at           = 2026-06-04 20:29:54
+  updated_at           = 2026-06-04 20:29:54
+
+  >>>>> request (full) >>>>>
+<?xml version="1.0" encoding="utf-8"?>
+<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0" xmlns:ecls="https://www.aade.gr/myDATA/expensesClassificaton/v1.0">
+  <invoice>
+    <issuer>
+      <vatNumber>800561849</vatNumber>
+      <country>GR</country>
+      <branch>0</branch>
+    </issuer>
+    <counterpart>
+      <vatNumber>801280908</vatNumber>
+      <country>GR</country>
+      <branch>0</branch>
+    </counterpart>
+    <invoiceHeader>
+      <series>ΤΠΥ</series>
+      <aa>6654</aa>
+      <issueDate>2026-06-04</issueDate>
+      <invoiceType>2.1</invoiceType>
+      <currency>EUR</currency>
+    </invoiceHeader>
+    <paymentMethods>
+      <paymentMethodDetails>
+        <type>7</type>
+        <amount>1.24</amount>
+      </paymentMethodDetails>
+    </paymentMethods>
+    <invoiceDetails>
+      <lineNumber>1</lineNumber>
+      <netValue>1</netValue>
+      <vatCategory>1</vatCategory>
+      <vatAmount>0.24</vatAmount>
+      <incomeClassification>
+        <icls:classificationType>E3_561_001</icls:classificationType>
+        <icls:classificationCategory>category1_3</icls:classificationCategory>
+        <icls:amount>1</icls:amount>
+      </incomeClassification>
+    </invoiceDetails>
+    <invoiceSummary>
+      <totalNetValue>1</totalNetValue>
+      <totalVatAmount>0.24</totalVatAmount>
+      <totalWithheldAmount>0</totalWithheldAmount>
+      <totalFeesAmount>0</totalFeesAmount>
+      <totalStampDutyAmount>0</totalStampDutyAmount>
+      <totalOtherTaxesAmount>0</totalOtherTaxesAmount>
+      <totalDeductionsAmount>0</totalDeductionsAmount>
+      <totalGrossValue>1.24</totalGrossValue>
+      <incomeClassification>
+        <icls:classificationType>E3_561_001</icls:classificationType>
+        <icls:classificationCategory>category1_3</icls:classificationCategory>
+        <icls:amount>1</icls:amount>
+      </incomeClassification>
+    </invoiceSummary>
+  </invoice>
+</InvoicesDoc>
+
+  <<<<< end request <<<<<
+
+  >>>>> response (full) >>>>>
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <response>
+    <index>1</index>
+    <invoiceUid>2A77DC8AD96E86E75FEC910B6F791DD7A239D6DC</invoiceUid>
+    <invoiceMark>400013829677137</invoiceMark>
+    <qrUrl>https://mydatapi.aade.gr/myDATA/TimologioQR/QRInfo?q=m4ZWUqko%2fImON5rqEJQgDl4taJHI2CAMbgddMItWgN4FdTmZ%2fa9KpqaSVElN8Ilb3OINX309ogzg1uc%2f74xFirilmgqMSg8VGc7JPLQWv%2bI%3d</qrUrl>
+    <statusCode>Success</statusCode>
+  </response>
+</ResponseDoc>
+
+  <<<<< end response <<<<<
+
+----- mark row id=1324 -----
+  id                   = 1324
+  company_id           = 4
+  legacy_id            = NULL
+  invoice_id           = 6779
+  mark                 = NULL
+  mydata_action        = DRY_RUN
+  provider_key         = NULL
+  authentication_code  = NULL
+  delivery_state       = NULL
+  invoice_url          = NULL
+  mark_date            = 2026-06-04
+  mark_time            = 20:45:16
+  created_at           = 2026-06-04 20:45:16
+  updated_at           = 2026-06-04 20:45:16
+
+  >>>>> request (full) >>>>>
+<?xml version="1.0" encoding="utf-8"?>
+<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0" xmlns:ecls="https://www.aade.gr/myDATA/expensesClassificaton/v1.0">
+  <invoice>
+    <issuer>
+      <vatNumber>800561849</vatNumber>
+      <country>GR</country>
+      <branch>0</branch>
+    </issuer>
+    <counterpart>
+      <vatNumber>801280908</vatNumber>
+      <country>GR</country>
+      <branch>0</branch>
+    </counterpart>
+    <invoiceHeader>
+      <series>ΤΠΥ</series>
+      <aa>6654</aa>
+      <issueDate>2026-06-04</issueDate>
+      <invoiceType>2.1</invoiceType>
+      <currency>EUR</currency>
+    </invoiceHeader>
+    <paymentMethods>
+      <paymentMethodDetails>
+        <type>7</type>
+        <amount>1.24</amount>
+      </paymentMethodDetails>
+    </paymentMethods>
+    <invoiceDetails>
+      <lineNumber>1</lineNumber>
+      <netValue>1</netValue>
+      <vatCategory>1</vatCategory>
+      <vatAmount>0.24</vatAmount>
+      <incomeClassification>
+        <icls:classificationType>E3_561_001</icls:classificationType>
+        <icls:classificationCategory>category1_3</icls:classificationCategory>
+        <icls:amount>1</icls:amount>
+      </incomeClassification>
+    </invoiceDetails>
+    <invoiceSummary>
+      <totalNetValue>1</totalNetValue>
+      <totalVatAmount>0.24</totalVatAmount>
+      <totalWithheldAmount>0</totalWithheldAmount>
+      <totalFeesAmount>0</totalFeesAmount>
+      <totalStampDutyAmount>0</totalStampDutyAmount>
+      <totalOtherTaxesAmount>0</totalOtherTaxesAmount>
+      <totalDeductionsAmount>0</totalDeductionsAmount>
+      <totalGrossValue>1.24</totalGrossValue>
+      <incomeClassification>
+        <icls:classificationType>E3_561_001</icls:classificationType>
+        <icls:classificationCategory>category1_3</icls:classificationCategory>
+        <icls:amount>1</icls:amount>
+      </incomeClassification>
+    </invoiceSummary>
+  </invoice>
+</InvoicesDoc>
+
+  <<<<< end request <<<<<
+
+
+=== STEP 2: environment confirmation ===
+  id                             = 4
+  name                           = MyIP Networks OE
+  slug                           = myip
+  country_code                   = GR
+  einvoice_provider              = gr-mydata
+  einvoice_provider_key          = [REDACTED: null]
+  einvoice_provider_config       = NULL
+  einvoice_provider_mode         = off
+  afm                            = 800561849
+  tax_office                     = Ξάνθης
+  kad_primary                    = Υπηρεσίες Διαδικτύου
+  address                        = Κανάρη 5
+  city                           = Ξάνθη
+  postcode                       = 67100
+  phone                          = 215 215 4722
+  email                          = chris@myip.gr
+  logo_path                      = logos/01KSW54W2VBS6FY0QMAAS8R4J0.png
+  pdf_footer_text                = NULL
+  mail_from_address              = NULL
+  mail_from_name                 = NULL
+  invoice_audit_bcc              = NULL
+  auto_email_on_mydata_accept    = 0
+  auto_email_on_issue            = 0
+  mail_smtp_host                 = NULL
+  mail_smtp_port                 = NULL
+  mail_smtp_username             = NULL
+  mail_smtp_password             = [REDACTED: null]
+  mail_smtp_encryption           = NULL
+  mail_subject_template          = NULL
+  mail_body_template             = NULL
+  whmcs_api_url                  = https://myip.gr/clients/includes/api.php
+  whmcs_fetch_via_bridge         = 1
+  whmcs_api_identifier           = joYMNnsTplSWDff7YLI5Uhfk3kdcIV4S
+  whmcs_api_secret               = [REDACTED: 256 chars]
+  whmcs_custom_field_map         = {"wantsinvoice":12,"vatno":13,"taxoffice":14,"occupation":15,"griniaris":338}
+  whmcs_webhook_secret           = [REDACTED: 256 chars]
+  whmcs_invoice_min_date         = 2026-03-01
+  whmcs_third_party_enabled      = 1
+  whmcs_auto_issue_immediate     = 0
+  whmcs_default_invoice_type_id  = NULL
+  whmcs_amount_includes_tax      = 1
+  mydata_aade_id_sandbox         = 800561849
+  mydata_subscription_key_sandbox = [REDACTED: 256 chars]
+  mydata_aade_id_production      = 800561849M
+  mydata_subscription_key_production = [REDACTED: 256 chars]
+  mydata_mode                    = production
+  mydata_send_item_descr         = 0
+  gsis_username                  = NEXON12345
+  gsis_password                  = [REDACTED: 200 chars]
+  created_at                     = 2026-05-30 00:05:42
+  updated_at                     = 2026-06-04 22:21:37
+  quote_counter                  = 1
+
+  qr_url prefix check: starts-with mydatapi.aade.gr (PROD)? YES → PROD
+  qr_url contains 'mydataapidev' (SANDBOX)? NO
+
+
+=== STEP 3: RequestTransmittedDocs analysis (from --raw run) ===
+Window: 04/05/2026 – 04/06/2026 (covers today). Pages returned: 1 (complete, ends </RequestedDoc>).
+Unique 40001-marks in feed: 123. Range min=400013455169790 max=400013825294978.
+Target MARK 400013829677137 present in feed? NO (0 occurrences).
+Note: target mark (...829677137) is NEWER/HIGHER than the feed max (...825294978 = ΤΠΥ6661), yet absent.
+
+=== STEP 4: compare ΤΠΥ6654 vs ΤΠΥ6661 (local) ===
+ΤΠΥ6661 not found locally.
+
+
+=== STEP 4: field diff ΤΠΥ6654 (ekdosi-new request) vs ΤΠΥ6661 (as stored in AADE feed) ===
+ΤΠΥ6661 is NOT in our local DB → it was issued by the LEGACY app, not ekdosi-new.
+
+Common (both Success-accepted): issuer 800561849/GR/branch0; invoiceType 2.1; series ΤΠΥ; currency EUR;
+  vatCategory 1; incomeClassification E3_561_001/category1_3; the 5 zero tax-total summary fields present.
+
+Differences (none of which blocks acceptance — both already got Success+MARK):
+  counterpart  : 6654 = VAT only (801280908, no name/address) | 6661 = VAT 133523967 + <address> postalCode+city
+  paymentMethod: 6654 type=7 amount=1.24 (no info) | 6661 type=3 amount=15.50 + <paymentMethodInfo>
+  extra fields : 6661 has <vatPaymentSuspension>, <withheldAmount>/<withheldPercentCategory> (legacy emits them); 6654 omits.
+  marks        : 6654 = 400013829677137 (NEWER) | 6661 = 400013825294978 (OLDER → submitted earlier → indexed already)
+
+=> 6654's XML is structurally valid and consistent with the accepted shape. No field difference explains its
+   absence from the feed; it simply carries a newer MARK that AADE has not yet surfaced in RequestTransmittedDocs.
+
+
+=== STEP 3b: reconcile bucket summary (live, no --raw) ===
+AADE total 123 | Local total 113 | Matched 112 | StateMismatch 0 | MissingAtAade 1 | MissingLocally 11 | DupLocal 0
+
+TARGET BUCKET: ΤΠΥ6654 MARK=400013829677137 => **Missing at AADE**
+  («Καταχωρημένο τοπικά ως υποβληθέν, αλλά το AADE δεν επιστρέφει αυτό το ΜΑΡΚ.»)
+
+!!! COUNTER COLLISION (dual-run) — the important secondary finding !!!
+  'Missing locally' = 11 docs the AADE feed has but we don't: ΤΠΥ 6651..6661,
+  marks 400013795872018 .. 400013825294978 — a batch issued TODAY by the LEGACY app.
+  Among them: ΤΠΥ 6654 MARK=400013809018448  <-- legacy's OWN 6654.
+  So series+aa 'ΤΠΥ 6654' now exists TWICE at AADE: legacy ...809018448 AND ekdosi-new ...829677137.
+  Legacy & new app counters have COLLIDED (both reached 6654). All 11 legacy marks are LOWER than
+  our 829677137 => our doc is the single NEWEST mark, which is exactly why it's the one not yet indexed.
+
+=== STEP 5: CONCLUSION ===
+1) Environment: PROD. mydata_mode=production; qrUrl/invoice_url on https://mydatapi.aade.gr (NOT mydataapidev). Issuer AFM 800561849. No sandbox leak.
+2) XML validity: VALID. AADE returned statusCode=Success + invoiceMark 400013829677137 + invoiceUid + qrUrl. mydata_state=VALID, local_status=active. Structure matches accepted shape (cf. ΤΠΥ6661).
+3) In RequestTransmittedDocs? NO. Feed returned 1 complete page, 123 marks, max=400013825294978; our 829677137 (newer/higher) is absent. Bucket = Missing at AADE.
+4) Diagnosis: AADE INDEXING LAG, not our bug. The doc is fully registered at AADE (Success+MARK+working prod QR); it simply has not yet surfaced in the RequestTransmittedDocs feed (~2h elapsed; AADE's transmitted-docs view can lag minutes-to-hours). Every older mark is present; only the newest is missing — the signature of lag, not rejection or wrong environment.
+5) SEPARATE real issue exposed: legacy app is running in parallel and issued ΤΠΥ 6651-6661 today, INCLUDING its own ΤΠΥ 6654 (MARK ...809018448). The ekdosi-new ΤΠΥ counter has collided with legacy -> duplicate AA 6654 at AADE. This is a dual-run numbering problem to fix at the operational/counter level (it does NOT affect 6654's visibility, which is pure lag).
+6) RECOMMENDED ACTION: WAIT and re-run `php artisan mydata:reconcile-sales --tenant=myip` later (e.g. +2-6h / next morning); the mark should move to 'Matched'. Do NOT resubmit and do NOT cancel (it is already VALID at AADE — resubmit would create a second duplicate). If still absent after ~24h, open an AADE myDATA ticket quoting MARK 400013829677137 / UID 2A77DC8AD96E86E75FEC910B6F791DD7A239D6DC. SEPARATELY: stop dual-issuing (legacy vs new) and reconcile the ΤΠΥ counter to avoid further 66xx collisions.
+
+======================================================================
+=== STEP 6: CORRECTION after operator's CancelInvoice attempt (301) ===
+======================================================================
+Update timestamp: 2026-06-05 00:1x (after operator cancel)
+
+NEW EVIDENCE from operator: CancelInvoice(400013829677137) returned
+  statusCode=ValidationError, code=301
+  "Invoice with ΜΑΡΚ 400013829677137 not found for VAT number 800561849"
+
+This OVERTURNS the earlier "indexing-lag, benign" reading of STEP 5.
+
+A) Cancel mechanics (operator question "δεν στέλνουμε XML για cancel?"):
+   AADE CancelInvoice is NOT an InvoicesDoc submission. It is a parameterised
+   call carrying ONLY the mark (+ entity VAT). It sends no invoice XML and no
+   reason — the "Cancel reason: Τεστ" is stored LOCALLY only. So: correct, no
+   XML on cancel.
+
+B) Environment proof (read-only, in-memory firebed init, NO db/config change):
+   - SANDBOX (dev creds, aade_id 800561849): 7 docs, marks 400001964394607..
+     400001964541385. MARK 400013829677137 NOT present. Sandbox marks live in a
+     DIFFERENT numeric range (4000019xxx).
+   - PRODUCTION (prod creds, aade_id 800561849M): 123 docs, max 400013825294978.
+     MARK 400013829677137 NOT present.
+   - Our mark 400013829677137 sits in the PROD numeric sequence (4000134..4000138),
+     just above the current prod feed max.  => The submit DID go to PRODUCTION;
+     it was NOT mis-routed to dev. (Sandbox has neither the mark nor the range.)
+
+C) So: PROD submit returned Success + a genuine prod-sequence mark + prod qrUrl,
+   yet AADE PROD now (a) omits it from RequestTransmittedDocs and (b) returns 301
+   "not found" on CancelInvoice. Both prod query subsystems agree the document is
+   not registered/queryable under VAT 800561849.
+
+D) Ruled out: wrong environment (proved prod). Still possible:
+   - AADE-side propagation lag / incident: mark issued in the submission store
+     but not yet propagated to the query+cancel store (would explain BOTH the
+     feed-absence AND a transient 301). It is the single NEWEST mark, the classic
+     lag signature — but ~4h is long.
+   - Phantom/lost mark: AADE returned a mark that did not durably persist.
+   Either way it is an AADE-SIDE discrepancy, not a local XML/mapping fault
+   (XML is valid; 112 other ekdosi-new invoices matched at prod).
+
+E) LOCAL STATE IS NOW INCONSISTENT: operator's cancel flipped us to
+   local_status=cancelled and pushed "cancelled" to WHMCS (log 2026-06-05
+   00:10:38), but AADE never had the mark to cancel (301). So locally cancelled
+   vs AADE has-no-record. If AADE later surfaces the mark as VALID we get a
+   state mismatch; if it never surfaces, ΤΠΥ6654 was effectively never filed.
+
+F) RECOMMENDED ACTION (still NO blind resubmit):
+   1. Re-run read-only checks periodically (RequestTransmittedDocs + a direct
+      RequestDocs-by-mark) over the next 24h; watch whether 829677137 appears.
+   2. Open an AADE myDATA prod ticket quoting MARK 400013829677137 / UID
+      2A77DC8AD96E86E75FEC910B6F791DD7A239D6DC / issuer 800561849 / 2026-06-04
+      20:29, asking why a Success-acknowledged mark is absent + 301 on cancel.
+   3. Do NOT resubmit until AADE confirms the mark is truly absent — a resubmit
+      while it is merely lagging would create a DUPLICATE (and note a legacy
+      ΤΠΥ 6654 / MARK 400013809018448 already exists at AADE → numbering clash).
+   4. Reconcile the local cancelled state once AADE's truth is known.
