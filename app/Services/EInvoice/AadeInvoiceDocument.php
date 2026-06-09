@@ -11,6 +11,9 @@ use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
+use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
+use Firebed\AadeMyData\Enums\StampCategory;
 use Firebed\AadeMyData\Enums\TaxType;
 use Firebed\AadeMyData\Enums\VatCategory as AadeVatCategory;
 use Firebed\AadeMyData\Enums\VatExemption;
@@ -192,10 +195,10 @@ class AadeInvoiceDocument
             ->setTotalNetValue($vatBreakdown->totalNet())
             ->setTotalVatAmount($vatBreakdown->totalVat())
             ->setTotalWithheldAmount((float) ($invoice->withhold_amount ?? 0))
-            ->setTotalFeesAmount(0.0)
-            ->setTotalStampDutyAmount(0.0)
-            ->setTotalOtherTaxesAmount(0.0)
-            ->setTotalDeductionsAmount(0.0)
+            ->setTotalFeesAmount((float) ($invoice->fees_amount ?? 0))
+            ->setTotalStampDutyAmount((float) ($invoice->stamp_duty_amount ?? 0))
+            ->setTotalOtherTaxesAmount((float) ($invoice->other_taxes_amount ?? 0))
+            ->setTotalDeductionsAmount((float) ($invoice->deductions_amount ?? 0))
             ->setTotalGrossValue($vatBreakdown->totalGross());
 
         // Summary-level income classification = aggregate of the per-line
@@ -246,6 +249,11 @@ class AadeInvoiceDocument
                     ->setTaxAmount($withhold)
             );
         }
+
+        // #3c: the remaining taxesTotals taxTypes (fees/otherTaxes/stamp/deductions).
+        // Each mirrors withholding: an amount + a §8.x category, emitted only when the
+        // amount is > 0, with the matching summary total set above.
+        $this->addAdditionalTaxes($aade, $invoice, $vatBreakdown->totalNet());
 
         if ($counterpart) {
             $aade->setCounterpart($counterpart);
@@ -424,6 +432,52 @@ class AadeInvoiceDocument
      * resolved from the tenant's 0%-rate VatCategory (resolveVatExemptionCategory).
      * That resolution is what guards against filing an unexplained exempt line.
      */
+    /**
+     * Emit taxesTotals[taxType=2..5] (fees / otherTaxes / stampDuty / deductions)
+     * for any that carry an amount. Mirrors the withholding block: amount + a §8.x
+     * category (validated against the firebed enum where one exists; deductions has
+     * none → a positive int is required). The summary totals are set from the same
+     * columns. Throws — never guesses a category — when an amount lacks a valid one.
+     */
+    private function addAdditionalTaxes(AadeInvoice $aade, Invoice $invoice, float $underlyingValue): void
+    {
+        // [amount col, category col, TaxType, enum class|null (null = deductions, no
+        //  firebed enum → int>0), human §ref for the error message]
+        $taxes = [
+            ['fees_amount', 'fees_category', TaxType::TYPE_2, FeesPercentCategory::class, 'τελών (§8.5)'],
+            ['other_taxes_amount', 'other_taxes_category', TaxType::TYPE_3, OtherTaxesPercentCategory::class, 'λοιπών φόρων (§8.6)'],
+            ['stamp_duty_amount', 'stamp_duty_category', TaxType::TYPE_4, StampCategory::class, 'χαρτοσήμου (§8.7)'],
+            ['deductions_amount', 'deductions_category', TaxType::TYPE_5, null, 'κρατήσεων (§8.8)'],
+        ];
+
+        foreach ($taxes as [$amountCol, $categoryCol, $taxType, $enum, $ref]) {
+            $amount = round((float) ($invoice->{$amountCol} ?? 0), 2);
+            if ($amount <= 0) {
+                continue;
+            }
+
+            $category = $invoice->{$categoryCol};
+            $valid = $category !== null
+                && ($enum === null ? (int) $category > 0 : $enum::tryFrom((int) $category) !== null);
+
+            if (! $valid) {
+                throw new RuntimeException(
+                    'Invoice '.$invoice->invcode.' has a '.$ref.' amount ('.$amount.') but no valid '.
+                    'category in '.$categoryCol.'. AADE needs the category to file the taxesTotals block; '.
+                    'it cannot be guessed.'
+                );
+            }
+
+            $aade->addTaxesTotals(
+                (new TaxTotals)
+                    ->setTaxType($taxType)
+                    ->setTaxCategory((int) $category)
+                    ->setUnderlyingValue($underlyingValue)
+                    ->setTaxAmount($amount)
+            );
+        }
+    }
+
     /** @var array<string,?int> memoised per-rate myDATA category override */
     private array $mydataCategoryOverrideCache = [];
 

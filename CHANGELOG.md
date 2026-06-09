@@ -17,6 +17,14 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Full myDATA taxesTotals (fees / other taxes / stamp duty / deductions).** Beyond
+  withholding (G1, taxType 1), invoices can now carry a fees (2, §8.5 — e.g. τέλος
+  ανθεκτικότητας), other-taxes (3, §8.6), stamp-duty (4, §8.7) and deductions (5, §8.8)
+  amount + category. The submitter emits a `taxesTotals` block per type with an amount
+  and sets the matching `invoiceSummary` total (was hardcoded 0); the category is
+  validated against the firebed enum (deductions has none → a positive int) and throws
+  when an amount lacks a valid one. New invoice columns + InvoiceForm fields. **Deploy:**
+  `php artisan migrate`.
 - **4% VAT category override (ν.5057/2023 ambiguity).** A 4% rate maps to AADE
   §8.2 category 6 (pre-existing island) OR 10 (αρ.31 ν.5057/2023); 3%→9. New
   optional `vat_categories.mydata_vat_category` override (Setup → VAT Categories,

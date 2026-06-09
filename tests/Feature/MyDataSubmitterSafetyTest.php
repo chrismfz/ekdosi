@@ -408,6 +408,55 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<totalWithheldAmount>200', $xml);
     }
 
+    public function test_all_additional_tax_types_emit_blocks_and_totals(): void
+    {
+        // #3c: fees (2) / otherTaxes (3) / stampDuty (4) / deductions (5) each emit a
+        // taxesTotals block + set the matching summary total when an amount is present.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill([
+            'fees_amount' => 30, 'fees_category' => 1,
+            'other_taxes_amount' => 20, 'other_taxes_category' => 1,
+            'stamp_duty_amount' => 50, 'stamp_duty_category' => 1,
+            'deductions_amount' => 10, 'deductions_category' => 1,
+        ])->save();
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        foreach (['2', '3', '4', '5'] as $taxType) {
+            $this->assertStringContainsString("<taxType>{$taxType}</taxType>", $xml);
+        }
+        $this->assertStringContainsString('<totalFeesAmount>30', $xml);
+        $this->assertStringContainsString('<totalOtherTaxesAmount>20', $xml);
+        $this->assertStringContainsString('<totalStampDutyAmount>50', $xml);
+        $this->assertStringContainsString('<totalDeductionsAmount>10', $xml);
+    }
+
+    public function test_additional_tax_amount_without_category_throws(): void
+    {
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill(['fees_amount' => 30, 'fees_category' => null])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/no valid category/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
+    }
+
+    public function test_invalid_additional_tax_category_throws(): void
+    {
+        // 999 is not a valid §8.5 fees category → loud-fail, don't file garbage.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $inv->forceFill(['fees_amount' => 30, 'fees_category' => 999])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/no valid category/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
+    }
+
     public function test_withholding_amount_without_category_throws(): void
     {
         $inv = $this->makeInvoice();
