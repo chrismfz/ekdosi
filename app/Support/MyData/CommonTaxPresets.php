@@ -16,11 +16,11 @@ class CommonTaxPresets
 {
     /** tax group → [amount column, category column] on `invoices`. */
     public const GROUPS = [
-        'withhold' => ['withhold_amount', 'withhold_category'],
-        'fees' => ['fees_amount', 'fees_category'],
-        'other_taxes' => ['other_taxes_amount', 'other_taxes_category'],
-        'stamp_duty' => ['stamp_duty_amount', 'stamp_duty_category'],
-        'deductions' => ['deductions_amount', 'deductions_category'],
+        'withhold' => ['withhold_amount', 'withhold_category', 'withhold_rate'],
+        'fees' => ['fees_amount', 'fees_category', 'fees_rate'],
+        'other_taxes' => ['other_taxes_amount', 'other_taxes_category', 'other_taxes_rate'],
+        'stamp_duty' => ['stamp_duty_amount', 'stamp_duty_category', 'stamp_duty_rate'],
+        'deductions' => ['deductions_amount', 'deductions_category', 'deductions_rate'],
     ];
 
     /**
@@ -49,7 +49,7 @@ class CommonTaxPresets
         return self::all()[$key] ?? null;
     }
 
-    /** [amountColumn, categoryColumn] for a preset's group. */
+    /** [amountColumn, categoryColumn, rateColumn] for a preset's group. */
     public static function columnsFor(array $preset): array
     {
         return self::GROUPS[$preset['group']];

@@ -42,7 +42,7 @@ class CommonTaxPresetsTest extends TestCase
         $stamp = CommonTaxPresets::find('stamp_3_6');
         $this->assertSame('stamp_duty', $stamp['group']);
         $this->assertSame(3, $stamp['category']);
-        $this->assertSame(['stamp_duty_amount', 'stamp_duty_category'], CommonTaxPresets::columnsFor($stamp));
+        $this->assertSame(['stamp_duty_amount', 'stamp_duty_category', 'stamp_duty_rate'], CommonTaxPresets::columnsFor($stamp));
 
         // 3.6% of 1000 = 36.00
         $this->assertSame(36.0, CommonTaxPresets::amountFor($stamp, 1000.0));

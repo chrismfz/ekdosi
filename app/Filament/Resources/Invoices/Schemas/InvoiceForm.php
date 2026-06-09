@@ -429,26 +429,31 @@ class InvoiceForm
                         ->dehydrated(false)
                         ->live()
                         ->columnSpanFull()
-                        ->helperText('Διάλεξε ένα τυπικό τέλος/φόρο: συμπληρώνει την κατηγορία· '
-                            .'για ποσοστιαία υπολογίζει αυτόματα το ποσό από την καθαρή αξία των γραμμών. '
-                            .'⚠ Το ποσό υπολογίζεται τη στιγμή της επιλογής — αν αλλάξεις γραμμές/έκπτωση, ξαναδιάλεξέ το (ή διόρθωσε το ποσό).')
-                        ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                        ->helperText('Διάλεξε ένα τυπικό τέλος/φόρο: συμπληρώνει την κατηγορία + το ποσοστό. '
+                            .'Το ποσό υπολογίζεται ΑΥΤΟΜΑΤΑ στον server (ποσοστό × καθαρή αξία) κατά την αποθήκευση — '
+                            .'μένει πάντα σωστό ακόμη κι αν αλλάξεις γραμμές/έκπτωση.')
+                        ->afterStateUpdated(function ($state, callable $set) {
                             $preset = CommonTaxPresets::find($state);
                             if (! $preset) {
                                 return;
                             }
-                            [$amountCol, $categoryCol] = CommonTaxPresets::columnsFor($preset);
+                            [, $categoryCol, $rateCol] = CommonTaxPresets::columnsFor($preset);
                             $set($categoryCol, $preset['category']);
-                            // Apply the header discount too, so the base matches the filed net.
-                            $net = CommonTaxPresets::netFromLines(
-                                (array) $get('lines'),
-                                (float) ($get('header_discount_percent') ?? 0)
-                            );
-                            $amount = CommonTaxPresets::amountFor($preset, $net);
-                            if ($amount !== null) {
-                                $set($amountCol, $amount);
+                            if ($preset['rate'] !== null) {
+                                // Store the RATE — RecomputeInvoiceTaxes derives the amount
+                                // from the authoritative net on save (no stale value).
+                                $set($rateCol, $preset['rate']);
                             }
+                            // Flat presets (no rate) → the operator types the amount.
                         }),
+
+                    // Optional explicit %-rates. When set, the amount is recomputed
+                    // server-side (rate × net) on save by RecomputeInvoiceTaxes.
+                    TextInput::make('withhold_rate')->label('Παρακράτηση — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
+                    TextInput::make('stamp_duty_rate')->label('Χαρτόσημο — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
+                    TextInput::make('fees_rate')->label('Τέλη — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
+                    TextInput::make('other_taxes_rate')->label('Λοιποί φόροι — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
+                    TextInput::make('deductions_rate')->label('Κρατήσεις — ποσοστό %')->numeric()->step('0.0001')->minValue(0)->suffix('%'),
                     TextInput::make('withhold_amount')
                         ->label('Ποσό παρακράτησης (€)')
                         ->numeric()
