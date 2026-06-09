@@ -53,7 +53,8 @@ class InvoicePdfRelatedDocsTest extends TestCase
         $invoice->loadMissing([
             'lines', 'invoiceType', 'customer', 'company',
             'creditNotes' => fn ($q) => $q->where('local_status', 'active'),
-            'creditedInvoice', 'deliveryNotes',
+            'creditedInvoice',
+            'deliveryNotes' => fn ($q) => $q->where('local_status', 'active'),
         ]);
         $renderer = app(InvoicePdfRenderer::class);
         $totals = (fn (Invoice $i) => $this->totalsView($i))->call($renderer, $invoice);
@@ -112,6 +113,28 @@ class InvoicePdfRelatedDocsTest extends TestCase
 
         $this->assertStringContainsString('ΠΙΣΕΝΕΡΓΟ', $html);       // issued → shown
         $this->assertStringNotContainsString('ΠΙΣΠΡΟΧΕΙΡΟ', $html);  // draft → hidden
+    }
+
+    public function test_only_issued_delivery_notes_are_linked(): void
+    {
+        // A draft / cancelled δελτίο must NOT appear on the customer invoice — only
+        // issued (active) ones, same rule as credit notes.
+        $inv = $this->invoice();
+        \App\Models\DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΔΑΕΝΕΡΓΟ', 'code' => 1,
+            'delivery_type_id' => $this->type->id, 'issued_at' => now(),
+            'invoice_id' => $inv->id, 'local_status' => 'active',
+        ]);
+        \App\Models\DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΔΑΠΡΟΧΕΙΡΟ', 'code' => 2,
+            'delivery_type_id' => $this->type->id, 'issued_at' => now(),
+            'invoice_id' => $inv->id, 'local_status' => 'draft',
+        ]);
+
+        $html = $this->renderHtml($inv->fresh());
+
+        $this->assertStringContainsString('ΔΑΕΝΕΡΓΟ', $html);
+        $this->assertStringNotContainsString('ΔΑΠΡΟΧΕΙΡΟ', $html);
     }
 
     public function test_credit_note_shows_the_invoice_it_reverses(): void
