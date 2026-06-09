@@ -66,3 +66,55 @@ table filters + picker wiring). Not worth bolting on mid-form-redesign;
 revisit as a focused slice.
 
 ---
+
+---
+
+## 📋 Roadmap snapshot — open items (2026-06-10)
+
+Consolidated «what's left» after the myDATA-payload + product-linked-taxes work.
+Grouped by theme; ✅ done items live in CLAUDE.md.
+
+### 🟢 Finish/verify — built, NOT live-validated (high value, low risk)
+- **Sandbox round-trips** (run on the VM): ΔΑ lifecycle, the new taxTypes
+  (fees/stamp/other/deductions) + **product-linked taxes**, the **4% override**.
+  Runbook: `docs/sandbox-validation-runbook.md`. Once green → mark sandbox-validated.
+- **Schedules**: most `EKDOSI_SCHEDULE_*` are ON by default; backups + auto-issue +
+  resend-failed + service-renewals are OFF (safe). Flip per-need in `.env`.
+
+### 🟠 myDATA completeness
+- **`invoice_taxes` table (Phase-2)** — many categories per taxType on one invoice
+  (today: one/type, else throw). Also lets a fee count in `gross_total`/owed.
+- **Product-linked taxes — money-core decision**: fees are filed in the AADE gross +
+  payment but NOT yet in `invoices.gross_total` / the money cache (Καρτέλα/owed). If
+  fees should count toward what the customer owes → a money-core follow-up.
+- **§8.13 measurement units** for goods delivery notes (follow-up if a goods tenant).
+- **Expenses (Έξοδα)**: `SendExpensesClassification` AADE submit, `RequestVatInfo`/E3
+  cross-checks, `RequestMyExpenses`, manual expense entry, per-row + supplier CSV import.
+
+### 🔵 Big features (when the time comes)
+- **Estonian PEPPOL submitter** — the last big ❌ (stub; `EInvoiceSubmitter` slot ready).
+- **GR Πάροχος/Ιδιοπάροχος (ΥΠΑΗΕΣ)** — blueprint only (`docs/paroxos/regulatory-blueprint.md`).
+- **Bridges/Connectors Phase 1** — a real 2nd source (e.g. WooCommerce) beyond WHMCS.
+
+### 🟣 WHMCS loose ends
+- **Multi-party SPLIT write-back** (one WHMCS invoice → many MARKs, one `invoiced` col).
+- **«All of a client's third parties» 2nd dropdown** (needs a `contacts-by-userid` bridge endpoint).
+
+### ⚙️ Tech debt / latent (CLAUDE.md «Known latent items»)
+- **Strict tenant scope** — flip `CompanyScope` null→throw once every CLI/queue uses `actAs`.
+- **Soft-deleted FK rows render blank** in Filament Selects → `withTrashed()` label lookups + a «deleted» badge.
+- **`TenantScopedUnique`** helper — `Rule::unique(...)->where('company_id', …)` degrades to
+  `IS NULL` outside panel context (duplicates can pass in queue/CLI).
+- **FK-aware delete guards** (`GuardedDeleteAction`) — friendly count-and-block + «Deactivate».
+
+### 🔒 Backup / DR
+- **Phase 6 — «work without APP_KEY»** (plain `mysqldump` self-sufficient) — deferred
+  (`docs/company-portability-plan.md`).
+- **Backup encryption** — operator prefers «no app-level» → deferred (rely on SFTP/S3 access control).
+
+### 💡 PDF / UX & ideas
+- **G10** — one adaptive PDF template vs 8 legacy designs.
+- **Curated tax-presets expansion** per sector + **%-per-product** (not just €/unit).
+- **Tags on invoice/quote lines** + **«Show all / browse» picker** (above, deferred).
+- **`clear:right` on single-word doc-types** (PDF review flag) — refine if the QR-then-type
+  layout is undesired for short names.

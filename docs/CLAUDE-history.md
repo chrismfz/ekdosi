@@ -2186,7 +2186,7 @@ PR: **295 pass**.
 ## myDATA code tables + pre-flight audit (`mydata:preflight`)
 
 The official AADE spec is committed at the repo root:
-**`myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (the §8 appendix
+**`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (the §8 appendix
 has every code table; §7.2 has the full business-error list 101–280).
 
 **`App\Support\MyData\Codes`** bakes the §8 tables into one authoritative
@@ -2235,7 +2235,7 @@ side; the submitter changes are the payload side.
 The SendInvoices submit path is now validated against the AADE **sandbox**
 for all four invoice types myip actually issues, not just the single PR #57
 retail ΑΠΥ. Report committed at the repo root:
-`mydata-sandbox-validation-2026-05-28.md`.
+`docs/mydata-sandbox-validation-2026-05-28.md`.
 
 **Result: zero rejections, no payload changes needed.** Filed + accepted:
 `1.1` (B2B τιμολόγιο w/ counterpart), `2.1` (service ΤΠΥ), `11.2` (retail

@@ -162,4 +162,4 @@ toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a t
 - **`docs/Comparison.md`** — legacy → new mapping + what's net-new / deferred.
 - **`docs/services-quotes-roadmap.md`** — Quotes + Services/recurring (both built).
 - **`docs/CLAUDE-history.md`** — archived per-PR history and resolved findings.
-- **`myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** — the AADE spec.
+- **`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** — the AADE spec.

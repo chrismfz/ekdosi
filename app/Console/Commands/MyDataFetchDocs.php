@@ -27,7 +27,7 @@ use Throwable;
  *   php artisan mydata:fetch-docs --tenant=myip --vat --grouped --raw
  *
  * Tip: pipe --raw to a file and share it back, e.g.
- *   php artisan mydata:fetch-docs --tenant=myip --raw > requestdocs-sample.xml
+ *   php artisan mydata:fetch-docs --tenant=myip --raw > docs/samples/requestdocs-sample.xml
  */
 class MyDataFetchDocs extends Command
 {
