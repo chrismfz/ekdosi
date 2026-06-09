@@ -118,3 +118,46 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 - **Tags on invoice/quote lines** + **«Show all / browse» picker** (above, deferred).
 - **`clear:right` on single-word doc-types** (PDF review flag) — refine if the QR-then-type
   layout is undesired for short names.
+
+### 🆕 Settings-in-the-UI — single source of truth, visible + audited (asked 2026-06-10)
+**Principle:** NO runtime setting lives only in `.env`/`config` where it can be
+silently left off and forgotten («θα φταίμε»). Every operator-facing knob —
+**admin / super_admin / operator** — is set AND **visible** from the web UI, and
+each change is **recorded in the activity log** (win-win audit: who turned what
+on/off, when).
+
+**Concretely:**
+- A `system_settings` (key→value, typed) store + a settings model that uses our
+  existing `TracksActivity`/`LogsActivity` → toggle changes land in the activity
+  log automatically (causer = the user) and show in `ActivityFeed`.
+- Admin-only Filament Page(s): **«Χρονοπρογραμματιστής»** (the `EKDOSI_SCHEDULE_*`
+  flags as Toggles + helperText + ⚠ for the dangerous ones, e.g. resend-failed
+  during a mail outage) and a wider **«Ρυθμίσεις συστήματος»** (mailer health
+  hint: global vs per-tenant SMTP; cache/queue/cron status via `ops:health`).
+- `routes/console.php` (and any code reading these) reads the DB setting with the
+  env flag as the DEFAULT — a flip takes effect next `schedule:run` (~1 min), no
+  `config:clear`. `.env` stays the deploy-time default/override only.
+- **Visibility first:** a read-only «what's on/off right now» panel so nothing is
+  silently disabled. `whmcs_auto_issue` stays two-key (UI + `companies.whmcs_auto_issue_immediate`).
+- Role-scope: per-company knobs (backups, billing, email) gated to company_admin;
+  system/cross-tenant ones to super_admin; the operator-relevant ones visible to operators.
+- Migrate the existing scattered env flags + the per-company toggles under this one
+  consistent, audited surface over time (not a big-bang rewrite).
+
+### 🆕 Health / observability — in the web UI, not just `artisan` (asked 2026-06-10)
+Not everyone on the team has terminal access, so `php artisan ops:health` must also
+be a **web page**. An admin/super_admin Filament Page «Υγεία συστήματος» that shows,
+read-only:
+- **Liveness:** is the queue worker (systemd) up? did the cron `schedule:run` fire
+  recently? cache/DB/Redis reachable? mailer (global vs per-tenant) configured?
+  disk space. → wrap the existing `OperatorHealth` service (reuse its checks; the
+  command and the page render the same source).
+- **«Τι έτρεξε / πότε / πόσο»:** per scheduled task — last run, duration, success/fail,
+  last error. Needs a unified `scheduled_task_runs` log (task, started_at, finished_at,
+  status, summary) written via the scheduler's `->onSuccess()/->onFailure()` hooks in
+  `routes/console.php` (today only some tasks record state: CompanyBackupRun,
+  VatPictureCache «last fetch», mydata reconcile). Surface e.g. «ΦΠΑ τελευταία λήψη:
+  …», «WHMCS fetch: …», «Backup: …».
+- **Queue:** pending + failed jobs count, with a «retry/clear» action (admin).
+- Ties into the settings-in-UI item above: one «Σύστημα» area = toggles (audited) +
+  health + run history, so an operator sees at a glance what's on, what ran, and what's stuck.
