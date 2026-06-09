@@ -16,6 +16,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
+use App\Support\MyData\CommonTaxPresets;
 use Firebed\AadeMyData\Enums\FeesPercentCategory;
 use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
 use Firebed\AadeMyData\Enums\StampCategory;
@@ -409,14 +410,42 @@ class InvoiceForm
                     TextInput::make('country')->label('Χώρα')->maxLength(60)->helperText('Κατά προτίμηση ISO alpha-2. Κανονικοποιείται κατά την υποβολή.'),
                 ]),
 
-            // ─── Παρατηρήσεις (εκτύπωσης) + παρακράτηση — collapsed ───
-            Section::make('Παρατηρήσεις (εκτύπωσης) & παρακράτηση')
+            // ─── Παρατηρήσεις (εκτύπωσης) + τέλη/φόροι/παρακράτηση — collapsed ───
+            Section::make('Παρατηρήσεις (εκτύπωσης) & τέλη/φόροι')
                 ->columnSpanFull()
                 ->collapsed()
                 ->schema([
                     Textarea::make('notes')->rows(4)->columnSpanFull()
                         ->label('Παρατηρήσεις (εκτυπώνονται στο παραστατικό)')
                         ->helperText('⚠ Εμφανίζονται στο PDF και στο email του πελάτη. Για εσωτερικά σχόλια (π.χ. «κακοπληρωτής») χρησιμοποίησε την καρτέλα «Σημειώσεις (εσωτερικές)».'),
+
+                    // Quick-fill helper (preview): a curated «typical fee/tax» picker
+                    // that sets the right §8.x category + auto-computes the amount from
+                    // the line net for percentage-based ones. Synthetic — not a column.
+                    Select::make('tax_preset')
+                        ->label('⚡ Τυπικά τέλη/φόροι (γρήγορη συμπλήρωση)')
+                        ->options(CommonTaxPresets::options())
+                        ->searchable()
+                        ->dehydrated(false)
+                        ->live()
+                        ->columnSpanFull()
+                        ->helperText('Διάλεξε ένα τυπικό τέλος/φόρο: συμπληρώνει την κατηγορία· '
+                            .'για ποσοστιαία υπολογίζει αυτόματα το ποσό από την καθαρή αξία των γραμμών.')
+                        ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                            $preset = CommonTaxPresets::find($state);
+                            if (! $preset) {
+                                return;
+                            }
+                            [$amountCol, $categoryCol] = CommonTaxPresets::columnsFor($preset);
+                            $set($categoryCol, $preset['category']);
+                            $amount = CommonTaxPresets::amountFor(
+                                $preset,
+                                CommonTaxPresets::netFromLines((array) $get('lines'))
+                            );
+                            if ($amount !== null) {
+                                $set($amountCol, $amount);
+                            }
+                        }),
                     TextInput::make('withhold_amount')
                         ->label('Ποσό παρακράτησης (€)')
                         ->numeric()
