@@ -16,6 +16,17 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Changed
+- **Default seed is now ONE «DEMO Α.Ε.» tenant** (full demo mode, `mydata_mode=off`)
+  + an admin user, replacing the per-developer myip/nixpal/sample-ee fixtures.
+  `DemoCompanySeeder` builds a self-contained working company: lookups (VAT /
+  invoice types / payment methods / units), a 5-item catalogue (incl. a service
+  with a product-linked per-unit fee), 3 customers, 3 invoices (one with 20%
+  withholding, one with the product fee), and 2 delivery notes — so a fresh clone
+  or a reviewer can log in and see a populated tenant immediately. Idempotent
+  (skips if a `demo` company exists). Real tenants come from the install wizard /
+  ETL, not the seeder. `php artisan migrate --seed`.
+
 ### Fixed
 - **Withholding now reduces `totalGrossValue` (AADE `[208]`).** `AadeInvoiceDocument`
   filed gross = net+vat with the withheld amount *not* subtracted, which the AADE
