@@ -3,7 +3,8 @@
 namespace App\Filament\Resources\MetricUnits\Pages;
 
 use App\Filament\Resources\MetricUnits\MetricUnitResource;
-use Filament\Actions\DeleteAction;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\Product;
 use Filament\Resources\Pages\EditRecord;
 
 class EditMetricUnit extends EditRecord
@@ -13,7 +14,9 @@ class EditMetricUnit extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            GuardedDeleteAction::make(fn ($record): array => [
+                'προϊόντα' => GuardedDeleteAction::count(Product::class, 'metric_unit_id', $record->id),
+            ]),
         ];
     }
 }

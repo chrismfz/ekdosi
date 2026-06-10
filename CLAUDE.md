@@ -773,13 +773,30 @@ real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
 - **Soft-deleted FK rows render blank** in Filament Selects app-wide (a deleted
   lookup row's dependents show empty). Fix once with `withTrashed()` label
   lookups + a "deleted" badge.
-- **`Rule::unique(...)->where('company_id', Filament::getTenant()?->getKey())`**
-  degrades to `WHERE company_id IS NULL` outside panel context — duplicates can
-  pass in a queue/CLI path. A `TenantScopedUnique` helper should throw when
-  tenant context is missing.
-- **FK-aware delete guards** (`GuardedDeleteAction`) — deleting a referenced
-  lookup either silently soft-deletes (orphaning dependents) or crashes on
-  `restrictOnDelete`. Add a friendly count-and-block + "Deactivate".
+- **`Rule::unique(...)->where('company_id', …)` degrades outside panel context —
+  ✅ NON-ISSUE (verified).** The DB ALREADY carries the `unique(company_id, …)`
+  constraints (invoice_types.code, products.sku/barcode, suppliers.afm, tags.name,
+  …), so a queue/CLI write can't slip a duplicate through — the DB blocks it; the
+  Filament rule is just the friendly in-panel message (and forms always run with a
+  tenant set). A `TenantScopedUnique` helper would be redundant — dropped.
+- **FK-aware delete guards** (`App\Filament\Support\GuardedDeleteAction`) — **✅ DONE
+  (single-record delete).** All lookups soft-delete, so a plain delete of an in-use
+  lookup left the dependents showing a BLANK label (and a force-delete would crash a
+  `restrictOnDelete` FK / orphan a `nullOnDelete` one). The guard now BLOCKS the
+  delete on the 8 lookup edit pages (VatCategory/ProductCategory/InvoiceType/
+  PaymentMethod/DeliveryMethod/DistributionAim/MetricUnit/BankAccount) with a friendly
+  «χρησιμοποιείται από — προϊόντα: N · τιμολόγια: M» count. Counts run through
+  `GuardedDeleteAction::count()` which is **withTrashed-aware** (a soft-deleted
+  invoice still references the lookup) and the maps are COMPLETE incl. the
+  non-obvious `nullOnDelete` defaults (`companies.whmcs_default_invoice_type_id`,
+  `invoice_types.{payment_method_id,delivery_method_id,distribution_aim_id}`,
+  `payments.payment_method_id`). **Remaining (follow-up):** the table
+  `DeleteBulkAction` + **`ForceDeleteBulkAction`** are still UNGUARDED — bulk
+  force-deleting an in-use lookup hard-fails on a `restrictOnDelete` FK
+  (products→vat/category, invoices→invoice_type, delivery_notes→delivery_type) with
+  a raw DB error (no data loss — the FK rejects it). Guarding bulk needs a
+  per-record dependency check across the selection. A real «Απενεργοποίηση» needs an
+  `is_active` column on the lookups (only BankAccount has one today).
 - **Cross-model activity log — ✅ DONE.** `spatie/laravel-activitylog` wired on
   `Invoice`, `Customer`, `Payment` via `App\Models\Concerns\TracksActivity`
   (`LogsActivity` + house rules: `logOnly($this->loggedAttributes())` — business

@@ -3,7 +3,8 @@
 namespace App\Filament\Resources\ProductCategories\Pages;
 
 use App\Filament\Resources\ProductCategories\ProductCategoryResource;
-use Filament\Actions\DeleteAction;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\Product;
 use Filament\Resources\Pages\EditRecord;
 
 class EditProductCategory extends EditRecord
@@ -13,7 +14,9 @@ class EditProductCategory extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            GuardedDeleteAction::make(fn ($record): array => [
+                'προϊόντα' => GuardedDeleteAction::count(Product::class, 'product_category_id', $record->id),
+            ]),
         ];
     }
 }

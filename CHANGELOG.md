@@ -16,6 +16,19 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **FK-aware delete guard on the lookup resources** (`App\Filament\Support\GuardedDeleteAction`).
+  The lookups soft-delete, so deleting one still in use left its dependents showing a
+  BLANK label (and a force-delete would crash a `restrictOnDelete` FK / orphan a
+  `nullOnDelete` one). The guard now BLOCKS the delete on the 8 lookup edit pages
+  (VAT categories / product categories / invoice types / payment methods / delivery
+  methods / distribution aims / metric units / bank accounts) with a friendly
+  «χρησιμοποιείται από — προϊόντα: N · τιμολόγια: M …» count instead. Counts are
+  withTrashed-aware (`GuardedDeleteAction::count()`) and the dependency maps are
+  complete (incl. the non-obvious WHMCS-default + invoice-type default FKs). The
+  table bulk `DeleteBulkAction`/`ForceDeleteBulkAction` stay unguarded — a noted
+  follow-up.
+
 ### Security
 - **Secret columns hidden from serialization.** `Company` (myDATA/GSIS/SMTP/WHMCS keys +
   provider config), `Server`/`ServerGroup` (`secret_encrypted`) and `CompanyBackupSetting`
