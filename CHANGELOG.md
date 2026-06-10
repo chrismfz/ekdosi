@@ -1,9 +1,9 @@
 # Changelog — ekdosi
 
 Notable changes to the **ekdosi app** (Laravel + Filament). Format:
-[Keep a Changelog](https://keepachangelog.com/). The app ships continuously
-(no SemVer tag yet), so changes are grouped under `[Unreleased]` and dated as
-they merge.
+[Keep a Changelog](https://keepachangelog.com/), **SemVer** `X.Y.Z` (app semantics:
+major = milestone, minor = a new feature, patch = fixes). New work accrues under
+`[Unreleased]`; a release is cut with `php artisan ekdosi:release {--major|--minor|--patch}`.
 
 > **The WHMCS-side plugin has its own log:**
 > `whmcs-plugin/ekdosi_bridge/CHANGELOG.md`.
@@ -16,6 +16,16 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-06-10
+
+### Added
+- **Versioning + `ekdosi:release`.** The app now carries a canonical SemVer version
+  (`config('app.version')`); `php artisan ekdosi:release {--major|--minor|--patch}`
+  rolls `[Unreleased]` → a dated `[X.Y.Z]` heading, bumps `config/app.php`, and prints
+  the `git tag` command (the level is judgement; the roll is mechanised). Discipline +
+  the bump rule are in `CLAUDE.md`. First cut: **v1.0.0**.
+
 ### Security
 - **BankAccount + ServiceContract now policy-gated** like every other resource. They were
   the only two models without a committed policy, so `shield:generate` regenerated stubs on
@@ -1293,4 +1303,5 @@ they merge.
 Earlier changes (tenancy/auth, customers + Καρτέλα, invoices + VAT math + QR/PDF,
 myDATA submit/cancel/reconcile, payments + credit notes, Έξοδα/Ε3, Quotes, VIES,
 roles, activitylog, the WHMCS bridge A–B3 + timologia v2) predate this file —
-see `docs/CLAUDE-history.md`, `docs/Comparison.md`, and git history.
+see `docs/CLAUDE-history.md`, `FEATURES.md`, and git history.
+
