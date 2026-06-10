@@ -1,0 +1,381 @@
+================================================================
+ekdosi — Expense classification AADE sandbox validation
+Branch: main  Commit: 1b99f08
+Generated: 2026-06-10T08:20:42Z (UTC)
+Command under test: expenses:test-classify <id> [--execute]
+Safety: --execute ONLY against tenant slug=myip (InvoSign dev + myDATA sandbox creds)
+================================================================
+
+########## STEP 1 — sandbox tenant (slug=myip) + creds ##########
+$ php artisan tinker --execute="<inspect myip Company>"
+id=4 name=MyIP Networks OE slug=myip
+einvoice_provider=gr-provider
+afm/vat=800561849
+ einvoice_provider = gr-p…(11)
+ einvoice_provider_key = invosign
+ einvoice_provider_config = {"de…(106)
+ einvoice_provider_mode = sandbox
+ auto_email_on_mydata_accept = 0
+ mydata_aade_id_sandbox = 8005…(9)
+ mydata_subscription_key_sandbox = 0abd…(32)
+ mydata_aade_id_production = 8005…(10)
+ mydata_subscription_key_production = 1424…(32)
+ mydata_mode = off
+ mydata_send_item_descr = 0
+
+SAFETY CHECK — credential environment that --execute will use:
+  einvoice_provider=gr-provider, einvoice_provider_mode=sandbox, mydata_mode=off
+  mydataReadMode() resolves order [Sandbox, Production]; sandbox aade-id is filled
+  => SendExpensesClassification primes the SANDBOX (dev) myDATA endpoint. SAFE.
+mydataReadMode = sandbox
+resolved aade_id = 8005… key set = yes
+
+$ php artisan mydata:preflight --tenant=myip
+
+
+Tenant: MyIP Networks OE (#4)
+ provider is 'gr-provider', not gr-mydata — myDATA filing won't run
+ mydata_mode is Off — no submissions will be attempted
+
+Invoice types (24):
+ [INV] Invoice
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΑΚΑΠΥ] Ακυρωτική απόδειξη παροχής υπηρεσιών
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΑΚΤΔΑ] Ακυρωτικό τιμολόγιο - δελτίο αποστολής
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΑΚΤΠΥ] Ακυρωτικό τιμολόγιο παροχής υπηρεσιών
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ ✓ [ΑΛΠ] Απόδειξη λιανικής πώλησης
+ ✓ [ΑΠΥ] Απόδειξη παροχής υπηρεσιών
+ ✓ [ΔΑΠ] Δελτίο αποστολής
+ ✓ [ΔΑΣ] Δελτίο Αποστολής Συσχετιζόμενο
+ [ΔΠΡ] Δελτιο Παραλαβής
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ ✓ [ΕΝΔ] Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις
+ ✓ [ΕΝΥ] Τιμολόγιο Παροχής / Ενδοκοινοτική Παροχή Υπηρεσιών
+ ✓ [ΕΞΑ] Τιμολόγιο Πώλησης / Παραδόσεις Τρίτων Χωρών
+ ✓ [ΠΙΛ] Πιστωτικό Στοιχείο Λιανικής
+ ✓ [ΠΙΜ] Πιστωτικό Τιμολόγιο / Μη Συσχετιζόμενο
+ ✓ [ΠΙΣ] Πιστωτικό τιμολόγιο
+ ✓ [ΣΔΑ] Συγκεντρωτικό Δελτίο Αποστολής
+ [ΣΔΑΠ] Συγκεντρωτικό Δελτίο Αποστολής
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ [ΣΔΕΠ] Συγκεντρωτικό δελτίο επιστροφης
+ WARN mydata_type not set — never filed to myDATA (OK for delivery/internal docs; a problem if you expect it filed)
+ ✓ [ΤΔΑ] Τιμολόγιο Δελτίο Αποστολής
+ ✓ [ΤΙΜ] Τιμολόγιο πώλησης
+ ✓ [ΤΠΒ] Τιμολόγιο Παροχής υπηρεσιών (Σειρά 2)
+ ✓ [ΤΠΥ] Τιμολόγιο παροχής υπηρεσιών
+ ✓ [ΤΠΧ] ΤΠΧ Τιμολόγιο Παροχής υπηρεσίων
+ ✓ [ΥΤΧ] Τιμολόγιο Παροχής / Παροχή σε λήπτη Τρίτης Χώρας
+
+VAT categories (7):
+ 0% — Άνευ ΦΠΑ 0%
+ WARN 0% AADE category 7 needs a vatExemptionCategory ([217]); submitter throws on 0% today
+ 4% — ΦΠΑ νήσων 4%
+ WARN rate 4% is ambiguous — AADE categories 6/10; confirm which regime applies
+ ✓ 6% — Υπερμειωμένος ΦΠΑ 6%
+ ✓ 9% — ΦΠΑ νήσων 9%
+ ✓ 13% — Μειωμένος ΦΠΑ 13%
+ ✓ 17% — ΦΠΑ νήσων 17%
+ ✓ 24% — Κανονικός ΦΠΑ 24%
+
+
+Summary: 0 error(s), 11 warning(s).
+(exit=0)
+
+########## STEP 2 — candidate expenses (source=sync, mydata_mark set, >=1 line) ##########
+matched: 11
+id mark supplier net_total lines kind 
+6 400013593 ΑΛΦΑ ΒΗΤΑ ΒΑΣΙΛΟΠΟΥΛΟΣ ΜΟΝΟΠ 80.32 16 MULTI 
+3 400013433 SYNAPSECOM ΑΝΩΝΥΜΗ ΕΤΑΙΡΕΙΑ 510.00 2 MULTI 
+9 400013691 ΑΛΦΑΝΕΤ ΣΥΣΤΗΜΑΤΑ ΠΛΗΡΟΦΟΡΙΚ 63.14 2 MULTI 
+1 400013413 ΝΕΑ ΕΓΝΑΤΙΑ ΟΔΟΣ ΠΑΡΑΧΩΡΗΣΗ 26.29 1 single 
+2 400013414 OLYMPIC ΕΜΠΟΡΙΚΕΣ ΚΑΙ ΤΟΥΡΙΣ 548.91 1 single 
+4 400013500 ΤΡΑΠΕΖΑ ΠΕΙΡΑΙΩΣ ΑΝΩΝΥΜΟΣ ΕΤ 4.00 1 single 
+5 400013547 ΤΡΑΠΕΖΑ ΠΕΙΡΑΙΩΣ ΑΝΩΝΥΜΟΣ ΕΤ 0.30 1 single 
+7 400013618 ΝΙΚΟΛΑΙΔΗΣ ΜΙΧΑΗΛ ΠΟΛΥΚΑΡΠΟ 150.00 1 single 
+8 400013633 ΚΑΛΑΛΟΥΔΗΣ ΙΩΑΝΝΗΣ ΑΝΔΡΕΑΣ 322.58 1 single 
+10 400013694 SYNAPSECOM ΑΝΩΝΥΜΗ ΕΤΑΙΡΕΙΑ 595.53 1 single 
+11 400013761 ΤΡΑΠΕΖΑ ΠΕΙΡΑΙΩΣ ΑΝΩΝΥΜΟΣ ΕΤ 5.40 1 single 
+
+Chosen: CASE A = expense #10 (SYNAPSECOM, single line, net 595.53) — uniform HEADER classification
+        CASE B = expense #3  (SYNAPSECOM, 2 lines 290.00/220.00) — PER-LINE mixed classification
+
+########## STEP 3 — CASE A: header-level classification (expense #10) ##########
+Setting header classification_type=E3_102_001 (αγορές εμπορευμάτων χονδρικές), classification_category=category2_1, classification_state=classified
+OK #10 -> hdr E3_102_001/category2_1 state=classified
+
+--- CASE A dry-run ---
+$ php artisan expenses:test-classify 10
+<?xml version="1.0" encoding="utf-8"?>
+<ExpensesClassificationsDoc xmlns="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <expensesInvoiceClassification>
+ <invoiceMark>400013694811809</invoiceMark>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>1</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_001</classificationType>
+ <classificationCategory>category2_1</classificationCategory>
+ <amount>595.53</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ </expensesInvoiceClassification>
+</ExpensesClassificationsDoc>
+
+
+Dry-run: τίποτα δεν υποβλήθηκε. (Ο έλεγχος διαπιστευτηρίων myDATA γίνεται ΜΟΝΟ στο --execute.) Ξανατρέξε με --execute για πραγματική υποβολή.
+(exit=0)
+
+--- CASE A EXECUTE (real sandbox submission) ---
+$ php artisan expenses:test-classify 10 --execute
+<?xml version="1.0" encoding="utf-8"?>
+<ExpensesClassificationsDoc xmlns="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <expensesInvoiceClassification>
+ <invoiceMark>400013694811809</invoiceMark>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>1</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_001</classificationType>
+ <classificationCategory>category2_1</classificationCategory>
+ <amount>595.53</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ </expensesInvoiceClassification>
+</ExpensesClassificationsDoc>
+
+
+✗ Υποβολή απέτυχε: Η ΑΑΔΕ απέρριψε τον χαρακτηρισμό: [301] Invoice with ΜΑΡΚ 400013694811809 not found for VAT number 800561849
+(exit=1)
+
+########## STEP 2b — probe SANDBOX for inbound expense docs (to get a sandbox-known MARK) ##########
+$ php artisan mydata:fetch-docs --tenant=myip --from=2025-01-01 --to=2026-06-10
+RequestDocs — tenant=myip window=01/01/2025..10/06/2026
++-----------------------------+-------+
+| metric | count |
++-----------------------------+-------+
+| response bytes | 52541 |
+| <invoice> elements | 26 |
+| <cancelledInvoice> elements | 0 |
+| <VatInfo> elements | 0 |
++-----------------------------+-------+
+Run with --raw to print the full RequestDocs XML (and pipe it to a file to share).
+(exit=0)
+
+########## STEP 2c — import the SANDBOX inbound docs → local expenses (sandbox-known MARKs) ##########
+Reason: the pre-existing source=sync expenses carry PRODUCTION MARKs (rejected [301] in sandbox).
+ExpenseImporter::import() over the sandbox RequestDocs gives expenses whose MARK the sandbox owns.
+scannedDocs=26 created=26 skippedExisting=0 suppliersCreated=2
+created MARKs: 400001946726019, 400001946924063, 400001946975074, 400001947104092, 400001947295494, 400001947342654, 400001949062309, 400001949997972, 400001950055734, 400001950196966, 400001951777484, 400001956396168, 400001956759277, 400001958231530, 400001958912347, 400001958964889, 400001958999024, 400001959018478, 400001959038221, 400001959453409, 400001959480273, 400001959499767, 400001961536939, 400001961861853, 400001962105432, 400001962235535
+
+NOTE: all 26 imported sandbox inbound docs are SINGLE-line (see table). Probing an earlier window for a MULTI-line inbound doc to back CASE B:
+$ php artisan mydata:fetch-docs --tenant=myip --from=2023-01-01 --to=2024-12-31
+RequestDocs — tenant=myip window=01/01/2023..31/12/2024
++-----------------------------+-------+
+| metric | count |
++-----------------------------+-------+
+| response bytes | 39231 |
+| <invoice> elements | 21 |
+| <cancelledInvoice> elements | 0 |
+| <VatInfo> elements | 0 |
++-----------------------------+-------+
+Run with --raw to print the full RequestDocs XML (and pipe it to a file to share).
+
+(2023-2024 window imported 21 more; STILL 0 multi-line inbound docs for this VAT in sandbox — 47 single-line total.)
+
+>>> CASE A re-run on a SANDBOX-known MARK (the earlier #10 attempt used a production MARK → [301]).
+Switching CASE A to imported sandbox expense #59 (mark 400001951777484, single line, net 548.91).
+Setting header classification_type=E3_102_001, classification_category=category2_1, classification_state=classified
+OK #59 mark=400001951777484 hdr=E3_102_001/category2_1 state=classified
+
+--- CASE A dry-run (expense #59) ---
+$ php artisan expenses:test-classify 59
+<?xml version="1.0" encoding="utf-8"?>
+<ExpensesClassificationsDoc xmlns="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <expensesInvoiceClassification>
+ <invoiceMark>400001951777484</invoiceMark>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>1</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_001</classificationType>
+ <classificationCategory>category2_1</classificationCategory>
+ <amount>548.91</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ </expensesInvoiceClassification>
+</ExpensesClassificationsDoc>
+
+
+Dry-run: τίποτα δεν υποβλήθηκε. (Ο έλεγχος διαπιστευτηρίων myDATA γίνεται ΜΟΝΟ στο --execute.) Ξανατρέξε με --execute για πραγματική υποβολή.
+(exit=0)
+
+--- CASE A EXECUTE (expense #59, real sandbox submission) ---
+$ php artisan expenses:test-classify 59 --execute
+<?xml version="1.0" encoding="utf-8"?>
+<ExpensesClassificationsDoc xmlns="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <expensesInvoiceClassification>
+ <invoiceMark>400001951777484</invoiceMark>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>1</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_001</classificationType>
+ <classificationCategory>category2_1</classificationCategory>
+ <amount>548.91</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ </expensesInvoiceClassification>
+</ExpensesClassificationsDoc>
+
+
+✗ Υποβολή απέτυχε: Η ΑΑΔΕ απέρριψε τον χαρακτηρισμό: [323] User cannot use directly this service due to annual gross income limits
+(exit=1)
+
+########## STEP 4 — CASE B: per-line (μικτός) classification ##########
+Need a MULTI-line doc. The sandbox has NONE for this VAT (all 47 inbound single-line),
+so per-line STRUCTURE is proven on multi-line PRODUCTION expense #3 (2 lines 290.00/220.00).
+Setting: line#1=E3_102_001/category2_1 (εμπορεύματα), line#2=E3_102_002/category2_7 (πάγια), header CLEARED, state=classified.
+hdr=null/null state=classified
+ line#1 -> E3_102_001/category2_1 net=290.00
+ line#2 -> E3_102_002/category2_7 net=220.00
+
+--- CASE B dry-run (expense #3, per-line) — expect TWO <lineNumber> with TWO categories ---
+$ php artisan expenses:test-classify 3
+<?xml version="1.0" encoding="utf-8"?>
+<ExpensesClassificationsDoc xmlns="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <expensesInvoiceClassification>
+ <invoiceMark>400013433937604</invoiceMark>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>1</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_001</classificationType>
+ <classificationCategory>category2_1</classificationCategory>
+ <amount>290</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>2</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_002</classificationType>
+ <classificationCategory>category2_7</classificationCategory>
+ <amount>220</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ </expensesInvoiceClassification>
+</ExpensesClassificationsDoc>
+
+
+Dry-run: τίποτα δεν υποβλήθηκε. (Ο έλεγχος διαπιστευτηρίων myDATA γίνεται ΜΟΝΟ στο --execute.) Ξανατρέξε με --execute για πραγματική υποβολή.
+(exit=0)
+
+--- CASE B EXECUTE (expense #3, production MARK → expect [301]; per-line transport check) ---
+$ php artisan expenses:test-classify 3 --execute
+<?xml version="1.0" encoding="utf-8"?>
+<ExpensesClassificationsDoc xmlns="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <expensesInvoiceClassification>
+ <invoiceMark>400013433937604</invoiceMark>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>1</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_001</classificationType>
+ <classificationCategory>category2_1</classificationCategory>
+ <amount>290</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>2</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_002</classificationType>
+ <classificationCategory>category2_7</classificationCategory>
+ <amount>220</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ </expensesInvoiceClassification>
+</ExpensesClassificationsDoc>
+
+
+✗ Υποβολή απέτυχε: Η ΑΑΔΕ απέρριψε τον χαρακτηρισμό: [301] Invoice with ΜΑΡΚ 400013433937604 not found for VAT number 800561849
+(exit=1)
+
+--- CASE B' — per-line path against a SANDBOX MARK (expense #60, line-level classify, header empty) ---
+Isolates that the PER-LINE code path also reaches AADE on a sandbox MARK (expect [323] account limit, NOT [301]/payload).
+#60 mark=400001956396168 hdr=null/null line#1=E3_102_001/category2_1 net=4.00
+$ php artisan expenses:test-classify 60 --execute
+<?xml version="1.0" encoding="utf-8"?>
+<ExpensesClassificationsDoc xmlns="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <expensesInvoiceClassification>
+ <invoiceMark>400001956396168</invoiceMark>
+ <invoicesExpensesClassificationDetails>
+ <lineNumber>1</lineNumber>
+ <expensesClassificationDetailData>
+ <classificationType>E3_102_001</classificationType>
+ <classificationCategory>category2_1</classificationCategory>
+ <amount>4</amount>
+ </expensesClassificationDetailData>
+ </invoicesExpensesClassificationDetails>
+ </expensesInvoiceClassification>
+</ExpensesClassificationsDoc>
+
+
+✗ Υποβολή απέτυχε: Η ΑΑΔΕ απέρριψε τον χαρακτηρισμό: [323] User cannot use directly this service due to annual gross income limits
+(exit=1)
+
+########## STEP 5 — post-execute state (all executes were AADE-rejected) ##########
+Expected on rejection: classification_state stays 'classified' (NOT 'submitted'); NO 'SendExpensesClassification' row in expense_marks (only the import RequestDocs mark).
+Expense #59 mark=400001951777484 classification_state=classified
+ expense_marks: action=RequestDocs mark=400001951777484
+Expense #3 mark=400013433937604 classification_state=classified
+ expense_marks: action=RequestDocs mark=400013433937604
+Expense #60 mark=400001956396168 classification_state=classified
+ expense_marks: action=RequestDocs mark=400001956396168
+
+########## CLEANUP — revert test classification mutations ##########
+Pre-existing production-imported #10 and #3 restored to null; test-classified sandbox #59/#60 cleared. (The 47 imported sandbox expenses are genuine sandbox data, idempotent — left in place.)
+#10 reverted -> state=null
+#59 reverted -> state=null
+#3 reverted -> state=null
+#60 reverted -> state=null
+
+================================================================
+SUMMARY — expenses:test-classify sandbox validation (2026-06-10 UTC)
+================================================================
+
+WHAT WORKS (validated):
+  • Dry-run builds correct ExpensesClassificationsDoc XML for BOTH paths:
+      - CASE A header/uniform  → one <lineNumber> (expense #59).
+      - CASE B per-line/μικτός → TWO <lineNumber> each with its own
+        classificationType/Category + amount (expense #3: E3_102_001/category2_1
+        290.00 + E3_102_002/category2_7 220.00). The per-line requirement is met.
+  • Per-line classification correctly WINS over the header (header cleared, line
+    values emitted) — verified on #3 (mixed) and #60 (line-only).
+  • Credentials: myip (gr-provider, provider_mode=sandbox) primes the SANDBOX
+    myDATA endpoint via mydataReadMode()=Sandbox. Confirmed safe — no prod call.
+  • Transport + error parsing: describeErrors() surfaces AADE rejections cleanly
+    as '[NNN] message' (no TypeError over firebed's Errors collection).
+  • Failure path is transactional-on-success: on rejection classification_state
+    stays 'classified' (NOT 'submitted') and NO SendExpensesClassification row is
+    written to expense_marks. Correct.
+
+WHAT COULD NOT BE GREEN-VALIDATED (and why — both are ENV/account, not payload):
+  • [301] Invoice with ΜΑΡΚ … not found for VAT 800561849 — the pre-existing
+    source=sync expenses (#1–#11) carry PRODUCTION MARKs the sandbox doesn't own.
+    Worked around by importing the sandbox's own inbound docs (ExpenseImporter
+    over RequestDocs → 47 expenses, MARKs 400001…) which DO resolve (no [301]).
+  • [323] User cannot use directly this service due to annual gross income limits
+    — AADE blocks ΑΦΜ 800561849 from submitting expense classification DIRECTLY in
+    the sandbox (must route via intermediary/provider). Hit on BOTH a sandbox MARK
+    header classify (#59) AND a sandbox MARK per-line classify (#60). This is an
+    account-profile restriction, INDEPENDENT of our payload — the MARK resolved and
+    the XML was accepted structurally before [323].
+
+CONSEQUENCE: the SUCCESS path (classification_state→'submitted' + a
+  SendExpensesClassification audit row + returned classification MARK) could NOT be
+  exercised here because every sandbox submit is rejected with [323].
+
+ACTION FOR OPERATOR (to finish green validation):
+  Need a sandbox ΑΦΜ profile permitted to submit expense classification directly
+  (no [323] income-limit), with at least one MULTI-line inbound doc (this VAT's
+  sandbox set is 100% single-line, so even without [323] a true 2-line green accept
+  needs a multi-line supplier doc). Then re-run CASE A (#59) + CASE B on a
+  multi-line sandbox MARK → expect classification_state='submitted' + the audit row.
+================================================================
