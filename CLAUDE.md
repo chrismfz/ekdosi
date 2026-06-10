@@ -639,15 +639,31 @@ The supplier/inbound mirror of the sales side, end-to-end:
 - **`MyDataConsoleExpenses`** page + **`ExpenseImporter`** — one-click import of
   αδέσποτα into local `expenses` (+ lines + supplier + audit mark, idempotent),
   and a read-only `ExpenseResource` (list/view/lines).
-- **`Expense` classification (E5, LOCAL)** — per-document E3 type + category2_x
-  via the ViewExpense action; `Codes::expenseClass*` delegate to firebed's §8
-  enums. **AADE submit (`SendExpensesClassification`) deferred.**
+- **`Expense` classification (E5)** — per-document **OR per-line** E3 type +
+  category2_x via the ViewExpense actions («Χαρακτηρισμός» / «Χαρακτηρισμός ανά
+  γραμμή» — same supplier invoice may mix εμπορεύματα+πάγια+δαπάνες);
+  `Codes::expenseClass*` delegate to firebed's §8 enums. **AADE submit ✅ DONE**
+  (`ExpenseClassificationSubmitter` + «Υποβολή χαρακτηρισμού» action +
+  `expenses:test-classify <id> [--execute]` dry-run command) — the inbound mirror
+  of `MyDataSubmitter`: builds `SendExpensesClassification`, prefers each line's
+  own classification (falls back to header), writes an `expense_marks` audit row,
+  flips `classification_state`→`submitted`; on reject state stays `classified`
+  (no audit row). **Sandbox 2026-06-10 (`docs/expenses-classification-sandbox-results.txt`):**
+  payload/XML (header + per-line/mixed), per-line-wins, sandbox credential routing,
+  error parsing `[NNN]`, and reject-transactional-safety all **proven against real
+  AADE**. A fully-green *accept* was NOT reachable: the sandbox ΑΦΜ 800561849 is
+  blocked by **[323]** (annual-gross-income limit → must submit via λογιστής) and
+  the pre-imported rows carried prod MARKs (**[301]**) — both account/env, NOT
+  payload. The λογιστής/`entityVatNumber` (third-party-submission) path is the
+  noted follow-up for over-threshold tenants.
 - **`VatPeriodReport` + `MyDataPictureStats` widget** — ΦΠΑ εκροών−εισροών per
   month/quarter ("πόσο ΦΠΑ χρωστάω"). **`RequestVatInfo` cross-check deferred.**
 - **`E3Reporter` + `MyDataE3Overview`** — Ε3 figures from `RequestE3Info`.
 **Full story + remaining-polish list: `docs/expenses-phase-plan.md`.** Deferred:
-expense-classification AADE submit, RequestVatInfo/E3 cross-checks,
-`RequestMyExpenses`, manual expense entry, per-row import, supplier CSV import.
+RequestVatInfo/E3 cross-checks, `RequestMyExpenses`, manual expense entry
+(off-the-books, `source=manual`), per-row import, supplier CSV import, and the
+λογιστής/`entityVatNumber` third-party-submission path (for over-threshold
+tenants the ΑΑΔΕ blocks from direct expense classification — error [323]).
 
 ### Παραστατικά Διακίνησης / Delivery notes (myDATA Ψηφιακό ΔΑ)
 The shipping-document side, mirroring the invoice surfaces. Two specs apply:
