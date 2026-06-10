@@ -89,7 +89,21 @@ are already done or deliberately not-built (the VATinfo trap).
 - **`$hidden` on secret models** (PR #255) — secrets out of `toArray`/logs.
 - **Expense classification → AADE** (PR #256) — `SendExpensesClassification` + **per-line** (εμπορεύματα/πάγια/δαπάνες) + `expenses:test-classify`; **sandbox-validated** (payload/per-line/safety proven; full-accept blocked by the test ΑΦΜ's [323], not our code).
 - **FK-aware delete guard** (PR #258) — `GuardedDeleteAction` blocks deleting an in-use lookup on all 8 lookup edit pages.
-- Earlier this session: DEMO seeder, export/import without a passphrase, SMTP test button, «Εργαλεία» commands-as-buttons, `ekdosi:install` wizard.
+- **«Σύστημα» area — 3 slices (2026-06-10)** — closes the «Health / observability» +
+  «Settings-in-the-UI (scheduler)» + «Onboarding» asks below:
+  - **«Υγεία συστήματος»** page (super_admin) — read-only `ops:health` in the web UI
+    (worker heartbeat, scheduler, backups, mail, WHMCS + myDATA per tenant, disk),
+    short-TTL cached.
+  - **Durable `scheduled_task_runs` log** + queue **pending/failed** count + a
+    «Επανάληψη αποτυχημένων» (`queue:retry all`) action.
+  - **«Ρυθμίσεις χρονοπρογραμματιστή»** (super_admin) — audited per-task toggles in a
+    `system_settings` typed store; `routes/console.php` reads them at run-time
+    (`->when()`), env = default. See `FEATURES.md §15`.
+- **Onboarding / operator productivity (2026-06-10)** — DEMO seeder (`DemoCompanySeeder`),
+  `ekdosi:install` first-run wizard (incl. standard ΦΠΑ/τύποι/πληρωμές/μονάδες lookup
+  seeding via `MyDataLookupSeeder` + a re-run safeguard), per-company **+ global** «Δοκιμή
+  SMTP», «Εργαλεία» (artisan commands as guarded admin buttons), export/import without a
+  passphrase.
 
 ### 🛑 Looks like a gap — but it is NOT (don't re-open without a NEW reason)
 - **RequestVatInfo «ΦΠΑ cross-check»** — **deferred, low value, ON PURPOSE.** The
@@ -113,7 +127,8 @@ are already done or deliberately not-built (the VATinfo trap).
   (fees/stamp/other/deductions) + **product-linked taxes**, the **4% override**.
   Runbook: `docs/sandbox-validation-runbook.md`. Once green → mark sandbox-validated.
 - **Schedules**: most `EKDOSI_SCHEDULE_*` are ON by default; backups + auto-issue +
-  resend-failed + service-renewals are OFF (safe). Flip per-need in `.env`.
+  resend-failed + service-renewals are OFF (safe). Flip per-need from the
+  **«Ρυθμίσεις χρονοπρογραμματιστή»** UI page (audited, env = default) or `.env`.
 
 ### 🟠 myDATA completeness
 - **`invoice_taxes` table (Phase-2)** — many categories per taxType on one invoice
@@ -168,74 +183,23 @@ are already done or deliberately not-built (the VATinfo trap).
 - **`clear:right` on single-word doc-types** (PDF review flag) — refine if the QR-then-type
   layout is undesired for short names.
 
-### 🆕 Settings-in-the-UI — single source of truth, visible + audited (asked 2026-06-10)
-**Principle:** NO runtime setting lives only in `.env`/`config` where it can be
-silently left off and forgotten («θα φταίμε»). Every operator-facing knob —
-**admin / super_admin / operator** — is set AND **visible** from the web UI, and
-each change is **recorded in the activity log** (win-win audit: who turned what
-on/off, when).
+### 🆕 Settings-in-the-UI — widen the audited surface (scheduler page SHIPPED 2026-06-10)
+**Principle (still the goal):** NO runtime setting lives only in `.env`/`config` where
+it can be silently left off and forgotten («θα φταίμε») — every operator-facing knob is
+set AND **visible** from the web UI, each change **recorded in the activity log**.
 
-**Concretely:**
-- A `system_settings` (key→value, typed) store + a settings model that uses our
-  existing `TracksActivity`/`LogsActivity` → toggle changes land in the activity
-  log automatically (causer = the user) and show in `ActivityFeed`.
-- Admin-only Filament Page(s): **«Χρονοπρογραμματιστής»** (the `EKDOSI_SCHEDULE_*`
-  flags as Toggles + helperText + ⚠ for the dangerous ones, e.g. resend-failed
-  during a mail outage) and a wider **«Ρυθμίσεις συστήματος»** (mailer health
-  hint: global vs per-tenant SMTP; cache/queue/cron status via `ops:health`).
-- `routes/console.php` (and any code reading these) reads the DB setting with the
-  env flag as the DEFAULT — a flip takes effect next `schedule:run` (~1 min), no
-  `config:clear`. `.env` stays the deploy-time default/override only.
-- **Visibility first:** a read-only «what's on/off right now» panel so nothing is
-  silently disabled. `whmcs_auto_issue` stays two-key (UI + `companies.whmcs_auto_issue_immediate`).
-- Role-scope: per-company knobs (backups, billing, email) gated to company_admin;
-  system/cross-tenant ones to super_admin; the operator-relevant ones visible to operators.
-- Migrate the existing scattered env flags + the per-company toggles under this one
-  consistent, audited surface over time (not a big-bang rewrite).
+**Shipped (slice 3):** the `system_settings` typed store + the super_admin
+**«Ρυθμίσεις χρονοπρογραμματιστή»** page (audited per-task toggles; `routes/console.php`
+reads them run-time with env as default). The «Σύστημα» area also has the read-only
+**«Υγεία συστήματος»** «what's on/what ran» panel (slices 1-2).
 
-### 🆕 Health / observability — in the web UI, not just `artisan` (asked 2026-06-10)
-Not everyone on the team has terminal access, so `php artisan ops:health` must also
-be a **web page**. An admin/super_admin Filament Page «Υγεία συστήματος» that shows,
-read-only:
-- **Liveness:** is the queue worker (systemd) up? did the cron `schedule:run` fire
-  recently? cache/DB/Redis reachable? mailer (global vs per-tenant) configured?
-  disk space. → wrap the existing `OperatorHealth` service (reuse its checks; the
-  command and the page render the same source).
-- **«Τι έτρεξε / πότε / πόσο»:** per scheduled task — last run, duration, success/fail,
-  last error. Needs a unified `scheduled_task_runs` log (task, started_at, finished_at,
-  status, summary) written via the scheduler's `->onSuccess()/->onFailure()` hooks in
-  `routes/console.php` (today only some tasks record state: CompanyBackupRun,
-  VatPictureCache «last fetch», mydata reconcile). Surface e.g. «ΦΠΑ τελευταία λήψη:
-  …», «WHMCS fetch: …», «Backup: …».
-- **Queue:** pending + failed jobs count, with a «retry/clear» action (admin).
-- Ties into the settings-in-UI item above: one «Σύστημα» area = toggles (audited) +
-  health + run history, so an operator sees at a glance what's on, what ran, and what's stuck.
-
-### 🆕 Onboarding / operator productivity (asked 2026-06-10)
-Operator-pasted ideas. (The big-feature / tech-debt / PDF lists from the same day
-are already captured in the sections above — these are the new ones.)
-
-- **Artisan actions → buttons.** Surface the operator-facing commands as Filament
-  buttons/actions, no terminal: `mydata:vat-picture` refresh, `mydata:reconcile-sales`,
-  `whmcs:fetch-pending`, `invoices:resend-failed-emails`, `mydata:preflight`, the
-  sandbox/test-submit dry-runs, etc. — each as a guarded admin action with a result
-  notification. (Pairs with the «Health / observability» + «Settings-in-the-UI» items:
-  one «Σύστημα» area = status + toggles + run-now buttons, all audited.)
-- **DEMO company seeder — «full demo mode».** A `DemoCompanySeeder` that builds ONE
-  self-contained «DEMO Α.Ε.»: 2-3 products + 2-3 services (one with withholding, one
-  with a bound fee), 2-3 customers, 2-3 issued invoices, 2-3 delivery notes — so a
-  fresh install / a reviewer sees a working tenant immediately. Replaces the
-  nexon/nixpal/myip dev fixtures for demos (keep those for real ETL/dev).
-- **Fresh-install wizard.** From-zero onboarding: if NO admin user exists, a guided
-  «create the first super_admin + first company» wizard; if one already exists, a
-  safeguard (refuse / require auth) so it can't be re-run to mint an admin. Make
-  install-from-scratch turnkey (today it's artisan + manual seeding per INSTALL.md).
-- **Seeders for from-zero installs.** We have great `VatCategory` / `InvoiceType`
-  (+ income-class, payment-methods, units) seeders — make sure they're wired into the
-  install path (a `php artisan ekdosi:bootstrap-company <slug>` or the wizard) so a
-  new tenant gets the §8 lookups without copy-paste. Audit which lookups still need a
-  from-zero seeder.
-- **SMTP test button.** Per-company «Δοκιμή SMTP» (send a test email to a typed
-  address) on the Company → PDF & Email tab, using `TenantMailerFactory`; and a
-  super_admin-only «test the global .env mailer» so the ops-alert / fallback path can
-  be verified from the UI (ties into the mailer-health hint in «Health»).
+**Still open — broaden it beyond the scheduler (not a big-bang rewrite):**
+- A wider **«Ρυθμίσεις συστήματος»** page for the remaining global knobs (e.g. `require_2fa`,
+  `encrypt_secrets_at_rest`, backup-alert email) + a mailer-health hint (global vs per-tenant SMTP).
+- **Role-scoped knobs:** per-company settings (backups, billing, email) gated to
+  company_admin; the operator-relevant ones visible to operators — today the «Σύστημα»
+  area is super_admin-only (deploy-wide flags). When per-company settings move into the
+  store, scope the page accordingly.
+- Migrate the existing scattered per-company toggles (on `companies`) under this one
+  consistent, audited surface over time. `whmcs_auto_issue` stays two-key
+  (UI + `companies.whmcs_auto_issue_immediate`).
