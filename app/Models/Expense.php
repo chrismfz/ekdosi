@@ -111,4 +111,23 @@ class Expense extends Model
             default => 'gray',
         };
     }
+
+    /**
+     * Do the lines carry DIFFERENT classifications (per-line «Χαρακτηρισμός ανά
+     * γραμμή»)? When true, the single header type/category field is misleading, so
+     * surfaces show «Μικτός — βλ. ανά γραμμή» instead. Each line's effective value
+     * is its own, falling back to the header (same rule the submitter uses).
+     */
+    public function classificationIsMixed(): bool
+    {
+        $this->loadMissing('lines');
+        if ($this->lines->count() < 2) {
+            return false;
+        }
+
+        $combos = $this->lines->map(fn ($line): string => ($line->classification_type ?: $this->classification_type)
+            .'|'.($line->classification_category ?: $this->classification_category))->unique();
+
+        return $combos->count() > 1;
+    }
 }

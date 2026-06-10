@@ -89,6 +89,27 @@ class ExpenseClassificationSubmitterTest extends TestCase
     }
 
     #[Test]
+    public function mixed_lines_are_flagged_as_mixed(): void
+    {
+        // Header-only (uniform) → not mixed.
+        $uniform = $this->classifiedExpense();
+        $this->assertFalse($uniform->classificationIsMixed());
+
+        // Two lines with different categories → mixed.
+        $mixed = $this->classifiedExpense([
+            'mydata_mark' => '400009999999999',
+            'classification_type' => null, 'classification_category' => null,
+        ]);
+        $mixed->lines()->first()->forceFill(['classification_type' => 'E3_102_001', 'classification_category' => 'category2_1'])->save();
+        ExpenseLine::create([
+            'company_id' => $this->tenant->id, 'expense_id' => $mixed->id,
+            'line_number' => 2, 'net_value' => 500, 'vat_amount' => 120, 'vat_category' => 1,
+            'classification_type' => 'E3_103', 'classification_category' => 'category2_7',
+        ]);
+        $this->assertTrue($mixed->fresh('lines')->classificationIsMixed());
+    }
+
+    #[Test]
     public function request_xml_is_a_dry_run_that_posts_nothing(): void
     {
         $expense = $this->classifiedExpense();
