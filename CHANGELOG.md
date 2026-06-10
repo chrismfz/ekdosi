@@ -25,6 +25,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   WHMCS/myDATA), so it's gated on super_admin (not a per-tenant shield permission a
   company_admin would hold); the report is short-TTL cached so a refresh can't hang
   on a large storage tree. **Deploy:** `shield:sync-super-admin`.
+- **Settings-in-UI — scheduler toggles** (the «Σύστημα» area, slice 3). New
+  deploy-wide `system_settings` typed store (`SystemSettings`) + a super_admin-only
+  «Ρυθμίσεις χρονοπρογραμματιστή» page that flips any `EKDOSI_SCHEDULE_*` task on/off
+  without editing env. `routes/console.php` reads each toggle at run-time via a
+  `->when()` filter (env stays the default; the UI can also enable a task env left
+  off), so a disabled task is filtered before its hooks fire. Saving stores only
+  deviations from the env default (toggling back removes the override) and is audited
+  (activity log + `updated_by`). **Deploy:** `migrate`.
 - **Durable scheduled-task run history** (the «Σύστημα» area, slice 2). New
   `scheduled_task_runs` table — the scheduler `before`/`onSuccess`/`onFailure`
   hooks now log a row per run (status, exit code, duration, summary), surviving

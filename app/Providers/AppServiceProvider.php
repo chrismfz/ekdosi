@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Support\Facades\Blade;
@@ -17,6 +18,10 @@ class AppServiceProvider extends ServiceProvider
         // Ambient tenant for the CompanyScope global scope. Singleton so the
         // current company id lives for the whole request / command.
         $this->app->singleton(CompanyContext::class);
+
+        // Deploy-wide settings store — singleton so the loaded map is shared
+        // (one DB/cache read per process; the scheduler reads it on every tick).
+        $this->app->singleton(SystemSettings::class);
     }
 
     public function boot(): void
