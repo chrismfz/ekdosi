@@ -9,6 +9,7 @@ use App\Models\InvoiceType;
 use App\Models\Product;
 use App\Models\VatCategory;
 use App\Services\RecomputeInvoiceTaxes;
+use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -121,6 +122,41 @@ class RecomputeInvoiceTaxesTest extends TestCase
         $this->expectExceptionMessageMatches('/ΔΙΑΦΟΡΕΤΙΚΕΣ κατηγορίες/u');
 
         app(RecomputeInvoiceTaxes::class)($inv);
+    }
+
+    public function test_additional_tax_adjustment_and_payable_total_logic(): void
+    {
+        // gross_total stays net+VAT; payableTotal() adds the [208] adjustment.
+        $inv = new Invoice(['gross_total' => 124]);
+        $inv->fees_amount = 5;
+        $this->assertSame(5.0, $inv->additionalTaxAdjustment());
+        $this->assertSame(129.0, $inv->payableTotal());                 // gross + fee
+
+        $inv->withhold_amount = 20;
+        $inv->withhold_category = 1;                                    // 1–7,11–18 → reduce gross
+        $this->assertSame(-15.0, $inv->additionalTaxAdjustment());      // +5 fee − 20 withholding
+        $this->assertSame(109.0, $inv->payableTotal());
+
+        $inv->withhold_category = 8;                                    // §8.4 informational → no reduce
+        $this->assertSame(5.0, $inv->additionalTaxAdjustment());
+        $this->assertSame(129.0, $inv->payableTotal());
+
+        $inv->payable_total = 200;                                     // an explicit persisted value wins
+        $this->assertSame(200.0, $inv->payableTotal());
+    }
+
+    public function test_recompute_persists_payable_total_separately_from_gross(): void
+    {
+        $inv = $this->invoice();
+        $this->line($inv, null, qty: 1, price: 100); // net 100, gross 124 (auto net/gross_price)
+        $inv->forceFill(['fees_rate' => 10, 'fees_category' => 1])->save();
+
+        app(RecomputeInvoiceTotals::class)($inv);
+        $inv->refresh();
+
+        $this->assertSame('124.00', (string) $inv->gross_total);    // net+VAT — revenue/turnover
+        $this->assertSame('10.00', (string) $inv->fees_amount);     // 10% × 100
+        $this->assertSame('134.00', (string) $inv->payable_total);  // collectible = 124 + 10 fee
     }
 
     public function test_amount_with_no_product_and_no_rate_is_cleared(): void

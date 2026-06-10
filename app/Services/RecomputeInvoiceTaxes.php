@@ -27,11 +27,10 @@ use RuntimeException;
  * One category per taxType per invoice (Phase-1) — products that disagree throw.
  * Runs from RecomputeInvoiceTotals AFTER net_total is saved.
  *
- * KNOWN LIMITATION (documented, not yet fixed): these fees are filed at AADE in the
- * gross + paymentMethod amount, but `invoices.gross_total` (and therefore the money
- * cache / Καρτέλα / dashboard) is net+vat only — fees are NOT yet reflected in the
- * customer's owed. Deciding whether fees count toward receivables touches the money
- * core (InvoiceBalance + gross_total semantics) — a separate follow-up.
+ * The COLLECTIBLE amount (fees up, withholding down, per AADE [208]) is persisted to
+ * `invoices.payable_total` here (= gross_total + Invoice::additionalTaxAdjustment()).
+ * `gross_total` STAYS net+VAT (revenue/turnover/VAT); `payable_total` is the basis the
+ * owed/balance/receivables sites read via Invoice::payableTotal().
  */
 class RecomputeInvoiceTaxes
 {
@@ -109,8 +108,16 @@ class RecomputeInvoiceTaxes
         }
 
         if ($changes !== []) {
-            $fresh->forceFill($changes)->save();
+            $fresh->forceFill($changes);
         }
+
+        // The COLLECTIBLE total: gross (net+VAT) + the [208] additional-tax
+        // adjustment (fees/stamp/other up, deductions/withholding down). Owns
+        // `payable_total` like net_total/gross_total — always written so the
+        // owed/receivables sites read a fresh value (gross_total is saved by
+        // RecomputeInvoiceTotals just before this runs).
+        $fresh->payable_total = round((float) ($fresh->gross_total ?? 0) + $fresh->additionalTaxAdjustment(), 2);
+        $fresh->save();
 
         return $fresh;
     }

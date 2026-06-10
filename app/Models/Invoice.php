@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Illuminate\Support\Facades\URL;
 
 /**
@@ -132,6 +133,7 @@ class Invoice extends Model
         'header_discount_percent',
         'net_total',
         'gross_total',
+        'payable_total',
         'withhold_amount',
         'withhold_category',
         'withhold_rate',
@@ -177,6 +179,7 @@ class Invoice extends Model
             'header_discount_percent' => 'decimal:2',
             'net_total' => 'decimal:2',
             'gross_total' => 'decimal:2',
+            'payable_total' => 'decimal:2',
             // Money-status cache — written ONLY by App\Services\InvoiceBalance
             // (not $fillable, mirroring the mydata_* cache columns).
             'paid_total' => 'decimal:2',
@@ -307,6 +310,44 @@ class Invoice extends Model
         return $this->credited_invoice_id === null
             && (float) $this->gross_total > 0
             && (float) $this->credited_total >= (float) $this->gross_total - 0.005;
+    }
+
+    /**
+     * The myDATA additional-tax adjustment to the gross — the SINGLE source of the
+     * AADE [208] rule, reused by both the submitter (AadeInvoiceDocument) and the
+     * local `payable_total`, so the two can never diverge:
+     *   + fees + stampDuty + otherTaxes − deductions − withholding
+     * Withholding reduces it UNLESS its §8.4 category is informational (8/9/10),
+     * which AADE reports but does not deduct from the gross.
+     */
+    public function additionalTaxAdjustment(): float
+    {
+        $withheld = round((float) ($this->withhold_amount ?? 0), 2);
+        $withheldReducesGross = $withheld > 0
+            && $this->withhold_category !== null
+            && WithheldPercentCategory::tryFrom((int) $this->withhold_category)?->affectsTotalGrossValue() === true;
+
+        return round(
+            round((float) ($this->fees_amount ?? 0), 2)
+            + round((float) ($this->stamp_duty_amount ?? 0), 2)
+            + round((float) ($this->other_taxes_amount ?? 0), 2)
+            - round((float) ($this->deductions_amount ?? 0), 2)
+            - ($withheldReducesGross ? $withheld : 0.0),
+            2,
+        );
+    }
+
+    /**
+     * The real COLLECTIBLE amount (what the customer pays / we receive): the
+     * persisted `payable_total`, else a live fallback `gross_total + adjustment`
+     * for rows not yet recomputed. This — NOT gross_total — is the basis for
+     * owed/balance/receivables. (gross_total stays net+VAT = revenue/turnover.)
+     */
+    public function payableTotal(): float
+    {
+        return $this->payable_total !== null
+            ? round((float) $this->payable_total, 2)
+            : round((float) ($this->gross_total ?? 0) + $this->additionalTaxAdjustment(), 2);
     }
 
     private ?InvoiceBalanceData $balanceDataCache = null;
