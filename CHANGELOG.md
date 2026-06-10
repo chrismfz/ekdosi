@@ -24,6 +24,23 @@ they merge.
   φεύγει τίποτα» case), with the full SMTP error on failure. Lets the operator
   verify `.env` mail works at all, which is what every tenant without its own SMTP
   falls back to.
+- **«Εργαλεία» maintenance page (commands → buttons).** A new admin page (Setup
+  group, gated on `View:MaintenanceTools`) surfaces safe, re-runnable artisan
+  commands as one-click per-tenant buttons — Ανανέωση εικόνας ΦΠΑ
+  (`mydata:refresh-vat-picture`), Επανυπολογισμός υπολοίπων
+  (`invoices:recompute-balances`), Έλεγχος ρυθμίσεων myDATA (`mydata:preflight`)
+  — each scoped to the current company, with the captured command output shown on
+  the page. No terminal needed for routine upkeep; only read-only / idempotent
+  commands are exposed. **Deploy:** `shield:generate` + `shield:sync-super-admin`
+  so the page permission exists.
+### Changed
+- **Export χωρίς υποχρεωτικό συνθηματικό.** The company «Εξαγωγή ρυθμίσεων» panel
+  action now offers a «Μυστικά» mode picker (Κρυπτογραφημένα με συνθηματικό /
+  Χωρίς κρυπτογράφηση) — the passphrase is no longer required, so a settings-only
+  OR full bundle can be exported with secrets in the clear for a local download
+  (a warning shows). Import already accepts raw (no-passphrase) bundles; a raw
+  export→import round-trip is now covered end-to-end. Step toward portability that
+  works without APP_KEY/encryption.
 
 ### Fixed
 - **Withholding now reduces `totalGrossValue` (AADE `[208]`).** `AadeInvoiceDocument`
