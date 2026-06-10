@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CompanyBackupDownloadController;
+use App\Http\Controllers\ExpenseDocumentDownloadController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use Illuminate\Support\Facades\Route;
 
@@ -34,3 +35,9 @@ Route::get('/invoice/{invoice}/official-pdf', PublicInvoicePdfController::class)
 Route::get('/company-backups/{run}/download', CompanyBackupDownloadController::class)
     ->middleware(['auth', 'signed'])
     ->name('company-backups.download');
+
+// Expense attachment — AUTH + SIGNED + tenant-checked (see controller). Streams
+// the private supplier-document scan from the local disk.
+Route::get('/expenses/{expense}/document', ExpenseDocumentDownloadController::class)
+    ->middleware(['auth', 'signed'])
+    ->name('expenses.document.download');

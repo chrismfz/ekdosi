@@ -17,6 +17,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 ### Added
+- **Manual expense entry + document attachment** (Expenses polish). Supplier docs not
+  in myDATA (foreign supplier, cash receipt) can now be keyed in: a `source=manual`
+  Create/Edit form with a lines repeater (header totals recomputed from the lines; the
+  supplier snapshot + `company_id`/`line_number` stamped by the page), a «Χειροκίνητα»
+  list tab, and edit gated to manual (myDATA-sourced expenses stay read-only). Each
+  expense can carry a **private PDF/scan** (`expenses.document_path`) downloaded over a
+  short-lived **signed, auth + tenant-checked** route (streamed from the local disk).
+  **Deploy:** `migrate`.
 - **«Ρυθμίσεις συστήματος» page** (the «Σύστημα» area). A super_admin-only page that
   surfaces the deploy-wide global knobs as audited `system_settings` toggles (env =
   default, only deviations stored): **`require_2fa`** (read live by the panel) and the

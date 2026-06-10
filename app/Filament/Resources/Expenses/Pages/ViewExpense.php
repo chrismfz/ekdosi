@@ -6,11 +6,13 @@ use App\Filament\Resources\Expenses\ExpenseResource;
 use App\Services\MyData\ExpenseClassificationSubmitter;
 use App\Support\MyData\Codes;
 use Filament\Actions\Action;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Support\Facades\URL;
 
 class ViewExpense extends ViewRecord
 {
@@ -155,6 +157,22 @@ class ViewExpense extends ViewRecord
                         ->success()
                         ->send();
                 }),
+
+            // Download the attached private document over a short-lived signed
+            // route (streamed from disk, never a public URL).
+            Action::make('download_document')
+                ->label('Λήψη παραστατικού')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->visible(fn (): bool => filled($this->record->document_path))
+                ->url(fn (): string => URL::temporarySignedRoute(
+                    'expenses.document.download',
+                    now()->addMinutes(5),
+                    ['expense' => $this->record],
+                ), shouldOpenInNewTab: true),
+
+            // Edit — only for MANUAL expenses (the resource's canEdit gate).
+            EditAction::make(),
         ];
     }
 }

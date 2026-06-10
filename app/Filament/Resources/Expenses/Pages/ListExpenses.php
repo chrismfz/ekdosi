@@ -11,6 +11,7 @@ use App\Models\Company;
 use App\Models\Expense;
 use App\Support\MyData\Codes;
 use Filament\Actions\Action;
+use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -35,18 +36,27 @@ class ListExpenses extends BaseListRecords
      */
     protected function getHeaderActions(): array
     {
-        if (! $this->canFetchMyData()) {
-            return [];
-        }
+        $actions = [
+            // Manual entry: a supplier doc that isn't in myDATA (foreign supplier,
+            // cash receipt…). The myDATA-sourced rows stay read-only.
+            CreateAction::make()
+                ->label('Νέα δαπάνη (χειροκίνητη)')
+                ->icon('heroicon-o-plus'),
+        ];
 
-        return [
-            Action::make('fetchFromMyData')
+        // «Άντληση από myDATA» — one click: fetch the current quarter's expense
+        // docs and jump to the «Κονσόλα myDATA — Έξοδα» worklist (read-only;
+        // import stays operator-gated). Only for users who can open that console.
+        if ($this->canFetchMyData()) {
+            $actions[] = Action::make('fetchFromMyData')
                 ->label('Άντληση από myDATA')
                 ->icon('heroicon-o-cloud-arrow-down')
-                ->color('primary')
+                ->color('gray')
                 ->tooltip('Κατεβάζει τα έξοδα του τρέχοντος τριμήνου από το myDATA και ανοίγει την Κονσόλα — Έξοδα με τα αδέσποτα έτοιμα προς καταχώριση. Δεν δημιουργεί εγγραφές.')
-                ->action(fn () => $this->fetchFromMyData()),
-        ];
+                ->action(fn () => $this->fetchFromMyData());
+        }
+
+        return $actions;
     }
 
     /** Read-only fetch → land on the console worklist; surface AADE errors here. */
@@ -139,6 +149,9 @@ class ListExpenses extends BaseListRecords
                 ->modifyQueryUsing(fn (Builder $query) => $query
                     ->where('source', ExpenseSource::SelfDeclared->value)
                     ->whereIn('category', $accounting)),
+
+            'manual' => Tab::make('Χειροκίνητα')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('source', ExpenseSource::Manual->value)),
         ] + TagControls::tagTabs(Expense::class);
     }
 }
