@@ -19,6 +19,9 @@ class EInvoiceProviderConfigTest extends TestCase
 
     public function test_provider_config_round_trips_as_array_and_is_encrypted_at_rest(): void
     {
+        // Encryption-at-rest is now opt-in (DR default = plaintext); turn it on
+        // to exercise the encrypted path this test is about.
+        config(['ekdosi.secrets.encrypt_at_rest' => true]);
         $company = Company::create([
             'name' => 't', 'slug' => 't-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-provider',

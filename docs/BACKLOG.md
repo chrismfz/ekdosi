@@ -108,8 +108,10 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 - **FK-aware delete guards** (`GuardedDeleteAction`) — friendly count-and-block + «Deactivate».
 
 ### 🔒 Backup / DR
-- **Phase 6 — «work without APP_KEY»** (plain `mysqldump` self-sufficient) — deferred
-  (`docs/company-portability-plan.md`).
+- **Phase 6 — «work without APP_KEY» — ✅ DONE.** `MaybeEncrypted` cast +
+  `EKDOSI_ENCRYPT_SECRETS_AT_REST` (default plaintext) → plain `mysqldump`
+  self-sufficient, restore needs no old APP_KEY; `secrets:reencrypt` to switch
+  modes. `docs/dr-without-app-key.md`.
 - **Backup encryption** — operator prefers «no app-level» → deferred (rely on SFTP/S3 access control).
 
 ### 💡 PDF / UX & ideas

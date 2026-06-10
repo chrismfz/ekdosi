@@ -16,6 +16,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Secrets at-rest encryption (DR / «work without APP_KEY»)
+    |--------------------------------------------------------------------------
+    |
+    | When FALSE (default), the secret columns (per-tenant myDATA/GSIS/SMTP/WHMCS
+    | keys, server creds, 2FA secrets, backup passphrase) are stored as PLAINTEXT
+    | in the DB — so a plain mysqldump is self-sufficient and a DR restore on a
+    | new VM does NOT need the old APP_KEY. Protection then rests on DB/disk access
+    | control (the DB is the trust boundary). Set TRUE to keep them encrypted at
+    | rest under APP_KEY (the classic posture — but then DR must carry the key).
+    |
+    | The `App\Casts\MaybeEncrypted` cast ALWAYS decrypts legacy ciphertext on
+    | read, so flipping this flag never breaks existing rows; run
+    | `php artisan secrets:reencrypt --to=plain|encrypted` to rewrite them.
+    |
+    */
+    'secrets' => [
+        'encrypt_at_rest' => (bool) env('EKDOSI_ENCRYPT_SECRETS_AT_REST', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Scheduled tasks
     |--------------------------------------------------------------------------
     |

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Casts\MaybeEncrypted;
 use BezhanSalleh\FilamentShield\Traits\HasPanelShield;
 use Database\Factories\UserFactory;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
@@ -66,9 +67,10 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            // TOTP secret + recovery codes encrypted at rest.
-            'app_authentication_secret' => 'encrypted',
-            'app_authentication_recovery_codes' => 'encrypted:array',
+            // TOTP secret + recovery codes — encrypted at rest only when
+            // ekdosi.secrets.encrypt_at_rest is on (DR default = plaintext).
+            'app_authentication_secret' => MaybeEncrypted::class,
+            'app_authentication_recovery_codes' => MaybeEncrypted::class.':array',
         ];
     }
 

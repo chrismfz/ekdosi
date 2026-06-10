@@ -16,6 +16,19 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **DR without APP_KEY — optional at-rest secret encryption (Phase 6).** New
+  `App\Casts\MaybeEncrypted` replaces the `encrypted` casts on every secret column
+  (companies' myDATA/GSIS/SMTP/WHMCS keys + provider config, server creds, backup
+  passphrase, user 2FA), driven by `EKDOSI_ENCRYPT_SECRETS_AT_REST` (**default
+  false → plaintext at rest**). So a plain `mysqldump` is self-sufficient — a
+  restore on a fresh VM needs NO old APP_KEY (protection = DB/disk access control).
+  The cast ALWAYS decrypts legacy ciphertext on read, so flipping the flag never
+  breaks existing rows; `php artisan secrets:reencrypt --to=plain|encrypted`
+  rewrites them. Sessions/cookies are a soft dependency (a new key just means
+  re-login). Docs: `docs/dr-without-app-key.md`. Portability's secret-detection
+  routed through `MaybeEncrypted::isSecretCast()` (no leak into bundles).
+
 ### Changed
 - **Default seed is now ONE «DEMO Α.Ε.» tenant** (full demo mode, `mydata_mode=off`)
   + an admin user, replacing the per-developer myip/nixpal/sample-ee fixtures.

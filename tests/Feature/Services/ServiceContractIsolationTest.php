@@ -30,6 +30,9 @@ class ServiceContractIsolationTest extends TestCase
 
     public function test_contracts_and_servers_do_not_touch_the_money_path(): void
     {
+        // Server creds are encrypted at rest only with the flag on (DR default =
+        // plaintext) — enable it for the encrypted-at-rest assertion below.
+        config(['ekdosi.secrets.encrypt_at_rest' => true]);
         $tenant = Company::create(['name' => 'Rec', 'slug' => 'rec-'.uniqid(), 'country_code' => 'GR']);
         $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'Π', 'afm' => '123456789']);
         $type = InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τ', 'invcount' => 1, 'mydata_type' => '1.1']);

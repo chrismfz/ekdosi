@@ -108,16 +108,17 @@ class CompanyExportTest extends TestCase
 
         $bundle = app(CompanyExporter::class)->build($company, 'passphrase', 'p@ss');
 
-        // EVERY encrypted-cast column must be sealed out of company.json — derived
-        // from the casts so a future encrypted column can't silently leak.
-        $encrypted = 0;
+        // EVERY secret-cast column must be sealed out of company.json — derived
+        // from the casts so a future secret column can't silently leak. Detection
+        // matches the exporter (MaybeEncrypted OR the legacy encrypted casts).
+        $secret = 0;
         foreach ($company->getCasts() as $col => $cast) {
-            if ($cast === 'encrypted' || str_starts_with((string) $cast, 'encrypted:')) {
-                $encrypted++;
+            if (\App\Casts\MaybeEncrypted::isSecretCast((string) $cast)) {
+                $secret++;
                 $this->assertArrayNotHasKey($col, $bundle['company'], "secret {$col} leaked into company.json");
             }
         }
-        $this->assertGreaterThanOrEqual(7, $encrypted, 'expected the encrypted-cast columns to be present');
+        $this->assertGreaterThanOrEqual(7, $secret, 'expected the secret-cast columns to be present');
     }
 
     public function test_command_writes_a_readable_zip(): void

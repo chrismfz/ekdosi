@@ -2,6 +2,7 @@
 
 namespace App\Services\Portability;
 
+use App\Casts\MaybeEncrypted;
 use App\Models\Company;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -187,7 +188,9 @@ class CompanyExporter
     {
         $cols = [];
         foreach ($company->getCasts() as $column => $cast) {
-            if ($cast === 'encrypted' || str_starts_with((string) $cast, 'encrypted:')) {
+            // Secret columns are sealed regardless of whether they're stored
+            // encrypted or plaintext at rest (the cast may be MaybeEncrypted now).
+            if (MaybeEncrypted::isSecretCast((string) $cast)) {
                 $cols[] = $column;
             }
         }

@@ -37,6 +37,9 @@ class CompanySendChannelTest extends TestCase
 
     public function test_provider_channel_decomposes_into_columns_and_encrypted_config(): void
     {
+        // Encryption-at-rest is opt-in now (DR default = plaintext) — enable it
+        // for the encrypted-config assertion below.
+        config(['ekdosi.secrets.encrypt_at_rest' => true]);
         $slug = 'prov-'.uniqid();
 
         Livewire::test(CreateCompany::class)
