@@ -1,0 +1,153 @@
+<?php
+
+namespace App\Filament\Pages;
+
+use App\Support\OperatorHealth\OperatorHealthReport;
+use BackedEnum;
+use Filament\Actions\Action;
+use Filament\Facades\Filament;
+use Filament\Pages\Page;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+
+/**
+ * «Υγεία συστήματος» — the web face of `php artisan ops:health`, so an admin
+ * without terminal access sees the same liveness picture: queue worker heartbeat,
+ * scheduled-task last-runs, backups, mail, WHMCS + myDATA per tenant, disk. Pure
+ * read-only — renders `OperatorHealthReport::build()` (one source for CLI + web).
+ *
+ * SUPER_ADMIN-ONLY: this is system/infra + CROSS-TENANT (every company's WHMCS +
+ * myDATA status), so a company_admin must NOT see it — they'd read other tenants'
+ * data. company_admin = company-scoped; super_admin = everything. Part of the
+ * «Σύστημα» area.
+ */
+class SystemHealth extends Page
+{
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-heart';
+
+    protected static ?int $navigationSort = 99;
+
+    protected string $view = 'filament.pages.system-health';
+
+    /** @var array<string, mixed> */
+    public array $report = [];
+
+    /** Short TTL: cheap page-loads/re-mounts reuse the last walk; «Ανανέωση» busts it. */
+    private const CACHE_KEY = 'system_health.report';
+
+    private const CACHE_TTL = 30; // seconds
+
+    public function mount(): void
+    {
+        // On first paint, reuse a recent report if one is cached — build()
+        // walks the storage/backups trees + per-tenant queries, so we don't
+        // want every mount/poll to re-run it. The refresh action forces fresh.
+        $this->report = Cache::remember(
+            self::CACHE_KEY,
+            self::CACHE_TTL,
+            fn () => app(OperatorHealthReport::class)->build(),
+        );
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return 'Υγεία συστήματος';
+    }
+
+    public function getTitle(): string
+    {
+        return 'Υγεία συστήματος';
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return 'Σύστημα';
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
+    }
+
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        // System/cross-tenant page → super_admin only (not gated on a per-tenant
+        // shield permission, which company_admin would also hold).
+        return Filament::getTenant() !== null
+            && $user !== null
+            && app(\App\Services\TenantRoleProvisioner::class)->isSuperAdminAnywhere($user);
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('refresh')
+                ->label('Ανανέωση')
+                ->icon('heroicon-o-arrow-path')
+                ->color('gray')
+                ->action(fn () => $this->refreshReport()),
+        ];
+    }
+
+    public function refreshReport(): void
+    {
+        // Explicit operator action → always a fresh walk; reseed the cache so the
+        // next mount within the TTL reuses it.
+        $this->report = app(OperatorHealthReport::class)->build();
+        Cache::put(self::CACHE_KEY, $this->report, self::CACHE_TTL);
+    }
+
+    // ── view helpers (one place for status → colour/label + formatting) ──
+
+    public function statusColor(?string $status): string
+    {
+        return match ($status) {
+            'ok' => 'success',
+            'stale', 'missing', 'warn' => 'warning',
+            'fail', 'failed', 'error' => 'danger',
+            default => 'gray',
+        };
+    }
+
+    public function statusLabel(?string $status): string
+    {
+        return match ($status) {
+            'ok' => 'ΟΚ',
+            'stale' => 'Παλιό',
+            'missing' => 'Άγνωστο',
+            'fail', 'failed', 'error' => 'Σφάλμα',
+            'warn' => 'Προσοχή',
+            default => (string) ($status ?? '—'),
+        };
+    }
+
+    public function ago(?string $iso): string
+    {
+        if (! $iso) {
+            return '—';
+        }
+        try {
+            return Carbon::parse($iso)->diffForHumans();
+        } catch (\Throwable) {
+            return (string) $iso;
+        }
+    }
+
+    public function bytes(?int $n): string
+    {
+        if ($n === null) {
+            return '—';
+        }
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $i = 0;
+        $v = (float) $n;
+        while ($v >= 1024 && $i < count($units) - 1) {
+            $v /= 1024;
+            $i++;
+        }
+
+        return round($v, 1).' '.$units[$i];
+    }
+}
