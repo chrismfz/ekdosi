@@ -11,8 +11,10 @@ use Firebed\AadeMyData\Exceptions\MyDataException;
 use Firebed\AadeMyData\Exceptions\MyDataTimeoutException;
 use Firebed\AadeMyData\Http\SendExpensesClassification;
 use Firebed\AadeMyData\Models\ExpensesClassification;
+use Firebed\AadeMyData\Models\ExpensesClassificationsDoc;
 use Firebed\AadeMyData\Models\InvoiceExpensesClassification;
 use Firebed\AadeMyData\Models\InvoicesExpensesClassificationDetail;
+use Firebed\AadeMyData\Xml\ExpensesClassificationsDocWriter;
 use RuntimeException;
 use Throwable;
 
@@ -55,13 +57,20 @@ class ExpenseClassificationSubmitter
             throw new RuntimeException('Το έξοδο δεν έχει γραμμές για χαρακτηρισμό.');
         }
 
-        $payload = [$this->build($expense)];
+        $doc = new ExpensesClassificationsDoc($this->build($expense));
+        // Build the request XML ourselves (firebed's handle() doesn't expose it
+        // cleanly — see the audit row below) so the legal trail is byte-exact.
+        $requestXml = (new ExpensesClassificationsDocWriter)->asXML($doc);
 
+        // A WRITE through the READ-oriented credential primer: for a gr-mydata
+        // tenant read-mode == submit-mode, so this is correct; classifying one's
+        // own expenses goes direct to myDATA (the provider channel only changes
+        // who submits SALES). FirebedCredentials throws for a non-GR / Off tenant.
         FirebedCredentials::init($this->tenant, $this->mockHandler);
 
         $action = new SendExpensesClassification;
         try {
-            $response = $action->handle($payload);
+            $response = $action->handle($doc);
         } catch (MyDataAuthenticationException $e) {
             throw new RuntimeException('Η myDATA απέρριψε τα διαπιστευτήρια. Έλεγξε Company → myDATA.', 0, $e);
         } catch (MyDataTimeoutException|MyDataConnectionException $e) {
@@ -73,16 +82,28 @@ class ExpenseClassificationSubmitter
         }
 
         $first = $response->first();
-        $classificationMark = $first?->getClassificationMark();
-        if ($classificationMark === null && $first?->getStatusCode() !== 'Success') {
+        if ($first === null || ! $first->isSuccessful()) {
             throw new RuntimeException('Η ΑΑΔΕ απέρριψε τον χαρακτηρισμό: '.$this->describeErrors($first));
         }
+        $classificationMark = (string) ($first->getClassificationMark() ?? '');
 
-        $expense->forceFill([
-            'classification_state' => 'submitted',
-        ])->save();
+        // Legal audit trail: the byte-exact request + response of every myDATA
+        // call on the expense side (twin of MyDataSubmitter's MyDataMark row).
+        $expense->marks()->create([
+            'company_id' => $expense->company_id,
+            'mydata_action' => 'SendExpensesClassification',
+            'mark' => $classificationMark ?: null,
+            'date' => now(),
+            'request' => $requestXml ?: null,
+            // firebed quirk: SendExpensesClassification::handle() leaves
+            // responseDom null and parks the RESPONSE reader's DOM in requestDom —
+            // so getRequestDom() here is actually the response XML.
+            'response' => $action->getRequestDom()?->saveXML() ?: null,
+        ]);
 
-        return (string) ($classificationMark ?? '');
+        $expense->forceFill(['classification_state' => 'submitted'])->save();
+
+        return $classificationMark;
     }
 
     private function build(Expense $expense): InvoiceExpensesClassification

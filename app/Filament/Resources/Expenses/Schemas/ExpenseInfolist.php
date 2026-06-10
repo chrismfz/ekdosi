@@ -85,8 +85,8 @@ class ExpenseInfolist
                         TextEntry::make('classification_state')
                             ->label('Κατάσταση')
                             ->badge()
-                            ->formatStateUsing(fn (?string $state): string => $state === 'classified' ? 'Χαρακτηρισμένο' : 'Αχαρακτήριστο')
-                            ->color(fn (?string $state): string => $state === 'classified' ? 'success' : 'gray'),
+                            ->formatStateUsing(fn (?string $state): string => \App\Models\Expense::classificationStateLabel($state))
+                            ->color(fn (?string $state): string => \App\Models\Expense::classificationStateColor($state)),
                     ]),
 
                 RepeatableEntry::make('lines')

@@ -26,7 +26,9 @@ class ViewExpense extends ViewRecord
                 ->icon('heroicon-o-tag')
                 ->color('primary')
                 ->modalHeading('Χαρακτηρισμός εξόδου')
-                ->modalDescription('Επιλέξτε τύπο (E3) και κατηγορία χαρακτηρισμού (εμπορεύματα/πάγια/δαπάνες) για όλο το παραστατικό. Αποθηκεύεται τοπικά — υπόβαλέ το στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
+                ->modalDescription(fn (): string => $this->record->classification_state === 'submitted'
+                    ? '⚠ Έχει ΗΔΗ υποβληθεί χαρακτηρισμός στην ΑΑΔΕ. Νέος χαρακτηρισμός απαιτεί ΕΠΑΝΥΠΟΒΟΛΗ (η προηγούμενη υποβολή διατηρείται στο ιστορικό).'
+                    : 'Επιλέξτε τύπο (E3) και κατηγορία χαρακτηρισμού (εμπορεύματα/πάγια/δαπάνες) για όλο το παραστατικό. Αποθηκεύεται τοπικά — υπόβαλέ το στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
                 ->modalSubmitActionLabel('Αποθήκευση')
                 ->fillForm(fn (): array => [
                     'classification_type' => $this->record->classification_type,

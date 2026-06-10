@@ -63,8 +63,18 @@ class ExpenseClassificationSubmitterTest extends TestCase
         return new MockHandler([new HttpResponse(200, body: $factory->asXML())]);
     }
 
+    private function rejectionHandler(): MockHandler
+    {
+        $factory = new ResponseDocXmlFactory;
+        $factory->addResponse(AadeResponse::factory()->make([
+            'statusCode' => 'ValidationError', 'classificationMark' => null,
+        ]));
+
+        return new MockHandler([new HttpResponse(200, body: $factory->asXML())]);
+    }
+
     #[Test]
-    public function it_submits_the_classification_and_flips_state(): void
+    public function it_submits_the_classification_and_writes_an_audit_row(): void
     {
         $expense = $this->classifiedExpense();
 
@@ -73,6 +83,28 @@ class ExpenseClassificationSubmitterTest extends TestCase
 
         $this->assertNotSame('', $mark);                                  // AADE classification MARK
         $this->assertSame('submitted', $expense->fresh()->classification_state);
+
+        // Legal audit trail: a SendExpensesClassification mark row with request+response.
+        $auditRow = $expense->marks()->where('mydata_action', 'SendExpensesClassification')->first();
+        $this->assertNotNull($auditRow);
+        $this->assertNotEmpty($auditRow->request);
+        $this->assertNotEmpty($auditRow->response);
+    }
+
+    #[Test]
+    public function an_aade_rejection_throws_and_leaves_state_untouched(): void
+    {
+        $expense = $this->classifiedExpense();
+
+        try {
+            (new ExpenseClassificationSubmitter($this->tenant, $this->rejectionHandler()))->submit($expense);
+            $this->fail('expected the rejection to throw');
+        } catch (RuntimeException) {
+            // state must NOT flip, and no audit row claims success
+        }
+
+        $this->assertSame('classified', $expense->fresh()->classification_state);
+        $this->assertSame(0, $expense->marks()->count());
     }
 
     #[Test]

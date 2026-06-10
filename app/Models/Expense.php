@@ -88,4 +88,27 @@ class Expense extends Model
     {
         return $this->hasMany(ExpenseMark::class);
     }
+
+    /**
+     * Operator-facing label for a classification_state — the single source the
+     * list column + infolist + actions share so a new state value (e.g.
+     * 'submitted') can't read as «Αχαρακτήριστο» on one surface.
+     */
+    public static function classificationStateLabel(?string $state): string
+    {
+        return match ($state) {
+            'submitted' => 'Υποβλήθηκε στην ΑΑΔΕ',
+            'classified' => 'Χαρακτηρισμένο',
+            default => 'Αχαρακτήριστο',
+        };
+    }
+
+    public static function classificationStateColor(?string $state): string
+    {
+        return match ($state) {
+            'submitted' => 'success',
+            'classified' => 'info',
+            default => 'gray',
+        };
+    }
 }
