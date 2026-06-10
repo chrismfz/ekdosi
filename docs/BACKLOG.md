@@ -47,6 +47,7 @@ surfaced in the open-items sections further down.
 - **FK-aware delete guard** (PR #258) — `GuardedDeleteAction`.
 - **«Σύστημα» area — 3 slices** (2026-06-10): «Υγεία συστήματος» page · durable `scheduled_task_runs` + queue retry · «Ρυθμίσεις χρονοπρογραμματιστή» (audited toggles, `system_settings`).
 - **«Ρυθμίσεις συστήματος» page** — global knobs (`require_2fa`, backup-alert on/off + email) ως audited live toggles· at-rest encryption + mailer status read-only.
+- **Expenses polish** (2026-06-10): χειροκίνητη καταχώριση εξόδου (`source=manual`, γραμμές, tab «Χειροκίνητα», edit μόνο για manual) + ιδιωτικό PDF/scan attachment με signed download.
 - **Onboarding** (2026-06-10): DEMO seeder · `ekdosi:install` wizard (+ lookup seeding via `MyDataLookupSeeder`) · global+per-company «Δοκιμή SMTP» · «Εργαλεία» · export/import χωρίς passphrase.
 - **myDATA console unification** (PR #272) — one «Κονσόλα myDATA» cluster (Πωλήσεις/Έξοδα/Ε3) + redirects.
 - **Expenses fetch** (PR #272) — «Άντληση από myDATA» κουμπί στη λίστα Έξοδα + tip + read-only `mydata:refresh-expenses` cron (UI toggle, default OFF).
@@ -81,9 +82,8 @@ surfaced in the open-items sections further down.
 - **`SalesOrphanImporter`** — νέο τοπικό τιμολόγιο **πώλησης** από sales-orphan MARK + **line/E3
   backfill** στο enrich όταν το τοπικό δεν έχει γραμμές. _Χαμηλή αξία — πώληση εκδομένη από
   άλλο πρόγραμμα συνήθως απλώς αναγνωρίζεται. (Το expense-orphan import υπάρχει.)_
-- **Expenses polish:** per-row import action (+ «held/needs-review» state) · **manual expense
-  entry** (editable form, `source=manual`) · **PDF/scan attachment** (`expenses.document_path` +
-  FileUpload).
+- **Expenses polish (remaining):** per-row import action (+ «held/needs-review» state) στην
+  κονσόλα-Έξοδα. _(Χειροκίνητη καταχώριση + PDF/scan attachment: ✅ shipped — βλ. «Done recently».)_
 - **§8.13 quantity/units για ΔΑ αγαθών** — οι μονάδες υπάρχουν· τυχόν goods-tenant ειδικά
   (π.χ. `<quantity>` per-line σε goods invoice types) ανοίγουν μόνο αν έρθει goods tenant.
 
@@ -131,6 +131,9 @@ surfaced in the open-items sections further down.
 ## 💡 PDF / UX & ideas
 - **G10** — ένα adaptive PDF template αντί 8 legacy + **δίγλωσσο/EN output** (cross-border/PEPPOL:
   label dictionary ανά locale· GR/EN/bilingual από τη χώρα πελάτη ή per-invoice flag).
-- **Tags σε γραμμές τιμολογίου/προσφοράς** + **«Show all / browse»** picker (search-beyond-typing).
+- **«Show all / browse» picker** (search-beyond-typing) στους product/customer pickers —
+  να ξεφυλλίζεις όλον τον κατάλογο χωρίς πληκτρολόγηση. _(Tags σε **γραμμές**: dropped — δεν
+  έχει use case· μια γραμμή δεν είναι οντότητα που ταξινομείς. Tags σε **πελάτες/προϊόντα**
+  ήδη υπάρχουν.)_
 - **Curated tax-presets** expansion ανά κλάδο + **%-ανά-προϊόν** (όχι μόνο €/τεμ).
 - **`clear:right`** σε single-word doc-types (PDF tweak).

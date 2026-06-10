@@ -64,6 +64,11 @@
   Έξοδα** (one-click read-only fetch → worklist) + tip «τελευταία άντληση · X αδέσποτα» +
   read-only cron **`mydata:refresh-expenses`** (default OFF, toggle στη «Ρυθμίσεις
   χρονοπρογραμματιστή»· δεν δημιουργεί εγγραφές).
+- **Χειροκίνητη καταχώριση εξόδου** (`source=manual`) — για παραστατικό προμηθευτή εκτός
+  myDATA (ξένος προμηθευτής, απόδειξη): φόρμα με γραμμές (header totals από τις γραμμές),
+  tab «Χειροκίνητα», edit μόνο για manual (τα myDATA-sourced μένουν read-only). **Συνημμένο
+  PDF/scan** (`expenses.document_path`, ιδιωτικό) με λήψη μέσω υπογεγραμμένου route
+  (auth + tenant-checked).
 - **Χαρακτηρισμός** (E3 type + category2_x) **per-document ή per-line** (εμπορεύματα/
   πάγια/δαπάνες) → **υποβολή στην ΑΑΔΕ** (`SendExpensesClassification`) +
   `expenses:test-classify` dry-run. Audit row + transactional safety.

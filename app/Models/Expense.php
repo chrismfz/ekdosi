@@ -56,6 +56,7 @@ class Expense extends Model
         'source',
         'category',
         'notes',
+        'document_path',
     ];
 
     protected function casts(): array
