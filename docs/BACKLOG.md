@@ -120,6 +120,15 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 
 ### 💡 PDF / UX & ideas
 - **G10** — one adaptive PDF template vs 8 legacy designs.
+  - **Bilingual / English output (asked 2026-06-10).** A GR tenant (myip/nexon) OR
+    the Estonian one (nixpal) will eventually invoice a foreign company, so the PDF
+    needs an English (or GR+EN bilingual) variant of the field labels — amount /
+    total / quantity / unit price / VAT / net / notes / payment terms… Approach:
+    a label dictionary keyed by locale, the template picking GR vs EN (vs bilingual)
+    from the customer's country / a per-invoice language flag (default GR for
+    domestic, EN for a non-GR/foreign recipient). Ties into the PEPPOL work —
+    an EE/cross-border invoice is exactly the case that needs the EN labels.
+    Deferred with G10.
 - **Curated tax-presets expansion** per sector + **%-per-product** (not just €/unit).
 - **Tags on invoice/quote lines** + **«Show all / browse» picker** (above, deferred).
 - **`clear:right` on single-word doc-types** (PDF review flag) — refine if the QR-then-type
