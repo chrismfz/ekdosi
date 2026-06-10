@@ -16,6 +16,13 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Security
+- **BankAccount + ServiceContract now policy-gated** like every other resource. They were
+  the only two models without a committed policy, so `shield:generate` regenerated stubs on
+  every run AND Filament left them reachable by operators (every other lookup is admin-only).
+  Committing the standard shield policies makes them admin-only (super_admin + company_admin)
+  — consistent + closes the operator-visibility gap. Run `shield:sync-super-admin` after deploy.
+
 ### Changed
 - **Docs reorg + CLAUDE.md slimmed.** `FEATURES.md` (root) is now the catalogue of
   what's built; `docs/BACKLOG.md` is what's left + ideas; `docs/Comparison.md`
