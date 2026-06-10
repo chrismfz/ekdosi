@@ -3,6 +3,7 @@
 use App\Jobs\RecordQueueHeartbeat;
 use App\Models\Company;
 use App\Support\OperatorHealth\HealthRecorder;
+use App\Support\Settings\SystemSettings;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -19,6 +20,18 @@ $trackSchedule = function ($event, string $task) {
 };
 
 /*
+ | Per-task enable switch (the «Σύστημα» settings UI). The DB override wins; the
+ | config/env flag is the DEFAULT (empty system_settings = exactly today's
+ | behaviour). Evaluated as a RUN-TIME `->when()` filter, never at file load —
+ | so this stays DB-query-free when the file is merely parsed (migrate etc.),
+ | and a disabled task is filtered before its before/onSuccess hooks fire (no
+ | run-history pollution). The UI can therefore also turn ON a task that env
+ | left off, which registration-gating couldn't.
+ */
+$scheduleEnabled = fn (string $key): bool => app(SystemSettings::class)
+    ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+
+/*
 |--------------------------------------------------------------------------
 | Scheduled tasks  (config: config/ekdosi.php → 'schedule')
 |--------------------------------------------------------------------------
@@ -29,7 +42,8 @@ $trackSchedule = function ($event, string $task) {
 | non-destructive (stage / read-only / crash-recovery).
 |
 | DB queries live INSIDE the closures (run-time), never at file load —
-| this file is parsed on every artisan invocation, including migrate.
+| this file is parsed on every artisan invocation, including migrate. The
+| same rule is why the enable switch above is a `->when()` filter.
 |
 | withoutOverlapping(30): BOUNDED lock TTL (minutes). The default is 24h, so a
 | run killed mid-flight (reboot / deploy / OOM) orphans the cache lock and every
@@ -40,170 +54,156 @@ $trackSchedule = function ($event, string $task) {
 */
 
 // mail-log:sweep-orphans — recover rows stuck by a crashed worker.
-if (config('ekdosi.schedule.mail_sweep_enabled')) {
-    $trackSchedule(
-        Schedule::command('mail-log:sweep-orphans')
-            ->everyFifteenMinutes()
-            ->withoutOverlapping(30),
-        'mail_sweep'
-    );
-}
+$trackSchedule(
+    Schedule::command('mail-log:sweep-orphans')
+        ->everyFifteenMinutes()
+        ->when(fn () => $scheduleEnabled('mail_sweep_enabled'))
+        ->withoutOverlapping(30),
+    'mail_sweep'
+);
 
 // Queue worker heartbeat — dispatch a tiny queued job. The health command only
 // turns green when a real worker picks it up and writes the heartbeat.
-if (config('ekdosi.schedule.queue_heartbeat_enabled')) {
-    Schedule::job(new RecordQueueHeartbeat)
-        ->everyFiveMinutes()
-        ->name('queue-worker-heartbeat')
-        ->withoutOverlapping(10);
-}
+Schedule::job(new RecordQueueHeartbeat)
+    ->everyFiveMinutes()
+    ->name('queue-worker-heartbeat')
+    ->when(fn () => $scheduleEnabled('queue_heartbeat_enabled'))
+    ->withoutOverlapping(10);
 
 // invoices:resend-failed-emails — re-queue invoice emails whose last attempt
 // failed. Default OFF (two-key: this flag); run manually until SMTP is healthy.
-if (config('ekdosi.schedule.resend_failed_emails_enabled')) {
-    Schedule::command('invoices:resend-failed-emails', [
-        '--since' => config('ekdosi.schedule.resend_failed_emails_since_days', 3),
-    ])
-        ->cron(config('ekdosi.schedule.resend_failed_emails_cron', '30 * * * *'))
-        ->withoutOverlapping(30);
-}
+Schedule::command('invoices:resend-failed-emails', [
+    '--since' => config('ekdosi.schedule.resend_failed_emails_since_days', 3),
+])
+    ->cron(config('ekdosi.schedule.resend_failed_emails_cron', '30 * * * *'))
+    ->when(fn () => $scheduleEnabled('resend_failed_emails_enabled'))
+    ->withoutOverlapping(30);
 
 // whmcs:fetch-pending — stage paid+unfiled WHMCS invoices into the inbox,
 // once per WHMCS-configured tenant. Operator-gated: this only STAGES,
 // it never files at AADE.
-if (config('ekdosi.schedule.whmcs_fetch_enabled')) {
-    $trackSchedule(
-        Schedule::call(function () {
-            Company::query()
-                ->whereNotNull('whmcs_api_url')
-                ->where('whmcs_api_url', '!=', '')
-                ->get()
-                ->each(fn (Company $c) => Artisan::call('whmcs:fetch-pending', ['--tenant' => $c->slug]));
-        })
-            ->cron(config('ekdosi.schedule.whmcs_fetch_cron', '*/15 * * * *'))
-            ->name('whmcs-fetch-all')
-            ->withoutOverlapping(30),
-        'whmcs_fetch'
-    );
-}
+$trackSchedule(
+    Schedule::call(function () {
+        Company::query()
+            ->whereNotNull('whmcs_api_url')
+            ->where('whmcs_api_url', '!=', '')
+            ->get()
+            ->each(fn (Company $c) => Artisan::call('whmcs:fetch-pending', ['--tenant' => $c->slug]));
+    })
+        ->cron(config('ekdosi.schedule.whmcs_fetch_cron', '*/15 * * * *'))
+        ->name('whmcs-fetch-all')
+        ->when(fn () => $scheduleEnabled('whmcs_fetch_enabled'))
+        ->withoutOverlapping(30),
+    'whmcs_fetch'
+);
 
 // whmcs:auto-issue — auto-FILE paid inbox rows for γκρινιάρης customers on
 // tenants that armed it (companies.whmcs_auto_issue_immediate). UNLIKE the
 // fetch above, this files at AADE, so it's a two-key arming: this scheduler
 // flag (default OFF) AND the per-tenant toggle. The command loops every
 // armed tenant itself + leaves anything ambiguous in the inbox for a human.
-if (config('ekdosi.schedule.whmcs_auto_issue_enabled')) {
-    Schedule::command('whmcs:auto-issue')
-        ->cron(config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'))
-        ->name('whmcs-auto-issue-all')
-        ->withoutOverlapping(30);
-}
+Schedule::command('whmcs:auto-issue')
+    ->cron(config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'))
+    ->name('whmcs-auto-issue-all')
+    ->when(fn () => $scheduleEnabled('whmcs_auto_issue_enabled'))
+    ->withoutOverlapping(30);
 
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
 // per myDATA-readable tenant (direct gr-mydata OR a provider reading its own
 // AADE picture back). Discrepancies surface in the command output (exit 2);
 // pipe schedule output to a log for alerting.
-if (config('ekdosi.schedule.mydata_reconcile_enabled')) {
-    $trackSchedule(
-        Schedule::call(function () {
-            Company::myDataReadable()
-                ->each(fn (Company $c) => Artisan::call('mydata:reconcile-sales', ['--tenant' => $c->slug]));
-        })
-            ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))
-            ->name('mydata-reconcile-all')
-            ->withoutOverlapping(30),
-        'mydata_reconcile'
-    );
-}
+$trackSchedule(
+    Schedule::call(function () {
+        Company::myDataReadable()
+            ->each(fn (Company $c) => Artisan::call('mydata:reconcile-sales', ['--tenant' => $c->slug]));
+    })
+        ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))
+        ->name('mydata-reconcile-all')
+        ->when(fn () => $scheduleEnabled('mydata_reconcile_enabled'))
+        ->withoutOverlapping(30),
+    'mydata_reconcile'
+);
 
 // Refresh the cached dashboard "Εικόνα από myDATA" VAT snapshot (the widget
 // reads the cache; this is the heavy AADE pull). All gr-mydata / non-Off
 // tenants, every few hours.
-if (config('ekdosi.schedule.mydata_vat_picture_enabled')) {
-    $trackSchedule(
-        Schedule::command('mydata:refresh-vat-picture')
-            ->cron(config('ekdosi.schedule.mydata_vat_picture_cron', '0 */4 * * *'))
-            ->name('mydata-vat-picture-all')
-            ->withoutOverlapping(30),
-        'mydata_vat_picture'
-    );
-}
+$trackSchedule(
+    Schedule::command('mydata:refresh-vat-picture')
+        ->cron(config('ekdosi.schedule.mydata_vat_picture_cron', '0 */4 * * *'))
+        ->name('mydata-vat-picture-all')
+        ->when(fn () => $scheduleEnabled('mydata_vat_picture_enabled'))
+        ->withoutOverlapping(30),
+    'mydata_vat_picture'
+);
 
 // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
 // tenant. Read-only, NO email; default OFF (opt-in per deploy).
-if (config('ekdosi.schedule.overdue_notifications_enabled')) {
-    Schedule::command('invoices:notify-overdue')
-        ->dailyAt(config('ekdosi.schedule.overdue_notifications_time', '07:30'))
-        ->name('invoices-notify-overdue')
-        ->withoutOverlapping(30);
-}
+Schedule::command('invoices:notify-overdue')
+    ->dailyAt(config('ekdosi.schedule.overdue_notifications_time', '07:30'))
+    ->name('invoices-notify-overdue')
+    ->when(fn () => $scheduleEnabled('overdue_notifications_enabled'))
+    ->withoutOverlapping(30);
 
 // services:stage-renewals — stage DRAFT renewal invoices for due service
 // contracts, once per tenant (the command loops tenants itself). Default OFF:
 // it creates real draft documents. Operator-gated downstream — drafts NEVER
 // auto-file at AADE; they flow through the normal invoice lifecycle. lead_days
 // stages contracts due within the next N days (early billing, default 0).
-if (config('ekdosi.schedule.service_renewals_enabled')) {
-    Schedule::command('services:stage-renewals', [
-        '--lead-days' => config('ekdosi.schedule.service_renewals_lead_days', 0),
-    ])
-        ->dailyAt(config('ekdosi.schedule.service_renewals_time', '07:00'))
-        ->name('service-renewals')
-        ->withoutOverlapping();
-}
+Schedule::command('services:stage-renewals', [
+    '--lead-days' => config('ekdosi.schedule.service_renewals_lead_days', 0),
+])
+    ->dailyAt(config('ekdosi.schedule.service_renewals_time', '07:00'))
+    ->name('service-renewals')
+    ->when(fn () => $scheduleEnabled('service_renewals_enabled'))
+    ->withoutOverlapping();
 
 // services:run-dunning — auto suspend/terminate overdue contracts (or unsuspend
 // a paid one), once per tenant (the command loops tenants itself). Default ON,
 // BUT the real on/off is the per-product dunning_enabled toggle (default OFF):
 // a fresh deploy acts on nothing until an operator opts a product in. The
 // command does NOT file at AADE — it only flips contract status + provisioning.
-if (config('ekdosi.schedule.service_dunning_enabled')) {
-    Schedule::command('services:run-dunning')
-        ->dailyAt(config('ekdosi.schedule.service_dunning_time', '08:00'))
-        ->name('service-dunning')
-        ->withoutOverlapping();
-}
+Schedule::command('services:run-dunning')
+    ->dailyAt(config('ekdosi.schedule.service_dunning_time', '08:00'))
+    ->name('service-dunning')
+    ->when(fn () => $scheduleEnabled('service_dunning_enabled'))
+    ->withoutOverlapping();
 
 // spatie/laravel-backup tasks — disabled by config if a deployment runs them
 // from systemd/cron directly, but tracked here when the Laravel scheduler owns them.
-if (config('ekdosi.schedule.backup_run_enabled')) {
-    $trackSchedule(
-        Schedule::command('backup:run')
-            ->cron(config('ekdosi.schedule.backup_run_cron', '0 2 * * *'))
-            ->name('backup-run')
-            ->withoutOverlapping(120),
-        'backup_run'
-    );
-}
+$trackSchedule(
+    Schedule::command('backup:run')
+        ->cron(config('ekdosi.schedule.backup_run_cron', '0 2 * * *'))
+        ->name('backup-run')
+        ->when(fn () => $scheduleEnabled('backup_run_enabled'))
+        ->withoutOverlapping(120),
+    'backup_run'
+);
 
-if (config('ekdosi.schedule.backup_cleanup_enabled')) {
-    $trackSchedule(
-        Schedule::command('backup:clean')
-            ->cron(config('ekdosi.schedule.backup_cleanup_cron', '30 2 * * *'))
-            ->name('backup-cleanup')
-            ->withoutOverlapping(120),
-        'backup_cleanup'
-    );
-}
+$trackSchedule(
+    Schedule::command('backup:clean')
+        ->cron(config('ekdosi.schedule.backup_cleanup_cron', '30 2 * * *'))
+        ->name('backup-cleanup')
+        ->when(fn () => $scheduleEnabled('backup_cleanup_enabled'))
+        ->withoutOverlapping(120),
+    'backup_cleanup'
+);
 
-if (config('ekdosi.schedule.backup_monitor_enabled')) {
-    $trackSchedule(
-        Schedule::command('backup:monitor')
-            ->cron(config('ekdosi.schedule.backup_monitor_cron', '0 8 * * *'))
-            ->name('backup-monitor')
-            ->withoutOverlapping(30)
-            ->onSuccess(fn () => app(HealthRecorder::class)->recordBackupMonitor(['status' => 'ok', 'exit_code' => 0]))
-            ->onFailure(fn () => app(HealthRecorder::class)->recordBackupMonitor(['status' => 'failed', 'exit_code' => 1])),
-        'backup_monitor'
-    );
-}
+$trackSchedule(
+    Schedule::command('backup:monitor')
+        ->cron(config('ekdosi.schedule.backup_monitor_cron', '0 8 * * *'))
+        ->name('backup-monitor')
+        ->when(fn () => $scheduleEnabled('backup_monitor_enabled'))
+        ->withoutOverlapping(30)
+        ->onSuccess(fn () => app(HealthRecorder::class)->recordBackupMonitor(['status' => 'ok', 'exit_code' => 0]))
+        ->onFailure(fn () => app(HealthRecorder::class)->recordBackupMonitor(['status' => 'failed', 'exit_code' => 1])),
+    'backup_monitor'
+);
 
 // company:run-scheduled-backups — per-TENANT backups (Phase 4), distinct from
 // the spatie whole-DB tasks above. Fires hourly; each company runs once per its
 // own cadence (daily/weekly/monthly) at/after its configured time. Default OFF.
-if (config('ekdosi.schedule.company_backups_enabled')) {
-    Schedule::command('company:run-scheduled-backups')
-        ->cron(config('ekdosi.schedule.company_backups_cron', '0 * * * *'))
-        ->name('company-backups')
-        ->withoutOverlapping(60);
-}
+Schedule::command('company:run-scheduled-backups')
+    ->cron(config('ekdosi.schedule.company_backups_cron', '0 * * * *'))
+    ->name('company-backups')
+    ->when(fn () => $scheduleEnabled('company_backups_enabled'))
+    ->withoutOverlapping(60);

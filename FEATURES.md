@@ -148,7 +148,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   **«Σύστημα»**. + **«Εργαλεία»** (artisan commands ως κουμπιά) +
   **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run.
 - **Scheduler + queue** (DB driver) — backups/auto-email/reconcile/WHMCS/VAT-picture,
-  gated by `EKDOSI_SCHEDULE_*`.
+  gated by `EKDOSI_SCHEDULE_*` **+ σελίδα «Ρυθμίσεις χρονοπρογραμματιστή»**
+  (super_admin-only): toggles ανά εργασία στο `system_settings` store, διαβάζονται
+  run-time από `routes/console.php` (env = προεπιλογή· αποθηκεύονται μόνο οι αποκλίσεις,
+  με audit). Νέο nav group **«Σύστημα»**.
 
 ## 16. Dashboard & widgets
 Έσοδα μήνα/προηγ./τρίμηνο, ΦΠΑ εκροών, ανεξόφλητα, παραστατικά μήνα, MRR/ανανεώσεις,
