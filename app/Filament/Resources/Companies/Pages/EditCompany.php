@@ -14,7 +14,21 @@ class EditCompany extends EditRecord
     /** Inject the synthetic «Τρόπος αποστολής» + provider-cred fields from the record (P3). */
     protected function mutateFormDataBeforeFill(array $data): array
     {
-        return SendChannelFormBridge::hydrate($data, $this->record);
+        $data = SendChannelFormBridge::hydrate($data, $this->record);
+
+        // The secret columns are $hidden, so attributesToArray() (Filament's fill
+        // source) omits them — re-inject the scalar ones from the record so the
+        // admin form prefills exactly as before (the array provider_config is
+        // handled above by the bridge's cfg_* fields). Blank-on-save still keeps
+        // the stored value via each field's ->dehydrated(filled) rule.
+        foreach ($this->record->getHidden() as $column) {
+            $value = $this->record->getAttribute($column);
+            if (is_scalar($value)) {
+                $data[$column] = $value;
+            }
+        }
+
+        return $data;
     }
 
     /** Decompose the synthetic fields back into the real columns + encrypted config (P3). */

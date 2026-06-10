@@ -106,10 +106,11 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 - **`TenantScopedUnique`** helper — `Rule::unique(...)->where('company_id', …)` degrades to
   `IS NULL` outside panel context (duplicates can pass in queue/CLI).
 - **FK-aware delete guards** (`GuardedDeleteAction`) — friendly count-and-block + «Deactivate».
-- **`$hidden` on secret-bearing models** — `Company`/`Server`/`ServerGroup`/`CompanyBackupSetting`
-  have no `$hidden`/`#[Hidden]`, so `toArray()`/`toJson()` exposes decrypted secrets (now plaintext
-  at rest by default → one step easier to leak via a log/dump). `User` already guards 2FA via
-  `#[Hidden]`. Add `$hidden` to the four (test the full suite — Filament/Livewire serialization).
+- **`$hidden` on secret-bearing models — ✅ DONE.** `Company`/`Server`/`ServerGroup`/
+  `CompanyBackupSetting` now carry `$hidden` for their secret columns (`User` already did via
+  `#[Hidden]`), so `toArray()`/`toJson()`/logs no longer expose them. Attribute access is
+  unaffected; the admin Company + backup-schedule forms re-inject the values explicitly so the
+  edit UX is unchanged.
 
 ### 🔒 Backup / DR
 - **Phase 6 — «work without APP_KEY» — ✅ DONE.** `MaybeEncrypted` cast +

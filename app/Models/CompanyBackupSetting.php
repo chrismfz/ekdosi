@@ -32,6 +32,9 @@ class CompanyBackupSetting extends Model
         'destinations',
     ];
 
+    /** Keep the backup passphrase out of array/JSON serialization. */
+    protected $hidden = ['passphrase'];
+
     protected function casts(): array
     {
         return [
