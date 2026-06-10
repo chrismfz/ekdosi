@@ -1,10 +1,17 @@
 # Backlog / Roadmap — deferred ideas
 
-Cross-cutting TODOs that are **deliberately not built yet**. Captured so they
-don't get lost in drift. (Per-feature plans live in their own docs:
-`services-quotes-roadmap.md`, `expenses-phase-plan.md`,
-`paroxos/` (regulatory-blueprint.md + implementation-plan.md). The myDATA-filing gaps + tech-debt list live in
-`CLAUDE.md`.)
+Cross-cutting TODOs that are **deliberately not built yet**, + new ideas. Captured
+so they don't get lost in drift. (What IS built → **`FEATURES.md`** at the root.)
+
+**Standalone idea / plan docs** (the bigger ones live on their own — index here so
+they're not lost):
+- `paroxos/regulatory-blueprint.md` + `implementation-plan.md` — GR ΥΠΑΗΕΣ provider + EU PEPPOL.
+- `ai-assistant-blueprint.md` — in-app «Βοηθός» / **MCP-style assistant** (idea, nothing built).
+- `payment-connectors.md` + `payments-ar-roadmap.md` — payment gateways / AR next steps.
+- `bridges-connectors.md` — 2nd billing source beyond WHMCS (WooCommerce…).
+- `services-quotes-roadmap.md`, `expenses-phase-plan.md` — built; remaining-polish lists.
+
+The myDATA-filing gaps + tech-debt latent list also live in `CLAUDE.md`.
 
 ---
 
@@ -69,10 +76,37 @@ revisit as a focused slice.
 
 ---
 
-## 📋 Roadmap snapshot — open items (2026-06-10)
+## 📋 Roadmap snapshot — open items (refreshed 2026-06-10)
 
-Consolidated «what's left» after the myDATA-payload + product-linked-taxes work.
-Grouped by theme; ✅ done items live in CLAUDE.md.
+**THIS is the single source of truth for «τι μένει». Read it before picking work —
+don't trust a pasted copy.** ✅ DONE items live in `CLAUDE.md`; the
+«looks-like-a-gap-but-isn't» list below exists so we DON'T re-litigate things that
+are already done or deliberately not-built (the VATinfo trap).
+
+### ✅ Done recently (so we don't re-pick them)
+- **PEPPOL Phase 1** (PR #253) — provider-independent BIS 3.0 UBL builder + `peppol:test-submit`. (Phase 2 = the Access-Point transport, still open.)
+- **DR / «work without APP_KEY»** (PR #254) — `MaybeEncrypted` cast + `secrets:reencrypt`; default plaintext at rest. **Live prod migrated to plaintext.**
+- **`$hidden` on secret models** (PR #255) — secrets out of `toArray`/logs.
+- **Expense classification → AADE** (PR #256) — `SendExpensesClassification` + **per-line** (εμπορεύματα/πάγια/δαπάνες) + `expenses:test-classify`; **sandbox-validated** (payload/per-line/safety proven; full-accept blocked by the test ΑΦΜ's [323], not our code).
+- **FK-aware delete guard** (PR #258) — `GuardedDeleteAction` blocks deleting an in-use lookup on all 8 lookup edit pages.
+- Earlier this session: DEMO seeder, export/import without a passphrase, SMTP test button, «Εργαλεία» commands-as-buttons, `ekdosi:install` wizard.
+
+### 🛑 Looks like a gap — but it is NOT (don't re-open without a NEW reason)
+- **RequestVatInfo «ΦΠΑ cross-check»** — **deferred, low value, ON PURPOSE.** The
+  ΦΠΑ picture ALREADY exists on the dashboard (`VatPictureCache`, from the AADE
+  docs). `RequestVatInfo` is AADE's *Φ2 deductible* total — it measures a
+  **different thing** than our «sum of VAT on expense docs», so a «ΑΑΔΕ vs εμείς ·
+  διαφορά» would show a **permanent fake discrepancy** = ψυχολογικός μπελάς. Build
+  ONLY if a real accountant need appears, and ONLY in the Κονσόλα (never the dashboard).
+- **E3 overview** — **already done.** `MyDataE3Overview` pulls AADE's `RequestE3Info`
+  directly; the numbers ARE AADE's. Nothing to «cross-check».
+- **`TenantScopedUnique`** — **redundant.** The DB already has the
+  `unique(company_id, …)` constraints, so queue/CLI duplicates are blocked at the DB.
+- **Manual «off-the-books» expense entry** — a SEPARATE thing from the (done)
+  classification of myDATA-pulled expenses. Deferred (only if a tenant needs to
+  record non-myDATA expenses).
+- **Stock movements / ΣΔΕΠ / WHMCS `-333/-1000` sentinels** — DEAD code in the
+  legacy app; build only if the prod `.fbk` proves real usage.
 
 ### 🟢 Finish/verify — built, NOT live-validated (high value, low risk)
 - **Sandbox round-trips** (run on the VM): ΔΑ lifecycle, the new taxTypes
@@ -84,21 +118,16 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 ### 🟠 myDATA completeness
 - **`invoice_taxes` table (Phase-2)** — many categories per taxType on one invoice
   (today: one/type, else throw). Also lets a fee count in `gross_total`/owed.
-- **Product-linked taxes — money-core decision**: fees are filed in the AADE gross +
-  payment but NOT yet in `invoices.gross_total` / the money cache (Καρτέλα/owed). If
-  fees should count toward what the customer owes → a money-core follow-up.
+  **Needs the money-core decision first** (do fees count toward what the customer owes?).
 - **§8.13 measurement units** for goods delivery notes (follow-up if a goods tenant).
-- **Expenses (Έξοδα)**: ~~`SendExpensesClassification` AADE submit~~ ✅ DONE +
-  ~~per-LINE classification~~ ✅ DONE + ~~`expenses:test-classify` dry-run~~ ✅ DONE
-  (sandbox-validated 2026-06-10 — payload/per-line/safety proven; full accept
-  blocked by the sandbox account's [323], see `docs/expenses-classification-sandbox-results.txt`).
-  Still open: **λογιστής/`entityVatNumber` third-party submission** (for tenants
-  the ΑΑΔΕ blocks from direct classification with [323] — annual-income limit);
-  `RequestVatInfo`/E3 cross-checks, `RequestMyExpenses`, manual expense entry
-  (off-the-books, source=manual), per-row + supplier CSV import.
+- **Expenses — λογιστής/`entityVatNumber`** third-party submission (for tenants the
+  ΑΑΔΕ blocks from direct classification with [323]); `RequestMyExpenses`; per-row +
+  supplier CSV import. (Classification submit + per-line are DONE — see above.)
 
 ### 🔵 Big features (when the time comes)
-- **Estonian PEPPOL submitter** — the last big ❌ (stub; `EInvoiceSubmitter` slot ready).
+- **PEPPOL Phase 2** — the Access-Point transport (the «send»). Phase 1 (UBL builder)
+  is DONE; Phase 2 needs a chosen EE provider + sandbox creds (Billit/Finbite/Telema…).
+  Checklist: `docs/paroxos/regulatory-blueprint.md §7`.
 - **GR Πάροχος/Ιδιοπάροχος (ΥΠΑΗΕΣ)** — blueprint only (`docs/paroxos/regulatory-blueprint.md`).
 - **Bridges/Connectors Phase 1** — a real 2nd source (e.g. WooCommerce) beyond WHMCS.
 
@@ -108,15 +137,13 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
 
 ### ⚙️ Tech debt / latent (CLAUDE.md «Known latent items»)
 - **Strict tenant scope** — flip `CompanyScope` null→throw once every CLI/queue uses `actAs`.
-- **Soft-deleted FK rows render blank** in Filament Selects → `withTrashed()` label lookups + a «deleted» badge.
-- **`TenantScopedUnique`** helper — `Rule::unique(...)->where('company_id', …)` degrades to
-  `IS NULL` outside panel context (duplicates can pass in queue/CLI).
-- **FK-aware delete guards** (`GuardedDeleteAction`) — friendly count-and-block + «Deactivate».
-- **`$hidden` on secret-bearing models — ✅ DONE.** `Company`/`Server`/`ServerGroup`/
-  `CompanyBackupSetting` now carry `$hidden` for their secret columns (`User` already did via
-  `#[Hidden]`), so `toArray()`/`toJson()`/logs no longer expose them. Attribute access is
-  unaffected; the admin Company + backup-schedule forms re-inject the values explicitly so the
-  edit UX is unchanged.
+- **Bulk-delete guard** — the single-record lookup delete is now guarded (PR #258), but the
+  table `DeleteBulkAction` + `ForceDeleteBulkAction` stay unguarded (force-delete of an in-use
+  lookup hard-fails on a `restrictOnDelete` FK — raw error, no data loss).
+- **Soft-deleted FK rows render blank** in Filament Selects → now *prevented* for new deletes by
+  the guard; remaining = a `withTrashed()` label + «deleted» badge for rows trashed before the guard.
+- ~~`TenantScopedUnique`~~ ✅ non-issue (DB constraints — see «not a gap» above).
+- ~~FK-aware delete guards~~ ✅ DONE (PR #258). ~~`$hidden` on secret models~~ ✅ DONE (PR #255).
 
 ### 🔒 Backup / DR
 - **Phase 6 — «work without APP_KEY» — ✅ DONE.** `MaybeEncrypted` cast +

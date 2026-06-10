@@ -159,7 +159,8 @@ toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a t
 - **`CLAUDE.md`** — architecture, decisions, conventions, current status (read first).
 - **`docs/company-portability-plan.md`** — per-company backup/export/import + wipe plan.
 - **`INSTALL.md`** — production install (RHEL/nginx/php-fpm/MariaDB, systemd, cron).
-- **`docs/Comparison.md`** — legacy → new mapping + what's net-new / deferred.
+- **`FEATURES.md`** (root) — the full catalogue of what ekdosi does today.
+- **`docs/BACKLOG.md`** — what's left + new ideas (incl. «looks like a gap but isn't»).
 - **`docs/services-quotes-roadmap.md`** — Quotes + Services/recurring (both built).
 - **`docs/CLAUDE-history.md`** — archived per-PR history and resolved findings.
 - **`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** — the AADE spec.
