@@ -9,7 +9,7 @@ use RuntimeException;
  * Seals/opens the handful of secret values that ride inside a company export
  * bundle, decoupling at-rest encryption (APP_KEY, per VM) from transport
  * encryption (a passphrase the operator carries) — see
- * docs/company-portability-plan.md → Secrets.
+ * FEATURES.md → Secrets.
  *
  * Two modes:
  *   - passphrase (default): each secret is encrypted under a key derived from

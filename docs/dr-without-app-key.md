@@ -77,4 +77,4 @@ bundle), so re-enter those on the target after a settings/full import.
 
 (The per-company **portability** export/import — `company:export`/`import` and the
 panel «Εξαγωγή/Εισαγωγή ρυθμίσεων» — is a separate, finer-grained path and already
-works without a passphrase via `raw` mode; see `docs/company-portability-plan.md`.)
+works without a passphrase via `raw` mode. See `FEATURES.md` for the shipped feature.)

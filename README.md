@@ -153,7 +153,7 @@ toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a t
   invoices + lines + MARKs, payments, quotes, expenses), restored with every FK
   rewired to the new ids (incl. the credit-note self-reference). Deferred (v1):
   delivery notes, service contracts, stock movements, the WHMCS inbox, activity
-  log, notes/attachments — see `docs/company-portability-plan.md`.
+  log, notes/attachments.
 - **Limitation (v1)**: server / server-group provisioning secrets
   (`secret_encrypted`) export as raw APP_KEY ciphertext — portable only within
   the **same** `APP_KEY`; re-enter them after a cross-VM restore.
@@ -161,10 +161,9 @@ toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a t
 ## Documentation
 
 - **`CLAUDE.md`** — architecture, decisions, conventions, current status (read first).
-- **`docs/company-portability-plan.md`** — per-company backup/export/import + wipe plan.
 - **`INSTALL.md`** — production install (RHEL/nginx/php-fpm/MariaDB, systemd, cron).
 - **`FEATURES.md`** (root) — the full catalogue of what ekdosi does today.
-- **`docs/BACKLOG.md`** — what's left + new ideas (incl. «looks like a gap but isn't»).
-- **`docs/services-quotes-roadmap.md`** — Quotes + Services/recurring (both built).
+- **`docs/BACKLOG.md`** — single source for what's left + ideas (incl. «looks like a gap
+  but isn't» + an index of the kept design/reference docs).
 - **`docs/CLAUDE-history.md`** — archived per-PR history and resolved findings.
 - **`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** — the AADE spec.

@@ -9,7 +9,7 @@ use Illuminate\Console\Command;
 use RuntimeException;
 
 /**
- * Phase 1 (docs/company-portability-plan.md) — export a tenant's SETTINGS +
+ * per-company portability (FEATURES.md) — export a tenant's SETTINGS +
  * SETUP to a portable .zip. Non-destructive. Secrets are passphrase-encrypted
  * by default (option 5); `--raw` opts into a cleartext debug dump.
  *

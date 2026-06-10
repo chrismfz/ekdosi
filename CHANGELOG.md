@@ -59,6 +59,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   lazy fetch). The local «Συμφωνία myDATA» stays separate (operator, no AADE call). Old
   URLs (`my-data-console`, `…-expenses`, `my-data-e3-overview`) **301→** the new
   `mydata/{sales,expenses,e3}` paths so bookmarks survive.
+- **Docs consolidation — `BACKLOG.md` is now the single source for «what's left».**
+  Audited every scattered roadmap/idea `.md` against the code; the realized ones
+  (services-quotes-roadmap, payments-ar-roadmap, company-portability-plan,
+  aade-mark-enrich-crosscheck, expenses-phase-plan) + the obsolete one-time sandbox
+  prompts (delivery-sandbox-prompt, phase2-sandbox-handoff, sandbox-validation-runbook)
+  were removed, their residual open items folded into `BACKLOG.md`. Genuine
+  specs/blueprints/runbooks are kept and indexed from `BACKLOG.md`. Stale «not built»
+  lines for the ΔΑ movement lifecycle, §8.13 units, and MARK-enrich (all long shipped)
+  are gone.
 
 ## [1.0.0] - 2026-06-10
 
