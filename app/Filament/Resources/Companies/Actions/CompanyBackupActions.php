@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\URL;
 use Throwable;
 
 /**
- * Filament glue for the per-company backup (docs/company-portability-plan.md,
+ * Filament glue for the per-company backup (FEATURES.md,
  * Phase 1 UI). Thin wrappers over CompanyExporter/CompanyImporter so the panel
  * offers the same export/restore the artisan commands do — download a settings
  * .zip, and upload-to-restore (dry-run preview → execute). Admin-only via the

@@ -50,6 +50,9 @@
   stateMismatch / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε
   tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
 - **Σελίδα ΜΑΡΚ** (direction-aware) + per-line E3 classification.
+- **Enrich/έλεγχος από ΑΑΔΕ** (`EnrichInvoiceFromAade`) — από τη Σελίδα ΜΑΡΚ: live-pull
+  του MARK, stamp **QR**, συμπλήρωση κενών header πεδίων + **per-field σύγκριση**
+  (cross-check τοπικού ↔ ΑΑΔΕ).
 - **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables.
 - **Code tables** (`App\Support\MyData\Codes`) — §8 πίνακες με validation helpers.
 

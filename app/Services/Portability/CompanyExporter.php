@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Phase 1 of docs/company-portability-plan.md — builds a per-company
+ * the per-company portability feature (FEATURES.md) — builds a per-company
  * SETTINGS + SETUP bundle (buckets A + B): the `companies` row (secrets sealed
  * via SecretsCodec, logo bundled) plus the operator-curated lookup tables.
  *
@@ -45,7 +45,7 @@ class CompanyExporter
      * Bucket C — transactional data (only in a `--full` bundle). Dumped as-is;
      * the importer rewires FKs. Deferred (v1): delivery notes, service contracts,
      * stock movements, pending WHMCS inbox, activity log, notes, attachments,
-     * tag pivots — polymorphic / re-derivable, see docs/company-portability-plan.md.
+     * tag pivots — polymorphic / re-derivable, see FEATURES.md.
      *
      * @var list<string>
      */

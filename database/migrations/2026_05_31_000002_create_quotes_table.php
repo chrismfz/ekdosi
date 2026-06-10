@@ -14,7 +14,7 @@ return new class extends Migration
      * καρτέλα / ΦΠΑ. It lives in its OWN table precisely so it can never leak
      * into App\Support\InvoiceScope::live() or the balance/dashboard
      * aggregations (those query `invoices` unconditionally). See
-     * docs/services-quotes-roadmap.md.
+     * FEATURES.md.
      *
      * The party-snapshot columns deliberately mirror `invoices` (same names)
      * so "Μετατροπή σε Παραστατικό" is a direct field copy and a future quote

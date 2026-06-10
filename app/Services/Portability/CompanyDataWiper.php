@@ -13,7 +13,7 @@ use RuntimeException;
 /**
  * Wipes a tenant's TRANSACTIONAL data while keeping the company row + all
  * settings + setup/lookups — the safe «clean slate before a Firebird re-import»
- * (docs/company-portability-plan.md). Lives in the «Αντίγραφα» menu next to
+ * (FEATURES.md). Lives in the «Αντίγραφα» menu next to
  * export/import precisely so a wipe is never reached without a backup at hand.
  *
  * FK ordering is sidestepped with Schema::withoutForeignKeyConstraints (portable
