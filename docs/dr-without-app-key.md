@@ -56,6 +56,15 @@ php artisan secrets:reencrypt --to=plain --dry-run   # preview, write nothing
 Idempotent + re-runnable (skips columns already in the target form). Run it while
 you **still have the working APP_KEY** (so existing ciphertext can be decrypted).
 
+**Safety net:** `--to=plain` will **not** freeze an unreadable blob — if it meets
+ciphertext it can't decrypt (wrong/lost APP_KEY) it **skips** that column, warns,
+and **exits non-zero**, so you can't silently lose a secret by converting before
+restoring the right key. Put the correct `APP_KEY` back and re-run.
+
+**Portability bundles** never carry server creds: `servers`/`server_groups`
+`secret_encrypted` is redacted on `company:export` (a secret must not ride in a
+bundle), so re-enter those on the target after a settings/full import.
+
 ## DR runbook (default plaintext mode)
 
 1. New VM: clone the repo, `composer install`, `npm run build`.

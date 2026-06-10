@@ -57,20 +57,30 @@ class SecretsReencrypt extends Command
         $dry = (bool) $this->option('dry-run');
 
         $totalChanged = 0;
+        $totalSkipped = 0;
         foreach (self::MODELS as $modelClass) {
             $columns = $this->secretColumns($modelClass);
             if ($columns === []) {
                 continue;
             }
 
-            $changed = $this->process($modelClass, $columns, $encrypt, $dry);
+            $skipped = 0;
+            $changed = $this->process($modelClass, $columns, $encrypt, $dry, $skipped);
             $totalChanged += $changed;
+            $totalSkipped += $skipped;
             $this->line(sprintf('  %-22s %d %s', class_basename($modelClass), $changed, $dry ? 'θα άλλαζαν' : 'ενημερώθηκαν'));
         }
 
         $this->info(($dry ? 'ΠΡΟΕΠΙΣΚΟΠΗΣΗ — ' : '').'Σύνολο: '.$totalChanged.' στήλες → '.($encrypt ? 'κρυπτογραφημένες' : 'plaintext').'.');
         if ($dry) {
             $this->warn('Dry-run: τίποτα δεν γράφτηκε. Ξανατρέξε χωρίς --dry-run.');
+        }
+        if ($totalSkipped > 0) {
+            // Undecryptable ciphertext was left untouched (wrong/lost APP_KEY) — a
+            // non-zero exit so a deploy script notices instead of assuming success.
+            $this->error("⚠ {$totalSkipped} στήλες παραλείφθηκαν (κρυπτογραφημένες που δεν ανοίγουν με το τρέχον APP_KEY). Βάλε το σωστό APP_KEY και ξανατρέξε.");
+
+            return self::FAILURE;
         }
 
         return self::SUCCESS;
@@ -80,7 +90,7 @@ class SecretsReencrypt extends Command
      * @param  class-string<Model>  $modelClass
      * @param  array<string,bool>  $columns  column => isArray
      */
-    private function process(string $modelClass, array $columns, bool $encrypt, bool $dry): int
+    private function process(string $modelClass, array $columns, bool $encrypt, bool $dry, int &$skipped): int
     {
         $changed = 0;
         $table = (new $modelClass)->getTable();
@@ -91,7 +101,7 @@ class SecretsReencrypt extends Command
             $query->withTrashed();
         }
         $query->chunkById(200, function ($models) use (
-            $table, $columns, $encrypt, $dry, &$changed
+            $table, $columns, $encrypt, $dry, &$changed, &$skipped
         ) {
             foreach ($models as $model) {
                 $updates = [];
@@ -102,12 +112,25 @@ class SecretsReencrypt extends Command
                     }
 
                     $plain = MaybeEncrypted::decryptIfPossible((string) $raw);
+
+                    // SAFETY: ciphertext that did NOT decrypt (looks encrypted but
+                    // decryptIfPossible returned it unchanged) means the wrong/lost
+                    // APP_KEY. Writing it as "plaintext" would freeze an unreadable
+                    // blob → silent data loss. Warn + skip, never corrupt.
+                    if (! $encrypt && $this->looksEncrypted((string) $raw) && $plain === (string) $raw) {
+                        $this->warn("  ⚠ {$table}.{$column} #{$model->getKey()}: κρυπτογραφημένο που ΔΕΝ ανοίγει (λάθος/χαμένο APP_KEY) — παραλείπεται.");
+                        $skipped++;
+
+                        continue;
+                    }
+
                     $target = $encrypt ? Crypt::encryptString($plain) : $plain;
 
-                    // Already in the target form? (plaintext == decrypted; or
-                    // encrypted blob that decrypts to the same plaintext)
+                    // Already in the target form? Encrypted target → the raw value
+                    // already looks like a Laravel ciphertext blob; plain target →
+                    // the raw value already equals the decrypted plaintext.
                     $alreadyTarget = $encrypt
-                        ? (MaybeEncrypted::decryptIfPossible((string) $raw) === $plain && $this->looksEncrypted((string) $raw))
+                        ? $this->looksEncrypted((string) $raw)
                         : ((string) $raw === $plain);
 
                     if ($alreadyTarget) {

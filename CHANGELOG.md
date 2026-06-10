@@ -25,9 +25,12 @@ they merge.
   restore on a fresh VM needs NO old APP_KEY (protection = DB/disk access control).
   The cast ALWAYS decrypts legacy ciphertext on read, so flipping the flag never
   breaks existing rows; `php artisan secrets:reencrypt --to=plain|encrypted`
-  rewrites them. Sessions/cookies are a soft dependency (a new key just means
-  re-login). Docs: `docs/dr-without-app-key.md`. Portability's secret-detection
-  routed through `MaybeEncrypted::isSecretCast()` (no leak into bundles).
+  rewrites them (with a safety net: `--to=plain` skips + fails loudly on ciphertext
+  it can't decrypt, so a wrong/lost APP_KEY can't silently freeze a secret).
+  Sessions/cookies are a soft dependency (a new key just means re-login). Portability's
+  secret-detection routed through `MaybeEncrypted::isSecretCast()` and `servers`/
+  `server_groups` `secret_encrypted` is now **redacted** from export bundles (a secret
+  must not ride in a portable file — re-enter on the target). Docs: `docs/dr-without-app-key.md`.
 
 ### Changed
 - **Default seed is now ONE «DEMO Α.Ε.» tenant** (full demo mode, `mydata_mode=off`)

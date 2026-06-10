@@ -72,4 +72,24 @@ class SecretsReencryptCommandTest extends TestCase
         $this->withoutMockingConsoleOutput();
         $this->assertSame(1, $this->artisan('secrets:reencrypt', ['--to' => 'nonsense']));
     }
+
+    #[Test]
+    public function to_plain_skips_ciphertext_it_cannot_decrypt_and_fails_loudly(): void
+    {
+        $this->withoutMockingConsoleOutput();
+        $c = $this->company();
+
+        // Simulate a row encrypted under a DIFFERENT/lost APP_KEY: a value that
+        // looks like a Laravel ciphertext blob but won't decrypt here.
+        $garbageCipher = base64_encode(json_encode(['iv' => 'AAAA', 'value' => 'BBBB', 'mac' => 'CCCC']));
+        DB::table('companies')->where('id', $c->id)->update(['gsis_password' => $garbageCipher]);
+
+        // --to=plain must NOT write the unreadable blob as "plaintext" (data loss);
+        // it skips it and exits non-zero so a deploy script notices.
+        $exit = $this->artisan('secrets:reencrypt', ['--to' => 'plain']);
+        $this->assertSame(1, $exit);
+
+        // The blob is left untouched (not frozen as plaintext).
+        $this->assertSame($garbageCipher, $this->raw($c, 'gsis_password'));
+    }
 }
