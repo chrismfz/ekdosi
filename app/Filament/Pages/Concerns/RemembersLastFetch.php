@@ -32,12 +32,50 @@ trait RemembersLastFetch
             $state[$prop] = $this->{$prop};
         }
 
-        Cache::put($this->fetchCacheKey(), [
+        static::putFetchState(Filament::getTenant()?->getKey(), $state);
+        $this->fetchedAtHuman = now()->diffForHumans();
+    }
+
+    /**
+     * Write a fetch snapshot for a tenant WITHOUT a page instance — so a CLI
+     * refresh (the read-only expenses cron) or another page can seed the exact
+     * cache this page restores on mount. Same key + shape as rememberFetch().
+     *
+     * @param  array<string, mixed>  $state  keyed by this page's cachedFetchProps()
+     */
+    public static function putFetchState(int|string|null $tenantKey, array $state): void
+    {
+        Cache::put(static::fetchCacheKeyFor($tenantKey), [
             'state' => $state,
             'at' => now()->toIso8601String(),
         ], now()->addHours(12));
+    }
 
-        $this->fetchedAtHuman = now()->diffForHumans();
+    /** Whole cached payload (['state' => …, 'at' => iso]) for a tenant, or null. */
+    public static function lastFetchPayload(int|string|null $tenantKey): ?array
+    {
+        $cached = Cache::get(static::fetchCacheKeyFor($tenantKey));
+
+        return is_array($cached) ? $cached : null;
+    }
+
+    /** When this page last fetched for the tenant (interactive OR cron), or null. */
+    public static function lastFetchAt(int|string|null $tenantKey): ?Carbon
+    {
+        $payload = static::lastFetchPayload($tenantKey);
+
+        return isset($payload['at']) ? Carbon::parse($payload['at']) : null;
+    }
+
+    /**
+     * The cached prop state for the tenant (e.g. to read a count off the last
+     * result without rebuilding it), or null.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function lastFetchState(int|string|null $tenantKey): ?array
+    {
+        return static::lastFetchPayload($tenantKey)['state'] ?? null;
     }
 
     protected function restoreFetch(): void
@@ -58,9 +96,12 @@ trait RemembersLastFetch
 
     protected function fetchCacheKey(): string
     {
-        $tenant = Filament::getTenant()?->getKey() ?? 'none';
+        return static::fetchCacheKeyFor(Filament::getTenant()?->getKey());
+    }
 
-        return 'mydata-fetch:'.class_basename(static::class).':'.$tenant;
+    protected static function fetchCacheKeyFor(int|string|null $tenantKey): string
+    {
+        return 'mydata-fetch:'.class_basename(static::class).':'.($tenantKey ?? 'none');
     }
 
     /**

@@ -57,7 +57,10 @@
 - **Προμηθευτές** (`Supplier`) — CRUD + «Άντληση από ΑΑΔΕ» (GSIS) + **`suppliers:sync`**
   (μοναδικά issuer ΑΦΜ από `RequestDocs`).
 - **Εισαγωγή αδέσποτων** εξόδων από myDATA (`ExpenseImporter`/`ExpenseReconciler`) +
-  self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ).
+  self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ). **Κουμπί «Άντληση από myDATA» στη λίστα
+  Έξοδα** (one-click read-only fetch → worklist) + tip «τελευταία άντληση · X αδέσποτα» +
+  read-only cron **`mydata:refresh-expenses`** (default OFF, toggle στη «Ρυθμίσεις
+  χρονοπρογραμματιστή»· δεν δημιουργεί εγγραφές).
 - **Χαρακτηρισμός** (E3 type + category2_x) **per-document ή per-line** (εμπορεύματα/
   πάγια/δαπάνες) → **υποβολή στην ΑΑΔΕ** (`SendExpensesClassification`) +
   `expenses:test-classify` dry-run. Audit row + transactional safety.

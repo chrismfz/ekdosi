@@ -183,7 +183,7 @@ class MyDataConsoleExpenses extends Page
 
             $this->ran = true;
             $this->resultMode = 'both';
-            $this->result = $this->serialize($result);
+            $this->result = self::serializeFor($tenant, $result);
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
             $this->rememberFetch();
@@ -283,14 +283,46 @@ class MyDataConsoleExpenses extends Page
         }
     }
 
-    private function serialize(ExpenseReconciliationResult $r): array
+    /**
+     * Run the reconcile for a tenant and write the snapshot into the SAME cache
+     * this page restores on mount — so the read-only cron (`mydata:refresh-expenses`)
+     * and the «Άντληση από myDATA» button on the Έξοδα list seed exactly what the
+     * console shows. Static + tenant-explicit (no Filament tenant context needed).
+     */
+    public static function refreshSnapshot(Company $tenant, Carbon $from, Carbon $to, ?MockHandler $handler = null): ExpenseReconciliationResult
+    {
+        // Fall back to the static test seam so the CLI refresh + the Έξοδα-list
+        // button (neither passes a handler) are exercisable without the network.
+        $result = (new ExpenseReconciler($tenant, $handler ?? static::$testHandler))->reconcile(
+            $from->copy()->startOfDay(),
+            $to->copy()->endOfDay(),
+        );
+
+        static::putFetchState($tenant->getKey(), [
+            'result' => self::serializeFor($tenant, $result),
+            'resultMode' => 'both',
+            'fromLabel' => $result->from,
+            'toLabel' => $result->to,
+            'ran' => true,
+        ]);
+
+        return $result;
+    }
+
+    /** Count of αδέσποτα (importable orphan expenses) in the last cached fetch. */
+    public static function lastOrphanCount(int|string|null $tenantKey): int
+    {
+        return count(static::lastFetchState($tenantKey)['result']['missingLocally'] ?? []);
+    }
+
+    public static function serializeFor(Company $tenant, ExpenseReconciliationResult $r): array
     {
         // GR issuers' names are forbidden in myDATA ([219]/[220]) — only the
         // AFM arrives. Resolve those AFMs against our synced suppliers so the
         // αδέσποτα worklist shows a name, not a blank. Batch-load once.
-        $names = $this->supplierNamesByAfm($r);
+        $names = self::supplierNamesByAfm($tenant, $r);
 
-        $rows = fn (array $rows) => array_map(fn (ReconciliationRow $row) => $this->rowToArray($row, $names), $rows);
+        $rows = fn (array $rows) => array_map(fn (ReconciliationRow $row) => self::rowToArray($tenant, $row, $names), $rows);
 
         return [
             'from' => $r->from,
@@ -309,7 +341,7 @@ class MyDataConsoleExpenses extends Page
     /**
      * @param  array<string, string>  $names  afm => supplier name
      */
-    private function rowToArray(ReconciliationRow $row, array $names = []): array
+    private static function rowToArray(Company $tenant, ReconciliationRow $row, array $names = []): array
     {
         $afm = $row->counterpartVat;
         // Name from the doc → else our synced supplier (by AFM) → else null.
@@ -329,7 +361,7 @@ class MyDataConsoleExpenses extends Page
             'aadeState' => $row->aadeState,
             'cancelledByMark' => $row->cancelledByMark,
             'problem' => $row->problem,
-            'url' => $row->expenseId ? $this->expenseUrl($row->expenseId) : null,
+            'url' => $row->expenseId ? self::expenseUrl($tenant, $row->expenseId) : null,
         ];
     }
 
@@ -339,13 +371,8 @@ class MyDataConsoleExpenses extends Page
      *
      * @return array<string, string> afm => name
      */
-    private function supplierNamesByAfm(ExpenseReconciliationResult $r): array
+    private static function supplierNamesByAfm(Company $tenant, ExpenseReconciliationResult $r): array
     {
-        $tenant = Filament::getTenant();
-        if ($tenant === null) {
-            return [];
-        }
-
         $afms = collect([
             ...$r->matched, ...$r->stateMismatch, ...$r->missingAtAade,
             ...$r->missingLocally, ...$r->duplicateLocal,
@@ -366,11 +393,11 @@ class MyDataConsoleExpenses extends Page
             ->all();
     }
 
-    private function expenseUrl(int $expenseId): ?string
+    private static function expenseUrl(Company $tenant, int $expenseId): ?string
     {
         return ExpenseResource::getUrl('view', [
             'record' => $expenseId,
-            'tenant' => Filament::getTenant(),
+            'tenant' => $tenant,
         ]);
     }
 }

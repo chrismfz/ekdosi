@@ -53,4 +53,15 @@ class ScheduleToggleRespectedTest extends TestCase
 
         $this->assertTrue($this->event('invoices-notify-overdue')->filtersPass($this->app));
     }
+
+    #[Test]
+    public function the_expenses_refresh_cron_honours_its_ui_toggle(): void
+    {
+        // Read-only expenses refresh defaults OFF → blocked until the UI toggle flips it.
+        $this->assertFalse($this->event('mydata-fetch-expenses-all')->filtersPass($this->app));
+
+        app(SystemSettings::class)->setBool('schedule.mydata_fetch_expenses_enabled', true, null);
+
+        $this->assertTrue($this->event('mydata-fetch-expenses-all')->filtersPass($this->app));
+    }
 }
