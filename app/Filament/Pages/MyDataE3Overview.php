@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\MyDataCluster;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Models\Company;
 use App\Services\MyData\E3Report;
@@ -21,7 +22,6 @@ use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
-use UnitEnum;
 
 /**
  * Επισκόπηση Ε3 (E7) — read-only. Pulls AADE's `RequestE3Info` for a window
@@ -40,9 +40,11 @@ class MyDataE3Overview extends Page
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-table-cells';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static ?string $cluster = MyDataCluster::class;
 
-    protected static ?int $navigationSort = 93;
+    protected static ?string $slug = 'e3';
+
+    protected static ?int $navigationSort = 3;
 
     protected string $view = 'filament.pages.my-data-e3-overview';
 
@@ -103,7 +105,7 @@ class MyDataE3Overview extends Page
 
     public function getTitle(): string
     {
-        return 'Επισκόπηση Ε3 (myDATA)';
+        return 'Κονσόλα myDATA — Επισκόπηση Ε3';
     }
 
     public static function shouldRegisterNavigation(): bool

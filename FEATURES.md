@@ -44,9 +44,11 @@
 - **Υποβολή / ακύρωση / dry-run** μέσω `firebed/aade-mydata` (`MyDataSubmitter`),
   sandbox-validated (1.1/2.1/11.x/5.1 + CANCEL + νέοι taxTypes + 4% override + ΔΑ).
 - **`mydata_marks` = source of truth** (πλήρες request/response XML, νομικό audit).
-- **Κονσόλα myDATA** — ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:
-  τοπικό (Phase 1) + ζωντανό (Phase 2, `SalesReconciler`)· matched / stateMismatch /
-  missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση).
+- **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3**·
+  ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**: τοπικό (Phase 1,
+  ξεχωριστή «Συμφωνία myDATA») + ζωντανό (Phase 2, `SalesReconciler`)· matched /
+  stateMismatch / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε
+  tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
 - **Σελίδα ΜΑΡΚ** (direction-aware) + per-line E3 classification.
 - **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables.
 - **Code tables** (`App\Support\MyData\Codes`) — §8 πίνακες με validation helpers.

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\MyDataCluster;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Expenses\ExpenseResource;
@@ -22,7 +23,6 @@ use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
-use UnitEnum;
 
 /**
  * Κονσόλα myDATA — Έξοδα (E4). The expense-side twin of MyDataConsole.
@@ -44,9 +44,11 @@ class MyDataConsoleExpenses extends Page
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-document-arrow-down';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static ?string $cluster = MyDataCluster::class;
 
-    protected static ?int $navigationSort = 92;
+    protected static ?string $slug = 'expenses';
+
+    protected static ?int $navigationSort = 2;
 
     protected string $view = 'filament.pages.my-data-console-expenses';
 
@@ -84,7 +86,7 @@ class MyDataConsoleExpenses extends Page
 
     public static function getNavigationLabel(): string
     {
-        return 'Κονσόλα myDATA — Έξοδα';
+        return 'Έξοδα';
     }
 
     public function getTitle(): string

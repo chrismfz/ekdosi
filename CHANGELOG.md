@@ -41,6 +41,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   queue **pending-jobs** count, and a super_admin «Επανάληψη αποτυχημένων»
   (`queue:retry all`) action shown only when jobs have failed. **Deploy:** `migrate`.
 
+### Changed
+- **myDATA consoles unified under one «Κονσόλα myDATA» menu** (cluster, Πακέτο 1).
+  The three live-AADE consoles (Πωλήσεις / Έξοδα / Επισκόπηση Ε3) are now sub-navigation
+  tabs of a single `MyDataCluster` instead of three scattered nav items — each page kept
+  intact (own fetch actions, `RemembersLastFetch` «τελευταία ενημέρωση», `View:*` perm,
+  lazy fetch). The local «Συμφωνία myDATA» stays separate (operator, no AADE call). Old
+  URLs (`my-data-console`, `…-expenses`, `my-data-e3-overview`) **301→** the new
+  `mydata/{sales,expenses,e3}` paths so bookmarks survive.
+
 ## [1.0.0] - 2026-06-10
 
 ### Added
