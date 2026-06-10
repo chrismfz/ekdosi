@@ -17,6 +17,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 ### Added
+- **Bilingual / English PDF** (invoice + quote). A per-document `language` choice
+  (Greek / English / **bilingual GR-EN**) drives the PDF field labels via a shared
+  `App\Support\Pdf\PdfLabels` dictionary; when unset it auto-resolves from the
+  recipient's country (GR → Greek, foreign → bilingual — Greek for the AADE-facing
+  copy + English for the foreign reader). Labels only — never amounts/legal content.
+  Set on the invoice/quote «Παρατηρήσεις» form. **Deploy:** `migrate`.
 - **Manual expense entry + document attachment** (Expenses polish). Supplier docs not
   in myDATA (foreign supplier, cash receipt) can now be keyed in: a `source=manual`
   Create/Edit form with a lines repeater (header totals recomputed from the lines; the

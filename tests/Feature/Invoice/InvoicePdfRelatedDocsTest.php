@@ -65,6 +65,9 @@ class InvoicePdfRelatedDocsTest extends TestCase
             'qrDataUri' => null,
             'logoDataUri' => null,
             'totals' => $totals,
+            'L' => \App\Support\Pdf\PdfLabels::for(
+                \App\Support\Pdf\PdfLabels::resolveLanguage($invoice->language, $invoice->country)
+            ),
         ])->render();
     }
 

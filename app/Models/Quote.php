@@ -53,6 +53,7 @@ class Quote extends Model
         'gross_total',
         'proposal_text',
         'customer_notes',
+        'language',
         'admin_notes',
         'converted_invoice_id',
         'converted_service_contract_id',

@@ -268,6 +268,15 @@ class QuoteForm
                         ->rows(2)
                         ->columnSpanFull()
                         ->helperText('Δεν εμφανίζονται στον πελάτη.'),
+                    Select::make('language')
+                        ->label('Γλώσσα PDF')
+                        ->options([
+                            'el' => 'Ελληνικά',
+                            'en' => 'Αγγλικά',
+                            'both' => 'Δίγλωσσο (GR/EN)',
+                        ])
+                        ->placeholder('Αυτόματο (από χώρα πελάτη)')
+                        ->helperText('Κενό = αυτόματο: Ελληνικά για GR, δίγλωσσο για ξένο παραλήπτη.'),
                 ]),
         ]);
     }

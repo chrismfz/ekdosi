@@ -57,22 +57,22 @@
                 @endif
                 <div class="tenant-name">{{ $tenant->name }}</div>
                 <div class="tenant-meta">
-                    @if ($tenant->afm)ΑΦΜ: {{ $tenant->afm }}@endif
-                    @if ($tenant->tax_office) · ΔΟΥ: {{ $tenant->tax_office }}@endif<br>
+                    @if ($tenant->afm){{ $L('vat_no') }}: {{ $tenant->afm }}@endif
+                    @if ($tenant->tax_office) · {{ $L('tax_office') }}: {{ $tenant->tax_office }}@endif<br>
                     @if ($tenant->address){{ $tenant->address }}@endif
                     @if ($tenant->city), {{ $tenant->city }}@endif
                     @if ($tenant->postcode) {{ $tenant->postcode }}@endif<br>
-                    @if ($tenant->phone)Τηλ: {{ $tenant->phone }}@endif
+                    @if ($tenant->phone){{ $L('phone') }}: {{ $tenant->phone }}@endif
                     @if ($tenant->email) · {{ $tenant->email }}@endif
                 </div>
             </td>
             <td style="width: 40%;" class="doc-box">
-                <div class="doc-title">@gup('Προσφορά')</div>
+                <div class="doc-title">@gup($L('quote_title'))</div>
                 <div class="doc-meta">
                     <strong>{{ $quote->code }}</strong><br>
                     @if ($quote->subject){{ $quote->subject }}<br>@endif
-                    Ημ/νία: {{ $quote->issued_at?->format('d/m/Y') }}<br>
-                    @if ($quote->valid_until)Ισχύει έως: {{ $quote->valid_until?->format('d/m/Y') }}@endif
+                    {{ $L('date') }}: {{ $quote->issued_at?->format('d/m/Y') }}<br>
+                    @if ($quote->valid_until){{ $L('valid_until') }}: {{ $quote->valid_until?->format('d/m/Y') }}@endif
                 </div>
             </td>
         </tr>
@@ -88,10 +88,10 @@
         <tr>
             <td>
                 <div class="party-card">
-                    <div class="party-label">@gup('Προς')</div>
+                    <div class="party-label">@gup($L('to'))</div>
                     <div class="party-name">{{ $quote->company_name ?: ($quote->customer?->name ?: '—') }}</div>
                     <div class="party-meta">
-                        @if ($quote->vat_no)ΑΦΜ: {{ $quote->vat_no }}@endif
+                        @if ($quote->vat_no){{ $L('vat_no') }}: {{ $quote->vat_no }}@endif
                         @if ($quote->occupation)<br>{{ $quote->occupation }}@endif
                         @if ($quote->address1)<br>{{ $quote->address1 }}@endif
                         @if ($quote->city), {{ $quote->city }}@endif
@@ -108,11 +108,11 @@
         <thead>
             <tr>
                 <th style="width: 38px;">#</th>
-                <th>@gup('Περιγραφή')</th>
-                <th style="width: 60px;" class="num">@gup('Ποσότ.')</th>
-                <th style="width: 75px;" class="num">@gup('Τιμή μον.')</th>
-                <th style="width: 45px;" class="num">@gup('ΦΠΑ%')</th>
-                <th style="width: 80px;" class="num">@gup('Αξία')</th>
+                <th>@gup($L('description'))</th>
+                <th style="width: 60px;" class="num">@gup($L('quantity_short'))</th>
+                <th style="width: 75px;" class="num">@gup($L('unit_price'))</th>
+                <th style="width: 45px;" class="num">@gup($L('vat_pct'))</th>
+                <th style="width: 80px;" class="num">@gup($L('amount'))</th>
             </tr>
         </thead>
         <tbody>
@@ -132,8 +132,8 @@
     {{-- VAT breakdown --}}
     <table class="vat-break">
         <tr>
-            <th>@gup('Καθαρή αξία')</th>
-            <th>@gup('ΦΠΑ')</th>
+            <th>@gup($L('net_value'))</th>
+            <th>@gup($L('vat'))</th>
         </tr>
         @foreach ($totals['rows'] as $row)
             <tr>
@@ -146,15 +146,15 @@
     {{-- Totals --}}
     <table class="totals">
         <tr>
-            <td class="lbl">Καθαρή αξία</td>
+            <td class="lbl">{{ $L('net_value') }}</td>
             <td class="val">{{ number_format($totals['totalNet'], 2, ',', '.') }} €</td>
         </tr>
         <tr>
-            <td class="lbl">ΦΠΑ</td>
+            <td class="lbl">{{ $L('vat') }}</td>
             <td class="val">{{ number_format($totals['totalVat'], 2, ',', '.') }} €</td>
         </tr>
         <tr class="grand">
-            <td>Σύνολο</td>
+            <td>{{ $L('total') }}</td>
             <td class="val">{{ number_format($totals['totalGross'], 2, ',', '.') }} €</td>
         </tr>
     </table>
@@ -165,7 +165,7 @@
     @endif
 
     <div class="footer">
-        {{ $tenant->name }} — Προσφορά {{ $quote->code }} — Η παρούσα προσφορά δεν αποτελεί φορολογικό παραστατικό.
+        {{ $tenant->name }} — {{ $L('quote_title') }} {{ $quote->code }} — {{ $L('quote_not_tax_doc') }}
     </div>
 
 </body>

@@ -27,7 +27,10 @@
 - **VAT/εκπτώσεις/στρογγυλοποίηση** portαρισμένα ακριβώς (`RecomputeInvoiceTotals` +
   `InvoiceVatBreakdown`), per-VAT-rate breakdown.
 - **Αρίθμηση** συνεχόμενη ανά τύπο, με **row-lock σε transaction** (`InvoiceNumberer`).
-- **QR + PDF** (Blade/dompdf).
+- **QR + PDF** (Blade/dompdf) — **γλώσσα ανά παραστατικό** (Ελληνικά/Αγγλικά/**Δίγλωσσο
+  GR-EN**), per-invoice/quote επιλογή με default από τη χώρα πελάτη (GR → Ελληνικά, ξένος
+  → δίγλωσσο)· `App\Support\Pdf\PdfLabels` localizes μόνο τις ετικέτες (όχι ποσά/περιεχόμενο),
+  σε invoice + quote.
 - **Δύο ορθογώνιες καταστάσεις**: `local_status` (draft/active/cancelled) vs
   `mydata_state` (null/VALID/CANCELLED) — ποτέ μπερδεμένες· ένα predicate
   (`InvoiceScope::live()`) σε όλα τα money sites.

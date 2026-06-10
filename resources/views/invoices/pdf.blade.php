@@ -119,11 +119,11 @@
 @endphp
 
 @if($invoice->mydata_state === null)
-    <div class="banner banner-draft">ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ ΥΠΟΒΛΗΘΕΙ ΣΤΗ myDATA</div>
+    <div class="banner banner-draft">{{ $L('banner_draft') }}</div>
 @elseif($invoice->mydata_state === 'CANCELLED')
-    <div class="banner banner-cancelled">ΑΚΥΡΩΘΕΝ ΠΑΡΑΣΤΑΤΙΚΟ — Δεν έχει νόμιμη ισχύ</div>
+    <div class="banner banner-cancelled">{{ $L('banner_cancelled') }}</div>
 @elseif($isCredit)
-    <div class="banner banner-credit">ΠΙΣΤΩΤΙΚΟ ΠΑΡΑΣΤΑΤΙΚΟ</div>
+    <div class="banner banner-credit">{{ $L('banner_credit') }}</div>
 @endif
 
 {{-- ====================== Header: logo + tenant info | invoice meta ====================== --}}
@@ -137,10 +137,10 @@
             @if($tenant->address) {{ $tenant->address }}<br> @endif
             @if($tenant->city || $tenant->postcode){{ $tenant->postcode }} {{ $tenant->city }}<br>@endif
             @if($tenant->afm)
-                ΑΦΜ: {{ $tenant->afm }}@if($tenant->tax_office) · ΔΟΥ {{ $tenant->tax_office }}@endif
+                {{ $L('vat_no') }}: {{ $tenant->afm }}@if($tenant->tax_office) · {{ $L('tax_office') }} {{ $tenant->tax_office }}@endif
                 <br>
             @endif
-            @if($tenant->phone) Τηλ: {{ $tenant->phone }} @endif
+            @if($tenant->phone) {{ $L('phone') }}: {{ $tenant->phone }} @endif
             @if($tenant->email) · {{ $tenant->email }} @endif
         </p>
     </div>
@@ -154,12 +154,12 @@
                 @endif
             </div>
         @endif
-        <p class="doc-type">@gup($invoice->invoiceType?->name ?? 'Παραστατικό')</p>
+        <p class="doc-type">@gup($invoice->invoiceType?->name ?? $L('doc_generic'))</p>
         <p class="doc-code">{{ $invoice->invcode }}</p>
         <p class="doc-date">
             {{ optional($invoice->issued_at)->format('d/m/Y H:i') }}
             @if($invoice->delivery_date && $isDelivery)
-                <br><span class="meta-label">Παράδοση:</span> {{ $invoice->delivery_date->format('d/m/Y') }}
+                <br><span class="meta-label">{{ $L('delivery_date') }}:</span> {{ $invoice->delivery_date->format('d/m/Y') }}
             @endif
         </p>
     </div>
@@ -170,7 +170,7 @@
 @if(! $isRetail || $invoice->vat_no)
     <div class="meta">
         <div class="meta-cell">
-            <h3>@gup('Στοιχεία Πελάτη')</h3>
+            <h3>@gup($L('customer_details'))</h3>
             <div class="name">{{ $invoice->company_name ?: '—' }}</div>
             <div class="meta-row">
                 @if($invoice->occupation) {{ $invoice->occupation }}<br> @endif
@@ -178,29 +178,29 @@
                 @if($invoice->address2) {{ $invoice->address2 }}<br> @endif
                 @if($invoice->city || $invoice->postcode){{ $invoice->postcode }} {{ $invoice->city }}@endif
                 @if($invoice->country && $invoice->country !== 'GR') · {{ $invoice->country }} @endif
-                @if($invoice->vat_no)<br>ΑΦΜ: {{ $invoice->vat_no }}@endif
+                @if($invoice->vat_no)<br>{{ $L('vat_no') }}: {{ $invoice->vat_no }}@endif
                 @if($invoice->vies_vat)<br>VIES: {{ $invoice->vies_vat }}@endif
             </div>
         </div>
         <div class="meta-cell">
-            <h3>@gup('Όροι Παραστατικού')</h3>
+            <h3>@gup($L('doc_terms'))</h3>
             @if($invoice->paymentMethod && ! $isDelivery)
-                <div class="meta-row"><span class="meta-label">Τρόπος πληρωμής:</span> {{ $invoice->paymentMethod->description }}</div>
+                <div class="meta-row"><span class="meta-label">{{ $L('payment_method') }}:</span> {{ $invoice->paymentMethod->description }}</div>
             @endif
             @if(($invoice->bankAccount ?? null) && ! $isDelivery)
-                <div class="meta-row"><span class="meta-label">Λογαριασμός κατάθεσης:</span> {{ $invoice->bankAccount->bank_name }}@if($invoice->bankAccount->iban) — {{ $invoice->bankAccount->iban }}@endif</div>
+                <div class="meta-row"><span class="meta-label">{{ $L('deposit_account') }}:</span> {{ $invoice->bankAccount->bank_name }}@if($invoice->bankAccount->iban) — {{ $invoice->bankAccount->iban }}@endif</div>
             @endif
             @if($invoice->deliveryMethod ?? null)
-                <div class="meta-row"><span class="meta-label">Τρόπος αποστολής:</span> {{ $invoice->deliveryMethod->description }}</div>
+                <div class="meta-row"><span class="meta-label">{{ $L('shipping_method') }}:</span> {{ $invoice->deliveryMethod->description }}</div>
             @endif
             @if($invoice->distributionAim ?? null)
-                <div class="meta-row"><span class="meta-label">Σκοπός διακίνησης:</span> {{ $invoice->distributionAim->description }}</div>
+                <div class="meta-row"><span class="meta-label">{{ $L('movement_purpose') }}:</span> {{ $invoice->distributionAim->description }}</div>
             @endif
             @if($invoice->invoiceType?->mydata_type)
-                <div class="meta-row"><span class="meta-label">myDATA τύπος:</span> {{ $invoice->invoiceType->mydata_type }}</div>
+                <div class="meta-row"><span class="meta-label">{{ $L('mydata_type') }}:</span> {{ $invoice->invoiceType->mydata_type }}</div>
             @endif
             @if($invoice->mydata_url && $invoice->mydata_state === 'VALID')
-                <div class="meta-row"><span class="meta-label">Κατάσταση:</span> <strong style="color:#065f46">Πιστοποιημένο</strong></div>
+                <div class="meta-row"><span class="meta-label">{{ $L('status') }}:</span> <strong style="color:#065f46">{{ $L('certified') }}</strong></div>
             @endif
         </div>
     </div>
@@ -211,18 +211,18 @@
     <table class="lines">
         <thead>
             <tr>
-                <th style="width: 38%">@gup('Περιγραφή')</th>
-                <th class="center" style="width: 8%">@gup('ΜΜ')</th>
-                <th class="num" style="width: 10%">@gup('Ποσότητα')</th>
+                <th style="width: 38%">@gup($L('description'))</th>
+                <th class="center" style="width: 8%">@gup($L('unit'))</th>
+                <th class="num" style="width: 10%">@gup($L('quantity'))</th>
                 @if(! $isDelivery)
-                    <th class="num" style="width: 12%">@gup('Τιμή μον.')</th>
+                    <th class="num" style="width: 12%">@gup($L('unit_price'))</th>
                     @php $anyDiscount = $invoice->lines->contains(fn($l) => (float)$l->discount > 0); @endphp
                     @if($anyDiscount)
-                        <th class="num" style="width: 7%">@gup('Έκπτ.%')</th>
+                        <th class="num" style="width: 7%">@gup($L('discount_pct'))</th>
                     @endif
-                    <th class="num" style="width: 7%">@gup('ΦΠΑ%')</th>
-                    <th class="num" style="width: 11%">@gup('Καθαρή')</th>
-                    <th class="num" style="width: 12%">@gup('Με ΦΠΑ')</th>
+                    <th class="num" style="width: 7%">@gup($L('vat_pct'))</th>
+                    <th class="num" style="width: 11%">@gup($L('net'))</th>
+                    <th class="num" style="width: 12%">@gup($L('gross_incl_vat'))</th>
                 @endif
             </tr>
         </thead>
@@ -246,7 +246,7 @@
                     @endif
                 </tr>
             @empty
-                <tr><td colspan="8" style="text-align:center; color:#9ca3af; font-style:italic">— Καμία γραμμή —</td></tr>
+                <tr><td colspan="8" style="text-align:center; color:#9ca3af; font-style:italic">— {{ $L('no_lines') }} —</td></tr>
             @endforelse
         </tbody>
     </table>
@@ -260,35 +260,35 @@
             <table class="totals">
                 @foreach($totals['rows'] as $row)
                     <tr class="vat-row">
-                        <td class="label">ΦΠΑ {{ rtrim(rtrim(number_format($row['rate'], 2, ',', '.'), '0'), ',') }}% επί καθ. {{ number_format($row['net'], 2, ',', '.') }}</td>
+                        <td class="label">{{ $L('vat') }} {{ rtrim(rtrim(number_format($row['rate'], 2, ',', '.'), '0'), ',') }}% {{ $L('on_net') }} {{ number_format($row['net'], 2, ',', '.') }}</td>
                         <td class="value">{{ number_format($row['vat'], 2, ',', '.') }}</td>
                     </tr>
                 @endforeach
                 <tr class="subtotal">
-                    <td class="label">Καθαρή αξία</td>
+                    <td class="label">{{ $L('net_value') }}</td>
                     <td class="value">{{ number_format($totals['totalNet'], 2, ',', '.') }} €</td>
                 </tr>
                 <tr>
-                    <td class="label">Σύνολο ΦΠΑ</td>
+                    <td class="label">{{ $L('total_vat') }}</td>
                     <td class="value">{{ number_format($totals['totalVat'], 2, ',', '.') }} €</td>
                 </tr>
                 @if(((float) $invoice->header_discount_percent) > 0)
                     <tr class="discount-note">
-                        <td>Έκπτωση παραστατικού {{ number_format((float)$invoice->header_discount_percent, 2, ',', '.') }}% (εφαρμοσμένη)</td>
+                        <td>{{ $L('header_discount') }} {{ number_format((float)$invoice->header_discount_percent, 2, ',', '.') }}% ({{ $L('applied') }})</td>
                         <td></td>
                     </tr>
                 @endif
                 <tr class="grand">
-                    <td>Συνολική αξία</td>
+                    <td>{{ $L('total_value') }}</td>
                     <td class="value">{{ number_format($totals['totalGross'], 2, ',', '.') }} €</td>
                 </tr>
                 @if($totals['withhold'] > 0)
                     <tr class="withhold">
-                        <td class="label">Παρακράτηση φόρου</td>
+                        <td class="label">{{ $L('withholding') }}</td>
                         <td class="value">−{{ number_format($totals['withhold'], 2, ',', '.') }} €</td>
                     </tr>
                     <tr class="grand">
-                        <td>Πληρωτέο</td>
+                        <td>{{ $L('payable') }}</td>
                         <td class="value">{{ number_format($totals['payable'], 2, ',', '.') }} €</td>
                     </tr>
                 @endif
@@ -300,7 +300,7 @@
 {{-- ====================== Notes ====================== --}}
 @if($invoice->notes)
     <div class="notes-box">
-        <h3>@gup('Παρατηρήσεις')</h3>
+        <h3>@gup($L('notes'))</h3>
         {!! nl2br(e($invoice->notes)) !!}
     </div>
 @endif
@@ -315,21 +315,21 @@
 @php($showCreditedFor = $invoice->credited_invoice_id !== null && $invoice->creditedInvoice)
 @if($invoice->isFullyCredited() || $showCreditedFor || $relCredits->isNotEmpty() || $relDeliveries->isNotEmpty())
     <div class="related">
-        <h3>@gup('Σχετικά παραστατικά')</h3>
+        <h3>@gup($L('related_docs'))</h3>
 
         @if($invoice->isFullyCredited())
             <div class="rel-row">
-                <span class="rel-label">Κατάσταση παραστατικού:</span>
-                <span class="rel-badge">Ακυρώθηκε με πιστωτικό</span>
+                <span class="rel-label">{{ $L('doc_status') }}:</span>
+                <span class="rel-badge">{{ $L('cancelled_by_credit') }}</span>
             </div>
         @endif
 
         @if($showCreditedFor)
             <div class="rel-row">
-                <span class="rel-label">Πιστωτικό — αντιστρέφει το παραστατικό:</span>
+                <span class="rel-label">{{ $L('credit_reverses') }}:</span>
                 <strong>{{ $invoice->creditedInvoice->invcode }}</strong>
             </div>
-            <div class="rel-note">Αυτό το πιστωτικό εκδόθηκε για να ακυρώσει/διορθώσει το παραπάνω παραστατικό.</div>
+            <div class="rel-note">{{ $L('credit_note_purpose') }}</div>
         @endif
 
         @if($relCredits->isNotEmpty())
@@ -337,19 +337,19 @@
                 {{-- Full cancel vs partial credit: «Ακυρώθηκε» only when the credit
                      notes fully reverse the invoice — else it would mislead a customer
                      who still owes a balance. --}}
-                <span class="rel-label">{{ $invoice->isFullyCredited() ? 'Ακυρώθηκε / πιστώθηκε με:' : 'Πιστώθηκε (μερικώς) με:' }}</span>
+                <span class="rel-label">{{ ($invoice->isFullyCredited() ? $L('cancelled_credited_with') : $L('credited_partially_with')).':' }}</span>
                 <strong>{{ $relCredits->pluck('invcode')->implode(', ') }}</strong>
             </div>
             {{-- Only assert the AADE status when it's actually VALID — never on a
                  cancelled-at-AADE or non-myDATA invoice (would be a false claim). --}}
             @if($invoice->mydata_state === 'VALID')
-                <div class="rel-note">Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.</div>
+                <div class="rel-note">{{ $L('original_valid_note') }}</div>
             @endif
         @endif
 
         @if($relDeliveries->isNotEmpty())
             <div class="rel-row">
-                <span class="rel-label">Δελτία αποστολής:</span>
+                <span class="rel-label">{{ $L('delivery_notes') }}:</span>
                 <strong>{{ $relDeliveries->pluck('invcode')->implode(', ') }}</strong>
             </div>
         @endif
@@ -360,7 +360,7 @@
 <div class="footer">
     @if($invoice->mydata_url)
         <div class="mydata-line">
-            Πιστοποιημένο στη myDATA — επαληθεύστε σαρώνοντας το QR ή στη διεύθυνση:
+            {{ $L('mydata_verify') }}
         </div>
         {{-- The AADE qrUrl is one long ~150-char token with no spaces. DomPDF
              won't break it in the fixed footer (it overflowed and got clipped on
@@ -373,7 +373,7 @@
         <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>
     @endif
     <div style="margin-top:1mm">
-        Σελίδα <span class="pager"></span> από <span class="pager-total"></span>
+        {{ $L('page') }} <span class="pager"></span> {{ $L('of') }} <span class="pager-total"></span>
     </div>
 </div>
 
