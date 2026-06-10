@@ -17,6 +17,15 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **`ekdosi:install` — turnkey first-run command.** Creates the first super_admin
+  user + the first company, wires Shield (permissions + per-tenant super_admin /
+  standard roles), and seeds the standard Greek AADE lookups (VAT categories +
+  classified invoice types + payment methods + units) so a brand-new tenant can
+  issue a ΤΠΥ with zero manual Setup. Safeguard: refuses to run if any user
+  already exists (a populated install) unless `--force`; idempotent on the company
+  slug + admin email. Interactive prompts or fully-flagged
+  (`--email/--password/--company/--afm/--no-interaction`). New box from zero →
+  `php artisan migrate && php artisan ekdosi:install`.
 - **Δοκιμή global SMTP (.env).** A super-admin-only header action on the Companies
   list sends a probe through the app-wide `MAIL_MAILER` mailer (tenant-independent)
   — the counterpart to the existing per-company «Send a test email». Surfaces the
