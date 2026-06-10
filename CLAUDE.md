@@ -290,7 +290,7 @@ against them (read-only) and flags what AADE would reject. Exit 0/1/2.
   cancellations) and diffs vs local into matched / stateMismatch / missingAtAade
   / missingLocally / duplicateLocal. Read-only worklist. **Sandbox-verified
   2026-05-28** (parser needed no changes). Inbound `RequestDocs` (expense side)
-  IS built — see the Έξοδα phase (`ExpenseReconciler` / `MyDataConsoleExpenses`).
+  IS built (`ExpenseReconciler` / `MyDataConsoleExpenses` — see `FEATURES.md §4`).
 - **Console UX (2026-05-31):** orphans (`missingLocally`) are bucketed by
   economic type — `Codes::transmittedDocBucket()` → income (1/2/5/6/7/8/11) /
   expense (13/14) / other (3/15/16/17 = μισθοδοσία, πάγια…) — so a €5k payroll
@@ -327,526 +327,91 @@ credit; works on filed invoices but then surfaces the ⚠ reconciliation row),
 `MyDataSubmitter` syncs `local_status` at its own persist/cancel choke-point
 (VALID→active, cancel→cancelled). `EditInvoice` is editable only while draft.
 
-## WHMCS bridge (built — Stages A / B-1 / B-2 / B-3)
-Operator-gated **inbox** model (NOT auto-issuing — invoices are legally
-significant): WHMCS push/poll → ekdosi webhook → `pending_whmcs_invoices` →
-operator reviews in `WhmcsInbox` → **«Δημιουργία Παραστατικού» (editable draft)**
-→ fix line text → issue via the normal invoice lifecycle (Οριστικοποίηση →
-myDATA submit) → write-back `invoiced=MARK`. The inbox no longer files straight
-to AADE (safer — review the real παραστατικό first); the direct `file()` path
-survives only for the γκρινιάρης `whmcs:auto-issue` command.
-- Services: `Whmcs\WhmcsClient` (+factory), `WhmcsInvoiceIngestor`,
-  `WhmcsInbox\WhmcsInvoiceMapper` + `WhmcsInvoiceFiler`, `WhmcsBridgeClient`
-  (write-back). Webhook controllers in `routes/webhooks.php`.
-- **HMAC** (must match both sides): `X-Webhook-Signature: sha256=<hex>` over
-  the raw body (push/write-back) or the `"{slug}:{id}"` canonical string
-  (status). Body is `{"whmcs_invoice_id":N}` only — we fetch the canonical
-  payload via our API creds (never accept full invoice data over the webhook).
-- **`whmcs-plugin/ekdosi_bridge/`** is OUR WHMCS-side plugin (the consolidated
-  successor to the 3 archived legacy plugins). Deployed to the tenant's WHMCS.
+## WHMCS bridge (built)
+Operator-gated **draft-first inbox** (NOT auto-issuing — invoices are legally
+significant): WHMCS push/poll → ekdosi webhook → `pending_whmcs_invoices` → operator
+«Δημιουργία Παραστατικού» (editable draft) → issue via the normal lifecycle (→ myDATA)
+→ write-back `invoiced=MARK`. The inbox never files straight to AADE; the direct
+`file()` path survives only for the γκρινιάρης `whmcs:auto-issue`. Services:
+`WhmcsClient` (+factory), `WhmcsInvoiceIngestor`, `WhmcsInbox\WhmcsInvoiceMapper`/
+`WhmcsInvoiceFiler`, `WhmcsWritebackService`, `WhmcsBridgeClient`; webhooks in
+`routes/webhooks.php`. **`whmcs-plugin/ekdosi_bridge/`** is OUR WHMCS-side plugin.
 
-**Inbox UX + visibility (2026-05-31):**
-- **Draft-first inbox** (`WhmcsInvoiceFiler::createDraft`): primary action
-  «Δημιουργία Παραστατικού» creates an editable draft (`status='drafted'`, ΑΑ
-  allocated, `local_status='draft'`, `whmcs_pending_id` linked) — NO AADE submit;
-  mirrors the splitter. Operator edits then issues via the lifecycle.
-- **Billing-intent surfacing**: the inbox reads the WHMCS client custom fields
-  off the staged payload via `companies.whmcs_custom_field_map` (roles `vatno`,
-  `taxoffice`, `occupation`, `griniaris`, **`wantsinvoice`**) →
-  `PendingWhmcsInvoice::wantsInvoice()/whmcsAfm()/needsAfm()/whmcsClientName()`.
-  Columns «Πελάτης (WHMCS)» + «Πρόθεση» (Τιμολόγιο/Απόδειξη, red «λείπει ΑΦΜ»);
-  the Hold action takes a reason (`hold_reason`); the WHMCS # opens a full
-  read-only invoice modal. `whmcs_third_party_enabled` is now a Company toggle.
-- **`ekdosi_bridge` plugin v0.5.0 — WHMCS-side visibility** (PR #101 branch):
-  per-invoice admin badge with the real MARK, an invoice-LIST badge (footer-JS
-  + read-only `marks` JSON action), a CSRF «Αποστολή στο Ekdosi» button, and a
-  per-client **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ, drafts incl.) via
-  `GET /webhooks/whmcs/{slug}/invoice-map/{whmcs_userid}`
-  (`WhmcsClientInvoiceMapController`, HMAC `"{slug}:map:{userid}"`).
+> The feature list is in **`FEATURES.md §11`**; the plugin-version blow-by-blow in
+> `CHANGELOG.md` + `whmcs-plugin/ekdosi_bridge/CHANGELOG.md`; the third-party design
+> in `docs/whmcs-legacy-plugin-map.md`; the connectors story in `docs/bridges-connectors.md`.
 
-**Live-deploy hardening + UX (2026-05-31, plugin v0.12.0 — PRs #112–#120,
-verified against the restored prod WHMCS):**
-- **AFM-keyed visibility** (no stored WHMCS↔ekdosi link survived the import —
-  verified `customers.whmcs_client_id` NULL 100%, `whmcs_invoice_log` empty):
-  `POST /webhooks/whmcs/{slug}/invoices-by-afm` (per-client card, ΑΦΜ set) +
-  `POST .../invoice-states` (batch ΤΠΥ/ΜΑΡΚ for the addon invoice list). The
-  per-invoice `invoice-status` now also returns `ekdosi_invcode`. **The legacy
-  historical WHMCS#→ΤΠΥ matcher was BUILT then REMOVED** — content-matching is
-  heuristic and wrong on a legal link; forward-only deterministic
-  (`whmcs_pending_id`) is the policy.
-- **Inbox paging — THE bug that hid invoices:** `getPendingInvoices` used
-  `limit`/`offset`, which WHMCS GetInvoices SILENTLY IGNORES (it paginates via
-  **`limitstart`/`limitnum`**) → every page identical → "stuck at 16 / 5-min
-  freeze". Fixed: correct params, advance cursor by ACTUAL returned count, stop
-  on short/empty page, id-repeat loop guard. Prod 16→146.
-- **VAT net-vs-gross from the payload, not a guess:** `WhmcsInvoiceMapper`
-  reads the invoice's own `subtotal/tax/taxrate/total` — subtotal+tax==total →
-  amounts are NET (add VAT); subtotal==total → GROSS (back out). Falls back to
-  `whmcs_amount_includes_tax` only when no breakdown. (Closed the "ekdosi
-  πετσοκόβει την τιμή" €19 vs €23.56 bug.)
-- **Third-party recipient at file time:** the «Δημιουργία Παραστατικού» modal
-  shows the routed beneficiaries (read-only) + lets the operator pick ANY
-  customer as recipient (name+ΑΦΜ search — covers "pick the third party"); the
-  inbox «Τρίτος» column (now right after «Πελάτης (ekdosi)») shows the
-  beneficiary NAME, not just «Σε τρίτο». Changing the recipient while a draft
-  works via EditInvoice (`customer_id` editable until a MARK is issued).
-- **AADE as source of truth on Customer/Supplier forms:** «Άντληση από ΑΑΔΕ»
-  (fill-empty) **+** «Διόρθωση από ΑΑΔΕ» (overwrite, confirm) — when the
-  customer typed wrong, the GSIS registry wins. Shared rule in
-  `AadeFormFill::assign($get,$set,$field,$value,$overwrite)` (never blanks on
-  empty AADE value).
-- **Addon invoice list** (plugin): consolidated WHMCS→ekdosi list with date
-  window (εβδομάδα/μήνας/τρίμηνο/όλα, default εβδομάδα), «Είδος» (τιμολόγιο/απόδειξη), «Τρίτος» resolved
-  LOCALLY from `mod_ekdosi_routing` (`ThirdPartyStore::bucketsForInvoices`,
-  shows the beneficiary name) — works for every invoice, no ekdosi/inbox
-  dependency. Admin third-party routing is now EDITABLE
-  (`ThirdPartyStore::setRouteForUser`, CS-side re-route; takes effect next
-  invoice since `resolve.php` reads routing live).
-- **Admin-only `whmcs_third_party_enabled`** gates the per-invoice resolve.php
-  call (fills «Τρίτος»); independent from the client-area `show_client_v2`
-  visibility switch. `whmcs:fetch-pending` re-resolves third parties per ingest.
-
-**WHMCS gaps (real):**
-- **Write-back on lifecycle-filed drafts — ✅ DONE.** A draft created from the
-  inbox (`createDraft`, carrying `whmcs_pending_id`) and later issued via the
-  normal lifecycle now triggers write-back: `MyDataSubmitter`'s VALID persist
-  calls `WhmcsWritebackService::syncFiledFromLifecycle`, which flips the pending
-  row drafted→filed and pushes `invoiced=MARK`. The write-back push was extracted
-  into the shared `WhmcsWritebackService` (used by both `WhmcsInvoiceFiler::file()`
-  and the lifecycle path). **Multi-party SPLIT drafts still excluded** (one WHMCS
-  invoice → many MARKs but `tblinvoices.invoiced` is one column — separate design).
-  `WhmcsLifecycleWritebackTest` covers flip+push / no-op(non-WHMCS,no-mark,split) /
-  skipped(no bridge) / failed(bridge rejects).
-- **`mod_timologia` third-party invoicing — ✅ DONE (T-1 + T-2, merged).** The
-  bridge resolves each line's routing (own `mod_ekdosi_*` tables, synced from
-  legacy), ekdosi bills the end customer for single-party invoices and stages
-  multi-party ones for a guided operator split; a hideable v2 client page lets
-  resellers manage contacts + routing. Full story:
-  `docs/whmcs-legacy-plugin-map.md`. Remaining: per-group invoice-type at file
-  time relies on the operator; WHMCS write-back of split invoices (one MARK col).
-- **`whmcs_amount_includes_tax`: ✅ SUPERSEDED (2026-05-31).** The mapper now
-  DETECTS net-vs-gross from the invoice payload's `subtotal/tax/taxrate/total`;
-  the toggle is only the fallback when no breakdown is present. A tax-exclusive
-  tenant is handled automatically.
-- **FUTURE IDEA — "all of a client's third parties" 2nd dropdown** in the
-  create-draft modal: pre-fill a recipient picker with EVERY third party the
-  client routes to (not just this invoice's). The data lives in WHMCS
-  `mod_ekdosi_contacts` (ekdosi can't read it → would need a new
-  `contacts-by-userid` bridge endpoint). DEFERRED: the existing ΑΦΜ search on
-  the recipient dropdown already covers picking any third party; this is a
-  speed/convenience nicety, not a gap.
-- **griniaris** (field 338 immediate-invoicing) — ✅ DONE (G8, two phases):
-  phase 1 = an "Άμεσο" badge on inbox rows whose customer is `needs_immediate_invoice`;
-  phase 2 = the `whmcs:auto-issue` command auto-files those rows at AADE (see G8 below).
-- **Plugin error-handling — ✅ IMPROVED (plugin v0.13.0).** `EkdosiClient`'s
-  push/status summarisers now classify failures distinctly via `classifyError()`:
-  409 (`whmcs_invoice_not_found` — input contradicts upstream, re-push won't help),
-  502/503/504 (transient — retry), 401/403 (HMAC/secret mismatch), and surface the
-  `audit_preserved` success flag (already filed at AADE → re-push left the frozen
-  record untouched) instead of a generic "HTTP NNN". (The earlier note said
-  "still v0.1.0" — that was stale; the plugin was already v0.12.0.)
-- **`invoiced` rollback — ✅ DONE (plugin v0.14.0).** An earlier version WIDENED
-  `tblinvoices.invoiced` SMALLINT→BIGINT to stuff the 15-digit MARK in — which
-  BROKE the legacy ekdosi app (it reads `invoiced` as a SMALLINT {0,1} flag).
-  Fixed: the MARK now lives in OUR OWN `mod_ekdosi_invoice_marks`
-  (`InvoiceMarkStore`); the bridge NEVER writes `invoiced` at runtime; activation
-  RESTORES it to SMALLINT (detect type → move MARKs out → reset >65535 to 1,
-  NULL→0 → `MODIFY … SMALLINT(5)`), privilege-safe (warns with exact manual SQL,
-  never fails activation). `WhmcsBridgeClient::setInvoiced` / `inbound.php` /
-  `WhmcsWritebackService` all decoupled. **Deploy = deactivate → upload →
-  reactivate** (the rollback runs on activate).
-- **Dual-run visibility — ✅ DONE (plugin v0.15.0).** During "test new, keep
-  invoicing from old": (a) `invoiced` kept as a READ-ONLY signal — admin badges
-  show «Τιμολογήθηκε στη legacy» next to the AADE MARK; (b) the **ekdosi inbox**
-  gets a «Legacy» badge column + filter («τιμολογήθηκε στη legacy / όχι /
-  άγνωστο») + «Έλεγχος legacy» action, fed by `pending_whmcs_invoices.legacy_invoiced`
-  (refreshed by `LegacyInvoicedRefresher` over the bridge's read-only
-  `resolve.php` op `invoiced_flags`, and at the tail of `whmcs:fetch-pending`).
-  Catches an invoice the partner files in the OLD app AFTER it was staged here →
-  no double-issue. (c) The write-back now also carries the ekdosi **ΤΠΥ invcode**
-  → badges read «Στο AADE · ΤΠΥ ΑΠΥ423 · ΜΑΡΚ …» (stored in
-  `mod_ekdosi_invoice_marks.invcode`). **Deploy:** `php artisan migrate` (adds
-  `legacy_invoiced`).
-- **Deterministic historical WHMCS↔ekdosi link — ✅ DONE (plugin v0.16.0).**
-  THE breakthrough that the removed content-matcher couldn't do: the legacy
-  auto-invoicer (`FAutoInvoice.cpp`) wrote the legacy ekdosi `INVOICE_ID` into
-  WHMCS `tblinvoices.invoiced`, and the ETL kept that same id as
-  `invoices.legacy_id` — so **`tblinvoices.invoiced === invoices.legacy_id`** is
-  an EXACT foreign key (verified end-to-end: WHMCS #31618 invoiced=7677 →
-  ΤΠΥ6642/MARK). Lights up the ~6.7k imported invoices retroactively, no
-  re-import, no ΑΦΜ guessing. Two read-only surfaces: (a) WHMCS-side badges —
-  the bridge admin invoice page resolves a filed-in-legacy invoice to its ΤΠΥ +
-  ΜΑΡΚ via `POST /webhooks/whmcs/{slug}/invoices-by-legacy-id`
-  (`WhmcsInvoicesByLegacyIdController`, HMAC raw body); (b) ekdosi-side backfill —
-  `whmcs:backfill-invoice-ids --tenant=` pages the bridge's `resolve.php` op
-  `legacy_invoice_links` and stamps `invoices.whmcs_invoice_id` (shown on
-  ViewInvoice «WHMCS #»). Sentinels (`-1000`/`-333`/`-1`) and `0` are skipped
-  (not legacy ids). **Deploy:** `php artisan migrate` (adds
-  `invoices.whmcs_invoice_id`) + deploy plugin v0.16.0, then
-  `php artisan whmcs:backfill-invoice-ids --tenant=SLUG` (idempotent, re-runnable).
-- **Plugin-API consolidation — ✅ DONE (plugin v0.32.0–v0.33.0).** ekdosi talks
-  to WHMCS through ONE path: the bridge plugin's `resolve.php` (HMAC), the
-  "Plugin-API". `resolve.php` now serves **`op=invoice`** (single-invoice twin of
-  `op=invoices` — same rich payload, no status filter, `invoice:null` when
-  unknown), so BOTH the inbox **pull** (`whmcs:fetch-pending`) AND the **push**
-  webhook (`WhmcsInvoicePaidController`, via `WhmcsBridgeClient::fetchInvoice`)
-  fetch from the plugin instead of the native WHMCS API. The native `WhmcsClient`
-  stays the path for **plugin-less tenants only** (no derivable bridge URL/secret
-  → e.g. a future non-WHMCS tenant); a bridge config gap → 422. Source is per
-  tenant: `companies.whmcs_fetch_via_bridge`, flipped by the **guarded**
-  `whmcs:use-bridge --tenant=SLUG [--off]` (probes the deployed plugin for
-  `op=invoice` FIRST — refuses on a pre-v0.32 plugin, closing the deploy-ordering
-  trap). **Visibility:** every `resolve.php` call is logged to
-  `mod_ekdosi_bridge_log` (`BridgeLogStore`, created by `SchemaGuard`) and shown
-  in the WHMCS admin **«Bridge logs»** tab — op / status / result / IP, a
-  «last inbound poll» freshness banner (>1h → red), and 401/422 rows that surface
-  a wiped/rotated secret. This is the tripwire for the failure that hid the inbox
-  for ~1.5 days. **Deploy:** upload plugin v0.33.0 (schema self-heals via
-  SchemaGuard — no reactivation), THEN `php artisan whmcs:use-bridge --tenant=SLUG`.
-  Root cause of that outage was unrelated (a `withoutOverlapping` 24h lock that
-  orphaned on a killed run → now bounded to 30 min in `routes/console.php`).
-- **Bridges / Connectors seam — ✅ Phase 0 DONE.** A tenant can run SEVERAL
-  billing systems at once (WHMCS + a WooCommerce shop, two shops…), so the source
-  is a REGISTRY (`billing_connections`: one row per company×system, each
-  `is_active`-toggleable — the future Company «Γέφυρες» tab), NOT a column on
-  `companies`. `App\Contracts\BillingSource` (identity + `SourceCapabilities`
-  only — the data methods are deferred to avoid baking WHMCS-isms from one
-  example), resolved by `BillingSourceRegistry` (config-driven via
-  `config/ekdosi.php → billing.sources`, mirrors `EInvoiceSubmitterFactory`).
-  `WhmcsBillingSource` is the only impl; `pending_whmcs_invoices.source` stamps
-  each staged doc; existing WHMCS-configured tenants are seeded a `whmcs`
-  connection. **No behaviour change** — the seam sits alongside the live WHMCS
-  pipeline. Phase 1 (a real 2nd source) finalises the `ExternalDocument` DTO +
-  fetch/write-back methods + per-source inbox(es). **Full design + the
-  migration-away-from-WHMCS story: `docs/bridges-connectors.md`.**
+**Locked decisions (don't re-litigate):**
+- **HMAC** (both sides): `X-Webhook-Signature: sha256=<hex>` over the raw body
+  (push/write-back) or the `"{slug}:{id}"` canonical string (status). Body is
+  `{"whmcs_invoice_id":N}` only — fetch the canonical payload via our API creds
+  (never trust full invoice data over the webhook).
+- **The MARK lives in our own `mod_ekdosi_invoice_marks`; the bridge NEVER writes
+  `tblinvoices.invoiced` at runtime** (it's a legacy SMALLINT {0,1} flag — widening it
+  broke the legacy app; activation restores it to SMALLINT).
+- **Deterministic links only.** `tblinvoices.invoiced === invoices.legacy_id` is an EXACT
+  FK (the legacy auto-invoicer wrote the ekdosi INVOICE_ID there) → `whmcs:backfill-invoice-ids`
+  lights up the imported invoices. The heuristic content-matcher was BUILT then REMOVED —
+  never guess a legal link; forward-only `whmcs_pending_id` for new ones.
+- **Plugin-API is THE path.** ekdosi → WHMCS via the plugin's `resolve.php` (HMAC, logged to
+  `mod_ekdosi_bridge_log` → «Bridge logs» tab); `companies.whmcs_fetch_via_bridge` (guarded
+  `whmcs:use-bridge`); native `WhmcsClient` only for plugin-less tenants. WHMCS `GetInvoices`
+  paginates via `limitstart/limitnum` (NOT limit/offset — silently ignored; THE bug that
+  froze the inbox at 16).
+- **VAT net-vs-gross is DETECTED** from the payload (`subtotal/tax/taxrate/total`), not guessed;
+  `whmcs_amount_includes_tax` is only the no-breakdown fallback.
+- **Third-party (timologia v2):** multi-party → block + guided split (never the legacy's silent
+  merge). **Bridges/Connectors Phase 0**: a `billing_connections` registry (one row per
+  company×system) + `BillingSource`/`BillingSourceRegistry` so a tenant can run several billing
+  sources; Phase 1 = a real 2nd source.
 
 ---
 
-## Where we stand — Legacy vs New + roadmap
+## Where we stand — status lives elsewhere now
+**What's built → `FEATURES.md`** (root, the catalogue). **What's left + new ideas →
+`docs/BACKLOG.md`** (incl. the «looks like a gap but isn't» list — read it before
+re-opening anything). Per-change detail → `CHANGELOG.md`; the «why» → `docs/CLAUDE-history.md`.
 
-**✅ DONE (built + unit-tested):** tenancy/auth (Shield); customers + GSIS
-lookup + **Καρτέλα** ledger (+ YoY KPI/charts); products/tiers; 7 lookup tables;
-invoices (numbering, VAT math, QR, PDF); lifecycle + local & live
-reconciliation; **myDATA submit/cancel/dry-run** (sandbox-validated for myip's 4
-types); payments + credit notes; WHMCS bridge (A–B3) + `ekdosi_bridge` plugin;
-**timologia v2 / third-party invoicing — T-1 + T-2 DONE & merged** (resolution,
-single-party billing, multi-party split, hideable client page; see the WHMCS
-section + `docs/whmcs-legacy-plugin-map.md`); PDF + per-tenant email + send-log;
-dashboard + widgets; ETL + import UI; **scheduler wired** (`routes/console.php`); **Προσφορές / Quotes** (μη-νομικό sales offer σε ΞΕΧΩΡΙΣΤΟΥΣ πίνακες — δεν αγγίζει InvoiceScope/χρήματα/ΦΠΑ· form/lines με προϊόν|free-text|inline-create· lifecycle Αποδοχή·Απόρριψη·Επαναφορά + **Μετατροπή→πρόχειρο παραστατικό** με αμφίδρομο ιστορικό quote↔invoice· δικός counter `ΠΡ-{n}` ποτέ το ΑΑ· PDF + email + send-log — **independent-reviewed**); **VIES EU-VAT validation/import** (`ViesLookup` REST `check-vat-number` — ο non-GR δίδυμος του GSIS· `ViesFormFill` «Επαλήθευση/Άντληση VIES» σε Customer/Supplier forms· typed result + 24h cache + transient-error handling)· **reverse-charge UX** (`ReverseCharge` predicate + invoice-form hint για ΕΕ-non-GR πελάτη· human-readable §8.3 exemption labels — code 16/άρθρο 45 = ενδοκοινοτική).
-
-**🚧 PARTIAL:** auto-email — both issue paths now covered: the **myDATA-VALID**
-path (`MyDataSubmitter::dispatchAutoEmailIfEnabled`, gated by
-`auto_email_on_mydata_accept`, with audit BCC) and the **non-myDATA finalize
-path** (G6 ✅ — `companies.auto_email_on_issue` fires on draft→active for
-`none`/Estonian/mode-off tenants, guarded against double-send for myDATA
-tenants). Both honour a per-customer opt-out (`customers.auto_email_invoices`,
-default on); the manual "Resend email" action ignores both toggles. **Batch
-mail sweep — ✅ DONE:** `invoices:resend-failed-emails` re-queues invoices whose
-LATEST mail-log row is still `failed` (a later `sent` supersedes it), `--tenant`/
-`--since`/`--limit`/`--dry-run`, trigger=`batch` (opt-out NOT re-checked — only
-retrying SMTP). Scheduler entry gated by `resend_failed_emails_enabled` (default
-OFF — a mail outage would mass-requeue). **Web surface too:** the invoices list
-has an «Email» status badge (Στάλθηκε/Απέτυχε/Σε ουρά, error in the tooltip), a
-«Κατάσταση email» filter (`Invoice::scopeWhereLatestMailStatus` — latest log per
-invoice via correlated subquery, NOT whereHas on the `latestMailLog`
-latestOfMany), and a bulk «Επαναποστολή email» action (skips no-email customers).
-Remaining: one adaptive PDF template vs 8 legacy FastReport designs (G10);
-`ekdosi_bridge` error-handling.
-
-### Gap analysis — legacy vs new (verified 2026-05-28, by code scan)
-Two scans cross-checked legacy source + Firebird schema against the actual new
-code. **Corrections to earlier roadmap claims** (these SHRINK the backlog):
-- **Stock / inventory movements were NEVER implemented in legacy.**
-  `CHECK_PROD_AVAILABILITY` is an empty-body stub (`ekdosi-schema.sql`); no stock
-  table; `PRODUCT.RESERVE*` are fractional factors, not quantities; no decrement
-  code in any form. So this is a *net-new idea*, not a port we're "behind" on. LOW.
-- **ΣΔΕΠ / cumulative invoices are DEAD CODE in legacy.**
-  `findCumInvoiceDate()` starts with `return(0)`; `CREATE_RETURN_INVOICE` is an
-  empty stub. Build only if the prod `.fbk` shows real `CONV_INVOICE_ID` rows. LOW.
-- **Credit notes**: legacy `CREATE_RETURN_INVOICE` was an empty stub → our
-  `IssueCreditNote` is a clean reimplementation, not a risky port.
-
-**Real remaining gaps (myDATA-filing correctness — the ones that matter):**
-- **G1 — Withholding (παρακράτηση): ✅ DONE.** `MyDataSubmitter` now emits a
-  `taxesTotals[taxType=1]` block (category + amount) when `withhold_amount > 0`,
-  matching the summary's `totalWithheldAmount`. New `invoices.withhold_category`
-  (§8.4, 1–18) + a required-when-amount form select; throws if amount set
-  without a valid category. (Auto-calc of 20%×net from the customer flag is a
-  separate UX follow-up — the *transmission* gap is closed.)
-- **G4 — 0% / VAT-exempt lines: ✅ DONE.** `vatCategoryFor(0)` returns 7 and the
-  line carries `vatExemptionCategory` (§8.3) resolved from the tenant's 0%-rate
-  VatCategory's new `vat_exemption_category` field; throws if unconfigured or
-  ambiguous. WHMCS filer pre-flight aligned. Set the reason on the 0%-rate VAT
-  category (Setup → VAT Categories).
-- **G3 — net/gross handling: ✅ DONE + HARDENED (2026-05-31).** `WhmcsInvoiceMapper`
-  now DETECTS net-vs-gross from the invoice payload (`subtotal/tax/taxrate/total`:
-  subtotal+tax==total → net, add VAT; subtotal==total → gross, back out net),
-  so it's correct without per-tenant config. `companies.whmcs_amount_includes_tax`
-  (default true) is only the fallback when the payload carries no breakdown.
-- **G9 — PaymentMethod→myDATA type: ✅ DONE.** `payment_methods.mydata_payment_type`
-  (§8.12, 1–8); `MyDataSubmitter::paymentMethodTypeFor` reads it, falls back to
-  3 (cash) when unmapped/invalid. PaymentMethod-form select.
-- **G5 — per-line `<quantity>`: ✅ DONE.** `invoice_types.mydata_requires_quantity`
-  (default false = the validated service path, no quantity); goods types opt in
-  and the submitter emits `setQuantity(qty)`. `measurementUnit` omitted
-  (optional per spec) — a follow-up if a goods tenant needs §8.13 units.
-  InvoiceType-form toggle. (Enable + sandbox-verify per the goods tenant.)
-- **G7 — gross-price line edit: ✅ DONE.** The `InvoiceForm` lines repeater
-  adds a VAT-inclusive "Unit price (incl. VAT)" input that back-computes net
-  (`price_per_item = wvat / (1+vat/100)`, `InvoiceForm::netFromGross`); two-way
-  synced with the net field + re-derived on VAT/product change. Net stays the
-  stored source of truth (`dehydrated(false)`; `InvoiceLine::saving` is
-  authoritative). Conversion math unit-tested (`GrossPriceConversionTest`).
-  UX parity.
-- **G6 — auto-email on the non-myDATA issue path: ✅ DONE.** Two-level gate:
-  `companies.auto_email_on_issue` (global, default OFF — kill-switch for
-  testing) fires `SendInvoiceEmail` on the `finalize` action (draft→active)
-  for tenants NOT filing via myDATA (those get it on VALID — `Invoice::
-  shouldAutoEmailOnFinalize()` guards the double-send); `customers.
-  auto_email_invoices` (per-customer, default ON) opts a customer out of BOTH
-  auto paths (`Invoice::customerAcceptsAutoEmail()`); manual "Resend email"
-  ignores both. Gate predicates unit-tested (`AutoEmailGateTest`). Remaining:
-  a batch mail sweep (bulk / failure re-send).
-- **G8 — griniaris immediate-invoicing: ✅ DONE (two phases).** Phase 1: an
-  "Άμεσο" badge (`heroicon-o-bolt`) on WHMCS-inbox rows whose matched customer
-  is `needs_immediate_invoice` — pure prioritisation hint. Phase 2: the
-  `whmcs:auto-issue` command (scheduled, gated by `EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE`)
-  auto-FILES paid inbox rows at AADE for those customers, **two-key armed** (that
-  scheduler flag AND per-tenant `companies.whmcs_auto_issue_immediate`, both
-  default OFF). Reuses `WhmcsInvoiceFiler::file()` (all guards intact) and only
-  touches the unambiguous set — `status=pending_review`, `invoice_id` null,
-  `third_party_state ∈ {null,none,single}`; anything `held`/`multi`/unmatched is
-  left in the inbox for a human. Requires a per-tenant default invoice type
-  (`companies.whmcs_default_invoice_type_id`) — never guesses; skips the tenant
-  if unset. Tenant-safe (explicit `company_id` scope, no `BelongsToTenant` in
-  CLI). Loud audit: `Log::info` per filing + `Αυτόματη έκδοση (γκρινιάρης)` in
-  the row notes (filer gained an optional `$auditNote`). `WhmcsAutoIssueCommandTest`
-  covers the gate. **The scheduler runs on prod (systemd + cron), so this fires
-  once its two flags are on** (`EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE` +
-  `companies.whmcs_auto_issue_immediate`, both default OFF).
-
-**❌ NOT YET (lower / confirm-usage-first):** stock movements & ΣΔΕΠ (dead in
-legacy — see corrections); `invoiced=-333/-1000` WHMCS sentinel states;
-customer manual reorder UI; `conf_params` imported-but-unread; live VIES/AFM.
-
-**✅ Έξοδα / Expenses phase — FIRST COMPLETE PASS (E0–E7, built + reviewed).**
-The supplier/inbound mirror of the sales side, end-to-end:
-- **Suppliers** (`Supplier` + `SupplierSource`): the προμηθευτές entity. CRUD +
-  "Άντληση από ΑΑΔΕ" (GSIS) + bulk `SupplierSyncFromMyData` (`suppliers:sync`
-  command + list action) that scans `RequestDocs` for unique issuer AFMs.
-- **Data model**: `expenses` + `expense_lines` + `expense_marks` (twins of
-  invoices/invoice_lines/mydata_marks; §8.2/§8.3 codes stored verbatim).
-- **`ExpenseReconciler`** over `RequestDocs` — the exact reverse of
-  `SalesReconciler` (same pagination/folding/buckets), `missingLocally` =
-  αδέσποτα έξοδα.
-- **`MyDataConsoleExpenses`** page + **`ExpenseImporter`** — one-click import of
-  αδέσποτα into local `expenses` (+ lines + supplier + audit mark, idempotent),
-  and a read-only `ExpenseResource` (list/view/lines).
-- **`Expense` classification (E5)** — per-document **OR per-line** E3 type +
-  category2_x via the ViewExpense actions («Χαρακτηρισμός» / «Χαρακτηρισμός ανά
-  γραμμή» — same supplier invoice may mix εμπορεύματα+πάγια+δαπάνες);
-  `Codes::expenseClass*` delegate to firebed's §8 enums. **AADE submit ✅ DONE**
-  (`ExpenseClassificationSubmitter` + «Υποβολή χαρακτηρισμού» action +
-  `expenses:test-classify <id> [--execute]` dry-run command) — the inbound mirror
-  of `MyDataSubmitter`: builds `SendExpensesClassification`, prefers each line's
-  own classification (falls back to header), writes an `expense_marks` audit row,
-  flips `classification_state`→`submitted`; on reject state stays `classified`
-  (no audit row). **Sandbox 2026-06-10 (`docs/expenses-classification-sandbox-results.txt`):**
-  payload/XML (header + per-line/mixed), per-line-wins, sandbox credential routing,
-  error parsing `[NNN]`, and reject-transactional-safety all **proven against real
-  AADE**. A fully-green *accept* was NOT reachable: the sandbox ΑΦΜ 800561849 is
-  blocked by **[323]** (annual-gross-income limit → must submit via λογιστής) and
-  the pre-imported rows carried prod MARKs (**[301]**) — both account/env, NOT
-  payload. The λογιστής/`entityVatNumber` (third-party-submission) path is the
-  noted follow-up for over-threshold tenants.
-- **`VatPeriodReport` + `MyDataPictureStats` widget** — ΦΠΑ εκροών−εισροών per
-  month/quarter ("πόσο ΦΠΑ χρωστάω"). **`RequestVatInfo` cross-check deferred.**
-- **`E3Reporter` + `MyDataE3Overview`** — Ε3 figures from `RequestE3Info`.
-**Full story + remaining-polish list: `docs/expenses-phase-plan.md`.** Deferred:
-RequestVatInfo/E3 cross-checks, `RequestMyExpenses`, manual expense entry
-(off-the-books, `source=manual`), per-row import, supplier CSV import, and the
-λογιστής/`entityVatNumber` third-party-submission path (for over-threshold
-tenants the ΑΑΔΕ blocks from direct expense classification — error [323]).
-
-### Παραστατικά Διακίνησης / Delivery notes (myDATA Ψηφιακό ΔΑ)
-The shipping-document side, mirroring the invoice surfaces. Two specs apply:
-the **submission** schema lives in the main AADE doc (a ΔΑ is a normal
-`SendInvoices` doc with `isDeliveryNote=true` — confirmed by delivery-error
-**805**); the **post-issuance lifecycle/tracking** API is the separate
-`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`.
-
-- **✅ Phase 1+2 (merged, PR #228):** invoice-grade `DeliveryNoteResource` —
-  rich View (myDATA/πάροχος card, lifecycle card, lines RM editable-while-draft,
-  Ιστορικό υποβολών / Σημειώσεις / Συνημμένα / Ιστορικό tabs via the polymorphic
-  concerns), two-way binding δελτίο↔τιμολόγιο (`delivery_notes.invoice_id` ↔
-  `Invoice::deliveryNotes()`), tenant `ActivityFeed` parity. Columns:
-  `delivery_state` + `transfer_mark`/`outcome_mark`/`reject_mark`;
-  `delivery_marks` carries provider key/auth/state.
-- **firebed ALREADY implements the whole v2.0.x tracking API** — no protocol
-  work needed, only wiring: `Firebed\AadeMyData\Enums\DigitalGoodsMovement\`
-  `DeliveryStatus` (= §7.1 EXACTLY: 1 REGISTERED, 2 CANCELLED, 3 IN_TRANSIT,
-  4 REJECTED, 5 DELIVERED_BY_CARRIER, **7** FAILED_DELIVERY, 8 COMPLETED —
-  **no 6**, with Greek labels) + `DeliveryEventType` (= §7.2); writers
-  `TransportWriter`/`DeliveryOutcomeWriter`/`DeliveryRejectionWriter`/`GroupQr*`,
-  `DeliveryNoteStatusResponseReader`, `ResponseDocReader`, and
-  `Http\CancelDeliveryNote`.
-- **✅ Phase 3+4 ALREADY BUILT (PR #179, `claude/diakinisi-sandbox-tooling`) —
-  code-complete, pending live sandbox round-trip.** Don't re-port:
-  - `Services\Delivery\DeliveryNoteSubmitter` — issues the ΔΑ via the SAME
-    `SendInvoices` path (provider channel too) → MARK + QR + `delivery_state`.
-  - `Services\Delivery\DeliveryLifecycleService` — `registerTransfer` (→in_transit),
-    `confirmDelivery` (FULL/PARTIAL/NONE), `refreshStatus` (RequestDeliveryNoteStatus
-    → maps §7.1 status to our cache), `cancel` (CancelInvoice by the issue MARK;
-    the provider-only CancelDeliveryNote is NOT the route), `describeResponseErrors`.
-  - `ViewDeliveryNote` header actions (state-guarded): issue / Έναρξη διακίνησης /
-    Δήλωση παράδοσης / Έλεγχος κατάστασης / Ακύρωση / PDF.
-  - Commands: `delivery:sandbox-validate`, `delivery:test-lifecycle`,
-    `delivery:test-submit`.
-  - `delivery_state` is OUR string cache (registered/in_transit/delivered/failed/
-    rejected/cancelled), mapped from firebed `DeliveryStatus` in
-    `deliveryStateFromAade()` — deliberately NOT the raw int.
-  - **STATUS: ✅ sandbox round-tripped 2026-06-10** (`delivery:sandbox-validate
-    --execute`): issue → έναρξη → παράδοση all accepted with real MARKs; cancel of a
-    Completed ΔΑ is rejected with **[801]** (by design). `sandbox-results.txt`.
-- **✅ lifecycleHistory timeline (this branch).** `refreshStatus` no longer
-  discards the §4.1 `lifecycleHistory` — `syncLifecycleHistory()` persists the
-  carrier/recipient events (RegisterTransfer/ConfirmOutcome/Rejection, each with
-  `eventTimestamp`/`actorVat`/`mark` + flattened transport/outcome/rejection
-  `details`) into `delivery_note_events` (model `DeliveryNoteEvent`,
-  `DeliveryNote::events()`), idempotent on `dedup_key` (event MARK, else a
-  type|ts|actor hash) so a re-poll never duplicates. Surfaced read-only as the
-  «Ιστορικό διακίνησης» tab (`DeliveryEventsRelationManager`, chronological,
-  actor shown as «Εσείς (εκδότης)» vs the carrier/recipient ΑΦΜ); the «Έλεγχος
-  κατάστασης» notification reports how many events were synced. **Deferred:**
-  `RejectDeliveryNote` (recipient-only, §6.2/803 — only if a tenant acts as
-  recipient), Group QR (3.2.5/6, batch transport). **Deploy:** `php artisan
-  migrate` (adds `delivery_note_events`).
-- **✅ Έκδοση δελτίου μέσω παρόχου — `[88-006]` fixed (this branch).**
-  `InvoSignTransport::sendDelivery` now calls `InvoSignDocument::augmentDelivery`
-  (appends the mandatory `<API_InvoiceDetails>`: issuer + recipient-as-counterpart
-  from the `DeliveryNote`), instead of only prefix-normalising — InvoSign rejects
-  a δελτίο without that block. `buildApiInvoiceDetails` was generalised to array
-  inputs so invoice & delivery share it.
-- **✅ provider-channel lifecycle — RESOLVED (full model).** The InvoSign
-  reference confirmed the πάροχος exposes ONLY issue + cancel-delivery-note (no
-  RegisterTransfer/ConfirmOutcome; its status is transmission-status, not §7.1
-  movement). So the natural split was implemented: **issue + cancel → provider**
-  (`DeliveryNoteSubmitter::submitViaProvider`, `DeliveryLifecycleService::
-  cancelViaProvider` → `iNVOSign_CancelDeliveryNote`; cancel's INSERT-MARK lookup
-  now also matches `PROVIDER_INSERT`), **έναρξη/παράδοση/έλεγχος/history → direct
-  myDATA** for everyone (the interim guard was REMOVED; the existing `initFirebed`
-  creds-check gates a provider tenant lacking myDATA creds with a clear message).
-  All 4 UI actions show again for provider tenants. **Confirmed in writing by
-  InvoSign (B. Karinos):** the ΔΑ Β' φάση (movement lifecycle) is the ERP's job
-  directly to myDATA, not the provider's — exactly this model. No open items.
-  Full analysis: **`docs/delivery-provider-split-brain.md`**.
-
-Also still open: Estonian PEPPOL submitter; myDATA console one-click fixes.
-(Cross-model activitylog + per-tenant roles/permissions are now ✅ DONE — see
-the latent-items section.) **E-invoicing-via-provider (GR ΥΠΑΗΕΣ) +
-PEPPOL blueprint: `docs/paroxos/regulatory-blueprint.md`** (deferred; the
-`EInvoiceSubmitter` factory already has the slot — a `gr-provider`/`PeppolSubmitter`
-drops in. Provider schema reference: `docs/paroxos/reference/aade-provider-invoicesDoc-v0.6.1.xsd`).
-
-**Suggested order:** (1)✅ sandbox myDATA. (2)✅ scheduler. (3)✅ timologia v2
-(T-1+T-2). (4)✅ **G1 withholding + G4 exempt** (merged, PR #68). (5)✅ **G3
-tax-inclusive + G9 payment-type + G5 goods-quantity** (filing correctness).
-(6)✅ **G7 gross-edit + G6 issue-email + G8 griniaris** — the UX tail (done).
-(7)✅ **Έξοδα / Expenses (E0–E7)** — first complete pass, see above.
-(8) PEPPOL. Defer stock/ΣΔΕΠ/-333 unless the `.fbk` proves
-real usage. `.fbk` usage probes: `docs/go-live-usage-checks.sql.md`.
+A few **don't-re-port / don't-re-litigate** decisions worth keeping inline:
+- **Stock movements & ΣΔΕΠ/cumulative were DEAD CODE in legacy** (`CHECK_PROD_AVAILABILITY`
+  empty, `findCumInvoiceDate()` returns 0). Net-new IDEAS, not a port we're behind on — build
+  only if the prod `.fbk` proves real usage (`docs/go-live-usage-checks.sql.md`).
+- **Delivery notes (Ψηφιακό ΔΑ): firebed already implements the whole v2.0.x tracking API** —
+  don't re-port the protocol, only wire it. Issue+cancel → provider; movement lifecycle
+  (έναρξη/παράδοση/έλεγχος/history) → direct myDATA for everyone (confirmed by InvoSign).
+  Full model: `docs/delivery-provider-split-brain.md`.
+- **Credit notes**: legacy `CREATE_RETURN_INVOICE` was an empty stub → `IssueCreditNote` is a
+  clean reimplementation, not a risky port.
 
 ---
 
-## Known latent items / tech debt (still open — full context in the history doc)
-- **Global `BelongsToCompany` scope — ✅ LANDED (no-op mode).** All 22
-  tenant-owned models (`Invoice`/`InvoiceLine`/`MyDataMark`/`Product`/
-  `PaymentMethod`/`Customer`/`Supplier`/`Expense*`/… — `App\Models\Concerns\
-  BelongsToCompany`) carry a `CompanyScope` global scope driven by the ambient
-  `App\Support\Tenancy\CompanyContext` (a singleton). Filament sets it on
-  `TenantSet`, so raw `Invoice::where(...)` inside the panel (actions/pages/
-  widgets) is now auto-filtered — not just Filament's resource queries.
-  **Design = no-op when no context:** CLI/queue with no ambient tenant fall
-  through to a no-op, so the existing explicit `->where('company_id', ...)`
-  paths are unchanged (non-breaking). Opt in to auto-scoping from CLI/jobs with
-  `CompanyContext::actAs($company, fn () => ...)`; opt out per query with
-  `->withoutGlobalScope(CompanyScope::class)`. **Remaining (deferred):** flip
-  the null-context case to THROW (strict mode) once every CLI/queue path uses
-  `actAs` — the read scope is read-only (no `company_id` auto-fill on create).
-- **Soft-deleted FK rows render blank** in Filament Selects app-wide (a deleted
-  lookup row's dependents show empty). Fix once with `withTrashed()` label
-  lookups + a "deleted" badge.
-- **`Rule::unique(...)->where('company_id', …)` degrades outside panel context —
-  ✅ NON-ISSUE (verified).** The DB ALREADY carries the `unique(company_id, …)`
-  constraints (invoice_types.code, products.sku/barcode, suppliers.afm, tags.name,
-  …), so a queue/CLI write can't slip a duplicate through — the DB blocks it; the
-  Filament rule is just the friendly in-panel message (and forms always run with a
-  tenant set). A `TenantScopedUnique` helper would be redundant — dropped.
-- **FK-aware delete guards** (`App\Filament\Support\GuardedDeleteAction`) — **✅ DONE
-  (single-record delete).** All lookups soft-delete, so a plain delete of an in-use
-  lookup left the dependents showing a BLANK label (and a force-delete would crash a
-  `restrictOnDelete` FK / orphan a `nullOnDelete` one). The guard now BLOCKS the
-  delete on the 8 lookup edit pages (VatCategory/ProductCategory/InvoiceType/
-  PaymentMethod/DeliveryMethod/DistributionAim/MetricUnit/BankAccount) with a friendly
-  «χρησιμοποιείται από — προϊόντα: N · τιμολόγια: M» count. Counts run through
-  `GuardedDeleteAction::count()` which is **withTrashed-aware** (a soft-deleted
-  invoice still references the lookup) and the maps are COMPLETE incl. the
-  non-obvious `nullOnDelete` defaults (`companies.whmcs_default_invoice_type_id`,
-  `invoice_types.{payment_method_id,delivery_method_id,distribution_aim_id}`,
-  `payments.payment_method_id`). **Remaining (follow-up):** the table
-  `DeleteBulkAction` + **`ForceDeleteBulkAction`** are still UNGUARDED — bulk
-  force-deleting an in-use lookup hard-fails on a `restrictOnDelete` FK
-  (products→vat/category, invoices→invoice_type, delivery_notes→delivery_type) with
-  a raw DB error (no data loss — the FK rejects it). Guarding bulk needs a
-  per-record dependency check across the selection. A real «Απενεργοποίηση» needs an
-  `is_active` column on the lookups (only BankAccount has one today).
-- **Cross-model activity log — ✅ DONE.** `spatie/laravel-activitylog` wired on
-  `Invoice`, `Customer`, `Payment` via `App\Models\Concerns\TracksActivity`
-  (`LogsActivity` + house rules: `logOnly($this->loggedAttributes())` — business
-  columns only, NEVER the money/myDATA CACHE columns; `logOnlyDirty()` +
-  `dontLogEmptyChanges()` so a cache-only recompute or the query-builder ETL —
-  which fires no Eloquent events — never spams the trail; `log_name` = the table;
-  Greek event labels). v5 stores the diff in the **`attribute_changes`** column
-  (not `properties`). Causer = the auth user (null = «Σύστημα» on CLI/queue).
-  Viewed via ONE shared read-only relation manager
-  (`App\Filament\RelationManagers\ActivityLogRelationManager`, relationship
-  `activitiesAsSubject`, «Ιστορικό» tab) registered on the Invoice / Customer /
-  Payment resources — naturally tenant-safe (a record's own activities; the page
-  already scopes the record). **Tenant-wide feed** too: `activity_log.company_id`
-  (stamped on write by `App\Models\Activity` from the subject; config points
-  `activity_model` at it) powers `App\Filament\Pages\ActivityFeed`
-  («Πρόσφατη δραστηριότητα», admin-only via `View:ActivityFeed`) — the whole
-  tenant's changes in one chronological, filterable list. `App\Models\Activity`
-  is the single home for the Greek subject label + the diff formatter, shared by
-  the relation manager and the feed. **Deploy:** `php artisan migrate` (creates
-  `activity_log` + adds `company_id`), then `shield:generate` + `shield:sync-super-admin`
-  so `View:ActivityFeed` exists and `company_admin` holds it.
-- **Per-tenant roles + role-picker — ✅ DONE (PR1–PR3, PR #136).** Three managed
-  roles per tenant (`super_admin`, `company_admin`, `operator`), all provisioned
-  by `App\Services\TenantRoleProvisioner` (`ensureStandardRoles` from the
-  `CompanyObserver` + `DatabaseSeeder` + `shield:sync-super-admin`; one
-  `withTeam()` helper owns the team-pin/cache discipline). `company_admin` = every
-  permission of THIS tenant **EXCEPT** `ADMIN_FORBIDDEN_RESOURCES`
-  (`User`/`Company`/`Role` — the panel-global, non-tenant-scoped resources), so a
-  tenant admin can't reach the cross-tenant user/company roster or escalate;
-  `operator` = explicit per-resource `OPERATOR_PERMISSION_MAP` (incl. WHMCS inbox
-  + read-only `View:MyDataMarkDetail`, no delete/Setup/users). **Role management
-  is super_admin-only:** `ManageTenantRoleAction` is `->visible()` to super_admins
-  AND hard-guards in the action body (Filament's `mountAction` doesn't re-check
-  `->visible()`), so a non-super actor can neither grant nor strip any role.
-  **The 8 ex-`auth()->check()` screens ride on real permissions** (PR3): Quotes
-  (`QuotePolicy`), WHMCS inbox (`PendingWhmcsInvoicePolicy`), Καρτέλα
-  (`View:Customer`), ΜΑΡΚ detail (`View:MyDataMarkDetail`); the live myDATA
-  consoles + Reports stay admin-only. All use `Gate::can` → missing permission =
-  false, never a `PermissionDoesNotExist` throw (no 404 storm). The live-AADE
-  orphan lookup inside ΜΑΡΚ detail is separately gated on `View:MyDataConsole`.
-  **After `git pull`/deploy, run `shield:sync-super-admin`** so the role maps
-  (operator's WHMCS-inbox/MARK perms, company_admin's deny-list) are applied.
-- **ETL re-run preserves soft-delete but refreshes columns** — a row soft-
-  deleted in ekdosi gets its legacy values re-applied on re-import (deleted_at
-  stays). To truly drop a row across re-imports, force-delete it.
-- **Concurrency / row-lock tests** can't run on sqlite (CI); the locks
-  (`InvoiceNumberer`, `InvoiceBalance::recompute`) are real on MariaDB only.
+## Known latent items + key tenant-safety behaviors
+Open items live in `docs/BACKLOG.md` (tech-debt section); the «why» in `docs/CLAUDE-history.md`.
+The behaviors below are how the system actually works — keep them in mind:
+- **Global `BelongsToCompany`/`CompanyScope` (no-op mode).** Tenant-owned models carry a
+  `CompanyScope` driven by the ambient `CompanyContext` singleton (Filament sets it on `TenantSet`),
+  so raw `Invoice::where(...)` in the panel auto-filters. **No-op when no context** (CLI/queue) →
+  existing explicit `->where('company_id', …)` paths unchanged. Opt in from CLI/jobs with
+  `CompanyContext::actAs($company, fn () => …)`; opt out per query with
+  `->withoutGlobalScope(CompanyScope::class)`. (Strict null→throw mode deferred — BACKLOG.)
+- **Activity log** (`spatie/laravel-activitylog` via `TracksActivity` on Invoice/Customer/Payment):
+  `logOnly(loggedAttributes())` — business columns only, NEVER the money/myDATA CACHE columns;
+  `logOnlyDirty()` + `dontLogEmptyChanges()` (a cache recompute or the query-builder ETL never spams
+  the trail). v5 stores the diff in **`attribute_changes`** (not `properties`); causer null = «Σύστημα».
+  `activity_log.company_id` powers the tenant-wide `ActivityFeed`.
+- **Per-tenant roles** (`super_admin`/`company_admin`/`operator`, `TenantRoleProvisioner`):
+  `company_admin` = every tenant permission EXCEPT `ADMIN_FORBIDDEN_RESOURCES` (User/Company/Role,
+  panel-global); `operator` = explicit `OPERATOR_PERMISSION_MAP`. Role management is super_admin-only
+  (`->visible()` AND a hard guard in the action body — `mountAction` doesn't re-check visible()).
+  Screens gate on real permissions via `Gate::can` (missing → false, never `PermissionDoesNotExist`).
+  **After deploy: `shield:sync-super-admin`.**
+- **GuardedDeleteAction** ✅ blocks deleting an in-use lookup (single-record, withTrashed-aware,
+  complete maps); bulk/force-delete still unguarded + soft-deleted-FK-blank Selects → BACKLOG.
+  `TenantScopedUnique` = non-issue (the DB already has the `unique(company_id,…)` constraints).
+- **Gotchas:** ETL re-run re-applies legacy column values to a soft-deleted row (deleted_at stays —
+  force-delete to truly drop). Row-lock tests (`InvoiceNumberer`, `InvoiceBalance::recompute`) are
+  MariaDB-only (can't run on sqlite/CI).
+
 
 ## Env-prep gotchas (deploy host)
 > **Don't re-derive deploy state by hand.** Run **`php artisan ops:health`**
