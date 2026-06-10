@@ -88,8 +88,12 @@ Grouped by theme; ✅ done items live in CLAUDE.md.
   payment but NOT yet in `invoices.gross_total` / the money cache (Καρτέλα/owed). If
   fees should count toward what the customer owes → a money-core follow-up.
 - **§8.13 measurement units** for goods delivery notes (follow-up if a goods tenant).
-- **Expenses (Έξοδα)**: `SendExpensesClassification` AADE submit, `RequestVatInfo`/E3
-  cross-checks, `RequestMyExpenses`, manual expense entry, per-row + supplier CSV import.
+- **Expenses (Έξοδα)**: ~~`SendExpensesClassification` AADE submit~~ ✅ DONE
+  (`ExpenseClassificationSubmitter` + «Υποβολή χαρακτηρισμού» on ViewExpense —
+  pull→classify→submit closed). Still open: `RequestVatInfo`/E3 cross-checks,
+  `RequestMyExpenses`, manual expense entry (off-the-books, source=manual),
+  per-row + supplier CSV import, per-LINE classification (today the header
+  category applies to all lines).
 
 ### 🔵 Big features (when the time comes)
 - **Estonian PEPPOL submitter** — the last big ❌ (stub; `EInvoiceSubmitter` slot ready).

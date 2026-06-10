@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Expenses\Pages;
 
 use App\Filament\Resources\Expenses\ExpenseResource;
+use App\Services\MyData\ExpenseClassificationSubmitter;
 use App\Support\MyData\Codes;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
@@ -16,16 +17,16 @@ class ViewExpense extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
-            // Per-document expense classification (E5). Local only — the
-            // operator assigns one §8.x E3 type + category2_x for the whole
-            // doc; stored on the header for the ΦΠΑ/Ε3 reports. Filing it at
-            // AADE (SendExpensesClassification) is a documented follow-up.
+            // Per-document expense classification (E5). LOCAL — the operator
+            // assigns one §8.x E3 type + category2_x (εμπορεύματα/πάγια/δαπάνες)
+            // for the whole doc; stored on the header for the ΦΠΑ/Ε3 reports and
+            // then submitted to AADE via the «Υποβολή» action below.
             Action::make('classify')
                 ->label('Χαρακτηρισμός')
                 ->icon('heroicon-o-tag')
                 ->color('primary')
                 ->modalHeading('Χαρακτηρισμός εξόδου')
-                ->modalDescription('Επιλέξτε τύπο (E3) και κατηγορία χαρακτηρισμού για όλο το παραστατικό. Αποθηκεύεται τοπικά (δεν υποβάλλεται στο myDATA σε αυτή τη φάση).')
+                ->modalDescription('Επιλέξτε τύπο (E3) και κατηγορία χαρακτηρισμού (εμπορεύματα/πάγια/δαπάνες) για όλο το παραστατικό. Αποθηκεύεται τοπικά — υπόβαλέ το στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
                 ->modalSubmitActionLabel('Αποθήκευση')
                 ->fillForm(fn (): array => [
                     'classification_type' => $this->record->classification_type,
@@ -52,6 +53,38 @@ class ViewExpense extends ViewRecord
 
                     Notification::make()
                         ->title('Ο χαρακτηρισμός αποθηκεύτηκε')
+                        ->body('Υπόβαλέ τον στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
+                        ->success()
+                        ->send();
+                }),
+
+            // Submit the local classification to AADE (SendExpensesClassification).
+            // Visible only for a myDATA-pulled doc (has a ΜΑΡΚ) that is classified
+            // but not yet submitted.
+            Action::make('submit_classification')
+                ->label('Υποβολή χαρακτηρισμού')
+                ->icon('heroicon-o-paper-airplane')
+                ->color('success')
+                ->visible(fn (): bool => filled($this->record->mydata_mark)
+                    && $this->record->classification_state === 'classified')
+                ->requiresConfirmation()
+                ->modalHeading('Υποβολή χαρακτηρισμού στην ΑΑΔΕ')
+                ->modalDescription('Στέλνει τον χαρακτηρισμό (τύπος E3 + κατηγορία) του παραστατικού στη myDATA. Μη αναστρέψιμο μέσω της εφαρμογής.')
+                ->action(function (): void {
+                    $tenant = $this->record->company ?? \Filament\Facades\Filament::getTenant();
+
+                    try {
+                        $mark = app()->makeWith(ExpenseClassificationSubmitter::class, ['tenant' => $tenant])
+                            ->submit($this->record);
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('Αποτυχία υποβολής')->body($e->getMessage())->danger()->persistent()->send();
+
+                        return;
+                    }
+
+                    Notification::make()
+                        ->title('Ο χαρακτηρισμός υποβλήθηκε στην ΑΑΔΕ')
+                        ->body($mark !== '' ? 'ΜΑΡΚ χαρακτηρισμού: '.$mark : 'Επιτυχία.')
                         ->success()
                         ->send();
                 }),

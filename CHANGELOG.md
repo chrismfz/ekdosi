@@ -17,6 +17,17 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Expense classification → AADE submit (`SendExpensesClassification`).** The
+  «Χαρακτηρισμός» action sets a pulled expense's E3 type + category2_x
+  (εμπορεύματα/πάγια/δαπάνες) locally; a new «Υποβολή χαρακτηρισμού» action on
+  `ViewExpense` now FILES that classification at myDATA via
+  `App\Services\MyData\ExpenseClassificationSubmitter` (the inbound mirror of
+  `MyDataSubmitter` — reuses `FirebedCredentials`). Applies the per-document
+  classification to each line by its net amount; visible only for a myDATA-pulled
+  doc (has ΜΑΡΚ) that's classified-but-not-submitted; flips
+  `classification_state` to `submitted`. Mock-Guzzle round-trip tested. (Manual
+  arbitrary expense entry stays a separate, deferred item — this closes the
+  pull→classify→submit loop.)
 - **DR without APP_KEY — optional at-rest secret encryption (Phase 6).** New
   `App\Casts\MaybeEncrypted` replaces the `encrypted` casts on every secret column
   (companies' myDATA/GSIS/SMTP/WHMCS keys + provider config, server creds, backup
