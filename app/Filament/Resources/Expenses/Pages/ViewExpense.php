@@ -72,7 +72,9 @@ class ViewExpense extends ViewRecord
                 ->color('primary')
                 ->visible(fn (): bool => $this->record->lines()->count() > 1)
                 ->modalHeading('Χαρακτηρισμός ανά γραμμή')
-                ->modalDescription('Όρισε τύπο (E3) + κατηγορία ξεχωριστά για κάθε γραμμή. Προ-συμπληρώνεται από τη γραμμή ή, αν λείπει, από τον χαρακτηρισμό κεφαλίδας.')
+                ->modalDescription(fn (): string => $this->record->classification_state === 'submitted'
+                    ? '⚠ Έχει ΗΔΗ υποβληθεί χαρακτηρισμός στην ΑΑΔΕ. Νέος χαρακτηρισμός ανά γραμμή απαιτεί ΕΠΑΝΥΠΟΒΟΛΗ (η προηγούμενη υποβολή διατηρείται στο ιστορικό).'
+                    : 'Όρισε τύπο (E3) + κατηγορία ξεχωριστά για κάθε γραμμή. Προ-συμπληρώνεται από τη γραμμή ή, αν λείπει, από τον χαρακτηρισμό κεφαλίδας.')
                 ->modalSubmitActionLabel('Αποθήκευση')
                 ->fillForm(fn (): array => [
                     'lines' => $this->record->lines->map(fn ($line): array => [

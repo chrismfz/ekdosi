@@ -51,7 +51,7 @@ class ExpenseTestClassify extends Command
         }
 
         if (! $this->option('execute')) {
-            $this->warn('Dry-run: τίποτα δεν υποβλήθηκε. Ξανατρέξε με --execute για πραγματική υποβολή.');
+            $this->warn('Dry-run: τίποτα δεν υποβλήθηκε. (Ο έλεγχος διαπιστευτηρίων myDATA γίνεται ΜΟΝΟ στο --execute.) Ξανατρέξε με --execute για πραγματική υποβολή.');
 
             return self::SUCCESS;
         }
