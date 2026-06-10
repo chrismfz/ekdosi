@@ -6,6 +6,8 @@ use App\Filament\Resources\Expenses\ExpenseResource;
 use App\Services\MyData\ExpenseClassificationSubmitter;
 use App\Support\MyData\Codes;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -55,6 +57,67 @@ class ViewExpense extends ViewRecord
 
                     Notification::make()
                         ->title('Ο χαρακτηρισμός αποθηκεύτηκε')
+                        ->body('Υπόβαλέ τον στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
+                        ->success()
+                        ->send();
+                }),
+
+            // Per-LINE classification — the same supplier invoice may mix
+            // εμπορεύματα + πάγια + δαπάνες, so each line gets its own E3 type +
+            // category2_x. The submitter prefers the line's value, falling back to
+            // the document header (the «Χαρακτηρισμός» action above).
+            Action::make('classify_lines')
+                ->label('Χαρακτηρισμός ανά γραμμή')
+                ->icon('heroicon-o-list-bullet')
+                ->color('primary')
+                ->visible(fn (): bool => $this->record->lines()->count() > 1)
+                ->modalHeading('Χαρακτηρισμός ανά γραμμή')
+                ->modalDescription('Όρισε τύπο (E3) + κατηγορία ξεχωριστά για κάθε γραμμή. Προ-συμπληρώνεται από τη γραμμή ή, αν λείπει, από τον χαρακτηρισμό κεφαλίδας.')
+                ->modalSubmitActionLabel('Αποθήκευση')
+                ->fillForm(fn (): array => [
+                    'lines' => $this->record->lines->map(fn ($line): array => [
+                        'id' => $line->id,
+                        'item_descr' => $line->item_descr,
+                        'net_value' => $line->net_value,
+                        'classification_type' => $line->classification_type ?: $this->record->classification_type,
+                        'classification_category' => $line->classification_category ?: $this->record->classification_category,
+                    ])->all(),
+                ])
+                ->schema([
+                    Repeater::make('lines')
+                        ->label('Γραμμές')
+                        ->addable(false)->deletable(false)->reorderable(false)
+                        ->itemLabel(fn (array $state): string => trim((string) ($state['item_descr'] ?? '—'))
+                            .' · '.number_format((float) ($state['net_value'] ?? 0), 2).'€')
+                        ->schema([
+                            Hidden::make('id'),
+                            Select::make('classification_type')
+                                ->label('Τύπος (E3)')
+                                ->options(Codes::expenseClassTypeOptions())
+                                ->searchable()->required(),
+                            Select::make('classification_category')
+                                ->label('Κατηγορία')
+                                ->options(Codes::expenseClassCategoryOptions())
+                                ->searchable()->required(),
+                        ])
+                        ->columns(2),
+                ])
+                ->action(function (array $data): void {
+                    $rows = collect($data['lines'] ?? [])->keyBy('id');
+                    foreach ($this->record->lines as $line) {
+                        $row = $rows->get($line->id);
+                        if ($row === null) {
+                            continue;
+                        }
+                        $line->forceFill([
+                            'classification_type' => $row['classification_type'],
+                            'classification_category' => $row['classification_category'],
+                        ])->save();
+                    }
+                    $this->record->forceFill(['classification_state' => 'classified'])->save();
+
+                    Notification::make()
+                        ->title('Ο χαρακτηρισμός ανά γραμμή αποθηκεύτηκε')
                         ->body('Υπόβαλέ τον στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
                         ->success()
                         ->send();

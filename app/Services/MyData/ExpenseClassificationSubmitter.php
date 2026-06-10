@@ -24,10 +24,11 @@ use Throwable;
  * itself was filed by the SUPPLIER (we pulled it via RequestDocs into `expenses`);
  * here the BUYER tells AADE how it books it — the inbound mirror of MyDataSubmitter.
  *
- * The local `classify` action sets the per-document E3 type + category2_x; this
- * applies that single classification to every line (each carrying its own net
- * amount) — the common case where a whole invoice is one category. Per-line
- * classification is a follow-up. Read-mostly: we don't touch the sales money core.
+ * The local «Χαρακτηρισμός» action sets a per-document E3 type + category2_x; the
+ * «Χαρακτηρισμός ανά γραμμή» action sets them PER LINE (same supplier invoice may
+ * mix εμπορεύματα + πάγια + δαπάνες). This submitter prefers each line's own
+ * classification and falls back to the document header — so a uniformly-classified
+ * doc and a mixed one both file correctly. Read-mostly: no sales money core touched.
  */
 class ExpenseClassificationSubmitter
 {
@@ -44,20 +45,7 @@ class ExpenseClassificationSubmitter
      */
     public function submit(Expense $expense): string
     {
-        $mark = trim((string) $expense->mydata_mark);
-        if ($mark === '') {
-            throw new RuntimeException('Το έξοδο δεν έχει ΜΑΡΚ myDATA — μόνο παραστατικά που τραβήχτηκαν από την ΑΑΔΕ χαρακτηρίζονται.');
-        }
-        if (blank($expense->classification_type) || blank($expense->classification_category)) {
-            throw new RuntimeException('Όρισε πρώτα τύπο (E3) + κατηγορία χαρακτηρισμού (π.χ. εμπορεύματα/πάγια/δαπάνες).');
-        }
-
-        $expense->loadMissing('lines');
-        if ($expense->lines->isEmpty()) {
-            throw new RuntimeException('Το έξοδο δεν έχει γραμμές για χαρακτηρισμό.');
-        }
-
-        $doc = new ExpensesClassificationsDoc($this->build($expense));
+        $doc = $this->document($expense);
         // Build the request XML ourselves (firebed's handle() doesn't expose it
         // cleanly — see the audit row below) so the legal trail is byte-exact.
         $requestXml = (new ExpensesClassificationsDocWriter)->asXML($doc);
@@ -106,15 +94,44 @@ class ExpenseClassificationSubmitter
         return $classificationMark;
     }
 
+    /** The request XML that submit() would POST — for the dry-run command. */
+    public function requestXml(Expense $expense): string
+    {
+        return (new ExpensesClassificationsDocWriter)->asXML($this->document($expense));
+    }
+
+    private function document(Expense $expense): ExpensesClassificationsDoc
+    {
+        $mark = trim((string) $expense->mydata_mark);
+        if ($mark === '') {
+            throw new RuntimeException('Το έξοδο δεν έχει ΜΑΡΚ myDATA — μόνο παραστατικά που τραβήχτηκαν από την ΑΑΔΕ χαρακτηρίζονται.');
+        }
+
+        $expense->loadMissing('lines');
+        if ($expense->lines->isEmpty()) {
+            throw new RuntimeException('Το έξοδο δεν έχει γραμμές για χαρακτηρισμό.');
+        }
+
+        return new ExpensesClassificationsDoc($this->build($expense));
+    }
+
     private function build(Expense $expense): InvoiceExpensesClassification
     {
-        $type = ExpenseClassificationType::tryFrom((string) $expense->classification_type)
-            ?? throw new RuntimeException("Άγνωστος τύπος χαρακτηρισμού «{$expense->classification_type}».");
-        $category = ExpenseClassificationCategory::tryFrom((string) $expense->classification_category)
-            ?? throw new RuntimeException("Άγνωστη κατηγορία χαρακτηρισμού «{$expense->classification_category}».");
+        // Document-level fallback for lines without their own classification.
+        $headerType = ExpenseClassificationType::tryFrom((string) $expense->classification_type);
+        $headerCategory = ExpenseClassificationCategory::tryFrom((string) $expense->classification_category);
 
         $details = [];
         foreach ($expense->lines->values() as $i => $line) {
+            $lineNo = (int) ($line->line_number ?: $i + 1);
+
+            // Per-line classification wins; fall back to the document header.
+            $type = ExpenseClassificationType::tryFrom((string) $line->classification_type) ?? $headerType;
+            $category = ExpenseClassificationCategory::tryFrom((string) $line->classification_category) ?? $headerCategory;
+            if ($type === null || $category === null) {
+                throw new RuntimeException("Η γραμμή #{$lineNo} δεν έχει χαρακτηρισμό (τύπο/κατηγορία) ούτε στη γραμμή ούτε στην κεφαλίδα.");
+            }
+
             $classification = new ExpensesClassification([
                 'classificationType' => $type,
                 'classificationCategory' => $category,
@@ -122,7 +139,7 @@ class ExpenseClassificationSubmitter
             ]);
 
             $details[] = new InvoicesExpensesClassificationDetail([
-                'lineNumber' => (int) ($line->line_number ?: $i + 1),
+                'lineNumber' => $lineNo,
                 'expensesClassificationDetailData' => [$classification],
             ]);
         }
