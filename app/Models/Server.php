@@ -33,6 +33,9 @@ class Server extends Model
         'is_active',
     ];
 
+    /** Keep the credential out of array/JSON serialization (plaintext at rest by default). */
+    protected $hidden = ['secret_encrypted'];
+
     protected function casts(): array
     {
         return [

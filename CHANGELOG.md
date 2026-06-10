@@ -16,6 +16,14 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Security
+- **Secret columns hidden from serialization.** `Company` (myDATA/GSIS/SMTP/WHMCS keys +
+  provider config), `Server`/`ServerGroup` (`secret_encrypted`) and `CompanyBackupSetting`
+  (`passphrase`) now carry `$hidden`, so `toArray()`/`toJson()`/logs/API never expose them
+  (defence-in-depth now that secrets are plaintext at rest by default; `User` already guarded
+  2FA via `#[Hidden]`). Attribute access is unchanged; the admin Company form + backup-schedule
+  form re-inject the values explicitly so the edit UX is identical.
+
 ### Added
 - **DR without APP_KEY — optional at-rest secret encryption (Phase 6).** New
   `App\Casts\MaybeEncrypted` replaces the `encrypted` casts on every secret column

@@ -91,6 +91,24 @@ class Company extends Model
         'whmcs_default_invoice_type_id',
     ];
 
+    /**
+     * Secret columns kept OUT of array/JSON serialization (toArray/toJson/logs/API)
+     * — defence-in-depth now that they're plaintext at rest by default
+     * (ekdosi.secrets.encrypt_at_rest). Attribute access ($company->gsis_password)
+     * and the admin Company form (which re-injects them explicitly) are unaffected.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'mydata_subscription_key_sandbox',
+        'mydata_subscription_key_production',
+        'einvoice_provider_config',
+        'gsis_password',
+        'mail_smtp_password',
+        'whmcs_api_secret',
+        'whmcs_webhook_secret',
+    ];
+
     protected function casts(): array
     {
         return [

@@ -125,8 +125,11 @@ class CompanyBackupActions
             // Drive the form straight off the model's attributes (form components
             // ignore keys without a matching field) so a new setting column added
             // in Slice 4b can't be silently dropped from the edit form.
-            ->fillForm(fn (Company $record) => $record->backupSetting?->attributesToArray()
-                ?? ['frequency' => 'off', 'bucket' => 'settings_setup', 'secrets_mode' => 'passphrase', 'run_at_time' => '02:00', 'retention_keep' => 7])
+            // passphrase is $hidden (out of toArray) → re-inject it explicitly so
+            // the form prefills it (else a save would force re-entry / wipe it).
+            ->fillForm(fn (Company $record) => $record->backupSetting
+                ? $record->backupSetting->attributesToArray() + ['passphrase' => $record->backupSetting->passphrase]
+                : ['frequency' => 'off', 'bucket' => 'settings_setup', 'secrets_mode' => 'passphrase', 'run_at_time' => '02:00', 'retention_keep' => 7])
             ->schema([
                 Toggle::make('enabled')->label('Ενεργό')->default(false),
                 Select::make('frequency')->label('Συχνότητα')
