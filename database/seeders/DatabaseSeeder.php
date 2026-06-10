@@ -5,7 +5,6 @@ namespace Database\Seeders;
 use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
-use App\Services\MyData\MyDataLookupSeeder;
 use App\Services\TenantRoleProvisioner;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
@@ -14,55 +13,45 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\PermissionRegistrar;
 
+/**
+ * Default seed = ONE self-contained «DEMO Α.Ε.» tenant (full demo mode) + an
+ * admin user, so a fresh clone / a reviewer gets a working company to log into
+ * immediately. The old per-developer fixtures (myip / nixpal / sample-ee) are
+ * gone — real tenants are created via the install wizard or the ETL, not here.
+ *
+ * Order matters: the DEMO company must exist BEFORE shield:generate, because
+ * with config/filament-shield.php's tenant_model = Company, Shield loops over
+ * Company::all() and creates a super_admin role row per tenant — so running it
+ * against an empty companies table would leave an orphan company_id=NULL role.
+ */
 class DatabaseSeeder extends Seeder
 {
     use WithoutModelEvents;
 
-    /**
-     * Seed three tenants (2 Greek/myDATA + 1 Estonian/PEPPOL), an admin
-     * user attached to all three, AND a super_admin role per tenant.
-     *
-     * Order matters: tenants must exist BEFORE shield:generate, because
-     * with config/filament-shield.php's tenant_model = Company, Shield
-     * loops over Company::all() and creates a super_admin role row per
-     * tenant automatically — saves us from manual Role::firstOrCreate
-     * calls and avoids leaving an orphan company_id=NULL role row
-     * (which is what would happen if shield:generate runs against an
-     * empty companies table).
-     */
     public function run(): void
     {
-        // (1) Tenants first
-        $myip = Company::create([
-            'name' => 'myip',
-            'slug' => 'myip',
-            'country_code' => 'GR',
-            'einvoice_provider' => 'gr-mydata',
-            'afm' => '999999999',
-            'tax_office' => 'Athens',
-            'mydata_mode' => 'off',
-        ]);
+        // (1) Admin user first, so DemoCompanySeeder::attachAdmin finds it.
+        $admin = User::query()->firstOrCreate(
+            ['email' => 'admin@ekdosi.local'],
+            [
+                'name' => 'Admin',
+                'password' => Hash::make('password'),
+                'email_verified_at' => now(),
+            ],
+        );
 
-        $nixpal = Company::create([
-            'name' => 'nixpal',
-            'slug' => 'nixpal',
-            'country_code' => 'GR',
-            'einvoice_provider' => 'gr-mydata',
-            'afm' => '888888888',
-            'tax_office' => 'Athens',
-            'mydata_mode' => 'off',
-        ]);
+        // (2) The DEMO tenant: roles, lookups, catalogue, customers, invoices,
+        //     delivery notes — and it attaches $admin to itself.
+        $this->call(DemoCompanySeeder::class);
 
-        $estonian = Company::create([
-            'name' => 'Sample EE OÜ',
-            'slug' => 'sample-ee',
-            'country_code' => 'EE',
-            'einvoice_provider' => 'ee-peppol',
-            'mydata_mode' => 'off',
-        ]);
+        $demo = Company::query()->where('slug', 'demo')->first();
+        if ($demo === null) {
+            // Already seeded earlier (idempotent skip) — nothing else to wire.
+            return;
+        }
 
-        // (2) Permissions + auto-created per-tenant super_admin roles
-        //     with the full permission set already attached.
+        // (3) Permissions + the auto-created per-tenant super_admin role with the
+        //     full permission set (the DEMO company now exists, so no orphan row).
         Artisan::call('shield:generate', [
             '--all' => true,
             '--panel' => 'admin',
@@ -70,56 +59,22 @@ class DatabaseSeeder extends Seeder
             '--no-interaction' => true,
         ]);
 
-        // (2b) Standard non-super roles (company_admin, operator) per tenant,
-        //      AFTER shield:generate so their permission maps attach the
-        //      now-existing permissions. NB: this seeder uses WithoutModelEvents,
-        //      so the CompanyObserver did NOT fire on (1) — this explicit loop is
-        //      the only thing creating + populating the standard roles for the
-        //      seeded tenants.
-        $provisioner = app(TenantRoleProvisioner::class);
-        foreach ([$myip, $nixpal, $estonian] as $company) {
-            $provisioner->ensureStandardRoles($company);
-        }
+        // (4) (Re)populate the standard roles AFTER shield:generate so their
+        //     permission maps attach the now-existing permissions.
+        app(TenantRoleProvisioner::class)->ensureStandardRoles($demo);
 
-        // (2c) Pre-install the standard Greek AADE lookups (VAT categories +
-        //      by-the-book classified invoice types) for the GR/myDATA tenants,
-        //      so a fresh install can issue a ΤΠΥ/ΤΙΜ with zero Setup. The
-        //      Estonian tenant is left clean (non-Greek). Idempotent.
-        $lookups = app(MyDataLookupSeeder::class);
-        foreach ([$myip, $nixpal] as $company) {
-            $lookups->seedVatCategories($company);
-            $lookups->seedInvoiceTypes($company);
-            $lookups->seedPaymentMethods($company);
-            $lookups->seedDistributionAims($company);
-            $lookups->seedMetricUnits($company);
-            $lookups->seedDeliveryMethods($company);
-            $lookups->seedProductCategories($company);
-        }
-
-        // (3) Admin user attached to every tenant
-        $admin = User::create([
-            'name' => 'Admin',
-            'email' => 'admin@ekdosi.local',
-            'password' => Hash::make('password'),
-            'email_verified_at' => now(),
-        ]);
-
-        $admin->companies()->attach([$myip->id, $nixpal->id, $estonian->id]);
-
-        // (4) Assign each tenant's super_admin role to the admin user.
-        $superAdminName = ShieldUtils::getSuperAdminName();
+        // (5) Ensure the admin holds the DEMO super_admin role.
         $registrar = app(PermissionRegistrar::class);
+        $registrar->setPermissionsTeamId($demo->id);
+        $registrar->forgetCachedPermissions();
 
-        foreach ([$myip, $nixpal, $estonian] as $company) {
-            $registrar->setPermissionsTeamId($company->id);
-            $registrar->forgetCachedPermissions();
+        $role = Role::query()
+            ->where('name', ShieldUtils::getSuperAdminName())
+            ->where('guard_name', 'web')
+            ->where('company_id', $demo->id)
+            ->first();
 
-            $role = Role::query()
-                ->where('name', $superAdminName)
-                ->where('guard_name', 'web')
-                ->where('company_id', $company->id)
-                ->firstOrFail();
-
+        if ($role !== null) {
             $admin->assignRole($role);
         }
     }
