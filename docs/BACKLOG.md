@@ -1,10 +1,17 @@
 # Backlog / Roadmap — deferred ideas
 
-Cross-cutting TODOs that are **deliberately not built yet**. Captured so they
-don't get lost in drift. (Per-feature plans live in their own docs:
-`services-quotes-roadmap.md`, `expenses-phase-plan.md`,
-`paroxos/` (regulatory-blueprint.md + implementation-plan.md). The myDATA-filing gaps + tech-debt list live in
-`CLAUDE.md`.)
+Cross-cutting TODOs that are **deliberately not built yet**, + new ideas. Captured
+so they don't get lost in drift. (What IS built → **`FEATURES.md`** at the root.)
+
+**Standalone idea / plan docs** (the bigger ones live on their own — index here so
+they're not lost):
+- `paroxos/regulatory-blueprint.md` + `implementation-plan.md` — GR ΥΠΑΗΕΣ provider + EU PEPPOL.
+- `ai-assistant-blueprint.md` — in-app «Βοηθός» / **MCP-style assistant** (idea, nothing built).
+- `payment-connectors.md` + `payments-ar-roadmap.md` — payment gateways / AR next steps.
+- `bridges-connectors.md` — 2nd billing source beyond WHMCS (WooCommerce…).
+- `services-quotes-roadmap.md`, `expenses-phase-plan.md` — built; remaining-polish lists.
+
+The myDATA-filing gaps + tech-debt latent list also live in `CLAUDE.md`.
 
 ---
 
