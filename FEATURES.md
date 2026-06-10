@@ -143,8 +143,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **`ops:health`** (queue/scheduler/backup/mail/WHMCS/myDATA/disk) — CLI **και**
   **σελίδα «Υγεία συστήματος»** (read-only, **super_admin-only** γιατί είναι cross-tenant·
   ίδια πηγή `OperatorHealthReport`: worker heartbeat, scheduled-task last-runs, backups,
-  mail, WHMCS+myDATA ανά tenant, δίσκος) — στο νέο nav group **«Σύστημα»**.
-  + **«Εργαλεία»** (artisan commands ως κουμπιά) +
+  mail, WHMCS+myDATA ανά tenant, δίσκος, **+ ιστορικό εκτελέσεων** `scheduled_task_runs`
+  + pending/failed jobs + κουμπί **«Επανάληψη αποτυχημένων»**) — στο νέο nav group
+  **«Σύστημα»**. + **«Εργαλεία»** (artisan commands ως κουμπιά) +
   **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run.
 - **Scheduler + queue** (DB driver) — backups/auto-email/reconcile/WHMCS/VAT-picture,
   gated by `EKDOSI_SCHEDULE_*`.

@@ -25,6 +25,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   WHMCS/myDATA), so it's gated on super_admin (not a per-tenant shield permission a
   company_admin would hold); the report is short-TTL cached so a refresh can't hang
   on a large storage tree. **Deploy:** `shield:sync-super-admin`.
+- **Durable scheduled-task run history** (the «Σύστημα» area, slice 2). New
+  `scheduled_task_runs` table — the scheduler `before`/`onSuccess`/`onFailure`
+  hooks now log a row per run (status, exit code, duration, summary), surviving
+  `cache:clear` (unlike the latest-only cache snapshot), pruned to the last 50 per
+  task. The Υγεία-συστήματος page gains a «Πρόσφατες εκτελέσεις» history table, a
+  queue **pending-jobs** count, and a super_admin «Επανάληψη αποτυχημένων»
+  (`queue:retry all`) action shown only when jobs have failed. **Deploy:** `migrate`.
 
 ## [1.0.0] - 2026-06-10
 
