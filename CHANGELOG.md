@@ -16,6 +16,13 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Changed
+- **Docs reorg + CLAUDE.md slimmed.** `FEATURES.md` (root) is now the catalogue of
+  what's built; `docs/BACKLOG.md` is what's left + ideas; `docs/Comparison.md`
+  retired. `CLAUDE.md` trimmed ~900→~465 lines (64K→32K) by replacing the
+  status/roadmap + WHMCS-version + tech-debt narration with pointers — every
+  decision / convention / the VAT math / tenant-safety behavior kept.
+
 ### Added
 - **FK-aware delete guard on the lookup resources** (`App\Filament\Support\GuardedDeleteAction`).
   The lookups soft-delete, so deleting one still in use left its dependents showing a
