@@ -6,6 +6,10 @@ quotes, and a **WHMCS bridge**. This is the modern rewrite of a legacy
 C++Builder (VCL) + Firebird application, now on **Laravel 13 + FilamentPHP 5 +
 MariaDB**, multi-tenant and multi-country from day one.
 
+**Version:** `v1.0.0` (SemVer — `config('app.version')`; cut releases with
+`php artisan ekdosi:release`). What's built → [`FEATURES.md`](FEATURES.md) ·
+what's left → [`docs/BACKLOG.md`](docs/BACKLOG.md) · changes → [`CHANGELOG.md`](CHANGELOG.md).
+
 > Internal tool — no public/customer portal. Operator-facing UI is Greek; code
 > identifiers are English.
 

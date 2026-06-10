@@ -114,7 +114,14 @@ after cutover.
 Part of "done", like tests. **Every change updates the right place:**
 - **`CHANGELOG.md`** (repo root) — the ekdosi **app** (Laravel/Filament). Add a
   one-liner under `## [Unreleased]` ([Keep a Changelog](https://keepachangelog.com/):
-  `Added`/`Changed`/`Fixed`/`Removed`/`Security`). No SemVer tag yet → date entries as they merge.
+  `Added`/`Changed`/`Fixed`/`Removed`/`Security`).
+- **Versioning — SemVer `X.Y.Z`, app semantics** (canonical: `config('app.version')`).
+  Cut a release with **`php artisan ekdosi:release {--major|--minor|--patch}`** (rolls
+  `[Unreleased]` → dated `[X.Y.Z]`, bumps `config/app.php`, prints the `git tag` command).
+  The LEVEL is judgement — the rule of thumb:
+  - **major (X.0.0)** = a milestone/epoch (e.g. PEPPOL goes live, a cutover).
+  - **minor (x.Y.0)** = the `[Unreleased]` block contains an **`Added`** (a new feature).
+  - **patch (x.x.Z)** = only `Fixed`/`Changed`/`Security`/docs since the last tag.
 - **`FEATURES.md`** (repo root) — the catalogue of WHAT ekdosi does. **A NEW feature
   (not a fix/tweak) ALSO gets a line/bullet here**, under the right section. This is
   the «μην χανόμαστε» file — keep it the truthful single source of what's built.

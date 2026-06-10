@@ -17,6 +17,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Application Version (ekdosi)
+    |--------------------------------------------------------------------------
+    |
+    | The canonical app version — read via config('app.version'). SemVer with
+    | app semantics: major = milestone/epoch, minor = a new feature, patch =
+    | fixes/tweaks. Bumped (with the CHANGELOG roll) by `php artisan ekdosi:release`.
+    |
+    */
+
+    'version' => '1.0.0',
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Environment
     |--------------------------------------------------------------------------
     |
