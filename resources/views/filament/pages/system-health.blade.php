@@ -13,6 +13,9 @@
                 Worker: {{ $this->statusLabel($q['worker_heartbeat_status'] ?? null) }}
             </x-filament::badge>
             <span>Τελευταίο heartbeat: <strong>{{ $this->ago($q['worker_heartbeat_at'] ?? null) }}</strong></span>
+            <x-filament::badge color="gray">
+                Pending jobs: {{ $q['pending_jobs'] ?? '—' }}
+            </x-filament::badge>
             <x-filament::badge :color="($q['failed_jobs'] ?? 0) > 0 ? 'danger' : 'success'">
                 Failed jobs: {{ $q['failed_jobs'] ?? '—' }}
             </x-filament::badge>
@@ -36,6 +39,28 @@
             </tbody>
         </table>
     </x-filament::section>
+
+    {{-- Recent runs (durable history) --}}
+    @if (!empty($report['recent_runs']))
+    <x-filament::section>
+        <x-slot name="heading">Πρόσφατες εκτελέσεις (ιστορικό)</x-slot>
+        <table class="w-full text-sm">
+            <thead><tr class="text-left text-gray-500"><th class="py-1">Εργασία</th><th>Κατάσταση</th><th>Ξεκίνησε</th><th>Διάρκεια</th><th>Exit</th><th>Σημείωση</th></tr></thead>
+            <tbody>
+            @foreach ($report['recent_runs'] as $run)
+                <tr class="border-t border-gray-100 dark:border-gray-800">
+                    <td class="py-1">{{ $run['label'] ?? $run['task'] ?? '—' }}</td>
+                    <td><x-filament::badge :color="$this->statusColor($run['status'] ?? null)">{{ $this->statusLabel($run['status'] ?? null) }}</x-filament::badge></td>
+                    <td>{{ $this->ago($run['started_at'] ?? null) }}</td>
+                    <td>{{ $this->ms($run['duration_ms'] ?? null) }}</td>
+                    <td>{{ $run['exit_code'] ?? '—' }}</td>
+                    <td class="text-gray-500">{{ $run['summary'] ?? '—' }}</td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    </x-filament::section>
+    @endif
 
     {{-- Backup + Mail (side by side) --}}
     <div class="grid gap-6 md:grid-cols-2">

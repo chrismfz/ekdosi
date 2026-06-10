@@ -6,8 +6,10 @@ use App\Support\OperatorHealth\OperatorHealthReport;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -88,6 +90,17 @@ class SystemHealth extends Page
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->action(fn () => $this->refreshReport()),
+
+            // Re-queue every failed job (the only write on this page). Hidden when
+            // nothing failed so it doesn't tempt a no-op.
+            Action::make('retryFailedJobs')
+                ->label('Επανάληψη αποτυχημένων')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('warning')
+                ->requiresConfirmation()
+                ->modalDescription('Θα ξαναμπούν στην ουρά όλες οι αποτυχημένες εργασίες (queue:retry all).')
+                ->visible(fn (): bool => (int) ($this->report['queue']['failed_jobs'] ?? 0) > 0)
+                ->action(fn () => $this->retryFailedJobs()),
         ];
     }
 
@@ -97,6 +110,17 @@ class SystemHealth extends Page
         // next mount within the TTL reuses it.
         $this->report = app(OperatorHealthReport::class)->build();
         Cache::put(self::CACHE_KEY, $this->report, self::CACHE_TTL);
+    }
+
+    public function retryFailedJobs(): void
+    {
+        Artisan::call('queue:retry', ['id' => ['all']]);
+        $this->refreshReport();
+
+        Notification::make()
+            ->title('Οι αποτυχημένες εργασίες ξαναμπήκαν στην ουρά')
+            ->success()
+            ->send();
     }
 
     // ── view helpers (one place for status → colour/label + formatting) ──
@@ -119,6 +143,7 @@ class SystemHealth extends Page
             'missing' => 'Άγνωστο',
             'fail', 'failed', 'error' => 'Σφάλμα',
             'warn' => 'Προσοχή',
+            'running' => 'Εκτελείται',
             default => (string) ($status ?? '—'),
         };
     }
@@ -149,5 +174,17 @@ class SystemHealth extends Page
         }
 
         return round($v, 1).' '.$units[$i];
+    }
+
+    public function ms(?int $n): string
+    {
+        if ($n === null) {
+            return '—';
+        }
+        if ($n < 1000) {
+            return $n.' ms';
+        }
+
+        return round($n / 1000, 1).' s';
     }
 }

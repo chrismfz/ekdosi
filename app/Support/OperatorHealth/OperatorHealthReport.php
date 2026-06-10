@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\InvoiceMailLog;
 use App\Models\MyDataMark;
 use App\Models\PendingWhmcsInvoice;
+use App\Models\ScheduledTaskRun;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,22 @@ use Throwable;
 
 class OperatorHealthReport
 {
+    /**
+     * Known scheduled-task keys → human labels (shared by the per-task summary
+     * and the durable run-history list).
+     *
+     * @var array<string, string>
+     */
+    private const TASK_LABELS = [
+        'whmcs_fetch' => 'WHMCS fetch',
+        'mydata_reconcile' => 'myDATA reconcile',
+        'mydata_vat_picture' => 'VAT picture refresh',
+        'mail_sweep' => 'mail sweep',
+        'backup_run' => 'backup run',
+        'backup_cleanup' => 'backup cleanup',
+        'backup_monitor' => 'backup monitor',
+    ];
+
     /** @return array<string, mixed> */
     public function build(): array
     {
@@ -23,6 +40,7 @@ class OperatorHealthReport
             'generated_at' => now()->toIso8601String(),
             'queue' => $this->queue(),
             'scheduler' => $this->scheduler(),
+            'recent_runs' => $this->recentRuns(),
             'backup' => $this->backup(),
             'mail' => $this->mail(),
             'whmcs' => $this->whmcs(),
@@ -41,6 +59,7 @@ class OperatorHealthReport
             'worker_heartbeat_at' => $heartbeat,
             'worker_heartbeat_age_minutes' => $ageMinutes,
             'worker_heartbeat_status' => $ageMinutes === null ? 'missing' : ($ageMinutes <= 10 ? 'ok' : 'stale'),
+            'pending_jobs' => $this->tableCount('jobs'),
             'failed_jobs' => $this->tableCount('failed_jobs'),
         ];
     }
@@ -48,18 +67,8 @@ class OperatorHealthReport
     /** @return array<string, mixed> */
     private function scheduler(): array
     {
-        $tasks = [
-            'whmcs_fetch' => 'WHMCS fetch',
-            'mydata_reconcile' => 'myDATA reconcile',
-            'mydata_vat_picture' => 'VAT picture refresh',
-            'mail_sweep' => 'mail sweep',
-            'backup_run' => 'backup run',
-            'backup_cleanup' => 'backup cleanup',
-            'backup_monitor' => 'backup monitor',
-        ];
-
         $rows = [];
-        foreach ($tasks as $key => $label) {
+        foreach (self::TASK_LABELS as $key => $label) {
             $payload = $this->cacheGet(HealthKeys::scheduledTask($key));
             $rows[$key] = [
                 'label' => $label,
@@ -70,6 +79,31 @@ class OperatorHealthReport
         }
 
         return $rows;
+    }
+
+    /**
+     * Durable run history (last N across all tasks) — survives cache:clear,
+     * unlike scheduler()'s latest-only snapshot.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function recentRuns(int $limit = 20): array
+    {
+        return $this->safeValue(fn () => ScheduledTaskRun::query()
+            ->orderByDesc('started_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (ScheduledTaskRun $run): array => [
+                'task' => $run->task,
+                'label' => self::TASK_LABELS[$run->task] ?? $run->task,
+                'status' => $run->status,
+                'exit_code' => $run->exit_code,
+                'duration_ms' => $run->duration_ms,
+                'started_at' => $run->started_at?->toIso8601String(),
+                'finished_at' => $run->finished_at?->toIso8601String(),
+                'summary' => $run->summary,
+            ])
+            ->all(), []);
     }
 
     /** @return array<string, mixed> */

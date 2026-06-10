@@ -4,8 +4,10 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\SystemHealth;
 use App\Models\Company;
+use App\Models\ScheduledTaskRun;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
+use App\Support\OperatorHealth\HealthRecorder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
@@ -81,5 +83,29 @@ class SystemHealthPageTest extends TestCase
             ->callAction('refresh')
             ->assertHasNoActionErrors()
             ->assertSet('report.generated_at', fn ($v) => $v !== null);
+    }
+
+    #[Test]
+    public function it_shows_the_durable_run_history(): void
+    {
+        $this->makeSuperAdmin();
+        app(HealthRecorder::class)->recordScheduledRun('whmcs_fetch', 'running');
+        app(HealthRecorder::class)->recordScheduledRun('whmcs_fetch', 'ok', 0);
+
+        Livewire::test(SystemHealth::class)
+            ->assertSee('Πρόσφατες εκτελέσεις')
+            ->assertSee('WHMCS fetch')
+            ->assertSet('report.recent_runs', fn ($v) => ! empty($v));
+    }
+
+    #[Test]
+    public function the_retry_action_is_hidden_when_no_jobs_failed(): void
+    {
+        $this->makeSuperAdmin();
+        $this->assertSame(0, ScheduledTaskRun::query()->count()); // sanity: fresh DB
+
+        // No failed_jobs rows → action hidden.
+        Livewire::test(SystemHealth::class)
+            ->assertActionHidden('retryFailedJobs');
     }
 }

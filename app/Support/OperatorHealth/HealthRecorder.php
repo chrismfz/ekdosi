@@ -3,20 +3,81 @@
 namespace App\Support\OperatorHealth;
 
 use App\Models\Company;
+use App\Models\ScheduledTaskRun;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 class HealthRecorder
 {
+    /** Durable run rows kept per task — older ones pruned on each close. */
+    private const RUN_HISTORY_KEEP = 50;
+
     /** @param array<string, mixed> $extra */
     public function recordScheduledRun(string $task, string $status, ?int $exitCode = null, array $extra = []): void
     {
+        // Fast snapshot (latest-only) for the at-a-glance report — survives a
+        // missing scheduled_task_runs table, so the report never goes dark.
         $this->forever(HealthKeys::scheduledTask($task), array_merge($extra, [
             'task' => $task,
             'status' => $status,
             'exit_code' => $exitCode,
             'ran_at' => now()->toIso8601String(),
         ]));
+
+        // Durable history: 'running' opens a row, a terminal status closes the
+        // latest open row (or stands alone if the before-hook never fired).
+        $this->recordRunHistory($task, $status, $exitCode, $extra['summary'] ?? null);
+    }
+
+    private function recordRunHistory(string $task, string $status, ?int $exitCode, ?string $summary): void
+    {
+        try {
+            if ($status === 'running') {
+                ScheduledTaskRun::create([
+                    'task' => $task, 'status' => 'running', 'started_at' => now(),
+                ]);
+
+                return;
+            }
+
+            $open = ScheduledTaskRun::query()
+                ->where('task', $task)->where('status', 'running')->whereNull('finished_at')
+                ->latest('started_at')->first();
+
+            if ($open) {
+                $open->forceFill([
+                    'status' => $status,
+                    'exit_code' => $exitCode,
+                    'summary' => $summary,
+                    'finished_at' => now(),
+                    'duration_ms' => $open->started_at ? (int) $open->started_at->diffInMilliseconds(now()) : null,
+                ])->save();
+            } else {
+                // No open row (e.g. only a terminal hook fired) — record a point-in-time run.
+                ScheduledTaskRun::create([
+                    'task' => $task, 'status' => $status, 'exit_code' => $exitCode,
+                    'summary' => $summary, 'started_at' => now(), 'finished_at' => now(), 'duration_ms' => 0,
+                ]);
+            }
+
+            $this->pruneRunHistory($task);
+        } catch (Throwable) {
+            // History is best-effort: the table may not be migrated yet, and a
+            // recording failure must never break the business command.
+        }
+    }
+
+    private function pruneRunHistory(string $task): void
+    {
+        $cutoff = ScheduledTaskRun::query()
+            ->where('task', $task)
+            ->orderByDesc('id')
+            ->skip(self::RUN_HISTORY_KEEP)
+            ->value('id');
+
+        if ($cutoff) {
+            ScheduledTaskRun::query()->where('task', $task)->where('id', '<=', $cutoff)->delete();
+        }
     }
 
     /** @param array<string, mixed> $extra */
