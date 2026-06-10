@@ -110,13 +110,16 @@ after cutover.
 - Money `decimal(14,2)`, qty `decimal(9,3)`, vat% `decimal(5,2)`.
 - Operator-facing UI text is Greek; code identifiers stay English.
 
-## Changelog discipline (keep these current — we were starting to lose track)
-Two **`CHANGELOG.md`** files, [Keep a Changelog](https://keepachangelog.com/)
-format (`Added` / `Changed` / `Fixed` / `Removed`). **Every change updates the
-right one** — it's part of "done", like tests:
+## Changelog + features discipline (keep these current — we were losing track)
+Part of "done", like tests. **Every change updates the right place:**
 - **`CHANGELOG.md`** (repo root) — the ekdosi **app** (Laravel/Filament). Add a
-  one-liner under `## [Unreleased]`. No SemVer tag yet, so date entries as they
-  merge.
+  one-liner under `## [Unreleased]` ([Keep a Changelog](https://keepachangelog.com/):
+  `Added`/`Changed`/`Fixed`/`Removed`/`Security`). No SemVer tag yet → date entries as they merge.
+- **`FEATURES.md`** (repo root) — the catalogue of WHAT ekdosi does. **A NEW feature
+  (not a fix/tweak) ALSO gets a line/bullet here**, under the right section. This is
+  the «μην χανόμαστε» file — keep it the truthful single source of what's built.
+  (`docs/BACKLOG.md` is its twin = what's left + new ideas; move an item from BACKLOG
+  → FEATURES when it ships.)
 - **`whmcs-plugin/ekdosi_bridge/CHANGELOG.md`** — the **WHMCS plugin**. A plugin
   change BOTH adds a line here AND bumps `'version'` in `ekdosi_bridge.php`
   (move the `[Unreleased]` items under the new `[vX.Y.Z]` heading).
