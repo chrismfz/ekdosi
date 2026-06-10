@@ -17,6 +17,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 ### Added
+- **«Ρυθμίσεις συστήματος» page** (the «Σύστημα» area). A super_admin-only page that
+  surfaces the deploy-wide global knobs as audited `system_settings` toggles (env =
+  default, only deviations stored): **`require_2fa`** (read live by the panel) and the
+  **backup-failure alert on/off + recipient email(s)** (read live by
+  `company:run-scheduled-backups`). Secrets at-rest encryption + the mailer status are
+  shown **read-only** — changing encryption is done safely via `secrets:reencrypt`, not a
+  silent one-click flip. **Deploy:** none (config defaults; flip in the UI).
 - **«Υγεία συστήματος» page** (the «Σύστημα» area, slice 1). A read-only
   **super_admin-only** Filament page that renders the same `OperatorHealthReport`
   as `php artisan ops:health` — queue-worker heartbeat + failed jobs, scheduled-task
