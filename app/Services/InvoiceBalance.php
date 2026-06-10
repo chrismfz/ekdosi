@@ -37,13 +37,17 @@ class InvoiceBalance
 
     public function for(Invoice $invoice): InvoiceBalanceData
     {
+        // `gross` stays the document value (net+VAT) for display; `payable` is the
+        // real COLLECTIBLE (net+VAT + fees − withholding, per AADE [208]) and is the
+        // basis for owed/balance — what the customer actually pays / we receive.
         $gross = round((float) ($invoice->gross_total ?? 0), 2);
+        $payable = round($invoice->payableTotal(), 2);
         $credited = round($this->creditedTotal($invoice), 2);
         $rawPaid = round($this->paidTotal($invoice), 2);
-        $owed = round($gross - $credited, 2);
+        $owed = round($payable - $credited, 2);
 
         // Fully credited (return) — wins over payment state.
-        if ($credited >= $gross - self::EPS && $gross > self::EPS) {
+        if ($credited >= $payable - self::EPS && $payable > self::EPS) {
             return new InvoiceBalanceData(
                 gross: $gross, credited: $credited, paid: $rawPaid,
                 owed: $owed, balance: round($owed - $rawPaid, 2),
@@ -161,7 +165,10 @@ class InvoiceBalance
             ->where('credited_invoice_id', $invoice->getKey())
             ->whereNull('deleted_at');
 
-        return (float) InvoiceScope::live($q)->sum('gross_total');
+        // Credit notes reduce the owed in the SAME (payable) unit as the original.
+        // COALESCE so a credit note not yet recomputed (null payable_total) still
+        // contributes its document gross.
+        return (float) InvoiceScope::live($q)->sum(DB::raw('COALESCE(payable_total, gross_total)'));
     }
 
     private function paidTotal(Invoice $invoice): float
