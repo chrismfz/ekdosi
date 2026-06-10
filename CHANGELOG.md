@@ -41,6 +41,25 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   queue **pending-jobs** count, and a super_admin «Επανάληψη αποτυχημένων»
   (`queue:retry all`) action shown only when jobs have failed. **Deploy:** `migrate`.
 
+- **Άντληση εξόδων από myDATA από τη λίστα Έξοδα** (Πακέτο 2). A «Άντληση από myDATA»
+  button on the Έξοδα list does a one-click (read-only) fetch and lands on the
+  «Κονσόλα myDATA — Έξοδα» worklist with the αδέσποτα ready to import — no more
+  «console → fetch → back» dance; a subheading shows «τελευταία άντληση … · X αδέσποτα».
+  New `mydata:refresh-expenses` command keeps that snapshot fresh on a schedule
+  (read-only — **creates no expense rows**; import stays operator-gated), **default OFF**,
+  toggled from «Ρυθμίσεις χρονοπρογραμματιστή» (no env edit). The button + cron share one
+  cache with the console, so all three show the same «last fetched». **Deploy:** none
+  (config default; flip the toggle to schedule it).
+
+### Changed
+- **myDATA consoles unified under one «Κονσόλα myDATA» menu** (cluster, Πακέτο 1).
+  The three live-AADE consoles (Πωλήσεις / Έξοδα / Επισκόπηση Ε3) are now sub-navigation
+  tabs of a single `MyDataCluster` instead of three scattered nav items — each page kept
+  intact (own fetch actions, `RemembersLastFetch` «τελευταία ενημέρωση», `View:*` perm,
+  lazy fetch). The local «Συμφωνία myDATA» stays separate (operator, no AADE call). Old
+  URLs (`my-data-console`, `…-expenses`, `my-data-e3-overview`) **301→** the new
+  `mydata/{sales,expenses,e3}` paths so bookmarks survive.
+
 ## [1.0.0] - 2026-06-10
 
 ### Added

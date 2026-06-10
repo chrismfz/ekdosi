@@ -44,9 +44,11 @@
 - **Υποβολή / ακύρωση / dry-run** μέσω `firebed/aade-mydata` (`MyDataSubmitter`),
   sandbox-validated (1.1/2.1/11.x/5.1 + CANCEL + νέοι taxTypes + 4% override + ΔΑ).
 - **`mydata_marks` = source of truth** (πλήρες request/response XML, νομικό audit).
-- **Κονσόλα myDATA** — ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:
-  τοπικό (Phase 1) + ζωντανό (Phase 2, `SalesReconciler`)· matched / stateMismatch /
-  missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση).
+- **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3**·
+  ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**: τοπικό (Phase 1,
+  ξεχωριστή «Συμφωνία myDATA») + ζωντανό (Phase 2, `SalesReconciler`)· matched /
+  stateMismatch / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε
+  tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
 - **Σελίδα ΜΑΡΚ** (direction-aware) + per-line E3 classification.
 - **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables.
 - **Code tables** (`App\Support\MyData\Codes`) — §8 πίνακες με validation helpers.
@@ -55,7 +57,10 @@
 - **Προμηθευτές** (`Supplier`) — CRUD + «Άντληση από ΑΑΔΕ» (GSIS) + **`suppliers:sync`**
   (μοναδικά issuer ΑΦΜ από `RequestDocs`).
 - **Εισαγωγή αδέσποτων** εξόδων από myDATA (`ExpenseImporter`/`ExpenseReconciler`) +
-  self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ).
+  self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ). **Κουμπί «Άντληση από myDATA» στη λίστα
+  Έξοδα** (one-click read-only fetch → worklist) + tip «τελευταία άντληση · X αδέσποτα» +
+  read-only cron **`mydata:refresh-expenses`** (default OFF, toggle στη «Ρυθμίσεις
+  χρονοπρογραμματιστή»· δεν δημιουργεί εγγραφές).
 - **Χαρακτηρισμός** (E3 type + category2_x) **per-document ή per-line** (εμπορεύματα/
   πάγια/δαπάνες) → **υποβολή στην ΑΑΔΕ** (`SendExpensesClassification`) +
   `expenses:test-classify` dry-run. Audit row + transactional safety.

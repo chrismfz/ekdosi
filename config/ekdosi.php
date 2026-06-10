@@ -95,6 +95,14 @@ return [
         'mydata_vat_picture_enabled' => env('EKDOSI_SCHEDULE_MYDATA_VAT_PICTURE', true),
         'mydata_vat_picture_cron' => env('EKDOSI_MYDATA_VAT_PICTURE_CRON', '0 */4 * * *'),
 
+        // mydata:refresh-expenses — READ-ONLY refresh of the expenses
+        // reconciliation snapshot (current quarter) per myDATA-readable tenant, so
+        // the «Κονσόλα myDATA — Έξοδα» worklist + the «Άντληση» badge on the Έξοδα
+        // list stay fresh. Creates NO expense rows (import stays operator-gated) →
+        // safe, but default OFF (opt-in per deploy; it's a recurring AADE pull).
+        'mydata_fetch_expenses_enabled' => env('EKDOSI_SCHEDULE_MYDATA_FETCH_EXPENSES', false),
+        'mydata_fetch_expenses_cron' => env('EKDOSI_MYDATA_FETCH_EXPENSES_CRON', '0 */6 * * *'),
+
         // spatie/laravel-backup tasks. Enable these when the Laravel scheduler
         // owns backups for the deployment; leave disabled if system cron/systemd
         // runs the backup commands separately.

@@ -59,6 +59,7 @@ class ScheduleSettings extends Page implements HasForms
         // myDATA
         'mydata_reconcile_enabled' => ['myDATA — αντιπαραβολή πωλήσεων', 'Καθημερινός read-only έλεγχος local↔ΑΑΔΕ.', false],
         'mydata_vat_picture_enabled' => ['myDATA — εικόνα ΦΠΑ', 'Ανανεώνει το cache του widget «Εικόνα από myDATA» (βαρύ AADE pull).', false],
+        'mydata_fetch_expenses_enabled' => ['myDATA — άντληση εξόδων (read-only)', 'Ανανεώνει την αντιπαραβολή εξόδων κάθε λίγες ώρες ώστε το badge «αδέσποτα έξοδα» να είναι φρέσκο. ΔΕΝ δημιουργεί εγγραφές.', false],
         // Αντίγραφα ασφαλείας
         'backup_run_enabled' => ['Backup — λήψη', 'Τρέχει το spatie backup:run (όλη η ΒΔ). Άφησέ το κλειστό αν τα backups τα τρέχει το systemd/cron.', false],
         'backup_cleanup_enabled' => ['Backup — καθαρισμός', 'spatie backup:clean — εφαρμόζει την πολιτική διατήρησης.', false],
@@ -78,7 +79,7 @@ class ScheduleSettings extends Page implements HasForms
     private const SECTIONS = [
         'Email & ουρά εργασιών' => ['mail_sweep_enabled', 'queue_heartbeat_enabled', 'resend_failed_emails_enabled'],
         'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_auto_issue_enabled'],
-        'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled'],
+        'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'service_renewals_enabled', 'service_dunning_enabled'],
     ];

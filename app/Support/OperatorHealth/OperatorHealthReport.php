@@ -27,6 +27,7 @@ class OperatorHealthReport
         'whmcs_fetch' => 'WHMCS fetch',
         'mydata_reconcile' => 'myDATA reconcile',
         'mydata_vat_picture' => 'VAT picture refresh',
+        'mydata_fetch_expenses' => 'myDATA expenses refresh',
         'mail_sweep' => 'mail sweep',
         'backup_run' => 'backup run',
         'backup_cleanup' => 'backup cleanup',

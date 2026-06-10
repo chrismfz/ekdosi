@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\MyDataCluster;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Invoices\InvoiceResource;
@@ -20,7 +21,6 @@ use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
-use UnitEnum;
 
 /**
  * Phase 2 — LIVE myDATA console ("Κονσόλα myDATA").
@@ -44,9 +44,11 @@ class MyDataConsole extends Page
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cloud-arrow-down';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static ?string $cluster = MyDataCluster::class;
 
-    protected static ?int $navigationSort = 91;
+    protected static ?string $slug = 'sales';
+
+    protected static ?int $navigationSort = 1;
 
     protected string $view = 'filament.pages.my-data-console';
 
@@ -90,12 +92,12 @@ class MyDataConsole extends Page
 
     public static function getNavigationLabel(): string
     {
-        return 'Κονσόλα myDATA';
+        return 'Πωλήσεις';
     }
 
     public function getTitle(): string
     {
-        return 'Κονσόλα myDATA';
+        return 'Κονσόλα myDATA — Πωλήσεις';
     }
 
     public static function shouldRegisterNavigation(): bool

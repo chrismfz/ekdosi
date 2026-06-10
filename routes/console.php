@@ -136,6 +136,18 @@ $trackSchedule(
     'mydata_vat_picture'
 );
 
+// mydata:refresh-expenses — READ-ONLY refresh of the expenses reconciliation
+// snapshot per myDATA-readable tenant (keeps the Έξοδα worklist + «Άντληση» badge
+// fresh). Creates no rows. Default OFF.
+$trackSchedule(
+    Schedule::command('mydata:refresh-expenses')
+        ->cron(config('ekdosi.schedule.mydata_fetch_expenses_cron', '0 */6 * * *'))
+        ->name('mydata-fetch-expenses-all')
+        ->when(fn () => $scheduleEnabled('mydata_fetch_expenses_enabled'))
+        ->withoutOverlapping(30),
+    'mydata_fetch_expenses'
+);
+
 // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
 // tenant. Read-only, NO email; default OFF (opt-in per deploy).
 Schedule::command('invoices:notify-overdue')
