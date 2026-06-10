@@ -64,6 +64,8 @@ class WhmcsClientFactoryTest extends TestCase
 
     public function test_secret_is_encrypted_at_rest(): void
     {
+        // Encryption-at-rest is opt-in now (DR default = plaintext); enable it.
+        config(['ekdosi.secrets.encrypt_at_rest' => true]);
         $tenant = Company::create([
             'name' => 'Encrypted',
             'slug' => 'enc-whmcs-'.uniqid(),

@@ -15,12 +15,14 @@ use RuntimeException;
  * found) so a re-import converges instead of duplicating, and matched rows keep
  * their id so transactional data that references them never dangles.
  *
- * Secrets are opened with the passphrase and written back through Eloquent, so
- * they are re-encrypted under the TARGET VM's APP_KEY on save.
+ * The company's secrets are opened with the passphrase and written back through
+ * Eloquent, so they are stored in the target VM's at-rest form on save —
+ * encrypted under its APP_KEY, or plaintext, per ekdosi.secrets.encrypt_at_rest.
  *
  * Known v1 limitations:
- *  - servers/server_groups carry their own APP_KEY-encrypted `secret_encrypted`,
- *    exported as raw ciphertext — portable only within the same APP_KEY.
+ *  - servers/server_groups `secret_encrypted` is REDACTED on export
+ *    (CompanyExporter::REDACTED_COLUMNS — a secret must not ride in a bundle),
+ *    so server creds are re-entered on the target VM after import.
  *  - A `--full` bundle targets a FRESH company (`--new`). Re-importing one INTO a
  *    company that already holds its data converges only for legacy_id-bearing
  *    rows (the ETL'd majority); Filament-created rows (legacy_id null) fall to a
@@ -395,7 +397,8 @@ class CompanyImporter
     {
         unset($companyData['logo_export_name']); // export-only meta, not a column
 
-        // Plaintext secrets → Eloquent re-encrypts under the target APP_KEY on save.
+        // Opened (plaintext) secrets → the MaybeEncrypted cast stores them in the
+        // target VM's at-rest form on save (encrypted under its APP_KEY, or plain).
         foreach ($secrets as $col => $value) {
             $companyData[$col] = $value;
         }

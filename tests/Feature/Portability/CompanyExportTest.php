@@ -108,16 +108,42 @@ class CompanyExportTest extends TestCase
 
         $bundle = app(CompanyExporter::class)->build($company, 'passphrase', 'p@ss');
 
-        // EVERY encrypted-cast column must be sealed out of company.json — derived
-        // from the casts so a future encrypted column can't silently leak.
-        $encrypted = 0;
+        // EVERY secret-cast column must be sealed out of company.json — derived
+        // from the casts so a future secret column can't silently leak. Detection
+        // matches the exporter (MaybeEncrypted OR the legacy encrypted casts).
+        $secret = 0;
         foreach ($company->getCasts() as $col => $cast) {
-            if ($cast === 'encrypted' || str_starts_with((string) $cast, 'encrypted:')) {
-                $encrypted++;
+            if (\App\Casts\MaybeEncrypted::isSecretCast((string) $cast)) {
+                $secret++;
                 $this->assertArrayNotHasKey($col, $bundle['company'], "secret {$col} leaked into company.json");
             }
         }
-        $this->assertGreaterThanOrEqual(7, $encrypted, 'expected the encrypted-cast columns to be present');
+        $this->assertGreaterThanOrEqual(7, $secret, 'expected the secret-cast columns to be present');
+    }
+
+    public function test_server_secrets_are_redacted_from_the_bundle(): void
+    {
+        $company = Company::create([
+            'name' => 'Srv OE', 'slug' => 'srv-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'afm' => '800561849',
+        ]);
+        $group = \App\Models\ServerGroup::create([
+            'company_id' => $company->id, 'name' => 'cPanel', 'module' => 'cpanel',
+            'username' => 'reseller', 'secret_encrypted' => 'super-secret-token',
+        ]);
+        \App\Models\Server::create([
+            'company_id' => $company->id, 'server_group_id' => $group->id, 'name' => 'Virgo',
+            'hostname' => 'virgo.example.gr', 'secret_encrypted' => 'per-server-pw',
+        ]);
+
+        $bundle = app(CompanyExporter::class)->build($company, 'raw', null);
+
+        // A secret must NEVER ride in a bundle (plaintext OR ciphertext) — redacted.
+        $this->assertNull($bundle['setup']['server_groups'][0]['secret_encrypted']);
+        $this->assertNull($bundle['setup']['servers'][0]['secret_encrypted']);
+        // The rest of the row still travels (re-enter the secret on the target VM).
+        $this->assertSame('reseller', $bundle['setup']['server_groups'][0]['username']);
+        $this->assertSame('virgo.example.gr', $bundle['setup']['servers'][0]['hostname']);
     }
 
     public function test_command_writes_a_readable_zip(): void

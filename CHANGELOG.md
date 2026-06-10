@@ -17,6 +17,20 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **DR without APP_KEY — optional at-rest secret encryption (Phase 6).** New
+  `App\Casts\MaybeEncrypted` replaces the `encrypted` casts on every secret column
+  (companies' myDATA/GSIS/SMTP/WHMCS keys + provider config, server creds, backup
+  passphrase, user 2FA), driven by `EKDOSI_ENCRYPT_SECRETS_AT_REST` (**default
+  false → plaintext at rest**). So a plain `mysqldump` is self-sufficient — a
+  restore on a fresh VM needs NO old APP_KEY (protection = DB/disk access control).
+  The cast ALWAYS decrypts legacy ciphertext on read, so flipping the flag never
+  breaks existing rows; `php artisan secrets:reencrypt --to=plain|encrypted`
+  rewrites them (with a safety net: `--to=plain` skips + fails loudly on ciphertext
+  it can't decrypt, so a wrong/lost APP_KEY can't silently freeze a secret).
+  Sessions/cookies are a soft dependency (a new key just means re-login). Portability's
+  secret-detection routed through `MaybeEncrypted::isSecretCast()` and `servers`/
+  `server_groups` `secret_encrypted` is now **redacted** from export bundles (a secret
+  must not ride in a portable file — re-enter on the target). Docs: `docs/dr-without-app-key.md`.
 - **PEPPOL Phase 1 — BIS Billing 3.0 (EN 16931) UBL builder** (provider-independent).
   `App\Services\Peppol\PeppolInvoiceDocument` maps a local `Invoice` → PEPPOL UBL via
   `josemmo/einvoicing` (we own only the mapping, the lib owns the syntax + EN 16931

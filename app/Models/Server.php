@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\MaybeEncrypted;
 use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -35,7 +36,7 @@ class Server extends Model
     protected function casts(): array
     {
         return [
-            'secret_encrypted' => 'encrypted',
+            'secret_encrypted' => MaybeEncrypted::class,
             'meta' => 'array',
             'is_active' => 'boolean',
         ];

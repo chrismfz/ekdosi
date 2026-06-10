@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\MaybeEncrypted;
 use App\Enums\MyDataMode;
 use App\Observers\CompanyObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
@@ -93,15 +94,15 @@ class Company extends Model
     protected function casts(): array
     {
         return [
-            'mydata_subscription_key_sandbox' => 'encrypted',
-            'mydata_subscription_key_production' => 'encrypted',
-            // Provider credential blob — encrypted JSON (api key / token / endpoint /
+            'mydata_subscription_key_sandbox' => MaybeEncrypted::class,
+            'mydata_subscription_key_production' => MaybeEncrypted::class,
+            // Provider credential blob — JSON (api key / token / endpoint /
             // provider AFM + ΥΠΑΗΕΣ licence no.). Same at-rest pattern as the keys above.
-            'einvoice_provider_config' => 'encrypted:array',
-            'gsis_password' => 'encrypted',
-            'mail_smtp_password' => 'encrypted',
-            'whmcs_api_secret' => 'encrypted',
-            'whmcs_webhook_secret' => 'encrypted',
+            'einvoice_provider_config' => MaybeEncrypted::class.':array',
+            'gsis_password' => MaybeEncrypted::class,
+            'mail_smtp_password' => MaybeEncrypted::class,
+            'whmcs_api_secret' => MaybeEncrypted::class,
+            'whmcs_webhook_secret' => MaybeEncrypted::class,
             'whmcs_custom_field_map' => 'array',
             'whmcs_invoice_min_date' => 'date',
             'whmcs_third_party_enabled' => 'boolean',

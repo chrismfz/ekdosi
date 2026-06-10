@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\MaybeEncrypted;
 use App\Models\Concerns\BelongsToCompany;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
@@ -35,7 +36,7 @@ class CompanyBackupSetting extends Model
     {
         return [
             'enabled' => 'boolean',
-            'passphrase' => 'encrypted',
+            'passphrase' => MaybeEncrypted::class,
             'retention_keep' => 'integer',
             'retention_days' => 'integer',
             'destinations' => 'array',

@@ -2,6 +2,7 @@
 
 namespace App\Services\Portability;
 
+use App\Casts\MaybeEncrypted;
 use App\Models\Company;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -85,6 +86,21 @@ class CompanyExporter
         'company_backup_runs',
     ];
 
+    /**
+     * Secret columns on DUMPED setup/transactional tables that must NOT travel in
+     * a bundle. The company row's own secrets are passphrase-sealed separately
+     * (see secretColumns()), but these rows are dumped raw — and with at-rest
+     * encryption optional (config ekdosi.secrets.encrypt_at_rest) they could be
+     * plaintext, so we redact them to null. The operator re-enters server creds on
+     * the target VM (infra credentials, not part of the accounting dataset).
+     *
+     * @var array<string, list<string>>
+     */
+    public const REDACTED_COLUMNS = [
+        'servers' => ['secret_encrypted'],
+        'server_groups' => ['secret_encrypted'],
+    ];
+
     public function __construct(private readonly SecretsCodec $codec) {}
 
     /**
@@ -165,10 +181,20 @@ class CompanyExporter
             if (! Schema::hasTable($table)) {
                 continue;
             }
+            $redact = self::REDACTED_COLUMNS[$table] ?? [];
             $rows = DB::table($table)
                 ->where('company_id', $companyId)
                 ->get()
-                ->map(fn ($row): array => (array) $row)
+                ->map(function ($row) use ($redact): array {
+                    $arr = (array) $row;
+                    foreach ($redact as $col) {
+                        if (array_key_exists($col, $arr)) {
+                            $arr[$col] = null;   // never carry a secret in a bundle
+                        }
+                    }
+
+                    return $arr;
+                })
                 ->all();
             $out[$table] = $rows;
             $counts[$table] = count($rows);
@@ -187,7 +213,9 @@ class CompanyExporter
     {
         $cols = [];
         foreach ($company->getCasts() as $column => $cast) {
-            if ($cast === 'encrypted' || str_starts_with((string) $cast, 'encrypted:')) {
+            // Secret columns are sealed regardless of whether they're stored
+            // encrypted or plaintext at rest (the cast may be MaybeEncrypted now).
+            if (MaybeEncrypted::isSecretCast((string) $cast)) {
                 $cols[] = $column;
             }
         }

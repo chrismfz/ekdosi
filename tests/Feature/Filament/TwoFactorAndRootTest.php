@@ -21,6 +21,9 @@ class TwoFactorAndRootTest extends TestCase
 
     public function test_totp_secret_and_recovery_codes_round_trip_encrypted(): void
     {
+        // 2FA secrets are encrypted at rest only when the flag is on (DR default
+        // = plaintext) — enable it for this round-trip-encrypted assertion.
+        config(['ekdosi.secrets.encrypt_at_rest' => true]);
         $user = User::create([
             'name' => 'Op', 'email' => '2fa-'.uniqid().'@test.local', 'password' => bcrypt('x'),
         ]);
