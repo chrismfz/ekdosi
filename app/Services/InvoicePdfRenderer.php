@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Invoice;
 use App\Support\MyData\QrImage;
+use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
 
@@ -91,6 +92,7 @@ class InvoicePdfRenderer
                 'qrDataUri'   => $qrDataUri,
                 'logoDataUri' => $logoDataUri,
                 'totals'      => $this->totalsView($invoice),
+                'L'           => PdfLabels::for(PdfLabels::resolveLanguage($invoice->language, $invoice->country)),
             ])
                 ->setPaper('A4', 'portrait')
                 ->output();

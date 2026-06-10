@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Quote;
+use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
 
@@ -38,6 +39,7 @@ class QuotePdfRenderer
                 'tenant' => $quote->company,
                 'logoDataUri' => $logoDataUri,
                 'totals' => $this->totalsView($quote),
+                'L' => PdfLabels::for(PdfLabels::resolveLanguage($quote->language, $quote->country)),
             ])
                 ->setPaper('A4', 'portrait')
                 ->output();

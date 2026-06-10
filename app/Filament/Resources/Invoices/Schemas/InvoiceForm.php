@@ -419,6 +419,16 @@ class InvoiceForm
                         ->label('Παρατηρήσεις (εκτυπώνονται στο παραστατικό)')
                         ->helperText('⚠ Εμφανίζονται στο PDF και στο email του πελάτη. Για εσωτερικά σχόλια (π.χ. «κακοπληρωτής») χρησιμοποίησε την καρτέλα «Σημειώσεις (εσωτερικές)».'),
 
+                    Select::make('language')
+                        ->label('Γλώσσα PDF')
+                        ->options([
+                            'el' => 'Ελληνικά',
+                            'en' => 'Αγγλικά',
+                            'both' => 'Δίγλωσσο (GR/EN)',
+                        ])
+                        ->placeholder('Αυτόματο (από χώρα πελάτη)')
+                        ->helperText('Κενό = αυτόματο: Ελληνικά για GR, δίγλωσσο για ξένο παραλήπτη. Αλλάζει μόνο τις ετικέτες του PDF.'),
+
                     // Quick-fill helper (preview): a curated «typical fee/tax» picker
                     // that sets the right §8.x category + auto-computes the amount from
                     // the line net for percentage-based ones. Synthetic — not a column.

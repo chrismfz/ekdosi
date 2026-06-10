@@ -158,6 +158,7 @@ class Invoice extends Model
         'vies_vat',
         'occupation',
         'notes',
+        'language',
         // myDATA invoice type snapshot — captured at submit time, NOT
         // edit-time. Source: $invoice->invoiceType->mydata_type at
         // the moment MyDataSubmitter ran. Reading via the relation
