@@ -3,7 +3,10 @@
 namespace App\Filament\Resources\InvoiceTypes\Pages;
 
 use App\Filament\Resources\InvoiceTypes\InvoiceTypeResource;
-use Filament\Actions\DeleteAction;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\DeliveryNote;
+use App\Models\Invoice;
+use App\Models\ServiceContract;
 use Filament\Resources\Pages\EditRecord;
 
 class EditInvoiceType extends EditRecord
@@ -13,7 +16,11 @@ class EditInvoiceType extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            GuardedDeleteAction::make(fn ($record): array => [
+                'τιμολόγια' => Invoice::where('invoice_type_id', $record->id)->count(),
+                'δελτία αποστολής' => DeliveryNote::where('delivery_type_id', $record->id)->count(),
+                'συμβόλαια' => ServiceContract::where('invoice_type_id', $record->id)->count(),
+            ]),
         ];
     }
 }

@@ -3,7 +3,8 @@
 namespace App\Filament\Resources\VatCategories\Pages;
 
 use App\Filament\Resources\VatCategories\VatCategoryResource;
-use Filament\Actions\DeleteAction;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\Product;
 use Filament\Resources\Pages\EditRecord;
 
 class EditVatCategory extends EditRecord
@@ -13,7 +14,9 @@ class EditVatCategory extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            GuardedDeleteAction::make(fn ($record): array => [
+                'προϊόντα' => Product::where('vat_category_id', $record->id)->count(),
+            ]),
         ];
     }
 }

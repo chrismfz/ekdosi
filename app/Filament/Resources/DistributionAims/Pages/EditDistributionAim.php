@@ -3,7 +3,9 @@
 namespace App\Filament\Resources\DistributionAims\Pages;
 
 use App\Filament\Resources\DistributionAims\DistributionAimResource;
-use Filament\Actions\DeleteAction;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\DeliveryNote;
+use App\Models\Invoice;
 use Filament\Resources\Pages\EditRecord;
 
 class EditDistributionAim extends EditRecord
@@ -13,7 +15,10 @@ class EditDistributionAim extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            GuardedDeleteAction::make(fn ($record): array => [
+                'τιμολόγια' => Invoice::where('distribution_aim_id', $record->id)->count(),
+                'δελτία αποστολής' => DeliveryNote::where('distribution_aim_id', $record->id)->count(),
+            ]),
         ];
     }
 }
