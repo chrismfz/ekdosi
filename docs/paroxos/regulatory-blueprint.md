@@ -244,7 +244,14 @@ The **UBL we build is identical** for all of them — only the send API differs.
    of `gr-provider`'s `einvoice_provider_mode != off`).
 5. **Recipient reachability** (buyer's-choice / 4-corner): an SMP/SML participant lookup — is the
    recipient registered to receive on PEPPOL? (optional for issuing, needed for guaranteed delivery).
-6. Optional: full **PEPPOL schematron** validation (official `.sch`) beyond the library's rule subset;
-   Filament «Προεπισκόπηση PEPPOL UBL» action (the dry-run in the panel); UN/ECE unit-code map
-   (currently every line defaults to `C62`); a `companies.peppol_endpoint`/scheme field for the seller;
-   header-discount as an explicit BG-20 document allowance (today folded into line prices).
+6. **Credit notes (type 381):** add the preceding-invoice reference (BG-3 / BT-25 BillingReference)
+   to the original — `PeppolInvoiceDocument` sets 381 for `credited_invoice_id` but not yet the
+   reference (the library's `validate()` doesn't catch its absence; a real AP/Schematron will).
+7. Optional: full **PEPPOL schematron** validation (official `.sch`) beyond the library's rule subset
+   (the lib checks only EN-16931 structural BRs + R002/R003/R061/BG-17 — NOT BT-34/49 endpoint
+   presence, BR-CO total consistency, or per-category VAT reason rules, so a dry-run "valid" ≠ a
+   guarantee the AP accepts it); Filament «Προεπισκόπηση PEPPOL UBL» action (the dry-run in the
+   panel); UN/ECE unit-code map (currently every line defaults to `C62`); a
+   `companies.peppol_endpoint`/scheme field for the seller (today derived from the tax id, omitted
+   if no EAS scheme resolves); header-discount as an explicit BG-20 document allowance (today folded
+   into line prices, amounts correct).

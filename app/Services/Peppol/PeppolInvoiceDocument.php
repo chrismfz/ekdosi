@@ -46,6 +46,11 @@ class PeppolInvoiceDocument
         }
 
         $ubl = new UblInvoice(Peppol::class);
+        // EN 16931 BR-DEC-*: monetary amounts are 2dp. The library defaults to 8dp
+        // (and its validate() does NOT check this), which would serialise rejectable
+        // values — so pin every monetary field to 2dp, EXCEPT the unit price (BT-146),
+        // kept at 4dp so the folded header discount (net/qty) doesn't lose a cent.
+        $ubl->setRoundingMatrix(['' => 2, 'line/price' => 4]);
         $ubl->setNumber((string) ($invoice->invcode ?: $invoice->code ?: $invoice->id))
             ->setType($invoice->credited_invoice_id !== null ? 381 : 380) // 381 credit note / 380 invoice
             ->setCurrency('EUR')
@@ -72,9 +77,14 @@ class PeppolInvoiceDocument
     }
 
     /**
-     * Validate against EN 16931 + the library's PEPPOL rules.
+     * Validate against the library's rule set — EN 16931 structural BRs + a
+     * SUBSET of the PEPPOL rules (R002/R003/R061/BG-17). This is NOT a full
+     * Schematron check: it does NOT verify BT-34/49 endpoint presence, BR-CO-*
+     * total consistency, or the per-category VAT reason rules. A null result
+     * means "passed the subset", not "the Access Point will accept it" — the
+     * authoritative validation is the AP's (Phase 2).
      *
-     * @return ?string  null when valid, else "[RULE] message" of the first failure
+     * @return ?string  null when it passes, else "[RULE] message" of the first failure
      */
     public function validate(Invoice $invoice): ?string
     {
@@ -123,6 +133,10 @@ class PeppolInvoiceDocument
         if ($vatId !== '') {
             $party->setVatNumber($this->vatNumber($vatId, $customer->country ?: $sellerCountry));
             $party->setCompanyId(new Identifier($vatId));
+        }
+        $addressLines = array_values(array_filter([$customer->address1, $customer->address2]));
+        if ($addressLines !== []) {
+            $party->setAddress($addressLines);
         }
         $party->setCity($customer->city ?: null);
         $party->setPostalCode($customer->postcode ?: null);

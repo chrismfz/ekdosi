@@ -48,7 +48,8 @@ class PeppolTestSubmit extends Command
 
         $error = $doc->validate($invoice);
         if ($error === null) {
-            $this->info("✓ Έγκυρο PEPPOL BIS 3.0 (EN 16931) — invcode {$invoice->invcode}.");
+            $this->info("✓ Πέρασε τους κανόνες της βιβλιοθήκης (EN 16931 + PEPPOL subset) — invcode {$invoice->invcode}.");
+            $this->comment('  ⚠ Δεν είναι πλήρες Schematron — η οριστική επικύρωση γίνεται από τον Access Point (Phase 2).');
 
             return self::SUCCESS;
         }

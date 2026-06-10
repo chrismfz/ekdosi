@@ -38,7 +38,11 @@ class PeppolVatCategory
         $seller = self::normalize($sellerCountry);
         $buyer = $buyerCountry === null || trim($buyerCountry) === '' ? $seller : self::normalize($buyerCountry);
 
-        // A positive rate is always standard-rated, regardless of geography.
+        // A positive rate ⇒ standard-rated. This ASSUMES the app has already zeroed
+        // the rate for a reverse-charge / intra-community supply (which the
+        // App\Support\MyData\ReverseCharge UX does) — a foreign EU B2B line carrying
+        // a positive rate would wrongly serialise as S here. Refine in Phase 2 if a
+        // real cross-border-with-rate case appears (→ K/AE at 0%).
         if ($rate > 0) {
             return self::row('S', $rate);
         }

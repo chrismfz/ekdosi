@@ -111,6 +111,33 @@ class PeppolInvoiceDocumentTest extends TestCase
     }
 
     #[Test]
+    public function multi_rate_invoice_with_odd_cents_stays_consistent_and_2dp(): void
+    {
+        $company = $this->eeCompany();
+        $customer = Customer::create([
+            'company_id' => $company->id, 'type' => 'company', 'name' => 'Eesti Klient OÜ',
+            'afm' => '109876543', 'country' => 'EE', 'city' => 'Tartu', 'postcode' => '51004',
+        ]);
+
+        // Two VAT rates + a qty/price that yields an odd-cent unit net (10/3).
+        $invoice = $this->invoiceWith($company, $customer, [
+            ['name' => 'Majutus', 'qty' => 3, 'price' => 3.3333, 'vat' => 22],
+            ['name' => 'Raamat', 'qty' => 1, 'price' => 50, 'vat' => 0],
+        ]);
+
+        $doc = app(PeppolInvoiceDocument::class);
+        $this->assertNull($doc->validate($invoice), 'multi-rate doc should pass');
+
+        // Monetary amounts serialise at 2dp (no 8dp tails) — BR-DEC-*.
+        $xml = $doc->xml($invoice);
+        $this->assertMatchesRegularExpression('/<cbc:TaxInclusiveAmount[^>]*>\d+\.\d{2}<\/cbc:TaxInclusiveAmount>/', $xml);
+        $this->assertStringNotContainsString('.000', $xml); // no 8dp monetary tails
+
+        // Two VAT subtotals present (22% standard + 0% zero-rated).
+        $this->assertSame(2, substr_count($xml, '<cac:TaxSubtotal>'));
+    }
+
+    #[Test]
     public function header_discount_is_folded_into_line_prices(): void
     {
         $company = $this->eeCompany();

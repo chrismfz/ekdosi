@@ -42,13 +42,16 @@ class PeppolEndpoint
     {
         $explicit = trim((string) ($customer->peppol_endpoint ?? ''));
         if ($explicit !== '') {
-            // "scheme:value" → split; bare → derive the scheme from the country.
+            // "scheme:value" → split; bare → derive the scheme from the country/VAT prefix.
             if (preg_match('/^(\d{4}):(.+)$/', $explicit, $m)) {
                 return new Identifier($m[2], $m[1]);
             }
-            $scheme = self::schemeFor($customer->country) ?? self::schemeFor($customer->vat_vies ? substr((string) $customer->vat_vies, 0, 2) : null);
+            $scheme = self::schemeFor($customer->country)
+                ?? self::schemeFor($customer->vat_vies ? substr((string) $customer->vat_vies, 0, 2) : null);
 
-            return new Identifier($explicit, $scheme);
+            // A scheme-less EndpointID is INVALID PEPPOL (BT-49 requires schemeID),
+            // and the library's validate() won't catch it — omit rather than emit garbage.
+            return $scheme === null ? null : new Identifier($explicit, $scheme);
         }
 
         return self::fromVat($customer->vat_vies ?: $customer->afm, $customer->country);
@@ -64,13 +67,15 @@ class PeppolEndpoint
         // A prefixed VAT (EE123…) implies its own country scheme.
         if (preg_match('/^([A-Z]{2})(.+)$/', $vat, $m)) {
             $scheme = self::schemeFor($m[1]);
-
-            return $scheme !== null ? new Identifier($vat, $scheme) : new Identifier($vat);
+        } else {
+            $scheme = self::schemeFor($country);
         }
 
-        $scheme = self::schemeFor($country);
-
-        return new Identifier($vat, $scheme);
+        // No resolvable EAS scheme → omit the endpoint (a scheme-less BT-34/49 is
+        // invalid PEPPOL and slips past the library's validate()). The seller/buyer
+        // address is still complete; the missing endpoint surfaces in Phase-2's real
+        // Schematron/AP validation, not as malformed XML now.
+        return $scheme === null ? null : new Identifier($vat, $scheme);
     }
 
     private static function schemeFor(?string $country): ?string
