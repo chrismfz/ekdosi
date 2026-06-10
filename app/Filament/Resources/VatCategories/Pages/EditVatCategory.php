@@ -15,7 +15,7 @@ class EditVatCategory extends EditRecord
     {
         return [
             GuardedDeleteAction::make(fn ($record): array => [
-                'προϊόντα' => Product::where('vat_category_id', $record->id)->count(),
+                'προϊόντα' => GuardedDeleteAction::count(Product::class, 'vat_category_id', $record->id),
             ]),
         ];
     }

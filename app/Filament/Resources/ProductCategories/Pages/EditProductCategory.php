@@ -15,7 +15,7 @@ class EditProductCategory extends EditRecord
     {
         return [
             GuardedDeleteAction::make(fn ($record): array => [
-                'προϊόντα' => Product::where('product_category_id', $record->id)->count(),
+                'προϊόντα' => GuardedDeleteAction::count(Product::class, 'product_category_id', $record->id),
             ]),
         ];
     }

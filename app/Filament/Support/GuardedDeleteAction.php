@@ -6,6 +6,7 @@ use Closure;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * A DeleteAction that BLOCKS deletion of a lookup row still referenced by other
@@ -51,5 +52,27 @@ class GuardedDeleteAction
 
                 $action->halt();
             });
+    }
+
+    /**
+     * Count rows of $model referencing $id via $column — INCLUDING soft-deleted
+     * ones (a trashed invoice still references the lookup; ignoring it would let
+     * the lookup be deleted and then surface blank if that invoice is restored).
+     *
+     * @param  class-string<Model>  $model
+     */
+    public static function count(string $model, string $column, int|string|null $id): int
+    {
+        if ($id === null) {
+            return 0;
+        }
+
+        $query = $model::query()->where($column, $id);
+
+        if (in_array(SoftDeletes::class, class_uses_recursive($model), true)) {
+            $query->withTrashed();
+        }
+
+        return $query->count();
     }
 }

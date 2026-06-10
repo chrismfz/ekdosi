@@ -65,4 +65,20 @@ class GuardedDeleteActionTest extends TestCase
 
         $this->assertSoftDeleted('vat_categories', ['id' => $vat->id]);
     }
+
+    #[Test]
+    public function it_blocks_an_invoice_type_used_as_a_whmcs_default(): void
+    {
+        // The non-obvious dependency the review surfaced: an invoice type wired as
+        // a tenant's WHMCS auto-issue default (companies.whmcs_default_invoice_type_id).
+        $type = \App\Models\InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ', 'invcount' => 0,
+        ]);
+        $this->tenant->forceFill(['whmcs_default_invoice_type_id' => $type->id])->save();
+
+        Livewire::test(\App\Filament\Resources\InvoiceTypes\Pages\EditInvoiceType::class, ['record' => $type->getRouteKey()])
+            ->callAction('delete');
+
+        $this->assertDatabaseHas('invoice_types', ['id' => $type->id, 'deleted_at' => null]);
+    }
 }

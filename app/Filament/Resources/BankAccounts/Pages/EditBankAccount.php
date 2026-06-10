@@ -16,8 +16,8 @@ class EditBankAccount extends EditRecord
     {
         return [
             GuardedDeleteAction::make(fn ($record): array => [
-                'τιμολόγια' => Invoice::where('bank_account_id', $record->id)->count(),
-                'πληρωμές' => Payment::where('bank_account_id', $record->id)->count(),
+                'τιμολόγια' => GuardedDeleteAction::count(Invoice::class, 'bank_account_id', $record->id),
+                'πληρωμές' => GuardedDeleteAction::count(Payment::class, 'bank_account_id', $record->id),
             ]),
         ];
     }

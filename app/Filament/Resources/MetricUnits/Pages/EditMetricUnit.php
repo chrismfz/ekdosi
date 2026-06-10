@@ -15,7 +15,7 @@ class EditMetricUnit extends EditRecord
     {
         return [
             GuardedDeleteAction::make(fn ($record): array => [
-                'προϊόντα' => Product::where('metric_unit_id', $record->id)->count(),
+                'προϊόντα' => GuardedDeleteAction::count(Product::class, 'metric_unit_id', $record->id),
             ]),
         ];
     }
