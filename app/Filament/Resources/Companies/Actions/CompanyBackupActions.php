@@ -13,6 +13,7 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Component;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -41,20 +42,39 @@ class CompanyBackupActions
             ->icon('heroicon-o-arrow-down-tray')
             ->color('gray')
             ->modalHeading('Εξαγωγή ρυθμίσεων εταιρίας')
-            ->modalDescription('Κατεβάζει .zip με ρυθμίσεις + setup. Τα μυστικά κρυπτογραφούνται με το συνθηματικό — κράτησέ το, χρειάζεται για επαναφορά.')
+            ->modalDescription('Κατεβάζει .zip με ρυθμίσεις + setup. Διάλεξε αν τα μυστικά (κλειδιά myDATA/GSIS/SMTP/WHMCS) θα κρυπτογραφηθούν με συνθηματικό ή θα γραφτούν χωρίς κρυπτογράφηση (για τοπικό αρχείο).')
             ->modalSubmitActionLabel('Εξαγωγή')
             ->schema([
+                // Passphrase is OPTIONAL: «raw» (no encryption) is a first-class
+                // choice for a local download, so an export never *requires* a
+                // password — the step toward working without APP_KEY/encryption.
+                Select::make('secrets_mode')
+                    ->label('Μυστικά')
+                    ->options([
+                        'passphrase' => 'Κρυπτογραφημένα (με συνθηματικό)',
+                        'raw' => 'Χωρίς κρυπτογράφηση (μόνο τοπικά!)',
+                    ])
+                    ->default('passphrase')->live()->required(),
                 TextInput::make('passphrase')
                     ->label('Συνθηματικό κρυπτογράφησης')
-                    ->password()->revealable()->required()->minLength(4),
+                    ->password()->revealable()
+                    ->visible(fn (Get $get) => $get('secrets_mode') === 'passphrase')
+                    ->requiredIf('secrets_mode', 'passphrase')->minLength(4)
+                    ->helperText('Χρειάζεται για επαναφορά — κράτησέ το ασφαλές.'),
+                Placeholder::make('raw_warning')
+                    ->label('')
+                    ->content('⚠ Τα μυστικά θα γραφτούν σε ΚΑΘΑΡΟ ΚΕΙΜΕΝΟ μέσα στο .zip. Κράτησέ το αρχείο μόνο σε ασφαλές, τοπικό σημείο.')
+                    ->visible(fn (Get $get) => $get('secrets_mode') === 'raw'),
                 Toggle::make('full')
                     ->label('Πλήρες αντίγραφο (με δεδομένα: πελάτες/παραστατικά/πληρωμές…)')
                     ->helperText('Κλειστό = μόνο ρυθμίσεις + setup.')
                     ->default(false),
             ])
             ->action(function (array $data, Company $record) {
+                $mode = ($data['secrets_mode'] ?? 'passphrase') === 'raw' ? 'raw' : 'passphrase';
+                $passphrase = $mode === 'raw' ? null : (string) ($data['passphrase'] ?? '');
                 $bundle = app(CompanyExporter::class)->build(
-                    $record, 'passphrase', (string) $data['passphrase'], (bool) ($data['full'] ?? false)
+                    $record, $mode, $passphrase, (bool) ($data['full'] ?? false)
                 );
                 $suffix = ($data['full'] ?? false) ? 'full' : 'settings';
                 $path = storage_path('app/exports/'.$record->slug.'-'.$suffix.'-'.now()->format('Ymd-His').'.zip');
