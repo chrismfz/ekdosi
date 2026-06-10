@@ -88,4 +88,46 @@ class Expense extends Model
     {
         return $this->hasMany(ExpenseMark::class);
     }
+
+    /**
+     * Operator-facing label for a classification_state — the single source the
+     * list column + infolist + actions share so a new state value (e.g.
+     * 'submitted') can't read as «Αχαρακτήριστο» on one surface.
+     */
+    public static function classificationStateLabel(?string $state): string
+    {
+        return match ($state) {
+            'submitted' => 'Υποβλήθηκε στην ΑΑΔΕ',
+            'classified' => 'Χαρακτηρισμένο',
+            default => 'Αχαρακτήριστο',
+        };
+    }
+
+    public static function classificationStateColor(?string $state): string
+    {
+        return match ($state) {
+            'submitted' => 'success',
+            'classified' => 'info',
+            default => 'gray',
+        };
+    }
+
+    /**
+     * Do the lines carry DIFFERENT classifications (per-line «Χαρακτηρισμός ανά
+     * γραμμή»)? When true, the single header type/category field is misleading, so
+     * surfaces show «Μικτός — βλ. ανά γραμμή» instead. Each line's effective value
+     * is its own, falling back to the header (same rule the submitter uses).
+     */
+    public function classificationIsMixed(): bool
+    {
+        $this->loadMissing('lines');
+        if ($this->lines->count() < 2) {
+            return false;
+        }
+
+        $combos = $this->lines->map(fn ($line): string => ($line->classification_type ?: $this->classification_type)
+            .'|'.($line->classification_category ?: $this->classification_category))->unique();
+
+        return $combos->count() > 1;
+    }
 }

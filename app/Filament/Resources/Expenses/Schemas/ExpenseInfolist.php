@@ -73,20 +73,22 @@ class ExpenseInfolist
                         TextEntry::make('classification_type')
                             ->label('Τύπος (E3)')
                             ->placeholder('— (αχαρακτήριστο)')
-                            ->formatStateUsing(fn (?string $state): ?string => $state === null
-                                ? null
-                                : trim($state.' — '.(Codes::e3TypeLabel($state) ?? ''), ' —')),
+                            ->state(fn (\App\Models\Expense $record): ?string => $record->classificationIsMixed()
+                                ? 'Μικτός — βλ. ανά γραμμή'
+                                : ($record->classification_type === null ? null
+                                    : trim($record->classification_type.' — '.(Codes::e3TypeLabel($record->classification_type) ?? ''), ' —'))),
                         TextEntry::make('classification_category')
                             ->label('Κατηγορία')
                             ->placeholder('—')
-                            ->formatStateUsing(fn (?string $state): ?string => $state === null
-                                ? null
-                                : trim($state.' — '.(Codes::e3CategoryLabel($state) ?? ''), ' —')),
+                            ->state(fn (\App\Models\Expense $record): ?string => $record->classificationIsMixed()
+                                ? 'Μικτός — βλ. ανά γραμμή'
+                                : ($record->classification_category === null ? null
+                                    : trim($record->classification_category.' — '.(Codes::e3CategoryLabel($record->classification_category) ?? ''), ' —'))),
                         TextEntry::make('classification_state')
                             ->label('Κατάσταση')
                             ->badge()
-                            ->formatStateUsing(fn (?string $state): string => $state === 'classified' ? 'Χαρακτηρισμένο' : 'Αχαρακτήριστο')
-                            ->color(fn (?string $state): string => $state === 'classified' ? 'success' : 'gray'),
+                            ->formatStateUsing(fn (?string $state): string => \App\Models\Expense::classificationStateLabel($state))
+                            ->color(fn (?string $state): string => \App\Models\Expense::classificationStateColor($state)),
                     ]),
 
                 RepeatableEntry::make('lines')
