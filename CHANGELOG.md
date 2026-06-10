@@ -16,6 +16,18 @@ they merge.
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **PEPPOL Phase 1 — BIS Billing 3.0 (EN 16931) UBL builder** (provider-independent).
+  `App\Services\Peppol\PeppolInvoiceDocument` maps a local `Invoice` → PEPPOL UBL via
+  `josemmo/einvoicing` (we own only the mapping, the lib owns the syntax + EN 16931
+  rules — the firebed-equivalent for the EU side). Estonia applies no national CIUS,
+  so the same UBL is accepted by every Access Point + the free RIK tool.
+  `App\Support\Peppol\PeppolVatCategory` resolves EN 16931 VAT categories
+  (S/Z/K/G/E, country-agnostic — domestic / intra-community / export) and
+  `PeppolEndpoint` derives the PEPPOL participant id (EAS scheme). New read-only
+  `peppol:test-submit <invoiceId>` prints + validates the UBL (dry-run; nothing is
+  sent — the Access-Point transport is Phase 2). Adds `josemmo/einvoicing`.
+
 ### Changed
 - **Default seed is now ONE «DEMO Α.Ε.» tenant** (full demo mode, `mydata_mode=off`)
   + an admin user, replacing the per-developer myip/nixpal/sample-ee fixtures.
