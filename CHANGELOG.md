@@ -26,6 +26,14 @@ they merge.
   the page. No terminal needed for routine upkeep; only read-only / idempotent
   commands are exposed. **Deploy:** `shield:generate` + `shield:sync-super-admin`
   so the page permission exists.
+### Changed
+- **Export χωρίς υποχρεωτικό συνθηματικό.** The company «Εξαγωγή ρυθμίσεων» panel
+  action now offers a «Μυστικά» mode picker (Κρυπτογραφημένα με συνθηματικό /
+  Χωρίς κρυπτογράφηση) — the passphrase is no longer required, so a settings-only
+  OR full bundle can be exported with secrets in the clear for a local download
+  (a warning shows). Import already accepts raw (no-passphrase) bundles; a raw
+  export→import round-trip is now covered end-to-end. Step toward portability that
+  works without APP_KEY/encryption.
 
 ### Fixed
 - **Withholding now reduces `totalGrossValue` (AADE `[208]`).** `AadeInvoiceDocument`

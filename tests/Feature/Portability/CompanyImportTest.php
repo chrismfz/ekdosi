@@ -163,4 +163,28 @@ class CompanyImportTest extends TestCase
         }
         $this->assertSame(0, Company::where('slug', 'src')->count());
     }
+
+    /**
+     * The «χωρίς υποχρεωτικό κωδικό» path: a raw (no-passphrase) export imports
+     * with NO passphrase and still restores the secrets in clear (then they get
+     * re-encrypted under the target VM's APP_KEY on save). Mirrors the new
+     * UI/CLI raw mode end-to-end.
+     */
+    public function test_raw_bundle_imports_without_a_passphrase(): void
+    {
+        $bundle = app(CompanyExporter::class)->build($this->sourceCompany(), 'raw', null);
+        $this->assertSame('raw', $bundle['secrets']['mode']);
+
+        Company::where('slug', 'src')->forceDelete();
+
+        $summary = app(CompanyImporter::class)->run($bundle, [
+            'new' => true, 'execute' => true, 'passphrase' => null,
+        ]);
+        $this->assertSame('create', $summary['company']);
+
+        $company = Company::where('slug', 'src')->firstOrFail();
+        $this->assertSame('PRODKEY', $company->mydata_subscription_key_production);
+        $this->assertSame('gsis-pw', $company->gsis_password);
+        $this->assertSame(7, InvoiceType::where('company_id', $company->id)->where('code', 'TPY')->firstOrFail()->invcount);
+    }
 }
