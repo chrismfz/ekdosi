@@ -16,6 +16,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+### Added
+- **«Υγεία συστήματος» page** (the «Σύστημα» area, slice 1). A read-only
+  **super_admin-only** Filament page that renders the same `OperatorHealthReport`
+  as `php artisan ops:health` — queue-worker heartbeat + failed jobs, scheduled-task
+  last-runs/status, backups, mail, WHMCS + myDATA per tenant, disk — so an admin
+  without terminal access sees liveness at a glance. Cross-tenant (every company's
+  WHMCS/myDATA), so it's gated on super_admin (not a per-tenant shield permission a
+  company_admin would hold); the report is short-TTL cached so a refresh can't hang
+  on a large storage tree. **Deploy:** `shield:sync-super-admin`.
 
 ## [1.0.0] - 2026-06-10
 

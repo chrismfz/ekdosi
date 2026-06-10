@@ -140,9 +140,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.
 - **2FA** (TOTP) + `EKDOSI_REQUIRE_2FA`.
 - **FK-aware delete guard** (`GuardedDeleteAction`) — μπλοκάρει διαγραφή lookup σε χρήση.
-- **`ops:health`** (queue/scheduler/backup/mail/WHMCS/myDATA/disk) + **«Εργαλεία»**
-  (artisan commands ως κουμπιά) + **Δοκιμή SMTP** (per-company + global) +
-  **`ekdosi:install`** turnkey first-run.
+- **`ops:health`** (queue/scheduler/backup/mail/WHMCS/myDATA/disk) — CLI **και**
+  **σελίδα «Υγεία συστήματος»** (read-only, **super_admin-only** γιατί είναι cross-tenant·
+  ίδια πηγή `OperatorHealthReport`: worker heartbeat, scheduled-task last-runs, backups,
+  mail, WHMCS+myDATA ανά tenant, δίσκος) — στο νέο nav group **«Σύστημα»**.
+  + **«Εργαλεία»** (artisan commands ως κουμπιά) +
+  **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run.
 - **Scheduler + queue** (DB driver) — backups/auto-email/reconcile/WHMCS/VAT-picture,
   gated by `EKDOSI_SCHEDULE_*`.
 

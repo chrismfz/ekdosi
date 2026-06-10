@@ -1,0 +1,122 @@
+<x-filament-panels::page>
+    <div class="text-sm text-gray-500 dark:text-gray-400">
+        Read-only εικόνα του <code>php artisan ops:health</code>. Ενημερώθηκε
+        <strong>{{ $this->ago($report['generated_at'] ?? null) }}</strong> — «Ανανέωση» για φρέσκο.
+    </div>
+
+    {{-- Queue --}}
+    <x-filament::section>
+        <x-slot name="heading">Ουρά εργασιών (queue)</x-slot>
+        @php($q = $report['queue'] ?? [])
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+            <x-filament::badge :color="$this->statusColor($q['worker_heartbeat_status'] ?? null)">
+                Worker: {{ $this->statusLabel($q['worker_heartbeat_status'] ?? null) }}
+            </x-filament::badge>
+            <span>Τελευταίο heartbeat: <strong>{{ $this->ago($q['worker_heartbeat_at'] ?? null) }}</strong></span>
+            <x-filament::badge :color="($q['failed_jobs'] ?? 0) > 0 ? 'danger' : 'success'">
+                Failed jobs: {{ $q['failed_jobs'] ?? '—' }}
+            </x-filament::badge>
+        </div>
+    </x-filament::section>
+
+    {{-- Scheduler --}}
+    <x-filament::section>
+        <x-slot name="heading">Χρονοπρογραμματιστής (τι έτρεξε)</x-slot>
+        <table class="w-full text-sm">
+            <thead><tr class="text-left text-gray-500"><th class="py-1">Εργασία</th><th>Κατάσταση</th><th>Τελευταία εκτέλεση</th><th>Exit</th></tr></thead>
+            <tbody>
+            @foreach (($report['scheduler'] ?? []) as $task)
+                <tr class="border-t border-gray-100 dark:border-gray-800">
+                    <td class="py-1">{{ $task['label'] ?? '—' }}</td>
+                    <td><x-filament::badge :color="$this->statusColor($task['status'] ?? null)">{{ $this->statusLabel($task['status'] ?? null) }}</x-filament::badge></td>
+                    <td>{{ $this->ago($task['last_run_at'] ?? null) }}</td>
+                    <td>{{ $task['exit_code'] ?? '—' }}</td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    </x-filament::section>
+
+    {{-- Backup + Mail (side by side) --}}
+    <div class="grid gap-6 md:grid-cols-2">
+        <x-filament::section>
+            <x-slot name="heading">Αντίγραφα ασφαλείας</x-slot>
+            @php($b = $report['backup'] ?? [])
+            <div class="space-y-1 text-sm">
+                <div><x-filament::badge :color="$this->statusColor($b['monitor']['status'] ?? null)">Monitor: {{ $this->statusLabel($b['monitor']['status'] ?? null) }}</x-filament::badge></div>
+                <div>Τελευταίο τοπικό: <strong>{{ $this->ago($b['latest_backup_at'] ?? null) }}</strong>
+                    @if(isset($b['latest_backup_age_hours'])) ({{ $b['latest_backup_age_hours'] }}h) @endif</div>
+                <div>Μέγεθος: {{ $this->bytes($b['latest_backup_size_bytes'] ?? null) }}</div>
+            </div>
+        </x-filament::section>
+
+        <x-filament::section>
+            <x-slot name="heading">Email</x-slot>
+            @php($m = $report['mail'] ?? [])
+            <div class="space-y-1 text-sm">
+                <x-filament::badge :color="($m['failed_24h'] ?? 0) > 0 ? 'danger' : 'success'">Αποτυχίες 24ω: {{ $m['failed_24h'] ?? '—' }}</x-filament::badge>
+                <div>Αποτυχίες 7ημ: {{ $m['failed_7d'] ?? '—' }}</div>
+                <div>Κολλημένα (queued/sending): <strong>{{ $m['stuck_queued_or_sending'] ?? '—' }}</strong></div>
+                <div>Τελευταία αποτυχία: {{ $this->ago($m['latest_failure_at'] ?? null) }}</div>
+            </div>
+        </x-filament::section>
+    </div>
+
+    {{-- WHMCS per tenant --}}
+    @if (!empty($report['whmcs']))
+    <x-filament::section>
+        <x-slot name="heading">WHMCS (ανά εταιρία)</x-slot>
+        <table class="w-full text-sm">
+            <thead><tr class="text-left text-gray-500"><th class="py-1">Tenant</th><th>Κατάσταση</th><th>Τελ. επιτυχία</th><th>Εκκρεμή inbox</th></tr></thead>
+            <tbody>
+            @foreach ($report['whmcs'] as $w)
+                <tr class="border-t border-gray-100 dark:border-gray-800">
+                    <td class="py-1">{{ $w['tenant'] ?? '—' }}</td>
+                    <td><x-filament::badge :color="$this->statusColor($w['status'] ?? null)">{{ $this->statusLabel($w['status'] ?? null) }}</x-filament::badge></td>
+                    <td>{{ $this->ago($w['last_success_at'] ?? null) }}</td>
+                    <td>{{ $w['pending_review'] ?? '—' }}</td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    </x-filament::section>
+    @endif
+
+    {{-- myDATA per tenant --}}
+    @if (!empty($report['mydata']))
+    <x-filament::section>
+        <x-slot name="heading">myDATA reconcile (ανά εταιρία)</x-slot>
+        <table class="w-full text-sm">
+            <thead><tr class="text-left text-gray-500"><th class="py-1">Tenant</th><th>Κατάσταση</th><th>Αποκλίσεις</th><th>Τελ. επιτυχία</th></tr></thead>
+            <tbody>
+            @foreach ($report['mydata'] as $d)
+                <tr class="border-t border-gray-100 dark:border-gray-800">
+                    <td class="py-1">{{ $d['tenant'] ?? '—' }}</td>
+                    <td><x-filament::badge :color="$this->statusColor($d['status'] ?? null)">{{ $this->statusLabel($d['status'] ?? null) }}</x-filament::badge></td>
+                    <td>{{ $d['discrepancies'] ?? '—' }}</td>
+                    <td>{{ $this->ago($d['last_success_at'] ?? null) }}</td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    </x-filament::section>
+    @endif
+
+    {{-- Disk --}}
+    <x-filament::section>
+        <x-slot name="heading">Δίσκος</x-slot>
+        <table class="w-full text-sm">
+            <thead><tr class="text-left text-gray-500"><th class="py-1">Διαδρομή</th><th>Σε χρήση</th><th>Ελεύθερα</th><th>Σύνολο</th></tr></thead>
+            <tbody>
+            @foreach (($report['disk'] ?? []) as $name => $d)
+                <tr class="border-t border-gray-100 dark:border-gray-800">
+                    <td class="py-1">{{ $name }}</td>
+                    <td>{{ $this->bytes($d['used_bytes'] ?? null) }}</td>
+                    <td>{{ $this->bytes($d['free_bytes'] ?? null) }}</td>
+                    <td>{{ $this->bytes($d['total_bytes'] ?? null) }}</td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    </x-filament::section>
+</x-filament-panels::page>
