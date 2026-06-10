@@ -202,3 +202,56 @@ feature backlog.
 4. Persist `authenticationCode` (+ `transmissionFailure`) on the mark/invoice.
 5. Validate the provider XSD enum drift (v0.6.1 vs v2.0.0) before going live.
 6. Re-confirm Α.1112/2025 specifics on aade.gr (this doc is forms-based).
+
+---
+
+## 7. PEPPOL Phase 1 — DONE (2026-06-10), and what Phase 2 needs
+
+**Phase 1 (merged via `claude/peppol-phase1`): the provider-INDEPENDENT document.**
+Estonia applies **no national CIUS beyond EN 16931** (confirmed: *"Estonia does not
+apply national CIUS or extensions beyond the European standard"*), so we build plain
+**PEPPOL BIS Billing 3.0** once and it's accepted by every Access Point + the free
+RIK tool. No MARK / reconciliation / real-time reporting (unlike myDATA) — the AP
+just delivers.
+- `App\Services\Peppol\PeppolInvoiceDocument` — `Invoice → UBL` via `josemmo/einvoicing`
+  (we own the mapping; the lib owns UBL + EN 16931 rules). `build()` / `xml()` / `validate()`.
+- `App\Support\Peppol\PeppolVatCategory` — EN 16931 categories (S/Z/K/G/E), country-agnostic
+  (domestic / intra-community / export), NOT GR-centric like `MyData\ReverseCharge`.
+- `App\Support\Peppol\PeppolEndpoint` — PEPPOL participant id + EAS scheme (`customers.peppol_endpoint`
+  already exists; seller derived from the tenant's tax id).
+- `peppol:test-submit <invoiceId>` — read-only dry-run (prints + validates UBL; sends NOTHING).
+
+### EE Access-Point providers (the "ΠΩΣ" axis — pick ONE for Phase 2)
+The 5 RIK-certified providers, all PEPPOL-connected (roaming between them). Several have
+**free tiers / sandboxes** good for a first integration — no rush, we can test before committing:
+| Provider | Notes |
+|---|---|
+| **Billit** (billit.eu) | Has a developer API + free/trial tier — good first sandbox candidate. |
+| **Finbite** (ex-Envoice) | Certified EE AP; REST API. |
+| **Telema** | Certified EE AP (EDI heritage); REST API. |
+| Unifiedpost / Billberry / CostPocket | Other certified EE APs. |
+| **E-arveldaja (RIK)** | The government's FREE issuance tool — zero-cost fallback, not an API integration. |
+The **UBL we build is identical** for all of them — only the send API differs.
+
+### Phase 2 checklist (when a provider + creds are chosen)
+1. Pick the Access Point (per above) and get **sandbox API docs + credentials**.
+2. `App\Contracts\PeppolAccessPointTransport` (send / status / ping) + `NullPeppolTransport`
+   default — mirrors the `gr-provider` `EInvoiceProviderTransport` + `ProviderTransportRegistry`.
+3. Concrete transport for the chosen AP (the only provider-specific code).
+4. `PeppolSubmitter implements EInvoiceSubmitter`: build UBL → hand to transport → persist the
+   AP receipt/message-id (reuse `mydata_marks` as a generic submission-audit row, `action=INSERT`,
+   no AADE MARK). Wire `EInvoiceSubmitterFactory`: `ee-peppol` + an armed/staged gate (the twin
+   of `gr-provider`'s `einvoice_provider_mode != off`).
+5. **Recipient reachability** (buyer's-choice / 4-corner): an SMP/SML participant lookup — is the
+   recipient registered to receive on PEPPOL? (optional for issuing, needed for guaranteed delivery).
+6. **Credit notes (type 381):** add the preceding-invoice reference (BG-3 / BT-25 BillingReference)
+   to the original — `PeppolInvoiceDocument` sets 381 for `credited_invoice_id` but not yet the
+   reference (the library's `validate()` doesn't catch its absence; a real AP/Schematron will).
+7. Optional: full **PEPPOL schematron** validation (official `.sch`) beyond the library's rule subset
+   (the lib checks only EN-16931 structural BRs + R002/R003/R061/BG-17 — NOT BT-34/49 endpoint
+   presence, BR-CO total consistency, or per-category VAT reason rules, so a dry-run "valid" ≠ a
+   guarantee the AP accepts it); Filament «Προεπισκόπηση PEPPOL UBL» action (the dry-run in the
+   panel); UN/ECE unit-code map (currently every line defaults to `C62`); a
+   `companies.peppol_endpoint`/scheme field for the seller (today derived from the tax id, omitted
+   if no EAS scheme resolves); header-discount as an explicit BG-20 document allowance (today folded
+   into line prices, amounts correct).
