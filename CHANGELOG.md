@@ -17,6 +17,13 @@ they merge.
 
 ## [Unreleased]
 ### Added
+- **Δοκιμή global SMTP (.env).** A super-admin-only header action on the Companies
+  list sends a probe through the app-wide `MAIL_MAILER` mailer (tenant-independent)
+  — the counterpart to the existing per-company «Send a test email». Surfaces the
+  active mailer + from-address (and warns when `MAIL_MAILER=log`, the common «δεν
+  φεύγει τίποτα» case), with the full SMTP error on failure. Lets the operator
+  verify `.env` mail works at all, which is what every tenant without its own SMTP
+  falls back to.
 - **«Εργαλεία» maintenance page (commands → buttons).** A new admin page (Setup
   group, gated on `View:MaintenanceTools`) surfaces safe, re-runnable artisan
   commands as one-click per-tenant buttons — Ανανέωση εικόνας ΦΠΑ
