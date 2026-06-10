@@ -46,6 +46,7 @@ surfaced in the open-items sections further down.
 - **Expense classification → AADE** (PR #256) — `SendExpensesClassification` + per-line + `expenses:test-classify`.
 - **FK-aware delete guard** (PR #258) — `GuardedDeleteAction`.
 - **«Σύστημα» area — 3 slices** (2026-06-10): «Υγεία συστήματος» page · durable `scheduled_task_runs` + queue retry · «Ρυθμίσεις χρονοπρογραμματιστή» (audited toggles, `system_settings`).
+- **«Ρυθμίσεις συστήματος» page** — global knobs (`require_2fa`, backup-alert on/off + email) ως audited live toggles· at-rest encryption + mailer status read-only.
 - **Onboarding** (2026-06-10): DEMO seeder · `ekdosi:install` wizard (+ lookup seeding via `MyDataLookupSeeder`) · global+per-company «Δοκιμή SMTP» · «Εργαλεία» · export/import χωρίς passphrase.
 - **myDATA console unification** (PR #272) — one «Κονσόλα myDATA» cluster (Πωλήσεις/Έξοδα/Ε3) + redirects.
 - **Expenses fetch** (PR #272) — «Άντληση από myDATA» κουμπί στη λίστα Έξοδα + tip + read-only `mydata:refresh-expenses` cron (UI toggle, default OFF).
@@ -109,11 +110,11 @@ surfaced in the open-items sections further down.
 - **T-4 manual split tools** (transfer_invoice / relid_remover) — χαμηλή προτεραιότητα.
 - **«All of a client's third parties» 2ο dropdown** (θέλει `contacts-by-userid` bridge endpoint).
 
-## 🆕 Settings-in-UI — widen (scheduler page shipped)
-- **«Ρυθμίσεις συστήματος»** page για τα υπόλοιπα global knobs (`require_2fa`,
-  `encrypt_secrets_at_rest`, backup-alert email) + mailer-health hint.
-- **Role-scoped knobs:** per-company ρυθμίσεις (backups/billing/email) σε company_admin·
-  σταδιακή μεταφορά των `companies.*` toggles στο audited `system_settings`.
+## 🆕 Settings-in-UI — widen (scheduler + global pages shipped)
+- **Role-scoped per-company knobs:** μεταφορά των `companies.*` toggles (backups/billing/
+  email/whmcs) στο audited `system_settings`, gated σε company_admin (το «Σύστημα» area
+  είναι σήμερα super_admin-only/deploy-wide). `whmcs_auto_issue` μένει two-key
+  (UI + `companies.whmcs_auto_issue_immediate`). _Μεγαλύτερο slice — όχι big-bang._
 
 ## 🔒 Backup / DR / Portability
 - **Portability Phase 3** — selective per-table/per-entity CSV export (το upload-and-run UI

@@ -37,7 +37,9 @@ class AdminPanelProvider extends PanelProvider
             // login once the whole team is set up.
             ->multiFactorAuthentication(
                 [AppAuthentication::make()->recoverable()],
-                isRequired: (bool) config('ekdosi.require_2fa', false),
+                // DB override (set from «Ρυθμίσεις συστήματος») wins; env is the default.
+                isRequired: app(\App\Support\Settings\SystemSettings::class)
+                    ->bool('system.require_2fa', (bool) config('ekdosi.require_2fa', false)),
             )
             ->tenant(Company::class, slugAttribute: 'slug')
             ->colors([

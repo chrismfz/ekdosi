@@ -160,6 +160,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (super_admin-only): toggles ανά εργασία στο `system_settings` store, διαβάζονται
   run-time από `routes/console.php` (env = προεπιλογή· αποθηκεύονται μόνο οι αποκλίσεις,
   με audit). Νέο nav group **«Σύστημα»**.
+- **Σελίδα «Ρυθμίσεις συστήματος»** (super_admin-only) — οι καθολικές knobs ως audited
+  toggles στο `system_settings` (env = προεπιλογή, αποθηκεύονται μόνο οι αποκλίσεις):
+  **`require_2fa`** (live — διαβάζεται από τον panel), **backup-alert on/off + email(s)**
+  (live — διαβάζεται από `company:run-scheduled-backups`). **At-rest κρυπτογράφηση** +
+  **κατάσταση mailer** εμφανίζονται read-only (η αλλαγή κρυπτογράφησης γίνεται με ασφάλεια
+  μέσω `secrets:reencrypt`).
 
 ## 16. Dashboard & widgets
 Έσοδα μήνα/προηγ./τρίμηνο, ΦΠΑ εκροών, ανεξόφλητα, παραστατικά μήνα, MRR/ανανεώσεις,

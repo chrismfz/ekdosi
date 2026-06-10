@@ -88,6 +88,38 @@ class BackupFailureAlertTest extends TestCase
     }
 
     #[Test]
+    public function a_db_override_can_switch_alerting_off_over_the_config_default(): void
+    {
+        Notification::fake();
+        // Config DEFAULT says alert (true); the «Ρυθμίσεις συστήματος» override wins.
+        config(['ekdosi.backup.alert_email' => 'ops@example.gr', 'ekdosi.backup.alert_on_failure' => true]);
+        app(\App\Support\Settings\SystemSettings::class)->setBool('system.backup_alert_on_failure', false, null);
+
+        $this->settings($this->company(), [['driver' => 'boom']]);
+
+        $this->artisan('company:run-scheduled-backups', ['--force' => true])->assertSuccessful();
+
+        Notification::assertNothingSent();
+    }
+
+    #[Test]
+    public function a_db_override_email_takes_precedence_over_config(): void
+    {
+        Notification::fake();
+        config(['ekdosi.backup.alert_email' => 'config@example.gr']);
+        app(\App\Support\Settings\SystemSettings::class)->set('system.backup_alert_email', 'override@example.gr', 'string', null);
+
+        $this->settings($this->company(), [['driver' => 'boom']]);
+
+        $this->artisan('company:run-scheduled-backups', ['--force' => true])->assertSuccessful();
+
+        Notification::assertSentOnDemand(
+            ScheduledBackupFailed::class,
+            fn ($notification, array $channels, $notifiable) => in_array('override@example.gr', (array) ($notifiable->routes['mail'] ?? []), true),
+        );
+    }
+
+    #[Test]
     public function no_recipients_configured_does_not_crash(): void
     {
         Notification::fake();

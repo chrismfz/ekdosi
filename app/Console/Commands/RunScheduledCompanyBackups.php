@@ -82,7 +82,8 @@ class RunScheduledCompanyBackups extends Command
             'destinations' => $run->destinations,
         ]);
 
-        if (! config('ekdosi.backup.alert_on_failure', true)) {
+        // DB override (set from «Ρυθμίσεις συστήματος») wins; env is the default.
+        if (! app(\App\Support\Settings\SystemSettings::class)->bool('system.backup_alert_on_failure', (bool) config('ekdosi.backup.alert_on_failure', true))) {
             return;
         }
 
@@ -104,7 +105,8 @@ class RunScheduledCompanyBackups extends Command
      */
     private function alertRecipients(): array
     {
-        $configured = array_filter(array_map('trim', explode(',', (string) config('ekdosi.backup.alert_email'))));
+        $email = app(\App\Support\Settings\SystemSettings::class)->string('system.backup_alert_email', (string) config('ekdosi.backup.alert_email'));
+        $configured = array_filter(array_map('trim', explode(',', (string) $email)));
         if ($configured !== []) {
             return array_values(array_unique($configured));
         }
