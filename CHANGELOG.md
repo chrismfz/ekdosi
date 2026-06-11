@@ -18,6 +18,16 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **«Ρυθμίσεις εταιρείας» self-service page** (`CompanySettings`, gated
+  `View:CompanySettings`). Lets a `company_admin` manage their OWN tenant's safe
+  subset — PDF branding (logo/footer/balance-on-PDF), invoice-mail templates +
+  from-address/name, the auto-email toggles, and backup enable+cadence — without the
+  super_admin-only panel-global CompanyResource. Credentials (myDATA/GSIS/WHMCS/SMTP),
+  e-invoice provider, tenant identity, and the sensitive backup policy (passphrase/
+  destinations/retention) stay super_admin. `save()` writes an explicit whitelist only
+  (no raw mass-assign — a crafted payload can't reach a non-whitelisted column), audited
+  to `activity_log` under the tenant. company_admin auto-gets the permission (not in
+  `ADMIN_FORBIDDEN_RESOURCES`); operator does not. Deploy: `shield:generate` + re-provision.
 - **«Υπόλοιπο πελάτη» στο invoice PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ»). On issue
   (draft→active), an invoice that moves the running balance (credit-term sale or
   credit note) captures the customer's total Καρτέλα balance into a new

@@ -183,6 +183,13 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (live — διαβάζεται από `company:run-scheduled-backups`). **At-rest κρυπτογράφηση** +
   **κατάσταση mailer** εμφανίζονται read-only (η αλλαγή κρυπτογράφησης γίνεται με ασφάλεια
   μέσω `secrets:reencrypt`).
+- **Σελίδα «Ρυθμίσεις εταιρείας»** (company_admin + super_admin, gated `View:CompanySettings`)
+  — self-service υποσύνολο των ρυθμίσεων της ΙΔΙΑΣ εταιρείας χωρίς το panel-global
+  CompanyResource: εμφάνιση PDF (logo/υποσέλιδο/υπόλοιπο), πρότυπα email + αποστολέας,
+  auto-email toggles, **ενεργοποίηση + συχνότητα αντιγράφων**. Audited («Ιστορικό»).
+  Τα ευαίσθητα (SMTP server, διαπιστευτήρια myDATA/GSIS/WHMCS, κρυπτογράφηση/προορισμοί/
+  διατήρηση αντιγράφων, ταυτότητα/ΑΦΜ) μένουν super_admin — η save γράφει **μόνο**
+  explicit whitelist (κανένα raw mass-assign).
 
 ## 16. Dashboard & widgets
 Έσοδα μήνα/προηγ./τρίμηνο, ΦΠΑ εκροών, ανεξόφλητα, παραστατικά μήνα, MRR/ανανεώσεις,

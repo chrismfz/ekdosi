@@ -116,10 +116,14 @@ surfaced in the open-items sections further down.
 - **«All of a client's third parties» 2ο dropdown** (θέλει `contacts-by-userid` bridge endpoint).
 
 ## 🆕 Settings-in-UI — widen (scheduler + global pages shipped)
-- **Role-scoped per-company knobs:** μεταφορά των `companies.*` toggles (backups/billing/
-  email/whmcs) στο audited `system_settings`, gated σε company_admin (το «Σύστημα» area
-  είναι σήμερα super_admin-only/deploy-wide). `whmcs_auto_issue` μένει two-key
-  (UI + `companies.whmcs_auto_issue_immediate`). _Μεγαλύτερο slice — όχι big-bang._
+- **Role-scoped per-company knobs:** _✅ SHIPPED (trimmed) — «Ρυθμίσεις εταιρείας»
+  (`CompanySettings`, `View:CompanySettings`): company_admin self-serves the SAFE subset
+  (PDF branding · invoice-mail templates/from · auto-email toggles · backup enable+cadence),
+  audited, explicit-whitelist save._ **Still deferred (deliberately super_admin):** the
+  credential/infra knobs (myDATA/GSIS/WHMCS/SMTP secrets, e-invoice provider, backup
+  passphrase/destinations/retention, tenant identity). `whmcs_auto_issue` stays two-key
+  (UI + `companies.whmcs_auto_issue_immediate`). Widen only if a real per-tenant admin
+  needs a specific credential delegated — don't bulk-move secrets into company_admin reach.
 
 ## 🔒 Backup / DR / Portability
 - **Portability Phase 3** — selective per-table/per-entity CSV export (το upload-and-run UI
