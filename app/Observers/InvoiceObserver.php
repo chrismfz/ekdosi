@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Models\Invoice;
 use App\Models\ServiceContract;
+use App\Services\CustomerLedger\CustomerLedgerBuilder;
 use App\Services\InvoiceBalance;
 use App\Services\Stock\StockService;
 use Illuminate\Support\Carbon;
@@ -32,6 +33,59 @@ class InvoiceObserver
         $this->recomputeOriginal($invoice);
         $this->applyStockSaleIfActivated($invoice);
         $this->advanceServiceContractOnIssue($invoice);
+        $this->captureCustomerBalanceSnapshot($invoice);
+    }
+
+    /**
+     * Capture the customer's TOTAL running balance (Καρτέλα «υπόλοιπο», incl.
+     * on-account credit) at the moment an invoice is ISSUED — so the PDF can
+     * print a legacy-true «Νέο υπόλοιπο» block that stays STABLE on reprint
+     * (a live recompute would drift as later invoices/payments land).
+     *
+     * Fires exactly once per invoice: only when it FIRST becomes active with a
+     * customer (`customer_balance_snapshot` still null) AND actually moves the
+     * balance (credit-term sale or credit note — cash-term is settled at issue,
+     * so a «Νέο υπόλοιπο» there is meaningless and we skip it). App-issued only:
+     * the ETL/Epsilon importers write via raw query-builder (no observer), and
+     * the `legacy_id` guard belts-and-suspenders any Eloquent-path import.
+     *
+     * Best-effort: the issue already persisted, so a hiccup computing the
+     * balance must never look like a failed finalize. saveQuietly avoids
+     * re-entering the observer.
+     */
+    private function captureCustomerBalanceSnapshot(Invoice $invoice): void
+    {
+        if ($invoice->local_status !== 'active'
+            || $invoice->customer_balance_snapshot !== null
+            || $invoice->customer_id === null
+            || $invoice->legacy_id !== null
+            || ! $invoice->affectsCustomerBalance()) {
+            return;
+        }
+
+        try {
+            $customer = $invoice->customer;
+            if ($customer === null) {
+                return;
+            }
+
+            $balance = app(CustomerLedgerBuilder::class)
+                ->buildStatsBlock($customer)['stats']['balance'] ?? null;
+
+            if ($balance === null) {
+                return;
+            }
+
+            $invoice->forceFill([
+                'customer_balance_snapshot' => round((float) $balance, 2),
+            ])->saveQuietly();
+        } catch (Throwable $e) {
+            Log::warning('Capturing customer balance snapshot failed (the issue succeeded)', [
+                'invoice_id' => $invoice->id,
+                'customer_id' => $invoice->customer_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
