@@ -55,7 +55,7 @@ class ScheduleSettings extends Page implements HasForms
         'resend_failed_emails_enabled' => ['Επαναποστολή αποτυχημένων email', 'Ξαναβάζει στην ουρά τιμολόγια που απέτυχαν. Άναψέ το αφού σταθεροποιηθεί το SMTP.', false],
         // WHMCS
         'whmcs_fetch_enabled' => ['WHMCS — άντληση εκκρεμών', 'Φέρνει πληρωμένα/αδήλωτα WHMCS τιμολόγια στο inbox (μόνο staging, ΔΕΝ δηλώνει στην ΑΑΔΕ).', false],
-        'whmcs_auto_issue_enabled' => ['WHMCS — αυτόματη έκδοση', 'Δηλώνει ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ για γκρινιάρηδες πελάτες σε οπλισμένους tenants. Διπλό κλειδί με την per-tenant ρύθμιση.', true],
+        'whmcs_auto_issue_enabled' => ['WHMCS — αυτόματη έκδοση', 'Δηλώνει ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ για πελάτες άμεσης τιμολόγησης σε οπλισμένους tenants. Διπλό κλειδί με την per-tenant ρύθμιση.', true],
         // myDATA
         'mydata_reconcile_enabled' => ['myDATA — αντιπαραβολή πωλήσεων', 'Καθημερινός read-only έλεγχος local↔ΑΑΔΕ.', false],
         'mydata_vat_picture_enabled' => ['myDATA — εικόνα ΦΠΑ', 'Ανανεώνει το cache του widget «Εικόνα από myDATA» (βαρύ AADE pull).', false],

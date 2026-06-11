@@ -5,6 +5,7 @@ namespace Tests\Feature\Whmcs;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
+use App\Models\User;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
@@ -350,5 +351,39 @@ class WhmcsInvoiceIngestorTest extends TestCase
 
         $this->expectException(\LogicException::class);
         $filed->update(['status' => \App\Models\PendingWhmcsInvoice::STATUS_PENDING_REVIEW]);
+    }
+
+    public function test_notifies_operators_when_a_new_immediate_row_is_staged(): void
+    {
+        $tenant = $this->tenant();
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $tenant->users()->attach($user->id);
+        Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Άμεσος', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => true,
+        ]);
+
+        $this->ingestor()->ingest($tenant, ['invoiceid' => 9001, 'userid' => 555, 'total' => '10.00']);
+
+        $this->assertSame(1, $user->fresh()->notifications()->count(), 'a new immediate row pings the operator');
+
+        // Re-ingest (update, not create) must NOT re-notify.
+        $this->ingestor()->ingest($tenant, ['invoiceid' => 9001, 'userid' => 555, 'total' => '12.00']);
+        $this->assertSame(1, $user->fresh()->notifications()->count(), 'a refresh does not re-notify');
+    }
+
+    public function test_does_not_notify_for_a_non_immediate_row(): void
+    {
+        $tenant = $this->tenant();
+        $user = User::create(['name' => 'Op', 'email' => 'op2-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $tenant->users()->attach($user->id);
+        Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Ήσυχος', 'whmcs_client_id' => 556,
+            'needs_immediate_invoice' => false,
+        ]);
+
+        $this->ingestor()->ingest($tenant, ['invoiceid' => 9002, 'userid' => 556, 'total' => '10.00']);
+
+        $this->assertSame(0, $user->fresh()->notifications()->count());
     }
 }

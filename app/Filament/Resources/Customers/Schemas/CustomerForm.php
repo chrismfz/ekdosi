@@ -47,8 +47,8 @@ class CustomerForm
                                     ->helperText('Inactive customers stay in the books for invoice history but are hidden from the default list.'),
 
                                 Toggle::make('needs_immediate_invoice')
-                                    ->label('Immediate invoicing (γκρινιάρης)')
-                                    ->helperText('When on, the scheduled invoicing command issues + sends to myDATA on the same tick as payment lands, instead of rolling into the weekly batch.'),
+                                    ->label('Άμεση τιμολόγηση')
+                                    ->helperText('Όταν είναι ON, η προγραμματισμένη έκδοση εκδίδει + υποβάλλει στη myDATA αμέσως μόλις πληρωθεί, αντί να μπει στην εβδομαδιαία παρτίδα.'),
                             ])
                             ->columns(2),
 

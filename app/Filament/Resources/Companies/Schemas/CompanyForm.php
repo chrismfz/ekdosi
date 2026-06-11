@@ -784,19 +784,19 @@ class CompanyForm
                                             }),
                                     ]),
 
-                                // G8 phase 2: γκρινιάρης auto-issue. DANGER zone —
+                                // G8 phase 2: άμεση-τιμολόγηση auto-issue. DANGER zone —
                                 // files legal documents unattended. Two-key armed:
                                 // this toggle + the scheduler flag
                                 // (EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE).
-                                Section::make('Αυτόματη έκδοση (γκρινιάρης)')
-                                    ->description('Όταν ενεργοποιηθεί, οι πληρωμένες εγγραφές του Inbox για πελάτες με σήμανση «άμεσης έκδοσης» (γκρινιάρης) εκδίδονται + υποβάλλονται ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ από το προγραμματισμένο whmcs:auto-issue — μόνο οι σαφείς μονομερείς εγγραφές· οτιδήποτε αμφίβολο μένει στο Inbox για τον χειριστή. ΠΡΟΣΟΧΗ: εκδίδει νομικά παραστατικά χωρίς έγκριση.')
+                                Section::make('Αυτόματη έκδοση (άμεση τιμολόγηση)')
+                                    ->description('Όταν ενεργοποιηθεί, οι πληρωμένες εγγραφές του Inbox για πελάτες με σήμανση «άμεσης τιμολόγησης» εκδίδονται + υποβάλλονται ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ από το προγραμματισμένο whmcs:auto-issue — μόνο οι σαφείς εγγραφές· οτιδήποτε αμφίβολο μένει στο Inbox για τον χειριστή. ΠΡΟΣΟΧΗ: εκδίδει νομικά παραστατικά χωρίς έγκριση.')
                                     ->schema([
                                         Toggle::make('whmcs_auto_issue_immediate')
-                                            ->label('Αυτόματη έκδοση για γκρινιάρηδες')
+                                            ->label('Αυτόματη έκδοση (άμεση τιμολόγηση)')
                                             ->default(false)
                                             ->helperText('Απαιτεί ΚΑΙ τον γενικό διακόπτη του scheduler (EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE) ΚΑΙ ορισμένο προεπιλεγμένο τύπο παραστατικού παρακάτω. Με OFF (προεπιλογή) δεν εκδίδεται τίποτα αυτόματα — η εγγραφή απλώς επισημαίνεται «Άμεσο» στο Inbox.'),
                                         Select::make('whmcs_default_invoice_type_id')
-                                            ->label('Προεπιλεγμένος τύπος παραστατικού (αυτόματη έκδοση)')
+                                            ->label('Προεπιλεγμένος τύπος ΤΙΜΟΛΟΓΙΟΥ (αυτόματη έκδοση)')
                                             ->options(fn (?Company $record) => $record
                                                 ? InvoiceType::query()
                                                     ->where('company_id', $record->id)
@@ -806,7 +806,19 @@ class CompanyForm
                                                     ->toArray()
                                                 : [])
                                             ->searchable()
-                                            ->helperText('Ο τύπος που χρησιμοποιεί η αυτόματη έκδοση. Χωρίς αυτόν, η αυτόματη έκδοση παραλείπει τον tenant (δεν μαντεύει ποτέ τον τύπο). Η χειροκίνητη επιλογή στο Inbox δεν επηρεάζεται.'),
+                                            ->helperText('Ο τύπος για πελάτες που ζήτησαν ΤΙΜΟΛΟΓΙΟ (ή τρίτους που δεν είναι απόδειξη). Χωρίς αυτόν, η αυτόματη έκδοση παραλείπει τον tenant (δεν μαντεύει ποτέ τον τύπο). Η χειροκίνητη επιλογή στο Inbox δεν επηρεάζεται.'),
+                                        Select::make('whmcs_default_receipt_type_id')
+                                            ->label('Προεπιλεγμένος τύπος ΑΠΟΔΕΙΞΗΣ (προαιρετικό)')
+                                            ->options(fn (?Company $record) => $record
+                                                ? InvoiceType::query()
+                                                    ->where('company_id', $record->id)
+                                                    ->orderBy('code')
+                                                    ->get()
+                                                    ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+                                                    ->toArray()
+                                                : [])
+                                            ->searchable()
+                                            ->helperText('Ο τύπος «Απόδειξης λιανικής» για όταν ο πελάτης ΔΕΝ ζήτησε τιμολόγιο, ή ένας μονομερής τρίτος είναι σημασμένος ως απόδειξη. Χωρίς αυτόν, τέτοιες εγγραφές ΜΕΝΟΥΝ στο Inbox για τον χειριστή (δεν εκδίδονται ποτέ ως λάθος τύπος).'),
                                     ]),
 
                                 // T-1 (timologia v2): third-party invoicing. When ON, the
@@ -878,7 +890,7 @@ class CompanyForm
                                                     'wantsinvoice' => 'Θέλει τιμολόγιο (wantsinvoice)',
                                                     'taxoffice' => 'ΔΟΥ (taxoffice)',
                                                     'occupation' => 'Δραστηριότητα (occupation)',
-                                                    'griniaris' => 'Γκρινιάρης / άμεση έκδοση (griniaris)',
+                                                    'griniaris' => 'Άμεση τιμολόγηση (WHMCS role: griniaris)',
                                                 ];
                                                 $schema = [];
                                                 foreach ($roles as $role => $label) {

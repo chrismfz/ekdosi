@@ -201,7 +201,7 @@ class WhmcsInvoiceFiler
             'notes' => ($hasMark
                 ? 'Filed at AADE as invoice #'.$invoice->invcode.' (MARK '.$mark->mark.').'
                 : 'Recorded locally (off-mode — not filed at AADE) as invoice #'.$invoice->invcode.'.')
-                // Optional audit suffix (e.g. the γκρινιάρης auto-issue
+                // Optional audit suffix (e.g. the άμεση-τιμολόγηση auto-issue
                 // reason). Appended here because the row is frozen against
                 // mutation once status flips to 'filed' below — the filer
                 // is the single writer of this notes column.

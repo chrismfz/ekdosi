@@ -148,7 +148,7 @@ class WhmcsInboxTable
                     })
                     ->searchable(),
 
-                // G8 (phase 1): γκρινιάρης / immediate-invoicing heads-up. A
+                // G8 (phase 1): άμεση-τιμολόγηση / immediate-invoicing heads-up. A
                 // matched customer flagged needs_immediate_invoice wants their
                 // παραστατικό issued ASAP — surface it so the operator
                 // prioritises this row. Warning only here; auto-issue is a
@@ -162,7 +162,33 @@ class WhmcsInboxTable
                     ->state(fn (PendingWhmcsInvoice $r): ?string => $r->customer?->needs_immediate_invoice
                         ? 'Άμεσο'
                         : null)
-                    ->tooltip('Ο πελάτης ζητά άμεση έκδοση (γκρινιάρης) — δώσε προτεραιότητα.'),
+                    ->tooltip('Ο πελάτης ζητά άμεση τιμολόγηση — δώσε προτεραιότητα.'),
+
+                // Scannable third-party flag: lights up when the WHMCS invoice
+                // routes (some/all) lines to a beneficiary other than the client.
+                // Single → the beneficiary name; multi → «Πολλοί (N)» (needs split).
+                // The «Παραλήπτης» column carries the detail; this is the at-a-glance
+                // «έχει τρίτο;» badge the operator scans for.
+                TextColumn::make('third_party')
+                    ->label('Τρίτος')
+                    ->badge()
+                    ->icon('heroicon-o-users')
+                    ->placeholder('—')
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->third_party_state) {
+                        PendingWhmcsInvoice::TP_SINGLE => self::firstBeneficiaryName($r) ?? 'Τρίτος',
+                        PendingWhmcsInvoice::TP_MULTI => ($n = count(self::beneficiaryNames($r))) > 0 ? "Πολλοί ({$n})" : 'Πολλοί',
+                        default => null,
+                    })
+                    ->color(fn (PendingWhmcsInvoice $r): string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI ? 'warning' : 'info')
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => ($n = self::beneficiaryNames($r)) !== [] ? 'Κλικ για ανάλυση ανά γραμμή · '.implode(' · ', $n) : null)
+                    // Click the badge → per-line routing preview. Only meaningful for
+                    // third-party rows; the '—' placeholder on plain rows isn't clickable.
+                    ->disabledClick(fn (PendingWhmcsInvoice $r): bool => ! in_array(
+                        $r->third_party_state,
+                        [PendingWhmcsInvoice::TP_SINGLE, PendingWhmcsInvoice::TP_MULTI],
+                        true,
+                    ))
+                    ->action(self::viewRoutingAction()),
 
                 TextColumn::make('status')
                     ->label('Κατάσταση')
@@ -235,7 +261,17 @@ class WhmcsInboxTable
                     ->sortable()
                     ->tooltip('Πότε συγχρονίστηκε στο inbox'),
             ])
-            ->defaultSort('created_at', 'desc')
+            // DEFAULT order (overridable by a column-header click — Filament appends
+            // the user's sort BEFORE this closure, so a manual sort stays primary and
+            // this only acts as the default + tiebreaker): «άμεση τιμολόγηση» rows
+            // float to the top, then newest first. COALESCE(...,0) makes the NULL
+            // (unmatched) case deterministic across MariaDB/sqlite.
+            ->defaultSort(fn (Builder $query): Builder => $query
+                ->orderByRaw('coalesce((select c.needs_immediate_invoice from customers c where c.id = pending_whmcs_invoices.customer_id limit 1), 0) desc')
+                ->orderByDesc('created_at'))
+            // Auto-refresh so a freshly-paid (immediate) row surfaces within ~30s
+            // without a manual reload — pairs with the bell notification.
+            ->poll('30s')
             ->filters([
                 SelectFilter::make('status')
                     ->label('Κατάσταση')
@@ -265,6 +301,26 @@ class WhmcsInboxTable
                         'unknown' => $query->whereNull('legacy_invoiced'),
                         default => $query,
                     }),
+
+                // Isolate the rows the operator scans for most.
+                SelectFilter::make('immediate')
+                    ->label('Άμεσο')
+                    ->options(['yes' => 'Άμεσα μόνο'])
+                    ->query(fn (Builder $query, array $data): Builder => ($data['value'] ?? null) === 'yes'
+                        ? $query->whereHas('customer', fn (Builder $q) => $q->where('needs_immediate_invoice', true))
+                        : $query),
+
+                SelectFilter::make('third_party')
+                    ->label('Τρίτος')
+                    ->options([
+                        'any' => 'Με τρίτο',
+                        PendingWhmcsInvoice::TP_MULTI => 'Πολλαπλοί (split)',
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'any' => $query->whereIn('third_party_state', [PendingWhmcsInvoice::TP_SINGLE, PendingWhmcsInvoice::TP_MULTI]),
+                        PendingWhmcsInvoice::TP_MULTI => $query->where('third_party_state', PendingWhmcsInvoice::TP_MULTI),
+                        default => $query,
+                    }),
             ])
             ->headerActions([
                 self::syncNowAction(),
@@ -275,10 +331,12 @@ class WhmcsInboxTable
                 // Παραστατικού». Everything else (including «Άνοιγμα», kept first)
                 // collapses into a «…» dropdown so the row doesn't sprawl.
                 self::createDraftAction(),
+                // Direct «Διαχωρισμός» button on multi-party rows (visible() gates
+                // it to TP_MULTI) so splitting is one click, not buried in «…».
+                self::splitAction(),
                 ActionGroup::make([
                     self::openInvoiceAction(),
                     self::createCustomerAction(),
-                    self::splitAction(),
                     self::reResolveThirdPartyAction(),
                     self::holdAction(),
                     self::reStageAction(),
@@ -437,6 +495,62 @@ class WhmcsInboxTable
         $names = self::beneficiaryNames($r);
 
         return $names[0] ?? null;
+    }
+
+    /**
+     * Per-LINE routing for the preview modal: each WHMCS line → who it bills →
+     * ΑΦΜ → Τιμολόγιο/Απόδειξη. Mirrors the WHMCS-side «Δρομολόγηση υπηρεσιών»
+     * screen so the operator SEES which line goes where before splitting. Own
+     * (non-routed) lines bill the WHMCS client and take the primary's type
+     * (ownLinesAreReceipt); routed lines take the route's explicit is_receipt and
+     * go to the contact.
+     *
+     * @return list<array{line:string,who:string,afm:string,receipt:bool,routed:bool}>
+     */
+    private static function routingRows(PendingWhmcsInvoice $r): array
+    {
+        $lines = $r->third_party_resolution['lines'] ?? [];
+        if (! is_array($lines) || $lines === []) {
+            return [];
+        }
+
+        $decode = static fn (string $s): string => html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $ownReceipt = $r->ownLinesAreReceipt();
+        $ownName = $r->customer?->name ?? $r->whmcsClientName() ?? 'Πελάτης WHMCS';
+        $ownAfm = $r->customer?->afm ?? $r->whmcsAfm();
+
+        $out = [];
+        foreach ($lines as $l) {
+            if (! is_array($l)) {
+                continue; // defensive: a malformed (scalar) line entry
+            }
+            $routed = ! empty($l['routed']) && ! empty($l['contact']);
+            $out[] = [
+                'line' => $decode((string) ($l['description'] ?? '—')),
+                'who' => $routed
+                    ? $decode((string) ($l['contact']['company_name'] ?? 'Τρίτος'))
+                    : $decode($ownName).' (ίδιος)',
+                'afm' => $routed ? (string) ($l['contact']['gr_vatno'] ?? '') : (string) ($ownAfm ?? ''),
+                'receipt' => $routed ? (bool) ($l['is_receipt'] ?? false) : $ownReceipt,
+                'routed' => $routed,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** Read-only per-line routing preview, opened by clicking the «Τρίτος» cell. */
+    private static function viewRoutingAction(): Action
+    {
+        return Action::make('view_routing')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δρομολόγηση WHMCS #'.$r->whmcs_invoice_id)
+            ->modalContent(fn (PendingWhmcsInvoice $r) => view('filament.whmcs-inbox.third-party-routing', [
+                'rows' => self::routingRows($r),
+                'isMulti' => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI,
+            ]))
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Κλείσιμο')
+            ->modalWidth('2xl');
     }
 
     /**

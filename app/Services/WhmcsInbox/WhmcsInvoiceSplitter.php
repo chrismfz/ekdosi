@@ -49,8 +49,8 @@ class WhmcsInvoiceSplitter
      * created.
      *
      * @return array<int, array{
-     *   key: string, label: string, is_receipt: bool, item_ids: array<int,int>,
-     *   contact: ?array<string,mixed>, customer: ?Customer
+     *   key: string, label: string, is_receipt: bool, receipt_ambiguous: bool,
+     *   item_ids: array<int,int>, contact: ?array<string,mixed>, customer: ?Customer
      * }>
      */
     public function planGroups(Company $tenant, PendingWhmcsInvoice $pending): array
@@ -79,10 +79,23 @@ class WhmcsInvoiceSplitter
                 $groups[$key] = [
                     'key' => $key,
                     'label' => $label,
-                    'is_receipt' => (bool) ($line['is_receipt'] ?? false),
+                    // Routed (third-party) group: the explicit per-route flag.
+                    // Own/reseller group: the PRIMARY customer's intent (ΑΦΜ +
+                    // wantsinvoice) — NOT the resolution's is_receipt, which the
+                    // plugin defaults to false for own lines (so a no-ΑΦΜ retail
+                    // customer's own portion would wrongly become a τιμολόγιο).
+                    'is_receipt' => $routed
+                        ? (bool) ($line['is_receipt'] ?? false)
+                        : $pending->ownLinesAreReceipt(),
+                    'receipt_ambiguous' => false,
                     'item_ids' => [],
                     'contact' => $contact,
                 ];
+            } elseif ($routed && (bool) ($line['is_receipt'] ?? false) !== $groups[$key]['is_receipt']) {
+                // A later line for the SAME contact disagrees on receipt-vs-invoice
+                // → can't silently pick the first; flag it so split() refuses (one
+                // document = one type; the operator fixes the routing).
+                $groups[$key]['receipt_ambiguous'] = true;
             }
             $itemId = (int) ($line['item_id'] ?? 0);
             if ($itemId > 0) {
@@ -146,6 +159,13 @@ class WhmcsInvoiceSplitter
                 throw new RuntimeException(sprintf(
                     'Ο δικαιούχος «%s» δεν αντιστοιχεί σε πελάτη ekdosi (λείπει ΑΦΜ ή σύνδεση). '
                     .'Διόρθωσέ τον πριν τον διαχωρισμό.',
+                    $group['label'],
+                ));
+            }
+            if ($group['receipt_ambiguous'] ?? false) {
+                throw new RuntimeException(sprintf(
+                    'Ο δικαιούχος «%s» έχει γραμμές με μικτή σήμανση απόδειξης/τιμολογίου — '
+                    .'διόρθωσε τη δρομολόγηση (ένα παραστατικό = ένας τύπος) πριν τον διαχωρισμό.',
                     $group['label'],
                 ));
             }

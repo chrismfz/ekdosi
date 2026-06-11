@@ -143,12 +143,20 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - Ενοποιημένο plugin **`ekdosi_bridge`**, **PHP-to-PHP μέσω WHMCS API** (HMAC, όχι shared-DB).
 - **Inbox draft-first** (`WhmcsInbox`) — webhook/poll → `pending_whmcs_invoices` →
   «Δημιουργία Παραστατικού» (editable draft) → lifecycle → write-back `invoiced=MARK`.
+- **Inbox alerts**: «άμεση τιμολόγηση» rows float to top + red badge + red nav badge +
+  **durable bell notification** (Filament database notifications, 30s poll) on staging· 30s
+  table poll· **«Τρίτος» badge** (δικαιούχος / «Πολλοί (N)») + «Άμεσο»/«Τρίτος» filters.
 - **Πρόθεση πελάτη** (τιμολόγιο/απόδειξη, ΑΦΜ/ΔΟΥ, «λείπει ΑΦΜ»), **legacy badge**.
 - **Αμφίδρομη ορατότητα** (WHMCS-side): badge+ΜΑΡΚ, badge λίστας, «Αποστολή στο Ekdosi»,
   **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ), συγκεντρωτική λίστα, AFM-keyed + deterministic
   `invoiced===legacy_id` historical link.
 - **timologia v2 / τρίτοι** — resolution, single-party billing, **multi-party guided
-  split** (όχι σιωπηλό ανακάτεμα), editable routing.
+  split** (όχι σιωπηλό ανακάτεμα), editable routing. **Τύπος ανά δικαιούχο**: η ΙΔΙΑ μερίδα
+  του μεταπωλητή τυποποιείται από το ΔΙΚΟ του ΑΦΜ (χωρίς ΑΦΜ → Απόδειξη), οι routed γραμμές
+  από το ρητό per-route `is_receipt` προς τον τελικό πελάτη (κάθε δικαιούχος → δικό του παραστατικό).
+- **Άμεση τιμολόγηση (auto-issue) type-aware** — διαλέγει Απόδειξη/Τιμολόγιο από την πρόθεση
+  (ΑΦΜ/wantsinvoice ή route is_receipt)· `whmcs_default_invoice_type_id` + `whmcs_default_receipt_type_id`·
+  ό,τι δεν τυποποιείται με ασφάλεια ΜΕΝΕΙ στο Inbox (ποτέ λάθος τύπος).
 - **Plugin-API consolidation** (`resolve.php`) + Bridge logs tab + `whmcs:use-bridge`.
 
 ## 12. Βιβλία / Λογιστικά / Αναφορές

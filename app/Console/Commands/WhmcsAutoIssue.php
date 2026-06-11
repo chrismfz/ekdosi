@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * G8 phase 2 — γκρινιάρης auto-issue.
+ * G8 phase 2 — άμεση τιμολόγηση auto-issue.
  *
  *   php artisan whmcs:auto-issue [--tenant=SLUG] [--dry-run]
  *
@@ -22,7 +22,7 @@ use Throwable;
  * operator asked for:
  *
  *   • the tenant armed it (companies.whmcs_auto_issue_immediate), AND
- *   • the matched customer is flagged needs_immediate_invoice (γκρινιάρης), AND
+ *   • the matched customer is flagged needs_immediate_invoice (άμεση τιμολόγηση), AND
  *   • the row is single-party and cleanly resolvable.
  *
  * This is a TWO-KEY arming: the per-tenant toggle above PLUS the
@@ -45,7 +45,7 @@ use Throwable;
  *     AADE submit) still applies. A guard that throws is caught per-row,
  *     logged loudly, and the row is left for the operator.
  *   - Every auto-filed row is logged (Log::info) and tagged in its notes
- *     ('Αυτόματη έκδοση (γκρινιάρης)') for the audit trail.
+ *     ('Αυτόματη έκδοση (άμεση τιμολόγηση)') for the audit trail.
  *
  * Inert until the scheduler + a queue worker are live (see CLAUDE.md
  * Env-prep) — same as the rest of routes/console.php.
@@ -60,9 +60,9 @@ class WhmcsAutoIssue extends Command
         {--tenant= : Limit to one Company slug (default: every armed tenant).}
         {--dry-run : List what WOULD be auto-issued; file nothing.}';
 
-    protected $description = 'WHMCS bridge: auto-file paid inbox rows for γκρινιάρης (immediate-invoice) customers on tenants that armed it. Files at AADE — gated by the per-tenant toggle + the scheduler flag.';
+    protected $description = 'WHMCS bridge: auto-file paid inbox rows for άμεση τιμολόγηση (immediate-invoice) customers on tenants that armed it. Files at AADE — gated by the per-tenant toggle + the scheduler flag.';
 
-    private const AUDIT_NOTE = 'Αυτόματη έκδοση (γκρινιάρης) — whmcs:auto-issue.';
+    private const AUDIT_NOTE = 'Αυτόματη έκδοση (άμεση τιμολόγηση) — whmcs:auto-issue.';
 
     public function handle(WhmcsInvoiceFiler $filer): int
     {
@@ -75,26 +75,35 @@ class WhmcsAutoIssue extends Command
         }
 
         if ($tenants->isEmpty()) {
-            $this->info('No tenants have γκρινιάρης auto-issue armed (companies.whmcs_auto_issue_immediate). Nothing to do.');
+            $this->info('No tenants have άμεση τιμολόγηση auto-issue armed (companies.whmcs_auto_issue_immediate). Nothing to do.');
 
             return self::SUCCESS;
         }
 
         $totalFiled = 0;
         $totalFailed = 0;
+        $totalHeld = 0;
         $totalCandidates = 0;
 
         foreach ($tenants as $tenant) {
-            [$filed, $failed, $candidates] = $this->processTenant($tenant, $filer, $dryRun);
+            [$filed, $failed, $candidates, $held] = $this->processTenant($tenant, $filer, $dryRun);
             $totalFiled += $filed;
             $totalFailed += $failed;
+            $totalHeld += $held;
             $totalCandidates += $candidates;
         }
 
         $verb = $dryRun ? 'would auto-issue' : 'auto-issued';
         $this->newLine();
-        $this->info("Done. {$verb} {$totalFiled}/{$totalCandidates} γκρινιάρης row(s)".
+        $this->info("Done. {$verb} {$totalFiled}/{$totalCandidates} άμεση τιμολόγηση row(s)".
             ($totalFailed > 0 ? "; {$totalFailed} failed (left in inbox)." : '.'));
+        // Held rows are CORRECT behaviour (type intent the unattended path can't
+        // safely resolve — e.g. receipt-intent with no default receipt type), but
+        // surface the count + a warn so an armed tenant doesn't silently pile up
+        // un-issued rows after deploy (configure whmcs_default_receipt_type_id).
+        if ($totalHeld > 0) {
+            $this->warn("  {$totalHeld} row(s) held for type intent — set a default receipt type or fill ΑΦΜ. See the inbox.");
+        }
 
         return self::SUCCESS;
     }
@@ -115,7 +124,7 @@ class WhmcsAutoIssue extends Command
                 return null;
             }
             if (! $tenant->hasWhmcsIntegration() || ! $tenant->whmcs_auto_issue_immediate) {
-                $this->warn("Tenant '{$slug}' has not armed γκρινιάρης auto-issue (or WHMCS isn't configured). Nothing to do.");
+                $this->warn("Tenant '{$slug}' has not armed άμεση τιμολόγηση auto-issue (or WHMCS isn't configured). Nothing to do.");
 
                 return collect();
             }
@@ -135,7 +144,7 @@ class WhmcsAutoIssue extends Command
     }
 
     /**
-     * @return array{0:int,1:int,2:int} [filed, failed, candidates]
+     * @return array{0:int,1:int,2:int,3:int} [filed, failed, candidates, held]
      */
     private function processTenant(Company $tenant, WhmcsInvoiceFiler $filer, bool $dryRun): array
     {
@@ -156,19 +165,31 @@ class WhmcsAutoIssue extends Command
                 'slug' => $tenant->slug,
             ]);
 
-            return [0, 0, 0];
+            return [0, 0, 0, 0];
         }
+
+        // Optional «Απόδειξη» type for receipt-intent rows (customer didn't ask
+        // for a τιμολόγιο, or a single third-party route is flagged is_receipt).
+        // When unset, receipt-intent rows are HELD for the operator rather than
+        // mis-issued as invoices.
+        $receiptType = $tenant->whmcs_default_receipt_type_id
+            ? InvoiceType::query()
+                ->where('company_id', $tenant->id)
+                ->whereKey($tenant->whmcs_default_receipt_type_id)
+                ->first()
+            : null;
 
         $candidates = $this->candidates($tenant);
 
         if ($candidates->isEmpty()) {
-            $this->line('  No γκρινιάρης rows awaiting issue.');
+            $this->line('  No άμεση τιμολόγηση rows awaiting issue.');
 
-            return [0, 0, 0];
+            return [0, 0, 0, 0];
         }
 
         $filed = 0;
         $failed = 0;
+        $held = 0;
 
         foreach ($candidates as $row) {
             $customer = $row->customer;   // eager-loaded, tenant-scoped, non-trashed
@@ -183,8 +204,25 @@ class WhmcsAutoIssue extends Command
 
             $label = "#{$row->whmcs_invoice_id} → {$customer->name}";
 
+            // Pick receipt vs invoice from the row's intent — never the legacy
+            // «primary VAT decides everything». A receipt-intent row with no
+            // default receipt type (or an ambiguous third-party) is HELD, not
+            // mis-issued.
+            [$chosenType, $holdReason] = $this->chooseType($row, $invoiceType, $receiptType);
+            if ($chosenType === null) {
+                $held++;
+                $this->line("  · {$label}: {$holdReason} — left in inbox.");
+                Log::info('whmcs:auto-issue held a row (type intent needs operator)', [
+                    'company_id' => $tenant->id, 'slug' => $tenant->slug,
+                    'whmcs_invoice_id' => $row->whmcs_invoice_id, 'pending_id' => $row->id,
+                    'reason' => $holdReason,
+                ]);
+
+                continue;
+            }
+
             if ($dryRun) {
-                $this->line("  · would issue {$label} as {$invoiceType->code}");
+                $this->line("  · would issue {$label} as {$chosenType->code}");
                 $filed++;
 
                 continue;
@@ -195,14 +233,14 @@ class WhmcsAutoIssue extends Command
                     tenant: $tenant,
                     pending: $row,
                     customer: $customer,
-                    invoiceType: $invoiceType,
+                    invoiceType: $chosenType,
                     filedByUserId: null,            // system-issued (no operator)
                     auditNote: self::AUDIT_NOTE,
                 );
                 $filed++;
                 $this->line("  ✓ {$label} → {$result->invoice->invcode}".
                     ($result->mark ? " (MARK {$result->mark})" : ' (off-mode)'));
-                Log::info('whmcs:auto-issue filed a γκρινιάρης row', [
+                Log::info('whmcs:auto-issue filed a άμεση τιμολόγηση row', [
                     'company_id' => $tenant->id,
                     'slug' => $tenant->slug,
                     'whmcs_invoice_id' => $row->whmcs_invoice_id,
@@ -216,7 +254,7 @@ class WhmcsAutoIssue extends Command
             } catch (Throwable $e) {
                 $failed++;
                 $this->warn("  ✗ {$label}: {$e->getMessage()} — left in inbox.");
-                Log::error('whmcs:auto-issue failed to file a γκρινιάρης row (left for operator)', [
+                Log::error('whmcs:auto-issue failed to file a άμεση τιμολόγηση row (left for operator)', [
                     'company_id' => $tenant->id,
                     'slug' => $tenant->slug,
                     'whmcs_invoice_id' => $row->whmcs_invoice_id,
@@ -226,11 +264,64 @@ class WhmcsAutoIssue extends Command
             }
         }
 
-        return [$filed, $failed, $candidates->count()];
+        return [$filed, $failed, $candidates->count(), $held];
     }
 
     /**
-     * The narrow, unambiguous, γκρινιάρης set for one tenant. Explicit
+     * Choose the document type for a row from its receipt-vs-invoice INTENT, or
+     * signal a HOLD. Returns [InvoiceType, null] to file, or [null, reason] to
+     * leave the row for the operator.
+     *
+     * Intent:
+     *   - SINGLE third-party: the route's explicit `is_receipt` is authoritative
+     *     (decided by the third party, not the WHMCS client's VAT). Mixed flags
+     *     are ambiguous → hold.
+     *   - own billing: an EXPLICIT wantsinvoice=false → «Απόδειξη»; true or
+     *     unknown(null) → «Τιμολόγιο» (backward compatible — tenants that never
+     *     mapped `wantsinvoice` keep issuing the invoice type).
+     * A receipt intent with no default receipt type configured → hold.
+     *
+     * @return array{0: ?InvoiceType, 1: ?string}
+     */
+    private function chooseType(PendingWhmcsInvoice $row, InvoiceType $invoiceType, ?InvoiceType $receiptType): array
+    {
+        if ($row->third_party_state === PendingWhmcsInvoice::TP_SINGLE) {
+            $isReceipt = $row->singleThirdPartyReceipt();
+            if ($isReceipt === null) {
+                return [null, 'τρίτος με ασαφή/μικτή σήμανση απόδειξης-τιμολογίου'];
+            }
+            if ($isReceipt) {
+                return $receiptType !== null
+                    ? [$receiptType, null]
+                    : [null, 'τρίτος ζητά απόδειξη αλλά δεν έχει οριστεί προεπιλεγμένος τύπος απόδειξης'];
+            }
+
+            return [$invoiceType, null];
+        }
+
+        // Own billing. EXPLICIT invoice intent but no ekdosi ΑΦΜ on the customer
+        // → can't file a valid τιμολόγιο (the counterpart ΑΦΜ comes from
+        // customer.afm); HOLD for the operator to fill it rather than downgrade to
+        // a receipt or file an empty-ΑΦΜ invoice. A WHMCS-typed vatno that isn't on
+        // the ekdosi record does NOT count — see ownLinesAreReceipt().
+        if ($row->wantsInvoice() === true && blank($row->customer?->afm)) {
+            return [null, 'ζητά τιμολόγιο αλλά λείπει ΑΦΜ στον πελάτη ekdosi — συμπλήρωσέ το πρώτα'];
+        }
+
+        // The primary customer's intent (no ΑΦΜ → απόδειξη; has ΑΦΜ +
+        // wantsinvoice≠false → τιμολόγιο). Same predicate the manual splitter uses
+        // for the own portion, so auto and manual agree.
+        if ($row->ownLinesAreReceipt()) {
+            return $receiptType !== null
+                ? [$receiptType, null]
+                : [null, 'ο πελάτης χρειάζεται απόδειξη (χωρίς ΑΦΜ ή δεν ζήτησε τιμολόγιο) αλλά δεν έχει οριστεί προεπιλεγμένος τύπος απόδειξης'];
+        }
+
+        return [$invoiceType, null];
+    }
+
+    /**
+     * The narrow, unambiguous, immediate-invoice set for one tenant. Explicit
      * company_id scope (no BelongsToTenant here). Soft-deleted customers
      * are excluded by the relation's default scope → such rows yield a
      * null customer and are skipped in the loop.
@@ -255,7 +346,8 @@ class WhmcsAutoIssue extends Command
                     PendingWhmcsInvoice::TP_SINGLE,
                 ]))
             ->whereHas('customer', fn ($q) => $q->where('needs_immediate_invoice', true))
-            ->with(['customer:id,company_id,name,needs_immediate_invoice'])
+            // afm is needed by ownLinesAreReceipt() (no ΑΦΜ → απόδειξη).
+            ->with(['customer:id,company_id,name,afm,needs_immediate_invoice'])
             ->orderBy('id')
             ->get();
     }
