@@ -331,9 +331,11 @@
         <div class="balance-box">
             <h3>@gup($L('customer_balance'))</h3>
             <table class="balance">
+                {{-- A negative balance = customer in credit; use the U+2212 minus
+                     to match the rest of the document (deductions/withholding rows). --}}
                 <tr>
                     <td class="label">{{ $L('previous_balance') }}</td>
-                    <td class="value">{{ number_format($customerBalance['previous'], 2, ',', '.') }} €</td>
+                    <td class="value">{{ str_replace('-', '−', number_format($customerBalance['previous'], 2, ',', '.')) }} €</td>
                 </tr>
                 <tr>
                     <td class="label">{{ $L('this_document') }}</td>
@@ -341,7 +343,7 @@
                 </tr>
                 <tr class="new">
                     <td class="label">{{ $L('new_balance') }}</td>
-                    <td class="value">{{ number_format($customerBalance['new'], 2, ',', '.') }} €</td>
+                    <td class="value">{{ str_replace('-', '−', number_format($customerBalance['new'], 2, ',', '.')) }} €</td>
                 </tr>
             </table>
         </div>

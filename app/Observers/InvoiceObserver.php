@@ -52,6 +52,13 @@ class InvoiceObserver
      * Best-effort: the issue already persisted, so a hiccup computing the
      * balance must never look like a failed finalize. saveQuietly avoids
      * re-entering the observer.
+     *
+     * Deliberately NOT gated on wasChanged('local_status') (unlike the stock /
+     * service-contract hooks): the `snapshot !== null` guard already short-circuits
+     * every already-captured invoice BEFORE the read-heavy buildStatsBlock, so the
+     * only builds are the at-issue capture and a retry on a still-null one (a prior
+     * best-effort failure) — both wanted. Omitting the transition guard keeps that
+     * retry resilience.
      */
     private function captureCustomerBalanceSnapshot(Invoice $invoice): void
     {

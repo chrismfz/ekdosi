@@ -22,7 +22,7 @@ return new class extends Migration
             $table->boolean('show_customer_balance_on_pdf')->default(false)->after('pdf_footer_text');
         });
         Schema::table('customers', function (Blueprint $table): void {
-            $table->boolean('show_balance_on_pdf')->nullable()->after('details');
+            $table->boolean('show_balance_on_pdf')->nullable()->after('is_favorite');
         });
     }
 

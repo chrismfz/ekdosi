@@ -395,6 +395,13 @@ class Invoice extends Model
      * This document's signed contribution to the customer's running balance:
      * +payable for a credit-term sale, −payable for a credit note, 0 for a
      * cash-term sale. So Προηγούμενο υπόλοιπο = snapshot − contribution.
+     *
+     * NOTE: reconciles with the snapshot (built from CustomerLedgerBuilder, whose
+     * `payable()` is `payable_total ?? gross_total`) only while `payable_total` is
+     * populated — which it always is for app-issued invoices (RecomputeInvoiceTotals
+     * writes it before issue, and only app-issued rows get a snapshot). On a NULL
+     * fallback the two would diverge by the [208] adjustment; that path is unreachable
+     * here by construction.
      */
     public function customerBalanceContribution(): float
     {
