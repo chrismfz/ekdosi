@@ -143,6 +143,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - Ενοποιημένο plugin **`ekdosi_bridge`**, **PHP-to-PHP μέσω WHMCS API** (HMAC, όχι shared-DB).
 - **Inbox draft-first** (`WhmcsInbox`) — webhook/poll → `pending_whmcs_invoices` →
   «Δημιουργία Παραστατικού» (editable draft) → lifecycle → write-back `invoiced=MARK`.
+- **Inbox alerts**: «άμεση τιμολόγηση» rows float to top + red badge + red nav badge +
+  **durable bell notification** (Filament database notifications, 30s poll) on staging· 30s
+  table poll· **«Τρίτος» badge** (δικαιούχος / «Πολλοί (N)») + «Άμεσο»/«Τρίτος» filters.
 - **Πρόθεση πελάτη** (τιμολόγιο/απόδειξη, ΑΦΜ/ΔΟΥ, «λείπει ΑΦΜ»), **legacy badge**.
 - **Αμφίδρομη ορατότητα** (WHMCS-side): badge+ΜΑΡΚ, badge λίστας, «Αποστολή στο Ekdosi»,
   **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ), συγκεντρωτική λίστα, AFM-keyed + deterministic

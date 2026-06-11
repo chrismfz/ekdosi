@@ -70,6 +70,17 @@ class WhmcsInboxResource extends Resource
 
     public static function getNavigationBadgeColor(): ?string
     {
+        // Red when an «άμεση τιμολόγηση» row is waiting — a persistent nav-level
+        // cue that something needs issuing NOW; plain warning otherwise.
+        $tenant = Filament::getTenant();
+        if ($tenant && PendingWhmcsInvoice::query()
+            ->where('company_id', $tenant->getKey())
+            ->where('status', PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
+            ->whereHas('customer', fn ($q) => $q->where('needs_immediate_invoice', true))
+            ->exists()) {
+            return 'danger';
+        }
+
         return 'warning';
     }
 

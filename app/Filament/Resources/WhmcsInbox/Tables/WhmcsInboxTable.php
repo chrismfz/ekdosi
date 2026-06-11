@@ -51,7 +51,16 @@ class WhmcsInboxTable
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
                 $query->where('company_id', $tenant?->getKey() ?? 0)
-                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
+                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map'])
+                    // «Άμεση τιμολόγηση» rows float to the top (correlated subquery
+                    // on the matched customer's flag) — the default created_at sort
+                    // below stays the secondary order.
+                    ->orderByDesc(
+                        Customer::query()
+                            ->select('needs_immediate_invoice')
+                            ->whereColumn('customers.id', 'pending_whmcs_invoices.customer_id')
+                            ->limit(1)
+                    );
             })
             ->columns([
                 // Bridges/Connectors: which billing source this row came from. One
@@ -164,6 +173,24 @@ class WhmcsInboxTable
                         : null)
                     ->tooltip('Ο πελάτης ζητά άμεση τιμολόγηση — δώσε προτεραιότητα.'),
 
+                // Scannable third-party flag: lights up when the WHMCS invoice
+                // routes (some/all) lines to a beneficiary other than the client.
+                // Single → the beneficiary name; multi → «Πολλοί (N)» (needs split).
+                // The «Παραλήπτης» column carries the detail; this is the at-a-glance
+                // «έχει τρίτο;» badge the operator scans for.
+                TextColumn::make('third_party')
+                    ->label('Τρίτος')
+                    ->badge()
+                    ->icon('heroicon-o-users')
+                    ->placeholder('—')
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->third_party_state) {
+                        PendingWhmcsInvoice::TP_SINGLE => self::firstBeneficiaryName($r) ?? 'Τρίτος',
+                        PendingWhmcsInvoice::TP_MULTI => 'Πολλοί ('.count(self::beneficiaryNames($r)).')',
+                        default => null,
+                    })
+                    ->color(fn (PendingWhmcsInvoice $r): string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI ? 'warning' : 'info')
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => ($n = self::beneficiaryNames($r)) !== [] ? implode(' · ', $n) : null),
+
                 TextColumn::make('status')
                     ->label('Κατάσταση')
                     ->badge()
@@ -236,6 +263,9 @@ class WhmcsInboxTable
                     ->tooltip('Πότε συγχρονίστηκε στο inbox'),
             ])
             ->defaultSort('created_at', 'desc')
+            // Auto-refresh so a freshly-paid (immediate) row surfaces within ~30s
+            // without a manual reload — pairs with the bell notification.
+            ->poll('30s')
             ->filters([
                 SelectFilter::make('status')
                     ->label('Κατάσταση')
@@ -263,6 +293,26 @@ class WhmcsInboxTable
                         'yes' => $query->where('legacy_invoiced', '>', 0),
                         'no' => $query->where('legacy_invoiced', 0),
                         'unknown' => $query->whereNull('legacy_invoiced'),
+                        default => $query,
+                    }),
+
+                // Isolate the rows the operator scans for most.
+                SelectFilter::make('immediate')
+                    ->label('Άμεσο')
+                    ->options(['yes' => 'Άμεσα μόνο'])
+                    ->query(fn (Builder $query, array $data): Builder => ($data['value'] ?? null) === 'yes'
+                        ? $query->whereHas('customer', fn (Builder $q) => $q->where('needs_immediate_invoice', true))
+                        : $query),
+
+                SelectFilter::make('third_party')
+                    ->label('Τρίτος')
+                    ->options([
+                        'any' => 'Με τρίτο',
+                        PendingWhmcsInvoice::TP_MULTI => 'Πολλαπλοί (split)',
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'any' => $query->whereIn('third_party_state', [PendingWhmcsInvoice::TP_SINGLE, PendingWhmcsInvoice::TP_MULTI]),
+                        PendingWhmcsInvoice::TP_MULTI => $query->where('third_party_state', PendingWhmcsInvoice::TP_MULTI),
                         default => $query,
                     }),
             ])

@@ -42,6 +42,11 @@ class AdminPanelProvider extends PanelProvider
                     ->bool('system.require_2fa', (bool) config('ekdosi.require_2fa', false)),
             )
             ->tenant(Company::class, slugAttribute: 'slug')
+            // Bell + durable «άμεση τιμολόγηση» alerts (WhmcsInvoiceIngestor sends
+            // a database notification when a paid immediate row is staged). Polls
+            // so a new one surfaces within ~30s without a websocket server.
+            ->databaseNotifications()
+            ->databaseNotificationsPolling('30s')
             ->colors([
                 'primary' => Color::Amber,
             ])

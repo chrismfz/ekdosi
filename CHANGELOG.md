@@ -17,6 +17,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Added
+- **WHMCS inbox: «άμεση τιμολόγηση» can't-miss alerts + scannable third-party.** A paid
+  immediate-invoice row now (a) floats to the top of the inbox, (b) carries the red «Άμεσο»
+  bolt badge, (c) flips the nav badge to red, and (d) fires a **durable Filament database
+  notification (the bell)** to the tenant's operators when it's staged — so the manual,
+  reviewed path is fast enough that unattended auto-issue is optional, not needed. The inbox
+  table polls every 30s. New **«Τρίτος»** badge column (single beneficiary name / «Πολλοί (N)»)
+  + «Άμεσο»/«Τρίτος» quick filters. Enabled `databaseNotifications` (30s poll) on the panel.
+
 ### Fixed
 - **WHMCS third-party document-type bug (Απόδειξη vs Τιμολόγιο per party).** The WHMCS
   plugin defaults a line's `is_receipt` to `false` for the customer's OWN (non-routed)

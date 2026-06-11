@@ -7,6 +7,7 @@ use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Models\PendingWhmcsInvoice;
+use Filament\Notifications\Notification;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -91,7 +92,7 @@ class WhmcsInvoiceIngestor
         unset($whmcsInvoicePayload['third_party']);
         $tp = $this->thirdPartyDecision($tenant, $invoiceId, $embeddedRouting);
 
-        return DB::transaction(function () use (
+        $result = DB::transaction(function () use (
             $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp
         ) {
             $existing = PendingWhmcsInvoice::query()
@@ -189,6 +190,50 @@ class WhmcsInvoiceIngestor
 
             return new IngestionResult(row: $existing, created: false, auditPreserved: false);
         });
+
+        // After commit (outside the tx, so a notification hiccup can't roll back
+        // the staging): ping the operators for a NEW immediate-invoice row.
+        $this->notifyIfImmediate($tenant, $result);
+
+        return $result;
+    }
+
+    /**
+     * Database-notify the tenant's operators when a NEW «άμεση τιμολόγηση»
+     * (needs_immediate_invoice) row is staged for review — the durable «bell» so
+     * a paid-and-waiting row is never missed (no unattended filing needed). Only
+     * on creation + pending_review + the matched customer flagged immediate;
+     * re-ingests (updates) and non-immediate rows are silent. Best-effort: a
+     * notification failure must never break ingestion.
+     */
+    private function notifyIfImmediate(Company $tenant, IngestionResult $result): void
+    {
+        $row = $result->row;
+        if (! $result->created
+            || $row->status !== PendingWhmcsInvoice::STATUS_PENDING_REVIEW
+            || ! $row->customer?->needs_immediate_invoice) {
+            return;
+        }
+
+        $recipients = $tenant->users;
+        if ($recipients->isEmpty()) {
+            return;
+        }
+
+        try {
+            Notification::make()
+                ->title('Άμεσο παραστατικό προς έκδοση')
+                ->body("WHMCS #{$row->whmcs_invoice_id} — {$row->customer?->name} ζητά άμεση τιμολόγηση.")
+                ->icon('heroicon-o-bolt')
+                ->color('danger')
+                ->sendToDatabase($recipients);
+        } catch (\Throwable $e) {
+            Log::warning('Immediate-invoice notification failed (ingestion unaffected).', [
+                'company_id' => $tenant->id,
+                'pending_id' => $row->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
