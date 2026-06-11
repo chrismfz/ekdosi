@@ -80,10 +80,10 @@ class StockService
             if (! $product || ! $product->track_stock) {
                 continue;
             }
-            if ($this->lineAlreadyMoved(InvoiceLine::class, $line->getKey())) {
+            if ($this->lineAlreadyMoved($product->company_id, InvoiceLine::class, $line->getKey())) {
                 continue;
             }
-            if ($this->groupMovedProduct(DeliveryNoteLine::class, $linkedDeliveryLineIds, (int) $product->id)) {
+            if ($this->groupMovedProduct($product->company_id, DeliveryNoteLine::class, $linkedDeliveryLineIds, (int) $product->id)) {
                 continue;
             }
             $this->record($product, -(float) $line->qty, StockMovement::REASON_SALE, source: $line, occurredAt: $invoice->issued_at);
@@ -111,10 +111,10 @@ class StockService
             if (! $product || ! $product->track_stock) {
                 continue;
             }
-            if ($this->lineAlreadyMoved(DeliveryNoteLine::class, $line->getKey())) {
+            if ($this->lineAlreadyMoved($product->company_id, DeliveryNoteLine::class, $line->getKey())) {
                 continue;
             }
-            if ($this->groupMovedProduct(InvoiceLine::class, $linkedInvoiceLineIds, (int) $product->id)) {
+            if ($this->groupMovedProduct($product->company_id, InvoiceLine::class, $linkedInvoiceLineIds, (int) $product->id)) {
                 continue;
             }
             $this->record($product, -(float) $line->qty, StockMovement::REASON_SALE, source: $line, occurredAt: $note->issued_at);
@@ -137,7 +137,7 @@ class StockService
             if (! $product || ! $product->track_stock) {
                 continue;
             }
-            if ($this->lineHasMovement(InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
+            if ($this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
                 continue;
             }
             $this->record($product, (float) $line->qty, StockMovement::REASON_RETURN, source: $line, occurredAt: $creditNote->issued_at);
@@ -174,10 +174,10 @@ class StockService
             if (! $product || ! $product->track_stock) {
                 continue;
             }
-            if (! $this->lineHasMovement(InvoiceLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
+            if (! $this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
                 continue; // this line never moved (e.g. the linked δελτίο did) — nothing to reverse
             }
-            if ($this->lineHasMovement(InvoiceLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
+            if ($this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
                 continue; // already reversed
             }
 
@@ -211,15 +211,22 @@ class StockService
     // matching → double-counting.
 
     /** Has THIS exact source line already produced a sale movement? (idempotent re-fire) */
-    private function lineAlreadyMoved(string $sourceType, int|string $sourceId): bool
+    private function lineAlreadyMoved(int|string $companyId, string $sourceType, int|string $sourceId): bool
     {
-        return $this->lineHasMovement($sourceType, $sourceId, StockMovement::REASON_SALE);
+        return $this->lineHasMovement($companyId, $sourceType, $sourceId, StockMovement::REASON_SALE);
     }
 
     /** Has THIS exact source line already produced a movement of the given reason? */
-    private function lineHasMovement(string $sourceType, int|string $sourceId, string $reason): bool
+    private function lineHasMovement(int|string $companyId, string $sourceType, int|string $sourceId, string $reason): bool
     {
         return StockMovement::query()
+            // Explicit tenant filter: these helpers run from the InvoiceObserver
+            // (queued/sync, NO ambient CompanyContext), so the global scope is a
+            // no-op here. source_id is a globally-unique surrogate PK so this was
+            // never a leak — but scope it anyway (defense-in-depth + survives any
+            // future strict tenant mode). The caller always has the product's
+            // company_id (the same value record() stamps on the movement).
+            ->where('company_id', $companyId)
             ->where('reason', $reason)
             ->where('source_type', $sourceType)
             ->where('source_id', $sourceId)
@@ -227,13 +234,14 @@ class StockService
     }
 
     /** Has the linked counterpart (sale group) already moved this product? (whichever-first) */
-    private function groupMovedProduct(string $sourceType, array $sourceLineIds, int $productId): bool
+    private function groupMovedProduct(int|string $companyId, string $sourceType, array $sourceLineIds, int $productId): bool
     {
         if ($sourceLineIds === []) {
             return false;
         }
 
         return StockMovement::query()
+            ->where('company_id', $companyId)
             ->where('reason', StockMovement::REASON_SALE)
             ->where('product_id', $productId)
             ->where('source_type', $sourceType)

@@ -400,7 +400,15 @@ The behaviors below are how the system actually works — keep them in mind:
   so raw `Invoice::where(...)` in the panel auto-filters. **No-op when no context** (CLI/queue) →
   existing explicit `->where('company_id', …)` paths unchanged. Opt in from CLI/jobs with
   `CompanyContext::actAs($company, fn () => …)`; opt out per query with
-  `->withoutGlobalScope(CompanyScope::class)`. (Strict null→throw mode deferred — BACKLOG.)
+  `->withoutGlobalScope(CompanyScope::class)`. **The CLI/queue rule for ANY new
+  command/job/observer/webhook that touches a tenant-owned model: pick ONE of —
+  (a) explicit `->where('company_id', …)` (the dominant existing pattern), (b)
+  `actAs($company, …)`, or (c) a deliberate all-tenant sweep → `->withoutGlobalScope(
+  CompanyScope::class)` to DECLARE the intent.** A full audit (2026-06-11) found **0
+  live leaks** across all ~54 entry points, so the no-op default is currently
+  load-bearing AND correct. Strict null→throw stays deferred (a naive flip would break
+  ~18 safe explicit-where paths; an execution-time tripwire false-positives on
+  relation/eager-load FK queries — see `docs/CLAUDE-history.md`).
 - **Activity log** (`spatie/laravel-activitylog` via `TracksActivity` on Invoice/Customer/Payment):
   `logOnly(loggedAttributes())` — business columns only, NEVER the money/myDATA CACHE columns;
   `logOnlyDirty()` + `dontLogEmptyChanges()` (a cache recompute or the query-builder ETL never spams

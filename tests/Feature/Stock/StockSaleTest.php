@@ -97,6 +97,42 @@ class StockSaleTest extends TestCase
         $this->assertDatabaseMissing('stock_movements', ['product_id' => $this->untracked->id, 'reason' => 'sale']);
     }
 
+    public function test_sale_dedup_is_tenant_scoped(): void
+    {
+        // The idempotency/whichever-first guards run from the InvoiceObserver with
+        // NO ambient CompanyContext (the global scope is a no-op there), so they
+        // now filter company_id explicitly. Prove it: plant a foreign-tenant
+        // movement whose source_id COLLIDES with our line id. source_id is a
+        // globally-unique surrogate PK so this can't happen in production — but the
+        // synthetic collision shows the dedup query no longer matches across
+        // tenants (the unscoped version would have wrongly skipped our sale).
+        $inv = $this->draftInvoice();
+        $line = $this->line($inv, $this->tracked, 3);
+
+        $other = Company::create(['name' => 'Other', 'slug' => 'oth-'.uniqid(), 'country_code' => 'GR']);
+        StockMovement::create([
+            'company_id' => $other->id,
+            // A different product so it can't pollute currentStock(tracked) — the
+            // dedup (lineHasMovement) keys on source_type+source_id, not product.
+            'product_id' => $this->untracked->id,
+            'qty_change' => -1,
+            'reason' => StockMovement::REASON_SALE,
+            'source_type' => InvoiceLine::class,
+            'source_id' => $line->id,           // the colliding key
+            'occurred_at' => now(),
+        ]);
+
+        $inv->update(['local_status' => 'active']);
+
+        // Our sale still fires (the foreign movement is filtered out by company_id).
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh())); // 10 − 3
+        $this->assertSame(1, StockMovement::query()
+            ->where('company_id', $this->tenant->id)
+            ->where('source_id', $line->id)
+            ->where('reason', StockMovement::REASON_SALE)
+            ->count());
+    }
+
     public function test_reactivation_is_idempotent(): void
     {
         $inv = $this->draftInvoice();
