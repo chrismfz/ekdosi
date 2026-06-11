@@ -38,6 +38,15 @@ class WhmcsInboxTable
 {
     public static function configure(Table $table): Table
     {
+        // Bridges/Connectors: resolve source-key → label ONCE from the registry
+        // (not per row). An unregistered source key on a row then falls back to
+        // its upper-cased key WITHOUT spamming a "unknown source" warning per row
+        // (BillingSourceRegistry::for() logs + doesn't cache null on miss).
+        $sourceLabels = [];
+        foreach (app(\App\Services\Billing\BillingSourceRegistry::class)->all() as $key => $src) {
+            $sourceLabels[$key] = $src->label();
+        }
+
         return $table
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
@@ -45,6 +54,17 @@ class WhmcsInboxTable
                     ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
             })
             ->columns([
+                // Bridges/Connectors: which billing source this row came from. One
+                // «Εισερχόμενα» for every bridge; the badge label comes from the
+                // source's registry entry (so a future WooCommerce row reads its own
+                // label from one place). WHMCS-only today, but already source-driven.
+                TextColumn::make('source')
+                    ->label('Πηγή')
+                    ->badge()
+                    ->color('gray')
+                    ->formatStateUsing(fn (?string $state): string => $sourceLabels[(string) $state]
+                        ?? strtoupper((string) ($state ?? '—'))),
+
                 TextColumn::make('whmcs_invoice_id')
                     // Phase 0 (Bridges/Connectors): the external-id label comes
                     // from the billing source's capabilities, so a future source

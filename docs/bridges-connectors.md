@@ -5,9 +5,15 @@ WooCommerce / Blesta / OpenCart / PrestaShop tomorrow) and turns them into
 ekdosi invoices, **without** entangling those systems with the legal core
 (invoices / myDATA / money / PDF / customers).
 
-> **Status:** Phase 0 landed (the seam + the multi-source registry). Phase 1
-> (a real second source) is deferred until one actually arrives — that's when
-> the data contract is finalised from *two* shapes, not guessed from one.
+> **Status:** Phase 0 landed (the seam + the multi-source registry). **Phase 0.5
+> landed** (presentation-only): the inbox is the source-neutral «Εισερχόμενα» with
+> a per-row source badge, and a «Γέφυρες» page (`Bridges`, `View:Bridges`) lists
+> the registered sources with TRUTHFUL status (no fake on/off toggle — the live
+> pipeline keys off `companies.whmcs_*`, not `billing_connections.is_active`).
+> Phase 1 (a real second source) is deferred until one actually arrives — that's
+> when the data contract is finalised from *two* shapes, not guessed from one, and
+> when `companies.whmcs_*` → `billing_connections.config` + real is_active gating
+> become worth doing.
 > **§8–§10 capture the candidate sources + concrete Phase-1 pickup notes** so a
 > future implementer (or a fresh session) can start without re-deriving them.
 

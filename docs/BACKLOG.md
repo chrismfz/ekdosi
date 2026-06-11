@@ -100,6 +100,10 @@ surfaced in the open-items sections further down.
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
   (InvoSign/SBZ). `paroxos/`.
 - **Bridges/Connectors Phase 1** — πραγματική 2η πηγή (WooCommerce/Blesta…). `bridges-connectors.md`.
+  _Phase 0.5 ✅ (presentation-only): source-neutral «Εισερχόμενα» + source badge · «Γέφυρες» page
+  (honest status, no fake toggle). Phase 1 = move `companies.whmcs_*` → `billing_connections.config`,
+  ExternalDocument DTO, generic ingest dispatcher, real is_active gating, + the 2nd connector —
+  build WHEN a real 2nd source exists (designing the contract against WHMCS+guesswork bakes in WHMCS-isms)._
 - **AI «Βοηθός»** — Phase 1 read-only Q&A (~1 βδομάδα). `ai-assistant-blueprint.md`.
 - **Payment connectors** — IRIS + card-POS. `payment-connectors.md`.
 

@@ -133,7 +133,13 @@ matrix** + per-customer `service_contracts`· **ανανέωση = staged DRAFT*
 auto-AADE)· **dunning** (auto suspend/terminate, opt-in ανά προϊόν)· **provisioning
 seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcoming.
 
-## 11. WHMCS γέφυρα
+## 11. Γέφυρες τιμολόγησης (WHMCS + seam για πολλαπλές)
+- **Source-neutral «Εισερχόμενα»** + per-row **source badge** (από `BillingSourceRegistry`)·
+  **«Γέφυρες» page** (`Bridges`, `View:Bridges`): λίστα πηγών με αληθινό status (WHMCS
+  «ρυθμισμένο» = creds) + link ρυθμίσεων. Χωρίς fake on/off — η πραγματική
+  ενεργοποίηση/credentials-ανά-σύνδεση (`billing_connections.config`) είναι Phase 1
+  (όταν προστεθεί 2η γέφυρα). Phase-0 seam: `BillingSource`/`BillingSourceRegistry`/
+  `SourceCapabilities` + `billing_connections` (company×source×is_active×config).
 - Ενοποιημένο plugin **`ekdosi_bridge`**, **PHP-to-PHP μέσω WHMCS API** (HMAC, όχι shared-DB).
 - **Inbox draft-first** (`WhmcsInbox`) — webhook/poll → `pending_whmcs_invoices` →
   «Δημιουργία Παραστατικού» (editable draft) → lifecycle → write-back `invoiced=MARK`.
