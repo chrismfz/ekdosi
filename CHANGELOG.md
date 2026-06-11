@@ -16,6 +16,9 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-06-11
+
 ### Added
 - **Withholding/fees count toward what's owed.** New `invoices.payable_total` = the
   COLLECTIBLE (gross_total = net+VAT, PLUS the AADE [208] adjustment: fees/stamp/other
