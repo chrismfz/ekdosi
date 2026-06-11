@@ -38,6 +38,15 @@ class WhmcsInboxTable
 {
     public static function configure(Table $table): Table
     {
+        // Bridges/Connectors: resolve source-key → label ONCE from the registry
+        // (not per row). An unregistered source key on a row then falls back to
+        // its upper-cased key WITHOUT spamming a "unknown source" warning per row
+        // (BillingSourceRegistry::for() logs + doesn't cache null on miss).
+        $sourceLabels = [];
+        foreach (app(\App\Services\Billing\BillingSourceRegistry::class)->all() as $key => $src) {
+            $sourceLabels[$key] = $src->label();
+        }
+
         return $table
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
@@ -53,8 +62,8 @@ class WhmcsInboxTable
                     ->label('Πηγή')
                     ->badge()
                     ->color('gray')
-                    ->formatStateUsing(fn (?string $state): string => app(\App\Services\Billing\BillingSourceRegistry::class)
-                        ->for((string) $state)?->label() ?? strtoupper((string) ($state ?? '—'))),
+                    ->formatStateUsing(fn (?string $state): string => $sourceLabels[(string) $state]
+                        ?? strtoupper((string) ($state ?? '—'))),
 
                 TextColumn::make('whmcs_invoice_id')
                     // Phase 0 (Bridges/Connectors): the external-id label comes
