@@ -24,8 +24,11 @@ use Illuminate\Support\Facades\DB;
  *
  * Balance semantics mirror the legacy GET_CUSTOMER_BALANCE stored
  * procedure (schema.sql:652):
- *   balance = SUM(invoice.gross_total WHERE due_days > 0)
+ *   balance = SUM(invoice.payable_total WHERE due_days > 0)
  *           - SUM(payment.amount)
+ * where payable_total is the COLLECTIBLE (net+VAT + fees − withholding, AADE
+ * [208]) — withholding/fees reduce what the customer actually pays. Turnover
+ * stats (ytd_gross, the yearly gross/net columns) stay on gross_total.
  * Cash-term invoices (payment_method.due_days = 0) do NOT count
  * toward balance. Credit-term invoices DO. This is a load-bearing
  * Greek-accounting convention - cash sales are settled at point
@@ -154,6 +157,7 @@ class CustomerLedgerBuilder
                 'invoices.issued_at',
                 'invoices.net_total',
                 'invoices.gross_total',
+                'invoices.payable_total',
                 'invoices.mydata_state',
                 'invoices.mydata_mark',
                 'invoices.credited_invoice_id',
@@ -174,6 +178,18 @@ class CustomerLedgerBuilder
     private function isCreditNote(object $inv): bool
     {
         return $inv->credited_invoice_id !== null || (bool) ($inv->is_credit ?? false);
+    }
+
+    /**
+     * The COLLECTIBLE amount of an invoice row for the AR ledger: payable_total
+     * (net+VAT + fees − withholding) when present, else gross_total (rows not yet
+     * backfilled). This is the basis for the receivables BALANCE / aging / running
+     * balance — NOT the turnover stats (ytd_gross, the yearly gross/net columns),
+     * which keep gross_total (the document value).
+     */
+    private function payable(object $inv): float
+    {
+        return (float) ($inv->payable_total ?? $inv->gross_total);
     }
 
     /**
@@ -277,14 +293,17 @@ class CustomerLedgerBuilder
             $sign = $isCreditNote ? -1 : 1;
 
             if ($issuedAt->year === $currentYear) {
+                // YTD net/gross = turnover (document value) — stays gross_total.
                 $ytdNet += $sign * (float) $inv->net_total;
                 $ytdGross += $sign * (float) $inv->gross_total;
             }
 
+            // Balance basis = the collectible (payable_total), so withholding/fees
+            // are reflected in what the customer owes.
             if ($isCreditNote) {
-                $creditReductions += (float) $inv->gross_total;
+                $creditReductions += $this->payable($inv);
             } elseif ($isCreditTerm) {
-                $creditTermGross += (float) $inv->gross_total;
+                $creditTermGross += $this->payable($inv);
             }
 
             if ($lastActivity === null || $issuedAt->gt($lastActivity)) {
@@ -337,7 +356,7 @@ class CustomerLedgerBuilder
                 if (! $isCreditTerm || $this->isCreditNote($inv)) {
                     continue;
                 }
-                $gross = (float) $inv->gross_total;
+                $gross = $this->payable($inv);
                 if ($remainingPaid >= $gross) {
                     $remainingPaid -= $gross;
 
@@ -376,7 +395,7 @@ class CustomerLedgerBuilder
         // Credit notes settle receivables FIFO just like payments; refunds
         // count negative (signedAmount) — they un-settle.
         $totalPaid = (float) $payments->sum(fn ($p) => $this->signedAmount($p))
-            + (float) $invoices->filter(fn ($inv) => $this->isCreditNote($inv))->sum('gross_total');
+            + (float) $invoices->filter(fn ($inv) => $this->isCreditNote($inv))->sum(fn ($inv) => $this->payable($inv));
         $bucket = [
             'bucket_0_30' => 0.0,
             'bucket_31_60' => 0.0,
@@ -391,7 +410,7 @@ class CustomerLedgerBuilder
                 continue;
             }
 
-            $gross = (float) $inv->gross_total;
+            $gross = $this->payable($inv);
             if ($totalPaid >= $gross) {
                 $totalPaid -= $gross;
 
@@ -428,10 +447,13 @@ class CustomerLedgerBuilder
             // Credit notes carry negative net/gross (they reduce sales +
             // the year-end running balance).
             $sign = $this->isCreditNote($inv) ? -1 : 1;
-            $byYear[$year] ??= ['year' => $year, 'invoice_count' => 0, 'net' => 0.0, 'gross' => 0.0, 'paid' => 0.0];
+            // net/gross = turnover (document value); `payable` = the collectible,
+            // used only for the year-end running BALANCE (withholding-aware).
+            $byYear[$year] ??= ['year' => $year, 'invoice_count' => 0, 'net' => 0.0, 'gross' => 0.0, 'payable' => 0.0, 'paid' => 0.0];
             $byYear[$year]['invoice_count']++;
             $byYear[$year]['net'] += $sign * (float) $inv->net_total;
             $byYear[$year]['gross'] += $sign * (float) $inv->gross_total;
+            $byYear[$year]['payable'] += $sign * $this->payable($inv);
         }
 
         foreach ($payments as $p) {
@@ -439,7 +461,7 @@ class CustomerLedgerBuilder
                 continue;
             }
             $year = (int) Carbon::parse($p->pay_date)->year;
-            $byYear[$year] ??= ['year' => $year, 'invoice_count' => 0, 'net' => 0.0, 'gross' => 0.0, 'paid' => 0.0];
+            $byYear[$year] ??= ['year' => $year, 'invoice_count' => 0, 'net' => 0.0, 'gross' => 0.0, 'payable' => 0.0, 'paid' => 0.0];
             // Refunds reduce that year's paid (signedAmount).
             $byYear[$year]['paid'] += $this->signedAmount($p);
         }
@@ -448,11 +470,13 @@ class CustomerLedgerBuilder
         $running = 0.0;
         $out = [];
         foreach ($byYear as $row) {
-            $running += $row['gross'] - $row['paid'];
+            // Running balance tracks the collectible (payable), not the turnover gross.
+            $running += $row['payable'] - $row['paid'];
             $row['year_end_balance'] = round($running, 2);
             $row['net'] = round($row['net'], 2);
             $row['gross'] = round($row['gross'], 2);
             $row['paid'] = round($row['paid'], 2);
+            unset($row['payable']);   // internal accumulator — not part of the row contract
             $out[] = $row;
         }
 
@@ -482,7 +506,10 @@ class CustomerLedgerBuilder
             // balance); a normal invoice is a debit. is_credit_term is
             // forced false on credit notes so the debit branch is skipped.
             $isCreditNote = $this->isCreditNote($inv);
-            $gross = (float) $inv->gross_total;
+            // AR-ledger debit/credit = the collectible (net of withholding), so the
+            // running balance stays consistent with the receivables balance. The
+            // document value (gross) lives on the invoice + the turnover stats.
+            $gross = $this->payable($inv);
             $events[] = [
                 'date_sort' => Carbon::parse($inv->issued_at)->timestamp,
                 'date' => Carbon::parse($inv->issued_at)->toDateString(),

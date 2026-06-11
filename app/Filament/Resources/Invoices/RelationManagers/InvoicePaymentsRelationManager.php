@@ -118,7 +118,7 @@ class InvoicePaymentsRelationManager extends RelationManager
         // (gross − credited). NOT compared against balance(): for a cash-term
         // invoice the pre-payment balance is the SYNTHETIC 0 (settled-at-issue),
         // which would false-warn on the very first (correct) receipt.
-        $owed = round((float) $invoice->gross_total - (float) $invoice->balanceData()->credited, 2);
+        $owed = round($invoice->payableTotal() - (float) $invoice->balanceData()->credited, 2);
         if ($this->paidSoFar() > $owed + 0.005) {
             Notification::make()->warning()
                 ->title('Υπερπληρωμή')
@@ -155,7 +155,7 @@ class InvoicePaymentsRelationManager extends RelationManager
         $invoice = $this->invoice();
         $credited = (float) $invoice->balanceData()->credited;
 
-        return round(max((float) $invoice->gross_total - $credited - $this->paidSoFar(), 0), 2);
+        return round(max($invoice->payableTotal() - $credited - $this->paidSoFar(), 0), 2);
     }
 
     /**

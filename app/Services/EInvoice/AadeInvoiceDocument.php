@@ -211,16 +211,11 @@ class AadeInvoiceDocument
         $otherTaxes = round((float) ($invoice->other_taxes_amount ?? 0), 2);
         $deductions = round((float) ($invoice->deductions_amount ?? 0), 2);
 
-        // Withholding reduces the gross unless its §8.4 category is informational (8/9/10).
-        $withheldReducesGross = $withheld > 0
-            && ($withheldCat = $invoice->withhold_category) !== null
-            && WithheldPercentCategory::tryFrom((int) $withheldCat)?->affectsTotalGrossValue() === true;
-        $withheldGrossAdjust = $withheldReducesGross ? $withheld : 0.0;
-
-        $grossValue = round(
-            $vatBreakdown->totalGross() + $fees + $stampDuty + $otherTaxes - $deductions - $withheldGrossAdjust,
-            2,
-        );
+        // The gross adjustment is the SAME rule the local `payable_total` uses
+        // (Invoice::additionalTaxAdjustment) — one source so AADE gross and the
+        // ledger's collectible can't diverge. The base differs by design: AADE
+        // uses the per-VAT-rate gross, the ledger uses gross_total.
+        $grossValue = round($vatBreakdown->totalGross() + $invoice->additionalTaxAdjustment(), 2);
 
         $summary = (new InvoiceSummary)
             ->setTotalNetValue($vatBreakdown->totalNet())

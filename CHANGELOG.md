@@ -16,7 +16,22 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-06-11
+
 ### Added
+- **Withholding/fees count toward what's owed.** New `invoices.payable_total` = the
+  COLLECTIBLE (gross_total = net+VAT, PLUS the AADE [208] adjustment: fees/stamp/other
+  up, deductions/withholding down — except the informational §8.4 withholding
+  categories 8/9/10). `gross_total` stays net+VAT (revenue/turnover); `payable_total`
+  is the basis for **owed/balance** everywhere — `InvoiceBalance`, the dashboard
+  receivables, `Customer` owed, the overdue widget + digest, the payments cockpit, and
+  the **Καρτέλα** (current balance, aging, running balance) — so a service invoice with
+  20% παρακράτηση shows the reduced receivable consistently across all surfaces. The PDF
+  «Πληρωτέο» now equals `payable_total` (and surfaces τέλη/χαρτόσημο/παρακράτηση lines).
+  A single `Invoice::additionalTaxAdjustment()` drives both the AADE gross and the local
+  payable, so they can't diverge. **Deploy:** `migrate` then
+  `php artisan invoices:backfill-payable-total` (populates existing rows).
 - **Bilingual / English PDF** (invoice + quote). A per-document `language` choice
   (Greek / English / **bilingual GR-EN**) drives the PDF field labels via a shared
   `App\Support\Pdf\PdfLabels` dictionary; when unset it auto-resolves from the

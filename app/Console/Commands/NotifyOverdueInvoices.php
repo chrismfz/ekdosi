@@ -48,7 +48,7 @@ class NotifyOverdueInvoices extends Command
                 ->where('invoices.company_id', $company->id)
                 ->whereNull('invoices.deleted_at')
                 ->overdue()
-                ->get(['id', 'gross_total', 'credited_total', 'paid_total']);
+                ->get(['id', 'gross_total', 'payable_total', 'credited_total', 'paid_total']);
 
             $count = $overdue->count();
             if ($count === 0) {
@@ -57,7 +57,7 @@ class NotifyOverdueInvoices extends Command
                 continue;
             }
 
-            $total = round($overdue->sum(fn (Invoice $i) => (float) $i->gross_total - (float) $i->credited_total - (float) $i->paid_total), 2);
+            $total = round($overdue->sum(fn (Invoice $i) => $i->payableTotal() - (float) $i->credited_total - (float) $i->paid_total), 2);
             $totalLabel = number_format($total, 2, ',', '.').' €';
 
             $this->info("[{$company->slug}] {$count} ληξιπρόθεσμα, σύνολο {$totalLabel}".($dryRun ? ' (dry-run)' : ''));

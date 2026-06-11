@@ -68,6 +68,22 @@ class IssueCreditNote
                 'code'                    => $allocation->code,
                 'invcode'                 => $allocation->invcode,
                 'header_discount_percent' => $original->header_discount_percent,
+                // Mirror the original's additional-tax RATES/categories so the
+                // credit note reverses the withholding/fees too: RecomputeInvoiceTaxes
+                // then recomputes its amounts from the credit note's (possibly partial)
+                // net, so its payable_total matches what it reverses (no phantom
+                // negative owed on a withholding invoice). Product-linked fees come
+                // back via the copied product_id on the lines below.
+                'withhold_rate'        => $original->withhold_rate,
+                'withhold_category'    => $original->withhold_category,
+                'fees_rate'            => $original->fees_rate,
+                'fees_category'        => $original->fees_category,
+                'other_taxes_rate'     => $original->other_taxes_rate,
+                'other_taxes_category' => $original->other_taxes_category,
+                'stamp_duty_rate'      => $original->stamp_duty_rate,
+                'stamp_duty_category'  => $original->stamp_duty_category,
+                'deductions_rate'      => $original->deductions_rate,
+                'deductions_category'  => $original->deductions_category,
                 // Party snapshot copied from the original — the credit
                 // note is a legal document for the same counterparty.
                 'company_name' => $original->company_name,

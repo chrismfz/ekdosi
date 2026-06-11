@@ -40,6 +40,9 @@
 - **Τέλη / παρακρατήσεις / φόροι** — withholding (§8.4), χαρτόσημο/τέλη/λοιποί/
   κρατήσεις (taxesTotals), **product-linked per-unit fees** (π.χ. τέλος διαμονής),
   «Τυπικά τέλη/φόροι» quick-fill· gross-edit γραμμής (τιμή με ΦΠΑ → back-compute net).
+  **Μετράνε στο εισπρακτέο:** `invoices.payable_total` (= καθαρή+ΦΠΑ + τέλη − παρακράτηση,
+  κανόνας AADE [208]) είναι η βάση για owed/balance/Καρτέλα/receivables (το `gross_total`
+  μένει net+ΦΠΑ = τζίρος)· το PDF «Πληρωτέο» = `payable_total`.
 - **Pickers**: αγαπημένα-πρώτα + most-used + inline create προϊόντος· tags· πλήρες
   ελληνικό UI· «Νέο Παραστατικό» από την Καρτέλα.
 
