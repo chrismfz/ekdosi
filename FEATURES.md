@@ -178,6 +178,11 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   + pending/failed jobs + κουμπί **«Επανάληψη αποτυχημένων»**) — στο νέο nav group
   **«Σύστημα»**. + **«Εργαλεία»** (artisan commands ως κουμπιά) +
   **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run.
+- **`ekdosi:go-live-check --tenant=SLUG [--json]`** — per-tenant cutover-readiness gate
+  (read-only): provider · τύποι+E3 · default ΦΠΑ · ΦΠΑ→ΑΑΔΕ · **production creds (hard FAIL)** ·
+  mode · αρίθμηση · **golden totals-drift** · backups · queue/infra (από `OperatorHealthReport`).
+  myDATA gates SKIP για μη-myDATA tenants. Exit 0/1/2. Runbook: `docs/go-live-runbook.md`
+  (τα χειροκίνητα: Firebird usage probes + AADE production smoke-test).
 - **Scheduler + queue** (DB driver) — backups/auto-email/reconcile/WHMCS/VAT-picture,
   gated by `EKDOSI_SCHEDULE_*` **+ σελίδα «Ρυθμίσεις χρονοπρογραμματιστή»**
   (super_admin-only): toggles ανά εργασία στο `system_settings` store, διαβάζονται
