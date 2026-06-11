@@ -108,7 +108,7 @@ TXT;
             'invoice_type'  => (string) ($invoice->invoiceType?->name ?? 'Παραστατικό'),
             'issued_at'     => $invoice->issued_at?->format('d/m/Y H:i') ?? '',
             'customer_name' => (string) ($invoice->company_name ?? ''),
-            'total'         => $this->money($invoice->gross_total),
+            'total'         => $this->money($invoice->payableTotal()),
             'net_total'     => $this->money($invoice->net_total),
             'mark'          => $mark,
             'verify_url'    => $url,

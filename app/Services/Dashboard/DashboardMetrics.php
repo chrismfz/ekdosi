@@ -93,8 +93,10 @@ class DashboardMetrics
                     });
             });
 
+        // Receivable base = payable_total (collectible) per row, gross_total fallback
+        // for not-yet-backfilled rows. Revenue/turnover sums elsewhere stay on gross_total.
         $row = InvoiceScope::live($base, 'invoices.')
-            ->selectRaw('COALESCE(SUM(invoices.gross_total), 0) - COALESCE(SUM(invoices.credited_total), 0) AS net_owed')
+            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) - COALESCE(SUM(invoices.credited_total), 0) AS net_owed')
             ->first();
 
         $netOwed = (float) ($row->net_owed ?? 0);

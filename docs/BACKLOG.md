@@ -138,4 +138,9 @@ surfaced in the open-items sections further down.
   έχει use case· μια γραμμή δεν είναι οντότητα που ταξινομείς. Tags σε **πελάτες/προϊόντα**
   ήδη υπάρχουν.)_
 - **Curated tax-presets** expansion ανά κλάδο + **%-ανά-προϊόν** (όχι μόνο €/τεμ).
+- **«Υπόλοιπο πελάτη» block στο invoice PDF** (legacy parity — το παλιό σύστημα τύπωνε
+  «ΝΕΟ ΥΠΟΛΟΙΠΟ»). Προηγούμενο + αυτό το παραστατικό + **Νέο υπόλοιπο** (το συνολικό
+  υπόλοιπο καρτέλας, incl. on-account credit — από `CustomerLedger`, **όχι** το payable του
+  εγγράφου). **Προαιρετικό** (per-tenant default + per-customer override): επί πιστώσει B2B
+  ναι, λιανική όχι. _Μετά το «withholding-in-owed», ώστε το «Νέο υπόλοιπο» = σωστό (payable-based)._
 - **`clear:right`** σε single-word doc-types (PDF tweak).

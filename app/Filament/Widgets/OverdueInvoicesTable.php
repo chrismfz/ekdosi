@@ -76,7 +76,7 @@ class OverdueInvoicesTable extends TableWidget
                     ->weight('bold')
                     ->color('danger')
                     ->state(fn (Invoice $record) => round(
-                        (float) $record->gross_total - (float) $record->credited_total - (float) $record->paid_total,
+                        $record->payableTotal() - (float) $record->credited_total - (float) $record->paid_total,
                         2,
                     )),
             ]);

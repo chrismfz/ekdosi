@@ -207,11 +207,11 @@ class Customer extends Model
             })
             ->groupBy('invoices.customer_id')
             ->select('invoices.customer_id')
-            // COALESCE each SUM separately (NOT SUM(gross - credited)) —
-            // credited_total is NULL on never-credited invoices and
-            // per-row NULL arithmetic would null the whole sum. Mirrors
-            // DashboardMetrics::outstandingReceivables() exactly.
-            ->selectRaw('COALESCE(SUM(invoices.gross_total), 0) - COALESCE(SUM(invoices.credited_total), 0) as owed');
+            // Receivable base = payable_total (collectible: net+VAT + fees −
+            // withholding) per row, falling back to gross_total for rows not yet
+            // backfilled. COALESCE each SUM separately (credited_total is NULL on
+            // never-credited invoices). Mirrors DashboardMetrics::outstandingReceivables().
+            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) - COALESCE(SUM(invoices.credited_total), 0) as owed');
         $owed = InvoiceScope::live($owed, 'invoices.');
 
         $paid = DB::table('payments')
