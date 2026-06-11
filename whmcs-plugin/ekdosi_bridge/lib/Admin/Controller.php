@@ -340,6 +340,11 @@ EOF;
         // from their WHMCS custom field, per client, in one batch.
         $wantsInvoice = $this->wantsInvoiceByClient($userIds);
 
+        // «Άμεσο» (immediate-invoice flag): which clients want fast issuance, so
+        // their still-unfiled rows light up RED — the WHMCS-side mirror of the
+        // ekdosi inbox's red badge. Best-effort (no distinct field → no reds).
+        $immediate = $this->griniarisByClient($userIds);
+
         // relid warning per invoice (ONE batch query) — ⚠ N links straight to the
         // relid manager (relidCheck), the same one Inspect / manage-invoice use.
         $relidCounts = RelidInspector::activeCountsForInvoices(
@@ -389,13 +394,23 @@ EOF;
 
             $kind = $this->kindCell($wantsInvoice[(int) $inv->userid] ?? null);
 
+            // «Άμεσο»: badge on the client name; RED row only while the invoice is
+            // still unfiled (state === null && hist === null → it shows «Αποστολή»),
+            // i.e. the operator still needs to act. A filed immediate row keeps the
+            // badge but not the red (it's done).
+            $isImmediate = $immediate[(int) $inv->userid] ?? false;
+            $rowClass = ($isImmediate && $state === null && $hist === null) ? ' class="danger"' : '';
+            if ($isImmediate) {
+                $name .= ' <span class="label label-danger" title="Άμεση τιμολόγηση — ο πελάτης ζητά άμεση έκδοση"><i class="fa fa-bolt"></i> Άμεσο</span>';
+            }
+
             $relidN = $relidCounts[$id] ?? 0;
             $relidCell = $relidN > 0
                 ? '<a href="'.$link.'&action=show&invoiceid='.$id.'" class="label label-warning" '
                     .'title="'.$relidN.' γραμμές με ενεργό relid — δες/μηδένισε πριν το Mark Paid">⚠ '.$relidN.'</a>'
                 : '<span class="text-muted">—</span>';
 
-            $rows .= '<tr>'
+            $rows .= '<tr'.$rowClass.'>'
                 .'<td><a href="'.$invHref.'">#'.$id.'</a></td>'
                 .'<td>'.htmlspecialchars((string) $inv->date).'</td>'
                 .'<td>'.$name.'</td>'
@@ -630,6 +645,70 @@ EOF;
             foreach ($userIds as $uid) {
                 if (! isset($vals[$uid])) {
                     continue;   // leave unknown
+                }
+                $v = strtolower(trim((string) $vals[$uid]));
+                $out[$uid] = in_array($v, ['on', 'yes', '1', 'true', 'ναι', 'checked'], true);
+            }
+        } catch (\Throwable $e) {
+            return $out;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Batch: per WHMCS client, are they flagged «άμεση τιμολόγηση» (the legacy
+     * γκρινιάρης immediate-invoice flag)? Resolved by field NAME, like
+     * wantsInvoiceByClient — but the wantsinvoice field is EXCLUDED first so the
+     * two can never collide on one field. Best-effort: if no distinctly-named
+     * immediate field exists, every client is «unknown» and no row lights up
+     * (graceful — no false reds). Mirrors the ekdosi-side `griniaris` role.
+     *
+     * @param  array<int, int>  $userIds
+     * @return array<int, bool>   userid => immediate (absent = unknown/false)
+     */
+    private function griniarisByClient(array $userIds): array
+    {
+        $out = [];
+        if ($userIds === []) {
+            return $out;
+        }
+
+        try {
+            // The wantsinvoice field id — so we never mistake it for the immediate one.
+            $wantsId = (int) Capsule::table('tblcustomfields')
+                ->where('type', 'client')
+                ->where(function ($q): void {
+                    $q->where('fieldname', 'like', '%τιμολ%')
+                        ->orWhere('fieldname', 'like', '%invoice%');
+                })
+                ->orderBy('id')
+                ->value('id');
+
+            $fieldId = (int) Capsule::table('tblcustomfields')
+                ->where('type', 'client')
+                ->when($wantsId > 0, fn ($q) => $q->where('id', '!=', $wantsId))
+                ->where(function ($q): void {
+                    $q->where('fieldname', 'like', '%γκριν%')
+                        ->orWhere('fieldname', 'like', '%griniaris%')
+                        ->orWhere('fieldname', 'like', '%άμεσ%')
+                        ->orWhere('fieldname', 'like', '%immediate%')
+                        ->orWhere('fieldname', 'like', '%priority%');
+                })
+                ->orderBy('id')
+                ->value('id');
+            if ($fieldId <= 0) {
+                return $out;   // no distinct immediate field → nobody flagged
+            }
+
+            $vals = Capsule::table('tblcustomfieldsvalues')
+                ->where('fieldid', $fieldId)
+                ->whereIn('relid', $userIds)
+                ->pluck('value', 'relid');
+
+            foreach ($userIds as $uid) {
+                if (! isset($vals[$uid])) {
+                    continue;
                 }
                 $v = strtolower(trim((string) $vals[$uid]));
                 $out[$uid] = in_array($v, ['on', 'yes', '1', 'true', 'ναι', 'checked'], true);

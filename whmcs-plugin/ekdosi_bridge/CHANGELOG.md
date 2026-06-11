@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-06-11
+### Added
+- **«Άμεσο» (immediate-invoice) red row** in the `?module=ekdosi_bridge&action=invoices`
+  list — the WHMCS-side mirror of the ekdosi inbox's red badge. A client flagged
+  «άμεση τιμολόγηση» (the legacy γκρινιάρης custom field, resolved by NAME like the
+  existing «θέλω τιμολόγιο» field — and EXCLUDING that field so the two never collide)
+  gets a red «⚡ Άμεσο» badge on their name; the row turns red while the invoice is
+  still **unfiled** (shows «Αποστολή»), so the operator spots what needs sending NOW.
+  Best-effort: no distinctly-named immediate field → nothing lights up (no false reds).
+  One extra batch query per page (`griniarisByClient`).
+
 ## [0.39.0] — 2026-06-04
 ### Added
 - **`op=custom_fields` (Plugin-API):** read-only catalogue of the WHMCS client
