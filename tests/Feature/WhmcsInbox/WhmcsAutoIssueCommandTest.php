@@ -260,4 +260,26 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $fresh->status);
         $this->assertSame($receiptType->id, Invoice::find($fresh->invoice_id)->invoice_type_id, 'no-ΑΦΜ → απόδειξη type');
     }
+
+    public function test_wants_invoice_but_no_ekdosi_afm_is_held(): void
+    {
+        // Customer asked for a τιμολόγιο (wantsinvoice=on) but has no ekdosi ΑΦΜ →
+        // can't file a valid invoice (the counterpart ΑΦΜ comes from customer.afm).
+        // Must HOLD for the operator, not file an empty-ΑΦΜ τιμολόγιο.
+        $tenant = $this->tenant(['whmcs_custom_field_map' => ['wantsinvoice' => 7]]);
+        $customer = $this->noAfmCustomer($tenant);
+        $pending = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 8123, 'userid' => 1, 'date' => '2026-05-20', 'total' => '124.00',
+                'customfields' => [['id' => 7, 'value' => 'on']],
+                'items' => ['item' => [['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1']]],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status, 'wants invoice + no ΑΦΜ → held');
+        $this->assertNull($fresh->invoice_id);
+    }
 }

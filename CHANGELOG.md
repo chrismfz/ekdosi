@@ -32,10 +32,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   Auto-issue («άμεση τιμολόγηση») now picks Απόδειξη vs Τιμολόγιο from the row's intent —
   own billing by the customer's ΑΦΜ/wantsinvoice, a single third-party by the route's
   `is_receipt` — instead of always filing the default invoice type. A receipt-intent row with
-  no default receipt type configured (or an ambiguous/mixed third-party) is HELD for the
-  operator, never mis-issued. `TP_MULTI` stays held → manual guided split. Migration adds the
-  nullable FK + a form field; backward compatible (no receipt type set → unchanged for
-  invoice-intent rows).
+  no default receipt type configured (or an ambiguous/mixed third-party, or a wants-invoice
+  customer with no ekdosi ΑΦΜ) is HELD for the operator, never mis-issued. `TP_MULTI` stays
+  held → manual guided split. The run summary now reports a **held count + a warn** so holds
+  don't pile up unseen. Migration adds the nullable FK + a form field; backward compatible.
+  **Deploy note:** an armed tenant (`whmcs_auto_issue_immediate=true`) that serves no-ΑΦΜ /
+  retail immediate customers should set `whmcs_default_receipt_type_id` (Company → WHMCS bridge
+  → Auto-issue), else those rows now wait in the inbox instead of auto-filing as invoices.
 - **UI rename «γκρινιάρης» → «Άμεση τιμολόγηση» / «Άμεσο»** across the operator-facing strings
   (customer toggle/filter, inbox tooltip, company auto-issue section, CLI output, audit note).
   The WHMCS custom-field **role key `griniaris` is retained** (tenant field-map contract), as

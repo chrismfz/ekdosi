@@ -82,12 +82,14 @@ class WhmcsAutoIssue extends Command
 
         $totalFiled = 0;
         $totalFailed = 0;
+        $totalHeld = 0;
         $totalCandidates = 0;
 
         foreach ($tenants as $tenant) {
-            [$filed, $failed, $candidates] = $this->processTenant($tenant, $filer, $dryRun);
+            [$filed, $failed, $candidates, $held] = $this->processTenant($tenant, $filer, $dryRun);
             $totalFiled += $filed;
             $totalFailed += $failed;
+            $totalHeld += $held;
             $totalCandidates += $candidates;
         }
 
@@ -95,6 +97,13 @@ class WhmcsAutoIssue extends Command
         $this->newLine();
         $this->info("Done. {$verb} {$totalFiled}/{$totalCandidates} άμεση τιμολόγηση row(s)".
             ($totalFailed > 0 ? "; {$totalFailed} failed (left in inbox)." : '.'));
+        // Held rows are CORRECT behaviour (type intent the unattended path can't
+        // safely resolve — e.g. receipt-intent with no default receipt type), but
+        // surface the count + a warn so an armed tenant doesn't silently pile up
+        // un-issued rows after deploy (configure whmcs_default_receipt_type_id).
+        if ($totalHeld > 0) {
+            $this->warn("  {$totalHeld} row(s) held for type intent — set a default receipt type or fill ΑΦΜ. See the inbox.");
+        }
 
         return self::SUCCESS;
     }
@@ -135,7 +144,7 @@ class WhmcsAutoIssue extends Command
     }
 
     /**
-     * @return array{0:int,1:int,2:int} [filed, failed, candidates]
+     * @return array{0:int,1:int,2:int,3:int} [filed, failed, candidates, held]
      */
     private function processTenant(Company $tenant, WhmcsInvoiceFiler $filer, bool $dryRun): array
     {
@@ -156,7 +165,7 @@ class WhmcsAutoIssue extends Command
                 'slug' => $tenant->slug,
             ]);
 
-            return [0, 0, 0];
+            return [0, 0, 0, 0];
         }
 
         // Optional «Απόδειξη» type for receipt-intent rows (customer didn't ask
@@ -175,11 +184,12 @@ class WhmcsAutoIssue extends Command
         if ($candidates->isEmpty()) {
             $this->line('  No άμεση τιμολόγηση rows awaiting issue.');
 
-            return [0, 0, 0];
+            return [0, 0, 0, 0];
         }
 
         $filed = 0;
         $failed = 0;
+        $held = 0;
 
         foreach ($candidates as $row) {
             $customer = $row->customer;   // eager-loaded, tenant-scoped, non-trashed
@@ -200,6 +210,7 @@ class WhmcsAutoIssue extends Command
             // mis-issued.
             [$chosenType, $holdReason] = $this->chooseType($row, $invoiceType, $receiptType);
             if ($chosenType === null) {
+                $held++;
                 $this->line("  · {$label}: {$holdReason} — left in inbox.");
                 Log::info('whmcs:auto-issue held a row (type intent needs operator)', [
                     'company_id' => $tenant->id, 'slug' => $tenant->slug,
@@ -253,7 +264,7 @@ class WhmcsAutoIssue extends Command
             }
         }
 
-        return [$filed, $failed, $candidates->count()];
+        return [$filed, $failed, $candidates->count(), $held];
     }
 
     /**
@@ -288,9 +299,18 @@ class WhmcsAutoIssue extends Command
             return [$invoiceType, null];
         }
 
-        // Own billing: the primary customer's intent (no ΑΦΜ → απόδειξη; has ΑΦΜ
-        // + wantsinvoice≠false → τιμολόγιο). Same predicate the manual splitter
-        // uses for the own portion, so auto and manual agree.
+        // Own billing. EXPLICIT invoice intent but no ekdosi ΑΦΜ on the customer
+        // → can't file a valid τιμολόγιο (the counterpart ΑΦΜ comes from
+        // customer.afm); HOLD for the operator to fill it rather than downgrade to
+        // a receipt or file an empty-ΑΦΜ invoice. A WHMCS-typed vatno that isn't on
+        // the ekdosi record does NOT count — see ownLinesAreReceipt().
+        if ($row->wantsInvoice() === true && blank($row->customer?->afm)) {
+            return [null, 'ζητά τιμολόγιο αλλά λείπει ΑΦΜ στον πελάτη ekdosi — συμπλήρωσέ το πρώτα'];
+        }
+
+        // The primary customer's intent (no ΑΦΜ → απόδειξη; has ΑΦΜ +
+        // wantsinvoice≠false → τιμολόγιο). Same predicate the manual splitter uses
+        // for the own portion, so auto and manual agree.
         if ($row->ownLinesAreReceipt()) {
             return $receiptType !== null
                 ? [$receiptType, null]

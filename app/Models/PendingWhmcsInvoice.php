@@ -277,16 +277,19 @@ class PendingWhmcsInvoice extends Model
      * «Απόδειξη», false = «Τιμολόγιο». Driven by the PRIMARY customer, NOT the
      * per-route is_receipt (which the plugin defaults to false for own lines —
      * the legacy «own portion always τιμολόγιο» bug). Rule:
-     *   - no ΑΦΜ → Απόδειξη (you can't issue a τιμολόγιο without one);
+     *   - no ekdosi customer ΑΦΜ → Απόδειξη — base it on customer.afm (the ΑΦΜ
+     *     that actually goes ON the document), NOT a WHMCS-typed vatno that never
+     *     made it onto the record: typing such a row as a τιμολόγιο would file an
+     *     invoice with an empty counterpart ΑΦΜ (tax-invalid / AADE-rejected);
      *   - has ΑΦΜ + explicit wantsinvoice=false → Απόδειξη (business buying retail);
      *   - has ΑΦΜ otherwise (wants invoice / unknown) → Τιμολόγιο.
-     * The contradictory «wants invoice but no ΑΦΜ» case is held upstream
-     * (needsAfm()), so here no-ΑΦΜ safely means receipt.
+     * The «wants invoice but no ΑΦΜ» contradiction is a HOLD, not a silent receipt
+     * — the auto-issue + inbox flows guard it separately (a τιμολόγιο needs the
+     * operator to fill the ΑΦΜ first).
      */
     public function ownLinesAreReceipt(): bool
     {
-        $hasAfm = filled($this->customer?->afm) || filled($this->whmcsAfm());
-        if (! $hasAfm) {
+        if (blank($this->customer?->afm)) {
             return true;
         }
 

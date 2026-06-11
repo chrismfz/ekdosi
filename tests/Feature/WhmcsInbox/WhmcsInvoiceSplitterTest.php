@@ -235,4 +235,43 @@ class WhmcsInvoiceSplitterTest extends TestCase
         $this->assertSame($receiptType->id, $resellerInvoice->invoice_type_id, 'no-ΑΦΜ reseller → απόδειξη');
         $this->assertSame($this->invoiceType->id, $harisInvoice->invoice_type_id, 'ΑΦΜ end-customer → τιμολόγιο');
     }
+
+    public function test_refuses_a_contact_with_mixed_receipt_flags(): void
+    {
+        // Same contact (#5) has one απόδειξη line and one τιμολόγιο line → one
+        // document can't be both types. Must refuse, not silently pick the first.
+        $payload = [
+            'invoiceid' => 1235, 'userid' => 793, 'total' => 37.20, 'currencycode' => 'EUR', 'date' => '2026-05-28',
+            'items' => ['item' => [
+                ['id' => 11, 'description' => 'a', 'amount' => '12.40', 'taxed' => 1],
+                ['id' => 22, 'description' => 'b', 'amount' => '12.40', 'taxed' => 1],
+                ['id' => 33, 'description' => 'c (own)', 'amount' => '12.40', 'taxed' => 1],
+            ]],
+        ];
+        $contact = ['id' => 5, 'company_name' => 'Haris', 'gr_vatno' => '081951154'];
+        $pending = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 1235, 'whmcs_userid' => 793,
+            'customer_id' => $this->reseller->id, 'payload' => $payload,
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'third_party_state' => PendingWhmcsInvoice::TP_MULTI,
+            'third_party_resolution' => ['multi_party' => true, 'lines' => [
+                ['item_id' => 11, 'routed' => true, 'is_receipt' => true, 'contact' => $contact],
+                ['item_id' => 22, 'routed' => true, 'is_receipt' => false, 'contact' => $contact],
+                ['item_id' => 33, 'routed' => false, 'is_receipt' => false, 'contact' => null],
+            ]],
+            'status' => PendingWhmcsInvoice::STATUS_HELD,
+        ]);
+        $receiptType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'APY', 'name' => 'Απόδειξη',
+            'invcount' => 0, 'payment_method_id' => $this->invoiceType->payment_method_id,
+        ]);
+
+        try {
+            $this->splitter()->split($this->tenant, $pending, $this->invoiceType, $receiptType);
+            $this->fail('Expected a refusal for a contact with mixed receipt/invoice flags.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('μικτή σήμανση', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::where('whmcs_pending_id', $pending->id)->count(), 'no partial split');
+    }
 }
