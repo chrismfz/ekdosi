@@ -148,7 +148,7 @@ class WhmcsInboxTable
                     })
                     ->searchable(),
 
-                // G8 (phase 1): γκρινιάρης / immediate-invoicing heads-up. A
+                // G8 (phase 1): άμεση-τιμολόγηση / immediate-invoicing heads-up. A
                 // matched customer flagged needs_immediate_invoice wants their
                 // παραστατικό issued ASAP — surface it so the operator
                 // prioritises this row. Warning only here; auto-issue is a
@@ -162,7 +162,7 @@ class WhmcsInboxTable
                     ->state(fn (PendingWhmcsInvoice $r): ?string => $r->customer?->needs_immediate_invoice
                         ? 'Άμεσο'
                         : null)
-                    ->tooltip('Ο πελάτης ζητά άμεση έκδοση (γκρινιάρης) — δώσε προτεραιότητα.'),
+                    ->tooltip('Ο πελάτης ζητά άμεση τιμολόγηση — δώσε προτεραιότητα.'),
 
                 TextColumn::make('status')
                     ->label('Κατάσταση')

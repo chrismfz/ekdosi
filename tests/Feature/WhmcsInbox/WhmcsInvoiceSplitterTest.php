@@ -188,4 +188,51 @@ class WhmcsInvoiceSplitterTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->splitter()->split($this->tenant, $pending->fresh(), $this->invoiceType);
     }
+
+    // ── Own-portion typing follows the PRIMARY (reseller), not the resolution's
+    //    is_receipt default (which the plugin leaves false for own lines). ──
+
+    public function test_own_portion_is_invoice_when_reseller_has_afm(): void
+    {
+        // Case #1: reseller HAS ΑΦΜ → own lines are a τιμολόγιο.
+        $groups = $this->splitter()->planGroups($this->tenant, $this->multiPartyPending());
+        $own = collect($groups)->firstWhere('key', 'reseller');
+
+        $this->assertNotNull($own);
+        $this->assertFalse($own['is_receipt'], 'reseller with ΑΦΜ → τιμολόγιο');
+    }
+
+    public function test_own_portion_is_receipt_when_reseller_has_no_afm(): void
+    {
+        // Case #3: reseller has NO ΑΦΜ + one line routed to an ΑΦΜ-bearing client.
+        // Own portion MUST be an απόδειξη; the routed line stays a τιμολόγιο.
+        $noAfm = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Designer (no ΑΦΜ)',
+            'afm' => null, 'whmcs_client_id' => 794,
+        ]);
+        $pending = $this->multiPartyPending();
+        $pending->update(['customer_id' => $noAfm->id]);
+
+        $groups = $this->splitter()->planGroups($this->tenant, $pending);
+        $own = collect($groups)->firstWhere('key', 'reseller');
+        $routed = collect($groups)->first(fn ($g) => str_starts_with($g['key'], 'contact:'));
+
+        $this->assertTrue($own['is_receipt'], 'reseller without ΑΦΜ → απόδειξη');
+        $this->assertFalse($routed['is_receipt'], 'routed end-customer line stays τιμολόγιο');
+
+        // End-to-end: the own group needs a receipt type; the split then files the
+        // reseller under it and the routed client under the invoice type.
+        $receiptType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'APY', 'name' => 'Απόδειξη',
+            'invcount' => 0, 'payment_method_id' => $this->invoiceType->payment_method_id,
+        ]);
+        $invoices = $this->splitter()->split($this->tenant, $pending->fresh(), $this->invoiceType, $receiptType);
+
+        $resellerInvoice = collect($invoices)->firstWhere('customer_id', $noAfm->id);
+        $haris = Customer::where('company_id', $this->tenant->id)->where('afm', '081951154')->first();
+        $harisInvoice = collect($invoices)->firstWhere('customer_id', $haris->id);
+
+        $this->assertSame($receiptType->id, $resellerInvoice->invoice_type_id, 'no-ΑΦΜ reseller → απόδειξη');
+        $this->assertSame($this->invoiceType->id, $harisInvoice->invoice_type_id, 'ΑΦΜ end-customer → τιμολόγιο');
+    }
 }

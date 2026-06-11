@@ -99,8 +99,8 @@ class CustomersTable
                     ->sortable(),
 
                 IconColumn::make('needs_immediate_invoice')
-                    ->label('Immediate')
-                    ->tooltip('γκρινιάρης — invoice immediately on payment')
+                    ->label('Άμεσο')
+                    ->tooltip('Άμεση τιμολόγηση — έκδοση αμέσως μετά την πληρωμή')
                     ->boolean()
                     ->trueIcon('heroicon-o-bolt')
                     ->falseIcon('heroicon-o-clock')
@@ -162,7 +162,7 @@ class CustomersTable
                 TernaryFilter::make('needs_immediate_invoice')
                     ->label('Immediate invoicing')
                     ->boolean()
-                    ->trueLabel('γκρινιάρης only')
+                    ->trueLabel('Άμεσα μόνο')
                     ->falseLabel('Batched only')
                     ->placeholder('All'),
 

@@ -17,7 +17,29 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Fixed
+- **WHMCS third-party document-type bug (Απόδειξη vs Τιμολόγιο per party).** The WHMCS
+  plugin defaults a line's `is_receipt` to `false` for the customer's OWN (non-routed)
+  lines, so the manual guided-split typed a no-ΑΦΜ reseller's own portion as a **Τιμολόγιο**
+  (legacy «own portion is always an invoice» bug). Now the own/reseller group's type is
+  derived from the PRIMARY customer (no ΑΦΜ → Απόδειξη; has ΑΦΜ + wantsinvoice≠false →
+  Τιμολόγιο); routed (third-party) lines keep their explicit per-route flag and go to the
+  end-customer they're tied to. A mixed invoice correctly yields one document per party,
+  each with the right type (`PendingWhmcsInvoice::ownLinesAreReceipt()`, `WhmcsInvoiceSplitter`).
+
 ### Added
+- **Type-aware WHMCS auto-issue + default receipt type** (`companies.whmcs_default_receipt_type_id`).
+  Auto-issue («άμεση τιμολόγηση») now picks Απόδειξη vs Τιμολόγιο from the row's intent —
+  own billing by the customer's ΑΦΜ/wantsinvoice, a single third-party by the route's
+  `is_receipt` — instead of always filing the default invoice type. A receipt-intent row with
+  no default receipt type configured (or an ambiguous/mixed third-party) is HELD for the
+  operator, never mis-issued. `TP_MULTI` stays held → manual guided split. Migration adds the
+  nullable FK + a form field; backward compatible (no receipt type set → unchanged for
+  invoice-intent rows).
+- **UI rename «γκρινιάρης» → «Άμεση τιμολόγηση» / «Άμεσο»** across the operator-facing strings
+  (customer toggle/filter, inbox tooltip, company auto-issue section, CLI output, audit note).
+  The WHMCS custom-field **role key `griniaris` is retained** (tenant field-map contract), as
+  are the `needs_immediate_invoice` / `whmcs_auto_issue_immediate` columns.
 - **`ekdosi:go-live-check --tenant=SLUG [--json]`** — per-tenant cutover-readiness gate
   (read-only). Consolidates the «can this tenant issue real documents?» checks into one
   pass/warn/fail report: provider, invoice-types + income classification, default VAT,

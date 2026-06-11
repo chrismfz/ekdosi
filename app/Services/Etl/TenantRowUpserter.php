@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
  *
  *   day 0:   import current legacy backup
  *   day 1-7: operate in ekdosi (create new invoices, edit customer
- *            records, link to WHMCS, mark griniaris, etc.)
+ *            records, link to WHMCS, mark immediate-invoice, etc.)
  *   day 7:   take a NEWER legacy backup, re-import to pick up the
  *            invoices the legacy system issued during the week
  *

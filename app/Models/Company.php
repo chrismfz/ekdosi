@@ -88,9 +88,10 @@ class Company extends Model
         'whmcs_amount_includes_tax',
         // Slice 2: fetch the inbox feed from the bridge plugin (not the native API)
         'whmcs_fetch_via_bridge',
-        // G8 phase 2: γκρινιάρης auto-issue knob + its default invoice type
+        // G8 phase 2: άμεση-τιμολόγηση auto-issue knob + its default invoice/receipt types
         'whmcs_auto_issue_immediate',
         'whmcs_default_invoice_type_id',
+        'whmcs_default_receipt_type_id',
     ];
 
     /**
@@ -464,7 +465,7 @@ class Company extends Model
     }
 
     /**
-     * G8 phase 2: the invoice type the γκρινιάρης auto-issue uses. Null =
+     * G8 phase 2: the invoice type the άμεση-τιμολόγηση auto-issue uses. Null =
      * not configured → auto-issue skips this tenant (never guesses).
      */
     public function defaultWhmcsInvoiceType(): BelongsTo

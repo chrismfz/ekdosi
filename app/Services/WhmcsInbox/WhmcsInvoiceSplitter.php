@@ -79,7 +79,14 @@ class WhmcsInvoiceSplitter
                 $groups[$key] = [
                     'key' => $key,
                     'label' => $label,
-                    'is_receipt' => (bool) ($line['is_receipt'] ?? false),
+                    // Routed (third-party) group: the explicit per-route flag.
+                    // Own/reseller group: the PRIMARY customer's intent (ΑΦΜ +
+                    // wantsinvoice) — NOT the resolution's is_receipt, which the
+                    // plugin defaults to false for own lines (so a no-ΑΦΜ retail
+                    // customer's own portion would wrongly become a τιμολόγιο).
+                    'is_receipt' => $routed
+                        ? (bool) ($line['is_receipt'] ?? false)
+                        : $pending->ownLinesAreReceipt(),
                     'item_ids' => [],
                     'contact' => $contact,
                 ];

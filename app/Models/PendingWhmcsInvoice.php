@@ -272,6 +272,48 @@ class PendingWhmcsInvoice extends Model
         return in_array($v, ['on', '1', 'yes', 'true', 'ναι', 'checked'], true);
     }
 
+    /**
+     * Receipt-vs-invoice for the customer's OWN (non-routed) lines: true =
+     * «Απόδειξη», false = «Τιμολόγιο». Driven by the PRIMARY customer, NOT the
+     * per-route is_receipt (which the plugin defaults to false for own lines —
+     * the legacy «own portion always τιμολόγιο» bug). Rule:
+     *   - no ΑΦΜ → Απόδειξη (you can't issue a τιμολόγιο without one);
+     *   - has ΑΦΜ + explicit wantsinvoice=false → Απόδειξη (business buying retail);
+     *   - has ΑΦΜ otherwise (wants invoice / unknown) → Τιμολόγιο.
+     * The contradictory «wants invoice but no ΑΦΜ» case is held upstream
+     * (needsAfm()), so here no-ΑΦΜ safely means receipt.
+     */
+    public function ownLinesAreReceipt(): bool
+    {
+        $hasAfm = filled($this->customer?->afm) || filled($this->whmcsAfm());
+        if (! $hasAfm) {
+            return true;
+        }
+
+        return $this->wantsInvoice() === false;
+    }
+
+    /**
+     * For a SINGLE third-party row, the uniform receipt-vs-invoice intent of its
+     * route(s): true = «Απόδειξη», false = «Τιμολόγιο», null = no routes OR mixed
+     * flags (ambiguous → must go to the operator, never auto-typed). The flag is
+     * the explicit per-route `is_receipt` set in the WHMCS plugin's client area —
+     * decided by the THIRD PARTY's nature, independent of the WHMCS client's VAT.
+     */
+    public function singleThirdPartyReceipt(): ?bool
+    {
+        $lines = $this->third_party_resolution['lines'] ?? [];
+        if ($lines === []) {
+            return null;
+        }
+        $flags = array_unique(array_map(
+            static fn ($l): bool => (bool) ($l['is_receipt'] ?? false),
+            $lines
+        ));
+
+        return count($flags) === 1 ? (bool) reset($flags) : null;
+    }
+
     /** The ΑΦΜ the customer entered in WHMCS (role 'vatno'), digits only. */
     public function whmcsAfm(): ?string
     {

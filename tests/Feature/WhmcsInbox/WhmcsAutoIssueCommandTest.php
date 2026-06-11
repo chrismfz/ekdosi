@@ -14,12 +14,12 @@ use Tests\TestCase;
 
 /**
  * G8 phase 2 — whmcs:auto-issue. The command files paid inbox rows at AADE
- * for γκρινιάρης (needs_immediate_invoice) customers, but ONLY on armed
+ * for άμεση τιμολόγηση (needs_immediate_invoice) customers, but ONLY on armed
  * tenants and ONLY for unambiguous single-party rows. Tenant runs 'off'
  * mode → NullSubmitter (no HTTP, no MARK), so the orchestration is tested
  * without AADE creds.
  *
- * Locks the gate: armed + γκρινιάρης + clean → filed; everything else is
+ * Locks the gate: armed + άμεση τιμολόγηση + clean → filed; everything else is
  * left in the inbox.
  */
 class WhmcsAutoIssueCommandTest extends TestCase
@@ -106,7 +106,7 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $fresh->status);
         $this->assertNotNull($fresh->invoice_id);
         $this->assertNull($fresh->filed_by_user_id, 'auto-issue is system-filed (no operator)');
-        $this->assertStringContainsString('γκρινιάρης', (string) $fresh->notes);
+        $this->assertStringContainsString('άμεση τιμολόγηση', (string) $fresh->notes);
         $this->assertSame('ΤΠΥ1', Invoice::find($fresh->invoice_id)->invcode);
     }
 
@@ -180,7 +180,7 @@ class WhmcsAutoIssueCommandTest extends TestCase
         // The candidate query's whereHas('customer') is NOT company-scoped
         // (customer is belongsTo by id). The per-row company_id assertion
         // is the single CLI isolation guard — prove it holds: a pending
-        // row on tenant A pointing at tenant B's γκρινιάρης customer must
+        // row on tenant A pointing at tenant B's άμεση τιμολόγηση customer must
         // NOT be auto-filed.
         $tenantA = $this->tenant();
         $tenantB = $this->tenant();   // separate company
@@ -220,5 +220,44 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $fresh = $pending->fresh();
         $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status);
         $this->assertNull($fresh->invoice_id);
+    }
+
+    private function noAfmCustomer(Company $tenant): Customer
+    {
+        return Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Λιανική', 'afm' => null,
+            'needs_immediate_invoice' => true,
+        ]);
+    }
+
+    public function test_no_afm_customer_is_held_without_a_receipt_type(): void
+    {
+        // A no-ΑΦΜ immediate customer needs an απόδειξη, but the tenant has no
+        // default receipt type → HOLD (never mis-issue as a τιμολόγιο).
+        $tenant = $this->tenant();
+        $pending = $this->pending($tenant, $this->noAfmCustomer($tenant));
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
+    }
+
+    public function test_no_afm_customer_files_as_receipt_when_receipt_type_set(): void
+    {
+        $tenant = $this->tenant();
+        $pmId = InvoiceType::where('company_id', $tenant->id)->value('payment_method_id');
+        $receiptType = InvoiceType::create([
+            'company_id' => $tenant->id, 'name' => 'ΑΛΠ', 'code' => 'ΑΛΠ',
+            'invcount' => 0, 'payment_method_id' => $pmId,
+        ]);
+        $tenant->update(['whmcs_default_receipt_type_id' => $receiptType->id]);
+
+        $pending = $this->pending($tenant, $this->noAfmCustomer($tenant));
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $fresh->status);
+        $this->assertSame($receiptType->id, Invoice::find($fresh->invoice_id)->invoice_type_id, 'no-ΑΦΜ → απόδειξη type');
     }
 }

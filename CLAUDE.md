@@ -372,6 +372,17 @@ significant): WHMCS push/poll → ekdosi webhook → `pending_whmcs_invoices` �
   merge). **Bridges/Connectors Phase 0**: a `billing_connections` registry (one row per
   company×system) + `BillingSource`/`BillingSourceRegistry` so a tenant can run several billing
   sources; Phase 1 = a real 2nd source.
+- **Doc-type is PER PARTY, not per WHMCS-invoice.** The plugin's resolution leaves own-line
+  `is_receipt=false` (only ROUTED lines carry an explicit flag), so the OWN/reseller portion's
+  type is decided ekdosi-side by the PRIMARY customer (`PendingWhmcsInvoice::ownLinesAreReceipt()`:
+  no ΑΦΜ → Απόδειξη; has ΑΦΜ + wantsinvoice≠false → Τιμολόγιο); routed lines keep the per-route
+  flag and go to the end-customer they're tied to. A mixed invoice = one document per party, each
+  typed independently (`WhmcsInvoiceSplitter`). **Auto-issue** («άμεση τιμολόγηση») is type-aware
+  via `whmcs_default_invoice_type_id` + `whmcs_default_receipt_type_id`; what it can't safely type
+  (receipt-intent w/o a receipt type, mixed/ambiguous, `TP_MULTI`) is HELD for the operator.
+- **UI term «Άμεση τιμολόγηση»/«Άμεσο»** (ex-«γκρινιάρης»). The WHMCS custom-field **role key
+  `griniaris` is RETAINED** (tenant field-map contract) — rename only the operator-facing strings,
+  never the role key or the `needs_immediate_invoice`/`whmcs_auto_issue_immediate` columns.
 
 ---
 
