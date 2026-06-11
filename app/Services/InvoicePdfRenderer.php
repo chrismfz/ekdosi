@@ -178,16 +178,22 @@ class InvoicePdfRenderer
     private function totalsView(Invoice $invoice): array
     {
         $breakdown = InvoiceVatBreakdown::for($invoice);
+
         return [
             'rows'       => $breakdown->rows,
             'totalNet'   => $breakdown->totalNet(),
             'totalVat'   => $breakdown->totalVat(),
             'totalGross' => $breakdown->totalGross(),
-            'withhold'   => (float) ($invoice->withhold_amount ?? 0),
-            'payable'    => round(
-                $breakdown->totalGross() - (float) ($invoice->withhold_amount ?? 0),
-                2,
-            ),
+            // Additional taxes (myDATA taxesTotals) surfaced so the «Πληρωτέο» on
+            // the PDF == the collectible (and the AADE gross). Withholding is shown
+            // as a reduction ONLY when it actually reduces the gross (§8.4 8/9/10
+            // are informational).
+            'fees'       => (float) ($invoice->fees_amount ?? 0),
+            'stamp'      => (float) ($invoice->stamp_duty_amount ?? 0),
+            'other'      => (float) ($invoice->other_taxes_amount ?? 0),
+            'deductions' => (float) ($invoice->deductions_amount ?? 0),
+            'withhold'   => $invoice->withholdingReducesGross() ? (float) ($invoice->withhold_amount ?? 0) : 0.0,
+            'payable'    => round($breakdown->totalGross() + $invoice->additionalTaxAdjustment(), 2),
         ];
     }
 }

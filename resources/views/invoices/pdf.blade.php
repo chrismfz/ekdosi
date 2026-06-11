@@ -282,11 +282,24 @@
                     <td>{{ $L('total_value') }}</td>
                     <td class="value">{{ number_format($totals['totalGross'], 2, ',', '.') }} €</td>
                 </tr>
+                {{-- Additional taxes (τέλη/χαρτόσημο/παρακράτηση…): + charges, − reductions.
+                     «Πληρωτέο» shows the collectible whenever it differs from the gross. --}}
+                @if($totals['fees'] > 0)
+                    <tr class="withhold"><td class="label">{{ $L('fees') }}</td><td class="value">+{{ number_format($totals['fees'], 2, ',', '.') }} €</td></tr>
+                @endif
+                @if($totals['stamp'] > 0)
+                    <tr class="withhold"><td class="label">{{ $L('stamp_duty') }}</td><td class="value">+{{ number_format($totals['stamp'], 2, ',', '.') }} €</td></tr>
+                @endif
+                @if($totals['other'] > 0)
+                    <tr class="withhold"><td class="label">{{ $L('other_taxes') }}</td><td class="value">+{{ number_format($totals['other'], 2, ',', '.') }} €</td></tr>
+                @endif
+                @if($totals['deductions'] > 0)
+                    <tr class="withhold"><td class="label">{{ $L('deductions') }}</td><td class="value">−{{ number_format($totals['deductions'], 2, ',', '.') }} €</td></tr>
+                @endif
                 @if($totals['withhold'] > 0)
-                    <tr class="withhold">
-                        <td class="label">{{ $L('withholding') }}</td>
-                        <td class="value">−{{ number_format($totals['withhold'], 2, ',', '.') }} €</td>
-                    </tr>
+                    <tr class="withhold"><td class="label">{{ $L('withholding') }}</td><td class="value">−{{ number_format($totals['withhold'], 2, ',', '.') }} €</td></tr>
+                @endif
+                @if(abs($totals['payable'] - $totals['totalGross']) > 0.005)
                     <tr class="grand">
                         <td>{{ $L('payable') }}</td>
                         <td class="value">{{ number_format($totals['payable'], 2, ',', '.') }} €</td>

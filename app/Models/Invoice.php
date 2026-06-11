@@ -323,18 +323,27 @@ class Invoice extends Model
     public function additionalTaxAdjustment(): float
     {
         $withheld = round((float) ($this->withhold_amount ?? 0), 2);
-        $withheldReducesGross = $withheld > 0
-            && $this->withhold_category !== null
-            && WithheldPercentCategory::tryFrom((int) $this->withhold_category)?->affectsTotalGrossValue() === true;
 
         return round(
             round((float) ($this->fees_amount ?? 0), 2)
             + round((float) ($this->stamp_duty_amount ?? 0), 2)
             + round((float) ($this->other_taxes_amount ?? 0), 2)
             - round((float) ($this->deductions_amount ?? 0), 2)
-            - ($withheldReducesGross ? $withheld : 0.0),
+            - ($this->withholdingReducesGross() ? $withheld : 0.0),
             2,
         );
+    }
+
+    /**
+     * Does this invoice's withholding reduce the gross/payable? Yes for normal
+     * §8.4 categories; NO for the informational prepaid-tax categories 8/9/10
+     * (architects/engineers/lawyers), which AADE reports but doesn't deduct.
+     */
+    public function withholdingReducesGross(): bool
+    {
+        return (float) ($this->withhold_amount ?? 0) > 0
+            && $this->withhold_category !== null
+            && WithheldPercentCategory::tryFrom((int) $this->withhold_category)?->affectsTotalGrossValue() === true;
     }
 
     /**

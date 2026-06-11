@@ -68,6 +68,10 @@ class PdfLabels
         'total_value' => ['Συνολική αξία', 'Total'],
         'total' => ['Σύνολο', 'Total'],
         'withholding' => ['Παρακράτηση φόρου', 'Tax withholding'],
+        'fees' => ['Τέλη', 'Fees'],
+        'stamp_duty' => ['Χαρτόσημο', 'Stamp duty'],
+        'other_taxes' => ['Λοιποί φόροι', 'Other taxes'],
+        'deductions' => ['Κρατήσεις', 'Deductions'],
         'payable' => ['Πληρωτέο', 'Payable'],
 
         // Sections

@@ -5,12 +5,14 @@ namespace Tests\Feature\Invoice;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\Quote;
 use App\Models\QuoteLine;
 use App\Services\InvoicePdfRenderer;
 use App\Services\QuoteNumberer;
 use App\Services\QuotePdfRenderer;
+use App\Services\RecomputeInvoiceTotals;
 use App\Services\QuoteTotals;
 use App\Support\Pdf\PdfLabels;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -108,6 +110,24 @@ class BilingualPdfTest extends TestCase
 
         $this->assertStringStartsWith('%PDF', app(InvoicePdfRenderer::class)->render($invoice));
         $this->assertSame('both', PdfLabels::resolveLanguage($invoice->language, $invoice->country));
+    }
+
+    #[Test]
+    public function the_pdf_payable_line_reflects_withholding(): void
+    {
+        $inv = $this->invoice(['withhold_rate' => 20, 'withhold_category' => 1]); // 20% withholding
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 1000, 'vat_percent' => 24, // net 1000, gross 1240
+        ]);
+        app(RecomputeInvoiceTotals::class)($inv);
+
+        $html = $this->renderHtml($inv->fresh(), 'el');
+
+        $this->assertStringContainsString('Παρακράτηση', $html);           // the withholding line
+        $this->assertStringContainsString('200,00', $html);                // withheld amount
+        $this->assertStringContainsString('Πληρωτέο', $html);              // the collectible row
+        $this->assertStringContainsString('1.040,00', $html);              // 1240 − 200
     }
 
     #[Test]

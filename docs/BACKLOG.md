@@ -49,6 +49,7 @@ surfaced in the open-items sections further down.
 - **«Ρυθμίσεις συστήματος» page** — global knobs (`require_2fa`, backup-alert on/off + email) ως audited live toggles· at-rest encryption + mailer status read-only.
 - **Expenses polish** (2026-06-10): χειροκίνητη καταχώριση εξόδου (`source=manual`, γραμμές, tab «Χειροκίνητα», edit μόνο για manual) + ιδιωτικό PDF/scan attachment με signed download.
 - **Δίγλωσσο/EN PDF** (2026-06-10): γλώσσα ανά invoice/quote (GR/EN/δίγλωσσο, default από χώρα πελάτη)· `PdfLabels` dictionary· localizes μόνο ετικέτες.
+- **Withholding/fees count toward owed** (2026-06-11): `invoices.payable_total` (= gross + AADE [208] adjustment)· owed/balance/Καρτέλα/receivables/dashboard + PDF «Πληρωτέο» = payable· `invoices:backfill-payable-total`· money-consistency proven με τιμολόγιο παρακράτησης.
 - **Onboarding** (2026-06-10): DEMO seeder · `ekdosi:install` wizard (+ lookup seeding via `MyDataLookupSeeder`) · global+per-company «Δοκιμή SMTP» · «Εργαλεία» · export/import χωρίς passphrase.
 - **myDATA console unification** (PR #272) — one «Κονσόλα myDATA» cluster (Πωλήσεις/Έξοδα/Ε3) + redirects.
 - **Expenses fetch** (PR #272) — «Άντληση από myDATA» κουμπί στη λίστα Έξοδα + tip + read-only `mydata:refresh-expenses` cron (UI toggle, default OFF).
@@ -75,9 +76,10 @@ surfaced in the open-items sections further down.
 ---
 
 ## 🟠 myDATA / expenses completeness
-- **`invoice_taxes` table** — πολλές κατηγορίες ανά taxType σε ένα τιμολόγιο (σήμερα μία/τύπο
-  αλλιώς throw)· επιτρέπει και να μετρά ένα τέλος στο gross/owed. **Θέλει πρώτα money-core
-  απόφαση** (μετράνε τα τέλη στο οφειλόμενο;).
+- **`invoice_taxes` table** — πολλές κατηγορίες ανά taxType σε **ΕΝΑ** τιμολόγιο (σήμερα μία/τύπο
+  αλλιώς throw). **Χαμηλή προτεραιότητα/σπάνιο** — το ΦΠΑ ανά γραμμή παίζει ήδη· αυτό αφορά
+  μόνο 2+ διαφορετικές κατηγορίες **ειδικού τέλους** (§8.x) στο ίδιο παραστατικό. _(Η money-core
+  απόφαση «μετράνε τα τέλη/παρακράτηση στο οφειλόμενο;» **λύθηκε ✅** = `payable_total` — βλ. «Done recently».)_
 - **Expenses — λογιστής/`entityVatNumber`** third-party submission (για tenants που μπλοκάρει
   η ΑΑΔΕ με [323]) + `RequestMyExpenses` (sanity totals) + **supplier CSV import** (`source=import`).
 - **`SalesOrphanImporter`** — νέο τοπικό τιμολόγιο **πώλησης** από sales-orphan MARK + **line/E3
@@ -138,6 +140,10 @@ surfaced in the open-items sections further down.
   έχει use case· μια γραμμή δεν είναι οντότητα που ταξινομείς. Tags σε **πελάτες/προϊόντα**
   ήδη υπάρχουν.)_
 - **Curated tax-presets** expansion ανά κλάδο + **%-ανά-προϊόν** (όχι μόνο €/τεμ).
+- **Καρτέλα: «αναλυτική» χρέωση παρακράτησης** (display refinement) — σήμερα το AR-ledger
+  debit = `payable_total` (το εισπρακτέο, net παρακράτησης). Εναλλακτική εμφάνιση: debit =
+  `gross_total` (1240) + ξεχωριστή πιστωτική γραμμή «Παρακράτηση φόρου» (−200), για να
+  φαίνεται και η αξία εγγράφου και η παρακράτηση. Ίδιο τελικό υπόλοιπο· καθαρά UX.
 - **«Υπόλοιπο πελάτη» block στο invoice PDF** (legacy parity — το παλιό σύστημα τύπωνε
   «ΝΕΟ ΥΠΟΛΟΙΠΟ»). Προηγούμενο + αυτό το παραστατικό + **Νέο υπόλοιπο** (το συνολικό
   υπόλοιπο καρτέλας, incl. on-account credit — από `CustomerLedger`, **όχι** το payable του
