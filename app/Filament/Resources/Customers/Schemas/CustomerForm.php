@@ -213,6 +213,17 @@ class CustomerForm
                                     ->numeric()
                                     ->helperText('Set by the WHMCS bridge when it lands. Editable manually for now.'),
 
+                                // «Υπόλοιπο πελάτη» στο PDF — override της εταιρικής
+                                // προεπιλογής. null = κληρονομεί την εταιρεία.
+                                Select::make('show_balance_on_pdf')
+                                    ->label('Υπόλοιπο πελάτη στο PDF')
+                                    ->options([
+                                        1 => 'Ναι — να τυπώνεται',
+                                        0 => 'Όχι — να μην τυπώνεται',
+                                    ])
+                                    ->placeholder('Προεπιλογή εταιρείας')
+                                    ->helperText('Block «Νέο υπόλοιπο» στα τιμολόγια επί πιστώσει. Κενό = ακολουθεί τη ρύθμιση της εταιρείας.'),
+
                                 TagControls::field()
                                     ->columnSpanFull(),
                             ])

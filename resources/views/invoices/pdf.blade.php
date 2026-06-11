@@ -85,6 +85,17 @@
         table.totals .withhold td { color: #9a3412; font-style: italic; }
         table.totals .discount-note td { color: #6b7280; font-size: 8pt; font-style: italic; padding-top: 0; }
 
+        /* Customer running-balance block (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») */
+        .balance-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 4mm; }
+        .balance-spacer { display: table-cell; width: 45%; }
+        .balance-box { display: table-cell; width: 55%; vertical-align: top; border: 0.5pt solid #d1d5db; border-radius: 1mm; }
+        .balance-box h3 { margin: 0; padding: 1.5mm 3mm; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; background: #f3f4f6; border-bottom: 0.5pt solid #d1d5db; }
+        table.balance { width: 100%; border-collapse: collapse; }
+        table.balance td { padding: 1.5mm 3mm; font-size: 9.5pt; }
+        table.balance .label { color: #374151; }
+        table.balance .value { text-align: right; }
+        table.balance .new td { border-top: 0.5pt solid #d1d5db; font-weight: bold; }
+
         /* Notes / payment terms */
         .notes-box { margin-top: 5mm; padding: 3mm; background: #f9fafb; border-left: 3pt solid #6b7280; font-size: 9pt; }
         .notes-box h3 { margin: 0 0 1mm 0; font-size: 8.5pt; text-transform: uppercase; color: #6b7280; letter-spacing: 0.3pt; }
@@ -305,6 +316,33 @@
                         <td class="value">{{ number_format($totals['payable'], 2, ',', '.') }} €</td>
                     </tr>
                 @endif
+            </table>
+        </div>
+    </div>
+@endif
+
+{{-- ============== Υπόλοιπο πελάτη (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») ==============
+     Snapshot-at-issue running balance: Προηγούμενο + αυτό το παραστατικό = Νέο.
+     Printed only when the tenant/customer opted in AND a snapshot was captured
+     (credit-term/credit-note invoice). Stable on reprint. --}}
+@if(($customerBalance ?? null) !== null)
+    <div class="balance-wrap">
+        <div class="balance-spacer"></div>
+        <div class="balance-box">
+            <h3>@gup($L('customer_balance'))</h3>
+            <table class="balance">
+                <tr>
+                    <td class="label">{{ $L('previous_balance') }}</td>
+                    <td class="value">{{ number_format($customerBalance['previous'], 2, ',', '.') }} €</td>
+                </tr>
+                <tr>
+                    <td class="label">{{ $L('this_document') }}</td>
+                    <td class="value">{{ ($customerBalance['current'] >= 0 ? '+' : '−') }}{{ number_format(abs($customerBalance['current']), 2, ',', '.') }} €</td>
+                </tr>
+                <tr class="new">
+                    <td class="label">{{ $L('new_balance') }}</td>
+                    <td class="value">{{ number_format($customerBalance['new'], 2, ',', '.') }} €</td>
+                </tr>
             </table>
         </div>
     </div>

@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
+use App\Services\InvoicePdfRenderer;
 use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
@@ -107,5 +108,46 @@ class CustomerBalanceSnapshotTest extends TestCase
 
         $a->refresh()->update(['notes' => 'touched']);
         $this->assertSame('1240.00', (string) $a->fresh()->customer_balance_snapshot);
+    }
+
+    /** Render the invoice PDF to HTML (skip the DomPDF binary stage). */
+    private function html(Invoice $invoice): string
+    {
+        $renderer = app(InvoicePdfRenderer::class);
+        $invoice->loadMissing(['lines', 'invoiceType', 'customer', 'company', 'paymentMethod']);
+        $balance = (fn (Invoice $i) => $this->customerBalanceView($i))->call($renderer, $invoice);
+        $totals = (fn (Invoice $i) => $this->totalsView($i))->call($renderer, $invoice);
+
+        return view('invoices.pdf', [
+            'invoice' => $invoice, 'tenant' => $invoice->company,
+            'qrDataUri' => null, 'logoDataUri' => null,
+            'totals' => $totals, 'customerBalance' => $balance,
+            'L' => \App\Support\Pdf\PdfLabels::for('el'),
+        ])->render();
+    }
+
+    #[Test]
+    public function the_balance_block_prints_only_when_the_toggle_is_on(): void
+    {
+        $tenant = $this->tenant();
+        $type = InvoiceType::create(['company_id' => $tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1]);
+        $pm = PaymentMethod::create(['company_id' => $tenant->id, 'description' => '30 ημέρες', 'due_days' => 30]);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'Acme']);
+
+        $a = $this->issue($tenant, $customer, $pm, $type, 1, 1000, 24); // gross 1240
+
+        // Default: tenant off, customer inherit → block omitted.
+        $this->assertStringNotContainsString('Νέο υπόλοιπο', $this->html($a->fresh()));
+
+        // Tenant default on → block printed (Προηγούμενο 0 / +1.240 / Νέο 1.240).
+        $tenant->update(['show_customer_balance_on_pdf' => true]);
+        $html = $this->html($a->fresh());
+        $this->assertStringContainsString('Νέο υπόλοιπο', $html);
+        $this->assertStringContainsString('Προηγούμενο υπόλοιπο', $html);
+        $this->assertStringContainsString('+1.240,00', $html);
+
+        // Per-customer override OFF wins over the tenant default.
+        $customer->update(['show_balance_on_pdf' => false]);
+        $this->assertStringNotContainsString('Νέο υπόλοιπο', $this->html($a->fresh()));
     }
 }
