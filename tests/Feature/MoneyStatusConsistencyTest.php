@@ -84,6 +84,41 @@ class MoneyStatusConsistencyTest extends TestCase
         return app(RecomputeInvoiceTotals::class)($inv);
     }
 
+    /** A credit-term sale (line net 100 → gross 124) carrying 20% withholding. */
+    private function makeWithholdingSale(Customer $c): Invoice
+    {
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->saleType->id, 'customer_id' => $c->id,
+            'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-10 10:00:00',
+            'withhold_rate' => 20, 'withhold_category' => 1,   // §8.4 cat 1 → reduces the collectible
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24, 'product_descr' => 'W',
+        ]);
+
+        return app(RecomputeInvoiceTotals::class)($inv);
+    }
+
+    public function test_withholding_reduces_the_receivable_consistently_across_all_three_surfaces(): void
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'WH', 'afm' => '199999999']);
+        $inv = $this->makeWithholdingSale($c)->refresh();
+
+        // gross = net+VAT (124); payable = collectible (124 − 20 withholding = 104).
+        $this->assertSame('124.00', (string) $inv->gross_total);
+        $this->assertSame('104.00', (string) $inv->payable_total);
+
+        // All three money surfaces agree on the REDUCED receivable (104, not 124).
+        $this->assertInvariants(collect([$c]));
+
+        $dashboard = (new DashboardMetrics($this->tenant))->outstandingReceivables();
+        $ledger = app(CustomerLedgerBuilder::class)->build($c)->stats['balance'];
+        $this->assertEqualsWithDelta(104.0, $dashboard, 0.001);
+        $this->assertEqualsWithDelta(104.0, $ledger, 0.001);
+    }
+
     public function test_surfaces_stay_consistent_across_randomized_scenarios(): void
     {
         $customers = collect();
