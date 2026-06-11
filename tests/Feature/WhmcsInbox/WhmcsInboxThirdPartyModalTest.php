@@ -4,6 +4,7 @@ namespace Tests\Feature\WhmcsInbox;
 
 use App\Filament\Resources\WhmcsInbox\Tables\WhmcsInboxTable;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -77,5 +78,39 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
 
         $this->assertSame([], $m->invoke(null, $this->pending(null)));
         $this->assertSame([], $m->invoke(null, $this->pending(['lines' => []])));
+    }
+
+    public function test_routing_rows_maps_each_line_to_its_beneficiary_and_type(): void
+    {
+        // Reseller WITH ΑΦΜ + one line routed to an end-customer (the «Πολλοί» case).
+        $reseller = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Reseller', 'afm' => '700700700']);
+        $row = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => random_int(1, 9_999_999),
+            'customer_id' => $reseller->id, 'payload' => [], 'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'third_party_state' => PendingWhmcsInvoice::TP_MULTI,
+            'third_party_resolution' => ['lines' => [
+                ['item_id' => 1, 'description' => 'domain.gr', 'routed' => true, 'is_receipt' => false,
+                    'contact' => ['id' => 5, 'company_name' => 'Haris', 'gr_vatno' => '081951154']],
+                ['item_id' => 2, 'description' => 'hosting', 'routed' => false, 'is_receipt' => false, 'contact' => null],
+            ]],
+        ]);
+
+        $m = new \ReflectionMethod(WhmcsInboxTable::class, 'routingRows');
+        $m->setAccessible(true);
+        $rows = $m->invoke(null, $row);
+
+        $this->assertCount(2, $rows);
+        // Routed line → the end-customer, his ΑΦΜ, τιμολόγιο (route is_receipt=false).
+        $this->assertSame('domain.gr', $rows[0]['line']);
+        $this->assertSame('Haris', $rows[0]['who']);
+        $this->assertSame('081951154', $rows[0]['afm']);
+        $this->assertFalse($rows[0]['receipt']);
+        $this->assertTrue($rows[0]['routed']);
+        // Own line → the reseller (has ΑΦΜ → τιμολόγιο), marked as «ίδιος».
+        $this->assertStringContainsString('Reseller', $rows[1]['who']);
+        $this->assertSame('700700700', $rows[1]['afm']);
+        $this->assertFalse($rows[1]['receipt']);
+        $this->assertFalse($rows[1]['routed']);
     }
 }

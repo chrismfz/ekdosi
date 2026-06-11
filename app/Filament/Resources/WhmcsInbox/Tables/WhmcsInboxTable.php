@@ -189,7 +189,9 @@ class WhmcsInboxTable
                         default => null,
                     })
                     ->color(fn (PendingWhmcsInvoice $r): string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI ? 'warning' : 'info')
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => ($n = self::beneficiaryNames($r)) !== [] ? implode(' · ', $n) : null),
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => ($n = self::beneficiaryNames($r)) !== [] ? 'Κλικ για ανάλυση ανά γραμμή · '.implode(' · ', $n) : null)
+                    // Click the badge → per-line routing preview (which line → who → τύπος).
+                    ->action(self::viewRoutingAction()),
 
                 TextColumn::make('status')
                     ->label('Κατάσταση')
@@ -325,10 +327,12 @@ class WhmcsInboxTable
                 // Παραστατικού». Everything else (including «Άνοιγμα», kept first)
                 // collapses into a «…» dropdown so the row doesn't sprawl.
                 self::createDraftAction(),
+                // Direct «Διαχωρισμός» button on multi-party rows (visible() gates
+                // it to TP_MULTI) so splitting is one click, not buried in «…».
+                self::splitAction(),
                 ActionGroup::make([
                     self::openInvoiceAction(),
                     self::createCustomerAction(),
-                    self::splitAction(),
                     self::reResolveThirdPartyAction(),
                     self::holdAction(),
                     self::reStageAction(),
@@ -487,6 +491,59 @@ class WhmcsInboxTable
         $names = self::beneficiaryNames($r);
 
         return $names[0] ?? null;
+    }
+
+    /**
+     * Per-LINE routing for the preview modal: each WHMCS line → who it bills →
+     * ΑΦΜ → Τιμολόγιο/Απόδειξη. Mirrors the WHMCS-side «Δρομολόγηση υπηρεσιών»
+     * screen so the operator SEES which line goes where before splitting. Own
+     * (non-routed) lines bill the WHMCS client and take the primary's type
+     * (ownLinesAreReceipt); routed lines take the route's explicit is_receipt and
+     * go to the contact.
+     *
+     * @return list<array{line:string,who:string,afm:string,receipt:bool,routed:bool}>
+     */
+    private static function routingRows(PendingWhmcsInvoice $r): array
+    {
+        $lines = $r->third_party_resolution['lines'] ?? [];
+        if (! is_array($lines) || $lines === []) {
+            return [];
+        }
+
+        $decode = static fn (string $s): string => html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $ownReceipt = $r->ownLinesAreReceipt();
+        $ownName = $r->customer?->name ?? $r->whmcsClientName() ?? 'Πελάτης WHMCS';
+        $ownAfm = $r->customer?->afm ?? $r->whmcsAfm();
+
+        $out = [];
+        foreach ($lines as $l) {
+            $routed = ! empty($l['routed']) && ! empty($l['contact']);
+            $out[] = [
+                'line' => $decode((string) ($l['description'] ?? '—')),
+                'who' => $routed
+                    ? $decode((string) ($l['contact']['company_name'] ?? 'Τρίτος'))
+                    : $decode($ownName).' (ίδιος)',
+                'afm' => $routed ? (string) ($l['contact']['gr_vatno'] ?? '') : (string) ($ownAfm ?? ''),
+                'receipt' => $routed ? (bool) ($l['is_receipt'] ?? false) : $ownReceipt,
+                'routed' => $routed,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** Read-only per-line routing preview, opened by clicking the «Τρίτος» cell. */
+    private static function viewRoutingAction(): Action
+    {
+        return Action::make('view_routing')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δρομολόγηση WHMCS #'.$r->whmcs_invoice_id)
+            ->modalContent(fn (PendingWhmcsInvoice $r) => view('filament.whmcs-inbox.third-party-routing', [
+                'rows' => self::routingRows($r),
+                'isMulti' => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI,
+            ]))
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Κλείσιμο')
+            ->modalWidth('2xl');
     }
 
     /**

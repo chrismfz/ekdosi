@@ -25,6 +25,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   reviewed path is fast enough that unattended auto-issue is optional, not needed. The inbox
   table polls every 30s. New **«Τρίτος»** badge column (single beneficiary name / «Πολλοί (N)»)
   + «Άμεσο»/«Τρίτος» quick filters. Enabled `databaseNotifications` (30s poll) on the panel.
+- **WHMCS inbox: per-line third-party routing preview + one-click split.** Clicking the
+  «Τρίτος» badge opens a read-only breakdown — *ποια γραμμή → ποιος δικαιούχος (ΑΦΜ) →
+  Τιμολόγιο/Απόδειξη* (mirrors the WHMCS «Δρομολόγηση υπηρεσιών» screen). «Διαχωρισμός σε
+  προσχέδια» is now a direct row button on multi-party rows (was buried in the «…» menu).
 
 ### Fixed
 - **WHMCS third-party document-type bug (Απόδειξη vs Τιμολόγιο per party).** The WHMCS
