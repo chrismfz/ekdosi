@@ -48,7 +48,7 @@ class NotifyOverdueInvoices extends Command
                 ->where('invoices.company_id', $company->id)
                 ->whereNull('invoices.deleted_at')
                 ->overdue()
-                ->get(['id', 'gross_total', 'credited_total', 'paid_total']);
+                ->get(['id', 'gross_total', 'payable_total', 'credited_total', 'paid_total']);
 
             $count = $overdue->count();
             if ($count === 0) {
