@@ -71,6 +71,9 @@ class Customer extends Model
         // Operator-feedback polish: pin frequent customers to the top of
         // the invoice-form picker (favourites-first + auto-top).
         'is_favorite',
+        // «Υπόλοιπο πελάτη» on the invoice PDF — per-customer override
+        // (null = inherit the tenant default, true/false = force).
+        'show_balance_on_pdf',
         'peppol_endpoint',
         'referred_by_customer_id',
         // T-1b: count of WHMCS third-party routing rows this customer owns
@@ -86,6 +89,7 @@ class Customer extends Model
             'auto_email_invoices' => 'boolean',
             'is_active' => 'boolean',
             'is_favorite' => 'boolean',
+            'show_balance_on_pdf' => 'boolean',
             'whmcs_reseller_routes' => 'integer',
         ];
     }

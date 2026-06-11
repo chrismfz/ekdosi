@@ -17,6 +17,25 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Added
+- **«Υπόλοιπο πελάτη» στο invoice PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ»). On issue
+  (draft→active), an invoice that moves the running balance (credit-term sale or
+  credit note) captures the customer's total Καρτέλα balance into a new
+  `invoices.customer_balance_snapshot` column — stable on reprint (a live recompute
+  would drift). The PDF then prints a **Προηγούμενο υπόλοιπο + αυτό το παραστατικό =
+  Νέο υπόλοιπο** block, gated by a per-tenant default toggle
+  (`companies.show_customer_balance_on_pdf`) with a per-customer override
+  (`customers.show_balance_on_pdf`: ναι/όχι/προεπιλογή). Cash-term invoices (settled at
+  issue) are skipped. Bilingual labels (EL/EN). App-issued only — the ETL/Epsilon
+  raw-write importers bypass the observer.
+
+### Changed
+- **Καρτέλα: «αναλυτική παρακράτηση» στο ledger.** A receivable row whose collectible
+  differs from the document value (withholding/τέλη) now shows a detail line «Αξία
+  εγγράφου … · Παρακράτηση φόρου …» under the reference (both the page table and the
+  statement PDF). Display-only — the Χρέωση/Πίστωση/Υπόλοιπο stay = payable, so the
+  running balance and the paid/unpaid filters are unchanged.
+
 ## [1.1.0] - 2026-06-11
 
 ### Added

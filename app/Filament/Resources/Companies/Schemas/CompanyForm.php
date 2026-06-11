@@ -408,6 +408,9 @@ class CompanyForm
                                             ->rows(2)
                                             ->maxLength(500)
                                             ->helperText('Appears in the page footer of every PDF. Plain text only.'),
+                                        Toggle::make('show_customer_balance_on_pdf')
+                                            ->label('Υπόλοιπο πελάτη στο PDF')
+                                            ->helperText('Προεπιλογή: τυπώνει block «Νέο υπόλοιπο» (Προηγούμενο + παραστατικό = Νέο) στα τιμολόγια επί πιστώσει. Ανά πελάτη υπερισχύει η δική του ρύθμιση.'),
                                     ])
                                     ->columns(2),
 

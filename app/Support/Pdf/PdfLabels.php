@@ -74,6 +74,12 @@ class PdfLabels
         'deductions' => ['Κρατήσεις', 'Deductions'],
         'payable' => ['Πληρωτέο', 'Payable'],
 
+        // Customer running-balance block («ΝΕΟ ΥΠΟΛΟΙΠΟ»)
+        'customer_balance' => ['Υπόλοιπο πελάτη', 'Customer balance'],
+        'previous_balance' => ['Προηγούμενο υπόλοιπο', 'Previous balance'],
+        'this_document' => ['Αυτό το παραστατικό', 'This document'],
+        'new_balance' => ['Νέο υπόλοιπο', 'New balance'],
+
         // Sections
         'notes' => ['Παρατηρήσεις', 'Notes'],
         'related_docs' => ['Σχετικά παραστατικά', 'Related documents'],

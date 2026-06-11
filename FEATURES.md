@@ -31,6 +31,10 @@
   GR-EN**), per-invoice/quote επιλογή με default από τη χώρα πελάτη (GR → Ελληνικά, ξένος
   → δίγλωσσο)· `App\Support\Pdf\PdfLabels` localizes μόνο τις ετικέτες (όχι ποσά/περιεχόμενο),
   σε invoice + quote.
+- **«Υπόλοιπο πελάτη» στο PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») — Προηγούμενο + αυτό το παραστατικό
+  = Νέο υπόλοιπο, **snapshot τη στιγμή έκδοσης** (`invoices.customer_balance_snapshot`,
+  σταθερό σε reprint)· opt-in ανά εταιρεία (`show_customer_balance_on_pdf`) με override ανά
+  πελάτη· μόνο σε παραστατικά επί πιστώσει/πιστωτικά (τα μετρητοίς εξοφλούνται στην έκδοση).
 - **Δύο ορθογώνιες καταστάσεις**: `local_status` (draft/active/cancelled) vs
   `mydata_state` (null/VALID/CANCELLED) — ποτέ μπερδεμένες· ένα predicate
   (`InvoiceScope::live()`) σε όλα τα money sites.
@@ -102,7 +106,9 @@
 - **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ».
 - **VIES (EU)** — επαλήθευση/άντληση μη-GR ενδοκοινοτικών ΑΦΜ (`ViesLookup`) +
   **reverse-charge hint** (0% + §8.3 «16 — άρθρο 45»).
-- **Καρτέλα**: ledger κινήσεων, aging, **YoY**, charts, εξαγωγή **PDF/CSV** + email.
+- **Καρτέλα**: ledger κινήσεων, aging, **YoY**, charts, εξαγωγή **PDF/CSV** + email·
+  «αναλυτική παρακράτηση» (αξία εγγράφου + παρακράτηση/τέλη κάτω από την αναφορά, χωρίς
+  να αλλάζει το υπόλοιπο).
 - **Tags** (tenant-scoped) + favourites σε customers/products.
 
 ## 8. Πληρωμές & Είσπραξη (AR)

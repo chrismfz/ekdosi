@@ -180,6 +180,9 @@ class Invoice extends Model
             'net_total' => 'decimal:2',
             'gross_total' => 'decimal:2',
             'payable_total' => 'decimal:2',
+            // Customer running-balance snapshot at issue time — written ONLY by
+            // App\Observers\InvoiceObserver (forceFill, not $fillable).
+            'customer_balance_snapshot' => 'decimal:2',
             // Money-status cache — written ONLY by App\Services\InvoiceBalance
             // (not $fillable, mirroring the mydata_* cache columns).
             'paid_total' => 'decimal:2',
@@ -362,6 +365,51 @@ class Invoice extends Model
         return $this->payable_total !== null
             ? round((float) $this->payable_total, 2)
             : round((float) ($this->gross_total ?? 0) + $this->additionalTaxAdjustment(), 2);
+    }
+
+    /**
+     * Is this invoice a credit note (reduces the customer's running balance)?
+     * Either correlated to an original or a standalone credit-type document.
+     * Mirrors CustomerLedgerBuilder::isCreditNote.
+     */
+    public function isCreditNote(): bool
+    {
+        return $this->credited_invoice_id !== null
+            || (bool) ($this->invoiceType?->is_credit);
+    }
+
+    /**
+     * Does this invoice move the customer's running balance (Καρτέλα «υπόλοιπο»)?
+     * Credit notes always do; normal sales only on credit terms (cash-term =
+     * settled at issue, never a receivable). Mirrors the ledger's balance math
+     * (CustomerLedgerBuilder::isTracked + isCreditNote) so the «Νέο υπόλοιπο»
+     * block on the PDF reconciles with the Καρτέλα.
+     */
+    public function affectsCustomerBalance(): bool
+    {
+        return $this->isCreditNote()
+            || (int) ($this->paymentMethod?->due_days ?? 0) > 0;
+    }
+
+    /**
+     * This document's signed contribution to the customer's running balance:
+     * +payable for a credit-term sale, −payable for a credit note, 0 for a
+     * cash-term sale. So Προηγούμενο υπόλοιπο = snapshot − contribution.
+     *
+     * NOTE: reconciles with the snapshot (built from CustomerLedgerBuilder, whose
+     * `payable()` is `payable_total ?? gross_total`) only while `payable_total` is
+     * populated — which it always is for app-issued invoices (RecomputeInvoiceTotals
+     * writes it before issue, and only app-issued rows get a snapshot). On a NULL
+     * fallback the two would diverge by the [208] adjustment; that path is unreachable
+     * here by construction.
+     */
+    public function customerBalanceContribution(): float
+    {
+        if (! $this->affectsCustomerBalance()) {
+            return 0.0;
+        }
+
+        return $this->isCreditNote() ? -$this->payableTotal() : $this->payableTotal();
     }
 
     private ?InvoiceBalanceData $balanceDataCache = null;

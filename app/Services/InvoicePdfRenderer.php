@@ -92,6 +92,7 @@ class InvoicePdfRenderer
                 'qrDataUri'   => $qrDataUri,
                 'logoDataUri' => $logoDataUri,
                 'totals'      => $this->totalsView($invoice),
+                'customerBalance' => $this->customerBalanceView($invoice),
                 'L'           => PdfLabels::for(PdfLabels::resolveLanguage($invoice->language, $invoice->country)),
             ])
                 ->setPaper('A4', 'portrait')
@@ -194,6 +195,39 @@ class InvoicePdfRenderer
             'deductions' => (float) ($invoice->deductions_amount ?? 0),
             'withhold'   => $invoice->withholdingReducesGross() ? (float) ($invoice->withhold_amount ?? 0) : 0.0,
             'payable'    => round($breakdown->totalGross() + $invoice->additionalTaxAdjustment(), 2),
+        ];
+    }
+
+    /**
+     * The «Υπόλοιπο πελάτη» block (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ»): Προηγούμενο / αυτό το
+     * παραστατικό / Νέο, derived from the issue-time snapshot so it stays STABLE
+     * on reprint. Returns null (block omitted) unless:
+     *   • the snapshot was captured (credit-term/credit-note invoice), AND
+     *   • the toggle is on — per-customer override wins, else the tenant default.
+     *
+     * Νέο = the snapshot (the customer's running balance right after this issue);
+     * Προηγούμενο = Νέο − this document's signed contribution.
+     */
+    private function customerBalanceView(Invoice $invoice): ?array
+    {
+        if ($invoice->customer_balance_snapshot === null) {
+            return null;
+        }
+
+        $customer = $invoice->customer;
+        $enabled = $customer?->show_balance_on_pdf
+            ?? (bool) ($invoice->company?->show_customer_balance_on_pdf);
+        if (! $enabled) {
+            return null;
+        }
+
+        $new = round((float) $invoice->customer_balance_snapshot, 2);
+        $current = round($invoice->customerBalanceContribution(), 2);
+
+        return [
+            'previous' => round($new - $current, 2),
+            'current'  => $current,
+            'new'      => $new,
         ];
     }
 }

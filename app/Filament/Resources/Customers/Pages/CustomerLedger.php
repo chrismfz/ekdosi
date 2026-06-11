@@ -234,7 +234,15 @@ class CustomerLedger extends Page implements HasTable
                 TextColumn::make('reference')
                     ->label('Αναφορά')
                     ->searchable()
-                    ->color(fn (array $record): ?string => ($record['type'] === 'invoice' && $record['invoice_id']) ? 'primary' : null),
+                    ->color(fn (array $record): ?string => ($record['type'] === 'invoice' && $record['invoice_id']) ? 'primary' : null)
+                    // «Αναλυτική παρακράτηση»: when the collectible differs from the
+                    // document value (withholding/τέλη), show both under the reference.
+                    // Display-only — the Χρέωση/Υπόλοιπο stay = payable.
+                    ->description(fn (array $record): ?string => CustomerLedgerBuilder::adjustmentDetail(
+                        $record['document_gross'] ?? null,
+                        (float) ($record['tax_adjustment'] ?? 0),
+                        fn ($v): string => $this->fmtMoney($v),
+                    )),
                 TextColumn::make('debit')
                     ->label('Χρέωση')
                     ->alignEnd()

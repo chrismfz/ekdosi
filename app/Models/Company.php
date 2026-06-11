@@ -60,6 +60,8 @@ class Company extends Model
         // PR #27: branding + outbound mail config
         'logo_path',
         'pdf_footer_text',
+        // «Υπόλοιπο πελάτη» on the invoice PDF — per-tenant default (off).
+        'show_customer_balance_on_pdf',
         'mail_from_address',
         'mail_from_name',
         'invoice_audit_bcc',
@@ -128,6 +130,7 @@ class Company extends Model
             'whmcs_fetch_via_bridge' => 'boolean',
             'whmcs_auto_issue_immediate' => 'boolean',
             'mydata_send_item_descr' => 'boolean',
+            'show_customer_balance_on_pdf' => 'boolean',
             'auto_email_on_mydata_accept' => 'boolean',
             'auto_email_on_issue' => 'boolean',
             'mail_smtp_port' => 'integer',
