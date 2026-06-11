@@ -130,6 +130,42 @@ class CustomerLedgerBuilderTest extends TestCase
         $this->assertSame(124.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
     }
 
+    public function test_withholding_invoice_surfaces_an_analytic_breakdown_without_changing_the_math(): void
+    {
+        // A credit-term service invoice: document value 1240 (net+VAT), 200
+        // withheld → collectible 1040. The ledger row keeps debit/balance = 1040
+        // (the receivable), but exposes the document value + the παρακράτηση so the
+        // Καρτέλα can show «Αξία εγγράφου 1.240 · Παρακράτηση φόρου 200».
+        $c = $this->makeCustomer();
+        $inv = $this->makeInvoice($c, '2026-05-01', 1240.0, $this->credit, net: 1000.0);
+        $inv->forceFill(['payable_total' => 1040.0])->save();
+
+        $result = app(CustomerLedgerBuilder::class)->build($c);
+
+        // Money unchanged: receivable balance = the collectible.
+        $this->assertSame(1040.0, $result->stats['balance']);
+
+        $row = collect($result->ledger)->firstWhere('invoice_id', $inv->id);
+        $this->assertSame(1040.0, $row['debit']);            // running balance honest
+        $this->assertSame(1040.0, $row['running_balance']);
+        $this->assertSame(1240.0, $row['document_gross']);   // the document value
+        $this->assertSame(-200.0, $row['tax_adjustment']);   // payable − gross
+
+        $detail = CustomerLedgerBuilder::adjustmentDetail(
+            $row['document_gross'], $row['tax_adjustment'], fn ($v) => number_format($v, 2, ',', '.').' €'
+        );
+        $this->assertStringContainsString('Αξία εγγράφου 1.240,00 €', $detail);
+        $this->assertStringContainsString('Παρακράτηση φόρου 200,00 €', $detail);
+
+        // A plain invoice (no adjustment) yields no detail line.
+        $plain = $this->makeInvoice($c, '2026-05-02', 124.0, $this->credit);
+        $plainRow = collect(app(CustomerLedgerBuilder::class)->build($c)->ledger)->firstWhere('invoice_id', $plain->id);
+        $this->assertSame(0.0, $plainRow['tax_adjustment']);
+        $this->assertNull(CustomerLedgerBuilder::adjustmentDetail(
+            $plainRow['document_gross'], $plainRow['tax_adjustment'], fn ($v) => (string) $v
+        ));
+    }
+
     public function test_empty_customer_returns_zeroed_stats(): void
     {
         $c = $this->makeCustomer();

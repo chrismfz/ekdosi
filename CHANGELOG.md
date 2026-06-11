@@ -29,6 +29,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   issue) are skipped. Bilingual labels (EL/EN). App-issued only — the ETL/Epsilon
   raw-write importers bypass the observer.
 
+### Changed
+- **Καρτέλα: «αναλυτική παρακράτηση» στο ledger.** A receivable row whose collectible
+  differs from the document value (withholding/τέλη) now shows a detail line «Αξία
+  εγγράφου … · Παρακράτηση φόρου …» under the reference (both the page table and the
+  statement PDF). Display-only — the Χρέωση/Πίστωση/Υπόλοιπο stay = payable, so the
+  running balance and the paid/unpaid filters are unchanged.
+
 ## [1.1.0] - 2026-06-11
 
 ### Added

@@ -258,6 +258,24 @@ class CustomerLedgerBuilder
     }
 
     /**
+     * «Αναλυτική» detail for an invoice ledger row whose collectible differs from
+     * its document value: «Αξία εγγράφου 1.240,00 € · Παρακράτηση φόρου 200,00 €»
+     * (or «Τέλη/φόροι» when the net adjustment ADDS). Returns null when there's
+     * nothing to break down (adjustment 0) so the caller can skip the line.
+     * The amounts are display-only — the row's debit/credit stay = payable.
+     */
+    public static function adjustmentDetail(?float $documentGross, float $taxAdjustment, callable $fmt): ?string
+    {
+        if ($documentGross === null || abs($taxAdjustment) < 0.005) {
+            return null;
+        }
+
+        $label = $taxAdjustment < 0 ? 'Παρακράτηση φόρου' : 'Τέλη/φόροι';
+
+        return 'Αξία εγγράφου '.$fmt($documentGross).' · '.$label.' '.$fmt(abs($taxAdjustment));
+    }
+
+    /**
      * Signed contribution of a payment row to the paid total: a refund
      * (money OUT, back to the customer) counts NEGATIVE — it un-pays, so the
      * balance rises again. Mirrors Payment::NET_AMOUNT_SQL on the SQL side.
@@ -510,6 +528,13 @@ class CustomerLedgerBuilder
             // running balance stays consistent with the receivables balance. The
             // document value (gross) lives on the invoice + the turnover stats.
             $gross = $this->payable($inv);
+            // «Αναλυτική» display: surface the document value + the [208] tax
+            // adjustment (payable − gross: −withholding/κρατήσεις, +τέλη/φόροι) so the
+            // Καρτέλα shows BOTH the invoice value and the παρακράτηση, WITHOUT
+            // touching the money: debit/credit stay = payable, so the running
+            // balance + the paid/unpaid filters are unchanged. 0 = nothing to detail.
+            $documentGross = round((float) $inv->gross_total, 2);
+            $taxAdjustment = round($gross - $documentGross, 2);
             $events[] = [
                 'date_sort' => Carbon::parse($inv->issued_at)->timestamp,
                 'date' => Carbon::parse($inv->issued_at)->toDateString(),
@@ -522,6 +547,8 @@ class CustomerLedgerBuilder
                 'invoice_type_code' => $inv->invoice_type_code,
                 'debit' => $isCreditNote ? 0.0 : $gross,
                 'credit' => $isCreditNote ? $gross : 0.0,
+                'document_gross' => $documentGross,
+                'tax_adjustment' => $taxAdjustment,
                 'mydata_state' => $inv->mydata_state,
                 'mydata_mark' => $inv->mydata_mark,
                 'is_credit_term' => ! $isCreditNote && $this->isTracked($inv, $paidIds),
@@ -713,6 +740,9 @@ class CustomerLedgerBuilder
         foreach ($events as &$e) {
             unset($e['date_sort'], $e['is_credit_term']);
             $e['net'] = $e['debit'];   // for backward-compat / view convenience
+            // Uniform shape: payment/refund rows carry no document breakdown.
+            $e['document_gross'] ??= null;
+            $e['tax_adjustment'] ??= 0.0;
         }
         unset($e);
 

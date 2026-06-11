@@ -106,7 +106,9 @@
 - **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ».
 - **VIES (EU)** — επαλήθευση/άντληση μη-GR ενδοκοινοτικών ΑΦΜ (`ViesLookup`) +
   **reverse-charge hint** (0% + §8.3 «16 — άρθρο 45»).
-- **Καρτέλα**: ledger κινήσεων, aging, **YoY**, charts, εξαγωγή **PDF/CSV** + email.
+- **Καρτέλα**: ledger κινήσεων, aging, **YoY**, charts, εξαγωγή **PDF/CSV** + email·
+  «αναλυτική παρακράτηση» (αξία εγγράφου + παρακράτηση/τέλη κάτω από την αναφορά, χωρίς
+  να αλλάζει το υπόλοιπο).
 - **Tags** (tenant-scoped) + favourites σε customers/products.
 
 ## 8. Πληρωμές & Είσπραξη (AR)

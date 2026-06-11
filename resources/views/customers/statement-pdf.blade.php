@@ -117,7 +117,10 @@
                     <td><span class="badge">{{ \App\Services\CustomerLedger\CustomerLedgerBuilder::eventTypeLabel($row['type'], $row['invoice_type_code'] ?? null) }}</span></td>
                     <td>{{ ! empty($row['is_receipt_group']) && ! empty($row['allocations'])
                         ? \App\Services\CustomerLedger\ReceiptAllocationSummary::describe($row['reference'], $row['allocations'], $fmt)
-                        : $row['reference'] }}</td>
+                        : $row['reference'] }}
+                        @php($adjDetail = \App\Services\CustomerLedger\CustomerLedgerBuilder::adjustmentDetail($row['document_gross'] ?? null, (float) ($row['tax_adjustment'] ?? 0), $fmt))
+                        @if ($adjDetail)<div class="muted" style="font-size: 8pt;">{{ $adjDetail }}</div>@endif
+                    </td>
                     <td class="right">{{ $row['debit'] > 0 ? $fmt($row['debit']) : '' }}</td>
                     <td class="right credit">{{ $row['credit'] > 0 ? $fmt($row['credit']) : '' }}</td>
                     <td class="right {{ $row['running_balance'] > 0 ? 'danger' : '' }}">{{ $fmt($row['running_balance']) }}</td>
