@@ -26,7 +26,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   e-invoice provider, tenant identity, and the sensitive backup policy (passphrase/
   destinations/retention) stay super_admin. `save()` writes an explicit whitelist only
   (no raw mass-assign — a crafted payload can't reach a non-whitelisted column), audited
-  to `activity_log` under the tenant. company_admin auto-gets the permission (not in
+  to `activity_log` under the tenant (the per-field diff lands in `attribute_changes` so
+  it renders in «Ιστορικό»). A backup row first enabled here defaults to `secrets_mode=raw`
+  (local-only) — a company_admin can't set a passphrase, so the `passphrase` default would
+  make every scheduled run throw. company_admin auto-gets the permission (not in
   `ADMIN_FORBIDDEN_RESOURCES`); operator does not. Deploy: `shield:generate` + re-provision.
 - **«Υπόλοιπο πελάτη» στο invoice PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ»). On issue
   (draft→active), an invoice that moves the running balance (credit-term sale or

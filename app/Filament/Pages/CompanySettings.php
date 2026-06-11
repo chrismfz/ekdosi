@@ -171,7 +171,7 @@ class CompanySettings extends Page implements HasForms
                     ->schema([
                         Toggle::make('backup_enabled')
                             ->label('Ενεργό')
-                            ->helperText('Όταν είναι ενεργό, λαμβάνεται αντίγραφο με την παρακάτω συχνότητα (τοπικά, κρυπτογραφημένα από προεπιλογή).'),
+                            ->helperText('Όταν είναι ενεργό, λαμβάνεται τοπικό αντίγραφο με την παρακάτω συχνότητα. Κρυπτογράφηση (συνθηματικό) και απομακρυσμένοι προορισμοί ρυθμίζονται από τον διαχειριστή συστήματος.'),
                         Select::make('backup_frequency')
                             ->label('Συχνότητα')
                             ->options(['off' => 'Ανενεργό', 'daily' => 'Καθημερινά', 'weekly' => 'Εβδομαδιαία', 'monthly' => 'Μηνιαία'])
@@ -227,47 +227,65 @@ class CompanySettings extends Page implements HasForms
         $company = $this->tenant();
         $state = $this->form->getState();
 
+        // Build the per-field diff as the {attributes,old} shape the activity feed
+        // renders (Activity::changeLines reads the `attribute_changes` column —
+        // hence withChanges(), NOT withProperties() which lands in `properties`
+        // and shows blank).
+        $new = [];
+        $old = [];
+
         // ── Company safe subset (explicit whitelist, never raw mass-assign) ──
         $companyUpdate = [];
-        $changes = [];
         foreach (self::COMPANY_FIELDS as $field) {
-            $new = $state[$field] ?? null;
-            $companyUpdate[$field] = $new;
-            $before = $company->{$field};
-            if ($this->normalize($before) !== $this->normalize($new)) {
-                $changes[$field] = ['from' => $this->normalize($before), 'to' => $this->normalize($new)];
+            $value = $state[$field] ?? null;
+            $companyUpdate[$field] = $value;
+            if ($this->normalize($company->{$field}) !== $this->normalize($value)) {
+                $new[$field] = $this->normalize($value);
+                $old[$field] = $this->normalize($company->{$field});
             }
         }
         $company->update($companyUpdate);
 
         // ── Backup enable + cadence (preserves the super_admin-owned columns:
-        //    updateOrCreate touches ONLY these keys; secrets_mode/passphrase/
-        //    destinations/retention keep their existing values or table defaults) ──
+        //    updateOrCreate touches ONLY these keys; passphrase/destinations/
+        //    retention keep their existing values or table defaults) ──
         $backup = $company->backupSetting;
+        $backupDefaults = ['enabled' => false, 'frequency' => 'off', 'run_at_time' => '02:00'];
         $backupUpdate = [
             'enabled' => (bool) ($state['backup_enabled'] ?? false),
             'frequency' => (string) ($state['backup_frequency'] ?? 'off'),
             'run_at_time' => (string) ($state['backup_run_at_time'] ?? '02:00'),
         ];
+        // A NEW row created here gets secrets_mode='raw': a company_admin can't set
+        // a passphrase (super_admin-only), so the table's 'passphrase' default +
+        // null passphrase would make CompanyBackupRunner throw on EVERY run. raw =
+        // unencrypted, local-only (no remote target without super_admin
+        // destinations) — the safe self-service default. Existing rows are left as
+        // the administrator configured them.
+        if ($backup === null) {
+            $backupUpdate['secrets_mode'] = 'raw';
+        }
         foreach (self::BACKUP_FIELDS as $field) {
-            $before = $backup->{$field} ?? null;
+            $before = $backup->{$field} ?? $backupDefaults[$field];
             if ($this->normalize($before) !== $this->normalize($backupUpdate[$field])) {
-                $changes["backup_{$field}"] = ['from' => $this->normalize($before), 'to' => $this->normalize($backupUpdate[$field])];
+                $new["backup_{$field}"] = $this->normalize($backupUpdate[$field]);
+                $old["backup_{$field}"] = $this->normalize($before);
             }
         }
         CompanyBackupSetting::updateOrCreate(['company_id' => $company->getKey()], $backupUpdate);
 
-        if ($changes !== []) {
+        $changed = $new !== [];
+        if ($changed) {
             activity('company_settings')
                 ->performedOn($company)
                 ->causedBy(auth()->user())
-                ->withProperties(['changes' => $changes])
+                ->withChanges(['attributes' => $new, 'old' => $old])
                 ->event('updated')
                 ->log('Ενημέρωση ρυθμίσεων εταιρείας');
         }
 
         Notification::make()
-            ->title($changes === [] ? 'Καμία αλλαγή' : 'Οι ρυθμίσεις αποθηκεύτηκαν')
+            ->title($changed ? 'Οι ρυθμίσεις αποθηκεύτηκαν' : 'Καμία αλλαγή')
             ->success()
             ->send();
     }

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\CompanySettings;
+use App\Models\Activity;
 use App\Models\Company;
 use App\Models\CompanyBackupSetting;
 use App\Models\Role;
@@ -128,14 +129,22 @@ class CompanySettingsPageTest extends TestCase
         $this->assertTrue((bool) $backup->enabled);
         $this->assertSame('daily', $backup->frequency);
         $this->assertSame('03:30', $backup->run_at_time);
-        // Untouched super_admin columns kept their table defaults (not wiped).
-        $this->assertSame('passphrase', $backup->secrets_mode);
+        // A row CREATED via self-service defaults to raw (local-only): a company_admin
+        // can't set a passphrase, so 'passphrase' mode + null passphrase would make
+        // every scheduled run throw. raw keeps the local backup actually runnable.
+        $this->assertSame('raw', $backup->secrets_mode);
 
-        $this->assertDatabaseHas('activity_log', [
-            'log_name' => 'company_settings',
-            'description' => 'Ενημέρωση ρυθμίσεων εταιρείας',
-            'company_id' => $company->id,
-        ]);
+        // The audit diff must land in `attribute_changes` (what the «Ιστορικό» feed
+        // renders), not `properties` — else the change shows blank.
+        $row = Activity::where('log_name', 'company_settings')->latest('id')->first();
+        $this->assertNotNull($row);
+        $this->assertSame('Ενημέρωση ρυθμίσεων εταιρείας', $row->description);
+        $this->assertSame($company->id, $row->company_id);
+        $changed = $row->attribute_changes?->toArray() ?? [];
+        $this->assertArrayHasKey('attributes', $changed);
+        $this->assertSame('Νέο υποσέλιδο', $changed['attributes']['pdf_footer_text'] ?? null);
+        $this->assertSame('daily', $changed['attributes']['backup_frequency'] ?? null);
+        $this->assertNotEmpty($row->changeLines(), 'the feed must render per-field diff lines');
     }
 
     #[Test]
