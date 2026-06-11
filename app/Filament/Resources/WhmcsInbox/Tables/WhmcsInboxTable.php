@@ -51,16 +51,7 @@ class WhmcsInboxTable
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
                 $query->where('company_id', $tenant?->getKey() ?? 0)
-                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map'])
-                    // «Άμεση τιμολόγηση» rows float to the top (correlated subquery
-                    // on the matched customer's flag) — the default created_at sort
-                    // below stays the secondary order.
-                    ->orderByDesc(
-                        Customer::query()
-                            ->select('needs_immediate_invoice')
-                            ->whereColumn('customers.id', 'pending_whmcs_invoices.customer_id')
-                            ->limit(1)
-                    );
+                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
             })
             ->columns([
                 // Bridges/Connectors: which billing source this row came from. One
@@ -185,12 +176,18 @@ class WhmcsInboxTable
                     ->placeholder('—')
                     ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->third_party_state) {
                         PendingWhmcsInvoice::TP_SINGLE => self::firstBeneficiaryName($r) ?? 'Τρίτος',
-                        PendingWhmcsInvoice::TP_MULTI => 'Πολλοί ('.count(self::beneficiaryNames($r)).')',
+                        PendingWhmcsInvoice::TP_MULTI => ($n = count(self::beneficiaryNames($r))) > 0 ? "Πολλοί ({$n})" : 'Πολλοί',
                         default => null,
                     })
                     ->color(fn (PendingWhmcsInvoice $r): string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI ? 'warning' : 'info')
                     ->tooltip(fn (PendingWhmcsInvoice $r): ?string => ($n = self::beneficiaryNames($r)) !== [] ? 'Κλικ για ανάλυση ανά γραμμή · '.implode(' · ', $n) : null)
-                    // Click the badge → per-line routing preview (which line → who → τύπος).
+                    // Click the badge → per-line routing preview. Only meaningful for
+                    // third-party rows; the '—' placeholder on plain rows isn't clickable.
+                    ->disabledClick(fn (PendingWhmcsInvoice $r): bool => ! in_array(
+                        $r->third_party_state,
+                        [PendingWhmcsInvoice::TP_SINGLE, PendingWhmcsInvoice::TP_MULTI],
+                        true,
+                    ))
                     ->action(self::viewRoutingAction()),
 
                 TextColumn::make('status')
@@ -264,7 +261,14 @@ class WhmcsInboxTable
                     ->sortable()
                     ->tooltip('Πότε συγχρονίστηκε στο inbox'),
             ])
-            ->defaultSort('created_at', 'desc')
+            // DEFAULT order (overridable by a column-header click — Filament appends
+            // the user's sort BEFORE this closure, so a manual sort stays primary and
+            // this only acts as the default + tiebreaker): «άμεση τιμολόγηση» rows
+            // float to the top, then newest first. COALESCE(...,0) makes the NULL
+            // (unmatched) case deterministic across MariaDB/sqlite.
+            ->defaultSort(fn (Builder $query): Builder => $query
+                ->orderByRaw('coalesce((select c.needs_immediate_invoice from customers c where c.id = pending_whmcs_invoices.customer_id limit 1), 0) desc')
+                ->orderByDesc('created_at'))
             // Auto-refresh so a freshly-paid (immediate) row surfaces within ~30s
             // without a manual reload — pairs with the bell notification.
             ->poll('30s')
@@ -517,6 +521,9 @@ class WhmcsInboxTable
 
         $out = [];
         foreach ($lines as $l) {
+            if (! is_array($l)) {
+                continue; // defensive: a malformed (scalar) line entry
+            }
             $routed = ! empty($l['routed']) && ! empty($l['contact']);
             $out[] = [
                 'line' => $decode((string) ($l['description'] ?? '—')),

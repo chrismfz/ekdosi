@@ -50,9 +50,10 @@ class WhmcsInboxResource extends Resource
     protected static ?string $recordTitleAttribute = 'whmcs_invoice_id';
 
     /**
-     * Navigation badge: count of pending_review rows for the current
-     * tenant. Surfaces "X invoices waiting for review" without the
-     * operator needing to click into the inbox.
+     * Navigation badge: count of pending_review rows for the current tenant —
+     * "X invoices waiting" without clicking in. (Deliberately NOT memoised in a
+     * process-static: that would serve stale counts across requests under Octane.
+     * Two cheap indexed queries per render are fine.)
      */
     public static function getNavigationBadge(): ?string
     {

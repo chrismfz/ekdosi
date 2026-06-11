@@ -3,9 +3,12 @@
 namespace Tests\Feature\WhmcsInbox;
 
 use App\Filament\Resources\WhmcsInbox\Tables\WhmcsInboxTable;
+use App\Filament\Resources\WhmcsInbox\WhmcsInboxResource;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
+use App\Models\User;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -112,5 +115,35 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
         $this->assertSame('700700700', $rows[1]['afm']);
         $this->assertFalse($rows[1]['receipt']);
         $this->assertFalse($rows[1]['routed']);
+    }
+
+    public function test_nav_badge_turns_red_only_when_an_immediate_row_waits(): void
+    {
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $user->companies()->attach($this->tenant->id);
+        $this->actingAs($user);
+        Filament::setTenant($this->tenant);
+        $this->assertNull(WhmcsInboxResource::getNavigationBadge());
+
+        // A plain pending row → warning, count 1.
+        $plain = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Ήσυχος', 'needs_immediate_invoice' => false]);
+        $this->pendingFor($plain);
+        $this->assertSame('1', WhmcsInboxResource::getNavigationBadge());
+        $this->assertSame('warning', WhmcsInboxResource::getNavigationBadgeColor());
+
+        // Add an immediate one → red.
+        $hot = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Άμεσος', 'needs_immediate_invoice' => true]);
+        $this->pendingFor($hot);
+        $this->assertSame('2', WhmcsInboxResource::getNavigationBadge());
+        $this->assertSame('danger', WhmcsInboxResource::getNavigationBadgeColor());
+    }
+
+    private function pendingFor(Customer $c): PendingWhmcsInvoice
+    {
+        return PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => random_int(1, 9_999_999),
+            'customer_id' => $c->id, 'payload' => [], 'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+        ]);
     }
 }

@@ -208,19 +208,22 @@ class WhmcsInvoiceIngestor
      */
     private function notifyIfImmediate(Company $tenant, IngestionResult $result): void
     {
-        $row = $result->row;
-        if (! $result->created
-            || $row->status !== PendingWhmcsInvoice::STATUS_PENDING_REVIEW
-            || ! $row->customer?->needs_immediate_invoice) {
-            return;
-        }
-
-        $recipients = $tenant->users;
-        if ($recipients->isEmpty()) {
-            return;
-        }
-
+        // Fully best-effort: the customer/users lazy-loads AND the send are all
+        // inside the try, so nothing here (a slow DB, a notify hiccup) can bubble
+        // out of an already-committed ingest.
         try {
+            $row = $result->row;
+            if (! $result->created
+                || $row->status !== PendingWhmcsInvoice::STATUS_PENDING_REVIEW
+                || ! $row->customer?->needs_immediate_invoice) {
+                return;
+            }
+
+            $recipients = $tenant->users;
+            if ($recipients->isEmpty()) {
+                return;
+            }
+
             Notification::make()
                 ->title('Άμεσο παραστατικό προς έκδοση')
                 ->body("WHMCS #{$row->whmcs_invoice_id} — {$row->customer?->name} ζητά άμεση τιμολόγηση.")
@@ -230,7 +233,7 @@ class WhmcsInvoiceIngestor
         } catch (\Throwable $e) {
             Log::warning('Immediate-invoice notification failed (ingestion unaffected).', [
                 'company_id' => $tenant->id,
-                'pending_id' => $row->id,
+                'pending_id' => $result->row->id ?? null,
                 'error' => $e->getMessage(),
             ]);
         }
