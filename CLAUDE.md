@@ -136,6 +136,7 @@ Part of "done", like tests. **Every change updates the right place:**
 ## Commands
 ```bash
 php artisan ops:health [--json]                         # one-shot deploy check: queue/scheduler/backup/mail/WHMCS/myDATA/disk
+php artisan ekdosi:go-live-check --tenant=SLUG [--json]  # per-tenant cutover-readiness gate (read-only; 0/1/2). See docs/go-live-runbook.md
 php artisan migrate
 php artisan shield:generate                              # (re)sync resource permissions after new resources
 

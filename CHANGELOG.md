@@ -18,6 +18,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **`ekdosi:go-live-check --tenant=SLUG [--json]`** — per-tenant cutover-readiness gate
+  (read-only). Consolidates the «can this tenant issue real documents?» checks into one
+  pass/warn/fail report: provider, invoice-types + income classification, default VAT,
+  VAT→AADE mapping, **production myDATA credentials (hard FAIL)**, mode, numbering, a
+  **golden totals-drift** recompute vs the stored cache (~1-cent = WARN, more = FAIL), per-
+  tenant backups, and the queue/infra slice (delegated to `OperatorHealthReport`). myDATA
+  gates SKIP for non-gr-mydata tenants (Estonian/PEPPOL). Exit 0/1/2 (mirrors
+  `mydata:preflight`). Pairs with the new `docs/go-live-runbook.md` for the manual steps it
+  can't automate (Firebird usage probes, the real AADE production smoke-test).
 - **Bridges framing (presentation-only, no pipeline change).** The WHMCS inbox is now
   the source-neutral **«Εισερχόμενα»** with a per-row **source badge** rendered from the
   `BillingSourceRegistry` (so a future WooCommerce/Blesta row reads its own label from one
