@@ -307,9 +307,14 @@ class Invoice extends Model
      */
     public function isFullyCredited(): bool
     {
+        // Compared against payableTotal() (the collectible), since credited_total
+        // is now summed in payable units (mirrors InvoiceBalance) — so a withholding
+        // invoice fully reversed by a credit note reads as fully credited, not −€X.
+        $payable = $this->payableTotal();
+
         return $this->credited_invoice_id === null
-            && (float) $this->gross_total > 0
-            && (float) $this->credited_total >= (float) $this->gross_total - 0.005;
+            && $payable > 0.005
+            && (float) $this->credited_total >= $payable - 0.005;
     }
 
     /**

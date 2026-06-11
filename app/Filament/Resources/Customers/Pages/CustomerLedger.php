@@ -427,9 +427,11 @@ class CustomerLedger extends Page implements HasTable
         InvoiceScope::live($q, 'invoices.');
 
         return $this->openInvoiceOptionsCache = $q->orderBy('invoices.issued_at')
-            ->get(['invoices.id', 'invoices.invcode', 'invoices.gross_total', 'invoices.credited_total', 'invoices.paid_total'])
+            ->get(['invoices.id', 'invoices.invcode', 'invoices.gross_total', 'invoices.payable_total', 'invoices.credited_total', 'invoices.paid_total'])
             ->mapWithKeys(function (Invoice $inv): array {
-                $balance = round((float) $inv->gross_total - (float) $inv->credited_total - (float) $inv->paid_total, 2);
+                // Open balance = collectible (payable_total, gross fallback) − credited − paid.
+                $payable = (float) ($inv->payable_total ?? $inv->gross_total);
+                $balance = round($payable - (float) $inv->credited_total - (float) $inv->paid_total, 2);
 
                 return $balance > 0.005
                     ? [$inv->id => $inv->invcode.' — υπόλοιπο '.$this->fmtMoney($balance)]

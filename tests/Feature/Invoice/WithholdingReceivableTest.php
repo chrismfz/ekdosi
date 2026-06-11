@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Invoice;
 
+use App\Actions\IssueCreditNote;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -63,6 +64,39 @@ class WithholdingReceivableTest extends TestCase
 
         // Dashboard receivable = the reduced collectible (1040, NOT 1240).
         $this->assertEqualsWithDelta(1040.0, (new DashboardMetrics($tenant))->outstandingReceivables(), 0.001);
+    }
+
+    #[Test]
+    public function fully_crediting_a_withholding_invoice_nets_to_zero(): void
+    {
+        $tenant = Company::create([
+            'name' => 'WC', 'slug' => 'wc-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off', 'afm' => '800561849',
+        ]);
+        $saleType = InvoiceType::create(['company_id' => $tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1]);
+        $creditType = InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΠΙΣ', 'name' => 'Πιστωτικό', 'invcount' => 1, 'is_credit' => true]);
+        $pm = PaymentMethod::create(['company_id' => $tenant->id, 'description' => '30 ημέρες', 'due_days' => 30]);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'Acme']);
+
+        $inv = Invoice::create([
+            'company_id' => $tenant->id, 'invoice_type_id' => $saleType->id, 'customer_id' => $customer->id,
+            'payment_method_id' => $pm->id, 'code' => 1, 'invcode' => 'TPY1', 'issued_at' => now(),
+            'local_status' => 'active', 'withhold_rate' => 20, 'withhold_category' => 1,
+        ]);
+        $line = InvoiceLine::create([
+            'company_id' => $tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 1000, 'vat_percent' => 24,
+        ]);
+        app(RecomputeInvoiceTotals::class)($inv);
+        $this->assertSame('1040.00', (string) $inv->fresh()->payable_total);
+
+        // Full credit note — must reverse the withholding too (its payable = 1040).
+        app(IssueCreditNote::class)($inv->fresh(), $creditType, [['line_id' => $line->id, 'qty' => 1]]);
+
+        $inv->refresh();
+        $this->assertEqualsWithDelta(0.0, app(InvoiceBalance::class)->for($inv)->owed, 0.005); // no phantom −200
+        $this->assertTrue($inv->isFullyCredited());
+        $this->assertEqualsWithDelta(0.0, (new DashboardMetrics($tenant))->outstandingReceivables(), 0.005);
     }
 
     #[Test]
