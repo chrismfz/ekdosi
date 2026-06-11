@@ -419,7 +419,13 @@ The behaviors below are how the system actually works — keep them in mind:
   panel-global); `operator` = explicit `OPERATOR_PERMISSION_MAP`. Role management is super_admin-only
   (`->visible()` AND a hard guard in the action body — `mountAction` doesn't re-check visible()).
   Screens gate on real permissions via `Gate::can` (missing → false, never `PermissionDoesNotExist`).
-  **After deploy: `shield:sync-super-admin`.**
+  **After deploy: `shield:sync-super-admin`.** Self-service settings for company_admin live on
+  the **`CompanySettings` page** («Ρυθμίσεις εταιρείας», `View:CompanySettings`) — the SAFE
+  subset of the tenant's own `companies`/`company_backup_settings` (PDF branding, mail
+  templates/from, auto-email toggles, backup enable+cadence), explicit-whitelist save (NEVER
+  raw mass-assign — keeps credentials/identity/backup-policy out of reach), audited. The
+  credential/infra knobs stay on the super_admin-only CompanyResource. New page perm → run
+  `shield:generate` + re-provision (`shield:sync-super-admin` / role-picker) post-deploy.
 - **GuardedDeleteAction** ✅ blocks deleting an in-use lookup (single-record, withTrashed-aware,
   complete maps); bulk/force-delete still unguarded + soft-deleted-FK-blank Selects → BACKLOG.
   `TenantScopedUnique` = non-issue (the DB already has the `unique(company_id,…)` constraints).
