@@ -126,6 +126,45 @@ class GoLiveCheckTest extends TestCase
         $this->artisan('ekdosi:go-live-check', ['--tenant' => $c->slug])->assertExitCode(0);
     }
 
+    public function test_gr_provider_without_provider_config_is_not_falsely_ready(): void
+    {
+        // A ΥΠΑΗΕΣ-provider tenant files electronically via a provider; the myDATA
+        // transport gates SKIP, but provider_live must FAIL when the provider
+        // isn't live — else the gate would falsely report READY.
+        $c = Company::create([
+            'name' => 'Provider OE', 'slug' => 'pv-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'off', 'mydata_mode' => 'off',
+        ]);
+        $this->grType($c);
+        $this->vat($c, 24);
+
+        $report = $this->report($c);
+
+        $this->assertSame('skip', $this->gate($report, 'mydata_prod_creds')['status'], 'direct-myDATA creds skip for a provider tenant');
+        $this->assertSame('skip', $this->gate($report, 'mydata_mode')['status']);
+        $this->assertSame('fail', $this->gate($report, 'provider_live')['status'], 'provider not live → FAIL, not a silent skip');
+        // Document-structure gates still apply (the provider files to AADE too).
+        $this->assertSame('pass', $this->gate($report, 'invoice_types')['status']);
+        $this->assertSame('not_ready', $report['overall']);
+
+        $this->artisan('ekdosi:go-live-check', ['--tenant' => $c->slug])->assertExitCode(2);
+    }
+
+    public function test_gr_provider_live_and_configured_is_ready(): void
+    {
+        $c = Company::create([
+            'name' => 'Provider Live OE', 'slug' => 'pvl-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
+            'einvoice_provider_key' => 'invosign', 'mydata_mode' => 'off',
+        ]);
+        $this->grType($c);
+        $this->vat($c, 24);
+
+        $report = $this->report($c);
+        $this->assertSame('pass', $this->gate($report, 'provider_live')['status']);
+        $this->assertSame('ready', $report['overall']);
+    }
+
     public function test_no_default_vat_fails(): void
     {
         $c = $this->readyTenant();

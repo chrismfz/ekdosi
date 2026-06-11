@@ -33,8 +33,11 @@ use App\Support\OperatorHealth\OperatorHealthReport;
  */
 class GoLiveCheckReport
 {
-    /** Drift above this (€) is real, not the legacy TCurrency 2dp rounding. */
-    private const DRIFT_TOLERANCE = 0.015;
+    /** Drift above this (€) is real, not the legacy TCurrency 2dp rounding. The
+     *  documented tolerance is a single off-by-€0.01 invoice-discount row, so the
+     *  WARN band is ≤ 1 cent; anything strictly above is a FAIL (a 1.4-cent drift
+     *  must NOT pass a legal cutover gate). The epsilon absorbs float noise. */
+    private const DRIFT_TOLERANCE = 0.0101;
 
     public function __construct(private OperatorHealthReport $health) {}
 
@@ -46,14 +49,20 @@ class GoLiveCheckReport
     public function build(Company $tenant): array
     {
         $isGrMyData = $tenant->einvoice_provider === 'gr-mydata';
+        $isGrProvider = $tenant->einvoice_provider === 'gr-provider';
+        // Both direct-myDATA and ΥΠΑΗΕΣ-provider tenants emit AADE documents, so
+        // the document-STRUCTURE gates (invoice types, VAT→AADE) apply to both;
+        // only the TRANSPORT gates differ (direct creds/mode vs provider-live).
+        $filesToAade = $isGrMyData || $isGrProvider;
 
         $gates = [
-            $this->providerGate($tenant, $isGrMyData),
-            $this->invoiceTypesGate($tenant, $isGrMyData),
+            $this->providerGate($tenant),
+            $this->invoiceTypesGate($tenant, $filesToAade),
             $this->vatDefaultGate($tenant),
-            $this->vatRatesGate($tenant, $isGrMyData),
+            $this->vatRatesGate($tenant, $filesToAade),
             $this->productionCredsGate($tenant, $isGrMyData),
             $this->modeGate($tenant, $isGrMyData),
+            $this->providerLiveGate($tenant, $isGrProvider),
             $this->numberingGate($tenant),
             $this->driftGate($tenant),
             $this->backupGate($tenant),
@@ -82,29 +91,28 @@ class GoLiveCheckReport
     // ── Gates ───────────────────────────────────────────────────────────────
 
     /** @return array{key:string,label:string,status:string,detail:string} */
-    private function providerGate(Company $tenant, bool $isGrMyData): array
+    private function providerGate(Company $tenant): array
     {
         $p = $tenant->einvoice_provider;
         if (empty($p)) {
             return $this->gate('provider', 'Πάροχος e-invoicing', 'fail', 'δεν έχει οριστεί einvoice_provider');
         }
 
-        return $this->gate('provider', 'Πάροχος e-invoicing', 'pass',
-            "provider: {$p}".($isGrMyData ? '' : ' — οι έλεγχοι myDATA παραλείπονται'));
+        return $this->gate('provider', 'Πάροχος e-invoicing', 'pass', "provider: {$p}");
     }
 
     /** @return array{key:string,label:string,status:string,detail:string} */
-    private function invoiceTypesGate(Company $tenant, bool $isGrMyData): array
+    private function invoiceTypesGate(Company $tenant, bool $filesToAade): array
     {
-        if (! $isGrMyData) {
-            return $this->gate('invoice_types', 'Τύποι παραστατικών (myDATA)', 'skip', 'μη-myDATA tenant');
+        if (! $filesToAade) {
+            return $this->gate('invoice_types', 'Τύποι παραστατικών (ΑΑΔΕ)', 'skip', 'δεν υποβάλλει σε ΑΑΔΕ');
         }
 
         $types = InvoiceType::query()->where('company_id', $tenant->id)->get();
         $filable = $types->filter(fn (InvoiceType $t) => ! empty($t->mydata_type));
 
         if ($filable->isEmpty()) {
-            return $this->gate('invoice_types', 'Τύποι παραστατικών (myDATA)', 'fail',
+            return $this->gate('invoice_types', 'Τύποι παραστατικών (ΑΑΔΕ)', 'fail',
                 'κανένας τύπος με mydata_type — δεν μπορεί να εκδοθεί στην ΑΑΔΕ');
         }
 
@@ -126,10 +134,10 @@ class GoLiveCheckReport
         }
 
         if ($bad !== []) {
-            return $this->gate('invoice_types', 'Τύποι παραστατικών (myDATA)', 'fail', implode(' · ', $bad));
+            return $this->gate('invoice_types', 'Τύποι παραστατικών (ΑΑΔΕ)', 'fail', implode(' · ', $bad));
         }
 
-        return $this->gate('invoice_types', 'Τύποι παραστατικών (myDATA)', 'pass',
+        return $this->gate('invoice_types', 'Τύποι παραστατικών (ΑΑΔΕ)', 'pass',
             "{$filable->count()} τύπος/οι έτοιμοι για ΑΑΔΕ");
     }
 
@@ -144,10 +152,10 @@ class GoLiveCheckReport
     }
 
     /** @return array{key:string,label:string,status:string,detail:string} */
-    private function vatRatesGate(Company $tenant, bool $isGrMyData): array
+    private function vatRatesGate(Company $tenant, bool $filesToAade): array
     {
-        if (! $isGrMyData) {
-            return $this->gate('vat_rates', 'Συντελεστές ΦΠΑ → ΑΑΔΕ', 'skip', 'μη-myDATA tenant');
+        if (! $filesToAade) {
+            return $this->gate('vat_rates', 'Συντελεστές ΦΠΑ → ΑΑΔΕ', 'skip', 'δεν υποβάλλει σε ΑΑΔΕ');
         }
 
         $vats = VatCategory::query()->where('company_id', $tenant->id)->get();
@@ -211,6 +219,34 @@ class GoLiveCheckReport
         };
     }
 
+    /**
+     * Transport readiness for a ΥΠΑΗΕΣ-provider (gr-provider) tenant — the
+     * provider does the submitting, so its own mode/key must be live (the direct
+     * mydata_prod_creds/mode gates SKIP for these tenants). Without this, a
+     * gr-provider tenant with no provider config would falsely read READY.
+     * Checks mode + provider key only — the encrypted provider_config and its
+     * live validity are the runbook's manual smoke-test (no decryption here, so
+     * a rotated APP_KEY never crashes the gate).
+     *
+     * @return array{key:string,label:string,status:string,detail:string}
+     */
+    private function providerLiveGate(Company $tenant, bool $isGrProvider): array
+    {
+        if (! $isGrProvider) {
+            return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'skip', 'μη-provider tenant');
+        }
+
+        $mode = (string) ($tenant->einvoice_provider_mode ?? 'off');
+        if ($mode === 'off') {
+            return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', 'einvoice_provider_mode = off');
+        }
+        if (empty($tenant->einvoice_provider_key)) {
+            return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', 'δεν έχει οριστεί provider (einvoice_provider_key)');
+        }
+
+        return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'pass', "{$tenant->einvoice_provider_key} ({$mode})");
+    }
+
     /** @return array{key:string,label:string,status:string,detail:string} */
     private function numberingGate(Company $tenant): array
     {
@@ -221,7 +257,9 @@ class GoLiveCheckReport
 
         $emptyCode = $types->filter(fn (InvoiceType $t) => empty($t->code));
         $dupCodes = $types->pluck('code')->filter()->duplicates();
-        $nullCount = $types->filter(fn (InvoiceType $t) => $t->invcount === null);
+        // null OR negative → GET_INV_CODE (code||invcount, no floor) would emit a
+        // malformed/negative ΑΑ that AADE rejects. 0 is fine (unused → starts at 1).
+        $badCount = $types->filter(fn (InvoiceType $t) => $t->invcount === null || (int) $t->invcount < 0);
 
         $problems = [];
         if ($emptyCode->isNotEmpty()) {
@@ -230,8 +268,8 @@ class GoLiveCheckReport
         if ($dupCodes->isNotEmpty()) {
             $problems[] = 'διπλό code: '.$dupCodes->implode(', ');
         }
-        if ($nullCount->isNotEmpty()) {
-            $problems[] = 'invcount μη ορισμένο σε κάποιους τύπους';
+        if ($badCount->isNotEmpty()) {
+            $problems[] = 'invcount μη ορισμένο / αρνητικό σε κάποιους τύπους';
         }
 
         if ($problems !== []) {
@@ -248,6 +286,11 @@ class GoLiveCheckReport
      * handful of ~1-cent rows are the documented TCurrency-rounding tolerance
      * (WARN); anything larger means the import/edit math drifted (FAIL). NEVER
      * saves.
+     *
+     * KEEP IN SYNC with App\Services\RecomputeInvoiceTotals (the canonical, but
+     * mutating, formula): `round(Σ line.net_price × (1 − header_discount/100), 2)`.
+     * If that rounding shape changes, change it here too — a divergent copy would
+     * report phantom drift (false FAIL) or hide real drift (false PASS).
      *
      * @return array{key:string,label:string,status:string,detail:string}
      */
@@ -313,7 +356,10 @@ class GoLiveCheckReport
      */
     private function infraGates(): array
     {
-        $queue = $this->health->build()['queue'] ?? [];
+        // Only the queue slice is needed — call it directly rather than build(),
+        // which also runs disk() (recursive storage/logs/backups walk) + the
+        // per-tenant mail/whmcs/mydata queries this read-only gate has no use for.
+        $queue = $this->health->queue();
         $gates = [];
 
         $hb = $queue['worker_heartbeat_status'] ?? 'missing';

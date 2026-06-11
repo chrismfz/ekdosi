@@ -50,8 +50,14 @@ class OperatorHealthReport
         ];
     }
 
-    /** @return array<string, mixed> */
-    private function queue(): array
+    /**
+     * The queue slice (worker heartbeat + pending/failed counts). Public so
+     * callers that only need this — e.g. GoLiveCheckReport — can read it without
+     * running the full build() (which also walks disk + probes every tenant).
+     *
+     * @return array<string, mixed>
+     */
+    public function queue(): array
     {
         $heartbeat = $this->cacheGet(HealthKeys::QUEUE_HEARTBEAT);
         $ageMinutes = $heartbeat ? Carbon::parse($heartbeat)->diffInMinutes(now()) : null;
