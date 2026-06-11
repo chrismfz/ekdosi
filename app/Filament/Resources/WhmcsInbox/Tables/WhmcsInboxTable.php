@@ -45,6 +45,17 @@ class WhmcsInboxTable
                     ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
             })
             ->columns([
+                // Bridges/Connectors: which billing source this row came from. One
+                // «Εισερχόμενα» for every bridge; the badge label comes from the
+                // source's registry entry (so a future WooCommerce row reads its own
+                // label from one place). WHMCS-only today, but already source-driven.
+                TextColumn::make('source')
+                    ->label('Πηγή')
+                    ->badge()
+                    ->color('gray')
+                    ->formatStateUsing(fn (?string $state): string => app(\App\Services\Billing\BillingSourceRegistry::class)
+                        ->for((string) $state)?->label() ?? strtoupper((string) ($state ?? '—'))),
+
                 TextColumn::make('whmcs_invoice_id')
                     // Phase 0 (Bridges/Connectors): the external-id label comes
                     // from the billing source's capabilities, so a future source

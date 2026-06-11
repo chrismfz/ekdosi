@@ -35,11 +35,15 @@ class WhmcsInboxResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Data';
 
-    protected static ?string $navigationLabel = 'WHMCS Inbox';
+    // Bridges/Connectors: the inbox is source-neutral in the UI (one «Εισερχόμενα»
+    // for every billing bridge; each row carries its source badge). The model +
+    // table names stay WHMCS-specific until a real 2nd source justifies the rename
+    // (Phase 1) — relabel now is cheap, table/service rename is not.
+    protected static ?string $navigationLabel = 'Εισερχόμενα';
 
-    protected static ?string $modelLabel = 'pending WHMCS invoice';
+    protected static ?string $modelLabel = 'εισερχόμενο παραστατικό';
 
-    protected static ?string $pluralModelLabel = 'WHMCS Inbox';
+    protected static ?string $pluralModelLabel = 'Εισερχόμενα';
 
     protected static ?int $navigationSort = 80;
 

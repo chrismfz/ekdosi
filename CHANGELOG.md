@@ -18,6 +18,16 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Bridges framing (presentation-only, no pipeline change).** The WHMCS inbox is now
+  the source-neutral **«Εισερχόμενα»** with a per-row **source badge** rendered from the
+  `BillingSourceRegistry` (so a future WooCommerce/Blesta row reads its own label from one
+  place; the `source` column already existed). New **«Γέφυρες»** page (`Bridges`, gated
+  `View:Bridges`) lists the registered billing sources with TRUTHFUL status (WHMCS
+  «ρυθμισμένο» = credentials present) + a «Ρυθμίσεις» link for those who can configure it —
+  deliberately NO on/off toggle (the live pipeline keys off `companies.whmcs_*`, not
+  `billing_connections.is_active`, so a toggle would be cosmetic). The genuine enable/disable
+  + per-source credentials (`billing_connections.config`) stay Phase 1, for when a real 2nd
+  bridge exists. Deploy: `shield:generate` + re-provision (new `View:Bridges` perm).
 - **«Ρυθμίσεις εταιρείας» self-service page** (`CompanySettings`, gated
   `View:CompanySettings`). Lets a `company_admin` manage their OWN tenant's safe
   subset — PDF branding (logo/footer/balance-on-PDF), invoice-mail templates +
