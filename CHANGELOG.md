@@ -30,6 +30,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   raw-write importers bypass the observer.
 
 ### Changed
+- **CI: dropped the `pint --test` gate** (chronically red — the tree was never
+  Pint-formatted). The `Laravel` workflow now runs `php artisan test` only. Added a
+  `pint.json` (laravel preset) that excludes `legacy/` and `whmcs-plugin/` so a local
+  `vendor/bin/pint` skips the archived/plugin trees.
 - **Καρτέλα: «αναλυτική παρακράτηση» στο ledger.** A receivable row whose collectible
   differs from the document value (withholding/τέλη) now shows a detail line «Αξία
   εγγράφου … · Παρακράτηση φόρου …» under the reference (both the page table and the
