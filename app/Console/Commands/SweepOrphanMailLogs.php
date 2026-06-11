@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\InvoiceMailLog;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Console\Command;
 
 /**
@@ -45,7 +46,13 @@ class SweepOrphanMailLogs extends Command
 
         $cutoff = now()->subMinutes($minutes);
 
+        // Deliberately ALL-TENANT: a crashed worker can leave stuck rows for any
+        // company, and this runs from the scheduler with no ambient
+        // CompanyContext. Declare that intent with an explicit withoutGlobalScope
+        // (a no-op today, but self-documenting + immune to a future strict tenant
+        // mode that would otherwise refuse an unscoped tenant query).
         $query = InvoiceMailLog::query()
+            ->withoutGlobalScope(CompanyScope::class)
             ->whereIn('status', ['queued', 'sending'])
             ->where('queued_at', '<', $cutoff);
 

@@ -129,7 +129,7 @@ surfaced in the open-items sections further down.
 - **Backup encryption** (app-level) — deferred (βασιζόμαστε σε SFTP/S3 access control).
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
-- **Strict tenant scope** — flip `CompanyScope` null→throw αφού κάθε CLI/queue περάσει από `actAs`.
+- **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
 

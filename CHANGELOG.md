@@ -36,6 +36,17 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   statement PDF). Display-only — the Χρέωση/Πίστωση/Υπόλοιπο stay = payable, so the
   running balance and the paid/unpaid filters are unchanged.
 
+### Security
+- **Tenant-scope hardening (defense-in-depth).** A full audit of all ~54 CLI/queue/
+  observer/webhook entry points found **0 live cross-tenant leaks** (the
+  `CompanyScope` no-op-when-no-context design holds). Tightened the one query that
+  relied on surrogate-PK uniqueness instead of an explicit filter: `StockService`'s
+  sale/return dedup now filters `company_id` explicitly. Declared the intent of the
+  deliberately all-tenant `mail-log:sweep-orphans` sweep with an explicit
+  `withoutGlobalScope`. Added the CLI/queue tenant-scoping rule to `CLAUDE.md`. The
+  strict null→throw enforcement stays deferred (would break ~18 safe explicit-where
+  paths / false-positive on relation queries).
+
 ## [1.1.0] - 2026-06-11
 
 ### Added
