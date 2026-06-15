@@ -52,6 +52,17 @@ class CsvEntityExporterTest extends TestCase
         $this->assertStringNotContainsString('ΜΟΝΟ Β', $csv);   // other tenant excluded
     }
 
+    public function test_neutralises_csv_formula_injection(): void
+    {
+        $c = $this->company('csvinj');
+        Customer::create(['company_id' => $c->id, 'name' => '=HYPERLINK("http://evil")', 'afm' => '444']);
+
+        $csv = app(CsvEntityExporter::class)->export($c, ['customers'])['customers.csv'];
+
+        // The dangerous lead «=» is prefixed with a quote → Excel treats it as text.
+        $this->assertStringContainsString("'=HYPERLINK", $csv);
+    }
+
     public function test_unknown_entity_is_skipped(): void
     {
         $c = $this->company('csv2');

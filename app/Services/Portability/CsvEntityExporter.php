@@ -140,6 +140,22 @@ class CsvEntityExporter
             return $value ? '1' : '0';
         }
 
-        return (string) $value;
+        return self::neutraliseFormula((string) $value);
+    }
+
+    /**
+     * CSV formula-injection guard: a cell starting with = + - @ TAB CR is run as
+     * a formula by Excel/LibreOffice when the file is opened — and the data here
+     * includes untrusted input (customer/WHMCS-sourced names/addresses). Prefix a
+     * single quote to neutralise it, but leave plain NUMBERS (amounts, +30… phones,
+     * negatives) untouched so the export stays analysable.
+     */
+    private static function neutraliseFormula(string $s): string
+    {
+        if ($s === '' || is_numeric($s)) {
+            return $s;
+        }
+
+        return in_array($s[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'".$s : $s;
     }
 }
