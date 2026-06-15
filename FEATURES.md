@@ -147,6 +147,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   **durable bell notification** (Filament database notifications, 30s poll) on staging· 30s
   table poll· **«Τρίτος» badge** (δικαιούχος / «Πολλοί (N)») + «Άμεσο»/«Τρίτος» filters.
 - **Πρόθεση πελάτη** (τιμολόγιο/απόδειξη, ΑΦΜ/ΔΟΥ, «λείπει ΑΦΜ»), **legacy badge**.
+- **Εισαγωγή πελάτη από ΑΦΜ μέσα στο «Δημιουργία Παραστατικού»** — επεξεργάσιμο ΑΦΜ +
+  GSIS lookup (επίσημα ΑΑΔΕ + συμπλήρωση email/τηλεφώνου/διεύθυνσης από WHMCS), δημιουργεί
+  & συνδέει τον πελάτη χωρίς να φύγει ο χειριστής· διαφορές ΑΑΔΕ↔WHMCS → κρατιέται το
+  επίσημο **με προειδοποίηση** (`WhmcsCustomerCreator`).
 - **Αμφίδρομη ορατότητα** (WHMCS-side): badge+ΜΑΡΚ, badge λίστας, «Αποστολή στο Ekdosi»,
   **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ), συγκεντρωτική λίστα, AFM-keyed + deterministic
   `invoiced===legacy_id` historical link. **«Άμεσο» κόκκινη γραμμή** στη λίστα τιμολογίων

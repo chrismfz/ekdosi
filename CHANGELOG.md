@@ -18,6 +18,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **WHMCS inbox: «Εισαγωγή πελάτη από ΑΦΜ (ΑΑΔΕ)» μέσα στο «Δημιουργία Παραστατικού».**
+  Επεξεργάσιμο πεδίο ΑΦΜ (default το ΑΦΜ του WHMCS) με κουμπί GSIS lookup: αντλεί
+  επίσημα στοιχεία ΑΑΔΕ, συμπληρώνει email/τηλέφωνο/διεύθυνση από WHMCS, δημιουργεί &
+  συνδέει τον πελάτη χωρίς να φύγει ο χειριστής από το modal. Καλύπτει και γραμμές
+  χωρίς/με λάθος ΑΦΜ. Όταν τα στοιχεία ΑΑΔΕ διαφέρουν από όσα δήλωσε ο πελάτης στο
+  WHMCS, κρατιέται το επίσημο **με προειδοποίηση** που απαριθμεί τι διορθώθηκε
+  (`WhmcsCustomerCreator` + `WhmcsCustomerCreateResult.discrepancies`). Ο creator
+  τραβάει πλέον και **τηλέφωνο** (`phone1`) από το WHMCS.
 - **Dev tooling: `laravel/boost`** (dev-dependency) — MCP server that grounds the
   AI coding assistant in the real app (DB schema, tinker, version-correct docs).
   Wired for Claude Code via committed `.mcp.json`; only active under

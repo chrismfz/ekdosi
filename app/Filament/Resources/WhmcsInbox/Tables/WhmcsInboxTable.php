@@ -7,6 +7,11 @@ use App\Filament\Support\PickerOptions;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
+use App\Services\Billing\BillingSourceRegistry;
+use App\Services\Whmcs\LegacyInvoicedRefresher;
+use App\Services\Whmcs\WhmcsCustomerCreateResult;
+use App\Services\Whmcs\WhmcsCustomerCreator;
+use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use Filament\Actions\Action;
@@ -17,15 +22,17 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
-use Illuminate\Support\Facades\Artisan;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Artisan;
+use Livewire\Component;
 use Throwable;
 
 /**
@@ -43,7 +50,7 @@ class WhmcsInboxTable
         // its upper-cased key WITHOUT spamming a "unknown source" warning per row
         // (BillingSourceRegistry::for() logs + doesn't cache null on miss).
         $sourceLabels = [];
-        foreach (app(\App\Services\Billing\BillingSourceRegistry::class)->all() as $key => $src) {
+        foreach (app(BillingSourceRegistry::class)->all() as $key => $src) {
             $sourceLabels[$key] = $src->label();
         }
 
@@ -69,7 +76,7 @@ class WhmcsInboxTable
                     // Phase 0 (Bridges/Connectors): the external-id label comes
                     // from the billing source's capabilities, so a future source
                     // reads «WooCommerce #» from one place. WHMCS-only today.
-                    ->label(app(\App\Services\Billing\BillingSourceRegistry::class)
+                    ->label(app(BillingSourceRegistry::class)
                         ->for(PendingWhmcsInvoice::SOURCE_WHMCS)?->capabilities()->externalIdLabel ?? 'WHMCS #')
                     ->sortable()
                     ->searchable()
@@ -591,7 +598,7 @@ class WhmcsInboxTable
                 }
                 try {
                     $exit = Artisan::call('whmcs:fetch-pending', ['--tenant' => $tenant->slug]);
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     Notification::make()->title('Ο συγχρονισμός απέτυχε')->body($e->getMessage())->danger()->persistent()->send();
 
                     return;
@@ -619,7 +626,7 @@ class WhmcsInboxTable
             ->action(function () {
                 $tenant = Filament::getTenant();
                 try {
-                    $changed = app(\App\Services\Whmcs\LegacyInvoicedRefresher::class)->refresh($tenant);
+                    $changed = app(LegacyInvoicedRefresher::class)->refresh($tenant);
                     Notification::make()
                         ->title($changed > 0
                             ? $changed.' τιμολόγιο(α) σημάνθηκαν ως «τιμολογημένα στη legacy»'
@@ -659,30 +666,58 @@ class WhmcsInboxTable
             ->modalSubmitActionLabel('Δημιουργία')
             ->action(function (PendingWhmcsInvoice $r) {
                 $tenant = Filament::getTenant();
-                $result = app(\App\Services\Whmcs\WhmcsCustomerCreator::class)->createForPending($tenant, $r);
+                $result = app(WhmcsCustomerCreator::class)->createForPending($tenant, $r);
 
-                if ($result->customer === null) {
-                    Notification::make()->title('Δεν υπάρχει ΑΦΜ στο WHMCS — δεν δημιουργήθηκε πελάτης')->danger()->send();
-
-                    return;
+                if ($result->customer !== null) {
+                    $r->update([
+                        'customer_id' => $result->customer->id,
+                        'match_reason' => PendingWhmcsInvoice::REASON_AFM,
+                    ]);
                 }
 
-                $r->update([
-                    'customer_id' => $result->customer->id,
-                    'match_reason' => PendingWhmcsInvoice::REASON_AFM,
-                ]);
-
-                $title = match ($result->source) {
-                    'aade' => 'Δημιουργήθηκε από ΑΑΔΕ',
-                    'whmcs' => 'Δημιουργήθηκε από στοιχεία WHMCS (ΑΑΔΕ μη διαθέσιμη — έλεγξε τα στοιχεία)',
-                    'existing' => 'Συνδέθηκε με υπάρχοντα πελάτη',
-                    default => 'Δημιουργήθηκε',
-                };
-                Notification::make()
-                    ->title($title.': '.$result->customer->name)
-                    ->{$result->source === 'whmcs' ? 'warning' : 'success'}()
-                    ->send();
+                self::notifyCustomerCreateResult($result);
             });
+    }
+
+    /**
+     * Surface a WhmcsCustomerCreator outcome as operator notifications: the
+     * create/link result (source-coloured), plus — when the official GSIS data
+     * DIFFERED from what the customer typed in WHMCS — a persistent warning
+     * listing each corrected field (the GSIS value was kept). Shared by the «…»
+     * «Δημ. πελάτη (ΑΑΔΕ)» action and the inline modal «Εισαγωγή από ΑΦΜ» button
+     * so the two can't drift.
+     */
+    private static function notifyCustomerCreateResult(WhmcsCustomerCreateResult $result): void
+    {
+        if ($result->customer === null) {
+            Notification::make()->title('Δεν υπάρχει/δόθηκε ΑΦΜ — δεν δημιουργήθηκε πελάτης')->danger()->send();
+
+            return;
+        }
+
+        $title = match ($result->source) {
+            'aade' => 'Δημιουργήθηκε από ΑΑΔΕ',
+            'whmcs' => 'Δημιουργήθηκε από στοιχεία WHMCS (ΑΑΔΕ μη διαθέσιμη — έλεγξε τα στοιχεία)',
+            'existing' => 'Συνδέθηκε με υπάρχοντα πελάτη',
+            default => 'Δημιουργήθηκε',
+        };
+        Notification::make()
+            ->title($title.': '.$result->customer->name)
+            ->{$result->source === 'whmcs' ? 'warning' : 'success'}()
+            ->send();
+
+        if ($result->discrepancies !== []) {
+            $lines = ['Κρατήθηκαν τα επίσημα στοιχεία ΑΑΔΕ. Διέφεραν από όσα είχε δηλώσει ο πελάτης στο WHMCS:'];
+            foreach ($result->discrepancies as $d) {
+                $lines[] = '• '.$d['field'].': WHMCS «'.$d['whmcs'].'» → ΑΑΔΕ «'.$d['aade'].'»';
+            }
+            Notification::make()
+                ->title('Διορθώθηκαν στοιχεία από την ΑΑΔΕ')
+                ->body(implode("\n", $lines))
+                ->warning()
+                ->persistent()
+                ->send();
+        }
     }
 
     /**
@@ -821,6 +856,46 @@ class WhmcsInboxTable
                     ->helperText('Προτείνεται ο πελάτης που εντοπίστηκε από τη Stage B-1 (match: '
                         .$r->match_reason.'). Άλλαξέ τον αν δεν είναι σωστός.'),
 
+                // Δεν υπάρχει ο πελάτης; Δημιούργησέ τον επιτόπου από ΑΦΜ χωρίς
+                // να φύγεις από το modal: GSIS-authoritative + WHMCS συμπλήρωση
+                // (email/τηλέφωνο/διεύθυνση), και το Select πελάτη από πάνω
+                // ενημερώνεται αυτόματα. Το ΑΦΜ είναι επεξεργάσιμο (default το
+                // ΑΦΜ του WHMCS) ώστε να καλύπτει και γραμμές χωρίς/με λάθος ΑΦΜ.
+                TextInput::make('lookup_afm')
+                    ->label('Δεν υπάρχει ο πελάτης; Εισαγωγή από ΑΦΜ (ΑΑΔΕ)')
+                    ->placeholder('ΑΦΜ')
+                    ->default(fn () => $r->whmcsAfm())
+                    ->helperText('Γράψε/διόρθωσε ΑΦΜ και πάτα 🔍 — αντλεί επίσημα στοιχεία από ΑΑΔΕ (GSIS), '
+                        .'συμπληρώνει email/τηλέφωνο/διεύθυνση από WHMCS, δημιουργεί & συνδέει τον πελάτη εδώ. '
+                        .'Αν κάποιο στοιχείο διαφέρει, κρατιέται το επίσημο της ΑΑΔΕ με προειδοποίηση.')
+                    ->suffixActions([
+                        Action::make('import_from_afm')
+                            ->icon('heroicon-m-magnifying-glass')
+                            ->label('Εισαγωγή από ΑΑΔΕ')
+                            ->action(function (callable $get, callable $set) use ($r) {
+                                $afm = preg_replace('/\D+/', '', (string) $get('lookup_afm'));
+                                if (blank($afm)) {
+                                    Notification::make()->title('Συμπλήρωσε πρώτα ΑΦΜ')->warning()->send();
+
+                                    return;
+                                }
+                                $tenant = Filament::getTenant();
+                                try {
+                                    $result = app(WhmcsCustomerCreator::class)->createForPending($tenant, $r, $afm);
+                                } catch (Throwable $e) {
+                                    Notification::make()->title('Η εισαγωγή απέτυχε')->body($e->getMessage())->danger()->send();
+
+                                    return;
+                                }
+                                // Link the new/existing customer into the picker
+                                // above (it's ->live(), so the preview re-renders).
+                                if ($result->customer !== null) {
+                                    $set('customer_id', $result->customer->id);
+                                }
+                                self::notifyCustomerCreateResult($result);
+                            }),
+                    ]),
+
                 Select::make('invoice_type_id')
                     ->label('Τύπος παραστατικού')
                     // Same favorites-first (⭐) ordering as the normal invoice form
@@ -901,7 +976,7 @@ class WhmcsInboxTable
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->color('success'),
             ])
-            ->action(function (PendingWhmcsInvoice $r, array $data, array $arguments, \Livewire\Component $livewire) {
+            ->action(function (PendingWhmcsInvoice $r, array $data, array $arguments, Component $livewire) {
                 $tenant = Filament::getTenant();
                 // withTrashed so a soft-deleted matched customer still resolves
                 // (the Select renders it with a "(διαγραμμένος)" suffix); refuse
@@ -1162,7 +1237,7 @@ class WhmcsInboxTable
             ->modalDescription('Ρωτά ξανά τη γέφυρα αν το τιμολόγιο δρομολογείται σε τρίτους δικαιούχους και ενημερώνει τη στήλη «Τρίτος». Δεν αλλάζει κατάσταση ή σύνδεση.')
             ->action(function (PendingWhmcsInvoice $r) {
                 $tenant = Filament::getTenant();
-                $state = app(\App\Services\Whmcs\WhmcsInvoiceIngestor::class)
+                $state = app(WhmcsInvoiceIngestor::class)
                     ->reResolveThirdParty($tenant, $r);
 
                 $label = match ($state) {
