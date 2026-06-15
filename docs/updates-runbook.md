@@ -112,3 +112,8 @@ scheduled, per-company archives are `spatie/laravel-backup` (see
   bring the app back with `php artisan up` only once it's healthy.
 - After config changes that are cached, `update.sh`'s `optimize` re-caches; if
   you edit `.env` manually outside a deploy, run `php artisan config:clear`.
+- **Snapshots are sensitive.** A `db-snapshot` is a full plaintext dump that
+  includes the plaintext-at-rest secrets (myDATA/WHMCS/GSIS/SMTP). They live in
+  `storage/app/db-snapshots/` (outside `public/`, never web-served) and are
+  excluded from the spatie file backups. Keep the dir owner-only, set a retention
+  (`--keep`), and don't copy them to a less-trusted location uncompressed.

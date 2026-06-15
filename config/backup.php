@@ -39,6 +39,11 @@ return [
                     base_path('vendor'),
                     base_path('node_modules'),
                     storage_path('framework'),
+                    // Pre-update DB rollback snapshots (ekdosi:db-snapshot): plaintext
+                    // full-DB dumps that include plaintext-at-rest secrets. NEVER let
+                    // them get swept into a file backup (recursive bloat + a second
+                    // copy of every secret in the archive).
+                    storage_path('app/db-snapshots'),
                 ],
 
                 /*
