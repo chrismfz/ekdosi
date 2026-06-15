@@ -130,8 +130,6 @@ surfaced in the open-items sections further down.
   needs a specific credential delegated — don't bulk-move secrets into company_admin reach.
 
 ## 🔒 Backup / DR / Portability
-- **Portability Phase 3** — selective per-table/per-entity CSV export (το upload-and-run UI
-  υπάρχει· checkboxes «τι να τραβήξω» + CSV per-entity ΟΧΙ).
 - **Portability Phase 5** — envelope-key (option 4) — optional future (το plaintext-at-rest
   καλύπτει cross-VM σήμερα).
 - **Backup encryption** (app-level) — deferred (βασιζόμαστε σε SFTP/S3 access control).

@@ -177,6 +177,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (Τοπικά/SFTP/FTP/S3), «Αντίγραφο/Λήψη τώρα».
 - **Export/Import εταιρίας** — settings+setup ή πλήρες· **χωρίς υποχρεωτικό κωδικό**
   (passphrase ή raw)· `company:export`/`company:import` + panel actions.
+- **Επιλεκτική εξαγωγή CSV** (Phase 3) — checkboxes «τι να τραβήξω» → .zip με CSV ανά
+  entity (Excel-ready, UTF-8 BOM)· tenant-scoped + redaction μυστικών· «Εξαγωγή CSV»
+  στο panel + `company:export-csv` (`CsvEntityExporter`).
 - **DR χωρίς APP_KEY** — `MaybeEncrypted` cast + `EKDOSI_ENCRYPT_SECRETS_AT_REST`
   (default plaintext) → plain `mysqldump` αυτάρκες· `secrets:reencrypt` για εναλλαγή.
 - **DB snapshot/restore** (`ekdosi:db-snapshot` / `ekdosi:db-restore`) — γρήγορο

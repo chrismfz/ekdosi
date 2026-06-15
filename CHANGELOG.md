@@ -18,6 +18,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Φορητότητα Phase 3: επιλεκτική εξαγωγή CSV ανά entity.** «Εξαγωγή CSV» (Company →
+  Αντίγραφα) με checkboxes «τι να τραβήξω» (πελάτες/προϊόντα/παραστατικά/πληρωμές/…) →
+  .zip με ένα CSV ανά entity (UTF-8 BOM για Excel). Tenant-scoped, redaction μυστικών,
+  + εντολή `company:export-csv --tenant= --only= [--list]`. Διαφορετικό από το
+  restore-bundle (`CsvEntityExporter`).
 - **Off-site backup verification στο `ops:health`.** Ανά tenant με ενεργά backups: ελέγχει
   αν υπάρχει προορισμός **εκτός VM** (sftp/ftp/s3) και αν πέτυχε η τελευταία off-site
   αποστολή· `backup.companies.offsite_gap` ανάβει για «μόνο τοπικά» ή αποτυχημένο push (CLI +
