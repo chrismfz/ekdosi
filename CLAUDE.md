@@ -462,6 +462,10 @@ The behaviors below are how the system actually works — keep them in mind:
 > the scheduler + backup cron lines) and **`README.md` §Deploy notes**. **Deploy
 > routine after `git pull`:** `php artisan migrate` → `php artisan queue:restart`
 > (worker picks up new code) → `shield:sync-super-admin` when permissions changed.
+> **Or just `deploy/update.sh <tag>`** — wraps all of it (pre-update DB snapshot →
+> maintenance → checkout tag → composer → migrate → optimize → shield → queue:restart →
+> ops:health), with `deploy/rollback.sh` + `ekdosi:db-snapshot`/`db-restore` as the
+> rollback layer. Full flow: **`docs/updates-runbook.md`**.
 - **Scheduler + queue worker — PROVISIONED on prod (systemd + cron).** The wired
   schedule (`routes/console.php`) IS live on the production host: a cron line runs
   `php artisan schedule:run` every minute, and a **systemd service** keeps a

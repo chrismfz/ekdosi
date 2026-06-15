@@ -18,6 +18,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Ασφαλή updates: `deploy/update.sh` + `deploy/rollback.sh` + DB snapshot/restore.**
+  Ένα βήμα για production update από version tag (pre-update DB snapshot → maintenance →
+  checkout → `composer install` → `migrate` → `optimize` → `shield:sync-super-admin` →
+  `queue:restart` → `ops:health`), με rollback (code + προαιρετική επαναφορά snapshot).
+  Νέες εντολές `ekdosi:db-snapshot` (gzip mysqldump, `--keep=N`, password μέσω `MYSQL_PWD`)
+  και `ekdosi:db-restore` (guarded, production → `--force`). Runbook: `docs/updates-runbook.md`.
 - **WHMCS inbox: «Εισαγωγή πελάτη από ΑΦΜ (ΑΑΔΕ)» μέσα στο «Δημιουργία Παραστατικού».**
   Επεξεργάσιμο πεδίο ΑΦΜ (default το ΑΦΜ του WHMCS) με κουμπί GSIS lookup: αντλεί
   επίσημα στοιχεία ΑΑΔΕ, συμπληρώνει email/τηλέφωνο/διεύθυνση από WHMCS, δημιουργεί &

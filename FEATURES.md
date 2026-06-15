@@ -179,6 +179,13 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (passphrase ή raw)· `company:export`/`company:import` + panel actions.
 - **DR χωρίς APP_KEY** — `MaybeEncrypted` cast + `EKDOSI_ENCRYPT_SECRETS_AT_REST`
   (default plaintext) → plain `mysqldump` αυτάρκες· `secrets:reencrypt` για εναλλαγή.
+- **DB snapshot/restore** (`ekdosi:db-snapshot` / `ekdosi:db-restore`) — γρήγορο
+  τοπικό gzip στιγμιότυπο όλης της ΒΔ ως rollback point (creds από .env, password
+  μέσω `MYSQL_PWD`). Restore guarded (production → `--force`). Το rollback layer
+  των updates (ξεχωριστό από τα off-site spatie αρχεία).
+- **Ασφαλή updates** — `deploy/update.sh <tag>` (snapshot→maintenance→checkout→
+  composer→migrate→optimize→shield→queue:restart→ops:health) + `deploy/rollback.sh`·
+  version tags via `ekdosi:release`. Runbook: `docs/updates-runbook.md`.
 
 ## 15. Ασφάλεια & λειτουργικά
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.
