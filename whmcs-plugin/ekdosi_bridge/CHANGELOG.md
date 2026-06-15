@@ -10,6 +10,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-06-15
+### Added
+- **`phonenumber` in the invoice feed** (`InvoiceFeed`) — the bridge feed now carries
+  the client's phone alongside email/address, matching the native
+  `getInvoiceWithClient` shape. Lets ekdosi populate `customers.phone1` when it
+  creates a customer from a staged invoice (was a silent no-op for bridge-feed
+  tenants, since only the native API path carried the phone).
+
 ## [0.40.0] — 2026-06-11
 ### Added
 - **«Άμεσο» (immediate-invoice) red row** in the `?module=ekdosi_bridge&action=invoices`

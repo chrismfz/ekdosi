@@ -147,6 +147,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   **durable bell notification** (Filament database notifications, 30s poll) on staging· 30s
   table poll· **«Τρίτος» badge** (δικαιούχος / «Πολλοί (N)») + «Άμεσο»/«Τρίτος» filters.
 - **Πρόθεση πελάτη** (τιμολόγιο/απόδειξη, ΑΦΜ/ΔΟΥ, «λείπει ΑΦΜ»), **legacy badge**.
+- **Εισαγωγή πελάτη από ΑΦΜ μέσα στο «Δημιουργία Παραστατικού»** — επεξεργάσιμο ΑΦΜ +
+  GSIS lookup (επίσημα ΑΑΔΕ + συμπλήρωση email/τηλεφώνου/διεύθυνσης από WHMCS), δημιουργεί
+  & συνδέει τον πελάτη χωρίς να φύγει ο χειριστής· διαφορές ΑΑΔΕ↔WHMCS → κρατιέται το
+  επίσημο **με προειδοποίηση** (`WhmcsCustomerCreator`).
 - **Αμφίδρομη ορατότητα** (WHMCS-side): badge+ΜΑΡΚ, badge λίστας, «Αποστολή στο Ekdosi»,
   **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ), συγκεντρωτική λίστα, AFM-keyed + deterministic
   `invoiced===legacy_id` historical link. **«Άμεσο» κόκκινη γραμμή** στη λίστα τιμολογίων
@@ -173,13 +177,26 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (Τοπικά/SFTP/FTP/S3), «Αντίγραφο/Λήψη τώρα».
 - **Export/Import εταιρίας** — settings+setup ή πλήρες· **χωρίς υποχρεωτικό κωδικό**
   (passphrase ή raw)· `company:export`/`company:import` + panel actions.
+- **Επιλεκτική εξαγωγή CSV** (Phase 3) — checkboxes «τι να τραβήξω» → .zip με CSV ανά
+  entity (Excel-ready, UTF-8 BOM)· tenant-scoped + redaction μυστικών· «Εξαγωγή CSV»
+  στο panel + `company:export-csv` (`CsvEntityExporter`).
 - **DR χωρίς APP_KEY** — `MaybeEncrypted` cast + `EKDOSI_ENCRYPT_SECRETS_AT_REST`
   (default plaintext) → plain `mysqldump` αυτάρκες· `secrets:reencrypt` για εναλλαγή.
+- **DB snapshot/restore** (`ekdosi:db-snapshot` / `ekdosi:db-restore`) — γρήγορο
+  τοπικό gzip στιγμιότυπο όλης της ΒΔ ως rollback point (creds από .env, password
+  μέσω `MYSQL_PWD`). Restore guarded (production → `--force`). Το rollback layer
+  των updates (ξεχωριστό από τα off-site spatie αρχεία).
+- **Ασφαλή updates** — `deploy/update.sh <tag>` (snapshot→maintenance→checkout→
+  composer→migrate→optimize→shield→queue:restart→ops:health) + `deploy/rollback.sh`·
+  version tags via `ekdosi:release`. Runbook: `docs/updates-runbook.md`.
 
 ## 15. Ασφάλεια & λειτουργικά
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.
 - **2FA** (TOTP) + `EKDOSI_REQUIRE_2FA`.
 - **FK-aware delete guard** (`GuardedDeleteAction`) — μπλοκάρει διαγραφή lookup σε χρήση.
+- **Off-site backup verification** (`ops:health` → `backup.companies`) — ανά tenant με
+  ενεργά backups: υπάρχει προορισμός **εκτός VM** (sftp/ftp/s3); και πέτυχε η τελευταία
+  off-site αποστολή; `offsite_gap` προειδοποιεί για «μένουν μόνο τοπικά» ή αποτυχημένο push.
 - **`ops:health`** (queue/scheduler/backup/mail/WHMCS/myDATA/disk) — CLI **και**
   **σελίδα «Υγεία συστήματος»** (read-only, **super_admin-only** γιατί είναι cross-tenant·
   ίδια πηγή `OperatorHealthReport`: worker heartbeat, scheduled-task last-runs, backups,

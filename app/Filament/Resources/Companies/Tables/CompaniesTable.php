@@ -99,6 +99,7 @@ class CompaniesTable
                     CompanyBackupActions::runNow(),
                     CompanyBackupActions::downloadNow(),
                     CompanyBackupActions::export(),
+                    CompanyBackupActions::exportCsv(),
                     CompanyBackupActions::importInto(),
                     CompanyBackupActions::wipe(),
                 ])

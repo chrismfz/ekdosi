@@ -18,6 +18,29 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Φορητότητα Phase 3: επιλεκτική εξαγωγή CSV ανά entity.** «Εξαγωγή CSV» (Company →
+  Αντίγραφα) με checkboxes «τι να τραβήξω» (πελάτες/προϊόντα/παραστατικά/πληρωμές/…) →
+  .zip με ένα CSV ανά entity (UTF-8 BOM για Excel). Tenant-scoped, redaction μυστικών,
+  + εντολή `company:export-csv --tenant= --only= [--list]`. Διαφορετικό από το
+  restore-bundle (`CsvEntityExporter`).
+- **Off-site backup verification στο `ops:health`.** Ανά tenant με ενεργά backups: ελέγχει
+  αν υπάρχει προορισμός **εκτός VM** (sftp/ftp/s3) και αν πέτυχε η τελευταία off-site
+  αποστολή· `backup.companies.offsite_gap` ανάβει για «μόνο τοπικά» ή αποτυχημένο push (CLI +
+  «Υγεία συστήματος»). Διακρίνει το «πάρθηκε backup» από το «έφυγε από το μηχάνημα».
+- **Ασφαλή updates: `deploy/update.sh` + `deploy/rollback.sh` + DB snapshot/restore.**
+  Ένα βήμα για production update από version tag (pre-update DB snapshot → maintenance →
+  checkout → `composer install` → `migrate` → `optimize` → `shield:sync-super-admin` →
+  `queue:restart` → `ops:health`), με rollback (code + προαιρετική επαναφορά snapshot).
+  Νέες εντολές `ekdosi:db-snapshot` (gzip mysqldump, `--keep=N`, password μέσω `MYSQL_PWD`)
+  και `ekdosi:db-restore` (guarded, production → `--force`). Runbook: `docs/updates-runbook.md`.
+- **WHMCS inbox: «Εισαγωγή πελάτη από ΑΦΜ (ΑΑΔΕ)» μέσα στο «Δημιουργία Παραστατικού».**
+  Επεξεργάσιμο πεδίο ΑΦΜ (default το ΑΦΜ του WHMCS) με κουμπί GSIS lookup: αντλεί
+  επίσημα στοιχεία ΑΑΔΕ, συμπληρώνει email/τηλέφωνο/διεύθυνση από WHMCS, δημιουργεί &
+  συνδέει τον πελάτη χωρίς να φύγει ο χειριστής από το modal. Καλύπτει και γραμμές
+  χωρίς/με λάθος ΑΦΜ. Όταν τα στοιχεία ΑΑΔΕ διαφέρουν από όσα δήλωσε ο πελάτης στο
+  WHMCS, κρατιέται το επίσημο **με προειδοποίηση** που απαριθμεί τι διορθώθηκε
+  (`WhmcsCustomerCreator` + `WhmcsCustomerCreateResult.discrepancies`). Ο creator
+  τραβάει πλέον και **τηλέφωνο** (`phone1`) από το WHMCS.
 - **Dev tooling: `laravel/boost`** (dev-dependency) — MCP server that grounds the
   AI coding assistant in the real app (DB schema, tinker, version-correct docs).
   Wired for Claude Code via committed `.mcp.json`; only active under

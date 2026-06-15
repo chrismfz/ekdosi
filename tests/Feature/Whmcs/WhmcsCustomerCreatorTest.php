@@ -130,4 +130,56 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertSame('no_afm', $result->source);
         $this->assertSame(0, Customer::where('company_id', $t->id)->count());
     }
+
+    public function test_uses_afm_override_when_given(): void
+    {
+        $t = $this->tenant();
+        $row = $this->pending($t, null);   // no ΑΦΜ in WHMCS — operator types one
+        $this->mockGsis($this->aadeRecord());
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row, 'EL123456789');
+
+        $this->assertTrue($result->created);
+        $this->assertSame('aade', $result->source);
+        $this->assertSame('123456789', $result->customer->afm);   // EL stripped, override used
+    }
+
+    public function test_pulls_phone_from_whmcs_payload(): void
+    {
+        $t = $this->tenant();
+        $row = $this->pending($t, '123456789');
+        $row->update(['payload' => array_merge($row->payload, ['phonenumber' => '2101234567'])]);
+        $this->mockGsis($this->aadeRecord());
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertSame('2101234567', $result->customer->phone1);   // phone from WHMCS (GSIS has none)
+    }
+
+    public function test_reports_discrepancies_when_aade_differs_from_whmcs(): void
+    {
+        $t = $this->tenant();
+        // WHMCS company name «ACME WHMCS OE» differs from the official GSIS name.
+        $row = $this->pending($t, '123456789');
+        $this->mockGsis($this->aadeRecord());
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $name = collect($result->discrepancies)->firstWhere('field', 'Επωνυμία');
+        $this->assertNotNull($name, 'name discrepancy reported');
+        $this->assertSame('ACME WHMCS OE', $name['whmcs']);
+        $this->assertSame('ΟΦΙΣΙΑΛ ΑΑΔΕ ΕΠΕ', $name['aade']);
+        $this->assertSame('ΟΦΙΣΙΑΛ ΑΑΔΕ ΕΠΕ', $result->customer->name);   // official value kept
+    }
+
+    public function test_no_discrepancies_when_gsis_unavailable(): void
+    {
+        $t = $this->tenant();
+        $row = $this->pending($t, '999999999');
+        $this->mockGsis(null, new AadeAfmNotFound('x'));
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertSame([], $result->discrepancies);   // no GSIS → nothing to compare
+    }
 }

@@ -3,14 +3,17 @@
 namespace App\Filament\Resources\Companies\Actions;
 
 use App\Models\Company;
+use App\Models\CompanyBackupRun;
 use App\Models\CompanyBackupSetting;
 use App\Services\Backup\CompanyBackupRunner;
 use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyDataWiper;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
+use App\Services\Portability\CsvEntityExporter;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Component;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
@@ -79,6 +82,48 @@ class CompanyBackupActions
                 $suffix = ($data['full'] ?? false) ? 'full' : 'settings';
                 $path = storage_path('app/exports/'.$record->slug.'-'.$suffix.'-'.now()->format('Ymd-His').'.zip');
                 app(BundleArchive::class)->write($path, $bundle);
+
+                return response()->download($path, basename($path))->deleteFileAfterSend();
+            });
+    }
+
+    /**
+     * Per-row: Portability Phase 3 — pick entities and download a .zip of plain
+     * per-entity CSVs (open in Excel / hand to an accountant). NOT a restore
+     * bundle (that's export()); tenant-scoped, secret columns redacted.
+     */
+    public static function exportCsv(): Action
+    {
+        return Action::make('export_csv')
+            ->label('Εξαγωγή CSV')
+            ->icon('heroicon-o-table-cells')
+            ->color('gray')
+            ->modalHeading('Εξαγωγή σε CSV')
+            ->modalDescription('Διάλεξε τι να τραβήξεις. Κατεβάζει .zip με ένα CSV ανά entity (ανοίγει σε Excel). Δεν είναι αντίγραφο επαναφοράς — για μεταφορά/λογιστή.')
+            ->modalSubmitActionLabel('Εξαγωγή')
+            ->schema([
+                CheckboxList::make('entities')
+                    ->label('Τι να εξαχθεί')
+                    ->options(fn () => collect(app(CsvEntityExporter::class)->available())
+                        ->mapWithKeys(fn (string $k): array => [$k => CsvEntityExporter::LABELS[$k] ?? $k])
+                        ->all())
+                    ->default(fn () => app(CsvEntityExporter::class)->available())
+                    ->columns(2)
+                    ->bulkToggleable()
+                    ->required(),
+            ])
+            ->action(function (array $data, Company $record) {
+                $exporter = app(CsvEntityExporter::class);
+                $entities = array_values(array_intersect((array) ($data['entities'] ?? []), $exporter->available()));
+                if ($entities === []) {
+                    Notification::make()->title('Δεν επιλέχθηκε entity')->warning()->send();
+
+                    return null;
+                }
+
+                $files = $exporter->export($record, $entities);
+                $path = storage_path('app/exports/'.$record->slug.'-csv-'.now()->format('Ymd-His').'.zip');
+                $exporter->writeZip($files, $path);
 
                 return response()->download($path, basename($path))->deleteFileAfterSend();
             });
@@ -306,7 +351,7 @@ class CompanyBackupActions
     }
 
     /** Short-lived signed URL to stream a finished bundle (see the download route). */
-    private static function downloadUrl(\App\Models\CompanyBackupRun $run): string
+    private static function downloadUrl(CompanyBackupRun $run): string
     {
         return URL::temporarySignedRoute('company-backups.download', now()->addMinutes(15), ['run' => $run->getKey()]);
     }

@@ -130,11 +130,14 @@ surfaced in the open-items sections further down.
   needs a specific credential delegated — don't bulk-move secrets into company_admin reach.
 
 ## 🔒 Backup / DR / Portability
-- **Portability Phase 3** — selective per-table/per-entity CSV export (το upload-and-run UI
-  υπάρχει· checkboxes «τι να τραβήξω» + CSV per-entity ΟΧΙ).
 - **Portability Phase 5** — envelope-key (option 4) — optional future (το plaintext-at-rest
   καλύπτει cross-VM σήμερα).
 - **Backup encryption** (app-level) — deferred (βασιζόμαστε σε SFTP/S3 access control).
+- **No-password (un-encrypted) exports/backups — συνεπές & εμφανές παντού.** Η δυνατότητα
+  ΥΠΑΡΧΕΙ ήδη: per-company `company_backup_settings.secrets_mode='raw'`, `company:export --raw`,
+  και global spatie χωρίς `BACKUP_ARCHIVE_PASSWORD`. **TODO:** να εκτεθεί καθαρά το `raw`
+  toggle στο UI των company backups (default είναι `passphrase`) + ένα σαφές «χωρίς κωδικό»
+  per-company ΚΑΙ global, με προειδοποίηση. Μικρό — UI/policy, όχι νέα μηχανική.
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
