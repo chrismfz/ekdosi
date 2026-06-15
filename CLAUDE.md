@@ -134,6 +134,13 @@ Part of "done", like tests. **Every change updates the right place:**
   `docs/CLAUDE-history.md`. Don't backfill old versions — start from now.
 
 ## Commands
+> **Dev AI tooling:** `laravel/boost` (dev-dep) gives the coding assistant live
+> access to this app's DB schema / tinker / version-correct docs. Wired via
+> `.mcp.json` (Claude Code) — only registers under `APP_ENV=local`/`APP_DEBUG`,
+> zero prod footprint. Setup + the «skip generic skills» decision:
+> **`docs/boost-setup.md`**. (NOT the in-app AI «Βοηθός» — that's
+> `docs/ai-assistant-blueprint.md`.)
+
 ```bash
 php artisan ops:health [--json]                         # one-shot deploy check: queue/scheduler/backup/mail/WHMCS/myDATA/disk
 php artisan ekdosi:go-live-check --tenant=SLUG [--json]  # per-tenant cutover-readiness gate (read-only; 0/1/2). See docs/go-live-runbook.md

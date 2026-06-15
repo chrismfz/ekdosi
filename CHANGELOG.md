@@ -18,6 +18,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Dev tooling: `laravel/boost`** (dev-dependency) — MCP server that grounds the
+  AI coding assistant in the real app (DB schema, tinker, version-correct docs).
+  Wired for Claude Code via committed `.mcp.json`; only active under
+  `APP_ENV=local`/`APP_DEBUG` (zero prod footprint). Setup + the «skip the generic
+  skill catalogue» decision in `docs/boost-setup.md`.
 - **WHMCS inbox: «άμεση τιμολόγηση» can't-miss alerts + scannable third-party.** A paid
   immediate-invoice row now (a) floats to the top of the inbox, (b) carries the red «Άμεσο»
   bolt badge, (c) flips the nav badge to red, and (d) fires a **durable Filament database
