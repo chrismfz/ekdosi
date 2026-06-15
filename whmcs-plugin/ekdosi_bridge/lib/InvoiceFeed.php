@@ -113,7 +113,7 @@ class InvoiceFeed
             ? collect()
             : Capsule::table('tblclients')->whereIn('id', $userIds)->get([
                 'id', 'firstname', 'lastname', 'companyname', 'email',
-                'address1', 'address2', 'city', 'state', 'postcode', 'country', 'currency',
+                'address1', 'address2', 'city', 'state', 'postcode', 'country', 'phonenumber', 'currency',
             ])->keyBy('id');
         $customFieldsByClient = self::customFieldsByClient($userIds);
         $currencyCodes = self::currencyCodes($clients);
@@ -151,6 +151,7 @@ class InvoiceFeed
                 'state' => $client->state ?? '',
                 'postcode' => $client->postcode ?? '',
                 'country' => $client->country ?? '',
+                'phonenumber' => $client->phonenumber ?? '',
                 // Client custom fields as [{id, value}] — the matcher reads ΑΦΜ
                 // (+ intent) by field id via the tenant's whmcs_custom_field_map.
                 'customfields' => $customFieldsByClient[$userId] ?? [],
