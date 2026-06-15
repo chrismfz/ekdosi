@@ -117,11 +117,20 @@ class OperatorHealthReport
     }
 
     /**
-     * Backup-destination drivers that actually leave the VM. `local`/`disk`
-     * may be on the same host, so they don't count as off-site — a tenant whose
-     * ONLY destination is local has no disaster-recovery copy.
+     * Backup-destination drivers that actually leave the VM = every CONFIGURED
+     * destination driver except `local` (which lives on the same host, so it's
+     * no disaster-recovery copy). Derived from `config/ekdosi.php →
+     * backup.destinations` so a future cloud driver counts as off-site without
+     * editing this file.
+     *
+     * @return list<string>
      */
-    private const OFFSITE_DRIVERS = ['sftp', 'ftp', 's3'];
+    private function offsiteDrivers(): array
+    {
+        $configured = array_keys((array) config('ekdosi.backup.destinations', []));
+
+        return array_values(array_filter($configured, static fn (string $d): bool => $d !== 'local'));
+    }
 
     /** @return array<string, mixed> */
     private function backup(): array
@@ -154,6 +163,8 @@ class OperatorHealthReport
     private function companyBackups(): array
     {
         return $this->safeValue(function (): array {
+            $offsiteDrivers = $this->offsiteDrivers();
+
             $settings = CompanyBackupSetting::query()
                 ->withoutGlobalScope(CompanyScope::class)
                 ->where('enabled', true)
@@ -166,7 +177,7 @@ class OperatorHealthReport
             foreach ($settings as $setting) {
                 $destinations = is_array($setting->destinations) ? $setting->destinations : [];
                 $offsiteConfigured = collect($destinations)->contains(
-                    fn ($d): bool => in_array($d['driver'] ?? null, self::OFFSITE_DRIVERS, true)
+                    fn ($d): bool => in_array($d['driver'] ?? null, $offsiteDrivers, true)
                 );
 
                 $latest = CompanyBackupRun::query()
@@ -181,7 +192,7 @@ class OperatorHealthReport
                 if ($latest !== null && is_array($latest->destinations)) {
                     $offsiteResults = array_filter(
                         $latest->destinations,
-                        fn ($r): bool => in_array($r['driver'] ?? null, self::OFFSITE_DRIVERS, true)
+                        fn ($r): bool => in_array($r['driver'] ?? null, $offsiteDrivers, true)
                     );
                     if ($offsiteResults !== []) {
                         $offsitePushOk = collect($offsiteResults)
