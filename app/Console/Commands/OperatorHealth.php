@@ -43,6 +43,26 @@ class OperatorHealth extends Command
         $this->components->twoColumnDetail('Monitor status', $data['backup']['monitor']['status'] ?? 'missing');
         $this->components->twoColumnDetail('Monitor checked', $data['backup']['monitor']['checked_at'] ?? 'missing');
 
+        // Off-site verification: do enabled per-tenant backups actually leave the
+        // VM, and did the last off-site push land?
+        $cb = $data['backup']['companies'] ?? null;
+        if (is_array($cb)) {
+            $this->components->twoColumnDetail(
+                'Off-site backups',
+                $cb['enabled_count'] === 0
+                    ? 'no tenant has backups enabled'
+                    : ($cb['offsite_gap'] ? '⚠ GAP — see per-tenant below' : 'ok ('.$cb['enabled_count'].' tenant(s))')
+            );
+            foreach ($cb['companies'] as $row) {
+                $parts = [$row['offsite_configured'] ? 'off-site set' : '⚠ LOCAL ONLY'];
+                $parts[] = 'last: '.($row['latest_run_status'] ?? 'never').($row['latest_run_at'] ? ' '.$row['latest_run_at'] : '');
+                if ($row['offsite_push_ok'] === false) {
+                    $parts[] = '⚠ off-site push FAILED';
+                }
+                $this->components->twoColumnDetail('  '.($row['slug'] ?? '?'), implode(' · ', $parts));
+            }
+        }
+
         $this->newLine();
         $this->info('Mail');
         $this->components->twoColumnDetail('Failed invoice mails (24h)', (string) $data['mail']['failed_24h']);

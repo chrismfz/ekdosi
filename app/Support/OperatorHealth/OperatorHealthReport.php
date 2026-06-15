@@ -3,10 +3,13 @@
 namespace App\Support\OperatorHealth;
 
 use App\Models\Company;
+use App\Models\CompanyBackupRun;
+use App\Models\CompanyBackupSetting;
 use App\Models\InvoiceMailLog;
 use App\Models\MyDataMark;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\ScheduledTaskRun;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -113,6 +116,13 @@ class OperatorHealthReport
             ->all(), []);
     }
 
+    /**
+     * Backup-destination drivers that actually leave the VM. `local`/`disk`
+     * may be on the same host, so they don't count as off-site — a tenant whose
+     * ONLY destination is local has no disaster-recovery copy.
+     */
+    private const OFFSITE_DRIVERS = ['sftp', 'ftp', 's3'];
+
     /** @return array<string, mixed> */
     private function backup(): array
     {
@@ -125,7 +135,81 @@ class OperatorHealthReport
             'latest_backup_age_hours' => isset($latest['modified_at']) ? round(Carbon::parse($latest['modified_at'])->diffInMinutes(now()) / 60, 2) : null,
             'latest_backup_size_bytes' => $latest['size_bytes'] ?? null,
             'monitor' => $monitor ?: ['status' => 'missing', 'checked_at' => null, 'exit_code' => null],
+            // Per-tenant off-site verification: are enabled backups actually
+            // leaving the VM, and did the last off-site push succeed?
+            'companies' => $this->companyBackups(),
         ];
+    }
+
+    /**
+     * For every company with automated backups ENABLED, report whether an
+     * off-site destination is configured and whether the latest run's off-site
+     * push succeeded. `offsite_gap` is true if ANY enabled tenant has no off-site
+     * destination, or its last off-site push failed — the "your backups never
+     * leave the VM / aren't landing" warning. Read-only, all-tenant sweep (CLI
+     * context: declare the intent by dropping the CompanyScope).
+     *
+     * @return array<string, mixed>
+     */
+    private function companyBackups(): array
+    {
+        return $this->safeValue(function (): array {
+            $settings = CompanyBackupSetting::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('enabled', true)
+                ->with('company:id,slug,name')
+                ->get();
+
+            $companies = [];
+            $gap = false;
+
+            foreach ($settings as $setting) {
+                $destinations = is_array($setting->destinations) ? $setting->destinations : [];
+                $offsiteConfigured = collect($destinations)->contains(
+                    fn ($d): bool => in_array($d['driver'] ?? null, self::OFFSITE_DRIVERS, true)
+                );
+
+                $latest = CompanyBackupRun::query()
+                    ->withoutGlobalScope(CompanyScope::class)
+                    ->where('company_id', $setting->company_id)
+                    ->orderByDesc('started_at')
+                    ->first();
+
+                // null = no off-site destination ran (can't judge); true/false =
+                // every off-site result in the last run was ok / at least one failed.
+                $offsitePushOk = null;
+                if ($latest !== null && is_array($latest->destinations)) {
+                    $offsiteResults = array_filter(
+                        $latest->destinations,
+                        fn ($r): bool => in_array($r['driver'] ?? null, self::OFFSITE_DRIVERS, true)
+                    );
+                    if ($offsiteResults !== []) {
+                        $offsitePushOk = collect($offsiteResults)
+                            ->every(fn ($r): bool => ($r['status'] ?? null) === 'ok');
+                    }
+                }
+
+                $companyGap = ! $offsiteConfigured || $offsitePushOk === false;
+                $gap = $gap || $companyGap;
+
+                $companies[] = [
+                    'slug' => $setting->company?->slug,
+                    'name' => $setting->company?->name,
+                    'frequency' => $setting->frequency,
+                    'offsite_configured' => $offsiteConfigured,
+                    'latest_run_at' => $latest?->finished_at?->toIso8601String() ?? $latest?->started_at?->toIso8601String(),
+                    'latest_run_status' => $latest?->status,
+                    'offsite_push_ok' => $offsitePushOk,
+                    'warn' => $companyGap,
+                ];
+            }
+
+            return [
+                'offsite_gap' => $gap,
+                'enabled_count' => count($companies),
+                'companies' => $companies,
+            ];
+        }, ['offsite_gap' => false, 'enabled_count' => 0, 'companies' => []]);
     }
 
     /** @return array<string, mixed>|null */

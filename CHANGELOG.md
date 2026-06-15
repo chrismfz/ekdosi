@@ -18,6 +18,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Off-site backup verification στο `ops:health`.** Ανά tenant με ενεργά backups: ελέγχει
+  αν υπάρχει προορισμός **εκτός VM** (sftp/ftp/s3) και αν πέτυχε η τελευταία off-site
+  αποστολή· `backup.companies.offsite_gap` ανάβει για «μόνο τοπικά» ή αποτυχημένο push (CLI +
+  «Υγεία συστήματος»). Διακρίνει το «πάρθηκε backup» από το «έφυγε από το μηχάνημα».
 - **Ασφαλή updates: `deploy/update.sh` + `deploy/rollback.sh` + DB snapshot/restore.**
   Ένα βήμα για production update από version tag (pre-update DB snapshot → maintenance →
   checkout → `composer install` → `migrate` → `optimize` → `shield:sync-super-admin` →
