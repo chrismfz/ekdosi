@@ -61,8 +61,18 @@ $ART ekdosi:db-snapshot --keep=10 || { fail "Snapshot failed — aborting before
 # --- maintenance window -----------------------------------------------------
 log "Maintenance mode ON"
 $ART down --retry=15 || true
-# Always lift maintenance on exit, even if a step below fails.
-trap '$ART up || true' EXIT
+# On any FAILURE after this point, deliberately STAY in maintenance mode — a
+# half-applied update (e.g. a failed migration on new code) must never be served.
+# Only the success path below lifts maintenance.
+deploy_failed() {
+  local code=$?
+  [[ $code -eq 0 ]] && return 0
+  fail "Update FAILED (exit $code) — app LEFT IN MAINTENANCE MODE on purpose."
+  echo  "  Investigate, then fix-forward or roll back:"
+  echo  "    deploy/rollback.sh $CURRENT  <newest in storage/app/db-snapshots/>"
+  echo  "  When healthy again:  $ART up"
+}
+trap deploy_failed EXIT
 
 # --- update -----------------------------------------------------------------
 log "Checkout $REF"

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Commands\Concerns\BuildsDbClientArgs;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
 
@@ -21,6 +22,8 @@ use Symfony\Component\Process\Process;
  */
 class DbRestore extends Command
 {
+    use BuildsDbClientArgs;
+
     protected $signature = 'ekdosi:db-restore
         {--file= : Path to a .sql or .sql.gz snapshot (from ekdosi:db-snapshot)}
         {--force : Required in production; also skips the interactive confirmation}';
@@ -102,10 +105,7 @@ class DbRestore extends Command
     {
         return [
             'mysql',
-            '--host='.($cfg['host'] ?? '127.0.0.1'),
-            '--port='.($cfg['port'] ?? 3306),
-            '--user='.($cfg['username'] ?? 'root'),
-            '--default-character-set='.($cfg['charset'] ?? 'utf8mb4'),
+            ...self::dbConnectionArgs($cfg),
             (string) ($cfg['database'] ?? ''),
         ];
     }

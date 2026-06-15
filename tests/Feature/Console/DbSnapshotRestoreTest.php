@@ -42,6 +42,21 @@ class DbSnapshotRestoreTest extends TestCase
         $this->assertStringNotContainsString('s3cr3t', implode(' ', $cmd));
     }
 
+    public function test_commands_use_socket_when_configured(): void
+    {
+        $cfg = ['driver' => 'mariadb', 'unix_socket' => '/run/mysqld/mysqld.sock',
+            'host' => '127.0.0.1', 'port' => 3306, 'username' => 'ekdosi',
+            'database' => 'ekdosi', 'charset' => 'utf8mb4'];
+
+        $dump = DbSnapshot::dumpCommand($cfg, '/tmp/o.sql');
+        $this->assertContains('--socket=/run/mysqld/mysqld.sock', $dump);
+        $this->assertNotContains('--host=127.0.0.1', $dump);   // socket wins, no TCP
+
+        $restore = DbRestore::restoreCommand($cfg);
+        $this->assertContains('--socket=/run/mysqld/mysqld.sock', $restore);
+        $this->assertNotContains('--port=3306', $restore);
+    }
+
     public function test_restore_command_builds_expected_args(): void
     {
         $cmd = DbRestore::restoreCommand($this->cfg());

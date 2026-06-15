@@ -30,7 +30,13 @@ fi
 
 echo "▶ Maintenance mode ON"
 $ART down --retry=15 || true
-trap '$ART up || true' EXIT
+# On failure, STAY in maintenance (a half-done rollback must not be served).
+rollback_failed() {
+  local code=$?
+  [[ $code -eq 0 ]] && return 0
+  printf '\n\033[1;31m✗ Rollback FAILED (exit %s) — app LEFT IN MAINTENANCE MODE. Fix, then: %s up\033[0m\n' "$code" "$ART" >&2
+}
+trap rollback_failed EXIT
 
 echo "▶ Checkout $REF"
 git checkout --force "$REF"

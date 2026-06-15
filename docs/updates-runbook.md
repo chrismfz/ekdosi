@@ -89,7 +89,26 @@ scheduled, per-company archives are `spatie/laravel-backup` (see
   process list. MariaDB/MySQL only.
 - They need `mysqldump` + `mysql` on PATH (the MariaDB client package — already
   present on an `INSTALL.md` box).
+- **Connection transport:** if the connection defines a unix socket
+  (`DB_SOCKET` → `unix_socket`), the commands use `--socket=…`; otherwise
+  `--host`/`--port`. So both `localhost` (socket) and TCP setups work.
+- **DB privileges:** the snapshot dumps routines/triggers/events, so the DB user
+  needs the matching privileges. The INSTALL.md grant (`GRANT ALL PRIVILEGES ON
+  ekdosi.*`) covers them. A least-privilege user without TRIGGER/EVENT/CREATE
+  ROUTINE will make `mysqldump` fail — which **aborts the update** (fails safe,
+  no half-backup), but fix the grant before relying on snapshots.
+- **Restore caveat (older schema):** `db-restore` runs the dump as-is — it
+  drops/recreates the tables IN the snapshot but does **not** drop tables a later
+  migration ADDED. Those orphan tables are harmless to the older code, but for a
+  pristine restore, recreate the database first (`DROP DATABASE … ; CREATE
+  DATABASE …`) then restore.
+- **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
+  may lag `origin` after a fetch; tags are immutable and always correct. Deploy
+  tags on prod; use branches only on the dev VM.
 - `update.sh` refuses to run with a dirty working tree: never hand-edit code on
   prod; fix on dev, tag, deploy.
+- **On failure, `update.sh`/`rollback.sh` STAY in maintenance mode** on purpose
+  (a half-applied update must not be served). They print the rollback command;
+  bring the app back with `php artisan up` only once it's healthy.
 - After config changes that are cached, `update.sh`'s `optimize` re-caches; if
   you edit `.env` manually outside a deploy, run `php artisan config:clear`.

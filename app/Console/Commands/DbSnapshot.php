@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Commands\Concerns\BuildsDbClientArgs;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Symfony\Component\Process\Process;
@@ -23,6 +24,8 @@ use Symfony\Component\Process\Process;
  */
 class DbSnapshot extends Command
 {
+    use BuildsDbClientArgs;
+
     protected $signature = 'ekdosi:db-snapshot
         {--out= : Output file path (default: storage/app/db-snapshots/ekdosi-<ts>.sql.gz)}
         {--keep=0 : Keep only the N most recent snapshots in the default dir (0 = keep all)}';
@@ -64,10 +67,21 @@ class DbSnapshot extends Command
             return self::FAILURE;
         }
 
-        $this->gzipFile($tmpSql, $out);
+        // gzip the dump. A failure here MUST fail the command — the snapshot is
+        // the update rollback point; a swallowed gzip error would let
+        // deploy/update.sh proceed with no valid backup.
+        $gzipped = $this->gzipFile($tmpSql, $out);
         @unlink($tmpSql);
 
-        $size = number_format(((int) (@filesize($out) ?: 0)) / 1048576, 2);
+        $bytes = (int) (@filesize($out) ?: 0);
+        if (! $gzipped || $bytes <= 0) {
+            @unlink($out);
+            $this->error('Η συμπίεση του στιγμιότυπου απέτυχε — δεν δημιουργήθηκε έγκυρο snapshot.');
+
+            return self::FAILURE;
+        }
+
+        $size = number_format($bytes / 1048576, 2);
         $this->info("✓ Στιγμιότυπο: {$out} ({$size} MB)");
 
         $this->prune();
@@ -91,10 +105,7 @@ class DbSnapshot extends Command
     {
         return [
             'mysqldump',
-            '--host='.($cfg['host'] ?? '127.0.0.1'),
-            '--port='.($cfg['port'] ?? 3306),
-            '--user='.($cfg['username'] ?? 'root'),
-            '--default-character-set='.($cfg['charset'] ?? 'utf8mb4'),
+            ...self::dbConnectionArgs($cfg),
             '--single-transaction',   // consistent dump without locking InnoDB
             '--quick',
             '--routines',
@@ -105,25 +116,42 @@ class DbSnapshot extends Command
         ];
     }
 
-    /** Stream-gzip $src → $dst (constant memory, handles large dumps). */
-    private function gzipFile(string $src, string $dst): void
+    /**
+     * Stream-gzip $src → $dst (constant memory, handles large dumps). Returns
+     * false on any I/O failure so the caller can fail the command rather than
+     * report a missing/truncated snapshot as success.
+     */
+    private function gzipFile(string $src, string $dst): bool
     {
         $in = fopen($src, 'rb');
         $gz = gzopen($dst, 'wb9');
         if ($in === false || $gz === false) {
-            $this->error('Αδυναμία συμπίεσης του στιγμιότυπου.');
+            if ($in !== false) {
+                fclose($in);
+            }
+            if ($gz !== false) {
+                gzclose($gz);
+            }
 
-            return;
+            return false;
         }
+
+        $ok = true;
         while (! feof($in)) {
             $chunk = fread($in, 1 << 20);
             if ($chunk === false) {
+                $ok = false;
                 break;
             }
-            gzwrite($gz, $chunk);
+            if ($chunk !== '' && gzwrite($gz, $chunk) === false) {
+                $ok = false;
+                break;
+            }
         }
         fclose($in);
         gzclose($gz);
+
+        return $ok;
     }
 
     /** Keep only the N newest snapshots in the default dir (--keep). */
