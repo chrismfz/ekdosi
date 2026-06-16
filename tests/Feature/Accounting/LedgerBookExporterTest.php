@@ -103,6 +103,39 @@ class LedgerBookExporterTest extends TestCase
         $this->assertSame('50,00', $totals[14], 'expense net total under Έξοδα — Καθαρό (idx 14)');
     }
 
+    public function test_pdf_renders_landscape_bytes(): void
+    {
+        $pdf = (new LedgerBookExporter)->pdf($this->buildResult(), null);
+
+        $this->assertStringStartsWith('%PDF', $pdf, 'valid PDF stream');
+        $this->assertGreaterThan(1000, strlen($pdf), 'non-trivial PDF');
+    }
+
+    public function test_pdf_renders_company_header_and_credit_row(): void
+    {
+        // Exercise the two branches the shared buildResult() doesn't: a non-null
+        // Company header and a credit (πιστωτικό) row. Company is unsaved — the
+        // view only reads name/afm/tax_office (no DB needed).
+        $company = new \App\Models\Company(['name' => 'Δοκιμή ΑΕ', 'afm' => '123456789', 'tax_office' => 'ΦΑΕ ΑΘΗΝΩΝ']);
+        $rows = [
+            new LedgerRow(
+                book: 'income', date: Carbon::parse('2026-01-10'), docType: 'ΤΠΥ', doc: 'ΤΠΥ1',
+                counterparty: 'Πελάτης', afm: '1', categoryCode: 'category1_3', categoryLabel: 'Υπηρεσίες',
+                net: 100.0, vat: 24.0, gross: 124.0, isCredit: false, mydataState: 'VALID', mark: '400001',
+            ),
+            new LedgerRow(
+                book: 'income', date: Carbon::parse('2026-01-12'), docType: 'ΠΙΣ', doc: 'ΠΙΣ1',
+                counterparty: 'Πελάτης', afm: '1', categoryCode: 'category1_3', categoryLabel: 'Υπηρεσίες',
+                net: -50.0, vat: -12.0, gross: -62.0, isCredit: true, mydataState: 'VALID', mark: '400002',
+            ),
+        ];
+
+        $pdf = (new LedgerBookExporter)->pdf(new LedgerBookResult($rows, '01/01/2026 – 31/01/2026'), $company);
+
+        $this->assertStringStartsWith('%PDF', $pdf);
+        $this->assertGreaterThan(1000, strlen($pdf));
+    }
+
     public function test_json_structure_and_totals(): void
     {
         $json = (new LedgerBookExporter)->json($this->buildResult());

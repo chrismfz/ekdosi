@@ -2,6 +2,8 @@
 
 namespace App\Services\Accounting;
 
+use App\Models\Company;
+use Barryvdh\DomPDF\Facade\Pdf;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
@@ -162,6 +164,32 @@ class LedgerBookExporter
         $writer->close();
 
         return $path;
+    }
+
+    /**
+     * Render the book to a LANDSCAPE A4 PDF (so all the Έσοδα/Έξοδα columns fit —
+     * the "full sheet, sideways" view the accountant reads). Self-contained inline
+     * CSS + DejaVu Sans (Greek), like the other PDFs; returns the raw bytes.
+     */
+    public function pdf(LedgerBookResult $result, ?Company $company): string
+    {
+        $originalMemory = ini_get('memory_limit');
+        @ini_set('memory_limit', '512M');
+        $restoreTimeLimit = (int) ini_get('max_execution_time');
+        @set_time_limit(60);
+
+        try {
+            return Pdf::loadView('accounting.ledger-book-pdf', [
+                'result' => $result,
+                'company' => $company,
+                'generatedAt' => now(),
+            ])
+                ->setPaper('a4', 'landscape')
+                ->output();
+        } finally {
+            @ini_set('memory_limit', $originalMemory);
+            @set_time_limit($restoreTimeLimit);
+        }
     }
 
     public function filename(string $ext, ?string $from = null, ?string $to = null): string
