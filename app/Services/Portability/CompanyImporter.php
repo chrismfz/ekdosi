@@ -403,7 +403,11 @@ class CompanyImporter
             $companyData[$col] = $value;
         }
 
-        return $companyData;
+        // Keep only real `companies` columns: the exported row came from
+        // attributesToArray(), which can carry non-column aggregates/appends
+        // (e.g. users_count from a withCount() list query) that would break the
+        // INSERT with "Unknown column". Defends older bundles too.
+        return array_intersect_key($companyData, array_flip(Schema::getColumnListing('companies')));
     }
 
     private function restoreLogo(Company $company, array $bundle): void

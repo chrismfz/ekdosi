@@ -131,6 +131,12 @@ class CompanyExporter
         // Surrogate id + lifecycle timestamps are re-assigned on import.
         unset($companyData['id'], $companyData['created_at'], $companyData['updated_at'], $companyData['deleted_at']);
 
+        // attributesToArray() can include non-column aggregates/appends (e.g.
+        // users_count from a withCount() list query) — keep only real columns so
+        // the bundle stays clean and the import INSERT can't hit "Unknown column".
+        // (logo_export_name is added AFTER this, deliberately.)
+        $companyData = array_intersect_key($companyData, array_flip(Schema::getColumnListing('companies')));
+
         $sealed = $this->codec->seal($secrets, $secretsMode, $passphrase);
 
         $counts = [];

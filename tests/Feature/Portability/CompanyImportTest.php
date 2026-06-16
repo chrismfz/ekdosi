@@ -187,4 +187,39 @@ class CompanyImportTest extends TestCase
         $this->assertSame('gsis-pw', $company->gsis_password);
         $this->assertSame(7, InvoiceType::where('company_id', $company->id)->where('code', 'TPY')->firstOrFail()->invcount);
     }
+
+    /**
+     * Regression: the company row is exported via attributesToArray(), which can
+     * carry non-column aggregates (e.g. users_count from the Companies list's
+     * withCount). The export must strip them so the bundle stays column-clean.
+     */
+    public function test_export_strips_non_column_aggregate_attributes(): void
+    {
+        $company = $this->sourceCompany();
+        $company->setAttribute('users_count', 5);   // as a withCount() list query would
+
+        $bundle = $this->bundle($company);
+
+        $this->assertArrayNotHasKey('users_count', $bundle['company']);
+    }
+
+    /**
+     * Regression: an OLDER bundle (built before the export fix) may carry a stray
+     * non-column attribute in its company payload. Import must tolerate it instead
+     * of dying with SQLSTATE 42S22 «Unknown column 'users_count'».
+     */
+    public function test_import_tolerates_stray_non_column_in_company_payload(): void
+    {
+        $bundle = $this->bundle($this->sourceCompany());
+        Company::where('slug', 'src')->forceDelete();
+
+        $bundle['company']['users_count'] = 9;   // simulate a pre-fix bundle
+
+        $summary = app(CompanyImporter::class)->run($bundle, [
+            'new' => true, 'execute' => true, 'passphrase' => 'p@ss',
+        ]);
+
+        $this->assertSame('create', $summary['company']);
+        $this->assertNotNull(Company::where('slug', 'src')->first());
+    }
 }
