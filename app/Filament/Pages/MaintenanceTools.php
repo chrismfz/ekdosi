@@ -14,9 +14,12 @@ use Illuminate\Support\Str;
 /**
  * «Εργαλεία» — surfaces a few safe, idempotent maintenance artisan commands as
  * one-click buttons for the CURRENT tenant, so an operator never needs terminal
- * access for routine upkeep (ανανέωση εικόνας ΦΠΑ, επανυπολογισμός υπολοίπων,
- * έλεγχος ρυθμίσεων myDATA). Each button runs the same command the scheduler /
- * CLI runs, scoped to this company, and shows the captured output on the page.
+ * access for routine upkeep (ανανέωση εικόνας ΦΠΑ, επανυπολογισμός υπολοίπων).
+ * Each button runs the same command the scheduler / CLI runs, scoped to this
+ * company, and shows the captured output on the page.
+ *
+ * (The myDATA config audit moved to the structured «Έλεγχος ρυθμίσεων» tab in the
+ * Κονσόλα myDATA cluster — richer, with click-to-fix links into Invoice Types.)
  *
  * Admin territory (gated on View:MaintenanceTools — company_admin + super_admin;
  * run shield:generate + shield:sync-super-admin after deploy so the permission
@@ -83,15 +86,6 @@ class MaintenanceTools extends Page
                 command: 'invoices:recompute-balances',
                 params: fn (Company $c) => ['--company' => $c->getKey()],
                 confirm: 'Ξαναϋπολογίζει τα cache πεδία χρημάτων (πληρωμένο/πιστωμένο/κατάσταση) όλων των παραστατικών αυτής της εταιρίας από πληρωμές + πιστωτικά. Ασφαλές, idempotent.',
-                color: 'gray',
-            ),
-            $this->commandAction(
-                key: 'mydata_preflight',
-                label: 'Έλεγχος ρυθμίσεων myDATA',
-                icon: 'heroicon-o-clipboard-document-check',
-                command: 'mydata:preflight',
-                params: fn (Company $c) => ['--tenant' => $c->slug],
-                confirm: null, // read-only audit
                 color: 'gray',
             ),
         ];

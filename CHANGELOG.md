@@ -17,7 +17,16 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Added
+- **«Έλεγχος ρυθμίσεων» tab στην Κονσόλα myDATA** — structured, click-to-fix view πάνω σε ένα
+  νέο κοινό `MyDataConfigAudit`: ετοιμότητα tenant + κάθε τύπος παραστατικού / κατηγορία ΦΠΑ με
+  badge ✓/⚠/✗, το AADE error code του κάθε ευρήματος, και link «Διόρθωση →» στη ρύθμιση. Το ίδιο
+  audit τροφοδοτεί πλέον το `mydata:preflight` (thin renderer) ΚΑΙ ένα badge «Ετοιμότητα myDATA»
+  στη λίστα Invoice Types — ο μισός έλεγχος ζει εκεί που ζει το config.
+
 ### Changed
+- **Ο έλεγχος ρυθμίσεων myDATA έφυγε από τα «Εργαλεία»** → στο νέο «Έλεγχος ρυθμίσεων» tab
+  (richer από το text-dump κουμπί). Τα «Εργαλεία» κρατούν εικόνα ΦΠΑ + επανυπολογισμό υπολοίπων.
 - **Deploy defaults to the current branch tip, not a tag.** `deploy/update.sh` with no arg now
   ships the pushed tip of the branch you're on (`origin/main` on main) and stays ON the branch —
   the `git pull` workflow, no tags to remember. Passing a tag still works (pinned release /
