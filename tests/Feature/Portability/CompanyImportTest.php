@@ -189,6 +189,20 @@ class CompanyImportTest extends TestCase
         $this->assertSame(7, InvoiceType::where('company_id', $company->id)->where('code', 'TPY')->firstOrFail()->invcount);
     }
 
+    public function test_import_new_provisions_roles_after_commit(): void
+    {
+        $bundle = $this->bundle($this->sourceCompany());
+        Company::where('slug', 'src')->forceDelete();
+
+        app(CompanyImporter::class)->run($bundle, [
+            'new' => true, 'execute' => true, 'passphrase' => 'p@ss',
+        ]);
+
+        $company = Company::where('slug', 'src')->firstOrFail();
+        $this->assertSame(1, DB::table('roles')
+            ->where('company_id', $company->id)->where('name', 'super_admin')->count());
+    }
+
     /**
      * Regression: the company row is exported via attributesToArray(), which can
      * carry non-column aggregates (e.g. users_count from the Companies list's
