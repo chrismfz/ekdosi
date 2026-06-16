@@ -72,14 +72,13 @@ class LedgerBookExporterTest extends TestCase
         $this->assertStringContainsString('Παροχή Υπηρεσιών', $csv);
         // Comma decimal, ';' delimited.
         $this->assertStringContainsString('100,00', $csv);
-        $this->assertStringContainsString('Σύνολο εσόδων', $csv);
+        $this->assertStringContainsString('Σύνολα', $csv);
+        $this->assertStringContainsString('Καθαρό αποτέλεσμα', $csv);
         $this->assertStringContainsString('ΦΠΑ εκροών − εισροών', $csv);
 
-        // Column-count guard: header, a data row and the totals line must all
-        // parse to 15 fields, so a future column shift can't silently mis-align
-        // the totals trailer (the off-by-one this layout is sensitive to). We
-        // PARSE each line (fputcsv quotes multibyte labels, so a raw prefix
-        // match is unreliable) after stripping the BOM.
+        // Column-count guard: header + a data row must parse to 16 fields, so a
+        // future column shift can't silently mis-align the income/expense split.
+        // We PARSE each line (fputcsv quotes multibyte labels) after the BOM.
         $body = str_replace("\xEF\xBB\xBF", '', $csv);
         $rows = array_map(
             fn ($l) => str_getcsv($l, ';', '"', '\\'),
@@ -87,16 +86,21 @@ class LedgerBookExporterTest extends TestCase
         );
         $first = fn (string $v) => collect($rows)->first(fn ($r) => ($r[0] ?? null) === $v);
 
-        $this->assertCount(15, $first('Ημ/νία'), 'header has 15 columns');
+        $this->assertCount(16, $first('Ημ/νία'), 'header has 16 columns');
 
+        // The income row (TPY100) foots on the Έσοδα side; the Έξοδα side is blank.
         $dataRow = $first('2026-01-10');
-        $this->assertCount(15, $dataRow, 'data row has 15 columns');
+        $this->assertCount(16, $dataRow, 'data row has 16 columns');
         $this->assertSame('400001', $dataRow[3], 'ΜΑΡΚ lands in column 4 (idx 3)');
         $this->assertSame('73', $dataRow[10], 'account lands in column 11 (idx 10)');
+        $this->assertSame('100,00', $dataRow[12], 'income net lands under Έσοδα — Καθαρό (idx 12)');
+        $this->assertSame('', $dataRow[14], 'the Έξοδα — Καθαρό cell is blank for an income row');
 
-        $totals = $first('Σύνολο εσόδων');
-        $this->assertCount(15, $totals, 'totals row has 15 columns');
-        $this->assertSame('100,00', $totals[12], 'income net lands under Καθαρό (idx 12)');
+        // The «Σύνολα» footing row puts income/expense subtotals under their columns.
+        $totals = $first('Σύνολα');
+        $this->assertCount(16, $totals, 'totals row has 16 columns');
+        $this->assertSame('100,00', $totals[12], 'income net total under Έσοδα — Καθαρό (idx 12)');
+        $this->assertSame('50,00', $totals[14], 'expense net total under Έξοδα — Καθαρό (idx 14)');
     }
 
     public function test_json_structure_and_totals(): void
