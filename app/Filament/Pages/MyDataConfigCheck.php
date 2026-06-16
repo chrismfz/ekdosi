@@ -22,9 +22,10 @@ use Filament\Pages\Page;
  * straight to the record that needs fixing — so half the check lives where the
  * config does (Invoice Types), and this is its overview.
  *
- * Visible to gr-mydata tenants regardless of mode/credentials (you audit config
- * DURING setup, before creds exist — the audit itself flags the missing creds),
- * gated on View:MyDataConfigCheck.
+ * Gated like its sibling console tabs — the tenant must be able to READ from
+ * myDATA (canReadMyData) + hold View:MyDataConfigCheck — so the cluster keeps one
+ * coherent visibility rule. The audit itself is local (no AADE call); it still
+ * surfaces the «credentials missing» readiness warning when relevant.
  */
 class MyDataConfigCheck extends Page
 {
@@ -78,7 +79,7 @@ class MyDataConfigCheck extends Page
         $tenant = Filament::getTenant();
 
         return $tenant instanceof Company
-            && $tenant->einvoice_provider === 'gr-mydata'
+            && $tenant->canReadMyData()
             && (bool) auth()->user()?->can('View:MyDataConfigCheck');
     }
 

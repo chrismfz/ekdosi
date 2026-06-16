@@ -25,6 +25,9 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   στη λίστα Invoice Types — ο μισός έλεγχος ζει εκεί που ζει το config.
 
 ### Changed
+- **«Συμφωνία myDATA» → «Τοπικός έλεγχος κατάστασης»** με ρητό banner ότι είναι ΕΣΩΤΕΡΙΚΟΣ
+  έλεγχος (δεν ρωτά το AADE) — ώστε να μη φαίνεται αντιφατικό όταν λέει «καμία ασυμφωνία» ενώ
+  η ζωντανή Κονσόλα myDATA δείχνει διαφορές (μετράνε διαφορετικά πράγματα).
 - **Ο έλεγχος ρυθμίσεων myDATA έφυγε από τα «Εργαλεία»** → στο νέο «Έλεγχος ρυθμίσεων» tab
   (richer από το text-dump κουμπί). Τα «Εργαλεία» κρατούν εικόνα ΦΠΑ + επανυπολογισμό υπολοίπων.
 - **Deploy defaults to the current branch tip, not a tag.** `deploy/update.sh` with no arg now

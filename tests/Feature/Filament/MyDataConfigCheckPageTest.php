@@ -30,7 +30,10 @@ class MyDataConfigCheckPageTest extends TestCase
         ]));
         $this->tenant = Company::create([
             'name' => 'Cfg OE', 'slug' => 'cfg-'.uniqid(), 'country_code' => 'GR',
-            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
+            'afm' => '800561849',
+            'mydata_aade_id_sandbox' => 'TESTUSER',
+            'mydata_subscription_key_sandbox' => 'TESTKEY',
         ]);
         Filament::setTenant($this->tenant);
     }

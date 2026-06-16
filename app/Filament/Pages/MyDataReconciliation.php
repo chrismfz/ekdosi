@@ -40,12 +40,12 @@ class MyDataReconciliation extends Page implements HasTable
 
     public static function getNavigationLabel(): string
     {
-        return 'Συμφωνία myDATA';
+        return 'Τοπικός έλεγχος κατάστασης';
     }
 
     public function getTitle(): string
     {
-        return 'Συμφωνία myDATA';
+        return 'Τοπικός έλεγχος κατάστασης';
     }
 
     public static function getNavigationBadge(): ?string
