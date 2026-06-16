@@ -137,6 +137,10 @@ class LedgerBook extends Page
     {
         return [
             ActionGroup::make([
+                Action::make('export_pdf')
+                    ->label('PDF (οριζόντιο)')
+                    ->icon('heroicon-o-document-text')
+                    ->action(fn () => $this->export('pdf')),
                 Action::make('export_csv')
                     ->label('CSV')
                     ->icon('heroicon-o-table-cells')
@@ -179,6 +183,11 @@ class LedgerBook extends Page
                 },
                 $name,
                 ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+            ),
+            'pdf' => response()->streamDownload(
+                fn () => print ($exporter->pdf($result, Filament::getTenant())),
+                $name,
+                ['Content-Type' => 'application/pdf'],
             ),
             default => response()->streamDownload(
                 fn () => print ($exporter->csv($result)),

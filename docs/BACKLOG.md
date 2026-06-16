@@ -176,8 +176,8 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   (βλ. «Expenses — λογιστής/`entityVatNumber`»). Ιδέα: ekdosi **ετοιμάζει** τους χαρακτηρισμούς, ο
   λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει** — θέλει διερεύνηση ρόλων/δικαιωμάτων.
 - **#6 Βιβλίο Εσόδων-Εξόδων → myDATA period report.** _✅ SHIPPED — στήλες ΜΑΡΚ + κατάσταση myDATA
-  στο ημερολόγιο + στα CSV/XLSX/JSON exports· self-contained styling (no build)._ **Still open:**
-  PDF export (σήμερα CSV/XLSX/JSON). _(Το panel styling λύθηκε καθολικά — βλ. «Panel utility CSS».)_
+  στο ημερολόγιο + στα CSV/XLSX/JSON exports· Έσοδα/Έξοδα στήλες+σύνολα· period presets·
+  **PDF (οριζόντιο A4)** ✅· self-contained styling (no build)._ _(Πλήρως κλεισμένο.)_
 - **Panel utility CSS — ✅ SHIPPED (no-build).** Ο admin panel δεν φόρτωνε custom Tailwind theme,
   οπότε ΟΛΑ τα utility classes στα custom blade ήταν άστυλα (το Filament CSS είναι αμιγώς `.fi-*`).
   Λύση: `resources/css/panel.css` (hand-written utilities, standard Tailwind τιμές + dark/responsive),

@@ -103,6 +103,14 @@ class LedgerBookExporterTest extends TestCase
         $this->assertSame('50,00', $totals[14], 'expense net total under Έξοδα — Καθαρό (idx 14)');
     }
 
+    public function test_pdf_renders_landscape_bytes(): void
+    {
+        $pdf = (new LedgerBookExporter)->pdf($this->buildResult(), null);
+
+        $this->assertStringStartsWith('%PDF', $pdf, 'valid PDF stream');
+        $this->assertGreaterThan(1000, strlen($pdf), 'non-trivial PDF');
+    }
+
     public function test_json_structure_and_totals(): void
     {
         $json = (new LedgerBookExporter)->json($this->buildResult());
