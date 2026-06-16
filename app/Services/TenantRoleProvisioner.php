@@ -158,15 +158,36 @@ class TenantRoleProvisioner
      */
     public function isSuperAdminAnywhere(User $user): bool
     {
-        $superName = ShieldUtils::getSuperAdminName();
+        return $this->isSystemSuperAdmin($user);
+    }
 
-        foreach ($user->companies as $company) {
-            if ($this->userHoldsRole($user, $company, $superName)) {
-                return true;
-            }
-        }
+    /**
+     * Is this user a SYSTEM super_admin — i.e. holds the super_admin role in ANY
+     * tenant? Single raw query (no team filter), safe to call from Gate::before.
+     * A system super_admin is the OPERATOR: they bypass every policy in every
+     * tenant (the global Gate::before bypass), unlike a per-tenant company_admin.
+     */
+    public function isSystemSuperAdmin(User $user): bool
+    {
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
+        $teamKey = $cols['team_foreign_key'] ?? 'company_id';
 
-        return false;
+        return DB::table(($tables['model_has_roles'] ?? 'model_has_roles').' as mhr')
+            ->join(($tables['roles'] ?? 'roles').' as r', 'r.id', '=', 'mhr.'.($cols['role_pivot_key'] ?? 'role_id'))
+            // Require the user to STILL be a member of that company. Detaching a
+            // user removes the company_user pivot but NOT their role assignment,
+            // so without this a detached super_admin would keep the global bypass
+            // (a privilege-non-revocation hole). Membership-gated = detach revokes.
+            ->join('company_user as cu', function ($join) use ($user, $teamKey): void {
+                $join->on('cu.company_id', '=', "r.{$teamKey}")
+                    ->where('cu.user_id', '=', $user->getKey());
+            })
+            ->where('r.name', ShieldUtils::getSuperAdminName())
+            ->where('r.guard_name', ShieldUtils::getFilamentAuthGuard())
+            ->where('mhr.'.($cols['model_morph_key'] ?? 'model_id'), $user->getKey())
+            ->where('mhr.model_type', $user->getMorphClass())
+            ->exists();
     }
 
     /**
@@ -243,11 +264,23 @@ class TenantRoleProvisioner
         }
 
         try {
-            return Role::query()->create([
+            // RAW insert — NOT Role::query()->create(): Eloquent's create fires
+            // spatie's teams `creating` hook, which OVERRIDES company_id with the
+            // registrar's CURRENT team (the ambient panel tenant), so the role is
+            // written under the WRONG company → a 1062 collision (the whole
+            // import/picker «collided but could not be re-read» saga: $company is
+            // 81 but the INSERT used the panel tenant 4). A raw insert writes the
+            // company_id we pass, verbatim.
+            $id = DB::table('roles')->insertGetId([
                 'name' => $name,
                 'guard_name' => $guard,
                 'company_id' => $companyId,
+                'created_at' => now(),
+                'updated_at' => now(),
             ]);
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+            return Role::query()->withoutGlobalScopes()->findOrFail($id);
         } catch (UniqueConstraintViolationException $e) {
             // The row exists despite the lookup missing it — adopt it.
             return $this->findRole($name, $guard, $companyId) ?? throw new RuntimeException(

@@ -17,6 +17,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Changed
+- **super_admin is now GLOBAL (the operator), not a per-tenant role.** `Gate::before`
+  bypasses every policy in EVERY tenant for a user who holds super_admin in ANY tenant
+  (`User::isSystemSuperAdmin`, single memoised query). So the owner sees everything in a
+  freshly created/restored company the moment they're attached — no per-company super_admin
+  assignment, and the role-picker chicken-and-egg is gone. Data isolation is unchanged
+  (CompanyScope still filters tenant data; only the permission bypass is global); per-tenant
+  company_admin/operator roles are unaffected.
+
 ### Fixed
 - **Role picker: a system super_admin can bootstrap roles in any company.** The
   «Ρόλος» action gated on being super_admin in THAT company, so after restoring/

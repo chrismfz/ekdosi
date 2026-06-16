@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\TenantRoleProvisioner;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
@@ -132,5 +133,40 @@ class TenantSuperAdminTest extends TestCase
         $this->artisan('shield:sync-super-admin', ['--user' => $user->email])->assertExitCode(0);
 
         $this->assertTrue($this->hasSuperAdminIn($user, $c));
+    }
+
+    public function test_system_super_admin_bypasses_policies_in_a_tenant_without_a_role(): void
+    {
+        $owned = $this->makeCompany('owned');
+        $other = $this->makeCompany('other');
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $user->companies()->attach([$owned->id, $other->id]);
+        app(TenantRoleProvisioner::class)->assignSuperAdmin($user, $owned);   // super_admin in ONE company
+
+        $this->actingAs($user);
+        // Switch the team context to the OTHER company (the user has NO role there).
+        app(PermissionRegistrar::class)->setPermissionsTeamId($other->getKey());
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        // GLOBAL bypass: a system super_admin passes every gate in every tenant.
+        $this->assertTrue(app(TenantRoleProvisioner::class)->isSystemSuperAdmin($user));
+        $this->assertTrue(Gate::allows('ViewAny:Invoice'));
+    }
+
+    public function test_detaching_from_the_super_admin_company_revokes_the_global_bypass(): void
+    {
+        $a = $this->makeCompany('a');
+        $b = $this->makeCompany('b');
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $user->companies()->attach([$a->id, $b->id]);
+        app(TenantRoleProvisioner::class)->assignSuperAdmin($user, $a);   // super_admin in A
+        $this->assertTrue(app(TenantRoleProvisioner::class)->isSystemSuperAdmin($user));
+
+        // Detach from A (the revoke action). The role-assignment row survives, but
+        // membership is gone — so the system-super_admin bypass must be REVOKED.
+        $user->companies()->detach($a->id);
+
+        $this->assertFalse(app(TenantRoleProvisioner::class)->isSystemSuperAdmin($user),
+            'detaching the super_admin company must revoke the global bypass (no stale-assignment escalation)');
     }
 }

@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Casts\MaybeEncrypted;
+use App\Services\TenantRoleProvisioner;
 use BezhanSalleh\FilamentShield\Traits\HasPanelShield;
 use Database\Factories\UserFactory;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
@@ -19,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Spatie\Permission\Traits\HasRoles;
 
 #[Fillable(['name', 'email', 'password', 'email_verified_at'])]
@@ -50,7 +52,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         // Leave a breadcrumb: a bare 403 with no log is undebuggable months
         // later. This is the single line that turns "why is this user locked
         // out?" into a grep.
-        \Illuminate\Support\Facades\Log::warning('Panel access denied — user belongs to no company.', [
+        Log::warning('Panel access denied — user belongs to no company.', [
             'user_id' => $this->getKey(),
             'email' => $this->email,
             'panel' => $panel->getId(),
@@ -58,6 +60,21 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
 
         return false;
     }
+
+    /**
+     * Is this the OPERATOR (a system super_admin — super_admin in any tenant)?
+     * Memoised per request: the authenticated user instance is reused, and the
+     * Gate::before bypass calls this on every authorization check. A system
+     * super_admin bypasses every policy in every tenant (global), unlike a
+     * per-tenant company_admin/operator.
+     */
+    public function isSystemSuperAdmin(): bool
+    {
+        return $this->systemSuperAdmin ??= app(TenantRoleProvisioner::class)->isSystemSuperAdmin($this);
+    }
+
+    /** Per-request memo for isSystemSuperAdmin(). */
+    protected ?bool $systemSuperAdmin = null;
 
     /**
      * @return array<string, string>
