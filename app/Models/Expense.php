@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
 
 use App\Enums\ExpenseSource;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -138,7 +139,7 @@ class Expense extends Model
      * are what the rules engine / the operator still needs to classify before
      * submitting their χαρακτηρισμός to AADE.
      */
-    public function scopeNeedsClassification(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    public function scopeNeedsClassification(Builder $query): Builder
     {
         return $query
             ->whereNotNull('mydata_mark')

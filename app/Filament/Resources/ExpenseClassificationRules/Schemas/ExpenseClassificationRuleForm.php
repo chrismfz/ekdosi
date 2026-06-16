@@ -54,6 +54,7 @@ class ExpenseClassificationRuleForm
                     ->label('Προτεραιότητα')
                     ->numeric()
                     ->default(0)
+                    ->required()   // integer NOT NULL — an empty submit must not reach the DB
                     ->helperText('Μεγαλύτερη = υπερισχύει όταν ταιριάζουν πολλοί κανόνες.'),
 
                 Toggle::make('is_active')

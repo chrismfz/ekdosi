@@ -14,6 +14,7 @@ use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 
 class ViewExpense extends ViewRecord
@@ -93,32 +94,37 @@ class ViewExpense extends ViewRecord
                         ->columns(2),
                 ])
                 ->action(function (array $data): void {
-                    if (($data['mode'] ?? 'single') === 'mixed') {
-                        $rows = collect($data['lines'] ?? [])->keyBy('id');
-                        foreach ($this->record->lines as $line) {
-                            $row = $rows->get($line->id);
-                            if ($row === null) {
-                                continue;
+                    // Atomic: the per-line writes + the header/state write must land
+                    // together (a crash mid-way must not leave lines cleared while
+                    // the header stays unclassified).
+                    DB::transaction(function () use ($data): void {
+                        if (($data['mode'] ?? 'single') === 'mixed') {
+                            $rows = collect($data['lines'] ?? [])->keyBy('id');
+                            foreach ($this->record->lines as $line) {
+                                $row = $rows->get($line->id);
+                                if ($row === null) {
+                                    continue;
+                                }
+                                $line->forceFill([
+                                    'classification_type' => $row['classification_type'],
+                                    'classification_category' => $row['classification_category'],
+                                ])->save();
                             }
-                            $line->forceFill([
-                                'classification_type' => $row['classification_type'],
-                                'classification_category' => $row['classification_category'],
+                            $this->record->forceFill(['classification_state' => 'classified'])->save();
+                        } else {
+                            // Single: clear any per-line overrides so the header is the
+                            // one effective classification, then stamp header + state.
+                            $this->record->lines()->update([
+                                'classification_type' => null,
+                                'classification_category' => null,
+                            ]);
+                            $this->record->forceFill([
+                                'classification_type' => $data['classification_type'],
+                                'classification_category' => $data['classification_category'],
+                                'classification_state' => 'classified',
                             ])->save();
                         }
-                    } else {
-                        // Single mode: clear any per-line overrides so the header
-                        // classification is the one effective value (no stale mix).
-                        $this->record->lines()->update([
-                            'classification_type' => null,
-                            'classification_category' => null,
-                        ]);
-                        $this->record->forceFill([
-                            'classification_type' => $data['classification_type'],
-                            'classification_category' => $data['classification_category'],
-                        ])->save();
-                    }
-
-                    $this->record->forceFill(['classification_state' => 'classified'])->save();
+                    });
 
                     Notification::make()
                         ->title('Ο χαρακτηρισμός αποθηκεύτηκε')

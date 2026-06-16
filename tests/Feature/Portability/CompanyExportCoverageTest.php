@@ -4,6 +4,7 @@ namespace Tests\Feature\Portability;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Services\Portability\CompanyExporter;
+use App\Services\Portability\CompanyImporter;
 use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\Test;
 use ReflectionClass;
@@ -44,6 +45,34 @@ class CompanyExportCoverageTest extends TestCase
             ."or to CompanyExporter::INTENTIONALLY_EXCLUDED (with a reason):\n  "
             .implode("\n  ", array_map(fn ($m, $t) => "{$t}  ←  {$m}", $unclassified, array_keys($unclassified)))
         );
+    }
+
+    #[Test]
+    public function every_exported_table_is_also_imported(): void
+    {
+        // The exporter writes SETUP_TABLES/TRANSACTIONAL_TABLES into the bundle, but
+        // the IMPORTER only restores what's in its ORDER / ORDER_TRANSACTIONAL lists.
+        // A table in a setup/tx bucket but missing from the matching import ORDER is
+        // exported then silently dropped on restore — this guards that round-trip.
+        $importOrder = array_merge(
+            $this->privateConst(CompanyImporter::class, 'ORDER'),
+            $this->privateConst(CompanyImporter::class, 'ORDER_TRANSACTIONAL'),
+        );
+
+        $exported = array_merge(CompanyExporter::SETUP_TABLES, CompanyExporter::TRANSACTIONAL_TABLES);
+
+        $this->assertSame(
+            [],
+            array_values(array_diff($exported, $importOrder)),
+            'These tables are EXPORTED but not in CompanyImporter::ORDER/ORDER_TRANSACTIONAL — '
+            .'they would be silently dropped on restore. Add each to the matching import order list.'
+        );
+    }
+
+    /** @return list<string> */
+    private function privateConst(string $class, string $name): array
+    {
+        return (array) (new ReflectionClass($class))->getConstant($name);
     }
 
     #[Test]
