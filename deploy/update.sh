@@ -4,10 +4,11 @@
 #
 #   deploy/update.sh [GIT_REF]
 #
-# GIT_REF = a release tag (RECOMMENDED, e.g. v1.3.0) or a branch. Defaults to
-# the highest SemVer tag. Cut the tag on your dev box first with `php artisan
-# ekdosi:release --minor|--patch|--major`, push it, then run this on the server.
-# A DOWNGRADE (target older than current HEAD) is refused unless ALLOW_DOWNGRADE=1.
+# GIT_REF = what to deploy. Omit it for the everyday flow: it deploys the CURRENT
+# branch's pushed tip (i.e. `origin/main` when you're on main) — the `git pull`
+# workflow, no tags to remember. Pass a tag (e.g. v1.3.0) for a pinned release or
+# a rollback; tags check out detached on purpose. A DOWNGRADE (target older than
+# current HEAD) is refused unless ALLOW_DOWNGRADE=1.
 #
 # What it does, in order (safe + idempotent):
 #   1. pre-flight: working tree must be clean
@@ -49,34 +50,41 @@ log "Fetching tags + commits"
 git fetch --all --tags --prune
 
 if [[ -z "$REF" ]]; then
-  # Highest SemVer tag — NOT `git rev-list --tags --max-count=1`, which is the
-  # most recently CREATED tag object and can be an OLD release still sitting on a
-  # branch, so a no-arg deploy could silently roll prod BACKWARDS.
-  REF="$(git tag --sort=-v:refname | head -n1)"
-  if [[ -z "$REF" ]]; then
-    fail "No ref given and no tags exist — pass an explicit ref (a tag, or 'main')."
-    exit 1
-  fi
-  log "No ref given — using latest tag: $REF"
+  # Everyday flow: deploy the branch you're on (its pushed tip). Detached HEAD
+  # (e.g. left over from a prior tag deploy) → fall back to main, which also
+  # auto-recovers you onto the branch.
+  REF="$(git symbolic-ref --quiet --short HEAD || echo main)"
+  log "No ref given — deploying branch tip: $REF (the git-pull workflow)"
 fi
 
 CURRENT="$(git rev-parse --short HEAD)"
-echo "Current: $CURRENT   →   Target: $REF"
+
+# Resolve what we'll ACTUALLY land on. For a BRANCH, that's its pushed (origin)
+# tip — so a no-arg deploy ships what's on GitHub, exactly like `git pull`; we
+# also stay ON the branch at checkout. For a TAG / sha (no matching origin
+# branch), the ref itself, checked out detached (a pinned release).
+if git rev-parse --verify --quiet "origin/${REF}^{commit}" >/dev/null 2>&1; then
+  TARGET_REF="origin/${REF}"
+  ON_BRANCH=1
+else
+  TARGET_REF="$REF"
+  ON_BRANCH=0
+fi
+TARGET_SHA="$(git rev-parse --verify "${TARGET_REF}^{commit}" 2>/dev/null)" \
+  || { fail "Unknown ref: $REF"; exit 1; }
+echo "Current: $CURRENT   →   Target: $REF ($(git rev-parse --short "$TARGET_SHA"))"
 
 # --- safety: REFUSE a downgrade --------------------------------------------
 # If the target resolves to an ANCESTOR of the current HEAD (older code), bail.
-# Defaulting to the latest tag while HEAD is AHEAD of it would otherwise roll the
-# app back — and if the target predates a tracked file (e.g. this very script),
-# the checkout DELETES it from the working tree. ALLOW_DOWNGRADE=1 for a
-# deliberate rollback (prefer deploy/rollback.sh for that).
-TARGET_SHA="$(git rev-parse --verify "${REF}^{commit}" 2>/dev/null)" \
-  || { fail "Unknown ref: $REF"; exit 1; }
+# Rolling prod back is almost never intended — and if the target predates a
+# tracked file (e.g. this very script), the checkout DELETES it from the working
+# tree. ALLOW_DOWNGRADE=1 for a deliberate rollback (prefer deploy/rollback.sh).
 if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
    && git merge-base --is-ancestor "$TARGET_SHA" HEAD; then
   if [[ "${ALLOW_DOWNGRADE:-0}" != "1" ]]; then
-    fail "Target $REF is OLDER than current HEAD ($CURRENT) — refusing to downgrade."
-    echo  "  Cut a new release tag first (php artisan ekdosi:release …) and deploy that,"
-    echo  "  or pass an explicit newer ref. Deliberate rollback: ALLOW_DOWNGRADE=1 deploy/update.sh $REF"
+    fail "Target $REF ($(git rev-parse --short "$TARGET_SHA")) is OLDER than current HEAD ($CURRENT) — refusing to downgrade."
+    echo  "  Push your changes first, or pass an explicit newer ref."
+    echo  "  Deliberate rollback: ALLOW_DOWNGRADE=1 deploy/update.sh $REF"
     exit 1
   fi
   log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
@@ -103,8 +111,14 @@ deploy_failed() {
 trap deploy_failed EXIT
 
 # --- update -----------------------------------------------------------------
-log "Checkout $REF"
-git checkout --force "$REF"
+log "Checkout $REF ($(git rev-parse --short "$TARGET_SHA"))"
+if [[ "$ON_BRANCH" == "1" ]]; then
+  # Stay ON the branch, reset to the pushed tip — keeps the server on `main`
+  # tracking origin (your git-pull mental model) and auto-recovers a detached HEAD.
+  git checkout --force -B "$REF" "$TARGET_REF"
+else
+  git checkout --force "$REF"   # tag / sha → detached on purpose (pinned release)
+fi
 
 log "composer install (--no-dev)"
 $COMPOSER install --no-dev --optimize-autoloader --no-interaction
