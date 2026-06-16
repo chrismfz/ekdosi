@@ -18,6 +18,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **myDATA «Outbox» — έτοιμο φίλτρο «Προς υποβολή» + dashboard tiles.** Νέα καρτέλα-φίλτρο «Προς
+  υποβολή» στα «Παραστατικά» ΚΑΙ στη «Ψηφιακή Διακίνηση» = ζωντανά έγγραφα που ΘΑ έπρεπε να
+  υποβληθούν αλλά δεν έχουν ΜΑΡΚ (πρόχειρα + αποτυχημένες/παραλειφθείσες υποβολές· τα imported
+  legacy έχουν ήδη ΜΑΡΚ → δεν εμφανίζονται). Κοινό scope `Invoice/DeliveryNote::scopeAwaitingMyData`.
+  Νέο dashboard widget **«Συγχρονισμός myDATA»**: κάρτες «προς υποβολή» (→ το φίλτρο), «τοπικές
+  ασυμφωνίες» (→ τοπικός έλεγχος), «διασταύρωση με AADE» (freshness + ασυμφωνίες από το cache του
+  scheduled reconcile, → κονσόλα). Όλα cheap COUNT/cache — κανένα live AADE call στο dashboard.
 - **«Ανανέωση όλων» — ένα fetch για όλη την Κονσόλα myDATA.** Ένα κουμπί (πρωτεύον σε κάθε tab)
   κατεβάζει ΜΑΖΙ Πωλήσεις + Έξοδα + Επισκόπηση Ε3 + εικόνα ΦΠΑ για το διάστημα (σειριακά, rate-limit
   friendly) και «σπέρνει» την cache κάθε καρτέλας με ένα κλικ. Per-step isolation: αν μία σκάσει

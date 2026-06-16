@@ -62,6 +62,9 @@
 - **«Ανανέωση όλων»** (`MyDataConsoleRefresh`) — ένα κουμπί κατεβάζει μαζί Πωλήσεις+Έξοδα+Ε3+εικόνα
   ΦΠΑ (σειριακά) και σπέρνει την cache κάθε tab· per-step isolation + summary toast. Το per-tab
   «Έλεγχος» μένει ως δευτερεύον single-source refresh.
+- **myDATA «Outbox»** — φίλτρο «Προς υποβολή» στα Παραστατικά + Ψηφιακή Διακίνηση (ζωντανά έγγραφα
+  filable χωρίς ΜΑΡΚ· `scopeAwaitingMyData`) + dashboard widget **«Συγχρονισμός myDATA»** (προς
+  υποβολή / τοπικές ασυμφωνίες / διασταύρωση-AADE με freshness — κάθε κάρτα link στο worklist της).
 - **Έλεγχος ρυθμίσεων** (tab) — structured insight πάνω στο `MyDataConfigAudit`: ετοιμότητα
   tenant + κάθε τύπος παραστατικού/κατηγορία ΦΠΑ με badge ✓/⚠/✗ και **link «Διόρθωση →»** στη
   ρύθμιση. Ίδιο audit τροφοδοτεί το `mydata:preflight` ΚΑΙ το badge «Ετοιμότητα myDATA» στη

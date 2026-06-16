@@ -60,6 +60,12 @@ class MyDataReconciliation extends Page implements HasTable
         return 'danger';
     }
 
+    /** Count of local↔AADE state contradictions for the current tenant (dashboard tile). */
+    public static function mismatchCount(): int
+    {
+        return static::mismatchQuery()->count();
+    }
+
     /** Tenant-scoped invoices whose local status contradicts the AADE state. */
     protected static function mismatchQuery(): Builder
     {

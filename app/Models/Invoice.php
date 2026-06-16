@@ -548,6 +548,22 @@ class Invoice extends Model
     }
 
     /**
+     * The myDATA «Outbox»: live παραστατικά that SHOULD be filed to AADE but
+     * carry no MARK yet — i.e. a draft awaiting οριστικοποίηση+υποβολή, or a
+     * finalized invoice whose submission never landed (failed/skipped). The
+     * predicate is: the type is one we file (`invoice_types.mydata_type` set),
+     * the invoice is NOT cancelled, and there's no `mydata_mark`. Imported legacy
+     * invoices already carry their MARK, so they never appear here.
+     */
+    public function scopeAwaitingMyData(Builder $query): Builder
+    {
+        return $query
+            ->whereHas('invoiceType', fn (Builder $t) => $t->whereNotNull('mydata_type'))
+            ->where('local_status', '!=', 'cancelled')
+            ->whereNull('mydata_mark');
+    }
+
+    /**
      * Latest myDATA submission for this invoice — for the read-only
      * view page. Ordered by the legal action time (mark_date +
      * mark_time), NOT by autoincrement id. Live submissions get id
