@@ -3,6 +3,7 @@
 namespace App\Services\Portability;
 
 use App\Models\Company;
+use App\Services\TenantRoleProvisioner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -128,7 +129,10 @@ class CompanyImporter
 
     private const DROP_COLUMNS = ['id', 'company_id', 'created_at', 'updated_at', 'deleted_at'];
 
-    public function __construct(private readonly SecretsCodec $codec) {}
+    public function __construct(
+        private readonly SecretsCodec $codec,
+        private readonly TenantRoleProvisioner $provisioner,
+    ) {}
 
     /**
      * @param  array<string,mixed>  $bundle  CompanyExporter::build() shape
@@ -164,13 +168,18 @@ class CompanyImporter
             return $summary;
         }
 
-        DB::transaction(function () use ($bundle, $secrets, $new, $existing): void {
+        $company = DB::transaction(function () use ($bundle, $secrets, $new, $existing): Company {
             $attrs = $this->companyAttributes($bundle['company'], $secrets);
             $whmcsTypeOld = $attrs['whmcs_default_invoice_type_id'] ?? null;
             $attrs['whmcs_default_invoice_type_id'] = null; // rewired after invoice_types
 
             $company = $new ? new Company : $existing;
-            $company->forceFill($attrs)->save();
+            // Suppress the created-observer's role provisioning INSIDE this big
+            // transaction. On MariaDB its role INSERT can collide with a row the
+            // transaction's snapshot can't re-read ("could not be re-read"), and a
+            // rolled-back import would orphan roles. Roles are provisioned AFTER
+            // commit (below) — visible, idempotent, race-safe.
+            Company::withoutEvents(fn () => $company->forceFill($attrs)->save());
 
             $this->restoreLogo($company, $bundle);
 
@@ -180,7 +189,7 @@ class CompanyImporter
             }
 
             if ($whmcsTypeOld !== null && isset($maps['invoice_types'][$whmcsTypeOld])) {
-                $company->forceFill(['whmcs_default_invoice_type_id' => $maps['invoice_types'][$whmcsTypeOld]])->save();
+                Company::withoutEvents(fn () => $company->forceFill(['whmcs_default_invoice_type_id' => $maps['invoice_types'][$whmcsTypeOld]])->save());
             }
 
             // Bucket C (full bundle): transactional, parents before children.
@@ -190,7 +199,16 @@ class CompanyImporter
             $this->patchInvoiceSelfRefs($bundle['data']['invoices'] ?? [], $maps);
             // invoice_types.default_customer_id → customers (imported just now).
             $this->patchInvoiceTypeDefaults($bundle['setup']['invoice_types'] ?? [], $maps);
+
+            return $company;
         });
+
+        // Provision the tenant's roles now that the company is COMMITTED + visible
+        // (the observer was suppressed above). Idempotent + outside the import
+        // transaction, so it can't hit an unreadable-snapshot collision and a
+        // failed import never leaves orphan roles.
+        $this->provisioner->ensureSuperAdminRole($company);
+        $this->provisioner->ensureStandardRoles($company);
 
         return $summary;
     }
