@@ -27,4 +27,19 @@ class PanelAssetsTest extends TestCase
         $response->assertOk();
         $response->assertSee('ekdosi-panel.css', escape: false);
     }
+
+    public function test_high_traffic_utilities_are_defined(): void
+    {
+        // Cheap completeness guard: the utilities most used across custom pages
+        // must be defined, or those pages render unstyled with a green suite.
+        // `overflow-x-auto` (the wide-table scroll container) is the #1 by usage.
+        $css = file_get_contents(resource_path('css/panel.css'));
+
+        foreach ([
+            '.overflow-x-auto', '.flex', '.grid', '.grid-cols-3', '.gap-x-4',
+            '.flex-wrap', '.rounded-full', '.bg-success-100', '.text-sm', '.pr-4',
+        ] as $selector) {
+            $this->assertStringContainsString($selector.' ', $css, "panel.css must define {$selector}");
+        }
+    }
 }

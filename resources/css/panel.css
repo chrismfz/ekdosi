@@ -209,3 +209,33 @@
 .dark .dark\:divide-gray-700 > * + * { border-color: #374151; }
 .dark .dark\:divide-white\/10 > * + * { border-color: rgba(255, 255, 255, .1); }
 .dark .dark\:hover\:bg-gray-800\/50:hover { background-color: rgba(31, 41, 55, .5); }
+
+/* ── round 2: utilities the first pass missed (in @class()/ternaries) ──── */
+.flex-wrap { flex-wrap: wrap; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.flex-1 { flex: 1 1 0%; }
+.overflow-x-auto { overflow-x: auto; }
+.gap-x-2 { column-gap: .5rem; }
+.gap-x-3 { column-gap: .75rem; }
+.gap-x-4 { column-gap: 1rem; }
+.gap-x-6 { column-gap: 1.5rem; }
+.px-2 { padding-left: .5rem; padding-right: .5rem; }
+.py-0\.5 { padding-top: .125rem; padding-bottom: .125rem; }
+.rounded-full { border-radius: 9999px; }
+.text-gray-900 { color: #111827; }
+.text-gray-100 { color: #f3f4f6; }
+.bg-gray-800 { background-color: #1f2937; }
+.bg-gray-800\/50 { background-color: rgba(31, 41, 55, .5); }
+.bg-gray-900 { background-color: #111827; }
+.bg-success-100 { background-color: #dcfce7; }
+.bg-warning-100 { background-color: #fef3c7; }
+.bg-danger-100 { background-color: #fee2e2; }
+.bg-info-100 { background-color: #dbeafe; }
+
+@media (min-width: 640px) {
+    .sm\:flex-row { flex-direction: row; }
+}
+
+.dark .dark\:bg-gray-950 { background-color: #030712; }
+
