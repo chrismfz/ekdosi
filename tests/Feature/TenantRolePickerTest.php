@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\TenantRoleProvisioner;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -82,6 +83,30 @@ class TenantRolePickerTest extends TestCase
 
         $p->setRoleInCompany($owner, $restored, ShieldUtils::getSuperAdminName());
         $this->assertSame(ShieldUtils::getSuperAdminName(), $p->roleInCompany($owner, $restored));
+    }
+
+    public function test_role_assignment_lands_in_the_target_company_not_the_ambient_team(): void
+    {
+        $this->seedPermissions();
+        $ambient = $this->makeCompany('ambient');   // the open panel tenant
+        $target = $this->makeCompany('target');      // the company being managed
+        $user = $this->makeUser();
+        $user->companies()->attach([$ambient->id, $target->id]);
+
+        // Simulate the panel: the registrar team is the CURRENT tenant (ambient),
+        // NOT the company we're assigning a role in.
+        app(PermissionRegistrar::class)->setPermissionsTeamId($ambient->id);
+
+        app(TenantRoleProvisioner::class)->setRoleInCompany($user, $target, TenantRoleProvisioner::ROLE_OPERATOR);
+
+        // The pivot row must be written under TARGET (raw, explicit company_id) —
+        // not the ambient team a spatie write would have used.
+        $this->assertTrue(DB::table('model_has_roles')
+            ->where('model_id', $user->id)->where('company_id', $target->id)->exists(),
+            'operator role assigned under the TARGET company');
+        $this->assertFalse(DB::table('model_has_roles')
+            ->where('model_id', $user->id)->where('company_id', $ambient->id)->exists(),
+            'nothing leaked into the ambient team');
     }
 
     public function test_picker_replaces_previous_role(): void

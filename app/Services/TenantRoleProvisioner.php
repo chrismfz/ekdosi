@@ -140,16 +140,9 @@ class TenantRoleProvisioner
     public function assignSuperAdmin(User $user, Company $company): void
     {
         $role = $this->ensureSuperAdminRole($company);
-
-        // Read via the RAW pivot (userHoldsRole), assign via the ROLE OBJECT —
-        // never spatie's by-name/teams-aware resolution, which can miss.
-        if ($this->userHoldsRole($user, $company, $role->name)) {
-            return;
-        }
-        $this->withTeam($company, function () use ($user, $role): void {
-            $user->unsetRelation('roles');
-            $user->assignRole($role);
-        });
+        // RAW attach (idempotent) — see attachRole: spatie's assignRole would
+        // write the wrong team under the ambient panel tenant.
+        $this->attachRole($user, $role, (int) $company->getKey());
     }
 
     /**
@@ -365,14 +358,7 @@ class TenantRoleProvisioner
         }
 
         $role = $this->upsertRole($roleName, ShieldUtils::getFilamentAuthGuard(), $company);
-
-        if ($this->userHoldsRole($user, $company, $roleName)) {
-            return;
-        }
-        $this->withTeam($company, function () use ($user, $role): void {
-            $user->unsetRelation('roles');
-            $user->assignRole($role);   // OBJECT, not a name → no teams find-miss
-        });
+        $this->attachRole($user, $role, (int) $company->getKey());
     }
 
     // ── Role picker (per user × company) ───────────────────────────────────
@@ -434,30 +420,63 @@ class TenantRoleProvisioner
         $guard = ShieldUtils::getFilamentAuthGuard();
         $companyId = (int) $company->getKey();
 
-        $this->withTeam($company, function () use ($user, $roleName, $managed, $guard, $companyId, $company): void {
-            $user->unsetRelation('roles');
-
-            // Strip any OTHER managed role — reads via raw pivot, removes via the
-            // role OBJECT (never by-name, which can miss under teams).
-            foreach ($managed as $name) {
-                if ($name === $roleName) {
-                    continue;
-                }
-                if ($this->userHoldsRole($user, $company, $name)) {
-                    $role = $this->findRole($name, $guard, $companyId);
-                    if ($role !== null) {
-                        $user->removeRole($role);
-                    }
-                }
+        // Strip any OTHER managed role, then attach the chosen one — all via RAW
+        // model_has_roles writes (attachRole/detachRole), NOT spatie's
+        // assignRole/removeRole which write the team column from the registrar's
+        // CURRENT team (the ambient panel tenant), landing the row under the WRONG
+        // company when managing a non-current tenant.
+        foreach ($managed as $name) {
+            if ($name === $roleName) {
+                continue;
             }
-
-            if ($roleName !== null && ! $this->userHoldsRole($user, $company, $roleName)) {
-                $role = $this->findRole($roleName, $guard, $companyId);
-                if ($role !== null) {
-                    $user->assignRole($role);
-                }
+            $role = $this->findRole($name, $guard, $companyId);
+            if ($role !== null) {
+                $this->detachRole($user, $role, $companyId);
             }
-        });
+        }
+
+        if ($roleName !== null) {
+            $role = $this->findRole($roleName, $guard, $companyId);
+            if ($role !== null) {
+                $this->attachRole($user, $role, $companyId);
+            }
+        }
+    }
+
+    /**
+     * Attach a role to a user in a company's team via RAW model_has_roles —
+     * idempotent (insertOrIgnore on the composite PK). NOT spatie's assignRole,
+     * which writes the team column from the registrar's CURRENT team (the ambient
+     * panel tenant), so assigning a role in a NON-current tenant would land it
+     * under the WRONG company (the same wrong-team bug the role INSERT had).
+     */
+    private function attachRole(User $user, Role $role, int $companyId): void
+    {
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
+
+        DB::table($tables['model_has_roles'] ?? 'model_has_roles')->insertOrIgnore([
+            ($cols['role_pivot_key'] ?? 'role_id') => $role->getKey(),
+            ($cols['model_morph_key'] ?? 'model_id') => $user->getKey(),
+            'model_type' => $user->getMorphClass(),
+            ($cols['team_foreign_key'] ?? 'company_id') => $companyId,
+        ]);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+    }
+
+    /** Detach a role from a user in a company's team via RAW model_has_roles. */
+    private function detachRole(User $user, Role $role, int $companyId): void
+    {
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
+
+        DB::table($tables['model_has_roles'] ?? 'model_has_roles')
+            ->where(($cols['role_pivot_key'] ?? 'role_id'), $role->getKey())
+            ->where(($cols['model_morph_key'] ?? 'model_id'), $user->getKey())
+            ->where('model_type', $user->getMorphClass())
+            ->where(($cols['team_foreign_key'] ?? 'company_id'), $companyId)
+            ->delete();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 
     /**
