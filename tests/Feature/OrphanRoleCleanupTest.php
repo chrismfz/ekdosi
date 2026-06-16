@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Company;
+use App\Services\TenantRoleProvisioner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -34,6 +35,19 @@ class OrphanRoleCleanupTest extends TestCase
         $company->delete();   // instance delete → fires the `deleted` observer
 
         $this->assertFalse(DB::table('roles')->where('company_id', $id)->exists());
+    }
+
+    public function test_ensure_super_admin_role_is_idempotent(): void
+    {
+        $company = $this->company('idemco');   // observer already provisioned super_admin
+        $provisioner = app(TenantRoleProvisioner::class);
+
+        $first = $provisioner->ensureSuperAdminRole($company);
+        $again = $provisioner->ensureSuperAdminRole($company);   // must NOT throw a duplicate
+
+        $this->assertSame($first->id, $again->id);
+        $this->assertSame(1, DB::table('roles')
+            ->where('company_id', $company->id)->where('name', 'super_admin')->count());
     }
 
     public function test_prune_command_deletes_only_orphan_roles(): void
