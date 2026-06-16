@@ -175,9 +175,14 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   **Μένει deferred:** η **υποβολή για λογαριασμό τρίτου** (λογιστής) που θέλει `entityVatNumber` [323]
   (βλ. «Expenses — λογιστής/`entityVatNumber`»). Ιδέα: ekdosi **ετοιμάζει** τους χαρακτηρισμούς, ο
   λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει** — θέλει διερεύνηση ρόλων/δικαιωμάτων.
-- **#6 Βιβλίο Εσόδων-Εξόδων → myDATA period report.** Αναβάθμιση του `/ledger-book` (`LedgerBook`):
-  διάλεξε περίοδο → δες έσοδα/έξοδα **με τη στήλη ΜΑΡΚ + κατάσταση myDATA** → **export** (CSV/PDF) για
-  τον λογιστή στο κλείσιμο. Στην ουσία υπάρχει· θέλει polishing + ΜΑΡΚ/κατάσταση + export.
+- **#6 Βιβλίο Εσόδων-Εξόδων → myDATA period report.** _✅ SHIPPED — στήλες ΜΑΡΚ + κατάσταση myDATA
+  στο ημερολόγιο + στα CSV/XLSX/JSON exports· self-contained styling (no build)._ **Still open:**
+  PDF export (σήμερα CSV/XLSX/JSON) + ο γενικός panel custom-theme/build (βλ. κάτω) ώστε όλες οι
+  custom σελίδες να μπορούν να χρησιμοποιούν Tailwind utilities.
+- **Panel custom Tailwind theme + asset build (latent).** Ο admin panel ΔΕΝ φορτώνει custom theme
+  (`viteTheme` λείπει) + δεν τρέχει `npm run build` (no package-lock) → οι custom blade σελίδες
+  βασίζονται μόνο στο CSS του Filament· arbitrary utilities (grid-cols-N, spacing) μένουν άστυλα.
+  Λύση όταν θελήσουμε global fix: theme registration + build στο deploy (ή commit built assets).
 
 ## 🖥️ Console/interface polish (B — sweep 2026-06-16)
 - **Auto-refresh-on-stale** στην Κονσόλα myDATA: αν το cache > Ν ώρες, διακριτικό «παλιά δεδομένα —
