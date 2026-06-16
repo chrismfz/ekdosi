@@ -162,6 +162,7 @@ class ExpenseImporter
             }
 
             $supplierWasCreated = false;
+            $createdExpense = null;
 
             // Fold cancellation from both the inline <cancelledByMark> and the
             // standalone <cancelledInvoicesDoc> list (same as the reconciler), so
@@ -169,7 +170,7 @@ class ExpenseImporter
             $inlineCancel = (string) ($doc->getCancelledByMark() ?? '');
             $isCancelled = $inlineCancel !== '' || isset($cancelledMarks[$mark]);
 
-            DB::transaction(function () use ($doc, $mark, $mode, $isCancelled, &$supplierWasCreated): void {
+            DB::transaction(function () use ($doc, $mark, $mode, $isCancelled, &$supplierWasCreated, &$createdExpense): void {
                 $header = $doc->getInvoiceHeader();
                 $summary = $doc->getInvoiceSummary();
                 $type = $header?->getInvoiceType()?->value;
@@ -215,12 +216,22 @@ class ExpenseImporter
                     'mydata_action' => $mode === 'self_declared' ? 'RequestTransmittedDocs' : 'RequestDocs',
                     'response' => $doc->toXml(),
                 ]);
+
+                $createdExpense = $expense;
             });
 
             $created++;
             $createdMarks[] = $mark;
             if ($supplierWasCreated) {
                 $suppliersCreated++;
+            }
+
+            // Auto-classification (#5): stamp the operator's «supplier → χαρακτηρισμός»
+            // rule on a freshly-imported expense so recurring supplier docs land
+            // pre-classified. No-op when no rule matches. Outside the create
+            // transaction — a classification write must not roll back the import.
+            if ($createdExpense !== null) {
+                app(ExpenseClassifier::class)->classify($createdExpense);
             }
         }
 
