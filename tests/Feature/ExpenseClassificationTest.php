@@ -86,4 +86,42 @@ class ExpenseClassificationTest extends TestCase
         $expense->refresh();
         $this->assertSame('E3_585_001', $expense->classification_type, 'forged code must not overwrite the valid one');
     }
+
+    public function test_classify_action_mixed_mode_sets_per_line(): void
+    {
+        $tenant = Company::create([
+            'name' => 'Mix test', 'slug' => 'mix-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '801280908',
+        ]);
+        Gate::before(fn () => true);
+        $this->actingAs(\App\Models\User::create([
+            'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]));
+        Filament::setTenant($tenant);
+
+        $expense = Expense::create([
+            'company_id' => $tenant->id, 'mydata_mark' => '400000000000999', 'source' => 'sync',
+        ]);
+        // Two lines with DIFFERENT classifications → classificationIsMixed() is
+        // true, so the action opens in «Μικτό» mode pre-filled per line. Submitting
+        // (defaults) must persist each line distinctly and mark the doc classified.
+        $l1 = \App\Models\ExpenseLine::create([
+            'company_id' => $tenant->id, 'expense_id' => $expense->id, 'line_number' => 1, 'net_value' => 100,
+            'classification_type' => 'E3_585_001', 'classification_category' => 'category2_3',
+        ]);
+        $l2 = \App\Models\ExpenseLine::create([
+            'company_id' => $tenant->id, 'expense_id' => $expense->id, 'line_number' => 2, 'net_value' => 50,
+            'classification_type' => 'E3_585_002', 'classification_category' => 'category2_4',
+        ]);
+
+        Livewire::test(ViewExpense::class, ['record' => $expense->getRouteKey()])
+            ->mountAction('classify')
+            ->assertSchemaStateSet(['mode' => 'mixed'])   // opened in mixed mode
+            ->callMountedAction()
+            ->assertHasNoActionErrors();
+
+        $this->assertSame('E3_585_001', $l1->refresh()->classification_type);
+        $this->assertSame('E3_585_002', $l2->refresh()->classification_type);
+        $this->assertSame('classified', $expense->refresh()->classification_state);
+    }
 }
