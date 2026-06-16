@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Delete tenant roles whose company no longer exists — orphans left by a
@@ -49,6 +50,8 @@ class PruneOrphanRoles extends Command
 
         // Pivots (model_has_roles / role_has_permissions) cascade from roles.
         $deleted = DB::table('roles')->whereIn('id', $orphans->pluck('id'))->delete();
+        // Bust the spatie permission cache so it stops referencing deleted roles.
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
         $this->info("Διαγράφηκαν {$deleted} orphan role(s).");
 
         return self::SUCCESS;

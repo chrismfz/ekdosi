@@ -207,8 +207,31 @@ class CompanyImporter
         // (the observer was suppressed above). Idempotent + outside the import
         // transaction, so it can't hit an unreadable-snapshot collision and a
         // failed import never leaves orphan roles.
-        $this->provisioner->ensureSuperAdminRole($company);
-        $this->provisioner->ensureStandardRoles($company);
+        try {
+            if ($new) {
+                // Fresh company: full provision (rows + permission maps).
+                $this->provisioner->ensureSuperAdminRole($company);
+                $this->provisioner->ensureStandardRoles($company);
+            } else {
+                // --into existing: ensure the role ROWS exist (heal a roles-less
+                // company) but DON'T re-sync permission maps — that would clobber
+                // any manual per-tenant role customization.
+                $this->provisioner->ensureManagedRolesExist($company);
+            }
+        } catch (\Throwable $e) {
+            // The data is already committed — surface a clear, recoverable
+            // message instead of a raw error implying nothing happened.
+            Log::error('CompanyImporter: company imported but role provisioning failed.', [
+                'company_id' => $company->id,
+                'slug' => $company->slug,
+                'error' => $e->getMessage(),
+            ]);
+            throw new RuntimeException(
+                'Η εταιρία «'.$company->slug.'» ΕΙΣΗΧΘΗ, αλλά απέτυχε η δημιουργία ρόλων: '
+                .$e->getMessage().' — τρέξε «php artisan shield:sync-super-admin» για να ολοκληρωθεί.',
+                previous: $e,
+            );
+        }
 
         return $summary;
     }
