@@ -49,12 +49,33 @@
         .lb-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; }
         .lb-empty { padding:1.5rem; text-align:center; color:#6b7280; }
         .dark .lb-empty { color:#9ca3af; }
+        /* Βιβλίο Εσόδων-Εξόδων: grouped income/expense money columns + footing */
+        .lb-grp { text-align:center; border-left:1px solid #e5e7eb; }
+        .dark .lb-grp { border-color:rgba(255,255,255,.12); }
+        .lb-bl { border-left:1px solid #f3f4f6; }
+        .dark .lb-bl { border-color:rgba(255,255,255,.07); }
+        .lb-table tfoot td { border-top:2px solid #e5e7eb; padding-top:.5rem; }
+        .dark .lb-table tfoot td { border-color:rgba(255,255,255,.18); }
+        .lb-foot-sum { font-size:.8rem; color:#6b7280; padding-top:.6rem; }
+        .dark .lb-foot-sum { color:#9ca3af; }
     </style>
 
     {{-- Φίλτρα --}}
     <x-filament::section>
         <x-slot name="heading">Φίλτρα</x-slot>
         <div class="lb-filters">
+            <label class="lb-field">
+                <span>Περίοδος</span>
+                <select class="lb-input" wire:model.live="period">
+                    <option value="this_month">Τρέχων μήνας</option>
+                    <option value="last_month">Προηγούμενος μήνας</option>
+                    <option value="quarter">Τρέχον τρίμηνο</option>
+                    <option value="prev_quarter">Προηγούμενο τρίμηνο</option>
+                    <option value="year">Τρέχον έτος</option>
+                    <option value="prev_year">Προηγούμενο έτος</option>
+                    <option value="custom">Προσαρμογή…</option>
+                </select>
+            </label>
             <label class="lb-field">
                 <span>Από</span>
                 <input type="date" class="lb-input" wire:model.live="from" />
@@ -156,32 +177,34 @@
             <table class="lb-table">
                 <thead>
                     <tr>
-                        <th>Ημ/νία</th>
-                        <th>Βιβλίο</th>
-                        <th>Παραστατικό</th>
-                        <th>ΜΑΡΚ</th>
-                        <th>myDATA</th>
-                        <th>Είδος</th>
-                        <th>Αντισυμβαλλόμενος</th>
-                        <th>ΑΦΜ</th>
-                        <th>Κατηγορία</th>
-                        <th>Λογ/σμός</th>
-                        <th class="lb-num">Καθαρό</th>
+                        <th rowspan="2">Ημ/νία</th>
+                        <th rowspan="2">Παραστατικό</th>
+                        <th rowspan="2">ΜΑΡΚ</th>
+                        <th rowspan="2">myDATA</th>
+                        <th rowspan="2">Είδος</th>
+                        <th rowspan="2">Αντισυμβαλλόμενος</th>
+                        <th rowspan="2">ΑΦΜ</th>
+                        <th rowspan="2">Κατηγορία</th>
+                        <th rowspan="2">Λογ/σμός</th>
+                        <th class="lb-grp" colspan="2">Έσοδα</th>
+                        <th class="lb-grp" colspan="2">Έξοδα</th>
+                    </tr>
+                    <tr>
+                        <th class="lb-num lb-bl">Καθαρό</th>
                         <th class="lb-num">ΦΠΑ</th>
-                        <th class="lb-num">Σύνολο</th>
+                        <th class="lb-num lb-bl">Καθαρό</th>
+                        <th class="lb-num">ΦΠΑ</th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse ($result->rows as $row)
+                        @php $isIncome = $row->book === 'income'; @endphp
                         <tr>
                             <td class="lb-nowrap">{{ $row->date->format('d/m/Y') }}</td>
-                            <td class="lb-nowrap">
-                                <x-filament::badge :color="$row->book === 'income' ? 'success' : 'danger'">
-                                    {{ $row->book === 'income' ? 'Έσοδο' : 'Έξοδο' }}
-                                </x-filament::badge>
-                                @if ($row->isCredit)<div class="lb-credit">πιστωτικό</div>@endif
+                            <td class="lb-nowrap lb-strong">
+                                {{ $row->doc }}
+                                @if ($row->isCredit)<span class="lb-credit">πιστωτικό</span>@endif
                             </td>
-                            <td class="lb-nowrap lb-strong">{{ $row->doc }}</td>
                             <td class="lb-mono">{{ $row->mark ?? '—' }}</td>
                             <td>
                                 @if ($row->mydataState === 'VALID')
@@ -200,14 +223,36 @@
                                 @if ($row->categoryCode)<span class="lb-sub">({{ $row->categoryCode }})</span>@endif
                             </td>
                             <td class="lb-nowrap" @if ($row->accountName) title="{{ $row->accountName }}" @endif>{{ $row->accountCode ?? '—' }}</td>
-                            <td class="lb-num">{{ $money($row->net) }}</td>
-                            <td class="lb-num">{{ $money($row->vat) }}</td>
-                            <td class="lb-num lb-strong">{{ $money($row->gross) }}</td>
+                            {{-- Each row foots on ITS side; the other side stays blank, the
+                                 way an απλογραφικό βιβλίο εσόδων-εξόδων reads. --}}
+                            <td class="lb-num lb-bl lb-strong">{{ $isIncome ? $money($row->net) : '' }}</td>
+                            <td class="lb-num">{{ $isIncome ? $money($row->vat) : '' }}</td>
+                            <td class="lb-num lb-bl lb-strong">{{ ! $isIncome ? $money($row->net) : '' }}</td>
+                            <td class="lb-num">{{ ! $isIncome ? $money($row->vat) : '' }}</td>
                         </tr>
                     @empty
                         <tr><td colspan="13" class="lb-empty">Καμία εγγραφή στην περίοδο.</td></tr>
                     @endforelse
                 </tbody>
+                @if (count($result->rows) > 0)
+                    <tfoot>
+                        <tr>
+                            <td colspan="9" class="lb-num lb-strong">Σύνολα</td>
+                            <td class="lb-num lb-bl lb-strong">{{ $money($result->incomeNet()) }}</td>
+                            <td class="lb-num lb-strong">{{ $money($result->incomeVat()) }}</td>
+                            <td class="lb-num lb-bl lb-strong">{{ $money($result->expenseNet()) }}</td>
+                            <td class="lb-num lb-strong">{{ $money($result->expenseVat()) }}</td>
+                        </tr>
+                        <tr>
+                            <td colspan="13" class="lb-foot-sum">
+                                Καθαρό αποτέλεσμα (έσοδα − έξοδα):
+                                <strong>{{ $money($result->incomeNet() - $result->expenseNet()) }}</strong>
+                                &nbsp;·&nbsp; ΦΠΑ {{ $result->vatBalance() > 0 ? 'προς απόδοση' : '(πιστωτικό)' }} (εκροών − εισροών):
+                                <strong>{{ $money(abs($result->vatBalance())) }}</strong>
+                            </td>
+                        </tr>
+                    </tfoot>
+                @endif
             </table>
         </div>
     </x-filament::section>
