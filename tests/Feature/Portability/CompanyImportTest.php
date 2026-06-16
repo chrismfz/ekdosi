@@ -189,6 +189,23 @@ class CompanyImportTest extends TestCase
         $this->assertSame(7, InvoiceType::where('company_id', $company->id)->where('code', 'TPY')->firstOrFail()->invcount);
     }
 
+    public function test_import_into_existing_does_not_touch_its_roles(): void
+    {
+        $company = $this->sourceCompany();
+        $bundle = $this->bundle($company);
+        $before = DB::table('roles')->where('company_id', $company->id)->orderBy('id')->pluck('id')->all();
+        $this->assertNotEmpty($before);   // observer provisioned roles on create
+
+        // --into an EXISTING company must NOT re-provision/re-sync roles (would
+        // clobber any manual per-tenant permission customization).
+        app(CompanyImporter::class)->run($bundle, [
+            'into' => 'src', 'execute' => true, 'passphrase' => 'p@ss',
+        ]);
+
+        $after = DB::table('roles')->where('company_id', $company->id)->orderBy('id')->pluck('id')->all();
+        $this->assertSame($before, $after);
+    }
+
     public function test_import_new_provisions_roles_after_commit(): void
     {
         $bundle = $this->bundle($this->sourceCompany());

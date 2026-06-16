@@ -43,12 +43,14 @@ class TestInvoiceNumberingConcurrent extends Command
     {
         if (! function_exists('pcntl_fork')) {
             $this->error('pcntl_fork is not available — this command needs CLI PHP with pcntl enabled.');
+
             return self::FAILURE;
         }
 
         $workers = (int) $this->option('workers');
         if ($workers < 2) {
             $this->error('--workers must be >= 2');
+
             return self::FAILURE;
         }
 
@@ -60,6 +62,8 @@ class TestInvoiceNumberingConcurrent extends Command
         if ($orphanCompanies->isNotEmpty()) {
             InvoiceType::whereIn('company_id', $orphanCompanies)->forceDelete();
             Company::whereIn('id', $orphanCompanies)->forceDelete();
+            // Mass delete skips the CompanyObserver → clean the tenant roles too.
+            DB::table('roles')->whereIn('company_id', $orphanCompanies)->delete();
             $this->warn('Swept '.$orphanCompanies->count().' orphan probe tenant(s) from prior runs.');
         }
 
@@ -96,6 +100,7 @@ class TestInvoiceNumberingConcurrent extends Command
 
                 if ($pid === -1) {
                     $this->error('pcntl_fork failed');
+
                     return self::FAILURE;
                 }
 
@@ -152,6 +157,7 @@ class TestInvoiceNumberingConcurrent extends Command
                 foreach ($errors as $e) {
                     $this->line('  '.$e);
                 }
+
                 return self::FAILURE;
             }
 
@@ -176,6 +182,7 @@ class TestInvoiceNumberingConcurrent extends Command
 
             if (! $pass) {
                 $this->error('FAILED — concurrent allocation produced duplicates, gaps, or wrong final count.');
+
                 return self::FAILURE;
             }
 
@@ -188,6 +195,8 @@ class TestInvoiceNumberingConcurrent extends Command
             if (isset($company)) {
                 InvoiceType::where('company_id', $company->id)->forceDelete();
                 Company::where('id', $company->id)->forceDelete();
+                // Mass delete skips the CompanyObserver → clean the tenant roles too.
+                DB::table('roles')->where('company_id', $company->id)->delete();
             }
         }
     }

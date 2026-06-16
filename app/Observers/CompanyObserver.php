@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Models\Company;
 use App\Services\TenantRoleProvisioner;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Ensures every company — however it's created (Companies UI, factory, future
@@ -42,12 +43,19 @@ class CompanyObserver
 
     /**
      * After a tenant is deleted, drop its roles so a reused company id can't
-     * collide with leftovers. `deleted` (not `deleting`) so it only runs once
-     * the delete actually succeeded — and rolls back with the same transaction
-     * if the surrounding delete is rolled back.
+     * collide with leftovers. `deleted` (not `deleting`) so it only runs once the
+     * delete actually succeeded. Pivots (model_has_roles / role_has_permissions)
+     * cascade from roles. Note: Filament's delete actions don't wrap the delete in
+     * a transaction, so this is NOT atomic with the company delete — on the happy
+     * path the roles are dropped right after; a one-off leftover is mopped up by
+     * `ekdosi:prune-orphan-roles`.
      */
     public function deleted(Company $company): void
     {
         DB::table('roles')->where('company_id', $company->getKey())->delete();
+
+        // The role rows are gone; bust spatie's permission cache so it doesn't
+        // serve a stale role→permission map referencing them.
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 }

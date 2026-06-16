@@ -141,13 +141,14 @@ class TenantRoleProvisioner
     {
         $role = $this->ensureSuperAdminRole($company);
 
+        // Read via the RAW pivot (userHoldsRole), assign via the ROLE OBJECT —
+        // never spatie's by-name/teams-aware resolution, which can miss.
+        if ($this->userHoldsRole($user, $company, $role->name)) {
+            return;
+        }
         $this->withTeam($company, function () use ($user, $role): void {
-            // Drop any roles relation cached under a different team, else the
-            // hasRole() guard reads stale data across team switches.
             $user->unsetRelation('roles');
-            if (! $user->hasRole($role)) {
-                $user->assignRole($role);
-            }
+            $user->assignRole($role);
         });
     }
 
@@ -160,14 +161,7 @@ class TenantRoleProvisioner
         $superName = ShieldUtils::getSuperAdminName();
 
         foreach ($user->companies as $company) {
-            // Read-only role check per team — no cache flush needed.
-            $hasIt = $this->withTeam($company, function () use ($user, $superName): bool {
-                $user->unsetRelation('roles');
-
-                return $user->hasRole($superName);
-            }, flushCache: false);
-
-            if ($hasIt) {
+            if ($this->userHoldsRole($user, $company, $superName)) {
                 return true;
             }
         }
@@ -182,11 +176,7 @@ class TenantRoleProvisioner
      */
     public function hasSuperAdminIn(User $user, Company $company): bool
     {
-        return $this->withTeam($company, function () use ($user): bool {
-            $user->unsetRelation('roles');
-
-            return $user->hasRole(ShieldUtils::getSuperAdminName());
-        }, flushCache: false);
+        return $this->userHoldsRole($user, $company, ShieldUtils::getSuperAdminName());
     }
 
     // ── Standard non-super roles (company_admin, operator) ─────────────────
@@ -340,13 +330,14 @@ class TenantRoleProvisioner
             throw new \InvalidArgumentException("Unknown standard role: {$roleName}");
         }
 
-        $this->ensureManagedRolesExist($company);
+        $role = $this->upsertRole($roleName, ShieldUtils::getFilamentAuthGuard(), $company);
 
-        $this->withTeam($company, function () use ($user, $roleName): void {
+        if ($this->userHoldsRole($user, $company, $roleName)) {
+            return;
+        }
+        $this->withTeam($company, function () use ($user, $role): void {
             $user->unsetRelation('roles');
-            if (! $user->hasRole($roleName)) {
-                $user->assignRole($roleName);
-            }
+            $user->assignRole($role);   // OBJECT, not a name → no teams find-miss
         });
     }
 
@@ -377,17 +368,14 @@ class TenantRoleProvisioner
      */
     public function roleInCompany(User $user, Company $company): ?string
     {
-        return $this->withTeam($company, function () use ($user): ?string {
-            $user->unsetRelation('roles');
-
-            foreach ($this->managedRoleNames() as $name) {
-                if ($user->hasRole($name)) {
-                    return $name;
-                }
+        // Raw pivot reads — no spatie teams resolution, no cache, no team switch.
+        foreach ($this->managedRoleNames() as $name) {
+            if ($this->userHoldsRole($user, $company, $name)) {
+                return $name;
             }
+        }
 
-            return null;
-        }, flushCache: false);
+        return null;
     }
 
     /**
@@ -409,19 +397,51 @@ class TenantRoleProvisioner
         }
 
         $this->ensureManagedRolesExist($company);
+        $guard = ShieldUtils::getFilamentAuthGuard();
+        $companyId = (int) $company->getKey();
 
-        $this->withTeam($company, function () use ($user, $roleName, $managed): void {
+        $this->withTeam($company, function () use ($user, $roleName, $managed, $guard, $companyId, $company): void {
             $user->unsetRelation('roles');
 
+            // Strip any OTHER managed role — reads via raw pivot, removes via the
+            // role OBJECT (never by-name, which can miss under teams).
             foreach ($managed as $name) {
-                if ($name !== $roleName && $user->hasRole($name)) {
-                    $user->removeRole($name);
+                if ($name === $roleName) {
+                    continue;
+                }
+                if ($this->userHoldsRole($user, $company, $name)) {
+                    $role = $this->findRole($name, $guard, $companyId);
+                    if ($role !== null) {
+                        $user->removeRole($role);
+                    }
                 }
             }
 
-            if ($roleName !== null && ! $user->hasRole($roleName)) {
-                $user->assignRole($roleName);
+            if ($roleName !== null && ! $this->userHoldsRole($user, $company, $roleName)) {
+                $role = $this->findRole($roleName, $guard, $companyId);
+                if ($role !== null) {
+                    $user->assignRole($role);
+                }
             }
         });
+    }
+
+    /**
+     * Does the user hold the named role in the company's team? Checked via a RAW
+     * join on model_has_roles → roles — bypassing spatie's teams-aware relation
+     * (the same unreliability the findRole() write fix avoids). No team context
+     * or permission cache involved; it reads the pivot directly.
+     */
+    public function userHoldsRole(User $user, Company $company, string $name): bool
+    {
+        return DB::table('model_has_roles as mhr')
+            ->join('roles as r', 'r.id', '=', 'mhr.role_id')
+            ->where('r.name', $name)
+            ->where('r.guard_name', ShieldUtils::getFilamentAuthGuard())
+            ->where('r.company_id', $company->getKey())
+            ->where('mhr.model_id', $user->getKey())
+            ->where('mhr.model_type', $user->getMorphClass())
+            ->where('mhr.company_id', $company->getKey())
+            ->exists();
     }
 }

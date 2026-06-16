@@ -18,6 +18,19 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **Roles robustness sweep (import/restore/attach/role-picker).** Hardened every
+  tenant-role path against spatie's teams-aware Eloquent lookup that can MISS a row
+  the unique index still has: role WRITES now resolve a Role OBJECT via raw
+  `DB::table` and pass it to assign/remove (no by-name `findByName` → no
+  `RoleDoesNotExist` crash in the role picker / standard-role assign); role READS
+  (`userHoldsRole`, `roleInCompany`, `isSuperAdminAnywhere`, `hasSuperAdminIn`,
+  `assignSuperAdmin`) use a raw `model_has_roles`→`roles` pivot check (no silent
+  wrong-reads). Import now provisions roles **only for a NEW company** (an `--into`
+  update keeps existing roles + manual permission customization), and a post-commit
+  provisioning failure throws a clear «εταιρία εισήχθη — τρέξε shield:sync-super-admin»
+  instead of a raw error. `CompanyObserver::deleted` + `ekdosi:prune-orphan-roles`
+  now bust the spatie permission cache; the numbering-probe command cleans roles on
+  its mass-delete sweep.
 - **Orphan tenant roles after a company delete («Duplicate entry … super_admin»).**
   `roles.company_id` (spatie teams mode) has no FK cascade to `companies`, so a
   deleted tenant left orphan roles that collided when a later company reused the
