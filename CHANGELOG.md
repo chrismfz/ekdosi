@@ -18,6 +18,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **Orphan tenant roles after a company delete («Duplicate entry … super_admin»).**
+  `roles.company_id` (spatie teams mode) has no FK cascade to `companies`, so a
+  deleted tenant left orphan roles that collided when a later company reused the
+  freed auto-increment id (e.g. on import after a MariaDB restart). `CompanyObserver`
+  now deletes a tenant's roles on company delete, and `ekdosi:prune-orphan-roles`
+  (dry-run/`--execute`) mops up existing leftovers. Pivots cascade from `roles`.
 - **Company export/import: «Unknown column 'users_count'».** The company row is
   exported via `attributesToArray()`, which carried a non-column aggregate
   (`users_count` from the Companies list's `withCount`) into the bundle → the

@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Models\Company;
 use App\Services\TenantRoleProvisioner;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Ensures every company — however it's created (Companies UI, factory, future
@@ -15,6 +16,12 @@ use App\Services\TenantRoleProvisioner;
  * Assignment to a specific user happens on attach (see the relation managers)
  * or via `shield:sync-super-admin`; the observer only guarantees the roles
  * EXIST for the team.
+ *
+ * On delete it cleans the tenant's spatie roles: `roles.company_id` (teams
+ * mode) has NO FK cascade to `companies`, so a deleted tenant would otherwise
+ * leave ORPHAN roles — which then collide ("Duplicate entry … super_admin")
+ * when a later company reuses the freed auto-increment id (e.g. after a MariaDB
+ * restart). Pivots (model_has_roles / role_has_permissions) cascade from roles.
  */
 class CompanyObserver
 {
@@ -31,5 +38,16 @@ class CompanyObserver
         // `php artisan shield:sync-super-admin` once after shield:generate — there
         // is no automatic re-sync for tenants created before permissions exist.
         $this->provisioner->ensureStandardRoles($company);
+    }
+
+    /**
+     * After a tenant is deleted, drop its roles so a reused company id can't
+     * collide with leftovers. `deleted` (not `deleting`) so it only runs once
+     * the delete actually succeeded — and rolls back with the same transaction
+     * if the surrounding delete is rolled back.
+     */
+    public function deleted(Company $company): void
+    {
+        DB::table('roles')->where('company_id', $company->getKey())->delete();
     }
 }
