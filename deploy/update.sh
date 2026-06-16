@@ -5,8 +5,9 @@
 #   deploy/update.sh [GIT_REF]
 #
 # GIT_REF = a release tag (RECOMMENDED, e.g. v1.3.0) or a branch. Defaults to
-# the latest tag. Cut the tag on your dev box first with `php artisan
+# the highest SemVer tag. Cut the tag on your dev box first with `php artisan
 # ekdosi:release --minor|--patch|--major`, push it, then run this on the server.
+# A DOWNGRADE (target older than current HEAD) is refused unless ALLOW_DOWNGRADE=1.
 #
 # What it does, in order (safe + idempotent):
 #   1. pre-flight: working tree must be clean
@@ -48,12 +49,38 @@ log "Fetching tags + commits"
 git fetch --all --tags --prune
 
 if [[ -z "$REF" ]]; then
-  REF="$(git describe --tags "$(git rev-list --tags --max-count=1)")"
+  # Highest SemVer tag — NOT `git rev-list --tags --max-count=1`, which is the
+  # most recently CREATED tag object and can be an OLD release still sitting on a
+  # branch, so a no-arg deploy could silently roll prod BACKWARDS.
+  REF="$(git tag --sort=-v:refname | head -n1)"
+  if [[ -z "$REF" ]]; then
+    fail "No ref given and no tags exist — pass an explicit ref (a tag, or 'main')."
+    exit 1
+  fi
   log "No ref given — using latest tag: $REF"
 fi
 
 CURRENT="$(git rev-parse --short HEAD)"
 echo "Current: $CURRENT   →   Target: $REF"
+
+# --- safety: REFUSE a downgrade --------------------------------------------
+# If the target resolves to an ANCESTOR of the current HEAD (older code), bail.
+# Defaulting to the latest tag while HEAD is AHEAD of it would otherwise roll the
+# app back — and if the target predates a tracked file (e.g. this very script),
+# the checkout DELETES it from the working tree. ALLOW_DOWNGRADE=1 for a
+# deliberate rollback (prefer deploy/rollback.sh for that).
+TARGET_SHA="$(git rev-parse --verify "${REF}^{commit}" 2>/dev/null)" \
+  || { fail "Unknown ref: $REF"; exit 1; }
+if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
+   && git merge-base --is-ancestor "$TARGET_SHA" HEAD; then
+  if [[ "${ALLOW_DOWNGRADE:-0}" != "1" ]]; then
+    fail "Target $REF is OLDER than current HEAD ($CURRENT) — refusing to downgrade."
+    echo  "  Cut a new release tag first (php artisan ekdosi:release …) and deploy that,"
+    echo  "  or pass an explicit newer ref. Deliberate rollback: ALLOW_DOWNGRADE=1 deploy/update.sh $REF"
+    exit 1
+  fi
+  log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
+fi
 
 # --- safety: DB snapshot BEFORE anything changes ----------------------------
 log "Pre-update DB snapshot (rollback point)"
