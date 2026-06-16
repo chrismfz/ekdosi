@@ -27,6 +27,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   company_admin/operator roles are unaffected.
 
 ### Fixed
+- **Deploy now runs `shield:generate` before the role sync.** `deploy/update.sh` only ran
+  `shield:sync-super-admin`, so a release that added a new resource/page never created its
+  `Permission` rows on prod until run by hand — leaving the new screen ungranted. The deploy
+  now regenerates permissions (idempotent, `--all`) then re-syncs the tenant role maps, so a
+  new resource is granted to company_admin/operator automatically on update. `shield:generate`
+  stays deploy-time + code-driven (NOT per-user/per-company).
 - **Role picker no longer grants an EMPTY role.** Assigning company_admin/operator to a
   user in a company whose roles were never permission-synced (a fresh box where
   `shield:generate` ran late, or an import `--into` heal which creates rows only) left the

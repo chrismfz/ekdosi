@@ -18,10 +18,11 @@
 #   7. php artisan migrate --force
 #   8. build assets (only if a package-lock.json exists)
 #   9. php artisan optimize  (config/route/view cache)
-#  10. shield:sync-super-admin  (permission sync)
-#  11. queue:restart           (workers pick up new code)
-#  12. maintenance mode OFF
-#  13. ops:health
+#  10. shield:generate          (create permission rows for any NEW resources)
+#  11. shield:sync-super-admin  (re-sync role→permission maps to them)
+#  12. queue:restart           (workers pick up new code)
+#  13. maintenance mode OFF
+#  14. ops:health
 #
 # Env overrides:  PHP=/usr/bin/php8.4  COMPOSER=/usr/local/bin/composer
 #
@@ -94,7 +95,13 @@ fi
 log "Caching config / routes / views"
 $ART optimize
 
-log "Syncing permissions (super admin)"
+# A release may add new resources/pages → create their Permission rows now, so
+# the role re-sync below (and the per-tenant role picker) has something to grant.
+# Code-driven + idempotent: a no-op when nothing new was added.
+log "Generating Shield permissions (new resources)"
+$ART shield:generate --all --panel=admin --ignore-existing-policies --no-interaction || true
+
+log "Syncing permissions (super admin + tenant roles)"
 $ART shield:sync-super-admin || true
 
 log "Restarting queue workers"
