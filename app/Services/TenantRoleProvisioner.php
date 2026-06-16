@@ -207,9 +207,10 @@ class TenantRoleProvisioner
      * Ensure the managed role ROWS exist for a team WITHOUT re-syncing their
      * permission maps — used before assigning a role so we never block on a
      * missing row, but don't do a full permission re-sync on every picker save
-     * (that would also clobber any manual per-tenant role customization).
+     * (that would also clobber any manual per-tenant role customization). Public
+     * so an --into import can HEAL a roles-less company without the clobber.
      */
-    private function ensureManagedRolesExist(Company $company): void
+    public function ensureManagedRolesExist(Company $company): void
     {
         $this->withTeam($company, function () use ($company): void {
             $guard = ShieldUtils::getFilamentAuthGuard();
@@ -434,14 +435,23 @@ class TenantRoleProvisioner
      */
     public function userHoldsRole(User $user, Company $company, string $name): bool
     {
-        return DB::table('model_has_roles as mhr')
-            ->join('roles as r', 'r.id', '=', 'mhr.role_id')
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
+        $roles = $tables['roles'] ?? 'roles';
+        $pivot = $tables['model_has_roles'] ?? 'model_has_roles';
+        $rolePivotKey = $cols['role_pivot_key'] ?? 'role_id';
+        $morphKey = $cols['model_morph_key'] ?? 'model_id';
+        // team key is company_id across ekdosi (the locked tenant decision).
+        $teamKey = $cols['team_foreign_key'] ?? 'company_id';
+
+        return DB::table("{$pivot} as mhr")
+            ->join("{$roles} as r", 'r.id', '=', "mhr.{$rolePivotKey}")
             ->where('r.name', $name)
             ->where('r.guard_name', ShieldUtils::getFilamentAuthGuard())
-            ->where('r.company_id', $company->getKey())
-            ->where('mhr.model_id', $user->getKey())
+            ->where("r.{$teamKey}", $company->getKey())
+            ->where("mhr.{$morphKey}", $user->getKey())
             ->where('mhr.model_type', $user->getMorphClass())
-            ->where('mhr.company_id', $company->getKey())
+            ->where("mhr.{$teamKey}", $company->getKey())
             ->exists();
     }
 }
