@@ -130,6 +130,13 @@ surfaced in the open-items sections further down.
   needs a specific credential delegated — don't bulk-move secrets into company_admin reach.
 
 ## 🔒 Backup / DR / Portability
+- **Durable native portable key (μετά το legacy_id sunset).** Ο `CompanyImporter` κλειδώνει
+  το idempotent matching σε `legacy_id` (+ content-signature fallback). Όταν σβήσει το legacy
+  (Delphi/Firebird), τα native rows (legacy_id NULL) δεν συγκλίνουν αξιόπιστα σε re-import-πάνω-
+  σε-υπάρχουσα-εταιρία (το `--new`/fresh-copy ΟΚ — FK rewiring μέσω surrogate `id`). Λύση: ένα
+  `uuid`/`public_id` ανά portable πίνακα, παραγόμενο στο create, ως ΤΟ idempotency key (uuid→
+  legacy_id→signature)· + ΑΦΜ-dedup για πελάτες. Χρειάζεται μόνο για sync/merge μεταξύ ζωντανών
+  ekdosi — όχι για μεταφορά-σε-VM.
 - **Portability Phase 5** — envelope-key (option 4) — optional future (το plaintext-at-rest
   καλύπτει cross-VM σήμερα).
 - **Backup encryption** (app-level) — deferred (βασιζόμαστε σε SFTP/S3 access control).

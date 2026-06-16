@@ -17,6 +17,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Fixed
+- **Company export/import: «Unknown column 'users_count'».** The company row is
+  exported via `attributesToArray()`, which carried a non-column aggregate
+  (`users_count` from the Companies list's `withCount`) into the bundle → the
+  import INSERT failed (SQLSTATE 42S22). Export now keeps only real `companies`
+  columns; import filters stray attributes too (so older bundles restore).
+
+
 ### Added
 - **Φορητότητα Phase 3: επιλεκτική εξαγωγή CSV ανά entity.** «Εξαγωγή CSV» (Company →
   Αντίγραφα) με checkboxes «τι να τραβήξω» (πελάτες/προϊόντα/παραστατικά/πληρωμές/…) →

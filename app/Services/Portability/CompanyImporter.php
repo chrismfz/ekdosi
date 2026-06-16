@@ -4,6 +4,7 @@ namespace App\Services\Portability;
 
 use App\Models\Company;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -403,7 +404,28 @@ class CompanyImporter
             $companyData[$col] = $value;
         }
 
-        return $companyData;
+        // Keep only real `companies` columns: the exported row came from
+        // attributesToArray(), which can carry non-column aggregates/appends
+        // (e.g. users_count from a withCount() list query) that would break the
+        // INSERT with "Unknown column". Defends older bundles too.
+        //
+        // (b) Import assumes a SAME-OR-NEWER target schema. If a bundle from a
+        // newer schema carries a `companies` column this target lacks, it is
+        // dropped here (and logged) rather than failing — a deliberate trade-off
+        // so a stray attribute can't wedge the restore. Cross-version bundles
+        // aren't a supported path: deploy the code first, then import.
+        $filtered = array_intersect_key($companyData, array_flip(Schema::getColumnListing('companies')));
+
+        // (a) Surface what was dropped — usually a harmless aggregate, but a
+        // real column here means a schema skew worth a second look.
+        $dropped = array_keys(array_diff_key($companyData, $filtered));
+        if ($dropped !== []) {
+            Log::warning('CompanyImporter: dropped non-column attributes from the company payload.', [
+                'dropped' => $dropped,
+            ]);
+        }
+
+        return $filtered;
     }
 
     private function restoreLogo(Company $company, array $bundle): void
