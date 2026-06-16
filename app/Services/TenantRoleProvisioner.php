@@ -9,6 +9,7 @@ use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Closure;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Spatie\Permission\Models\Permission;
@@ -244,13 +245,9 @@ class TenantRoleProvisioner
      */
     private function upsertRole(string $name, string $guard, Company $company): Role
     {
-        $find = fn (): ?Role => Role::query()
-            ->where('name', $name)
-            ->where('guard_name', $guard)
-            ->where('company_id', $company->getKey())
-            ->first();
+        $companyId = (int) $company->getKey();
 
-        if ($role = $find()) {
+        if ($role = $this->findRole($name, $guard, $companyId)) {
             return $role;
         }
 
@@ -258,15 +255,35 @@ class TenantRoleProvisioner
             return Role::query()->create([
                 'name' => $name,
                 'guard_name' => $guard,
-                'company_id' => $company->getKey(),
+                'company_id' => $companyId,
             ]);
         } catch (UniqueConstraintViolationException $e) {
-            // The row exists despite the find missing it — adopt it.
-            return $find() ?? throw new RuntimeException(
-                "Role «{$name}» for company {$company->getKey()} collided but could not be re-read.",
+            // The row exists despite the lookup missing it — adopt it.
+            return $this->findRole($name, $guard, $companyId) ?? throw new RuntimeException(
+                "Role «{$name}» for company {$companyId} collided but could not be re-read.",
                 previous: $e,
             );
         }
+    }
+
+    /**
+     * Look up a role by its (company_id, name, guard_name) unique key via RAW
+     * DB::table — bypassing spatie's teams-aware Eloquent query. That query, with
+     * the registrar's team state, can MISS a row the unique index still rejects,
+     * producing a 1062 on the follow-up insert that surfaced as «… collided but
+     * could not be re-read» on import provisioning AND on attach-user. The raw
+     * lookup can't miss it; we hydrate the Eloquent model (no global scopes) for
+     * the caller.
+     */
+    private function findRole(string $name, string $guard, int $companyId): ?Role
+    {
+        $id = DB::table('roles')
+            ->where('name', $name)
+            ->where('guard_name', $guard)
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        return $id !== null ? Role::query()->withoutGlobalScopes()->find($id) : null;
     }
 
     /**
