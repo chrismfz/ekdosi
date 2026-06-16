@@ -2,7 +2,9 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\MyDataMode;
 use App\Filament\Clusters\MyDataCluster;
+use App\Filament\Pages\Concerns\RefreshesAllMyData;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Invoices\InvoiceResource;
@@ -18,6 +20,7 @@ use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
+use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -39,6 +42,7 @@ use Throwable;
  */
 class MyDataConsole extends Page
 {
+    use RefreshesAllMyData;
     use RemembersLastFetch;
     use ResolvesReconcileWindow;
 
@@ -79,6 +83,13 @@ class MyDataConsole extends Page
     public bool $ran = false;
 
     public ?string $error = null;
+
+    /**
+     * Test seam (a MockHandler can't be a public Livewire prop) — also used by
+     * the static refreshSnapshot() so the «Ανανέωση όλων» orchestrator round-trip
+     * is exercisable without the network. Null in production → real AADE.
+     */
+    public static ?MockHandler $testHandler = null;
 
     public function mount(): void
     {
@@ -127,15 +138,18 @@ class MyDataConsole extends Page
     protected function getHeaderActions(): array
     {
         return [
-            // ONE fetch (RequestTransmittedDocs), BOTH directions shown together:
-            // «τα δικά μας» (υπάρχουν/συμφωνούν στο myDATA;) + «αδέσποτα» (το
-            // myDATA έχει για το ΑΦΜ μας χωρίς τοπική εγγραφή). Same SalesReconciler
-            // call served two ways — one button, half the AADE calls.
+            // Primary: one click refreshes ALL console tabs + the ΦΠΑ box.
+            $this->refreshAllAction(),
+
+            // Secondary: just THIS tab. ONE fetch (RequestTransmittedDocs), BOTH
+            // directions shown together: «τα δικά μας» (υπάρχουν/συμφωνούν στο
+            // myDATA;) + «αδέσποτα» (το myDATA έχει για το ΑΦΜ μας χωρίς τοπική
+            // εγγραφή). Same SalesReconciler call served two ways.
             Action::make('reconcile')
-                ->label('Έλεγχος myDATA')
+                ->label('Μόνο πωλήσεις')
                 ->icon('heroicon-o-clipboard-document-check')
-                ->color('primary')
-                ->modalHeading('Έλεγχος myDATA')
+                ->color('gray')
+                ->modalHeading('Έλεγχος myDATA — Πωλήσεις')
                 ->modalDescription('Κατεβάζει ό,τι έχει το myDATA για το ΑΦΜ μας στο διάστημα και δείχνει μαζί: αν τα δικά μας υπάρχουν/συμφωνούν, ΚΑΙ τυχόν «αδέσποτα» (στο myDATA αλλά όχι στο ekdosi). Δεν τροποποιεί τίποτα.')
                 ->modalSubmitActionLabel('Έλεγχος')
                 ->schema($this->windowSchema())
@@ -156,7 +170,7 @@ class MyDataConsole extends Page
         $this->error = null;
 
         try {
-            $reconciler = new SalesReconciler($tenant);
+            $reconciler = new SalesReconciler($tenant, static::$testHandler);
             $result = $reconciler->reconcile(
                 Carbon::parse($from)->startOfDay(),
                 Carbon::parse($to)->endOfDay(),
@@ -166,7 +180,7 @@ class MyDataConsole extends Page
             $this->resultMode = 'both';
             $this->windowFrom = $from;
             $this->windowTo = $to;
-            $this->result = $this->serialize($result);
+            $this->result = self::serializeFor($tenant, $result, $from, $to);
             $this->fromLabel = $result->from;
             $this->toLabel = $result->to;
             $this->rememberFetch();
@@ -231,16 +245,51 @@ class MyDataConsole extends Page
         }
     }
 
-    private function serialize(SalesReconciliationResult $r): array
+    /**
+     * Run the sales reconcile for a tenant and write the snapshot into the SAME
+     * cache this page restores on mount — so the «Ανανέωση όλων» orchestrator
+     * (MyDataConsoleRefresh) seeds exactly what this tab shows. Static +
+     * tenant-explicit (no Filament tenant context needed beyond URL building).
+     */
+    public static function refreshSnapshot(Company $tenant, Carbon $from, Carbon $to, ?MockHandler $handler = null): SalesReconciliationResult
     {
-        $rows = fn (array $rows) => array_map($this->rowToArray(...), $rows);
+        $result = (new SalesReconciler($tenant, $handler ?? static::$testHandler))->reconcile(
+            $from->copy()->startOfDay(),
+            $to->copy()->endOfDay(),
+        );
+
+        $fromYmd = $from->format('Y-m-d');
+        $toYmd = $to->format('Y-m-d');
+
+        static::putFetchState($tenant->getKey(), [
+            'result' => self::serializeFor($tenant, $result, $fromYmd, $toYmd),
+            'resultMode' => 'both',
+            'fromLabel' => $result->from,
+            'toLabel' => $result->to,
+            'windowFrom' => $fromYmd,
+            'windowTo' => $toYmd,
+            'ran' => true,
+        ]);
+
+        return $result;
+    }
+
+    public static function serializeFor(Company $tenant, SalesReconciliationResult $r, ?string $windowFrom, ?string $windowTo): array
+    {
+        $rows = fn (array $rows) => array_map(fn (ReconciliationRow $row) => self::rowToArray($tenant, $row, $windowFrom, $windowTo), $rows);
 
         return [
             'from' => $r->from,
             'to' => $r->to,
             'aadeTotal' => $r->aadeTotal,
             'localTotal' => $r->localTotal,
+            // The HONEST discrepancy count — excludes imported legacy MARKs a
+            // sandbox connection can't see (see SalesReconciliationResult).
             'discrepancyCount' => $r->discrepancyCount(),
+            'importedMissingCount' => count($r->importedMissingAtAade()),
+            // Sandbox connection → imported (production) MARKs legitimately won't
+            // reconcile; the blade shows a banner so the «εισαγμένα» aren't alarming.
+            'sandbox' => $tenant->mydata_mode_enum === MyDataMode::Sandbox,
             'matched' => $rows($r->matched),
             'stateMismatch' => $rows($r->stateMismatch),
             'missingAtAade' => $rows($r->missingAtAade),
@@ -249,7 +298,7 @@ class MyDataConsole extends Page
         ];
     }
 
-    private function rowToArray(ReconciliationRow $row): array
+    private static function rowToArray(Company $tenant, ReconciliationRow $row, ?string $windowFrom, ?string $windowTo): array
     {
         return [
             'mark' => $row->mark,
@@ -268,24 +317,25 @@ class MyDataConsole extends Page
             'invoiceTypeLabel' => $row->invoiceTypeLabel,
             // Economic bucket for orphan grouping: income / expense / other.
             'bucket' => Codes::transmittedDocBucket($row->invoiceType),
-            'url' => $row->invoiceId ? $this->invoiceUrl($row->invoiceId) : null,
+            // Imported (legacy) local invoice → its MARK is a production MARK; a
+            // sandbox «missing at AADE» is expected, not a real fault.
+            'imported' => $row->legacyId !== null,
+            'url' => $row->invoiceId ? self::invoiceUrl($tenant, $row->invoiceId) : null,
             // Every MARK (linked or orphan) gets a detail link, carrying the
             // queried window so an orphan lookup re-fetches the right page.
-            'markUrl' => $this->markUrl($row->mark),
+            'markUrl' => self::markUrl($tenant, $row->mark, $windowFrom, $windowTo),
         ];
     }
 
-    private function invoiceUrl(int $invoiceId): ?string
+    private static function invoiceUrl(Company $tenant, int $invoiceId): ?string
     {
-        $tenant = Filament::getTenant();
-
         return InvoiceResource::getUrl('view', [
             'record' => $invoiceId,
             'tenant' => $tenant,
         ]);
     }
 
-    private function markUrl(string $mark): ?string
+    private static function markUrl(Company $tenant, string $mark, ?string $windowFrom, ?string $windowTo): ?string
     {
         if ($mark === '') {
             return null;
@@ -293,9 +343,9 @@ class MyDataConsole extends Page
 
         return MyDataMarkDetail::getUrl([
             'mark' => $mark,
-            'tenant' => Filament::getTenant(),
-            'from' => $this->windowFrom,
-            'to' => $this->windowTo,
+            'tenant' => $tenant,
+            'from' => $windowFrom,
+            'to' => $windowTo,
         ]);
     }
 }

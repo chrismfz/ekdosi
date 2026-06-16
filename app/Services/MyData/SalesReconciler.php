@@ -336,6 +336,7 @@ class SalesReconciler
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,
+            sandbox: $this->tenant->mydata_mode_enum === MyDataMode::Sandbox,
         );
     }
 
@@ -363,6 +364,7 @@ class SalesReconciler
             aadeState: $aadeState,
             cancelledByMark: $cancelledByMark,
             problem: $problem,
+            legacyId: $invoice->legacy_id,
         );
     }
 

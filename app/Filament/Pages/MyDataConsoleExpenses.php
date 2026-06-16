@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Clusters\MyDataCluster;
+use App\Filament\Pages\Concerns\RefreshesAllMyData;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Expenses\ExpenseResource;
@@ -39,6 +40,7 @@ use Throwable;
  */
 class MyDataConsoleExpenses extends Page
 {
+    use RefreshesAllMyData;
     use RemembersLastFetch;
     use ResolvesReconcileWindow;
 
@@ -117,13 +119,16 @@ class MyDataConsoleExpenses extends Page
     protected function getHeaderActions(): array
     {
         return [
-            // ONE fetch (RequestDocs), BOTH directions together: «τα δικά μας
-            // έξοδα» (συμφωνούν;) + «αδέσποτα έξοδα» (μας υπέβαλε προμηθευτής
-            // αλλά δεν τα έχουμε). Same ExpenseReconciler call served two ways.
+            // Primary: one click refreshes ALL console tabs + the ΦΠΑ box.
+            $this->refreshAllAction(),
+
+            // Secondary: just THIS tab. ONE fetch (RequestDocs), BOTH directions
+            // together: «τα δικά μας έξοδα» (συμφωνούν;) + «αδέσποτα έξοδα» (μας
+            // υπέβαλε προμηθευτής αλλά δεν τα έχουμε).
             Action::make('reconcile')
-                ->label('Έλεγχος myDATA — Έξοδα')
+                ->label('Μόνο έξοδα')
                 ->icon('heroicon-o-clipboard-document-check')
-                ->color('primary')
+                ->color('gray')
                 ->modalHeading('Έλεγχος myDATA — Έξοδα')
                 ->modalDescription('Κατεβάζει ό,τι μας υπέβαλαν προμηθευτές στο διάστημα και δείχνει μαζί: αν τα δικά μας έξοδα συμφωνούν, ΚΑΙ τυχόν «αδέσποτα έξοδα» (στο myDATA αλλά όχι στο ekdosi). Δεν τροποποιεί τίποτα.')
                 ->modalSubmitActionLabel('Έλεγχος')

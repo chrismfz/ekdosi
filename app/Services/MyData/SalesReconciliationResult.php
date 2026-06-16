@@ -37,12 +37,58 @@ final readonly class SalesReconciliationResult
         public array $missingAtAade,
         public array $missingLocally,
         public array $duplicateLocal = [],
+        // Whether the reconcile ran against the SANDBOX channel. ONLY then is an
+        // imported (production-MARK) «missing at AADE» noise; in PRODUCTION an
+        // imported MARK was filed to the SAME channel, so its absence is a REAL
+        // discrepancy and must count.
+        public bool $sandbox = false,
     ) {}
 
+    /**
+     * `missingAtAade` rows that are IMPORTED legacy invoices (legacy_id set).
+     *
+     * @return list<ReconciliationRow>
+     */
+    public function importedMissingAtAade(): array
+    {
+        return array_values(array_filter($this->missingAtAade, fn (ReconciliationRow $r) => $r->legacyId !== null));
+    }
+
+    /**
+     * The EXPECTED-noise subset: imported MARKs that a SANDBOX connection can't
+     * return (the «203»). Empty in production — there an imported MARK should be
+     * present, so its absence is a real concern, not noise.
+     *
+     * @return list<ReconciliationRow>
+     */
+    public function noiseMissingAtAade(): array
+    {
+        return $this->sandbox ? $this->importedMissingAtAade() : [];
+    }
+
+    /**
+     * `missingAtAade` rows that genuinely need attention — everything except the
+     * sandbox imported-noise (so: all of them in production; native-only in sandbox).
+     *
+     * @return list<ReconciliationRow>
+     */
+    public function realMissingAtAade(): array
+    {
+        if (! $this->sandbox) {
+            return $this->missingAtAade;
+        }
+
+        return array_values(array_filter($this->missingAtAade, fn (ReconciliationRow $r) => $r->legacyId === null));
+    }
+
+    /**
+     * Real discrepancies needing attention — excludes ONLY the sandbox
+     * imported-noise, so the headline count is honest in both modes.
+     */
     public function discrepancyCount(): int
     {
         return count($this->stateMismatch)
-            + count($this->missingAtAade)
+            + count($this->realMissingAtAade())
             + count($this->missingLocally)
             + count($this->duplicateLocal);
     }

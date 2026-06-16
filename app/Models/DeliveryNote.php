@@ -159,4 +159,20 @@ class DeliveryNote extends Model
     {
         return $this->hasOne(DeliveryMark::class)->latestOfMany();
     }
+
+    /**
+     * The myDATA «Outbox» for delivery notes: NATIVE δελτία that should be
+     * registered to AADE but carry no MARK yet (draft awaiting issue, or a
+     * registration that never landed). Predicate: a filable type (`mydata_type`
+     * set), not cancelled, no `mydata_mark`, AND not imported (`legacy_id` null).
+     * Mirrors Invoice::scopeAwaitingMyData.
+     */
+    public function scopeAwaitingMyData(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query
+            ->whereNull('legacy_id')
+            ->whereNotNull('mydata_type')
+            ->where('local_status', '!=', 'cancelled')
+            ->whereNull('mydata_mark');
+    }
 }

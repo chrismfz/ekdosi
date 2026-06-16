@@ -9,10 +9,15 @@ use App\Filament\Resources\Expenses\ExpenseResource;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Company;
 use App\Models\Expense;
+use App\Services\MyData\ExpenseImporter;
+use App\Support\Money;
 use App\Support\MyData\Codes;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Placeholder;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs\Tab;
 use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
@@ -25,12 +30,22 @@ class ListExpenses extends BaseListRecords
 {
     protected static string $resource = ExpenseResource::class;
 
+    /** Fetched αδέσποτα (mark => label) for the «Άντληση» picker modal. */
+    public array $orphanOptions = [];
+
+    public ?string $orphanFrom = null;
+
+    public ?string $orphanTo = null;
+
+    public ?string $orphanError = null;
+
     /**
-     * «Άντληση από myDATA» — one click from the Έξοδα list: fetch the current
-     * quarter's expense docs and jump straight to the «Κονσόλα myDATA — Έξοδα»
-     * worklist with the αδέσποτα ready to import (no more «console → fetch →
-     * back to Έξοδα» dance). The fetch is read-only; import stays operator-gated
-     * on the console. Shown only to users who can actually open that console.
+     * «Άντληση από myDATA» — self-contained on the Έξοδα list: one click fetches
+     * the current quarter's supplier docs and opens a picker modal of the
+     * αδέσποτα (στο myDATA, όχι τοπικά), each with a checkbox; the operator keeps
+     * exactly the ones they want and they're imported in place — no bounce to the
+     * console, no all-or-nothing. Import stays a deliberate, reviewed write
+     * (creates expenses + suppliers). Shown only to users who can read myDATA.
      *
      * @return array<int, Action>
      */
@@ -44,48 +59,177 @@ class ListExpenses extends BaseListRecords
                 ->icon('heroicon-o-plus'),
         ];
 
-        // «Άντληση από myDATA» — one click: fetch the current quarter's expense
-        // docs and jump to the «Κονσόλα myDATA — Έξοδα» worklist (read-only;
-        // import stays operator-gated). Only for users who can open that console.
         if ($this->canFetchMyData()) {
+            // The button itself has NO schema → clicking runs immediately: fetch
+            // the αδέσποτα, then chain into the picker modal. (Filament builds an
+            // action's schema BEFORE its mountUsing runs, so we can't fetch in
+            // mountUsing and read it in the schema — the fetch must happen first,
+            // here, then replaceMountedAction opens the picker whose schema reads
+            // the now-populated options.)
             $actions[] = Action::make('fetchFromMyData')
                 ->label('Άντληση από myDATA')
                 ->icon('heroicon-o-cloud-arrow-down')
-                ->color('gray')
-                ->tooltip('Κατεβάζει τα έξοδα του τρέχοντος τριμήνου από το myDATA και ανοίγει την Κονσόλα — Έξοδα με τα αδέσποτα έτοιμα προς καταχώριση. Δεν δημιουργεί εγγραφές.')
-                ->action(fn () => $this->fetchFromMyData());
+                ->color('primary')
+                ->tooltip('Κατεβάζει τα έξοδα του τρέχοντος τριμήνου από το myDATA και ανοίγει λίστα επιλογής για καταχώριση.')
+                ->action(function (): void {
+                    $this->loadOrphans();
+                    $this->replaceMountedAction('pickMyDataOrphans');
+                });
         }
 
         return $actions;
     }
 
-    /** Read-only fetch → land on the console worklist; surface AADE errors here. */
-    private function fetchFromMyData(): void
+    /**
+     * The picker modal mounted after «Άντληση»: a checkbox list of the fetched
+     * αδέσποτα (all pre-ticked), importing exactly the kept ones. Resolved by name
+     * via Filament's {name}Action() convention when chained from the button.
+     */
+    public function pickMyDataOrphansAction(): Action
     {
+        return Action::make('pickMyDataOrphans')
+            ->modalHeading('Άντληση εξόδων από myDATA')
+            ->modalDescription('Έξοδα που υπέβαλαν προμηθευτές και δεν τα έχουμε τοπικά. Επιλέξτε ποια να καταχωριστούν — ήδη καταχωρημένα παραλείπονται.')
+            ->modalSubmitActionLabel('Καταχώριση επιλεγμένων')
+            ->schema(fn (): array => $this->orphanSchema())
+            // Hide the submit button when there's nothing to import (error / empty).
+            ->modalSubmitAction(fn ($action) => filled($this->orphanOptions) ? $action : false)
+            ->action(fn (array $data) => $this->importSelectedOrphans($data['marks'] ?? []));
+    }
+
+    /** Build the picker modal body from the fetched αδέσποτα (or an error/empty note). */
+    private function orphanSchema(): array
+    {
+        if ($this->orphanError !== null) {
+            return [Placeholder::make('orphanError')->hiddenLabel()->content($this->orphanError)];
+        }
+
+        $window = ($this->orphanFrom && $this->orphanTo) ? " ({$this->orphanFrom} – {$this->orphanTo})" : '';
+
+        if ($this->orphanOptions === []) {
+            return [Placeholder::make('orphanNone')->hiddenLabel()
+                ->content('Δεν βρέθηκαν αδέσποτα έξοδα στο τρέχον τρίμηνο'.$window.'.')];
+        }
+
+        return [
+            CheckboxList::make('marks')
+                ->label('Αδέσποτα έξοδα προς καταχώριση'.$window)
+                ->options($this->orphanOptions)
+                ->default(array_keys($this->orphanOptions)) // all pre-checked; untick to skip
+                ->bulkToggleable()
+                ->columns(1),
+        ];
+    }
+
+    /** Read-only fetch of the current-quarter αδέσποτα into the picker options. */
+    private function loadOrphans(): void
+    {
+        $this->orphanOptions = [];
+        $this->orphanError = null;
+
         /** @var Company $tenant */
         $tenant = Filament::getTenant();
         $now = now();
+        $from = $now->copy()->startOfQuarter();
+        $to = $now->copy();
+        $this->orphanFrom = $from->format('d/m/Y');
+        $this->orphanTo = $to->format('d/m/Y');
 
         try {
-            MyDataConsoleExpenses::refreshSnapshot($tenant, $now->copy()->startOfQuarter(), $now->copy());
+            // Reuse the console snapshot (writes the same cache the subheading
+            // reads) — its serialized αδέσποτα already have supplier names resolved.
+            MyDataConsoleExpenses::refreshSnapshot($tenant, $from, $to);
         } catch (RateLimitExceededException) {
-            Notification::make()->title('Προσωρινό όριο myDATA')->body('Δοκιμάστε ξανά σε λίγο.')->warning()->send();
+            $this->orphanError = 'Προσωρινό όριο myDATA — δοκιμάστε ξανά σε λίγο.';
 
             return;
         } catch (RuntimeException $e) {
-            Notification::make()->title('Η άντληση απέτυχε')->body($e->getMessage())->danger()->send();
+            $this->orphanError = $e->getMessage();
 
             return;
         } catch (Throwable $e) {
             Log::warning('Expenses list myDATA fetch failed', [
                 'company_id' => $tenant->getKey(), 'exception' => $e::class, 'message' => $e->getMessage(),
             ]);
-            Notification::make()->title('Η άντληση απέτυχε')->body('Σφάλμα σύνδεσης με το AADE.')->danger()->send();
+            $this->orphanError = 'Σφάλμα σύνδεσης με το AADE.';
 
             return;
         }
 
-        $this->redirect(MyDataConsoleExpenses::getUrl(['tenant' => $tenant]));
+        foreach (MyDataConsoleExpenses::lastFetchState($tenant->getKey())['result']['missingLocally'] ?? [] as $row) {
+            $name = $row['counterpartName'] ?: ($row['afm'] ?? '—');
+            $code = $row['invcode'] ?: $row['mark'];
+            $this->orphanOptions[$row['mark']] = trim("{$code} · {$name} · ".Money::eur($row['gross']).' · '.($row['issuedAt'] ?? ''));
+        }
+    }
+
+    /** Import exactly the MARKs the operator kept ticked, then stay on the list. */
+    private function importSelectedOrphans(array $marks): void
+    {
+        $marks = array_values(array_filter($marks));
+        if ($marks === []) {
+            Notification::make()->title('Δεν επιλέχθηκε κανένα έξοδο')->warning()->send();
+
+            return;
+        }
+
+        // Defensive (like MyDataConsoleExpenses::importOrphans): the picker only
+        // submits when options are filled, and loadOrphans() sets the dates before
+        // the options — but guard the coupling so a future refactor can't TypeError
+        // on createFromFormat(null).
+        if (! $this->orphanFrom || ! $this->orphanTo) {
+            return;
+        }
+
+        /** @var Company $tenant */
+        $tenant = Filament::getTenant();
+        $from = Carbon::createFromFormat('d/m/Y', $this->orphanFrom)->startOfDay();
+        $to = Carbon::createFromFormat('d/m/Y', $this->orphanTo)->endOfDay();
+
+        try {
+            // Share the console's MockHandler test seam so the round-trip is
+            // exercisable without the network (null in production → real AADE).
+            $result = (new ExpenseImporter($tenant, MyDataConsoleExpenses::$testHandler))->importMarks($from, $to, $marks);
+            // Drop the just-imported MARKs from the cached αδέσποτα so the «X
+            // αδέσποτα» subheading updates WITHOUT a third AADE fetch (loadOrphans +
+            // importMarks already hit the window twice).
+            $this->dropImportedFromSnapshot($tenant, $result->createdMarks);
+
+            Notification::make()
+                ->title("Καταχωρήθηκαν {$result->created} έξοδα")
+                ->body($result->summary())
+                ->{$result->created > 0 ? 'success' : 'warning'}()
+                ->send();
+        } catch (RuntimeException $e) {
+            Notification::make()->title('Η καταχώριση απέτυχε')->body($e->getMessage())->danger()->send();
+        } catch (Throwable $e) {
+            Log::warning('Expenses list myDATA import failed', [
+                'company_id' => $tenant->getKey(), 'exception' => $e::class, 'message' => $e->getMessage(),
+            ]);
+            Notification::make()->title('Η καταχώριση απέτυχε')->body('Σφάλμα κατά τη λήψη/καταχώριση από το AADE.')->danger()->send();
+        }
+    }
+
+    /**
+     * Remove the just-imported MARKs from the cached expenses snapshot so the
+     * subheading «X αδέσποτα» reflects the import without re-fetching from AADE.
+     *
+     * @param  list<string|int>  $createdMarks
+     */
+    private function dropImportedFromSnapshot(Company $tenant, array $createdMarks): void
+    {
+        $state = MyDataConsoleExpenses::lastFetchState($tenant->getKey());
+        if ($state === null || ! isset($state['result']['missingLocally'])) {
+            return;
+        }
+
+        $imported = array_map('strval', $createdMarks);
+        $state['result']['missingLocally'] = array_values(array_filter(
+            $state['result']['missingLocally'],
+            fn (array $row): bool => ! in_array((string) $row['mark'], $imported, true),
+        ));
+
+        MyDataConsoleExpenses::putFetchState($tenant->getKey(), $state);
     }
 
     /** A «τελευταία άντληση myDATA … · X αδέσποτα» line under the title. */

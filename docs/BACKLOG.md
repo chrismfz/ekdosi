@@ -161,3 +161,41 @@ surfaced in the open-items sections further down.
   ήδη υπάρχουν.)_
 - **Curated tax-presets** expansion ανά κλάδο + **%-ανά-προϊόν** (όχι μόνο €/τεμ).
 - **`clear:right`** σε single-word doc-types (PDF tweak).
+
+## 📡 myDATA sync — insights & next (sweep 2026-06-16)
+_Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 διερεύνηση** πιάνονται
+ΤΩΡΑ (βλ. `claude/polish-touches`)· τα παρακάτω είναι το follow-up._
+- **#2 console split — «εκτός τρέχοντος καναλιού» vs «πραγματικά ανεπιβεβαίωτο».** Το «203 λείπουν
+  από AADE» στην κονσόλα είναι κυρίως **imported legacy ΜΑΡΚ** (prod MARK + `mydata_state=VALID` από
+  το ETL· `MigrateFromFirebird` l.778) που το **sandbox** κανάλι δεν επιστρέφει → ψεύτικος συναγερμός.
+  Ο `SalesReconciler` πρέπει να σπάει το `missingAtAade` σε (a) τοπικό-ΜΑΡΚ-όχι-στο-κανάλι (legacy/
+  prod-vs-sandbox → ενημερωτικό) vs (b) **χωρίς τοπικό ΜΑΡΚ** (πραγματικό). Καθαρό insight, χαμηλό ρίσκο.
+- **#5 χαρακτηρισμός + υποβολή για λογαριασμό (λογιστής).** Ο **χαρακτηρισμός εισροών** (rules-engine:
+  «προμηθευτής Χ → κατηγορία Υ») δεν θέλει ΑΦΜ λογιστή· η **υποβολή για λογαριασμό τρίτου** θέλει
+  `entityVatNumber` (ήδη στο backlog «Expenses — λογιστής/`entityVatNumber` [323]»). Ιδέα: ekdosi
+  **ετοιμάζει** τους χαρακτηρισμούς, ο λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει**.
+  Θέλει διερεύνηση ρόλων/δικαιωμάτων. _(Worklist «προς χαρακτηρισμό» + bulk-classify = το ορατό κομμάτι.)_
+- **#6 Βιβλίο Εσόδων-Εξόδων → myDATA period report.** Αναβάθμιση του `/ledger-book` (`LedgerBook`):
+  διάλεξε περίοδο → δες έσοδα/έξοδα **με τη στήλη ΜΑΡΚ + κατάσταση myDATA** → **export** (CSV/PDF) για
+  τον λογιστή στο κλείσιμο. Στην ουσία υπάρχει· θέλει polishing + ΜΑΡΚ/κατάσταση + export.
+
+## 🖥️ Console/interface polish (B — sweep 2026-06-16)
+- **Auto-refresh-on-stale** στην Κονσόλα myDATA: αν το cache > Ν ώρες, διακριτικό «παλιά δεδομένα —
+  ανανέωση;» (τώρα ο operator δεν ξέρει αν κοιτά φρέσκα· το «τελευταία ενημέρωση» υπάρχει αλλά παθητικό).
+- **Per-row import + «held/needs-review» state** στην κονσόλα-Έξοδα (ήδη στο «myDATA/expenses completeness»)
+  — τώρα που υπάρχει το selective picker στη λίστα Έξοδα, το ίδιο μοτίβο ταιριάζει και στην κονσόλα.
+- **MARK lifecycle chip** στο παραστατικό: εκδόθηκε → υποβλήθηκε → VALID → ακυρώθηκε (το MARK detail +
+  full XML υπάρχουν· λείπει το οπτικό timeline/status chip στο `ViewInvoice`).
+
+## 🧾 ERP-parity ideas (C — sweep 2026-06-16)
+_Έχουμε ήδη: balances/Καρτέλα, τραπεζικοί λογαριασμοί, κανάλια είσπραξης (IRIS/vPOS/μετρητά), πληρωμές,
+πιστωτικά, προσφορές, recurring services (v1)._
+- **Dunning ladder** — κλιμακωτές αυτόματες υπενθυμίσεις ληξιπρόθεσμων (3/7/15/30 ημ.) πάνω στο υπάρχον
+  auto-email + `InvoiceBalance` (σήμερα: single resend). Templates ανά σκαλί + opt-out ανά πελάτη.
+- **Bank-statement import → match πληρωμών** — ανέβασμα κίνησης (CSV/MT940) → auto-match σε ανοιχτά
+  τιμολόγια (ποσό/ημερομηνία/ΑΦΜ) → προτεινόμενες `Payment` εγγραφές προς έγκριση.
+- **Per-customer τιμοκατάλογοι / εκπτώσεις** — default τιμή/έκπτωση ανά πελάτη (σήμερα: ανά γραμμή).
+- **Multi-currency invoicing** — `currency` υπάρχει στο payload (EUR hardcoded)· πραγματικό FX +
+  στρογγυλοποίηση + εμφάνιση. (myDATA θέλει EUR ισοτιμία — προσοχή.)
+- **Aged-receivables report** — ηλικίωση οφειλών (0-30/30-60/60-90/90+) πάνω στο `InvoiceBalance`.
+- **Sendable customer statement** — η Καρτέλα ως PDF/email προς τον πελάτη (recap υπολοίπου + κινήσεων).

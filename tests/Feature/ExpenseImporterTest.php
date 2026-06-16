@@ -117,6 +117,25 @@ class ExpenseImporterTest extends TestCase
         $this->assertSame(0, Expense::where('company_id', $this->tenant->id)->count());
     }
 
+    public function test_import_marks_imports_only_the_selected_set(): void
+    {
+        // The window holds mark 701; selecting it imports it (one fetch, idempotent).
+        $result = (new ExpenseImporter($this->tenant, new MockHandler([
+            new Response(200, [], $this->twoLineDoc()),
+        ])))->importMarks(now()->subMonth(), now(), ['400012434052701']);
+
+        $this->assertSame(1, $result->created);
+        $this->assertSame(1, Expense::where('company_id', $this->tenant->id)->count());
+
+        // A selected MARK that isn't in the window is reported not-found, nothing made.
+        $miss = (new ExpenseImporter($this->tenant, new MockHandler([
+            new Response(200, [], $this->twoLineDoc()),
+        ])))->importMarks(now()->subMonth(), now(), ['999999999999999']);
+
+        $this->assertSame(0, $miss->created);
+        $this->assertSame(['999999999999999'], $miss->notFoundMarks);
+    }
+
     public function test_cancelled_doc_imports_as_cancelled(): void
     {
         // The doc's MARK is listed in <cancelledInvoicesDoc> → must import as

@@ -93,6 +93,34 @@
             Τα δικά μας στο myDATA
         </div>
 
+        @php
+            // Only on a SANDBOX connection is an imported (production-MARK) «missing
+            // at AADE» noise — there the MARK can't be returned. In PRODUCTION an
+            // imported MARK was filed to the SAME channel, so its absence is a REAL
+            // concern and stays in the danger bucket.
+            $sandbox = $result['sandbox'] ?? false;
+            $missingNoise = $sandbox
+                ? array_values(array_filter($result['missingAtAade'], fn ($r) => ! empty($r['imported'])))
+                : [];
+            $missingReal = $sandbox
+                ? array_values(array_filter($result['missingAtAade'], fn ($r) => empty($r['imported'])))
+                : $result['missingAtAade'];
+        @endphp
+
+        {{-- Sandbox caveat: explains why imported (production) MARKs show as missing. --}}
+        @if (count($missingNoise) > 0)
+            <x-filament::section>
+                <div class="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-300">
+                    <x-filament::icon icon="heroicon-o-beaker" class="mt-0.5 h-5 w-5 shrink-0 text-warning-500" />
+                    <span>
+                        Συνδεδεμένο σε <strong>δοκιμαστικό (sandbox)</strong> myDATA. Τα {{ count($missingNoise) }}
+                        <strong>εισαγμένα</strong> παραστατικά (ΜΑΡΚ παραγωγής από το προηγούμενο σύστημα) δεν
+                        επιστρέφονται από το sandbox — <em>δεν</em> είναι πραγματική ασυμφωνία. Δες τα στο «Εισαγμένα» πιο κάτω.
+                    </span>
+                </div>
+            </x-filament::section>
+        @endif
+
         @if ($result['discrepancyCount'] === 0)
             <x-filament::section>
                 <div class="flex items-center gap-2 text-success-600 dark:text-success-400">
@@ -104,7 +132,6 @@
 
         @foreach ([
             ['key' => 'stateMismatch', 'title' => 'Ασυμφωνία κατάστασης', 'color' => 'warning', 'icon' => 'heroicon-o-exclamation-triangle'],
-            ['key' => 'missingAtAade', 'title' => 'Λείπουν από το AADE', 'color' => 'danger', 'icon' => 'heroicon-o-x-circle'],
             ['key' => 'duplicateLocal', 'title' => 'Διπλά ΜΑΡΚ τοπικά', 'color' => 'danger', 'icon' => 'heroicon-o-document-duplicate'],
         ] as $bucket)
             @if (count($result[$bucket['key']]) > 0)
@@ -128,6 +155,46 @@
                 </x-filament::section>
             @endif
         @endforeach
+
+        {{-- Λείπουν από το AADE — the genuinely worrying bucket (all of them in
+             production; native-only in sandbox). --}}
+        @if (count($missingReal) > 0)
+            <x-filament::section :collapsible="true">
+                <x-slot name="heading">
+                    <span class="flex items-center gap-2">
+                        <x-filament::icon icon="heroicon-o-x-circle" class="h-5 w-5 text-danger-500" />
+                        Λείπουν από το AADE
+                        <x-filament::badge color="danger">{{ count($missingReal) }}</x-filament::badge>
+                    </span>
+                </x-slot>
+                <x-slot name="description">Τα φιλοξενούμε ως υποβληθέντα, αλλά το AADE δεν τα επιστρέφει — χρειάζονται έλεγχο.</x-slot>
+
+                @include('filament.pages.partials.reconciliation-table', [
+                    'rows' => $missingReal,
+                    'columns' => ['invcode', 'mark', 'issuedAt', 'counterpart', 'gross', 'localState', 'aadeState', 'problem', 'open'],
+                ])
+            </x-filament::section>
+        @endif
+
+        {{-- Εισαγμένα — production MARKs a SANDBOX can't see. Informational, collapsed.
+             (Non-empty only in sandbox; in production these are real → above.) --}}
+        @if (count($missingNoise) > 0)
+            <x-filament::section :collapsible="true" :collapsed="true">
+                <x-slot name="heading">
+                    <span class="flex items-center gap-2">
+                        <x-filament::icon icon="heroicon-o-archive-box" class="h-5 w-5 text-gray-400" />
+                        Εισαγμένα (ΜΑΡΚ άλλου καναλιού)
+                        <x-filament::badge color="gray">{{ count($missingNoise) }}</x-filament::badge>
+                    </span>
+                </x-slot>
+                <x-slot name="description">Εισαγμένα από το προηγούμενο σύστημα με ΜΑΡΚ παραγωγής — δεν επιστρέφονται στο sandbox. Ενημερωτικό.</x-slot>
+
+                @include('filament.pages.partials.reconciliation-table', [
+                    'rows' => $missingNoise,
+                    'columns' => ['invcode', 'mark', 'issuedAt', 'counterpart', 'gross', 'localState', 'aadeState', 'problem', 'open'],
+                ])
+            </x-filament::section>
+        @endif
 
         {{-- Matched (collapsed by default) --}}
         @if (count($result['matched']) > 0)

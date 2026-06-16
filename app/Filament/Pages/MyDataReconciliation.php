@@ -40,12 +40,12 @@ class MyDataReconciliation extends Page implements HasTable
 
     public static function getNavigationLabel(): string
     {
-        return 'Συμφωνία myDATA';
+        return 'Τοπικός έλεγχος κατάστασης';
     }
 
     public function getTitle(): string
     {
-        return 'Συμφωνία myDATA';
+        return 'Τοπικός έλεγχος κατάστασης';
     }
 
     public static function getNavigationBadge(): ?string
@@ -58,6 +58,12 @@ class MyDataReconciliation extends Page implements HasTable
     public static function getNavigationBadgeColor(): ?string
     {
         return 'danger';
+    }
+
+    /** Count of local↔AADE state contradictions for the current tenant (dashboard tile). */
+    public static function mismatchCount(): int
+    {
+        return static::mismatchQuery()->count();
     }
 
     /** Tenant-scoped invoices whose local status contradicts the AADE state. */

@@ -54,16 +54,27 @@
 - **Υποβολή / ακύρωση / dry-run** μέσω `firebed/aade-mydata` (`MyDataSubmitter`),
   sandbox-validated (1.1/2.1/11.x/5.1 + CANCEL + νέοι taxTypes + 4% override + ΔΑ).
 - **`mydata_marks` = source of truth** (πλήρες request/response XML, νομικό audit).
-- **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3**·
-  ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**: τοπικό (Phase 1,
-  ξεχωριστή «Συμφωνία myDATA») + ζωντανό (Phase 2, `SalesReconciler`)· matched /
-  stateMismatch / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε
+- **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3 /
+  Έλεγχος ρυθμίσεων**· ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:
+  τοπικό (Phase 1, ξεχωριστός «Τοπικός έλεγχος κατάστασης») + ζωντανό (Phase 2, `SalesReconciler`)·
+  matched / stateMismatch / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε
   tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
+- **«Ανανέωση όλων»** (`MyDataConsoleRefresh`) — ένα κουμπί κατεβάζει μαζί Πωλήσεις+Έξοδα+Ε3+εικόνα
+  ΦΠΑ (σειριακά) και σπέρνει την cache κάθε tab· per-step isolation + summary toast. Το per-tab
+  «Έλεγχος» μένει ως δευτερεύον single-source refresh.
+- **myDATA «Outbox»** — φίλτρο «Προς υποβολή» στα Παραστατικά + Ψηφιακή Διακίνηση (ζωντανά έγγραφα
+  filable χωρίς ΜΑΡΚ· `scopeAwaitingMyData`) + dashboard widget **«Συγχρονισμός myDATA»** (προς
+  υποβολή / τοπικές ασυμφωνίες / διασταύρωση-AADE με freshness — κάθε κάρτα link στο worklist της).
+- **Έλεγχος ρυθμίσεων** (tab) — structured insight πάνω στο `MyDataConfigAudit`: ετοιμότητα
+  tenant + κάθε τύπος παραστατικού/κατηγορία ΦΠΑ με badge ✓/⚠/✗ και **link «Διόρθωση →»** στη
+  ρύθμιση. Ίδιο audit τροφοδοτεί το `mydata:preflight` ΚΑΙ το badge «Ετοιμότητα myDATA» στη
+  λίστα Invoice Types.
 - **Σελίδα ΜΑΡΚ** (direction-aware) + per-line E3 classification.
 - **Enrich/έλεγχος από ΑΑΔΕ** (`EnrichInvoiceFromAade`) — από τη Σελίδα ΜΑΡΚ: live-pull
   του MARK, stamp **QR**, συμπλήρωση κενών header πεδίων + **per-field σύγκριση**
   (cross-check τοπικού ↔ ΑΑΔΕ).
-- **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables.
+- **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables (thin
+  renderer πάνω στο κοινό `MyDataConfigAudit`· βλ. «Έλεγχος ρυθμίσεων» tab).
 - **Code tables** (`App\Support\MyData\Codes`) — §8 πίνακες με validation helpers.
 
 ## 4. Έξοδα / Προμηθευτές / Ε3

@@ -17,7 +17,43 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Added
+- **myDATA «Outbox» — έτοιμο φίλτρο «Προς υποβολή» + dashboard tiles.** Νέα καρτέλα-φίλτρο «Προς
+  υποβολή» στα «Παραστατικά» ΚΑΙ στη «Ψηφιακή Διακίνηση» = ζωντανά έγγραφα που ΘΑ έπρεπε να
+  υποβληθούν αλλά δεν έχουν ΜΑΡΚ (πρόχειρα + αποτυχημένες/παραλειφθείσες υποβολές· τα imported
+  legacy έχουν ήδη ΜΑΡΚ → δεν εμφανίζονται). Κοινό scope `Invoice/DeliveryNote::scopeAwaitingMyData`.
+  Νέο dashboard widget **«Συγχρονισμός myDATA»**: κάρτες «προς υποβολή» (→ το φίλτρο), «τοπικές
+  ασυμφωνίες» (→ τοπικός έλεγχος), «διασταύρωση με AADE» (freshness + ασυμφωνίες από το cache του
+  scheduled reconcile, → κονσόλα). Όλα cheap COUNT/cache — κανένα live AADE call στο dashboard.
+- **«Ανανέωση όλων» — ένα fetch για όλη την Κονσόλα myDATA.** Ένα κουμπί (πρωτεύον σε κάθε tab)
+  κατεβάζει ΜΑΖΙ Πωλήσεις + Έξοδα + Επισκόπηση Ε3 + εικόνα ΦΠΑ για το διάστημα (σειριακά, rate-limit
+  friendly) και «σπέρνει» την cache κάθε καρτέλας με ένα κλικ. Per-step isolation: αν μία σκάσει
+  (π.χ. 429) οι υπόλοιπες συνεχίζουν και ένα toast συνοψίζει. Το per-tab «Έλεγχος» μένει ως
+  δευτερεύον (single-source). Νέο `MyDataConsoleRefresh` + στατικοί `refreshSnapshot` σε όλες τις tabs.
+- **«Έλεγχος ρυθμίσεων» tab στην Κονσόλα myDATA** — structured, click-to-fix view πάνω σε ένα
+  νέο κοινό `MyDataConfigAudit`: ετοιμότητα tenant + κάθε τύπος παραστατικού / κατηγορία ΦΠΑ με
+  badge ✓/⚠/✗, το AADE error code του κάθε ευρήματος, και link «Διόρθωση →» στη ρύθμιση. Το ίδιο
+  audit τροφοδοτεί πλέον το `mydata:preflight` (thin renderer) ΚΑΙ ένα badge «Ετοιμότητα myDATA»
+  στη λίστα Invoice Types — ο μισός έλεγχος ζει εκεί που ζει το config.
+
 ### Changed
+- **Κονσόλα myDATA — ειλικρινές «Λείπουν από AADE» (το «203» insight).** Το `missingAtAade` σπάει
+  σε **εισαγμένα** (legacy invoice με ΜΑΡΚ παραγωγής — ένα sandbox κανάλι δεν τα επιστρέφει,
+  ενημερωτικό) vs **ανεπιβεβαίωτα native** (το φιλοξενούμε ως υποβληθέν αλλά το AADE δεν το γυρνά →
+  πραγματικός έλεγχος). Το `discrepancyCount` (άρα toast + dashboard tile) μετρά ΜΟΝΟ τα native →
+  το νούμερο «ασυμφωνίες» γίνεται αληθινό. + banner όταν `mydata_mode=sandbox` εξηγεί το γιατί.
+- **Η «Ανανέωση εικόνας ΦΠΑ» έφυγε από τα «Εργαλεία»** → καλύπτεται από το «Ανανέωση όλων» της
+  κονσόλας (ο scheduler `mydata:refresh-vat-picture` μένει). Τα «Εργαλεία» κρατούν πλέον μόνο το
+  τοπικό «Επανυπολογισμός υπολοίπων».
+- **«Άντληση από myDATA» στα Έξοδα = in-place picker, όχι redirect.** Αντί να σε πετάει στην
+  Κονσόλα — Έξοδα, ανοίγει modal με τα αδέσποτα (checkbox-list, όλα προεπιλεγμένα) και καταχωρίζει
+  ΑΚΡΙΒΩΣ όσα κρατάς τσεκαρισμένα — μένεις στη λίστα. Νέο `ExpenseImporter::importMarks()` (ένα
+  fetch, idempotent) για το επιλεκτικό import. Το all-or-nothing του console παραμένει.
+- **«Συμφωνία myDATA» → «Τοπικός έλεγχος κατάστασης»** με ρητό banner ότι είναι ΕΣΩΤΕΡΙΚΟΣ
+  έλεγχος (δεν ρωτά το AADE) — ώστε να μη φαίνεται αντιφατικό όταν λέει «καμία ασυμφωνία» ενώ
+  η ζωντανή Κονσόλα myDATA δείχνει διαφορές (μετράνε διαφορετικά πράγματα).
+- **Ο έλεγχος ρυθμίσεων myDATA έφυγε από τα «Εργαλεία»** → στο νέο «Έλεγχος ρυθμίσεων» tab
+  (richer από το text-dump κουμπί). Τα «Εργαλεία» κρατούν εικόνα ΦΠΑ + επανυπολογισμό υπολοίπων.
 - **Deploy defaults to the current branch tip, not a tag.** `deploy/update.sh` with no arg now
   ships the pushed tip of the branch you're on (`origin/main` on main) and stays ON the branch —
   the `git pull` workflow, no tags to remember. Passing a tag still works (pinned release /

@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\InvoiceTypes\Tables;
 
+use App\Models\InvoiceType;
+use App\Services\MyData\MyDataConfigAudit;
 use App\Support\MyData\InvoiceTypeClassSuggester;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -83,6 +85,32 @@ class InvoiceTypesTable
                     })
                     ->toggleable(),
 
+                // myDATA-readiness verdict from the SHARED MyDataConfigAudit — the
+                // same check behind `mydata:preflight` and the «Έλεγχος ρυθμίσεων»
+                // console tab. Beyond «is mydata_type set» (the column above), it
+                // also validates the income classification (type + category), so a
+                // ✓ here means AADE would accept this type's config.
+                TextColumn::make('mydata_ready')
+                    ->label('Ετοιμότητα myDATA')
+                    ->badge()
+                    ->state(fn (InvoiceType $record): string => match (self::auditRow($record)->status()) {
+                        'error' => 'Σφάλμα',
+                        'warn' => 'Προσοχή',
+                        default => 'Εντάξει',
+                    })
+                    ->color(fn (InvoiceType $record): string => match (self::auditRow($record)->status()) {
+                        'error' => 'danger',
+                        'warn' => 'warning',
+                        default => 'success',
+                    })
+                    ->icon(fn (InvoiceType $record): string => match (self::auditRow($record)->status()) {
+                        'error' => 'heroicon-o-x-circle',
+                        'warn' => 'heroicon-o-exclamation-triangle',
+                        default => 'heroicon-o-check-circle',
+                    })
+                    ->tooltip(fn (InvoiceType $record): ?string => implode(' · ', self::auditRow($record)->messages()) ?: null)
+                    ->toggleable(),
+
                 IconColumn::make('show_on_menu')
                     ->label('On menu')
                     ->boolean()
@@ -134,5 +162,23 @@ class InvoiceTypesTable
                 ]),
             ])
             ->defaultSort('code');
+    }
+
+    /**
+     * Memoised per-record audit row (the badge reads status/color/icon AND the
+     * tooltip reads messages() off the SAME row — four closures per row, one
+     * audit). In-memory check against the §8 code tables, no query. Keyed by the
+     * global surrogate PK (no cross-tenant collision; the legacy_id collision
+     * doesn't touch the PK). Per-request under FPM — see the Octane note in
+     * CLAUDE.md if this ever runs on a persistent worker.
+     *
+     * @var array<int, \App\Services\MyData\ConfigAuditRow>
+     */
+    private static array $auditCache = [];
+
+    private static function auditRow(InvoiceType $record): \App\Services\MyData\ConfigAuditRow
+    {
+        return self::$auditCache[$record->getKey()] ??=
+            app(MyDataConfigAudit::class)->auditInvoiceType($record);
     }
 }

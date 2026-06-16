@@ -63,7 +63,35 @@ class ExpenseImporter
 
         [$docs, $cancelledMarks] = $this->fetchFullDocs(new RequestDocs, $from->format('d/m/Y'), $to->format('d/m/Y'));
 
-        return $this->persistDocs($docs, $cancelledMarks, mode: 'sync', onlyMark: $onlyMark);
+        return $this->persistDocs($docs, $cancelledMarks, mode: 'sync', onlyMarks: self::markSet($onlyMark));
+    }
+
+    /**
+     * Import a SPECIFIC set of supplier-doc MARKs (the «Άντληση από myDATA» picker
+     * on the Έξοδα list: fetch once, then the operator checks which αδέσποτα to
+     * keep). One AADE fetch for the window, persist only the chosen MARKs.
+     * Idempotent — already-present MARKs are skipped.
+     *
+     * @param  list<string>  $marks
+     */
+    public function importMarks(Carbon $from, Carbon $to, array $marks): ExpenseImportResult
+    {
+        FirebedCredentials::init($this->tenant, $this->mockHandler);
+
+        [$docs, $cancelledMarks] = $this->fetchFullDocs(new RequestDocs, $from->format('d/m/Y'), $to->format('d/m/Y'));
+
+        $set = [];
+        foreach ($marks as $m) {
+            $set[$m] = true;
+        }
+
+        return $this->persistDocs($docs, $cancelledMarks, mode: 'sync', onlyMarks: $set ?: null);
+    }
+
+    /** @return array<string, true>|null */
+    private static function markSet(?string $mark): ?array
+    {
+        return $mark === null ? null : [$mark => true];
     }
 
     /**
@@ -83,7 +111,7 @@ class ExpenseImporter
             fn ($doc): bool => Codes::transmittedDocBucket($doc->getInvoiceHeader()?->getInvoiceType()?->value) !== 'income',
         );
 
-        return $this->persistDocs($docs, $cancelledMarks, mode: 'self_declared', onlyMark: $onlyMark);
+        return $this->persistDocs($docs, $cancelledMarks, mode: 'self_declared', onlyMarks: self::markSet($onlyMark));
     }
 
     /**
@@ -93,8 +121,9 @@ class ExpenseImporter
      *
      * @param  array<string, \Firebed\AadeMyData\Models\Invoice>  $docs
      * @param  array<string, true>  $cancelledMarks  MARKs AADE folds as cancelled
+     * @param  array<string, true>|null  $onlyMarks  restrict to this MARK set (null = all)
      */
-    private function persistDocs(array $docs, array $cancelledMarks, string $mode, ?string $onlyMark): ExpenseImportResult
+    private function persistDocs(array $docs, array $cancelledMarks, string $mode, ?array $onlyMarks): ExpenseImportResult
     {
         $created = 0;
         $skipped = 0;
@@ -103,13 +132,18 @@ class ExpenseImporter
         $skippedMarks = [];
         $notFoundMarks = [];
 
-        // When importing a single MARK, surface "not found in window".
-        if ($onlyMark !== null && ! isset($docs[$onlyMark])) {
-            $notFoundMarks[] = $onlyMark;
+        // When importing a specific set, surface any MARK not present in the
+        // window. Cast to string — PHP coerces numeric-string array keys to int.
+        if ($onlyMarks !== null) {
+            foreach (array_keys($onlyMarks) as $wanted) {
+                if (! isset($docs[$wanted])) {
+                    $notFoundMarks[] = (string) $wanted;
+                }
+            }
         }
 
         foreach ($docs as $mark => $doc) {
-            if ($onlyMark !== null && $mark !== $onlyMark) {
+            if ($onlyMarks !== null && ! isset($onlyMarks[$mark])) {
                 continue;
             }
 

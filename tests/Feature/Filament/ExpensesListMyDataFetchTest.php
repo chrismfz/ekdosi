@@ -16,9 +16,10 @@ use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
- * Πακέτο 2 — the «Άντληση από myDATA» entry point on the Έξοδα list: a one-click
- * fetch that lands on the console worklist, plus a «τελευταία άντληση» tip. Both
- * gated on the same access as the expenses console.
+ * The «Άντληση από myDATA» entry point on the Έξοδα list: a one-click fetch that
+ * opens an in-place picker modal of the αδέσποτα (checkbox-select → import the
+ * kept ones), plus a «τελευταία άντληση» tip. Both gated on the same access as
+ * the expenses console.
  */
 class ExpensesListMyDataFetchTest extends TestCase
 {
@@ -124,7 +125,7 @@ XML;
     }
 
     #[Test]
-    public function the_button_fetches_and_redirects_to_the_console(): void
+    public function the_button_fetches_and_opens_the_orphan_picker(): void
     {
         $tenant = $this->tenant();
         $this->actAdmin($tenant);
@@ -133,13 +134,41 @@ XML;
         try {
             Livewire::test(ListExpenses::class)
                 ->callAction('fetchFromMyData')
-                ->assertRedirect(MyDataConsoleExpenses::getUrl(['tenant' => $tenant]));
+                // Fetch chains into the picker modal (no redirect to the console).
+                ->assertActionMounted('pickMyDataOrphans');
         } finally {
             MyDataConsoleExpenses::$testHandler = null;
         }
 
-        // The fetch seeded the console snapshot (and imported nothing).
+        // The fetch seeded the console snapshot (and imported nothing yet).
         $this->assertSame(1, MyDataConsoleExpenses::lastOrphanCount($tenant->id));
         $this->assertDatabaseMissing('expenses', ['company_id' => $tenant->id, 'mydata_mark' => '400012434052701']);
+    }
+
+    #[Test]
+    public function picking_an_orphan_imports_only_the_selected_one(): void
+    {
+        $tenant = $this->tenant();
+        $this->actAdmin($tenant);
+
+        // Two fetches only: loadOrphans (build picker) + importMarks (persist).
+        // The post-import subheading update filters the cache — no third fetch.
+        MyDataConsoleExpenses::$testHandler = new MockHandler([
+            new Response(200, [], $this->orphanDoc()),
+            new Response(200, [], $this->orphanDoc()),
+        ]);
+        try {
+            Livewire::test(ListExpenses::class)
+                ->callAction('fetchFromMyData')
+                ->assertActionMounted('pickMyDataOrphans')
+                ->setActionData(['marks' => ['400012434052701']])
+                ->callMountedAction();
+        } finally {
+            MyDataConsoleExpenses::$testHandler = null;
+        }
+
+        $this->assertDatabaseHas('expenses', [
+            'company_id' => $tenant->id, 'mydata_mark' => '400012434052701',
+        ]);
     }
 }

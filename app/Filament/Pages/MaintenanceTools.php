@@ -14,9 +14,12 @@ use Illuminate\Support\Str;
 /**
  * «Εργαλεία» — surfaces a few safe, idempotent maintenance artisan commands as
  * one-click buttons for the CURRENT tenant, so an operator never needs terminal
- * access for routine upkeep (ανανέωση εικόνας ΦΠΑ, επανυπολογισμός υπολοίπων,
- * έλεγχος ρυθμίσεων myDATA). Each button runs the same command the scheduler /
+ * access for routine upkeep. Each button runs the same command the scheduler /
  * CLI runs, scoped to this company, and shows the captured output on the page.
+ *
+ * The myDATA bits moved into the Κονσόλα myDATA cluster: the config audit → the
+ * structured «Έλεγχος ρυθμίσεων» tab; the εικόνα ΦΠΑ refresh → the «Ανανέωση όλων»
+ * one-fetch on the console tabs. What remains here is the non-myDATA upkeep.
  *
  * Admin territory (gated on View:MaintenanceTools — company_admin + super_admin;
  * run shield:generate + shield:sync-super-admin after deploy so the permission
@@ -68,30 +71,12 @@ class MaintenanceTools extends Page
     {
         return [
             $this->commandAction(
-                key: 'refresh_vat_picture',
-                label: 'Ανανέωση εικόνας ΦΠΑ',
-                icon: 'heroicon-o-receipt-percent',
-                command: 'mydata:refresh-vat-picture',
-                params: fn (Company $c) => ['--tenant' => $c->slug],
-                confirm: 'Ζητά από την ΑΑΔΕ την τρέχουσα εικόνα ΦΠΑ (εκροές−εισροές) για μήνα + τρίμηνο και την αποθηκεύει στην cache. Μπορεί να αργήσει λίγο.',
-                color: 'primary',
-            ),
-            $this->commandAction(
                 key: 'recompute_balances',
                 label: 'Επανυπολογισμός υπολοίπων',
                 icon: 'heroicon-o-calculator',
                 command: 'invoices:recompute-balances',
                 params: fn (Company $c) => ['--company' => $c->getKey()],
                 confirm: 'Ξαναϋπολογίζει τα cache πεδία χρημάτων (πληρωμένο/πιστωμένο/κατάσταση) όλων των παραστατικών αυτής της εταιρίας από πληρωμές + πιστωτικά. Ασφαλές, idempotent.',
-                color: 'gray',
-            ),
-            $this->commandAction(
-                key: 'mydata_preflight',
-                label: 'Έλεγχος ρυθμίσεων myDATA',
-                icon: 'heroicon-o-clipboard-document-check',
-                command: 'mydata:preflight',
-                params: fn (Company $c) => ['--tenant' => $c->slug],
-                confirm: null, // read-only audit
                 color: 'gray',
             ),
         ];
