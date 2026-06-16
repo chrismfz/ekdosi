@@ -17,6 +17,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Fixed
+- **Custom Filament σελίδες ήταν άστυλες (no-build CSS fix).** Ο admin panel φορτώνει μόνο το
+  component-CSS του Filament (καθόλου Tailwind utility layer) και δεν υπάρχει custom theme/asset
+  build — οπότε grids/spacing/πίνακες σε ~23 custom blade σελίδες έμεναν άστυλα (στοιβαγμένες
+  κάρτες, κολλημένοι headers· το ledger ήταν το χειρότερο). Νέο `resources/css/panel.css`
+  (hand-written utilities, standard Tailwind τιμές + dark/responsive) φορτωμένο μέσω
+  `FilamentAsset::register` και δημοσιευμένο από `filament:assets` (composer post-install) —
+  **χωρίς npm/Vite**. Όλες οι custom σελίδες αποδίδουν πλέον σωστά + dark-mode.
+
 ### Changed
 - **Βιβλίο Εσόδων-Εξόδων (#6) — ΜΑΡΚ/κατάσταση myDATA + καθαρότερη εμφάνιση.** Το `/ledger-book`
   αποκτά στήλες **ΜΑΡΚ** + **κατάσταση myDATA** (badge VALID/CANCELLED) στο ημερολόγιο και στα
