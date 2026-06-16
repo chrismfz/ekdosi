@@ -4,12 +4,16 @@ namespace App\Filament\Resources\Expenses\Tables;
 
 use App\Enums\ExpenseSource;
 use App\Filament\Support\Tags\TagControls;
+use App\Services\MyData\ExpenseClassifier;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\ViewAction;
+use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 
 class ExpensesTable
 {
@@ -125,6 +129,23 @@ class ExpensesTable
                     // No create/edit form for expenses (read-only import) — the
                     // bulk action is how you tag them.
                     TagControls::bulkAttachAction(),
+
+                    // Run the auto-classification rules (#5) over the selected
+                    // expenses — classifies the ones whose supplier matches a rule.
+                    BulkAction::make('applyClassificationRules')
+                        ->label('Εφαρμογή κανόνων χαρακτηρισμού')
+                        ->icon('heroicon-o-sparkles')
+                        ->color('primary')
+                        ->action(function (Collection $records): void {
+                            $applied = app(ExpenseClassifier::class)->classifyMany($records);
+
+                            Notification::make()
+                                ->title($applied > 0 ? "Χαρακτηρίστηκαν {$applied} έξοδα" : 'Κανένα έξοδο δεν ταίριαξε σε κανόνα')
+                                ->body($applied > 0 ? 'Υπόβαλέ τα στην ΑΑΔΕ από το κάθε έξοδο ή μαζικά.' : 'Φτιάξε κανόνες στο «Κανόνες χαρακτηρισμού».')
+                                ->{$applied > 0 ? 'success' : 'warning'}()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion(),
                 ]),
             ])
             ->defaultSort('issue_date', 'desc');

@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
 
 use App\Enums\ExpenseSource;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -130,5 +131,19 @@ class Expense extends Model
             .'|'.($line->classification_category ?: $this->classification_category))->unique();
 
         return $combos->count() > 1;
+    }
+
+    /**
+     * The «προς χαρακτηρισμό» worklist (#5): live AADE-pulled expenses (have a
+     * ΜΑΡΚ, not cancelled) that haven't been classified yet (state null). These
+     * are what the rules engine / the operator still needs to classify before
+     * submitting their χαρακτηρισμός to AADE.
+     */
+    public function scopeNeedsClassification(Builder $query): Builder
+    {
+        return $query
+            ->whereNotNull('mydata_mark')
+            ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'))
+            ->whereNull('classification_state');
     }
 }

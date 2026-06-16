@@ -39,6 +39,7 @@ class CompanyExporter
         'servers',
         'server_groups',
         'billing_connections',
+        'expense_classification_rules',
     ];
 
     /**

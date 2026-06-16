@@ -8,10 +8,13 @@ use App\Support\MyData\Codes;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 
 class ViewExpense extends ViewRecord
@@ -21,10 +24,12 @@ class ViewExpense extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
-            // Per-document expense classification (E5). LOCAL — the operator
-            // assigns one §8.x E3 type + category2_x (εμπορεύματα/πάγια/δαπάνες)
-            // for the whole doc; stored on the header for the ΦΠΑ/Ε3 reports and
-            // then submitted to AADE via the «Υποβολή» action below.
+            // Unified expense classification (E5). LOCAL — one action, two modes:
+            // «Ενιαίος» = one §8.x E3 type + category2_x (εμπορεύματα/πάγια/δαπάνες)
+            // for the whole doc; «Μικτό» = a per-line type+category (a supplier
+            // invoice may mix εμπόρευμα + πάγιο + δαπάνη). Stored locally, then
+            // submitted to AADE via «Υποβολή». The submitter prefers each line's
+            // value, falling back to the header — so both modes file correctly.
             Action::make('classify')
                 ->label('Χαρακτηρισμός')
                 ->icon('heroicon-o-tag')
@@ -32,53 +37,12 @@ class ViewExpense extends ViewRecord
                 ->modalHeading('Χαρακτηρισμός εξόδου')
                 ->modalDescription(fn (): string => $this->record->classification_state === 'submitted'
                     ? '⚠ Έχει ΗΔΗ υποβληθεί χαρακτηρισμός στην ΑΑΔΕ. Νέος χαρακτηρισμός απαιτεί ΕΠΑΝΥΠΟΒΟΛΗ (η προηγούμενη υποβολή διατηρείται στο ιστορικό).'
-                    : 'Επιλέξτε τύπο (E3) και κατηγορία χαρακτηρισμού (εμπορεύματα/πάγια/δαπάνες) για όλο το παραστατικό. Αποθηκεύεται τοπικά — υπόβαλέ το στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
+                    : 'Διάλεξε «Ενιαίος» για όλο το παραστατικό, ή «Μικτό» για διαφορετικό χαρακτηρισμό ανά γραμμή. Αποθηκεύεται τοπικά — υπόβαλέ το με το «Υποβολή χαρακτηρισμού».')
                 ->modalSubmitActionLabel('Αποθήκευση')
                 ->fillForm(fn (): array => [
+                    'mode' => $this->record->classificationIsMixed() ? 'mixed' : 'single',
                     'classification_type' => $this->record->classification_type,
                     'classification_category' => $this->record->classification_category,
-                ])
-                ->schema([
-                    Select::make('classification_type')
-                        ->label('Τύπος χαρακτηρισμού (E3)')
-                        ->options(Codes::expenseClassTypeOptions())
-                        ->searchable()
-                        ->required(),
-                    Select::make('classification_category')
-                        ->label('Κατηγορία χαρακτηρισμού')
-                        ->options(Codes::expenseClassCategoryOptions())
-                        ->searchable()
-                        ->required(),
-                ])
-                ->action(function (array $data): void {
-                    $this->record->forceFill([
-                        'classification_type' => $data['classification_type'],
-                        'classification_category' => $data['classification_category'],
-                        'classification_state' => 'classified',
-                    ])->save();
-
-                    Notification::make()
-                        ->title('Ο χαρακτηρισμός αποθηκεύτηκε')
-                        ->body('Υπόβαλέ τον στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
-                        ->success()
-                        ->send();
-                }),
-
-            // Per-LINE classification — the same supplier invoice may mix
-            // εμπορεύματα + πάγια + δαπάνες, so each line gets its own E3 type +
-            // category2_x. The submitter prefers the line's value, falling back to
-            // the document header (the «Χαρακτηρισμός» action above).
-            Action::make('classify_lines')
-                ->label('Χαρακτηρισμός ανά γραμμή')
-                ->icon('heroicon-o-list-bullet')
-                ->color('primary')
-                ->visible(fn (): bool => $this->record->lines()->count() > 1)
-                ->modalHeading('Χαρακτηρισμός ανά γραμμή')
-                ->modalDescription(fn (): string => $this->record->classification_state === 'submitted'
-                    ? '⚠ Έχει ΗΔΗ υποβληθεί χαρακτηρισμός στην ΑΑΔΕ. Νέος χαρακτηρισμός ανά γραμμή απαιτεί ΕΠΑΝΥΠΟΒΟΛΗ (η προηγούμενη υποβολή διατηρείται στο ιστορικό).'
-                    : 'Όρισε τύπο (E3) + κατηγορία ξεχωριστά για κάθε γραμμή. Προ-συμπληρώνεται από τη γραμμή ή, αν λείπει, από τον χαρακτηρισμό κεφαλίδας.')
-                ->modalSubmitActionLabel('Αποθήκευση')
-                ->fillForm(fn (): array => [
                     'lines' => $this->record->lines->map(fn ($line): array => [
                         'id' => $line->id,
                         'item_descr' => $line->item_descr,
@@ -88,8 +52,31 @@ class ViewExpense extends ViewRecord
                     ])->all(),
                 ])
                 ->schema([
+                    Radio::make('mode')
+                        ->label('Τρόπος χαρακτηρισμού')
+                        ->options($this->classificationModeOptions())
+                        ->default('single')
+                        ->live()
+                        ->required(),
+
+                    // «Ενιαίος» — one classification for the whole document.
+                    Select::make('classification_type')
+                        ->label('Τύπος χαρακτηρισμού (E3)')
+                        ->options(Codes::expenseClassTypeOptions())
+                        ->searchable()
+                        ->visible(fn (Get $get): bool => $get('mode') !== 'mixed')
+                        ->required(fn (Get $get): bool => $get('mode') !== 'mixed'),
+                    Select::make('classification_category')
+                        ->label('Κατηγορία χαρακτηρισμού')
+                        ->options(Codes::expenseClassCategoryOptions())
+                        ->searchable()
+                        ->visible(fn (Get $get): bool => $get('mode') !== 'mixed')
+                        ->required(fn (Get $get): bool => $get('mode') !== 'mixed'),
+
+                    // «Μικτό» — a type+category per line.
                     Repeater::make('lines')
                         ->label('Γραμμές')
+                        ->visible(fn (Get $get): bool => $get('mode') === 'mixed')
                         ->addable(false)->deletable(false)->reorderable(false)
                         ->itemLabel(fn (array $state): string => trim((string) ($state['item_descr'] ?? '—'))
                             .' · '.number_format((float) ($state['net_value'] ?? 0), 2).'€')
@@ -107,22 +94,94 @@ class ViewExpense extends ViewRecord
                         ->columns(2),
                 ])
                 ->action(function (array $data): void {
-                    $rows = collect($data['lines'] ?? [])->keyBy('id');
-                    foreach ($this->record->lines as $line) {
-                        $row = $rows->get($line->id);
-                        if ($row === null) {
-                            continue;
+                    // Atomic: the per-line writes + the header/state write must land
+                    // together (a crash mid-way must not leave lines cleared while
+                    // the header stays unclassified).
+                    DB::transaction(function () use ($data): void {
+                        if (($data['mode'] ?? 'single') === 'mixed') {
+                            $rows = collect($data['lines'] ?? [])->keyBy('id');
+                            foreach ($this->record->lines as $line) {
+                                $row = $rows->get($line->id);
+                                if ($row === null) {
+                                    continue;
+                                }
+                                $line->forceFill([
+                                    'classification_type' => $row['classification_type'],
+                                    'classification_category' => $row['classification_category'],
+                                ])->save();
+                            }
+                            $this->record->forceFill(['classification_state' => 'classified'])->save();
+                        } else {
+                            // Single: clear any per-line overrides so the header is the
+                            // one effective classification, then stamp header + state.
+                            $this->record->lines()->update([
+                                'classification_type' => null,
+                                'classification_category' => null,
+                            ]);
+                            $this->record->forceFill([
+                                'classification_type' => $data['classification_type'],
+                                'classification_category' => $data['classification_category'],
+                                'classification_state' => 'classified',
+                            ])->save();
                         }
-                        $line->forceFill([
-                            'classification_type' => $row['classification_type'],
-                            'classification_category' => $row['classification_category'],
-                        ])->save();
-                    }
-                    $this->record->forceFill(['classification_state' => 'classified'])->save();
+                    });
 
                     Notification::make()
-                        ->title('Ο χαρακτηρισμός ανά γραμμή αποθηκεύτηκε')
+                        ->title('Ο χαρακτηρισμός αποθηκεύτηκε')
                         ->body('Υπόβαλέ τον στην ΑΑΔΕ με το «Υποβολή χαρακτηρισμού».')
+                        ->success()
+                        ->send();
+                }),
+
+            // Build a reusable auto-classification rule (#5) from THIS expense, so
+            // the next doc from the same supplier classifies itself. Prefills the
+            // supplier ΑΦΜ + the current classification; the operator picks whether
+            // it's supplier-wide or only for this type.
+            Action::make('create_rule')
+                ->label('Δημιουργία κανόνα')
+                ->icon('heroicon-o-sparkles')
+                ->color('gray')
+                ->visible(fn (): bool => filled($this->record->supplier_afm)
+                    && $this->record->company?->einvoice_provider === 'gr-mydata')
+                ->modalHeading('Κανόνας αυτόματου χαρακτηρισμού')
+                ->modalDescription(fn (): string => 'Τα επόμενα έξοδα από τον προμηθευτή «'
+                    .($this->record->supplier_name ?: $this->record->supplier_afm).'» θα χαρακτηρίζονται αυτόματα.')
+                ->modalSubmitActionLabel('Δημιουργία')
+                ->fillForm(fn (): array => [
+                    'classification_type' => $this->record->classification_type,
+                    'classification_category' => $this->record->classification_category,
+                    'only_this_type' => false,
+                ])
+                ->schema([
+                    Select::make('classification_type')
+                        ->label('Τύπος χαρακτηρισμού (E3)')
+                        ->options(Codes::expenseClassTypeOptions())
+                        ->searchable()
+                        ->required(),
+                    Select::make('classification_category')
+                        ->label('Κατηγορία χαρακτηρισμού')
+                        ->options(Codes::expenseClassCategoryOptions())
+                        ->searchable()
+                        ->required(),
+                    \Filament\Forms\Components\Toggle::make('only_this_type')
+                        ->label(fn (): string => 'Μόνο για τον τύπο '.($this->record->invoice_type ?: '—'))
+                        ->visible(fn (): bool => filled($this->record->invoice_type))
+                        ->helperText('Αλλιώς ο κανόνας ισχύει για όλους τους τύπους αυτού του προμηθευτή.'),
+                ])
+                ->action(function (array $data): void {
+                    \App\Models\ExpenseClassificationRule::create([
+                        'company_id' => $this->record->company_id,
+                        'supplier_afm' => $this->record->supplier_afm,
+                        'invoice_type' => ($data['only_this_type'] ?? false) ? $this->record->invoice_type : null,
+                        'classification_type' => $data['classification_type'],
+                        'classification_category' => $data['classification_category'],
+                        'label' => $this->record->supplier_name,
+                        'is_active' => true,
+                    ]);
+
+                    Notification::make()
+                        ->title('Ο κανόνας δημιουργήθηκε')
+                        ->body('Θα εφαρμόζεται αυτόματα στα επόμενα έξοδα του προμηθευτή.')
                         ->success()
                         ->send();
                 }),
@@ -174,5 +233,21 @@ class ViewExpense extends ViewRecord
             // Edit — only for MANUAL expenses (the resource's canEdit gate).
             EditAction::make(),
         ];
+    }
+
+    /**
+     * Classification-mode options: «Ενιαίος» always; «Μικτό» only when there are
+     * 2+ lines to mix (a single-line doc can't be mixed).
+     *
+     * @return array<string, string>
+     */
+    private function classificationModeOptions(): array
+    {
+        $options = ['single' => 'Ενιαίος (όλο το παραστατικό)'];
+        if ($this->record->lines()->count() > 1) {
+            $options['mixed'] = 'Μικτό (διαφορετικός ανά γραμμή)';
+        }
+
+        return $options;
     }
 }

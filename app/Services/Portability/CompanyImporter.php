@@ -68,6 +68,7 @@ class CompanyImporter
         'distribution_aims', 'delivery_methods', 'vat_categories', 'payment_methods',
         'bank_accounts', 'product_categories', 'metric_units', 'tags',
         'server_groups', 'billing_connections', 'invoice_types', 'servers',
+        'expense_classification_rules',
     ];
 
     /** Import order for transactional (bucket C, --full): parents before children. */

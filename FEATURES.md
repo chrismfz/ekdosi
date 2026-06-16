@@ -75,6 +75,9 @@
   (cross-check τοπικού ↔ ΑΑΔΕ).
 - **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables (thin
   renderer πάνω στο κοινό `MyDataConfigAudit`· βλ. «Έλεγχος ρυθμίσεων» tab).
+- **Αυτόματος χαρακτηρισμός εξόδων** (`ExpenseClassifier` + «Κανόνες χαρακτηρισμού») — «προμηθευτής
+  (+ προαιρ. τύπος) → E3 χαρακτηρισμός»· auto-apply στο import + bulk «Εφαρμογή κανόνων» + worklist
+  «Προς χαρακτηρισμό» + «Δημιουργία κανόνα» από έξοδο. (Η υποβολή-για-τρίτο/`entityVatNumber` μένει BACKLOG.)
 - **Code tables** (`App\Support\MyData\Codes`) — §8 πίνακες με validation helpers.
 
 ## 4. Έξοδα / Προμηθευτές / Ε3

@@ -276,8 +276,17 @@ class ListExpenses extends BaseListRecords
 
         // The fixed economic buckets, then the operator's pinned-tag tabs
         // (appended after — same Έξοδα-style fast filters, tag-driven).
+        $needsClassification = Expense::query()->needsClassification()->count();
+
         return [
             'all' => Tab::make('Όλα'),
+
+            // Worklist: AADE-pulled expenses still awaiting a χαρακτηρισμός (#5).
+            'needs_classification' => Tab::make('Προς χαρακτηρισμό')
+                ->icon('heroicon-o-tag')
+                ->badge($needsClassification ?: null)
+                ->badgeColor('warning')
+                ->modifyQueryUsing(fn (Builder $query) => $query->needsClassification()),
 
             'suppliers' => Tab::make('Προμηθευτών')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('source', ExpenseSource::Sync->value)),
