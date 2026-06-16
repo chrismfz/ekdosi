@@ -127,6 +127,59 @@ class ViewExpense extends ViewRecord
                         ->send();
                 }),
 
+            // Build a reusable auto-classification rule (#5) from THIS expense, so
+            // the next doc from the same supplier classifies itself. Prefills the
+            // supplier ΑΦΜ + the current classification; the operator picks whether
+            // it's supplier-wide or only for this type.
+            Action::make('create_rule')
+                ->label('Δημιουργία κανόνα')
+                ->icon('heroicon-o-sparkles')
+                ->color('gray')
+                ->visible(fn (): bool => filled($this->record->supplier_afm)
+                    && $this->record->company?->einvoice_provider === 'gr-mydata')
+                ->modalHeading('Κανόνας αυτόματου χαρακτηρισμού')
+                ->modalDescription(fn (): string => 'Τα επόμενα έξοδα από τον προμηθευτή «'
+                    .($this->record->supplier_name ?: $this->record->supplier_afm).'» θα χαρακτηρίζονται αυτόματα.')
+                ->modalSubmitActionLabel('Δημιουργία')
+                ->fillForm(fn (): array => [
+                    'classification_type' => $this->record->classification_type,
+                    'classification_category' => $this->record->classification_category,
+                    'only_this_type' => false,
+                ])
+                ->schema([
+                    Select::make('classification_type')
+                        ->label('Τύπος χαρακτηρισμού (E3)')
+                        ->options(Codes::expenseClassTypeOptions())
+                        ->searchable()
+                        ->required(),
+                    Select::make('classification_category')
+                        ->label('Κατηγορία χαρακτηρισμού')
+                        ->options(Codes::expenseClassCategoryOptions())
+                        ->searchable()
+                        ->required(),
+                    \Filament\Forms\Components\Toggle::make('only_this_type')
+                        ->label(fn (): string => 'Μόνο για τον τύπο '.($this->record->invoice_type ?: '—'))
+                        ->visible(fn (): bool => filled($this->record->invoice_type))
+                        ->helperText('Αλλιώς ο κανόνας ισχύει για όλους τους τύπους αυτού του προμηθευτή.'),
+                ])
+                ->action(function (array $data): void {
+                    \App\Models\ExpenseClassificationRule::create([
+                        'company_id' => $this->record->company_id,
+                        'supplier_afm' => $this->record->supplier_afm,
+                        'invoice_type' => ($data['only_this_type'] ?? false) ? $this->record->invoice_type : null,
+                        'classification_type' => $data['classification_type'],
+                        'classification_category' => $data['classification_category'],
+                        'label' => $this->record->supplier_name,
+                        'is_active' => true,
+                    ]);
+
+                    Notification::make()
+                        ->title('Ο κανόνας δημιουργήθηκε')
+                        ->body('Θα εφαρμόζεται αυτόματα στα επόμενα έξοδα του προμηθευτή.')
+                        ->success()
+                        ->send();
+                }),
+
             // Submit the local classification to AADE (SendExpensesClassification).
             // Visible only for a myDATA-pulled doc (has a ΜΑΡΚ) that is classified
             // but not yet submitted.
