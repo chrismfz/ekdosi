@@ -67,7 +67,7 @@
             <td style="width:25%;"><div class="label">Καθαρό αποτέλεσμα (έσοδα − έξοδα)</div>
                 <div class="val {{ $net >= 0 ? 'pos' : 'neg' }}">{{ $eur($net) }}</div></td>
             <td style="width:25%;"><div class="label">ΦΠΑ εκροών − εισροών</div>
-                <div class="val {{ $result->vatBalance() > 0 ? 'neg' : 'pos' }}">{{ $eur($result->vatBalance()) }}</div>
+                <div class="val {{ $result->vatBalance() > 0 ? 'neg' : 'pos' }}">{{ $eur(abs($result->vatBalance())) }}</div>
                 <div class="muted">{{ $result->vatBalance() > 0 ? 'Προς απόδοση' : 'Πιστωτικό' }}</div></td>
         </tr>
     </table>
