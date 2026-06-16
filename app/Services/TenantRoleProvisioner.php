@@ -191,8 +191,40 @@ class TenantRoleProvisioner
     {
         $guard = ShieldUtils::getFilamentAuthGuard();
         foreach ($this->managedRoleNames() as $name) {
-            $this->upsertRole($name, $guard, $company);
+            $role = $this->upsertRole($name, $guard, $company);
+
+            // super_admin needs NO permissions (the global Gate::before bypass).
+            if ($name === ShieldUtils::getSuperAdminName()) {
+                continue;
+            }
+
+            // Backfill the baseline permission map ONLY when the role currently
+            // holds NONE — a freshly created (import `--into` heal) row, or one a
+            // picker save created rows-only before any permission sync ran. A role
+            // that already holds ≥1 permission is left untouched (never clobber a
+            // manual per-tenant customization). Without this, assigning
+            // company_admin/operator via the picker to a company whose roles were
+            // never permission-synced grants an EMPTY role → the user sees the
+            // tenant but no resources (the «βλέπει Nexon αλλά τίποτα μέσα» case).
+            if ($role->permissions()->count() === 0) {
+                $role->syncPermissions($this->defaultPermissionsFor($name, $guard));
+            }
         }
+    }
+
+    /**
+     * The default permission set a managed non-super role should hold, used to
+     * backfill an empty role. super_admin is intentionally absent (it needs none).
+     *
+     * @return Collection<int, Permission>
+     */
+    private function defaultPermissionsFor(string $name, string $guard): Collection
+    {
+        return match ($name) {
+            self::ROLE_COMPANY_ADMIN => $this->companyAdminPermissions($guard),
+            self::ROLE_OPERATOR => $this->operatorPermissions($guard),
+            default => collect(),
+        };
     }
 
     /**

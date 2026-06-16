@@ -176,6 +176,60 @@ class TenantRolePickerTest extends TestCase
         $this->assertFalse($p->hasSuperAdminIn($user, $b), 'NOT super_admin in B');
     }
 
+    public function test_picker_backfills_permissions_for_an_empty_managed_role(): void
+    {
+        // Company created BEFORE any Permission rows exist (the order a fresh box
+        // / an import `--into` heal hits): the provisioner makes the company_admin
+        // ROW but has nothing to sync, so it lands with ZERO permissions — the
+        // «βλέπει την εταιρία αλλά τίποτα μέσα» state.
+        $company = $this->makeCompany('healme');
+        $user = $this->makeUser();
+        $user->companies()->attach($company->id);
+
+        // Shield permissions appear afterwards (shield:generate runs).
+        $this->seedPermissions();
+
+        $role = \App\Models\Role::query()->withoutGlobalScopes()
+            ->where('name', TenantRoleProvisioner::ROLE_COMPANY_ADMIN)
+            ->where('company_id', $company->getKey())
+            ->first();
+        $this->assertNotNull($role, 'company_admin row exists');
+        $this->assertSame(0, $role->permissions()->count(), 'precondition: empty role');
+
+        // Assigning via the picker must HEAL the empty role with its baseline map.
+        app(TenantRoleProvisioner::class)
+            ->setRoleInCompany($user, $company, TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
+
+        $role->unsetRelation('permissions');
+        $names = $role->permissions()->pluck('name');
+        $this->assertTrue($names->contains('ViewAny:Invoice'), 'company_admin gets the tenant permissions');
+        $this->assertFalse($names->contains('ViewAny:User'), 'forbidden resource (User) stays excluded');
+    }
+
+    public function test_picker_does_not_clobber_a_customized_role(): void
+    {
+        $this->seedPermissions();
+        $company = $this->makeCompany('custom');
+        $user = $this->makeUser();
+        $user->companies()->attach($company->id);
+
+        $p = app(TenantRoleProvisioner::class);
+        $p->ensureManagedRolesExist($company);
+
+        // Hand-trim the operator role to a single permission (a per-tenant tweak).
+        $operator = \App\Models\Role::query()->withoutGlobalScopes()
+            ->where('name', TenantRoleProvisioner::ROLE_OPERATOR)
+            ->where('company_id', $company->getKey())->first();
+        $operator->syncPermissions([Permission::findByName('ViewAny:Invoice', $this->guard)]);
+        $this->assertSame(1, $operator->permissions()->count());
+
+        // Assigning it again must NOT re-sync the full baseline (no clobber).
+        $p->setRoleInCompany($user, $company, TenantRoleProvisioner::ROLE_OPERATOR);
+
+        $operator->unsetRelation('permissions');
+        $this->assertSame(1, $operator->permissions()->count(), 'a non-empty role is left untouched');
+    }
+
     public function test_set_role_rejects_unknown(): void
     {
         $company = $this->makeCompany('bad');

@@ -27,6 +27,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   company_admin/operator roles are unaffected.
 
 ### Fixed
+- **Role picker no longer grants an EMPTY role.** Assigning company_admin/operator to a
+  user in a company whose roles were never permission-synced (a fresh box where
+  `shield:generate` ran late, or an import `--into` heal which creates rows only) left the
+  role with zero permissions → the user saw the tenant but no resources («βλέπει την εταιρία
+  αλλά τίποτα μέσα»). `ensureManagedRolesExist` now backfills the baseline permission map for
+  any managed non-super role that currently holds NONE (never clobbers a non-empty, manually
+  customized role; super_admin still needs none).
 - **Role picker: a system super_admin can bootstrap roles in any company.** The
   «Ρόλος» action gated on being super_admin in THAT company, so after restoring/
   creating a tenant you could never give yourself (or anyone) a role there — the
