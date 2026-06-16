@@ -363,6 +363,7 @@ class SalesReconciler
             aadeState: $aadeState,
             cancelledByMark: $cancelledByMark,
             problem: $problem,
+            legacyId: $invoice->legacy_id,
         );
     }
 

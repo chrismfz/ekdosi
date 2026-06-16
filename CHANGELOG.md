@@ -37,6 +37,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   στη λίστα Invoice Types — ο μισός έλεγχος ζει εκεί που ζει το config.
 
 ### Changed
+- **Κονσόλα myDATA — ειλικρινές «Λείπουν από AADE» (το «203» insight).** Το `missingAtAade` σπάει
+  σε **εισαγμένα** (legacy invoice με ΜΑΡΚ παραγωγής — ένα sandbox κανάλι δεν τα επιστρέφει,
+  ενημερωτικό) vs **ανεπιβεβαίωτα native** (το φιλοξενούμε ως υποβληθέν αλλά το AADE δεν το γυρνά →
+  πραγματικός έλεγχος). Το `discrepancyCount` (άρα toast + dashboard tile) μετρά ΜΟΝΟ τα native →
+  το νούμερο «ασυμφωνίες» γίνεται αληθινό. + banner όταν `mydata_mode=sandbox` εξηγεί το γιατί.
 - **Η «Ανανέωση εικόνας ΦΠΑ» έφυγε από τα «Εργαλεία»** → καλύπτεται από το «Ανανέωση όλων» της
   κονσόλας (ο scheduler `mydata:refresh-vat-picture` μένει). Τα «Εργαλεία» κρατούν πλέον μόνο το
   τοπικό «Επανυπολογισμός υπολοίπων».

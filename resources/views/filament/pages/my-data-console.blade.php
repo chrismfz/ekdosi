@@ -93,6 +93,28 @@
             Τα δικά μας στο myDATA
         </div>
 
+        @php
+            // Split «λείπουν από AADE» into NATIVE (we filed it here, AADE should
+            // hold it → real concern) vs IMPORTED (legacy production MARK — a
+            // sandbox query can't return it → informational, not a fault).
+            $missingNative = array_values(array_filter($result['missingAtAade'], fn ($r) => empty($r['imported'])));
+            $missingImported = array_values(array_filter($result['missingAtAade'], fn ($r) => ! empty($r['imported'])));
+        @endphp
+
+        {{-- Sandbox caveat: explains why imported (production) MARKs show as missing. --}}
+        @if (($result['sandbox'] ?? false) && count($missingImported) > 0)
+            <x-filament::section>
+                <div class="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-300">
+                    <x-filament::icon icon="heroicon-o-beaker" class="mt-0.5 h-5 w-5 shrink-0 text-warning-500" />
+                    <span>
+                        Συνδεδεμένο σε <strong>δοκιμαστικό (sandbox)</strong> myDATA. Τα {{ count($missingImported) }}
+                        <strong>εισαγμένα</strong> παραστατικά (ΜΑΡΚ παραγωγής από το προηγούμενο σύστημα) δεν
+                        επιστρέφονται από το sandbox — <em>δεν</em> είναι πραγματική ασυμφωνία. Δες τα στο «Εισαγμένα» πιο κάτω.
+                    </span>
+                </div>
+            </x-filament::section>
+        @endif
+
         @if ($result['discrepancyCount'] === 0)
             <x-filament::section>
                 <div class="flex items-center gap-2 text-success-600 dark:text-success-400">
@@ -104,7 +126,6 @@
 
         @foreach ([
             ['key' => 'stateMismatch', 'title' => 'Ασυμφωνία κατάστασης', 'color' => 'warning', 'icon' => 'heroicon-o-exclamation-triangle'],
-            ['key' => 'missingAtAade', 'title' => 'Λείπουν από το AADE', 'color' => 'danger', 'icon' => 'heroicon-o-x-circle'],
             ['key' => 'duplicateLocal', 'title' => 'Διπλά ΜΑΡΚ τοπικά', 'color' => 'danger', 'icon' => 'heroicon-o-document-duplicate'],
         ] as $bucket)
             @if (count($result[$bucket['key']]) > 0)
@@ -128,6 +149,44 @@
                 </x-filament::section>
             @endif
         @endforeach
+
+        {{-- Λείπουν από το AADE — NATIVE only (the genuinely worrying bucket). --}}
+        @if (count($missingNative) > 0)
+            <x-filament::section :collapsible="true">
+                <x-slot name="heading">
+                    <span class="flex items-center gap-2">
+                        <x-filament::icon icon="heroicon-o-x-circle" class="h-5 w-5 text-danger-500" />
+                        Λείπουν από το AADE
+                        <x-filament::badge color="danger">{{ count($missingNative) }}</x-filament::badge>
+                    </span>
+                </x-slot>
+                <x-slot name="description">Τα φιλοξενούμε ως υποβληθέντα, αλλά το AADE δεν τα επιστρέφει — χρειάζονται έλεγχο.</x-slot>
+
+                @include('filament.pages.partials.reconciliation-table', [
+                    'rows' => $missingNative,
+                    'columns' => ['invcode', 'mark', 'issuedAt', 'counterpart', 'gross', 'localState', 'aadeState', 'problem', 'open'],
+                ])
+            </x-filament::section>
+        @endif
+
+        {{-- Εισαγμένα — production MARKs a sandbox can't see. Informational, collapsed. --}}
+        @if (count($missingImported) > 0)
+            <x-filament::section :collapsible="true" :collapsed="true">
+                <x-slot name="heading">
+                    <span class="flex items-center gap-2">
+                        <x-filament::icon icon="heroicon-o-archive-box" class="h-5 w-5 text-gray-400" />
+                        Εισαγμένα (ΜΑΡΚ άλλου καναλιού)
+                        <x-filament::badge color="gray">{{ count($missingImported) }}</x-filament::badge>
+                    </span>
+                </x-slot>
+                <x-slot name="description">Εισαγμένα από το προηγούμενο σύστημα με ΜΑΡΚ παραγωγής — δεν επιστρέφονται στο τρέχον κανάλι. Ενημερωτικό.</x-slot>
+
+                @include('filament.pages.partials.reconciliation-table', [
+                    'rows' => $missingImported,
+                    'columns' => ['invcode', 'mark', 'issuedAt', 'counterpart', 'gross', 'localState', 'aadeState', 'problem', 'open'],
+                ])
+            </x-filament::section>
+        @endif
 
         {{-- Matched (collapsed by default) --}}
         @if (count($result['matched']) > 0)

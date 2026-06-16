@@ -40,5 +40,10 @@ final readonly class ReconciliationRow
         // and shows the type so a payroll/Hetzner row reads as what it is.
         public ?string $invoiceType = null,
         public ?string $invoiceTypeLabel = null,
+        // Local invoices only: the legacy PK if this row was IMPORTED from the old
+        // system. An imported invoice carries a PRODUCTION MARK, so when the
+        // console queries the SANDBOX channel it legitimately "won't be found at
+        // AADE" — the console buckets these as «εισαγμένα» rather than alarming.
+        public ?int $legacyId = null,
     ) {}
 }

@@ -39,10 +39,37 @@ final readonly class SalesReconciliationResult
         public array $duplicateLocal = [],
     ) {}
 
+    /**
+     * `missingAtAade` rows that are IMPORTED legacy invoices (legacy_id set) —
+     * they hold a PRODUCTION MARK, so a sandbox query legitimately won't return
+     * them. Informational, NOT a real discrepancy.
+     *
+     * @return list<ReconciliationRow>
+     */
+    public function importedMissingAtAade(): array
+    {
+        return array_values(array_filter($this->missingAtAade, fn (ReconciliationRow $r) => $r->legacyId !== null));
+    }
+
+    /**
+     * `missingAtAade` rows that are NATIVE (legacy_id null) — we filed them in
+     * this app yet AADE doesn't return the MARK. The genuinely-worrying bucket.
+     *
+     * @return list<ReconciliationRow>
+     */
+    public function unacknowledgedMissingAtAade(): array
+    {
+        return array_values(array_filter($this->missingAtAade, fn (ReconciliationRow $r) => $r->legacyId === null));
+    }
+
+    /**
+     * Real discrepancies needing attention — EXCLUDES imported legacy MARKs that a
+     * sandbox connection can't see (the «203» noise), so the headline count is honest.
+     */
     public function discrepancyCount(): int
     {
         return count($this->stateMismatch)
-            + count($this->missingAtAade)
+            + count($this->unacknowledgedMissingAtAade())
             + count($this->missingLocally)
             + count($this->duplicateLocal);
     }

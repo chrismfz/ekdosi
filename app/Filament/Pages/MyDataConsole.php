@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\MyDataMode;
 use App\Filament\Clusters\MyDataCluster;
 use App\Filament\Pages\Concerns\RefreshesAllMyData;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
@@ -282,7 +283,13 @@ class MyDataConsole extends Page
             'to' => $r->to,
             'aadeTotal' => $r->aadeTotal,
             'localTotal' => $r->localTotal,
+            // The HONEST discrepancy count — excludes imported legacy MARKs a
+            // sandbox connection can't see (see SalesReconciliationResult).
             'discrepancyCount' => $r->discrepancyCount(),
+            'importedMissingCount' => count($r->importedMissingAtAade()),
+            // Sandbox connection → imported (production) MARKs legitimately won't
+            // reconcile; the blade shows a banner so the «εισαγμένα» aren't alarming.
+            'sandbox' => $tenant->mydata_mode_enum === MyDataMode::Sandbox,
             'matched' => $rows($r->matched),
             'stateMismatch' => $rows($r->stateMismatch),
             'missingAtAade' => $rows($r->missingAtAade),
@@ -310,6 +317,9 @@ class MyDataConsole extends Page
             'invoiceTypeLabel' => $row->invoiceTypeLabel,
             // Economic bucket for orphan grouping: income / expense / other.
             'bucket' => Codes::transmittedDocBucket($row->invoiceType),
+            // Imported (legacy) local invoice → its MARK is a production MARK; a
+            // sandbox «missing at AADE» is expected, not a real fault.
+            'imported' => $row->legacyId !== null,
             'url' => $row->invoiceId ? self::invoiceUrl($tenant, $row->invoiceId) : null,
             // Every MARK (linked or orphan) gets a detail link, carrying the
             // queried window so an orphan lookup re-fetches the right page.
