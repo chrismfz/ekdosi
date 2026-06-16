@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
 use Filament\Events\TenantSet;
+use Filament\Support\Assets\Css;
+use Filament\Support\Facades\FilamentAsset;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -42,6 +44,18 @@ class AppServiceProvider extends ServiceProvider
          * Plain `migrate` is unaffected — deploys keep working.
          */
         DB::prohibitDestructiveCommands(! $this->app->environment('testing'));
+
+        /*
+         * No-build panel utility CSS. The admin panel ships only Filament's
+         * component CSS and registers no custom Tailwind theme, so utility classes
+         * in our custom blade pages went unstyled. This hand-written supplement
+         * (resources/css/panel.css) is copied into public + injected into the
+         * panel <head> by `filament:assets` (which runs on every composer install
+         * via filament:upgrade) — no npm / Vite build. See the file header.
+         */
+        FilamentAsset::register([
+            Css::make('ekdosi-panel', resource_path('css/panel.css')),
+        ]);
 
         /*
          * @gup('Κείμενο') — Greek ALL-CAPS without τόνος, for PDF/print labels.
