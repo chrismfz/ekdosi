@@ -63,7 +63,7 @@ final class ManageTenantRoleAction
                             ? app(TenantRoleProvisioner::class)->roleInCompany($user, $company)
                             : null)
                         ->placeholder('— Κανένας ρόλος (μόνο πρόσβαση) —')
-                        ->helperText('Ένας ρόλος ανά εταιρία. Ο «Super admin» ισχύει μόνο για αυτή την εταιρία και παρακάμπτει κάθε δικαίωμα.')
+                        ->helperText('Ένας ρόλος ανά εταιρία. Ο «Super admin» είναι ρόλος συστήματος — παρακάμπτει κάθε δικαίωμα σε ΟΛΕΣ τις εταιρίες (αρκεί να τον έχει σε μία).')
                         ->native(false),
                 ];
             })

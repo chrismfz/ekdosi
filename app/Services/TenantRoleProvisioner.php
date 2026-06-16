@@ -158,15 +158,27 @@ class TenantRoleProvisioner
      */
     public function isSuperAdminAnywhere(User $user): bool
     {
-        $superName = ShieldUtils::getSuperAdminName();
+        return $this->isSystemSuperAdmin($user);
+    }
 
-        foreach ($user->companies as $company) {
-            if ($this->userHoldsRole($user, $company, $superName)) {
-                return true;
-            }
-        }
+    /**
+     * Is this user a SYSTEM super_admin — i.e. holds the super_admin role in ANY
+     * tenant? Single raw query (no team filter), safe to call from Gate::before.
+     * A system super_admin is the OPERATOR: they bypass every policy in every
+     * tenant (the global Gate::before bypass), unlike a per-tenant company_admin.
+     */
+    public function isSystemSuperAdmin(User $user): bool
+    {
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
 
-        return false;
+        return DB::table(($tables['model_has_roles'] ?? 'model_has_roles').' as mhr')
+            ->join(($tables['roles'] ?? 'roles').' as r', 'r.id', '=', 'mhr.'.($cols['role_pivot_key'] ?? 'role_id'))
+            ->where('r.name', ShieldUtils::getSuperAdminName())
+            ->where('r.guard_name', ShieldUtils::getFilamentAuthGuard())
+            ->where('mhr.'.($cols['model_morph_key'] ?? 'model_id'), $user->getKey())
+            ->where('mhr.model_type', $user->getMorphClass())
+            ->exists();
     }
 
     /**

@@ -2,11 +2,13 @@
 
 namespace App\Providers;
 
+use App\Models\User;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
-use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
+use Filament\Events\TenantSet;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
@@ -49,15 +51,19 @@ class AppServiceProvider extends ServiceProvider
         Blade::directive('gup', fn (string $expr) => "<?php echo e(\App\Support\GreekText::upper($expr)); ?>");
 
         /*
-         * super_admin role bypasses every policy. Combined with Spatie's
-         * teams mode (team_foreign_key=company_id), this is a per-tenant
-         * bypass — admin@ekdosi.local has super_admin in each of their
-         * companies, so they see everything in each tenant context but
-         * a hypothetical operator with super_admin only in tenant A
-         * wouldn't bypass policies in tenant B.
+         * super_admin is GLOBAL (the operator), not a per-tenant role: a user who
+         * holds super_admin in ANY tenant bypasses every policy in EVERY tenant.
+         * So the owner sees everything in a freshly created/restored company the
+         * moment they're attached — no per-company super_admin assignment needed
+         * (which also kills the role-picker chicken-and-egg). Data isolation is
+         * unaffected: CompanyScope still filters tenant-owned queries to the
+         * current Filament tenant — only the PERMISSION bypass is global. Per-
+         * tenant company_admin/operator roles are unchanged (they scope non-super
+         * users). isSystemSuperAdmin() is a single memoised query, cheap on this
+         * hot path.
          */
-        Gate::before(function ($user, $ability) {
-            return $user?->hasRole(ShieldUtils::getSuperAdminName()) ? true : null;
+        Gate::before(function ($user) {
+            return ($user instanceof User && $user->isSystemSuperAdmin()) ? true : null;
         });
 
         /*
@@ -73,9 +79,9 @@ class AppServiceProvider extends ServiceProvider
          * tenant is identified, which is exactly when the gate bypass
          * for super_admin needs the right team scope.
          */
-        \Illuminate\Support\Facades\Event::listen(
-            \Filament\Events\TenantSet::class,
-            function (\Filament\Events\TenantSet $event) {
+        Event::listen(
+            TenantSet::class,
+            function (TenantSet $event) {
                 app(PermissionRegistrar::class)
                     ->setPermissionsTeamId($event->getTenant()->getKey());
 
