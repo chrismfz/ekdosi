@@ -25,6 +25,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   στη λίστα Invoice Types — ο μισός έλεγχος ζει εκεί που ζει το config.
 
 ### Changed
+- **«Άντληση από myDATA» στα Έξοδα = in-place picker, όχι redirect.** Αντί να σε πετάει στην
+  Κονσόλα — Έξοδα, ανοίγει modal με τα αδέσποτα (checkbox-list, όλα προεπιλεγμένα) και καταχωρίζει
+  ΑΚΡΙΒΩΣ όσα κρατάς τσεκαρισμένα — μένεις στη λίστα. Νέο `ExpenseImporter::importMarks()` (ένα
+  fetch, idempotent) για το επιλεκτικό import. Το all-or-nothing του console παραμένει.
 - **«Συμφωνία myDATA» → «Τοπικός έλεγχος κατάστασης»** με ρητό banner ότι είναι ΕΣΩΤΕΡΙΚΟΣ
   έλεγχος (δεν ρωτά το AADE) — ώστε να μη φαίνεται αντιφατικό όταν λέει «καμία ασυμφωνία» ενώ
   η ζωντανή Κονσόλα myDATA δείχνει διαφορές (μετράνε διαφορετικά πράγματα).
