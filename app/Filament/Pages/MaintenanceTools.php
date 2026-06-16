@@ -14,12 +14,12 @@ use Illuminate\Support\Str;
 /**
  * «Εργαλεία» — surfaces a few safe, idempotent maintenance artisan commands as
  * one-click buttons for the CURRENT tenant, so an operator never needs terminal
- * access for routine upkeep (ανανέωση εικόνας ΦΠΑ, επανυπολογισμός υπολοίπων).
- * Each button runs the same command the scheduler / CLI runs, scoped to this
- * company, and shows the captured output on the page.
+ * access for routine upkeep. Each button runs the same command the scheduler /
+ * CLI runs, scoped to this company, and shows the captured output on the page.
  *
- * (The myDATA config audit moved to the structured «Έλεγχος ρυθμίσεων» tab in the
- * Κονσόλα myDATA cluster — richer, with click-to-fix links into Invoice Types.)
+ * The myDATA bits moved into the Κονσόλα myDATA cluster: the config audit → the
+ * structured «Έλεγχος ρυθμίσεων» tab; the εικόνα ΦΠΑ refresh → the «Ανανέωση όλων»
+ * one-fetch on the console tabs. What remains here is the non-myDATA upkeep.
  *
  * Admin territory (gated on View:MaintenanceTools — company_admin + super_admin;
  * run shield:generate + shield:sync-super-admin after deploy so the permission
@@ -70,15 +70,6 @@ class MaintenanceTools extends Page
     protected function getHeaderActions(): array
     {
         return [
-            $this->commandAction(
-                key: 'refresh_vat_picture',
-                label: 'Ανανέωση εικόνας ΦΠΑ',
-                icon: 'heroicon-o-receipt-percent',
-                command: 'mydata:refresh-vat-picture',
-                params: fn (Company $c) => ['--tenant' => $c->slug],
-                confirm: 'Ζητά από την ΑΑΔΕ την τρέχουσα εικόνα ΦΠΑ (εκροές−εισροές) για μήνα + τρίμηνο και την αποθηκεύει στην cache. Μπορεί να αργήσει λίγο.',
-                color: 'primary',
-            ),
             $this->commandAction(
                 key: 'recompute_balances',
                 label: 'Επανυπολογισμός υπολοίπων',

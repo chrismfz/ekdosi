@@ -18,6 +18,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **«Ανανέωση όλων» — ένα fetch για όλη την Κονσόλα myDATA.** Ένα κουμπί (πρωτεύον σε κάθε tab)
+  κατεβάζει ΜΑΖΙ Πωλήσεις + Έξοδα + Επισκόπηση Ε3 + εικόνα ΦΠΑ για το διάστημα (σειριακά, rate-limit
+  friendly) και «σπέρνει» την cache κάθε καρτέλας με ένα κλικ. Per-step isolation: αν μία σκάσει
+  (π.χ. 429) οι υπόλοιπες συνεχίζουν και ένα toast συνοψίζει. Το per-tab «Έλεγχος» μένει ως
+  δευτερεύον (single-source). Νέο `MyDataConsoleRefresh` + στατικοί `refreshSnapshot` σε όλες τις tabs.
 - **«Έλεγχος ρυθμίσεων» tab στην Κονσόλα myDATA** — structured, click-to-fix view πάνω σε ένα
   νέο κοινό `MyDataConfigAudit`: ετοιμότητα tenant + κάθε τύπος παραστατικού / κατηγορία ΦΠΑ με
   badge ✓/⚠/✗, το AADE error code του κάθε ευρήματος, και link «Διόρθωση →» στη ρύθμιση. Το ίδιο
@@ -25,6 +30,9 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   στη λίστα Invoice Types — ο μισός έλεγχος ζει εκεί που ζει το config.
 
 ### Changed
+- **Η «Ανανέωση εικόνας ΦΠΑ» έφυγε από τα «Εργαλεία»** → καλύπτεται από το «Ανανέωση όλων» της
+  κονσόλας (ο scheduler `mydata:refresh-vat-picture` μένει). Τα «Εργαλεία» κρατούν πλέον μόνο το
+  τοπικό «Επανυπολογισμός υπολοίπων».
 - **«Άντληση από myDATA» στα Έξοδα = in-place picker, όχι redirect.** Αντί να σε πετάει στην
   Κονσόλα — Έξοδα, ανοίγει modal με τα αδέσποτα (checkbox-list, όλα προεπιλεγμένα) και καταχωρίζει
   ΑΚΡΙΒΩΣ όσα κρατάς τσεκαρισμένα — μένεις στη λίστα. Νέο `ExpenseImporter::importMarks()` (ένα

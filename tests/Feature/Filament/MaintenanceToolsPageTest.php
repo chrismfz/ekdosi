@@ -39,9 +39,8 @@ class MaintenanceToolsPageTest extends TestCase
     {
         Livewire::test(MaintenanceTools::class)
             ->assertSuccessful()
-            ->assertActionVisible('recompute_balances')
-            ->assertActionVisible('refresh_vat_picture');
-        // (mydata_preflight moved to the «Έλεγχος ρυθμίσεων» console tab.)
+            ->assertActionVisible('recompute_balances');
+        // (mydata_preflight → «Έλεγχος ρυθμίσεων» tab· refresh_vat_picture → «Ανανέωση όλων».)
     }
 
     public function test_recompute_balances_button_runs_and_captures_output(): void

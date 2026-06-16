@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Clusters\MyDataCluster;
+use App\Filament\Pages\Concerns\RefreshesAllMyData;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Models\Company;
 use App\Services\MyData\E3Report;
@@ -36,6 +37,7 @@ use Throwable;
  */
 class MyDataE3Overview extends Page
 {
+    use RefreshesAllMyData;
     use RemembersLastFetch;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-table-cells';
@@ -131,10 +133,14 @@ class MyDataE3Overview extends Page
     protected function getHeaderActions(): array
     {
         return [
+            // Primary: one click refreshes ALL console tabs + the ΦΠΑ box.
+            $this->refreshAllAction(),
+
+            // Secondary: just THIS tab (Ε3 only).
             Action::make('fetch')
-                ->label('Λήψη Ε3 από myDATA')
+                ->label('Μόνο Ε3')
                 ->icon('heroicon-o-cloud-arrow-down')
-                ->color('primary')
+                ->color('gray')
                 ->modalHeading('Επισκόπηση Ε3 από myDATA')
                 ->modalDescription('Κατεβάζει τα αθροιστικά στοιχεία Ε3 (ανά τύπο/κατηγορία χαρακτηρισμού) που τηρεί το myDATA για το ΑΦΜ μας στο διάστημα.')
                 ->modalSubmitActionLabel('Λήψη')
@@ -167,7 +173,7 @@ class MyDataE3Overview extends Page
                 Carbon::parse($to)->endOfDay(),
             );
 
-            $this->result = $this->serialize($report);
+            $this->result = self::serializeFor($report);
             $this->ran = true;
             $this->rememberFetch();
 
@@ -195,7 +201,27 @@ class MyDataE3Overview extends Page
         }
     }
 
-    private function serialize(E3Report $report): array
+    /**
+     * Run the Ε3 report for a tenant and write the snapshot into the SAME cache
+     * this page restores on mount — so the «Ανανέωση όλων» orchestrator seeds
+     * exactly what this tab shows. Static + tenant-explicit.
+     */
+    public static function refreshSnapshot(Company $tenant, Carbon $from, Carbon $to, ?MockHandler $handler = null): E3Report
+    {
+        $report = (new E3Reporter($tenant, $handler ?? static::$testHandler))->report(
+            $from->copy()->startOfDay(),
+            $to->copy()->endOfDay(),
+        );
+
+        static::putFetchState($tenant->getKey(), [
+            'result' => self::serializeFor($report),
+            'ran' => true,
+        ]);
+
+        return $report;
+    }
+
+    private static function serializeFor(E3Report $report): array
     {
         $rows = array_map(fn ($r) => [
             'classType' => $r->classType,
