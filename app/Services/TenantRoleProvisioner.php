@@ -7,8 +7,10 @@ use App\Models\Role;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Closure;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -122,11 +124,11 @@ class TenantRoleProvisioner
      */
     public function ensureSuperAdminRole(Company $company): Role
     {
-        return $this->withTeam($company, fn (): Role => Role::query()->firstOrCreate([
-            'name' => ShieldUtils::getSuperAdminName(),
-            'guard_name' => ShieldUtils::getFilamentAuthGuard(),
-            'company_id' => $company->getKey(),
-        ]));
+        return $this->withTeam($company, fn (): Role => $this->upsertRole(
+            ShieldUtils::getSuperAdminName(),
+            ShieldUtils::getFilamentAuthGuard(),
+            $company,
+        ));
     }
 
     /**
@@ -228,11 +230,43 @@ class TenantRoleProvisioner
 
     private function firstOrCreateRole(string $name, string $guard, Company $company): Role
     {
-        return Role::query()->firstOrCreate([
-            'name' => $name,
-            'guard_name' => $guard,
-            'company_id' => $company->getKey(),
-        ]);
+        return $this->upsertRole($name, $guard, $company);
+    }
+
+    /**
+     * Idempotent role upsert under teams mode. Plain `firstOrCreate` can still
+     * raise a 1062 duplicate — a find/create race, or (on MariaDB) the
+     * transaction's snapshot not yet seeing a row the (company_id, name,
+     * guard_name) unique index already rejects. So on a unique violation we ADOPT
+     * the existing row instead of failing the whole flow (e.g. an import
+     * provisioning a company id whose role already exists). "ensure…" must never
+     * throw on an already-present role.
+     */
+    private function upsertRole(string $name, string $guard, Company $company): Role
+    {
+        $find = fn (): ?Role => Role::query()
+            ->where('name', $name)
+            ->where('guard_name', $guard)
+            ->where('company_id', $company->getKey())
+            ->first();
+
+        if ($role = $find()) {
+            return $role;
+        }
+
+        try {
+            return Role::query()->create([
+                'name' => $name,
+                'guard_name' => $guard,
+                'company_id' => $company->getKey(),
+            ]);
+        } catch (UniqueConstraintViolationException $e) {
+            // The row exists despite the find missing it — adopt it.
+            return $find() ?? throw new RuntimeException(
+                "Role «{$name}» for company {$company->getKey()} collided but could not be re-read.",
+                previous: $e,
+            );
+        }
     }
 
     /**
