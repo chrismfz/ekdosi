@@ -255,11 +255,23 @@ class TenantRoleProvisioner
         }
 
         try {
-            return Role::query()->create([
+            // RAW insert — NOT Role::query()->create(): Eloquent's create fires
+            // spatie's teams `creating` hook, which OVERRIDES company_id with the
+            // registrar's CURRENT team (the ambient panel tenant), so the role is
+            // written under the WRONG company → a 1062 collision (the whole
+            // import/picker «collided but could not be re-read» saga: $company is
+            // 81 but the INSERT used the panel tenant 4). A raw insert writes the
+            // company_id we pass, verbatim.
+            $id = DB::table('roles')->insertGetId([
                 'name' => $name,
                 'guard_name' => $guard,
                 'company_id' => $companyId,
+                'created_at' => now(),
+                'updated_at' => now(),
             ]);
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+            return Role::query()->withoutGlobalScopes()->findOrFail($id);
         } catch (UniqueConstraintViolationException $e) {
             // The row exists despite the lookup missing it — adopt it.
             return $this->findRole($name, $guard, $companyId) ?? throw new RuntimeException(
