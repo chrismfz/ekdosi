@@ -183,6 +183,8 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   + ημερολόγιο με **Έσοδα/Έξοδα στήλες + σύνολα**, **ΜΑΡΚ + κατάσταση myDATA**, **export CSV/XLSX/JSON
   + PDF (οριζόντιο A4)**. + **Λογαριασμοί** (`Accounts`).
 - **Αναφορές** (`Reports`) + **ΦΠΑ ανά περίοδο** (`VatPeriodReport`, μήνας/τρίμηνο).
+- **Ηλικίωση οφειλών** (`AgedReceivables`) — ανοιχτό υπόλοιπο ανά πελάτη σε buckets 0-30/31-60/61-90/90+
+  (ίδιο FIFO aging με την Καρτέλα), σύνολα, drill στην Καρτέλα, εξαγωγή CSV.
 
 ## 13. Migration / ETL
 - **`migrate:firebird`** — επαναλήψιμο ETL, μία εταιρία/run, upsert σε
