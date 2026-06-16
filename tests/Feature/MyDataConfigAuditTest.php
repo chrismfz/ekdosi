@@ -107,6 +107,21 @@ class MyDataConfigAuditTest extends TestCase
         $this->assertSame('ok', $std->status());
     }
 
+    public function test_empty_config_warns_on_the_readiness_row(): void
+    {
+        // A freshly-provisioned tenant with no invoice types / VAT categories must
+        // still warn (the preflight behaviour, folded into the readiness row).
+        $c = $this->tenant();
+        $result = app(MyDataConfigAudit::class)->audit($c);
+
+        $this->assertSame([], $result->invoiceTypes);
+        $this->assertSame([], $result->vatCategories);
+        $messages = $result->tenant->messages();
+        $this->assertContains('Δεν έχουν οριστεί τύποι παραστατικών.', $messages);
+        $this->assertContains('Δεν έχουν οριστεί κατηγορίες ΦΠΑ.', $messages);
+        $this->assertFalse($result->isClean());
+    }
+
     public function test_full_audit_rolls_up_counts(): void
     {
         $c = $this->tenant();

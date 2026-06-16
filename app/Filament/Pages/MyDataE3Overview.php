@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Filament\Clusters\MyDataCluster;
 use App\Filament\Pages\Concerns\RefreshesAllMyData;
 use App\Filament\Pages\Concerns\RemembersLastFetch;
+use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Models\Company;
 use App\Services\MyData\E3Report;
 use App\Services\MyData\E3Reporter;
@@ -39,6 +40,7 @@ class MyDataE3Overview extends Page
 {
     use RefreshesAllMyData;
     use RemembersLastFetch;
+    use ResolvesReconcileWindow;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-table-cells';
 

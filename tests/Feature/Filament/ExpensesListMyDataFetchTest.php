@@ -151,9 +151,9 @@ XML;
         $tenant = $this->tenant();
         $this->actAdmin($tenant);
 
-        // Three fetches: loadOrphans, importMarks, post-import refresh.
+        // Two fetches only: loadOrphans (build picker) + importMarks (persist).
+        // The post-import subheading update filters the cache — no third fetch.
         MyDataConsoleExpenses::$testHandler = new MockHandler([
-            new Response(200, [], $this->orphanDoc()),
             new Response(200, [], $this->orphanDoc()),
             new Response(200, [], $this->orphanDoc()),
         ]);

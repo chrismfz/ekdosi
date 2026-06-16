@@ -8,7 +8,6 @@ use App\Services\MyData\RefreshStep;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\DatePicker;
 use Filament\Notifications\Notification;
 
 /**
@@ -18,7 +17,9 @@ use Filament\Notifications\Notification;
  * rehydrates the CURRENT page from its freshly written snapshot. The per-tab
  * «Έλεγχος» stays as a secondary, single-source refresh.
  *
- * Requires the host page to use RemembersLastFetch (for restoreFetch()).
+ * Requires the host page to ALSO use RemembersLastFetch (for restoreFetch()) and
+ * ResolvesReconcileWindow (for the shared preset window picker — same Μήνας /
+ * Τρίμηνο / … selector the per-tab actions use, so one window UX everywhere).
  */
 trait RefreshesAllMyData
 {
@@ -31,11 +32,11 @@ trait RefreshesAllMyData
             ->modalHeading('Ανανέωση όλων από myDATA')
             ->modalDescription('Κατεβάζει μαζί Πωλήσεις, Έξοδα, Επισκόπηση Ε3 και εικόνα ΦΠΑ για το διάστημα, και ενημερώνει όλες τις καρτέλες της κονσόλας. Read-only — δεν τροποποιεί παραστατικά.')
             ->modalSubmitActionLabel('Ανανέωση')
-            ->schema([
-                DatePicker::make('from')->label('Από')->required()->default(now()->startOfQuarter()),
-                DatePicker::make('to')->label('Έως')->required()->default(now()),
-            ])
-            ->action(fn (array $data) => $this->runRefreshAll($data['from'], $data['to']));
+            ->schema($this->windowSchema())
+            ->action(function (array $data): void {
+                [$from, $to] = $this->resolveWindow($data);
+                $this->runRefreshAll($from, $to);
+            });
     }
 
     protected function runRefreshAll(string $from, string $to): void

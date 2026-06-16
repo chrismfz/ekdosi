@@ -26,26 +26,32 @@ class MyDataConfigAudit
     /** Full audit for a tenant: readiness + every invoice type + every VAT category. */
     public function audit(Company $company): ConfigAuditResult
     {
+        $invoiceTypes = InvoiceType::query()
+            ->where('company_id', $company->getKey())
+            ->orderBy('code')
+            ->get()
+            ->map(fn (InvoiceType $t) => $this->auditInvoiceType($t))
+            ->all();
+
+        $vatCategories = VatCategory::query()
+            ->where('company_id', $company->getKey())
+            ->orderBy('rate')
+            ->get()
+            ->map(fn (VatCategory $v) => $this->auditVatCategory($v))
+            ->all();
+
         return new ConfigAuditResult(
             company: $company,
-            tenant: $this->auditTenant($company),
-            invoiceTypes: InvoiceType::query()
-                ->where('company_id', $company->getKey())
-                ->orderBy('code')
-                ->get()
-                ->map(fn (InvoiceType $t) => $this->auditInvoiceType($t))
-                ->all(),
-            vatCategories: VatCategory::query()
-                ->where('company_id', $company->getKey())
-                ->orderBy('rate')
-                ->get()
-                ->map(fn (VatCategory $v) => $this->auditVatCategory($v))
-                ->all(),
+            // Fold the "nothing configured" warnings into the readiness row so they
+            // surface on every consumer (CLI / tab / badge), like the old preflight.
+            tenant: $this->auditTenant($company, empty($invoiceTypes), empty($vatCategories)),
+            invoiceTypes: $invoiceTypes,
+            vatCategories: $vatCategories,
         );
     }
 
-    /** Tenant-level readiness (provider / mode / credentials). One row. */
-    public function auditTenant(Company $company): ConfigAuditRow
+    /** Tenant-level readiness (provider / mode / credentials / empty config). One row. */
+    public function auditTenant(Company $company, bool $noInvoiceTypes = false, bool $noVatCategories = false): ConfigAuditRow
     {
         $findings = [];
 
@@ -61,6 +67,12 @@ class MyDataConfigAudit
         if (empty($aadeId) || empty($subKey)) {
             $findings[] = new ConfigAuditFinding('warn',
                 "Δεν έχουν οριστεί διαπιστευτήρια myDATA για την ενεργή λειτουργία («{$company->mydata_mode_enum->value}»).");
+        }
+        if ($noInvoiceTypes) {
+            $findings[] = new ConfigAuditFinding('warn', 'Δεν έχουν οριστεί τύποι παραστατικών.');
+        }
+        if ($noVatCategories) {
+            $findings[] = new ConfigAuditFinding('warn', 'Δεν έχουν οριστεί κατηγορίες ΦΠΑ.');
         }
 
         return new ConfigAuditRow('tenant', $company->name, $findings);

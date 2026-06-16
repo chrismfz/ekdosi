@@ -173,6 +173,14 @@ class ListExpenses extends BaseListRecords
             return;
         }
 
+        // Defensive (like MyDataConsoleExpenses::importOrphans): the picker only
+        // submits when options are filled, and loadOrphans() sets the dates before
+        // the options — but guard the coupling so a future refactor can't TypeError
+        // on createFromFormat(null).
+        if (! $this->orphanFrom || ! $this->orphanTo) {
+            return;
+        }
+
         /** @var Company $tenant */
         $tenant = Filament::getTenant();
         $from = Carbon::createFromFormat('d/m/Y', $this->orphanFrom)->startOfDay();
@@ -182,8 +190,10 @@ class ListExpenses extends BaseListRecords
             // Share the console's MockHandler test seam so the round-trip is
             // exercisable without the network (null in production → real AADE).
             $result = (new ExpenseImporter($tenant, MyDataConsoleExpenses::$testHandler))->importMarks($from, $to, $marks);
-            // Refresh the snapshot so the «X αδέσποτα» subheading drops what we just imported.
-            MyDataConsoleExpenses::refreshSnapshot($tenant, $from, $to);
+            // Drop the just-imported MARKs from the cached αδέσποτα so the «X
+            // αδέσποτα» subheading updates WITHOUT a third AADE fetch (loadOrphans +
+            // importMarks already hit the window twice).
+            $this->dropImportedFromSnapshot($tenant, $result->createdMarks);
 
             Notification::make()
                 ->title("Καταχωρήθηκαν {$result->created} έξοδα")
@@ -198,6 +208,28 @@ class ListExpenses extends BaseListRecords
             ]);
             Notification::make()->title('Η καταχώριση απέτυχε')->body('Σφάλμα κατά τη λήψη/καταχώριση από το AADE.')->danger()->send();
         }
+    }
+
+    /**
+     * Remove the just-imported MARKs from the cached expenses snapshot so the
+     * subheading «X αδέσποτα» reflects the import without re-fetching from AADE.
+     *
+     * @param  list<string|int>  $createdMarks
+     */
+    private function dropImportedFromSnapshot(Company $tenant, array $createdMarks): void
+    {
+        $state = MyDataConsoleExpenses::lastFetchState($tenant->getKey());
+        if ($state === null || ! isset($state['result']['missingLocally'])) {
+            return;
+        }
+
+        $imported = array_map('strval', $createdMarks);
+        $state['result']['missingLocally'] = array_values(array_filter(
+            $state['result']['missingLocally'],
+            fn (array $row): bool => ! in_array((string) $row['mark'], $imported, true),
+        ));
+
+        MyDataConsoleExpenses::putFetchState($tenant->getKey(), $state);
     }
 
     /** A «τελευταία άντληση myDATA … · X αδέσποτα» line under the title. */

@@ -93,23 +93,22 @@ class InvoiceTypesTable
                 TextColumn::make('mydata_ready')
                     ->label('Ετοιμότητα myDATA')
                     ->badge()
-                    ->state(fn (InvoiceType $record): string => match (self::auditStatus($record)) {
+                    ->state(fn (InvoiceType $record): string => match (self::auditRow($record)->status()) {
                         'error' => 'Σφάλμα',
                         'warn' => 'Προσοχή',
                         default => 'Εντάξει',
                     })
-                    ->color(fn (InvoiceType $record): string => match (self::auditStatus($record)) {
+                    ->color(fn (InvoiceType $record): string => match (self::auditRow($record)->status()) {
                         'error' => 'danger',
                         'warn' => 'warning',
                         default => 'success',
                     })
-                    ->icon(fn (InvoiceType $record): string => match (self::auditStatus($record)) {
+                    ->icon(fn (InvoiceType $record): string => match (self::auditRow($record)->status()) {
                         'error' => 'heroicon-o-x-circle',
                         'warn' => 'heroicon-o-exclamation-triangle',
                         default => 'heroicon-o-check-circle',
                     })
-                    ->tooltip(fn (InvoiceType $record): ?string => implode(' · ',
-                        app(MyDataConfigAudit::class)->auditInvoiceType($record)->messages()) ?: null)
+                    ->tooltip(fn (InvoiceType $record): ?string => implode(' · ', self::auditRow($record)->messages()) ?: null)
                     ->toggleable(),
 
                 IconColumn::make('show_on_menu')
@@ -166,17 +165,20 @@ class InvoiceTypesTable
     }
 
     /**
-     * Memoised per-record audit status (the badge reads color + icon + label off
-     * it, three closures per row — compute once). In-memory check against the
-     * §8 code tables, no query.
+     * Memoised per-record audit row (the badge reads status/color/icon AND the
+     * tooltip reads messages() off the SAME row — four closures per row, one
+     * audit). In-memory check against the §8 code tables, no query. Keyed by the
+     * global surrogate PK (no cross-tenant collision; the legacy_id collision
+     * doesn't touch the PK). Per-request under FPM — see the Octane note in
+     * CLAUDE.md if this ever runs on a persistent worker.
      *
-     * @var array<int, string>
+     * @var array<int, \App\Services\MyData\ConfigAuditRow>
      */
-    private static array $statusCache = [];
+    private static array $auditCache = [];
 
-    private static function auditStatus(InvoiceType $record): string
+    private static function auditRow(InvoiceType $record): \App\Services\MyData\ConfigAuditRow
     {
-        return self::$statusCache[$record->getKey()] ??=
-            app(MyDataConfigAudit::class)->auditInvoiceType($record)->status();
+        return self::$auditCache[$record->getKey()] ??=
+            app(MyDataConfigAudit::class)->auditInvoiceType($record);
     }
 }
