@@ -179,7 +179,8 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Plugin-API consolidation** (`resolve.php`) + Bridge logs tab + `whmcs:use-bridge`.
 
 ## 12. Βιβλία / Λογιστικά / Αναφορές
-- **Λογιστικά βιβλία** (`LedgerBook`) + **Λογαριασμοί** (`Accounts`).
+- **Βιβλίο Εσόδων-Εξόδων** (`LedgerBook`) — περίοδος → έσοδα/έξοδα ανά κατηγορία + ημερολόγιο με
+  **ΜΑΡΚ + κατάσταση myDATA**, σύνολα/ΦΠΑ, **export CSV/XLSX/JSON**. + **Λογαριασμοί** (`Accounts`).
 - **Αναφορές** (`Reports`) + **ΦΠΑ ανά περίοδο** (`VatPeriodReport`, μήνας/τρίμηνο).
 
 ## 13. Migration / ETL

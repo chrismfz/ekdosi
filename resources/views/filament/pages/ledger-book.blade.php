@@ -5,33 +5,75 @@
         $categoryOptions = $this->getCategoryOptions();
     @endphp
 
+    {{-- Self-contained styling: the admin panel ships only Filament's CSS (no
+         custom Tailwind theme is built/loaded), so arbitrary utility classes go
+         unstyled. We scope the layout here — responsive + dark-mode via .dark —
+         so the page looks right with zero build step. Chrome (sections/badges)
+         stays Filament-native. --}}
+    <style>
+        .lb-grid { display:grid; grid-template-columns:1fr; gap:1rem; }
+        @media (min-width:640px){ .lb-grid{ grid-template-columns:repeat(3,minmax(0,1fr)); } }
+        .lb-filters { display:grid; grid-template-columns:1fr; gap:1rem; }
+        @media (min-width:640px){ .lb-filters{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+        @media (min-width:1024px){ .lb-filters{ grid-template-columns:repeat(4,minmax(0,1fr)); } }
+        .lb-field { display:flex; flex-direction:column; gap:.25rem; font-size:.875rem; }
+        .lb-field > span { font-weight:500; color:#374151; }
+        .dark .lb-field > span { color:#d1d5db; }
+        .lb-input { border:1px solid #d1d5db; border-radius:.5rem; padding:.45rem .6rem; background:#fff; color:#111827; width:100%; }
+        .dark .lb-input { border-color:#4b5563; background:#1f2937; color:#f3f4f6; }
+        .lb-card { border:1px solid #e5e7eb; border-radius:.75rem; padding:1rem; }
+        .dark .lb-card { border-color:rgba(255,255,255,.1); }
+        .lb-card__label { font-size:.8rem; color:#6b7280; }
+        .dark .lb-card__label { color:#9ca3af; }
+        .lb-card__value { font-size:1.5rem; font-weight:700; line-height:1.2; margin-top:.15rem; }
+        .lb-card__hint { font-size:.75rem; color:#6b7280; margin-top:.35rem; }
+        .dark .lb-card__hint { color:#9ca3af; }
+        .lb-pos { color:#16a34a; } .dark .lb-pos { color:#4ade80; }
+        .lb-neg { color:#dc2626; } .dark .lb-neg { color:#f87171; }
+        .lb-note { font-size:.75rem; color:#6b7280; margin-top:.75rem; }
+        .dark .lb-note { color:#9ca3af; }
+        .lb-wrap { overflow-x:auto; }
+        .lb-table { width:100%; border-collapse:collapse; font-size:.875rem; }
+        .lb-table th, .lb-table td { padding:.5rem 1rem .5rem 0; text-align:left; vertical-align:top; }
+        .lb-table thead th { color:#6b7280; border-bottom:1px solid #e5e7eb; font-weight:600; white-space:nowrap; }
+        .dark .lb-table thead th { color:#9ca3af; border-color:rgba(255,255,255,.12); }
+        .lb-table tbody td { border-bottom:1px solid #f3f4f6; }
+        .dark .lb-table tbody td { border-color:rgba(255,255,255,.07); }
+        .lb-num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+        .lb-nowrap { white-space:nowrap; }
+        .lb-strong { font-weight:600; }
+        .lb-muted { color:#9ca3af; }
+        .lb-sub { font-size:.72rem; color:#9ca3af; }
+        .lb-credit { font-size:.72rem; color:#d97706; }
+        .dark .lb-credit { color:#fbbf24; }
+        .lb-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; }
+        .lb-empty { padding:1.5rem; text-align:center; color:#6b7280; }
+        .dark .lb-empty { color:#9ca3af; }
+    </style>
+
     {{-- Φίλτρα --}}
     <x-filament::section>
         <x-slot name="heading">Φίλτρα</x-slot>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <label class="flex flex-col gap-1 text-sm">
-                <span class="font-medium text-gray-700 dark:text-gray-300">Από</span>
-                <input type="date" wire:model.live="from"
-                    class="fi-input rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-800" />
+        <div class="lb-filters">
+            <label class="lb-field">
+                <span>Από</span>
+                <input type="date" class="lb-input" wire:model.live="from" />
             </label>
-            <label class="flex flex-col gap-1 text-sm">
-                <span class="font-medium text-gray-700 dark:text-gray-300">Έως</span>
-                <input type="date" wire:model.live="to"
-                    class="fi-input rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-800" />
+            <label class="lb-field">
+                <span>Έως</span>
+                <input type="date" class="lb-input" wire:model.live="to" />
             </label>
-            <label class="flex flex-col gap-1 text-sm">
-                <span class="font-medium text-gray-700 dark:text-gray-300">Βιβλίο</span>
-                <select wire:model.live="book"
-                    class="fi-select rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-800">
+            <label class="lb-field">
+                <span>Βιβλίο</span>
+                <select class="lb-input" wire:model.live="book">
                     <option value="all">Όλα</option>
                     <option value="income">Έσοδα</option>
                     <option value="expense">Έξοδα</option>
                 </select>
             </label>
-            <label class="flex flex-col gap-1 text-sm">
-                <span class="font-medium text-gray-700 dark:text-gray-300">Κατηγορία</span>
-                <select wire:model.live="category"
-                    class="fi-select rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-800">
+            <label class="lb-field">
+                <span>Κατηγορία</span>
+                <select class="lb-input" wire:model.live="category">
                     <option value="">— όλες —</option>
                     @foreach ($categoryOptions as $code => $label)
                         <option value="{{ $code }}">{{ $label }}</option>
@@ -39,42 +81,30 @@
                 </select>
             </label>
         </div>
-        <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            Περίοδος: {{ $result->periodLabel }} · read-only — η σελίδα δεν τροποποιεί τίποτα.
-        </p>
+        <p class="lb-note">Περίοδος: {{ $result->periodLabel }} · read-only — η σελίδα δεν τροποποιεί τίποτα.</p>
     </x-filament::section>
 
     {{-- Σύνολα περιόδου --}}
     <x-filament::section>
         <x-slot name="heading">Σύνολα περιόδου</x-slot>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
-                <div class="text-sm text-gray-500 dark:text-gray-400">Έσοδα ({{ $result->incomeCount() }})</div>
-                <div class="text-xl font-bold text-success-600 dark:text-success-400">{{ $money($result->incomeNet()) }}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">
-                    ΦΠΑ εκροών {{ $money($result->incomeVat()) }} · μικτό {{ $money($result->incomeGross()) }}
-                </div>
+        <div class="lb-grid">
+            <div class="lb-card">
+                <div class="lb-card__label">Έσοδα ({{ $result->incomeCount() }})</div>
+                <div class="lb-card__value lb-pos">{{ $money($result->incomeNet()) }}</div>
+                <div class="lb-card__hint">ΦΠΑ εκροών {{ $money($result->incomeVat()) }} · μικτό {{ $money($result->incomeGross()) }}</div>
             </div>
-            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
-                <div class="text-sm text-gray-500 dark:text-gray-400">Έξοδα ({{ $result->expenseCount() }})</div>
-                <div class="text-xl font-bold text-danger-600 dark:text-danger-400">{{ $money($result->expenseNet()) }}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">
-                    ΦΠΑ εισροών {{ $money($result->expenseVat()) }} · μικτό {{ $money($result->expenseGross()) }}
-                </div>
+            <div class="lb-card">
+                <div class="lb-card__label">Έξοδα ({{ $result->expenseCount() }})</div>
+                <div class="lb-card__value lb-neg">{{ $money($result->expenseNet()) }}</div>
+                <div class="lb-card__hint">ΦΠΑ εισροών {{ $money($result->expenseVat()) }} · μικτό {{ $money($result->expenseGross()) }}</div>
             </div>
-            <div class="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
-                <div class="text-sm text-gray-500 dark:text-gray-400">ΦΠΑ εκροών − εισροών</div>
-                <div @class([
-                    'text-xl font-bold',
-                    'text-danger-600 dark:text-danger-400' => $result->vatBalance() > 0,
-                    'text-success-600 dark:text-success-400' => $result->vatBalance() <= 0,
-                ])>{{ $money(abs($result->vatBalance())) }}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">
-                    {{ $result->vatBalance() > 0 ? 'Προς απόδοση' : 'Πιστωτικό υπόλοιπο' }}
-                </div>
+            <div class="lb-card">
+                <div class="lb-card__label">ΦΠΑ εκροών − εισροών</div>
+                <div class="lb-card__value {{ $result->vatBalance() > 0 ? 'lb-neg' : 'lb-pos' }}">{{ $money(abs($result->vatBalance())) }}</div>
+                <div class="lb-card__hint">{{ $result->vatBalance() > 0 ? 'Προς απόδοση' : 'Πιστωτικό υπόλοιπο' }}</div>
             </div>
         </div>
-        <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+        <p class="lb-note">
             Τα πιστωτικά εμφανίζονται με αρνητικό πρόσημο και συμψηφίζονται στα σύνολα —
             γι' αυτό τα έσοδα εδώ μπορεί να διαφέρουν από τον πίνακα εργαλείων (που εξαιρεί τα πιστωτικά).
         </p>
@@ -86,32 +116,30 @@
         @if (! empty($subtotals))
             <x-filament::section collapsible>
                 <x-slot name="heading">{{ $heading }}</x-slot>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                <div class="lb-wrap">
+                    <table class="lb-table">
                         <thead>
-                            <tr class="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                                <th class="py-2 pr-4">Κατηγορία</th>
-                                <th class="py-2 pr-4">Λογαριασμός</th>
-                                <th class="py-2 pr-4 text-right">Πλήθος</th>
-                                <th class="py-2 pr-4 text-right">Καθαρό</th>
-                                <th class="py-2 pr-4 text-right">ΦΠΑ</th>
-                                <th class="py-2 text-right">Σύνολο</th>
+                            <tr>
+                                <th>Κατηγορία</th>
+                                <th>Λογαριασμός</th>
+                                <th class="lb-num">Πλήθος</th>
+                                <th class="lb-num">Καθαρό</th>
+                                <th class="lb-num">ΦΠΑ</th>
+                                <th class="lb-num">Σύνολο</th>
                             </tr>
                         </thead>
                         <tbody>
                             @foreach ($subtotals as $row)
-                                <tr class="border-b border-gray-100 dark:border-gray-800">
-                                    <td class="py-2 pr-4">
+                                <tr>
+                                    <td>
                                         {{ $row['label'] ?? ($row['code'] ?: '— αταξινόμητο —') }}
-                                        @if ($row['code'])
-                                            <span class="text-xs text-gray-400">({{ $row['code'] }})</span>
-                                        @endif
+                                        @if ($row['code'])<span class="lb-sub">({{ $row['code'] }})</span>@endif
                                     </td>
-                                    <td class="py-2 pr-4">{{ $row['account'] ?? '—' }}</td>
-                                    <td class="py-2 pr-4 text-right">{{ $row['count'] }}</td>
-                                    <td class="py-2 pr-4 text-right">{{ $money($row['net']) }}</td>
-                                    <td class="py-2 pr-4 text-right">{{ $money($row['vat']) }}</td>
-                                    <td class="py-2 text-right font-medium">{{ $money($row['gross']) }}</td>
+                                    <td>{{ $row['account'] ?? '—' }}</td>
+                                    <td class="lb-num">{{ $row['count'] }}</td>
+                                    <td class="lb-num">{{ $money($row['net']) }}</td>
+                                    <td class="lb-num">{{ $money($row['vat']) }}</td>
+                                    <td class="lb-num lb-strong">{{ $money($row['gross']) }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
@@ -124,56 +152,60 @@
     {{-- Ημερολόγιο --}}
     <x-filament::section>
         <x-slot name="heading">Ημερολόγιο</x-slot>
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+        <div class="lb-wrap">
+            <table class="lb-table">
                 <thead>
-                    <tr class="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                        <th class="py-2 pr-4">Ημ/νία</th>
-                        <th class="py-2 pr-4">Βιβλίο</th>
-                        <th class="py-2 pr-4">Παραστατικό</th>
-                        <th class="py-2 pr-4">Είδος</th>
-                        <th class="py-2 pr-4">Αντισυμβαλλόμενος</th>
-                        <th class="py-2 pr-4">ΑΦΜ</th>
-                        <th class="py-2 pr-4">Κατηγορία</th>
-                        <th class="py-2 pr-4">Λογ/σμός</th>
-                        <th class="py-2 pr-4 text-right">Καθαρό</th>
-                        <th class="py-2 pr-4 text-right">ΦΠΑ</th>
-                        <th class="py-2 text-right">Σύνολο</th>
+                    <tr>
+                        <th>Ημ/νία</th>
+                        <th>Βιβλίο</th>
+                        <th>Παραστατικό</th>
+                        <th>ΜΑΡΚ</th>
+                        <th>myDATA</th>
+                        <th>Είδος</th>
+                        <th>Αντισυμβαλλόμενος</th>
+                        <th>ΑΦΜ</th>
+                        <th>Κατηγορία</th>
+                        <th>Λογ/σμός</th>
+                        <th class="lb-num">Καθαρό</th>
+                        <th class="lb-num">ΦΠΑ</th>
+                        <th class="lb-num">Σύνολο</th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse ($result->rows as $row)
-                        <tr class="border-b border-gray-100 dark:border-gray-800">
-                            <td class="py-2 pr-4 whitespace-nowrap">{{ $row->date->format('d/m/Y') }}</td>
-                            <td class="py-2 pr-4">
+                        <tr>
+                            <td class="lb-nowrap">{{ $row->date->format('d/m/Y') }}</td>
+                            <td class="lb-nowrap">
                                 <x-filament::badge :color="$row->book === 'income' ? 'success' : 'danger'">
                                     {{ $row->book === 'income' ? 'Έσοδο' : 'Έξοδο' }}
                                 </x-filament::badge>
-                                @if ($row->isCredit)
-                                    <span class="text-xs text-warning-600 dark:text-warning-400">πιστωτικό</span>
+                                @if ($row->isCredit)<div class="lb-credit">πιστωτικό</div>@endif
+                            </td>
+                            <td class="lb-nowrap lb-strong">{{ $row->doc }}</td>
+                            <td class="lb-mono">{{ $row->mark ?? '—' }}</td>
+                            <td>
+                                @if ($row->mydataState === 'VALID')
+                                    <x-filament::badge color="success">VALID</x-filament::badge>
+                                @elseif ($row->mydataState === 'CANCELLED')
+                                    <x-filament::badge color="danger">CANCELLED</x-filament::badge>
+                                @else
+                                    <span class="lb-muted">—</span>
                                 @endif
                             </td>
-                            <td class="py-2 pr-4 whitespace-nowrap font-medium">{{ $row->doc }}</td>
-                            <td class="py-2 pr-4">{{ $row->docType }}</td>
-                            <td class="py-2 pr-4">{{ $row->counterparty ?? '—' }}</td>
-                            <td class="py-2 pr-4 whitespace-nowrap">{{ $row->afm ?? '—' }}</td>
-                            <td class="py-2 pr-4">
+                            <td>{{ $row->docType }}</td>
+                            <td>{{ $row->counterparty ?? '—' }}</td>
+                            <td class="lb-nowrap">{{ $row->afm ?? '—' }}</td>
+                            <td>
                                 {{ $row->categoryLabel ?? '—' }}
-                                @if ($row->categoryCode)
-                                    <span class="text-xs text-gray-400">({{ $row->categoryCode }})</span>
-                                @endif
+                                @if ($row->categoryCode)<span class="lb-sub">({{ $row->categoryCode }})</span>@endif
                             </td>
-                            <td class="py-2 pr-4 whitespace-nowrap" @if ($row->accountName) title="{{ $row->accountName }}" @endif>{{ $row->accountCode ?? '—' }}</td>
-                            <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row->net) }}</td>
-                            <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($row->vat) }}</td>
-                            <td class="py-2 text-right whitespace-nowrap font-medium">{{ $money($row->gross) }}</td>
+                            <td class="lb-nowrap" @if ($row->accountName) title="{{ $row->accountName }}" @endif>{{ $row->accountCode ?? '—' }}</td>
+                            <td class="lb-num">{{ $money($row->net) }}</td>
+                            <td class="lb-num">{{ $money($row->vat) }}</td>
+                            <td class="lb-num lb-strong">{{ $money($row->gross) }}</td>
                         </tr>
                     @empty
-                        <tr>
-                            <td colspan="11" class="py-6 text-center text-gray-500 dark:text-gray-400">
-                                Καμία εγγραφή στην περίοδο.
-                            </td>
-                        </tr>
+                        <tr><td colspan="13" class="lb-empty">Καμία εγγραφή στην περίοδο.</td></tr>
                     @endforelse
                 </tbody>
             </table>

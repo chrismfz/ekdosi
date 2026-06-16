@@ -23,7 +23,7 @@ class LedgerBookExporter
     public function headers(): array
     {
         return [
-            'Ημ/νία', 'Βιβλίο', 'Παραστατικό', 'Είδος', 'Αντισυμβαλλόμενος', 'ΑΦΜ',
+            'Ημ/νία', 'Βιβλίο', 'Παραστατικό', 'ΜΑΡΚ', 'Κατάσταση myDATA', 'Είδος', 'Αντισυμβαλλόμενος', 'ΑΦΜ',
             'Κωδ. κατηγορίας', 'Κατηγορία', 'Λογαριασμός', 'Πιστωτικό', 'Καθαρό', 'ΦΠΑ', 'Σύνολο',
         ];
     }
@@ -41,6 +41,8 @@ class LedgerBookExporter
                 'date' => $row->date->format('Y-m-d'),
                 'book' => $row->book === 'income' ? 'Έσοδο' : 'Έξοδο',
                 'doc' => $row->doc,
+                'mark' => $row->mark ?? '',
+                'mydataState' => $row->mydataState ?? '',
                 'docType' => $row->docType,
                 'counterparty' => $row->counterparty ?? '',
                 'afm' => $row->afm ?? '',
@@ -73,18 +75,19 @@ class LedgerBookExporter
 
         foreach ($this->records($result) as $rec) {
             fputcsv($handle, [
-                $rec['date'], $rec['book'], $safe($rec['doc']), $safe($rec['docType']), $safe($rec['counterparty']),
+                $rec['date'], $rec['book'], $safe($rec['doc']), $safe($rec['mark']), $safe($rec['mydataState']),
+                $safe($rec['docType']), $safe($rec['counterparty']),
                 $safe($rec['afm']), $safe($rec['categoryCode']), $safe($rec['categoryLabel']), $safe($rec['account']), $rec['isCredit'],
                 $fmt($rec['net']), $fmt($rec['vat']), $fmt($rec['gross']),
             ], ';');
         }
 
-        // Totals trailer — amounts under Καθαρό/ΦΠΑ/Σύνολο (cols 10/11/12).
-        $pad = fn (string $label, array $tail): array => array_merge(array_pad([$label], 10, ''), $tail);
+        // Totals trailer — amounts under Καθαρό/ΦΠΑ/Σύνολο (the last 3 of 15 cols).
+        $pad = fn (string $label, array $tail): array => array_merge(array_pad([$label], 12, ''), $tail);
         fputcsv($handle, [], ';');
         fputcsv($handle, $pad('Σύνολο εσόδων', [$fmt($result->incomeNet()), $fmt($result->incomeVat()), $fmt($result->incomeGross())]), ';');
         fputcsv($handle, $pad('Σύνολο εξόδων', [$fmt($result->expenseNet()), $fmt($result->expenseVat()), $fmt($result->expenseGross())]), ';');
-        fputcsv($handle, array_merge(array_pad(['ΦΠΑ εκροών − εισροών'], 12, ''), [$fmt($result->vatBalance())]), ';');
+        fputcsv($handle, array_merge(array_pad(['ΦΠΑ εκροών − εισροών'], 14, ''), [$fmt($result->vatBalance())]), ';');
 
         rewind($handle);
         $csv = stream_get_contents($handle);
@@ -135,16 +138,17 @@ class LedgerBookExporter
 
         foreach ($this->records($result) as $rec) {
             $writer->addRow(Row::fromValues([
-                $rec['date'], $rec['book'], $rec['doc'], $rec['docType'], $rec['counterparty'],
+                $rec['date'], $rec['book'], $rec['doc'], $rec['mark'], $rec['mydataState'],
+                $rec['docType'], $rec['counterparty'],
                 $rec['afm'], $rec['categoryCode'], $rec['categoryLabel'], $rec['account'], $rec['isCredit'],
                 $rec['net'], $rec['vat'], $rec['gross'],
             ]));
         }
 
         $writer->addRow(Row::fromValues([]));
-        $writer->addRow(Row::fromValues($this->pad(['Σύνολο εσόδων'], 10, [$result->incomeNet(), $result->incomeVat(), $result->incomeGross()]), $boldStyle));
-        $writer->addRow(Row::fromValues($this->pad(['Σύνολο εξόδων'], 10, [$result->expenseNet(), $result->expenseVat(), $result->expenseGross()]), $boldStyle));
-        $writer->addRow(Row::fromValues($this->pad(['ΦΠΑ εκροών − εισροών'], 12, [$result->vatBalance()]), $boldStyle));
+        $writer->addRow(Row::fromValues($this->pad(['Σύνολο εσόδων'], 12, [$result->incomeNet(), $result->incomeVat(), $result->incomeGross()]), $boldStyle));
+        $writer->addRow(Row::fromValues($this->pad(['Σύνολο εξόδων'], 12, [$result->expenseNet(), $result->expenseVat(), $result->expenseGross()]), $boldStyle));
+        $writer->addRow(Row::fromValues($this->pad(['ΦΠΑ εκροών − εισροών'], 14, [$result->vatBalance()]), $boldStyle));
 
         $writer->close();
 

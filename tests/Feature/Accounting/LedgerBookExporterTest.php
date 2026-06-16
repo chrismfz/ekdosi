@@ -76,7 +76,7 @@ class LedgerBookExporterTest extends TestCase
         $this->assertStringContainsString('ΦΠΑ εκροών − εισροών', $csv);
 
         // Column-count guard: header, a data row and the totals line must all
-        // parse to 13 fields, so a future column shift can't silently mis-align
+        // parse to 15 fields, so a future column shift can't silently mis-align
         // the totals trailer (the off-by-one this layout is sensitive to). We
         // PARSE each line (fputcsv quotes multibyte labels, so a raw prefix
         // match is unreliable) after stripping the BOM.
@@ -87,15 +87,16 @@ class LedgerBookExporterTest extends TestCase
         );
         $first = fn (string $v) => collect($rows)->first(fn ($r) => ($r[0] ?? null) === $v);
 
-        $this->assertCount(13, $first('Ημ/νία'), 'header has 13 columns');
+        $this->assertCount(15, $first('Ημ/νία'), 'header has 15 columns');
 
         $dataRow = $first('2026-01-10');
-        $this->assertCount(13, $dataRow, 'data row has 13 columns');
-        $this->assertSame('73', $dataRow[8], 'account lands in column 9 (idx 8)');
+        $this->assertCount(15, $dataRow, 'data row has 15 columns');
+        $this->assertSame('400001', $dataRow[3], 'ΜΑΡΚ lands in column 4 (idx 3)');
+        $this->assertSame('73', $dataRow[10], 'account lands in column 11 (idx 10)');
 
         $totals = $first('Σύνολο εσόδων');
-        $this->assertCount(13, $totals, 'totals row has 13 columns');
-        $this->assertSame('100,00', $totals[10], 'income net lands under Καθαρό (idx 10)');
+        $this->assertCount(15, $totals, 'totals row has 15 columns');
+        $this->assertSame('100,00', $totals[12], 'income net lands under Καθαρό (idx 12)');
     }
 
     public function test_json_structure_and_totals(): void

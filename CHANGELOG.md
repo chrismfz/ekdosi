@@ -17,6 +17,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Changed
+- **Βιβλίο Εσόδων-Εξόδων (#6) — ΜΑΡΚ/κατάσταση myDATA + καθαρότερη εμφάνιση.** Το `/ledger-book`
+  αποκτά στήλες **ΜΑΡΚ** + **κατάσταση myDATA** (badge VALID/CANCELLED) στο ημερολόγιο και στα
+  exports (CSV/XLSX/JSON). Η σελίδα ξαναγράφτηκε με **self-contained styling** (scoped `<style>`,
+  responsive + dark-mode) ώστε να δείχνει σωστά χωρίς custom Tailwind build — ο panel δεν φορτώνει
+  custom theme, οπότε τα utility classes έμεναν άστυλα (στοιβαγμένες κάρτες/κολλημένοι headers).
+
 ### Added
 - **Αυτόματος χαρακτηρισμός εξόδων με κανόνες (#5).** Νέοι «Κανόνες χαρακτηρισμού» (Setup): «προμηθευτής
   (+ προαιρ. τύπος) → χαρακτηρισμός E3». Ο `ExpenseClassifier` τους εφαρμόζει **αυτόματα στο import**
