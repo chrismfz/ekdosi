@@ -85,6 +85,57 @@ class AgedReceivablesTest extends TestCase
         );
     }
 
+    public function test_finds_debtor_even_with_null_payment_status_cache(): void
+    {
+        // Canonical discovery is cache-independent (due_days>0 + payments), so a
+        // credit-term debtor whose payment_status was never recomputed (NULL) must
+        // still appear — the bug the review caught with the old cache-based query.
+        $tenant = Company::create([
+            'name' => 'Cache OE', 'slug' => 'c-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
+        ]);
+        $pm = PaymentMethod::create(['company_id' => $tenant->id, 'description' => 'Πίστωση', 'due_days' => 30]);
+        $type = InvoiceType::create([
+            'company_id' => $tenant->id, 'code' => 'T', 'name' => 'Τ', 'invcount' => 1, 'mydata_type' => '2.1',
+        ]);
+        $cust = Customer::create(['company_id' => $tenant->id, 'name' => 'Χωρίς cache', 'afm' => '999']);
+        // NOTE: payment_status left NULL (no forceFill, no recompute).
+        Invoice::create([
+            'company_id' => $tenant->id, 'invcode' => 'X1', 'code' => 1,
+            'invoice_type_id' => $type->id, 'payment_method_id' => $pm->id, 'customer_id' => $cust->id,
+            'issued_at' => now()->subDays(40), 'local_status' => 'active',
+            'net_total' => 80, 'gross_total' => 99.2, 'header_discount_percent' => 0,
+        ]);
+
+        $result = app(AgedReceivablesReport::class)->build($tenant);
+
+        $this->assertCount(1, $result->rows);
+        $this->assertSame($cust->id, $result->rows[0]->customerId);
+        $this->assertGreaterThan(0, $result->rows[0]->b31_60);
+    }
+
+    public function test_csv_neutralises_formula_injection_in_name(): void
+    {
+        // A debtor named with a formula payload must be quoted in the CSV.
+        Gate::before(fn () => true);
+        $this->actingAs(User::create([
+            'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]));
+        $this->old->forceFill(['name' => '=HYPERLINK("http://evil","x")'])->save();
+        Filament::setTenant($this->tenant);
+
+        $page = new AgedReceivablesPage;
+        $ref = new \ReflectionMethod($page, 'exportCsv');
+        $ref->setAccessible(true);
+        /** @var \Symfony\Component\HttpFoundation\StreamedResponse $resp */
+        $resp = $ref->invoke($page);
+        ob_start();
+        $resp->sendContent();
+        $csv = (string) ob_get_clean();
+
+        $this->assertStringContainsString("'=HYPERLINK", $csv, 'leading = is neutralised with a quote');
+    }
+
     public function test_page_renders_with_rows(): void
     {
         Gate::before(fn () => true);

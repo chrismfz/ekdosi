@@ -104,6 +104,23 @@ class CustomerLedgerBuilder
     }
 
     /**
+     * Lean variant for the aged-receivables report: stats + aging only (skips the
+     * yearly breakdown the report never reads). Same FIFO ageing as the Καρτέλα.
+     *
+     * @return array{stats: array, aging: array}
+     */
+    public function buildAgingBlock(Customer $customer): array
+    {
+        $invoices = $this->loadInvoices($customer);
+        $payments = $this->loadPayments($customer);
+
+        return [
+            'stats' => $this->computeStats($invoices, $payments),
+            'aging' => $this->computeAging($invoices, $payments),
+        ];
+    }
+
+    /**
      * Build ONLY the chronological ledger array. Re-run on every
      * filter change. Loads invoices + payments fresh each time so
      * stat-block staleness across long-lived component sessions

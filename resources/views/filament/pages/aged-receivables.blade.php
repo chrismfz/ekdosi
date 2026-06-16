@@ -20,7 +20,7 @@
             </div>
         @else
             {{-- Summary cards --}}
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
                     <div class="text-xs text-gray-500 dark:text-gray-400">Σύνολο οφειλών ({{ $result->customerCount() }} πελάτες)</div>
                     <div class="text-2xl font-bold">{{ $money($result->grandTotal()) }}</div>

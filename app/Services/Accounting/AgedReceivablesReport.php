@@ -2,10 +2,8 @@
 
 namespace App\Services\Accounting;
 
-use App\Enums\PaymentStatus;
 use App\Models\Company;
 use App\Models\Customer;
-use App\Models\Invoice;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
 
 /**
@@ -22,29 +20,25 @@ class AgedReceivablesReport
 {
     public function build(Company $tenant): AgedReceivablesResult
     {
-        $customerIds = Invoice::query()
+        // Canonical, cache-independent debtor discovery — the SAME query the
+        // dashboard uses (due_days>0 + payments, not the nullable payment_status
+        // cache), so the report can't miss a debtor with a stale cache and its
+        // grand total reconciles with the dashboard receivables figure.
+        $customers = Customer::query()
             ->where('company_id', $tenant->getKey())
-            ->whereNull('credited_invoice_id')
-            ->whereNotNull('customer_id')
-            ->whereIn('payment_status', [PaymentStatus::Unpaid->value, PaymentStatus::Partial->value])
-            ->distinct()
-            ->pluck('customer_id')
-            ->all();
+            ->withOutstandingBalance($tenant->getKey())
+            ->onlyDebtors()
+            ->get();
 
-        if ($customerIds === []) {
+        if ($customers->isEmpty()) {
             return new AgedReceivablesResult([]);
         }
 
         $builder = app(CustomerLedgerBuilder::class);
         $rows = [];
 
-        $customers = Customer::query()
-            ->where('company_id', $tenant->getKey())
-            ->whereIn('id', $customerIds)
-            ->get();
-
         foreach ($customers as $customer) {
-            $block = $builder->buildStatsBlock($customer);
+            $block = $builder->buildAgingBlock($customer);
             $aging = $block['aging'];
             $total = round(
                 $aging['bucket_0_30'] + $aging['bucket_31_60'] + $aging['bucket_61_90'] + $aging['bucket_90_plus'],

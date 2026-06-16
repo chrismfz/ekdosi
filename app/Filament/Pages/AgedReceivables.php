@@ -78,14 +78,16 @@ class AgedReceivables extends Page
         $result = $this->getResult();
         $name = 'ilikiosi-ofeilon-'.now()->format('Y-m-d').'.csv';
         $num = fn ($v): string => number_format((float) $v, 2, ',', '');
+        // Neutralise CSV formula injection in the free-text name (=,+,-,@ → quote).
+        $safe = fn (string $v): string => ($v !== '' && in_array($v[0], ['=', '+', '-', '@'], true)) ? "'".$v : $v;
 
-        return response()->streamDownload(function () use ($result, $num): void {
+        return response()->streamDownload(function () use ($result, $num, $safe): void {
             $h = fopen('php://output', 'w');
             fwrite($h, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
             fputcsv($h, ['Πελάτης', 'ΑΦΜ', '0-30', '31-60', '61-90', '90+', 'Σύνολο', 'Παλαιότερο (ημέρες)'], ';');
             foreach ($result->rows as $row) {
                 fputcsv($h, [
-                    $row->customerName, $row->afm ?? '',
+                    $safe($row->customerName), $safe($row->afm ?? ''),
                     $num($row->b0_30), $num($row->b31_60), $num($row->b61_90), $num($row->b90plus),
                     $num($row->total), $row->oldestDays ?? '',
                 ], ';');
