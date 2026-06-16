@@ -171,9 +171,18 @@ class TenantRoleProvisioner
     {
         $tables = (array) config('permission.table_names');
         $cols = (array) config('permission.column_names');
+        $teamKey = $cols['team_foreign_key'] ?? 'company_id';
 
         return DB::table(($tables['model_has_roles'] ?? 'model_has_roles').' as mhr')
             ->join(($tables['roles'] ?? 'roles').' as r', 'r.id', '=', 'mhr.'.($cols['role_pivot_key'] ?? 'role_id'))
+            // Require the user to STILL be a member of that company. Detaching a
+            // user removes the company_user pivot but NOT their role assignment,
+            // so without this a detached super_admin would keep the global bypass
+            // (a privilege-non-revocation hole). Membership-gated = detach revokes.
+            ->join('company_user as cu', function ($join) use ($user, $teamKey): void {
+                $join->on('cu.company_id', '=', "r.{$teamKey}")
+                    ->where('cu.user_id', '=', $user->getKey());
+            })
             ->where('r.name', ShieldUtils::getSuperAdminName())
             ->where('r.guard_name', ShieldUtils::getFilamentAuthGuard())
             ->where('mhr.'.($cols['model_morph_key'] ?? 'model_id'), $user->getKey())

@@ -52,6 +52,7 @@ class TenantRolePickerActionTest extends TestCase
     public function test_picker_from_user_tenants_side_sets_role(): void
     {
         $company = $this->company('uside');
+        $this->actor->companies()->attach($company->id);   // a system super_admin is a member
         app(TenantRoleProvisioner::class)->assignSuperAdmin($this->actor, $company);
 
         $user = User::create(['name' => 'Target', 'email' => 't-'.uniqid().'@test.local', 'password' => bcrypt('x')]);
@@ -73,6 +74,7 @@ class TenantRolePickerActionTest extends TestCase
     public function test_picker_from_company_users_side_sets_role(): void
     {
         $company = $this->company('cside');
+        $this->actor->companies()->attach($company->id);   // a system super_admin is a member
         app(TenantRoleProvisioner::class)->assignSuperAdmin($this->actor, $company);
 
         $user = User::create(['name' => 'Target', 'email' => 't-'.uniqid().'@test.local', 'password' => bcrypt('x')]);
