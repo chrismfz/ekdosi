@@ -4,6 +4,9 @@ namespace Tests\Feature\Accounting;
 
 use App\Filament\Pages\LedgerBook;
 use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -31,10 +34,28 @@ class LedgerBookPageTest extends TestCase
         ]);
         Filament::setTenant($tenant);
 
+        // A populated, filed income row IN the default period (current month), so
+        // the journal actually renders a ΜΑΡΚ value + the VALID status badge.
+        $type = InvoiceType::create([
+            'company_id' => $tenant->id, 'code' => 'TPY', 'name' => 'Τιμολόγιο', 'invcount' => 1,
+            'mydata_type' => '2.1', 'mydata_income_class_category' => 'category1_3',
+        ]);
+        $cust = Customer::create(['company_id' => $tenant->id, 'name' => 'Πελάτης ΑΕ']);
+        $inv = Invoice::create([
+            'company_id' => $tenant->id, 'invcode' => 'TPY1', 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $cust->id,
+            'issued_at' => now(), 'local_status' => 'active',
+            'net_total' => 100, 'gross_total' => 124, 'header_discount_percent' => 0,
+        ]);
+        $inv->forceFill(['mydata_mark' => '400000000000123', 'mydata_state' => 'VALID'])->saveQuietly();
+
         Livewire::test(LedgerBook::class)
             ->assertSuccessful()
             ->assertSee('Ημερολόγιο')
             ->assertSee('ΜΑΡΚ')
-            ->assertSee('Σύνολα περιόδου');
+            ->assertSee('Σύνολα περιόδου')
+            // The populated row surfaces its myDATA ΜΑΡΚ + status badge.
+            ->assertSee('400000000000123')
+            ->assertSee('VALID');
     }
 }

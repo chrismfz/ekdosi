@@ -44,6 +44,8 @@
         .lb-strong { font-weight:600; }
         .lb-muted { color:#9ca3af; }
         .lb-sub { font-size:.72rem; color:#9ca3af; }
+        .lb-credit { font-size:.72rem; color:#d97706; }
+        .dark .lb-credit { color:#fbbf24; }
         .lb-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; }
         .lb-empty { padding:1.5rem; text-align:center; color:#6b7280; }
         .dark .lb-empty { color:#9ca3af; }
@@ -177,7 +179,7 @@
                                 <x-filament::badge :color="$row->book === 'income' ? 'success' : 'danger'">
                                     {{ $row->book === 'income' ? 'Έσοδο' : 'Έξοδο' }}
                                 </x-filament::badge>
-                                @if ($row->isCredit)<div class="lb-sub">πιστωτικό</div>@endif
+                                @if ($row->isCredit)<div class="lb-credit">πιστωτικό</div>@endif
                             </td>
                             <td class="lb-nowrap lb-strong">{{ $row->doc }}</td>
                             <td class="lb-mono">{{ $row->mark ?? '—' }}</td>
