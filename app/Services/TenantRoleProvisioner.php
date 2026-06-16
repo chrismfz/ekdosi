@@ -6,7 +6,6 @@ use App\Models\Company;
 use App\Models\Role;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
-use Closure;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -20,24 +19,26 @@ use Spatie\Permission\PermissionRegistrar;
  *
  * Background: Shield runs in teams mode (`team_foreign_key=company_id`), so a
  * role row exists PER company. The super-admin bypass in AppServiceProvider is
- * `Gate::before(fn => $user->hasRole(super_admin))`, evaluated against the
- * CURRENT tenant's team — so a role must exist in, and be assigned within, each
- * company's team. This service is the single place that creates/repairs those
- * roles and assigns them, called from the CompanyObserver, the DatabaseSeeder,
- * the `shield:sync-super-admin` backfill command, and the role-picker UI.
+ * `Gate::before(fn => $user->isSystemSuperAdmin())` — GLOBAL: a user who holds
+ * super_admin in ANY tenant (and is still a member of it) bypasses every policy
+ * everywhere. company_admin/operator stay per-tenant. This service is the single
+ * place that creates/repairs roles and assigns them, called from the
+ * CompanyObserver, the DatabaseSeeder, the `shield:sync-super-admin` backfill
+ * command, the importer, and the role-picker UI.
  *
  * Three managed roles per tenant:
- *   - super_admin   : Gate::before bypass; needs no permissions.
+ *   - super_admin   : Gate::before bypass (global); needs no permissions.
  *   - company_admin : every permission of THIS tenant EXCEPT the cross-tenant /
  *                     platform-level resources in ADMIN_FORBIDDEN_RESOURCES
  *                     (User/Company/Role) — so a tenant admin can't reach the
  *                     panel-global user/company roster or escalate roles.
  *   - operator      : the curated daily-work subset (OPERATOR_PERMISSION_MAP).
  *
- * Team-cache discipline: every role read/write must pin the registrar's team id
- * and restore it afterwards, and a WRITE must bust the permission cache. All of
- * that lives in one place — `withTeam()` — so no caller hand-rolls (and forgets
- * a step of) the envelope.
+ * Teams-mode discipline: every role read AND write goes through RAW queries with
+ * the EXPLICIT target company_id (findRole/userHoldsRole/isSystemSuperAdmin/
+ * upsertRole/attachRole/detachRole) — NEVER spatie's registrar-team-aware
+ * Eloquent, which writes/reads the AMBIENT panel tenant and would land rows under
+ * the wrong company (the long «collided»/«stripped menu» saga).
  */
 class TenantRoleProvisioner
 {
@@ -82,41 +83,6 @@ class TenantRoleProvisioner
      */
     public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role'];
 
-    // ── Team-scoped envelope ───────────────────────────────────────────────
-
-    /**
-     * Run $fn with the registrar's team pinned to $company, restoring the
-     * previous team afterwards. WRITES pass $flushCache=true to bust the
-     * permission cache on entry + exit; READS (role-name lookups) pass false —
-     * they only need the team switch + the caller's own unsetRelation('roles'),
-     * so they don't thrash the global permission cache (important: the role
-     * badge columns call the reads once PER ROW).
-     *
-     * @template T
-     *
-     * @param  Closure(PermissionRegistrar): T  $fn
-     * @return T
-     */
-    private function withTeam(Company $company, Closure $fn, bool $flushCache = true): mixed
-    {
-        $registrar = app(PermissionRegistrar::class);
-        $previousTeam = $registrar->getPermissionsTeamId();
-        $registrar->setPermissionsTeamId($company->getKey());
-
-        if ($flushCache) {
-            $registrar->forgetCachedPermissions();
-        }
-
-        try {
-            return $fn($registrar);
-        } finally {
-            $registrar->setPermissionsTeamId($previousTeam);
-            if ($flushCache) {
-                $registrar->forgetCachedPermissions();
-            }
-        }
-    }
-
     // ── super_admin ────────────────────────────────────────────────────────
 
     /**
@@ -125,11 +91,7 @@ class TenantRoleProvisioner
      */
     public function ensureSuperAdminRole(Company $company): Role
     {
-        return $this->withTeam($company, fn (): Role => $this->upsertRole(
-            ShieldUtils::getSuperAdminName(),
-            ShieldUtils::getFilamentAuthGuard(),
-            $company,
-        ));
+        return $this->upsertRole(ShieldUtils::getSuperAdminName(), ShieldUtils::getFilamentAuthGuard(), $company);
     }
 
     /**
@@ -140,16 +102,9 @@ class TenantRoleProvisioner
     public function assignSuperAdmin(User $user, Company $company): void
     {
         $role = $this->ensureSuperAdminRole($company);
-
-        // Read via the RAW pivot (userHoldsRole), assign via the ROLE OBJECT —
-        // never spatie's by-name/teams-aware resolution, which can miss.
-        if ($this->userHoldsRole($user, $company, $role->name)) {
-            return;
-        }
-        $this->withTeam($company, function () use ($user, $role): void {
-            $user->unsetRelation('roles');
-            $user->assignRole($role);
-        });
+        // RAW attach (idempotent) — see attachRole: spatie's assignRole would
+        // write the wrong team under the ambient panel tenant.
+        $this->attachRole($user, $role, (int) $company->getKey());
     }
 
     /**
@@ -213,15 +168,16 @@ class TenantRoleProvisioner
      */
     public function ensureStandardRoles(Company $company): void
     {
-        $this->withTeam($company, function () use ($company): void {
-            $guard = ShieldUtils::getFilamentAuthGuard();
+        $guard = ShieldUtils::getFilamentAuthGuard();
 
-            $admin = $this->firstOrCreateRole(self::ROLE_COMPANY_ADMIN, $guard, $company);
-            $admin->syncPermissions($this->companyAdminPermissions($guard));
+        // No team envelope needed: upsertRole writes the role row RAW with the
+        // explicit company_id, and role_has_permissions has no team column, so
+        // syncPermissions is team-agnostic.
+        $admin = $this->upsertRole(self::ROLE_COMPANY_ADMIN, $guard, $company);
+        $admin->syncPermissions($this->companyAdminPermissions($guard));
 
-            $operator = $this->firstOrCreateRole(self::ROLE_OPERATOR, $guard, $company);
-            $operator->syncPermissions($this->operatorPermissions($guard));
-        });
+        $operator = $this->upsertRole(self::ROLE_OPERATOR, $guard, $company);
+        $operator->syncPermissions($this->operatorPermissions($guard));
     }
 
     /**
@@ -233,17 +189,10 @@ class TenantRoleProvisioner
      */
     public function ensureManagedRolesExist(Company $company): void
     {
-        $this->withTeam($company, function () use ($company): void {
-            $guard = ShieldUtils::getFilamentAuthGuard();
-            foreach ($this->managedRoleNames() as $name) {
-                $this->firstOrCreateRole($name, $guard, $company);
-            }
-        });
-    }
-
-    private function firstOrCreateRole(string $name, string $guard, Company $company): Role
-    {
-        return $this->upsertRole($name, $guard, $company);
+        $guard = ShieldUtils::getFilamentAuthGuard();
+        foreach ($this->managedRoleNames() as $name) {
+            $this->upsertRole($name, $guard, $company);
+        }
     }
 
     /**
@@ -271,10 +220,12 @@ class TenantRoleProvisioner
             // import/picker «collided but could not be re-read» saga: $company is
             // 81 but the INSERT used the panel tenant 4). A raw insert writes the
             // company_id we pass, verbatim.
-            $id = DB::table('roles')->insertGetId([
+            $tables = (array) config('permission.table_names');
+            $cols = (array) config('permission.column_names');
+            $id = DB::table($tables['roles'] ?? 'roles')->insertGetId([
                 'name' => $name,
                 'guard_name' => $guard,
-                'company_id' => $companyId,
+                ($cols['team_foreign_key'] ?? 'company_id') => $companyId,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -301,10 +252,12 @@ class TenantRoleProvisioner
      */
     private function findRole(string $name, string $guard, int $companyId): ?Role
     {
-        $id = DB::table('roles')
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
+        $id = DB::table($tables['roles'] ?? 'roles')
             ->where('name', $name)
             ->where('guard_name', $guard)
-            ->where('company_id', $companyId)
+            ->where(($cols['team_foreign_key'] ?? 'company_id'), $companyId)
             ->value('id');
 
         return $id !== null ? Role::query()->withoutGlobalScopes()->find($id) : null;
@@ -365,14 +318,7 @@ class TenantRoleProvisioner
         }
 
         $role = $this->upsertRole($roleName, ShieldUtils::getFilamentAuthGuard(), $company);
-
-        if ($this->userHoldsRole($user, $company, $roleName)) {
-            return;
-        }
-        $this->withTeam($company, function () use ($user, $role): void {
-            $user->unsetRelation('roles');
-            $user->assignRole($role);   // OBJECT, not a name → no teams find-miss
-        });
+        $this->attachRole($user, $role, (int) $company->getKey());
     }
 
     // ── Role picker (per user × company) ───────────────────────────────────
@@ -434,30 +380,63 @@ class TenantRoleProvisioner
         $guard = ShieldUtils::getFilamentAuthGuard();
         $companyId = (int) $company->getKey();
 
-        $this->withTeam($company, function () use ($user, $roleName, $managed, $guard, $companyId, $company): void {
-            $user->unsetRelation('roles');
-
-            // Strip any OTHER managed role — reads via raw pivot, removes via the
-            // role OBJECT (never by-name, which can miss under teams).
-            foreach ($managed as $name) {
-                if ($name === $roleName) {
-                    continue;
-                }
-                if ($this->userHoldsRole($user, $company, $name)) {
-                    $role = $this->findRole($name, $guard, $companyId);
-                    if ($role !== null) {
-                        $user->removeRole($role);
-                    }
-                }
+        // Strip any OTHER managed role, then attach the chosen one — all via RAW
+        // model_has_roles writes (attachRole/detachRole), NOT spatie's
+        // assignRole/removeRole which write the team column from the registrar's
+        // CURRENT team (the ambient panel tenant), landing the row under the WRONG
+        // company when managing a non-current tenant.
+        foreach ($managed as $name) {
+            if ($name === $roleName) {
+                continue;
             }
-
-            if ($roleName !== null && ! $this->userHoldsRole($user, $company, $roleName)) {
-                $role = $this->findRole($roleName, $guard, $companyId);
-                if ($role !== null) {
-                    $user->assignRole($role);
-                }
+            $role = $this->findRole($name, $guard, $companyId);
+            if ($role !== null) {
+                $this->detachRole($user, $role, $companyId);
             }
-        });
+        }
+
+        if ($roleName !== null) {
+            $role = $this->findRole($roleName, $guard, $companyId);
+            if ($role !== null) {
+                $this->attachRole($user, $role, $companyId);
+            }
+        }
+    }
+
+    /**
+     * Attach a role to a user in a company's team via RAW model_has_roles —
+     * idempotent (insertOrIgnore on the composite PK). NOT spatie's assignRole,
+     * which writes the team column from the registrar's CURRENT team (the ambient
+     * panel tenant), so assigning a role in a NON-current tenant would land it
+     * under the WRONG company (the same wrong-team bug the role INSERT had).
+     */
+    private function attachRole(User $user, Role $role, int $companyId): void
+    {
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
+
+        DB::table($tables['model_has_roles'] ?? 'model_has_roles')->insertOrIgnore([
+            ($cols['role_pivot_key'] ?? 'role_id') => $role->getKey(),
+            ($cols['model_morph_key'] ?? 'model_id') => $user->getKey(),
+            'model_type' => $user->getMorphClass(),
+            ($cols['team_foreign_key'] ?? 'company_id') => $companyId,
+        ]);
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+    }
+
+    /** Detach a role from a user in a company's team via RAW model_has_roles. */
+    private function detachRole(User $user, Role $role, int $companyId): void
+    {
+        $tables = (array) config('permission.table_names');
+        $cols = (array) config('permission.column_names');
+
+        DB::table($tables['model_has_roles'] ?? 'model_has_roles')
+            ->where(($cols['role_pivot_key'] ?? 'role_id'), $role->getKey())
+            ->where(($cols['model_morph_key'] ?? 'model_id'), $user->getKey())
+            ->where('model_type', $user->getMorphClass())
+            ->where(($cols['team_foreign_key'] ?? 'company_id'), $companyId)
+            ->delete();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 
     /**
