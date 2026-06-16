@@ -11,6 +11,7 @@ use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -215,11 +216,19 @@ class CompanyImportTest extends TestCase
 
         $bundle['company']['users_count'] = 9;   // simulate a pre-fix bundle
 
+        Log::spy();
+
         $summary = app(CompanyImporter::class)->run($bundle, [
             'new' => true, 'execute' => true, 'passphrase' => 'p@ss',
         ]);
 
         $this->assertSame('create', $summary['company']);
         $this->assertNotNull(Company::where('slug', 'src')->first());
+
+        // (a) the drop is surfaced (visibility for a real schema skew).
+        Log::shouldHaveReceived('warning')
+            ->withArgs(fn (string $msg, array $ctx = []): bool => str_contains($msg, 'dropped non-column')
+                && in_array('users_count', $ctx['dropped'] ?? [], true))
+            ->once();
     }
 }
