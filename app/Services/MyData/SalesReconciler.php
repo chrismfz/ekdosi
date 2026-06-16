@@ -336,6 +336,7 @@ class SalesReconciler
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,
+            sandbox: $this->tenant->mydata_mode_enum === MyDataMode::Sandbox,
         );
     }
 

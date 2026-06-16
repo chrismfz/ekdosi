@@ -94,10 +94,12 @@ class MyDataSyncStats extends StatsOverviewWidget
                 ->url($url);
         }
 
-        $state = MyDataConsole::lastFetchState($tenant->getKey());
-        $discrepancies = (int) ($state['result']['discrepancyCount'] ?? 0);
+        // lastFetchAt and lastFetchState read the cache independently — guard a
+        // partial/evicted body (timestamp present, state gone) so we never index null.
+        $result = MyDataConsole::lastFetchState($tenant->getKey())['result'] ?? [];
+        $discrepancies = (int) ($result['discrepancyCount'] ?? 0);
         $orphanIncome = 0;
-        foreach ($state['result']['missingLocally'] ?? [] as $row) {
+        foreach ($result['missingLocally'] ?? [] as $row) {
             if (($row['bucket'] ?? null) === 'income') {
                 $orphanIncome++;
             }

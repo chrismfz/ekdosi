@@ -548,16 +548,19 @@ class Invoice extends Model
     }
 
     /**
-     * The myDATA «Outbox»: live παραστατικά that SHOULD be filed to AADE but
-     * carry no MARK yet — i.e. a draft awaiting οριστικοποίηση+υποβολή, or a
-     * finalized invoice whose submission never landed (failed/skipped). The
-     * predicate is: the type is one we file (`invoice_types.mydata_type` set),
-     * the invoice is NOT cancelled, and there's no `mydata_mark`. Imported legacy
-     * invoices already carry their MARK, so they never appear here.
+     * The myDATA «Outbox»: NATIVE (ekdosi-created) live παραστατικά that SHOULD be
+     * filed to AADE but carry no MARK yet — a draft awaiting οριστικοποίηση+υποβολή,
+     * or a finalized invoice whose submission never landed. Predicate: filable type
+     * (`invoice_types.mydata_type` set), NOT cancelled, no `mydata_mark`, AND NOT
+     * imported (`legacy_id` null). The legacy_id guard is essential: pre-myDATA /
+     * ΕΑΦΔΣΣ-era imported invoices land active with a NULL mark and can't be re-filed
+     * from here — without the guard they'd flood the Outbox. Imported docs belong to
+     * the legacy lifecycle, never this worklist.
      */
     public function scopeAwaitingMyData(Builder $query): Builder
     {
         return $query
+            ->whereNull('legacy_id')
             ->whereHas('invoiceType', fn (Builder $t) => $t->whereNotNull('mydata_type'))
             ->where('local_status', '!=', 'cancelled')
             ->whereNull('mydata_mark');

@@ -37,12 +37,15 @@ final readonly class SalesReconciliationResult
         public array $missingAtAade,
         public array $missingLocally,
         public array $duplicateLocal = [],
+        // Whether the reconcile ran against the SANDBOX channel. ONLY then is an
+        // imported (production-MARK) «missing at AADE» noise; in PRODUCTION an
+        // imported MARK was filed to the SAME channel, so its absence is a REAL
+        // discrepancy and must count.
+        public bool $sandbox = false,
     ) {}
 
     /**
-     * `missingAtAade` rows that are IMPORTED legacy invoices (legacy_id set) —
-     * they hold a PRODUCTION MARK, so a sandbox query legitimately won't return
-     * them. Informational, NOT a real discrepancy.
+     * `missingAtAade` rows that are IMPORTED legacy invoices (legacy_id set).
      *
      * @return list<ReconciliationRow>
      */
@@ -52,24 +55,40 @@ final readonly class SalesReconciliationResult
     }
 
     /**
-     * `missingAtAade` rows that are NATIVE (legacy_id null) — we filed them in
-     * this app yet AADE doesn't return the MARK. The genuinely-worrying bucket.
+     * The EXPECTED-noise subset: imported MARKs that a SANDBOX connection can't
+     * return (the «203»). Empty in production — there an imported MARK should be
+     * present, so its absence is a real concern, not noise.
      *
      * @return list<ReconciliationRow>
      */
-    public function unacknowledgedMissingAtAade(): array
+    public function noiseMissingAtAade(): array
     {
+        return $this->sandbox ? $this->importedMissingAtAade() : [];
+    }
+
+    /**
+     * `missingAtAade` rows that genuinely need attention — everything except the
+     * sandbox imported-noise (so: all of them in production; native-only in sandbox).
+     *
+     * @return list<ReconciliationRow>
+     */
+    public function realMissingAtAade(): array
+    {
+        if (! $this->sandbox) {
+            return $this->missingAtAade;
+        }
+
         return array_values(array_filter($this->missingAtAade, fn (ReconciliationRow $r) => $r->legacyId === null));
     }
 
     /**
-     * Real discrepancies needing attention — EXCLUDES imported legacy MARKs that a
-     * sandbox connection can't see (the «203» noise), so the headline count is honest.
+     * Real discrepancies needing attention — excludes ONLY the sandbox
+     * imported-noise, so the headline count is honest in both modes.
      */
     public function discrepancyCount(): int
     {
         return count($this->stateMismatch)
-            + count($this->unacknowledgedMissingAtAade())
+            + count($this->realMissingAtAade())
             + count($this->missingLocally)
             + count($this->duplicateLocal);
     }

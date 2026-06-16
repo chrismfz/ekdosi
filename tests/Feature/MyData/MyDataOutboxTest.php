@@ -68,6 +68,11 @@ class MyDataOutboxTest extends TestCase
         $internalDoc = $this->invoice($c, $internal, 'active', null);// ✗ type never filed
         $cancelled = $this->invoice($c, $filable, 'cancelled', null);// ✗ cancelled
 
+        // ✗ imported pre-myDATA invoice (legacy_id set, MARK-less, active) — belongs
+        // to the legacy lifecycle, must NOT flood the Outbox.
+        $imported = $this->invoice($c, $filable, 'active', null);
+        $imported->forceFill(['legacy_id' => 5001])->saveQuietly();
+
         $ids = Invoice::query()->where('company_id', $c->id)->awaitingMyData()->pluck('id')->all();
 
         sort($ids);
