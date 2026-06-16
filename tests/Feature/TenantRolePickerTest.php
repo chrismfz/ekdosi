@@ -63,6 +63,27 @@ class TenantRolePickerTest extends TestCase
         $this->assertSame(TenantRoleProvisioner::ROLE_OPERATOR, $p->roleInCompany($user, $company));
     }
 
+    public function test_system_super_admin_can_bootstrap_a_role_in_a_company_without_one(): void
+    {
+        $this->seedPermissions();
+        $owned = $this->makeCompany('owned');
+        $restored = $this->makeCompany('restored');   // owner holds NO role here yet
+        $owner = $this->makeUser();
+        $owner->companies()->attach([$owned->id, $restored->id]);
+
+        $p = app(TenantRoleProvisioner::class);
+        $p->assignSuperAdmin($owner, $owned);   // super_admin in ONE company only
+
+        // The role-picker gate (actorMayManageRoles) keys on this: a system
+        // super_admin may manage roles in EVERY company, so they can give
+        // themselves a role in a freshly restored tenant they have no role in.
+        $this->assertTrue($p->isSuperAdminAnywhere($owner));
+        $this->assertFalse($p->hasSuperAdminIn($owner, $restored), 'no role in the restored company yet');
+
+        $p->setRoleInCompany($owner, $restored, ShieldUtils::getSuperAdminName());
+        $this->assertSame(ShieldUtils::getSuperAdminName(), $p->roleInCompany($owner, $restored));
+    }
+
     public function test_picker_replaces_previous_role(): void
     {
         $this->seedPermissions();

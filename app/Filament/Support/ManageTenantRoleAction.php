@@ -181,14 +181,21 @@ final class ManageTenantRoleAction
     }
 
     /**
-     * May the currently authenticated user manage roles in this company? True
-     * only if they are super_admin there (role management is super_admin-only).
+     * May the currently authenticated user manage roles in this company? Role
+     * management is super_admin-only — but a SYSTEM super_admin (super_admin in
+     * ANY tenant) may manage roles in EVERY company, not just ones they already
+     * hold super_admin in. That lets the owner bootstrap roles in a freshly
+     * created / restored company they have no role in yet (the chicken-and-egg:
+     * otherwise you could never give yourself a role in a new tenant), and it
+     * matches the auto-grant of super_admin on attach. Safe because super_admin
+     * is the system-owner role — per-tenant admins get company_admin, which this
+     * never returns true for.
      */
     private static function actorMayManageRoles(Company $company): bool
     {
         $actor = auth()->user();
 
         return $actor instanceof User
-            && app(TenantRoleProvisioner::class)->hasSuperAdminIn($actor, $company);
+            && app(TenantRoleProvisioner::class)->isSuperAdminAnywhere($actor);
     }
 }

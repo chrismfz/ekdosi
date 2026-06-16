@@ -18,6 +18,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **Role picker: a system super_admin can bootstrap roles in any company.** The
+  «Ρόλος» action gated on being super_admin in THAT company, so after restoring/
+  creating a tenant you could never give yourself (or anyone) a role there — the
+  button was hidden (chicken-and-egg). It now gates on being a system super_admin
+  (super_admin in ANY tenant), which is the owner level (per-tenant admins get
+  company_admin). Available in BOTH Users → Tenants and Companies → Users.
 - **Roles robustness sweep (import/restore/attach/role-picker).** Hardened every
   tenant-role path against spatie's teams-aware Eloquent lookup that can MISS a row
   the unique index still has: role WRITES now resolve a Role OBJECT via raw
