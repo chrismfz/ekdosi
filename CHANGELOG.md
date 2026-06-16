@@ -18,6 +18,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Changed
+- **Deploy defaults to the current branch tip, not a tag.** `deploy/update.sh` with no arg now
+  ships the pushed tip of the branch you're on (`origin/main` on main) and stays ON the branch —
+  the `git pull` workflow, no tags to remember. Passing a tag still works (pinned release /
+  rollback, checks out detached). A detached HEAD auto-recovers onto the branch. Replaces the
+  earlier tag-default that bit by silently deploying an OLD tag.
 - **super_admin is now GLOBAL (the operator), not a per-tenant role.** `Gate::before`
   bypasses every policy in EVERY tenant for a user who holds super_admin in ANY tenant
   (`User::isSystemSuperAdmin`, single memoised query). So the owner sees everything in a
@@ -27,12 +32,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   company_admin/operator roles are unaffected.
 
 ### Fixed
-- **Deploy refuses to silently downgrade.** A no-arg `deploy/update.sh` picked the "latest
-  tag" via `git rev-list --tags --max-count=1` (most-recently-CREATED, which can be an OLD
-  release) and checked it out unconditionally — rolling prod BACKWARDS (and deleting any
-  tracked file the old tag predates, including `update.sh` itself). It now selects the highest
-  SemVer tag (`git tag --sort=-v:refname`) AND aborts if the target is an ancestor of current
-  HEAD (override: `ALLOW_DOWNGRADE=1`, but prefer `deploy/rollback.sh`).
+- **Deploy refuses to silently downgrade.** `deploy/update.sh` now aborts if the resolved
+  target is an ancestor of the current HEAD (older code) — the failure mode that rolled prod
+  BACKWARDS and deleted tracked files the old ref predated (including `update.sh` itself).
+  Override for a deliberate rollback: `ALLOW_DOWNGRADE=1` (or prefer `deploy/rollback.sh`).
 - **Deploy now runs `shield:generate` before the role sync.** `deploy/update.sh` only ran
   `shield:sync-super-admin`, so a release that added a new resource/page never created its
   `Permission` rows on prod until run by hand — leaving the new screen ungranted. The deploy
