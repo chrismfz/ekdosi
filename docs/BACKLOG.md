@@ -203,5 +203,6 @@ _Έχουμε ήδη: balances/Καρτέλα, τραπεζικοί λογαρι
 - **Per-customer τιμοκατάλογοι / εκπτώσεις** — default τιμή/έκπτωση ανά πελάτη (σήμερα: ανά γραμμή).
 - **Multi-currency invoicing** — `currency` υπάρχει στο payload (EUR hardcoded)· πραγματικό FX +
   στρογγυλοποίηση + εμφάνιση. (myDATA θέλει EUR ισοτιμία — προσοχή.)
-- **Aged-receivables report** — ηλικίωση οφειλών (0-30/30-60/60-90/90+) πάνω στο `InvoiceBalance`.
+- **Aged-receivables report** — _✅ SHIPPED («Ηλικίωση οφειλών» page: 0-30/31-60/61-90/90+ ανά πελάτη,
+  σύνολα, drill στην Καρτέλα, CSV· reuse του Καρτέλα FIFO aging)._
 - **Sendable customer statement** — η Καρτέλα ως PDF/email προς τον πελάτη (recap υπολοίπου + κινήσεων).

@@ -18,6 +18,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **«Ηλικίωση οφειλών» (aged receivables).** Νέα read-only αναφορά (Λογιστικά): ανοιχτό υπόλοιπο ανά
+  πελάτη σε buckets **0-30 / 31-60 / 61-90 / 90+**, μεγαλύτεροι οφειλέτες πρώτα, σύνολα ανά στήλη,
+  drill στην Καρτέλα + **CSV**. Χρησιμοποιεί το ΙΔΙΟ FIFO aging με την Καρτέλα (`AgedReceivablesReport`
+  πάνω σε `CustomerLedgerBuilder`), οπότε τα νούμερα συμφωνούν.
 - **Βιβλίο Εσόδων-Εξόδων — εξαγωγή PDF (οριζόντιο A4).** Νέα επιλογή «PDF (οριζόντιο)» στην Εξαγωγή:
   landscape A4 με όλες τις στήλες Έσοδα/Έξοδα + ΜΑΡΚ/κατάσταση + γραμμή συνόλων — «η κόλλα όπως στο
   Excel». Self-contained (DejaVu Sans, ελληνικά) μέσω `barryvdh/laravel-dompdf` — κανένα build.
