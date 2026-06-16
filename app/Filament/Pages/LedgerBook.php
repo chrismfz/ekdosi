@@ -38,6 +38,9 @@ class LedgerBook extends Page
 
     protected string $view = 'filament.pages.ledger-book';
 
+    /** Quick-period preset (this_month / last_month / quarter / prev_quarter / year / prev_year / custom). */
+    public string $period = 'this_month';
+
     public ?string $from = null;
 
     public ?string $to = null;
@@ -69,8 +72,62 @@ class LedgerBook extends Page
 
     public function mount(): void
     {
-        $this->from ??= now()->startOfMonth()->toDateString();
-        $this->to ??= now()->endOfMonth()->toDateString();
+        $this->applyPeriod();
+    }
+
+    /** Recompute the date window when the preset changes (Livewire hook). */
+    public function updatedPeriod(): void
+    {
+        $this->applyPeriod();
+    }
+
+    /** A manual date edit means the operator wants a custom window. */
+    public function updatedFrom(): void
+    {
+        $this->period = 'custom';
+    }
+
+    public function updatedTo(): void
+    {
+        $this->period = 'custom';
+    }
+
+    /**
+     * Resolve the preset into a concrete from/to (calendar = φορολογικά boundaries).
+     * 'custom' keeps whatever the operator typed (defaulting to the current month).
+     * No-overflow month math so «προηγούμενος μήνας» from a 31st is correct.
+     */
+    private function applyPeriod(): void
+    {
+        $now = now();
+
+        if ($this->period === 'custom') {
+            $this->from ??= $now->copy()->startOfMonth()->toDateString();
+            $this->to ??= $now->copy()->endOfMonth()->toDateString();
+
+            return;
+        }
+
+        [$from, $to] = match ($this->period) {
+            'last_month' => [
+                $now->copy()->subMonthsNoOverflow(1)->startOfMonth(),
+                $now->copy()->subMonthsNoOverflow(1)->endOfMonth(),
+            ],
+            'quarter' => [$now->copy()->startOfQuarter(), $now->copy()->endOfQuarter()],
+            'prev_quarter' => [
+                $now->copy()->subMonthsNoOverflow(3)->startOfQuarter(),
+                $now->copy()->subMonthsNoOverflow(3)->endOfQuarter(),
+            ],
+            'year' => [$now->copy()->startOfYear(), $now->copy()->endOfYear()],
+            'prev_year' => [
+                $now->copy()->subYear()->startOfYear(),
+                $now->copy()->subYear()->endOfYear(),
+            ],
+            default => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()], // this_month
+        };
+
+        $this->from = $from->toDateString();
+        $this->to = $to->toDateString();
     }
 
     /**

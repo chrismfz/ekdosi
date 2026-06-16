@@ -56,6 +56,33 @@ class LedgerBookPageTest extends TestCase
             ->assertSee('Σύνολα περιόδου')
             // The populated row surfaces its myDATA ΜΑΡΚ + status badge.
             ->assertSee('400000000000123')
-            ->assertSee('VALID');
+            ->assertSee('VALID')
+            // Λογιστική όψη: Έσοδα/Έξοδα columns + the footing summary line.
+            ->assertSee('Καθαρό αποτέλεσμα')
+            ->assertSee('Σύνολα');
+    }
+
+    public function test_period_preset_drives_the_window_and_manual_edit_is_custom(): void
+    {
+        Gate::before(fn () => true);
+        $this->actingAs(User::create([
+            'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]));
+        Filament::setTenant(Company::create([
+            'name' => 'L OE', 'slug' => 'l-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
+        ]));
+
+        Livewire::test(LedgerBook::class)
+            ->assertSet('period', 'this_month')
+            ->assertSet('from', now()->startOfMonth()->toDateString())
+            ->assertSet('to', now()->endOfMonth()->toDateString())
+            // Pick a preset → window recomputes.
+            ->set('period', 'prev_year')
+            ->assertSet('from', now()->subYear()->startOfYear()->toDateString())
+            ->assertSet('to', now()->subYear()->endOfYear()->toDateString())
+            // A manual date edit flips the preset to «Προσαρμογή».
+            ->set('from', '2026-02-01')
+            ->assertSet('period', 'custom');
     }
 }
