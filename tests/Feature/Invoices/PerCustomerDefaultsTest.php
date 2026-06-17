@@ -98,4 +98,23 @@ class PerCustomerDefaultsTest extends TestCase
             ->fillForm(['customer_id' => $customer->id])       // picking the customer resets it
             ->assertFormSet(['header_discount_percent' => 0.0]);
     }
+
+    public function test_kartela_prefill_applies_customer_defaults(): void
+    {
+        // The «Νέο Παραστατικό» from the Καρτέλα arrives as ?customer_id=N and
+        // fills programmatically (no reactive afterStateUpdated) — so its own
+        // prefill must carry the discount + payment method.
+        $customer = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Από Καρτέλα',
+            'discount' => 7.5, 'payment_method_id' => $this->credit->id,
+        ]);
+
+        Livewire::withQueryParams(['customer_id' => $customer->id])
+            ->test(CreateInvoice::class)
+            ->assertFormSet([
+                'customer_id' => $customer->id,
+                'header_discount_percent' => 7.5,
+                'payment_method_id' => $this->credit->id,
+            ]);
+    }
 }
