@@ -205,4 +205,9 @@ _Έχουμε ήδη: balances/Καρτέλα, τραπεζικοί λογαρι
   στρογγυλοποίηση + εμφάνιση. (myDATA θέλει EUR ισοτιμία — προσοχή.)
 - **Aged-receivables report** — _✅ SHIPPED («Ηλικίωση οφειλών» page: 0-30/31-60/61-90/90+ ανά πελάτη,
   σύνολα, drill στην Καρτέλα, CSV· reuse του Καρτέλα FIFO aging)._
-- **Sendable customer statement** — η Καρτέλα ως PDF/email προς τον πελάτη (recap υπολοίπου + κινήσεων).
+- **Sendable customer statement** — _✅ SHIPPED (Καρτέλα → PDF/email· επαφή-aware: παραλήπτες ο πελάτης
+  + οι επαφές του με email, role-labelled, + ελεύθερα extras· dedupe/validation)._
+- **Επαφές (shared CRM)** — κοινή οντότητα `Contact` ↔ many customers με ρόλους (π.χ. ένας λογιστής/
+  γραφείο που εξυπηρετεί πολλούς πελάτες-πελάτη), αντί για τις σημερινές per-customer `customer_contacts`.
+  Σκόπιμα DEFERRED («κρατάμε τις επαφές per customer να μην μπλέξουμε») — future CRM phase· να μη σπάσει
+  το per-customer μοντέλο που χρησιμοποιεί ήδη ο Sendable statement.

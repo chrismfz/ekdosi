@@ -27,6 +27,7 @@ use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -783,17 +784,25 @@ class CustomerLedger extends Page implements HasTable
                     ->label('Αποστολή στο email')
                     ->icon('heroicon-o-paper-airplane')
                     ->modalHeading('Αποστολή καρτέλας στο email')
+                    ->modalDescription('Επιλέξτε παραλήπτες από τον πελάτη και τις επαφές του (π.χ. λογιστήριο), ή προσθέστε ελεύθερα emails.')
                     ->modalSubmitActionLabel('Αποστολή')
                     ->fillForm(fn (): array => [
-                        'recipient' => $this->record->email,
+                        'recipients' => $this->defaultStatementRecipients(),
+                        'extra_recipients' => null,
                         'subject' => null,
                         'message' => null,
                     ])
                     ->schema([
-                        TextInput::make('recipient')
-                            ->label('Παραλήπτης')
-                            ->email()
-                            ->required(),
+                        CheckboxList::make('recipients')
+                            ->label('Παραλήπτες')
+                            ->options(fn (): array => $this->statementRecipientOptions())
+                            ->helperText($this->statementRecipientOptions() === []
+                                ? 'Ο πελάτης δεν έχει email ούτε επαφές με email — προσθέστε παραλήπτη παρακάτω.'
+                                : 'Πελάτης + επαφές με email.'),
+                        TextInput::make('extra_recipients')
+                            ->label('Επιπλέον παραλήπτες')
+                            ->placeholder('email1@example.com, email2@example.com')
+                            ->helperText('Προαιρετικά, χωρισμένα με κόμμα.'),
                         TextInput::make('subject')
                             ->label('Θέμα')
                             ->placeholder('Καρτέλα πελάτη: '.$this->record->name),
@@ -803,7 +812,8 @@ class CustomerLedger extends Page implements HasTable
                     ])
                     ->action(function (array $data) {
                         $this->sendStatementEmail(
-                            $data['recipient'],
+                            $data['recipients'] ?? [],
+                            $data['extra_recipients'] ?? null,
                             $data['subject'] ?? null,
                             $data['message'] ?? null,
                         );
@@ -826,7 +836,74 @@ class CustomerLedger extends Page implements HasTable
         ];
     }
 
-    private function sendStatementEmail(string $recipient, ?string $subject, ?string $message): void
+    /**
+     * Pickable recipients for the statement email: the customer's own email
+     * plus every per-customer contact that has an email, labelled with the
+     * contact's name + role (e.g. «Λογιστήριο (Μαρία) — maria@…»). Keyed by the
+     * address itself so the CheckboxList returns ready-to-send emails. Contacts
+     * were eager-loaded on mount().
+     *
+     * @return array<string, string>
+     */
+    private function statementRecipientOptions(): array
+    {
+        $options = [];
+
+        $email = trim((string) $this->record->email);
+        if ($email !== '') {
+            $options[$email] = 'Πελάτης — '.$email;
+        }
+
+        foreach ($this->record->contacts as $contact) {
+            $cEmail = trim((string) $contact->email);
+            if ($cEmail === '' || isset($options[$cEmail])) {
+                continue;
+            }
+            $label = trim((string) $contact->name) ?: 'Επαφή';
+            if (filled($contact->role)) {
+                $label .= ' ('.$contact->role.')';
+            }
+            $options[$cEmail] = $label.' — '.$cEmail;
+        }
+
+        return $options;
+    }
+
+    /**
+     * Pre-checked recipients: the customer email (if any) and any primary
+     * contact's email — the common «στείλ' το στον πελάτη και στο λογιστήριό
+     * του» default; the operator can tick/untick the rest.
+     *
+     * @return array<int, string>
+     */
+    private function defaultStatementRecipients(): array
+    {
+        $defaults = [];
+
+        $email = trim((string) $this->record->email);
+        if ($email !== '') {
+            $defaults[] = $email;
+        }
+
+        foreach ($this->record->contacts as $contact) {
+            $cEmail = trim((string) $contact->email);
+            if ($cEmail !== '' && $contact->is_primary && ! in_array($cEmail, $defaults, true)) {
+                $defaults[] = $cEmail;
+            }
+        }
+
+        return $defaults;
+    }
+
+    /**
+     * Email the Καρτέλα PDF to one or more recipients (επαφή-aware): the picked
+     * customer/contact addresses merged with any free-text extras. Validates +
+     * dedupes (case-insensitive), warns on bad addresses, and renders the PDF
+     * once for the whole batch.
+     *
+     * @param  array<int, string>  $selected
+     */
+    private function sendStatementEmail(array $selected, ?string $extra, ?string $subject, ?string $message): void
     {
         $tenant = $this->record->company;
         if ($tenant === null) {
@@ -844,6 +921,46 @@ class CustomerLedger extends Page implements HasTable
             return;
         }
 
+        // Merge picked + free-text (comma/semicolon/whitespace separated),
+        // validate, dedupe case-insensitively (keeping the first casing seen).
+        $candidates = array_merge(
+            $selected,
+            preg_split('/[,;\s]+/', (string) $extra, -1, PREG_SPLIT_NO_EMPTY) ?: [],
+        );
+
+        $valid = [];
+        $invalid = [];
+        foreach ($candidates as $addr) {
+            $addr = trim((string) $addr);
+            if ($addr === '') {
+                continue;
+            }
+            if (filter_var($addr, FILTER_VALIDATE_EMAIL)) {
+                $valid[mb_strtolower($addr)] ??= $addr;
+            } else {
+                $invalid[] = $addr;
+            }
+        }
+        $recipients = array_values($valid);
+
+        if ($invalid !== []) {
+            Notification::make()
+                ->title('Μη έγκυρα email')
+                ->body('Αγνοήθηκαν: '.implode(', ', $invalid))
+                ->warning()
+                ->send();
+        }
+
+        if ($recipients === []) {
+            Notification::make()
+                ->title('Δεν επιλέχθηκε παραλήπτης')
+                ->body('Επιλέξτε τουλάχιστον έναν έγκυρο παραλήπτη.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
         try {
             $bytes = app(CustomerStatementPdfRenderer::class)->render($this->record);
 
@@ -854,11 +971,11 @@ class CustomerLedger extends Page implements HasTable
                 subjectLine: $subject ?: null,
             );
 
-            app(TenantMailerFactory::class)->for($tenant)->to($recipient)->send($mail);
+            app(TenantMailerFactory::class)->for($tenant)->to($recipients)->send($mail);
 
             Notification::make()
                 ->title('Η καρτέλα στάλθηκε')
-                ->body('Παραλήπτης: '.$recipient)
+                ->body('Παραλήπτες: '.implode(', ', $recipients))
                 ->success()
                 ->send();
         } catch (\Throwable $e) {
