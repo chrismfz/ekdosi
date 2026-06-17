@@ -125,12 +125,44 @@ surfaced in the open-items sections further down.
   αυτόματα) — `send_customer_statement` (επαφή-aware) + `create_reminder`· staging σε `ai_pending_actions`,
   confirm/cancel κάρτες, `AiActionExecutor` (re-validate, scoped tenant+user), reminders → Filament DB
   notifications μέσω `ai:dispatch-reminders`._
-  **Phase 2+ (open):** (α) **περισσότερα read tools** (compare income/expense, backups status, WHMCS inbox),
-  (β) **per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `ai_api_key`
-  υπάρχει· λείπει UI exposure + per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA),
-  (γ) **persistence σε `ai_conversations` table** (ιστορικό/πολλές συνομιλίες, αντί session), (δ) usage
-  **dashboard** (κόστος/tokens ανά εταιρεία — ποιος πληρώνει/κοντά στο όριο), (ε) prompt-caching του system
-  prompt. `ai-assistant-blueprint.md`
+  **Phase 2c (open) — ιδέες/σημειώσεις (καμία δέσμευση, χαμηλή προτεραιότητα):**
+  - **(α) Περισσότερα read tools** — σύγκριση εσόδων/εξόδων (income vs expense),
+    κατάσταση backups (`OperatorHealth`), WHMCS inbox (εκκρεμή `pending_whmcs_invoices`),
+    top προϊόντα/υπηρεσίες ανά περίοδο (`CustomerTopProducts`-style αλλά εταιρείας).
+  - **(β) Περισσότερα write tools με confirm** — π.χ. «καταχώρισε είσπραξη/έμβασμα»
+    (reuse `PaymentAllocator`), «κόψε πρόχειρο παραστατικό» (το `find_customer` ήδη δίνει
+    link· εδώ θα στηνόταν draft μέσω `CreateInvoice`). Πάντα operator-confirm στο
+    `ai_pending_actions` — ίδιο pattern με 2b.
+  - **(γ) Per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `companies.ai_api_key` υπάρχει
+    (στο `$hidden`)· λείπει το UI exposure (στο `CompanySettings` ή super-admin only) +
+    per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).
+  - **(δ) Persistence συνομιλιών** — `ai_conversations` table (ιστορικό + πολλές
+    συνομιλίες ανά χρήστη, αντί session) — απαιτεί και UI επιλογής συνομιλίας.
+  - **(ε) Usage dashboard — tokens/κόστος ανά εταιρεία.** Τα ΔΕΔΟΜΕΝΑ ΥΠΑΡΧΟΥΝ ΗΔΗ:
+    το `ai_usage_log` κρατά input/output/cache tokens + `cost_estimate` ανά
+    εταιρεία/χρήστη/συνομιλία/μοντέλο (είναι το source of truth για τα caps, βλ.
+    `AiUsageMeter`). Λείπει ΜΟΝΟ το surface: Filament page/widget με
+    `sum(tokens)`/`sum(cost)` group-by μήνα × εταιρεία (ποιος πληρώνει, ποιος κοντά
+    στο όριο), προαιρετικά export CSV. Καθαρά read-only πάνω σε υπάρχοντα πίνακα.
+  - **(στ) Streaming απαντήσεων** — τώρα είναι «σκέφτομαι…» μέχρι να ολοκληρωθεί το
+    tool-loop· streaming θα ήθελε SSE/Livewire polling (μεγαλύτερη αλλαγή στο surface).
+  - **(ζ) Helper / «βοήθεια & συμβουλή» με curated knowledge base.** Δύο ΞΕΧΩΡΙΣΤΑ
+    πράγματα: **(i) app how-to** («πού βλέπω τι μου χρωστάνε;», «πώς κόβω πιστωτικό;») —
+    ασφαλές, γνώση της εφαρμογής· **(ii) domain advisory** («τι ΦΠΑ για Σκόπελο;», «τι
+    παραστατικό για αποστολή δικού μου εξοπλισμού στο datacenter;», «ποιον τύπο να
+    διαλέξω;») — ΕΠΙΚΙΝΔΥΝΟ αν απαντηθεί από γενική γνώση του μοντέλου (μειωμένα νησιά
+    άλλαξαν πολλές φορές· λάθος = λάθος ΦΠΑ/ΑΑΔΕ). **Σχέδιο:** curated KB σε markdown
+    (`docs/assistant-kb/`) που γράφεις εσύ/ο λογιστής + νέο tool `knowledge_search`
+    (RAG-lite: επιστρέφει σχετικά αποσπάσματα) → ο βοηθός στηρίζεται ΑΥΣΤΗΡΑ σε αυτό,
+    «δεν καλύπτεται → ρώτα λογιστή», ΠΟΤΕ εφευρεμένος φορολογικός κανόνας + πάντα
+    disclaimer για φορολογικά. **Κουμπώνει με τα έτοιμα:** links (π.χ. «πώς στέλνω
+    εξοπλισμό» → εξήγηση ΔΑ + link «Νέο Δελτίο Αποστολής»), `vat_categories` της
+    εταιρείας (δείξε τις ρυθμισμένες, μη μαντεύεις). Ίδιο grounding-discipline με τα
+    tools — απλώς προστίθεται μία ΕΓΚΕΚΡΙΜΕΝΗ πηγή δίπλα τους.
+  - _Σχεδιαστικά κλειδωμένα ήδη (μην ξανασυζητηθούν): tool-layer isolation (κανένα `company`
+    param), per-tool Shield permission, `#[Locked]` messages/transcript, `ChatMarkup`
+    same-origin links, writes ΠΟΤΕ auto (operator-confirm). Engine = Laravel HTTP/Messages
+    API χωρίς SDK. prompt-caching ✅ έγινε (2a)._ `ai-assistant-blueprint.md`
   (πλέον καλύπτει: **«δεν χρειάζεται Console agent»** για το in-app chat — μόνο API key +
   Messages API tool-loop· **abuse/resource safeguards** = no-code-execution + per-request
   max_tokens/tool-loop/timeout/history caps + per-tenant/user rate-limit + monthly token caps +
