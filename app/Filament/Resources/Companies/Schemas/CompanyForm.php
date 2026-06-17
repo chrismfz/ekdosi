@@ -955,6 +955,33 @@ class CompanyForm
                                             ->dehydrateStateUsing(fn (string $state) => $state),
                                     ]),
                             ]),
+                        Tab::make('AI Βοηθός')
+                            ->schema([
+                                Toggle::make('ai_assistant_enabled')
+                                    ->label('Ενεργός AI βοηθός')
+                                    ->helperText('Ενεργοποιεί τον in-app βοηθό (read-only Q&A) για αυτή την εταιρεία. Χρειάζεται και το global EKDOSI_AI_ENABLED.'),
+                                Select::make('ai_model')
+                                    ->label('Μοντέλο')
+                                    ->options([
+                                        'claude-sonnet-4-6' => 'Sonnet 4.6 (προεπιλογή — ισορροπία)',
+                                        'claude-haiku-4-5' => 'Haiku 4.5 (φθηνό/γρήγορο)',
+                                        'claude-opus-4-8' => 'Opus 4.8 (βαριά ανάλυση)',
+                                    ])
+                                    ->placeholder('Προεπιλογή συστήματος (Sonnet)')
+                                    ->helperText('Κενό = η προεπιλογή του συστήματος.'),
+                                TextInput::make('ai_monthly_token_cap')
+                                    ->label('Μηνιαίο όριο tokens')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->helperText('Πάνω από αυτό ο βοηθός σταματά για τον μήνα. Κενό = μόνο το global όριο.'),
+                                TextInput::make('ai_api_key')
+                                    ->label('Κλειδί API (προαιρετικό)')
+                                    ->password()
+                                    ->revealable()
+                                    ->helperText('Μόνο αν η εταιρεία θέλει δικό της Anthropic account· κενό = το global κλειδί. Encrypted at rest, leave blank to keep existing.')
+                                    ->dehydrated(fn (?string $state) => filled($state))
+                                    ->dehydrateStateUsing(fn (string $state) => $state),
+                            ]),
                     ]),
             ]);
     }

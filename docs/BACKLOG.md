@@ -116,7 +116,15 @@ surfaced in the open-items sections further down.
   (honest status, no fake toggle). Phase 1 = move `companies.whmcs_*` → `billing_connections.config`,
   ExternalDocument DTO, generic ingest dispatcher, real is_active gating, + the 2nd connector —
   build WHEN a real 2nd source exists (designing the contract against WHMCS+guesswork bakes in WHMCS-isms)._
-- **AI «Βοηθός»** — Phase 1 read-only Q&A (~1 βδομάδα). `ai-assistant-blueprint.md`
+- **AI «Βοηθός»** — _✅ Phase 1 SHIPPED 2026-06-17: read-only chat (σελίδα + floating widget, κοινό
+  `AssistantRunner`), tool layer isolation + per-tool permission, governance web/DB (on/off · model · token
+  cap · per-company key) + `ai_usage_log` metering + caps. 2 tools (`count_sales`/`outstanding_receivables`)._
+  **Phase 2+ (open):** (α) **περισσότερα tools** (compare income/expense, backups status, WHMCS inbox,
+  + WRITE tools με operator-confirm), (β) **per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `ai_api_key`
+  υπάρχει· λείπει UI exposure + per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA),
+  (γ) **persistence σε `ai_conversations` table** (ιστορικό/πολλές συνομιλίες, αντί session), (δ) usage
+  **dashboard** (κόστος/tokens ανά εταιρεία — ποιος πληρώνει/κοντά στο όριο), (ε) prompt-caching του system
+  prompt. `ai-assistant-blueprint.md`
   (πλέον καλύπτει: **«δεν χρειάζεται Console agent»** για το in-app chat — μόνο API key +
   Messages API tool-loop· **abuse/resource safeguards** = no-code-execution + per-request
   max_tokens/tool-loop/timeout/history caps + per-tenant/user rate-limit + monthly token caps +

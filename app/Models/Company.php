@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Collection;
 
 #[ObservedBy(CompanyObserver::class)]
 class Company extends Model
@@ -53,6 +54,11 @@ class Company extends Model
         'mydata_aade_id_production',
         'mydata_subscription_key_production',
         'mydata_mode',
+        // AI «Βοηθός» per-company governance (see ai-assistant-blueprint.md).
+        'ai_assistant_enabled',
+        'ai_model',
+        'ai_monthly_token_cap',
+        'ai_api_key',
         // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
         'mydata_send_item_descr',
         'gsis_username',
@@ -110,6 +116,7 @@ class Company extends Model
         'mail_smtp_password',
         'whmcs_api_secret',
         'whmcs_webhook_secret',
+        'ai_api_key',
     ];
 
     protected function casts(): array
@@ -123,6 +130,9 @@ class Company extends Model
             'gsis_password' => MaybeEncrypted::class,
             'mail_smtp_password' => MaybeEncrypted::class,
             'whmcs_api_secret' => MaybeEncrypted::class,
+            'ai_assistant_enabled' => 'boolean',
+            'ai_monthly_token_cap' => 'integer',
+            'ai_api_key' => MaybeEncrypted::class,
             'whmcs_webhook_secret' => MaybeEncrypted::class,
             'whmcs_custom_field_map' => 'array',
             'whmcs_invoice_min_date' => 'date',
@@ -432,9 +442,9 @@ class Company extends Model
      * OperatorHealth, so they never drift from the dashboard widget's gate. The
      * tenant count is a handful, so the full scan is irrelevant.
      *
-     * @return \Illuminate\Support\Collection<int, static>
+     * @return Collection<int, static>
      */
-    public static function myDataReadable(): \Illuminate\Support\Collection
+    public static function myDataReadable(): Collection
     {
         return static::query()
             ->whereIn('einvoice_provider', ['gr-mydata', 'gr-provider'])

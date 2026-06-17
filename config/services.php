@@ -35,4 +35,13 @@ return [
         ],
     ],
 
+    // AI «Βοηθός» — the ONE global Anthropic key (transport + billing account).
+    // Tenant isolation is the tool layer, not the key; per-tenant billing is the
+    // ai_usage_log meter. A tenant may override the key via companies.ai_api_key.
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+        'base_url' => env('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
+        'version' => env('ANTHROPIC_VERSION', '2023-06-01'),
+    ],
+
 ];
