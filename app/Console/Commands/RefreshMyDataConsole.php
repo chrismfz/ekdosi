@@ -9,6 +9,7 @@ use App\Support\Tenancy\CompanyContext;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -18,10 +19,14 @@ use Throwable;
  * snapshot on mount, so this keeps them fresh without the operator clicking.
  *
  * Reuses MyDataConsoleRefresh::refreshAll(), which already runs the four AADE
- * pulls SEQUENTIALLY (rate-limit friendly) and is resilient per step — a 429 /
- * missing-creds on one tab is recorded as a warn and the others still run. So a
- * partial result is normal, not a failure: we only return FAILURE when a step
- * errors HARD (connection fault), so the scheduler health surfaces it.
+ * pulls SEQUENTIALLY (rate-limit friendly) and is resilient per step. step()
+ * classifies a RateLimitExceededException / RuntimeException (incl. our own
+ * mode-off / missing-creds guards) as a «warn» and keeps going; only a harder
+ * fault — firebed's MyData*Exception family (connection/timeout/transmission,
+ * which extend Exception, not RuntimeException) or any unexpected Throwable —
+ * is an «error». So a partial/rate-limited run is SUCCESS (the stale banner is
+ * the operator's signal); we return FAILURE only when a step errored HARD, so a
+ * genuinely-down AADE surfaces on the scheduler health.
  *
  * READ-ONLY: seeds caches only, creates no rows. The window mirrors the console's
  * own default (current quarter → today) so the operator sees the same span.
@@ -74,8 +79,14 @@ class RefreshMyDataConsole extends Command
             } catch (Throwable $e) {
                 // refreshAll() swallows per-step failures, so reaching here is an
                 // unexpected fault (e.g. credential resolution) → report, continue.
+                // Log it too so a scheduled FAILURE is diagnosable without re-running.
                 $hadError = true;
                 $this->error("✗ {$tenant->slug}: {$e->getMessage()}");
+                Log::warning('mydata:refresh-console tenant failed', [
+                    'tenant' => $tenant->slug,
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
             }
 
             // Space out tenants so we don't trip the AADE rate limit on the next.

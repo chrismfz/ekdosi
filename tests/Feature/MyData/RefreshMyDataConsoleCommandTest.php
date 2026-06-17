@@ -5,7 +5,9 @@ namespace Tests\Feature\MyData;
 use App\Console\Commands\RefreshMyDataConsole;
 use App\Filament\Pages\MyDataConsole;
 use App\Models\Company;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -80,18 +82,35 @@ XML),
         );
     }
 
-    public function test_completes_resiliently_when_aade_is_unreachable(): void
+    public function test_does_not_crash_on_empty_pulls(): void
     {
         $tenant = $this->sandboxTenant();
 
-        // Empty mock → every AADE pull throws a transient (RuntimeException-family)
-        // error; refreshAll isolates each step as a warn, so the command completes
-        // WITHOUT crashing and exits 0 (transient AADE trouble is not a hard fault —
-        // the stale-data banner is the operator's signal that the cache is old).
+        // An empty mock queue makes each AADE call throw OutOfBoundsException
+        // (a RuntimeException → step() classifies it «warn»). This is NOT the
+        // production "AADE down" path (see the ConnectException test below); it
+        // only proves the loop completes + reports without crashing on empties.
         RefreshMyDataConsole::$testHandler = new MockHandler;
 
         $this->artisan('mydata:refresh-console', ['--gap' => 0])
             ->expectsOutputToContain($tenant->slug)
             ->assertExitCode(0);
+    }
+
+    public function test_real_connection_fault_exits_failure(): void
+    {
+        $tenant = $this->sandboxTenant();
+
+        // A genuine transport failure: Guzzle ConnectException → firebed wraps it
+        // as MyDataConnectionException (extends Exception, NOT RuntimeException) →
+        // step() classifies it «error» → the command must exit FAILURE so the
+        // scheduler health surfaces a truly-down AADE (covers the error branch).
+        RefreshMyDataConsole::$testHandler = new MockHandler([
+            new ConnectException('Connection refused', new Request('POST', 'https://mydata.aade.gr')),
+        ]);
+
+        $this->artisan('mydata:refresh-console', ['--gap' => 0])
+            ->expectsOutputToContain($tenant->slug)
+            ->assertExitCode(1);
     }
 }

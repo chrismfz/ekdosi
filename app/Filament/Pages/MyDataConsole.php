@@ -109,6 +109,9 @@ class MyDataConsole extends Page
      * timestamp)? Drives the «παλιά δεδομένα — ανανέωση» banner so the operator
      * knows the snapshot may be out of date — whether it was last refreshed
      * manually or by the `mydata:refresh-console` scheduled task.
+     *
+     * NB: "fresh" here is the SALES (Πωλήσεις) snapshot specifically — this
+     * banner lives on the sales console; Έξοδα/Ε3 carry their own lastFetchAt.
      */
     public function fetchIsStale(): bool
     {
