@@ -177,13 +177,24 @@ surfaced in the open-items sections further down.
   έχει use case· μια γραμμή δεν είναι οντότητα που ταξινομείς. Tags σε **πελάτες/προϊόντα**
   ήδη υπάρχουν.)_
 - **Curated tax-presets** expansion ανά κλάδο + **%-ανά-προϊόν** (όχι μόνο €/τεμ).
-- **Seeder «προϊόντα με θεσμικό τέλος» (templates, selective import)** — σαν το `MyDataLookupSeeder`
-  (VAT/invoice types): curated κατάλογος γνωστών «δεμένων» levied items προ-ρυθμισμένων με σωστό
-  `mydata_tax_type/category/per_unit` — π.χ. **περιβαλλοντικό τέλος πλαστικής σακούλας** €0,07/τεμ,
-  **τέλος διαμονής/ανθεκτικότητας** ανά κατηγορία καταλύματος, ανακύκλωσης κ.λπ. Ο operator **διαλέγει
-  ποια να κάνει import** (ή τα βλέπει ως templates) → γλιτώνει το να ξέρει §8.x κωδικούς + ποσά. (Η
-  μηχανική product-linked fee ΥΠΑΡΧΕΙ ήδη· αυτό είναι μόνο τα έτοιμα δεδομένα + ένα selective-import UI.)
+- **Seeder «προϊόντα με θεσμικό τέλος»** — _✅ SHIPPED 2026-06-17: «Πρότυπα τελών» selective-import στη
+  λίστα Προϊόντων (`LeviedProductTemplates` + `ImportLeviedProducts`) — σακούλα €0,07 / πλαστικά €0,04 /
+  ανακύκλωσης €0,08 / διαμονής, προ-ρυθμισμένα με myDATA Fees §8.5· idempotent._
 - **`clear:right`** σε single-word doc-types (PDF tweak).
+
+## 🧰 Setup / onboarding helpers (from-zero — sweep 2026-06-17)
+_Ήδη: `ekdosi:install` wizard · `MyDataLookupSeeder` (VAT/invoice types/payment-delivery methods/aims/
+units, με one-click `StandardLookupSeedAction` ανά resource) · `DemoCompanySeeder` · GSIS/VIES lookup ·
+`suppliers:sync` · «Πρότυπα τελών». Ιδέες για ευκολότερο στήσιμο από το 0:_
+- **Generic CSV importer (προϊόντα / πελάτες)** — bulk onboarding από άλλο σύστημα (έχουμε CSV *export*
+  `CsvEntityExporter`· λείπει το *import*). Column-map + dry-run preview + tenant-scope. _Το μεγαλύτερο
+  win για μεταφορά καταλόγου/πελατολογίου._
+- **Setup profiles ανά κλάδο** (λιανική / εστίαση / ξενοδοχείο / υπηρεσίες) — bundle σε ένα κλικ: invoice
+  types + default ΦΠΑ + σχετικά «πρότυπα τελών» (ξενοδοχείο → διαμονής· λιανική → σακούλα/ανακύκλωσης) +
+  payment methods. Πάνω στο υπάρχον seeding.
+- **Curated tax-presets** (βλ. PDF/UX ideas) — withholding/χαρτόσημο presets ανά κλάδο για το per-invoice
+  «Τυπικά τέλη/φόροι».
+- **Κατάλογος συνήθων υπηρεσιών** (hosting/domain/SSL…) για WHMCS-style tenants — προαιρετικό template.
 
 ## 📡 myDATA sync — insights & next (sweep 2026-06-16)
 _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 διερεύνηση** πιάνονται
