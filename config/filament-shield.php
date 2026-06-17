@@ -86,8 +86,13 @@ return [
     |
     */
 
+    // DISABLED: ekdosi gates panel access via User::canAccessPanel() (tenant
+    // membership) + its own TenantRoleProvisioner roles (super_admin /
+    // company_admin / operator). The default `panel_user` auto-assign (the
+    // HasPanelShield trait, now removed from User) threw «no role panel_user for
+    // guard web» on every user-create in the panel — we never managed that role.
     'panel_user' => [
-        'enabled' => true,
+        'enabled' => false,
         'name' => 'panel_user',
     ],
 

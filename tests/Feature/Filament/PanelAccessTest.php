@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Models\Company;
 use App\Models\User;
+use BezhanSalleh\FilamentShield\Traits\HasPanelShield;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -22,6 +23,24 @@ class PanelAccessTest extends TestCase
     public function test_user_implements_the_filament_user_contract(): void
     {
         $this->assertInstanceOf(FilamentUser::class, new User);
+    }
+
+    public function test_panel_user_auto_assign_is_disabled(): void
+    {
+        // The filament-shield HasPanelShield trait auto-assigned a `panel_user`
+        // role on user-create (outside console) → «no role panel_user for guard
+        // web» in the live panel, because ekdosi never managed that role (it gates
+        // access via canAccessPanel + TenantRoleProvisioner). Guard it stays off.
+        $this->assertNotContains(
+            HasPanelShield::class,
+            class_uses_recursive(User::class),
+        );
+        $this->assertFalse((bool) config('filament-shield.panel_user.enabled'));
+
+        $user = User::create([
+            'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]);
+        $this->assertFalse($user->hasRole('panel_user'));
     }
 
     public function test_panel_access_requires_tenant_membership(): void
