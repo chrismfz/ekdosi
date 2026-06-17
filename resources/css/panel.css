@@ -255,3 +255,27 @@
     flex-wrap: wrap;
     justify-content: flex-end;
 }
+
+/* ── AI «Βοηθός» chat (page + floating widget) ────────────────────────── */
+.self-end { align-self: flex-end; }
+.overflow-y-auto { overflow-y: auto; }
+.bg-primary-50 { background-color: #fffbeb; }      /* primary = Amber */
+.dark .dark\:bg-primary-400\/10 { background-color: rgba(251, 191, 36, .1); }
+
+.ai-widget-fab {
+    position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 40;
+    display: flex; align-items: center; justify-content: center;
+    width: 3.25rem; height: 3.25rem; border-radius: 9999px;
+    background-color: #f59e0b; color: #fff; border: none; cursor: pointer;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,.2), 0 4px 6px -4px rgba(0,0,0,.2);
+}
+.ai-widget-fab:hover { background-color: #d97706; }
+.ai-widget-panel {
+    position: fixed; bottom: 5rem; right: 1.25rem; z-index: 40;
+    width: 22rem; max-width: calc(100vw - 2rem);
+    display: flex; flex-direction: column;
+    background-color: #fff; border: 1px solid #e5e7eb; border-radius: .75rem;
+    box-shadow: 0 20px 25px -5px rgba(0,0,0,.2), 0 8px 10px -6px rgba(0,0,0,.2);
+}
+.dark .ai-widget-panel { background-color: #111827; border-color: rgba(255,255,255,.1); }
+.ai-widget-log { min-height: 12rem; max-height: 24rem; overflow-y: auto; }

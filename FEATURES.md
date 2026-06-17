@@ -269,6 +269,15 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 Έσοδα μήνα/προηγ./τρίμηνο, ΦΠΑ εκροών, ανεξόφλητα, παραστατικά μήνα, MRR/ανανεώσεις,
 **Εικόνα από myDATA — ΦΠΑ**, top πελάτες, YoY chart, ληξιπρόθεσμα, πελάτες με υπόλοιπο.
 
+## 16β. AI «Βοηθός» (Phase 1, read-only)
+In-app chat που απαντά για τα δεδομένα της **τρέχουσας** εταιρείας μέσω εργαλείων
+(`count_sales`, `outstanding_receivables`· επεκτάσιμο registry). **Σελίδα «Βοηθός AI» + floating
+widget σε κάθε σελίδα** (κοινό `AssistantRunner`, συνομιλία στο session). **Isolation = tool layer**
+(κανένα `company` param → cross-tenant αδύνατο), **per-tool Shield permission**. **Governance web/DB**:
+per-company on/off · μοντέλο (Sonnet default/Haiku/Opus) · μηνιαίο όριο tokens · προαιρ. per-company κλειδί.
+**Metering** `ai_usage_log` (tokens+κόστος ανά εταιρεία/χρήστη) + caps (soft 80% / hard 100% / global
+backstop). Global switch `EKDOSI_AI_ENABLED` (default OFF). Engine = Laravel HTTP (Messages API), χωρίς SDK.
+
 ## 17. Setup / lookups
 VAT categories · invoice types · payment/delivery methods · distribution aims · metric
 units · bank accounts · product categories · **tags** — όλα tenant-scoped, με

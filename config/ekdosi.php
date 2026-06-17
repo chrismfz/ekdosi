@@ -282,4 +282,40 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | AI «Βοηθός» (assistant)
+    |--------------------------------------------------------------------------
+    | Phase-1 read-only in-app chat. The global feature switch + the default
+    | model + the per-model price map (USD per 1M tokens) the ai_usage_log cost
+    | estimate is computed from. Per-company on/off, model and cap live on the
+    | `companies` row; this is the deploy-wide defaults + economics.
+    */
+    'ai' => [
+        // Master switch — even an ai_assistant_enabled tenant stays dark if off.
+        'enabled' => env('EKDOSI_AI_ENABLED', false),
+
+        // Default model when a tenant hasn't picked one. Sonnet = the sweet spot
+        // for tool-use operator chat (see docs/ai-assistant-blueprint.md).
+        'default_model' => env('EKDOSI_AI_DEFAULT_MODEL', 'claude-sonnet-4-6'),
+
+        // Per-turn safety rails.
+        'max_tokens' => (int) env('EKDOSI_AI_MAX_TOKENS', 1024),
+        'max_tool_iterations' => (int) env('EKDOSI_AI_MAX_TOOL_ITERATIONS', 6),
+        'timeout' => (int) env('EKDOSI_AI_TIMEOUT', 60),
+
+        // Global backstop cap (tokens/tenant/month) independent of any per-tenant
+        // cap — a runaway-loop net. 0 = no global cap.
+        'global_monthly_token_cap' => (int) env('EKDOSI_AI_GLOBAL_TOKEN_CAP', 5_000_000),
+
+        // USD per 1,000,000 tokens. cache_read ≈ 0.1× input, cache_write ≈ 1.25×.
+        // Refresh on Anthropic price changes; cost is our estimate, reconciled to
+        // the single monthly invoice.
+        'pricing' => [
+            'claude-sonnet-4-6' => ['input' => 3.00, 'output' => 15.00],
+            'claude-haiku-4-5' => ['input' => 1.00, 'output' => 5.00],
+            'claude-opus-4-8' => ['input' => 5.00, 'output' => 25.00],
+        ],
+    ],
+
 ];

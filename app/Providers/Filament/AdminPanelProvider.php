@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Pages\Dashboard;
 use App\Models\Company;
+use App\Support\Settings\SystemSettings;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
@@ -13,11 +14,13 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
@@ -38,7 +41,7 @@ class AdminPanelProvider extends PanelProvider
             ->multiFactorAuthentication(
                 [AppAuthentication::make()->recoverable()],
                 // DB override (set from «Ρυθμίσεις συστήματος») wins; env is the default.
-                isRequired: app(\App\Support\Settings\SystemSettings::class)
+                isRequired: app(SystemSettings::class)
                     ->bool('system.require_2fa', (bool) config('ekdosi.require_2fa', false)),
             )
             ->tenant(Company::class, slugAttribute: 'slug')
@@ -75,6 +78,13 @@ class AdminPanelProvider extends PanelProvider
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
             ])
+            // Floating AI «Βοηθός» on every page (chat while navigating). The
+            // widget self-hides when the assistant isn't available for the tenant,
+            // so injecting unconditionally is safe.
+            ->renderHook(
+                PanelsRenderHook::BODY_END,
+                fn (): string => Blade::render('@livewire(\'assistant-widget\')'),
+            )
             ->plugins([
                 FilamentShieldPlugin::make(),
             ])

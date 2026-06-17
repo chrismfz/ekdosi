@@ -18,6 +18,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» — Phase 1 (read-only chat).** In-app βοηθός που απαντά για τα δεδομένα της ΤΡΕΧΟΥΣΑΣ
+  εταιρείας μέσω εργαλείων (Phase-1: `count_sales`, `outstanding_receivables`). **Δύο surfaces, κοινό
+  engine**: dedicated σελίδα «Βοηθός AI» + **floating widget σε κάθε σελίδα** (chat ενώ πλοηγείσαι·
+  συνομιλία στο session). **Isolation = tool layer** (κανένα tool δεν έχει `company` param → cross-tenant
+  read αδύνατο)· **per-tool permission** (Shield). **Governance όλο web/DB**: per-company on/off, μοντέλο
+  (Sonnet/Haiku/Opus), **μηνιαίο όριο tokens**, και προαιρετικό **per-company κλειδί** (escape hatch· global
+  key default). **Metering**: `ai_usage_log` (tokens + cost ανά εταιρεία/χρήστη) → cap soft-80%/hard-100% +
+  global backstop. Transport = Laravel HTTP (mockable), **όχι** νέα εξάρτηση. Global switch `EKDOSI_AI_ENABLED`,
+  default OFF.
 - **Συγχρονισμός πελατών από myDATA (+ presets διαστήματος).** Νέο κουμπί «Συγχρονισμός από myDATA»
   στους Πελάτες (καθρέφτης των Προμηθευτών): σαρώνει τις πωλήσεις μας (`RequestTransmittedDocs`),
   μαζεύει τα **ΑΦΜ συναλλασσομένων** και δημιουργεί πελάτες για όσα λείπουν, με **GSIS enrichment** για
