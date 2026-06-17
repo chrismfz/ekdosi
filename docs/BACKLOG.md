@@ -125,12 +125,27 @@ surfaced in the open-items sections further down.
   αυτόματα) — `send_customer_statement` (επαφή-aware) + `create_reminder`· staging σε `ai_pending_actions`,
   confirm/cancel κάρτες, `AiActionExecutor` (re-validate, scoped tenant+user), reminders → Filament DB
   notifications μέσω `ai:dispatch-reminders`._
-  **Phase 2+ (open):** (α) **περισσότερα read tools** (compare income/expense, backups status, WHMCS inbox),
-  (β) **per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `ai_api_key`
-  υπάρχει· λείπει UI exposure + per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA),
-  (γ) **persistence σε `ai_conversations` table** (ιστορικό/πολλές συνομιλίες, αντί session), (δ) usage
-  **dashboard** (κόστος/tokens ανά εταιρεία — ποιος πληρώνει/κοντά στο όριο), (ε) prompt-caching του system
-  prompt. `ai-assistant-blueprint.md`
+  **Phase 2c (open) — ιδέες/σημειώσεις (καμία δέσμευση, χαμηλή προτεραιότητα):**
+  - **(α) Περισσότερα read tools** — σύγκριση εσόδων/εξόδων (income vs expense),
+    κατάσταση backups (`OperatorHealth`), WHMCS inbox (εκκρεμή `pending_whmcs_invoices`),
+    top προϊόντα/υπηρεσίες ανά περίοδο (`CustomerTopProducts`-style αλλά εταιρείας).
+  - **(β) Περισσότερα write tools με confirm** — π.χ. «καταχώρισε είσπραξη/έμβασμα»
+    (reuse `PaymentAllocator`), «κόψε πρόχειρο παραστατικό» (το `find_customer` ήδη δίνει
+    link· εδώ θα στηνόταν draft μέσω `CreateInvoice`). Πάντα operator-confirm στο
+    `ai_pending_actions` — ίδιο pattern με 2b.
+  - **(γ) Per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `companies.ai_api_key` υπάρχει
+    (στο `$hidden`)· λείπει το UI exposure (στο `CompanySettings` ή super-admin only) +
+    per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).
+  - **(δ) Persistence συνομιλιών** — `ai_conversations` table (ιστορικό + πολλές
+    συνομιλίες ανά χρήστη, αντί session) — απαιτεί και UI επιλογής συνομιλίας.
+  - **(ε) Usage dashboard** — κόστος/tokens ανά εταιρεία/χρήστη/μήνα από το `ai_usage_log`
+    (ποιος πληρώνει, ποιος κοντά στο όριο) — Filament page/widget· τα δεδομένα υπάρχουν ήδη.
+  - **(στ) Streaming απαντήσεων** — τώρα είναι «σκέφτομαι…» μέχρι να ολοκληρωθεί το
+    tool-loop· streaming θα ήθελε SSE/Livewire polling (μεγαλύτερη αλλαγή στο surface).
+  - _Σχεδιαστικά κλειδωμένα ήδη (μην ξανασυζητηθούν): tool-layer isolation (κανένα `company`
+    param), per-tool Shield permission, `#[Locked]` messages/transcript, `ChatMarkup`
+    same-origin links, writes ΠΟΤΕ auto (operator-confirm). Engine = Laravel HTTP/Messages
+    API χωρίς SDK. prompt-caching ✅ έγινε (2a)._ `ai-assistant-blueprint.md`
   (πλέον καλύπτει: **«δεν χρειάζεται Console agent»** για το in-app chat — μόνο API key +
   Messages API tool-loop· **abuse/resource safeguards** = no-code-execution + per-request
   max_tokens/tool-loop/timeout/history caps + per-tenant/user rate-limit + monthly token caps +
