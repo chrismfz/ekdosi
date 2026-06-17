@@ -207,7 +207,11 @@ _Έχουμε ήδη: balances/Καρτέλα, τραπεζικοί λογαρι
   auto-email + `InvoiceBalance` (σήμερα: single resend). Templates ανά σκαλί + opt-out ανά πελάτη.
 - **Bank-statement import → match πληρωμών** — ανέβασμα κίνησης (CSV/MT940) → auto-match σε ανοιχτά
   τιμολόγια (ποσό/ημερομηνία/ΑΦΜ) → προτεινόμενες `Payment` εγγραφές προς έγκριση.
-- **Per-customer τιμοκατάλογοι / εκπτώσεις** — default τιμή/έκπτωση ανά πελάτη (σήμερα: ανά γραμμή).
+- **Per-customer εκπτώσεις/τιμές** — _✅ SHIPPED 2026-06-17 (έκπτωση + τρόπος-πληρωμής ανά πελάτη
+  εφαρμόζονται στην έκδοση· τύπος-wins fallback)._ Το **per-product τιμοκατάλογο** (default τιμή
+  μονάδας ανά προϊόν×πελάτη) **DROPPED** σκόπιμα: η **per-line έκπτωση** τη στιγμή της έκδοσης +
+  το per-customer default discount καλύπτουν την ανάγκη· πίνακας `customer_product_prices` =
+  over-engineering χωρίς πραγματικό use case (re-open μόνο αν εμφανιστεί).
 - **Multi-currency invoicing** — `currency` υπάρχει στο payload (EUR hardcoded)· πραγματικό FX +
   στρογγυλοποίηση + εμφάνιση. (myDATA θέλει EUR ισοτιμία — προσοχή.)
   _(Aged-receivables + Sendable customer statement: ✅ SHIPPED — βλ. «Done recently».)_

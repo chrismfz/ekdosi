@@ -49,6 +49,8 @@
   μένει net+ΦΠΑ = τζίρος)· το PDF «Πληρωτέο» = `payable_total`.
 - **Pickers**: αγαπημένα-πρώτα + most-used + inline create προϊόντος· tags· πλήρες
   ελληνικό UI· «Νέο Παραστατικό» από την Καρτέλα.
+- **Per-customer εμπορικά defaults**: επιλογή πελάτη → εφαρμόζεται η «Default discount %» του στην
+  κεφαλίδα + ο default τρόπος πληρωμής ως fallback (ο τύπος παραστατικού υπερισχύει).
 
 ## 3. myDATA (ο πυρήνας)
 - **Υποβολή / ακύρωση / dry-run** μέσω `firebed/aade-mydata` (`MyDataSubmitter`),

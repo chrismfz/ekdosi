@@ -13,6 +13,7 @@ use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
+use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -44,9 +45,9 @@ class CreateInvoice extends CreateRecord
      * Full-width content so the Excel-style lines table uses the whole screen
      * (the default centred container squeezed the columns).
      */
-    public function getMaxContentWidth(): \Filament\Support\Enums\Width
+    public function getMaxContentWidth(): Width
     {
-        return \Filament\Support\Enums\Width::Full;
+        return Width::Full;
     }
 
     /**
@@ -92,6 +93,11 @@ class CreateInvoice extends CreateRecord
             'city' => $customer->city,
             'postcode' => $customer->postcode,
             'country' => $customer->country ?: 'GR',
+            // Per-customer commercial defaults (mirror the form's customer-select
+            // handler). No invoice type chosen yet here, so the customer's payment
+            // method is the starting value — the type overrides it once picked.
+            'header_discount_percent' => (float) ($customer->discount ?? 0),
+            'payment_method_id' => $customer->payment_method_id,
         ]));
     }
 
