@@ -109,6 +109,17 @@ after cutover.
   makes sense. utf8mb4 / utf8mb4_unicode_ci.
 - Money `decimal(14,2)`, qty `decimal(9,3)`, vat% `decimal(5,2)`.
 - Operator-facing UI text is Greek; code identifiers stay English.
+- **No-build CSS (gotcha).** The panel ships ONLY Filament's `.fi-*` component CSS —
+  there is **no Tailwind utility layer** and no asset build. Any utility class used in a
+  custom blade page (`grid`, `gap-3`, `text-sm`, `dark:*`, responsive `md:*`, even a
+  `.fi-*` override) must be **hand-defined in `resources/css/panel.css`** or it renders
+  **unstyled**. Add the class there (standard Tailwind values + the `dark:`/responsive
+  variant you use); it's registered via `FilamentAsset::register` and republished by
+  `filament:assets` on `composer install` — no npm/Vite.
+- **Pint scope (gotcha).** The tree is **not** fully Pint-clean, so
+  `vendor/bin/pint app/ tests/` reformats ~200 **unrelated** pre-existing files and
+  buries your change. **Only Pint the files you touched** (pass them explicitly); revert
+  any stray reformats before committing.
 
 ## Changelog + features discipline (keep these current — we were losing track)
 Part of "done", like tests. **Every change updates the right place:**
