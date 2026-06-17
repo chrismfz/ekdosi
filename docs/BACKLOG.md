@@ -61,6 +61,18 @@ surfaced in the open-items sections further down.
   **enrich/QR από MARK** (`EnrichInvoiceFromAade`).
 - **Sandbox round 2 ✅** (2026-06-10) — ΔΑ lifecycle + νέοι taxTypes (fees/stamp/deductions) +
   product-linked taxes + 4% override, όλα AADE-accepted (`sandbox-results.txt`).
+- **Ηλικίωση οφειλών** (PR #308) — aged-receivables page (0-30/31-60/61-90/90+ ανά πελάτη, σύνολα,
+  drill στην Καρτέλα, CSV· reuse Καρτέλα FIFO aging). FEATURES §12.
+- **Βιβλίο Εσόδων-Εξόδων → myDATA period report** — ΜΑΡΚ+κατάσταση στήλες, Έσοδα/Έξοδα+σύνολα,
+  period presets, **PDF οριζόντιο A4**, exports CSV/XLSX/JSON. FEATURES §12. (Πλήρως κλεισμένο.)
+- **Panel utility CSS (no-build)** — `resources/css/panel.css` μέσω `FilamentAsset::register` →
+  `filament:assets`· όλα τα custom blade utilities πλέον styled, χωρίς npm/Vite/theme.
+  _(Maintenance: νέο utility σε blade → πρόσθεσέ το εκεί.)_
+- **Sendable customer statement (επαφή-aware)** (2026-06-17) — Καρτέλα → PDF/email σε πελάτη +
+  τις επαφές του (role-labelled) + ελεύθερα extras (validate/dedupe). FEATURES §7.
+- **Καρτέλα — όψη περιόδου + ομαδοποίηση header actions** (2026-06-17) — φίλτρα περιόδου πάνω από
+  τον πίνακα + **σύνολα έτους** (τζίρος/εισπράξεις/υπόλοιπο)· header actions σε dropdowns + **global
+  fix** στο overflow (`.fi-header-actions-ctn` wrap, αφορά όλες τις σελίδες με πολλά actions). FEATURES §7.
 
 ---
 
@@ -175,15 +187,7 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   **Μένει deferred:** η **υποβολή για λογαριασμό τρίτου** (λογιστής) που θέλει `entityVatNumber` [323]
   (βλ. «Expenses — λογιστής/`entityVatNumber`»). Ιδέα: ekdosi **ετοιμάζει** τους χαρακτηρισμούς, ο
   λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει** — θέλει διερεύνηση ρόλων/δικαιωμάτων.
-- **#6 Βιβλίο Εσόδων-Εξόδων → myDATA period report.** _✅ SHIPPED — στήλες ΜΑΡΚ + κατάσταση myDATA
-  στο ημερολόγιο + στα CSV/XLSX/JSON exports· Έσοδα/Έξοδα στήλες+σύνολα· period presets·
-  **PDF (οριζόντιο A4)** ✅· self-contained styling (no build)._ _(Πλήρως κλεισμένο.)_
-- **Panel utility CSS — ✅ SHIPPED (no-build).** Ο admin panel δεν φόρτωνε custom Tailwind theme,
-  οπότε ΟΛΑ τα utility classes στα custom blade ήταν άστυλα (το Filament CSS είναι αμιγώς `.fi-*`).
-  Λύση: `resources/css/panel.css` (hand-written utilities, standard Tailwind τιμές + dark/responsive),
-  φορτωμένο με `FilamentAsset::register` → publish από `filament:assets` (composer post-install) —
-  **χωρίς npm/Vite/theme**. _Maintenance: νέο utility σε blade → πρόσθεσέ το στο `panel.css`._
-  _(Το «κανονικό» Tailwind theme + build παραμένει επιλογή αν ποτέ θελήσουμε πλήρες Tailwind.)_
+  _(#6 Βιβλίο→period report + Panel utility CSS: ✅ SHIPPED — βλ. «Done recently».)_
 
 ## 🖥️ Console/interface polish (B — sweep 2026-06-16)
 - **Auto-refresh-on-stale** στην Κονσόλα myDATA: αν το cache > Ν ώρες, διακριτικό «παλιά δεδομένα —
@@ -203,10 +207,7 @@ _Έχουμε ήδη: balances/Καρτέλα, τραπεζικοί λογαρι
 - **Per-customer τιμοκατάλογοι / εκπτώσεις** — default τιμή/έκπτωση ανά πελάτη (σήμερα: ανά γραμμή).
 - **Multi-currency invoicing** — `currency` υπάρχει στο payload (EUR hardcoded)· πραγματικό FX +
   στρογγυλοποίηση + εμφάνιση. (myDATA θέλει EUR ισοτιμία — προσοχή.)
-- **Aged-receivables report** — _✅ SHIPPED («Ηλικίωση οφειλών» page: 0-30/31-60/61-90/90+ ανά πελάτη,
-  σύνολα, drill στην Καρτέλα, CSV· reuse του Καρτέλα FIFO aging)._
-- **Sendable customer statement** — _✅ SHIPPED (Καρτέλα → PDF/email· επαφή-aware: παραλήπτες ο πελάτης
-  + οι επαφές του με email, role-labelled, + ελεύθερα extras· dedupe/validation)._
+  _(Aged-receivables + Sendable customer statement: ✅ SHIPPED — βλ. «Done recently».)_
 - **Επαφές (shared CRM)** — κοινή οντότητα `Contact` ↔ many customers με ρόλους (π.χ. ένας λογιστής/
   γραφείο που εξυπηρετεί πολλούς πελάτες-πελάτη), αντί για τις σημερινές per-customer `customer_contacts`.
   Σκόπιμα DEFERRED («κρατάμε τις επαφές per customer να μην μπλέξουμε») — future CRM phase· να μη σπάσει
