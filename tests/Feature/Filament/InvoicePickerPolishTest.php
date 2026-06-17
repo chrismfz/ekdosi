@@ -175,6 +175,18 @@ class InvoicePickerPolishTest extends TestCase
         $this->assertCount(35, PickerOptions::favouriteProductOptions());
     }
 
+    public function test_customer_picker_caps_when_catalogue_exceeds_browse_ceiling(): void
+    {
+        // Above the browse-all ceiling (200) the on-open list falls back to the
+        // capped top slice (30) + search — a 1000-row Select isn't browsable.
+        // 201 plain customers (zero invoices, none favourite) → exactly 30 shown.
+        for ($i = 1; $i <= 201; $i++) {
+            Customer::create(['company_id' => $this->tenant->id, 'name' => sprintf('Cust %03d', $i)]);
+        }
+
+        $this->assertCount(30, PickerOptions::favouriteCustomerOptions());
+    }
+
     public function test_product_search_excludes_inactive_and_biases_favourites(): void
     {
         $cat = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'C']);
