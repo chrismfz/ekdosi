@@ -84,6 +84,39 @@ class ImportLeviedProductsTest extends TestCase
         $this->assertSame(2, LeviedProductTemplates::TAX_TYPE_FEES);
     }
 
+    public function test_falls_back_to_any_vat_when_no_default(): void
+    {
+        // Fresh tenant whose only VAT category is NOT flagged default — the
+        // import must still succeed (products.vat_category_id is NOT NULL).
+        $tenant = Company::create([
+            'name' => 'NoDef OE', 'slug' => 'nd-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        $vat = VatCategory::create(['company_id' => $tenant->id, 'description' => '13%', 'rate' => 13, 'is_default' => false]);
+
+        $res = app(ImportLeviedProducts::class)($tenant, ['plastic_bag']);
+
+        $this->assertNull($res['error']);
+        $bag = Product::where('company_id', $tenant->id)->where('mydata_tax_category', 8)->firstOrFail();
+        $this->assertSame($vat->id, (int) $bag->vat_category_id);
+    }
+
+    public function test_no_vat_category_returns_a_graceful_error_not_a_crash(): void
+    {
+        // From-zero tenant with NO VAT category at all → bail with error='no_vat'
+        // (the action notifies «φτιάξε ΦΠΑ πρώτα») instead of an integrity crash.
+        $tenant = Company::create([
+            'name' => 'Bare OE', 'slug' => 'bare-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+
+        $res = app(ImportLeviedProducts::class)($tenant, ['plastic_bag']);
+
+        $this->assertSame('no_vat', $res['error']);
+        $this->assertSame([], $res['created']);
+        $this->assertSame(0, Product::where('company_id', $tenant->id)->count());
+    }
+
     public function test_filament_action_imports_the_selected_templates(): void
     {
         Gate::before(fn () => true);

@@ -43,7 +43,7 @@ class ListProducts extends BaseListRecords
             ->color('gray')
             ->visible(fn (): bool => ProductResource::canCreate())
             ->modalHeading('Εισαγωγή προϊόντων με θεσμικό τέλος')
-            ->modalDescription('Έτοιμα προϊόντα/τέλη, προ-ρυθμισμένα με το σωστό myDATA τέλος (§8.5). Διάλεξε ποια να δημιουργηθούν — το τέλος υπολογίζεται μετά αυτόματα ανά παραστατικό.')
+            ->modalDescription('Έτοιμα προϊόντα/τέλη, προ-ρυθμισμένα με το σωστό myDATA τέλος (§8.5). Διάλεξε ποια να δημιουργηθούν — το τέλος υπολογίζεται μετά αυτόματα ανά παραστατικό. Προσοχή: δύο διαφορετικά τέλη ΙΔΙΟΥ τύπου (π.χ. σακούλα + ανακύκλωσης) δεν μπαίνουν στο ΙΔΙΟ παραστατικό — χώρισέ τα.')
             ->modalSubmitActionLabel('Εισαγωγή')
             ->schema([
                 CheckboxList::make('templates')
@@ -59,6 +59,16 @@ class ListProducts extends BaseListRecords
                 /** @var Company $tenant */
                 $tenant = Filament::getTenant();
                 $res = app(ImportLeviedProducts::class)($tenant, $data['templates'] ?? []);
+
+                if (($res['error'] ?? null) === 'no_vat') {
+                    Notification::make()
+                        ->title('Δημιούργησε πρώτα μια κατηγορία ΦΠΑ')
+                        ->body('Τα προϊόντα χρειάζονται κατηγορία ΦΠΑ. Πήγαινε Setup → Κατηγορίες ΦΠΑ (ή «Σπορά προτύπων») και ξαναδοκίμασε.')
+                        ->warning()
+                        ->send();
+
+                    return;
+                }
 
                 $body = count($res['created']).' δημιουργήθηκαν';
                 if ($res['skipped'] !== []) {
