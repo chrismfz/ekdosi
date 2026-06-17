@@ -85,6 +85,11 @@ class CompanyExporter
         // are reconfigured on the target VM) — never travel inside a bundle.
         'company_backup_settings',
         'company_backup_runs',
+        // AI «Βοηθός» operational state — metering/billing log + the transient
+        // confirm queue & reminders. Not part of the accounting dataset a tenant
+        // carries across VMs (re-accrues per usage; pending actions are ephemeral).
+        'ai_usage_log',
+        'ai_pending_actions',
     ];
 
     /**

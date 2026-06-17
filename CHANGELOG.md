@@ -18,6 +18,21 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» — Phase 2b (write actions με operator-confirm).** Δύο εργαλεία που **ΠΡΟΕΤΟΙΜΑΖΟΥΝ**
+  (δεν εκτελούν) ενέργειες: **«στείλε ενημερωτικό/καρτέλα»** (`send_customer_statement` — επαφή-aware,
+  ίδιοι παραλήπτες με το manual Καρτέλα send) και **«θύμισέ μου / notification»** (`create_reminder`).
+  Ο βοηθός **ΠΟΤΕ δεν στέλνει/δημιουργεί μόνος του**: στήνει μια εγγραφή σε `ai_pending_actions` και ο
+  χειριστής πατά **«Επιβεβαίωση»/«Άκυρο»** σε κάρτα κάτω από το chat· η εκτέλεση γίνεται server-side
+  (`AiActionExecutor`, re-validate από την εγγραφή + permission, scoped tenant+user — δεν εμπιστεύεται
+  client input). Οι υπενθυμίσεις παραδίδονται ως Filament database notifications (το «καμπανάκι») όταν
+  ωριμάσουν, μέσω `ai:dispatch-reminders` (scheduler, `EKDOSI_SCHEDULE_AI_REMINDERS`, default ON).
+- **AI «Βοηθός» — Phase 2a (insights + clickable links).** 4 νέα read-only εργαλεία: **ανάλυση
+  οφειλετών** (top debtors + link στην Καρτέλα καθενός — η ανάλυση ανά πελάτη που έλειπε), **αναζήτηση
+  πελάτη** (όνομα/ΑΦΜ → υπόλοιπο + link Καρτέλας + «Νέο Παραστατικό»), **πρόσφατα παραστατικά**
+  (κατάσταση myDATA/πληρωμής + link), **σύνοψη ΦΠΑ/τζίρου** περιόδου. Τα tools επιστρέφουν deep-links και
+  ο βοηθός τα δίνει ως **clickable σύνδεσμοι** (safe renderer: HTML-escape + μόνο same-origin links —
+  εξωτερικά URL μένουν inert). «Άνοιξε την καρτέλα του Χ» → link. (Write actions «στείλε ενημερωτικό»/
+  reminders = Phase 2b με operator-confirm.)
 - **AI «Βοηθός» — Phase 1 (read-only chat).** In-app βοηθός που απαντά για τα δεδομένα της ΤΡΕΧΟΥΣΑΣ
   εταιρείας μέσω εργαλείων (Phase-1: `count_sales`, `outstanding_receivables`). **Δύο surfaces, κοινό
   engine**: dedicated σελίδα «Βοηθός AI» + **floating widget σε κάθε σελίδα** (chat ενώ πλοηγείσαι·

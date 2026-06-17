@@ -2,8 +2,10 @@
 
 namespace App\Filament\Concerns;
 
+use App\Models\AiPendingAction;
 use App\Models\Company;
 use App\Models\User;
+use App\Services\Assistant\AiActionExecutor;
 use App\Services\Assistant\AssistantRunner;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
@@ -82,6 +84,80 @@ trait InteractsWithAssistant
         $this->messages = [];
         $this->draft = '';
         $this->afterAssistantTurn();
+    }
+
+    /**
+     * The WRITE actions the assistant PREPARED that still await this operator's
+     * confirmation — rendered as confirm/cancel cards below the chat. Queried
+     * fresh from the DB each render (cheap, tenant+user scoped), so they survive
+     * navigation (the non-SPA panel) and can't be tampered client-side.
+     *
+     * @return list<array{id:int,type:string,summary:string}>
+     */
+    public function pendingAssistantActions(): array
+    {
+        $tenant = Filament::getTenant();
+        $user = auth()->user();
+        if (! $tenant instanceof Company || ! $user instanceof User) {
+            return [];
+        }
+
+        return AiPendingAction::query()
+            ->where('company_id', $tenant->getKey())
+            ->where('user_id', $user->getKey())
+            ->pending()
+            ->latest('id')
+            ->limit(5)
+            ->get(['id', 'type', 'summary'])
+            ->map(fn (AiPendingAction $a): array => [
+                'id' => $a->id,
+                'type' => $a->type,
+                'summary' => $a->summary,
+            ])
+            ->all();
+    }
+
+    public function confirmAssistantAction(int $id): void
+    {
+        $user = auth()->user();
+        $action = $this->ownedPendingAction($id);
+        if ($action === null || ! $user instanceof User) {
+            return;
+        }
+        $result = app(AiActionExecutor::class)->confirm($action, $user);
+        $this->transcript[] = ['role' => 'system', 'text' => '✓ '.$result];
+        $this->afterAssistantTurn();
+    }
+
+    public function cancelAssistantAction(int $id): void
+    {
+        $action = $this->ownedPendingAction($id);
+        if ($action === null) {
+            return;
+        }
+        app(AiActionExecutor::class)->cancel($action);
+        $this->transcript[] = ['role' => 'system', 'text' => '✕ Ακυρώθηκε.'];
+        $this->afterAssistantTurn();
+    }
+
+    /**
+     * Load a pending action ONLY if it belongs to the current tenant + operator —
+     * the client passes an id, never the row, so this is the trust boundary (the
+     * executor re-validates again).
+     */
+    private function ownedPendingAction(int $id): ?AiPendingAction
+    {
+        $tenant = Filament::getTenant();
+        $user = auth()->user();
+        if (! $tenant instanceof Company || ! $user instanceof User) {
+            return null;
+        }
+
+        return AiPendingAction::query()
+            ->where('company_id', $tenant->getKey())
+            ->where('user_id', $user->getKey())
+            ->pending()
+            ->find($id);
     }
 
     /** Hook for surface-specific persistence (the widget saves to session). */

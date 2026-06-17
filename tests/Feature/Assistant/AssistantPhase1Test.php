@@ -99,9 +99,12 @@ class AssistantPhase1Test extends TestCase
 
     public function test_tool_registry_hides_tools_the_user_cannot_run(): void
     {
-        // No Gate::before → a plain user has neither View:Invoice nor View:Customer.
+        // No Gate::before → a plain user has neither View:Invoice nor View:Customer,
+        // so only the ungated `create_reminder` (a self-scoped reminder) is offered;
+        // every permission-gated read/write tool is hidden.
         $registry = new ToolRegistry;
-        $this->assertSame([], $registry->definitionsFor($this->user));
+        $names = array_column($registry->definitionsFor($this->user), 'name');
+        $this->assertSame(['create_reminder'], $names);
 
         $denied = $registry->run($this->tenant, $this->user, 'count_sales', []);
         $this->assertArrayHasKey('error', $denied);

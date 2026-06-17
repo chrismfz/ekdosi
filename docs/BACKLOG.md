@@ -118,9 +118,15 @@ surfaced in the open-items sections further down.
   build WHEN a real 2nd source exists (designing the contract against WHMCS+guesswork bakes in WHMCS-isms)._
 - **AI «Βοηθός»** — _✅ Phase 1 SHIPPED 2026-06-17: read-only chat (σελίδα + floating widget, κοινό
   `AssistantRunner`), tool layer isolation + per-tool permission, governance web/DB (on/off · model · token
-  cap · per-company key) + `ai_usage_log` metering + caps. 2 tools (`count_sales`/`outstanding_receivables`)._
-  **Phase 2+ (open):** (α) **περισσότερα tools** (compare income/expense, backups status, WHMCS inbox,
-  + WRITE tools με operator-confirm), (β) **per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `ai_api_key`
+  cap · per-company key) + `ai_usage_log` metering + caps. ✅ Phase 2a SHIPPED 2026-06-17: 6 read-only
+  insight tools (`count_sales`/`outstanding_receivables`/`list_top_debtors`/`find_customer`/`recent_invoices`/
+  `vat_summary`) + **clickable same-origin links** (Καρτέλα/view/νέο παραστατικό) μέσω `ChatMarkup` +
+  prompt-caching toggle. ✅ Phase 2b SHIPPED 2026-06-17: **WRITE tools με operator-confirm** (ποτέ
+  αυτόματα) — `send_customer_statement` (επαφή-aware) + `create_reminder`· staging σε `ai_pending_actions`,
+  confirm/cancel κάρτες, `AiActionExecutor` (re-validate, scoped tenant+user), reminders → Filament DB
+  notifications μέσω `ai:dispatch-reminders`._
+  **Phase 2+ (open):** (α) **περισσότερα read tools** (compare income/expense, backups status, WHMCS inbox),
+  (β) **per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `ai_api_key`
   υπάρχει· λείπει UI exposure + per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA),
   (γ) **persistence σε `ai_conversations` table** (ιστορικό/πολλές συνομιλίες, αντί session), (δ) usage
   **dashboard** (κόστος/tokens ανά εταιρεία — ποιος πληρώνει/κοντά στο όριο), (ε) prompt-caching του system

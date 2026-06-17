@@ -154,6 +154,12 @@ return [
         'service_dunning_enabled' => env('EKDOSI_SCHEDULE_SERVICE_DUNNING', true),
         'service_dunning_time' => env('EKDOSI_SERVICE_DUNNING_TIME', '08:00'),
 
+        // ai:dispatch-reminders — deliver due AI «Βοηθός» reminders (the bell).
+        // Default ON: a confirmed reminder is expected to fire (still inert until
+        // the OS cron + a queue worker run the scheduler). Cheap every-minute
+        // sweep so a reminder lands close to its time.
+        'ai_reminders_enabled' => env('EKDOSI_SCHEDULE_AI_REMINDERS', true),
+
     ],
 
     /*
