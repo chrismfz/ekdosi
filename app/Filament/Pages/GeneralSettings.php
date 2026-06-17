@@ -8,6 +8,7 @@ use App\Support\Settings\SystemSettings;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
@@ -115,8 +116,18 @@ class GeneralSettings extends Page implements HasForms
                             ->onColor('warning')
                             ->inline(false),
                     ]),
-                Section::make('Αντίγραφα ασφαλείας — ειδοποιήσεις')
+                Section::make('Αντίγραφα ασφαλείας')
                     ->schema([
+                        // Read-only status of the GLOBAL spatie backup encryption
+                        // (env-driven — changing it is a .env edit, not a live
+                        // toggle). Makes the «χωρίς κωδικό» case visible + warned,
+                        // next to the per-company «Μυστικά» knob on CompanyResource.
+                        Placeholder::make('global_backup_encryption')
+                            ->label('Κρυπτογράφηση καθολικών αντιγράφων (spatie backup:run)')
+                            ->content(fn (): string => filled(config('backup.backup.password'))
+                                ? '🔒 Κρυπτογραφημένα με κωδικό (env BACKUP_ARCHIVE_PASSWORD).'
+                                : '⚠ ΧΩΡΙΣ κωδικό — τα καθολικά αντίγραφα γράφονται χωρίς κρυπτογράφηση. Όρισε BACKUP_ARCHIVE_PASSWORD στο .env για κρυπτογράφηση.')
+                            ->helperText('Read-only (env). Αφορά ΜΟΝΟ το καθολικό spatie backup· τα per-company αντίγραφα έχουν δικό τους «Μυστικά» (κρυπτογραφημένα/raw) στην εταιρεία.'),
                         Toggle::make('backup_alert_on_failure')
                             ->label(self::KNOBS['backup_alert_on_failure'][1])
                             ->helperText(self::KNOBS['backup_alert_on_failure'][2])

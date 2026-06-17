@@ -206,7 +206,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Per-company backups** (`spatie/laravel-backup`) — πρόγραμμα/διατήρηση/προορισμοί
   (Τοπικά/SFTP/FTP/S3), «Αντίγραφο/Λήψη τώρα».
 - **Export/Import εταιρίας** — settings+setup ή πλήρες· **χωρίς υποχρεωτικό κωδικό**
-  (passphrase ή raw)· `company:export`/`company:import` + panel actions.
+  (passphrase ή raw, με σαφή plaintext προειδοποίηση στο raw)· `company:export`/`company:import`
+  + panel actions. Η κατάσταση κρυπτογράφησης **καθολικών** αντιγράφων (env `BACKUP_ARCHIVE_PASSWORD`)
+  φαίνεται read-only («🔒/⚠ χωρίς κωδικό») στις «Ρυθμίσεις συστήματος».
 - **Επιλεκτική εξαγωγή CSV** (Phase 3) — checkboxes «τι να τραβήξω» → .zip με CSV ανά
   entity (Excel-ready, UTF-8 BOM)· tenant-scoped + redaction μυστικών· «Εξαγωγή CSV»
   στο panel + `company:export-csv` (`CsvEntityExporter`).

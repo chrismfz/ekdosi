@@ -71,6 +71,25 @@ class GeneralSettingsPageTest extends TestCase
     }
 
     #[Test]
+    public function global_backup_encryption_status_reflects_the_archive_password(): void
+    {
+        $this->makeSuperAdmin();
+
+        // No archive password → the «χωρίς κωδικό» warning is shown.
+        config(['backup.backup.password' => null]);
+        Livewire::test(GeneralSettings::class)
+            ->assertSuccessful()
+            ->assertSee('ΧΩΡΙΣ κωδικό');
+
+        // Password set → the encrypted status is shown instead.
+        config(['backup.backup.password' => 's3cret']);
+        Livewire::test(GeneralSettings::class)
+            ->assertSuccessful()
+            ->assertSee('Κρυπτογραφημένα με κωδικό')
+            ->assertDontSee('ΧΩΡΙΣ κωδικό');
+    }
+
+    #[Test]
     public function saving_a_deviation_stores_an_override_and_audits_it(): void
     {
         $this->makeSuperAdmin();
