@@ -63,8 +63,10 @@ use Livewire\Attributes\Locked;
  *      and click-through links to each invoice.
  *   4. WHMCS comparison (collapsible).
  *
- * Header actions: AADE crosscheck, on-account payment, export PDF / CSV,
- * email statement.
+ * Header actions are grouped to keep the bar compact: «Νέο Παραστατικό»
+ * (standalone), «Εισπράξεις / Πληρωμές» (receipt / payment / allocations /
+ * credit / refund), «Εξαγωγή / Αποστολή» (PDF / CSV / email statement), and
+ * «Περισσότερα» (AADE crosscheck / edit / back).
  *
  * Read-only ledger. The running balance shown in the table is always
  * computed from the FULL history (CustomerLedgerBuilder), so a year/type
@@ -196,6 +198,51 @@ class CustomerLedger extends Page implements HasTable
     {
         return $this->record->whmcs_client_id !== null
             && ($this->record->company?->hasWhmcsIntegration() ?? false);
+    }
+
+    /**
+     * Totals for the period (έτος) currently picked in the movements-table
+     * filter — the «σαν το βιβλίο εσόδων-εξόδων» period view. Null when «Όλα τα
+     * έτη» is selected (the lifetime/YTD stat cards already cover the whole
+     * picture). Reads the already-cached per-year breakdown (computeYearly), so
+     * it adds NO query and the figures match the YoY chart exactly. The running
+     * balance in the table stays full-history regardless.
+     *
+     * @return array{year: int, invoice_count: int, net: float, gross: float, paid: float, year_end_balance: ?float}|null
+     */
+    public function getPeriodSummary(): ?array
+    {
+        $state = $this->getTableFilterState('year');
+        $value = $state['value'] ?? '';
+
+        if ($value === '' || $value === null) {
+            return null;
+        }
+
+        $year = (int) $value;
+
+        foreach ($this->cachedStatsBlock['yearly'] ?? [] as $row) {
+            if ((int) ($row['year'] ?? 0) === $year) {
+                return [
+                    'year' => $year,
+                    'invoice_count' => (int) ($row['invoice_count'] ?? 0),
+                    'net' => (float) ($row['net'] ?? 0),
+                    'gross' => (float) ($row['gross'] ?? 0),
+                    'paid' => (float) ($row['paid'] ?? 0),
+                    'year_end_balance' => isset($row['year_end_balance']) ? (float) $row['year_end_balance'] : null,
+                ];
+            }
+        }
+
+        // A picked year with no rows (e.g. only payments, no invoices) — show zeros.
+        return [
+            'year' => $year,
+            'invoice_count' => 0,
+            'net' => 0.0,
+            'gross' => 0.0,
+            'paid' => 0.0,
+            'year_end_balance' => null,
+        ];
     }
 
     /* ===================== Movements table ===================== */
@@ -483,249 +530,39 @@ class CustomerLedger extends Page implements HasTable
                     'customer_id' => $this->record->getKey(),
                 ])),
 
-            Action::make('crosscheck_aade')
-                ->label('Διασταύρωση ΑΦΜ με ΑΑΔΕ')
-                ->icon('heroicon-o-shield-check')
-                ->color('info')
-                ->visible(fn () => $this->canCrosscheckAade())
-                ->modalHeading(fn () => 'Διασταύρωση ΑΦΜ '.($this->record->afm ?: '—').' με ΑΑΔΕ')
-                ->modalSubmitActionLabel('Ενημέρωση πελάτη με στοιχεία ΑΑΔΕ')
-                ->modalCancelActionLabel('Κλείσιμο')
-                ->modalContent(function () {
-                    $result = $this->runAadeCrosscheck();
-
-                    return view('filament.customers.aade-crosscheck-modal', [
-                        'customer' => $this->record,
-                        'result' => $result,
-                    ]);
-                })
-                ->action(function () {
-                    $result = $this->runAadeCrosscheck();
-                    if ($result['error'] !== null) {
-                        Notification::make()->title('Δεν εφαρμόστηκαν αλλαγές')->body($result['error'])->warning()->send();
-
-                        return;
-                    }
-                    if (empty($result['diffs'])) {
-                        Notification::make()->title('Τα στοιχεία είναι ήδη συγχρονισμένα')->success()->send();
-
-                        return;
-                    }
-                    $this->applyAadeCrosscheck($result['diffs']);
-                    Notification::make()
-                        ->title('Στοιχεία πελάτη ενημερώθηκαν')
-                        ->body(count($result['diffs']).' πεδίο/α ενημερώθηκαν από την ΑΑΔΕ.')
-                        ->success()->send();
-                    $this->aadeCrosscheckMemo = null;
-                }),
-
-            Action::make('record_on_account_payment')
-                ->label('Πληρωμή έναντι λογαριασμού')
-                ->icon('heroicon-o-banknotes')
-                ->color('success')
-                ->modalHeading('Πληρωμή έναντι λογαριασμού')
-                ->modalSubmitActionLabel('Καταχώριση')
-                ->schema([
-                    TextInput::make('amount')
-                        ->label('Ποσό')->numeric()->minValue(0.01)->required(),
-                    DatePicker::make('pay_date')
-                        ->label('Ημερομηνία')->required()->default(now()),
-                    Select::make('payment_method_id')
-                        ->label('Τρόπος πληρωμής')
-                        ->options(fn () => $this->paymentMethodOptions()),
-                    BankAccountField::make($this->record->company_id),
-                    TextInput::make('transaction_id')
-                        ->label('Κωδικός συναλλαγής')
-                        ->maxLength(100)
-                        ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας.'),
-                    Textarea::make('notes')
-                        ->label('Σημειώσεις')->rows(2),
-                ])
-                ->action(function (array $data) {
-                    Payment::create([
-                        'company_id' => $this->record->company_id,
-                        'customer_id' => $this->record->getKey(),
-                        'invoice_id' => null,
-                        'kind' => 'payment',
-                        'payment_method_id' => $data['payment_method_id'] ?? null,
-                        'bank_account_id' => $data['bank_account_id'] ?? null,
-                        'amount' => $data['amount'],
-                        'pay_date' => $data['pay_date'],
-                        'transaction_id' => $data['transaction_id'] ?? null,
-                        'notes' => $data['notes'] ?? null,
-                    ]);
-                    Notification::make()->title('Η πληρωμή καταχωρίστηκε')->success()->send();
-                    // Redirect to self so the KPI widgets + table reflect
-                    // the new balance (header widgets are separate Livewire
-                    // components mounted with the pre-payment stats).
-                    $this->redirect(static::getUrl(['record' => $this->record]));
-                }),
-
-            // One «έμβασμα/είσπραξη» auto-allocated FIFO across the open invoices
-            // (oldest first), remainder → on-account credit. Mirrors Epsilon.
-            Action::make('record_receipt')
-                ->label('Είσπραξη (έμβασμα)')
-                ->icon('heroicon-o-arrow-down-on-square-stack')
-                ->color('success')
-                ->modalHeading('Είσπραξη / Έμβασμα')
-                ->modalDescription('Το ποσό κατανέμεται αυτόματα στα ανοιχτά τιμολόγια (παλαιότερα πρώτα). Ό,τι περισσέψει μένει ως πίστωση/προκαταβολή στον πελάτη.')
-                ->modalSubmitActionLabel('Καταχώριση')
-                ->schema([
-                    TextInput::make('amount')
-                        ->label('Ποσό είσπραξης (€)')->numeric()->minValue(0.01)->required(),
-                    DatePicker::make('pay_date')
-                        ->label('Ημερομηνία')->required()->default(now()),
-                    Select::make('payment_method_id')
-                        ->label('Τρόπος πληρωμής')
-                        ->options(fn () => $this->paymentMethodOptions()),
-                    BankAccountField::make($this->record->company_id, 'Σε ποιον λογαριασμό μπήκε το έμβασμα. Μπαίνει σε όλες τις γραμμές.'),
-                    TextInput::make('transaction_id')
-                        ->label('Κωδικός συναλλαγής')
-                        ->maxLength(100)
-                        ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας. Μπαίνει σε όλες τις γραμμές του εμβάσματος.'),
-                    Textarea::make('notes')
-                        ->label('Σημειώσεις')->rows(2),
-                ])
-                ->action(function (array $data) {
-                    $res = app(PaymentAllocator::class)->allocate(
-                        $this->record,
-                        (float) $data['amount'],
-                        Carbon::parse($data['pay_date']),
-                        $data['payment_method_id'] ?? null,
-                        null,
-                        $data['notes'] ?? null,
-                        $data['transaction_id'] ?? null,
-                        $data['bank_account_id'] ?? null,
-                    );
-                    $msg = count($res->allocations).' τιμολόγια ('.number_format($res->allocatedToInvoices(), 2, ',', '.').' €)';
-                    if ($res->onAccount > 0.005) {
-                        $msg .= ' + '.number_format($res->onAccount, 2, ',', '.').' € πίστωση';
-                    }
-                    Notification::make()->success()->title('Η είσπραξη καταχωρίστηκε')->body($msg)->send();
-                    $this->redirect(static::getUrl(['record' => $this->record]));
-                }),
-
-            // Επιστροφή χρημάτων (refund) — money OUT, back to the customer, at
-            // the customer level (invoice_id null). Clears an on-account credit
-            // (e.g. left over after a credit note / cancellation) or returns an
-            // overpayment. Recorded as kind='refund' so every money surface
-            // (balance, καρτέλα, dashboard, receivables) nets it out.
-            Action::make('record_refund')
-                ->label('Επιστροφή χρημάτων')
-                ->icon('heroicon-o-arrow-uturn-left')
-                ->color('warning')
-                ->modalHeading('Επιστροφή χρημάτων στον πελάτη')
-                ->modalDescription('Καταγράφει χρήματα που επιστράφηκαν (π.χ. μετά από ακύρωση/πιστωτικό). Αυξάνει το υπόλοιπο/μειώνει την πίστωση του πελάτη.')
-                ->modalSubmitActionLabel('Καταχώριση επιστροφής')
-                ->schema([
-                    TextInput::make('amount')
-                        ->label('Ποσό επιστροφής (€)')->numeric()->minValue(0.01)->required(),
-                    DatePicker::make('pay_date')
-                        ->label('Ημερομηνία')->required()->default(now()),
-                    Select::make('payment_method_id')
-                        ->label('Τρόπος')
-                        ->options(fn () => $this->paymentMethodOptions()),
-                    BankAccountField::make($this->record->company_id, 'Από ποιον λογαριασμό επιστράφηκαν τα χρήματα.'),
-                    TextInput::make('transaction_id')
-                        ->label('Κωδικός συναλλαγής')
-                        ->maxLength(100)
-                        ->helperText('Προαιρετικό — ref επιστροφής τράπεζας / Stripe-PayPal refund.'),
-                    Textarea::make('notes')
-                        ->label('Σημειώσεις')->rows(2),
-                ])
-                ->action(function (array $data) {
-                    Payment::create([
-                        'company_id' => $this->record->company_id,
-                        'customer_id' => $this->record->getKey(),
-                        'invoice_id' => null,
-                        'kind' => 'refund',
-                        'payment_method_id' => $data['payment_method_id'] ?? null,
-                        'bank_account_id' => $data['bank_account_id'] ?? null,
-                        'amount' => $data['amount'],
-                        'pay_date' => $data['pay_date'],
-                        'transaction_id' => $data['transaction_id'] ?? null,
-                        'notes' => $data['notes'] ?? null,
-                    ]);
-                    Notification::make()->success()->title('Η επιστροφή καταχωρίστηκε')->send();
-                    $this->redirect(static::getUrl(['record' => $this->record]));
-                }),
-
-            // #1 — Εφαρμογή πίστωσης: μετακινεί διαθέσιμη on-account πίστωση πάνω
-            // σε ανοιχτό τιμολόγιο (re-point — net-zero στο συνολικό υπόλοιπο).
-            Action::make('apply_credit')
-                ->label('Χρήση πίστωσης')
-                ->icon('heroicon-o-arrow-right-circle')
-                ->color('info')
-                ->visible(fn () => $this->availableCredit() > 0.005 && $this->openInvoiceOptions() !== [])
-                ->modalHeading('Χρήση διαθέσιμης πίστωσης')
-                ->modalDescription(fn () => 'Διαθέσιμη πίστωση: '.$this->fmtMoney($this->availableCredit()).'. Επιλέξτε τιμολόγιο για να την εφαρμόσετε.')
-                ->modalSubmitActionLabel('Εφαρμογή')
-                ->schema(fn () => [
-                    Select::make('invoice_id')
-                        ->label('Τιμολόγιο')
-                        ->options($this->openInvoiceOptions())
-                        ->searchable()
-                        ->required(),
-                    TextInput::make('amount')
-                        ->label('Ποσό (€)')
-                        ->numeric()->minValue(0.01)->required()
-                        ->default(fn () => number_format($this->availableCredit(), 2, '.', ''))
-                        ->helperText('Δεν μπορεί να ξεπεράσει τη διαθέσιμη πίστωση ή το υπόλοιπο του τιμολογίου.'),
-                ])
-                ->action(function (array $data) {
-                    $invoice = Invoice::query()
-                        ->where('company_id', $this->record->company_id)
-                        ->where('customer_id', $this->record->getKey())
-                        ->findOrFail($data['invoice_id']);
-                    try {
-                        $applied = app(PaymentAllocator::class)->applyCredit($this->record, $invoice, (float) $data['amount']);
-                    } catch (\InvalidArgumentException $e) {
-                        Notification::make()->danger()->title('Δεν έγινε εφαρμογή')->body($e->getMessage())->send();
-
-                        return;
-                    }
-                    Notification::make()->success()->title('Η πίστωση εφαρμόστηκε')
-                        ->body($this->fmtMoney($applied).' στο '.$invoice->invcode)->send();
-                    $this->redirect(static::getUrl(['record' => $this->record]));
-                }),
-
-            // #2 — Χειροκίνητη κατανομή: ο χειριστής ορίζει ποσό ανά τιμολόγιο.
-            Action::make('manual_allocation')
-                ->label('Χειροκίνητη κατανομή')
-                ->icon('heroicon-o-adjustments-horizontal')
-                ->color('success')
-                ->visible(fn () => $this->openInvoiceOptions() !== [])
-                ->modalHeading('Χειροκίνητη κατανομή είσπραξης')
-                ->modalDescription('Ορίστε ΑΚΡΙΒΩΣ πόσα πηγαίνουν σε κάθε τιμολόγιο (αντί για αυτόματη FIFO).')
-                ->modalSubmitActionLabel('Καταχώριση')
-                ->schema([
-                    DatePicker::make('pay_date')->label('Ημερομηνία')->required()->default(now()),
-                    Select::make('payment_method_id')
-                        ->label('Τρόπος πληρωμής')
-                        ->options(fn () => $this->paymentMethodOptions()),
-                    BankAccountField::make($this->record->company_id),
-                    TextInput::make('transaction_id')->label('Κωδικός συναλλαγής')->maxLength(100),
-                    Repeater::make('lines')
-                        ->label('Κατανομή')
-                        ->schema([
-                            Select::make('invoice_id')
-                                ->label('Τιμολόγιο')
-                                ->options($this->openInvoiceOptions())
-                                ->searchable()
-                                ->required(),
-                            TextInput::make('amount')
-                                ->label('Ποσό (€)')->numeric()->minValue(0.01)->required(),
-                        ])
-                        ->columns(2)
-                        ->minItems(1)
-                        ->addActionLabel('Προσθήκη τιμολογίου'),
-                    Textarea::make('notes')->label('Σημειώσεις')->rows(2),
-                ])
-                ->action(function (array $data) {
-                    try {
-                        $res = app(PaymentAllocator::class)->allocateManual(
+            // All money operations live in one dropdown so the header stays
+            // compact (was ~9 top-level actions → the row overflowed off-screen
+            // on narrow viewports). Πιο συχνό πρώτο: Είσπραξη.
+            ActionGroup::make([
+                // One «έμβασμα/είσπραξη» auto-allocated FIFO across the open invoices
+                // (oldest first), remainder → on-account credit. Mirrors Epsilon.
+                Action::make('record_receipt')
+                    ->label('Είσπραξη (έμβασμα)')
+                    ->icon('heroicon-o-arrow-down-on-square-stack')
+                    ->color('success')
+                    ->modalHeading('Είσπραξη / Έμβασμα')
+                    ->modalDescription('Το ποσό κατανέμεται αυτόματα στα ανοιχτά τιμολόγια (παλαιότερα πρώτα). Ό,τι περισσέψει μένει ως πίστωση/προκαταβολή στον πελάτη.')
+                    ->modalSubmitActionLabel('Καταχώριση')
+                    ->schema([
+                        TextInput::make('amount')
+                            ->label('Ποσό είσπραξης (€)')->numeric()->minValue(0.01)->required(),
+                        DatePicker::make('pay_date')
+                            ->label('Ημερομηνία')->required()->default(now()),
+                        Select::make('payment_method_id')
+                            ->label('Τρόπος πληρωμής')
+                            ->options(fn () => $this->paymentMethodOptions()),
+                        BankAccountField::make($this->record->company_id, 'Σε ποιον λογαριασμό μπήκε το έμβασμα. Μπαίνει σε όλες τις γραμμές.'),
+                        TextInput::make('transaction_id')
+                            ->label('Κωδικός συναλλαγής')
+                            ->maxLength(100)
+                            ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας. Μπαίνει σε όλες τις γραμμές του εμβάσματος.'),
+                        Textarea::make('notes')
+                            ->label('Σημειώσεις')->rows(2),
+                    ])
+                    ->action(function (array $data) {
+                        $res = app(PaymentAllocator::class)->allocate(
                             $this->record,
-                            $data['lines'] ?? [],
+                            (float) $data['amount'],
                             Carbon::parse($data['pay_date']),
                             $data['payment_method_id'] ?? null,
                             null,
@@ -733,30 +570,213 @@ class CustomerLedger extends Page implements HasTable
                             $data['transaction_id'] ?? null,
                             $data['bank_account_id'] ?? null,
                         );
-                    } catch (\InvalidArgumentException $e) {
-                        Notification::make()->danger()->title('Δεν έγινε κατανομή')->body($e->getMessage())->send();
+                        $msg = count($res->allocations).' τιμολόγια ('.number_format($res->allocatedToInvoices(), 2, ',', '.').' €)';
+                        if ($res->onAccount > 0.005) {
+                            $msg .= ' + '.number_format($res->onAccount, 2, ',', '.').' € πίστωση';
+                        }
+                        Notification::make()->success()->title('Η είσπραξη καταχωρίστηκε')->body($msg)->send();
+                        $this->redirect(static::getUrl(['record' => $this->record]));
+                    }),
 
-                        return;
-                    }
-                    // Warn (don't block) if any target ended up overpaid —
-                    // parity with the single-payment cockpit path. One fetch for
-                    // all touched invoices (vs a query per allocation line).
-                    $overpaid = Invoice::query()
-                        ->where('company_id', $this->record->company_id)
-                        ->whereIn('invcode', array_column($res->allocations, 'invcode'))
-                        ->get()
-                        ->filter(fn (Invoice $inv) => $inv->balanceData()->status === PaymentStatus::Overpaid)
-                        ->pluck('invcode')
-                        ->all();
-                    if ($overpaid !== []) {
-                        Notification::make()->warning()->title('Υπερπληρωμή')
-                            ->body('Υπερβαίνει το υπόλοιπο: '.implode(', ', $overpaid).'.')->send();
-                    }
+                Action::make('record_on_account_payment')
+                    ->label('Πληρωμή έναντι λογαριασμού')
+                    ->icon('heroicon-o-banknotes')
+                    ->color('success')
+                    ->modalHeading('Πληρωμή έναντι λογαριασμού')
+                    ->modalSubmitActionLabel('Καταχώριση')
+                    ->schema([
+                        TextInput::make('amount')
+                            ->label('Ποσό')->numeric()->minValue(0.01)->required(),
+                        DatePicker::make('pay_date')
+                            ->label('Ημερομηνία')->required()->default(now()),
+                        Select::make('payment_method_id')
+                            ->label('Τρόπος πληρωμής')
+                            ->options(fn () => $this->paymentMethodOptions()),
+                        BankAccountField::make($this->record->company_id),
+                        TextInput::make('transaction_id')
+                            ->label('Κωδικός συναλλαγής')
+                            ->maxLength(100)
+                            ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας.'),
+                        Textarea::make('notes')
+                            ->label('Σημειώσεις')->rows(2),
+                    ])
+                    ->action(function (array $data) {
+                        Payment::create([
+                            'company_id' => $this->record->company_id,
+                            'customer_id' => $this->record->getKey(),
+                            'invoice_id' => null,
+                            'kind' => 'payment',
+                            'payment_method_id' => $data['payment_method_id'] ?? null,
+                            'bank_account_id' => $data['bank_account_id'] ?? null,
+                            'amount' => $data['amount'],
+                            'pay_date' => $data['pay_date'],
+                            'transaction_id' => $data['transaction_id'] ?? null,
+                            'notes' => $data['notes'] ?? null,
+                        ]);
+                        Notification::make()->title('Η πληρωμή καταχωρίστηκε')->success()->send();
+                        // Redirect to self so the KPI widgets + table reflect
+                        // the new balance (header widgets are separate Livewire
+                        // components mounted with the pre-payment stats).
+                        $this->redirect(static::getUrl(['record' => $this->record]));
+                    }),
 
-                    Notification::make()->success()->title('Η κατανομή καταχωρίστηκε')
-                        ->body(count($res->allocations).' τιμολόγια ('.$this->fmtMoney($res->allocatedToInvoices()).')')->send();
-                    $this->redirect(static::getUrl(['record' => $this->record]));
-                }),
+                // Επιστροφή χρημάτων (refund) — money OUT, back to the customer, at
+                // the customer level (invoice_id null). Clears an on-account credit
+                // (e.g. left over after a credit note / cancellation) or returns an
+                // overpayment. Recorded as kind='refund' so every money surface
+                // (balance, καρτέλα, dashboard, receivables) nets it out.
+                Action::make('record_refund')
+                    ->label('Επιστροφή χρημάτων')
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->modalHeading('Επιστροφή χρημάτων στον πελάτη')
+                    ->modalDescription('Καταγράφει χρήματα που επιστράφηκαν (π.χ. μετά από ακύρωση/πιστωτικό). Αυξάνει το υπόλοιπο/μειώνει την πίστωση του πελάτη.')
+                    ->modalSubmitActionLabel('Καταχώριση επιστροφής')
+                    ->schema([
+                        TextInput::make('amount')
+                            ->label('Ποσό επιστροφής (€)')->numeric()->minValue(0.01)->required(),
+                        DatePicker::make('pay_date')
+                            ->label('Ημερομηνία')->required()->default(now()),
+                        Select::make('payment_method_id')
+                            ->label('Τρόπος')
+                            ->options(fn () => $this->paymentMethodOptions()),
+                        BankAccountField::make($this->record->company_id, 'Από ποιον λογαριασμό επιστράφηκαν τα χρήματα.'),
+                        TextInput::make('transaction_id')
+                            ->label('Κωδικός συναλλαγής')
+                            ->maxLength(100)
+                            ->helperText('Προαιρετικό — ref επιστροφής τράπεζας / Stripe-PayPal refund.'),
+                        Textarea::make('notes')
+                            ->label('Σημειώσεις')->rows(2),
+                    ])
+                    ->action(function (array $data) {
+                        Payment::create([
+                            'company_id' => $this->record->company_id,
+                            'customer_id' => $this->record->getKey(),
+                            'invoice_id' => null,
+                            'kind' => 'refund',
+                            'payment_method_id' => $data['payment_method_id'] ?? null,
+                            'bank_account_id' => $data['bank_account_id'] ?? null,
+                            'amount' => $data['amount'],
+                            'pay_date' => $data['pay_date'],
+                            'transaction_id' => $data['transaction_id'] ?? null,
+                            'notes' => $data['notes'] ?? null,
+                        ]);
+                        Notification::make()->success()->title('Η επιστροφή καταχωρίστηκε')->send();
+                        $this->redirect(static::getUrl(['record' => $this->record]));
+                    }),
+
+                // #1 — Εφαρμογή πίστωσης: μετακινεί διαθέσιμη on-account πίστωση πάνω
+                // σε ανοιχτό τιμολόγιο (re-point — net-zero στο συνολικό υπόλοιπο).
+                Action::make('apply_credit')
+                    ->label('Χρήση πίστωσης')
+                    ->icon('heroicon-o-arrow-right-circle')
+                    ->color('info')
+                    ->visible(fn () => $this->availableCredit() > 0.005 && $this->openInvoiceOptions() !== [])
+                    ->modalHeading('Χρήση διαθέσιμης πίστωσης')
+                    ->modalDescription(fn () => 'Διαθέσιμη πίστωση: '.$this->fmtMoney($this->availableCredit()).'. Επιλέξτε τιμολόγιο για να την εφαρμόσετε.')
+                    ->modalSubmitActionLabel('Εφαρμογή')
+                    ->schema(fn () => [
+                        Select::make('invoice_id')
+                            ->label('Τιμολόγιο')
+                            ->options($this->openInvoiceOptions())
+                            ->searchable()
+                            ->required(),
+                        TextInput::make('amount')
+                            ->label('Ποσό (€)')
+                            ->numeric()->minValue(0.01)->required()
+                            ->default(fn () => number_format($this->availableCredit(), 2, '.', ''))
+                            ->helperText('Δεν μπορεί να ξεπεράσει τη διαθέσιμη πίστωση ή το υπόλοιπο του τιμολογίου.'),
+                    ])
+                    ->action(function (array $data) {
+                        $invoice = Invoice::query()
+                            ->where('company_id', $this->record->company_id)
+                            ->where('customer_id', $this->record->getKey())
+                            ->findOrFail($data['invoice_id']);
+                        try {
+                            $applied = app(PaymentAllocator::class)->applyCredit($this->record, $invoice, (float) $data['amount']);
+                        } catch (\InvalidArgumentException $e) {
+                            Notification::make()->danger()->title('Δεν έγινε εφαρμογή')->body($e->getMessage())->send();
+
+                            return;
+                        }
+                        Notification::make()->success()->title('Η πίστωση εφαρμόστηκε')
+                            ->body($this->fmtMoney($applied).' στο '.$invoice->invcode)->send();
+                        $this->redirect(static::getUrl(['record' => $this->record]));
+                    }),
+
+                // #2 — Χειροκίνητη κατανομή: ο χειριστής ορίζει ποσό ανά τιμολόγιο.
+                Action::make('manual_allocation')
+                    ->label('Χειροκίνητη κατανομή')
+                    ->icon('heroicon-o-adjustments-horizontal')
+                    ->color('success')
+                    ->visible(fn () => $this->openInvoiceOptions() !== [])
+                    ->modalHeading('Χειροκίνητη κατανομή είσπραξης')
+                    ->modalDescription('Ορίστε ΑΚΡΙΒΩΣ πόσα πηγαίνουν σε κάθε τιμολόγιο (αντί για αυτόματη FIFO).')
+                    ->modalSubmitActionLabel('Καταχώριση')
+                    ->schema([
+                        DatePicker::make('pay_date')->label('Ημερομηνία')->required()->default(now()),
+                        Select::make('payment_method_id')
+                            ->label('Τρόπος πληρωμής')
+                            ->options(fn () => $this->paymentMethodOptions()),
+                        BankAccountField::make($this->record->company_id),
+                        TextInput::make('transaction_id')->label('Κωδικός συναλλαγής')->maxLength(100),
+                        Repeater::make('lines')
+                            ->label('Κατανομή')
+                            ->schema([
+                                Select::make('invoice_id')
+                                    ->label('Τιμολόγιο')
+                                    ->options($this->openInvoiceOptions())
+                                    ->searchable()
+                                    ->required(),
+                                TextInput::make('amount')
+                                    ->label('Ποσό (€)')->numeric()->minValue(0.01)->required(),
+                            ])
+                            ->columns(2)
+                            ->minItems(1)
+                            ->addActionLabel('Προσθήκη τιμολογίου'),
+                        Textarea::make('notes')->label('Σημειώσεις')->rows(2),
+                    ])
+                    ->action(function (array $data) {
+                        try {
+                            $res = app(PaymentAllocator::class)->allocateManual(
+                                $this->record,
+                                $data['lines'] ?? [],
+                                Carbon::parse($data['pay_date']),
+                                $data['payment_method_id'] ?? null,
+                                null,
+                                $data['notes'] ?? null,
+                                $data['transaction_id'] ?? null,
+                                $data['bank_account_id'] ?? null,
+                            );
+                        } catch (\InvalidArgumentException $e) {
+                            Notification::make()->danger()->title('Δεν έγινε κατανομή')->body($e->getMessage())->send();
+
+                            return;
+                        }
+                        // Warn (don't block) if any target ended up overpaid —
+                        // parity with the single-payment cockpit path. One fetch for
+                        // all touched invoices (vs a query per allocation line).
+                        $overpaid = Invoice::query()
+                            ->where('company_id', $this->record->company_id)
+                            ->whereIn('invcode', array_column($res->allocations, 'invcode'))
+                            ->get()
+                            ->filter(fn (Invoice $inv) => $inv->balanceData()->status === PaymentStatus::Overpaid)
+                            ->pluck('invcode')
+                            ->all();
+                        if ($overpaid !== []) {
+                            Notification::make()->warning()->title('Υπερπληρωμή')
+                                ->body('Υπερβαίνει το υπόλοιπο: '.implode(', ', $overpaid).'.')->send();
+                        }
+
+                        Notification::make()->success()->title('Η κατανομή καταχωρίστηκε')
+                            ->body(count($res->allocations).' τιμολόγια ('.$this->fmtMoney($res->allocatedToInvoices()).')')->send();
+                        $this->redirect(static::getUrl(['record' => $this->record]));
+                    }),
+            ])
+                ->label('Εισπράξεις / Πληρωμές')
+                ->icon('heroicon-o-banknotes')
+                ->color('success')
+                ->button(),
 
             ActionGroup::make([
                 Action::make('export_pdf')
@@ -830,16 +850,58 @@ class CustomerLedger extends Page implements HasTable
                 ->icon('heroicon-o-arrow-down-tray')
                 ->button(),
 
-            Action::make('edit')
-                ->label('Επεξεργασία')
-                ->icon('heroicon-o-pencil-square')
+            // Secondary / occasional actions — out of the main row.
+            ActionGroup::make([
+                Action::make('crosscheck_aade')
+                    ->label('Διασταύρωση ΑΦΜ με ΑΑΔΕ')
+                    ->icon('heroicon-o-shield-check')
+                    ->color('info')
+                    ->visible(fn () => $this->canCrosscheckAade())
+                    ->modalHeading(fn () => 'Διασταύρωση ΑΦΜ '.($this->record->afm ?: '—').' με ΑΑΔΕ')
+                    ->modalSubmitActionLabel('Ενημέρωση πελάτη με στοιχεία ΑΑΔΕ')
+                    ->modalCancelActionLabel('Κλείσιμο')
+                    ->modalContent(function () {
+                        $result = $this->runAadeCrosscheck();
+
+                        return view('filament.customers.aade-crosscheck-modal', [
+                            'customer' => $this->record,
+                            'result' => $result,
+                        ]);
+                    })
+                    ->action(function () {
+                        $result = $this->runAadeCrosscheck();
+                        if ($result['error'] !== null) {
+                            Notification::make()->title('Δεν εφαρμόστηκαν αλλαγές')->body($result['error'])->warning()->send();
+
+                            return;
+                        }
+                        if (empty($result['diffs'])) {
+                            Notification::make()->title('Τα στοιχεία είναι ήδη συγχρονισμένα')->success()->send();
+
+                            return;
+                        }
+                        $this->applyAadeCrosscheck($result['diffs']);
+                        Notification::make()
+                            ->title('Στοιχεία πελάτη ενημερώθηκαν')
+                            ->body(count($result['diffs']).' πεδίο/α ενημερώθηκαν από την ΑΑΔΕ.')
+                            ->success()->send();
+                        $this->aadeCrosscheckMemo = null;
+                    }),
+                Action::make('edit')
+                    ->label('Επεξεργασία πελάτη')
+                    ->icon('heroicon-o-pencil-square')
+                    ->color('gray')
+                    ->url(fn () => CustomerResource::getUrl('edit', ['record' => $this->record])),
+                Action::make('back_to_list')
+                    ->label('Λίστα πελατών')
+                    ->icon('heroicon-o-arrow-left')
+                    ->color('gray')
+                    ->url(fn () => CustomerResource::getUrl('index')),
+            ])
+                ->label('Περισσότερα')
+                ->icon('heroicon-o-ellipsis-horizontal')
                 ->color('gray')
-                ->url(fn () => CustomerResource::getUrl('edit', ['record' => $this->record])),
-            Action::make('back_to_list')
-                ->label('Λίστα πελατών')
-                ->icon('heroicon-o-arrow-left')
-                ->color('gray')
-                ->url(fn () => CustomerResource::getUrl('index')),
+                ->button(),
         ];
     }
 

@@ -185,6 +185,33 @@
                 Το υπόλοιπο υπολογίζεται από ολόκληρη την ιστορία, ανεξάρτητα από τα φίλτρα.
             </x-slot>
 
+            {{-- Period totals — shown when a year is picked in the table filter
+                 above; reuses the cached per-year breakdown (no extra query). --}}
+            @php($period = $this->getPeriodSummary())
+            @if ($period)
+                <div class="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4">
+                    <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                        <div class="text-xs fi-color-gray">Τζίρος {{ $period['year'] }} (καθαρό)</div>
+                        <div class="text-lg font-bold">{{ \App\Support\Money::eur($period['net']) }}</div>
+                        <div class="text-xs fi-color-gray">{{ $period['invoice_count'] }} παραστατικά</div>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                        <div class="text-xs fi-color-gray">Αξία με ΦΠΑ {{ $period['year'] }}</div>
+                        <div class="text-lg font-bold">{{ \App\Support\Money::eur($period['gross']) }}</div>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                        <div class="text-xs fi-color-gray">Εισπράξεις {{ $period['year'] }}</div>
+                        <div class="text-lg font-bold text-success-600 dark:text-success-400">{{ \App\Support\Money::eur($period['paid']) }}</div>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                        <div class="text-xs fi-color-gray">Υπόλοιπο τέλους {{ $period['year'] }}</div>
+                        <div class="text-lg font-bold {{ ($period['year_end_balance'] ?? 0) > 0 ? 'text-danger-600 dark:text-danger-400' : '' }}">
+                            {{ $period['year_end_balance'] !== null ? \App\Support\Money::eur($period['year_end_balance']) : '—' }}
+                        </div>
+                    </div>
+                </div>
+            @endif
+
             {{ $this->table }}
         </x-filament::section>
 

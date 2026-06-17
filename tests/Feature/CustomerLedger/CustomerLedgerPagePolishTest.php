@@ -126,6 +126,29 @@ class CustomerLedgerPagePolishTest extends TestCase
             ->assertSee('TPY'); // an invoice reference appears in the table
     }
 
+    public function test_period_summary_is_null_until_a_year_is_picked_then_totals(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0); // net = 100
+        $this->makeInvoice('2025-09-01', 248.0); // net = 200
+
+        $component = Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertOk();
+
+        // «Όλα τα έτη» → no period card.
+        $this->assertNull($component->instance()->getPeriodSummary());
+
+        // Pick 2025 in the table year filter → period totals appear and match
+        // the cached per-year breakdown (2 invoices, net 300, gross 372).
+        $component->set('tableFilters.year.value', '2025');
+        $summary = $component->instance()->getPeriodSummary();
+
+        $this->assertNotNull($summary);
+        $this->assertSame(2025, $summary['year']);
+        $this->assertSame(2, $summary['invoice_count']);
+        $this->assertEqualsWithDelta(300.0, $summary['net'], 0.01);
+        $this->assertEqualsWithDelta(372.0, $summary['gross'], 0.01);
+    }
+
     public function test_empty_customer_shows_empty_state_and_still_renders(): void
     {
         Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
