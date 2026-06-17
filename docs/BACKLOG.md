@@ -116,7 +116,12 @@ surfaced in the open-items sections further down.
   (honest status, no fake toggle). Phase 1 = move `companies.whmcs_*` → `billing_connections.config`,
   ExternalDocument DTO, generic ingest dispatcher, real is_active gating, + the 2nd connector —
   build WHEN a real 2nd source exists (designing the contract against WHMCS+guesswork bakes in WHMCS-isms)._
-- **AI «Βοηθός»** — Phase 1 read-only Q&A (~1 βδομάδα). `ai-assistant-blueprint.md`.
+- **AI «Βοηθός»** — Phase 1 read-only Q&A (~1 βδομάδα). `ai-assistant-blueprint.md`
+  (πλέον καλύπτει: **«δεν χρειάζεται Console agent»** για το in-app chat — μόνο API key +
+  Messages API tool-loop· **abuse/resource safeguards** = no-code-execution + per-request
+  max_tokens/tool-loop/timeout/history caps + per-tenant/user rate-limit + monthly token caps +
+  audit· **grounding** system prompt (ξέρει ότι είναι ekdosi, ποια εταιρεία, off-task refusal)·
+  **υποψήφιο μοντέλο = Sonnet 4.6 default**, Haiku 4.5 cheap tier, Opus 4.8 για βαριά ανάλυση).
 - **Payment connectors** — IRIS + card-POS. `payment-connectors.md`.
 
 ---
