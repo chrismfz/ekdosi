@@ -177,11 +177,12 @@ surfaced in the open-items sections further down.
 ## 📡 myDATA sync — insights & next (sweep 2026-06-16)
 _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 διερεύνηση** πιάνονται
 ΤΩΡΑ (βλ. `claude/polish-touches`)· τα παρακάτω είναι το follow-up._
-- **#2 console split — «εκτός τρέχοντος καναλιού» vs «πραγματικά ανεπιβεβαίωτο».** Το «203 λείπουν
-  από AADE» στην κονσόλα είναι κυρίως **imported legacy ΜΑΡΚ** (prod MARK + `mydata_state=VALID` από
-  το ETL· `MigrateFromFirebird` l.778) που το **sandbox** κανάλι δεν επιστρέφει → ψεύτικος συναγερμός.
-  Ο `SalesReconciler` πρέπει να σπάει το `missingAtAade` σε (a) τοπικό-ΜΑΡΚ-όχι-στο-κανάλι (legacy/
-  prod-vs-sandbox → ενημερωτικό) vs (b) **χωρίς τοπικό ΜΑΡΚ** (πραγματικό). Καθαρό insight, χαμηλό ρίσκο.
+- **#2 console split — «εκτός τρέχοντος καναλιού» vs «πραγματικά ανεπιβεβαίωτο».** _✅ SHIPPED (ήταν
+  ήδη χτισμένο, η σημείωση ήταν stale): το `missingAtAade` σπάει mode-aware σε **imported legacy ΜΑΡΚ**
+  (`legacy_id` set → prod MARK που το sandbox δεν επιστρέφει = ενημερωτικό) vs **native** (πραγματική
+  ασυμφωνία). `SalesReconciliationResult::{imported,real,noise}MissingAtAade()` + `discrepancyCount()`
+  εξαιρεί το sandbox-noise· η κονσόλα δείχνει banner + «Λείπουν από AADE» (μόνο real) + collapsed
+  «Εισαγμένα (ΜΑΡΚ άλλου καναλιού)»· 3 unit tests (`SalesReconciliationResultTest`)._
 - **#5 χαρακτηρισμός εισροών — rules-engine ✅ SHIPPED** («Κανόνες χαρακτηρισμού» + `ExpenseClassifier`:
   auto-apply στο import + bulk «Εφαρμογή κανόνων» + worklist «Προς χαρακτηρισμό» + «Δημιουργία κανόνα»).
   **Μένει deferred:** η **υποβολή για λογαριασμό τρίτου** (λογιστής) που θέλει `entityVatNumber` [323]
