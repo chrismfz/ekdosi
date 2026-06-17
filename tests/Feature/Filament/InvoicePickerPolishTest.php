@@ -153,6 +153,28 @@ class InvoicePickerPolishTest extends TestCase
         $this->assertNotContains($inactive->id, $keys);
     }
 
+    public function test_customer_picker_lists_whole_small_catalogue_not_capped_at_30(): void
+    {
+        // 35 plain customers (zero invoices, none favourite). The old on-open list
+        // capped at 30 (most-billed) → 5 unreachable without typing. Browse-all
+        // returns ALL 35 so the operator can scroll the whole catalogue on open.
+        for ($i = 1; $i <= 35; $i++) {
+            Customer::create(['company_id' => $this->tenant->id, 'name' => sprintf('Cust %02d', $i)]);
+        }
+
+        $this->assertCount(35, PickerOptions::favouriteCustomerOptions());
+    }
+
+    public function test_product_picker_lists_whole_small_catalogue_not_capped_at_30(): void
+    {
+        $cat = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'C']);
+        for ($i = 1; $i <= 35; $i++) {
+            $this->makeProduct($cat, sprintf('Prod %02d', $i));
+        }
+
+        $this->assertCount(35, PickerOptions::favouriteProductOptions());
+    }
+
     public function test_product_search_excludes_inactive_and_biases_favourites(): void
     {
         $cat = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'C']);

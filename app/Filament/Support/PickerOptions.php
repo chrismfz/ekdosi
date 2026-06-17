@@ -20,6 +20,16 @@ use Filament\Facades\Filament;
 class PickerOptions
 {
     /**
+     * Browse-all ceiling: if a tenant's catalogue (customers / active products)
+     * has AT MOST this many rows, the on-open picker returns the WHOLE list
+     * alphabetically (favourites pinned) so the operator can scroll the entire
+     * catalogue without typing. Above it, we fall back to the most-used top
+     * slice + search (a thousand-row Select is neither useful nor fast to
+     * browse — typing is the right UX there). ~200 options render comfortably.
+     */
+    private const BROWSE_ALL_MAX = 200;
+
+    /**
      * Invoice-type options for the header picker — favourites first, then
      * most-used (invcount, the per-type running counter, is a good proxy).
      * Bounded by show_on_menu so retired types stay hidden.
@@ -47,14 +57,24 @@ class PickerOptions
      */
     public static function favouriteCustomerOptions(): array
     {
-        return Customer::query()
-            ->where('company_id', Filament::getTenant()?->getKey())
+        $tenantId = Filament::getTenant()?->getKey();
+
+        $query = Customer::query()
+            ->where('company_id', $tenantId)
             ->withCount('invoices')
             ->orderByDesc('is_favorite')
             ->orderByDesc('invoices_count')
-            ->orderBy('name')
-            ->limit(30)
-            ->get()
+            ->orderBy('name');
+
+        // Browse-all: keep the SAME ordering (favourites → most-billed → the
+        // alphabetical tail), but lift the cap when the catalogue is small enough
+        // to scroll the WHOLE list on open without typing. A large catalogue keeps
+        // the top slice (+ search) — a thousand-row Select isn't browsable anyway.
+        if (Customer::query()->where('company_id', $tenantId)->count() > self::BROWSE_ALL_MAX) {
+            $query->limit(30);
+        }
+
+        return $query->get()
             ->mapWithKeys(fn ($c) => [$c->id => static::customerLabel($c)])
             ->toArray();
     }
@@ -88,16 +108,25 @@ class PickerOptions
      */
     public static function favouriteProductOptions(): array
     {
-        return Product::query()
-            ->where('company_id', Filament::getTenant()?->getKey())
+        $tenantId = Filament::getTenant()?->getKey();
+
+        $query = Product::query()
+            ->where('company_id', $tenantId)
             ->where('is_active', true)
             ->withCount('invoiceLines')
             ->withSum('stockMovements as stock_on_hand', 'qty_change')
             ->orderByDesc('is_favorite')
             ->orderByDesc('invoice_lines_count')
-            ->orderBy('description_short')
-            ->limit(30)
-            ->get()
+            ->orderBy('description_short');
+
+        // Browse-all (same rationale as customers): lift the cap when the active
+        // catalogue is small enough to scroll the whole list on open.
+        $total = Product::query()->where('company_id', $tenantId)->where('is_active', true)->count();
+        if ($total > self::BROWSE_ALL_MAX) {
+            $query->limit(30);
+        }
+
+        return $query->get()
             ->mapWithKeys(fn ($p) => [$p->id => static::productLabel($p)])
             ->toArray();
     }
