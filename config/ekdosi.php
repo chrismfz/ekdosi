@@ -304,6 +304,9 @@ return [
         'max_tool_iterations' => (int) env('EKDOSI_AI_MAX_TOOL_ITERATIONS', 6),
         'timeout' => (int) env('EKDOSI_AI_TIMEOUT', 60),
 
+        // Per-incident throttle: max sends/minute per user+company.
+        'rate_per_minute' => (int) env('EKDOSI_AI_RATE_PER_MINUTE', 15),
+
         // Global backstop cap (tokens/tenant/month) independent of any per-tenant
         // cap — a runaway-loop net. 0 = no global cap.
         'global_monthly_token_cap' => (int) env('EKDOSI_AI_GLOBAL_TOKEN_CAP', 5_000_000),

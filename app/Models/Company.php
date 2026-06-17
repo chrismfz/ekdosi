@@ -116,6 +116,7 @@ class Company extends Model
         'mail_smtp_password',
         'whmcs_api_secret',
         'whmcs_webhook_secret',
+        'ai_api_key',
     ];
 
     protected function casts(): array

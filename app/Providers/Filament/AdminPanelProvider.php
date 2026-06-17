@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Assistant;
 use App\Filament\Pages\Dashboard;
 use App\Models\Company;
 use App\Support\Settings\SystemSettings;
@@ -83,7 +84,11 @@ class AdminPanelProvider extends PanelProvider
             // so injecting unconditionally is safe.
             ->renderHook(
                 PanelsRenderHook::BODY_END,
-                fn (): string => Blade::render('@livewire(\'assistant-widget\')'),
+                // Gate the injection itself so disabled tenants don't even mount
+                // the widget (the component re-checks, but skip the mount cost).
+                fn (): string => Assistant::assistantAvailable()
+                    ? Blade::render('@livewire(\'assistant-widget\')')
+                    : '',
             )
             ->plugins([
                 FilamentShieldPlugin::make(),

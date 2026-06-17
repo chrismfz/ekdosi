@@ -57,31 +57,46 @@ class AssistantRunner
 
         $maxIterations = (int) config('ekdosi.ai.max_tool_iterations', 6);
 
-        for ($i = 0; $i < $maxIterations; $i++) {
-            $response = $this->callApi($apiKey, $model, $tenant, $user, $messages);
+        try {
+            for ($i = 0; $i < $maxIterations; $i++) {
+                // Re-check the cap EACH iteration (each prior turn's tokens were
+                // logged): one ask() can fire several API turns, so this bounds a
+                // mid-turn overshoot to a single extra turn, not the whole loop.
+                if ($this->meter->blocked($tenant)) {
+                    return $this->refuse($messages, 'Εξαντλήθηκε το μηνιαίο όριο AI κατά τη διάρκεια της απάντησης. Επικοινωνήστε με τον διαχειριστή.');
+                }
 
-            $this->logUsage($tenant, $user, $model, $conversationId, $response['usage'] ?? []);
+                $response = $this->callApi($apiKey, $model, $tenant, $user, $messages);
 
-            $content = $response['content'] ?? [];
+                $this->logUsage($tenant, $user, $model, $conversationId, $response['usage'] ?? []);
 
-            if (($response['stop_reason'] ?? null) === 'tool_use') {
-                // Append the assistant's tool-call turn, then run the tools and
-                // feed the results back as a user turn — the harness gates each.
+                $content = $response['content'] ?? [];
+
+                if (($response['stop_reason'] ?? null) === 'tool_use') {
+                    // Append the assistant's tool-call turn, then run the tools and
+                    // feed the results back as a user turn — the harness gates each.
+                    $messages[] = ['role' => 'assistant', 'content' => $content];
+                    $messages[] = ['role' => 'user', 'content' => $this->runToolCalls($tenant, $user, $content)];
+
+                    continue;
+                }
+
+                $text = $this->textFrom($content);
                 $messages[] = ['role' => 'assistant', 'content' => $content];
-                $messages[] = ['role' => 'user', 'content' => $this->runToolCalls($tenant, $user, $content)];
 
-                continue;
+                return [
+                    'reply' => $text,
+                    'messages' => $messages,
+                    'blocked' => false,
+                    'warning' => $this->meter->warning($tenant),
+                ];
             }
+        } catch (\Throwable $e) {
+            // Transient AADE/Anthropic 5xx, timeout, parse error… → a polite reply,
+            // never a 500. The exception carries no key (only a status).
+            report($e);
 
-            $text = $this->textFrom($content);
-            $messages[] = ['role' => 'assistant', 'content' => $content];
-
-            return [
-                'reply' => $text,
-                'messages' => $messages,
-                'blocked' => false,
-                'warning' => $this->meter->warning($tenant),
-            ];
+            return $this->refuse($messages, 'Προσωρινό σφάλμα επικοινωνίας με το AI. Δοκιμάστε ξανά σε λίγο.');
         }
 
         // Iteration cap hit — don't loop forever.

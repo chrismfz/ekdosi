@@ -7,6 +7,8 @@ use App\Models\User;
 use App\Services\Assistant\AssistantRunner;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\RateLimiter;
+use Livewire\Attributes\Locked;
 
 /**
  * Shared chat state + send loop for the two AI «Βοηθός» surfaces (the dedicated
@@ -17,10 +19,19 @@ use Filament\Notifications\Notification;
  */
 trait InteractsWithAssistant
 {
-    /** @var list<array{role:string,text:string}> */
+    /**
+     * #[Locked]: these are SERVER-managed (set only by runAssistant) and round-trip
+     * to the client. Locking makes Livewire reject any client mutation, so a user
+     * with devtools can't tamper the transcript or smuggle fake tool_result blocks
+     * into `messages` (which is fed straight to the model).
+     *
+     * @var list<array{role:string,text:string}>
+     */
+    #[Locked]
     public array $transcript = [];
 
     /** @var list<array<string,mixed>> */
+    #[Locked]
     public array $messages = [];
 
     public string $draft = '';
@@ -37,6 +48,18 @@ trait InteractsWithAssistant
         if (! $tenant instanceof Company || ! $user instanceof User) {
             return;
         }
+
+        // Per-incident ceiling (the monthly cap is the cost ceiling): throttle
+        // rapid-fire sends per user+tenant before any work/API call.
+        $perMinute = (int) config('ekdosi.ai.rate_per_minute', 15);
+        $rlKey = 'ai-chat:'.$tenant->getKey().':'.$user->getKey();
+        if (RateLimiter::tooManyAttempts($rlKey, $perMinute)) {
+            $this->transcript[] = ['role' => 'system', 'text' => 'Πολλά αιτήματα σε λίγο χρόνο — περιμένετε λίγο και ξαναδοκιμάστε.'];
+            $this->afterAssistantTurn();
+
+            return;
+        }
+        RateLimiter::hit($rlKey, 60);
 
         $this->transcript[] = ['role' => 'user', 'text' => $text];
         $this->draft = '';
