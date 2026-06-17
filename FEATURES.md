@@ -269,12 +269,18 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 Έσοδα μήνα/προηγ./τρίμηνο, ΦΠΑ εκροών, ανεξόφλητα, παραστατικά μήνα, MRR/ανανεώσεις,
 **Εικόνα από myDATA — ΦΠΑ**, top πελάτες, YoY chart, ληξιπρόθεσμα, πελάτες με υπόλοιπο.
 
-## 16β. AI «Βοηθός» (read-only insights + links)
+## 16β. AI «Βοηθός» (insights + links + write actions με confirm)
 In-app chat που απαντά για τα δεδομένα της **τρέχουσας** εταιρείας μέσω εργαλείων.
 **6 read-only tools** (επεκτάσιμο registry): `count_sales`, `outstanding_receivables`,
 `list_top_debtors` (top οφειλέτες + link Καρτέλας), `find_customer` (αναζήτηση ονόματος/ΑΦΜ +
 links Καρτέλας/νέου παραστατικού), `recent_invoices` (πρόσφατα + view link), `vat_summary` (ΦΠΑ
-εκροών για περίοδο). **Clickable links**: όταν ένα tool επιστρέφει URL, ο βοηθός το δίνει ως markdown
+εκροών για περίοδο). **2 write tools με operator-confirm**: `send_customer_statement` («στείλε
+ενημερωτικό/καρτέλα» — επαφή-aware) και `create_reminder` («θύμισέ μου / notification»). Ο βοηθός
+**ΠΟΤΕ δεν εκτελεί** write μόνος του: στήνει εγγραφή σε `ai_pending_actions`, ο χειριστής πατά
+**«Επιβεβαίωση»/«Άκυρο»** σε κάρτα κάτω από το chat, και η εκτέλεση γίνεται server-side
+(`AiActionExecutor`, re-validate + permission, scoped tenant+user). Υπενθυμίσεις → Filament database
+notifications («καμπανάκι») όταν ωριμάσουν, μέσω `ai:dispatch-reminders` (scheduler). **Clickable
+links**: όταν ένα tool επιστρέφει URL, ο βοηθός το δίνει ως markdown
 link· render μέσω `App\Support\Assistant\ChatMarkup` (escape-first, **bold** + links **μόνο same-origin** →
 external/phishing αδρανές text). **Σελίδα «Βοηθός AI» + floating widget σε κάθε σελίδα** (κοινό
 `AssistantRunner`, συνομιλία στο session). **Isolation = tool layer** (κανένα `company` param → cross-tenant

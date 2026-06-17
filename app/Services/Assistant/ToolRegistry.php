@@ -6,10 +6,12 @@ use App\Models\Company;
 use App\Models\User;
 use App\Services\Assistant\Tools\AssistantTool;
 use App\Services\Assistant\Tools\CountSalesTool;
+use App\Services\Assistant\Tools\CreateReminderTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
 use App\Services\Assistant\Tools\RecentInvoicesTool;
+use App\Services\Assistant\Tools\SendCustomerStatementTool;
 use App\Services\Assistant\Tools\VatSummaryTool;
 use App\Support\Tenancy\CompanyContext;
 use Illuminate\Support\Facades\Gate;
@@ -20,7 +22,9 @@ use Illuminate\Support\Facades\Gate;
  * enforces the user's Shield permission and runs the body inside
  * CompanyContext::actAs($tenant) so a tool can only ever touch the ambient
  * tenant's data. A denied permission returns a structured «δεν έχετε πρόσβαση»,
- * not data; an unknown tool a structured error. Phase-1 = read-only tools.
+ * not data; an unknown tool a structured error. Read tools answer directly;
+ * WRITE tools only PREPARE an AiPendingAction the operator confirms (the tool
+ * never performs the side effect — see AiActionExecutor).
  */
 class ToolRegistry
 {
@@ -36,6 +40,9 @@ class ToolRegistry
             new FindCustomerTool,
             new RecentInvoicesTool,
             new VatSummaryTool,
+            // Write tools — PREPARE only; the operator confirms before execution.
+            new SendCustomerStatementTool,
+            new CreateReminderTool,
         ];
     }
 

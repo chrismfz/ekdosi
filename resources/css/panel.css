@@ -281,3 +281,5 @@
 .ai-widget-log { min-height: 12rem; max-height: 24rem; overflow-y: auto; }
 .ai-link { color: #d97706; text-decoration: underline; font-weight: 500; }
 .dark .ai-link { color: #fbbf24; }
+.ai-confirm-card { display: flex; flex-direction: column; gap: .5rem; padding: .625rem .75rem; border: 1px solid #fcd34d; border-radius: .5rem; background-color: #fffbeb; }
+.dark .ai-confirm-card { border-color: rgba(251,191,36,.3); background-color: rgba(120,53,15,.2); }

@@ -106,11 +106,11 @@ class AssistantInsightToolsTest extends TestCase
         $this->assertEqualsWithDelta(124.0, $res['gross'], 0.01);
     }
 
-    public function test_registry_exposes_all_six_tools(): void
+    public function test_registry_exposes_all_tools(): void
     {
         $names = array_column((new ToolRegistry)->definitionsFor(auth()->user()), 'name');
         $this->assertEqualsCanonicalizing(
-            ['count_sales', 'outstanding_receivables', 'list_top_debtors', 'find_customer', 'recent_invoices', 'vat_summary'],
+            ['count_sales', 'outstanding_receivables', 'list_top_debtors', 'find_customer', 'recent_invoices', 'vat_summary', 'send_customer_statement', 'create_reminder'],
             $names,
         );
     }

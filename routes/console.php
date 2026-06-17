@@ -194,6 +194,15 @@ Schedule::command('services:run-dunning')
     ->when(fn () => $scheduleEnabled('service_dunning_enabled'))
     ->withoutOverlapping();
 
+// ai:dispatch-reminders — deliver due AI «Βοηθός» reminders (operator-confirmed)
+// as Filament database notifications. Every minute so a reminder lands close to
+// its time; idempotent (delivered_at gates re-delivery). Default ON.
+Schedule::command('ai:dispatch-reminders')
+    ->everyMinute()
+    ->name('ai-dispatch-reminders')
+    ->when(fn () => $scheduleEnabled('ai_reminders_enabled'))
+    ->withoutOverlapping();
+
 // spatie/laravel-backup tasks — disabled by config if a deployment runs them
 // from systemd/cron directly, but tracked here when the Laravel scheduler owns them.
 $trackSchedule(

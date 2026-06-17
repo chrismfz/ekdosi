@@ -18,6 +18,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» — Phase 2b (write actions με operator-confirm).** Δύο εργαλεία που **ΠΡΟΕΤΟΙΜΑΖΟΥΝ**
+  (δεν εκτελούν) ενέργειες: **«στείλε ενημερωτικό/καρτέλα»** (`send_customer_statement` — επαφή-aware,
+  ίδιοι παραλήπτες με το manual Καρτέλα send) και **«θύμισέ μου / notification»** (`create_reminder`).
+  Ο βοηθός **ΠΟΤΕ δεν στέλνει/δημιουργεί μόνος του**: στήνει μια εγγραφή σε `ai_pending_actions` και ο
+  χειριστής πατά **«Επιβεβαίωση»/«Άκυρο»** σε κάρτα κάτω από το chat· η εκτέλεση γίνεται server-side
+  (`AiActionExecutor`, re-validate από την εγγραφή + permission, scoped tenant+user — δεν εμπιστεύεται
+  client input). Οι υπενθυμίσεις παραδίδονται ως Filament database notifications (το «καμπανάκι») όταν
+  ωριμάσουν, μέσω `ai:dispatch-reminders` (scheduler, `EKDOSI_SCHEDULE_AI_REMINDERS`, default ON).
 - **AI «Βοηθός» — Phase 2a (insights + clickable links).** 4 νέα read-only εργαλεία: **ανάλυση
   οφειλετών** (top debtors + link στην Καρτέλα καθενός — η ανάλυση ανά πελάτη που έλειπε), **αναζήτηση
   πελάτη** (όνομα/ΑΦΜ → υπόλοιπο + link Καρτέλας + «Νέο Παραστατικό»), **πρόσφατα παραστατικά**

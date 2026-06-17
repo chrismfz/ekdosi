@@ -28,6 +28,20 @@
                 <div wire:loading wire:target="send" class="text-xs text-gray-400 dark:text-gray-500">Σκέφτομαι…</div>
             </div>
 
+            @foreach ($this->pendingAssistantActions() as $action)
+                <div class="ai-confirm-card" wire:key="ai-w-action-{{ $action['id'] }}">
+                    <div class="text-sm">{{ $action['summary'] }}</div>
+                    <div class="flex items-center gap-2">
+                        <x-filament::button size="sm" color="success" icon="heroicon-o-check"
+                            wire:click="confirmAssistantAction({{ $action['id'] }})"
+                            wire:loading.attr="disabled">Επιβεβαίωση</x-filament::button>
+                        <x-filament::button size="sm" color="gray" icon="heroicon-o-x-mark"
+                            wire:click="cancelAssistantAction({{ $action['id'] }})"
+                            wire:loading.attr="disabled">Άκυρο</x-filament::button>
+                    </div>
+                </div>
+            @endforeach
+
             <form wire:submit="send" class="flex items-center gap-2 border-t border-gray-200 p-2 dark:border-white/10">
                 <x-filament::input.wrapper class="flex-1">
                     <x-filament::input type="text" wire:model="draft" placeholder="Ερώτηση…" wire:loading.attr="disabled" />
