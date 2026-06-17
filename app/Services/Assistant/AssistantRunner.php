@@ -6,6 +6,7 @@ use App\Models\AiUsageLog;
 use App\Models\Company;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -124,7 +125,19 @@ class AssistantRunner
             ]);
 
         if ($resp->failed()) {
-            throw new RuntimeException('AI API error: '.$resp->status());
+            // Surface Anthropic's actual error MESSAGE (not just the status) so the
+            // log self-explains — e.g. «credit balance too low» (a 400 when the
+            // account has no funds), «model: … not found», a rate-limit, etc. The
+            // RESPONSE body carries no api key, so it's safe to log.
+            $reason = $resp->json('error.message') ?? $resp->body();
+            Log::warning('AI API call failed', [
+                'company_id' => $tenant->getKey(),
+                'status' => $resp->status(),
+                'model' => $model,
+                'reason' => is_string($reason) ? mb_substr($reason, 0, 500) : null,
+            ]);
+
+            throw new RuntimeException('AI API error '.$resp->status().': '.(is_string($reason) ? $reason : ''));
         }
 
         return $resp->json();
