@@ -194,7 +194,15 @@ class CompanyBackupActions
                 TextInput::make('passphrase')->label('Συνθηματικό')
                     ->password()->revealable()
                     ->requiredIf('secrets_mode', 'passphrase')
+                    ->visible(fn (Get $get) => $get('secrets_mode') === 'passphrase')
                     ->helperText('Χρειάζεται για επαναφορά — κράτησέ το ασφαλές.'),
+                // Same plaintext warning as the export action, so «raw» is never a
+                // silent choice (the confirm_raw_remote checkbox below covers the
+                // remote case; this flags the local-zip plaintext too).
+                Placeholder::make('raw_warning')
+                    ->label('')
+                    ->content('⚠ Με «Χωρίς κρυπτογράφηση» τα μυστικά γράφονται σε ΚΑΘΑΡΟ ΚΕΙΜΕΝΟ μέσα στο αντίγραφο. Κράτησέ το μόνο σε ασφαλές, τοπικό σημείο.')
+                    ->visible(fn (Get $get) => $get('secrets_mode') === 'raw'),
                 TextInput::make('retention_keep')->label('Διατήρηση (πλήθος)')->numeric()->default(7)->minValue(0),
                 TextInput::make('retention_days')->label('…ή ημέρες (προαιρετικό)')->numeric()->nullable()->minValue(1),
 
