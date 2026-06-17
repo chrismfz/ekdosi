@@ -43,9 +43,19 @@
         @endphp
 
         @if ($fetchedAtHuman)
-            <div class="text-xs text-gray-400 dark:text-gray-500">
-                Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — πατήστε ξανά «Έλεγχος myDATA» για ανανέωση.
-            </div>
+            @if ($this->fetchIsStale())
+                <div class="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-950/40 dark:text-warning-400">
+                    <x-filament::icon icon="heroicon-o-clock" class="mt-0.5 h-5 w-5 shrink-0" />
+                    <span>
+                        Τα δεδομένα είναι από <strong>{{ $fetchedAtHuman }}</strong> — πιθανώς παλιά.
+                        Πατήστε <strong>«Ανανέωση όλων»</strong> για φρέσκα στοιχεία από το myDATA.
+                    </span>
+                </div>
+            @else
+                <div class="text-xs text-gray-400 dark:text-gray-500">
+                    Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — «Ανανέωση όλων» για ανανέωση.
+                </div>
+            @endif
         @endif
 
         {{-- Unified summary cards (both directions) --}}

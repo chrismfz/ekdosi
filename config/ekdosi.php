@@ -103,6 +103,15 @@ return [
         'mydata_fetch_expenses_enabled' => env('EKDOSI_SCHEDULE_MYDATA_FETCH_EXPENSES', false),
         'mydata_fetch_expenses_cron' => env('EKDOSI_MYDATA_FETCH_EXPENSES_CRON', '0 */6 * * *'),
 
+        // mydata:refresh-console — warms ALL «Κονσόλα myDATA» snapshots (Πωλήσεις /
+        // Έξοδα / Ε3 / Εικόνα ΦΠΑ) for the current quarter per myDATA-readable
+        // tenant, so the console opens with fresh data instead of a stale-or-empty
+        // cache. The heaviest AADE pull of the lot (four endpoints) → default OFF;
+        // it SUPERSEDES the per-piece vat-picture / fetch-expenses tasks for a
+        // tenant that turns it on. READ-ONLY (creates no rows).
+        'mydata_console_refresh_enabled' => env('EKDOSI_SCHEDULE_MYDATA_CONSOLE_REFRESH', false),
+        'mydata_console_refresh_cron' => env('EKDOSI_MYDATA_CONSOLE_REFRESH_CRON', '0 */6 * * *'),
+
         // spatie/laravel-backup tasks. Enable these when the Laravel scheduler
         // owns backups for the deployment; leave disabled if system cron/systemd
         // runs the backup commands separately.
