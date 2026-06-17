@@ -148,6 +148,20 @@ $trackSchedule(
     'mydata_fetch_expenses'
 );
 
+// mydata:refresh-console — warm ALL Κονσόλα myDATA snapshots (Πωλήσεις/Έξοδα/Ε3/
+// εικόνα ΦΠΑ) per myDATA-readable tenant, so the console opens fresh. The heaviest
+// AADE pull (four endpoints); default OFF. READ-ONLY (seeds caches, no rows). For a
+// tenant that enables this, it supersedes the per-piece vat-picture / fetch-expenses
+// tasks (it warms the same caches).
+$trackSchedule(
+    Schedule::command('mydata:refresh-console')
+        ->cron(config('ekdosi.schedule.mydata_console_refresh_cron', '0 */6 * * *'))
+        ->name('mydata-console-refresh-all')
+        ->when(fn () => $scheduleEnabled('mydata_console_refresh_enabled'))
+        ->withoutOverlapping(30),
+    'mydata_console_refresh'
+);
+
 // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
 // tenant. Read-only, NO email; default OFF (opt-in per deploy).
 Schedule::command('invoices:notify-overdue')

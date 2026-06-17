@@ -61,7 +61,9 @@
   tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
 - **«Ανανέωση όλων»** (`MyDataConsoleRefresh`) — ένα κουμπί κατεβάζει μαζί Πωλήσεις+Έξοδα+Ε3+εικόνα
   ΦΠΑ (σειριακά) και σπέρνει την cache κάθε tab· per-step isolation + summary toast. Το per-tab
-  «Έλεγχος» μένει ως δευτερεύον single-source refresh.
+  «Έλεγχος» μένει ως δευτερεύον single-source refresh. **Auto-refresh**: stale banner όταν η cache
+  είναι παλιά (>6h) + προγραμματισμένη εργασία `mydata:refresh-console` (opt-in, default OFF) που
+  ζεσταίνει όλα τα snapshots ανά tenant — σαν το VAT-picture cron.
 - **myDATA «Outbox»** — φίλτρο «Προς υποβολή» στα Παραστατικά + Ψηφιακή Διακίνηση (ζωντανά έγγραφα
   filable χωρίς ΜΑΡΚ· `scopeAwaitingMyData`) + dashboard widget **«Συγχρονισμός myDATA»** (προς
   υποβολή / τοπικές ασυμφωνίες / διασταύρωση-AADE με freshness — κάθε κάρτα link στο worklist της).

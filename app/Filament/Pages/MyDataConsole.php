@@ -101,6 +101,25 @@ class MyDataConsole extends Page
         return ['result', 'resultMode', 'fromLabel', 'toLabel', 'windowFrom', 'windowTo', 'ran'];
     }
 
+    /** Hours after which the cached fetch is flagged «παλιά» in the UI. */
+    private const STALE_AFTER_HOURS = 6;
+
+    /**
+     * Is the displayed result older than STALE_AFTER_HOURS (or has no cached
+     * timestamp)? Drives the «παλιά δεδομένα — ανανέωση» banner so the operator
+     * knows the snapshot may be out of date — whether it was last refreshed
+     * manually or by the `mydata:refresh-console` scheduled task.
+     *
+     * NB: "fresh" here is the SALES (Πωλήσεις) snapshot specifically — this
+     * banner lives on the sales console; Έξοδα/Ε3 carry their own lastFetchAt.
+     */
+    public function fetchIsStale(): bool
+    {
+        $at = static::lastFetchAt(Filament::getTenant()?->getKey());
+
+        return $at === null || $at->lt(now()->subHours(self::STALE_AFTER_HOURS));
+    }
+
     public static function getNavigationLabel(): string
     {
         return 'Πωλήσεις';

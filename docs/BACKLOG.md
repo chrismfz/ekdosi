@@ -191,8 +191,8 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   _(#6 Βιβλίο→period report + Panel utility CSS: ✅ SHIPPED — βλ. «Done recently».)_
 
 ## 🖥️ Console/interface polish (B — sweep 2026-06-16)
-- **Auto-refresh-on-stale** στην Κονσόλα myDATA: αν το cache > Ν ώρες, διακριτικό «παλιά δεδομένα —
-  ανανέωση;» (τώρα ο operator δεν ξέρει αν κοιτά φρέσκα· το «τελευταία ενημέρωση» υπάρχει αλλά παθητικό).
+- _(**Auto-refresh-on-stale** στην Κονσόλα myDATA: ✅ SHIPPED 2026-06-17 — stale banner >6h + opt-in
+  `mydata:refresh-console` scheduled warmer (όλα τα snapshots, default OFF, σαν το VAT picture). FEATURES §3.)_
 - **Per-row import + «held/needs-review» state** στην κονσόλα-Έξοδα (ήδη στο «myDATA/expenses completeness»)
   — τώρα που υπάρχει το selective picker στη λίστα Έξοδα, το ίδιο μοτίβο ταιριάζει και στην κονσόλα.
 - _(**MARK lifecycle chip** — DROPPED 2026-06-17: η πληροφορία ήδη φαίνεται (badge `mydata_state` + ΜΑΡΚ
