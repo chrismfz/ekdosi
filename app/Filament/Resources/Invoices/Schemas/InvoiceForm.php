@@ -17,10 +17,6 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use App\Support\MyData\CommonTaxPresets;
-use Firebed\AadeMyData\Enums\FeesPercentCategory;
-use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
-use Firebed\AadeMyData\Enums\StampCategory;
-use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use App\Support\MyData\ReverseCharge;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -35,6 +31,10 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
+use Firebed\AadeMyData\Enums\StampCategory;
+use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 
 /**
  * Invoice issuance form. Used by both CreateInvoice and EditInvoice
@@ -154,7 +154,7 @@ class InvoiceForm
                         // On customer change, auto-fill the snapshot fields.
                         // Operator can override before save; once saved + filed,
                         // the snapshot is legally frozen.
-                        ->afterStateUpdated(function ($state, callable $set, $record) {
+                        ->afterStateUpdated(function ($state, callable $set, $record, Get $get) {
                             if ($record && $record->mydata_state !== null) {
                                 return;  // already filed, don't clobber snapshot
                             }
@@ -174,6 +174,16 @@ class InvoiceForm
                             $set('city', $customer->city);
                             $set('postcode', $customer->postcode);
                             $set('country', $customer->country ?: 'GR');
+
+                            // Per-customer commercial defaults. The discount is the
+                            // customer's standing rate → apply it to the header
+                            // (operator can still override per invoice). The payment
+                            // method is a FALLBACK: the invoice TYPE wins, so only
+                            // fill from the customer when the type didn't set one.
+                            $set('header_discount_percent', (float) ($customer->discount ?? 0));
+                            if (blank($get('payment_method_id')) && $customer->payment_method_id) {
+                                $set('payment_method_id', $customer->payment_method_id);
+                            }
 
                             // Reverse-charge hint: EU non-GR customer with a VAT id →
                             // this is (almost certainly) an intra-community supply that
