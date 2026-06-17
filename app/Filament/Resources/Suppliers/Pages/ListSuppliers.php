@@ -4,14 +4,13 @@ namespace App\Filament\Resources\Suppliers\Pages;
 
 use App\Filament\BaseListRecords;
 use App\Filament\Resources\Suppliers\SupplierResource;
+use App\Filament\Support\PartySyncWindow;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Supplier;
 use App\Services\MyData\SupplierSyncFromMyData;
-use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use RuntimeException;
@@ -44,14 +43,7 @@ class ListSuppliers extends BaseListRecords
                 ->modalDescription('Σαρώνει τα παραστατικά εξόδων (RequestDocs) για το διάστημα και δημιουργεί προμηθευτές για όσα ΑΦΜ δεν υπάρχουν ήδη. Για ελληνικά ΑΦΜ αντλεί στοιχεία από το μητρώο ΑΑΔΕ (GSIS).')
                 ->modalSubmitActionLabel('Συγχρονισμός')
                 ->schema([
-                    DatePicker::make('from')
-                        ->label('Από')
-                        ->required()
-                        ->default(now()->subMonth()->startOfMonth()),
-                    DatePicker::make('to')
-                        ->label('Έως')
-                        ->required()
-                        ->default(now()),
+                    ...PartySyncWindow::schema(),
                     Toggle::make('enrich')
                         ->label('Άντληση στοιχείων από ΑΑΔΕ (GSIS)')
                         ->helperText('Για ελληνικά ΑΦΜ χωρίς όνομα στο παραστατικό.')
@@ -70,10 +62,12 @@ class ListSuppliers extends BaseListRecords
             return;
         }
 
+        [$from, $to] = PartySyncWindow::resolve($data);
+
         try {
             $result = (new SupplierSyncFromMyData($tenant))->sync(
-                Carbon::parse($data['from']),
-                Carbon::parse($data['to']),
+                $from,
+                $to,
                 (bool) ($data['enrich'] ?? true),
             );
         } catch (RuntimeException $e) {

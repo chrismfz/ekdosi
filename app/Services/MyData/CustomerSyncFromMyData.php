@@ -1,0 +1,190 @@
+<?php
+
+namespace App\Services\MyData;
+
+use App\Exceptions\Aade\AadeRegistryException;
+use App\Models\Company;
+use App\Models\Customer;
+use App\Services\AadeRegistryLookup;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\Log;
+
+/**
+ * Συγχρονισμός πελατών από myDATA — the customer twin of SupplierSyncFromMyData.
+ *
+ * Reuses {@see SalesReconciler::fetchAadeDocs} (RequestTransmittedDocs — OUR
+ * sales over a window), collects the UNIQUE counterpart AFMs (the CUSTOMERS),
+ * and upserts a `Customer` for each one we don't already have. Retail docs
+ * (11.x) carry NO counterpart → only B2B customers are discovered, which is
+ * exactly right. The bulk twin of the customer form's one-off GSIS «Άντληση».
+ *
+ * Name resolution mirrors the supplier sync:
+ *   1. a name carried IN the doc (foreign counterparts send name; GR omitted);
+ *   2. for GR AFMs (myDATA forbids the domestic name → only the AFM arrives),
+ *      GSIS via {@see AadeRegistryLookup} when `$enrich` is on;
+ *   3. otherwise an AFM-only customer for later manual fill.
+ *
+ * Tenant safety: runs from a Filament action (tenant in context) AND a CLI
+ * command (no context). Customer carries a CompanyScope, but every query here
+ * is ALSO scoped by `company_id` explicitly + every create sets it — never
+ * relying on the ambient scope (CLAUDE.md CLI/queue rule).
+ */
+class CustomerSyncFromMyData
+{
+    public function __construct(
+        private readonly Company $tenant,
+        private readonly mixed $handler = null,
+    ) {}
+
+    public function sync(CarbonInterface $from, CarbonInterface $to, bool $enrich = true): CustomerSyncResult
+    {
+        // Init firebed (creds + the optional test handler) ourselves — the public
+        // SalesReconciler::fetchAadeDocs does NOT (only reconcile() does), so a
+        // standalone call would otherwise hit a stale/empty credential state.
+        // Throws RuntimeException for non-GR / mode-off / missing creds.
+        FirebedCredentials::init($this->tenant, $this->handler);
+
+        $docs = (new SalesReconciler($this->tenant, $this->handler))->fetchAadeDocs(
+            $from->format('d/m/Y'),
+            $to->format('d/m/Y'),
+        );
+
+        $ourAfm = trim((string) ($this->tenant->afm ?? ''));
+
+        // afm => the best (named-over-blank) counterpart name seen for it.
+        /** @var array<string, string> $byAfm */
+        $byAfm = [];
+        $scannedDocs = 0;
+
+        foreach ($docs as $doc) {
+            $scannedDocs++;
+
+            $afm = trim((string) ($doc->counterpartVat ?? ''));
+            if ($afm === '') {
+                continue; // retail / no counterpart
+            }
+            if ($ourAfm !== '' && $afm === $ourAfm) {
+                continue; // never add ourselves
+            }
+
+            $name = trim((string) ($doc->counterpartName ?? ''));
+            if (! array_key_exists($afm, $byAfm) || ($byAfm[$afm] === '' && $name !== '')) {
+                $byAfm[$afm] = $name;
+            }
+        }
+
+        return $this->upsertCustomers($byAfm, $scannedDocs, $enrich);
+    }
+
+    /**
+     * @param  array<string, string>  $byAfm
+     */
+    private function upsertCustomers(array $byAfm, int $scannedDocs, bool $enrich): CustomerSyncResult
+    {
+        $created = 0;
+        $skipped = 0;
+        $enriched = 0;
+        $named = 0;
+        $nameless = 0;
+        $createdAfms = [];
+        $gsisFailures = [];
+
+        foreach ($byAfm as $afm => $docName) {
+            // withTrashed: a soft-deleted customer with this AFM means the
+            // operator removed it on purpose — never silently resurrect.
+            $exists = Customer::withTrashed()
+                ->where('company_id', $this->tenant->getKey())
+                ->where('afm', $afm)
+                ->exists();
+
+            if ($exists) {
+                $skipped++;
+
+                continue;
+            }
+
+            $attrs = [
+                'company_id' => $this->tenant->getKey(),
+                'afm' => $afm,
+                'is_active' => true,
+            ];
+
+            if ($docName !== '') {
+                // A name only arrives for FOREIGN counterparts (GR is omitted).
+                $attrs['name'] = $docName;
+                $named++;
+            } elseif ($enrich) {
+                // GR counterpart → resolve the domestic name from GSIS.
+                $gsis = $this->enrichFromGsis($afm);
+                if ($gsis !== null) {
+                    $attrs += $gsis;
+                    $enriched++;
+                } else {
+                    $gsisFailures[] = $afm;
+                    $nameless++;
+                }
+            } else {
+                $nameless++;
+            }
+
+            // customers.name is NOT NULL (unlike suppliers): a name-less discovery
+            // (GR no-name + enrich off, or a GSIS miss) gets an «ΑΦΜ …» placeholder
+            // the operator replaces — never a blank.
+            if (! isset($attrs['name']) || trim((string) $attrs['name']) === '') {
+                $attrs['name'] = 'ΑΦΜ '.$afm;
+            }
+
+            Customer::create($attrs);
+            $created++;
+            $createdAfms[] = $afm;
+        }
+
+        return new CustomerSyncResult(
+            scannedDocs: $scannedDocs,
+            uniqueAfms: count($byAfm),
+            created: $created,
+            skippedExisting: $skipped,
+            enrichedViaGsis: $enriched,
+            namedFromDoc: $named,
+            nameless: $nameless,
+            createdAfms: $createdAfms,
+            gsisFailures: $gsisFailures,
+        );
+    }
+
+    /**
+     * GSIS lookup → customer columns (same mapping as the customer form's AADE
+     * crosscheck). Returns null on any failure so a bulk run never aborts.
+     *
+     * @return array<string, string>|null
+     */
+    private function enrichFromGsis(string $afm): ?array
+    {
+        try {
+            $rec = app(AadeRegistryLookup::class, ['tenant' => $this->tenant])->findByAfm($afm);
+        } catch (AadeRegistryException $e) {
+            Log::info('Customer sync: GSIS enrichment skipped', [
+                'company_id' => $this->tenant->getKey(),
+                'afm' => $afm,
+                'reason' => class_basename($e),
+            ]);
+
+            return null;
+        }
+
+        $out = [
+            'name' => $rec->name,
+            'tax_office' => $rec->doy,
+            'address1' => $rec->address,
+            'city' => $rec->city,
+            'postcode' => $rec->postcode,
+            'country' => 'GR',
+        ];
+
+        if (($primary = $rec->primaryActivity()) !== null && ! empty($primary['description'])) {
+            $out['occupation'] = $primary['description'];
+        }
+
+        return array_filter($out, static fn ($v): bool => trim((string) $v) !== '');
+    }
+}

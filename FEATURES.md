@@ -125,6 +125,9 @@
 
 ## 7. Πελάτες & Καρτέλα
 - **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ».
+- **Συγχρονισμός πελατών από myDATA** (`CustomerSyncFromMyData` / `customers:sync`) — bulk discovery
+  από τα ΑΦΜ συναλλασσομένων στις πωλήσεις μας + GSIS enrichment· lookback presets 3/12/24 μήνες
+  (καθρέφτης του `suppliers:sync`).
 - **VIES (EU)** — επαλήθευση/άντληση μη-GR ενδοκοινοτικών ΑΦΜ (`ViesLookup`) +
   **reverse-charge hint** (0% + §8.3 «16 — άρθρο 45»).
 - **Καρτέλα**: ledger κινήσεων, aging, **YoY**, charts, εξαγωγή **PDF/CSV** + email·
