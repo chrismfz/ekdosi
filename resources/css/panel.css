@@ -239,3 +239,19 @@
 
 .dark .dark\:bg-gray-950 { background-color: #030712; }
 
+/* ── Filament fixes (overrides of .fi-* component CSS) ─────────────────── */
+/*
+ * Page header actions overflow on narrow viewports. Filament's
+ * .fi-header-actions-ctn is `display:flex; flex-shrink:0` with no wrap, so a
+ * page with many header actions (e.g. the Καρτέλα: Νέο Παραστατικό, εισπράξεις,
+ * πληρωμές, εξαγωγή…) keeps the row at full width and the right-most buttons
+ * fall off the edge — no wrap, no scrollbar. Let the container shrink and wrap
+ * its actions onto a second row instead (the inner .fi-ac already wraps once
+ * it's given a constrained width).
+ */
+.fi-header-actions-ctn {
+    min-width: 0;
+    flex-shrink: 1;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
