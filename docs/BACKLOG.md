@@ -138,10 +138,27 @@ surfaced in the open-items sections further down.
     per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).
   - **(δ) Persistence συνομιλιών** — `ai_conversations` table (ιστορικό + πολλές
     συνομιλίες ανά χρήστη, αντί session) — απαιτεί και UI επιλογής συνομιλίας.
-  - **(ε) Usage dashboard** — κόστος/tokens ανά εταιρεία/χρήστη/μήνα από το `ai_usage_log`
-    (ποιος πληρώνει, ποιος κοντά στο όριο) — Filament page/widget· τα δεδομένα υπάρχουν ήδη.
+  - **(ε) Usage dashboard — tokens/κόστος ανά εταιρεία.** Τα ΔΕΔΟΜΕΝΑ ΥΠΑΡΧΟΥΝ ΗΔΗ:
+    το `ai_usage_log` κρατά input/output/cache tokens + `cost_estimate` ανά
+    εταιρεία/χρήστη/συνομιλία/μοντέλο (είναι το source of truth για τα caps, βλ.
+    `AiUsageMeter`). Λείπει ΜΟΝΟ το surface: Filament page/widget με
+    `sum(tokens)`/`sum(cost)` group-by μήνα × εταιρεία (ποιος πληρώνει, ποιος κοντά
+    στο όριο), προαιρετικά export CSV. Καθαρά read-only πάνω σε υπάρχοντα πίνακα.
   - **(στ) Streaming απαντήσεων** — τώρα είναι «σκέφτομαι…» μέχρι να ολοκληρωθεί το
     tool-loop· streaming θα ήθελε SSE/Livewire polling (μεγαλύτερη αλλαγή στο surface).
+  - **(ζ) Helper / «βοήθεια & συμβουλή» με curated knowledge base.** Δύο ΞΕΧΩΡΙΣΤΑ
+    πράγματα: **(i) app how-to** («πού βλέπω τι μου χρωστάνε;», «πώς κόβω πιστωτικό;») —
+    ασφαλές, γνώση της εφαρμογής· **(ii) domain advisory** («τι ΦΠΑ για Σκόπελο;», «τι
+    παραστατικό για αποστολή δικού μου εξοπλισμού στο datacenter;», «ποιον τύπο να
+    διαλέξω;») — ΕΠΙΚΙΝΔΥΝΟ αν απαντηθεί από γενική γνώση του μοντέλου (μειωμένα νησιά
+    άλλαξαν πολλές φορές· λάθος = λάθος ΦΠΑ/ΑΑΔΕ). **Σχέδιο:** curated KB σε markdown
+    (`docs/assistant-kb/`) που γράφεις εσύ/ο λογιστής + νέο tool `knowledge_search`
+    (RAG-lite: επιστρέφει σχετικά αποσπάσματα) → ο βοηθός στηρίζεται ΑΥΣΤΗΡΑ σε αυτό,
+    «δεν καλύπτεται → ρώτα λογιστή», ΠΟΤΕ εφευρεμένος φορολογικός κανόνας + πάντα
+    disclaimer για φορολογικά. **Κουμπώνει με τα έτοιμα:** links (π.χ. «πώς στέλνω
+    εξοπλισμό» → εξήγηση ΔΑ + link «Νέο Δελτίο Αποστολής»), `vat_categories` της
+    εταιρείας (δείξε τις ρυθμισμένες, μη μαντεύεις). Ίδιο grounding-discipline με τα
+    tools — απλώς προστίθεται μία ΕΓΚΕΚΡΙΜΕΝΗ πηγή δίπλα τους.
   - _Σχεδιαστικά κλειδωμένα ήδη (μην ξανασυζητηθούν): tool-layer isolation (κανένα `company`
     param), per-tool Shield permission, `#[Locked]` messages/transcript, `ChatMarkup`
     same-origin links, writes ΠΟΤΕ auto (operator-confirm). Engine = Laravel HTTP/Messages
