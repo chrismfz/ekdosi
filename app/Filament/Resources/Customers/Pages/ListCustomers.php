@@ -35,7 +35,7 @@ class ListCustomers extends BaseListRecords
                 ->color('warning')
                 ->visible(fn (): bool => (bool) Filament::getTenant()?->canReadMyData())
                 ->modalHeading('Συγχρονισμός πελατών από myDATA')
-                ->modalDescription('Σαρώνει τα παραστατικά πωλήσεων (RequestTransmittedDocs) για το διάστημα και δημιουργεί πελάτες για όσα ΑΦΜ συναλλασσομένων δεν υπάρχουν ήδη. Για ελληνικά ΑΦΜ αντλεί στοιχεία από το μητρώο ΑΑΔΕ (GSIS). Η λιανική (χωρίς ΑΦΜ) δεν δημιουργεί πελάτη.')
+                ->modalDescription('Σαρώνει τα παραστατικά πωλήσεων (RequestTransmittedDocs) για το διάστημα και δημιουργεί πελάτες για όσα ΑΦΜ συναλλασσομένων δεν υπάρχουν ήδη. Για ελληνικά ΑΦΜ αντλεί στοιχεία από το μητρώο ΑΑΔΕ (GSIS). Η λιανική (χωρίς ΑΦΜ) δεν δημιουργεί πελάτη. Οι ΞΕΝΟΙ πελάτες δημιουργούνται με όνομα αλλά χωρίς χώρα/διεύθυνση — συμπληρώστε τα πριν τους τιμολογήσετε.')
                 ->modalSubmitActionLabel('Συγχρονισμός')
                 ->schema([
                     ...PartySyncWindow::schema(),

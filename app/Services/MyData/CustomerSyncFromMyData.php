@@ -44,7 +44,11 @@ class CustomerSyncFromMyData
         // Throws RuntimeException for non-GR / mode-off / missing creds.
         FirebedCredentials::init($this->tenant, $this->handler);
 
-        $docs = (new SalesReconciler($this->tenant, $this->handler))->fetchAadeDocs(
+        // The handler is already wired into firebed's static state by init()
+        // above; SalesReconciler's own handler arg is only used by ITS
+        // initFirebed (which fetchAadeDocs never calls), so pass null and avoid
+        // the ?MockHandler-vs-mixed type trap.
+        $docs = (new SalesReconciler($this->tenant))->fetchAadeDocs(
             $from->format('d/m/Y'),
             $to->format('d/m/Y'),
         );
@@ -90,8 +94,12 @@ class CustomerSyncFromMyData
         $gsisFailures = [];
 
         foreach ($byAfm as $afm => $docName) {
-            // withTrashed: a soft-deleted customer with this AFM means the
-            // operator removed it on purpose — never silently resurrect.
+            // Dedup is APP-LEVEL: unlike suppliers, `customers` has no
+            // unique(company_id, afm) constraint (afm is a non-unique index +
+            // legitimately NULL for retail), so this exists-check + the per-run
+            // $byAfm map are the guard — fine for the single-operator flow, not a
+            // concurrency lock. withTrashed: a soft-deleted customer with this AFM
+            // was removed on purpose → never silently resurrect.
             $exists = Customer::withTrashed()
                 ->where('company_id', $this->tenant->getKey())
                 ->where('afm', $afm)

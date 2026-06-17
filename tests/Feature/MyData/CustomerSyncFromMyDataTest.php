@@ -61,8 +61,9 @@ class CustomerSyncFromMyDataTest extends TestCase
         $this->assertDatabaseHas('customers', [
             'company_id' => $this->tenant->id, 'afm' => '123456789', 'name' => 'Foreign Buyer Ltd',
         ]);
+        // GR no-name + enrich off → «ΑΦΜ …» placeholder (customers.name NOT NULL).
         $this->assertDatabaseHas('customers', [
-            'company_id' => $this->tenant->id, 'afm' => '987654321',
+            'company_id' => $this->tenant->id, 'afm' => '987654321', 'name' => 'ΑΦΜ 987654321',
         ]);
         $this->assertDatabaseMissing('customers', [
             'company_id' => $this->tenant->id, 'afm' => '801280908', // ourselves
