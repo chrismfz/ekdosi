@@ -10,6 +10,7 @@ use App\Filament\Resources\Customers\Widgets\CustomerLedgerStats;
 use App\Mail\CustomerStatementMail;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerContact;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
@@ -36,9 +37,13 @@ class CustomerLedgerPagePolishTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private Customer $customer;
+
     private PaymentMethod $credit;
+
     private InvoiceType $invType;
+
     private static int $seq = 0;
 
     protected function setUp(): void
@@ -239,7 +244,8 @@ class CustomerLedgerPagePolishTest extends TestCase
 
         Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
             ->callAction('email_statement', data: [
-                'recipient' => 'accountant@example.test',
+                'recipients' => [],
+                'extra_recipients' => 'accountant@example.test',
                 'subject' => null,
                 'message' => 'Ορίστε η καρτέλα σας.',
             ])
@@ -248,5 +254,86 @@ class CustomerLedgerPagePolishTest extends TestCase
         Mail::assertSent(CustomerStatementMail::class, function (CustomerStatementMail $mail) {
             return $mail->hasTo('accountant@example.test');
         });
+    }
+
+    public function test_email_statement_defaults_to_customer_and_primary_contact(): void
+    {
+        Mail::fake();
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        // A primary λογιστήριο contact with its own email is pre-checked
+        // alongside the customer's email.
+        CustomerContact::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'name' => 'Μαρία',
+            'role' => 'Λογιστήριο',
+            'email' => 'logistirio@example.test',
+            'is_primary' => true,
+        ]);
+        // A secondary contact (not primary) is offered but NOT pre-checked.
+        CustomerContact::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'name' => 'Τεχνικός',
+            'role' => 'Support',
+            'email' => 'tech@example.test',
+        ]);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->callAction('email_statement', data: [
+                // Mirror the pre-checked default (customer + primary contact).
+                'recipients' => ['pelatis@example.test', 'logistirio@example.test'],
+                'extra_recipients' => null,
+                'subject' => null,
+                'message' => null,
+            ])
+            ->assertHasNoActionErrors();
+
+        Mail::assertSent(CustomerStatementMail::class, function (CustomerStatementMail $mail) {
+            return $mail->hasTo('pelatis@example.test')
+                && $mail->hasTo('logistirio@example.test')
+                && ! $mail->hasTo('tech@example.test');
+        });
+    }
+
+    public function test_email_statement_merges_picked_and_extra_recipients_and_dedupes(): void
+    {
+        Mail::fake();
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->callAction('email_statement', data: [
+                // Picked + a duplicate (different casing) + an extra + a bad one.
+                'recipients' => ['pelatis@example.test'],
+                'extra_recipients' => 'PELATIS@example.test, extra@example.test, not-an-email',
+                'subject' => null,
+                'message' => null,
+            ])
+            ->assertHasNoActionErrors();
+
+        Mail::assertSent(CustomerStatementMail::class, function (CustomerStatementMail $mail) {
+            // Deduped to the first casing; extra included; the invalid one dropped.
+            return $mail->hasTo('pelatis@example.test')
+                && $mail->hasTo('extra@example.test')
+                && count($mail->to) === 2;
+        });
+    }
+
+    public function test_email_statement_requires_a_valid_recipient(): void
+    {
+        Mail::fake();
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->callAction('email_statement', data: [
+                'recipients' => [],
+                'extra_recipients' => 'garbage',
+                'subject' => null,
+                'message' => null,
+            ])
+            ->assertHasNoActionErrors();
+
+        Mail::assertNothingSent();
     }
 }

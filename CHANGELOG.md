@@ -18,6 +18,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Αποστολή Καρτέλας με email — επαφή-aware.** Η ενέργεια «Αποστολή στο email» στην Καρτέλα δέχεται
+  πλέον **πολλούς παραλήπτες**: επιλογή (checkbox) από το email του πελάτη + τις **επαφές του** με email
+  (role-labelled, π.χ. «Λογιστήριο (Μαρία) — …»), προεπιλεγμένος ο πελάτης + η κύρια επαφή, συν πεδίο για
+  **ελεύθερα extra emails**. Validation + case-insensitive dedupe· το PDF αποδίδεται μία φορά για όλους.
 - **«Ηλικίωση οφειλών» (aged receivables).** Νέα read-only αναφορά (Λογιστικά): ανοιχτό υπόλοιπο ανά
   πελάτη σε buckets **0-30 / 31-60 / 61-90 / 90+**, μεγαλύτεροι οφειλέτες πρώτα, σύνολα ανά στήλη,
   drill στην Καρτέλα + **CSV**. Χρησιμοποιεί το ΙΔΙΟ FIFO aging με την Καρτέλα (`AgedReceivablesReport`
