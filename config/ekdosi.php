@@ -307,6 +307,11 @@ return [
         // Per-incident throttle: max sends/minute per user+company.
         'rate_per_minute' => (int) env('EKDOSI_AI_RATE_PER_MINUTE', 15),
 
+        // Prompt caching (automatic): caches the stable prefix (tools+system+
+        // history); cache reads are 0.1× input. Transparent cost optimisation —
+        // no behaviour change, no-op below the min cache size. Default ON.
+        'prompt_cache' => (bool) env('EKDOSI_AI_PROMPT_CACHE', true),
+
         // Global backstop cap (tokens/tenant/month) independent of any per-tenant
         // cap — a runaway-loop net. 0 = no global cap.
         'global_monthly_token_cap' => (int) env('EKDOSI_AI_GLOBAL_TOKEN_CAP', 5_000_000),

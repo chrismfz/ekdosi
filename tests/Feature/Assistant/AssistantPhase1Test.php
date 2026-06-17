@@ -164,6 +164,46 @@ class AssistantPhase1Test extends TestCase
         );
     }
 
+    public function test_empty_tool_input_is_resent_as_an_object_not_array(): void
+    {
+        Gate::before(fn () => true);
+        // Turn 1: a NO-ARG tool call → input {} which ->json() decodes to a PHP [].
+        Http::fake(['api.anthropic.com/*' => Http::sequence()
+            ->push([
+                'stop_reason' => 'tool_use',
+                'content' => [['type' => 'tool_use', 'id' => 'tu_1', 'name' => 'outstanding_receivables', 'input' => []]],
+                'usage' => ['input_tokens' => 10, 'output_tokens' => 5],
+            ])
+            ->push([
+                'stop_reason' => 'end_turn',
+                'content' => [['type' => 'text', 'text' => 'Σύνολο 0 €.']],
+                'usage' => ['input_tokens' => 20, 'output_tokens' => 5],
+            ]),
+        ]);
+
+        $res = app(AssistantRunner::class)->ask($this->tenant, $this->user, 'Πόσα μας χρωστάνε;');
+
+        $this->assertStringContainsString('Σύνολο', $res['reply']);
+        // The resent assistant tool_use turn must carry input as {} — NEVER «[]»
+        // (which Anthropic 400s «input: Input should be an object»).
+        Http::assertNotSent(fn ($request) => str_contains((string) json_encode($request->data()), '"input":[]'));
+    }
+
+    public function test_prompt_cache_control_toggles_with_config(): void
+    {
+        Gate::before(fn () => true);
+
+        config(['ekdosi.ai.prompt_cache' => true]);
+        $this->fakeReply('ok');
+        app(AssistantRunner::class)->ask($this->tenant, $this->user, 'Γεια');
+        Http::assertSent(fn ($request) => ($request->data()['cache_control']['type'] ?? null) === 'ephemeral');
+
+        config(['ekdosi.ai.prompt_cache' => false]);
+        $this->fakeReply('ok');
+        app(AssistantRunner::class)->ask($this->tenant, $this->user, 'Γεια');
+        Http::assertSent(fn ($request) => ! isset($request->data()['cache_control']));
+    }
+
     private function tenantWithSale(float $gross): Company
     {
         $t = Company::create([
