@@ -195,8 +195,10 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   ανανέωση;» (τώρα ο operator δεν ξέρει αν κοιτά φρέσκα· το «τελευταία ενημέρωση» υπάρχει αλλά παθητικό).
 - **Per-row import + «held/needs-review» state** στην κονσόλα-Έξοδα (ήδη στο «myDATA/expenses completeness»)
   — τώρα που υπάρχει το selective picker στη λίστα Έξοδα, το ίδιο μοτίβο ταιριάζει και στην κονσόλα.
-- **MARK lifecycle chip** στο παραστατικό: εκδόθηκε → υποβλήθηκε → VALID → ακυρώθηκε (το MARK detail +
-  full XML υπάρχουν· λείπει το οπτικό timeline/status chip στο `ViewInvoice`).
+- _(**MARK lifecycle chip** — DROPPED 2026-06-17: η πληροφορία ήδη φαίνεται (badge `mydata_state` + ΜΑΡΚ
+  + link σε MARK detail/XML + κουμπιά lifecycle + «Ιστορικό»)· ένα γραμμικό chip θα **αντέφασκε** με το
+  μοντέλο των δύο ορθογώνιων καταστάσεων `local_status` × `mydata_state` — π.χ. ακυρωμένο τοπικά αλλά
+  ακόμα VALID στην ΑΑΔΕ δεν χωράει σε ευθεία ακολουθία. Χαμηλή αξία + κίνδυνος σύγχυσης.)_
 
 ## 🧾 ERP-parity ideas (C — sweep 2026-06-16)
 _Έχουμε ήδη: balances/Καρτέλα, τραπεζικοί λογαριασμοί, κανάλια είσπραξης (IRIS/vPOS/μετρητά), πληρωμές,
