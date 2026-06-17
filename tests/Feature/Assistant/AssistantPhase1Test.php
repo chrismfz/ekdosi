@@ -19,6 +19,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -141,15 +142,26 @@ class AssistantPhase1Test extends TestCase
         $this->assertEqualsWithDelta(124.0, $res['gross_total'], 0.01);
     }
 
-    public function test_api_error_is_handled_gracefully_not_a_500(): void
+    public function test_api_error_is_handled_gracefully_and_logs_the_reason(): void
     {
         Gate::before(fn () => true);
-        Http::fake(['api.anthropic.com/*' => Http::response('upstream down', 500)]);
+        Log::spy();
+        // The real-world case: a 400 with Anthropic's «credit balance too low».
+        Http::fake(['api.anthropic.com/*' => Http::response([
+            'type' => 'error',
+            'error' => ['type' => 'invalid_request_error', 'message' => 'Your credit balance is too low'],
+        ], 400)]);
 
         $res = app(AssistantRunner::class)->ask($this->tenant, $this->user, 'Γεια');
 
+        // Graceful to the user…
         $this->assertTrue($res['blocked']);
         $this->assertStringContainsString('Προσωρινό σφάλμα', $res['reply']);
+        // …but the actual Anthropic reason is captured for the operator.
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $msg, array $ctx): bool => $msg === 'AI API call failed'
+                && str_contains((string) $ctx['reason'], 'credit balance')
+        );
     }
 
     private function tenantWithSale(float $gross): Company

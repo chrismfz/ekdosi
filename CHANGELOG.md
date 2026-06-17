@@ -91,6 +91,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   Το **export (CSV/XLSX)** ακολουθεί τις ίδιες στήλες Έσοδα/Έξοδα (η πλήρης όψη χωρίς scroll, για Excel).
 
 ### Fixed
+- **AI «Βοηθός» — το log δείχνει την ΑΙΤΙΑ της αποτυχίας.** Σε αποτυχία κλήσης Anthropic, το laravel.log
+  κατέγραφε μόνο το status («AI API error: 400»). Πλέον καταγράφει και το **μήνυμα του Anthropic** (π.χ.
+  «Your credit balance is too low», «model … not found») — αυτο-εξηγείται. (Το RESPONSE body δεν περιέχει
+  κλειδί.) Ο χρήστης συνεχίζει να βλέπει την ευγενική «Προσωρινό σφάλμα».
 - **Header actions ξεχείλιζαν εκτός οθόνης σε στενό παράθυρο.** Το `.fi-header-actions-ctn` του
   Filament είναι `flex; flex-shrink:0` χωρίς wrap — σε σελίδα με πολλά header κουμπιά (π.χ. η Καρτέλα:
   Νέο Παραστατικό, εισπράξεις/πληρωμές, εξαγωγή…) τα δεξιά κουμπιά «έπεφταν» εκτός δεξιού άκρου, χωρίς
