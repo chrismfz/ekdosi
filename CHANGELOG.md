@@ -18,6 +18,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Καρτέλα — φίλτρα περιόδου πάνω από τον πίνακα.** Τα φίλτρα κινήσεων (Έτος/περίοδος, Τύπος,
+  Κατάσταση) εμφανίζονται πλέον **πάνω από τον πίνακα** (όχι κρυμμένα πίσω από το χωνί) — επιλογή
+  «τρέχον/προηγούμενο έτος» με ένα κλικ, όπως στο Βιβλίο Εσόδων-Εξόδων. (Το τρέχον υπόλοιπο μένει
+  full-history — το φίλτρο δεν το μηδενίζει.)
 - **Αποστολή Καρτέλας με email — επαφή-aware.** Η ενέργεια «Αποστολή στο email» στην Καρτέλα δέχεται
   πλέον **πολλούς παραλήπτες**: επιλογή (checkbox) από το email του πελάτη + τις **επαφές του** με email
   (role-labelled, π.χ. «Λογιστήριο (Μαρία) — …»), προεπιλεγμένος ο πελάτης + η κύρια επαφή, συν πεδίο για
@@ -40,6 +44,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   Το **export (CSV/XLSX)** ακολουθεί τις ίδιες στήλες Έσοδα/Έξοδα (η πλήρης όψη χωρίς scroll, για Excel).
 
 ### Fixed
+- **Header actions ξεχείλιζαν εκτός οθόνης σε στενό παράθυρο.** Το `.fi-header-actions-ctn` του
+  Filament είναι `flex; flex-shrink:0` χωρίς wrap — σε σελίδα με πολλά header κουμπιά (π.χ. η Καρτέλα:
+  Νέο Παραστατικό, εισπράξεις/πληρωμές, εξαγωγή…) τα δεξιά κουμπιά «έπεφταν» εκτός δεξιού άκρου, χωρίς
+  να τυλίγονται και χωρίς scrollbar. Global override στο `panel.css` (shrink + `flex-wrap`) ώστε να
+  τυλίγονται σε δεύτερη σειρά — διορθώνει όλες τις σελίδες με πολλά actions.
 - **Custom Filament σελίδες ήταν άστυλες (no-build CSS fix).** Ο admin panel φορτώνει μόνο το
   component-CSS του Filament (καθόλου Tailwind utility layer) και δεν υπάρχει custom theme/asset
   build — οπότε grids/spacing/πίνακες σε ~23 custom blade σελίδες έμεναν άστυλα (στοιβαγμένες

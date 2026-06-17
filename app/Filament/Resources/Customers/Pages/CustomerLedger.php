@@ -38,6 +38,7 @@ use Filament\Resources\Pages\Page;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
@@ -272,8 +273,9 @@ class CustomerLedger extends Page implements HasTable
             ])
             ->filters([
                 SelectFilter::make('year')
-                    ->label('Έτος')
-                    ->options(array_combine($this->availableYears, $this->availableYears)),
+                    ->label('Έτος / περίοδος')
+                    ->options(array_combine($this->availableYears, $this->availableYears))
+                    ->placeholder('Όλα τα έτη'),
                 SelectFilter::make('invoice_type')
                     ->label('Τύπος παραστατικού')
                     ->options(collect($this->availableInvoiceTypes)->pluck('code', 'id')->all()),
@@ -284,6 +286,11 @@ class CustomerLedger extends Page implements HasTable
                         'unpaid' => 'Ανεξόφλητα',
                     ]),
             ])
+            // Surface the filters above the table (not hidden behind the funnel
+            // icon) so picking a customer's «τρέχον/προηγούμενο έτος» view is one
+            // click — the «εύκολος τρόπος» the ledger-book period dropdown gives.
+            ->filtersLayout(FiltersLayout::AboveContent)
+            ->filtersFormColumns(['default' => 1, 'sm' => 3])
             ->recordActions([
                 // Φ3 — drill-down on a grouped «έμβασμα/είσπραξη» row: a
                 // read-only modal listing each allocation (settled invoice →
