@@ -130,26 +130,30 @@ class AiActionExecutor
             return;
         }
 
-        $note = (string) ($action->payload['note'] ?? $action->summary);
+        // Bind the row's own tenant — the sweeper runs with no ambient context;
+        // this hardens any future tenant-scoped query added here against leaking.
+        app(CompanyContext::class)->actAs($action->company, function () use ($action, $user): void {
+            $note = (string) ($action->payload['note'] ?? $action->summary);
 
-        $notification = Notification::make()
-            ->title('Υπενθύμιση')
-            ->body($note)
-            ->icon('heroicon-o-bell-alert')
-            ->info();
+            $notification = Notification::make()
+                ->title('Υπενθύμιση')
+                ->body($note)
+                ->icon('heroicon-o-bell-alert')
+                ->info();
 
-        if ($action->customer !== null) {
-            $notification->actions([
-                Action::make('kartela')
-                    ->label('Καρτέλα')
-                    ->url(CustomerResource::getUrl('ledger', ['record' => $action->customer_id], tenant: $action->company))
-                    ->markAsRead(),
-            ]);
-        }
+            if ($action->customer !== null) {
+                $notification->actions([
+                    Action::make('kartela')
+                        ->label('Καρτέλα')
+                        ->url(CustomerResource::getUrl('ledger', ['record' => $action->customer_id], tenant: $action->company))
+                        ->markAsRead(),
+                ]);
+            }
 
-        $notification->sendToDatabase($user);
+            $notification->sendToDatabase($user);
 
-        $action->forceFill(['delivered_at' => now()])->save();
+            $action->forceFill(['delivered_at' => now()])->save();
+        });
     }
 
     private function fail(AiPendingAction $action, string $reason): string

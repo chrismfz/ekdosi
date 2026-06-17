@@ -119,11 +119,12 @@ trait InteractsWithAssistant
 
     public function confirmAssistantAction(int $id): void
     {
+        $user = auth()->user();
         $action = $this->ownedPendingAction($id);
-        if ($action === null) {
+        if ($action === null || ! $user instanceof User) {
             return;
         }
-        $result = app(AiActionExecutor::class)->confirm($action, auth()->user());
+        $result = app(AiActionExecutor::class)->confirm($action, $user);
         $this->transcript[] = ['role' => 'system', 'text' => '✓ '.$result];
         $this->afterAssistantTurn();
     }

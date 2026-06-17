@@ -126,4 +126,26 @@ class AssistantInsightToolsTest extends TestCase
         $this->assertStringContainsString('[κακό](https://evil.example/x)', $html); // external left inert
         $this->assertStringNotContainsString('<script>', $html);                    // escaped
     }
+
+    public function test_chat_markup_blocks_authority_confusion_and_protocol_relative_urls(): void
+    {
+        config(['app.url' => 'https://app.example.com']);
+
+        // Backslash/userinfo authority: parse_url says host=app.example.com but a
+        // browser navigates to evil.com — must NOT become a clickable anchor.
+        $a = (string) ChatMarkup::render('[x](https://evil.com\@app.example.com/p)');
+        $this->assertStringNotContainsString('<a ', $a);
+
+        // Protocol-relative → external authority, not a path.
+        $b = (string) ChatMarkup::render('[x](//evil.com/p)');
+        $this->assertStringNotContainsString('<a ', $b);
+
+        // A genuine same-host absolute URL (any case) DOES render.
+        $c = (string) ChatMarkup::render('[ok](https://APP.example.com/admin/x)');
+        $this->assertStringContainsString('class="ai-link"', $c);
+
+        // A relative path still renders.
+        $d = (string) ChatMarkup::render('[ok](/admin/x)');
+        $this->assertStringContainsString('<a href="/admin/x" class="ai-link">ok</a>', $d);
+    }
 }
