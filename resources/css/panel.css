@@ -279,3 +279,5 @@
 }
 .dark .ai-widget-panel { background-color: #111827; border-color: rgba(255,255,255,.1); }
 .ai-widget-log { min-height: 12rem; max-height: 24rem; overflow-y: auto; }
+.ai-link { color: #d97706; text-decoration: underline; font-weight: 500; }
+.dark .ai-link { color: #fbbf24; }

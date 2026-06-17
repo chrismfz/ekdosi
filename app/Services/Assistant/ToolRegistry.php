@@ -6,7 +6,11 @@ use App\Models\Company;
 use App\Models\User;
 use App\Services\Assistant\Tools\AssistantTool;
 use App\Services\Assistant\Tools\CountSalesTool;
+use App\Services\Assistant\Tools\FindCustomerTool;
+use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
+use App\Services\Assistant\Tools\RecentInvoicesTool;
+use App\Services\Assistant\Tools\VatSummaryTool;
 use App\Support\Tenancy\CompanyContext;
 use Illuminate\Support\Facades\Gate;
 
@@ -28,6 +32,10 @@ class ToolRegistry
         $this->tools = [
             new CountSalesTool,
             new OutstandingReceivablesTool,
+            new ListTopDebtorsTool,
+            new FindCustomerTool,
+            new RecentInvoicesTool,
+            new VatSummaryTool,
         ];
     }
 

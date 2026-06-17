@@ -18,6 +18,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» — Phase 2a (insights + clickable links).** 4 νέα read-only εργαλεία: **ανάλυση
+  οφειλετών** (top debtors + link στην Καρτέλα καθενός — η ανάλυση ανά πελάτη που έλειπε), **αναζήτηση
+  πελάτη** (όνομα/ΑΦΜ → υπόλοιπο + link Καρτέλας + «Νέο Παραστατικό»), **πρόσφατα παραστατικά**
+  (κατάσταση myDATA/πληρωμής + link), **σύνοψη ΦΠΑ/τζίρου** περιόδου. Τα tools επιστρέφουν deep-links και
+  ο βοηθός τα δίνει ως **clickable σύνδεσμοι** (safe renderer: HTML-escape + μόνο same-origin links —
+  εξωτερικά URL μένουν inert). «Άνοιξε την καρτέλα του Χ» → link. (Write actions «στείλε ενημερωτικό»/
+  reminders = Phase 2b με operator-confirm.)
 - **AI «Βοηθός» — Phase 1 (read-only chat).** In-app βοηθός που απαντά για τα δεδομένα της ΤΡΕΧΟΥΣΑΣ
   εταιρείας μέσω εργαλείων (Phase-1: `count_sales`, `outstanding_receivables`). **Δύο surfaces, κοινό
   engine**: dedicated σελίδα «Βοηθός AI» + **floating widget σε κάθε σελίδα** (chat ενώ πλοηγείσαι·
