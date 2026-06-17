@@ -91,6 +91,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   Το **export (CSV/XLSX)** ακολουθεί τις ίδιες στήλες Έσοδα/Έξοδα (η πλήρης όψη χωρίς scroll, για Excel).
 
 ### Fixed
+- **AI «Βοηθός» — εργαλεία χωρίς ορίσματα έσκαγαν (400).** Όταν το μοντέλο καλούσε εργαλείο χωρίς
+  ορίσματα (π.χ. «πόσα μας χρωστάνε» → `outstanding_receivables`), το `input: {}` αποκωδικοποιούνταν ως
+  κενό PHP array `[]` και ξανα-στελνόταν ως JSON array → Anthropic 400 «input: Input should be an object».
+  Πλέον κανονικοποιείται σε αντικείμενο. (Συν **prompt caching** — automatic· cache reads 0.1× input·
+  global toggle `EKDOSI_AI_PROMPT_CACHE`, default ON· το metering ήταν ήδη cache-aware.)
 - **AI «Βοηθός» — το log δείχνει την ΑΙΤΙΑ της αποτυχίας.** Σε αποτυχία κλήσης Anthropic, το laravel.log
   κατέγραφε μόνο το status («AI API error: 400»). Πλέον καταγράφει και το **μήνυμα του Anthropic** (π.χ.
   «Your credit balance is too low», «model … not found») — αυτο-εξηγείται. (Το RESPONSE body δεν περιέχει

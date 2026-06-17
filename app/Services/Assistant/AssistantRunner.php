@@ -76,7 +76,10 @@ class AssistantRunner
                 if (($response['stop_reason'] ?? null) === 'tool_use') {
                     // Append the assistant's tool-call turn, then run the tools and
                     // feed the results back as a user turn — the harness gates each.
-                    $messages[] = ['role' => 'assistant', 'content' => $content];
+                    // normalize…(): a no-arg tool_use comes back as input {}, which
+                    // ->json() decoded to a PHP [] → re-encodes as a JSON array and
+                    // AADE… er, Anthropic rejects «input: Input should be an object».
+                    $messages[] = ['role' => 'assistant', 'content' => $this->normalizeToolInputs($content)];
                     $messages[] = ['role' => 'user', 'content' => $this->runToolCalls($tenant, $user, $content)];
 
                     continue;
@@ -110,19 +113,33 @@ class AssistantRunner
      */
     private function callApi(string $apiKey, string $model, Company $tenant, User $user, array $messages): array
     {
-        $resp = Http::withHeaders([
+        $http = Http::withHeaders([
             'x-api-key' => $apiKey,
             'anthropic-version' => config('services.anthropic.version', '2023-06-01'),
             'content-type' => 'application/json',
-        ])
+        ]);
+
+        $body = [
+            'model' => $model,
+            'max_tokens' => (int) config('ekdosi.ai.max_tokens', 1024),
+            'system' => $this->systemPrompt($tenant),
+            'tools' => $this->tools->definitionsFor($user),
+            'messages' => $messages,
+        ];
+
+        // Prompt caching (automatic): one top-level breakpoint caches the stable
+        // prefix (tools + system + grown history) and moves forward as the chat
+        // grows. Cache reads are 0.1× input — a real saving since the tool-use
+        // loop resends the whole prefix each iteration. No-op below the min cache
+        // size; the ai_usage_log already meters cache_read/write tokens + cost.
+        // Toggle: EKDOSI_AI_PROMPT_CACHE (global, default ON).
+        if (config('ekdosi.ai.prompt_cache', true)) {
+            $body['cache_control'] = ['type' => 'ephemeral'];
+        }
+
+        $resp = $http
             ->timeout((int) config('ekdosi.ai.timeout', 60))
-            ->post(rtrim((string) config('services.anthropic.base_url'), '/').'/v1/messages', [
-                'model' => $model,
-                'max_tokens' => (int) config('ekdosi.ai.max_tokens', 1024),
-                'system' => $this->systemPrompt($tenant),
-                'tools' => $this->tools->definitionsFor($user),
-                'messages' => $messages,
-            ]);
+            ->post(rtrim((string) config('services.anthropic.base_url'), '/').'/v1/messages', $body);
 
         if ($resp->failed()) {
             // Surface Anthropic's actual error MESSAGE (not just the status) so the
@@ -166,6 +183,28 @@ class AssistantRunner
         }
 
         return $results;
+    }
+
+    /**
+     * Force every tool_use block's `input` to a JSON OBJECT before we resend the
+     * assistant turn. A no-argument tool call returns `input: {}`, which Laravel's
+     * ->json() decoded to a PHP `[]` (empty array) → that re-encodes as a JSON
+     * array `[]` and Anthropic 400s «input: Input should be an object». stdClass
+     * encodes as `{}`; a populated assoc array already encodes as an object.
+     *
+     * @param  list<array<string, mixed>>  $content
+     * @return list<array<string, mixed>>
+     */
+    private function normalizeToolInputs(array $content): array
+    {
+        foreach ($content as &$block) {
+            if (($block['type'] ?? null) === 'tool_use' && ($block['input'] ?? null) === []) {
+                $block['input'] = (object) [];
+            }
+        }
+        unset($block);
+
+        return $content;
     }
 
     /** @param  array<int, array<string, mixed>>  $content */
