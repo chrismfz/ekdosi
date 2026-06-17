@@ -303,14 +303,16 @@ class CustomerLedgerPagePolishTest extends TestCase
             'email' => 'tech@example.test',
         ]);
 
+        // Drive the REAL mounted form so defaultStatementRecipients() /
+        // statementRecipientOptions() are actually exercised (passing data:
+        // would override the pre-fill and test nothing). The default must be
+        // the customer email + the is_primary contact — and NOT the secondary.
         Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
-            ->callAction('email_statement', data: [
-                // Mirror the pre-checked default (customer + primary contact).
+            ->mountAction('email_statement')
+            ->assertSchemaStateSet([
                 'recipients' => ['pelatis@example.test', 'logistirio@example.test'],
-                'extra_recipients' => null,
-                'subject' => null,
-                'message' => null,
             ])
+            ->callMountedAction()
             ->assertHasNoActionErrors();
 
         Mail::assertSent(CustomerStatementMail::class, function (CustomerStatementMail $mail) {

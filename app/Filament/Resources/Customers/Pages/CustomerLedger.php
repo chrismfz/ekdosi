@@ -234,7 +234,8 @@ class CustomerLedger extends Page implements HasTable
             }
         }
 
-        // A picked year with no rows (e.g. only payments, no invoices) — show zeros.
+        // Defensive: the year dropdown is built from invoice years, so a picked
+        // year always has a computeYearly row — but never trust that blindly.
         return [
             'year' => $year,
             'invoice_count' => 0,
