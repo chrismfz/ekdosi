@@ -69,59 +69,88 @@
 → **Επιλογή (A).** Το CMR παραμένει «πρόσθετο layer» πάνω στο ΔΑ, όπως ακριβώς το
 CMR είναι layer πάνω στη διακίνηση στην πραγματικότητα.
 
-## 4. Data model (πρόταση)
+## 4. Η πραγματική φόρμα (από το `docs/reference/cmr-template.pdf`)
+
+Standard CMR, **μονή σελίδα A4 portrait** (594.96×841.92 pt). Επικεφαλίδα «CMR
+INTERNATIONAL CONSIGNMENT NOTE» + η ρήτρα Σύμβασης· πάνω-δεξιά **Reference No.**·
+πάνω-αριστερά η ετικέτα αντιτύπου («Copy for the carrier» κ.λπ.). Τα 24 κουτιά:
 
 ```
-companies:                      +name_en, +address_en, +city_en   (sender, set-once)
+1  Sender (name, address, country)
+2  Consignee (name, address, country)        16 Carrier (name, address, country)
+3  Place of delivery (place, country)         17 Successive carriers
+4  Place & date of taking over                18 Carrier's reservations & observations
+5  Annexed documents
+   ── Goods table (γραμμές) ──
+   6 Marks & numbers | 7 No. of packages | 8 Method of packing | 9 Nature of goods
+   10 Statistical number | 11 Gross weight kg | 12 Volume m³
+   (υπο-γραμμή ADR επικίνδυνων: Class | Number | Letter | ADR)
+13 Sender's instructions (Customs/formalities) 19 Special agreements
+14 Directions as to freight payment            20 To be paid by: Sender | Consignee
+   (Freight paid / Freight to be paid)            Carriage / Reductions / Balance /
+15 Cash on delivery                               Supplement / Miscellaneous / Total
+21 Established in / on
+22 Signature & stamp of sender  | 23 Signature & stamp of carrier | 24 …consignee
+                                  (Tractor plate / Trailer plate)
+```
+
+Τυπικά **4 αντίτυπα** με χρώμα/ετικέτα: κόκκινο=Sender, μπλε=Consignee,
+πράσινο=Carrier, μαύρο=αρχείο. Η φόρμα είναι μία σελίδα — τα αντίτυπα διαφέρουν
+μόνο στην ετικέτα/χρώμα πάνω-αριστερά.
+
+## 5. Data model (πρόταση — βάσει της πραγματικής φόρμας)
+
+```
+companies:                      +name_en, +address_en, +city_en   (sender box 1, set-once)
                                  (country υπάρχει ως country_code)
 
-delivery_note_lines:            +weight_kg DECIMAL(9,3) NULL       (CMR box 11)
-                                 +product_descr_en STRING(256) NULL (override· fallback=μεταγραφή)
+delivery_note_lines (goods table boxes 6–12):
+  +product_descr_en STRING(256) NULL   (box 9· fallback=μεταγραφή του product_descr)
+  +marks_numbers    STRING(60)  NULL   (box 6)
+  +packages_count   INT         NULL   (box 7)
+  +packing_method   STRING(40)  NULL   (box 8)
+  +statistical_no   STRING(20)  NULL   (box 10· HS/commodity code)
+  +weight_kg        DECIMAL(9,3) NULL  (box 11· gross weight)
+  +volume_m3        DECIMAL(9,3) NULL  (box 12)
+  +adr_class        STRING(10)  NULL   (επικίνδυνα — συνήθως κενό για server)
 
-NEW delivery_note_cmr (1:1):
-  id, company_id, delivery_note_id (unique)
-  # overrides (λατινικά)
-  sender_text, consignee_text, taking_over_text, delivery_text     (TEXT, pre-filled)
-  # carrier (CMR box 16/17)
-  carrier_name, carrier_address, successive_carrier_name?
-  # transport meta
-  taking_over_place, taking_over_at, established_place_date
-  documents_attached, instructions, payment_terms,
-  cash_on_delivery DECIMAL(14,2) NULL, special_agreements
-  reservations (box 18), copies_count TINYINT DEFAULT 3
+NEW delivery_note_cmr (1:1 με delivery_notes, unique delivery_note_id):
+  id, company_id, delivery_note_id
+  reference_no STRING(40) NULL                 # box top-right (default = ΔΑ invcode)
+  # overrides λατινικά (pre-filled, editable) — boxes 1–4
+  sender_text, consignee_text, delivery_text, taking_over_text   TEXT
+  taking_over_place STRING, taking_over_at DATETIME              # box 4
+  # carrier — boxes 16/17/23
+  carrier_name, carrier_address STRING                          # (έχουμε μόνο carrier_afm)
+  successive_carrier STRING NULL                                # box 17
+  tractor_plate, trailer_plate STRING NULL                      # κάτω από box 23
+  carrier_reservations TEXT NULL                                # box 18
+  # documents / instructions / agreements — boxes 5/13/19
+  annexed_documents, sender_instructions, special_agreements TEXT NULL
+  # freight charges — boxes 14/15/20
+  freight_paid BOOL NULL                                        # box 14 (paid/to-be-paid)
+  charges_to_be_paid_by ENUM('sender','consignee') NULL         # box 20
+  carriage_charges, reductions, balance, supplement,
+    misc_charges, total_charges DECIMAL(14,2) NULL              # box 20 table
+  cash_on_delivery DECIMAL(14,2) NULL                           # box 15
+  established_place STRING NULL, established_on DATE NULL        # box 21
+  copies_count TINYINT DEFAULT 4
   printed BOOL DEFAULT false
   timestamps, softDeletes
 ```
 
-Όλα **nullable**: ένα CMR γεννιέται από το ΔΑ, προ-συμπληρωμένο, και ο χειριστής
-συμπληρώνει/διορθώνει τα κενά. Tenant-scoped (`BelongsToCompany`), όπως όλα.
-
-## 5. CMR 24-box → πηγή δεδομένων (mapping)
-
-| # | Πεδίο CMR | Πηγή |
-|---|---|---|
-| 1 | Sender | `companies.name_en/address_en` (fallback μεταγραφή) |
-| 2 | Consignee | `delivery_note_cmr.consignee_text` (← `recipient_name`/customer) |
-| 3 | Place of delivery | `…taking_over`/`delivery_text` (← `delivery_*`) |
-| 4 | Place & date of taking over | `taking_over_place`/`taking_over_at` (← `loading_*`/`dispatch_at`) |
-| 5 | Documents attached | συνδεδεμένο ΔΑ invcode + (προαιρ.) τιμολόγιο |
-| 6–9 | Marks/numbers, packages, packing | γραμμές ΔΑ + (προαιρ.) πεδία |
-| 10–12 | Goods description / gross weight | `product_descr_en` + `weight_kg` |
-| 13 | Sender's instructions | `instructions` |
-| 15 | Terms of payment | `payment_terms` |
-| 16 | Carrier | `carrier_name/address` (έχουμε `carrier_afm`) |
-| 17 | Successive carrier | `successive_carrier_name` |
-| 18 | Reservations | `reservations` |
-| 21 | Established in / on | `established_place_date` |
-| 22–24 | Signatures (sender/carrier/consignee) | κενά πλαίσια υπογραφής στο PDF |
+Όλα **nullable**: το CMR γεννιέται από το ΔΑ προ-συμπληρωμένο και ο χειριστής
+διορθώνει/συμπληρώνει. Tenant-scoped (`BelongsToCompany`). Τα freight-charges είναι
+χρήσιμα όταν πληρώνεις μεταφορέα· για own-gear colocation συχνά μένουν κενά.
 
 ## 6. Rendering
 
 Σιβλινγκ του υπάρχοντος ΔΑ PDF — **καμία εμπλοκή myDATA**:
 - `App\Services\Delivery\CmrPdf` (κατά το `DeliveryNotePdf`: DomPDF, A4, ίδιο
   memory/time guard, ίδιο logo helper).
-- Blade `resources/views/delivery-notes/cmr.blade.php` — τυποποιημένη φόρμα CMR 24
-  κουτιών, **αγγλικά labels** (ή πολύγλωσσα EN/FR/DE όπως η επίσημη φόρμα).
+- Blade `resources/views/delivery-notes/cmr.blade.php` — **πιστή αναπαραγωγή** της
+  `docs/reference/cmr-template.pdf` (μονή A4, 24 κουτιά, αγγλικά labels). Η geometry/
+  διάταξη κουτιών αντιγράφεται από το reference PDF.
 - Action **«Εκτύπωση CMR»** στο `DeliveryNote` (δίπλα στο ΔΑ PDF), visible μόνο για
   διασυνοριακά (π.χ. όταν `customer.country`/`delivery` ≠ GR — ή πάντα διαθέσιμο με
   προειδοποίηση για εσωτερικά).
@@ -156,6 +185,7 @@ NEW delivery_note_cmr (1:1):
 
 ---
 
-_Δες επίσης: `docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`
-(ΔΑ lifecycle), `app/Services/Delivery/DeliveryNotePdf.php` (το PDF pattern που
-αντιγράφουμε), `FEATURES.md §Ψηφιακό ΔΑ`._
+_Δες επίσης: **`docs/reference/cmr-template.pdf`** (η ακριβής φόρμα που αναπαράγουμε),
+`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md` (ΔΑ lifecycle),
+`app/Services/Delivery/DeliveryNotePdf.php` (το PDF pattern που αντιγράφουμε),
+`FEATURES.md §Ψηφιακό ΔΑ`._
