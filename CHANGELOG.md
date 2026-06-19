@@ -106,6 +106,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   Το **export (CSV/XLSX)** ακολουθεί τις ίδιες στήλες Έσοδα/Έξοδα (η πλήρης όψη χωρίς scroll, για Excel).
 
 ### Fixed
+- **Εισαγωγή πελάτη από ΑΦΜ έσκαγε όταν η ΑΑΔΕ επιστρέφει τεράστια περιγραφή δραστηριότητας.**
+  Η περιγραφή κύριας δραστηριότητας (GSIS) μπορεί να είναι 300+ χαρακτήρες, αλλά η στήλη `occupation`
+  είναι VARCHAR(120) → η INSERT έσκαγε με SQLSTATE[22001] «Data too long for column 'occupation'» και
+  δεν δημιουργούνταν ποτέ ο πελάτης (π.χ. ΑΦΜ 801017172). Πλέον το `AadeRegistryRecord::primaryActivity()`
+  κόβει την περιγραφή στο μέγεθος της στήλης (multibyte-safe) — προστατεύει εισαγωγή πελάτη/προμηθευτή,
+  myDATA sync και το snapshot που αντιγράφεται στο τιμολόγιο.
 - **AI «Βοηθός» — εργαλεία χωρίς ορίσματα έσκαγαν (400).** Όταν το μοντέλο καλούσε εργαλείο χωρίς
   ορίσματα (π.χ. «πόσα μας χρωστάνε» → `outstanding_receivables`), το `input: {}` αποκωδικοποιούνταν ως
   κενό PHP array `[]` και ξανα-στελνόταν ως JSON array → Anthropic 400 «input: Input should be an object».

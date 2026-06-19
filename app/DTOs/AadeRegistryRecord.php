@@ -19,6 +19,17 @@ namespace App\DTOs;
  */
 final readonly class AadeRegistryRecord
 {
+    /**
+     * Cap for an activity description when it's stored as an `occupation`. AADE
+     * ships multi-hundred-char legal activity descriptions, but every
+     * `occupation` column is VARCHAR(120) (customers/invoices) — and the invoice
+     * snapshot copies the customer's value, so an un-capped blob overflowed
+     * customer import with SQLSTATE[22001] «Data too long for column 'occupation'».
+     * Capping at the DTO source protects every consumer (customer/supplier
+     * create, myDATA sync, the invoice snapshot) at once.
+     */
+    public const OCCUPATION_MAX_LENGTH = 120;
+
     public function __construct(
         public string $afm,
         public string $name,
@@ -62,7 +73,7 @@ final readonly class AadeRegistryRecord
         foreach ($this->activities as $a) {
             $kind = mb_strtolower(trim($a['kind']));
             if (in_array($kind, $primaryForms, true)) {
-                return $a;
+                return $this->withCappedDescription($a);
             }
         }
 
@@ -70,6 +81,21 @@ final readonly class AadeRegistryRecord
         // the first activity so the operator still gets SOMETHING; if
         // it's wrong they can manually override the kad_primary field
         // on the form.
-        return $this->activities[0] ?? null;
+        return isset($this->activities[0]) ? $this->withCappedDescription($this->activities[0]) : null;
+    }
+
+    /**
+     * Cap the activity `description` to what an `occupation` column can hold (see
+     * OCCUPATION_MAX_LENGTH). Multibyte-safe — Greek text is counted in
+     * characters, matching the VARCHAR(120) char-length semantics in utf8mb4.
+     *
+     * @param  array{code: string, description: string, kind: string}  $activity
+     * @return array{code: string, description: string, kind: string}
+     */
+    private function withCappedDescription(array $activity): array
+    {
+        $activity['description'] = rtrim(mb_substr((string) $activity['description'], 0, self::OCCUPATION_MAX_LENGTH));
+
+        return $activity;
     }
 }
