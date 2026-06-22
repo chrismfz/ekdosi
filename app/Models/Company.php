@@ -47,6 +47,10 @@ class Company extends Model
         'address',
         'city',
         'postcode',
+        // Latin-script identity for international transport docs (CMR sender).
+        'name_en',
+        'address_en',
+        'city_en',
         'phone',
         'email',
         'mydata_aade_id_sandbox',

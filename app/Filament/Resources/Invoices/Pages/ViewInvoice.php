@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Invoices\Pages;
 use App\Actions\IssueCreditNote;
 use App\Actions\ReissueInvoiceAsDraft;
 use App\Actions\StornoAndReissue;
+use App\Filament\Resources\Cmr\CmrResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\BankAccountField;
 use App\Jobs\SendInvoiceEmail;
@@ -12,6 +13,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
+use App\Services\Cmr\CreateCmrFromSource;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\EInvoice\Transports\InvoSignDocument;
 use App\Services\EInvoiceSubmitterFactory;
@@ -52,6 +54,25 @@ class ViewInvoice extends ViewRecord
         $channelLabel = $tenant?->einvoiceChannelLabel() ?? 'myDATA';
 
         return [
+            // «Δημιουργία CMR» — international consignment note for this invoice's
+            // goods (e.g. cross-border shipment). Pre-fills a DRAFT CMR (Greek→Latin
+            // transliteration) the operator corrects to English, then prints. NOT a
+            // myDATA document. Visible only to operators with CMR access.
+            Action::make('create_cmr')
+                ->label('Δημιουργία CMR')
+                ->icon('heroicon-o-clipboard-document-list')
+                ->color('gray')
+                ->visible(fn () => auth()->user()?->can('View:CmrNote') ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Δημιουργία CMR από το παραστατικό')
+                ->modalDescription('Δημιουργείται ΠΡΟΧΕΙΡΟ CMR στα Αγγλικά (μεταγραφή από τα ελληνικά). Διορθώστε το πριν την εκτύπωση.')
+                ->action(function (Invoice $record) {
+                    $cmr = app(CreateCmrFromSource::class)->fromInvoice($record);
+                    Notification::make()->success()->title('Δημιουργήθηκε προσχέδιο CMR')->send();
+
+                    return redirect(CmrResource::getUrl('edit', ['record' => $cmr]));
+                }),
+
             // --- Local lifecycle: Πρόχειρο → Ενεργό → Ακυρωμένο.
             // Independent of myDATA (the AADE truth). Reviving an
             // AADE-cancelled invoice is blocked (terminal there).

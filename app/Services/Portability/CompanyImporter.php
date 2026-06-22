@@ -79,6 +79,7 @@ class CompanyImporter
         'payments',
         'quotes', 'quote_lines', 'quote_mail_logs',
         'expenses', 'expense_lines', 'expense_marks',
+        'cmr_notes', 'cmr_lines',
     ];
 
     /** Invoice self-reference columns — nulled on insert, patched after the pass. */
@@ -126,6 +127,15 @@ class CompanyImporter
         'expenses' => ['supplier_id' => 'suppliers'],
         'expense_lines' => ['expense_id' => 'expenses'],
         'expense_marks' => ['expense_id' => 'expenses'],
+        'cmr_notes' => [
+            'customer_id' => 'customers',
+            // Polymorphic source (Invoice | DeliveryNote) can't be conditionally
+            // rewired by a single column→table map, and delivery_notes aren't in
+            // the bundle anyway → drop the back-link (map to a never-populated
+            // table nulls it). The CMR keeps all its own snapshot data.
+            'source_id' => 'delivery_notes',
+        ],
+        'cmr_lines' => ['cmr_note_id' => 'cmr_notes'],
     ];
 
     private const DROP_COLUMNS = ['id', 'company_id', 'created_at', 'updated_at', 'deleted_at'];
