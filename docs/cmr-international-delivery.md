@@ -18,8 +18,9 @@
 **Κρίσιμο για τον σχεδιασμό:**
 - Το CMR **ΔΕΝ** είναι φορολογικό παραστατικό. Η ΑΑΔΕ/myDATA **δεν** το διέπει.
   → **ΟΧΙ** `invoice_type` «CMR», **ΟΧΙ** δεύτερη υποβολή myDATA, **ΟΧΙ** ΑΑ μετρητής.
-- Είναι **συνοδευτικό του Δελτίου Αποστολής** — διαφορετική **όψη/εκτύπωση** των
-  ΙΔΙΩΝ δεδομένων διακίνησης, στα **Αγγλικά**, σε τυποποιημένη φόρμα 24 κουτιών.
+- Είναι **αυτοτελές έγγραφο μεταφοράς** στα **Αγγλικά** (τυποποιημένη φόρμα 24
+  κουτιών) — μπορεί να **συνοδεύει** δικό μας ΔΑ/τιμολόγιο Ή να στέκεται **μόνο του**
+  (όταν τα αγαθά τρίτου περνούν από τα χέρια μας). Δες §3 για τις δύο περιπτώσεις.
 
 > **Φορολογικό σκέλος = ερώτημα λογιστή, ΟΧΙ απόφαση κώδικα.** Η μεταφορά δικών σου
 > αγαθών σε άλλο κράτος-μέλος ΕΕ μπορεί να είναι «μεταφορά ιδίων αγαθών» (deemed
@@ -55,19 +56,31 @@
 > Η μεταγραφή ΕΛΟΤ-743 είναι «αρκετά καλή για να διαβαστεί», **όχι** αυθεντική. Γι'
 > αυτό κάθε πεδίο είναι **editable** — ο χειριστής διορθώνει επίσημες επωνυμίες.
 
-## 3. Πού «κρεμάμε» το CMR — όχι νέο παραστατικό, επέκταση του ΔΑ
+## 3. Πού «κρεμάμε» το CMR — ΑΥΤΟΤΕΛΕΣ έγγραφο με ΠΡΟΑΙΡΕΤΙΚΗ πηγή
 
-Το CMR είναι **1-προς-1 με ένα Δελτίο Αποστολής** (το ίδιο φορτίο, η ίδια κίνηση).
-Δύο επιλογές αποθήκευσης των CMR-only στοιχείων:
+Δύο πραγματικές περιπτώσεις χρήσης (από τον operator):
 
-- **(A) Νέος πίνακας `delivery_note_cmr`** (1:1 με `delivery_notes`) — καθαρός
-  διαχωρισμός, δεν φουσκώνει το ΔΑ· κρατά τα overrides + carrier + βάρη/όγκο +
-  flags (π.χ. cash-on-delivery, instructions). **Προτεινόμενο.**
-- (B) Στήλες πάνω στο `delivery_notes` — απλούστερο αλλά ανακατεύει transport-doc
-  πεδία με το φορολογικό ΔΑ.
+- **(Α) Standalone CMR** — κάτι περνά από τα χέρια μου από **τρίτο**, που έχει ήδη
+  δικό του τιμολόγιο/ΔΑ· θέλω **μόνο** CMR. Δεν υπάρχει δικό μας ΔΑ/τιμολόγιο.
+- **(Β) CMR πάνω σε δικό μας παραστατικό** — έκοψα **τιμολόγιο ή ΔΑ** και θέλω
+  ΚΑΙ CMR γι' αυτό.
 
-→ **Επιλογή (A).** Το CMR παραμένει «πρόσθετο layer» πάνω στο ΔΑ, όπως ακριβώς το
-CMR είναι layer πάνω στη διακίνηση στην πραγματικότητα.
+→ Αυτό σημαίνει ότι το CMR **ΔΕΝ** είναι 1:1 επέκταση του ΔΑ (η αρχική σκέψη). Είναι
+**αυτοτελές έγγραφο μεταφοράς** με μια **προαιρετική, πολυμορφική** σύνδεση πηγής:
+`source = DeliveryNote | Invoice | null`.
+
+- Standalone → `source = null`, ο χειριστής συμπληρώνει τα πάντα (αγγλικά).
+- Από ΔΑ/τιμολόγιο → `source` δείχνει το έγγραφο· προ-συμπληρώνεται (μεταγραφή) και
+  μένει **επεξεργάσιμο προσχέδιο** μέχρι την εκτύπωση.
+
+Sender/Consignee είναι **ελεύθερο κείμενο** (στην περίπτωση Α είναι τρίτοι, όχι
+απαραίτητα tenant/πελάτης) — απλώς προ-γεμίζουν από το context όταν υπάρχει.
+
+**Δύο entry points, ΕΝΑ κοινό editable form** (δες §7):
+1. **Μενού → «CMR» → Νέο** (standalone). _Σημ.: όχι κάτω από «Ψηφιακή Διακίνηση» —
+   αυτό είναι το myDATA e-transport του ΔΑ· το CMR είναι έγγραφο μεταφοράς. Καλύτερα
+   nav group «Διακίνηση/Μεταφορά» δίπλα στα Δελτία Αποστολής._
+2. **Παραστατικό (Τιμολόγιο/ΔΑ) → Ενέργειες → «Δημιουργία CMR»** (pre-filled draft).
 
 ## 4. Η πραγματική φόρμα (από το `docs/reference/cmr-template.pdf`)
 
@@ -98,90 +111,119 @@ INTERNATIONAL CONSIGNMENT NOTE» + η ρήτρα Σύμβασης· πάνω-δ�
 πράσινο=Carrier, μαύρο=αρχείο. Η φόρμα είναι μία σελίδα — τα αντίτυπα διαφέρουν
 μόνο στην ετικέτα/χρώμα πάνω-αριστερά.
 
-## 5. Data model (πρόταση — βάσει της πραγματικής φόρμας)
+## 5. Data model (πρόταση — αυτοτελές `cmr_notes` + `cmr_lines`)
+
+Το CMR είναι **self-contained**: κρατά δικά του στοιχεία + δικές του γραμμές αγαθών
+(snapshot, ώστε standalone να δουλεύει χωρίς πηγή, και sourced να είναι editable EN).
 
 ```
 companies:                      +name_en, +address_en, +city_en   (sender box 1, set-once)
                                  (country υπάρχει ως country_code)
 
-delivery_note_lines (goods table boxes 6–12):
-  +product_descr_en STRING(256) NULL   (box 9· fallback=μεταγραφή του product_descr)
-  +marks_numbers    STRING(60)  NULL   (box 6)
-  +packages_count   INT         NULL   (box 7)
-  +packing_method   STRING(40)  NULL   (box 8)
-  +statistical_no   STRING(20)  NULL   (box 10· HS/commodity code)
-  +weight_kg        DECIMAL(9,3) NULL  (box 11· gross weight)
-  +volume_m3        DECIMAL(9,3) NULL  (box 12)
-  +adr_class        STRING(10)  NULL   (επικίνδυνα — συνήθως κενό για server)
-
-NEW delivery_note_cmr (1:1 με delivery_notes, unique delivery_note_id):
-  id, company_id, delivery_note_id
-  reference_no STRING(40) NULL                 # box top-right (default = ΔΑ invcode)
-  # overrides λατινικά (pre-filled, editable) — boxes 1–4
+NEW cmr_notes:
+  id, company_id, legacy_id?
+  number INT, reference_no STRING(40) NULL      # per-company counter + box top-right ref
+  status STRING(20) DEFAULT 'draft'             # draft → finalized (όχι myDATA· soft lock)
+  # ΠΡΟΑΙΡΕΤΙΚΗ πηγή (πολυμορφική): DeliveryNote | Invoice | null (standalone)
+  source_type STRING NULL, source_id BIGINT NULL
+  customer_id BIGINT NULL                        # link όταν consignee = πελάτης μας
+  # boxes 1–4 (ελεύθερο κείμενο, λατινικά· pre-filled με μεταγραφή)
   sender_text, consignee_text, delivery_text, taking_over_text   TEXT
-  taking_over_place STRING, taking_over_at DATETIME              # box 4
-  # carrier — boxes 16/17/23
-  carrier_name, carrier_address STRING                          # (έχουμε μόνο carrier_afm)
-  successive_carrier STRING NULL                                # box 17
-  tractor_plate, trailer_plate STRING NULL                      # κάτω από box 23
-  carrier_reservations TEXT NULL                                # box 18
+  taking_over_place STRING NULL, taking_over_at DATETIME NULL     # box 4
+  # carrier — boxes 16/17/18/23
+  carrier_name, carrier_address STRING NULL, successive_carrier STRING NULL
+  tractor_plate, trailer_plate STRING NULL, carrier_reservations TEXT NULL
   # documents / instructions / agreements — boxes 5/13/19
   annexed_documents, sender_instructions, special_agreements TEXT NULL
   # freight charges — boxes 14/15/20
-  freight_paid BOOL NULL                                        # box 14 (paid/to-be-paid)
-  charges_to_be_paid_by ENUM('sender','consignee') NULL         # box 20
+  freight_paid BOOL NULL                                          # box 14
+  charges_to_be_paid_by ENUM('sender','consignee') NULL           # box 20
   carriage_charges, reductions, balance, supplement,
-    misc_charges, total_charges DECIMAL(14,2) NULL              # box 20 table
-  cash_on_delivery DECIMAL(14,2) NULL                           # box 15
-  established_place STRING NULL, established_on DATE NULL        # box 21
+    misc_charges, total_charges DECIMAL(14,2) NULL                # box 20 table
+  cash_on_delivery DECIMAL(14,2) NULL                             # box 15
+  established_place STRING NULL, established_on DATE NULL          # box 21
   copies_count TINYINT DEFAULT 4
-  printed BOOL DEFAULT false
+  issued_at DATETIME, printed BOOL DEFAULT false, notes TEXT NULL
   timestamps, softDeletes
+  index(company_id, source_type, source_id)
+
+NEW cmr_lines (goods table boxes 6–12):
+  id, company_id, cmr_note_id
+  marks_numbers STRING(60) NULL          # box 6
+  packages_count INT NULL                # box 7
+  packing_method STRING(40) NULL         # box 8
+  nature_en STRING(256) NULL             # box 9 (περιγραφή αγαθών, αγγλικά)
+  statistical_no STRING(20) NULL         # box 10 (HS/commodity)
+  weight_kg DECIMAL(9,3) NULL            # box 11 (gross weight)
+  volume_m3 DECIMAL(9,3) NULL            # box 12
+  adr_class STRING(10) NULL              # επικίνδυνα — συνήθως κενό
+  timestamps
 ```
 
-Όλα **nullable**: το CMR γεννιέται από το ΔΑ προ-συμπληρωμένο και ο χειριστής
-διορθώνει/συμπληρώνει. Tenant-scoped (`BelongsToCompany`). Τα freight-charges είναι
-χρήσιμα όταν πληρώνεις μεταφορέα· για own-gear colocation συχνά μένουν κενά.
+Όλα **nullable**: standalone ξεκινά κενό· sourced προ-γεμίζει (μεταγραφή) και
+διορθώνεται. Tenant-scoped (`BelongsToCompany`). **Καμία εμπλοκή myDATA / ΑΑ
+μετρητή** — το `number` είναι απλός per-company counter για αρχειοθέτηση.
 
-## 6. Rendering
+> Σημ.: η αρχική ιδέα ήταν `delivery_note_cmr` (1:1 με ΔΑ). Απορρίφθηκε γιατί η
+> περίπτωση (Α) standalone απαιτεί CMR **χωρίς** ΔΑ — άρα first-class έγγραφο.
+
+## 6. Entry points & ροή (προσχέδιο → εκτύπωση)
+
+**Ένα `CmrResource` (Filament)** σε nav group «Διακίνηση/Μεταφορά» (μαζί με τα ΔΑ),
+με κοινό **editable form** για τα 24 κουτιά + repeater για `cmr_lines`. Δύο τρόποι
+δημιουργίας, ίδιο form, ίδιο record:
+
+1. **Standalone** — `CmrResource` → «Νέο CMR»: κενή φόρμα, ο χειριστής συμπληρώνει
+   sender/consignee/goods/carrier (αγγλικά). `source = null`.
+2. **Από παραστατικό** — action **«Δημιουργία CMR»** μέσα στο `ViewInvoice` και στο
+   `DeliveryNote` (στις «Ενέργειες»): δημιουργεί `cmr_notes` με `source` = αυτό το
+   έγγραφο, **προ-συμπληρωμένο** (μεταγραφή ΕΛΟΤ-743 από τα ελληνικά στοιχεία +
+   γραμμές), `status='draft'`, και κάνει redirect στο edit form για διορθώσεις.
+
+**Προσχέδιο πριν «ξερά»:** το record μένει `draft` και πλήρως **editable** — ο
+χειριστής διορθώνει ελληνικά→αγγλικά πριν εκτυπώσει. Η «Εκτύπωση CMR» βγάζει το PDF
+οποτεδήποτε (δεν χρειάζεται lock — δεν είναι φορολογικό)· προαιρετικά `status=finalized`
++ `printed=true` ως ένδειξη. Από-edit μετά την εκτύπωση επιτρέπεται (re-print).
+
+## 7. Rendering
 
 Σιβλινγκ του υπάρχοντος ΔΑ PDF — **καμία εμπλοκή myDATA**:
-- `App\Services\Delivery\CmrPdf` (κατά το `DeliveryNotePdf`: DomPDF, A4, ίδιο
-  memory/time guard, ίδιο logo helper).
-- Blade `resources/views/delivery-notes/cmr.blade.php` — **πιστή αναπαραγωγή** της
-  `docs/reference/cmr-template.pdf` (μονή A4, 24 κουτιά, αγγλικά labels). Η geometry/
-  διάταξη κουτιών αντιγράφεται από το reference PDF.
-- Action **«Εκτύπωση CMR»** στο `DeliveryNote` (δίπλα στο ΔΑ PDF), visible μόνο για
-  διασυνοριακά (π.χ. όταν `customer.country`/`delivery` ≠ GR — ή πάντα διαθέσιμο με
-  προειδοποίηση για εσωτερικά).
+- `App\Services\Cmr\CmrPdf` (κατά το `DeliveryNotePdf`: DomPDF, A4, ίδιο memory/time
+  guard, ίδιο logo helper).
+- Blade `resources/views/cmr/pdf.blade.php` — **πιστή αναπαραγωγή** της
+  `docs/reference/cmr-template.pdf` (μονή A4, 24 κουτιά, αγγλικά labels). Η geometry
+  αντιγράφεται από το reference PDF.
 - Βγάζει τα N αντίτυπα (`copies_count`) με σήμανση «Copy 1 – Sender» κ.λπ.
 - **ΟΧΙ** QR/MARK (δεν είναι myDATA έγγραφο).
 
-## 7. Πλάνο (φάσεις)
+## 8. Πλάνο (φάσεις)
 
-- **Φάση 0 — απόφαση/λογιστής (μπλοκάρει):** ποιος `move_purpose` (§8.14) για
-  «αποστολή ιδίου εξοπλισμού για colocation»; υπάρχει ΦΠΑ/ICS συνέπεια; ποια
-  επίσημη αγγλική επωνυμία/διεύθυνση; consignee = «δική μου εταιρεία c/o Telepoint»
-  ή Telepoint; (καθαρά εκτός κώδικα).
-- **Φάση 1 — δεδομένα:** migrations (`companies` αγγλικά, `delivery_note_lines`
-  weight/descr_en, νέος `delivery_note_cmr`), models, `BelongsToCompany`,
-  `TransliterateGreek` helper (ΕΛΟΤ 743).
-- **Φάση 2 — προ-συμπλήρωση + φόρμα:** «Δημιουργία/Επεξεργασία CMR» από ένα ΔΑ
-  (προ-γεμίζει με μεταγραφή· editable). RelationManager ή dedicated page.
-- **Φάση 3 — εκτύπωση:** `CmrPdf` + Blade 24-box + action + αντίτυπα. Tests
-  (render smoke + το mapping + isolation).
-- **Φάση 4 (προαιρ.):** «πακέτο εξαγωγής» — ΔΑ PDF + CMR + (προαιρ.) commercial/
-  proforma invoice για το τελωνείο/μεταφορέα μαζί.
+- **Φάση 0 — απόφαση/λογιστής (μπλοκάρει ΜΟΝΟ το tax σκέλος, όχι το CMR):** για την
+  περίπτωση (Β)/own-gear: ποιος `move_purpose` (§8.14) στο ΔΑ· ΦΠΑ/ICS συνέπεια·
+  επίσημη αγγλική επωνυμία/διεύθυνση· consignee = «η εταιρεία μου c/o Telepoint» ή
+  Telepoint. (Το CMR ως έγγραφο χτίζεται ανεξάρτητα.)
+- **Φάση 1 — δεδομένα:** migrations (`companies` αγγλικά· νέα `cmr_notes` + `cmr_lines`),
+  models (+ `BelongsToCompany`, πολυμορφικό `source`), `TransliterateGreek` helper
+  (ΕΛΟΤ 743), per-company `number` counter.
+- **Φάση 2 — `CmrResource` + form:** list/create/edit (το κοινό editable form +
+  `cmr_lines` repeater). Standalone create λειτουργεί από εδώ.
+- **Φάση 3 — pre-fill από πηγή:** action «Δημιουργία CMR» σε `ViewInvoice` +
+  `DeliveryNote` → δημιουργεί draft με μεταγραφή & redirect στο edit.
+- **Φάση 4 — εκτύπωση:** `CmrPdf` + Blade 24-box + αντίτυπα. Tests (render smoke +
+  mapping + pre-fill/μεταγραφή + isolation).
+- **Φάση 5 (προαιρ.):** «πακέτο εξαγωγής» — source PDF + CMR (+ προαιρ. commercial/
+  proforma invoice) μαζί για τελωνείο/μεταφορέα.
 
-## 8. Ανοιχτά ερωτήματα
+## 9. Ανοιχτά ερωτήματα
 
 1. **Φάση 0 φορολογικά** (λογιστής) — βλ. πάνω. Δεν τα αποφασίζει το ekdosi.
 2. Μεταγραφή: ΕΛΟΤ 743 αρκεί ως default; (ναι, με override παντού).
-3. Πεδίο **βάρους**: το προσθέτουμε σε **όλες** τις γραμμές ΔΑ ή μόνο όταν υπάρχει
-   CMR; (πρόταση: στήλη στις γραμμές, προαιρετική — χρήσιμη και αλλού).
-4. Visibility του action: αυστηρά διασυνοριακά ή πάντα; (πρόταση: πάντα διαθέσιμο,
-   με badge «international» όταν consignee country ≠ GR).
+3. `source` από **Invoice**: το τιμολόγιο δεν έχει split loading/delivery διεύθυνσης
+   (το ΔΑ έχει) → ο χειριστής τις συμπληρώνει· OK για draft.
+4. Numbering: per-company `number` counter αρκεί, ή θέλουμε σειρά/έτος; (πρόταση:
+   απλός counter + ελεύθερο `reference_no`).
 5. Υπογραφές: αρκεί κενό πλαίσιο για χειρόγραφη; (ναι σε πρώτη φάση).
+6. Permission/Shield: νέο `CmrResource` → `shield:generate` + role provisioning.
 
 ---
 
