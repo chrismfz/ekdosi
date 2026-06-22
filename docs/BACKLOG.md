@@ -103,11 +103,11 @@ surfaced in the open-items sections further down.
   κονσόλα-Έξοδα. _(Χειροκίνητη καταχώριση + PDF/scan attachment: ✅ shipped — βλ. «Done recently».)_
 - **§8.13 quantity/units για ΔΑ αγαθών** — οι μονάδες υπάρχουν· τυχόν goods-tenant ειδικά
   (π.χ. `<quantity>` per-line σε goods invoice types) ανοίγουν μόνο αν έρθει goods tenant.
-- **CMR (διεθνής φορτωτική) πάνω στο ΔΑ** — διασυνοριακή αποστολή (π.χ. GR→BG colocation)
-  θέλει CMR πέρα από το Δελτίο Αποστολής. **ΟΧΙ** invoice_type/myDATA — είναι έγγραφο
-  μεταφοράς, αγγλικό, 1:1 με ΔΑ (νέος `delivery_note_cmr` + αγγλικά overrides/μεταγραφή +
-  `CmrPdf`). Πλήρης σχεδίαση + φάσεις + ανοιχτά (φορολογικά = λογιστής):
-  **`docs/cmr-international-delivery.md`**. _DESIGN, not built._
+- **CMR (διεθνής φορτωτική)** — _✅ BUILT (Φάσεις 1–4): αυτοτελές `cmr_notes`/`cmr_lines`,
+  `CmrResource` (standalone) + action «Δημιουργία CMR» σε Τιμολόγιο/ΔΑ (pre-fill + μεταγραφή
+  ΕΛΟΤ-743), editable draft, `CmrPdf` 24-box, αγγλικά στοιχεία εταιρείας._ **Εκκρεμεί Φάση 0**
+  (φορολογικά own-gear: move_purpose/ΦΠΑ = λογιστής, ΔΕΝ μπλοκάρει) + προαιρ. Φάση 5 («πακέτο
+  εξαγωγής»). **`docs/cmr-international-delivery.md`**. _Μετά deploy: `shield:generate`._
 
 ---
 

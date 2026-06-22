@@ -114,6 +114,12 @@
 - **lifecycleHistory** timeline (carrier/recipient events).
 - **Πάροχος vs direct**: έκδοση/ακύρωση μέσω παρόχου· έναρξη/παράδοση/έλεγχος direct
   myDATA. Sandbox round-tripped.
+- **CMR (διεθνής φορτωτική)** — αυτοτελές έγγραφο μεταφοράς (ΟΧΙ myDATA), στα Αγγλικά, για
+  διασυνοριακές αποστολές. `CmrResource` (standalone «Νέο CMR») + action «Δημιουργία CMR» σε
+  Τιμολόγιο/ΔΑ → **προσχέδιο** με μεταγραφή ΕΛΟΤ-743 (ελληνικά→λατινικά), editable πριν την
+  εκτύπωση. Προαιρετική πηγή (Τιμολόγιο | ΔΑ | standalone)· `cmr_notes`/`cmr_lines`, `CmrPdf`
+  (φόρμα 24 κουτιών), per-company counter. Αγγλικά στοιχεία εταιρείας (Sender). Σχεδίαση:
+  `docs/cmr-international-delivery.md`.
 
 ## 6. Πάροχοι e-invoicing & PEPPOL
 - **Δίαυλος αποστολής** per-tenant: `gr-mydata` (απευθείας ΑΑΔΕ), `gr-provider`

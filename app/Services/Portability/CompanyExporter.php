@@ -57,6 +57,7 @@ class CompanyExporter
         'payments',
         'quotes', 'quote_lines', 'quote_mail_logs',
         'expenses', 'expense_lines', 'expense_marks',
+        'cmr_notes', 'cmr_lines',
     ];
 
     /**

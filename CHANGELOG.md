@@ -18,6 +18,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **CMR — διεθνής φορτωτική (αυτοτελές έγγραφο μεταφοράς).** Για διασυνοριακές αποστολές (π.χ.
+  GR→Σόφια colocation) που απαιτούν CMR πέρα από το Δελτίο Αποστολής. **Δεν** είναι παραστατικό
+  myDATA — αυτοτελές, στα **Αγγλικά**, με **προαιρετική** πηγή (Τιμολόγιο | Δελτίο Αποστολής |
+  standalone). Δύο τρόποι: **μενού «CMR» → Νέο** (standalone) ή **«Δημιουργία CMR»** μέσα σε
+  Τιμολόγιο/ΔΑ (προ-συμπληρώνει **προσχέδιο** με μεταγραφή ΕΛΟΤ-743 ελληνικών→λατινικών — ο χειριστής
+  το διορθώνει πριν εκτυπώσει). Νέα `cmr_notes` + `cmr_lines`, `CmrResource`, `CmrPdf` (πιστή φόρμα
+  24 κουτιών), per-company counter (όχι ΑΑ/myDATA). Αγγλικά στοιχεία εταιρείας (`name_en` κ.λπ.) για
+  τον Sender. Πλήρης σχεδίαση: `docs/cmr-international-delivery.md`. _Νέο `CmrResource` → τρέξε
+  `shield:generate` + re-provision ρόλων μετά το deploy._
 - **AI «Βοηθός» — Phase 2b (write actions με operator-confirm).** Δύο εργαλεία που **ΠΡΟΕΤΟΙΜΑΖΟΥΝ**
   (δεν εκτελούν) ενέργειες: **«στείλε ενημερωτικό/καρτέλα»** (`send_customer_statement` — επαφή-aware,
   ίδιοι παραλήπτες με το manual Καρτέλα send) και **«θύμισέ μου / notification»** (`create_reminder`).

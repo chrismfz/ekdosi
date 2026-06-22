@@ -215,6 +215,16 @@ class CompanyForm
                                     ->label('Email address')
                                     ->email()
                                     ->maxLength(255),
+                                Section::make('Αγγλικά στοιχεία (διεθνή έγγραφα — CMR)')
+                                    ->description('Επίσημη λατινική επωνυμία/διεύθυνση για τη φορτωτική CMR (box 1 — Sender). Αν μείνουν κενά, γίνεται αυτόματη μεταγραφή των ελληνικών.')
+                                    ->columns(2)
+                                    ->collapsed()
+                                    ->columnSpanFull()
+                                    ->schema([
+                                        TextInput::make('name_en')->label('Company name (EN)')->maxLength(255)->columnSpanFull(),
+                                        TextInput::make('address_en')->label('Address (EN)')->maxLength(255)->columnSpanFull(),
+                                        TextInput::make('city_en')->label('City (EN)')->maxLength(255),
+                                    ]),
                             ])
                             ->columns(2),
 

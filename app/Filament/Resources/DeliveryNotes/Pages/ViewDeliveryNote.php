@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\DeliveryNotes\Pages;
 
+use App\Filament\Resources\Cmr\CmrResource;
 use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Models\DeliveryNote;
+use App\Services\Cmr\CreateCmrFromSource;
 use App\Services\Delivery\DeliveryLifecycleService;
 use App\Services\Delivery\DeliveryNotePdf;
 use App\Services\Delivery\DeliveryNoteSubmitter;
@@ -46,6 +48,24 @@ class ViewDeliveryNote extends ViewRecord
         $channelLabel = $tenant?->einvoiceChannelLabel() ?? 'myDATA';
 
         return [
+            // «Δημιουργία CMR» — international consignment note for this note's goods
+            // (cross-border). Pre-fills a DRAFT CMR (Greek→Latin) the operator edits
+            // to English, then prints. NOT a myDATA document.
+            Action::make('create_cmr')
+                ->label('Δημιουργία CMR')
+                ->icon('heroicon-o-clipboard-document-list')
+                ->color('gray')
+                ->visible(fn () => auth()->user()?->can('View:CmrNote') ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Δημιουργία CMR από το δελτίο')
+                ->modalDescription('Δημιουργείται ΠΡΟΧΕΙΡΟ CMR στα Αγγλικά (μεταγραφή από τα ελληνικά). Διορθώστε το πριν την εκτύπωση.')
+                ->action(function (DeliveryNote $record) {
+                    $cmr = app(CreateCmrFromSource::class)->fromDeliveryNote($record);
+                    Notification::make()->success()->title('Δημιουργήθηκε προσχέδιο CMR')->send();
+
+                    return redirect(CmrResource::getUrl('edit', ['record' => $cmr]));
+                }),
+
             Action::make('issue')
                 ->label($isProviderChannel ? 'Έκδοση μέσω Παρόχου' : 'Έκδοση (διαβίβαση στο myDATA)')
                 ->icon('heroicon-o-paper-airplane')
