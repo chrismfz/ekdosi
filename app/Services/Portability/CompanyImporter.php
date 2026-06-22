@@ -383,6 +383,13 @@ class CompanyImporter
             $row[$col] = ($old !== null && isset($maps[$sourceTable][$old])) ? $maps[$sourceTable][$old] : null;
         }
 
+        // Keep a polymorphic pair consistent: cmr_notes.source is dropped on
+        // import (the id is nulled above via FK_REWIRES), so null its *_type too —
+        // otherwise the row keeps a stale source_type with a null source_id.
+        if ($table === 'cmr_notes' && ($row['source_id'] ?? null) === null) {
+            $row['source_type'] = null;
+        }
+
         $row['created_at'] = now();
         $row['updated_at'] = now();
 
