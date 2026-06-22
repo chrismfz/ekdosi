@@ -2,6 +2,12 @@
     /** @var \App\Models\CmrNote $cmr */
     $nl2br = fn (?string $s) => nl2br(e((string) $s));
     $money = fn ($v) => $v === null ? '' : number_format((float) $v, 2);
+    $isDraft = $cmr->status === \App\Models\CmrNote::STATUS_DRAFT;
+    $copies = max(1, (int) $cmr->copies_count);
+    // Standard CMR copy set (red/blue/green/black). Beyond 4 → generic «Copy N».
+    $copyLabel = fn (int $i) => $isDraft
+        ? 'DRAFT — not final'
+        : ([1 => 'Copy 1 — Sender', 2 => 'Copy 2 — Consignee', 3 => 'Copy 3 — Carrier', 4 => 'Copy 4 — File'][$i] ?? 'Copy '.$i);
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -32,10 +38,12 @@
     </style>
 </head>
 <body>
+@for ($copy = 1; $copy <= $copies; $copy++)
+    <div @if($copy < $copies) style="page-break-after: always;" @endif>
     <table class="grid" style="margin-bottom:1mm; border:none;">
         <tr style="border:none;">
             <td style="border:none; width:60%;">
-                <span class="copy">{{ $cmr->status === \App\Models\CmrNote::STATUS_DRAFT ? 'DRAFT — not final' : 'Copy 1 — Sender' }}</span>
+                <span class="copy">{{ $copyLabel($copy) }}</span>
             </td>
             <td style="border:none; width:40%;" class="ref">Reference No. {{ $cmr->code() }}</td>
         </tr>
@@ -129,5 +137,7 @@
             <td colspan="2" class="sig"><span class="bx">24 — Signature &amp; stamp of the consignee</span></td>
         </tr>
     </table>
+    </div>
+@endfor
 </body>
 </html>

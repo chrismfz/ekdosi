@@ -17,6 +17,9 @@ class EditCmr extends EditRecord
 {
     protected static string $resource = CmrResource::class;
 
+    // Line repeater edits + the markPrinted side-effect run atomically.
+    protected ?bool $hasDatabaseTransactions = true;
+
     protected function getHeaderActions(): array
     {
         return [
@@ -28,13 +31,7 @@ class EditCmr extends EditRecord
                     /** @var CmrNote $record */
                     $record = $this->getRecord();
                     $bytes = app(CmrPdf::class)->render($record);
-
-                    if ($record->status === CmrNote::STATUS_DRAFT) {
-                        $record->forceFill([
-                            'status' => CmrNote::STATUS_FINALIZED,
-                            'printed' => true,
-                        ])->save();
-                    }
+                    $record->markPrinted();
 
                     return response()->streamDownload(
                         fn () => print ($bytes),

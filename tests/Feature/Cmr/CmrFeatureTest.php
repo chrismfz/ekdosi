@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Cmr;
 
+use App\Filament\Resources\Cmr\Pages\CreateCmr;
+use App\Models\CmrLine;
 use App\Models\CmrNote;
 use App\Models\Company;
 use App\Models\Customer;
@@ -9,10 +11,14 @@ use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
+use App\Models\User;
 use App\Services\Cmr\CmrPdf;
 use App\Services\Cmr\CreateCmrFromSource;
 use App\Support\TransliterateGreek;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class CmrFeatureTest extends TestCase
@@ -142,5 +148,46 @@ class CmrFeatureTest extends TestCase
         $this->assertSame(1, $cmr->number);
         $this->assertSame('CMR-1', $cmr->reference_no);
         $this->assertNotNull($cmr->issued_at);
+    }
+
+    public function test_number_counter_is_independent_per_tenant(): void
+    {
+        $a1 = CmrNote::create(['company_id' => $this->tenant->id, 'consignee_text' => 'A1']);
+
+        $other = Company::create([
+            'name' => 'Other OE', 'slug' => 'cmr-o-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        $b1 = CmrNote::create(['company_id' => $other->id, 'consignee_text' => 'B1']);
+        $a2 = CmrNote::create(['company_id' => $this->tenant->id, 'consignee_text' => 'A2']);
+
+        $this->assertSame(1, $a1->number);
+        $this->assertSame(1, $b1->number); // independent per company
+        $this->assertSame(2, $a2->number);
+    }
+
+    public function test_create_form_stamps_company_id_on_lines(): void
+    {
+        // Exercises the Filament Repeater path — the HasMany create stamps only
+        // cmr_note_id, so CmrLine must back-fill company_id (else NOT NULL crash).
+        Gate::before(fn () => true);
+        $this->actingAs(User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]));
+        Filament::setTenant($this->tenant);
+
+        Livewire::test(CreateCmr::class)
+            ->fillForm([
+                'reference_no' => 'CMR-TEST',
+                'consignee_text' => 'Third party, Sofia, BG',
+                'lines' => [
+                    ['nature_en' => 'DELL Server', 'packages_count' => 1, 'weight_kg' => 12.5],
+                ],
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $cmr = CmrNote::where('company_id', $this->tenant->id)->where('reference_no', 'CMR-TEST')->firstOrFail();
+        $line = CmrLine::where('cmr_note_id', $cmr->id)->firstOrFail();
+        $this->assertSame($this->tenant->id, $line->company_id); // back-filled
+        $this->assertSame('DELL Server', $line->nature_en);
     }
 }

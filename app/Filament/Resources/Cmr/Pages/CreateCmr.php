@@ -16,6 +16,10 @@ class CreateCmr extends CreateRecord
 {
     protected static string $resource = CmrResource::class;
 
+    // Wrap the whole create (the CmrNote::creating counter allocation + the line
+    // repeater) in ONE transaction so the number's lockForUpdate actually holds.
+    protected ?bool $hasDatabaseTransactions = true;
+
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $tenant = Filament::getTenant();

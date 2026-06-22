@@ -69,8 +69,16 @@ class CmrNote extends Model
         // issued_at + reference_no when the caller didn't set them.
         static::creating(function (CmrNote $cmr): void {
             if (empty($cmr->number) && $cmr->company_id) {
+                // lockForUpdate gap-locks this company's range on the
+                // unique(company_id, number) index, serialising concurrent
+                // creates so two don't grab the same number (→ duplicate-key
+                // crash). Requires an enclosing transaction: the service path
+                // wraps one, and the Filament Create/Edit pages enable
+                // hasDatabaseTransactions. Non-fiscal counter, so no gap-free
+                // ΑΑ guarantee is needed — just no collision.
                 $max = static::withoutGlobalScopes()
                     ->where('company_id', $cmr->company_id)
+                    ->lockForUpdate()
                     ->max('number');
                 $cmr->number = (int) $max + 1;
             }
@@ -106,5 +114,18 @@ class CmrNote extends Model
     public function code(): string
     {
         return (string) ($this->reference_no ?: 'CMR-'.$this->number);
+    }
+
+    /**
+     * Mark the CMR as printed (and finalize it if still a draft). Shared by the
+     * print actions so the list and the edit page behave identically. A CMR isn't
+     * fiscal, so this is just a marker — the record stays editable/re-printable.
+     */
+    public function markPrinted(): void
+    {
+        $this->forceFill([
+            'printed' => true,
+            'status' => $this->status === self::STATUS_DRAFT ? self::STATUS_FINALIZED : $this->status,
+        ])->save();
     }
 }

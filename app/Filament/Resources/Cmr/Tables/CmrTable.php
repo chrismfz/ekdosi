@@ -21,11 +21,15 @@ class CmrTable
                 TextColumn::make('reference_no')->label('Reference')->searchable()->sortable(),
                 TextColumn::make('consignee_text')->label('Παραλήπτης')->limit(40)->wrap(),
                 TextColumn::make('source_type')->label('Πηγή')
-                    ->formatStateUsing(fn (?string $state): string => match ($state) {
-                        Invoice::class => 'Τιμολόγιο',
-                        DeliveryNote::class => 'Δελτίο Αποστ.',
-                        default => 'Standalone',
-                    })
+                    // Check source_id too: an imported CMR keeps source_type but its
+                    // source_id is nulled on restore → that's a Standalone now.
+                    ->formatStateUsing(fn (?string $state, CmrNote $record): string => $record->source_id === null
+                        ? 'Standalone'
+                        : match ($state) {
+                            Invoice::class => 'Τιμολόγιο',
+                            DeliveryNote::class => 'Δελτίο Αποστ.',
+                            default => 'Standalone',
+                        })
                     ->badge(),
                 TextColumn::make('status')->label('Κατάσταση')->badge()
                     ->color(fn (string $state): string => $state === CmrNote::STATUS_FINALIZED ? 'success' : 'gray'),
@@ -37,11 +41,16 @@ class CmrTable
                     ->label('PDF')
                     ->icon('heroicon-o-document-arrow-down')
                     ->authorize(fn (CmrNote $record) => auth()->user()?->can('view', $record) ?? false)
-                    ->action(fn (CmrNote $record) => response()->streamDownload(
-                        fn () => print (app(CmrPdf::class)->render($record)),
-                        'cmr-'.$record->code().'.pdf',
-                        ['Content-Type' => 'application/pdf'],
-                    )),
+                    ->action(function (CmrNote $record) {
+                        $bytes = app(CmrPdf::class)->render($record);
+                        $record->markPrinted();
+
+                        return response()->streamDownload(
+                            fn () => print ($bytes),
+                            'cmr-'.$record->code().'.pdf',
+                            ['Content-Type' => 'application/pdf'],
+                        );
+                    }),
                 EditAction::make(),
                 DeleteAction::make(),
             ]);

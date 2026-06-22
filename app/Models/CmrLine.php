@@ -14,6 +14,20 @@ class CmrLine extends Model
 {
     use BelongsToCompany;
 
+    protected static function booted(): void
+    {
+        // Auto-stamp company_id from the parent CMR. Filament's Repeater
+        // (->relationship('lines')) creates lines via the HasMany, stamping only
+        // cmr_note_id — without this, every form save hits the NOT NULL
+        // constraint. Mirrors InvoiceLine. Cheap (FK-indexed); only when empty.
+        static::saving(function (self $line): void {
+            if (empty($line->company_id) && $line->cmr_note_id) {
+                $line->company_id = $line->cmrNote?->company_id
+                    ?? CmrNote::withoutGlobalScopes()->whereKey($line->cmr_note_id)->value('company_id');
+            }
+        });
+    }
+
     protected $fillable = [
         'company_id', 'cmr_note_id',
         'marks_numbers', 'packages_count', 'packing_method', 'nature_en',
