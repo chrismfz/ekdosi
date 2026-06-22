@@ -101,6 +101,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   Excel». Self-contained (DejaVu Sans, ελληνικά) μέσω `barryvdh/laravel-dompdf` — κανένα build.
 
 ### Changed
+- **CMR — οδηγίες συμπλήρωσης (helper + βοηθητικά κείμενα).** Η φόρμα CMR απέκτησε επεξηγηματικό
+  πάνελ («Τι είναι το CMR & πώς το συμπληρώνω») + inline helperText σε ΚΑΘΕ πεδίο (ποιο κουτί 1–24,
+  τι γράφω, στα Αγγλικά) — κατά το πρότυπο του helper της Ψηφιακής Διακίνησης. Όλα τα κείμενα σε ένα
+  σημείο: `App\Support\Cmr\CmrGuidance`.
 - **Καρτέλα — ομαδοποίηση header actions.** Τα ~9 κουμπιά του header μαζεύτηκαν σε λίγα dropdowns:
   **Νέο Παραστατικό** (μόνο του), **«Εισπράξεις / Πληρωμές»** (Είσπραξη/Πληρωμή έναντι/Χειροκίνητη
   κατανομή/Χρήση πίστωσης/Επιστροφή), **«Εξαγωγή / Αποστολή»** (PDF/CSV/email — τώρα φαίνεται καθαρά,
