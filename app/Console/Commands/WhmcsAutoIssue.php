@@ -285,6 +285,15 @@ class WhmcsAutoIssue extends Command
      */
     private function chooseType(PendingWhmcsInvoice $row, InvoiceType $invoiceType, ?InvoiceType $receiptType): array
     {
+        // A WHMCS consolidated/mass-pay invoice (lines reference other invoices,
+        // no VAT of its own) is never auto-issued — it's a payment-grouping
+        // artefact, not a sale. New rows are already ingested as 'held'; this
+        // guards any pre-existing 'pending_review' row (staged before the
+        // detector landed) from auto-filing 0% gross to AADE.
+        if ($row->isConsolidatedPayment()) {
+            return [null, PendingWhmcsInvoice::consolidatedPaymentReason($row->consolidatedPaymentRefs())];
+        }
+
         if ($row->third_party_state === PendingWhmcsInvoice::TP_SINGLE) {
             $isReceipt = $row->singleThirdPartyReceipt();
             if ($isReceipt === null) {

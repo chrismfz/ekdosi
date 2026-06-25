@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
 use App\Models\Observers\PendingWhmcsInvoiceObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -44,7 +43,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class PendingWhmcsInvoice extends Model
 {
     use BelongsToCompany;
-
     use HasFactory;
 
     /**
@@ -375,6 +373,160 @@ class PendingWhmcsInvoice extends Model
         $hasAfm = filled($this->customer?->afm) || filled($this->whmcsAfm());
 
         return ! $hasAfm;
+    }
+
+    /**
+     * WHMCS "mass payment" / consolidated-invoice detection.
+     *
+     * When a client pays several open invoices at once, WHMCS generates a NEW
+     * invoice whose every line item is a REFERENCE to another invoice
+     * (tblinvoiceitems.type='Invoice', relid=<source invoice id>; line text
+     * "Invoice #31690" / localised "Αρ. Λογαριασμού #31690"). Such an invoice
+     * carries NO VAT of its own — the tax was already charged on the source
+     * invoices — so WHMCS reports it at 0% and its line amounts are the source
+     * invoices' GROSS totals.
+     *
+     * It is a payment-grouping artefact, NOT a sale. Issuing it would (a)
+     * double-count the source invoices (which are themselves staged in this
+     * inbox) and (b) file their gross at 0% ΦΠΑ — wrong, and with άμεση
+     * τιμολόγηση ON it would even auto-file to AADE. So we detect it and refuse
+     * to issue it; the source invoices are the real παραστατικά.
+     *
+     * Returns null when this is NOT a consolidated payment; otherwise the
+     * referenced WHMCS invoice ids (possibly empty if the ids can't be parsed
+     * but the shape is unmistakably mass-pay). Conservative: EVERY non-empty
+     * line must be an invoice reference, so a normal invoice that merely
+     * contains one stray reference line is never blocked wholesale.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<int, int>|null
+     */
+    public static function detectConsolidatedRefs(array $payload): ?array
+    {
+        $items = $payload['items']['item'] ?? null;
+        if (! is_array($items) || $items === []) {
+            return null;
+        }
+        if (! array_is_list($items)) {
+            $items = [$items];   // WHMCS returns a bare object for a single line
+        }
+
+        // WHMCS pads invoices with empty-description rows — keep only real lines.
+        $lines = [];
+        foreach ($items as $item) {
+            if (is_array($item) && trim((string) ($item['description'] ?? '')) !== '') {
+                $lines[] = $item;
+            }
+        }
+        if ($lines === []) {
+            return null;
+        }
+
+        // Prefer the authoritative per-line `type` when the payload carries it
+        // (native GetInvoice). Only fall back to the description/taxed heuristic
+        // when NO line has a type at all (e.g. a slimmed bridge feed).
+        $hasTypeInfo = false;
+        foreach ($lines as $l) {
+            if (trim((string) ($l['type'] ?? '')) !== '') {
+                $hasTypeInfo = true;
+                break;
+            }
+        }
+
+        $refs = [];
+        foreach ($lines as $l) {
+            $ref = $hasTypeInfo
+                ? self::massPayRefByType($l)
+                : self::massPayRefByText($l);
+            if ($ref === null) {
+                return null;   // a real (non-reference) line → not a pure mass-pay
+            }
+            $refs[] = $ref;
+        }
+
+        return array_values(array_unique(array_filter($refs, static fn (int $r): bool => $r > 0)));
+    }
+
+    public function isConsolidatedPayment(): bool
+    {
+        return self::detectConsolidatedRefs($this->payload ?? []) !== null;
+    }
+
+    /** @return array<int, int> the source WHMCS invoice ids ([] if not consolidated / unparseable). */
+    public function consolidatedPaymentRefs(): array
+    {
+        return self::detectConsolidatedRefs($this->payload ?? []) ?? [];
+    }
+
+    /**
+     * Operator-facing reason a consolidated WHMCS payment is parked (held)
+     * instead of issued — lists the source invoices so the operator knows WHICH
+     * παραστατικά to file instead. Shared by the ingestor's hold, auto-issue's
+     * skip, and the inbox draft guard so the wording can't drift.
+     *
+     * @param  array<int, int>  $refs
+     */
+    public static function consolidatedPaymentReason(array $refs): string
+    {
+        $list = $refs !== []
+            ? ' Συγκεντρώνει τα WHMCS #'.implode(', #', $refs).'.'
+            : '';
+
+        return 'Συγκεντρωτικό τιμολόγιο πληρωμής WHMCS (mass-pay) — δεν αντιστοιχεί σε πώληση και δεν έχει δικό του ΦΠΑ.'
+            .$list.' Έκδοσε τα επιμέρους παραστατικά (έρχονται ξεχωριστά στο inbox), όχι αυτό.';
+    }
+
+    /**
+     * A line is a mass-pay reference when WHMCS typed it `Invoice` — the marker
+     * it puts on every line of a consolidated payment — carrying relid=<source
+     * invoice id>. Returns the source id, 0 when typed Invoice but the id is
+     * missing, or null for an ordinary product/service line.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    private static function massPayRefByType(array $line): ?int
+    {
+        if (strtolower(trim((string) ($line['type'] ?? ''))) !== 'invoice') {
+            return null;
+        }
+        $relid = (int) ($line['relid'] ?? 0);
+
+        return $relid > 0 ? $relid : (self::invoiceRefFromText((string) ($line['description'] ?? '')) ?? 0);
+    }
+
+    /**
+     * Heuristic fallback for payloads with no per-line type: a reference line is
+     * untaxed AND its text reads "Invoice #N" / "Αρ. Λογαριασμού #N". A taxed
+     * line or unrecognised text → null (treated as a real sale, so a genuine
+     * 0%/exempt invoice is never mistaken for a mass-pay).
+     *
+     * @param  array<string, mixed>  $line
+     */
+    private static function massPayRefByText(array $line): ?int
+    {
+        if ((int) ($line['taxed'] ?? 1) !== 0) {
+            return null;
+        }
+
+        return self::invoiceRefFromText((string) ($line['description'] ?? ''));
+    }
+
+    /**
+     * Parse the source invoice id out of a WHMCS mass-pay line description.
+     * Requires an invoice-ish keyword (EN «invoice» / GR «τιμολ» / «λογαρ») AND
+     * a #<number> so a product description that merely contains a number can't
+     * false-match. Returns null when the text isn't an invoice reference.
+     */
+    private static function invoiceRefFromText(string $desc): ?int
+    {
+        if (! preg_match('/invoice|τιμολ|λογαρ/iu', $desc)) {
+            return null;
+        }
+        if (preg_match('/#\s*(\d+)/', $desc, $m)) {
+            return (int) $m[1];
+        }
+
+        return null;
     }
 
     /**

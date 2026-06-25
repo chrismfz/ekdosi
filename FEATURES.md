@@ -200,6 +200,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (ΑΦΜ/wantsinvoice ή route is_receipt)· `whmcs_default_invoice_type_id` + `whmcs_default_receipt_type_id`·
   ό,τι δεν τυποποιείται με ασφάλεια ΜΕΝΕΙ στο Inbox (ποτέ λάθος τύπος).
 - **Plugin-API consolidation** (`resolve.php`) + Bridge logs tab + `whmcs:use-bridge`.
+- **Φύλαξη από «mass payment»**: συγκεντρωτικά τιμολόγια πληρωμής του WHMCS (γραμμές-αναφορές σε
+  άλλα τιμολόγια, χωρίς δικό τους ΦΠΑ) εντοπίζονται (`detectConsolidatedRefs`) και παρκάρονται «Σε
+  αναμονή» — ποτέ δεν εκδίδονται (ούτε χειροκίνητα ούτε με άμεση τιμολόγηση), ώστε να μη διπλομετρηθεί
+  τζίρος / δηλωθεί μικτό με 0% ΦΠΑ· εκδίδονται τα επιμέρους παραστατικά.
 
 ## 12. Βιβλία / Λογιστικά / Αναφορές
 - **Βιβλίο Εσόδων-Εξόδων** (`LedgerBook`) — συντόμευση περιόδου/προσαρμογή → έσοδα/έξοδα ανά κατηγορία
