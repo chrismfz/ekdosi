@@ -92,8 +92,15 @@ class WhmcsInvoiceIngestor
         unset($whmcsInvoicePayload['third_party']);
         $tp = $this->thirdPartyDecision($tenant, $invoiceId, $embeddedRouting);
 
+        // A WHMCS "mass payment" / consolidated invoice (every line references
+        // another invoice, no VAT of its own) is a payment-grouping artefact,
+        // not a sale — park it HELD so neither the operator nor άμεση
+        // τιμολόγηση can issue it (the source invoices are the real
+        // παραστατικά). Detection reads only the payload → computed here.
+        $consolidatedRefs = PendingWhmcsInvoice::detectConsolidatedRefs($whmcsInvoicePayload);
+
         $result = DB::transaction(function () use (
-            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp
+            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs
         ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
@@ -104,7 +111,15 @@ class WhmcsInvoiceIngestor
             // Third-party single-contact billing overrides the standard
             // reseller match; otherwise keep the matched WHMCS client.
             $customerId = $tp['customer_id'] ?? $match->customer?->id;
-            $createStatus = $tp['hold']
+
+            // A consolidated payment is held regardless of third-party routing —
+            // it's not a billable document at all. Its hold reason wins over a
+            // third-party note (and surfaces in the inbox via hold_reason).
+            $isConsolidated = $consolidatedRefs !== null;
+            $consolidatedReason = $isConsolidated
+                ? PendingWhmcsInvoice::consolidatedPaymentReason($consolidatedRefs)
+                : null;
+            $createStatus = ($isConsolidated || $tp['hold'])
                 ? PendingWhmcsInvoice::STATUS_HELD
                 : PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
 
@@ -121,7 +136,8 @@ class WhmcsInvoiceIngestor
                         'third_party_state' => $tp['state'],
                         'third_party_resolution' => $tp['resolution'],
                         'status' => $createStatus,
-                        'notes' => $tp['note'],
+                        'notes' => $consolidatedReason ?? $tp['note'],
+                        'hold_reason' => $consolidatedReason,
                     ]);
 
                     return new IngestionResult(row: $row, created: true, auditPreserved: false);
@@ -182,7 +198,11 @@ class WhmcsInvoiceIngestor
                 'third_party_state' => $tp['state'],
                 'third_party_resolution' => $tp['resolution'],
             ];
-            if ($tp['hold']) {
+            if ($isConsolidated) {
+                $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
+                $update['notes'] = $consolidatedReason;
+                $update['hold_reason'] = $consolidatedReason;
+            } elseif ($tp['hold']) {
                 $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
                 $update['notes'] = $tp['note'];
             }

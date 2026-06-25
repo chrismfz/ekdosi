@@ -977,6 +977,21 @@ class WhmcsInboxTable
                     ->color('success'),
             ])
             ->action(function (PendingWhmcsInvoice $r, array $data, array $arguments, Component $livewire) {
+                // Refuse a WHMCS consolidated/mass-pay invoice (lines reference
+                // other invoices, no VAT of its own): issuing it would double-count
+                // the source invoices and file their gross at 0% ΦΠΑ. New rows are
+                // held at ingest; this guards a re-staged / legacy pending row.
+                if ($r->isConsolidatedPayment()) {
+                    Notification::make()
+                        ->title('Συγκεντρωτικό τιμολόγιο πληρωμής (mass-pay)')
+                        ->body(PendingWhmcsInvoice::consolidatedPaymentReason($r->consolidatedPaymentRefs()))
+                        ->danger()
+                        ->persistent()
+                        ->send();
+
+                    return;
+                }
+
                 $tenant = Filament::getTenant();
                 // withTrashed so a soft-deleted matched customer still resolves
                 // (the Select renders it with a "(διαγραμμένος)" suffix); refuse
