@@ -120,6 +120,13 @@ class WhmcsConsolidatedInvoiceTest extends TestCase
         $this->assertStringContainsString('mass-pay', $row->hold_reason);
         $this->assertStringContainsString('#31690', $row->hold_reason);
         $this->assertTrue($row->isConsolidatedPayment());
+        // The reason runs ~216+ chars (Greek) — must persist IN FULL (the
+        // hold_reason column is TEXT, not the original varchar(200) that would
+        // truncate / throw on strict MariaDB). Round-trip the whole string.
+        $this->assertSame(
+            PendingWhmcsInvoice::consolidatedPaymentReason([31690, 31684]),
+            $row->fresh()->hold_reason,
+        );
     }
 
     public function test_auto_issue_refuses_a_consolidated_pending_row(): void

@@ -26,6 +26,9 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   (`PendingWhmcsInvoice::detectConsolidatedRefs`) σε **3 σημεία**: το ingest το παρκάρει «Σε αναμονή»
   με λόγο που αναφέρει τα επιμέρους #, το `whmcs:auto-issue` αρνείται να το εκδώσει, και το χειροκίνητο
   «Δημιουργία Παραστατικού» το μπλοκάρει με σαφές μήνυμα.
+- **`pending_whmcs_invoices.hold_reason` → TEXT** (από `varchar(200)`): το αναλυτικό ελληνικό
+  μήνυμα του mass-pay hold ξεπερνά τα 200 chars — σε strict-mode MariaDB θα έριχνε «Data too long»
+  μέσα στο ingest transaction (rollback/500). Τώρα χωράει χωρίς όριο.
 
 ### Added
 - **CMR — διεθνής φορτωτική (αυτοτελές έγγραφο μεταφοράς).** Για διασυνοριακές αποστολές (π.χ.
