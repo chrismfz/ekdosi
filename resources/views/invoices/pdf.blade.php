@@ -96,6 +96,10 @@
         table.balance .value { text-align: right; }
         table.balance .new td { border-top: 0.5pt solid #d1d5db; font-weight: bold; }
 
+        /* Payment accounts list (several IBANs) + total-quantity line */
+        .bank-row { padding-left: 3mm; font-size: 8.5pt; color: #374151; }
+        .qty-total { text-align: right; font-size: 8.5pt; color: #374151; margin-top: 1.5mm; }
+
         /* Notes / payment terms */
         .notes-box { margin-top: 5mm; padding: 3mm; background: #f9fafb; border-left: 3pt solid #6b7280; font-size: 9pt; }
         .notes-box h3 { margin: 0 0 1mm 0; font-size: 8.5pt; text-transform: uppercase; color: #6b7280; letter-spacing: 0.3pt; }
@@ -198,8 +202,11 @@
             @if($invoice->paymentMethod && ! $isDelivery)
                 <div class="meta-row"><span class="meta-label">{{ $L('payment_method') }}:</span> {{ $invoice->paymentMethod->description }}</div>
             @endif
-            @if(($invoice->bankAccount ?? null) && ! $isDelivery)
-                <div class="meta-row"><span class="meta-label">{{ $L('deposit_account') }}:</span> {{ $invoice->bankAccount->bank_name }}@if($invoice->bankAccount->iban) — {{ $invoice->bankAccount->iban }}@endif</div>
+            @if(! $isDelivery && ($bankAccounts ?? collect())->isNotEmpty())
+                <div class="meta-row"><span class="meta-label">{{ $L('payment_accounts') }}:</span></div>
+                @foreach($bankAccounts as $acc)
+                    <div class="meta-row bank-row">{{ $acc->bank_name }}@if($acc->iban) — {{ $acc->iban }}@endif@if($acc->swift) ({{ $acc->swift }})@endif</div>
+                @endforeach
             @endif
             @if($invoice->deliveryMethod ?? null)
                 <div class="meta-row"><span class="meta-label">{{ $L('shipping_method') }}:</span> {{ $invoice->deliveryMethod->description }}</div>
@@ -262,6 +269,12 @@
         </tbody>
     </table>
 </div>
+
+{{-- Συνολική ποσότητα (άθροισμα τεμαχίων όλων των γραμμών) — shown for both
+     invoices and the delivery variant, like a standard Greek τιμολόγιο. --}}
+@if($invoice->lines->isNotEmpty())
+    <div class="qty-total">{{ $L('total_quantity') }}: <strong>{{ number_format((float) ($totals['totalQty'] ?? 0), 3, ',', '.') }}</strong></div>
+@endif
 
 {{-- ====================== Totals (skipped for delivery notes) ====================== --}}
 @if(! $isDelivery)

@@ -38,6 +38,10 @@ class BankAccountsTable
                     ->label('Ενεργός')
                     ->boolean(),
 
+                IconColumn::make('show_on_invoices')
+                    ->label('Στα τιμολόγια')
+                    ->boolean(),
+
                 TextColumn::make('deleted_at')
                     ->dateTime()
                     ->sortable()

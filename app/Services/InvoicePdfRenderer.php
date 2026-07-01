@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\BankAccount;
+use App\Models\Company;
 use App\Models\Invoice;
 use App\Support\MyData\QrImage;
 use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
+use League\Flysystem\FilesystemException;
 
 /**
  * Renders an invoice to PDF bytes via DomPDF + the polished Blade
@@ -49,8 +52,48 @@ class InvoicePdfRenderer
 
     public function render(Invoice $invoice): string
     {
+        $previousMemory = ini_get('memory_limit');
+        $previousTime = ini_get('max_execution_time');
+
+        try {
+            // DomPDF reads ini at render time, not at load-view time —
+            // so the elevated limits cover the whole pipeline (Blade
+            // compile + DomPDF layout + PDF emit).
+            @ini_set('memory_limit', self::RENDER_MEMORY_LIMIT);
+            @set_time_limit(self::RENDER_TIME_LIMIT_SECONDS);
+
+            return Pdf::loadView('invoices.pdf', $this->viewData($invoice))
+                ->setPaper('A4', 'portrait')
+                ->output();
+        } finally {
+            // Restore previous limits so a long-lived FPM worker
+            // doesn't carry the elevated values into the next request.
+            @ini_set('memory_limit', $previousMemory);
+            @set_time_limit((int) $previousTime);
+        }
+    }
+
+    /**
+     * Render the invoice template to HTML (no DomPDF) — the same view data the
+     * PDF uses. For tests to assert printed content without parsing PDF bytes.
+     * NOT for the production render path: it skips the memory/time guard that
+     * render() applies for the DomPDF layout pass.
+     */
+    public function renderHtml(Invoice $invoice): string
+    {
+        return view('invoices.pdf', $this->viewData($invoice))->render();
+    }
+
+    /**
+     * The full data array the invoice template needs. Shared by render() (PDF)
+     * and renderHtml() (tests) so they can't drift.
+     *
+     * @return array<string, mixed>
+     */
+    public function viewData(Invoice $invoice): array
+    {
         $invoice->loadMissing([
-            'lines', 'invoiceType', 'customer', 'company', 'paymentMethod',
+            'lines', 'invoiceType', 'customer', 'company', 'paymentMethod', 'bankAccount',
             // For the «Σχετικά παραστατικά» block (credit-note / delivery links).
             // Only ISSUED credit notes (local_status active) — never a not-yet-issued
             // draft, which would assert a reversal on the customer PDF before it
@@ -73,36 +116,25 @@ class InvoicePdfRenderer
             $invoice->loadMissing('distributionAim');
         }
 
-        $qrDataUri   = $invoice->mydata_url ? $this->renderQrDataUri($invoice->mydata_url) : null;
-        $logoDataUri = $this->loadLogoDataUri($invoice->company);
-
-        $previousMemory = ini_get('memory_limit');
-        $previousTime   = ini_get('max_execution_time');
-
-        try {
-            // DomPDF reads ini at render time, not at load-view time —
-            // so the elevated limits cover the whole pipeline (Blade
-            // compile + DomPDF layout + PDF emit).
-            @ini_set('memory_limit', self::RENDER_MEMORY_LIMIT);
-            @set_time_limit(self::RENDER_TIME_LIMIT_SECONDS);
-
-            return Pdf::loadView('invoices.pdf', [
-                'invoice'     => $invoice,
-                'tenant'      => $invoice->company,
-                'qrDataUri'   => $qrDataUri,
-                'logoDataUri' => $logoDataUri,
-                'totals'      => $this->totalsView($invoice),
-                'customerBalance' => $this->customerBalanceView($invoice),
-                'L'           => PdfLabels::for(PdfLabels::resolveLanguage($invoice->language, $invoice->country)),
-            ])
-                ->setPaper('A4', 'portrait')
-                ->output();
-        } finally {
-            // Restore previous limits so a long-lived FPM worker
-            // doesn't carry the elevated values into the next request.
-            @ini_set('memory_limit', $previousMemory);
-            @set_time_limit((int) $previousTime);
+        // All the tenant's payment accounts to print (like a Greek τιμολόγιο with
+        // several IBANs) — the customer pays via any. Always include THIS invoice's
+        // explicitly-linked account too, even if it's hidden/inactive tenant-wide:
+        // a per-invoice choice must not be silently dropped by the global flag.
+        $bankAccounts = BankAccount::invoiceAccounts($invoice->company_id);
+        if ($invoice->bankAccount && ! $bankAccounts->contains('id', $invoice->bankAccount->id)) {
+            $bankAccounts = $bankAccounts->push($invoice->bankAccount)->values();
         }
+
+        return [
+            'invoice' => $invoice,
+            'tenant' => $invoice->company,
+            'qrDataUri' => $invoice->mydata_url ? $this->renderQrDataUri($invoice->mydata_url) : null,
+            'logoDataUri' => $this->loadLogoDataUri($invoice->company),
+            'totals' => $this->totalsView($invoice),
+            'customerBalance' => $this->customerBalanceView($invoice),
+            'bankAccounts' => $bankAccounts,
+            'L' => PdfLabels::for(PdfLabels::resolveLanguage($invoice->language, $invoice->country)),
+        ];
     }
 
     /**
@@ -131,7 +163,7 @@ class InvoicePdfRenderer
      * JPG, SVG (DomPDF only reads raster, so SVG would render as a
      * broken image; we warn at upload time instead of crashing here).
      */
-    private function loadLogoDataUri(?\App\Models\Company $tenant): ?string
+    private function loadLogoDataUri(?Company $tenant): ?string
     {
         if (! $tenant || empty($tenant->logo_path)) {
             return null;
@@ -152,7 +184,7 @@ class InvoicePdfRenderer
             }
 
             $bytes = $disk->get($tenant->logo_path);
-        } catch (\League\Flysystem\FilesystemException $e) {
+        } catch (FilesystemException $e) {
             return null;
         } catch (\Throwable $e) {
             // Belt-and-suspenders: any other unexpected exception from
@@ -181,20 +213,22 @@ class InvoicePdfRenderer
         $breakdown = InvoiceVatBreakdown::for($invoice);
 
         return [
-            'rows'       => $breakdown->rows,
-            'totalNet'   => $breakdown->totalNet(),
-            'totalVat'   => $breakdown->totalVat(),
+            'rows' => $breakdown->rows,
+            'totalNet' => $breakdown->totalNet(),
+            'totalVat' => $breakdown->totalVat(),
             'totalGross' => $breakdown->totalGross(),
             // Additional taxes (myDATA taxesTotals) surfaced so the «Πληρωτέο» on
             // the PDF == the collectible (and the AADE gross). Withholding is shown
             // as a reduction ONLY when it actually reduces the gross (§8.4 8/9/10
             // are informational).
-            'fees'       => (float) ($invoice->fees_amount ?? 0),
-            'stamp'      => (float) ($invoice->stamp_duty_amount ?? 0),
-            'other'      => (float) ($invoice->other_taxes_amount ?? 0),
+            'fees' => (float) ($invoice->fees_amount ?? 0),
+            'stamp' => (float) ($invoice->stamp_duty_amount ?? 0),
+            'other' => (float) ($invoice->other_taxes_amount ?? 0),
             'deductions' => (float) ($invoice->deductions_amount ?? 0),
-            'withhold'   => $invoice->withholdingReducesGross() ? (float) ($invoice->withhold_amount ?? 0) : 0.0,
-            'payable'    => round($breakdown->totalGross() + $invoice->additionalTaxAdjustment(), 2),
+            'withhold' => $invoice->withholdingReducesGross() ? (float) ($invoice->withhold_amount ?? 0) : 0.0,
+            'payable' => round($breakdown->totalGross() + $invoice->additionalTaxAdjustment(), 2),
+            // Σύνολο τεμαχίων — the «ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ» a Greek τιμολόγιο shows.
+            'totalQty' => (float) $invoice->lines->sum(fn ($l) => (float) $l->qty),
         ];
     }
 
@@ -226,8 +260,8 @@ class InvoicePdfRenderer
 
         return [
             'previous' => round($new - $current, 2),
-            'current'  => $current,
-            'new'      => $new,
+            'current' => $current,
+            'new' => $new,
         ];
     }
 }

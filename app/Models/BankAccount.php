@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,6 +27,7 @@ class BankAccount extends Model
         'account_name',
         'swift',
         'is_active',
+        'show_on_invoices',
         'notes',
     ];
 
@@ -33,7 +35,29 @@ class BankAccount extends Model
     {
         return [
             'is_active' => 'boolean',
+            'show_on_invoices' => 'boolean',
         ];
+    }
+
+    /**
+     * The tenant's accounts to PRINT on an invoice PDF — active + flagged for
+     * invoices, ordered by bank name. Explicit company_id (safe under the no-op
+     * global scope on the CLI/queue render path).
+     *
+     * @return Collection<int, BankAccount>
+     */
+    public static function invoiceAccounts(?int $companyId): Collection
+    {
+        if ($companyId === null) {
+            return new Collection;
+        }
+
+        return static::query()
+            ->where('company_id', $companyId)
+            ->where('is_active', true)
+            ->where('show_on_invoices', true)
+            ->orderBy('bank_name')
+            ->get();
     }
 
     public function company(): BelongsTo
