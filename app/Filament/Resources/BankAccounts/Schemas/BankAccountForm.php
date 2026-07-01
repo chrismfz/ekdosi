@@ -37,6 +37,11 @@ class BankAccountForm
                     ->default(true)
                     ->helperText('Μόνο οι ενεργοί εμφανίζονται στις φόρμες πληρωμής & στα παραστατικά.'),
 
+                Toggle::make('show_on_invoices')
+                    ->label('Εμφάνιση στα τιμολόγια')
+                    ->default(true)
+                    ->helperText('Αν ενεργό, ο λογαριασμός (IBAN) τυπώνεται στο PDF των παραστατικών ως τρόπος πληρωμής. Κλείσ\' το για λογαριασμούς που δεν θες να βλέπει ο πελάτης.'),
+
                 Textarea::make('notes')
                     ->label('Σημειώσεις')
                     ->rows(2)

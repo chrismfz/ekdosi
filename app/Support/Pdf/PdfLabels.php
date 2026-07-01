@@ -39,6 +39,8 @@ class PdfLabels
         'doc_terms' => ['Όροι Παραστατικού', 'Document terms'],
         'payment_method' => ['Τρόπος πληρωμής', 'Payment method'],
         'deposit_account' => ['Λογαριασμός κατάθεσης', 'Deposit account'],
+        'payment_accounts' => ['Λογαριασμοί πληρωμής', 'Payment accounts'],
+        'total_quantity' => ['Συνολική ποσότητα', 'Total quantity'],
         'shipping_method' => ['Τρόπος αποστολής', 'Shipping method'],
         'movement_purpose' => ['Σκοπός διακίνησης', 'Movement purpose'],
         'mydata_type' => ['myDATA τύπος', 'myDATA type'],
