@@ -76,6 +76,8 @@ class InvoicePdfRenderer
     /**
      * Render the invoice template to HTML (no DomPDF) — the same view data the
      * PDF uses. For tests to assert printed content without parsing PDF bytes.
+     * NOT for the production render path: it skips the memory/time guard that
+     * render() applies for the DomPDF layout pass.
      */
     public function renderHtml(Invoice $invoice): string
     {
@@ -91,7 +93,7 @@ class InvoicePdfRenderer
     public function viewData(Invoice $invoice): array
     {
         $invoice->loadMissing([
-            'lines', 'invoiceType', 'customer', 'company', 'paymentMethod',
+            'lines', 'invoiceType', 'customer', 'company', 'paymentMethod', 'bankAccount',
             // For the «Σχετικά παραστατικά» block (credit-note / delivery links).
             // Only ISSUED credit notes (local_status active) — never a not-yet-issued
             // draft, which would assert a reversal on the customer PDF before it
@@ -114,6 +116,15 @@ class InvoicePdfRenderer
             $invoice->loadMissing('distributionAim');
         }
 
+        // All the tenant's payment accounts to print (like a Greek τιμολόγιο with
+        // several IBANs) — the customer pays via any. Always include THIS invoice's
+        // explicitly-linked account too, even if it's hidden/inactive tenant-wide:
+        // a per-invoice choice must not be silently dropped by the global flag.
+        $bankAccounts = BankAccount::invoiceAccounts($invoice->company_id);
+        if ($invoice->bankAccount && ! $bankAccounts->contains('id', $invoice->bankAccount->id)) {
+            $bankAccounts = $bankAccounts->push($invoice->bankAccount)->values();
+        }
+
         return [
             'invoice' => $invoice,
             'tenant' => $invoice->company,
@@ -121,9 +132,7 @@ class InvoicePdfRenderer
             'logoDataUri' => $this->loadLogoDataUri($invoice->company),
             'totals' => $this->totalsView($invoice),
             'customerBalance' => $this->customerBalanceView($invoice),
-            // All the tenant's payment accounts to print (like a Greek τιμολόγιο
-            // with several IBANs) — the customer pays via any.
-            'bankAccounts' => BankAccount::invoiceAccounts($invoice->company_id),
+            'bankAccounts' => $bankAccounts,
             'L' => PdfLabels::for(PdfLabels::resolveLanguage($invoice->language, $invoice->country)),
         ];
     }

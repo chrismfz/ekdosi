@@ -71,4 +71,27 @@ class InvoicePdfBankAccountsTest extends TestCase
         $this->assertStringContainsString('Συνολική ποσότητα', $html);
         $this->assertStringContainsString('5,000', $html);
     }
+
+    public function test_invoices_own_linked_account_prints_even_if_hidden_tenant_wide(): void
+    {
+        $tenant = $this->tenant();
+        $type = InvoiceType::create(['company_id' => $tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1]);
+        $pm = PaymentMethod::create(['company_id' => $tenant->id, 'description' => 'Κατάθεση', 'due_days' => 0]);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'Πελάτης']);
+
+        // Hidden tenant-wide, but explicitly linked to THIS invoice → must still print.
+        $linked = BankAccount::create(['company_id' => $tenant->id, 'bank_name' => 'Special', 'iban' => 'GR5500005555', 'is_active' => true, 'show_on_invoices' => false]);
+
+        $inv = Invoice::create([
+            'company_id' => $tenant->id, 'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
+            'payment_method_id' => $pm->id, 'bank_account_id' => $linked->id,
+            'code' => 1, 'invcode' => 'TPY1', 'issued_at' => now(), 'local_status' => 'active',
+        ]);
+        InvoiceLine::create(['company_id' => $tenant->id, 'invoice_id' => $inv->id, 'qty' => 1, 'price_per_item' => 10, 'vat_percent' => 24]);
+        app(RecomputeInvoiceTotals::class)($inv);
+
+        $html = app(InvoicePdfRenderer::class)->renderHtml($inv->fresh());
+
+        $this->assertStringContainsString('GR5500005555', $html); // linked account honored despite being hidden
+    }
 }
