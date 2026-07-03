@@ -118,9 +118,16 @@ class AadeInvoiceDocument
         // per-line level AND aggregated on the summary — verified against
         // an imported legacy MARK request that AADE accepted (it carried
         // the classification at BOTH levels). One class per invoice type,
-        // so the per-line amount is just the line net.
+        // so the per-line amount is the line's (header-discounted) net.
         $incomeClass = $invoice->invoiceType?->mydata_income_class;
         $incomeCat = $invoice->invoiceType?->mydata_income_class_category;
+
+        // MYD-1: per-line net/vat with the header (invoice-level) discount
+        // folded in, summing EXACTLY to the InvoiceVatBreakdown rows the
+        // summary uses — see allocateDiscountedLineAmounts(). Emitting the
+        // raw line values on a discounted invoice made Σ(lines) ≠ totals and
+        // AADE rejected with [207]/[209].
+        $lineAmounts = $this->allocateDiscountedLineAmounts($invoice, $vatBreakdown);
 
         // G5: per-line <quantity> is FORBIDDEN for the service types we file
         // ([205]) but expected on goods παραστατικά. Spec §5.x: quantity is
@@ -131,13 +138,13 @@ class AadeInvoiceDocument
 
         $details = [];
         $lineNo = 1;
-        foreach ($invoice->lines as $line) {
+        foreach ($invoice->lines->values() as $i => $line) {
             $rate = (float) $line->vat_percent;
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
-                ->setNetValue((float) $line->net_price)
+                ->setNetValue($lineAmounts[$i]['net'])
                 ->setVatCategory($this->resolveVatCategoryCode($rate))
-                ->setVatAmount(round((float) $line->gross_price - (float) $line->net_price, 2));
+                ->setVatAmount($lineAmounts[$i]['vat']);
 
             if ($emitQuantity) {
                 // measurementUnit stays omitted (optional per spec; mapping
@@ -168,7 +175,10 @@ class AadeInvoiceDocument
             }
 
             if ($incomeClass && $incomeCat) {
-                $detail->addIncomeClassification($incomeClass, $incomeCat, (float) $line->net_price);
+                // Same discounted net as the line's netValue, so the per-line
+                // classifications also sum to the summary classification
+                // (which uses the breakdown's totalNet).
+                $detail->addIncomeClassification($incomeClass, $incomeCat, $lineAmounts[$i]['net']);
             }
 
             $details[] = $detail;
@@ -302,6 +312,106 @@ class AadeInvoiceDocument
         return (new InvoicesDocWriter)->asXml(
             new InvoicesDoc([$payload])
         );
+    }
+
+    /**
+     * MYD-1: per-line netValue/vatAmount with the invoice-level (header)
+     * discount folded in.
+     *
+     * Lines store net/gross WITHOUT the header discount (the InvoiceLine
+     * saving hook applies only the line discount; the header discount is an
+     * aggregate-level concern — CLAUDE.md canonical math). The summary,
+     * however, comes from InvoiceVatBreakdown WITH the discount applied. So
+     * emitting raw line values on a discounted invoice made
+     * Σ(line netValue) ≠ totalNetValue → AADE ValidationError [207] (and
+     * [209] for VAT). AADE validates the SUMS, not per-line rate arithmetic,
+     * so the fix is: discount each line, then reconcile the rounding residue
+     * inside each VAT-rate group (one cent at a time, largest lines first)
+     * until the group sums land exactly on the breakdown row the summary is
+     * built from.
+     *
+     * With header_discount_percent = 0 this is the identity — the stored 2dp
+     * line values already sum exactly to the breakdown rows — so the
+     * sandbox-validated payload shape is untouched.
+     *
+     * @return list<array{net: float, vat: float}> indexed like $invoice->lines->values()
+     */
+    private function allocateDiscountedLineAmounts(Invoice $invoice, InvoiceVatBreakdown $breakdown): array
+    {
+        $factor = 1 - ((float) $invoice->header_discount_percent) / 100;
+        $lines = $invoice->lines->values();
+
+        // Group line indexes by the same rate key InvoiceVatBreakdown groups by.
+        $groups = [];
+        foreach ($lines as $i => $line) {
+            $groups[(string) $line->vat_percent][] = $i;
+        }
+
+        $alloc = [];
+        foreach ($groups as $rateKey => $indexes) {
+            $rate = (float) $rateKey;
+
+            $nets = [];
+            $vats = [];
+            foreach ($indexes as $i) {
+                $line = $lines[$i];
+                $nets[$i] = round(((float) $line->net_price) * $factor, 2);
+                $vats[$i] = round(((float) $line->gross_price - (float) $line->net_price) * $factor, 2);
+            }
+
+            $this->reconcileGroupToTarget($nets, $breakdown->netAtRate($rate), $invoice, 'netValue');
+            $this->reconcileGroupToTarget($vats, $breakdown->vatAtRate($rate), $invoice, 'vatAmount');
+
+            foreach ($indexes as $i) {
+                $alloc[$i] = ['net' => $nets[$i], 'vat' => $vats[$i]];
+            }
+        }
+
+        ksort($alloc);
+
+        return $alloc;
+    }
+
+    /**
+     * Nudge the group's rounded per-line values by ±0.01 until they sum to
+     * the breakdown target ([207]/[209] check the sums exactly). Largest
+     * values first so the cent lands where it's proportionally invisible;
+     * never pushes a value below zero (the XSD floors netValue/vatAmount at
+     * 0). The residue is bounded by ½ cent per line, so running out of
+     * eligible lines is pathological — throw rather than file a payload AADE
+     * would reject anyway.
+     *
+     * @param  array<int, float>  $values  keyed by line index, mutated in place
+     */
+    private function reconcileGroupToTarget(array &$values, float $target, Invoice $invoice, string $field): void
+    {
+        $cents = (int) round(($target - array_sum($values)) * 100);
+        if ($cents === 0) {
+            return;
+        }
+
+        $step = $cents > 0 ? 0.01 : -0.01;
+        $keys = array_keys($values);
+        usort($keys, fn ($a, $b) => $values[$b] <=> $values[$a]);
+
+        $remaining = abs($cents);
+        $guard = $remaining * count($keys) + count($keys);
+        for ($k = 0; $remaining > 0 && $guard > 0; $k++, $guard--) {
+            $key = $keys[$k % count($keys)];
+            if ($step < 0 && $values[$key] < 0.01) {
+                continue; // can't take a cent from a zero line
+            }
+            $values[$key] = round($values[$key] + $step, 2);
+            $remaining--;
+        }
+
+        if ($remaining > 0) {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode}: cannot reconcile per-line {$field} to the ".
+                'header-discounted VAT-breakdown total (rounding residue larger than the lines '.
+                'can absorb). Check the line amounts and header_discount_percent.'
+            );
+        }
     }
 
     /**

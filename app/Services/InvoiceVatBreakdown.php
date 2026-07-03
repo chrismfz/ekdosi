@@ -110,6 +110,23 @@ class InvoiceVatBreakdown
                 return $row['vat'];
             }
         }
+
+        return 0.0;
+    }
+
+    /**
+     * Lookup the (header-discounted) NET amount for a specific rate —
+     * symmetric with vatAtRate(). Used by the myDATA payload builder to
+     * allocate per-line netValue so Σ(lines) lands exactly on this row.
+     */
+    public function netAtRate(float $rate): float
+    {
+        foreach ($this->rows as $row) {
+            if (abs($row['rate'] - $rate) < 0.001) {
+                return $row['net'];
+            }
+        }
+
         return 0.0;
     }
 }

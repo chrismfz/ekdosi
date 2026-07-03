@@ -47,7 +47,7 @@ qty_returned στην ακύρωση πιστωτικού (MON-1), πιστωτ�
 
 ### Blockers / High
 
-- [ ] **MYD-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Παραστατικό με έκπτωση κεφαλίδας απορρίπτεται από την ΑΑΔΕ με [207]/[209].**
+- [x] **MYD-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (κατανομή έκπτωσης στις γραμμές, `AadeInvoiceDocument::allocateDiscountedLineAmounts` + tests· ⚠ εκκρεμεί sandbox run με discount>0) — **Παραστατικό με έκπτωση κεφαλίδας απορρίπτεται από την ΑΑΔΕ με [207]/[209].**
   `app/Services/EInvoice/AadeInvoiceDocument.php:138` στέλνει per-line `netValue`
   από το `invoice_lines.net_price`, που **δεν** περιέχει την έκπτωση κεφαλίδας
   (βλ. `InvoiceLine` saving hook), ενώ το summary (`:221`) παίρνει
