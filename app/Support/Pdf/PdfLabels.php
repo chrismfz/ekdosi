@@ -67,6 +67,10 @@ class PdfLabels
         'total_vat' => ['Σύνολο ΦΠΑ', 'Total VAT'],
         'header_discount' => ['Έκπτωση παραστατικού', 'Document discount'],
         'applied' => ['εφαρμοσμένη', 'applied'],
+        // DOC-1: the exemption REASON itself stays the Greek legal citation
+        // verbatim (Codes::VAT_EXEMPTION_LABELS — a legal reference is not
+        // translated); only this prefix label localizes.
+        'vat_exemption' => ['Απαλλαγή ΦΠΑ', 'VAT exemption'],
         'total_value' => ['Συνολική αξία', 'Total'],
         'total' => ['Σύνολο', 'Total'],
         'withholding' => ['Παρακράτηση φόρου', 'Tax withholding'],

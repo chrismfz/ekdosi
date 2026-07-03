@@ -824,6 +824,42 @@ every 15 min):
   `2` when it finds discrepancies — if you want alerting, append the schedule
   output to a log instead and watch it.
 
+### Whole-DB backups (spatie/laravel-backup) — verify, don't just trust
+
+Once the scheduler cron above is in place, the **whole-DB backup** (nightly
+dump of ALL tenants + app files, 02:00) runs by default — `backup:run`,
+`backup:clean` and `backup:monitor` ship enabled (`EKDOSI_SCHEDULE_BACKUP_*`,
+see `config/ekdosi.php`). This is the disaster-recovery floor under the
+per-tenant exports. Three things to configure for production:
+
+1. **Off-site destination** — the default writes to the `local` disk only,
+   which dies with the VM. Point `BACKUP_DESTINATION_DISKS` at a
+   comma-separated disk list that includes an off-site one (e.g.
+   `local,s3` with the `s3` disk configured via the `AWS_*` vars in
+   `config/filesystems.php`, or a dedicated sftp disk you add there).
+2. **Archive passphrase** — set `BACKUP_ARCHIVE_PASSWORD` (the archives
+   contain the full dump, secrets included) and store it in the password
+   manager. Without the passphrase the archive is unencrypted.
+3. **Failure alerting recipient** — failures email the chain
+   «Ρυθμίσεις συστήματος» override → `EKDOSI_BACKUP_ALERT_EMAIL` →
+   all super_admin users. Set the env (comma-separated) or confirm the
+   super_admin accounts have real mailboxes. Successful runs are silent
+   by design; `backup:monitor` (08:00) mails when backups go stale.
+
+Then **prove it works** — run once by hand and check both ends:
+
+```bash
+sudo -u ekdosi php artisan backup:run          # creates + pushes the archive
+sudo -u ekdosi php artisan backup:list         # ages + sizes per destination
+sudo -u ekdosi php artisan ops:health          # backup rows must be green
+```
+
+Finally, **do one restore drill before go-live**: pull the newest archive
+from the off-site destination onto a scratch box/DB, unzip (passphrase!),
+load the dump, and confirm you can log in and open a tenant's invoices.
+A backup that has never been restored is a hope, not a backup. Repeat the
+drill after any backup-config change (and ideally quarterly).
+
 ## 12. ETL host extras (Firebird → MariaDB import)
 
 Only needed on whatever box is going to run
@@ -1144,15 +1180,21 @@ After install:
       (not `apache`); only the master is root.
 - [ ] Sign in at `/admin/login` with the user you created in §7b and
       confirm you land on `/admin/{your-slug}` (the tenant dashboard).
+- [ ] `php artisan backup:list` shows a fresh whole-DB archive on an
+      **off-site** destination (§11 backups: `BACKUP_DESTINATION_DISKS`
+      beyond `local`, `BACKUP_ARCHIVE_PASSWORD` set, alert recipient
+      real) — and you have restored one archive successfully at least once.
 
 ## 15. Hardening (do before going live)
 
 - `APP_DEBUG=false` (set above; double-check).
 - Rotate the dev DB password.
-- Add a per-tenant backup destination: `spatie/laravel-backup` config in
-  `config/backup.php`, then schedule its commands in
-  `app/Console/Kernel.php` (default: nightly DB dump + storage tarball
-  to S3-compatible bucket).
+- Backups: the whole-DB spatie schedule is already wired in
+  `routes/console.php` and enabled by default — configure the off-site
+  disk + passphrase + alert recipient in §11 (Whole-DB backups). On top,
+  enable **per-tenant** backups where wanted: Companies → Αντίγραφα
+  ασφαλείας (destinations/retention per company) +
+  `EKDOSI_SCHEDULE_COMPANY_BACKUPS=true`.
 - Restrict MariaDB to localhost: bind-address in
   `/etc/my.cnf.d/mariadb-server.cnf` already defaults to `127.0.0.1` on
   AlmaLinux; verify it didn't get changed.

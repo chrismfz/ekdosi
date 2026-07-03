@@ -9,6 +9,7 @@ use App\Models\InvoiceType;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use App\Support\OperatorHealth\OperatorHealthReport;
+use App\Support\Settings\SystemSettings;
 
 /**
  * Cutover-readiness gates for ONE tenant — the automated, read-only half of the
@@ -66,6 +67,7 @@ class GoLiveCheckReport
             $this->numberingGate($tenant),
             $this->driftGate($tenant),
             $this->backupGate($tenant),
+            $this->globalBackupGate(),
             ...$this->infraGates(),
         ];
 
@@ -345,6 +347,36 @@ class GoLiveCheckReport
         }
 
         return $this->gate('backup', 'Αντίγραφα ασφαλείας', 'pass', "ενεργά ({$bs->frequency})");
+    }
+
+    /**
+     * AUDIT OPS-1: the WHOLE-DB spatie backup (all tenants + files) is the
+     * disaster-recovery floor under the per-tenant exports — a disk loss with
+     * this off (or local-only) loses every tenant's books. Same enable
+     * resolution as routes/console.php: the «Ρυθμίσεις χρονοπρογραμματιστή»
+     * DB override wins, the env flag is the default.
+     *
+     * @return array{key:string,label:string,status:string,detail:string}
+     */
+    private function globalBackupGate(): array
+    {
+        $enabled = app(SystemSettings::class)
+            ->bool('schedule.backup_run_enabled', (bool) config('ekdosi.schedule.backup_run_enabled'));
+
+        if (! $enabled) {
+            return $this->gate('backup_global', 'Καθολικό αντίγραφο ΒΔ', 'warn',
+                'το backup:run είναι απενεργοποιημένο (EKDOSI_SCHEDULE_BACKUP_RUN / Ρυθμίσεις χρονοπρογραμματιστή)');
+        }
+
+        $disks = (array) config('backup.backup.destination.disks', []);
+        $offsite = array_values(array_diff($disks, ['local']));
+        if ($offsite === []) {
+            return $this->gate('backup_global', 'Καθολικό αντίγραφο ΒΔ', 'warn',
+                'μόνο τοπικός προορισμός — χάνεται μαζί με το VM (πρόσθεσε off-site disk στο BACKUP_DESTINATION_DISKS)');
+        }
+
+        return $this->gate('backup_global', 'Καθολικό αντίγραφο ΒΔ', 'pass',
+            'ενεργό, προορισμοί: '.implode(', ', $disks));
     }
 
     /**

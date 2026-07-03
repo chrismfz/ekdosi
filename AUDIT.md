@@ -47,7 +47,7 @@ qty_returned στην ακύρωση πιστωτικού (MON-1), πιστωτ�
 
 ### Blockers / High
 
-- [ ] **MYD-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Παραστατικό με έκπτωση κεφαλίδας απορρίπτεται από την ΑΑΔΕ με [207]/[209].**
+- [x] **MYD-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (κατανομή έκπτωσης στις γραμμές, `AadeInvoiceDocument::allocateDiscountedLineAmounts` + tests· ⚠ εκκρεμεί sandbox run με discount>0) — **Παραστατικό με έκπτωση κεφαλίδας απορρίπτεται από την ΑΑΔΕ με [207]/[209].**
   `app/Services/EInvoice/AadeInvoiceDocument.php:138` στέλνει per-line `netValue`
   από το `invoice_lines.net_price`, που **δεν** περιέχει την έκπτωση κεφαλίδας
   (βλ. `InvoiceLine` saving hook), ενώ το summary (`:221`) παίρνει
@@ -138,7 +138,7 @@ discounts, fees/stamp, cash-term, τοπικά ακυρωμένα πιστωτι
 
 ## C. PDF / QR / Email — νομικό περιεχόμενο εγγράφων (DOC)
 
-- [ ] **DOC-1 · HIGH (νομικό) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Η αιτία απαλλαγής ΦΠΑ δεν τυπώνεται πουθενά στο PDF.** Το δεδομένο υπάρχει και υποβάλλεται στην ΑΑΔΕ (`vat_categories.vat_exemption_category`), αλλά grep για «απαλλαγ/exempt» στα `resources/views` = 0 hits. Κάθε 0% τιμολόγιο (ενδοκοινοτικό, αρ.39α κλπ.) βγαίνει χωρίς την απαιτούμενη αναφορά διάταξης (ΕΛΠ ν.4308/2014 αρ.9 §1ιβ — να επιβεβαιωθεί με λογιστή η ακριβής διατύπωση). **Fix:** τύπωμα του §8.3 label στο per-rate breakdown ή στο footer.
+- [x] **DOC-1 · HIGH (νομικό) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (§8.3 verbatim citation στο totals box, non-throwing· tests) — **Η αιτία απαλλαγής ΦΠΑ δεν τυπώνεται πουθενά στο PDF.** Το δεδομένο υπάρχει και υποβάλλεται στην ΑΑΔΕ (`vat_categories.vat_exemption_category`), αλλά grep για «απαλλαγ/exempt» στα `resources/views` = 0 hits. Κάθε 0% τιμολόγιο (ενδοκοινοτικό, αρ.39α κλπ.) βγαίνει χωρίς την απαιτούμενη αναφορά διάταξης (ΕΛΠ ν.4308/2014 αρ.9 §1ιβ — να επιβεβαιωθεί με λογιστή η ακριβής διατύπωση). **Fix:** τύπωμα του §8.3 label στο per-rate breakdown ή στο footer.
 - [ ] **DOC-2 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Τοπικά ακυρωμένο + VALID στην ΑΑΔΕ τυπώνεται σαν πλήρως έγκυρο** (banner logic μόνο σε `mydata_state`, `resources/views/invoices/pdf.blade.php:136-142`): χωρίς ΑΚΥΡΩΘΕΝ, με QR + «Πιστοποιημένο». Το public route είναι fail-closed, αλλά download/email από χειριστή όχι. Υπο-περίπτωση: cancelled+null τυπώνει «ΠΡΟΧΕΙΡΟ» (λάθος ταμπέλα). **Fix:** banners = συνάρτηση `local_status` × `mydata_state`.
 - [ ] **DOC-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Εκδοθέν-αλλά-μη-υποβληθέν τυπώνει μόνιμα «ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ ΥΠΟΒΛΗΘΕΙ ΣΤΗ myDATA»** — για τον εσθονικό tenant (`NullSubmitter`, state μένει null) ΚΑΘΕ νόμιμο τιμολόγιο κουβαλάει DRAFT banner για πάντα, με αναφορά σε myDATA. **Fix:** μαζί με DOC-2 (τρίτη κατάσταση «εκδόθηκε, εκτός myDATA»).
 - [ ] **DOC-4 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **ΓΕΜΗ: δεν υπάρχει καν πεδίο** στο `companies` και δεν τυπώνεται (ν.4919/2022 αρ.22 απαιτεί αριθμό ΓΕΜΗ στα έγγραφα — επιβεβαίωση με λογιστή)· ούτε το επάγγελμα/δραστηριότητα εκδότη (το `kad_primary` υπάρχει, δεν τυπώνεται). Σήμερα μόνο workaround μέσω `pdf_footer_text`.
@@ -190,7 +190,7 @@ doc-type ανά δικαιούχο με HOLD σε κάθε ασάφεια· plug
 
 ## E. Ops: Backups / Scheduler / Queue / Deploy / Monitoring (OPS)
 
-- [ ] **OPS-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Whole-DB backup: local-only, default-OFF, και το INSTALL.md δεν το προβλέπει.**
+- [x] **OPS-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (schedule flags default ON· `BACKUP_DESTINATION_DISKS` env· go-live gate «Καθολικό αντίγραφο ΒΔ»· INSTALL.md §11/§14/§15 + restore drill· ⚠ στο prod host: όρισε off-site disk + `BACKUP_ARCHIVE_PASSWORD` + κάνε το drill) — **Whole-DB backup: local-only, default-OFF, και το INSTALL.md δεν το προβλέπει.**
   `config/backup.php:175-177` → μόνο `['local']` disk· `config/ekdosi.php:118-123`
   → `EKDOSI_SCHEDULE_BACKUP_RUN/CLEANUP/MONITOR` default false· το INSTALL.md §11
   στήνει cron μόνο για scheduler/queue, το §14 checklist δεν έχει backup item, και
@@ -199,7 +199,7 @@ doc-type ανά δικαιούχο με HOLD σε κάθε ασάφεια· plug
   per-tenant backups υπάρχουν και έχουν alerting — αλλά βλ. OPS-5 για το τι
   περιέχουν by default.) **Fix:** enable τα 3 schedule flags, off-site disk
   (S3/SFTP), `BACKUP_ARCHIVE_PASSWORD`, ενημέρωση INSTALL.md §11+§14.
-- [ ] **OPS-2 · BLOCKER (μαζί με OPS-1) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Ειδοποιήσεις αποτυχίας spatie backup σε **`your@example.com`** hardcoded (`config/backup.php:248`, χωρίς env override). Ακόμα κι όταν ενεργοποιηθεί το OPS-1, αποτυχία δεν ειδοποιεί κανέναν.
+- [x] **OPS-2 · BLOCKER (μαζί με OPS-1) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (`OpsBackupNotifiable` + κοινό `BackupAlertRecipients` με τα per-company alerts· success mails σιωπηλά) — Ειδοποιήσεις αποτυχίας spatie backup σε **`your@example.com`** hardcoded (`config/backup.php:248`, χωρίς env override). Ακόμα κι όταν ενεργοποιηθεί το OPS-1, αποτυχία δεν ειδοποιεί κανέναν.
 - [ ] **OPS-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Κανένα exception reporting**: `withExceptions()` άδειο, κανένα Sentry/Flare, `LOG_STACK=single`, cron `>> /dev/null 2>&1`. Για app που εκδίδει νομικά έγγραφα, τα σιωπηλά failures είναι το #1 λειτουργικό ρίσκο. **Fix:** έστω mail/Slack log channel σε `error` level, ή Sentry.
 - [ ] **OPS-4 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — `ops:health` επιστρέφει ΠΑΝΤΑ 0 (`OperatorHealth.php:90`) → το `deploy/update.sh:160` gate είναι νεκρός κώδικας και δεν μπαίνει σε cron monitoring. **Fix:** non-zero exit σε RED findings.
 - [ ] **OPS-5 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Τα per-tenant «off-site» backups by default ΔΕΝ περιέχουν τα βιβλία: `bucket` default `settings_setup` (migration `2026_06_09_000003:24`)· invoices/payments/marks μόνο σε `full`· και το `ops:health` δείχνει «Off-site ok» χωρίς να κοιτάει bucket → ψευδής αίσθηση DR. **Fix:** default `full` ή bucket-aware check.

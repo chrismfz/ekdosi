@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\BankAccount;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\VatCategory;
+use App\Support\MyData\Codes;
 use App\Support\MyData\QrImage;
 use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -229,6 +231,51 @@ class InvoicePdfRenderer
             'payable' => round($breakdown->totalGross() + $invoice->additionalTaxAdjustment(), 2),
             // Σύνολο τεμαχίων — the «ΣΥΝΟΛΙΚΗ ΠΟΣΟΤΗΤΑ» a Greek τιμολόγιο shows.
             'totalQty' => (float) $invoice->lines->sum(fn ($l) => (float) $l->qty),
+            // DOC-1: the VAT-exemption legal citation for 0% documents.
+            'vatExemption' => $this->vatExemptionView($invoice),
+        ];
+    }
+
+    /**
+     * DOC-1 (AUDIT): a 0% παραστατικό must PRINT the exempting provision
+     * (ΕΛΠ ν.4308/2014 άρθρο 9 — e.g. «Χωρίς ΦΠΑ - άρθρο 45» for an
+     * intra-community supply), not just file it to myDATA. Same source as
+     * the submitter (the tenant's 0%-rate VatCategory §8.3 code), but
+     * NON-throwing: a draft/preview PDF on an unconfigured tenant renders
+     * without the note instead of crashing — the submitter + preflight are
+     * the loud guards for filing.
+     *
+     * @return array{code:int,label:string}|null
+     */
+    private function vatExemptionView(Invoice $invoice): ?array
+    {
+        $hasZeroVatLine = $invoice->lines->contains(
+            fn ($line) => abs((float) $line->vat_percent) < 0.01
+        );
+        if (! $hasZeroVatLine) {
+            return null;
+        }
+
+        $codes = VatCategory::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('rate', 0)
+            ->whereNotNull('vat_exemption_category')
+            ->pluck('vat_exemption_category')
+            ->map(fn ($c) => (int) $c)
+            ->unique()
+            ->values();
+
+        // Unconfigured or ambiguous → omit the note (preflight/submitter
+        // surface the misconfiguration; the PDF must still render).
+        if ($codes->count() !== 1) {
+            return null;
+        }
+
+        $code = (int) $codes->first();
+
+        return [
+            'code' => $code,
+            'label' => Codes::VAT_EXEMPTION_LABELS[$code] ?? ('Κατηγορία '.$code),
         ];
     }
 

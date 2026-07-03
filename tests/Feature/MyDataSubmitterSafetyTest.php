@@ -629,6 +629,153 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<quantity>5</quantity>', $xml);
     }
 
+    public function test_header_discount_folds_into_per_line_values(): void
+    {
+        // MYD-1 regression: lines store net/gross WITHOUT the header discount,
+        // the summary applies it — so the payload used to ship
+        // Σ(line netValue) ≠ totalNetValue and AADE rejected with [207]/[209].
+        // A 10% header discount on a 100/124 line must now file the DISCOUNTED
+        // line values (90 / 21.60), matching the summary.
+        $inv = $this->makeInvoice();
+        $inv->forceFill(['header_discount_percent' => 10])->save();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'price_per_item' => 100,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<netValue>90</netValue>', $xml);
+        $this->assertStringContainsString('<vatAmount>21.6</vatAmount>', $xml);
+        $this->assertStringContainsString('<totalNetValue>90</totalNetValue>', $xml);
+        $this->assertStringContainsString('<totalVatAmount>21.6</totalVatAmount>', $xml);
+    }
+
+    public function test_header_discount_line_sums_match_summary_totals_exactly(): void
+    {
+        // MYD-1: the awkward-rounding case. Three 33.33 lines at 24% plus a
+        // 13% line, 10% header discount: each discounted line rounds to 30.00
+        // but the per-rate breakdown target is 89.99, so a cent must be taken
+        // from one line. Whatever the allocation, the [207]/[209] invariants
+        // are what AADE checks: Σ(line netValue) == totalNetValue and
+        // Σ(line vatAmount) == totalVatAmount, to the cent.
+        $inv = $this->makeInvoice();
+        $inv->forceFill(['header_discount_percent' => 10])->save();
+        foreach ([1, 2, 3] as $i) {
+            InvoiceLine::create([
+                'company_id' => $this->tenant->id,
+                'invoice_id' => $inv->id,
+                'qty' => 1,
+                'vat_percent' => 24,
+                'price_per_item' => 33.33,
+            ]);
+        }
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 1,
+            'vat_percent' => 13,
+            'price_per_item' => 50,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        [$lineNetSum, $lineVatSum] = $this->sumLineValues($xml);
+        $this->assertSame($this->summaryValue($xml, 'totalNetValue'), $lineNetSum, '[207] Σ(line netValue) must equal totalNetValue');
+        $this->assertSame($this->summaryValue($xml, 'totalVatAmount'), $lineVatSum, '[209] Σ(line vatAmount) must equal totalVatAmount');
+
+        // And the totals themselves are the header-discounted breakdown values:
+        // net (99.99 + 50) × 0.9 per-rate-rounded = 89.99 + 45.00 = 134.99.
+        $this->assertSame(134.99, $this->summaryValue($xml, 'totalNetValue'));
+    }
+
+    public function test_header_discount_income_classifications_sum_to_summary(): void
+    {
+        // MYD-1: per-line E3 classification amounts must also carry the
+        // discounted net, or the summary classification (built from the
+        // discounted total) wouldn't match the lines.
+        $this->invoiceType->forceFill([
+            'mydata_income_class' => 'E3_561_001',
+            'mydata_income_class_category' => 'category1_1',
+        ])->save();
+
+        $inv = $this->makeInvoice();
+        $inv->forceFill(['header_discount_percent' => 10])->save();
+        foreach ([1, 2, 3] as $i) {
+            InvoiceLine::create([
+                'company_id' => $this->tenant->id,
+                'invoice_id' => $inv->id,
+                'qty' => 1,
+                'vat_percent' => 24,
+                'price_per_item' => 33.33,
+            ]);
+        }
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $doc = new \DOMDocument;
+        $doc->loadXML($xml);
+        $perLine = 0.0;
+        $summaryAmount = null;
+        foreach ($doc->getElementsByTagNameNS('*', 'incomeClassification') as $node) {
+            $amount = (float) $node->getElementsByTagNameNS('*', 'amount')->item(0)?->textContent;
+            if ($node->parentNode?->localName === 'invoiceSummary') {
+                $summaryAmount = $amount;
+            } else {
+                $perLine += $amount;
+            }
+        }
+        $this->assertNotNull($summaryAmount);
+        $this->assertSame($summaryAmount, round($perLine, 2), 'Σ(per-line classification) must equal the summary classification');
+        $this->assertSame(89.99, $summaryAmount);
+    }
+
+    public function test_no_header_discount_keeps_raw_line_values(): void
+    {
+        // Regression for the sandbox-validated shape: with no header discount
+        // the allocation is the identity — raw stored line values file as-is.
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([ // net 1000 / gross 1240 (computed by the saving hook), hd = 0
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'price_per_item' => 1000,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<netValue>1000</netValue>', $xml);
+        $this->assertStringContainsString('<vatAmount>240</vatAmount>', $xml);
+        $this->assertStringContainsString('<totalNetValue>1000</totalNetValue>', $xml);
+    }
+
+    /** Σ(netValue), Σ(vatAmount) across the payload's invoiceDetails elements. */
+    private function sumLineValues(string $xml): array
+    {
+        $doc = new \DOMDocument;
+        $doc->loadXML($xml);
+        $net = 0.0;
+        $vat = 0.0;
+        foreach ($doc->getElementsByTagNameNS('*', 'invoiceDetails') as $detail) {
+            $net += (float) $detail->getElementsByTagNameNS('*', 'netValue')->item(0)?->textContent;
+            $vat += (float) $detail->getElementsByTagNameNS('*', 'vatAmount')->item(0)?->textContent;
+        }
+
+        return [round($net, 2), round($vat, 2)];
+    }
+
+    private function summaryValue(string $xml, string $tag): float
+    {
+        $doc = new \DOMDocument;
+        $doc->loadXML($xml);
+
+        return (float) $doc->getElementsByTagNameNS('*', $tag)->item(0)?->textContent;
+    }
+
     private function zeroVatLine(Invoice $inv): void
     {
         InvoiceLine::create([

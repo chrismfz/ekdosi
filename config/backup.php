@@ -1,6 +1,7 @@
 <?php
 
-use Spatie\Backup\Notifications\Notifiable;
+use App\Support\Backup\MinimumBackupSizeInKilobytes;
+use App\Support\Backup\OpsBackupNotifiable;
 use Spatie\Backup\Notifications\Notifications\BackupHasFailedNotification;
 use Spatie\Backup\Notifications\Notifications\BackupWasSuccessfulNotification;
 use Spatie\Backup\Notifications\Notifications\CleanupHasFailedNotification;
@@ -171,10 +172,17 @@ return [
 
             /*
              * The disk names on which the backups will be stored.
+             *
+             * AUDIT OPS-1: a local-only copy dies with the VM — production MUST
+             * add an off-site disk (e.g. BACKUP_DESTINATION_DISKS="local,s3"
+             * with the s3 disk configured in filesystems.php, or a dedicated
+             * sftp disk). Comma-separated env so provisioning is one line;
+             * default stays 'local' for dev/CI.
              */
-            'disks' => [
-                'local',
-            ],
+            'disks' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('BACKUP_DESTINATION_DISKS', 'local')),
+            ))),
 
             /*
              * Determines whether to allow backups to continue when some targets fail instead of failing completely.
@@ -229,22 +237,33 @@ return [
      * the `Spatie\Backup\Notifications\Notifications` classes.
      */
     'notifications' => [
+        /*
+         * AUDIT OPS-2: failures stay LOUD (mail), successes stay quiet — a
+         * nightly "backup ok" mail trains everyone to ignore the inbox, and
+         * `backup:monitor` (UnhealthyBackupWasFound) covers the "did it keep
+         * working" question.
+         */
         'notifications' => [
             BackupHasFailedNotification::class => ['mail'],
             UnhealthyBackupWasFoundNotification::class => ['mail'],
             CleanupHasFailedNotification::class => ['mail'],
-            BackupWasSuccessfulNotification::class => ['mail'],
-            HealthyBackupWasFoundNotification::class => ['mail'],
-            CleanupWasSuccessfulNotification::class => ['mail'],
+            BackupWasSuccessfulNotification::class => [],
+            HealthyBackupWasFoundNotification::class => [],
+            CleanupWasSuccessfulNotification::class => [],
         ],
 
         /*
-         * Here you can specify the notifiable to which the notifications should be sent. The default
-         * notifiable will use the variables specified in this config file.
+         * AUDIT OPS-2: route to the real ops recipients (the same chain the
+         * per-company backup alerts use: «Ρυθμίσεις συστήματος» override →
+         * EKDOSI_BACKUP_ALERT_EMAIL → super_admin users) instead of the
+         * static placeholder below.
          */
-        'notifiable' => Notifiable::class,
+        'notifiable' => OpsBackupNotifiable::class,
 
         'mail' => [
+            // Last-resort fallback ONLY (see OpsBackupNotifiable) — spatie
+            // validates this eagerly as an email, so it must keep a valid
+            // shape even though real routing happens in the notifiable.
             'to' => 'your@example.com',
 
             'from' => [
@@ -312,7 +331,7 @@ return [
                 MaximumStorageInMegabytes::class => 5000,
                 // Flag an empty/near-empty dump (e.g. the 9.7 KB one a wiped DB
                 // produces) as unhealthy instead of letting it pass as "OK".
-                \App\Support\Backup\MinimumBackupSizeInKilobytes::class => 100,
+                MinimumBackupSizeInKilobytes::class => 100,
             ],
         ],
 

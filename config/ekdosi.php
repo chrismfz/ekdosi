@@ -112,14 +112,22 @@ return [
         'mydata_console_refresh_enabled' => env('EKDOSI_SCHEDULE_MYDATA_CONSOLE_REFRESH', false),
         'mydata_console_refresh_cron' => env('EKDOSI_MYDATA_CONSOLE_REFRESH_CRON', '0 */6 * * *'),
 
-        // spatie/laravel-backup tasks. Enable these when the Laravel scheduler
-        // owns backups for the deployment; leave disabled if system cron/systemd
-        // runs the backup commands separately.
-        'backup_run_enabled' => env('EKDOSI_SCHEDULE_BACKUP_RUN', false),
+        // spatie/laravel-backup tasks — the WHOLE-DB (all tenants + files)
+        // safety net, distinct from the per-company backups below.
+        //
+        // AUDIT OPS-1: these default ON. They used to default OFF, and
+        // INSTALL.md never said to flip them — so a host provisioned by the
+        // book ran with ZERO automated DB backups. Like every scheduled task
+        // they only fire once the OS cron runs `schedule:run` (inert in
+        // dev/CI), and a local nightly dump is strictly better than none.
+        // Off-site replication is a one-liner on top: BACKUP_DESTINATION_DISKS
+        // (config/backup.php). Set the env flags to false only if system
+        // cron/systemd runs the backup commands separately.
+        'backup_run_enabled' => env('EKDOSI_SCHEDULE_BACKUP_RUN', true),
         'backup_run_cron' => env('EKDOSI_BACKUP_RUN_CRON', '0 2 * * *'),
-        'backup_cleanup_enabled' => env('EKDOSI_SCHEDULE_BACKUP_CLEANUP', false),
+        'backup_cleanup_enabled' => env('EKDOSI_SCHEDULE_BACKUP_CLEANUP', true),
         'backup_cleanup_cron' => env('EKDOSI_BACKUP_CLEANUP_CRON', '30 2 * * *'),
-        'backup_monitor_enabled' => env('EKDOSI_SCHEDULE_BACKUP_MONITOR', false),
+        'backup_monitor_enabled' => env('EKDOSI_SCHEDULE_BACKUP_MONITOR', true),
         'backup_monitor_cron' => env('EKDOSI_BACKUP_MONITOR_CRON', '0 8 * * *'),
 
         // company:run-scheduled-backups — per-TENANT backup pipeline (Phase 4),

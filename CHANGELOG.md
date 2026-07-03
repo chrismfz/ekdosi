@@ -26,6 +26,37 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   απαλλαγής ΦΠΑ στο PDF).
 
 ### Fixed
+- **AUDIT DOC-1 — η αιτία απαλλαγής ΦΠΑ τυπώνεται πλέον στο PDF.** Κάθε παραστατικό
+  με γραμμή 0% τυπώνει στο totals box τη νομική αναφορά της απαλλαγής (verbatim §8.3
+  κείμενο, π.χ. «Χωρίς ΦΠΑ - άρθρο 45 του Κώδικα ΦΠΑ» για ενδοκοινοτική) — απαίτηση
+  ΕΛΠ ν.4308/2014 αρ.9· η πηγή είναι η ίδια με τον submitter (0% VatCategory →
+  `vat_exemption_category`), αλλά non-throwing: αρρύθμιστος tenant τυπώνει χωρίς τη
+  σημείωση αντί να σκάει (ο preflight/submitter μένουν οι «θορυβώδεις» φύλακες).
+  Δίγλωσσο prefix label («Απαλλαγή ΦΠΑ»/«VAT exemption»)· η νομική αναφορά μένει
+  σκόπιμα στα ελληνικά.
+- **AUDIT OPS-1/OPS-2 — τα καθολικά (whole-DB) backups υπαρκτά και με πραγματικό
+  alerting.** Τα spatie `backup:run`/`clean`/`monitor` πλέον **default ON** (έτρεχαν
+  default OFF και το INSTALL.md δεν έλεγε πουθενά να ενεργοποιηθούν → host στημένος
+  «by the book» = μηδέν αυτόματα DB backups)· προορισμοί πλέον env-driven
+  (`BACKUP_DESTINATION_DISKS`, comma-separated, με οδηγία για off-site)· οι
+  ειδοποιήσεις αποτυχίας πάνε στους πραγματικούς παραλήπτες μέσω κοινής αλυσίδας με τα
+  per-company alerts (`OpsBackupNotifiable`/`BackupAlertRecipients`: Ρυθμίσεις
+  συστήματος → `EKDOSI_BACKUP_ALERT_EMAIL` → super_admins) αντί για το hardcoded
+  `your@example.com`, ενώ τα success mails σιωπούν (το `backup:monitor` καλύπτει το
+  staleness). Νέο gate «Καθολικό αντίγραφο ΒΔ» στο `ekdosi:go-live-check` (WARN όταν
+  OFF ή local-only), sections στο INSTALL.md §11/§14/§15 (off-site + passphrase +
+  restore drill· έφυγε και η νεκρή αναφορά σε `app/Console/Kernel.php`), νέα
+  `.env.example` τεκμηρίωση (`BACKUP_DESTINATION_DISKS`/`BACKUP_ARCHIVE_PASSWORD`).
+- **AUDIT MYD-1 — παραστατικό με έκπτωση κεφαλίδας δεν απορρίπτεται πλέον από την ΑΑΔΕ
+  ([207]/[209]).** Το myDATA payload έστελνε per-line `netValue`/`vatAmount` ΧΩΡΙΣ την
+  έκπτωση κεφαλίδας ενώ το summary την εφάρμοζε → Σ(γραμμών) ≠ σύνολα → βέβαιη απόρριψη
+  (και το πεδίο προσυμπληρώνεται από την έκπτωση πελάτη). Τώρα η έκπτωση κατανέμεται στις
+  γραμμές (`AadeInvoiceDocument::allocateDiscountedLineAmounts`) με συμφωνία υπολοίπων
+  στρογγυλοποίησης ανά συντελεστή (±1 λεπτό στις μεγαλύτερες γραμμές) ώστε τα αθροίσματα να
+  ισούνται ΑΚΡΙΒΩΣ με τα per-rate σύνολα του `InvoiceVatBreakdown`· ίδια κατανεμημένα ποσά
+  και στους per-line χαρακτηρισμούς Ε3. Με μηδενική έκπτωση το payload μένει byte-identical
+  με το sandbox-validated σχήμα (regression tests). Ισχύει και για το provider channel
+  (κοινό `AadeInvoiceDocument`). ⚠ Εκκρεμεί sandbox validation με πραγματική έκπτωση.
 - **WHMCS «mass payment» / συγκεντρωτικά τιμολόγια δεν εκδίδονται πλέον λάθος.** Όταν πελάτης
   πληρώνει πολλά ανοιχτά τιμολόγια μαζί, το WHMCS φτιάχνει ΝΕΟ τιμολόγιο με γραμμές-αναφορές σε άλλα
   τιμολόγια (`type='Invoice'`, `relid`, π.χ. «Αρ. Λογαριασμού #31690»), **χωρίς δικό του ΦΠΑ** (0%).
