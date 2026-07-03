@@ -17,6 +17,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Added
+- **`AUDIT.md`** — πλήρης έλεγχος ετοιμότητας παραγωγής (2026-07-03): 7 τομεακοί
+  έλεγχοι (myDATA/ΑΑΔΕ, χρηματικά, security/tenancy, ops/backups, PDF/email,
+  onboarding, WHMCS) με ευρήματα ανά σοβαρότητα (IDs + checkboxes), ετυμηγορία
+  go/no-go και προτεινόμενη σειρά εργασιών. Κύρια blockers: MYD-1 (έκπτωση
+  κεφαλίδας → απόρριψη [207]/[209]), OPS-1/2 (whole-DB backups), DOC-1 (αιτία
+  απαλλαγής ΦΠΑ στο PDF).
+
 ### Fixed
 - **WHMCS «mass payment» / συγκεντρωτικά τιμολόγια δεν εκδίδονται πλέον λάθος.** Όταν πελάτης
   πληρώνει πολλά ανοιχτά τιμολόγια μαζί, το WHMCS φτιάχνει ΝΕΟ τιμολόγιο με γραμμές-αναφορές σε άλλα
