@@ -190,7 +190,7 @@ doc-type ανά δικαιούχο με HOLD σε κάθε ασάφεια· plug
 
 ## E. Ops: Backups / Scheduler / Queue / Deploy / Monitoring (OPS)
 
-- [ ] **OPS-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Whole-DB backup: local-only, default-OFF, και το INSTALL.md δεν το προβλέπει.**
+- [x] **OPS-1 · BLOCKER · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (schedule flags default ON· `BACKUP_DESTINATION_DISKS` env· go-live gate «Καθολικό αντίγραφο ΒΔ»· INSTALL.md §11/§14/§15 + restore drill· ⚠ στο prod host: όρισε off-site disk + `BACKUP_ARCHIVE_PASSWORD` + κάνε το drill) — **Whole-DB backup: local-only, default-OFF, και το INSTALL.md δεν το προβλέπει.**
   `config/backup.php:175-177` → μόνο `['local']` disk· `config/ekdosi.php:118-123`
   → `EKDOSI_SCHEDULE_BACKUP_RUN/CLEANUP/MONITOR` default false· το INSTALL.md §11
   στήνει cron μόνο για scheduler/queue, το §14 checklist δεν έχει backup item, και
@@ -199,7 +199,7 @@ doc-type ανά δικαιούχο με HOLD σε κάθε ασάφεια· plug
   per-tenant backups υπάρχουν και έχουν alerting — αλλά βλ. OPS-5 για το τι
   περιέχουν by default.) **Fix:** enable τα 3 schedule flags, off-site disk
   (S3/SFTP), `BACKUP_ARCHIVE_PASSWORD`, ενημέρωση INSTALL.md §11+§14.
-- [ ] **OPS-2 · BLOCKER (μαζί με OPS-1) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Ειδοποιήσεις αποτυχίας spatie backup σε **`your@example.com`** hardcoded (`config/backup.php:248`, χωρίς env override). Ακόμα κι όταν ενεργοποιηθεί το OPS-1, αποτυχία δεν ειδοποιεί κανέναν.
+- [x] **OPS-2 · BLOCKER (μαζί με OPS-1) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (`OpsBackupNotifiable` + κοινό `BackupAlertRecipients` με τα per-company alerts· success mails σιωπηλά) — Ειδοποιήσεις αποτυχίας spatie backup σε **`your@example.com`** hardcoded (`config/backup.php:248`, χωρίς env override). Ακόμα κι όταν ενεργοποιηθεί το OPS-1, αποτυχία δεν ειδοποιεί κανέναν.
 - [ ] **OPS-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Κανένα exception reporting**: `withExceptions()` άδειο, κανένα Sentry/Flare, `LOG_STACK=single`, cron `>> /dev/null 2>&1`. Για app που εκδίδει νομικά έγγραφα, τα σιωπηλά failures είναι το #1 λειτουργικό ρίσκο. **Fix:** έστω mail/Slack log channel σε `error` level, ή Sentry.
 - [ ] **OPS-4 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — `ops:health` επιστρέφει ΠΑΝΤΑ 0 (`OperatorHealth.php:90`) → το `deploy/update.sh:160` gate είναι νεκρός κώδικας και δεν μπαίνει σε cron monitoring. **Fix:** non-zero exit σε RED findings.
 - [ ] **OPS-5 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Τα per-tenant «off-site» backups by default ΔΕΝ περιέχουν τα βιβλία: `bucket` default `settings_setup` (migration `2026_06_09_000003:24`)· invoices/payments/marks μόνο σε `full`· και το `ops:health` δείχνει «Off-site ok» χωρίς να κοιτάει bucket → ψευδής αίσθηση DR. **Fix:** default `full` ή bucket-aware check.

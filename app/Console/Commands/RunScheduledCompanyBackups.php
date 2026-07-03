@@ -7,6 +7,8 @@ use App\Models\CompanyBackupSetting;
 use App\Models\User;
 use App\Notifications\ScheduledBackupFailed;
 use App\Services\Backup\CompanyBackupRunner;
+use App\Support\Backup\BackupAlertRecipients;
+use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -83,7 +85,7 @@ class RunScheduledCompanyBackups extends Command
         ]);
 
         // DB override (set from «Ρυθμίσεις συστήματος») wins; env is the default.
-        if (! app(\App\Support\Settings\SystemSettings::class)->bool('system.backup_alert_on_failure', (bool) config('ekdosi.backup.alert_on_failure', true))) {
+        if (! app(SystemSettings::class)->bool('system.backup_alert_on_failure', (bool) config('ekdosi.backup.alert_on_failure', true))) {
             return;
         }
 
@@ -105,18 +107,8 @@ class RunScheduledCompanyBackups extends Command
      */
     private function alertRecipients(): array
     {
-        $email = app(\App\Support\Settings\SystemSettings::class)->string('system.backup_alert_email', (string) config('ekdosi.backup.alert_email'));
-        $configured = array_filter(array_map('trim', explode(',', (string) $email)));
-        if ($configured !== []) {
-            return array_values(array_unique($configured));
-        }
-
-        return User::query()
-            ->whereHas('roles', fn ($q) => $q->where('name', 'super_admin'))
-            ->whereNotNull('email')
-            ->pluck('email')
-            ->unique()
-            ->values()
-            ->all();
+        // Shared with the global spatie notifications (OpsBackupNotifiable)
+        // so both backup paths alert the same ops inboxes.
+        return BackupAlertRecipients::resolve();
     }
 }

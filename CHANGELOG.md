@@ -26,6 +26,19 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   απαλλαγής ΦΠΑ στο PDF).
 
 ### Fixed
+- **AUDIT OPS-1/OPS-2 — τα καθολικά (whole-DB) backups υπαρκτά και με πραγματικό
+  alerting.** Τα spatie `backup:run`/`clean`/`monitor` πλέον **default ON** (έτρεχαν
+  default OFF και το INSTALL.md δεν έλεγε πουθενά να ενεργοποιηθούν → host στημένος
+  «by the book» = μηδέν αυτόματα DB backups)· προορισμοί πλέον env-driven
+  (`BACKUP_DESTINATION_DISKS`, comma-separated, με οδηγία για off-site)· οι
+  ειδοποιήσεις αποτυχίας πάνε στους πραγματικούς παραλήπτες μέσω κοινής αλυσίδας με τα
+  per-company alerts (`OpsBackupNotifiable`/`BackupAlertRecipients`: Ρυθμίσεις
+  συστήματος → `EKDOSI_BACKUP_ALERT_EMAIL` → super_admins) αντί για το hardcoded
+  `your@example.com`, ενώ τα success mails σιωπούν (το `backup:monitor` καλύπτει το
+  staleness). Νέο gate «Καθολικό αντίγραφο ΒΔ» στο `ekdosi:go-live-check` (WARN όταν
+  OFF ή local-only), sections στο INSTALL.md §11/§14/§15 (off-site + passphrase +
+  restore drill· έφυγε και η νεκρή αναφορά σε `app/Console/Kernel.php`), νέα
+  `.env.example` τεκμηρίωση (`BACKUP_DESTINATION_DISKS`/`BACKUP_ARCHIVE_PASSWORD`).
 - **AUDIT MYD-1 — παραστατικό με έκπτωση κεφαλίδας δεν απορρίπτεται πλέον από την ΑΑΔΕ
   ([207]/[209]).** Το myDATA payload έστελνε per-line `netValue`/`vatAmount` ΧΩΡΙΣ την
   έκπτωση κεφαλίδας ενώ το summary την εφάρμοζε → Σ(γραμμών) ≠ σύνολα → βέβαιη απόρριψη
