@@ -26,6 +26,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   απαλλαγής ΦΠΑ στο PDF).
 
 ### Fixed
+- **AUDIT DOC-1 — η αιτία απαλλαγής ΦΠΑ τυπώνεται πλέον στο PDF.** Κάθε παραστατικό
+  με γραμμή 0% τυπώνει στο totals box τη νομική αναφορά της απαλλαγής (verbatim §8.3
+  κείμενο, π.χ. «Χωρίς ΦΠΑ - άρθρο 45 του Κώδικα ΦΠΑ» για ενδοκοινοτική) — απαίτηση
+  ΕΛΠ ν.4308/2014 αρ.9· η πηγή είναι η ίδια με τον submitter (0% VatCategory →
+  `vat_exemption_category`), αλλά non-throwing: αρρύθμιστος tenant τυπώνει χωρίς τη
+  σημείωση αντί να σκάει (ο preflight/submitter μένουν οι «θορυβώδεις» φύλακες).
+  Δίγλωσσο prefix label («Απαλλαγή ΦΠΑ»/«VAT exemption»)· η νομική αναφορά μένει
+  σκόπιμα στα ελληνικά.
 - **AUDIT OPS-1/OPS-2 — τα καθολικά (whole-DB) backups υπαρκτά και με πραγματικό
   alerting.** Τα spatie `backup:run`/`clean`/`monitor` πλέον **default ON** (έτρεχαν
   default OFF και το INSTALL.md δεν έλεγε πουθενά να ενεργοποιηθούν → host στημένος

@@ -288,6 +288,13 @@
                         <td class="value">{{ number_format($row['vat'], 2, ',', '.') }}</td>
                     </tr>
                 @endforeach
+                {{-- DOC-1: a 0% παραστατικό must cite the exempting provision (ΕΛΠ
+                     ν.4308/2014 αρ.9). The citation is the verbatim §8.3 legal text. --}}
+                @if(!empty($totals['vatExemption']))
+                    <tr class="discount-note">
+                        <td colspan="2">{{ $L('vat_exemption') }}: {{ $totals['vatExemption']['label'] }} (myDATA §8.3-{{ $totals['vatExemption']['code'] }})</td>
+                    </tr>
+                @endif
                 <tr class="subtotal">
                     <td class="label">{{ $L('net_value') }}</td>
                     <td class="value">{{ number_format($totals['totalNet'], 2, ',', '.') }} €</td>
