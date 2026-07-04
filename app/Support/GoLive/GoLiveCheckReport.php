@@ -68,6 +68,7 @@ class GoLiveCheckReport
             $this->driftGate($tenant),
             $this->backupGate($tenant),
             $this->globalBackupGate(),
+            $this->secretsAtRestGate(),
             ...$this->infraGates(),
         ];
 
@@ -347,6 +348,32 @@ class GoLiveCheckReport
         }
 
         return $this->gate('backup', 'Αντίγραφα ασφαλείας', 'pass', "ενεργά ({$bs->frequency})");
+    }
+
+    /**
+     * SEC-1 (AUDIT): per-tenant secrets (myDATA/WHMCS/SMTP/GSIS creds) are stored
+     * PLAINTEXT at rest unless EKDOSI_ENCRYPT_SECRETS_AT_REST is on — a deliberate
+     * DR trade-off, but one that must be a CONSCIOUS choice, not a silent default.
+     * PASS when encrypted, PASS when plaintext is explicitly acknowledged
+     * (EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED), WARN otherwise so cutover forces
+     * the decision. Global (not per-tenant), but reported per run for visibility.
+     *
+     * @return array{key:string,label:string,status:string,detail:string}
+     */
+    private function secretsAtRestGate(): array
+    {
+        if ((bool) config('ekdosi.secrets.encrypt_at_rest')) {
+            return $this->gate('secrets_at_rest', 'Μυστικά at-rest', 'pass', 'κρυπτογραφημένα (APP_KEY)');
+        }
+
+        if ((bool) config('ekdosi.secrets.plaintext_acknowledged')) {
+            return $this->gate('secrets_at_rest', 'Μυστικά at-rest', 'pass',
+                'plaintext — αποδεκτό ρητά (EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED· βλ. docs/security-at-rest.md)');
+        }
+
+        return $this->gate('secrets_at_rest', 'Μυστικά at-rest', 'warn',
+            'plaintext χωρίς ρητή αποδοχή — όρισε EKDOSI_ENCRYPT_SECRETS_AT_REST=true (+ secrets:reencrypt) '
+            .'ή EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED=true (βλ. docs/security-at-rest.md)');
     }
 
     /**

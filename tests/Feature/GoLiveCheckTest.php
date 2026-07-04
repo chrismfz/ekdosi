@@ -80,6 +80,22 @@ class GoLiveCheckTest extends TestCase
         $this->artisan('ekdosi:go-live-check', ['--tenant' => $c->slug])->assertExitCode(0);
     }
 
+    public function test_secrets_at_rest_gate_reflects_the_explicit_decision(): void
+    {
+        // SEC-1: plaintext without acknowledgement WARNS; acknowledging it (or
+        // encrypting) PASSES. Never a FAIL — plaintext is an accepted trade-off.
+        $c = $this->readyTenant();
+
+        config(['ekdosi.secrets.encrypt_at_rest' => false, 'ekdosi.secrets.plaintext_acknowledged' => false]);
+        $this->assertSame('warn', $this->gate($this->report($c), 'secrets_at_rest')['status']);
+
+        config(['ekdosi.secrets.plaintext_acknowledged' => true]);
+        $this->assertSame('pass', $this->gate($this->report($c), 'secrets_at_rest')['status']);
+
+        config(['ekdosi.secrets.encrypt_at_rest' => true, 'ekdosi.secrets.plaintext_acknowledged' => false]);
+        $this->assertSame('pass', $this->gate($this->report($c), 'secrets_at_rest')['status']);
+    }
+
     public function test_missing_production_creds_fails(): void
     {
         $c = $this->readyTenant();

@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\ErrorAlerts\ExceptionNotifier;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -25,5 +26,10 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // OPS-3: email the ops recipients when the app reports an unhandled
+        // exception (best-effort, deduped/throttled — see ExceptionNotifier).
+        // The closure returns void so the normal laravel.log line is kept.
+        $exceptions->report(function (Throwable $e): void {
+            app(ExceptionNotifier::class)->reportFromHandler($e);
+        });
     })->create();
