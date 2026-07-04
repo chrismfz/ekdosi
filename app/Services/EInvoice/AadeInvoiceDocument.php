@@ -657,6 +657,16 @@ class AadeInvoiceDocument
     private function normaliseCountryCode(string $raw): string
     {
         $trimmed = trim(mb_strtoupper($raw));
+
+        // VAT/common 2-letter aliases that DIFFER from ISO-3166 alpha-2 — resolved
+        // BEFORE the 2-alpha passthrough. 'EL' is the EU VAT prefix for Greece (a
+        // very common way to store a GR customer's country); left as-is it would
+        // fail the MYD-6 country↔type cross-check and hard-block a domestic filing.
+        $aliases = ['EL' => 'GR', 'UK' => 'GB'];
+        if (isset($aliases[$trimmed])) {
+            return $aliases[$trimmed];
+        }
+
         // Already in alpha-2 shape
         if (strlen($trimmed) === 2 && ctype_alpha($trimmed)) {
             return $trimmed;

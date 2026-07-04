@@ -71,6 +71,10 @@ class VatRateIsValidTest extends TestCase
         $this->assertTrue(Codes::vatRateFileable(3, 9));
         // A bogus override code doesn't unlock it.
         $this->assertFalse(Codes::vatRateFileable(3, 99));
+        // Nor does a VALID §8.2 code whose OWN rate isn't 3% — code 8 (no-VAT) and
+        // code 6 (4%) must NOT green-light a 3% row (they'd file a wrong category).
+        $this->assertFalse(Codes::vatRateFileable(3, 8));
+        $this->assertFalse(Codes::vatRateFileable(3, 6));
         // 4% is already directly fileable (category 6) — no override needed.
         $this->assertTrue(Codes::vatRateFileable(4, null));
         // A normal rate is fileable; an override can't rescue a genuinely bad rate.

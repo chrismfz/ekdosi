@@ -38,12 +38,21 @@ class ProductCategoryForm
                 // BUCKET here (goods vs services); the E3 TYPE keeps coming from the
                 // invoice type (it's channel-driven — wholesale vs retail). Leave
                 // blank to inherit the invoice type's default entirely.
+                // Restricted to the three goods/services/products buckets on
+                // purpose (MYD-5 review F1): those are the item-nature categories
+                // that vary per product and stay valid paired with the invoice
+                // type's E3 code. Offering the full §8.8 enum here would let an
+                // operator pick a bucket AADE forbids for the type → a live [307]/
+                // [313] rejection with no local warning.
                 Select::make('mydata_income_class_category')
                     ->label('myDATA: Κατηγορία εσόδων (αγαθά/υπηρεσίες)')
-                    ->options(MyDataOptions::incomeClassificationCategories())
-                    ->searchable()
-                    ->preload()
-                    ->helperText('Το κύριο πεδίο για μικτά τιμολόγια: π.χ. «Εμπορεύματα» → category1_1, «Υπηρεσίες» → category1_3. Κάθε γραμμή προϊόντος αυτής της κατηγορίας δηλώνεται έτσι. Κενό = κληρονομεί τον τύπο παραστατικού.')
+                    ->options([
+                        'category1_1' => 'category1_1 — Πώληση εμπορευμάτων (αγαθά)',
+                        'category1_2' => 'category1_2 — Πώληση προϊόντων',
+                        'category1_3' => 'category1_3 — Παροχή υπηρεσιών',
+                    ])
+                    ->native(false)
+                    ->helperText('Το κύριο πεδίο για μικτά τιμολόγια: π.χ. «Εμπορεύματα» → αγαθά, «Υπηρεσίες» → υπηρεσίες. Κάθε γραμμή προϊόντος αυτής της κατηγορίας δηλώνεται έτσι. Κενό = κληρονομεί τον τύπο παραστατικού.')
                     ->columnSpan(2),
 
                 Select::make('mydata_income_class')

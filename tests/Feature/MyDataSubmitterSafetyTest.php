@@ -827,6 +827,19 @@ class MyDataSubmitterSafetyTest extends TestCase
         ]);
     }
 
+    public function test_greek_customer_with_el_vat_prefix_country_files_as_gr(): void
+    {
+        // MYD-6 review F3: 'EL' (the EU VAT prefix for Greece) must normalise to GR
+        // and NOT hard-block a domestic 1.1 filing on the country↔type cross-check.
+        $this->customer->forceFill(['country' => 'EL'])->save();
+        $inv = $this->makeInvoice(); // type 1.1
+        $this->lineOn($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<country>GR</country>', $xml);
+    }
+
     public function test_domestic_type_with_foreign_counterpart_is_rejected(): void
     {
         // MYD-6: type 1.1 with a non-GR counterpart → clear error instead of [242].

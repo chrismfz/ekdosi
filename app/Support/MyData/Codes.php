@@ -435,11 +435,21 @@ final class Codes
         if (self::vatRateIsValid($rate)) {
             return true;
         }
+        if ($override === null) {
+            return false;
+        }
 
-        // The only rate that files ONLY via an override is 3%.
-        $needsOverride = abs((float) $rate - 3.0) < 0.01;
+        // The only rate that files ONLY via an override is 3%. And the override
+        // must be a §8.2 code whose OWN rate matches — otherwise a 3% row with,
+        // say, override=8 (records-without-VAT) would read green here yet file a
+        // no-VAT category with a nonzero 3%-derived vatAmount → AADE rejection.
+        $r = (float) $rate;
+        if (abs($r - 3.0) >= 0.01) {
+            return false;
+        }
+        $overrideRate = self::VAT_CATEGORY_RATES[(int) $override] ?? null;
 
-        return $needsOverride && $override !== null && array_key_exists((int) $override, self::VAT_CATEGORY_RATES);
+        return $overrideRate !== null && abs($overrideRate - $r) < 0.01;
     }
 
     /** Does this invoice type require an income classification? */
