@@ -817,6 +817,21 @@ class MyDataSubmitterSafetyTest extends TestCase
         (new MyDataSubmitter($this->tenant))->submit($invoice->fresh());
     }
 
+    public function test_submit_refuses_locally_cancelled_invoice(): void
+    {
+        // MYD-3 (AUDIT): a locally-voided sale must never be filed — it would
+        // declare income at AADE that the ledger doesn't recognise. Guarded at
+        // service level so bulk/console/automation callers are covered too.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['local_status' => 'cancelled'])->save();
+        $this->standardLine($invoice);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/locally cancelled/');
+
+        (new MyDataSubmitter($this->tenant))->submit($invoice->fresh('lines'));
+    }
+
     public function test_submit_refuses_unknown_mydata_state_value(): void
     {
         // Belt-and-suspenders catch-all from the fourth review. The

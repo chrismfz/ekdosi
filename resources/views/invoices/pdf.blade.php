@@ -131,12 +131,20 @@
     $isRetail   = str_starts_with($mydataType, '11.');
     $isCredit   = str_starts_with($mydataType, '5.') || ($invoice->invoiceType?->is_credit ?? false);
     $isReturn   = $invoice->invoiceType?->is_return ?? false;
+    // DOC-2/DOC-3: banner = f(local_status × mydata_state × provider), not
+    // mydata_state alone — see InvoiceBannerState for the matrix.
+    $bannerState = \App\Support\Pdf\InvoiceBannerState::for($invoice);
+    $isCancelledDoc = $bannerState['kind'] === 'cancelled';
 @endphp
 
-@if($invoice->mydata_state === null)
+@if($bannerState['kind'] === 'cancelled')
+    <div class="banner banner-cancelled">
+        {{ $L('banner_cancelled') }}@if($bannerState['note'] === 'cancel_pending_mydata')<br><span style="font-size:8.5pt; font-weight:400">{{ $L('banner_cancel_pending_mydata') }}</span>@endif
+    </div>
+@elseif($bannerState['kind'] === 'draft')
     <div class="banner banner-draft">{{ $L('banner_draft') }}</div>
-@elseif($invoice->mydata_state === 'CANCELLED')
-    <div class="banner banner-cancelled">{{ $L('banner_cancelled') }}</div>
+@elseif($bannerState['kind'] === 'pending_mydata')
+    <div class="banner banner-draft">{{ $L('banner_pending_mydata') }}</div>
 @elseif($isCredit)
     <div class="banner banner-credit">{{ $L('banner_credit') }}</div>
 @endif
@@ -217,7 +225,9 @@
             @if($invoice->invoiceType?->mydata_type)
                 <div class="meta-row"><span class="meta-label">{{ $L('mydata_type') }}:</span> {{ $invoice->invoiceType->mydata_type }}</div>
             @endif
-            @if($invoice->mydata_url && $invoice->mydata_state === 'VALID')
+            {{-- DOC-7: never assert «Πιστοποιημένο» on a cancelled document —
+                 a locally-voided invoice can still be VALID at AADE. --}}
+            @if($invoice->mydata_url && $invoice->mydata_state === 'VALID' && ! $isCancelledDoc)
                 <div class="meta-row"><span class="meta-label">{{ $L('status') }}:</span> <strong style="color:#065f46">{{ $L('certified') }}</strong></div>
             @endif
         </div>
@@ -431,7 +441,11 @@
 
 {{-- ====================== Footer (myDATA verification + per-tenant text + pagination) ====================== --}}
 <div class="footer">
-    @if($invoice->mydata_url)
+    {{-- DOC-7: the «Πιστοποιημένο στη myDATA — επαληθεύστε» claim only on a
+         live VALID document — next to an ΑΚΥΡΩΘΕΝ banner it contradicts the
+         page. (The QR + MARK stay in the header: scanning shows the real
+         AADE state, cancelled included.) --}}
+    @if($invoice->mydata_url && $invoice->mydata_state === 'VALID' && ! $isCancelledDoc)
         <div class="mydata-line">
             {{ $L('mydata_verify') }}
         </div>

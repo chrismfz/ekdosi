@@ -121,6 +121,19 @@ class MyDataSubmitter implements EInvoiceSubmitter
             );
         }
 
+        // MYD-3 (AUDIT): never file a locally-voided document. The business
+        // cancelled this sale; submitting it would declare income AADE-side
+        // that the ledger doesn't recognise (persistResponse deliberately
+        // does NOT resurrect a cancelled local_status, so the mismatch would
+        // only surface at reconciliation). Guarded at service level so EVERY
+        // caller — view action, bulk, console, future automation — is covered.
+        if ($invoice->local_status === 'cancelled') {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} is locally cancelled — refusing to file it at myDATA. ".
+                'Restore it first (Επαναφορά σε πρόχειρο → Οριστικοποίηση) if the cancellation was a mistake.'
+            );
+        }
+
         $payload = $this->document()->build($invoice);
         $xml = $this->document()->toXml($payload);
 

@@ -26,6 +26,22 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   απαλλαγής ΦΠΑ στο PDF).
 
 ### Fixed
+- **AUDIT DOC-2/DOC-3/DOC-7 — τα banners του PDF είναι πλέον συνάρτηση
+  `local_status` × `mydata_state` × provider** (`InvoiceBannerState`), όχι μόνο του
+  `mydata_state`: (α) τοπικά ακυρωμένο + VALID τυπώνει ΑΚΥΡΩΘΕΝ + «Εκκρεμεί ακύρωση
+  στο myDATA» αντί για καθαρό πιστοποιημένο αντίγραφο· (β) τοπικά ακυρωμένο + αδήλωτο
+  τυπώνει ΑΚΥΡΩΘΕΝ αντί για ΠΡΟΧΕΙΡΟ· (γ) εκδοθέν-αλλά-αδήλωτο σε myDATA tenant
+  τυπώνει «ΕΚΔΟΘΕΝ — ΕΚΚΡΕΜΕΙ ΥΠΟΒΟΛΗ ΣΤΟ myDATA» ενώ σε non-filing tenant
+  (none/ee-peppol/mode Off) δεν τυπώνει κανένα banner (το «ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ
+  ΥΠΟΒΛΗΘΕΙ ΣΤΗ myDATA» για πάντα στον εσθονικό tenant τέλος — το draft λεκτικό έγινε
+  provider-agnostic «ΔΕΝ ΕΧΕΙ ΕΚΔΟΘΕΙ»)· (δ) DOC-7: το «Πιστοποιημένο» meta row + το
+  footer «Πιστοποιημένο στη myDATA — επαληθεύστε» δεν τυπώνονται σε ακυρωμένο έγγραφο
+  (QR+ΜΑΡΚ μένουν — η σάρωση δείχνει την αληθινή κατάσταση ΑΑΔΕ).
+- **AUDIT MYD-3 — η «Υποβολή στο myDATA» δεν προσφέρεται/εκτελείται πλέον σε τοπικά
+  ακυρωμένα παραστατικά**: visibility guard στο `ViewInvoice` + hard guard στο σώμα
+  του action (το mountAction δεν ξαναελέγχει visible()) + refusal σε επίπεδο service
+  (`MyDataSubmitter::submit`, `GrProviderSubmitter`) ώστε να καλύπτονται ΟΛΟΙ οι
+  callers (bulk/console/μελλοντικά automations).
 - **AUDIT DOC-1 — η αιτία απαλλαγής ΦΠΑ τυπώνεται πλέον στο PDF.** Κάθε παραστατικό
   με γραμμή 0% τυπώνει στο totals box τη νομική αναφορά της απαλλαγής (verbatim §8.3
   κείμενο, π.χ. «Χωρίς ΦΠΑ - άρθρο 45 του Κώδικα ΦΠΑ» για ενδοκοινοτική) — απαίτηση
