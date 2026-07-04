@@ -236,6 +236,14 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'Refusing to submit — investigate before retrying.'
             );
         }
+        // MYD-3 (AUDIT): mirror MyDataSubmitter — a locally-voided document
+        // must never reach the provider/AADE.
+        if ($invoice->local_status === 'cancelled') {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} is locally cancelled — refusing to file it. ".
+                'Restore it first (Επαναφορά σε πρόχειρο → Οριστικοποίηση) if the cancellation was a mistake.'
+            );
+        }
     }
 
     /**

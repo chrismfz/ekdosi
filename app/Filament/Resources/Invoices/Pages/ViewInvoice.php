@@ -377,11 +377,18 @@ class ViewInvoice extends ViewRecord
             // Submit a draft invoice to myDATA. Visible only for drafts
             // (no mydata_state) on tenants in sandbox/production mode.
             // Off-mode + non-Greek tenants get no submission UI here.
+            // MYD-3 (AUDIT): NEVER on a locally-cancelled invoice — filing a
+            // sale the operator voided would over-declare income at AADE
+            // (persistResponse deliberately keeps local_status=cancelled, so
+            // the mismatch would only surface at reconciliation). Mirrors the
+            // bulk submit's skip in InvoicesTable.
             Action::make('submit_to_mydata')
                 ->label($isProviderChannel ? 'Αποστολή στον Πάροχο' : 'Υποβολή στο myDATA')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('success')
-                ->visible(fn (Invoice $record) => $tenantSupportsMyData && $record->mydata_state === null)
+                ->visible(fn (Invoice $record) => $tenantSupportsMyData
+                    && $record->mydata_state === null
+                    && $record->local_status !== 'cancelled')
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Αποστολή παραστατικού — '.$channelLabel)
@@ -393,6 +400,19 @@ class ViewInvoice extends ViewRecord
                         : 'Sandbox mode — files to AADE\'s test endpoint. Synthetic MARK.'))
                 ->modalSubmitActionLabel('Επιβεβαίωση αποστολής')
                 ->action(function (Invoice $record) {
+                    // Hard guard mirroring the visibility check — mountAction
+                    // does NOT re-check visible(), so a stale page / crafted
+                    // Livewire call could still reach here (same pattern as
+                    // ManageTenantRoleAction).
+                    if ($record->local_status === 'cancelled') {
+                        Notification::make()
+                            ->title('Το παραστατικό είναι ακυρωμένο')
+                            ->body('Δεν υποβάλλεται στο myDATA παραστατικό που έχει ακυρωθεί τοπικά.')
+                            ->danger()->send();
+
+                        return;
+                    }
+
                     try {
                         // Resolve the tenant from the record's own
                         // company relation, not Filament::getTenant().

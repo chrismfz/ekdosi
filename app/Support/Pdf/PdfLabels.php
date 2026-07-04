@@ -21,8 +21,13 @@ class PdfLabels
         // Document titles / banners
         'doc_generic' => ['Παραστατικό', 'Document'],
         'quote_title' => ['Προσφορά', 'Quotation'],
-        'banner_draft' => ['ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ ΥΠΟΒΛΗΘΕΙ ΣΤΗ myDATA', 'DRAFT — NOT SUBMITTED TO myDATA'],
+        // DOC-3: draft wording is provider-agnostic — a draft is «not issued»,
+        // full stop. myDATA is irrelevant for none/ee-peppol/Off tenants, and
+        // for GR tenants the not-yet-filed state has its own banner below.
+        'banner_draft' => ['ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ ΕΚΔΟΘΕΙ', 'DRAFT — NOT ISSUED'],
         'banner_cancelled' => ['ΑΚΥΡΩΘΕΝ ΠΑΡΑΣΤΑΤΙΚΟ — Δεν έχει νόμιμη ισχύ', 'CANCELLED DOCUMENT — Not legally valid'],
+        'banner_cancel_pending_mydata' => ['Εκκρεμεί ακύρωση στο myDATA', 'myDATA cancellation pending'],
+        'banner_pending_mydata' => ['ΕΚΔΟΘΕΝ — ΕΚΚΡΕΜΕΙ ΥΠΟΒΟΛΗ ΣΤΟ myDATA', 'ISSUED — myDATA SUBMISSION PENDING'],
         'banner_credit' => ['ΠΙΣΤΩΤΙΚΟ ΠΑΡΑΣΤΑΤΙΚΟ', 'CREDIT NOTE'],
 
         // Identity / parties
