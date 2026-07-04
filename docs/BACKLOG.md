@@ -19,6 +19,10 @@ These are genuine specs / architecture blueprints / ops runbooks / historical re
 kept on their own, with their current status. The forward-looking work in them is
 surfaced in the open-items sections further down.
 
+- **`PLAN.md`** (repo root) — master roadmap «Ekdosi ως σταδιακή αντικατάσταση WHMCS»
+  (4 πυλώνες: **Domains → Payment gateways → Provisioning → Portal**, strangler-fig).
+  Domains **OPEN** (Φάσεις A0–A5, βλ. epic «Αντικατάσταση WHMCS» παρακάτω)· Πυλ. B/C έχουν
+  ήδη blueprint/seam (`payment-connectors.md` · `ProvisioningModule`), Πυλ. D = νέο.
 - **`paroxos/regulatory-blueprint.md`** + **`paroxos/implementation-plan.md`** — GR
   ΥΠΑΗΕΣ provider + EU PEPPOL. PEPPOL Phase 1 (UBL builder, `peppol:test-submit`) **DONE**;
   provider P0–P5 built/gated (mode=off); **PEPPOL Phase 2 + live provider = OPEN**.
@@ -177,8 +181,32 @@ surfaced in the open-items sections further down.
 
 ---
 
+## 🌐 Αντικατάσταση WHMCS (σταδιακή) — master epic → βλ. **`PLAN.md`** (root)
+Στόχος: το ekdosi να αντικαταστήσει σταδιακά το WHMCS (**strangler-fig**, όχι big-bang·
+`billing_connections` επιτρέπει συνύπαρξη). Σειρά: **Domains → Payment gateways →
+Provisioning → Portal**. Το «δύσκολο» (invoices/myDATA/recurring/υπόλοιπα) ήδη γίνεται·
+κάθε πυλώνας = 6η/7η υλοποίηση του υπάρχοντος contract+registry pattern. Πλήρες σχέδιο +
+data model + phase gates: **`PLAN.md`**.
+- **Πυλώνας A — Domains** _(OPEN, πρώτο)_ — dedicated `Domain` model ↔ `ServiceContract`
+  billing clock· registrar modules à la `EInvoiceProviderTransport`, ξεκινώντας
+  **Openprovider** → **GR-Forth**. Φάσεις (stop σε κάθε gate):
+  - **A0** θεμέλιο — `companies.enable_domain_management` flag + nav-gating trait +
+    `DomainRegistrar` contract/registry/creds/Null + `config('ekdosi.domains.registrars')` +
+    `domain_registrar_connections` (super_admin creds).
+  - **A1** data model + manual CRUD (`domains`/`domain_tlds`/`domain_tld_prices`/
+    `domain_nameservers`/`domain_contacts`) — καταχώριση υπάρχοντος portfolio, μηδέν API.
+  - **A2** Openprovider read-only — availability/WHOIS/`domains:sync` (expiry pull).
+  - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
+    billing (reuse `StageServiceRenewal`) + grace/redemption.
+  - **A4** 2ος registrar **GR-Forth** (.gr/.ελ, 2ετία min) — αποδεικνύει το abstraction.
+  - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
+    reconciliation** (mirror myDATA reconcile).
+- **Πυλώνας B — Payment gateways** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά)· πριν το portal.
+- **Πυλώνας C — Provisioning modules** → seam `app/Contracts/ProvisioningModule.php` ήδη (βλ. «Services / Provisioning» κάτω).
+- **Πυλώνας D — Customer portal** — custom blades / 2ο panel· **τελευταίο** (θέλει A+B έτοιμα).
+
 ## 🟢 Services / Provisioning
-- **Real provisioning modules** (cPanel/Mailcow/license server) — σήμερα μόνο `NullProvisioningModule`.
+- **Real provisioning modules** (cPanel/Mailcow/license server) — σήμερα μόνο `NullProvisioningModule`. _(= Πυλώνας C του `PLAN.md`.)_
 - **Multi-line service contracts** — v1 = single-line.
 
 ## 🟣 WHMCS loose ends (βλ. `whmcs-legacy-plugin-map.md`)
