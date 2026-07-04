@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\VatCategories\Tables;
 
+use App\Support\MyData\Codes;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -37,11 +38,11 @@ class VatCategoriesTable
                     // Flag a rate AADE won't accept (§8.2 = 0/4/6/9/13/17/24).
                     // MyDataSubmitter::vatCategoryFor throws on anything else, so
                     // an invoice using this category would be rejected at filing.
-                    ->color(fn ($record) => self::isAadeRate((float) $record->rate) ? null : 'danger')
-                    ->tooltip(fn ($record) => self::isAadeRate((float) $record->rate)
+                    ->color(fn ($record) => self::isAadeRate($record) ? null : 'danger')
+                    ->tooltip(fn ($record) => self::isAadeRate($record)
                         ? null
                         : 'Μη έγκυρος συντελεστής ΑΑΔΕ (§8.2). Τα παραστατικά με αυτή την κατηγορία θα απορριφθούν στο myDATA.')
-                    ->icon(fn ($record) => self::isAadeRate((float) $record->rate) ? null : 'heroicon-o-exclamation-triangle'),
+                    ->icon(fn ($record) => self::isAadeRate($record) ? null : 'heroicon-o-exclamation-triangle'),
 
                 IconColumn::make('is_default')
                     ->label('Default')
@@ -94,9 +95,12 @@ class VatCategoriesTable
             ->defaultSort('rate');
     }
 
-    /** Is this an AADE-valid §8.2 VAT rate? Single source of truth in Codes. */
-    private static function isAadeRate(float $rate): bool
+    /**
+     * Is this row fileable at AADE? Single source of truth in Codes. MYD-8: a
+     * 3%/4% row is fileable when it carries a valid §8.2 override, so pass it.
+     */
+    private static function isAadeRate($record): bool
     {
-        return \App\Support\MyData\Codes::vatRateIsValid($rate);
+        return Codes::vatRateFileable((float) $record->rate, $record->mydata_vat_category);
     }
 }

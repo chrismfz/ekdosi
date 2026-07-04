@@ -134,6 +134,22 @@ class MyDataConfigAudit
             }
         }
 
+        // MYD-9: the per-line quantity flag must match the type's goods/services
+        // nature, or the FIRST filing of a hand-made type is rejected ([204] goods
+        // need quantity / [205] services forbid it). WARN — the seeder sets it
+        // right; this catches a manually-created type.
+        if (! empty($mt) && Codes::invoiceTypeExists($mt)) {
+            $goods = Codes::typeIsGoods($mt);
+            $requiresQty = (bool) $type->mydata_requires_quantity;
+            if ($goods === true && ! $requiresQty) {
+                $findings[] = new ConfigAuditFinding('warn',
+                    'Τύπος αγαθών χωρίς «απαιτεί ποσότητα» — η ΑΑΔΕ ζητά ποσότητα ανά γραμμή για αγαθά ([204]).');
+            } elseif ($goods === false && $requiresQty) {
+                $findings[] = new ConfigAuditFinding('warn',
+                    'Τύπος υπηρεσιών με «απαιτεί ποσότητα» — η ΑΑΔΕ απορρίπτει per-line ποσότητα σε υπηρεσίες ([205]).');
+            }
+        }
+
         return new ConfigAuditRow(
             kind: 'invoice_type',
             label: "[{$type->code}] {$type->name}",

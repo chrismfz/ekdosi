@@ -4,6 +4,7 @@ namespace App\Services\EInvoice;
 
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\InvoiceLine;
 use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\InvoiceVatBreakdown;
@@ -64,7 +65,8 @@ class AadeInvoiceDocument
      */
     public function build(Invoice $invoice): AadeInvoice
     {
-        $invoice->loadMissing(['lines', 'invoiceType', 'customer']);
+        // lines.product.productCategory feeds the per-line E3 income class (MYD-5).
+        $invoice->loadMissing(['lines.product.productCategory', 'invoiceType', 'customer']);
 
         // Draft guard: code (ΑΑ) is allocated by InvoiceNumberer at
         // issue-time. A code of 0 means the InvoiceNumberer wasn't run
@@ -114,14 +116,21 @@ class AadeInvoiceDocument
             $header->addCorrelatedInvoice((int) $this->originalInsertMark($invoice));
         }
 
-        // Income classification (E3_561_xxx + categoryN_x) comes from the
-        // InvoiceType config. AADE requires it for income documents at the
-        // per-line level AND aggregated on the summary — verified against
-        // an imported legacy MARK request that AADE accepted (it carried
-        // the classification at BOTH levels). One class per invoice type,
-        // so the per-line amount is the line's (header-discounted) net.
-        $incomeClass = $invoice->invoiceType?->mydata_income_class;
-        $incomeCat = $invoice->invoiceType?->mydata_income_class_category;
+        // Income classification (E3_561_xxx + categoryN_x). AADE requires it for
+        // income documents at the per-line level AND aggregated on the summary —
+        // verified against an imported legacy MARK request that AADE accepted (it
+        // carried the classification at BOTH levels).
+        //
+        // MYD-5: the class is resolved PER LINE. The invoice type carries the
+        // default (channel-driven E3 type + category); a line's product CATEGORY
+        // may override it as a coherent (class, category) pair, so a mixed
+        // goods+services invoice files each line under its own class instead of
+        // one class for the whole document. The summary then emits one
+        // <incomeClassification> per distinct (class, category), each summing its
+        // lines' (header-discounted) nets — which still total totalNet (MYD-1).
+        $typeClass = $invoice->invoiceType?->mydata_income_class;
+        $typeCat = $invoice->invoiceType?->mydata_income_class_category;
+        $summaryIncome = [];   // "class|cat" => ['class'=>, 'cat'=>, 'net'=>]
 
         // MYD-1: per-line net/vat with the header (invoice-level) discount
         // folded in, summing EXACTLY to the InvoiceVatBreakdown rows the
@@ -175,11 +184,17 @@ class AadeInvoiceDocument
                 $detail->setVatExemptionCategory(VatExemption::from($this->resolveVatExemptionCategory()));
             }
 
-            if ($incomeClass && $incomeCat) {
+            [$lineClass, $lineCat] = $this->resolveIncomeClass($line, $typeClass, $typeCat);
+            if ($lineClass && $lineCat) {
                 // Same discounted net as the line's netValue, so the per-line
-                // classifications also sum to the summary classification
-                // (which uses the breakdown's totalNet).
-                $detail->addIncomeClassification($incomeClass, $incomeCat, $lineAmounts[$i]['net']);
+                // classifications also sum to the summary classification.
+                $detail->addIncomeClassification($lineClass, $lineCat, $lineAmounts[$i]['net']);
+
+                // Accumulate the summary aggregate per distinct (class, category).
+                $key = $lineClass.'|'.$lineCat;
+                $summaryIncome[$key]['class'] = $lineClass;
+                $summaryIncome[$key]['cat'] = $lineCat;
+                $summaryIncome[$key]['net'] = ($summaryIncome[$key]['net'] ?? 0) + $lineAmounts[$i]['net'];
             }
 
             $details[] = $detail;
@@ -239,9 +254,10 @@ class AadeInvoiceDocument
             ->setTotalGrossValue($grossValue);
 
         // Summary-level income classification = aggregate of the per-line
-        // classifications (single class per invoice type → total net).
-        if ($incomeClass && $incomeCat) {
-            $summary->addIncomeClassification($incomeClass, $incomeCat, $vatBreakdown->totalNet());
+        // classifications, one node per distinct (class, category). Σ(group nets)
+        // == Σ(line nets) == totalNet (MYD-1), so it can't trip the AADE sum-check.
+        foreach ($summaryIncome as $g) {
+            $summary->addIncomeClassification($g['class'], $g['cat'], round($g['net'], 2));
         }
 
         $aade = (new AadeInvoice)
@@ -500,6 +516,65 @@ class AadeInvoiceDocument
      * Filing the wrong shape (e.g. attaching Counterpart to an 11.2
      * ΑΠΥ for an AFM-bearing customer) is a common AADE rejection.
      */
+    /**
+     * MYD-5: the (E3 income class, category) pair for a line. Resolved field by
+     * field so a product's CATEGORY can override just the goods/services BUCKET
+     * (`mydata_income_class_category`, e.g. category1_1 goods vs category1_3
+     * services) while the E3 TYPE keeps coming from the invoice type — because the
+     * type (E3_561_001 wholesale vs E3_561_003 retail) is CHANNEL-driven, not
+     * item-driven, so a fixed per-item type would misfile the same product across
+     * channels. A product category MAY also override the E3 type (advanced), but
+     * the common mixed-invoice case only sets the bucket. Free-text lines (no
+     * product) use the type default for both.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function resolveIncomeClass(InvoiceLine $line, ?string $typeClass, ?string $typeCat): array
+    {
+        $category = $line->product?->productCategory;
+
+        $class = filled($category?->mydata_income_class) ? $category->mydata_income_class : $typeClass;
+        $cat = filled($category?->mydata_income_class_category) ? $category->mydata_income_class_category : $typeCat;
+
+        return [$class, $cat];
+    }
+
+    /**
+     * MYD-6: reject a counterpart whose country contradicts the invoice type
+     * (AADE [242]-[244]) BEFORE filing, with an actionable message instead of the
+     * opaque AADE rejection. Only the unambiguous 1.x/2.x sales types are checked
+     * (see Codes::counterpartCountryClass).
+     */
+    private function assertCounterpartCountryMatchesType(Invoice $invoice, string $type, string $country): void
+    {
+        $expected = Codes::counterpartCountryClass($type);
+        if ($expected === null) {
+            return;
+        }
+
+        $isEu = Codes::isEuCountry($country);
+        $ok = match ($expected) {
+            'GR' => $country === 'GR',
+            'EU' => $country !== 'GR' && $isEu,
+            'NON_EU' => ! $isEu,
+            default => true,
+        };
+
+        if (! $ok) {
+            $need = match ($expected) {
+                'GR' => 'Ελλάδα (GR)',
+                'EU' => 'χώρα ΕΕ εκτός Ελλάδας',
+                'NON_EU' => 'χώρα εκτός ΕΕ',
+                default => '',
+            };
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode}: ο τύπος {$type} απαιτεί αντισυμβαλλόμενο με χώρα «{$need}», ".
+                "αλλά η χώρα είναι «{$country}». Διόρθωσε τη χώρα του πελάτη ή άλλαξε τον τύπο παραστατικού ".
+                '(1.1/2.1=εγχώριο, 1.2/2.2=ενδοκοινοτικό, 1.3/2.3=τρίτες χώρες).'
+            );
+        }
+    }
+
     private function buildCounterpart(Invoice $invoice, string $type): ?Counterpart
     {
         // Retail (Λιανικής) types forbid Counterpart even if customer
@@ -524,6 +599,10 @@ class AadeInvoiceDocument
         // anything else, including spelled-out names ("Greece").
         $country = $this->normaliseCountryCode($invoice->country ?: $customer->country ?: 'GR');
 
+        // MYD-6: pre-empt AADE's opaque [242]-[244] ("counterpart country for this
+        // invoice type must be Greece / EU-not-Greece / non-EU") with a clear error.
+        $this->assertCounterpartCountryMatchesType($invoice, $type, $country);
+
         $counterpart = (new Counterpart)
             ->setVatNumber($customer->afm)
             ->setCountry($country)
@@ -540,11 +619,26 @@ class AadeInvoiceDocument
                     "Foreign counterpart on invoice {$invoice->invcode} requires customer name (AADE rule)."
                 )
             );
+
+            // MYD-6: a REAL address is required. The old code fabricated
+            // 'Unknown'/'00000' placeholders — AADE accepts them but they file
+            // garbage onto a legal document (and it was inconsistent with
+            // DeliveryNoteSubmitter::requireAddress, which hard-fails). Refuse
+            // instead, so the operator fills the customer's real address.
+            $street = $invoice->address1 ?: $customer->address1;
+            $city = $invoice->city ?: $customer->city;
+            $postcode = $invoice->postcode ?: $customer->postcode;
+            if (blank($street) || blank($city) || blank($postcode)) {
+                throw new RuntimeException(
+                    "Foreign counterpart on invoice {$invoice->invcode} requires a full address ".
+                    '(οδός/πόλη/Τ.Κ.) — AADE rejects a missing one. Fill the customer address.'
+                );
+            }
             $counterpart->setAddress(
                 (new Address)
-                    ->setStreet($invoice->address1 ?: ($customer->address1 ?: 'Unknown'))
-                    ->setCity($invoice->city ?: ($customer->city ?: 'Unknown'))
-                    ->setPostalCode($invoice->postcode ?: ($customer->postcode ?: '00000'))
+                    ->setStreet($street)
+                    ->setCity($city)
+                    ->setPostalCode($postcode)
             );
         }
 

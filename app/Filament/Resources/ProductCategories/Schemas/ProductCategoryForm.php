@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\ProductCategories\Schemas;
 
-use Filament\Forms\Components\TextInput;
+use App\Support\MyDataOptions;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;
 
 class ProductCategoryForm
@@ -30,6 +32,26 @@ class ProductCategoryForm
                 Textarea::make('description')
                     ->rows(3)
                     ->columnSpanFull(),
+
+                // MYD-5: optional per-category myDATA E3 override. The COMMON case
+                // for a mixed goods+services invoice is to set just the category
+                // BUCKET here (goods vs services); the E3 TYPE keeps coming from the
+                // invoice type (it's channel-driven — wholesale vs retail). Leave
+                // blank to inherit the invoice type's default entirely.
+                Select::make('mydata_income_class_category')
+                    ->label('myDATA: Κατηγορία εσόδων (αγαθά/υπηρεσίες)')
+                    ->options(MyDataOptions::incomeClassificationCategories())
+                    ->searchable()
+                    ->preload()
+                    ->helperText('Το κύριο πεδίο για μικτά τιμολόγια: π.χ. «Εμπορεύματα» → category1_1, «Υπηρεσίες» → category1_3. Κάθε γραμμή προϊόντος αυτής της κατηγορίας δηλώνεται έτσι. Κενό = κληρονομεί τον τύπο παραστατικού.')
+                    ->columnSpan(2),
+
+                Select::make('mydata_income_class')
+                    ->label('myDATA: Χαρακτηρισμός E3 (προχωρημένο)')
+                    ->options(MyDataOptions::incomeClassificationTypes())
+                    ->searchable()
+                    ->preload()
+                    ->helperText('Προαιρετικό override του κωδικού E3_561_xxx. Συνήθως αφήνεται κενό ώστε ο τύπος E3 να ακολουθεί το κανάλι του παραστατικού (χονδρική/λιανική).'),
             ])
             ->columns(3);
     }
