@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\OperatorHealth;
 
+use App\Support\OperatorHealth\HealthKeys;
 use App\Support\OperatorHealth\HealthRecorder;
 use App\Support\OperatorHealth\OperatorHealthReport;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -18,9 +20,18 @@ class OperatorHealthCommandTest extends TestCase
     use RefreshDatabase;
 
     #[Test]
-    public function exits_critical_when_the_worker_heartbeat_is_missing(): void
+    public function exits_warning_when_the_worker_heartbeat_is_missing(): void
     {
-        // Fresh env: no queue heartbeat recorded → worker looks down → critical.
+        // Fresh env: no heartbeat yet → warning (not critical — could be a fresh box).
+        $this->artisan('ops:health')->assertExitCode(1);
+    }
+
+    #[Test]
+    public function exits_critical_when_the_heartbeat_is_long_silent(): void
+    {
+        // A heartbeat silent for >30 min is a real outage → critical.
+        Cache::forever(HealthKeys::QUEUE_HEARTBEAT, now()->subMinutes(45)->toIso8601String());
+
         $this->artisan('ops:health')->assertExitCode(2);
     }
 
@@ -35,7 +46,8 @@ class OperatorHealthCommandTest extends TestCase
     #[Test]
     public function json_output_carries_the_same_exit_code(): void
     {
-        $this->artisan('ops:health', ['--json' => true])->assertExitCode(2);
+        // No heartbeat → warning exit 1.
+        $this->artisan('ops:health', ['--json' => true])->assertExitCode(1);
     }
 
     #[Test]

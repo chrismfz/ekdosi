@@ -66,10 +66,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   με το threat model + escape hatch (`secrets:reencrypt`).
 
 ### Fixed
-- **AUDIT OPS-7 — clean-slate DB restore.** Το `ekdosi:db-snapshot` παίρνει `--add-drop-database
-  --databases` ώστε το restore να ρίχνει και ορφανό πίνακα κακού migration (αλλιώς το επόμενο
-  deploy έσκαγε «table already exists»)· το snapshot μεταφέρθηκε ΜΕΤΑ το `artisan down` (κλείνει
-  το παράθυρο χαμένων writes· snapshot-failure = clean abort με `up` + worker restart).
+- **AUDIT OPS-7 — clean-slate DB restore.** Το `ekdosi:db-restore` κάνει πρώτα `DROP DATABASE` +
+  `CREATE DATABASE` (στη ΒΔ της σύνδεσης, με το charset/collation της) και μετά φορτώνει το
+  (DB-agnostic) snapshot — ώστε ορφανός πίνακας κακού migration να μη επιβιώνει (αλλιώς το επόμενο
+  deploy έσκαγε «table already exists»)· self-heal σε διακοπείσα επαναφορά, χωρίς baked-in όνομα ΒΔ.
+  Το snapshot μεταφέρθηκε ΜΕΤΑ το `artisan down` (κλείνει το παράθυρο χαμένων writes· snapshot-failure
+  = clean abort με `up` + worker restart).
 - **AUDIT MYD-4 — ορατότητα για μη-αντιστοιχισμένους τρόπους πληρωμής (δηλώνονταν σιωπηλά ως
   «Μετρητά»).** Χωρίς `mydata_payment_type` (§8.12), τιμολόγιο με κάρτα/έμβασμα δηλωνόταν στην
   ΑΑΔΕ ως μετρητά (τύπος 3) χωρίς σημάδι. Πλέον: (α) το `MyDataConfigAudit` (preflight /

@@ -108,12 +108,18 @@ class AppServiceProvider extends ServiceProvider
             if ($this->app->runningUnitTests()) {
                 return;
             }
-            app(ExceptionNotifier::class)->reportFailedJob(
-                $event->job->resolveName(),
-                $event->exception,
-                $event->connectionName,
-                $event->job->getQueue() ?? 'default',
-            );
+            // Fully best-effort: a hiccup resolving the job name/queue must never
+            // throw inside the worker's own failure path.
+            try {
+                app(ExceptionNotifier::class)->reportFailedJob(
+                    $event->job->resolveName(),
+                    $event->exception,
+                    $event->connectionName,
+                    $event->job->getQueue() ?? 'default',
+                );
+            } catch (\Throwable) {
+                // swallow — the job already failed; alerting is secondary.
+            }
         });
 
         Event::listen(

@@ -37,10 +37,10 @@ class DbSnapshotRestoreTest extends TestCase
         $this->assertContains('--user=ekdosi', $cmd);
         $this->assertContains('--single-transaction', $cmd);
         $this->assertContains('--result-file=/tmp/out.sql', $cmd);
-        // OPS-7: clean-slate restore — DROP DATABASE + CREATE DATABASE in the dump
-        // so a table left by a half-applied migration doesn't survive a restore.
-        $this->assertContains('--add-drop-database', $cmd);
-        $this->assertContains('--databases', $cmd);
+        // OPS-7: the dump stays DB-AGNOSTIC (no --databases embedding the db name);
+        // the clean-slate DROP+CREATE lives in db-restore instead.
+        $this->assertNotContains('--databases', $cmd);
+        $this->assertNotContains('--add-drop-database', $cmd);
         $this->assertSame('ekdosi_prod', end($cmd));
         // The password is NEVER in argv (it travels via MYSQL_PWD).
         $this->assertStringNotContainsString('s3cr3t', implode(' ', $cmd));
@@ -70,6 +70,29 @@ class DbSnapshotRestoreTest extends TestCase
         $this->assertContains('--user=ekdosi', $cmd);
         $this->assertSame('ekdosi_prod', end($cmd));
         $this->assertStringNotContainsString('s3cr3t', implode(' ', $cmd));
+    }
+
+    public function test_recreate_step_drops_and_creates_the_target_db(): void
+    {
+        // OPS-7: db-restore starts from a clean schema so an orphan table from a
+        // half-applied migration can't survive. The DROP/CREATE targets the
+        // RESTORE connection's db (not a name baked into the snapshot).
+        $sql = DbRestore::recreateDatabaseSql($this->cfg());
+        $this->assertStringContainsString('DROP DATABASE IF EXISTS `ekdosi_prod`', $sql);
+        $this->assertStringContainsString('CREATE DATABASE `ekdosi_prod` CHARACTER SET utf8mb4', $sql);
+
+        // The recreate mysql invocation carries NO positional db (it may not exist yet).
+        $cmd = DbRestore::recreateCommand($this->cfg());
+        $this->assertSame('mysql', $cmd[0]);
+        $this->assertContains('--host=db.internal', $cmd);
+        $this->assertNotContains('ekdosi_prod', $cmd);
+        $this->assertStringNotContainsString('s3cr3t', implode(' ', $cmd));
+    }
+
+    public function test_recreate_sql_includes_collation_when_configured(): void
+    {
+        $sql = DbRestore::recreateDatabaseSql($this->cfg() + ['collation' => 'utf8mb4_unicode_ci']);
+        $this->assertStringContainsString('COLLATE utf8mb4_unicode_ci', $sql);
     }
 
     public function test_snapshot_refuses_non_mysql_driver(): void

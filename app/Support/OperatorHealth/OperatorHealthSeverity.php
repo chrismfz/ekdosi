@@ -14,12 +14,21 @@ namespace App\Support\OperatorHealth;
  *                  off-site/books backup gap, a failed scheduled task, myDATA
  *                  discrepancies…)
  *   critical → 2   the system can't process or protect data right now: the queue
- *                  worker is down, or the backup monitor is failing.
+ *                  worker is clearly down (no heartbeat for >30 min), or the
+ *                  backup monitor is failing.
  *
  * Pure function of the built report array — no DB/cache, fully unit-testable.
  */
 class OperatorHealthSeverity
 {
+    /**
+     * A heartbeat runs every 5 min; a deploy STOPS the worker for the whole
+     * maintenance window (OPS-6), so a briefly-stale heartbeat right after a
+     * deploy is expected — only escalate to CRITICAL once it's been silent long
+     * enough to mean a real outage, not a restart.
+     */
+    private const HEARTBEAT_CRITICAL_MINUTES = 30;
+
     /**
      * @param  array<string, mixed>  $data  OperatorHealthReport::build() output
      * @return array{level:string, exit_code:int, critical:list<string>, warnings:list<string>}
@@ -30,16 +39,24 @@ class OperatorHealthSeverity
         $warnings = [];
 
         // --- Queue worker: no/stale heartbeat = jobs (mail, imports, backups) aren't running.
+        // 'missing' (never seen / cache cleared) and a briefly-stale beat are only
+        // WARNINGS; a heartbeat silent for >30 min is a real outage → CRITICAL.
         $queue = $data['queue'] ?? [];
         $hb = $queue['worker_heartbeat_status'] ?? null;
+        $age = $queue['worker_heartbeat_age_minutes'] ?? null;
         if ($hb === 'missing') {
-            $critical[] = 'Queue worker: κανένα heartbeat (ο worker δεν τρέχει;).';
+            $warnings[] = 'Queue worker: κανένα heartbeat ακόμη (fresh box / cache;).';
         } elseif ($hb === 'stale') {
-            $critical[] = 'Queue worker: heartbeat παλιό (>10 λεπτά) — πιθανό stuck/down.';
+            if ($age !== null && $age > self::HEARTBEAT_CRITICAL_MINUTES) {
+                $critical[] = 'Queue worker: heartbeat σιωπηλό >'.self::HEARTBEAT_CRITICAL_MINUTES.' λεπτά — πιθανό down.';
+            } else {
+                $warnings[] = 'Queue worker: heartbeat παλιό (>10 λεπτά) — μόλις έκανε restart;';
+            }
         }
-        $failedJobs = (int) ($queue['failed_jobs'] ?? 0);
+        // Only RECENT (24h) failures gate — an old un-flushed row must not warn forever.
+        $failedJobs = (int) ($queue['failed_jobs_24h'] ?? 0);
         if ($failedJobs > 0) {
-            $warnings[] = "{$failedJobs} αποτυχημένη/ες εργασία/ες στην ουρά (failed_jobs).";
+            $warnings[] = "{$failedJobs} αποτυχημένη/ες εργασία/ες στην ουρά (24ω).";
         }
 
         // --- Backups: the DR surface.

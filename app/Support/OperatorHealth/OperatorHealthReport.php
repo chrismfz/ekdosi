@@ -83,6 +83,9 @@ class OperatorHealthReport
             'worker_heartbeat_status' => $ageMinutes === null ? 'missing' : ($ageMinutes <= 10 ? 'ok' : 'stale'),
             'pending_jobs' => $this->tableCount('jobs'),
             'failed_jobs' => $this->tableCount('failed_jobs'),
+            // RECENT failures gate the severity/exit code; the all-time count above
+            // is display-only (one old un-flushed failure must not warn forever).
+            'failed_jobs_24h' => $this->recentFailedJobs(),
         ];
     }
 
@@ -407,6 +410,18 @@ class OperatorHealthReport
             return DB::table($table)->count();
         } catch (Throwable) {
             return null;
+        }
+    }
+
+    /** Failed queue jobs in the last 24h (drives severity; total is display-only). */
+    private function recentFailedJobs(): int
+    {
+        try {
+            return (int) DB::table('failed_jobs')
+                ->where('failed_at', '>=', now()->subDay())
+                ->count();
+        } catch (Throwable) {
+            return 0;
         }
     }
 }

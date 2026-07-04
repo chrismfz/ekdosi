@@ -115,13 +115,15 @@ scheduled, per-company archives are `spatie/laravel-backup` (see
   ekdosi.*`) covers them. A least-privilege user without TRIGGER/EVENT/CREATE
   ROUTINE will make `mysqldump` fail — which **aborts the update** (fails safe,
   no half-backup), but fix the grant before relying on snapshots.
-- **Clean-slate restore (OPS-7):** snapshots now carry `--add-drop-database
-  --databases`, so a restore drops+recreates the WHOLE database first — including
-  a table a later (bad) migration ADDED, which used to survive a restore and make
-  the next deploy fail with "table already exists". The restore therefore targets
-  the **same database name** the snapshot was taken from (same-host rollback, the
-  normal case). After restoring an OLDER snapshot, run `php artisan migrate
-  --force` to re-apply forward migrations.
+- **Clean-slate restore (OPS-7):** `db-restore` now `DROP DATABASE` +
+  `CREATE DATABASE`s the **restore connection's** database first, then loads the
+  (DB-agnostic) snapshot. So a table a later (bad) migration ADDED — which used to
+  survive a restore and make the next deploy fail with "table already exists" — is
+  wiped, and the target db is recreated if it's missing (self-heals an interrupted
+  restore). It always targets the connection's db (matching the confirmation
+  prompt), not a name baked into the snapshot. After restoring an OLDER snapshot,
+  run `php artisan migrate --force` to re-apply forward migrations. The db user
+  needs DROP/CREATE on the database (the INSTALL.md `GRANT ALL ON ekdosi.*` covers it).
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.

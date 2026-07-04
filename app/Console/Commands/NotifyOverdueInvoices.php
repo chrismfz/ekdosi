@@ -38,9 +38,17 @@ class NotifyOverdueInvoices extends Command
             ->get();
 
         if ($companies->isEmpty()) {
-            $this->warn('Δεν βρέθηκε tenant.');
+            // A named-but-missing tenant is a real error; an empty all-tenant run
+            // (fresh box) is simply nothing to do — not a failure (else the
+            // tracked schedule would record a false 'failed').
+            if ($this->option('tenant')) {
+                $this->warn('Δεν βρέθηκε tenant.');
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
+            $this->info('Κανένας tenant — τίποτα να ειδοποιηθεί.');
+
+            return self::SUCCESS;
         }
 
         foreach ($companies as $company) {

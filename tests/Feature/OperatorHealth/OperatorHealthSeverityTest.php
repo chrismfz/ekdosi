@@ -17,7 +17,7 @@ class OperatorHealthSeverityTest extends TestCase
     private function healthy(): array
     {
         return [
-            'queue' => ['worker_heartbeat_status' => 'ok', 'failed_jobs' => 0],
+            'queue' => ['worker_heartbeat_status' => 'ok', 'worker_heartbeat_age_minutes' => 2, 'failed_jobs_24h' => 0],
             'backup' => [
                 'monitor' => ['status' => 'ok'],
                 'companies' => ['offsite_gap' => false, 'books_gap' => false],
@@ -44,15 +44,35 @@ class OperatorHealthSeverityTest extends TestCase
     }
 
     #[Test]
-    public function missing_worker_heartbeat_is_critical_exit_two(): void
+    public function missing_heartbeat_is_only_a_warning(): void
     {
+        // A never-seen heartbeat (fresh box / cache cleared) is not proof of an
+        // outage → warning, not critical.
         $data = $this->healthy();
         $data['queue']['worker_heartbeat_status'] = 'missing';
+        $data['queue']['worker_heartbeat_age_minutes'] = null;
 
         $s = OperatorHealthSeverity::evaluate($data);
 
-        $this->assertSame('critical', $s['level']);
-        $this->assertSame(2, $s['exit_code']);
+        $this->assertSame('warning', $s['level']);
+        $this->assertSame(1, $s['exit_code']);
+    }
+
+    #[Test]
+    public function briefly_stale_heartbeat_is_a_warning_but_long_silence_is_critical(): void
+    {
+        // Right after a deploy the worker was stopped for the window → a briefly
+        // stale beat is expected (warning). Only a long silence (>30 min) is a
+        // real down (critical).
+        $warn = $this->healthy();
+        $warn['queue']['worker_heartbeat_status'] = 'stale';
+        $warn['queue']['worker_heartbeat_age_minutes'] = 15;
+        $this->assertSame('warning', OperatorHealthSeverity::evaluate($warn)['level']);
+
+        $crit = $this->healthy();
+        $crit['queue']['worker_heartbeat_status'] = 'stale';
+        $crit['queue']['worker_heartbeat_age_minutes'] = 45;
+        $this->assertSame('critical', OperatorHealthSeverity::evaluate($crit)['level']);
     }
 
     #[Test]
@@ -86,7 +106,7 @@ class OperatorHealthSeverityTest extends TestCase
     {
         $data = $this->healthy();
         $data['scheduler']['whmcs_fetch']['status'] = 'failed';
-        $data['queue']['failed_jobs'] = 3;
+        $data['queue']['failed_jobs_24h'] = 3;
 
         $s = OperatorHealthSeverity::evaluate($data);
 
@@ -98,7 +118,8 @@ class OperatorHealthSeverityTest extends TestCase
     public function critical_outranks_warning(): void
     {
         $data = $this->healthy();
-        $data['queue']['worker_heartbeat_status'] = 'stale'; // critical
+        $data['queue']['worker_heartbeat_status'] = 'stale'; // critical (long silence)
+        $data['queue']['worker_heartbeat_age_minutes'] = 60;
         $data['mail']['failed_24h'] = 5;                     // warning
 
         $s = OperatorHealthSeverity::evaluate($data);
