@@ -9,9 +9,12 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
+use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\ReturnInvoiceExtra;
 use App\Services\InvoiceBalance;
+use App\Services\RecomputeInvoiceTotals;
+use App\Services\RecomputeReturnedQuantities;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 use Tests\TestCase;
@@ -21,9 +24,13 @@ class IssueCreditNoteTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private PaymentMethod $credit;
+
     private InvoiceType $type;
+
     private InvoiceType $creditType;
+
     private Customer $customer;
 
     protected function setUp(): void
@@ -59,7 +66,7 @@ class IssueCreditNoteTest extends TestCase
             'qty' => $qty, 'price_per_item' => $price, 'vat_percent' => $vat, 'product_descr' => 'Widget',
         ]);
 
-        return app(\App\Services\RecomputeInvoiceTotals::class)($inv);
+        return app(RecomputeInvoiceTotals::class)($inv);
     }
 
     private function svc(): InvoiceBalance
@@ -132,10 +139,94 @@ class IssueCreditNoteTest extends TestCase
         $this->assertSame('unpaid', $original->payment_status);
     }
 
+    public function test_cancelling_a_credit_note_frees_qty_and_allows_recredit(): void
+    {
+        // MON-1: the headline flow — issue a (wrong) full credit note, cancel
+        // it at AADE, then re-issue. Before the fix qty_returned stayed at the
+        // full qty forever and the re-issue threw «διαθέσιμη ποσότητα 0.000».
+        $original = $this->originalWithLine();        // qty 2
+        $line = $original->lines->first();
+
+        app(IssueCreditNote::class)($original, $this->creditType, [
+            ['line_id' => $line->id, 'qty' => 2],
+        ]);
+        $this->assertEqualsWithDelta(
+            2.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+
+        // Cancel at AADE (mydata_state) + local — MyDataSubmitter::cancel sets both.
+        $credit = Invoice::where('credited_invoice_id', $original->id)->firstOrFail();
+        $credit->forceFill(['mydata_state' => 'CANCELLED', 'local_status' => 'cancelled'])->save();
+
+        // qty_returned freed by the observer recompute.
+        $this->assertEqualsWithDelta(
+            0.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+
+        // Re-crediting the full qty now succeeds.
+        $credit2 = app(IssueCreditNote::class)($original->fresh(['lines']), $this->creditType, [
+            ['line_id' => $line->id, 'qty' => 2],
+        ]);
+        $this->assertNotNull($credit2->id);
+        $this->assertEqualsWithDelta(
+            2.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+    }
+
+    public function test_local_cancel_of_a_credit_note_also_frees_qty(): void
+    {
+        // Same freeing via a LOCAL cancel (local_status), independent of AADE.
+        $original = $this->originalWithLine();
+        $line = $original->lines->first();
+        app(IssueCreditNote::class)($original, $this->creditType, [['line_id' => $line->id, 'qty' => 2]]);
+
+        Invoice::where('credited_invoice_id', $original->id)->firstOrFail()
+            ->forceFill(['local_status' => 'cancelled'])->save();
+
+        $this->assertEqualsWithDelta(
+            0.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+    }
+
+    public function test_cancelling_one_of_two_credit_notes_frees_only_its_portion(): void
+    {
+        $original = $this->originalWithLine(qty: 5);
+        $line = $original->lines->first();
+
+        $c1 = app(IssueCreditNote::class)($original->fresh(['lines']), $this->creditType, [['line_id' => $line->id, 'qty' => 2]]);
+        app(IssueCreditNote::class)($original->fresh(['lines']), $this->creditType, [['line_id' => $line->id, 'qty' => 1]]);
+        $this->assertEqualsWithDelta(
+            3.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+
+        // Cancel c1 (qty 2) → only its portion frees; c2's 1 remains.
+        $c1->forceFill(['mydata_state' => 'CANCELLED', 'local_status' => 'cancelled'])->save();
+        $this->assertEqualsWithDelta(
+            1.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+    }
+
+    public function test_recompute_leaves_legacy_returns_untouched(): void
+    {
+        // ETL-safety: a line with a legacy-imported qty_returned but NO native
+        // credit note (no original_line_id link) must be left exactly as-is.
+        $original = $this->originalWithLine(qty: 5);
+        $line = $original->lines->first();
+        ReturnInvoiceExtra::create([
+            'company_id' => $this->tenant->id, 'invoice_line_id' => $line->id, 'qty_returned' => 3,
+        ]);
+
+        app(RecomputeReturnedQuantities::class)($original->fresh(['lines']));
+
+        $this->assertEqualsWithDelta(
+            3.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+    }
+
     public function test_gross_change_refreshes_payment_status_cache(): void
     {
         $original = $this->originalWithLine();        // gross 124, credit-term
-        \App\Models\Payment::create([
+        Payment::create([
             'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
             'invoice_id' => $original->id, 'amount' => 62, 'pay_date' => '2026-05-11',
         ]);
@@ -145,7 +236,7 @@ class IssueCreditNoteTest extends TestCase
         // by the 62 already paid. RecomputeInvoiceTotals must refresh the
         // money-status cache (was stale before the fix).
         $original->forceFill(['header_discount_percent' => 50])->save();
-        app(\App\Services\RecomputeInvoiceTotals::class)($original);
+        app(RecomputeInvoiceTotals::class)($original);
 
         $this->assertSame('paid', $original->refresh()->payment_status);
     }

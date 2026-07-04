@@ -39,9 +39,9 @@ transaction, αδύνατο διπλό ΑΑ), mark-persistence transactional, te
 
 **Απομένει από τα blockers:** μόνο η απόφαση **SEC-1** (deploy setting, όχι κώδικας)
 + οι δύο prod-side ενέργειες (sandbox discount run, backup off-site + restore drill).
-Αμέσως μετά (πρώτες εβδομάδες): exception reporting (OPS-3), το «κάψιμο»
-qty_returned στην ακύρωση πιστωτικού (MON-1), πιστωτικά στο VAT report (MON-2),
-ΓΕΜΗ στο PDF (DOC-4), guard στον `DatabaseSeeder` (SET-1).
+Αμέσως μετά (πρώτες εβδομάδες): ~~MON-1~~ ✅, ~~MON-2~~ ✅ (2026-07-05)· απομένουν:
+exception reporting (OPS-3), ΓΕΜΗ στο PDF (DOC-4), guard στον `DatabaseSeeder`
+(SET-1), MYD-2 (submit lock + in-doubt state).
 
 ---
 
@@ -110,7 +110,7 @@ uid [273], όχι ΦΠΑ σε taxesTotals [226], conditional quantity [205], wit
 
 ## B. Χρηματικά / Υπόλοιπα / Αρίθμηση (MON)
 
-- [ ] **MON-1 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Ακύρωση πιστωτικού «καίει» οριστικά τις επιστραφείσες ποσότητες — το αρχικό δεν ξανα-πιστώνεται.**
+- [x] **MON-1 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-05** (`invoice_lines.original_line_id` + `RecomputeReturnedQuantities` = Σ ζωντανών· observer ελευθερώνει σε ακύρωση/διαγραφή· ETL-safe) — **Ακύρωση πιστωτικού «καίει» οριστικά τις επιστραφείσες ποσότητες — το αρχικό δεν ξανα-πιστώνεται.**
   `app/Actions/IssueCreditNote.php:113-141` μόνο αυξάνει `return_invoice_extras.qty_returned`·
   κανένα path δεν το μειώνει. Μετά από AADE-cancel του πιστωτικού το χρηματικό
   σκέλος επανέρχεται σωστά, αλλά η επανέκδοση σκάει με «Επιστροφή > διαθέσιμη
@@ -118,7 +118,7 @@ uid [273], όχι ΦΠΑ σε taxesTotals [226], conditional quantity [205], wit
   αδύνατη χωρίς DB surgery. **Fix:** decrement/rollback του qty_returned όταν το
   πιστωτικό ακυρώνεται (τοπικά ή AADE).
 
-- [ ] **MON-2 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Το VAT report αγνοεί τα πιστωτικά στις εκροές** (υπερ-δηλώνει τοπικά ΦΠΑ εκροών): `DashboardMetrics::baseInvoices()` (`:641-649`) κάνει `whereNull('credited_invoice_id')` αντί να τα αφαιρεί, ενώ στις εισροές αφαιρούνται (`VatPeriodReport.php:84-101`) και η Καρτέλα κάνει sign-flip. Δεν υποβάλλεται πουθενά (informational), αλλά τα εταιρικά νούμερα διαφωνούν με Σ(Καρτελών) όταν υπάρχουν πιστωτικά.
+- [x] **MON-2 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-05** (`DashboardMetrics::outputForVat` αφαιρεί ζωντανά πιστωτικά· ευθυγράμμιση με LedgerBook+Καρτέλα· `income()` αμετάβλητο) — **Το VAT report αγνοεί τα πιστωτικά στις εκροές** (υπερ-δηλώνει τοπικά ΦΠΑ εκροών): `DashboardMetrics::baseInvoices()` (`:641-649`) κάνει `whereNull('credited_invoice_id')` αντί να τα αφαιρεί, ενώ στις εισροές αφαιρούνται (`VatPeriodReport.php:84-101`) και η Καρτέλα κάνει sign-flip. Δεν υποβάλλεται πουθενά (informational), αλλά τα εταιρικά νούμερα διαφωνούν με Σ(Καρτελών) όταν υπάρχουν πιστωτικά.
 - [ ] **MON-3 · MEDIUM · ΠΙΘΑΝΟ** — Ταυτόχρονες πληρωμές: το `InvoiceBalance::recompute` (`:133-152`) κλειδώνει το invoice αλλά τα SUM διαβάζονται από REPEATABLE READ snapshot που στήθηκε πριν το lock → ο «χαμένος» writer μπορεί να γράψει stale `paid_total` μέχρι το επόμενο event. **Fix:** lock πριν από κάθε consistent read ή recompute after-commit.
 - [ ] **MON-4 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ (εν μέρει by-design)** — ΑΑ δεσμεύεται στη δημιουργία DRAFT και τα drafts διαγράφονται (`EditInvoice.php:60-66`) → κενά αρίθμησης με ένα κλικ + δυνατότητα μη-χρονολογικών `issued_at` μέσα στη σειρά (το finalize δεν αγγίζει την ημερομηνία). Κανένα διπλό ΑΑ δεν είναι δυνατό (επιβεβαιωμένο). Θέμα φορολογικής υγιεινής — απόφαση/τεκμηρίωση: ή αρίθμηση στην οριστικοποίηση, ή ρητή πολιτική για τα κενά.
 - [ ] **MON-5 · LOW** — Τα drafts μετράνε πλήρως σε έσοδα/εισπρακτέα/ΦΠΑ/Καρτέλα (`InvoiceScope::live()` φιλτράρει μόνο ακυρώσεις). Συνειδητό (πιστωτικά-draft) και συνεπές παντού, αλλά τα staged renewals/WHMCS drafts φουσκώνουν dashboards και εκτυπωμένα statements.

@@ -85,6 +85,12 @@ class CompanyImporter
     /** Invoice self-reference columns — nulled on insert, patched after the pass. */
     private const INVOICE_SELF_REFS = ['credited_invoice_id', 'conv_invoice_id'];
 
+    /** invoice_lines self-reference columns (MON-1: a credit line → the original
+     *  line it credits). Same problem as INVOICE_SELF_REFS — the target line may
+     *  be imported later in the same pass, so the generic FK_REWIRES nulls it on
+     *  insert and patchInvoiceLineSelfRefs resolves it against the complete map. */
+    private const INVOICE_LINE_SELF_REFS = ['original_line_id'];
+
     /**
      * FK columns to rewire via the imported old-id → new-id maps. A source of
      * 'users' has no map (users are panel-global, not in the bundle) → the
@@ -113,7 +119,7 @@ class CompanyImporter
             // never-populated map, else the source id would violate the FK.
             'whmcs_pending_id' => 'pending_whmcs_invoices', 'service_contract_id' => 'service_contracts',
         ],
-        'invoice_lines' => ['invoice_id' => 'invoices', 'product_id' => 'products'],
+        'invoice_lines' => ['invoice_id' => 'invoices', 'product_id' => 'products', 'original_line_id' => 'invoice_lines'],
         'mydata_marks' => ['invoice_id' => 'invoices'],
         'return_invoice_extras' => ['invoice_line_id' => 'invoice_lines'],
         'invoice_mail_log' => ['invoice_id' => 'invoices', 'triggered_by_user_id' => 'users'],
@@ -208,6 +214,9 @@ class CompanyImporter
                 $maps[$table] = $this->importTable($table, $bundle['data'][$table] ?? [], $company->id, $maps);
             }
             $this->patchInvoiceSelfRefs($bundle['data']['invoices'] ?? [], $maps);
+            // MON-1: resolve invoice_lines.original_line_id against the complete
+            // invoice_lines map (the credited line may import before its original).
+            $this->patchInvoiceLineSelfRefs($bundle['data']['invoice_lines'] ?? [], $maps);
             // invoice_types.default_customer_id → customers (imported just now).
             $this->patchInvoiceTypeDefaults($bundle['setup']['invoice_types'] ?? [], $maps);
 
@@ -273,6 +282,38 @@ class CompanyImporter
             }
             if ($patch !== []) {
                 DB::table('invoices')->where('id', $invoiceMap[$oldId])->update($patch);
+            }
+        }
+    }
+
+    /**
+     * MON-1: patch invoice_lines.original_line_id after the whole invoice_lines
+     * pass — a credit-note line may point at an original line imported later in
+     * iteration, so it's nulled on insert (FK_REWIRES → 'invoice_lines' isn't
+     * fully mapped mid-pass) and resolved here against the complete map. Without
+     * this, export/import silently loses the credit↔original link and a cancelled
+     * credit note in the imported company couldn't free its returned qty.
+     *
+     * @param  list<array<string,mixed>>  $invoiceLineRows
+     * @param  array<string, array<int|string,int>>  $maps
+     */
+    private function patchInvoiceLineSelfRefs(array $invoiceLineRows, array $maps): void
+    {
+        $lineMap = $maps['invoice_lines'] ?? [];
+        foreach ($invoiceLineRows as $row) {
+            $oldId = $row['id'] ?? null;
+            if ($oldId === null || ! isset($lineMap[$oldId])) {
+                continue;
+            }
+            $patch = [];
+            foreach (self::INVOICE_LINE_SELF_REFS as $col) {
+                $oldRef = $row[$col] ?? null;
+                if ($oldRef !== null && isset($lineMap[$oldRef])) {
+                    $patch[$col] = $lineMap[$oldRef];
+                }
+            }
+            if ($patch !== []) {
+                DB::table('invoice_lines')->where('id', $lineMap[$oldId])->update($patch);
             }
         }
     }

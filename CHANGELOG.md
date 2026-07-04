@@ -26,6 +26,23 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   απαλλαγής ΦΠΑ στο PDF).
 
 ### Fixed
+- **AUDIT MON-1 — η ακύρωση πιστωτικού ΔΕΝ «καίει» πλέον τις επιστραφείσες ποσότητες.**
+  Το `qty_returned` ήταν μετρητής μόνο-αύξησης χωρίς σύνδεση της γραμμής πιστωτικού με
+  την αρχική γραμμή, οπότε η ακύρωση ενός πιστωτικού κλείδωνε οριστικά την ποσότητα και
+  δεν ξαναεκδιδόταν πιστωτικό. Νέα στήλη `invoice_lines.original_line_id` (self-FK,
+  nullable) συνδέει τη γραμμή πιστωτικού με αυτήν που πιστώνει· νέο
+  `RecomputeReturnedQuantities` ξαναϋπολογίζει το `qty_returned` = Σ(ποσοτήτων από **ζωντανά**
+  πιστωτικά, `InvoiceScope::live`) — ίδια πειθαρχία «cache = Σ ζωντανών» με το
+  `credited_total`. Ακύρωση (τοπική ή ΑΑΔΕ) ή διαγραφή πιστωτικού ελευθερώνει την ποσότητα
+  και επιτρέπει επανέκδοση (`InvoiceObserver`). **ETL-safe:** μόνο γραμμές με native
+  πιστωτικό (original_line_id) ξαναγράφονται· οι legacy-imported επιστροφές μένουν ανέγγιχτες.
+  Portability: ο `CompanyImporter` remap-άρει το self-FK.
+- **AUDIT MON-2 — το VAT report αφαιρεί πλέον τα πιστωτικά στις εκροές.** Το «πόσο ΦΠΑ θα
+  χρωστάμε» έπαιρνε το output από `DashboardMetrics::income()` που **εξαιρεί** (δεν αφαιρεί)
+  τα πιστωτικά → υπερδήλωνε ΦΠΑ εκροών (πώληση 124€ + πλήρες πιστωτικό = 24€ αντί 0€). Νέο
+  `DashboardMetrics::outputForVat()` **αφαιρεί** τα ζωντανά πιστωτικά (net/gross/vat),
+  ευθυγραμμισμένο με `LedgerBook::vatBalance()` + Καρτέλα· το `income()` (μικτός τζίρος για τα
+  dashboard tiles) μένει ως έχει. Ακυρωμένο πιστωτικό δεν μειώνει τις εκροές.
 - **AUDIT WH-1/WH-2/WH-3/WH-4/WH-5 — filer-level preflight πριν οπλιστεί η «Άμεση
   τιμολόγηση».** Νέο `WhmcsFilingGuard` (choke-point πάνω στην έξοδο του mapper, ΠΡΙΝ
   δεσμευτεί ΑΑ) κρατά (HOLD) στα Εισερχόμενα ό,τι δεν πρέπει να εκδοθεί αυτόματα:

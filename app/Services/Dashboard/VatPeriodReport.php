@@ -25,9 +25,11 @@ class VatPeriodReport
 
     public function forPeriod(CarbonInterface $start, CarbonInterface $end, ?string $label = null): VatPeriodSummary
     {
-        // OUTPUT (εκροών): reuse the invoice aggregation (live-scope + credit
-        // notes + cancelled already handled and reviewed there).
-        $output = (new DashboardMetrics($this->tenant))->income($start, $end);
+        // OUTPUT (εκροών): sales NET of credit notes (MON-1/MON-2). income()
+        // only EXCLUDES credit notes (correct for gross turnover, wrong for VAT
+        // liability — it over-declared output VAT); outputForVat() SUBTRACTS
+        // them, matching LedgerBook + the Καρτέλα.
+        $output = (new DashboardMetrics($this->tenant))->outputForVat($start, $end);
 
         // INPUT (εισροών): local expenses in the window, excluding AADE-cancelled.
         $input = $this->expenseInput($start, $end);
