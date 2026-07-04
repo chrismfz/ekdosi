@@ -110,6 +110,22 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertSame('ΤΠΥ1', Invoice::find($fresh->invoice_id)->invcode);
     }
 
+    public function test_wh3_does_not_auto_issue_a_row_already_filed_in_legacy(): void
+    {
+        // WH-3: the legacy ekdosi app already filed this WHMCS invoice
+        // (legacy_invoiced != 0). Auto-issuing it would double-declare income
+        // at AADE during the dual-run — it must be excluded from candidates.
+        $tenant = $this->tenant();
+        $customer = $this->customer($tenant, grumpy: true);
+        $pending = $this->pending($tenant, $customer, ['legacy_invoiced' => 3]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
+        $this->assertNull($pending->fresh()->invoice_id);
+        $this->assertSame(0, Invoice::count());
+    }
+
     public function test_does_not_file_non_grumpy_customer(): void
     {
         $tenant = $this->tenant();

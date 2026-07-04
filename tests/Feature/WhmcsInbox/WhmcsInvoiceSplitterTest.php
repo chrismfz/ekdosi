@@ -119,6 +119,27 @@ class WhmcsInvoiceSplitterTest extends TestCase
         $this->assertCount(2, $pending->splitInvoices);
     }
 
+    public function test_wh1_non_eur_split_is_held(): void
+    {
+        // WH-1: currency + negative guards apply on the split path too — a
+        // non-EUR multi-party invoice must not be split-filed. Rolls back
+        // (no drafts) because the guard throws inside the split transaction.
+        $pending = $this->multiPartyPending();
+        $payload = $pending->payload;
+        $payload['currencycode'] = 'GBP';
+        $pending->update(['payload' => $payload]);
+
+        try {
+            $this->splitter()->split($this->tenant, $pending->fresh(), $this->invoiceType);
+            $this->fail('Expected the split to refuse a non-EUR row.');
+        } catch (\LogicException $e) {
+            $this->assertStringContainsString('νόμισμα GBP', $e->getMessage());
+        }
+
+        $this->assertSame(0, Invoice::count());
+        $this->assertNotSame(PendingWhmcsInvoice::STATUS_SPLIT, $pending->fresh()->status);
+    }
+
     public function test_receipt_group_routes_to_receipt_type_and_requires_it(): void
     {
         // Haris's line is flagged απόδειξη (is_receipt=true); the reseller's is not.

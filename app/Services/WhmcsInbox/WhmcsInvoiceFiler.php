@@ -108,6 +108,13 @@ class WhmcsInvoiceFiler
         // tenants (NullSubmitter) tolerate 0%-VAT lines fine.
         $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
         $this->refuseProblematicZeroVatLines($tenant, $mapped, $pending);
+        // WH-1/WH-4: non-EUR or negative (promo/credit) lines → HOLD.
+        WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
+        // WH-2/WH-5: recomputed gross must reconcile with the WHMCS total, and
+        // the WHMCS tax rate must match the rate we apply (catches the
+        // tax-inclusive case the gross-check alone misses). Whole-invoice.
+        WhmcsFilingGuard::assertTotalsReconcile($mapped, $pending);
+        WhmcsFilingGuard::assertVatRateReconciles($mapped, $pending);
 
         // Phase 1: transactional persist with lockForUpdate on the
         // pending row + atomic invoice_id linking.
@@ -260,6 +267,18 @@ class WhmcsInvoiceFiler
         ?int $createdByUserId = null,
     ): Invoice {
         $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
+        // WH-1/WH-4: a non-EUR or negative-line draft would be wrong from the
+        // start (foreign amounts as EUR / a line AADE later rejects) and the
+        // operator can't fix it in the editable form — HOLD it, don't draft it.
+        //
+        // NOTE the deliberate asymmetry with file(): the totals/rate reconcile
+        // guards (WH-2/WH-5) are NOT applied here. createDraft is the manual,
+        // operator-reviewed path — the preview modal already warns on a gross
+        // gap, and a rate mismatch IS fixable in the draft (edit the per-line
+        // VAT before issuing). Hard-blocking it would remove the legitimate
+        // create-then-fix workflow that draft-first exists for. The unattended
+        // paths (file() / whmcs:auto-issue) keep the full reconcile guards.
+        WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
 
         return DB::transaction(function () use ($tenant, $pending, $invoiceType, $mapped, $createdByUserId) {
             $locked = PendingWhmcsInvoice::query()
@@ -328,6 +347,18 @@ class WhmcsInvoiceFiler
      */
     private function assertCanBeFiled(PendingWhmcsInvoice $locked): void
     {
+        // WH-3: during the dual-run the legacy ekdosi app may have already
+        // filed this WHMCS invoice (tblinvoices.invoiced != 0, mirrored here as
+        // legacy_invoiced). Issuing it again in ekdosi would double-declare the
+        // income at AADE. Refuse on EVERY path (manual file/draft/split AND the
+        // unattended auto-issue — which also excludes these in candidates()).
+        if ($locked->invoicedInLegacy()) {
+            throw new LogicException(
+                'Το WHMCS #'.$locked->whmcs_invoice_id.' έχει ήδη τιμολογηθεί από το παλιό (legacy) '
+                .'ekdosi (tblinvoices.invoiced='.$locked->legacy_invoiced.'). Έκδοση και εδώ θα '
+                .'διπλοδηλώσει το έσοδο στην ΑΑΔΕ. Αν το legacy flag είναι λάθος, καθάρισέ το πρώτα.'
+            );
+        }
         if ($locked->status === PendingWhmcsInvoice::STATUS_FILED) {
             throw new LogicException(
                 'PendingWhmcsInvoice #'.$locked->id.' is already filed (MARK: '

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\WhmcsInbox;
 
+use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -11,6 +12,7 @@ use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use LogicException;
@@ -27,7 +29,9 @@ class WhmcsInvoiceFilerTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private Customer $customer;
+
     private InvoiceType $invoiceType;
 
     protected function setUp(): void
@@ -77,21 +81,21 @@ class WhmcsInvoiceFilerTest extends TestCase
         ]);
     }
 
-    private function makePending(array $items): PendingWhmcsInvoice
+    private function makePending(array $items, string $total = '124.00'): PendingWhmcsInvoice
     {
         return PendingWhmcsInvoice::create([
-            'company_id'       => $this->tenant->id,
+            'company_id' => $this->tenant->id,
             'whmcs_invoice_id' => 8888,
-            'payload'          => [
+            'payload' => [
                 'invoiceid' => 8888,
-                'userid'    => 1,
-                'date'      => '2026-05-20',
-                'total'     => '124.00',
-                'items'     => ['item' => $items],
+                'userid' => 1,
+                'date' => '2026-05-20',
+                'total' => $total,
+                'items' => ['item' => $items],
             ],
-            'match_reason'     => PendingWhmcsInvoice::REASON_LINKED,
-            'status'           => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
-            'customer_id'      => $this->customer->id,
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'customer_id' => $this->customer->id,
         ]);
     }
 
@@ -175,7 +179,7 @@ class WhmcsInvoiceFilerTest extends TestCase
         app(WhmcsInvoiceFiler::class)->createDraft($this->tenant, $pending, $this->customer, $this->invoiceType);
 
         // Second attempt on the same row is blocked (assertCanBeFiled guard).
-        $this->expectException(\LogicException::class);
+        $this->expectException(LogicException::class);
         app(WhmcsInvoiceFiler::class)->createDraft($this->tenant->fresh(), $pending->fresh(), $this->customer, $this->invoiceType);
     }
 
@@ -187,12 +191,12 @@ class WhmcsInvoiceFilerTest extends TestCase
 
         // Second pending row for same tenant + type → next ΑΑ.
         $b = PendingWhmcsInvoice::create([
-            'company_id'       => $this->tenant->id,
+            'company_id' => $this->tenant->id,
             'whmcs_invoice_id' => 8889,
-            'payload'          => ['invoiceid' => 8889, 'userid' => 1, 'date' => '2026-05-21', 'total' => '50.00',
-                                   'items' => ['item' => [['description' => 'B', 'amount' => '50.00', 'taxed' => '0']]]],
-            'match_reason'     => PendingWhmcsInvoice::REASON_LINKED,
-            'status'           => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'payload' => ['invoiceid' => 8889, 'userid' => 1, 'date' => '2026-05-21', 'total' => '50.00',
+                'items' => ['item' => [['description' => 'B', 'amount' => '50.00', 'taxed' => '0']]]],
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
         ]);
         $r2 = app(WhmcsInvoiceFiler::class)->file($this->tenant, $b, $this->customer, $this->invoiceType);
         $this->assertSame('ΤΠΥ2', $r2->invoice->invcode);
@@ -267,16 +271,16 @@ class WhmcsInvoiceFilerTest extends TestCase
         // Simulate a previous attempt that linked invoice_id but
         // didn't reach the final filed status (e.g. AADE submit
         // failed, or the post-AADE update threw).
-        $existingInvoice = \App\Models\Invoice::create([
-            'company_id'        => $this->tenant->id,
-            'customer_id'       => $this->customer->id,
-            'invoice_type_id'   => $this->invoiceType->id,
+        $existingInvoice = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'invoice_type_id' => $this->invoiceType->id,
             'payment_method_id' => $this->invoiceType->payment_method_id,
-            'invcode'           => 'ORPHAN1',
-            'code'              => 999,
-            'issued_at'         => now(),
-            'net_total'         => 0,
-            'gross_total'       => 0,
+            'invcode' => 'ORPHAN1',
+            'code' => 999,
+            'issued_at' => now(),
+            'net_total' => 0,
+            'gross_total' => 0,
         ]);
         $pending->update(['invoice_id' => $existingInvoice->id]);
 
@@ -287,22 +291,22 @@ class WhmcsInvoiceFilerTest extends TestCase
         );
     }
 
-    public function test_file_does_not_consume_a_new_ΑΑ_when_in_progress_invoice_exists(): void
+    public function test_file_does_not_consume_a_new_α_α_when_in_progress_invoice_exists(): void
     {
         // Fix #5: the orphan ΑΑ scenario. Verify that the refusal at
         // the assertCanBeFiled check happens BEFORE InvoiceNumberer
         // bumps the counter.
         $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
-        $existingInvoice = \App\Models\Invoice::create([
-            'company_id'        => $this->tenant->id,
-            'customer_id'       => $this->customer->id,
-            'invoice_type_id'   => $this->invoiceType->id,
+        $existingInvoice = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'invoice_type_id' => $this->invoiceType->id,
             'payment_method_id' => $this->invoiceType->payment_method_id,
-            'invcode'           => 'ORPHAN2',
-            'code'              => 999,
-            'issued_at'         => now(),
-            'net_total'         => 0,
-            'gross_total'       => 0,
+            'invcode' => 'ORPHAN2',
+            'code' => 999,
+            'issued_at' => now(),
+            'net_total' => 0,
+            'gross_total' => 0,
         ]);
         $pending->update(['invoice_id' => $existingInvoice->id]);
 
@@ -326,7 +330,7 @@ class WhmcsInvoiceFilerTest extends TestCase
         // MyDataSubmitter::vatCategoryFor for any non-Off tenant. The
         // filer must refuse BEFORE the transactional persist, otherwise
         // a ghost invoice + consumed ΑΑ + stuck pending row results.
-        $this->tenant->update(['mydata_mode' => \App\Enums\MyDataMode::Sandbox->value]);
+        $this->tenant->update(['mydata_mode' => MyDataMode::Sandbox->value]);
 
         $pending = $this->makePending([
             ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
@@ -349,11 +353,11 @@ class WhmcsInvoiceFilerTest extends TestCase
         // Critical: no ΑΑ counter consumed.
         $this->assertSame($countBefore, $this->invoiceType->fresh()->invcount);
         // Critical: no Invoice row persisted.
-        $this->assertSame(0, \App\Models\Invoice::count());
+        $this->assertSame(0, Invoice::count());
         // Pending row stays pending_review (no invoice_id set).
         $this->assertNull($pending->fresh()->invoice_id);
         $this->assertSame(
-            \App\Models\PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
             $pending->fresh()->status
         );
     }
@@ -363,18 +367,22 @@ class WhmcsInvoiceFilerTest extends TestCase
         // Off-mode (NullSubmitter) tolerates 0%-VAT fine; the refusal
         // only applies to tenants that submit to a real AADE endpoint.
         // Tenant in this test is already off-mode (setUp). Verify the
-        // happy path with mixed taxed/untaxed lines works.
+        // happy path with mixed taxed/untaxed lines works. (A POSITIVE
+        // untaxed line — a negative one is a WHMCS promo/credit that WH-4
+        // now holds; that's covered in WhmcsFilingGuardTest.) The WHMCS
+        // total matches the mapped gross (124 + 20) so the WH-2/WH-5
+        // totals-reconcile guard passes.
         $pending = $this->makePending([
             ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
-            ['description' => 'Promo credit', 'amount' => '-20.00', 'taxed' => '0'],
-        ]);
+            ['description' => 'Δωρεάν υπηρεσία', 'amount' => '20.00', 'taxed' => '0'],
+        ], total: '144.00');
 
         $result = app(WhmcsInvoiceFiler::class)->file(
             $this->tenant, $pending, $this->customer, $this->invoiceType,
         );
 
-        $this->assertSame(2, \App\Models\InvoiceLine::where('invoice_id', $result->invoice->id)->count());
-        $this->assertSame(\App\Models\PendingWhmcsInvoice::STATUS_FILED, $result->pending->status);
+        $this->assertSame(2, InvoiceLine::where('invoice_id', $result->invoice->id)->count());
+        $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $result->pending->status);
     }
 
     public function _unused_test_file_logs_would_be_whmcs_writeback_for_stage_b3(): void
@@ -409,11 +417,11 @@ class WhmcsInvoiceFilerTest extends TestCase
 
         // Attempt force-delete of the linked Invoice — must throw FK
         // violation, NOT silently null pending.invoice_id.
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
         $result->invoice->forceDelete();
     }
 
-    public function test_preview_returns_FilePreview_without_persisting(): void
+    public function test_preview_returns_file_preview_without_persisting(): void
     {
         $pending = $this->makePending([['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]);
 

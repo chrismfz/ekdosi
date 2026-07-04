@@ -28,15 +28,17 @@ transaction, αδύνατο διπλό ΑΑ), mark-persistence transactional, te
 Ό,τι κόβει το go-live είναι **λίγο και συγκεκριμένο** — εκτίμηση ~1–2 εβδομάδες
 στοχευμένης δουλειάς:
 
-| # | Blocker | Γιατί |
+| # | Blocker | Κατάσταση |
 |---|---------|-------|
-| 1 | **MYD-1** — έκπτωση κεφαλίδας → βέβαιη απόρριψη ΑΑΔΕ [207]/[209] | Προσυμπληρώνεται από την έκπτωση πελάτη· ρουτίνα, όχι edge case. Το παραστατικό μένει άδηλωτο ενώ το ΑΑ έχει καεί. |
-| 2 | **OPS-1/OPS-2** — δεν υπάρχει λειτουργικό whole-DB backup εκτός VM + οι ειδοποιήσεις αποτυχίας πάνε σε `your@example.com` | Απώλεια δίσκου = απώλεια των βιβλίων και των 3 tenants. |
-| 3 | **DOC-1** — δεν τυπώνεται ΠΟΤΕ η αιτία απαλλαγής ΦΠΑ στο PDF | Νομική απαίτηση (ΕΛΠ ν.4308/2014 αρ.9) για κάθε 0% παραστατικό (π.χ. ενδοκοινοτικά). |
-| 4 | **DOC-2 + MYD-3** — ακυρωμένο τοπικά παραστατικό τυπώνεται/στέλνεται σαν έγκυρο, και μπορεί και να υποβληθεί στην ΑΑΔΕ | Δήλωση εσόδου που η επιχείρηση έχει ακυρώσει. |
-| 5 | **WH-1..4** — guards στο auto-issue ΠΡΙΝ οπλιστεί το `whmcs_auto_issue_immediate` | Μη-EUR, λάθος συντελεστής ΦΠΑ, αρνητικές γραμμές, διπλή υποβολή στο dual-run. (Αν το auto-issue μείνει OFF, υποβιβάζονται σε HIGH.) |
-| 6 | **SEC-1** — απόφαση: `EKDOSI_ENCRYPT_SECRETS_AT_REST=true` + `secrets:reencrypt`, ή ρητή αποδοχή plaintext-at-rest | Τα backups/dumps κουβαλούν myDATA/SMTP/WHMCS credentials σε cleartext. |
+| 1 | **MYD-1** — έκπτωση κεφαλίδας → βέβαιη απόρριψη ΑΑΔΕ [207]/[209] | ✅ **FIXED** (PR #335)· ⚠ εκκρεμεί sandbox run με discount>0 |
+| 2 | **OPS-1/OPS-2** — whole-DB backup εκτός VM + πραγματικός παραλήπτης alerts | ✅ **FIXED** (PR #335)· ⚠ στο prod: off-site disk + passphrase + restore drill |
+| 3 | **DOC-1** — αιτία απαλλαγής ΦΠΑ στο PDF (ΕΛΠ ν.4308/2014 αρ.9) | ✅ **FIXED** (PR #335) |
+| 4 | **DOC-2 + MYD-3** — ακυρωμένο τυπώνεται/υποβάλλεται σαν έγκυρο | ✅ **FIXED** (PR #336) |
+| 5 | **WH-1..5** — filer preflight πριν οπλιστεί το `whmcs_auto_issue_immediate` | ✅ **FIXED** (`WhmcsFilingGuard`)· ⚠ επιβεβαίωση με πραγματικό WHMCS πριν το arming |
+| 6 | **SEC-1** — απόφαση: `EKDOSI_ENCRYPT_SECRETS_AT_REST=true` + `secrets:reencrypt`, ή ρητή αποδοχή plaintext-at-rest | ⏳ **ΑΝΟΙΧΤΟ** — απόφαση/deploy setting (όχι κώδικας) |
 
+**Απομένει από τα blockers:** μόνο η απόφαση **SEC-1** (deploy setting, όχι κώδικας)
++ οι δύο prod-side ενέργειες (sandbox discount run, backup off-site + restore drill).
 Αμέσως μετά (πρώτες εβδομάδες): exception reporting (OPS-3), το «κάψιμο»
 qty_returned στην ακύρωση πιστωτικού (MON-1), πιστωτικά στο VAT report (MON-2),
 ΓΕΜΗ στο PDF (DOC-4), guard στον `DatabaseSeeder` (SET-1).
@@ -166,11 +168,11 @@ per-render χωρίς static state.
 > κλειδιά είναι default off) παραμένουν HIGH αλλά όχι blockers, γιατί μεσολαβεί
 > χειριστής + preview με warnings.
 
-- [ ] **WH-1 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ (απουσία)** — Κανένα currency guard στο map/file/auto-issue path: `WhmcsInvoiceMapper` δεν κοιτάει `currencycode` (το feed το στέλνει). USD $120 → παραστατικό €120 στην ΑΑΔΕ. **Fix:** hold σε μη-EUR στο ingestor/filer.
-- [ ] **WH-2 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Το WHMCS `taxrate` δεν συγκρίνεται ποτέ με τον default συντελεστή του tenant (`WhmcsInvoiceMapper.php:278` uses default VAT unconditionally)· η απόκλιση φαίνεται ΜΟΝΟ στο manual preview — `file()`/auto-issue δεν έχουν totals-mismatch check. **Fix:** filer-level guard: recomputed gross vs `whmcs_total` εντός tolerance, αλλιώς hold (καλύπτει και το WH-5).
-- [ ] **WH-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Auto-issue αγνοεί το `legacy_invoiced` flag (dual-run με το legacy app) → παράθυρο διπλής υποβολής στην ΑΑΔΕ· το ίδιο το tooltip του badge προειδοποιεί για διπλή υποβολή αλλά ΚΑΝΕΝΑΣ κώδικας δεν το επιβάλλει. **Fix:** exclude `legacy_invoiced > 0` στα candidates + guard στο `assertCanBeFiled()`.
-- [ ] **WH-4 · HIGH · ΠΙΘΑΝΟ** — Αρνητικές γραμμές (WHMCS promos/credits) περνάνε ως αρνητικό net → XSD rejection ΑΦΟΥ το τοπικό Invoice έχει δεσμεύσει ΑΑ (ghost invoice — ακριβώς το σενάριο που κλείνει το 0%-VAT preflight, το οποίο κοιτάει μόνο `vat_percent == 0`). **Fix:** negative-line preflight δίπλα στο `refuseProblematicZeroVatLines()`.
-- [ ] **WH-5 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ (self-documented)** — Per-line back-compute `round(amount/1.24,2)×1.24` → filed σύνολο ±0,01€/γραμμή vs WHMCS· ο unattended δρόμος δεν το μπλοκάρει. Λύνεται με το guard του WH-2.
+- [x] **WH-1 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-04** (`WhmcsFilingGuard::assertPayloadFilable` — HOLD μη-EUR σε file/createDraft/split) — Κανένα currency guard στο map/file/auto-issue path: `WhmcsInvoiceMapper` δεν κοιτάει `currencycode` (το feed το στέλνει). USD $120 → παραστατικό €120 στην ΑΑΔΕ. **Fix:** hold σε μη-EUR στο ingestor/filer.
+- [x] **WH-2 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-04** (`assertVatRateReconciles` σύγκριση `taxrate`↔applied + `assertTotalsReconcile` gross↔total· πιάνει και tax-inclusive) — Το WHMCS `taxrate` δεν συγκρίνεται ποτέ με τον default συντελεστή του tenant (`WhmcsInvoiceMapper.php:278` uses default VAT unconditionally)· η απόκλιση φαίνεται ΜΟΝΟ στο manual preview — `file()`/auto-issue δεν έχουν totals-mismatch check. **Fix:** filer-level guard: recomputed gross vs `whmcs_total` εντός tolerance, αλλιώς hold (καλύπτει και το WH-5).
+- [x] **WH-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-04** (exclude στα candidates + hard guard στο `assertCanBeFiled`) — Auto-issue αγνοεί το `legacy_invoiced` flag (dual-run με το legacy app) → παράθυρο διπλής υποβολής στην ΑΑΔΕ· το ίδιο το tooltip του badge προειδοποιεί για διπλή υποβολή αλλά ΚΑΝΕΝΑΣ κώδικας δεν το επιβάλλει. **Fix:** exclude `legacy_invoiced > 0` στα candidates + guard στο `assertCanBeFiled()`.
+- [x] **WH-4 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-04** (`assertPayloadFilable` — HOLD αρνητικών γραμμών· mapper εκθέτει `negative_lines`) — Αρνητικές γραμμές (WHMCS promos/credits) περνάνε ως αρνητικό net → XSD rejection ΑΦΟΥ το τοπικό Invoice έχει δεσμεύσει ΑΑ (ghost invoice — ακριβώς το σενάριο που κλείνει το 0%-VAT preflight, το οποίο κοιτάει μόνο `vat_percent == 0`). **Fix:** negative-line preflight δίπλα στο `refuseProblematicZeroVatLines()`.
+- [x] **WH-5 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-04** (καλύπτεται από το `assertTotalsReconcile` με ανοχή ±1λεπτό/γραμμή — μικρή στρογγυλοποίηση περνά, δομική ασυμφωνία μπλοκάρει) — Per-line back-compute `round(amount/1.24,2)×1.24` → filed σύνολο ±0,01€/γραμμή vs WHMCS· ο unattended δρόμος δεν το μπλοκάρει. Λύνεται με το guard του WH-2.
 - [ ] **WH-6 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — `getInvoicesForClient()` (`WhmcsClient.php:297-302`) χρησιμοποιεί το αγνοούμενο `limit` (η ίδια κλάση bug με το frozen-at-16) → το per-customer ledger βλέπει μέχρι 25 rows χωρίς pagination loop. Read-only, αλλά ελλιπής εικόνα.
 - [ ] **WH-7 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Αποτυχημένο MARK write-back: `whmcs_writeback_state='failed'` χωρίς κανένα retry surface (η «future retry-sweep command» δεν υπάρχει, και το log υποδεικνύει λάθος next-step). AADE OK αλλά το WHMCS badge μένει «Όχι στο AADE» μέχρι tinker. **Fix:** retry command ή Filament action.
 - [ ] **WH-8 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ σχήμα** — Splitter: καμία διαβεβαίωση πληρότητας Σ(item_ids ανά group) == payload items (skew σεναρίων audit-frozen rows)· και κενές περιγραφές με ποσό droppάρονται σιωπηλά σε ΟΛΑ τα mapping paths → πιθανό under-billing. Διπλομέτρημα αδύνατο (verified). **Fix:** completeness assertion + refuse σε non-zero blank-description.
