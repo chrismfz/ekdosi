@@ -65,7 +65,7 @@ passphrase + restore drill (OPS-1), και `EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGE
   στο PEPPOL) ή hard-refuse υποβολής όταν `header_discount_percent > 0`, + έλεγχος
   στο `MyDataConfigAudit`/preflight. Sandbox validation μετά.
 
-- [ ] **MYD-2 · HIGH · ΠΙΘΑΝΟ (μηχανισμός επιβεβαιωμένος)** — **Retry μετά από timeout μπορεί να διπλο-υποβάλει (2 MARKs = διπλά δηλωμένο έσοδο).**
+- [ ] **MYD-2 · HIGH · ΠΙΘΑΝΟ · ⏳ ΜΕΡΙΚΩΣ 2026-07-05** — **σκέλος (β) ✅**: cache lock ανά παραστατικό + fresh re-read κάτω από το lock στο `submit()` (τέλος η ταυτόχρονη διπλή υποβολή· `MyDataSubmitConcurrencyTest`). **Ανοιχτά (α)+(γ)**: το sandbox πείραμα uid-dedup + το in-doubt gate σε transport-timeout — σκόπιμα deferred, γιατί αν η ΑΑΔΕ κάνει server-side dedup (πιθανό) το blind retry είναι ήδη ασφαλές· ένα in-doubt gate χωρίς resolve-path θα κόλλαγε παραστατικά (χειρότερο από το σημερινό daily-reconcile backstop). — **Retry μετά από timeout μπορεί να διπλο-υποβάλει (2 MARKs = διπλά δηλωμένο έσοδο).**
   `app/Services/MyDataSubmitter.php:140-142`: σε transport exception το
   `mydata_state` μένει null → το retry ξαναστέλνει `SendInvoices`. Η υπόθεση του
   κώδικα (`AadeInvoiceDocument.php:290-296`) ότι η ΑΑΔΕ κάνει server-side dedup με

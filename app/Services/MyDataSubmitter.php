@@ -22,6 +22,7 @@ use Firebed\AadeMyData\Models\Invoice as AadeInvoice;
 use Firebed\AadeMyData\Models\Response;
 use Firebed\AadeMyData\Models\ResponseDoc;
 use GuzzleHttp\Handler\MockHandler;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -81,6 +82,36 @@ class MyDataSubmitter implements EInvoiceSubmitter
     }
 
     public function submit(Invoice $invoice): MyDataMark
+    {
+        // MYD-2 (AUDIT): serialise concurrent submits of the SAME invoice so
+        // two operators (or a double-click / two tabs) can't both POST it and
+        // create two MARKs at AADE. A cache atomic lock — NOT a DB row lock,
+        // which must not be held across the AADE HTTP call (the orphan-MARK
+        // rule). It auto-expires (120s > the AADE timeout) so a crashed process
+        // can't wedge the invoice permanently.
+        $lock = Cache::lock('mydata-submit:'.$invoice->getKey(), 120);
+        if (! $lock->get()) {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode}: μια υποβολή στο myDATA είναι ήδη σε εξέλιξη — ".
+                'περίμενε να ολοκληρωθεί πριν ξαναδοκιμάσεις.'
+            );
+        }
+
+        try {
+            // Re-read state FRESH under the lock: a submit that just finished on
+            // another worker may have flipped mydata_state to VALID, and the
+            // in-memory $invoice (read before the lock) would be stale — the
+            // guards in performSubmit() must see the committed state to refuse a
+            // second filing.
+            $invoice->refresh();
+
+            return $this->performSubmit($invoice);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function performSubmit(Invoice $invoice): MyDataMark
     {
         // Guard against re-submitting an already-filed invoice. Critical
         // for the ETL cutover path: imported legacy invoices arrive with
