@@ -26,6 +26,22 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   απαλλαγής ΦΠΑ στο PDF).
 
 ### Fixed
+- **AUDIT WH-1/WH-2/WH-3/WH-4/WH-5 — filer-level preflight πριν οπλιστεί η «Άμεση
+  τιμολόγηση».** Νέο `WhmcsFilingGuard` (choke-point πάνω στην έξοδο του mapper, ΠΡΙΝ
+  δεσμευτεί ΑΑ) κρατά (HOLD) στα Εισερχόμενα ό,τι δεν πρέπει να εκδοθεί αυτόματα:
+  **WH-1** μη-EUR τιμολόγιο (το ekdosi εκδίδει μόνο EUR — αλλιώς το $120 θα δηλωνόταν
+  €120)· **WH-4** αρνητικές γραμμές (WHMCS promo/credit — η ΑΑΔΕ απορρίπτει αρνητική
+  αξία, αφού όμως θα είχε καεί το ΑΑ)· **WH-2** ασυμφωνία συντελεστή ΦΠΑ (ο mapper
+  εφαρμόζει τον default· σύγκριση με το `taxrate` του WHMCS πιάνει και την tax-inclusive
+  περίπτωση που το gross-check αφήνει)· **WH-5** ασυμφωνία μικτού συνόλου με το WHMCS
+  total πέρα από ανοχή στρογγυλοποίησης. currency+αρνητικά τρέχουν σε ΟΛΑ τα paths
+  (`file()` / `createDraft()` / splitter — αδιόρθωτα στη φόρμα)· τα **totals/rate reconcile
+  ΜΟΝΟ στο `file()`** (unattended) — το χειροκίνητο draft-first αφήνει τον χειριστή να
+  διορθώσει τον ΦΠΑ ανά γραμμή (το preview ήδη προειδοποιεί). **WH-3** το `whmcs:auto-issue`
+  εξαιρεί πλέον rows που το legacy
+  ekdosi έχει ήδη τιμολογήσει (`legacy_invoiced != 0`) από τα candidates + hard guard στον
+  filer (`assertCanBeFiled`) — τέλος το παράθυρο διπλής υποβολής στο dual-run. Ο mapper
+  εκθέτει `whmcs_currency`/`whmcs_taxrate`/`negative_lines`.
 - **AUDIT DOC-2/DOC-3/DOC-7 — τα banners του PDF είναι πλέον συνάρτηση
   `local_status` × `mydata_state` × provider** (`InvoiceBannerState`), όχι μόνο του
   `mydata_state`: (α) τοπικά ακυρωμένο + VALID τυπώνει ΑΚΥΡΩΘΕΝ + «Εκκρεμεί ακύρωση

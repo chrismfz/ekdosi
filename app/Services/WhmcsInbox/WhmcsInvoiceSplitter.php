@@ -199,6 +199,11 @@ class WhmcsInvoiceSplitter
                 // exists when needed).
                 $groupType = $group['is_receipt'] ? $receiptType : $invoiceType;
                 $mapped = $this->mapper->map($tenant, $locked, $customer, $groupType, $group['item_ids']);
+                // WH-1/WH-4: currency + negative lines hold for a split group
+                // too (a non-EUR / promo-line party portion is just as unfilable).
+                // NOT the totals-reconcile guard — a group is a SUBSET of the
+                // WHMCS invoice total by design.
+                WhmcsFilingGuard::assertPayloadFilable($mapped, $locked);
 
                 // A group with items that all map away (e.g. every line blank)
                 // would silently vanish from billing — refuse rather than

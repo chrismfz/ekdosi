@@ -162,6 +162,18 @@ class WhmcsInvoiceMapper
                 'whmcs_userid' => (int) ($payload['userid'] ?? 0),
                 'whmcs_date' => (string) ($payload['date'] ?? ''),
                 'whmcs_total' => (float) ($payload['total'] ?? 0.0),
+                // WH-1: the WHMCS invoice currency. ekdosi files in EUR only
+                // (the AADE payload hardcodes CurrencyCode::EUR); a non-EUR
+                // amount taken as EUR would file the wrong value. Surfaced so
+                // the filing guard can HOLD non-EUR rows. Empty = not reported
+                // by this WHMCS instance (treated as EUR-compatible).
+                'whmcs_currency' => strtoupper(trim((string) ($payload['currencycode'] ?? ''))),
+                // WH-2: the VAT rate WHMCS actually charged. The mapper applies
+                // the tenant's DEFAULT rate to taxed lines (it doesn't map
+                // per-rate), so when this differs from the default the filed VAT
+                // would be wrong — even in tax-inclusive mode where the gross
+                // still reconciles. The filing guard compares the two.
+                'whmcs_taxrate' => (float) ($payload['taxrate'] ?? 0.0),
             ],
         ];
     }
@@ -485,6 +497,33 @@ class WhmcsInvoiceMapper
             // surfaced so the operator-facing error message can name
             // the problem lines specifically.
             'zero_vat_lines' => $this->zeroVatLineDescriptions($lines),
+            // WH-4: WHMCS promo/credit lines arrive as negative-amount items.
+            // myDATA's XSD floors netValue/vatAmount at 0, so filing one is
+            // rejected AFTER the ΑΑ is consumed (ghost invoice). Surfaced so
+            // the filing guard HOLDS the row instead. (A negative line with a
+            // blank description is dropped by buildLines and instead trips the
+            // totals-reconcile guard, since our gross would exceed the WHMCS
+            // total by the omitted discount.)
+            'negative_lines' => $this->negativeLineDescriptions($lines),
         ];
+    }
+
+    /**
+     * WH-4: descriptions of mapped lines with a negative net (WHMCS promo /
+     * credit items). The filing guard refuses these BEFORE persisting.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, string>
+     */
+    private function negativeLineDescriptions(array $lines): array
+    {
+        $out = [];
+        foreach ($lines as $line) {
+            if ((float) $line['net_price'] < -0.005) {
+                $out[] = (string) $line['product_descr'];
+            }
+        }
+
+        return $out;
     }
 }

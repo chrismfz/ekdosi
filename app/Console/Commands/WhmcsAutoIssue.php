@@ -344,6 +344,13 @@ class WhmcsAutoIssue extends Command
             ->where('status', PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
             ->whereNull('invoice_id')
             ->whereNotNull('customer_id')
+            // WH-3: skip rows the legacy ekdosi app already filed
+            // (tblinvoices.invoiced != 0). Auto-issuing them would
+            // double-declare income at AADE during the dual-run. The filer's
+            // assertCanBeFiled() is the belt-and-suspenders backstop; this
+            // keeps them out of the candidate set entirely (null/0 = not filed
+            // in legacy → eligible).
+            ->where(fn ($q) => $q->whereNull('legacy_invoiced')->orWhere('legacy_invoiced', 0))
             // third_party_state: null (feature off / noop), 'none' (bills
             // the WHMCS client), or 'single' (resolved single third party).
             // 'multi' / unresolved 'single' are ingested as 'held' and so
