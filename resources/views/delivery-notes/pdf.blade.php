@@ -138,6 +138,10 @@
                 ΑΦΜ: {{ $tenant->afm }}@if($tenant->tax_office) · ΔΟΥ {{ $tenant->tax_office }}@endif
                 <br>
             @endif
+            {{-- DOC-4: ΓΕΜΗ (ν.4919/2022 αρ.22) + δραστηριότητα — ένα ΔΑ είναι κι αυτό εκδοθέν έγγραφο. --}}
+            @if($tenant->gemi)ΓΕΜΗ: {{ $tenant->gemi }}@if($tenant->kad_primary) · Δραστηριότητα {{ $tenant->kad_primary }}@endif<br>
+            @elseif($tenant->kad_primary)Δραστηριότητα: {{ $tenant->kad_primary }}<br>
+            @endif
             @if($tenant->phone) Τηλ: {{ $tenant->phone }} @endif
             @if($tenant->email) · {{ $tenant->email }} @endif
         </p>

@@ -195,7 +195,12 @@ class CompanyForm
                                 TextInput::make('kad_primary')
                                     ->label('Primary KAD (Δραστηριότητα)')
                                     ->maxLength(20)
-                                    ->helperText('Auto-fills from the AADE Fetch button. Used on invoice headers as the issuer\'s primary activity classification.'),
+                                    ->helperText('Auto-fills from the AADE Fetch button. Printed on the invoice header as the issuer\'s primary activity classification.'),
+
+                                TextInput::make('gemi')
+                                    ->label('ΓΕΜΗ')
+                                    ->maxLength(30)
+                                    ->helperText('Αριθμός ΓΕΜΗ — τυπώνεται στην κεφαλίδα του παραστατικού (υποχρεωτικό για εγγεγραμμένες στο ΓΕΜΗ οντότητες, ν.4919/2022).'),
                             ])
                             ->columns(2),
 

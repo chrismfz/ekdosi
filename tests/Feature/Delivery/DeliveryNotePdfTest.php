@@ -4,10 +4,13 @@ namespace Tests\Feature\Delivery;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
+use App\Models\DeliveryNoteEvent;
 use App\Models\DeliveryNoteLine;
 use App\Models\InvoiceType;
 use App\Services\Delivery\DeliveryNotePdf;
+use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -161,17 +164,17 @@ class DeliveryNotePdfTest extends TestCase
     {
         $note = $this->fileNote($this->makeNote(), '400001234567890');
 
-        \App\Models\DeliveryNoteEvent::create([
+        DeliveryNoteEvent::create([
             'company_id' => $this->tenant->id,
             'delivery_note_id' => $note->id,
-            'event_type' => \Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType::REGISTER_TRANSFER->value,
+            'event_type' => DeliveryEventType::REGISTER_TRANSFER->value,
             'event_timestamp' => now(),
             'actor_vat' => '800561849',
             'details' => ['transport_type' => 1, 'vehicle_number' => 'ΙΑΒ1234'],
             'dedup_key' => 'evt-1',
         ]);
 
-        \App\Models\DeliveryMark::create([
+        DeliveryMark::create([
             'company_id' => $this->tenant->id,
             'delivery_note_id' => $note->id,
             'mark' => '400001234567890',
@@ -200,7 +203,7 @@ class DeliveryNotePdfTest extends TestCase
             ['mark' => null, 'mydata_action' => 'REGISTER_TRANSFER'],
             ['mark' => null, 'mydata_action' => 'PROVIDER_FAILED'],
         ] as $row) {
-            \App\Models\DeliveryMark::create($row + [
+            DeliveryMark::create($row + [
                 'company_id' => $this->tenant->id,
                 'delivery_note_id' => $note->id,
             ]);
@@ -261,6 +264,23 @@ class DeliveryNotePdfTest extends TestCase
         $this->assertStringContainsString('ΠΡΟΧΕΙΡΟ', $html);
         // Draft has no myDATA footer / QR image markup.
         $this->assertStringNotContainsString('myDATA QR', $html);
+    }
+
+    public function test_issuer_header_prints_gemi_and_activity_when_set(): void
+    {
+        // DOC-4: a ΔΑ is also a legally-issued document → the issuer header
+        // must carry ΓΕΜΗ (ν.4919/2022 αρ.22) + primary activity when configured.
+        $this->tenant->forceFill(['gemi' => '123456789000', 'kad_primary' => '62010'])->save();
+
+        $html = view('delivery-notes.pdf', [
+            'note' => $this->makeNote(),
+            'tenant' => $this->tenant->fresh(),
+            'qrDataUri' => null,
+            'logoDataUri' => null,
+        ])->render();
+
+        $this->assertStringContainsString('ΓΕΜΗ: 123456789000', $html);
+        $this->assertStringContainsString('62010', $html);
     }
 
     public function test_internal_movement_recipient_label(): void

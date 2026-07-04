@@ -33,6 +33,8 @@ class PdfLabels
         // Identity / parties
         'vat_no' => ['ΑΦΜ', 'VAT No'],
         'tax_office' => ['ΔΟΥ', 'Tax office'],
+        'gemi' => ['ΓΕΜΗ', 'GEMI No'],
+        'activity' => ['Δραστηριότητα', 'Activity'],
         'phone' => ['Τηλ', 'Tel'],
         'customer_details' => ['Στοιχεία Πελάτη', 'Customer'],
         'to' => ['Προς', 'To'],

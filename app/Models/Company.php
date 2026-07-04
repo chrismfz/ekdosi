@@ -44,6 +44,7 @@ class Company extends Model
         'afm',
         'tax_office',
         'kad_primary',
+        'gemi',
         'address',
         'city',
         'postcode',
