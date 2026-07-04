@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Company;
 use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\VatCategory;
 use App\Services\MyData\MyDataConfigAudit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -120,6 +121,31 @@ class MyDataConfigAuditTest extends TestCase
         $this->assertContains('Δεν έχουν οριστεί τύποι παραστατικών.', $messages);
         $this->assertContains('Δεν έχουν οριστεί κατηγορίες ΦΠΑ.', $messages);
         $this->assertFalse($result->isClean());
+    }
+
+    public function test_unmapped_payment_method_warns_on_the_readiness_row(): void
+    {
+        // MYD-4: a payment method with no §8.12 type would be filed as cash — warn.
+        $c = $this->tenant();
+        PaymentMethod::create(['company_id' => $c->id, 'description' => 'Κάρτα', 'due_days' => 0]); // unmapped
+        PaymentMethod::create(['company_id' => $c->id, 'description' => 'Μετρητά', 'due_days' => 0, 'mydata_payment_type' => 3]); // mapped
+
+        $paymentWarning = collect(app(MyDataConfigAudit::class)->audit($c)->tenant->messages())
+            ->first(fn ($m) => str_contains($m, 'χωρίς αντιστοίχιση myDATA'));
+
+        $this->assertNotNull($paymentWarning);
+        // The UNMAPPED method is named in the listing; the mapped one is not.
+        $this->assertStringContainsString('«Κάρτα»', $paymentWarning);
+    }
+
+    public function test_all_payment_methods_mapped_gives_no_payment_warning(): void
+    {
+        $c = $this->tenant();
+        PaymentMethod::create(['company_id' => $c->id, 'description' => 'Μετρητά', 'due_days' => 0, 'mydata_payment_type' => 3]);
+
+        $messages = implode(' | ', app(MyDataConfigAudit::class)->audit($c)->tenant->messages());
+
+        $this->assertStringNotContainsString('Τρόποι πληρωμής χωρίς αντιστοίχιση', $messages);
     }
 
     public function test_full_audit_rolls_up_counts(): void

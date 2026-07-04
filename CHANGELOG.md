@@ -34,6 +34,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   mail. Recipients: `EKDOSI_ERROR_ALERT_EMAIL` → κοινή αλυσίδα με τα backup alerts
   (`EKDOSI_BACKUP_ALERT_EMAIL` → super_admins). Gated `EKDOSI_ERROR_ALERTS` (default ON),
   throttle `EKDOSI_ERROR_ALERT_THROTTLE_MINUTES` (default 30).
+- **AUDIT DOC-4 — ΓΕΜΗ + Δραστηριότητα στην κεφαλίδα του PDF.** Νέο πεδίο `companies.gemi`
+  (φόρμα εταιρείας) που τυπώνεται στην κεφαλίδα του παραστατικού **και του δελτίου αποστολής**
+  (ν.4919/2022 αρ.22 — υποχρεωτικό για εγγεγραμμένες στο ΓΕΜΗ οντότητες)· τυπώνεται πλέον
+  και το `kad_primary` (Δραστηριότητα/ΚΑΔ) που υπήρχε αλλά δεν εμφανιζόταν.
 
 ### Changed
 - **AUDIT SEC-1 — η απόφαση «plaintext secrets at rest» γίνεται ρητή.** Το plaintext-at-rest
@@ -44,6 +48,13 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   με το threat model + escape hatch (`secrets:reencrypt`).
 
 ### Fixed
+- **AUDIT MYD-4 — ορατότητα για μη-αντιστοιχισμένους τρόπους πληρωμής (δηλώνονταν σιωπηλά ως
+  «Μετρητά»).** Χωρίς `mydata_payment_type` (§8.12), τιμολόγιο με κάρτα/έμβασμα δηλωνόταν στην
+  ΑΑΔΕ ως μετρητά (τύπος 3) χωρίς σημάδι. Πλέον: (α) το `MyDataConfigAudit` (preflight /
+  «Έλεγχος ρυθμίσεων» / go-live) **προειδοποιεί** με τους μη-αντιστοιχισμένους τρόπους, (β) ο
+  submitter **καταγράφει** (`Log::warning`) το fallback σε μετρητά για ρητά επιλεγμένο-αλλά-
+  αδιάστατο τρόπο. Σκόπιμα **δεν** μπλοκάρει την έκδοση (θα σταματούσε ζωντανή τιμολόγηση για
+  θέμα ποιότητας payload) — η ορατότητα λύνει το «σιωπηλό».
 - **AUDIT MYD-2 (μερικώς) — αδύνατη πλέον η ταυτόχρονη διπλή υποβολή του ίδιου παραστατικού.**
   Το `MyDataSubmitter::submit()` παίρνει atomic cache lock ανά παραστατικό (όχι DB row-lock —
   δεν κρατιέται πάνω από το AADE HTTP) και **ξαναδιαβάζει την κατάσταση φρέσκια κάτω από το

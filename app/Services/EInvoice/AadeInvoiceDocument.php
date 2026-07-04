@@ -29,6 +29,7 @@ use Firebed\AadeMyData\Models\Issuer;
 use Firebed\AadeMyData\Models\PaymentMethodDetail;
 use Firebed\AadeMyData\Models\TaxTotals;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -430,9 +431,29 @@ class AadeInvoiceDocument
      */
     private function paymentMethodTypeFor(Invoice $invoice): int
     {
-        $type = $invoice->paymentMethod?->mydata_payment_type;
+        $method = $invoice->paymentMethod;
+        $type = $method?->mydata_payment_type;
 
-        return ($type !== null && Codes::paymentMethodExists((int) $type)) ? (int) $type : 3;
+        if ($type !== null && Codes::paymentMethodExists((int) $type)) {
+            return (int) $type;
+        }
+
+        // MYD-4 (AUDIT): a method IS chosen but has no valid §8.12 mapping — we
+        // fall back to 3 (Μετρητά) rather than block a live filing over a
+        // payload-quality issue, but LOG it so the misreport is traceable (and
+        // MyDataConfigAudit surfaces the same gap in preflight/go-live). A null
+        // method (none chosen) defaults to cash silently — that's not a misreport.
+        if ($method !== null) {
+            Log::warning('myDATA: payment method has no §8.12 type — filing as cash (3)', [
+                'company_id' => $this->tenant->getKey(),
+                'invoice_id' => $invoice->getKey(),
+                'invcode' => $invoice->invcode,
+                'payment_method_id' => $method->getKey(),
+                'payment_method' => $method->description,
+            ]);
+        }
+
+        return 3;
     }
 
     /**

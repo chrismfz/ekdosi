@@ -30,7 +30,9 @@
 - **QR + PDF** (Blade/dompdf) — **γλώσσα ανά παραστατικό** (Ελληνικά/Αγγλικά/**Δίγλωσσο
   GR-EN**), per-invoice/quote επιλογή με default από τη χώρα πελάτη (GR → Ελληνικά, ξένος
   → δίγλωσσο)· `App\Support\Pdf\PdfLabels` localizes μόνο τις ετικέτες (όχι ποσά/περιεχόμενο),
-  σε invoice + quote.
+  σε invoice + quote. **Στοιχεία εκδότη στην κεφαλίδα**: επωνυμία/διεύθυνση/ΑΦΜ/ΔΟΥ/τηλ/email
+  + **ΓΕΜΗ** (`companies.gemi`, ν.4919/2022) + **Δραστηριότητα/ΚΑΔ** (`kad_primary`)· απαλλαγή
+  ΦΠΑ (§8.3 αιτία) σε 0% γραμμές.
 - **«Υπόλοιπο πελάτη» στο PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») — Προηγούμενο + αυτό το παραστατικό
   = Νέο υπόλοιπο, **snapshot τη στιγμή έκδοσης** (`invoices.customer_balance_snapshot`,
   σταθερό σε reprint)· opt-in ανά εταιρεία (`show_customer_balance_on_pdf`) με override ανά

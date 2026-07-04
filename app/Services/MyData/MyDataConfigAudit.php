@@ -5,6 +5,7 @@ namespace App\Services\MyData;
 use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 
@@ -73,6 +74,26 @@ class MyDataConfigAudit
         }
         if ($noVatCategories) {
             $findings[] = new ConfigAuditFinding('warn', 'Δεν έχουν οριστεί κατηγορίες ΦΠΑ.');
+        }
+
+        // MYD-4 (AUDIT): a payment method WITHOUT a myDATA §8.12 type is filed as
+        // «Μετρητά» (type 3) — so card/bank-transfer invoices silently misreport
+        // the payment means. Surface it here (visible in preflight / «Έλεγχος
+        // ρυθμίσεων» / go-live) so it's mapped BEFORE it matters. Only for tenants
+        // that actually file to AADE (direct or via provider).
+        if (in_array($company->einvoice_provider, ['gr-mydata', 'gr-provider'], true)) {
+            $unmapped = PaymentMethod::query()
+                ->where('company_id', $company->getKey())
+                ->whereNull('mydata_payment_type')
+                ->orderBy('id')
+                ->pluck('description');
+            if ($unmapped->isNotEmpty()) {
+                $sample = $unmapped->take(3)->implode('», «');
+                $more = $unmapped->count() > 3 ? ' (+'.($unmapped->count() - 3).')' : '';
+                $findings[] = new ConfigAuditFinding('warn',
+                    'Τρόποι πληρωμής χωρίς αντιστοίχιση myDATA («'.$sample.'»'.$more.') — θα δηλωθούν ως '
+                    .'«Μετρητά» (τύπος 3). Όρισε τον τύπο §8.12 στους «Τρόποι πληρωμής».');
+            }
         }
 
         return new ConfigAuditRow('tenant', $company->name, $findings);

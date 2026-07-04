@@ -571,6 +571,24 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringContainsString('<type>3</type>', $xml);
     }
 
+    public function test_set_but_unmapped_payment_method_files_as_cash_without_blocking(): void
+    {
+        // MYD-4: a chosen method with no §8.12 mapping falls back to cash (3) and
+        // does NOT block the filing (a live tenant must not be halted over a
+        // payload-quality issue — the config audit surfaces the gap instead).
+        $pm = PaymentMethod::create([
+            'company_id' => $this->tenant->id, 'description' => 'Κάρτα', 'due_days' => 0,
+            // mydata_payment_type deliberately null
+        ]);
+        $inv = $this->makeInvoice();
+        $inv->forceFill(['payment_method_id' => $pm->id])->save();
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<type>3</type>', $xml);
+    }
+
     public function test_payment_method_type_comes_from_the_mapped_method(): void
     {
         // G9: a method mapped to §8.12 type 7 (POS/e-POS) files as type 7.

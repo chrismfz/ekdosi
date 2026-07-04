@@ -163,6 +163,10 @@
                 {{ $L('vat_no') }}: {{ $tenant->afm }}@if($tenant->tax_office) · {{ $L('tax_office') }} {{ $tenant->tax_office }}@endif
                 <br>
             @endif
+            {{-- DOC-4: ΓΕΜΗ (ν.4919/2022 αρ.22) + issuer activity/ΚΑΔ on the header. --}}
+            @if($tenant->gemi){{ $L('gemi') }}: {{ $tenant->gemi }}@if($tenant->kad_primary) · {{ $L('activity') }} {{ $tenant->kad_primary }}@endif<br>
+            @elseif($tenant->kad_primary){{ $L('activity') }}: {{ $tenant->kad_primary }}<br>
+            @endif
             @if($tenant->phone) {{ $L('phone') }}: {{ $tenant->phone }} @endif
             @if($tenant->email) · {{ $tenant->email }} @endif
         </p>
