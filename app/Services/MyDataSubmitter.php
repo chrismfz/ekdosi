@@ -365,6 +365,30 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // MARK.) Mirror the INSERT guard (persistResponse): act only on Success.
         $cancelResult = $cancelResponse->first();
         if ($cancelResult === null || ! $cancelResult->isSuccessful()) {
+            // MYD-7: [251] "Invoice with MARK … cannot be cancelled because of
+            // being already cancelled" means AADE ALREADY has this MARK cancelled
+            // — a prior cancel succeeded at AADE but the local write failed (or a
+            // concurrent cancel won). Self-heal: sync local state to CANCELLED
+            // instead of throwing, so the invoice stops reading VALID locally and
+            // the daily reconcile stops flagging it. (Without this the retry kept
+            // throwing [251]-rejected forever.)
+            if ($cancelResult !== null && $this->responseHasErrorCode($cancelResult, 251)) {
+                Log::info('myDATA cancel: AADE reports [251] already cancelled — syncing local state', [
+                    'company_id' => $this->tenant->getKey(),
+                    'invoice_id' => $invoice->id,
+                    'invcode' => $invoice->invcode,
+                    'mark' => $markToCancel,
+                ]);
+
+                return $this->finaliseCancellation(
+                    $invoice,
+                    $markToCancel,
+                    null, // AADE performed no NEW cancel → no cancellation mark
+                    $reason !== '' ? $reason : 'Self-healed: AADE reported [251] already cancelled',
+                    $responseXml,
+                );
+            }
+
             $errors = $cancelResult ? $this->describeResponseErrors($cancelResult) : 'no response';
             $this->recordCancelRejection($invoice, $reason, $responseXml);
             throw new RuntimeException("myDATA rejected the cancellation: {$errors}");
@@ -372,39 +396,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         // A successful cancellation gets its OWN mark (distinct from the original
         // invoice MARK). Capture it for the audit row — the cancel act itself.
-        $cancellationMark = $cancelResult->getCancellationMark();
-
-        $mark = DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel, $cancellationMark) {
-            $mark = MyDataMark::create([
-                'company_id' => $invoice->company_id,
-                'invoice_id' => $invoice->id,
-                'mark' => $markToCancel,
-                'cancellation_mark' => $cancellationMark,
-                'mydata_action' => 'CANCEL',
-                'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
-                'response' => $responseXml,
-                'mark_date' => now()->toDateString(),
-                'mark_time' => now()->toTimeString(),
-            ]);
-
-            // MARK_AI0 trigger replacement: flip the invoice's
-            // mirror columns to reflect cancellation. The MARK is
-            // preserved for audit but state becomes CANCELLED. Sync the
-            // local status here too (single choke-point).
-            $invoice->forceFill([
-                'mydata_state' => 'CANCELLED',
-                'local_status' => 'cancelled',
-            ])->save();
-
-            return $mark;
-        });
-
-        // Reflect the cancellation on the WHMCS side (best-effort, never throws)
-        // so the bridge badge shows «ΑΚΥΡΩΜΕΝΟ». OUTSIDE the transaction — it's a
-        // network call and must not hold a DB lock. No-ops for non-WHMCS invoices.
-        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
-
-        return $mark;
+        return $this->finaliseCancellation(
+            $invoice,
+            $markToCancel,
+            $cancelResult->getCancellationMark(),
+            $reason,
+            $responseXml,
+        );
     }
 
     /**
@@ -667,6 +665,64 @@ class MyDataSubmitter implements EInvoiceSubmitter
         }
 
         return (string) $type;
+    }
+
+    /**
+     * MYD-7: flip the invoice's mirror columns to CANCELLED + write the audit
+     * MARK row, in one transaction, then reflect it on WHMCS. Shared by the
+     * successful-cancel path and the [251] already-cancelled self-heal (which
+     * passes a null cancellation mark — AADE performed no new cancel).
+     */
+    private function finaliseCancellation(Invoice $invoice, string $markToCancel, ?string $cancellationMark, string $reason, string $responseXml): MyDataMark
+    {
+        $mark = DB::transaction(function () use ($invoice, $responseXml, $reason, $markToCancel, $cancellationMark) {
+            $mark = MyDataMark::create([
+                'company_id' => $invoice->company_id,
+                'invoice_id' => $invoice->id,
+                'mark' => $markToCancel,
+                'cancellation_mark' => $cancellationMark,
+                'mydata_action' => 'CANCEL',
+                'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
+                'response' => $responseXml,
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]);
+
+            // MARK_AI0 trigger replacement: preserve the MARK for audit but flip
+            // state to CANCELLED; sync local_status here too (single choke-point).
+            $invoice->forceFill([
+                'mydata_state' => 'CANCELLED',
+                'local_status' => 'cancelled',
+            ])->save();
+
+            return $mark;
+        });
+
+        // Reflect on the WHMCS side (best-effort, never throws). OUTSIDE the
+        // transaction — a network call must not hold a DB lock. No-op for non-WHMCS.
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        return $mark;
+    }
+
+    /** Does the AADE response carry a specific ValidationError code (e.g. 251)? */
+    private function responseHasErrorCode($response, int $code): bool
+    {
+        if (! method_exists($response, 'getErrors')) {
+            return false;
+        }
+        $errs = $response->getErrors();
+        if ($errs === null) {
+            return false;
+        }
+        foreach ($errs as $e) {
+            $ec = method_exists($e, 'getCode') ? $e->getCode() : null;
+            if ($ec !== null && (int) $ec === $code) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function describeResponseErrors($response): string

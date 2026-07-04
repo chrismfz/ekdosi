@@ -55,6 +55,31 @@ class MyDataConfigAuditTest extends TestCase
         $this->assertSame('11.2', $row->detail);
     }
 
+    public function test_goods_type_without_quantity_flag_warns(): void
+    {
+        // MYD-9: a goods type (1.1) must carry the per-line quantity flag, or the
+        // first filing is rejected [204].
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType(
+            $this->type($c, ['mydata_type' => '1.1', 'mydata_requires_quantity' => false])
+        );
+
+        $this->assertSame('warn', $row->status());
+        $this->assertStringContainsString('[204]', implode(' ', $row->messages()));
+    }
+
+    public function test_services_type_with_quantity_flag_warns(): void
+    {
+        // MYD-9: a services type (11.2) must NOT require per-line quantity ([205]).
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType(
+            $this->type($c, ['mydata_type' => '11.2', 'mydata_requires_quantity' => true])
+        );
+
+        $this->assertSame('warn', $row->status());
+        $this->assertStringContainsString('[205]', implode(' ', $row->messages()));
+    }
+
     public function test_invalid_mydata_type_is_error_with_code(): void
     {
         $c = $this->tenant();

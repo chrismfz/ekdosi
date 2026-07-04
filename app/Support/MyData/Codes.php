@@ -420,12 +420,92 @@ final class Codes
         return false;
     }
 
+    /**
+     * MYD-8: "would AADE accept a line at this rate" WITH the ambiguous-rate
+     * override taken into account. 3% (ν.5057/2023) is NOT in FILEABLE_VAT_RATES
+     * because the DIRECT vatCategoryFor() mapping throws on it — but it IS fileable
+     * when the VatCategory carries a valid §8.2 `mydata_vat_category` override
+     * (3%→9). (4% is already directly fileable — category 6 — so it needs no
+     * override to file; its override only picks 6-vs-10.) Pass the override so the
+     * readiness surfaces (VAT-categories badge, ETL warning) stop false-flagging a
+     * correctly-configured 3% row. Without an override the answer is unchanged.
+     */
+    public static function vatRateFileable(int|float|string|null $rate, int|string|null $override = null): bool
+    {
+        if (self::vatRateIsValid($rate)) {
+            return true;
+        }
+        if ($override === null) {
+            return false;
+        }
+
+        // The only rate that files ONLY via an override is 3%. And the override
+        // must be a §8.2 code whose OWN rate matches — otherwise a 3% row with,
+        // say, override=8 (records-without-VAT) would read green here yet file a
+        // no-VAT category with a nonzero 3%-derived vatAmount → AADE rejection.
+        $r = (float) $rate;
+        if (abs($r - 3.0) >= 0.01) {
+            return false;
+        }
+        $overrideRate = self::VAT_CATEGORY_RATES[(int) $override] ?? null;
+
+        return $overrideRate !== null && abs($overrideRate - $r) < 0.01;
+    }
+
     /** Does this invoice type require an income classification? */
     public static function isIncomeInvoiceType(string $code): bool
     {
         $prefix = explode('.', $code)[0];
 
         return in_array($prefix, self::INCOME_TYPE_PREFIXES, true);
+    }
+
+    /**
+     * EU member states (ISO 3166-1 alpha-2), INCLUDING GR — feeds the
+     * counterpart country↔type cross-check (AADE [242]-[244]).
+     *
+     * @var list<string>
+     */
+    public const EU_MEMBER_COUNTRIES = [
+        'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+        'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+        'SI', 'ES', 'SE',
+    ];
+
+    public static function isEuCountry(string $iso): bool
+    {
+        return in_array(strtoupper($iso), self::EU_MEMBER_COUNTRIES, true);
+    }
+
+    /**
+     * MYD-6: the expected counterpart-country class for an invoice type, so we can
+     * pre-empt AADE's opaque [242]-[244] rejections with a clear error:
+     *   'GR'     → must be Greece            (domestic 1.1 / 2.1)          → [242]
+     *   'EU'     → EU member but not Greece  (intra-community 1.2 / 2.2)   → [243]
+     *   'NON_EU' → outside the EU            (third country 1.3 / 2.3)     → [244]
+     *   null     → no constraint / not cross-checked here.
+     * Deliberately covers only the unambiguous 1.x/2.x sales types; credit notes,
+     * self-billing and retail are left unconstrained (their country rules vary /
+     * carry no counterpart).
+     */
+    public static function counterpartCountryClass(?string $type): ?string
+    {
+        return match ($type) {
+            '1.1', '2.1' => 'GR',
+            '1.2', '2.2' => 'EU',
+            '1.3', '2.3' => 'NON_EU',
+            default => null,
+        };
+    }
+
+    /**
+     * MYD-9: is this §8.1 type a GOODS document (per TYPE_DEFAULTS)? Goods types
+     * carry a per-line quantity; service types FORBID it (AADE [205]). null =
+     * unknown type (no opinion). Drives the config-audit quantity-flag check.
+     */
+    public static function typeIsGoods(?string $type): ?bool
+    {
+        return self::TYPE_DEFAULTS[$type]['goods'] ?? null;
     }
 
     /**

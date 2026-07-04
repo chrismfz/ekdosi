@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Services\Etl\BackupNoteSync;
 use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
 use App\Support\MyData\Codes;
@@ -524,7 +525,7 @@ class MigrateFromFirebird extends Command
             $this->map['customers'][(int) $r['CUST_ID']] = $id;
 
             // Legacy DETAILS → a 'backup' internal note (replaces customers.details).
-            \App\Services\Etl\BackupNoteSync::sync($this->companyId, $id, $this->fld($r, 'DETAILS'));
+            BackupNoteSync::sync($this->companyId, $id, $this->fld($r, 'DETAILS'));
         }
     }
 
@@ -618,8 +619,9 @@ class MigrateFromFirebird extends Command
     {
         $badVat = DB::table('vat_categories')
             ->where('company_id', $this->companyId)
-            ->get(['description', 'rate'])
-            ->filter(fn ($v) => ! Codes::vatRateIsValid($v->rate));
+            ->get(['description', 'rate', 'mydata_vat_category'])
+            // MYD-8: a 3%/4% row IS fileable via a §8.2 override — don't false-warn.
+            ->filter(fn ($v) => ! Codes::vatRateFileable($v->rate, $v->mydata_vat_category));
 
         if ($badVat->isNotEmpty()) {
             $this->newLine();

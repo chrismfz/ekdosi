@@ -63,6 +63,25 @@ class VatRateIsValidTest extends TestCase
         $m->invoke($document, 3.0);   // not in FILEABLE_VAT_RATES → must throw
     }
 
+    public function test_3pct_is_fileable_only_with_a_valid_override(): void
+    {
+        // MYD-8: 3% is not fileable by rate alone (vatCategoryFor throws)…
+        $this->assertFalse(Codes::vatRateFileable(3, null));
+        // …but IS once the VatCategory carries a valid §8.2 override (3%→9).
+        $this->assertTrue(Codes::vatRateFileable(3, 9));
+        // A bogus override code doesn't unlock it.
+        $this->assertFalse(Codes::vatRateFileable(3, 99));
+        // Nor does a VALID §8.2 code whose OWN rate isn't 3% — code 8 (no-VAT) and
+        // code 6 (4%) must NOT green-light a 3% row (they'd file a wrong category).
+        $this->assertFalse(Codes::vatRateFileable(3, 8));
+        $this->assertFalse(Codes::vatRateFileable(3, 6));
+        // 4% is already directly fileable (category 6) — no override needed.
+        $this->assertTrue(Codes::vatRateFileable(4, null));
+        // A normal rate is fileable; an override can't rescue a genuinely bad rate.
+        $this->assertTrue(Codes::vatRateFileable(24, null));
+        $this->assertFalse(Codes::vatRateFileable(23, 9));
+    }
+
     public function test_null_or_empty_is_invalid(): void
     {
         $this->assertFalse(Codes::vatRateIsValid(null));

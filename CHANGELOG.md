@@ -18,6 +18,28 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **AUDIT MYD-5 — per-line myDATA E3 ανά κατηγορία προϊόντος (μικτά τιμολόγια).** Νέα πεδία
+  `product_categories.mydata_income_class[_category]`: μια γραμμή δηλώνει το bucket εσόδων της
+  κατηγορίας της (π.χ. «Εμπορεύματα» → category1_1, «Υπηρεσίες» → category1_3), ενώ ο E3 **τύπος**
+  ακολουθεί το κανάλι του παραστατικού. Το summary εκπέμπει ένα `incomeClassification` ανά distinct
+  (τύπο, κατηγορία), αθροίζοντας στο totalNet — τέλος το «ίδιο E3 σε όλες τις γραμμές» για μικτό
+  τιμολόγιο αγαθών+υπηρεσιών. Κενό = κληρονομεί τον τύπο (services-only tenants αμετάβλητοι).
+
+### Fixed
+- **AUDIT MYD-6 — διασταύρωση χώρας↔τύπου + πραγματική διεύθυνση αντισυμβαλλόμενου.** Πριν την
+  υποβολή ελέγχεται ότι η χώρα ταιριάζει στον τύπο (1.1/2.1→GR, 1.2/2.2→ΕΕ-όχι-GR, 1.3/2.3→εκτός ΕΕ)
+  με καθαρό μήνυμα αντί για opaque ΑΑΔΕ [242]-[244]· ξένος counterpart χωρίς πλήρη διεύθυνση κάνει
+  **hard-fail** αντί να δηλώνει fabricated `'Unknown'/'00000'`.
+- **AUDIT MYD-7 — cancel [251] «already cancelled» → self-heal.** Όταν η ΑΑΔΕ έχει ήδη ακυρώσει το
+  MARK (προηγούμενο cancel πέτυχε αλλά το τοπικό write απέτυχε), το retry συγχρονίζει το τοπικό state
+  σε CANCELLED αντί να throw-άρει επ' άπειρον.
+- **AUDIT MYD-8 — override-aware έλεγχος fileable ΦΠΑ.** Νέο `Codes::vatRateFileable(rate, override)`:
+  ένα σωστά ρυθμισμένο 3% row (§8.2 override → κατ. 9) δεν σημαίνεται πλέον ψευδώς «μη-fileable» στο
+  badge/ETL.
+- **AUDIT MYD-9 — έλεγχος `mydata_requires_quantity` vs φύση τύπου.** Το config audit προειδοποιεί
+  όταν ένας χειροποίητος τύπος αγαθών δεν ζητά ποσότητα ([204]) ή ένας τύπος υπηρεσιών τη ζητά ([205]).
+
+### Added
 - **`AUDIT.md`** — πλήρης έλεγχος ετοιμότητας παραγωγής (2026-07-03): 7 τομεακοί
   έλεγχοι (myDATA/ΑΑΔΕ, χρηματικά, security/tenancy, ops/backups, PDF/email,
   onboarding, WHMCS) με ευρήματα ανά σοβαρότητα (IDs + checkboxes), ετυμηγορία

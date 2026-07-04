@@ -60,6 +60,10 @@
 ## 3. myDATA (ο πυρήνας)
 - **Υποβολή / ακύρωση / dry-run** μέσω `firebed/aade-mydata` (`MyDataSubmitter`),
   sandbox-validated (1.1/2.1/11.x/5.1 + CANCEL + νέοι taxTypes + 4% override + ΔΑ).
+- **Per-line χαρακτηρισμός E3** — μικτό τιμολόγιο αγαθών+υπηρεσιών δηλώνει κάθε γραμμή στο σωστό
+  bucket (ανά κατηγορία προϊόντος· ο E3 τύπος ακολουθεί το κανάλι) — summary ανά (τύπο,κατηγορία).
+- **Pre-submit guards** — διασταύρωση χώρας↔τύπου αντισυμβαλλόμενου (καθαρό μήνυμα αντί για ΑΑΔΕ
+  [242]-[244])· hard-fail σε ξένη διεύθυνση που λείπει· cancel [251] «already cancelled» → self-heal.
 - **`mydata_marks` = source of truth** (πλήρες request/response XML, νομικό audit).
 - **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3 /
   Έλεγχος ρυθμίσεων**· ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:

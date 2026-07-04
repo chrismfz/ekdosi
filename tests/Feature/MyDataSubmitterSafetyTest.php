@@ -9,6 +9,8 @@ use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Models\PaymentMethod;
+use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\MyDataRejected;
 use App\Services\MyDataSubmitter;
@@ -751,6 +753,148 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertSame(89.99, $summaryAmount);
     }
 
+    public function test_mixed_category_invoice_files_per_line_income_class(): void
+    {
+        // MYD-5: a product's CATEGORY overrides the goods/services BUCKET per line,
+        // while the E3 TYPE keeps coming from the invoice type (channel-driven).
+        // So a mixed invoice files goods lines under category1_1 and service lines
+        // under category1_3 — both under the type's E3_561_001 — and the summary
+        // emits one node per distinct (type, category), summing to totalNet.
+        $this->invoiceType->forceFill([
+            'mydata_income_class' => 'E3_561_001',
+            'mydata_income_class_category' => 'category1_1',
+        ])->save();
+
+        // The recommended pattern: set ONLY the bucket on the category.
+        $goods = ProductCategory::create([
+            'company_id' => $this->tenant->id, 'description_short' => 'Εμπορεύματα',
+            'mydata_income_class_category' => 'category1_1',
+        ]);
+        $services = ProductCategory::create([
+            'company_id' => $this->tenant->id, 'description_short' => 'Υπηρεσίες',
+            'mydata_income_class_category' => 'category1_3',
+        ]);
+
+        $goodsProduct = Product::create([
+            'company_id' => $this->tenant->id, 'description_short' => 'Server',
+            'product_category_id' => $goods->id, 'vat_category_id' => $this->vat->id,
+        ]);
+        $serviceProduct = Product::create([
+            'company_id' => $this->tenant->id, 'description_short' => 'Support',
+            'product_category_id' => $services->id, 'vat_category_id' => $this->vat->id,
+        ]);
+
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'product_id' => $goodsProduct->id, 'qty' => 1, 'vat_percent' => 24, 'price_per_item' => 100,
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'product_id' => $serviceProduct->id, 'qty' => 1, 'vat_percent' => 24, 'price_per_item' => 40,
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $doc = new \DOMDocument;
+        $doc->loadXML($xml);
+
+        // Summary: one node per distinct (type|category), summing to net. Both lines
+        // keep the type's E3_561_001; the buckets differ (goods 1_1 vs services 1_3).
+        $summary = [];
+        foreach ($doc->getElementsByTagNameNS('*', 'incomeClassification') as $node) {
+            if ($node->parentNode?->localName !== 'invoiceSummary') {
+                continue;
+            }
+            $type = $node->getElementsByTagNameNS('*', 'classificationType')->item(0)?->textContent;
+            $cat = $node->getElementsByTagNameNS('*', 'classificationCategory')->item(0)?->textContent;
+            $amount = (float) $node->getElementsByTagNameNS('*', 'amount')->item(0)?->textContent;
+            $summary["{$type}|{$cat}"] = ($summary["{$type}|{$cat}"] ?? 0) + $amount;
+        }
+
+        $this->assertSame([
+            'E3_561_001|category1_1' => 100.0,
+            'E3_561_001|category1_3' => 40.0,
+        ], $summary);
+        $this->assertSame(140.0, $this->summaryValue($xml, 'totalNetValue'));
+    }
+
+    private function lineOn(Invoice $inv, float $price = 100): void
+    {
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 24, 'price_per_item' => $price,
+        ]);
+    }
+
+    public function test_greek_customer_with_el_vat_prefix_country_files_as_gr(): void
+    {
+        // MYD-6 review F3: 'EL' (the EU VAT prefix for Greece) must normalise to GR
+        // and NOT hard-block a domestic 1.1 filing on the country↔type cross-check.
+        $this->customer->forceFill(['country' => 'EL'])->save();
+        $inv = $this->makeInvoice(); // type 1.1
+        $this->lineOn($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<country>GR</country>', $xml);
+    }
+
+    public function test_domestic_type_with_foreign_counterpart_is_rejected(): void
+    {
+        // MYD-6: type 1.1 with a non-GR counterpart → clear error instead of [242].
+        $this->customer->forceFill(['country' => 'DE'])->save();
+        $inv = $this->makeInvoice();
+        $this->lineOn($inv);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/απαιτεί αντισυμβαλλόμενο/u');
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
+    }
+
+    public function test_intracommunity_type_with_gr_counterpart_is_rejected(): void
+    {
+        // MYD-6: type 1.2 with a GR counterpart → clear error instead of [243].
+        $this->invoiceType->forceFill(['mydata_type' => '1.2'])->save();
+        $inv = $this->makeInvoice(); // customer defaults to GR
+        $this->lineOn($inv);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/απαιτεί αντισυμβαλλόμενο/u');
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
+    }
+
+    public function test_foreign_counterpart_without_address_is_rejected_not_faked(): void
+    {
+        // MYD-6: a foreign counterpart with no address hard-fails instead of
+        // filing 'Unknown'/'00000' placeholders.
+        $this->invoiceType->forceFill(['mydata_type' => '1.2'])->save();
+        $this->customer->forceFill(['country' => 'DE', 'address1' => null, 'city' => null, 'postcode' => null])->save();
+        $inv = $this->makeInvoice();
+        $this->lineOn($inv);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('requires a full address');
+        (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'));
+    }
+
+    public function test_foreign_counterpart_with_full_address_files_the_real_address(): void
+    {
+        $this->invoiceType->forceFill(['mydata_type' => '1.2'])->save();
+        $this->customer->forceFill([
+            'country' => 'DE', 'address1' => 'Hauptstrasse 1', 'city' => 'Berlin', 'postcode' => '10115',
+        ])->save();
+        $inv = $this->makeInvoice();
+        $this->lineOn($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertStringContainsString('Hauptstrasse 1', $xml);
+        $this->assertStringContainsString('Berlin', $xml);
+        $this->assertStringNotContainsString('Unknown', $xml);
+        $this->assertStringNotContainsString('00000', $xml);
+    }
+
     public function test_no_header_discount_keeps_raw_line_values(): void
     {
         // Regression for the sandbox-validated shape: with no header discount
@@ -885,6 +1029,10 @@ class MyDataSubmitterSafetyTest extends TestCase
             'name' => 'ACME GmbH',
             'afm' => 'DE123456789',
             'country' => 'Germany',  // free-text — normalisation must catch
+            // MYD-6: a foreign counterpart now needs a REAL address (no placeholders).
+            'address1' => 'Hauptstrasse 1',
+            'city' => 'Berlin',
+            'postcode' => '10115',
         ]);
         $inv = Invoice::create([
             'company_id' => $this->tenant->id,
@@ -1135,6 +1283,63 @@ class MyDataSubmitterSafetyTest extends TestCase
             'mark' => '400013829677137',
             'cancellation_mark' => '400099999999999',
         ]);
+    }
+
+    public function test_cancel_self_heals_when_aade_reports_already_cancelled(): void
+    {
+        // MYD-7: a prior cancel succeeded at AADE but the local write failed, so
+        // the invoice still reads VALID locally. The retry gets [251] "already
+        // cancelled" — which must SYNC local state to CANCELLED (self-heal), not
+        // throw forever.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_state' => 'VALID',
+            'local_status' => 'active',
+            'mydata_mark' => '400013829677137',
+        ])->save();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400013829677137',
+            'mydata_action' => 'INSERT',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->cancelAlreadyCancelledXml())]);
+
+        // Does NOT throw — it heals.
+        (new MyDataSubmitter($this->tenant, $mock))->cancel($invoice->fresh(), 'Δοκιμή');
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('CANCELLED', $fresh->mydata_state, '[251] must sync local state to CANCELLED');
+        $this->assertSame('cancelled', $fresh->local_status);
+
+        // A CANCEL audit row is written (no cancellation mark — AADE did no new cancel).
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'CANCEL',
+            'mark' => '400013829677137',
+            'cancellation_mark' => null,
+        ]);
+    }
+
+    private function cancelAlreadyCancelledXml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <statusCode>ValidationError</statusCode>
+        <errors>
+            <error>
+                <message>Invoice with MARK 400013829677137 cannot be cancelled because of being already cancelled</message>
+                <code>251</code>
+            </error>
+        </errors>
+    </response>
+</ResponseDoc>
+XML;
     }
 
     private function cancelSuccessXml(): string

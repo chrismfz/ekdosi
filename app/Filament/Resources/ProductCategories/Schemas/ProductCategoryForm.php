@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\ProductCategories\Schemas;
 
-use Filament\Forms\Components\TextInput;
+use App\Support\MyDataOptions;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;
 
 class ProductCategoryForm
@@ -30,6 +32,35 @@ class ProductCategoryForm
                 Textarea::make('description')
                     ->rows(3)
                     ->columnSpanFull(),
+
+                // MYD-5: optional per-category myDATA E3 override. The COMMON case
+                // for a mixed goods+services invoice is to set just the category
+                // BUCKET here (goods vs services); the E3 TYPE keeps coming from the
+                // invoice type (it's channel-driven — wholesale vs retail). Leave
+                // blank to inherit the invoice type's default entirely.
+                // Restricted to the three goods/services/products buckets on
+                // purpose (MYD-5 review F1): those are the item-nature categories
+                // that vary per product and stay valid paired with the invoice
+                // type's E3 code. Offering the full §8.8 enum here would let an
+                // operator pick a bucket AADE forbids for the type → a live [307]/
+                // [313] rejection with no local warning.
+                Select::make('mydata_income_class_category')
+                    ->label('myDATA: Κατηγορία εσόδων (αγαθά/υπηρεσίες)')
+                    ->options([
+                        'category1_1' => 'category1_1 — Πώληση εμπορευμάτων (αγαθά)',
+                        'category1_2' => 'category1_2 — Πώληση προϊόντων',
+                        'category1_3' => 'category1_3 — Παροχή υπηρεσιών',
+                    ])
+                    ->native(false)
+                    ->helperText('Το κύριο πεδίο για μικτά τιμολόγια: π.χ. «Εμπορεύματα» → αγαθά, «Υπηρεσίες» → υπηρεσίες. Κάθε γραμμή προϊόντος αυτής της κατηγορίας δηλώνεται έτσι. Κενό = κληρονομεί τον τύπο παραστατικού.')
+                    ->columnSpan(2),
+
+                Select::make('mydata_income_class')
+                    ->label('myDATA: Χαρακτηρισμός E3 (προχωρημένο)')
+                    ->options(MyDataOptions::incomeClassificationTypes())
+                    ->searchable()
+                    ->preload()
+                    ->helperText('Προαιρετικό override του κωδικού E3_561_xxx. Συνήθως αφήνεται κενό ώστε ο τύπος E3 να ακολουθεί το κανάλι του παραστατικού (χονδρική/λιανική).'),
             ])
             ->columns(3);
     }
