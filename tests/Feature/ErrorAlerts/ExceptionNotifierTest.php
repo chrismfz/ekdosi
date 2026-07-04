@@ -38,6 +38,27 @@ class ExceptionNotifierTest extends TestCase
         );
     }
 
+    public function test_failed_queue_job_alerts_with_job_context(): void
+    {
+        // OPS-9: a job that exhausts its retries notified no one. reportFailedJob
+        // routes it through the same channel with a job-identifying context.
+        Notification::fake();
+        config(['ekdosi.error_alerts.enabled' => true, 'ekdosi.error_alerts.email' => 'ops@example.gr']);
+
+        $this->notifier()->reportFailedJob(
+            'App\\Jobs\\SendInvoiceEmail',
+            new \RuntimeException('SMTP timeout'),
+            'database',
+            'default',
+        );
+
+        Notification::assertSentOnDemand(
+            UnhandledExceptionAlert::class,
+            fn ($n) => str_contains($n->message, 'Queue job failed: App\\Jobs\\SendInvoiceEmail')
+                && str_contains($n->context, 'database/default'),
+        );
+    }
+
     public function test_identical_errors_are_deduped_within_the_window(): void
     {
         Notification::fake();

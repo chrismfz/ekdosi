@@ -4,6 +4,26 @@
         <strong>{{ $this->ago($report['generated_at'] ?? null) }}</strong> — «Ανανέωση» για φρέσκο.
     </div>
 
+    {{-- OPS-4: distilled verdict banner --}}
+    @php($sev = $report['severity'] ?? ['level' => 'ok', 'critical' => [], 'warnings' => []])
+    @if (($sev['level'] ?? 'ok') !== 'ok')
+        <x-filament::section>
+            <x-slot name="heading">
+                <x-filament::badge :color="($sev['level'] === 'critical') ? 'danger' : 'warning'">
+                    {{ $sev['level'] === 'critical' ? '✗ Κρίσιμη κατάσταση' : '⚠ Προειδοποιήσεις' }}
+                </x-filament::badge>
+            </x-slot>
+            <ul class="list-disc ps-4 text-sm space-y-1">
+                @foreach (($sev['critical'] ?? []) as $line)
+                    <li class="text-danger-600 dark:text-danger-400">{{ $line }}</li>
+                @endforeach
+                @foreach (($sev['warnings'] ?? []) as $line)
+                    <li class="text-warning-600 dark:text-warning-400">{{ $line }}</li>
+                @endforeach
+            </ul>
+        </x-filament::section>
+    @endif
+
     {{-- Queue --}}
     <x-filament::section>
         <x-slot name="heading">Ουρά εργασιών (queue)</x-slot>

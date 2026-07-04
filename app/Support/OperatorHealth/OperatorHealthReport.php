@@ -28,10 +28,17 @@ class OperatorHealthReport
      */
     private const TASK_LABELS = [
         'whmcs_fetch' => 'WHMCS fetch',
+        'whmcs_auto_issue' => 'WHMCS auto-issue',
         'mydata_reconcile' => 'myDATA reconcile',
         'mydata_vat_picture' => 'VAT picture refresh',
         'mydata_fetch_expenses' => 'myDATA expenses refresh',
+        'mydata_console_refresh' => 'myDATA console refresh',
         'mail_sweep' => 'mail sweep',
+        'resend_failed_emails' => 'resend failed emails',
+        'overdue_notifications' => 'overdue notifications',
+        'service_renewals' => 'service renewals',
+        'service_dunning' => 'service dunning',
+        'company_backups' => 'company backups',
         'backup_run' => 'backup run',
         'backup_cleanup' => 'backup cleanup',
         'backup_monitor' => 'backup monitor',
@@ -40,7 +47,7 @@ class OperatorHealthReport
     /** @return array<string, mixed> */
     public function build(): array
     {
-        return [
+        $data = [
             'generated_at' => now()->toIso8601String(),
             'queue' => $this->queue(),
             'scheduler' => $this->scheduler(),
@@ -51,6 +58,11 @@ class OperatorHealthReport
             'mydata' => $this->mydata(),
             'disk' => $this->disk(),
         ];
+
+        // OPS-4: one distilled severity + exit code over the whole report.
+        $data['severity'] = OperatorHealthSeverity::evaluate($data);
+
+        return $data;
     }
 
     /**
@@ -173,12 +185,18 @@ class OperatorHealthReport
 
             $companies = [];
             $gap = false;
+            $booksGap = false;
 
             foreach ($settings as $setting) {
                 $destinations = is_array($setting->destinations) ? $setting->destinations : [];
                 $offsiteConfigured = collect($destinations)->contains(
                     fn ($d): bool => in_array($d['driver'] ?? null, $offsiteDrivers, true)
                 );
+
+                // OPS-5: a `settings_setup` bucket backs up config/lookups but NOT
+                // the books (invoices/payments/marks live only in `full`). An
+                // enabled backup that excludes the books is a false DR sense.
+                $booksIncluded = $setting->bucket === 'full';
 
                 $latest = CompanyBackupRun::query()
                     ->withoutGlobalScope(CompanyScope::class)
@@ -202,25 +220,29 @@ class OperatorHealthReport
 
                 $companyGap = ! $offsiteConfigured || $offsitePushOk === false;
                 $gap = $gap || $companyGap;
+                $booksGap = $booksGap || ! $booksIncluded;
 
                 $companies[] = [
                     'slug' => $setting->company?->slug,
                     'name' => $setting->company?->name,
                     'frequency' => $setting->frequency,
+                    'bucket' => $setting->bucket,
+                    'books_included' => $booksIncluded,
                     'offsite_configured' => $offsiteConfigured,
                     'latest_run_at' => $latest?->finished_at?->toIso8601String() ?? $latest?->started_at?->toIso8601String(),
                     'latest_run_status' => $latest?->status,
                     'offsite_push_ok' => $offsitePushOk,
-                    'warn' => $companyGap,
+                    'warn' => $companyGap || ! $booksIncluded,
                 ];
             }
 
             return [
                 'offsite_gap' => $gap,
+                'books_gap' => $booksGap,
                 'enabled_count' => count($companies),
                 'companies' => $companies,
             ];
-        }, ['offsite_gap' => false, 'enabled_count' => 0, 'companies' => []]);
+        }, ['offsite_gap' => false, 'books_gap' => false, 'enabled_count' => 0, 'companies' => []]);
     }
 
     /** @return array<string, mixed>|null */

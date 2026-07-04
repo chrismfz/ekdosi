@@ -38,8 +38,26 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   (φόρμα εταιρείας) που τυπώνεται στην κεφαλίδα του παραστατικού **και του δελτίου αποστολής**
   (ν.4919/2022 αρ.22 — υποχρεωτικό για εγγεγραμμένες στο ΓΕΜΗ οντότητες)· τυπώνεται πλέον
   και το `kad_primary` (Δραστηριότητα/ΚΑΔ) που υπήρχε αλλά δεν εμφανιζόταν.
+- **AUDIT OPS-4 — `ops:health` επιστρέφει πραγματικό exit code.** Νέο `OperatorHealthSeverity`
+  αποστάζει το report σε level+exit **0=ok / 1=warning / 2=critical** (κρίσιμα: worker down,
+  backup monitor failed)· verdict banner στο CLI, `severity` στο JSON και στη σελίδα «Υγεία
+  συστήματος». Ξεκλειδώνει το gate στο `deploy/update.sh` + cron `ops:health || alert`.
+- **AUDIT OPS-9 — ειδοποίηση για αποτυχημένα queue jobs.** `Queue::failing` → ίδιο
+  deduped/throttled email channel με OPS-3 (`ExceptionNotifier::reportFailedJob`)· ένα job που
+  εξαντλεί τα retries πλέον ειδοποιεί αντί να «κάθεται» σιωπηλά στο `failed_jobs`.
 
 ### Changed
+- **AUDIT OPS-5 — τα αυτόματα αντίγραφα περιλαμβάνουν τα βιβλία by default.** Το default bucket
+  γίνεται `full` (φόρμα + migration) — ένα DR backup που εξαιρεί τιμολόγια/πληρωμές/ΜΑΡΚ ήταν
+  ψευδές δίχτυ. Υπάρχοντα rows ΔΕΝ αλλάζουν σιωπηλά· το `ops:health` πλέον προειδοποιεί (bucket-aware).
+- **AUDIT OPS-6 — drain του queue worker στο deploy/rollback.** Τα `update.sh`/`rollback.sh`
+  σταματούν τον worker ΠΡΙΝ το `migrate`/restore και τον ξεκινούν μετά (`QUEUE_STOP_CMD`/
+  `QUEUE_START_CMD` hooks + auto-detect του `ekdosi-queue` unit) — τέλος το «long in-flight job
+  γράφει σε μισο-migrated schema».
+- **AUDIT OPS-8 — ορατότητα στο health για τα unattended tasks.** Το `$trackSchedule` + TASK_LABELS
+  καλύπτουν πλέον `whmcs:auto-issue` (ο μόνος που εκδίδει μόνος του!), per-tenant backups,
+  resend-failed-emails, overdue/renewals/dunning, console-refresh.
+
 - **AUDIT SEC-1 — η απόφαση «plaintext secrets at rest» γίνεται ρητή.** Το plaintext-at-rest
   παραμένει το σκόπιμο default (DR χωρίς APP_KEY), αλλά πλέον απαιτεί συνειδητή αποδοχή:
   νέο `EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED`· το `ekdosi:go-live-check` έχει gate «Μυστικά
@@ -48,6 +66,10 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   με το threat model + escape hatch (`secrets:reencrypt`).
 
 ### Fixed
+- **AUDIT OPS-7 — clean-slate DB restore.** Το `ekdosi:db-snapshot` παίρνει `--add-drop-database
+  --databases` ώστε το restore να ρίχνει και ορφανό πίνακα κακού migration (αλλιώς το επόμενο
+  deploy έσκαγε «table already exists»)· το snapshot μεταφέρθηκε ΜΕΤΑ το `artisan down` (κλείνει
+  το παράθυρο χαμένων writes· snapshot-failure = clean abort με `up` + worker restart).
 - **AUDIT MYD-4 — ορατότητα για μη-αντιστοιχισμένους τρόπους πληρωμής (δηλώνονταν σιωπηλά ως
   «Μετρητά»).** Χωρίς `mydata_payment_type` (§8.12), τιμολόγιο με κάρτα/έμβασμα δηλωνόταν στην
   ΑΑΔΕ ως μετρητά (τύπος 3) χωρίς σημάδι. Πλέον: (α) το `MyDataConfigAudit` (preflight /

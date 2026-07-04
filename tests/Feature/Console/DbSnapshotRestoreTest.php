@@ -37,6 +37,10 @@ class DbSnapshotRestoreTest extends TestCase
         $this->assertContains('--user=ekdosi', $cmd);
         $this->assertContains('--single-transaction', $cmd);
         $this->assertContains('--result-file=/tmp/out.sql', $cmd);
+        // OPS-7: clean-slate restore — DROP DATABASE + CREATE DATABASE in the dump
+        // so a table left by a half-applied migration doesn't survive a restore.
+        $this->assertContains('--add-drop-database', $cmd);
+        $this->assertContains('--databases', $cmd);
         $this->assertSame('ekdosi_prod', end($cmd));
         // The password is NEVER in argv (it travels via MYSQL_PWD).
         $this->assertStringNotContainsString('s3cr3t', implode(' ', $cmd));

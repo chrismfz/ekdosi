@@ -111,7 +111,15 @@ class DbSnapshot extends Command
             '--routines',
             '--triggers',
             '--events',
+            // OPS-7: a clean-slate restore. --databases emits CREATE DATABASE +
+            // USE and --add-drop-database prepends DROP DATABASE IF EXISTS, so
+            // restoring drops the WHOLE schema first — including a table left
+            // behind by a half-applied migration (whose migrations row the
+            // restore rolls back), which otherwise makes the next deploy fail
+            // with "table already exists". Restore must target the SAME db name.
+            '--add-drop-database',
             '--result-file='.$resultFile,
+            '--databases',
             (string) ($cfg['database'] ?? ''),
         ];
     }

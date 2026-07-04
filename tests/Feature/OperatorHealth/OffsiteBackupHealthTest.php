@@ -95,6 +95,42 @@ class OffsiteBackupHealthTest extends TestCase
     }
 
     #[Test]
+    public function settings_only_bucket_is_flagged_as_a_books_gap(): void
+    {
+        // OPS-5: an enabled backup whose bucket excludes the books (invoices/
+        // payments/marks live only in `full`) is a false DR sense.
+        $c = $this->company('bookless');
+        CompanyBackupSetting::create([
+            'company_id' => $c->id, 'enabled' => true, 'frequency' => 'daily',
+            'bucket' => 'settings_setup', 'secrets_mode' => 'raw',
+            'destinations' => [['driver' => 'sftp', 'host' => 'x']],
+        ]);
+
+        $cb = $this->companyBackups();
+
+        $this->assertTrue($cb['books_gap']);
+        $this->assertFalse($cb['companies'][0]['books_included']);
+        $this->assertSame('settings_setup', $cb['companies'][0]['bucket']);
+        $this->assertTrue($cb['companies'][0]['warn']); // books gap alone warns
+    }
+
+    #[Test]
+    public function full_bucket_has_no_books_gap(): void
+    {
+        $c = $this->company('withbooks');
+        CompanyBackupSetting::create([
+            'company_id' => $c->id, 'enabled' => true, 'frequency' => 'daily',
+            'bucket' => 'full', 'secrets_mode' => 'raw',
+            'destinations' => [['driver' => 'sftp', 'host' => 'x']],
+        ]);
+
+        $cb = $this->companyBackups();
+
+        $this->assertFalse($cb['books_gap']);
+        $this->assertTrue($cb['companies'][0]['books_included']);
+    }
+
+    #[Test]
     public function disabled_backups_are_not_counted(): void
     {
         $c = $this->company('disabledco');

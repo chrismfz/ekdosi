@@ -3,15 +3,18 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Support\ErrorAlerts\ExceptionNotifier;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
 use Filament\Events\TenantSet;
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -93,6 +96,26 @@ class AppServiceProvider extends ServiceProvider
          * tenant is identified, which is exactly when the gate bypass
          * for super_admin needs the right team scope.
          */
+        /*
+         * OPS-3/OPS-9: a queue job that exhausts its retries lands in
+         * failed_jobs and previously notified no one (the worker swallows the
+         * exception). Route JobFailed through the same deduped/throttled ops
+         * alert as unhandled exceptions. Best-effort — the listener is guarded
+         * against the test runner and never throws.
+         */
+        Queue::failing(function (JobFailed $event): void {
+            // The suite fails jobs on purpose — don't enqueue alerts for those.
+            if ($this->app->runningUnitTests()) {
+                return;
+            }
+            app(ExceptionNotifier::class)->reportFailedJob(
+                $event->job->resolveName(),
+                $event->exception,
+                $event->connectionName,
+                $event->job->getQueue() ?? 'default',
+            );
+        });
+
         Event::listen(
             TenantSet::class,
             function (TenantSet $event) {
