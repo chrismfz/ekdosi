@@ -33,6 +33,35 @@ return [
     */
     'secrets' => [
         'encrypt_at_rest' => (bool) env('EKDOSI_ENCRYPT_SECRETS_AT_REST', false),
+        // SEC-1 (AUDIT): plaintext-at-rest is a DELIBERATE trade-off, but it must
+        // be a CONSCIOUS one. When secrets are NOT encrypted, go-live-check WARNS
+        // until this is set true — an explicit "yes, we accept plaintext-at-rest;
+        // the DB/backup access control is our trust boundary" acknowledgement
+        // (see docs/security-at-rest.md). Ignored when encrypt_at_rest = true.
+        'plaintext_acknowledged' => (bool) env('EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Unhandled-exception alerting (OPS-3)
+    |--------------------------------------------------------------------------
+    |
+    | Without this, every production exception goes ONLY to storage/logs/
+    | laravel.log — which nobody watches — so a wedged myDATA submit, a
+    | throwing observer or a dying scheduler task fails silently. When enabled,
+    | a reportable unhandled exception ALSO emails the ops recipients (deduped
+    | per signature within `throttle_minutes` so an error loop can't flood the
+    | inbox). It NEVER suppresses the normal log line, and it's best-effort —
+    | a mail hiccup can't break the request/command.
+    |
+    | Recipients: `email` (comma-separated) if set, else the same chain the
+    | backup alerts use (EKDOSI_BACKUP_ALERT_EMAIL → super_admins).
+    |
+    */
+    'error_alerts' => [
+        'enabled' => (bool) env('EKDOSI_ERROR_ALERTS', true),
+        'email' => env('EKDOSI_ERROR_ALERT_EMAIL'),
+        'throttle_minutes' => (int) env('EKDOSI_ERROR_ALERT_THROTTLE_MINUTES', 30),
     ],
 
     /*

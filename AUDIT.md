@@ -35,12 +35,13 @@ transaction, αδύνατο διπλό ΑΑ), mark-persistence transactional, te
 | 3 | **DOC-1** — αιτία απαλλαγής ΦΠΑ στο PDF (ΕΛΠ ν.4308/2014 αρ.9) | ✅ **FIXED** (PR #335) |
 | 4 | **DOC-2 + MYD-3** — ακυρωμένο τυπώνεται/υποβάλλεται σαν έγκυρο | ✅ **FIXED** (PR #336) |
 | 5 | **WH-1..5** — filer preflight πριν οπλιστεί το `whmcs_auto_issue_immediate` | ✅ **FIXED** (`WhmcsFilingGuard`)· ⚠ επιβεβαίωση με πραγματικό WHMCS πριν το arming |
-| 6 | **SEC-1** — απόφαση: `EKDOSI_ENCRYPT_SECRETS_AT_REST=true` + `secrets:reencrypt`, ή ρητή αποδοχή plaintext-at-rest | ⏳ **ΑΝΟΙΧΤΟ** — απόφαση/deploy setting (όχι κώδικας) |
+| 6 | **SEC-1** — απόφαση: encrypt ή ρητή αποδοχή plaintext-at-rest | ✅ **RESOLVED** — αποδεκτό plaintext ρητά (`EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED` + `docs/security-at-rest.md`) |
 
-**Απομένει από τα blockers:** μόνο η απόφαση **SEC-1** (deploy setting, όχι κώδικας)
-+ οι δύο prod-side ενέργειες (sandbox discount run, backup off-site + restore drill).
+**Απομένει από τα blockers: κανένα** — όλα κλεισμένα (SEC-1 = αποδεκτό plaintext ρητά).
+Prod-side ενέργειες πριν το cutover: sandbox discount run (MYD-1), backup off-site +
+passphrase + restore drill (OPS-1), και `EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED=true` στο prod .env.
 Αμέσως μετά (πρώτες εβδομάδες): ~~MON-1~~ ✅, ~~MON-2~~ ✅ (2026-07-05)· απομένουν:
-exception reporting (OPS-3), ΓΕΜΗ στο PDF (DOC-4), guard στον `DatabaseSeeder`
+~~OPS-3~~ ✅, ΓΕΜΗ στο PDF (DOC-4), guard στον `DatabaseSeeder`
 (SET-1), MYD-2 (submit lock + in-doubt state).
 
 ---
@@ -202,7 +203,7 @@ doc-type ανά δικαιούχο με HOLD σε κάθε ασάφεια· plug
   περιέχουν by default.) **Fix:** enable τα 3 schedule flags, off-site disk
   (S3/SFTP), `BACKUP_ARCHIVE_PASSWORD`, ενημέρωση INSTALL.md §11+§14.
 - [x] **OPS-2 · BLOCKER (μαζί με OPS-1) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-03** (`OpsBackupNotifiable` + κοινό `BackupAlertRecipients` με τα per-company alerts· success mails σιωπηλά) — Ειδοποιήσεις αποτυχίας spatie backup σε **`your@example.com`** hardcoded (`config/backup.php:248`, χωρίς env override). Ακόμα κι όταν ενεργοποιηθεί το OPS-1, αποτυχία δεν ειδοποιεί κανέναν.
-- [ ] **OPS-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — **Κανένα exception reporting**: `withExceptions()` άδειο, κανένα Sentry/Flare, `LOG_STACK=single`, cron `>> /dev/null 2>&1`. Για app που εκδίδει νομικά έγγραφα, τα σιωπηλά failures είναι το #1 λειτουργικό ρίσκο. **Fix:** έστω mail/Slack log channel σε `error` level, ή Sentry.
+- [x] **OPS-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-05** (`ExceptionNotifier` στο `withExceptions()->report()`· email deduped/throttled· κοινή recipient chain με backups) — **Κανένα exception reporting**: `withExceptions()` άδειο, κανένα Sentry/Flare, `LOG_STACK=single`, cron `>> /dev/null 2>&1`. Για app που εκδίδει νομικά έγγραφα, τα σιωπηλά failures είναι το #1 λειτουργικό ρίσκο. **Fix:** έστω mail/Slack log channel σε `error` level, ή Sentry.
 - [ ] **OPS-4 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — `ops:health` επιστρέφει ΠΑΝΤΑ 0 (`OperatorHealth.php:90`) → το `deploy/update.sh:160` gate είναι νεκρός κώδικας και δεν μπαίνει σε cron monitoring. **Fix:** non-zero exit σε RED findings.
 - [ ] **OPS-5 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Τα per-tenant «off-site» backups by default ΔΕΝ περιέχουν τα βιβλία: `bucket` default `settings_setup` (migration `2026_06_09_000003:24`)· invoices/payments/marks μόνο σε `full`· και το `ops:health` δείχνει «Off-site ok» χωρίς να κοιτάει bucket → ψευδής αίσθηση DR. **Fix:** default `full` ή bucket-aware check.
 - [ ] **OPS-6 · MEDIUM · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Deploy/restore με ζωντανό queue worker: στο `update.sh` ο worker τρέχει παλιό κώδικα ΚΑΤΑ το `migrate` (queue:restart μετά, `:149`)· στο `rollback.sh:47-54` το restore τρέχει με live worker → jobs γράφουν σε μισο-restored πίνακες. **Fix:** stop/drain worker πριν migrate/restore.
@@ -229,7 +230,7 @@ queue-retry double-file), auto-issue με lock+guards.
 
 ## F. Security / Tenant isolation (SEC)
 
-- [ ] **SEC-1 · HIGH (απόφαση go-live) · ΕΠΙΒΕΒΑΙΩΜΕΝΟ (σκόπιμο design)** — Secrets plaintext-at-rest by default (`EKDOSI_ENCRYPT_SECRETS_AT_REST=false`): myDATA keys, WHMCS secrets, SMTP passwords, AI keys ως καθαρές στήλες → κάθε dump/snapshot/backup τα κουβαλάει cleartext· και το company backup default `secrets_mode='raw'`. Συνειδητό DR trade-off, αλλά πριν το go-live: ή `=true` + `secrets:reencrypt`, ή ρητή αποδοχή στο runbook + το `ops:health`/`go-live-check` να το επισημαίνουν.
+- [x] **SEC-1 · HIGH (απόφαση go-live) — ✅ RESOLVED 2026-07-05: αποδεκτό plaintext, ρητά** (`EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED`· go-live gate warn→pass· `docs/security-at-rest.md`) — Secrets plaintext-at-rest by default (`EKDOSI_ENCRYPT_SECRETS_AT_REST=false`): myDATA keys, WHMCS secrets, SMTP passwords, AI keys ως καθαρές στήλες → κάθε dump/snapshot/backup τα κουβαλάει cleartext· και το company backup default `secrets_mode='raw'`. Συνειδητό DR trade-off, αλλά πριν το go-live: ή `=true` + `secrets:reencrypt`, ή ρητή αποδοχή στο runbook + το `ops:health`/`go-live-check` να το επισημαίνουν.
 - [ ] **SEC-2 · LOW · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Κανένα ελάχιστο μήκος password στο create/edit χρήστη (`UserForm.php:35-46` — μόνο maxLength· το reset action έχει minLength(8)). **Fix:** `Password::min(8)`/`defaults()` σε UserForm + Install.
 - [ ] **SEC-3 · LOW · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Webhooks χωρίς replay protection (no timestamp/nonce) και τα body-signed POSTs δεν δένουν το slug στο signature (θέμα ΜΟΝΟ αν δύο tenants μοιραστούν ποτέ secret). Bounded impact (idempotent effects, read-only leaks σε secret-holder). Hardening: slug+timestamp στο canonical, κανόνας «ποτέ κοινό webhook secret».
 - [ ] **SEC-4 · LOW · ΕΠΙΒΕΒΑΙΩΜΕΝΟ** — Το public invoice-PDF signed URL δεν λήγει ποτέ (by design για WHMCS)· leak = μόνιμη πρόσβαση στο συγκεκριμένο PDF· ανάκληση = μόνο APP_KEY rotation. Μια γραμμή στο runbook.

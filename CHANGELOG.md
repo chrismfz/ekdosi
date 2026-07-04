@@ -25,6 +25,24 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   κεφαλίδας → απόρριψη [207]/[209]), OPS-1/2 (whole-DB backups), DOC-1 (αιτία
   απαλλαγής ΦΠΑ στο PDF).
 
+### Added
+- **AUDIT OPS-3 — ειδοποίηση ανεπίλυτων σφαλμάτων (exception alerting).** Κάθε
+  reportable unhandled exception (web / scheduler / queue) στέλνει πλέον email στους
+  ops (best-effort, deduped ανά υπογραφή σφάλματος μέσα στο παράθυρο περιορισμού) αντί
+  να μένει μόνο στο `laravel.log`. Wired στο `bootstrap/app.php` `withExceptions()->report()`
+  (`ExceptionNotifier`) — δεν καταπνίγει το log line, δεν σπάει το request σε αποτυχία
+  mail. Recipients: `EKDOSI_ERROR_ALERT_EMAIL` → κοινή αλυσίδα με τα backup alerts
+  (`EKDOSI_BACKUP_ALERT_EMAIL` → super_admins). Gated `EKDOSI_ERROR_ALERTS` (default ON),
+  throttle `EKDOSI_ERROR_ALERT_THROTTLE_MINUTES` (default 30).
+
+### Changed
+- **AUDIT SEC-1 — η απόφαση «plaintext secrets at rest» γίνεται ρητή.** Το plaintext-at-rest
+  παραμένει το σκόπιμο default (DR χωρίς APP_KEY), αλλά πλέον απαιτεί συνειδητή αποδοχή:
+  νέο `EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED`· το `ekdosi:go-live-check` έχει gate «Μυστικά
+  at-rest» που κάνει **warn** όσο δεν έχει δηλωθεί (ή κρυπτογραφηθεί) και **pass** μόλις
+  δηλωθεί/κρυπτογραφηθεί — ποτέ fail (αποδεκτό trade-off). Νέο `docs/security-at-rest.md`
+  με το threat model + escape hatch (`secrets:reencrypt`).
+
 ### Fixed
 - **AUDIT MON-1 — η ακύρωση πιστωτικού ΔΕΝ «καίει» πλέον τις επιστραφείσες ποσότητες.**
   Το `qty_returned` ήταν μετρητής μόνο-αύξησης χωρίς σύνδεση της γραμμής πιστωτικού με

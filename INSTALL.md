@@ -823,6 +823,14 @@ every 15 min):
 - **Cron output is discarded** (`>> /dev/null`). `mydata:reconcile-sales` exits
   `2` when it finds discrepancies — if you want alerting, append the schedule
   output to a log instead and watch it.
+- **Exception alerting (OPS-3)** — an unhandled exception (anywhere: web,
+  scheduler task, queue job) emails the ops recipients, best-effort and deduped
+  per error signature (`EKDOSI_ERROR_ALERTS=true` by default; recipients fall
+  back to `EKDOSI_BACKUP_ALERT_EMAIL` → super_admins, or set a dedicated
+  `EKDOSI_ERROR_ALERT_EMAIL`). It never suppresses the `laravel.log` line and a
+  mail hiccup can't break the request/task — but it needs the **queue worker
+  up** (the alert is queued) and mail configured. So the earlier scheduler note
+  aside, real errors DO surface without anyone tailing the log.
 
 ### Whole-DB backups (spatie/laravel-backup) — verify, don't just trust
 
