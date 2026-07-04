@@ -112,9 +112,16 @@ class InvoicePdfBannerStateTest extends TestCase
 
     public function test_issued_invoice_of_non_filing_tenant_carries_no_banner(): void
     {
-        // DOC-3: the Estonian/none tenant — a legally issued invoice must NOT
-        // carry a DRAFT banner (or any myDATA reference) forever.
-        foreach ([['einvoice_provider' => 'none'], ['einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off']] as $cfg) {
+        // DOC-3: a non-filing tenant — a legally issued invoice must NOT carry
+        // a DRAFT / pending-submission banner (or any myDATA reference) forever.
+        // Covers every non-filing shape, including gr-provider in mode=off
+        // (the case a hand-rolled filesToAade() copy previously got wrong).
+        $configs = [
+            ['einvoice_provider' => 'none'],
+            ['einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off'],
+            ['einvoice_provider' => 'gr-provider', 'mydata_mode' => 'off', 'einvoice_provider_mode' => 'off'],
+        ];
+        foreach ($configs as $cfg) {
             $inv = $this->invoice($this->tenant($cfg));
 
             $html = $this->html($inv);
@@ -122,6 +129,20 @@ class InvoicePdfBannerStateTest extends TestCase
             $this->assertStringNotContainsString('ΕΚΚΡΕΜΕΙ ΥΠΟΒΟΛΗ', $html);
             $this->assertStringNotContainsString('<div class="banner banner-draft">', $html);
         }
+    }
+
+    public function test_issued_unfiled_on_live_provider_tenant_prints_pending_banner(): void
+    {
+        // Symmetric to the myDATA-tenant case: a live ΥΠΑΗΕΣ provider tenant
+        // (mode ≠ off) DOES file, so an issued-but-unfiled invoice warns.
+        $inv = $this->invoice($this->tenant([
+            'einvoice_provider' => 'gr-provider',
+            'mydata_mode' => 'off',
+            'einvoice_provider_mode' => 'production',
+        ]));
+
+        $html = $this->html($inv);
+        $this->assertStringContainsString('ΕΚΚΡΕΜΕΙ ΥΠΟΒΟΛΗ', $html);
     }
 
     public function test_valid_active_invoice_prints_certified_and_no_warning_banner(): void

@@ -2,7 +2,6 @@
 
 namespace App\Support\Pdf;
 
-use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\Invoice;
 
@@ -66,22 +65,19 @@ class InvoiceBannerState
     }
 
     /**
-     * Does this tenant's channel actually submit to AADE? Mirrors the
-     * submitter factory routing: gr-provider always files (via the ΥΠΑΗΕΣ
-     * provider), gr-mydata files unless the mode is Off (NullSubmitter),
-     * ee-peppol / none never file — for them "no MARK" is the normal,
-     * permanent state of a legal invoice, not something to flag.
+     * Does this tenant's channel actually submit electronically (direct
+     * myDATA OR a live ΥΠΑΗΕΣ provider)? This is THE predicate the submit
+     * action's visibility uses, so the "pending submission" banner appears on
+     * exactly the invoices that CAN still be filed — and never on a non-filing
+     * tenant (none / ee-peppol / mydata mode Off / provider mode off), for
+     * which "no MARK" is the normal, permanent state of a legal invoice.
+     *
+     * Delegates to Company::submitsElectronically() rather than re-deriving
+     * the rule — a hand-rolled copy previously flagged gr-provider tenants in
+     * mode=off as filing (they don't), reintroducing the DOC-3 bug.
      */
     private static function filesToAade(?Company $tenant): bool
     {
-        if (! $tenant) {
-            return false;
-        }
-
-        return match ($tenant->einvoice_provider) {
-            'gr-provider' => true,
-            'gr-mydata' => $tenant->mydata_mode_enum !== MyDataMode::Off,
-            default => false,
-        };
+        return (bool) $tenant?->submitsElectronically();
     }
 }
