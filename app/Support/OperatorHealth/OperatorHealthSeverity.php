@@ -30,6 +30,16 @@ class OperatorHealthSeverity
     private const HEARTBEAT_CRITICAL_MINUTES = 30;
 
     /**
+     * Free-disk ratio thresholds: below WARN = warning, below CRITICAL = critical.
+     * Conservative on purpose — free/total is systematically low because
+     * `disk_total_space` includes the filesystem's reserved blocks (a healthy
+     * 40%-used ext4 can report ~8% "free"), so a looser threshold false-positives.
+     */
+    private const DISK_WARN_RATIO = 0.05;
+
+    private const DISK_CRITICAL_RATIO = 0.02;
+
+    /**
      * @param  array<string, mixed>  $data  OperatorHealthReport::build() output
      * @return array{level:string, exit_code:int, critical:list<string>, warnings:list<string>}
      */
@@ -87,6 +97,34 @@ class OperatorHealthSeverity
         $mailFailed = (int) ($data['mail']['failed_24h'] ?? 0);
         if ($mailFailed > 0) {
             $warnings[] = "{$mailFailed} αποτυχία/ες email τιμολογίων (24ω).";
+        }
+        // A jammed mail queue (stuck queued/sending past the sweep threshold) is a
+        // degraded state even when nothing has FAILED yet.
+        $mailStuck = (int) ($data['mail']['stuck_queued_or_sending'] ?? 0);
+        if ($mailStuck > 0) {
+            $warnings[] = "{$mailStuck} email κολλημένα (queued/sending) — worker/SMTP;";
+        }
+
+        // --- Disk: a (near-)full filesystem breaks backups, DB writes and the
+        // queue — exactly the "can't protect data" case. The report probes several
+        // areas (often the same fs); gate on the WORST free-space ratio.
+        $worstFree = null;
+        foreach (($data['disk'] ?? []) as $area) {
+            $total = (float) ($area['total_bytes'] ?? 0);
+            $free = $area['free_bytes'] ?? null;
+            if ($total <= 0 || $free === null) {
+                continue;
+            }
+            $ratio = (float) $free / $total;
+            $worstFree = $worstFree === null ? $ratio : min($worstFree, $ratio);
+        }
+        if ($worstFree !== null) {
+            $pct = round($worstFree * 100, 1);
+            if ($worstFree < self::DISK_CRITICAL_RATIO) {
+                $critical[] = "Χώρος δίσκου κρίσιμα χαμηλός ({$pct}% ελεύθερος).";
+            } elseif ($worstFree < self::DISK_WARN_RATIO) {
+                $warnings[] = "Χώρος δίσκου χαμηλός ({$pct}% ελεύθερος).";
+            }
         }
 
         // --- WHMCS / myDATA per-tenant failures + discrepancies.

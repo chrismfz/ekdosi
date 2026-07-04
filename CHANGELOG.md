@@ -39,9 +39,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   (ν.4919/2022 αρ.22 — υποχρεωτικό για εγγεγραμμένες στο ΓΕΜΗ οντότητες)· τυπώνεται πλέον
   και το `kad_primary` (Δραστηριότητα/ΚΑΔ) που υπήρχε αλλά δεν εμφανιζόταν.
 - **AUDIT OPS-4 — `ops:health` επιστρέφει πραγματικό exit code.** Νέο `OperatorHealthSeverity`
-  αποστάζει το report σε level+exit **0=ok / 1=warning / 2=critical** (κρίσιμα: worker down,
-  backup monitor failed)· verdict banner στο CLI, `severity` στο JSON και στη σελίδα «Υγεία
-  συστήματος». Ξεκλειδώνει το gate στο `deploy/update.sh` + cron `ops:health || alert`.
+  αποστάζει το report σε level+exit **0=ok / 1=warning / 2=critical**· κρίσιμα: worker down (>30′
+  σιωπής), backup monitor failed, **δίσκος <2% ελεύθερος**· warnings: failed jobs (24ω), off-site/
+  books gap, στημένα email queue, χαμηλός δίσκος (<5%), failed scheduled task, WHMCS/myDATA. Verdict
+  banner στο CLI, `severity` στο JSON και στη σελίδα «Υγεία συστήματος» (+ per-tenant off-site/books
+  rows, parity με το CLI). Ξεκλειδώνει το gate στο `deploy/update.sh` + cron `ops:health || alert`.
 - **AUDIT OPS-9 — ειδοποίηση για αποτυχημένα queue jobs.** `Queue::failing` → ίδιο
   deduped/throttled email channel με OPS-3 (`ExceptionNotifier::reportFailedJob`)· ένα job που
   εξαντλεί τα retries πλέον ειδοποιεί αντί να «κάθεται» σιωπηλά στο `failed_jobs`.
@@ -71,7 +73,9 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   (DB-agnostic) snapshot — ώστε ορφανός πίνακας κακού migration να μη επιβιώνει (αλλιώς το επόμενο
   deploy έσκαγε «table already exists»)· self-heal σε διακοπείσα επαναφορά, χωρίς baked-in όνομα ΒΔ.
   Το snapshot μεταφέρθηκε ΜΕΤΑ το `artisan down` (κλείνει το παράθυρο χαμένων writes· snapshot-failure
-  = clean abort με `up` + worker restart).
+  = clean abort με `up` + worker restart). Hardening (review): το dump ανοίγει ΠΡΙΝ το destructive DROP
+  (μη-αναγνώσιμο snapshot δεν αφήνει άδεια ΒΔ)· falsy-guard στο `charset` (κενό `DB_CHARSET` δεν βγάζει
+  malformed CREATE).
 - **AUDIT MYD-4 — ορατότητα για μη-αντιστοιχισμένους τρόπους πληρωμής (δηλώνονταν σιωπηλά ως
   «Μετρητά»).** Χωρίς `mydata_payment_type` (§8.12), τιμολόγιο με κάρτα/έμβασμα δηλωνόταν στην
   ΑΑΔΕ ως μετρητά (τύπος 3) χωρίς σημάδι. Πλέον: (α) το `MyDataConfigAudit` (preflight /

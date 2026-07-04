@@ -26,9 +26,10 @@ class OperatorHealthSeverityTest extends TestCase
                 'whmcs_fetch' => ['label' => 'WHMCS fetch', 'status' => 'ok'],
                 'backup_run' => ['label' => 'backup run', 'status' => 'missing'], // never ran ≠ failed
             ],
-            'mail' => ['failed_24h' => 0],
+            'mail' => ['failed_24h' => 0, 'stuck_queued_or_sending' => 0],
             'whmcs' => [['tenant' => 'a', 'status' => 'ok']],
             'mydata' => [['tenant' => 'a', 'status' => 'ok', 'discrepancies' => 0]],
+            'disk' => ['storage' => ['free_bytes' => 50, 'total_bytes' => 100]],
         ];
     }
 
@@ -107,6 +108,42 @@ class OperatorHealthSeverityTest extends TestCase
         $data = $this->healthy();
         $data['scheduler']['whmcs_fetch']['status'] = 'failed';
         $data['queue']['failed_jobs_24h'] = 3;
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('warning', $s['level']);
+        $this->assertSame(1, $s['exit_code']);
+    }
+
+    #[Test]
+    public function nearly_full_disk_warns_and_full_disk_is_critical(): void
+    {
+        $warn = $this->healthy();
+        $warn['disk']['storage'] = ['free_bytes' => 4, 'total_bytes' => 100]; // 4% free
+        $this->assertSame('warning', OperatorHealthSeverity::evaluate($warn)['level']);
+
+        $crit = $this->healthy();
+        $crit['disk']['storage'] = ['free_bytes' => 1, 'total_bytes' => 100]; // 1% free
+        $this->assertSame('critical', OperatorHealthSeverity::evaluate($crit)['level']);
+    }
+
+    #[Test]
+    public function worst_disk_area_drives_the_verdict(): void
+    {
+        $data = $this->healthy();
+        $data['disk'] = [
+            'storage' => ['free_bytes' => 90, 'total_bytes' => 100], // fine
+            'backups' => ['free_bytes' => 1, 'total_bytes' => 100],  // full (separate mount)
+        ];
+
+        $this->assertSame('critical', OperatorHealthSeverity::evaluate($data)['level']);
+    }
+
+    #[Test]
+    public function stuck_mail_queue_warns(): void
+    {
+        $data = $this->healthy();
+        $data['mail']['stuck_queued_or_sending'] = 12;
 
         $s = OperatorHealthSeverity::evaluate($data);
 

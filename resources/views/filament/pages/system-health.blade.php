@@ -93,6 +93,28 @@
                     @if(isset($b['latest_backup_age_hours'])) ({{ $b['latest_backup_age_hours'] }}h) @endif</div>
                 <div>Μέγεθος: {{ $this->bytes($b['latest_backup_size_bytes'] ?? null) }}</div>
             </div>
+
+            {{-- Per-tenant off-site + books (parity with CLI ops:health) --}}
+            @php($cb = $b['companies'] ?? [])
+            @if (($cb['enabled_count'] ?? 0) > 0)
+                <div class="mt-3 space-y-1 text-sm">
+                    <div class="text-gray-500">Ανά εταιρία (αυτόματα αντίγραφα)</div>
+                    @foreach (($cb['companies'] ?? []) as $row)
+                        <div class="flex flex-wrap items-center gap-2">
+                            <strong>{{ $row['slug'] ?? '—' }}</strong>
+                            <x-filament::badge :color="($row['offsite_configured'] ?? false) ? 'success' : 'warning'">
+                                {{ ($row['offsite_configured'] ?? false) ? 'εκτός VM' : 'μόνο τοπικά' }}
+                            </x-filament::badge>
+                            <x-filament::badge :color="($row['books_included'] ?? false) ? 'success' : 'warning'">
+                                {{ ($row['books_included'] ?? false) ? 'με βιβλία' : 'ρυθμίσεις μόνο' }}
+                            </x-filament::badge>
+                            @if (($row['offsite_push_ok'] ?? null) === false)
+                                <x-filament::badge color="danger">off-site push απέτυχε</x-filament::badge>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            @endif
         </x-filament::section>
 
         <x-filament::section>

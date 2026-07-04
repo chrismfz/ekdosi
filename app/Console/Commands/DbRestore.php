@@ -65,6 +65,17 @@ class DbRestore extends Command
 
         $pwd = ['MYSQL_PWD' => (string) ($cfg['password'] ?? '')];
 
+        // Open the (optionally gz) snapshot FIRST — BEFORE the destructive DROP —
+        // so an unreadable/missing dump can never leave the database dropped-and-
+        // empty. compress.zlib:// transparently decompresses a .gz with constant memory.
+        $isGz = str_ends_with(strtolower($file), '.gz');
+        $input = fopen($isGz ? 'compress.zlib://'.$file : $file, 'rb');
+        if ($input === false) {
+            $this->error('Αδυναμία ανάγνωσης του στιγμιότυπου — δεν έγινε καμία αλλαγή.');
+
+            return self::FAILURE;
+        }
+
         // OPS-7 (step 1): clean slate. DROP + CREATE the TARGET database before
         // loading, so a table left behind by a half-applied migration (whose
         // migrations row this restore rolls back) can't survive to break the next
@@ -77,21 +88,13 @@ class DbRestore extends Command
         $this->warn('Καθαρισμός σχήματος (DROP + CREATE DATABASE)…');
         $recreate->run(fn ($type, $buffer) => $this->output->write($buffer));
         if (! $recreate->isSuccessful()) {
+            fclose($input);
             $this->error('Ο καθαρισμός σχήματος απέτυχε: '.trim($recreate->getErrorOutput()));
 
             return self::FAILURE;
         }
 
-        // Step 2: stream the (optionally gz) snapshot straight into the mysql
-        // client. compress.zlib:// transparently decompresses a .gz with constant memory.
-        $isGz = str_ends_with(strtolower($file), '.gz');
-        $input = fopen($isGz ? 'compress.zlib://'.$file : $file, 'rb');
-        if ($input === false) {
-            $this->error('Αδυναμία ανάγνωσης του στιγμιότυπου.');
-
-            return self::FAILURE;
-        }
-
+        // Step 2: stream the snapshot into the (now freshly-created) database.
         $process = new Process(self::restoreCommand($cfg), timeout: null, env: $pwd);
         $process->setInput($input);
 
@@ -119,7 +122,9 @@ class DbRestore extends Command
     public static function recreateDatabaseSql(array $cfg): string
     {
         $db = str_replace('`', '``', (string) ($cfg['database'] ?? ''));
-        $charset = (string) ($cfg['charset'] ?? 'utf8mb4');
+        // Falsy-guard (not ??): env('DB_CHARSET') returns '' when the var is
+        // present-but-empty, which would emit a malformed `CHARACTER SET ;`.
+        $charset = (string) ($cfg['charset'] ?? '') ?: 'utf8mb4';
         $collation = (string) ($cfg['collation'] ?? '');
 
         $create = "CREATE DATABASE `{$db}` CHARACTER SET {$charset}";
