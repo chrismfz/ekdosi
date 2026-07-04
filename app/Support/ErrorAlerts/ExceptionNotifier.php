@@ -39,6 +39,23 @@ class ExceptionNotifier
     }
 
     /**
+     * OPS-9: a queue job that exhausts its retries fires JobFailed but is NOT
+     * reported to the exception handler (the worker swallows it into
+     * failed_jobs), so it alerted no one. Route it through the same
+     * deduped/throttled channel. The test-runner skip lives in the listener
+     * (AppServiceProvider) so this mapping stays unit-testable.
+     */
+    public function reportFailedJob(string $jobName, Throwable $e, string $connection, string $queue): void
+    {
+        $this->notify(
+            $e::class,
+            'Queue job failed: '.$jobName.' — '.$e->getMessage(),
+            $this->relativePath($e->getFile()).':'.$e->getLine(),
+            'Queue: '.$connection.'/'.$queue.' · job '.$jobName,
+        );
+    }
+
+    /**
      * Send the alert (deduped + throttled). Safe to call directly. Returns
      * early — without ever throwing — when disabled, when there are no
      * recipients, or when an identical error already alerted within the window.

@@ -250,7 +250,14 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **FK-aware delete guard** (`GuardedDeleteAction`) — μπλοκάρει διαγραφή lookup σε χρήση.
 - **Off-site backup verification** (`ops:health` → `backup.companies`) — ανά tenant με
   ενεργά backups: υπάρχει προορισμός **εκτός VM** (sftp/ftp/s3); και πέτυχε η τελευταία
-  off-site αποστολή; `offsite_gap` προειδοποιεί για «μένουν μόνο τοπικά» ή αποτυχημένο push.
+  off-site αποστολή; `offsite_gap` προειδοποιεί για «μένουν μόνο τοπικά» ή αποτυχημένο push·
+  **`books_gap`** προειδοποιεί για backup που **δεν περιέχει τα βιβλία** (bucket≠full).
+- **`ops:health` verdict + exit code** — `OperatorHealthSeverity` αποστάζει το report σε
+  **0=ok / 1=warning / 2=critical**, ώστε το deploy gate + cron `ops:health || alert` να είναι
+  ζωντανά· **failed queue jobs ειδοποιούν** (`Queue::failing` → ίδιο ops email με τα exceptions).
+- **Deploy worker-drain** — `deploy/update.sh`/`rollback.sh` σταματούν τον queue worker πριν το
+  `migrate`/restore (κανένα in-flight job σε μισο-migrated schema)· `db-snapshot` clean-slate
+  (`--add-drop-database`) + snapshot μετά το `artisan down`.
 - **`ops:health`** (queue/scheduler/backup/mail/WHMCS/myDATA/disk) — CLI **και**
   **σελίδα «Υγεία συστήματος»** (read-only, **super_admin-only** γιατί είναι cross-tenant·
   ίδια πηγή `OperatorHealthReport`: worker heartbeat, scheduled-task last-runs, backups,

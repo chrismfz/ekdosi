@@ -4,6 +4,26 @@
         <strong>{{ $this->ago($report['generated_at'] ?? null) }}</strong> — «Ανανέωση» για φρέσκο.
     </div>
 
+    {{-- OPS-4: distilled verdict banner --}}
+    @php($sev = $report['severity'] ?? ['level' => 'ok', 'critical' => [], 'warnings' => []])
+    @if (($sev['level'] ?? 'ok') !== 'ok')
+        <x-filament::section>
+            <x-slot name="heading">
+                <x-filament::badge :color="($sev['level'] === 'critical') ? 'danger' : 'warning'">
+                    {{ $sev['level'] === 'critical' ? '✗ Κρίσιμη κατάσταση' : '⚠ Προειδοποιήσεις' }}
+                </x-filament::badge>
+            </x-slot>
+            <ul class="list-disc ps-4 text-sm space-y-1">
+                @foreach (($sev['critical'] ?? []) as $line)
+                    <li class="text-danger-600 dark:text-danger-400">{{ $line }}</li>
+                @endforeach
+                @foreach (($sev['warnings'] ?? []) as $line)
+                    <li class="text-warning-600 dark:text-warning-400">{{ $line }}</li>
+                @endforeach
+            </ul>
+        </x-filament::section>
+    @endif
+
     {{-- Queue --}}
     <x-filament::section>
         <x-slot name="heading">Ουρά εργασιών (queue)</x-slot>
@@ -73,6 +93,28 @@
                     @if(isset($b['latest_backup_age_hours'])) ({{ $b['latest_backup_age_hours'] }}h) @endif</div>
                 <div>Μέγεθος: {{ $this->bytes($b['latest_backup_size_bytes'] ?? null) }}</div>
             </div>
+
+            {{-- Per-tenant off-site + books (parity with CLI ops:health) --}}
+            @php($cb = $b['companies'] ?? [])
+            @if (($cb['enabled_count'] ?? 0) > 0)
+                <div class="mt-3 space-y-1 text-sm">
+                    <div class="text-gray-500">Ανά εταιρία (αυτόματα αντίγραφα)</div>
+                    @foreach (($cb['companies'] ?? []) as $row)
+                        <div class="flex flex-wrap items-center gap-2">
+                            <strong>{{ $row['slug'] ?? '—' }}</strong>
+                            <x-filament::badge :color="($row['offsite_configured'] ?? false) ? 'success' : 'warning'">
+                                {{ ($row['offsite_configured'] ?? false) ? 'εκτός VM' : 'μόνο τοπικά' }}
+                            </x-filament::badge>
+                            <x-filament::badge :color="($row['books_included'] ?? false) ? 'success' : 'warning'">
+                                {{ ($row['books_included'] ?? false) ? 'με βιβλία' : 'ρυθμίσεις μόνο' }}
+                            </x-filament::badge>
+                            @if (($row['offsite_push_ok'] ?? null) === false)
+                                <x-filament::badge color="danger">off-site push απέτυχε</x-filament::badge>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            @endif
         </x-filament::section>
 
         <x-filament::section>

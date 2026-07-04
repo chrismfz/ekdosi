@@ -26,6 +26,20 @@ export PHP=/usr/bin/php8.4
 export COMPOSER=/usr/local/bin/composer
 ```
 
+**Queue-worker drain (OPS-6).** `update.sh`/`rollback.sh` STOP the queue worker
+before `migrate`/restore and start it after, so a long in-flight job (e.g. the
+30-min Firebird import) can't write into a half-migrated/half-restored schema.
+They auto-detect the documented `ekdosi-queue` systemd unit. If the deploy user
+can't `systemctl stop` it without a password, set explicit hooks once (persist
+them in the deploy user's shell profile) — otherwise the scripts fall back to
+maintenance-mode pause only, which does NOT interrupt an already-running job:
+
+```bash
+export QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'
+export QUEUE_START_CMD='sudo systemctl start ekdosi-queue'
+# or a different unit name:  export QUEUE_SERVICE=my-queue
+```
+
 ## The normal cycle
 
 ### 1. On the DEV box — cut a release
@@ -46,11 +60,15 @@ cd /var/www/ekdosi
 deploy/update.sh v1.3.0        # omit the tag to take the latest tag
 ```
 
-`update.sh` does, in order: pre-flight (clean tree) → **DB snapshot** →
-maintenance ON → checkout tag → `composer install --no-dev` → `migrate --force`
-→ asset build (if a lockfile exists) → `optimize` → `shield:sync-super-admin` →
-`queue:restart` → maintenance OFF → `ops:health`. Idempotent; the maintenance
-window is a few seconds.
+`update.sh` does, in order: pre-flight (clean tree) → maintenance ON →
+**drain the queue worker** → **DB snapshot** (after `down`, so no write is lost
+between snapshot and the window) → checkout tag → `composer install --no-dev` →
+`migrate --force` → asset build (if a lockfile exists) → `optimize` →
+`shield:sync-super-admin` → `queue:restart` → maintenance OFF → **restart the
+worker** → `ops:health`. Idempotent; the maintenance window is a few seconds.
+A snapshot failure is a clean abort (maintenance lifted, worker restarted,
+nothing deployed). `ops:health` now returns a real exit code (0/1/2), so a
+non-zero tail on the deploy flags a real issue.
 
 ## Rollback
 
@@ -97,11 +115,15 @@ scheduled, per-company archives are `spatie/laravel-backup` (see
   ekdosi.*`) covers them. A least-privilege user without TRIGGER/EVENT/CREATE
   ROUTINE will make `mysqldump` fail — which **aborts the update** (fails safe,
   no half-backup), but fix the grant before relying on snapshots.
-- **Restore caveat (older schema):** `db-restore` runs the dump as-is — it
-  drops/recreates the tables IN the snapshot but does **not** drop tables a later
-  migration ADDED. Those orphan tables are harmless to the older code, but for a
-  pristine restore, recreate the database first (`DROP DATABASE … ; CREATE
-  DATABASE …`) then restore.
+- **Clean-slate restore (OPS-7):** `db-restore` now `DROP DATABASE` +
+  `CREATE DATABASE`s the **restore connection's** database first, then loads the
+  (DB-agnostic) snapshot. So a table a later (bad) migration ADDED — which used to
+  survive a restore and make the next deploy fail with "table already exists" — is
+  wiped, and the target db is recreated if it's missing (self-heals an interrupted
+  restore). It always targets the connection's db (matching the confirmation
+  prompt), not a name baked into the snapshot. After restoring an OLDER snapshot,
+  run `php artisan migrate --force` to re-apply forward migrations. The db user
+  needs DROP/CREATE on the database (the INSTALL.md `GRANT ALL ON ekdosi.*` covers it).
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.

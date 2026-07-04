@@ -40,6 +40,48 @@ log()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; }
 
+# --- queue worker drain (OPS-6) --------------------------------------------
+# A long-running in-flight job (e.g. the 30-min Firebird import) would otherwise
+# keep processing against a HALF-MIGRATED schema while `migrate` runs. Cleanly
+# STOP the worker before touching the schema and START it again on the new code.
+#
+#   QUEUE_STOP_CMD / QUEUE_START_CMD — explicit hooks (win if set), e.g.
+#       QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'
+#   Otherwise auto-detect the documented systemd unit ($QUEUE_SERVICE, default
+#   ekdosi-queue). `systemctl stop` blocks until the current job drains (SIGTERM
+#   → queue:work finishes the job, then exits). If neither is available we warn
+#   and fall back to maintenance-mode pause only (a non-`--force` worker sleeps
+#   while `down`, but an already-in-flight long job is NOT interrupted).
+QUEUE_SERVICE="${QUEUE_SERVICE:-ekdosi-queue}"
+_have_unit() { command -v systemctl >/dev/null 2>&1 && systemctl cat "${QUEUE_SERVICE}.service" >/dev/null 2>&1; }
+
+# Returns the stop command's real exit status (call inside `if !`, which suspends
+# `set -e` for the body so the status propagates). A DETECTED hook/unit that
+# FAILS to stop returns non-zero → the caller aborts (we couldn't guarantee no
+# writes during migrate). With NO hook at all we warn and return 0 (deliberate
+# maintenance-pause fallback — the deploy still proceeds).
+stop_queue_worker() {
+  if [[ -n "${QUEUE_STOP_CMD:-}" ]]; then
+    log "Draining queue worker (QUEUE_STOP_CMD)"; eval "${QUEUE_STOP_CMD}"; return
+  elif _have_unit; then
+    log "Draining queue worker (systemd: ${QUEUE_SERVICE})"; systemctl stop "${QUEUE_SERVICE}"; return
+  else
+    fail "No queue-worker stop hook — a long in-flight job could run during migrate."
+    echo  "  Set QUEUE_STOP_CMD/QUEUE_START_CMD (e.g. 'sudo systemctl stop ekdosi-queue')."
+    echo  "  Falling back to maintenance-mode pause only (does NOT interrupt a running job)."
+    return 0
+  fi
+}
+
+# Best-effort restart — never aborts the script (the app is already back up).
+start_queue_worker() {
+  if [[ -n "${QUEUE_START_CMD:-}" ]]; then
+    log "Starting queue worker (QUEUE_START_CMD)"; eval "${QUEUE_START_CMD}" || true
+  elif _have_unit; then
+    log "Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true
+  fi
+}
+
 # --- pre-flight -------------------------------------------------------------
 if [[ -n "$(git status --porcelain)" ]]; then
   fail "Working tree not clean — commit/stash changes on the server first (don't edit code on prod)."
@@ -90,10 +132,6 @@ if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
   log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
 fi
 
-# --- safety: DB snapshot BEFORE anything changes ----------------------------
-log "Pre-update DB snapshot (rollback point)"
-$ART ekdosi:db-snapshot --keep=10 || { fail "Snapshot failed — aborting before any change."; exit 1; }
-
 # --- maintenance window -----------------------------------------------------
 log "Maintenance mode ON"
 $ART down --retry=15 || true
@@ -109,6 +147,31 @@ deploy_failed() {
   echo  "  When healthy again:  $ART up"
 }
 trap deploy_failed EXIT
+
+# --- drain the worker BEFORE any schema change (OPS-6) ----------------------
+# A DETECTED stop hook/unit that FAILS is a CLEAN abort (nothing has changed yet):
+# we can't guarantee the worker won't write during migrate, so don't proceed.
+if ! stop_queue_worker; then
+  fail "Could not stop the queue worker — aborting before any change."
+  echo  "  Fix permissions / set QUEUE_STOP_CMD, then re-run. Nothing was deployed."
+  $ART up || true
+  trap - EXIT
+  exit 1
+fi
+
+# --- safety: DB snapshot (OPS-7: AFTER `down` + worker drain) ----------------
+# Taken here, not before `down`, so no write that lands between the snapshot and
+# the maintenance window can be silently lost on a later rollback-restore (e.g.
+# a MARK the ΑΑΔΕ already accepted). Nothing has changed yet, so a snapshot
+# failure is a CLEAN abort: lift maintenance, bring the worker back, exit.
+log "Pre-update DB snapshot (rollback point)"
+if ! $ART ekdosi:db-snapshot --keep=10; then
+  fail "Snapshot failed — aborting before any change."
+  $ART up || true
+  start_queue_worker
+  trap - EXIT
+  exit 1
+fi
 
 # --- update -----------------------------------------------------------------
 log "Checkout $REF ($(git rev-parse --short "$TARGET_SHA"))"
@@ -153,11 +216,24 @@ log "Maintenance mode OFF"
 $ART up
 trap - EXIT
 
+# Bring the worker back on the NEW code (OPS-6). queue:restart above already
+# signalled any survivor to reload; this restarts a unit we stopped to drain.
+start_queue_worker
+
 NEW="$(git rev-parse --short HEAD)"
 ok "Updated $CURRENT → $REF ($NEW)"
 
 log "Health check"
-$ART ops:health || fail "ops:health flagged issues — review the output above."
+# ops:health now returns 0=ok / 1=warning / 2=critical. Right after a deploy the
+# worker heartbeat may briefly read 'stale' (the worker was stopped for the whole
+# window) → an expected WARNING, not a real problem. Only a CRITICAL (exit ≥2) is
+# worth flagging here.
+hc=0; $ART ops:health || hc=$?
+if [[ "$hc" -ge 2 ]]; then
+  fail "ops:health CRITICAL (exit $hc) — review the output above."
+elif [[ "$hc" -eq 1 ]]; then
+  echo "ℹ ops:health warnings (exit 1) — often just the worker heartbeat catching up after the restart."
+fi
 
 echo
 echo "Rollback if needed:"

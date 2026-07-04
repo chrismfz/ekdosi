@@ -72,12 +72,16 @@ Schedule::job(new RecordQueueHeartbeat)
 
 // invoices:resend-failed-emails — re-queue invoice emails whose last attempt
 // failed. Default OFF (two-key: this flag); run manually until SMTP is healthy.
-Schedule::command('invoices:resend-failed-emails', [
-    '--since' => config('ekdosi.schedule.resend_failed_emails_since_days', 3),
-])
-    ->cron(config('ekdosi.schedule.resend_failed_emails_cron', '30 * * * *'))
-    ->when(fn () => $scheduleEnabled('resend_failed_emails_enabled'))
-    ->withoutOverlapping(30);
+$trackSchedule(
+    Schedule::command('invoices:resend-failed-emails', [
+        '--since' => config('ekdosi.schedule.resend_failed_emails_since_days', 3),
+    ])
+        ->cron(config('ekdosi.schedule.resend_failed_emails_cron', '30 * * * *'))
+        ->name('resend-failed-emails')
+        ->when(fn () => $scheduleEnabled('resend_failed_emails_enabled'))
+        ->withoutOverlapping(30),
+    'resend_failed_emails'
+);
 
 // whmcs:fetch-pending — stage paid+unfiled WHMCS invoices into the inbox,
 // once per WHMCS-configured tenant. Operator-gated: this only STAGES,
@@ -102,11 +106,16 @@ $trackSchedule(
 // fetch above, this files at AADE, so it's a two-key arming: this scheduler
 // flag (default OFF) AND the per-tenant toggle. The command loops every
 // armed tenant itself + leaves anything ambiguous in the inbox for a human.
-Schedule::command('whmcs:auto-issue')
-    ->cron(config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'))
-    ->name('whmcs-auto-issue-all')
-    ->when(fn () => $scheduleEnabled('whmcs_auto_issue_enabled'))
-    ->withoutOverlapping(30);
+// Tracked: this is the ONLY task that FILES at AADE unattended — its health
+// must be visible (OPS-8).
+$trackSchedule(
+    Schedule::command('whmcs:auto-issue')
+        ->cron(config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'))
+        ->name('whmcs-auto-issue-all')
+        ->when(fn () => $scheduleEnabled('whmcs_auto_issue_enabled'))
+        ->withoutOverlapping(30),
+    'whmcs_auto_issue'
+);
 
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
 // per myDATA-readable tenant (direct gr-mydata OR a provider reading its own
@@ -164,35 +173,44 @@ $trackSchedule(
 
 // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
 // tenant. Read-only, NO email; default OFF (opt-in per deploy).
-Schedule::command('invoices:notify-overdue')
-    ->dailyAt(config('ekdosi.schedule.overdue_notifications_time', '07:30'))
-    ->name('invoices-notify-overdue')
-    ->when(fn () => $scheduleEnabled('overdue_notifications_enabled'))
-    ->withoutOverlapping(30);
+$trackSchedule(
+    Schedule::command('invoices:notify-overdue')
+        ->dailyAt(config('ekdosi.schedule.overdue_notifications_time', '07:30'))
+        ->name('invoices-notify-overdue')
+        ->when(fn () => $scheduleEnabled('overdue_notifications_enabled'))
+        ->withoutOverlapping(30),
+    'overdue_notifications'
+);
 
 // services:stage-renewals — stage DRAFT renewal invoices for due service
 // contracts, once per tenant (the command loops tenants itself). Default OFF:
 // it creates real draft documents. Operator-gated downstream — drafts NEVER
 // auto-file at AADE; they flow through the normal invoice lifecycle. lead_days
 // stages contracts due within the next N days (early billing, default 0).
-Schedule::command('services:stage-renewals', [
-    '--lead-days' => config('ekdosi.schedule.service_renewals_lead_days', 0),
-])
-    ->dailyAt(config('ekdosi.schedule.service_renewals_time', '07:00'))
-    ->name('service-renewals')
-    ->when(fn () => $scheduleEnabled('service_renewals_enabled'))
-    ->withoutOverlapping();
+$trackSchedule(
+    Schedule::command('services:stage-renewals', [
+        '--lead-days' => config('ekdosi.schedule.service_renewals_lead_days', 0),
+    ])
+        ->dailyAt(config('ekdosi.schedule.service_renewals_time', '07:00'))
+        ->name('service-renewals')
+        ->when(fn () => $scheduleEnabled('service_renewals_enabled'))
+        ->withoutOverlapping(),
+    'service_renewals'
+);
 
 // services:run-dunning — auto suspend/terminate overdue contracts (or unsuspend
 // a paid one), once per tenant (the command loops tenants itself). Default ON,
 // BUT the real on/off is the per-product dunning_enabled toggle (default OFF):
 // a fresh deploy acts on nothing until an operator opts a product in. The
 // command does NOT file at AADE — it only flips contract status + provisioning.
-Schedule::command('services:run-dunning')
-    ->dailyAt(config('ekdosi.schedule.service_dunning_time', '08:00'))
-    ->name('service-dunning')
-    ->when(fn () => $scheduleEnabled('service_dunning_enabled'))
-    ->withoutOverlapping();
+$trackSchedule(
+    Schedule::command('services:run-dunning')
+        ->dailyAt(config('ekdosi.schedule.service_dunning_time', '08:00'))
+        ->name('service-dunning')
+        ->when(fn () => $scheduleEnabled('service_dunning_enabled'))
+        ->withoutOverlapping(),
+    'service_dunning'
+);
 
 // ai:dispatch-reminders — deliver due AI «Βοηθός» reminders (operator-confirmed)
 // as Filament database notifications. Every minute so a reminder lands close to
@@ -237,8 +255,11 @@ $trackSchedule(
 // company:run-scheduled-backups — per-TENANT backups (Phase 4), distinct from
 // the spatie whole-DB tasks above. Fires hourly; each company runs once per its
 // own cadence (daily/weekly/monthly) at/after its configured time. Default OFF.
-Schedule::command('company:run-scheduled-backups')
-    ->cron(config('ekdosi.schedule.company_backups_cron', '0 * * * *'))
-    ->name('company-backups')
-    ->when(fn () => $scheduleEnabled('company_backups_enabled'))
-    ->withoutOverlapping(60);
+$trackSchedule(
+    Schedule::command('company:run-scheduled-backups')
+        ->cron(config('ekdosi.schedule.company_backups_cron', '0 * * * *'))
+        ->name('company-backups')
+        ->when(fn () => $scheduleEnabled('company_backups_enabled'))
+        ->withoutOverlapping(60),
+    'company_backups'
+);

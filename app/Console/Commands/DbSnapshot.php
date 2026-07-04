@@ -112,6 +112,10 @@ class DbSnapshot extends Command
             '--triggers',
             '--events',
             '--result-file='.$resultFile,
+            // OPS-7: DB-agnostic dump (no CREATE/USE DATABASE). The clean-slate
+            // DROP+CREATE lives in `db-restore` instead, so it always targets the
+            // RESTORE connection's db (not a name baked into the snapshot) and can
+            // recreate a db that doesn't exist. See DbRestore.
             (string) ($cfg['database'] ?? ''),
         ];
     }

@@ -18,7 +18,7 @@ class OperatorHealth extends Command
         if ($this->option('json')) {
             $this->line(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
-            return self::SUCCESS;
+            return (int) ($data['severity']['exit_code'] ?? self::SUCCESS);
         }
 
         $this->info('Operator health @ '.$data['generated_at']);
@@ -53,8 +53,16 @@ class OperatorHealth extends Command
                     ? 'no tenant has backups enabled'
                     : ($cb['offsite_gap'] ? '⚠ GAP — see per-tenant below' : 'ok ('.$cb['enabled_count'].' tenant(s))')
             );
+            // OPS-5: does the backup actually contain the books?
+            $this->components->twoColumnDetail(
+                'Books in backup',
+                $cb['enabled_count'] === 0
+                    ? 'n/a'
+                    : (($cb['books_gap'] ?? false) ? '⚠ some tenant backs up settings only (bucket≠full)' : 'ok (full bucket)')
+            );
             foreach ($cb['companies'] as $row) {
                 $parts = [$row['offsite_configured'] ? 'off-site set' : '⚠ LOCAL ONLY'];
+                $parts[] = ($row['books_included'] ?? false) ? 'full (με βιβλία)' : '⚠ ρυθμίσεις μόνο';
                 $parts[] = 'last: '.($row['latest_run_status'] ?? 'never').($row['latest_run_at'] ? ' '.$row['latest_run_at'] : '');
                 if ($row['offsite_push_ok'] === false) {
                     $parts[] = '⚠ off-site push FAILED';
@@ -88,7 +96,24 @@ class OperatorHealth extends Command
             $area, $row['path'], $row['exists'] ? 'yes' : 'no', $this->bytes($row['used_bytes']), $this->bytes($row['free_bytes']), $this->bytes($row['total_bytes']),
         ])->all());
 
-        return self::SUCCESS;
+        // OPS-4: an actionable verdict + a real exit code (0/1/2) so the deploy
+        // gate and cron `ops:health || alert` actually mean something.
+        $severity = $data['severity'] ?? ['level' => 'ok', 'exit_code' => 0, 'critical' => [], 'warnings' => []];
+        $this->newLine();
+        foreach ($severity['critical'] as $line) {
+            $this->components->error($line);
+        }
+        foreach ($severity['warnings'] as $line) {
+            $this->components->warn($line);
+        }
+        $this->newLine();
+        match ($severity['level']) {
+            'critical' => $this->error('✗ Κατάσταση: ΚΡΙΣΙΜΗ — απαιτείται ενέργεια (exit 2).'),
+            'warning' => $this->warn('⚠ Κατάσταση: προειδοποιήσεις (exit 1).'),
+            default => $this->info('✓ Κατάσταση: όλα καλά (exit 0).'),
+        };
+
+        return (int) $severity['exit_code'];
     }
 
     private function bytes(mixed $bytes): string

@@ -174,7 +174,7 @@ class CompanyBackupActions
             // the form prefills it (else a save would force re-entry / wipe it).
             ->fillForm(fn (Company $record) => $record->backupSetting
                 ? $record->backupSetting->attributesToArray() + ['passphrase' => $record->backupSetting->passphrase]
-                : ['frequency' => 'off', 'bucket' => 'settings_setup', 'secrets_mode' => 'passphrase', 'run_at_time' => '02:00', 'retention_keep' => 7])
+                : ['frequency' => 'off', 'bucket' => 'full', 'secrets_mode' => 'passphrase', 'run_at_time' => '02:00', 'retention_keep' => 7])
             ->schema([
                 Toggle::make('enabled')->label('Ενεργό')->default(false),
                 Select::make('frequency')->label('Συχνότητα')
@@ -185,9 +185,13 @@ class CompanyBackupActions
                 // Only two distinct behaviours exist: the exporter ALWAYS dumps
                 // setup; --full adds transactional. (A settings-only-without-setup
                 // bundle isn't implemented, so it's not offered — see plan doc.)
+                // OPS-5: default to «Πλήρες» — a DR backup that excludes the books
+                // (invoices/payments/marks) is a false safety net; «Ρυθμίσεις + setup»
+                // stays available for a deliberate config-only bundle.
                 Select::make('bucket')->label('Περιεχόμενο')
                     ->options(['settings_setup' => 'Ρυθμίσεις + setup', 'full' => 'Πλήρες (με δεδομένα)'])
-                    ->default('settings_setup')->required(),
+                    ->default('full')->required()
+                    ->helperText('«Πλήρες» περιλαμβάνει τα βιβλία (τιμολόγια/πληρωμές). «Ρυθμίσεις + setup» ΔΕΝ τα περιλαμβάνει.'),
                 Select::make('secrets_mode')->label('Μυστικά')
                     ->options(['passphrase' => 'Κρυπτογραφημένα (συνθηματικό)', 'raw' => 'Χωρίς κρυπτογράφηση (μόνο τοπικά!)'])
                     ->default('passphrase')->live()->required(),
