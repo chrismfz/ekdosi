@@ -62,6 +62,44 @@ class DashboardMetrics
     }
 
     /**
+     * MON-2 (AUDIT): the OUTPUT-side figure for VAT LIABILITY — sales in the
+     * window NET of credit notes issued in the window. Both carry positive
+     * magnitudes, and a credit note REFUNDS output VAT, so it must be
+     * SUBTRACTED (not merely excluded like income() does for gross turnover).
+     *
+     * income() reports gross sales turnover (credit notes excluded) for the
+     * revenue tiles; THIS is what the ΦΠΑ-εκροών−εισροών report ("πόσο ΦΠΑ θα
+     * χρωστάμε") needs, and it matches the net-VAT semantics already used by
+     * LedgerBook::vatBalance() and the customer Καρτέλα (which sign-flip credit
+     * notes). Using income() there over-declared output VAT whenever a credit
+     * note existed (a €124 sale + its full credit read as €24 output VAT vs the
+     * true €0).
+     */
+    public function outputForVat(CarbonInterface $start, CarbonInterface $end): IncomeFigure
+    {
+        $agg = 'COALESCE(SUM(net_total), 0) net, COALESCE(SUM(gross_total), 0) gross, COUNT(*) cnt';
+
+        $sales = $this->baseInvoices()
+            ->where('issued_at', '>=', $start)->where('issued_at', '<=', $end)
+            ->selectRaw($agg)->first();
+
+        $credits = $this->creditNotesQuery()
+            ->where('issued_at', '>=', $start)->where('issued_at', '<=', $end)
+            ->selectRaw($agg)->first();
+
+        $net = (float) ($sales->net ?? 0) - (float) ($credits->net ?? 0);
+        $gross = (float) ($sales->gross ?? 0) - (float) ($credits->gross ?? 0);
+
+        return new IncomeFigure(
+            net: round($net, 2),
+            gross: round($gross, 2),
+            vat: round($gross - $net, 2),
+            // Both sales and credit notes are issued output documents in the window.
+            count: (int) ($sales->cnt ?? 0) + (int) ($credits->cnt ?? 0),
+        );
+    }
+
+    /**
      * Outstanding receivables across ALL customers:
      *   Σ(credit-term, non-cancelled invoice gross − credited_total)
      *   − Σ(all non-trashed payments)

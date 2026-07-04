@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\User;
 use App\Services\Dashboard\VatPeriodReport;
 use Carbon\Carbon;
 use Filament\Facades\Filament;
@@ -49,7 +50,7 @@ class VatPeriodReportTest extends TestCase
 
     private function invoice(string $issuedAt, float $net, float $gross, ?string $state = 'VALID'): Invoice
     {
-        return Invoice::create([
+        $inv = Invoice::create([
             'company_id' => $this->tenant->id,
             'invoice_type_id' => $this->type->id,
             'invcode' => 'TPY'.uniqid(),
@@ -58,8 +59,15 @@ class VatPeriodReportTest extends TestCase
             'net_total' => $net,
             'gross_total' => $gross,
             'local_status' => 'active',
-            'mydata_state' => $state,
         ]);
+
+        // mydata_state is a non-fillable mirror column (written only via
+        // forceFill by the submitter) — set it the same way here.
+        if ($state !== null) {
+            $inv->forceFill(['mydata_state' => $state])->save();
+        }
+
+        return $inv;
     }
 
     private function expense(string $issueDate, float $net, float $vat, float $gross, ?string $state = 'VALID', ?string $invoiceType = null): Expense
@@ -100,6 +108,57 @@ class VatPeriodReportTest extends TestCase
         // net = 240 − 124 = 116 → προς απόδοση.
         $this->assertSame(116.00, $summary->netVat());
         $this->assertTrue($summary->isPayable());
+    }
+
+    public function test_credit_note_reduces_output_vat(): void
+    {
+        // MON-2: a €1240-gross sale fully credited by a €1240 credit note in the
+        // same period → output VAT nets to €0. Before the fix income() only
+        // EXCLUDED the credit note, so it over-declared €240 output VAT.
+        $sale = $this->invoice('2026-02-10 10:00:00', 1000, 1240);
+        $credit = $this->invoice('2026-02-15 10:00:00', 1000, 1240);
+        $credit->forceFill(['credited_invoice_id' => $sale->id])->save();
+
+        $summary = (new VatPeriodReport($this->tenant))->forPeriod(
+            Carbon::parse('2026-02-01')->startOfDay(),
+            Carbon::parse('2026-02-28')->endOfDay(),
+        );
+
+        $this->assertSame(0.00, $summary->outputVat);
+        $this->assertSame(0.00, $summary->outputNet);
+        $this->assertSame(0.00, $summary->outputGross);
+        $this->assertSame(2, $summary->outputCount);   // both are output documents
+    }
+
+    public function test_partial_credit_note_partially_reduces_output_vat(): void
+    {
+        // €1240 sale − €620 partial credit → output VAT 240 − 120 = 120.
+        $sale = $this->invoice('2026-04-10 10:00:00', 1000, 1240);
+        $credit = $this->invoice('2026-04-15 10:00:00', 500, 620);
+        $credit->forceFill(['credited_invoice_id' => $sale->id])->save();
+
+        $summary = (new VatPeriodReport($this->tenant))->forPeriod(
+            Carbon::parse('2026-04-01')->startOfDay(),
+            Carbon::parse('2026-04-30')->endOfDay(),
+        );
+
+        $this->assertSame(120.00, $summary->outputVat);
+        $this->assertSame(620.00, $summary->outputGross);
+    }
+
+    public function test_cancelled_credit_note_does_not_reduce_output_vat(): void
+    {
+        // A CANCELLED credit note is not live → must NOT reduce output VAT.
+        $sale = $this->invoice('2026-05-10 10:00:00', 1000, 1240);
+        $credit = $this->invoice('2026-05-15 10:00:00', 1000, 1240, state: 'CANCELLED');
+        $credit->forceFill(['credited_invoice_id' => $sale->id])->save();
+
+        $summary = (new VatPeriodReport($this->tenant))->forPeriod(
+            Carbon::parse('2026-05-01')->startOfDay(),
+            Carbon::parse('2026-05-31')->endOfDay(),
+        );
+
+        $this->assertSame(240.00, $summary->outputVat);
     }
 
     public function test_credit_balance_when_input_exceeds_output(): void
@@ -164,7 +223,7 @@ class VatPeriodReportTest extends TestCase
     public function test_widget_hidden_for_non_mydata_tenant(): void
     {
         // Filament's TenantSet event requires an authenticated user.
-        $user = \App\Models\User::create([
+        $user = User::create([
             'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
         ]);
         $this->actingAs($user);

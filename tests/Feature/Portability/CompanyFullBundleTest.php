@@ -73,6 +73,11 @@ class CompanyFullBundleTest extends TestCase
             'issued_at' => now(), 'header_discount_percent' => 0,
         ]);
         $credit->forceFill(['credited_invoice_id' => $inv->id])->save();
+        // MON-1: a credit-note LINE self-referencing the original line it credits.
+        InvoiceLine::create([
+            'company_id' => $src->id, 'invoice_id' => $credit->id, 'original_line_id' => $line->id,
+            'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24, 'product_descr' => 'Hosting (credit)',
+        ]);
 
         $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
         $this->assertSame('company-full', $bundle['manifest']['kind']);
@@ -104,6 +109,12 @@ class CompanyFullBundleTest extends TestCase
 
         // The credit note's self-reference resolves to the NEW original invoice id.
         $this->assertSame($newInv->id, $newCredit->credited_invoice_id);
+
+        // MON-1: the credit LINE's original_line_id resolves to the NEW original
+        // line id (the self-FK patch pass) — not nulled, not the old id.
+        $newCreditLine = InvoiceLine::where('invoice_id', $newCredit->id)->firstOrFail();
+        $this->assertNotNull($newCreditLine->original_line_id);
+        $this->assertSame($newLine->id, $newCreditLine->original_line_id);
 
         // FK to a DEFERRED table is nulled (not a dangling/violating source id).
         $this->assertNull($newInv->service_contract_id);

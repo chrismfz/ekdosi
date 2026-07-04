@@ -9,6 +9,7 @@ use App\Models\ReturnInvoiceExtra;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
+use App\Services\RecomputeReturnedQuantities;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -59,14 +60,14 @@ class IssueCreditNote
             $allocation = app(InvoiceNumberer::class)->allocate($original->company, $creditType->code);
 
             $credit = Invoice::create([
-                'company_id'              => $original->company_id,
-                'invoice_type_id'         => $creditType->id,
-                'customer_id'             => $original->customer_id,
-                'payment_method_id'       => $original->payment_method_id,
-                'credited_invoice_id'     => $original->id,
-                'issued_at'               => now(),
-                'code'                    => $allocation->code,
-                'invcode'                 => $allocation->invcode,
+                'company_id' => $original->company_id,
+                'invoice_type_id' => $creditType->id,
+                'customer_id' => $original->customer_id,
+                'payment_method_id' => $original->payment_method_id,
+                'credited_invoice_id' => $original->id,
+                'issued_at' => now(),
+                'code' => $allocation->code,
+                'invcode' => $allocation->invcode,
                 'header_discount_percent' => $original->header_discount_percent,
                 // Mirror the original's additional-tax RATES/categories so the
                 // credit note reverses the withholding/fees too: RecomputeInvoiceTaxes
@@ -74,27 +75,27 @@ class IssueCreditNote
                 // net, so its payable_total matches what it reverses (no phantom
                 // negative owed on a withholding invoice). Product-linked fees come
                 // back via the copied product_id on the lines below.
-                'withhold_rate'        => $original->withhold_rate,
-                'withhold_category'    => $original->withhold_category,
-                'fees_rate'            => $original->fees_rate,
-                'fees_category'        => $original->fees_category,
-                'other_taxes_rate'     => $original->other_taxes_rate,
+                'withhold_rate' => $original->withhold_rate,
+                'withhold_category' => $original->withhold_category,
+                'fees_rate' => $original->fees_rate,
+                'fees_category' => $original->fees_category,
+                'other_taxes_rate' => $original->other_taxes_rate,
                 'other_taxes_category' => $original->other_taxes_category,
-                'stamp_duty_rate'      => $original->stamp_duty_rate,
-                'stamp_duty_category'  => $original->stamp_duty_category,
-                'deductions_rate'      => $original->deductions_rate,
-                'deductions_category'  => $original->deductions_category,
+                'stamp_duty_rate' => $original->stamp_duty_rate,
+                'stamp_duty_category' => $original->stamp_duty_category,
+                'deductions_rate' => $original->deductions_rate,
+                'deductions_category' => $original->deductions_category,
                 // Party snapshot copied from the original — the credit
                 // note is a legal document for the same counterparty.
                 'company_name' => $original->company_name,
-                'vat_no'       => $original->vat_no,
-                'vies_vat'     => $original->vies_vat,
-                'occupation'   => $original->occupation,
-                'address1'     => $original->address1,
-                'address2'     => $original->address2,
-                'city'         => $original->city,
-                'postcode'     => $original->postcode,
-                'country'      => $original->country,
+                'vat_no' => $original->vat_no,
+                'vies_vat' => $original->vies_vat,
+                'occupation' => $original->occupation,
+                'address1' => $original->address1,
+                'address2' => $original->address2,
+                'city' => $original->city,
+                'postcode' => $original->postcode,
+                'country' => $original->country,
             ]);
 
             $any = false;
@@ -121,17 +122,21 @@ class IssueCreditNote
                 }
 
                 // Positive credit line (the saving hook computes net/gross).
+                // original_line_id links it to the line it credits (MON-1) so
+                // qty_returned can be recomputed from live credit notes and a
+                // cancelled credit note frees the quantity again.
                 InvoiceLine::create([
-                    'company_id'     => $original->company_id,
-                    'invoice_id'     => $credit->id,
-                    'product_id'     => $line->product_id,
-                    'qty'            => $qty,
+                    'company_id' => $original->company_id,
+                    'invoice_id' => $credit->id,
+                    'original_line_id' => $line->id,
+                    'product_id' => $line->product_id,
+                    'qty' => $qty,
                     'price_per_item' => $line->price_per_item,
-                    'discount'       => $line->discount,
-                    'vat_percent'    => $line->vat_percent,
-                    'product_descr'  => $line->product_descr,
-                    'metric_unit'    => $line->metric_unit,
-                    'notes'          => $line->notes,
+                    'discount' => $line->discount,
+                    'vat_percent' => $line->vat_percent,
+                    'product_descr' => $line->product_descr,
+                    'metric_unit' => $line->metric_unit,
+                    'notes' => $line->notes,
                 ]);
 
                 // Track returned qty on the ORIGINAL line (legacy parity).
@@ -149,6 +154,10 @@ class IssueCreditNote
 
             app(RecomputeInvoiceTotals::class)($credit);
             app(InvoiceBalance::class)->recompute($original);
+            // Canonicalise qty_returned from live credit notes (MON-1). The
+            // mid-loop writes above kept the intra-transaction remaining-qty
+            // check correct; this normalises to Σ(live) so it stays reversible.
+            app(RecomputeReturnedQuantities::class)($original);
 
             return $credit->refresh();
         });

@@ -6,6 +6,7 @@ use App\Models\Invoice;
 use App\Models\ServiceContract;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
 use App\Services\InvoiceBalance;
+use App\Services\RecomputeReturnedQuantities;
 use App\Services\Stock\StockService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -212,6 +213,12 @@ class InvoiceObserver
             return;
         }
 
-        DB::transaction(fn () => $this->balance->recompute($original));
+        DB::transaction(function () use ($original) {
+            $this->balance->recompute($original);
+            // MON-1: keep qty_returned in sync with the LIVE credit notes too,
+            // so a cancelled/deleted credit note frees the returned quantity
+            // and the original can be re-credited (mirrors credited_total).
+            app(RecomputeReturnedQuantities::class)($original);
+        });
     }
 }
