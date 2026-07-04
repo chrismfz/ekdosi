@@ -307,9 +307,10 @@ Filament panel** (το operator panel μένει internal, κατά CLAUDE.md
 
 - **Per-tenant opt-in:** `companies.enable_domain_management` boolean (migration
   + `$fillable` + `'boolean'` cast) — super_admin `Toggle` στο `CompanyForm`
-  (όπως `ai_assistant_enabled`). **Two-key gating** (house style): per-tenant
-  flag **ΚΑΙ** `View:Domain` permission **ΚΑΙ** (για cron)
-  `EKDOSI_SCHEDULE_DOMAIN_SYNC`.
+  (όπως `ai_assistant_enabled`). **Two-key gating** (house style) για την
+  **ορατότητα**: per-tenant flag **ΚΑΙ** `View:Domain` permission· ο scheduler
+  προσθέτει **τρίτο, ανεξάρτητο** gate `EKDOSI_SCHEDULE_DOMAIN_SYNC` (μόνο για το
+  cron).
 - **Nav visibility:** κοινό `canAccess()`/`shouldRegisterNavigation()` (σε **ΕΝΑ**
   trait/base για να μη διαφύγει) = `Filament::getTenant() instanceof Company &&
   tenant->enable_domain_management && auth()->user()?->can('View:Domain')`.
@@ -347,6 +348,46 @@ Filament panel** (το operator panel μένει internal, κατά CLAUDE.md
   (mirror του `MyDataSubmitterSafetyTest`).
 - **Two-clock reconciliation** (registrar expiry vs billing due) θέλει worklist
   σελίδα σαν τον myDATA reconciler — δηλωμένο εδώ ώστε να μην παραλειφθεί.
+
+---
+
+## 10. Ανοιχτά σχεδιαστικά ζητήματα (agenda για το αναλυτικό `docs/domains`)
+
+Adversarial review του σχεδίου: **όλες οι αναφορές κώδικα επαληθεύτηκαν (0 λάθος)**,
+αλλά ανέδειξε **άλυτα** σημεία. Λύνονται στο αναλυτικό `docs/domains` με Q&A **πριν** το
+A0 — όχι εδώ:
+
+**Scope decisions (θέλουν απόφαση):**
+- **DNS zone/record hosting** (A/AAAA/MX/TXT/CNAME) — το σχέδιο μοντελοποιεί μόνο NS
+  *delegation* (`domain_nameservers`), όχι διαχείριση ζώνης· το portal (§6) το υπονοεί.
+  Εντός scope (νέος πυλώνας/πίνακες) ή ρητό **non-goal v1**;
+- **Multi-currency / FX** — `domain_tld_prices` είναι EUR-only, αλλά cost (registrar) vs
+  τιμή πώλησης vs νόμισμα invoice/`ServiceContract` μπορεί να διαφέρουν (υπάρχουν ήδη
+  ee-peppol tenants).
+- **ICANN registrant-verification / change-of-registrant** για gTLDs — υπάρχει
+  `domain_contacts`, όχι το compliance flow. Εντός/εκτός v1;
+
+**Correctness/robustness (να λυθούν ΠΡΙΝ το A3 — writes):**
+- **Idempotency & partial-failure στα registrar writes** (register/renew/transfer =
+  εξωτερικά money+state). Idempotency key + adopt-on-retry (ίδιο μοτίβο με το
+  `InvoSignTransport::status()`, που υιοθετεί MARK αντί να ξαναφάιλάρει) για το «ο registrar
+  χρέωσε, timeout πριν το καταγράψει το ekdosi» → διπλοχρέωση/διπλο-renew. **Ο A5 reconciler
+  + οι idempotency guardrails να έρθουν ΜΑΖΙ με το A3**, όχι μετά — το detection δεν πρέπει
+  να αργεί σε σχέση με το risk window.
+- **Async transfer lifecycle** — submit → FOA/ack → poll → success/fail/timeout, auth-code,
+  inbound vs outbound· σήμερα μόνο ένα `pending_transfer` status → θέλει state machine.
+- **Push vs pull sync** — μόνο nightly `domains:sync` → ekdosi ~24h stale σε expiry/
+  transfer/suspension· να εξεταστούν registrar webhooks/notifications όπου υπάρχουν.
+- **Grace→redemption χρέωση vs operator-gated discipline** — μπαίνει αυτόματα το restore
+  invoice ή περιμένει operator; (κράτα τη «ποτέ auto-file» πειθαρχία).
+
+**Consistency nits στο data model (finalize στο `docs/domains`):**
+- Authoritative registrar ανά domain = `domains.registrar_connection_id`· το
+  `domain_tlds.registrar_connection_id` = default/routing hint (να δηλωθεί ρητά).
+- FK naming: `registrar_connection_id` → κατά convention `domain_registrar_connection_id`
+  (δείχνει στο `domain_registrar_connections`).
+- Το TLD αποθηκεύεται 3 φορές (`domain_tld_id` FK · `tld` denormalized · μέσα στο `fqdn`) —
+  όρισε το authoritative πεδίο + κανόνα παραγωγής του `fqdn`.
 
 ---
 
