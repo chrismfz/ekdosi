@@ -23,6 +23,9 @@ surfaced in the open-items sections further down.
   (4 πυλώνες: **Domains → Payment gateways → Provisioning → Portal**, strangler-fig).
   Domains **OPEN** (Φάσεις A0–A5, βλ. epic «Αντικατάσταση WHMCS» παρακάτω)· Πυλ. B/C έχουν
   ήδη blueprint/seam (`payment-connectors.md` · `ProvisioningModule`), Πυλ. D = νέο.
+- **`domains/README.md`** — Πυλώνας A **αναλυτικό design** (pre-build): data model + `DomainRegistrar`
+  contract + Openprovider endpoint mapping + .gr/grEPP rules + rich per-domain View + phase gates
+  A0–A5. **DESIGN, no code yet.**
 - **`paroxos/regulatory-blueprint.md`** + **`paroxos/implementation-plan.md`** — GR
   ΥΠΑΗΕΣ provider + EU PEPPOL. PEPPOL Phase 1 (UBL builder, `peppol:test-submit`) **DONE**;
   provider P0–P5 built/gated (mode=off); **PEPPOL Phase 2 + live provider = OPEN**.
@@ -187,9 +190,11 @@ surfaced in the open-items sections further down.
 Provisioning → Portal**. Το «δύσκολο» (invoices/myDATA/recurring/υπόλοιπα) ήδη γίνεται·
 κάθε πυλώνας = 6η/7η υλοποίηση του υπάρχοντος contract+registry pattern. Πλήρες σχέδιο +
 data model + phase gates: **`PLAN.md`**.
-- **Πυλώνας A — Domains** _(OPEN, πρώτο)_ — dedicated `Domain` model ↔ `ServiceContract`
-  billing clock· registrar modules à la `EInvoiceProviderTransport`, ξεκινώντας
-  **Openprovider** → **GR-Forth**. Φάσεις (stop σε κάθε gate):
+- **Πυλώνας A — Domains** _(OPEN, πρώτο)_ — **αναλυτικό design: `docs/domains/README.md`** (data
+  model, `DomainRegistrar` contract + OP endpoint mapping, .gr/grEPP rules, rich per-domain View,
+  «Μεταφορά ιδιοκτησίας», API history). Dedicated `Domain` ↔ `ServiceContract` billing clock·
+  registrar modules à la `EInvoiceProviderTransport`: **Openprovider** (gTLDs) + **grEPP** (.gr,
+  direct EPP), routing ανά TLD. Φάσεις (stop σε κάθε gate):
   - **A0** θεμέλιο — `companies.enable_domain_management` flag + nav-gating trait +
     `DomainRegistrar` contract/registry/creds/Null + `config('ekdosi.domains.registrars')` +
     `domain_registrar_connections` (super_admin creds).
@@ -198,7 +203,7 @@ data model + phase gates: **`PLAN.md`**.
   - **A2** Openprovider read-only — availability/WHOIS/`domains:sync` (expiry pull).
   - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
     billing (reuse `StageServiceRenewal`) + grace/redemption.
-  - **A4** 2ος registrar **GR-Forth** (.gr/.ελ, 2ετία min) — αποδεικνύει το abstraction.
+  - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).
 - **Πυλώνας B — Payment gateways** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά)· πριν το portal.
