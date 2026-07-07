@@ -93,7 +93,9 @@ class CreateAdmin extends Command
         });
 
         if ($existing !== null && ! $reset) {
-            $this->warn("Ο χρήστης {$email} υπήρχε ήδη — ο κωδικός ΔΕΝ άλλαξε (πρόσθεσε --reset για επαναφορά).");
+            // Be loud: this PROMOTES an existing (possibly non-admin) user to a
+            // GLOBAL super_admin — a consequential grant, not just a no-op.
+            $this->warn("Ο χρήστης {$email} υπήρχε ήδη → προάγεται σε GLOBAL super_admin (ο κωδικός ΔΕΝ άλλαξε· --reset για επαναφορά κωδικού).");
         } elseif ($reset && $existing !== null) {
             $this->info("Ο κωδικός του {$email} επαναφέρθηκε.");
         }

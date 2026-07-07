@@ -92,6 +92,15 @@ class TestInvoiceNumberingConcurrent extends Command
             $resultsDir = sys_get_temp_dir().'/numberer-'.uniqid();
             mkdir($resultsDir);
 
+            // Start barrier (SET-3 review): without it, the children can serialise
+            // (each commits before the next reads) and a DROPPED lockForUpdate()
+            // would still produce a clean 1..N — a false-green. Each child sets up
+            // its own connection, signals "ready", then SPINS until the parent
+            // releases the GO flag, so all workers hit the locked SELECT within
+            // microseconds of each other → maximal contention → a missing lock
+            // deterministically collides.
+            $goFile = "$resultsDir/GO";
+
             DB::disconnect();
 
             $pids = [];
@@ -105,9 +114,15 @@ class TestInvoiceNumberingConcurrent extends Command
                 }
 
                 if ($pid === 0) {
-                    // Child — re-establish DB, allocate once, write result.
+                    // Child — re-establish DB, wait at the barrier, allocate once.
                     try {
                         DB::purge();
+                        DB::connection()->getPdo();          // open the connection NOW (before the barrier)
+                        touch("$resultsDir/ready-$i");        // signal ready
+                        $spin = 0;
+                        while (! file_exists($goFile) && $spin++ < 300_000) {
+                            usleep(100);                      // ≤30s safety, then proceed regardless
+                        }
                         $allocation = DB::transaction(fn () => app(InvoiceNumberer::class)
                             ->allocate($company, 'APY'));
                         file_put_contents("$resultsDir/$i.ok", (string) $allocation->code);
@@ -119,6 +134,14 @@ class TestInvoiceNumberingConcurrent extends Command
 
                 $pids[] = $pid;
             }
+
+            // Release all children at once, once every worker has a live connection
+            // parked at the barrier (or a 30s safety deadline elapses).
+            $deadline = microtime(true) + 30;
+            while (count(glob("$resultsDir/ready-*")) < $workers && microtime(true) < $deadline) {
+                usleep(500);
+            }
+            touch($goFile);
 
             // Track which workers exited cleanly. A SIGSEGV / OOM / SIGKILL
             // before the child writes its .ok/.err file would otherwise be

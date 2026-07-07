@@ -82,15 +82,9 @@ jobs:
       run: php artisan key:generate
     - name: Directory Permissions
       run: chmod -R 777 storage bootstrap/cache
-    - name: Wait for MariaDB
-      run: |
-        for i in $(seq 1 30); do
-          if mysqladmin ping -h127.0.0.1 -P3306 -uroot -proot --silent; then exit 0; fi
-          sleep 2
-        done
-        echo "MariaDB did not become ready in time" >&2
-        exit 1
+    # The MariaDB service is health-gated (healthcheck.sh) before any step runs,
+    # so no manual wait loop is needed (one would only risk a false-RED).
     - name: Migrate (MariaDB)
       run: php artisan migrate --force
     - name: Concurrent invoice-numbering hammer (real row locks)
-      run: php artisan test:invoice-numbering-concurrent --workers=16
+      run: php artisan test:invoice-numbering-concurrent --workers=24

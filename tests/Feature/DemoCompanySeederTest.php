@@ -15,6 +15,8 @@ class DemoCompanySeederTest extends TestCase
 
     public function test_it_seeds_a_self_contained_demo_company(): void
     {
+        // SET-1: the demo tenant is opt-in (prod-safe). Enable it for this test.
+        config(['ekdosi.seed_demo' => true]);
         $this->seed(DemoCompanySeeder::class);
 
         $demo = Company::where('slug', 'demo')->firstOrFail();
@@ -34,5 +36,15 @@ class DemoCompanySeederTest extends TestCase
         // Idempotent.
         $this->seed(DemoCompanySeeder::class);
         $this->assertSame(1, Company::where('slug', 'demo')->count());
+    }
+
+    public function test_it_is_a_no_op_without_the_opt_in(): void
+    {
+        // SET-1: a direct `db:seed --class=DemoCompanySeeder` must ALSO respect the
+        // opt-in — no demo tenant (and no super_admin escalation) on a real host.
+        config(['ekdosi.seed_demo' => false]);
+        $this->seed(DemoCompanySeeder::class);
+
+        $this->assertSame(0, Company::count());
     }
 }
