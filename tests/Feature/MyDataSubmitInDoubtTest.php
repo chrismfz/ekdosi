@@ -222,6 +222,64 @@ class MyDataSubmitInDoubtTest extends TestCase
         );
     }
 
+    public function test_empty_http200_body_flags_the_invoice_in_doubt(): void
+    {
+        // MYD-2 review (HIGH): AADE returning HTTP 200 with an EMPTY body (proxy
+        // buffering / truncation) makes firebed throw InvalidResponseException,
+        // which extends MyDataException — it must NOT slip through the non-flagging
+        // protocol arm. The POST may have created a MARK we never saw, so it's
+        // in-doubt: the next submit reconciles instead of blindly re-POSTing.
+        $this->assertNull($this->invoice->mydata_pending_since);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], '')]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+            $this->fail('Expected the empty-body submission to throw.');
+        } catch (\RuntimeException $e) {
+            // expected — re-thrown after flagging in-doubt
+        }
+
+        $this->assertNotNull(
+            $this->invoice->fresh()->mydata_pending_since,
+            'an empty HTTP-200 body (ambiguous — a MARK may exist) must flag in-doubt'
+        );
+    }
+
+    public function test_a_genuine_aade_rejection_does_no_t_flag_in_doubt(): void
+    {
+        // MYD-2 review (MEDIUM) counter-case: a well-formed ValidationError (HTTP
+        // 200, no MARK) is a DEFINITE rejection — persistResponse throws
+        // MyDataRejected, which must be re-thrown WITHOUT flagging in-doubt (else a
+        // fixable rejection would be needlessly gated behind the grace window).
+        $rejectionXml = <<<'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <ResponseDoc xmlns="http://www.aade.gr/myDATA/response/v1.0">
+          <response>
+            <index>1</index>
+            <statusCode>ValidationError</statusCode>
+            <errors>
+              <error><message>Test rejection</message><code>102</code></error>
+            </errors>
+          </response>
+        </ResponseDoc>
+        XML;
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $rejectionXml)]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+            $this->fail('Expected the rejection to throw.');
+        } catch (\Throwable $e) {
+            // expected — a rejection propagates
+        }
+
+        $this->assertNull(
+            $this->invoice->fresh()->mydata_pending_since,
+            'a genuine no-MARK rejection must NOT be flagged in-doubt'
+        );
+    }
+
     public function test_in_doubt_within_grace_refuses_to_resubmit_when_aade_empty(): void
     {
         // Freshly in-doubt (within the grace window). AADE's feed shows nothing —

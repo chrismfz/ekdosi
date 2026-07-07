@@ -13,10 +13,13 @@ use App\Services\MyData\AadeDocSummary;
 use App\Services\MyData\SalesReconciler;
 use App\Services\Whmcs\WhmcsWritebackService;
 use Carbon\Carbon;
+use Firebed\AadeMyData\Exceptions\InvalidResponseException;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
 use Firebed\AadeMyData\Exceptions\MyDataException;
 use Firebed\AadeMyData\Exceptions\MyDataTimeoutException;
+use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
+use Firebed\AadeMyData\Exceptions\TransmissionFailedException;
 use Firebed\AadeMyData\Http\CancelInvoice;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
@@ -231,13 +234,33 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $this->markInDoubt($invoice);
             $this->logFailure($invoice, 'transport', $e);
             throw new RuntimeException('myDATA endpoint unreachable. Try again later.', 0, $e);
+        } catch (RateLimitExceededException $e) {
+            // 429: AADE throttled the request BEFORE processing → no MARK was
+            // created, so a later retry is safe and must NOT be gated. (Caught
+            // before the InvalidResponse/TransmissionFailed arm below, which it
+            // subclasses.)
+            $this->logFailure($invoice, 'rate-limit', $e);
+            throw new RuntimeException('myDATA rate limit exceeded. Try again shortly.', 0, $e);
+        } catch (InvalidResponseException|TransmissionFailedException $e) {
+            // MYD-2 review (HIGH): an EMPTY/invalid HTTP-200 body
+            // (InvalidResponseException) or a non-2xx transmission failure (5xx,
+            // TransmissionFailedException) is AMBIGUOUS — the POST may have reached
+            // AADE and created a MARK whose response we never saw. These subclass
+            // MyDataException, so without this arm they slipped through the generic
+            // MyDataException arm UNFLAGGED → blind retry → double-declared income
+            // (AADE does NOT dedup the ERP channel). Flag in-doubt like transport.
+            $this->markInDoubt($invoice);
+            $this->logFailure($invoice, 'ambiguous-response', $e);
+            throw new RuntimeException('myDATA returned an unusable response. Try again later.', 0, $e);
         } catch (MyDataException $e) {
+            // Any OTHER firebed protocol error (e.g. UnsupportedChannelException,
+            // thrown before the POST) means no MARK was created → not in-doubt.
             $this->logFailure($invoice, 'protocol', $e);
             throw new RuntimeException('myDATA submission failed: '.$e->getMessage(), 0, $e);
         } catch (Throwable $e) {
             // MYD-2 (σκέλος γ): any UNEXPECTED error during the POST is ambiguous
             // too — e.g. a 2xx that DID create a MARK at AADE but whose response
-            // firebed failed to parse (not a recognised timeout/connection). Treat
+            // firebed failed to parse (a PHP \Error, not a firebed exception). Treat
             // it like the transport bucket: flag in-doubt so the next submit()
             // reconciles (adopt-or-file) instead of blindly re-POSTing. Worst case
             // for a genuinely pre-send bug is one grace-window delay — cheap
@@ -249,7 +272,26 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         $responseXml = $action->getResponseXML() ?? '';
 
-        $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+        // MYD-2 review (MEDIUM): the POST SUCCEEDED here — AADE has (or rejected)
+        // the doc. persistResponse throws MyDataRejected for a no-MARK REJECTION
+        // (re-throw as-is; nothing was filed). But if it throws anything ELSE
+        // (e.g. a DB blip inside the mark+mirror transaction) AFTER AADE already
+        // created the MARK, the invoice would be left state=null / pending=null and
+        // the next submit would blindly re-POST → double income. Flag in-doubt in
+        // that case so the retry ADOPTS the existing MARK instead.
+        try {
+            $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+        } catch (MyDataRejected $e) {
+            throw $e; // genuine AADE rejection — no MARK created, not in-doubt
+        } catch (Throwable $e) {
+            $this->markInDoubt($invoice);
+            $this->logFailure($invoice, 'persist', $e);
+            throw new RuntimeException(
+                'myDATA filed at AADE but recording it locally failed — flagged for reconcile on the next attempt.',
+                0,
+                $e,
+            );
+        }
 
         // WHMCS write-back on the draft-first LIFECYCLE path. A draft created
         // from the WHMCS inbox (WhmcsInvoiceFiler::createDraft) carries
