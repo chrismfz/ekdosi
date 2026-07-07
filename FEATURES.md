@@ -273,7 +273,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   mail, WHMCS+myDATA ανά tenant, δίσκος, **+ ιστορικό εκτελέσεων** `scheduled_task_runs`
   + pending/failed jobs + κουμπί **«Επανάληψη αποτυχημένων»**) — στο νέο nav group
   **«Σύστημα»**. + **«Εργαλεία»** (artisan commands ως κουμπιά) +
-  **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run.
+  **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run +
+  **`ekdosi:create-admin`** (create/reset system super_admin σε όλες τις εταιρίες).
+  Ο demo seed (`db:seed`) είναι **opt-in** (`EKDOSI_SEED_DEMO`, default OFF) — κανένας
+  γνωστός-password super_admin σε πραγματικό host.
 - **`ekdosi:go-live-check --tenant=SLUG [--json]`** — per-tenant cutover-readiness gate
   (read-only): provider · τύποι+E3 · default ΦΠΑ · ΦΠΑ→ΑΑΔΕ · **production creds (hard FAIL)** ·
   mode · αρίθμηση · **golden totals-drift** · backups · queue/infra (από `OperatorHealthReport`).

@@ -17,7 +17,21 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Added
+- **AUDIT SET-1 companion — `php artisan ekdosi:create-admin`.** Δημιουργεί (ή κάνει `--reset`
+  κωδικού) έναν **system super_admin** χωρίς τον πλήρη installer: prompt/flags για name/email/password,
+  τον κάνει μέλος όλων των εταιριών και του αναθέτει super_admin παντού (reuse `shield:sync-super-admin
+  --user`). Ασφαλές path όταν δεν υπάρχει admin (χρειάζεται ≥1 εταιρία — αλλιώς `ekdosi:install`).
+- **AUDIT SET-3 — MariaDB CI job για την εγγύηση αρίθμησης.** Νέο `numbering-concurrency` job (MariaDB
+  service container) τρέχει `test:invoice-numbering-concurrent` με **πραγματικά row locks + forked
+  processes** — ένα dropped `lockForUpdate()`/transaction κόβει πλέον το CI. Το phpunit suite μένει sqlite.
+
 ### Security
+- **AUDIT SET-1 — ο demo seed γίνεται opt-in (τέλος ο γνωστός-password super_admin σε λάθος host).**
+  Ο `DatabaseSeeder` (DEMO tenant + `admin@ekdosi.local`) είναι **no-op** εκτός αν `EKDOSI_SEED_DEMO=true`
+  — prod-safe **ανεξαρτήτως `APP_ENV`** (ο prod είχε κάποτε λάθος `APP_ENV=local`, οπότε ένα σκέτο
+  `isProduction()` guard θα αστοχούσε)· + δεύτερο belt `isProduction()` bail· demo password
+  env-overridable. Πραγματικά installs: `ekdosi:install` / `ekdosi:create-admin`.
 - **AUDIT MYD-2 (σκέλος γ) — «in-doubt» gate κατά της διπλο-υποβολής μετά από transport timeout.**
   Sandbox-αποδεδειγμένο (2026-07-07) ότι η ΑΑΔΕ **ΔΕΝ** κάνει server-side dedup στο ERP κανάλι:
   blind retry του ίδιου `(series, ΑΑ)` παρήγαγε **δύο διαφορετικά MARK** με ίδιο `invoiceUid` → διπλά

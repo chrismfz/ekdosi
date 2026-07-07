@@ -42,6 +42,21 @@ class DemoCompanySeeder extends Seeder
 {
     public function run(): void
     {
+        // SET-1: same opt-in gate as DatabaseSeeder, so a direct
+        // `db:seed --class=DemoCompanySeeder` can't bypass it — building the DEMO
+        // tenant on a real host (or escalating the first user to super_admin via
+        // attachAdmin) must ALSO require the explicit flag + a non-prod host.
+        if (! config('ekdosi.seed_demo')) {
+            $this->command?->warn('DemoCompanySeeder: skipped — set EKDOSI_SEED_DEMO=true to enable the demo tenant.');
+
+            return;
+        }
+        if (app()->isProduction()) {
+            $this->command?->warn('DemoCompanySeeder: refusing to seed the DEMO tenant on a production host.');
+
+            return;
+        }
+
         if (Company::query()->where('slug', 'demo')->exists()) {
             $this->command?->warn('DEMO company already exists — skipping (delete it to reseed).');
 
