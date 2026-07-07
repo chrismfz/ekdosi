@@ -17,6 +17,19 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Security
+- **AUDIT MYD-2 (σκέλος γ) — «in-doubt» gate κατά της διπλο-υποβολής μετά από transport timeout.**
+  Sandbox-αποδεδειγμένο (2026-07-07) ότι η ΑΑΔΕ **ΔΕΝ** κάνει server-side dedup στο ERP κανάλι:
+  blind retry του ίδιου `(series, ΑΑ)` παρήγαγε **δύο διαφορετικά MARK** με ίδιο `invoiceUid` → διπλά
+  δηλωμένο έσοδο. Fix: νέα στήλη `invoices.mydata_pending_since`· σε transport failure το παραστατικό
+  σημαίνεται «in-doubt», και στο επόμενο `submit()` γίνεται ΠΡΩΤΑ reconcile `(series, ΑΑ)` μέσω
+  `RequestTransmittedDocs` → live MARK ⇒ **υιοθέτηση** (self-heal, καμία 2η υποβολή)· τίποτα ⇒ εντός
+  grace window (`einvoice.in_doubt_grace_minutes`, default 10) **άρνηση** (το feed της ΑΑΔΕ καθυστερεί
+  ~λεπτά — αλλιώς η ίδια καθυστέρηση ξανα-διπλο-υπέβαλλε), μετά το grace υποβολή κανονικά. Το ημερήσιο
+  reconcile παραμένει backstop. Επιβεβαιώθηκε επίσης ότι το κανάλι **παρόχου** (InvoSign) **κάνει dedup**
+  + έχει real-time `invoice_status.php`, οπότε το `GrProviderSubmitter` είναι ήδη ασφαλές (καμία αλλαγή).
+  Πλήρης αναφορά: `docs/mydata-sandbox-myd2-retry-2026-07-07.md`.
+
 ### Added
 - **AUDIT MYD-5 — per-line myDATA E3 ανά κατηγορία προϊόντος (μικτά τιμολόγια).** Νέα πεδία
   `product_categories.mydata_income_class[_category]`: μια γραμμή δηλώνει το bucket εσόδων της

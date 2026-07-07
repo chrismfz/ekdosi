@@ -64,6 +64,11 @@
   bucket (ανά κατηγορία προϊόντος· ο E3 τύπος ακολουθεί το κανάλι) — summary ανά (τύπο,κατηγορία).
 - **Pre-submit guards** — διασταύρωση χώρας↔τύπου αντισυμβαλλόμενου (καθαρό μήνυμα αντί για ΑΑΔΕ
   [242]-[244])· hard-fail σε ξένη διεύθυνση που λείπει· cancel [251] «already cancelled» → self-heal.
+- **Anti-διπλο-υποβολή** — per-invoice cache lock (ταυτόχρονη υποβολή) **+ «in-doubt» gate σε
+  transport timeout**: το ERP κανάλι της ΑΑΔΕ ΔΕΝ κάνει dedup (sandbox-proven), οπότε πριν από
+  κάθε retry γίνεται reconcile `(series, ΑΑ)` — live MARK ⇒ υιοθέτηση χωρίς 2η υποβολή· τίποτα ⇒
+  άρνηση εντός grace window (feed lag) και μετά κανονική υποβολή. (Το κανάλι παρόχου κάνει dedup +
+  real-time status → ήδη ασφαλές.)
 - **`mydata_marks` = source of truth** (πλήρες request/response XML, νομικό audit).
 - **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3 /
   Έλεγχος ρυθμίσεων**· ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:

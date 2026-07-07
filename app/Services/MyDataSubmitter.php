@@ -9,7 +9,10 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\EInvoice\AadeInvoiceDocument;
+use App\Services\MyData\AadeDocSummary;
+use App\Services\MyData\SalesReconciler;
 use App\Services\Whmcs\WhmcsWritebackService;
+use Carbon\Carbon;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
 use Firebed\AadeMyData\Exceptions\MyDataException;
@@ -105,6 +108,44 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // second filing.
             $invoice->refresh();
 
+            // MYD-2 (AUDIT, σκέλος γ): if a PRIOR submit's TRANSPORT failed
+            // (timeout / connection drop) this invoice is "in-doubt" — the POST
+            // may or may not have landed at AADE, and AADE does NOT dedup a
+            // resubmission of the same (series, ΑΑ): sandbox-proven 2026-07-07
+            // that the same invoiceUid yielded TWO distinct MARKs, i.e. a blind
+            // retry double-declares income. So before resubmitting, ASK AADE
+            // (RequestTransmittedDocs) whether the earlier POST landed: if a live
+            // MARK already exists for this (series, ΑΑ), ADOPT it (MYD-7-style
+            // self-heal) instead of filing a second one. Only when AADE has
+            // nothing do we fall through to a normal submit.
+            if ($invoice->mydata_pending_since !== null && $invoice->mydata_state === null) {
+                $adopted = $this->adoptExistingMarkIfPresent($invoice);
+                if ($adopted !== null) {
+                    return $adopted;
+                }
+
+                // Reconcile found NOTHING for this (series, ΑΑ). That is ambiguous:
+                // either the earlier POST never landed, OR it landed and AADE's
+                // RequestTransmittedDocs feed just hasn't surfaced it yet — the feed
+                // lags a freshly-filed doc by a minute or two (sandbox-observed
+                // 2026-07-07: an immediate re-check missed the just-filed MARK and a
+                // naive resubmit produced a SECOND MARK). So within the grace window
+                // we REFUSE to resubmit; only once it has elapsed with AADE still
+                // empty do we accept the POST was lost and file normally.
+                $graceMinutes = (int) config('ekdosi.einvoice.in_doubt_grace_minutes', 10);
+                if ($invoice->mydata_pending_since->gt(now()->subMinutes($graceMinutes))) {
+                    throw new RuntimeException(
+                        "Invoice {$invoice->invcode}: μια προηγούμενη υποβολή στο myDATA διακόπηκε ".
+                        "(timeout) και η ΑΑΔΕ δεν δείχνει ακόμη ΜΑΡΚ γι' αυτό το παραστατικό. ".
+                        'Επειδή το feed της ΑΑΔΕ καθυστερεί λίγα λεπτά, ΔΕΝ ξαναϋποβάλλουμε τυφλά '.
+                        "(κίνδυνος διπλο-δήλωσης). Περίμενε ~{$graceMinutes} λεπτά και ξαναδοκίμασε — ".
+                        'αν εν τω μεταξύ βρεθεί ΜΑΡΚ, θα υιοθετηθεί αυτόματα.'
+                    );
+                }
+                // Grace elapsed and AADE is still empty → the earlier POST never
+                // landed. Safe to file normally (fall through).
+            }
+
             return $this->performSubmit($invoice);
         } finally {
             $lock->release();
@@ -182,6 +223,12 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $this->logFailure($invoice, 'auth', $e);
             throw new RuntimeException('myDATA rejected credentials. Check Company → myDATA submission tab.', 0, $e);
         } catch (MyDataTimeoutException|MyDataConnectionException $e) {
+            // MYD-2 (σκέλος γ): a transport failure leaves the filing AMBIGUOUS —
+            // the request may have reached AADE and produced a MARK whose response
+            // we never saw. Flag the invoice "in-doubt" so the next submit()
+            // reconciles (adopt-or-file) instead of blindly re-POSTing (which
+            // AADE does NOT dedup → double income). mydata_state stays null.
+            $this->markInDoubt($invoice);
             $this->logFailure($invoice, 'transport', $e);
             throw new RuntimeException('myDATA endpoint unreachable. Try again later.', 0, $e);
         } catch (MyDataException $e) {
@@ -484,6 +531,164 @@ class MyDataSubmitter implements EInvoiceSubmitter
         MyDataRequest::setHandler($this->mockHandler);
     }
 
+    /**
+     * MYD-2 (σκέλος γ): flag an invoice "in-doubt" after a transport failure.
+     * Best-effort — an audit-write hiccup must not mask the transport error the
+     * caller is about to re-throw. mydata_state is deliberately left untouched
+     * (stays null) so every existing "is it filed?" predicate is unchanged; only
+     * submit()'s own pre-check reads mydata_pending_since.
+     */
+    private function markInDoubt(Invoice $invoice): void
+    {
+        try {
+            $invoice->forceFill(['mydata_pending_since' => now()])->save();
+        } catch (Throwable $e) {
+            Log::warning('myDATA: failed to set in-doubt flag after transport failure', [
+                'invoice_id' => $invoice->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * MYD-2 (σκέλος γ): before resubmitting an in-doubt invoice, ask AADE whether
+     * the earlier (ambiguous) POST actually landed. Pulls RequestTransmittedDocs
+     * for a window bracketing the invoice's issue date AND now (the transmission
+     * moment), then looks for a LIVE (non-cancelled) MARK on the same (series, ΑΑ).
+     * Returns the adopted MyDataMark if found (no second POST), or null when AADE
+     * has nothing — in which case the caller safely proceeds to a normal submit.
+     *
+     * Network failure here is NOT fatal: if we can't reach AADE to check, we must
+     * NOT resubmit blindly (that's the whole risk), so we re-throw and the invoice
+     * stays in-doubt for the next attempt.
+     */
+    private function adoptExistingMarkIfPresent(Invoice $invoice): ?MyDataMark
+    {
+        $invoice->loadMissing('invoiceType');
+        $series = $invoice->invoiceType?->code;
+        $aa = (string) $invoice->code;
+        if (blank($series) || (int) $invoice->code < 1) {
+            // Can't reconcile without a concrete (series, ΑΑ) — let the normal
+            // submit path fail fast with its own clear message.
+            return null;
+        }
+
+        $reconciler = new SalesReconciler($this->tenant, $this->mockHandler);
+
+        // Window: cover BOTH the issue date and the transmission moment (now),
+        // since RequestTransmittedDocs may filter by either, and a backdated
+        // invoice can be transmitted days after its issueDate. ±1 day padding
+        // absorbs timezone edges.
+        $issued = Carbon::parse($invoice->issued_at);
+        $from = $issued->copy()->min(now())->subDay();
+        $to = $issued->copy()->max(now())->addDay();
+
+        try {
+            // SalesReconciler::fetchAadeDocs() does NOT prime firebed's static
+            // credentials itself (only its reconcile()/rawTransmittedDocs()
+            // entrypoints do). Prime them here with the SAME logic the submit
+            // path uses so the read call authenticates + honours the test mock.
+            $this->initFirebed();
+            $docs = $reconciler->fetchAadeDocs($from->format('d/m/Y'), $to->format('d/m/Y'));
+        } catch (Throwable $e) {
+            Log::warning('myDATA in-doubt: reconcile lookup failed — NOT resubmitting blindly', [
+                'company_id' => $this->tenant->getKey(),
+                'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
+                'error' => $e->getMessage(),
+            ]);
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} is in-doubt (a prior submission timed out) and myDATA ".
+                'is unreachable to verify whether it was already filed. Refusing to resubmit blindly — '.
+                'try again once AADE is reachable.',
+                0,
+                $e,
+            );
+        }
+
+        $matches = array_values(array_filter(
+            $docs,
+            fn (AadeDocSummary $d): bool => (string) $d->series === (string) $series
+                && (string) $d->aa === $aa
+                && ! $d->cancelled
+        ));
+
+        if ($matches === []) {
+            return null; // AADE has no live MARK for this (series, ΑΑ) → safe to file.
+        }
+
+        if (count($matches) > 1) {
+            // The very failure mode this gate prevents — an earlier blind retry
+            // already double-filed. Adopt the first; flag the rest for manual
+            // cancellation via the reconcile worklist.
+            Log::warning('myDATA in-doubt: MULTIPLE live MARKs at AADE for one (series, ΑΑ) — adopting the first', [
+                'company_id' => $this->tenant->getKey(),
+                'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
+                'series' => $series,
+                'aa' => $aa,
+                'marks' => array_map(fn (AadeDocSummary $d) => $d->mark, $matches),
+            ]);
+        }
+
+        $adopted = $matches[0];
+        Log::info('myDATA in-doubt: adopting an existing AADE MARK instead of resubmitting', [
+            'company_id' => $this->tenant->getKey(),
+            'invoice_id' => $invoice->id,
+            'invcode' => $invoice->invcode,
+            'mark' => $adopted->mark,
+            'uid' => $adopted->uid,
+        ]);
+
+        return $this->adoptMark($invoice, $adopted->mark, $adopted->uid);
+    }
+
+    /**
+     * MYD-2 (σκέλος γ): record an AADE MARK that was already filed (discovered via
+     * reconcile) onto a previously in-doubt invoice, WITHOUT a new SendInvoices —
+     * the INSERT-row + mirror-column write half of a normal filing. Idempotent on
+     * the (invoice, mark) INSERT row (mirrors persistResponse). Best-effort WHMCS
+     * write-back afterwards, same as the normal filing path.
+     */
+    private function adoptMark(Invoice $invoice, string $mark, ?string $uid): MyDataMark
+    {
+        $existing = MyDataMark::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('mark', $mark)
+            ->where('mydata_action', 'INSERT')
+            ->first();
+
+        $audit = DB::transaction(function () use ($invoice, $mark, $uid, $existing) {
+            $row = $existing ?? MyDataMark::create([
+                'company_id' => $invoice->company_id,
+                'invoice_id' => $invoice->id,
+                'mark' => $mark,
+                'mydata_action' => 'INSERT',
+                'request' => null,
+                'response' => 'Adopted via RequestTransmittedDocs (MYD-2 in-doubt self-heal). AADE uid='.($uid ?? '?'),
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]);
+
+            $invoice->forceFill([
+                'mydata_sent' => true,
+                'mydata_state' => 'VALID',
+                'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
+                'mydata_mark' => $mark,
+                'mydata_pending_since' => null,
+                'mydata_type' => $invoice->invoiceType?->mydata_type,
+            ])->save();
+
+            return $row;
+        });
+
+        // Reflect the (now-confirmed) filing on WHMCS, mirroring performSubmit.
+        // Best-effort, never throws, no-op for non-WHMCS invoices.
+        app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, $audit->mark);
+
+        return $audit;
+    }
+
     private function recordDryRun(Invoice $invoice, string $xml): MyDataMark
     {
         return DB::transaction(fn () => MyDataMark::create([
@@ -635,6 +840,8 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
                 'mydata_mark' => $mark,
                 'mydata_url' => $qrUrl,
+                // MYD-2 (σκέλος γ): a successful filing resolves any prior in-doubt.
+                'mydata_pending_since' => null,
                 // firebed may return getInvoiceType() as either a raw
                 // string ("1.1") OR a BackedEnum case (AadeInvoiceType::TYPE_1_1)
                 // depending on how the header was set (we always pass
