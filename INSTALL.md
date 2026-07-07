@@ -356,16 +356,21 @@ on the second.
 
 ### Dev / staging — just seed it
 
-The repo ships a seeder that creates three sample tenants (`myip`,
-`nixpal`, `sample-ee`) and an `admin@ekdosi.local` user attached to
-all three:
+The repo ships a demo seeder (a self-contained «DEMO Α.Ε.» tenant + an
+`admin@ekdosi.local` user). **It is OPT-IN (SET-1):** it does nothing
+unless you explicitly set `EKDOSI_SEED_DEMO=true`, so a stray
+`db:seed --force` on a real host can never create a known-password
+super_admin. On a dev/demo box:
 
 ```bash
-sudo -u ekdosi php artisan migrate:fresh --seed --force
+EKDOSI_SEED_DEMO=true sudo -u ekdosi php artisan migrate:fresh --seed --force
 ```
 
-Login: `admin@ekdosi.local` / `password`. **Never run this on a
-production box** — the password is hard-coded and known.
+Login: `admin@ekdosi.local` / `password` (override with
+`EKDOSI_SEED_DEMO_PASSWORD`). For a REAL install don't use the demo
+seed at all — run `php artisan ekdosi:install` (prompts for real
+credentials + first company), or `php artisan ekdosi:create-admin` to
+add/reset a super_admin once a company exists.
 
 After this you have schema + an admin user + three empty tenants. If
 you also want actual ekdosi data to play with (71 customers, 161

@@ -30,12 +30,34 @@ class DatabaseSeeder extends Seeder
 
     public function run(): void
     {
+        // SET-1 (AUDIT): the demo seed creates a super_admin with a well-known
+        // password + a throwaway DEMO tenant — that must NEVER happen on a real
+        // host. Real installs use `php artisan ekdosi:install` (prompts for real
+        // credentials) or `ekdosi:create-admin`. Gate the whole seeder behind an
+        // EXPLICIT opt-in (EKDOSI_SEED_DEMO=true), which is prod-safe regardless
+        // of APP_ENV — unlike app()->isProduction() alone, which a mislabeled
+        // APP_ENV=local prod box would defeat. The isProduction() bail is a second
+        // belt for a correctly-labeled prod where the flag was set by mistake.
+        if (! config('ekdosi.seed_demo')) {
+            $this->command?->warn(
+                'DatabaseSeeder: demo seed skipped — set EKDOSI_SEED_DEMO=true to enable it. '.
+                'For a real install use `php artisan ekdosi:install` (or `ekdosi:create-admin`).'
+            );
+
+            return;
+        }
+        if (app()->isProduction()) {
+            $this->command?->warn('DatabaseSeeder: refusing to seed the DEMO tenant/admin on a production host.');
+
+            return;
+        }
+
         // (1) Admin user first, so DemoCompanySeeder::attachAdmin finds it.
         $admin = User::query()->firstOrCreate(
             ['email' => 'admin@ekdosi.local'],
             [
                 'name' => 'Admin',
-                'password' => Hash::make('password'),
+                'password' => Hash::make((string) config('ekdosi.seed_demo_password', 'password')),
                 'email_verified_at' => now(),
             ],
         );

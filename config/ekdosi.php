@@ -16,6 +16,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Demo seed (SET-1)
+    |--------------------------------------------------------------------------
+    |
+    | `db:seed` (DatabaseSeeder) builds a throwaway «DEMO Α.Ε.» tenant + a demo
+    | super_admin — for a fresh clone / reviewer. This must NEVER run on a real
+    | host (it would create a super_admin with a well-known password). Real
+    | installs use `php artisan ekdosi:install`. Gate the demo seed behind an
+    | EXPLICIT opt-in — not app()->isProduction() alone, because a prod box was
+    | once mislabeled APP_ENV=local, which would leave an env-based guard OFF
+    | exactly when it mattered. Opt-in is prod-safe regardless of APP_ENV.
+    |
+    */
+    'seed_demo' => (bool) env('EKDOSI_SEED_DEMO', false),
+    'seed_demo_password' => (string) env('EKDOSI_SEED_DEMO_PASSWORD', 'password'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Secrets at-rest encryption (DR / «work without APP_KEY»)
     |--------------------------------------------------------------------------
     |
