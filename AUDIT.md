@@ -42,7 +42,7 @@ Prod-side ενέργειες πριν το cutover: sandbox discount run (MYD-1)
 passphrase + restore drill (OPS-1), και `EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED=true` στο prod .env.
 Αμέσως μετά (πρώτες εβδομάδες): ~~MON-1~~ ✅, ~~MON-2~~ ✅ (2026-07-05)·
 ~~OPS-3~~ ✅, ~~ΓΕΜΗ στο PDF (DOC-4)~~ ✅, ~~MYD-4~~ ✅ (payment-method preflight),
-~~MYD-2~~ ✅ (submit lock), ~~OPS-4..9~~ ✅ (DR/backup/deploy safety, 2026-07-05)·
+~~MYD-2~~ ✅ (submit lock + in-doubt gate, sandbox-proven 2026-07-07), ~~OPS-4..9~~ ✅ (DR/backup/deploy safety, 2026-07-05)·
 απομένουν καθαρά MEDIUM/LOW: guard στον `DatabaseSeeder` (SET-1), DOC-5/6, WH-6..9,
 MON-3/4, OPS-10..15, MYD-5..9, SET-2..6.
 
@@ -67,17 +67,11 @@ MON-3/4, OPS-10..15, MYD-5..9, SET-2..6.
   στο PEPPOL) ή hard-refuse υποβολής όταν `header_discount_percent > 0`, + έλεγχος
   στο `MyDataConfigAudit`/preflight. Sandbox validation μετά.
 
-- [ ] **MYD-2 · HIGH · ΠΙΘΑΝΟ · ⏳ ΜΕΡΙΚΩΣ 2026-07-05** — **σκέλος (β) ✅**: cache lock ανά παραστατικό + fresh re-read κάτω από το lock στο `submit()` (τέλος η ταυτόχρονη διπλή υποβολή· `MyDataSubmitConcurrencyTest`). **Ανοιχτά (α)+(γ)**: το sandbox πείραμα uid-dedup + το in-doubt gate σε transport-timeout — σκόπιμα deferred, γιατί αν η ΑΑΔΕ κάνει server-side dedup (πιθανό) το blind retry είναι ήδη ασφαλές· ένα in-doubt gate χωρίς resolve-path θα κόλλαγε παραστατικά (χειρότερο από το σημερινό daily-reconcile backstop). — **Retry μετά από timeout μπορεί να διπλο-υποβάλει (2 MARKs = διπλά δηλωμένο έσοδο).**
-  `app/Services/MyDataSubmitter.php:140-142`: σε transport exception το
-  `mydata_state` μένει null → το retry ξαναστέλνει `SendInvoices`. Η υπόθεση του
-  κώδικα (`AadeInvoiceDocument.php:290-296`) ότι η ΑΑΔΕ κάνει server-side dedup με
-  δικό της uid **δεν τεκμηριώνεται από το spec για ERP** (το [233] «Αφορά μόνο τους
-  παρόχους»). Επίσης ΔΕΝ υπάρχει lock/re-fetch μέσα στο `submit()` — δύο χειριστές
-  που πατούν «Υποβολή» ταυτόχρονα POSTάρουν και οι δύο. Mitigation σήμερα: το
-  ημερήσιο reconcile εμφανίζει το ορφανό MARK. **Fix:** (α) sandbox πείραμα
-  resubmit-after-timeout για να γίνει η υπόθεση γεγονός, (β) `lockForUpdate` +
-  re-check state μέσα στο `submit()`, (γ) σε transport failure σήμανση «in-doubt»
-  που απαιτεί reconcile/`RequestTransmittedDocs` πριν επιτραπεί ξανά υποβολή.
+- [x] **MYD-2 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-07** (σκέλη α+β+γ όλα κλειστά). **Εύρημα (sandbox πείραμα 2026-07-07):** η ΑΑΔΕ **ΔΕΝ** κάνει server-side dedup στο ERP κανάλι — blind retry του ίδιου `(series, ΑΑ)` παρήγαγε **δύο διαφορετικά MARK** (`…931`/`…971`) με **ίδιο `invoiceUid`** (`E230F0…EAD1`), και τα δύο Success. Άρα το blind retry ήταν όντως επικίνδυνο (διπλά δηλωμένο έσοδο). Πλήρες response XML + reconnaissance: `docs/mydata-sandbox-myd2-retry-2026-07-07.md`.
+  - **(α) ✅** το πείραμα έγινε· η υπόθεση του κώδικα (`AadeInvoiceDocument` «NO `<uid>`») διαψεύστηκε για ERP.
+  - **(β) ✅** cache lock ανά παραστατικό + fresh re-read κάτω από το lock (`MyDataSubmitConcurrencyTest`).
+  - **(γ) ✅** **in-doubt gate**: νέα στήλη `invoices.mydata_pending_since` (mirror, forceFill-only)· σε transport failure σημαίνεται in-doubt· στο επόμενο `submit()` γίνεται ΠΡΩΤΑ reconcile `(series, ΑΑ)` μέσω `RequestTransmittedDocs` → αν υπάρχει live MARK **υιοθετείται** (self-heal, καμία 2η υποβολή)· αν ΔΕΝ υπάρχει, εντός grace window (`einvoice.in_doubt_grace_minutes`, default 10) **αρνείται** (το feed της ΑΑΔΕ καθυστερεί ~λεπτά — sandbox-observed διπλο-υποβολή `…665`/`…666` όταν έλειπε αυτό)· μετά το grace υποβάλλει κανονικά. Tests: `MyDataSubmitInDoubtTest` (3 branches) + real sandbox E2E.
+  - **Backstop:** το ημερήσιο `mydata:reconcile-sales` παραμένει για ό,τι ξεφύγει (και το adopt-path λογκάρει warning στην πολλαπλή-MARK περίπτωση).
 
 - [x] **MYD-3 · HIGH · ΕΠΙΒΕΒΑΙΩΜΕΝΟ — ✅ FIXED 2026-07-04** (visibility + hard guard στο action + service-level refusal σε MyDataSubmitter/GrProviderSubmitter) — **«Υποβολή στο myDATA» ορατή σε τοπικά ακυρωμένα παραστατικά.**
   `app/Filament/Resources/Invoices/Pages/ViewInvoice.php:384` — visibility ελέγχει

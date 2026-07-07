@@ -184,17 +184,57 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertSame('https://existing/qr', $invoice->fresh()->mydata_url); // not nulled
     }
 
-    public function test_cancel_records_provider_cancel_and_flips_state(): void
+    public function test_cancel_records_provider_cancel_and_flips_state_for_a_9_3_delivery_note(): void
     {
-        $invoice = $this->makeInvoice();
-        $submitter = new GrProviderSubmitter($this->tenant, new FakeGrTransport);
-        $submitter->submit($invoice);
+        // Provider cancel is possible ONLY for 9.3 δελτία αποστολής (CancelDeliveryNote).
+        // Seed a filed 9.3 directly — a 9.3 payload needs delivery-note fields the
+        // plain makeInvoice() path doesn't set, and cancel() only needs the MARK.
+        $dnType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'DAP', 'name' => 'Δελτίο Αποστολής',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DAP1', 'code' => 1,
+            'invoice_type_id' => $dnType->id, 'customer_id' => $this->customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400000000000999', 'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'fake',
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+        $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400000000000999'])->save();
 
-        $cancel = $submitter->cancel($invoice->fresh(), 'λάθος ποσό');
+        $cancel = (new GrProviderSubmitter($this->tenant, new FakeGrTransport))
+            ->cancel($invoice->fresh(), 'λάθος διακίνηση');
 
         $this->assertSame('PROVIDER_CANCEL', $cancel->mydata_action);
         $this->assertSame('CANCELLED', $invoice->fresh()->mydata_state);
         $this->assertSame('cancelled', $invoice->fresh()->local_status);
+    }
+
+    public function test_cancel_refuses_a_non_9_3_provider_invoice_pointing_to_a_credit_note(): void
+    {
+        // A filed 1.1/2.1 via a provider is NOT cancellable (CancelDeliveryNote →
+        // [283]); the transport must never be called and the operator is pointed to
+        // a credit note. Mirrors the UI gate (ViewInvoice::cancel_at_mydata).
+        $invoice = $this->makeInvoice();   // type 1.1
+        $submitter = new GrProviderSubmitter($this->tenant, new FakeGrTransport);
+        $submitter->submit($invoice);      // files via fake → VALID + PROVIDER_INSERT
+
+        try {
+            $submitter->cancel($invoice->fresh(), 'λάθος ποσό');
+            $this->fail('Expected a refusal for a non-9.3 provider invoice.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('πιστωτικό', $e->getMessage());
+        }
+
+        // Nothing was cancelled: state unchanged, no PROVIDER_CANCEL row written.
+        $this->assertSame('VALID', $invoice->fresh()->mydata_state);
+        $this->assertSame(0, MyDataMark::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('mydata_action', 'PROVIDER_CANCEL')
+            ->count());
     }
 
     public function test_test_connection_delegates_to_transport_ping(): void

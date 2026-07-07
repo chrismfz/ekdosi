@@ -251,6 +251,7 @@ data model + phase gates: **`PLAN.md`**.
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
+- _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._
 
 ## 💡 PDF / UX & ideas
 - _(G10 «ένα template αντί 8»: **non-issue** — τα 8 legacy FastReport δεν πορτάρονται· έχουμε

@@ -243,13 +243,10 @@ class InvoSignTransportTest extends TestCase
 
     public function test_cancel_transport_failure_records_a_forensic_row_and_keeps_state(): void
     {
-        $invoice = $this->makeInvoice();
-        $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400001964594701'])->save();
-        MyDataMark::create([
-            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
-            'mark' => '400001964594701', 'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'invosign',
-            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
-        ]);
+        // A 9.3 δελτίο αποστολής is the ONE provider-cancellable type, so it's the
+        // only path that reaches the transport — use it to exercise the
+        // transport-failure forensic recording.
+        $invoice = $this->makeFiledDeliveryNote('400001964594701');
 
         Http::fake([self::DEMO.'/*' => Http::response('upstream boom', 500)]);
 
@@ -337,12 +334,13 @@ class InvoSignTransportTest extends TestCase
         $this->assertStringContainsString('statusCode', (string) $mark->response); // what came back
     }
 
-    public function test_failed_cancel_records_a_forensic_row_and_keeps_state(): void
+    public function test_non_delivery_note_cancel_is_refused_before_reaching_the_provider(): void
     {
-        // InvoSign [283]: CancelDeliveryNote is 9.3-only — a 2.1 invoice cancel is
-        // rejected. The failed cancel must be recorded (so it's debuggable) and the
-        // invoice must STAY VALID (not flipped to CANCELLED).
-        $invoice = $this->makeInvoice();
+        // A 2.1 invoice cancel is impossible via a provider (CancelDeliveryNote is
+        // 9.3-only → InvoSign [283]). The service now PRE-EMPTS that round-trip:
+        // it refuses with a credit-note message BEFORE any HTTP, so the provider is
+        // never even contacted, no forensic row is written, and state stays VALID.
+        $invoice = $this->makeInvoice(); // type 2.1
         $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400001964594701'])->save();
         MyDataMark::create([
             'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
@@ -350,19 +348,19 @@ class InvoSignTransportTest extends TestCase
             'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
         ]);
 
-        $errorXml = '<?xml version="1.0"?><ResponseDoc><response><statusCode>ValidationError</statusCode>'
-            .'<errors><error><message>only 9.3 invoice type can be cancelled</message><code>283</code></error></errors>'
-            .'</response></ResponseDoc>';
-        Http::fake([self::DEMO.'/*' => Http::response($errorXml, 200)]);
+        Http::fake([self::DEMO.'/*' => Http::response('should not be called', 200)]);
 
         try {
             app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->cancel($invoice->fresh());
-            $this->fail('Expected the cancellation to be rejected.');
+            $this->fail('Expected the cancellation to be refused.');
         } catch (\Throwable $e) {
-            $this->assertStringContainsString('[283]', $e->getMessage());
+            $this->assertStringContainsString('πιστωτικό', $e->getMessage());
         }
 
-        $this->assertSame(1, MyDataMark::where('invoice_id', $invoice->id)->where('mydata_action', 'PROVIDER_CANCEL_REJECTED')->count());
+        Http::assertNothingSent(); // the provider was never contacted
+        $this->assertSame(0, MyDataMark::where('invoice_id', $invoice->id)
+            ->whereIn('mydata_action', ['PROVIDER_CANCEL', 'PROVIDER_CANCEL_FAILED', 'PROVIDER_CANCEL_REJECTED'])
+            ->count());
         $this->assertSame('VALID', $invoice->fresh()->mydata_state); // not flipped
     }
 
@@ -380,6 +378,32 @@ class InvoSignTransportTest extends TestCase
         ]);
 
         return $invoice->fresh('lines');
+    }
+
+    /**
+     * A filed 9.3 δελτίο αποστολής — the one provider-cancellable type. Seeds the
+     * PROVIDER_INSERT mark + VALID state directly (cancel() only needs the MARK; a
+     * 9.3 payload's delivery fields aren't relevant to the cancel path).
+     */
+    private function makeFiledDeliveryNote(string $mark): Invoice
+    {
+        $dnType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'DAP', 'name' => 'Δελτίο Αποστολής',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DAP1', 'code' => 1,
+            'invoice_type_id' => $dnType->id, 'customer_id' => $this->customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => $mark, 'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'invosign',
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+        $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => $mark])->save();
+
+        return $invoice->fresh();
     }
 
     private function successXml(): string

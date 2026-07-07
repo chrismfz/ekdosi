@@ -123,6 +123,28 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             );
         }
 
+        // Provider cancellation is possible ONLY for 9.3 δελτία αποστολής: every
+        // provider's cancel endpoint is CancelDeliveryNote, which AADE accepts only
+        // for type 9.3 (InvoSign returns [283] otherwise — sandbox-observed
+        // 2026-07-07), and a provider-posted invoice can't be cancelled directly at
+        // AADE either ([249] "posted by provider"). For any other type the reversal
+        // is a credit note (5.1). The UI already routes this (ViewInvoice:
+        // cancel_at_mydata is 9.3-only on a provider channel; non-9.3 → «Ακύρωση
+        // μέσω πιστωτικού»); guard it at the service level too so a non-UI caller
+        // (automation / bulk / API) gets a clear refusal instead of the opaque
+        // provider [283]. (Holds even for a legacy direct INSERT on a migrated
+        // gr-mydata→gr-provider tenant: the provider transport still can't cancel a
+        // non-9.3.)
+        $invoice->loadMissing('invoiceType');
+        $type = (string) ($invoice->invoiceType?->mydata_type ?? '');
+        if ($type !== '9.3') {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} (τύπος ".($type !== '' ? $type : '—').') δεν ακυρώνεται μέσω παρόχου — '.
+                'μόνο τα δελτία αποστολής 9.3 ακυρώνονται (CancelDeliveryNote). Για διόρθωση/αναίρεση '.
+                'έκδοσε πιστωτικό τιμολόγιο (5.1) που συσχετίζεται με το αρχικό MARK.'
+            );
+        }
+
         // Read the MARK from the audit history, not the mirror column (same
         // reasoning as MyDataSubmitter::cancel). Accept both PROVIDER_INSERT and a
         // legacy direct INSERT — a tenant migrated gr-mydata→gr-provider mid-life

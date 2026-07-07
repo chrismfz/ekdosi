@@ -291,6 +291,24 @@ return [
         ],
 
         /*
+        | MYD-2 (AUDIT, σκέλος γ) — "in-doubt" retry grace, in MINUTES.
+        |
+        | On a TRANSPORT failure (timeout / connection drop) a submission is
+        | AMBIGUOUS: the POST may have reached AADE and produced a MARK we never
+        | saw. AADE does NOT dedup a resubmission of the same (series, ΑΑ)
+        | (sandbox-proven 2026-07-07: same invoiceUid → two MARKs), so a blind
+        | retry double-declares income. The next submit() reconciles first:
+        |   - a live MARK found  → ADOPT it (never a second filing);
+        |   - NOTHING found      → could be "never landed" OR "not yet indexed",
+        |     because RequestTransmittedDocs lags a freshly-filed doc by a minute
+        |     or two (sandbox-observed). So within this grace window we REFUSE to
+        |     resubmit (operator waits + retries); only AFTER it elapses with AADE
+        |     still empty do we treat the earlier POST as lost and file normally.
+        | The daily reconcile remains the backstop for anything that slips through.
+        */
+        'in_doubt_grace_minutes' => (int) env('EKDOSI_MYDATA_INDOUBT_GRACE_MINUTES', 10),
+
+        /*
         | Human labels for the operator "Τρόπος αποστολής" dropdown (P3). Each key
         | yields a "<label> — Δοκιμαστικό" + "<label> — Παραγωγή" pair. Listed here
         | so a provider is SELECTABLE (and its credentials enterable) before the

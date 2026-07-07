@@ -17,6 +17,31 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Security
+- **AUDIT MYD-2 (σκέλος γ) — «in-doubt» gate κατά της διπλο-υποβολής μετά από transport timeout.**
+  Sandbox-αποδεδειγμένο (2026-07-07) ότι η ΑΑΔΕ **ΔΕΝ** κάνει server-side dedup στο ERP κανάλι:
+  blind retry του ίδιου `(series, ΑΑ)` παρήγαγε **δύο διαφορετικά MARK** με ίδιο `invoiceUid` → διπλά
+  δηλωμένο έσοδο. Fix: νέα στήλη `invoices.mydata_pending_since`· σε transport failure το παραστατικό
+  σημαίνεται «in-doubt», και στο επόμενο `submit()` γίνεται ΠΡΩΤΑ reconcile `(series, ΑΑ)` μέσω
+  `RequestTransmittedDocs` → live MARK ⇒ **υιοθέτηση** (self-heal, καμία 2η υποβολή)· τίποτα ⇒ εντός
+  grace window (`einvoice.in_doubt_grace_minutes`, default 10) **άρνηση** (το feed της ΑΑΔΕ καθυστερεί
+  ~λεπτά — αλλιώς η ίδια καθυστέρηση ξανα-διπλο-υπέβαλλε), μετά το grace υποβολή κανονικά. Το ημερήσιο
+  reconcile παραμένει backstop. Το «in-doubt» καλύπτει ΚΑΘΕ αμφίσημη έκβαση, όχι μόνο τα ρητά
+  timeout/connection: **άδειο/μη-παρσαρίσιμο HTTP-200 body** (`InvalidResponseException`), **5xx**
+  (`TransmissionFailedException`), generic `Throwable`, ΚΑΙ αποτυχία τοπικής εγγραφής (`persistResponse`)
+  ΜΕΤΑ από επιτυχές POST — ενώ ένα 429 (rate-limit) και μια ρητή απόρριψη (`MyDataRejected`, χωρίς ΜΑΡΚ)
+  σκόπιμα ΔΕΝ σημαίνονται (κανένα ΜΑΡΚ → ασφαλές retry). Επιβεβαιώθηκε επίσης ότι το κανάλι **παρόχου** (InvoSign) **κάνει dedup**
+  + έχει real-time `invoice_status.php`, οπότε το `GrProviderSubmitter` είναι ήδη ασφαλές (καμία αλλαγή).
+  Πλήρης αναφορά: `docs/mydata-sandbox-myd2-retry-2026-07-07.md`.
+
+### Fixed
+- **Provider cancel — καθαρή άρνηση για μη-9.3 (αντί opaque `[283]`).** Το
+  `GrProviderSubmitter::cancel()` πλέον αρνείται σε service-level κάθε τύπο ≠ 9.3 με
+  μήνυμα «έκδοσε πιστωτικό (5.1)», χωρίς να χτυπά τον πάροχο — η ακύρωση provider-2.1/11.x
+  είναι αδύνατη by design (CancelDeliveryNote = 9.3-only· sandbox-observed `[283]`, direct-AADE
+  `[249]` «posted by provider»). Καλύπτει τα μη-UI μονοπάτια (automation/bulk/API)· το UI ήδη
+  γκρεϊτάρει το κουμπί σε 9.3-only.
+
 ### Added
 - **AUDIT MYD-5 — per-line myDATA E3 ανά κατηγορία προϊόντος (μικτά τιμολόγια).** Νέα πεδία
   `product_categories.mydata_income_class[_category]`: μια γραμμή δηλώνει το bucket εσόδων της

@@ -12,6 +12,7 @@ use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
 use App\Support\InvoiceScope;
+use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,7 +22,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
-use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Illuminate\Support\Facades\URL;
 
 /**
@@ -203,6 +203,10 @@ class Invoice extends Model
             'deductions_category' => 'integer',
             'deductions_rate' => 'decimal:4',
             'mydata_sent' => 'boolean',
+            // MYD-2 (σκέλος γ): "in-doubt" marker set on a transport failure, so
+            // submit() reconciles before it may resubmit. Mirror column — written
+            // ONLY by MyDataSubmitter (forceFill, not $fillable).
+            'mydata_pending_since' => 'datetime',
             'whmcs_invoice_id' => 'integer',
         ];
     }
