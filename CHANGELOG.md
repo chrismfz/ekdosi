@@ -30,6 +30,14 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   + έχει real-time `invoice_status.php`, οπότε το `GrProviderSubmitter` είναι ήδη ασφαλές (καμία αλλαγή).
   Πλήρης αναφορά: `docs/mydata-sandbox-myd2-retry-2026-07-07.md`.
 
+### Fixed
+- **Provider cancel — καθαρή άρνηση για μη-9.3 (αντί opaque `[283]`).** Το
+  `GrProviderSubmitter::cancel()` πλέον αρνείται σε service-level κάθε τύπο ≠ 9.3 με
+  μήνυμα «έκδοσε πιστωτικό (5.1)», χωρίς να χτυπά τον πάροχο — η ακύρωση provider-2.1/11.x
+  είναι αδύνατη by design (CancelDeliveryNote = 9.3-only· sandbox-observed `[283]`, direct-AADE
+  `[249]` «posted by provider»). Καλύπτει τα μη-UI μονοπάτια (automation/bulk/API)· το UI ήδη
+  γκρεϊτάρει το κουμπί σε 9.3-only.
+
 ### Added
 - **AUDIT MYD-5 — per-line myDATA E3 ανά κατηγορία προϊόντος (μικτά τιμολόγια).** Νέα πεδία
   `product_categories.mydata_income_class[_category]`: μια γραμμή δηλώνει το bucket εσόδων της
