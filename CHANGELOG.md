@@ -26,7 +26,8 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   `RequestTransmittedDocs` → live MARK ⇒ **υιοθέτηση** (self-heal, καμία 2η υποβολή)· τίποτα ⇒ εντός
   grace window (`einvoice.in_doubt_grace_minutes`, default 10) **άρνηση** (το feed της ΑΑΔΕ καθυστερεί
   ~λεπτά — αλλιώς η ίδια καθυστέρηση ξανα-διπλο-υπέβαλλε), μετά το grace υποβολή κανονικά. Το ημερήσιο
-  reconcile παραμένει backstop. Επιβεβαιώθηκε επίσης ότι το κανάλι **παρόχου** (InvoSign) **κάνει dedup**
+  reconcile παραμένει backstop. Το «in-doubt» καλύπτει ΚΑΘΕ αμφίσημη έκβαση του POST (και το generic
+  catch — π.χ. 2xx με ΜΑΡΚ αλλά μη-παρσαρίσιμη απάντηση), όχι μόνο τα ρητά timeout/connection. Επιβεβαιώθηκε επίσης ότι το κανάλι **παρόχου** (InvoSign) **κάνει dedup**
   + έχει real-time `invoice_status.php`, οπότε το `GrProviderSubmitter` είναι ήδη ασφαλές (καμία αλλαγή).
   Πλήρης αναφορά: `docs/mydata-sandbox-myd2-retry-2026-07-07.md`.
 

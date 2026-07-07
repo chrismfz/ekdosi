@@ -235,6 +235,14 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $this->logFailure($invoice, 'protocol', $e);
             throw new RuntimeException('myDATA submission failed: '.$e->getMessage(), 0, $e);
         } catch (Throwable $e) {
+            // MYD-2 (σκέλος γ): any UNEXPECTED error during the POST is ambiguous
+            // too — e.g. a 2xx that DID create a MARK at AADE but whose response
+            // firebed failed to parse (not a recognised timeout/connection). Treat
+            // it like the transport bucket: flag in-doubt so the next submit()
+            // reconciles (adopt-or-file) instead of blindly re-POSTing. Worst case
+            // for a genuinely pre-send bug is one grace-window delay — cheap
+            // insurance against a double-declared income.
+            $this->markInDoubt($invoice);
             $this->logFailure($invoice, 'other', $e);
             throw new RuntimeException('myDATA submission failed unexpectedly.', 0, $e);
         }

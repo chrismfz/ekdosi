@@ -197,6 +197,31 @@ class MyDataSubmitInDoubtTest extends TestCase
         $this->assertSame(0, $mock->count());
     }
 
+    public function test_unexpected_error_during_the_post_flags_the_invoice_in_doubt(): void
+    {
+        // MYD-2 review: the in-doubt flag must cover ANY ambiguous outcome during
+        // the POST — not only recognised timeouts. A 2xx that created a MARK but
+        // failed to parse lands in the generic catch, which must still flag
+        // in-doubt so the NEXT submit reconciles instead of blindly re-POSTing.
+        // Simulated with a non-Guzzle exception from the transport (firebed only
+        // maps GuzzleExceptions to its timeout/connection types).
+        $this->assertNull($this->invoice->mydata_pending_since);
+
+        $mock = new MockHandler([new \RuntimeException('unexpected transport error')]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+            $this->fail('Expected the submission to throw.');
+        } catch (\RuntimeException $e) {
+            // expected — the submitter re-throws after flagging in-doubt
+        }
+
+        $this->assertNotNull(
+            $this->invoice->fresh()->mydata_pending_since,
+            'an unexpected error during the POST must flag the invoice in-doubt'
+        );
+    }
+
     public function test_in_doubt_within_grace_refuses_to_resubmit_when_aade_empty(): void
     {
         // Freshly in-doubt (within the grace window). AADE's feed shows nothing —
