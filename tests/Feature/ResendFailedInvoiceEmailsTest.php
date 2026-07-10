@@ -46,6 +46,9 @@ class ResendFailedInvoiceEmailsTest extends TestCase
         return Invoice::create([
             'company_id' => $this->tenant->id, 'invcode' => $invcode, 'code' => (int) filter_var($invcode, FILTER_SANITIZE_NUMBER_INT) ?: 1,
             'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            // DOC-6: the sweep only re-queues ISSUED (active) invoices — a failed
+            // send implies the invoice was issued. Realistic fixture state.
+            'local_status' => 'active',
             'issued_at' => now(), 'company_name' => 'C', 'net_total' => 100, 'gross_total' => 124,
         ]);
     }
@@ -85,6 +88,30 @@ class ResendFailedInvoiceEmailsTest extends TestCase
 
         Queue::assertPushed(SendInvoiceEmail::class, 1);
         Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->invoice->is($failed) && $job->trigger === 'batch');
+    }
+
+    public function test_cancelled_invoices_are_never_requeued(): void
+    {
+        // DOC-6: a failed send whose invoice was later cancelled must NOT be
+        // re-queued — else the sweep churns it forever and would email a
+        // «…που εκδόθηκε…» body for a voided document.
+        $locallyCancelled = $this->invoice('TPY1');
+        $locallyCancelled->forceFill(['local_status' => 'cancelled'])->save();
+        $this->log($locallyCancelled, 'failed', now()->subHour());
+
+        $aadeCancelled = $this->invoice('TPY2');
+        $aadeCancelled->forceFill(['mydata_state' => 'CANCELLED'])->save();
+        $this->log($aadeCancelled, 'failed', now()->subHour());
+
+        // A still-active failed one IS re-queued (control).
+        $active = $this->invoice('TPY3');
+        $this->log($active, 'failed', now()->subHour());
+
+        $this->artisan('invoices:resend-failed-emails', ['--tenant' => $this->tenant->slug, '--since' => 7])
+            ->assertExitCode(0);
+
+        Queue::assertPushed(SendInvoiceEmail::class, 1);
+        Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->invoice->is($active));
     }
 
     public function test_dry_run_dispatches_nothing(): void

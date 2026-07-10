@@ -81,6 +81,38 @@ class SendInvoiceEmail implements ShouldQueue
         $tenant = $invoice->company;
         $email = trim((string) ($invoice->customer?->email ?? ''));
 
+        // DOC-6: THE choke-point gate. Every dispatcher funnels through here —
+        // the two UI actions (which also pre-gate for immediate feedback), the
+        // finalize + myDATA-VALID auto paths, AND the invoices:resend-failed-emails
+        // batch sweep. Only an ISSUED, non-cancelled document may go out: the mail
+        // body (InvoiceIssuedMail) asserts «…που εκδόθηκε…», so a draft or a
+        // now-cancelled invoice must not be sent — even if it was queued while
+        // still active and cancelled before the worker ran (the TOCTOU the UI
+        // gates can't close). We record the skip so operators see WHY nothing
+        // was sent; we do NOT throw (a deliberate skip is not a job failure).
+        if (! $invoice->isPubliclyViewable()) {
+            InvoiceMailLog::create([
+                'company_id'           => $invoice->company_id,
+                'invoice_id'           => $invoice->id,
+                'recipient'            => $email ?: '(no customer email)',
+                'from_address'         => $tenant?->mail_from_address ?: config('mail.from.address'),
+                'trigger'              => $this->trigger,
+                'status'               => 'failed',
+                'error_message'        => 'Το παραστατικό δεν είναι εκδοθέν (πρόχειρο ή ακυρωμένο) — δεν αποστέλλεται.',
+                'queued_at'            => now(),
+                'failed_at'            => now(),
+                'triggered_by_user_id' => $this->triggeredByUserId,
+            ]);
+            Log::info('SendInvoiceEmail: invoice not issued (draft/cancelled) — skipping send', [
+                'invoice_id'   => $invoice->getKey(),
+                'invoice'      => $invoice->invcode,
+                'local_status' => $invoice->local_status,
+                'mydata_state' => $invoice->mydata_state,
+            ]);
+
+            return;
+        }
+
         // Create the log row up-front in 'queued' state. Even the
         // "no email" path writes a row so operators see WHY nothing
         // was sent. We persist the id on $this so failed() can find

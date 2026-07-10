@@ -778,13 +778,31 @@ class ViewInvoice extends ViewRecord
                 ->label('Email PDF to customer')
                 ->icon('heroicon-o-envelope')
                 ->color('gray')
-                ->visible(fn (Invoice $record) => $record->customer?->email !== null && $record->customer?->email !== '')
+                // DOC-6: only an ISSUED, non-cancelled document may be emailed —
+                // the mail body asserts «…που εκδόθηκε…» (that it was issued), so
+                // sending a draft or a cancelled invoice would state a falsehood.
+                // Same fail-closed predicate as the public PDF route.
+                ->visible(fn (Invoice $record) => $record->customer?->email !== null
+                    && $record->customer?->email !== ''
+                    && $record->isPubliclyViewable())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Send invoice PDF to the customer')
                 ->modalDescription(fn (Invoice $record) => 'Queues a mail with the current PDF attached. To: '.($record->customer?->email ?? '—').'. BCC: tenant audit list (if configured). See the Send history section below for the lifecycle.')
                 ->modalSubmitActionLabel('Queue email')
                 ->action(function (Invoice $record) {
+                    // Defence-in-depth: the invoice could have been cancelled
+                    // between page render and click (visible() is not re-checked
+                    // on submit). Never email a non-issued document.
+                    if (! $record->isPubliclyViewable()) {
+                        Notification::make()
+                            ->title('Δεν στάλθηκε')
+                            ->body('Μόνο εκδοθέντα (ενεργά, μη ακυρωμένα) παραστατικά αποστέλλονται με email.')
+                            ->warning()->send();
+
+                        return;
+                    }
+
                     SendInvoiceEmail::dispatch(
                         $record,
                         trigger: 'manual',

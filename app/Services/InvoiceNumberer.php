@@ -70,6 +70,28 @@ use RuntimeException;
  *     it expecting the FOR UPDATE lock to still cover them — the lock
  *     covers the original SELECT; subsequent UPDATEs need their own
  *     locking strategy.
+ *
+ * ──── ΑΑ GAP POLICY (MON-4 — explicit, do not change without a decision) ────
+ *
+ * The ΑΑ is allocated when the DRAFT is created (CreateInvoice), NOT when it
+ * is finalised/filed. Two consequences, both accepted by design:
+ *
+ *   - Deleting a draft (EditInvoice, draft-only) leaves a PERMANENT gap in the
+ *     per-series sequence. The number is never recycled — recycling would risk
+ *     a duplicate ΑΑ on a filed (legally binding) document, which is far worse
+ *     than a gap. myDATA identifies a document by its AADE MARK, not by a
+ *     gapless ΑΑ, so a gap is legally fine; the legacy Firebird app behaved
+ *     identically (a failed INSERT / deleted row left the same gap).
+ *
+ *   - `issued_at` is captured at draft creation alongside the ΑΑ (form default =
+ *     now), so the two are aligned at capture. A draft that lingers before
+ *     finalisation keeps its creation-time date; finalisation does not renumber
+ *     or re-date it. Operators can edit `issued_at` on the draft form.
+ *
+ * The alternative — allocate the ΑΑ only at finalisation — would eliminate
+ * delete-gaps but a draft would then have no invcode (every PDF/preview/WHMCS
+ * surface assumes one), a large blast radius for a legally-immaterial gap. Not
+ * done. Revisit only if an operator's accountant requires gapless ΑΑ per series.
  */
 final class InvoiceNumberer
 {

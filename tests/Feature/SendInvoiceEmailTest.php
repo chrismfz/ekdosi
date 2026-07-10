@@ -9,7 +9,12 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceMailLog;
 use App\Models\InvoiceType;
+use App\Models\User;
+use App\Services\InvoicePdfRenderer;
+use App\Services\MailTemplateRenderer;
+use App\Services\TenantMailerFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
@@ -75,9 +80,9 @@ class SendInvoiceEmailTest extends TestCase
         $invoice = $this->makeFiledInvoice();
 
         (new SendInvoiceEmail($invoice, trigger: 'auto'))->handle(
-            app(\App\Services\InvoicePdfRenderer::class),
-            app(\App\Services\TenantMailerFactory::class),
-            app(\App\Services\MailTemplateRenderer::class),
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
         );
 
         // Mail dispatched to primary recipient
@@ -107,9 +112,9 @@ class SendInvoiceEmailTest extends TestCase
 
         // Job MUST NOT throw — "no email" is a non-error skip path
         (new SendInvoiceEmail($invoice))->handle(
-            app(\App\Services\InvoicePdfRenderer::class),
-            app(\App\Services\TenantMailerFactory::class),
-            app(\App\Services\MailTemplateRenderer::class),
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
         );
 
         Mail::assertNothingSent();
@@ -122,9 +127,31 @@ class SendInvoiceEmailTest extends TestCase
         $this->assertNotNull($log->failed_at);
     }
 
+    public function test_send_skips_a_cancelled_or_draft_invoice_at_the_job_choke_point(): void
+    {
+        // DOC-6: the job is the real gate — even if something queued this while it
+        // was active (batch sweep, or a cancel racing the worker), a non-issued
+        // document must NOT be emailed with a body claiming it «was issued».
+        $invoice = $this->makeFiledInvoice();
+        $invoice->forceFill(['local_status' => 'cancelled'])->save();
+
+        (new SendInvoiceEmail($invoice, trigger: 'batch'))->handle(
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
+        );
+
+        Mail::assertNothingSent();
+
+        $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
+        $this->assertNotNull($log);
+        $this->assertSame('failed', $log->status);
+        $this->assertStringContainsString('δεν είναι εκδοθέν', (string) $log->error_message);
+    }
+
     public function test_manual_trigger_records_operator_user_id(): void
     {
-        $user = \App\Models\User::factory()->create();
+        $user = User::factory()->create();
         $invoice = $this->makeFiledInvoice();
 
         (new SendInvoiceEmail(
@@ -132,9 +159,9 @@ class SendInvoiceEmailTest extends TestCase
             trigger: 'manual',
             triggeredByUserId: $user->id,
         ))->handle(
-            app(\App\Services\InvoicePdfRenderer::class),
-            app(\App\Services\TenantMailerFactory::class),
-            app(\App\Services\MailTemplateRenderer::class),
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
         );
 
         $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
@@ -148,9 +175,9 @@ class SendInvoiceEmailTest extends TestCase
         $invoice = $this->makeFiledInvoice();
 
         (new SendInvoiceEmail($invoice))->handle(
-            app(\App\Services\InvoicePdfRenderer::class),
-            app(\App\Services\TenantMailerFactory::class),
-            app(\App\Services\MailTemplateRenderer::class),
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
         );
 
         Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
@@ -176,14 +203,14 @@ class SendInvoiceEmailTest extends TestCase
      */
     public function test_dispatched_job_serialised_payload_is_small_and_carries_no_pdf_bytes(): void
     {
-        \Illuminate\Support\Facades\Bus::fake();
+        Bus::fake();
         $invoice = $this->makeFiledInvoice();
 
-        \App\Jobs\SendInvoiceEmail::dispatch($invoice, trigger: 'auto');
+        SendInvoiceEmail::dispatch($invoice, trigger: 'auto');
 
-        \Illuminate\Support\Facades\Bus::assertDispatched(
-            \App\Jobs\SendInvoiceEmail::class,
-            function (\App\Jobs\SendInvoiceEmail $job) use ($invoice): bool {
+        Bus::assertDispatched(
+            SendInvoiceEmail::class,
+            function (SendInvoiceEmail $job) use ($invoice): bool {
                 $this->assertSame($invoice->id, $job->invoice->id);
                 $this->assertSame('auto', $job->trigger);
 
@@ -221,25 +248,25 @@ class SendInvoiceEmailTest extends TestCase
 
         // Simulate attempt 1: handle() ran, wrote a 'failed' row with
         // the transient last-attempt error.
-        \App\Models\InvoiceMailLog::create([
-            'company_id'           => $invoice->company_id,
-            'invoice_id'           => $invoice->id,
-            'recipient'            => 'cust@example.com',
-            'trigger'              => 'auto',
-            'status'               => 'failed',
-            'error_message'        => 'SMTP timeout',
-            'queued_at'            => now(),
-            'failed_at'            => now(),
+        InvoiceMailLog::create([
+            'company_id' => $invoice->company_id,
+            'invoice_id' => $invoice->id,
+            'recipient' => 'cust@example.com',
+            'trigger' => 'auto',
+            'status' => 'failed',
+            'error_message' => 'SMTP timeout',
+            'queued_at' => now(),
+            'failed_at' => now(),
             'triggered_by_user_id' => null,
         ]);
 
         // Simulate the queue worker calling failed() with a FRESHLY
         // CONSTRUCTED job (the deserialization path doesn't restore
         // any properties handle() set — only constructor args).
-        $freshJob = new \App\Jobs\SendInvoiceEmail($invoice, trigger: 'auto');
+        $freshJob = new SendInvoiceEmail($invoice, trigger: 'auto');
         $freshJob->failed(new \RuntimeException('SMTP timeout'));
 
-        $log = \App\Models\InvoiceMailLog::where('invoice_id', $invoice->id)
+        $log = InvoiceMailLog::where('invoice_id', $invoice->id)
             ->latest('id')
             ->first();
 
@@ -252,20 +279,20 @@ class SendInvoiceEmailTest extends TestCase
     {
         $invoice = $this->makeFiledInvoice();
 
-        \App\Models\InvoiceMailLog::create([
-            'company_id'  => $invoice->company_id,
-            'invoice_id'  => $invoice->id,
-            'recipient'   => 'cust@example.com',
-            'trigger'     => 'auto',
-            'status'      => 'sent',
-            'queued_at'   => now(),
-            'sent_at'     => now(),
+        InvoiceMailLog::create([
+            'company_id' => $invoice->company_id,
+            'invoice_id' => $invoice->id,
+            'recipient' => 'cust@example.com',
+            'trigger' => 'auto',
+            'status' => 'sent',
+            'queued_at' => now(),
+            'sent_at' => now(),
         ]);
 
-        (new \App\Jobs\SendInvoiceEmail($invoice, trigger: 'auto'))
+        (new SendInvoiceEmail($invoice, trigger: 'auto'))
             ->failed(new \RuntimeException('Late failure'));
 
-        $log = \App\Models\InvoiceMailLog::where('invoice_id', $invoice->id)->first();
+        $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
         $this->assertSame('sent', $log->status);
         $this->assertNull($log->error_message);
     }
@@ -276,10 +303,10 @@ class SendInvoiceEmailTest extends TestCase
 
         // Worker died before handle() created any row. failed() must
         // not throw.
-        (new \App\Jobs\SendInvoiceEmail($invoice, trigger: 'auto'))
+        (new SendInvoiceEmail($invoice, trigger: 'auto'))
             ->failed(new \RuntimeException('Pre-handle crash'));
 
-        $this->assertSame(0, \App\Models\InvoiceMailLog::where('invoice_id', $invoice->id)->count());
+        $this->assertSame(0, InvoiceMailLog::where('invoice_id', $invoice->id)->count());
     }
 
     public function test_malformed_bcc_entries_are_silently_dropped(): void
@@ -289,9 +316,9 @@ class SendInvoiceEmailTest extends TestCase
         $invoice = $this->makeFiledInvoice();
 
         (new SendInvoiceEmail($invoice))->handle(
-            app(\App\Services\InvoicePdfRenderer::class),
-            app(\App\Services\TenantMailerFactory::class),
-            app(\App\Services\MailTemplateRenderer::class),
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
         );
 
         // Valid addresses BCC'd; invalid one not present (auditBccList
@@ -315,6 +342,10 @@ class SendInvoiceEmailTest extends TestCase
             'company_name' => $this->customer->name,
             'gross_total' => 124.00,
             'net_total' => 100.00,
+            // A filed invoice is issued (active); MyDataSubmitter syncs
+            // local_status→active on VALID. Realistic so the DOC-6 job gate
+            // (isPubliclyViewable) lets it send.
+            'local_status' => 'active',
         ]);
         $invoice->forceFill([
             'mydata_state' => 'VALID',
@@ -322,6 +353,7 @@ class SendInvoiceEmailTest extends TestCase
             'mydata_url' => 'https://verify.aade.gr/?mark=400099999999999',
             'mydata_sent' => true,
         ])->save();
+
         return $invoice->fresh();
     }
 }

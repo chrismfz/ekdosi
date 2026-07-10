@@ -110,6 +110,9 @@ class PdfLabels
             'The original stays VALID at AADE; the credit note(s) offset it for accounting.',
         ],
         'delivery_notes' => ['Δελτία αποστολής', 'Delivery notes'],
+        // DOC-5: standalone ΜΑΡΚ label, used when the mark prints without a QR
+        // (e.g. an ETL-imported legacy invoice: VALID + mydata_mark, no url).
+        'mark_label' => ['ΜΑΡΚ', 'MARK'],
 
         // Footer
         'mydata_verify' => [

@@ -87,6 +87,13 @@ class ResendFailedInvoiceEmails extends Command
     {
         return Invoice::query()
             ->where('company_id', $tenant->getKey())
+            // DOC-6: only ISSUED, non-cancelled documents are emailable (the mail
+            // body asserts «…που εκδόθηκε…»). Gating the SELECT — not just the job
+            // — stops the sweep from re-queuing a cancelled invoice on every run
+            // (it would otherwise churn: dispatch → job skips → still 'failed' →
+            // re-selected next run). Mirrors Invoice::isPubliclyViewable().
+            ->where('local_status', 'active')
+            ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'))
             ->whereHas('mailLog', fn ($q) => $q->where('status', 'failed')->where('created_at', '>=', $since))
             ->with('mailLog') // ordered desc by created_at on the relation
             ->latest('id')
