@@ -79,6 +79,9 @@ class DashboardMetricsTest extends TestCase
             'issued_at'       => '2026-05-10 10:00:00',
             'net_total'       => 100,
             'gross_total'     => 124,
+            // MON-5: default to an ISSUED invoice — unissued drafts no longer count
+            // toward the money surfaces (a test overrides this to exercise drafts).
+            'local_status'    => 'active',
         ], $attrs));
 
         // mydata_state isn't fillable (submitter-only) — force it.
@@ -326,6 +329,50 @@ class DashboardMetricsTest extends TestCase
 
         $this->assertSame(100.0, $fig->net);    // sale only, legacy credit excluded
         $this->assertSame(1, $fig->count);
+    }
+
+    public function test_income_excludes_unissued_sale_drafts_but_keeps_legacy_drafts(): void
+    {
+        // MON-5: an unissued sale draft is not revenue…
+        $this->makeInvoice(['net_total' => 100, 'gross_total' => 124]);                              // active → counts
+        $this->makeInvoice(['net_total' => 999, 'gross_total' => 999, 'local_status' => 'draft']);    // draft → excluded
+        // …but a legacy-imported draft (legacy_id set) IS a real historical document.
+        $this->makeInvoice(['net_total' => 70, 'gross_total' => 87, 'local_status' => 'draft', 'legacy_id' => 5000]);
+
+        $fig = (new DashboardMetrics($this->tenant))->income(
+            Carbon::parse('2026-05-01')->startOfMonth(),
+            Carbon::parse('2026-05-31')->endOfMonth(),
+        );
+
+        $this->assertSame(170.0, $fig->net);   // 100 active + 70 legacy; the 999 draft excluded
+        $this->assertSame(2, $fig->count);
+    }
+
+    public function test_receivables_exclude_unissued_sale_drafts(): void
+    {
+        // credit-term active sale → a receivable
+        $this->makeInvoice(['payment_method_id' => $this->credit->id, 'gross_total' => 500]);
+        // credit-term DRAFT sale → not issued → not a receivable
+        $this->makeInvoice(['payment_method_id' => $this->credit->id, 'gross_total' => 999, 'local_status' => 'draft']);
+
+        $this->assertSame(500.0, (new DashboardMetrics($this->tenant))->outstandingReceivables());
+    }
+
+    public function test_drafts_pipeline_reports_only_unissued_sale_drafts(): void
+    {
+        // Two unissued sale drafts → the pipeline.
+        $this->makeInvoice(['local_status' => 'draft', 'net_total' => 50, 'gross_total' => 62]);
+        $this->makeInvoice(['local_status' => 'draft', 'net_total' => 30, 'gross_total' => 37]);
+        // Active sale → not a draft.
+        $this->makeInvoice(['net_total' => 100, 'gross_total' => 124]);
+        // Legacy draft → real document, NOT part of the pro-forma pipeline.
+        $this->makeInvoice(['local_status' => 'draft', 'legacy_id' => 7001, 'net_total' => 999, 'gross_total' => 999]);
+
+        $p = (new DashboardMetrics($this->tenant))->draftsPipeline();
+
+        $this->assertSame(2, $p['count']);
+        $this->assertSame(80.0, $p['net']);     // 50 + 30
+        $this->assertSame(99.0, $p['gross']);   // 62 + 37
     }
 
     public function test_outstanding_nets_out_valid_credit_notes(): void

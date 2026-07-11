@@ -82,4 +82,48 @@ class InvoiceScope
                 ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
                 ->where('invoice_types.is_credit', true));
     }
+
+    /**
+     * MON-5: drop UNISSUED SALE DRAFTS from the real money surfaces (turnover,
+     * receivables, Καρτέλα). A draft is not an issued document, so a just-created /
+     * WHMCS-staged / renewal πρόχειρο must NOT read as revenue or a receivable.
+     *
+     * KEPT (still counted), because they are NOT unissued sales:
+     *  - credit-note drafts — IssueCreditNote issues them as a draft that ALREADY
+     *    reduces the balance locally (deliberate); dropping them would un-reduce.
+     *  - legacy-imported drafts (`legacy_id` set) — real historical documents the
+     *    ETL backfilled as draft (mirrors LedgerBook's carve-out).
+     *
+     * So a row survives if it is: not-draft OR legacy OR a credit note. Columns are
+     * qualified `invoices.` because the joined lookup tables (payment_methods /
+     * invoice_types) ALSO carry a `legacy_id` — unqualified would be ambiguous.
+     * Base table is `invoices` (no alias) at every call site.
+     */
+    public static function excludeUnissuedDrafts($query)
+    {
+        return $query->where(fn ($q) => $q
+            ->where('invoices.local_status', '!=', 'draft')
+            ->orWhereNotNull('invoices.legacy_id')
+            ->orWhereNotNull('invoices.credited_invoice_id')
+            ->orWhereExists(fn ($sub) => $sub->from('invoice_types')
+                ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
+                ->where('invoice_types.is_credit', true)));
+    }
+
+    /**
+     * The complement of excludeUnissuedDrafts() — ONLY the unissued sale drafts
+     * (πρόχειρα / προτιμολόγια): local draft, new-app (`legacy_id` null), NOT a
+     * credit note. Feeds the «Πρόχειρα» pipeline figure so operators still see how
+     * many drafts exist and their value, even though they're out of the money totals.
+     */
+    public static function onlyUnissuedDrafts($query)
+    {
+        return $query
+            ->where('invoices.local_status', 'draft')
+            ->whereNull('invoices.legacy_id')
+            ->whereNull('invoices.credited_invoice_id')
+            ->whereNotExists(fn ($sub) => $sub->from('invoice_types')
+                ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
+                ->where('invoice_types.is_credit', true));
+    }
 }

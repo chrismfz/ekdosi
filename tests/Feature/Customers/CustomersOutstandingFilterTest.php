@@ -63,7 +63,7 @@ class CustomersOutstandingFilterTest extends TestCase
             'company_id' => $this->tenant->id, 'invcode' => 'D'.uniqid(), 'code' => 1,
             'invoice_type_id' => $this->type->id, 'customer_id' => $c->id,
             'payment_method_id' => $this->credit->id, 'issued_at' => now(),
-            'net_total' => 200, 'gross_total' => 248,
+            'net_total' => 200, 'gross_total' => 248, 'local_status' => 'active',
         ]);
 
         return $c;
@@ -76,7 +76,7 @@ class CustomersOutstandingFilterTest extends TestCase
             'company_id' => $this->tenant->id, 'invcode' => 'S'.uniqid(), 'code' => 2,
             'invoice_type_id' => $this->type->id, 'customer_id' => $c->id,
             'payment_method_id' => $this->credit->id, 'issued_at' => now(),
-            'net_total' => 100, 'gross_total' => 124,
+            'net_total' => 100, 'gross_total' => 124, 'local_status' => 'active',
         ]);
         Payment::create([
             'company_id' => $this->tenant->id, 'customer_id' => $c->id,

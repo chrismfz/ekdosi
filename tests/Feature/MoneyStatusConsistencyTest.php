@@ -75,6 +75,7 @@ class MoneyStatusConsistencyTest extends TestCase
             'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ'.uniqid(), 'code' => 1,
             'invoice_type_id' => $this->saleType->id, 'customer_id' => $c->id,
             'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-10 10:00:00',
+            'local_status' => 'active',   // MON-5: an issued sale (drafts don't count)
         ]);
         InvoiceLine::create([
             'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
@@ -92,6 +93,7 @@ class MoneyStatusConsistencyTest extends TestCase
             'invoice_type_id' => $this->saleType->id, 'customer_id' => $c->id,
             'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-10 10:00:00',
             'withhold_rate' => 20, 'withhold_category' => 1,   // §8.4 cat 1 → reduces the collectible
+            'local_status' => 'active',   // MON-5: an issued sale
         ]);
         InvoiceLine::create([
             'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,

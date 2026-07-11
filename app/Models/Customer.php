@@ -230,6 +230,9 @@ class Customer extends Model
         // per-customer debtor table Σ diverges from the headline (the
         // reconciliation invariant OutstandingCustomersTable/MoneyStatusConsistencyTest guard).
         InvoiceScope::excludeCreditNotes($owed);
+        // MON-5: unissued sale drafts aren't receivables — mirror
+        // DashboardMetrics::outstandingReceivables() so the two stay reconciled.
+        InvoiceScope::excludeUnissuedDrafts($owed);
         $owed = InvoiceScope::live($owed, 'invoices.');
 
         // MON-9: standalone legacy credit notes (is_credit type, no

@@ -165,6 +165,10 @@ class CustomerLedgerBuilder
             // cancelled credit notes) from the ledger money math,
             // consistent with InvoiceBalance + DashboardMetrics.
             ->when(true, fn ($q) => InvoiceScope::live($q, 'invoices.'))
+            // MON-5: a πρόχειρο isn't a document on the customer's statement/balance
+            // (credit-note drafts, which reduce, are kept via the helper's carve-out;
+            // legacy-imported drafts are kept too). Matches DashboardMetrics.
+            ->when(true, fn ($q) => InvoiceScope::excludeUnissuedDrafts($q))
             ->orderBy('invoices.issued_at', 'asc')
             ->select(
                 'invoices.id',

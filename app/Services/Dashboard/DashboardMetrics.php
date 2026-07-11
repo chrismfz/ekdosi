@@ -135,6 +135,10 @@ class DashboardMetrics
         // type) shape. Safe unqualified here: the only join is payment_methods,
         // which carries neither credited_invoice_id nor invoice_type_id.
         InvoiceScope::excludeCreditNotes($base);
+        // MON-5: an unissued sale draft is not a receivable yet (credit-note drafts,
+        // which reduce, are kept via the helper's carve-out). Mirror in
+        // Customer::scopeWithOutstandingBalance so headline == Σ per-customer.
+        InvoiceScope::excludeUnissuedDrafts($base);
 
         // Receivable base = payable_total (collectible) per row, gross_total fallback
         // for not-yet-backfilled rows. Revenue/turnover sums elsewhere stay on gross_total.
@@ -191,6 +195,32 @@ class DashboardMetrics
             ->whereNull('legacy_id')
             ->where('local_status', '!=', 'cancelled')   // a cancelled draft is not a filing backlog
             ->count();
+    }
+
+    /**
+     * MON-5: the «Πρόχειρα / προτιμολόγια» pipeline — count + value of the exact
+     * unissued SALE drafts that excludeUnissuedDrafts() keeps OUT of turnover /
+     * receivables. Surfaced so the operator always sees how many drafts exist and
+     * their worth (and, if ekdosi ever runs as a service-manager, this is the
+     * pro-forma queue). Credit-note drafts + legacy drafts are NOT counted here —
+     * they're not unissued sales (they count in the money totals).
+     *
+     * @return array{count: int, net: float, gross: float}
+     */
+    public function draftsPipeline(): array
+    {
+        $q = DB::table('invoices')
+            ->where('company_id', $this->tenant->id)
+            ->whereNull('deleted_at');
+        InvoiceScope::onlyUnissuedDrafts($q);
+
+        $row = $q->selectRaw('COUNT(*) cnt, COALESCE(SUM(net_total), 0) net, COALESCE(SUM(gross_total), 0) gross')->first();
+
+        return [
+            'count' => (int) ($row->cnt ?? 0),
+            'net' => round((float) ($row->net ?? 0), 2),
+            'gross' => round((float) ($row->gross ?? 0), 2),
+        ];
     }
 
     /**
@@ -292,6 +322,8 @@ class DashboardMetrics
             // MON-9: exclude credit notes from sales — correlated (credited_invoice_id)
             // AND standalone/legacy (invoice_types.is_credit), matching the ledger.
             InvoiceScope::excludeCreditNotes($q);
+            // MON-5: unissued sale drafts aren't turnover.
+            InvoiceScope::excludeUnissuedDrafts($q);
             InvoiceScope::live($q);
         };
 
@@ -708,6 +740,9 @@ class DashboardMetrics
 
         // MON-9: exclude correlated AND standalone/legacy (is_credit) credit notes.
         InvoiceScope::excludeCreditNotes($q);
+        // MON-5: a πρόχειρο is not issued revenue — drop unissued sale drafts
+        // (the «Πρόχειρα» pipeline figure reports them separately).
+        InvoiceScope::excludeUnissuedDrafts($q);
 
         return InvoiceScope::live($q);
     }
