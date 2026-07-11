@@ -141,7 +141,10 @@ class InvoicePaymentsRelationManager extends RelationManager
             // receivables owed base while the ledger treats it as a credit
             // (dashboard ≠ ledger by 2×gross for that doc).
             && ! ($invoice->invoiceType?->is_credit ?? false)
-            && $invoice->mydata_state !== 'CANCELLED';
+            && $invoice->mydata_state !== 'CANCELLED'
+            // MON-5: a draft (πρόχειρο) isn't a receivable — paying it would
+            // understate the balance (phantom credit). Finalise first, then pay.
+            && $invoice->local_status !== 'draft';
     }
 
     /**

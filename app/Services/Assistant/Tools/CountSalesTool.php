@@ -54,6 +54,10 @@ class CountSalesTool implements AssistantTool
         // sales inflated both the invoice count and the turnover. Exclude them —
         // correlated (credited_invoice_id) AND standalone/legacy (is_credit type).
         InvoiceScope::excludeCreditNotes($q);
+        // MON-5: a πρόχειρο isn't an issued sale — mirror the dashboard so the
+        // assistant's «πόσες πωλήσεις» doesn't count drafts (credit-note/legacy
+        // drafts are kept by the helper, but this is the sales side).
+        InvoiceScope::excludeUnissuedDrafts($q);
         InvoiceScope::live($q);
 
         $count = (clone $q)->count();

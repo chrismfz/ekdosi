@@ -87,6 +87,7 @@ class CustomerLedgerBuilderTest extends TestCase
             'issued_at' => $issuedAt,
             'gross_total' => $gross,
             'net_total' => $net ?? round($gross / 1.24, 2),
+            'local_status' => 'active',   // MON-5: issued (unissued drafts don't count)
         ]);
     }
 

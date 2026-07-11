@@ -365,10 +365,29 @@ class InvoiceForm
                                     self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($get('vat_percent')))
                                 ))
                                 // Typing gross back-computes the stored net price.
-                                ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
-                                    'price_per_item',
-                                    self::netFromGross(self::numOrNull($state), self::numOrNull($get('vat_percent')))
-                                )),
+                                ->afterStateUpdated(function ($state, callable $set, Get $get): void {
+                                    $vat = self::numOrNull($get('vat_percent'));
+                                    $entered = self::numOrNull($state);
+                                    $net = self::netFromGross($entered, $vat);
+                                    $set('price_per_item', $net);
+
+                                    // MON-7: net is stored at 2dp (decimal(14,2)), so some gross
+                                    // values can't round-trip (10.00 @24% → net 8.06 → gross 9.99).
+                                    // Warn so the operator sees the line will bill at the recomputed
+                                    // gross and can tweak the «Καθαρή τιμή» if an exact gross matters.
+                                    if ($entered !== null && $net !== null) {
+                                        $recomputed = self::grossFromNet($net, $vat);
+                                        if ($recomputed !== null && abs($recomputed - round($entered, 2)) >= 0.005) {
+                                            Notification::make()
+                                                ->title('Η τιμή με ΦΠΑ στρογγυλοποιήθηκε')
+                                                ->body('Το '.number_format($entered, 2, ',', '.').'€ θα χρεωθεί ως '
+                                                    .number_format($recomputed, 2, ',', '.').'€ — το καθαρό αποθηκεύεται σε 2 δεκαδικά. '
+                                                    .'Προσάρμοσε την «Καθαρή τιμή» αν χρειάζεσαι ακριβές μικτό.')
+                                                ->warning()
+                                                ->send();
+                                        }
+                                    }
+                                }),
 
                             TextInput::make('discount')
                                 ->label('Έκπτωση %')

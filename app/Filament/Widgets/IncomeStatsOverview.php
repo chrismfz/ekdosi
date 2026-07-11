@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Widgets\Concerns\FormatsDashboardValues;
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
@@ -84,6 +85,21 @@ class IncomeStatsOverview extends StatsOverviewWidget
 
             $this->invoiceCountStat($tenant, $metrics, $thisMonth->count),
         ];
+
+        // MON-5: πρόχειρα (προτιμολόγια) — kept OUT of the money totals above, so
+        // show them separately whenever any exist (count + value), clickable into
+        // the invoices list filtered to drafts. Zero drafts → no tile (no noise).
+        $drafts = $metrics->draftsPipeline();
+        if ($drafts['count'] > 0) {
+            $stats[] = Stat::make('Πρόχειρα (προτιμολόγια)', (string) $drafts['count'])
+                ->description('Αξία (μικτά): '.$this->eur($drafts['gross']).' • δεν μετρούν στα έσοδα')
+                ->descriptionIcon('heroicon-m-document')
+                ->color('gray')
+                ->url(InvoiceResource::getUrl('index', [
+                    'tableFilters' => ['local_status' => ['value' => 'draft']],
+                ]))
+                ->extraAttributes(['class' => 'cursor-pointer']);
+        }
 
         return $stats;
     }

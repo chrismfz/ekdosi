@@ -48,4 +48,20 @@ class GrossPriceConversionTest extends TestCase
         $this->assertSame(100.0, InvoiceForm::grossFromNet(100.0, null));
         $this->assertSame(100.0, InvoiceForm::netFromGross(100.0, null));
     }
+
+    public function test_gross_edit_round_trip_loss_is_detectable(): void
+    {
+        // MON-7: 10.00 @24% can't round-trip through 2dp net (8.06) → 9.99. The form
+        // warns exactly on this |recomputed − entered| ≥ 0.005 condition.
+        $lossyNet = InvoiceForm::netFromGross(10.00, 24.0);
+        $this->assertSame(8.06, $lossyNet);
+        $this->assertSame(9.99, InvoiceForm::grossFromNet($lossyNet, 24.0));
+        $this->assertGreaterThanOrEqual(0.005, abs(InvoiceForm::grossFromNet($lossyNet, 24.0) - 10.00));
+
+        // A clean value round-trips exactly → no warning: 12.40 @24% → net 10.00 → 12.40.
+        $cleanNet = InvoiceForm::netFromGross(12.40, 24.0);
+        $this->assertSame(10.0, $cleanNet);
+        $this->assertSame(12.40, InvoiceForm::grossFromNet($cleanNet, 24.0));
+        $this->assertLessThan(0.005, abs(InvoiceForm::grossFromNet($cleanNet, 24.0) - 12.40));
+    }
 }

@@ -53,6 +53,7 @@ class ReportsRenderTest extends TestCase
                 'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ'.$i, 'code' => $i + 1,
                 'invoice_type_id' => $type->id, 'issued_at' => $date.' 10:00:00',
                 'net_total' => 100 * ($i + 1), 'gross_total' => 124 * ($i + 1),
+                'local_status' => 'active',   // MON-5: issued
             ]);
         }
 
