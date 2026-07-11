@@ -28,9 +28,20 @@ use App\Models\Invoice;
  * Whitespace + HTML escaping are the caller's responsibility — this
  * renderer hands back the substituted string. The Blade layout that
  * wraps the body escapes via {{ }} by default.
+ *
+ * DOC-8: the invoice mail is a MARKDOWN mailable, so the rendered body is
+ * parsed by CommonMark. `e()` in the Blade slot escapes HTML but NOT markdown
+ * syntax — so an interpolated value like a customer name «[x](http://evil)»
+ * would become a live link/image. `renderBody()` therefore backslash-escapes
+ * ASCII punctuation in the interpolated VALUES (not the operator's template,
+ * which may carry intentional markdown, and not the AADE url / mark_section,
+ * which must stay functional). The SUBJECT is plain text → never escaped.
  */
 class MailTemplateRenderer
 {
+    /** Body placeholders left RAW (functional URL / our own composed block). */
+    private const BODY_RAW_PLACEHOLDERS = ['verify_url', 'mark_section'];
+
     public const DEFAULT_SUBJECT_TEMPLATE = '{tenant_name} — {invoice_type} {invoice_code}';
 
     public const DEFAULT_BODY_TEMPLATE = <<<'TXT'
@@ -61,20 +72,50 @@ TXT;
     public function renderBody(Invoice $invoice, ?string $template): string
     {
         $tpl = trim((string) $template) !== '' ? $template : self::DEFAULT_BODY_TEMPLATE;
+        // DOC-8: escape markdown in the interpolated values — the body is
+        // rendered through CommonMark, so an un-escaped «[x](url)» in e.g. the
+        // customer name would become a live link.
+        return $this->interpolate($tpl, $this->vars($invoice), escapeMarkdown: true);
+    }
+
+    /**
+     * The SAME body, but WITHOUT markdown escaping — for the plain-text MIME
+     * part (DOC-8 Finding A). The text part is not parsed by CommonMark, so the
+     * backslash-escaping renderBody() adds for the HTML part would show up as
+     * literal `\.`/`\,` in text-only clients. The injection risk that DOC-8
+     * closes is HTML-only (a live link/image), so plain text needs no escaping.
+     */
+    public function renderBodyPlain(Invoice $invoice, ?string $template): string
+    {
+        $tpl = trim((string) $template) !== '' ? $template : self::DEFAULT_BODY_TEMPLATE;
         return $this->interpolate($tpl, $this->vars($invoice));
+    }
+
+    /**
+     * Backslash-escape CommonMark ASCII punctuation so an interpolated value
+     * renders LITERALLY in a markdown body (DOC-8). `\x` renders as `x` for
+     * every punctuation char, so a normal name/number is displayed unchanged.
+     */
+    public static function escapeMarkdown(string $value): string
+    {
+        return preg_replace('/[!"#$%&\'()*+,\-.\/:;<=>?@\[\\\\\]^_`{|}~]/', '\\\\$0', $value) ?? $value;
     }
 
     /**
      * @param  array<string, string>  $vars
      */
-    private function interpolate(string $template, array $vars): string
+    private function interpolate(string $template, array $vars, bool $escapeMarkdown = false): string
     {
         // strtr is fastest + safest: no regex, no recursion, no
         // accidental partial matches. Each placeholder is a literal
         // string key in $vars.
         $replacements = [];
         foreach ($vars as $name => $value) {
-            $replacements['{'.$name.'}'] = (string) $value;
+            $value = (string) $value;
+            if ($escapeMarkdown && ! in_array($name, self::BODY_RAW_PLACEHOLDERS, true)) {
+                $value = self::escapeMarkdown($value);
+            }
+            $replacements['{'.$name.'}'] = $value;
         }
         return strtr($template, $replacements);
     }

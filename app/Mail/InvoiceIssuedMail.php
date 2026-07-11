@@ -94,16 +94,26 @@ class InvoiceIssuedMail extends Mailable
     {
         $renderer = app(MailTemplateRenderer::class);
 
+        $template = $this->invoice->company?->mail_body_template;
+
         return new Content(
             markdown: 'mail.invoice.issued',
+            // DOC-8 Finding A: an explicit plain-text view fed the UN-escaped
+            // body. Without it Laravel auto-derives the text part from the same
+            // markdown view, which carries the CommonMark backslash-escaping and
+            // leaks literal `\.`/`\,` into text-only clients. renderText() does
+            // NOT run CommonMark, so the text part needs no escaping.
+            text: 'mail.invoice.issued_text',
             with: [
                 'tenant' => $this->invoice->company,
-                // Pre-interpolated body string. The Blade view {{ }}-
-                // escapes it on output, so any HTML/Blade syntax an
-                // operator put in the template is rendered as plain
-                // text — defending against operator-edited HTML being
-                // executed.
-                'body' => $renderer->renderBody($this->invoice, $this->invoice->company?->mail_body_template),
+                // Pre-interpolated body string (HTML part). The Blade view
+                // {{ }}-escapes it on output, so any HTML/Blade syntax an
+                // operator put in the template is rendered as plain text —
+                // defending against operator-edited HTML being executed; the
+                // markdown syntax is neutralised in renderBody() (DOC-8).
+                'body' => $renderer->renderBody($this->invoice, $template),
+                // Same body for the plain-text part, without markdown escaping.
+                'bodyText' => $renderer->renderBodyPlain($this->invoice, $template),
             ],
         );
     }

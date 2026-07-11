@@ -14,6 +14,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -47,6 +48,16 @@ class SendInvoiceEmail implements ShouldQueue
     public int $tries = 3;
 
     /**
+     * OPS-12: stable idempotency key for THIS dispatch. Generated once at
+     * construction and serialized with the job, so every retry of the same
+     * dispatch shares it — that's what lets handle() detect a prior attempt
+     * that already reached the transport and avoid a double-send. A separate
+     * dispatch (e.g. the operator clicks «Αποστολή» twice) gets a fresh key
+     * and is intentionally allowed through.
+     */
+    public string $sendKey;
+
+    /**
      * @return array<int, int>
      */
     public function backoff(): array
@@ -58,7 +69,9 @@ class SendInvoiceEmail implements ShouldQueue
         public Invoice $invoice,
         public string $trigger = 'auto',
         public ?int $triggeredByUserId = null,
-    ) {}
+    ) {
+        $this->sendKey = (string) Str::uuid();
+    }
 
     public function handle(
         InvoicePdfRenderer $renderer,
@@ -81,6 +94,48 @@ class SendInvoiceEmail implements ShouldQueue
         $tenant = $invoice->company;
         $email = trim((string) ($invoice->customer?->email ?? ''));
 
+        // OPS-12: best-effort idempotency. If a PRIOR attempt of this same
+        // dispatch (same send_key) is either a clean 'sent' or a 'sending' left
+        // hanging by a hard crash (kill-9/OOM), do NOT mail the customer again.
+        // The 'sending' window spans PDF render → transport send, so a crash
+        // inside it may have happened BEFORE or AFTER the SMTP accept — we can't
+        // tell, so we bias to at-most-once (assume it went; a rare miss the
+        // operator re-sends by hand beats a duplicate invoice email). This is
+        // the crash-retry double-send it closes. (An SMTP *exception* leaves the
+        // row 'failed' → not matched here → a genuine retry still re-sends.)
+        //
+        // NOT atomic: 'queued' is intentionally NOT in the guard set, and there
+        // is no row lock, so this does not defend against the SAME job running
+        // twice CONCURRENTLY — that's the queue's job (retry_after must exceed a
+        // job's worst-case runtime, which for us is PDF render + SMTP). This
+        // guard is only for the SEQUENTIAL retry-after-crash case.
+        $priorSend = InvoiceMailLog::query()
+            ->where('send_key', $this->sendKey)
+            ->whereIn('status', ['sending', 'sent'])
+            ->orderByDesc('id')
+            ->first();
+        if ($priorSend !== null) {
+            if ($priorSend->status === 'sending') {
+                // Reconcile the crashed-mid-send row: we don't know whether the
+                // transport accepted (the crash could have been before or after
+                // the SMTP handshake), so we assume it did — bias to at-most-once
+                // (a duplicate invoice email is worse than a rare miss the
+                // operator can re-send by hand).
+                $priorSend->update([
+                    'status'        => 'sent',
+                    'sent_at'       => $priorSend->sent_at ?? now(),
+                    'error_message' => 'Επαναδρομολόγηση μετά από διακοπή — θεωρήθηκε ότι στάλθηκε (OPS-12).',
+                ]);
+            }
+            Log::info('SendInvoiceEmail: duplicate retry suppressed (send_key already at transport)', [
+                'invoice_id' => $invoice->getKey(),
+                'send_key'   => $this->sendKey,
+                'prior'      => $priorSend->status,
+            ]);
+
+            return;
+        }
+
         // DOC-6: THE choke-point gate. Every dispatcher funnels through here —
         // the two UI actions (which also pre-gate for immediate feedback), the
         // finalize + myDATA-VALID auto paths, AND the invoices:resend-failed-emails
@@ -97,6 +152,7 @@ class SendInvoiceEmail implements ShouldQueue
                 'recipient'            => $email ?: '(no customer email)',
                 'from_address'         => $tenant?->mail_from_address ?: config('mail.from.address'),
                 'trigger'              => $this->trigger,
+                'send_key'             => $this->sendKey,
                 'status'               => 'failed',
                 'error_message'        => 'Το παραστατικό δεν είναι εκδοθέν (πρόχειρο ή ακυρωμένο) — δεν αποστέλλεται.',
                 'queued_at'            => now(),
@@ -128,6 +184,7 @@ class SendInvoiceEmail implements ShouldQueue
             'from_address'         => $tenant?->mail_from_address ?: config('mail.from.address'),
             'subject'              => $templateRenderer->renderSubject($invoice, $tenant?->mail_subject_template),
             'trigger'              => $this->trigger,
+            'send_key'             => $this->sendKey,
             'status'               => 'queued',
             'queued_at'            => now(),
             'triggered_by_user_id' => $this->triggeredByUserId,

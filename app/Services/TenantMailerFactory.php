@@ -88,7 +88,12 @@ class TenantMailerFactory
             // Misconfigured tenant SMTP would otherwise wedge every
             // future send. Fall through to the default mailer + log so
             // the operator sees the diagnostic in queue worker logs.
-            Log::warning('Tenant SMTP build failed — falling back to default mailer', [
+            // OPS-12: the From stays the tenant's address but now leaves via the
+            // GLOBAL SMTP server, which is almost certainly NOT authorised by the
+            // tenant domain's SPF/DKIM → the mail may be spam-foldered/rejected.
+            // Deliberate (send-degraded beats send-never); flagged loudly so an
+            // operator fixes the tenant SMTP rather than relying on the fallback.
+            Log::warning('Tenant SMTP build failed — falling back to default mailer (SPF/DKIM may misalign; fix the tenant SMTP)', [
                 'tenant_id' => $tenant->getKey(),
                 'error'     => $e->getMessage(),
             ]);

@@ -10,6 +10,7 @@ use App\Filament\Resources\Customers\Pages\CustomerLedger;
 use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Filament\Resources\Customers\Pages\ListCustomers;
 use App\Filament\Resources\Customers\RelationManagers\ContactsRelationManager;
+use App\Filament\Resources\Customers\RelationManagers\MailLogRelationManager;
 use App\Filament\Resources\Customers\RelationManagers\ServiceContractsRelationManager;
 use App\Filament\Resources\Customers\Schemas\CustomerForm;
 use App\Filament\Resources\Customers\Tables\CustomersTable;
@@ -94,6 +95,7 @@ class CustomerResource extends Resource
         return [
             ContactsRelationManager::class,
             ServiceContractsRelationManager::class,
+            MailLogRelationManager::class,
             InternalNotesRelationManager::class,
             AttachmentsRelationManager::class,
             ActivityLogRelationManager::class,

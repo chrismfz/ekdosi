@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Mail\InvoiceIssuedMail;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\MailTemplateRenderer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Markdown;
 use Tests\TestCase;
 
 /**
@@ -115,7 +117,7 @@ class MailTemplateRendererTest extends TestCase
         $this->assertStringContainsString($invoice->invcode, $body);
     }
 
-    public function test_blade_syntax_in_template_is_NOT_evaluated(): void
+    public function test_blade_syntax_in_template_is_no_t_evaluated(): void
     {
         // Security: operator-edited templates must never execute PHP
         // or Blade. The renderer is pure str_replace; Blade syntax
@@ -152,7 +154,7 @@ class MailTemplateRendererTest extends TestCase
         $invoice = $this->makeInvoice();
         $invoice->forceFill([
             'mydata_mark' => '400099999999999',
-            'mydata_url'  => 'https://verify.aade.gr/?mark=400099999999999',
+            'mydata_url' => 'https://verify.aade.gr/?mark=400099999999999',
             'mydata_state' => 'VALID',
         ])->save();
 
@@ -163,6 +165,99 @@ class MailTemplateRendererTest extends TestCase
         $this->assertStringContainsString('400099999999999', $body);
         $this->assertStringContainsString('https://verify.aade.gr', $body);
         $this->assertStringContainsString('myDATA', $body);
+    }
+
+    public function test_markdown_in_customer_name_is_escaped_not_a_live_link(): void
+    {
+        // DOC-8: a customer name «[x](http://evil)» must NOT become a live link
+        // when the markdown mail body is parsed by CommonMark.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['company_name' => '[Δες εδώ](http://evil.example)'])->save();
+
+        $body = app(MailTemplateRenderer::class)
+            ->renderBody($invoice->fresh(), 'Πελάτης: {customer_name}');
+
+        // The renderer escaped the markdown punctuation…
+        $this->assertStringContainsString('\\[', $body);
+        $this->assertStringNotContainsString('[Δες εδώ](http://evil', $body);
+
+        // …so CommonMark renders it literally, NOT as an anchor.
+        $html = (string) Markdown::parse($body);
+        $this->assertStringNotContainsString('href="http://evil', $html);
+        $this->assertStringNotContainsString('<a ', $html);
+    }
+
+    public function test_normal_name_with_punctuation_displays_unchanged_after_markdown(): void
+    {
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['company_name' => 'Παπαδόπουλος Α.Ε. & Σία'])->save();
+
+        $body = app(MailTemplateRenderer::class)
+            ->renderBody($invoice->fresh(), 'Πελάτης: {customer_name}');
+        $html = (string) Markdown::parse($body);
+
+        // Backslash-escaped punctuation renders as the literal char.
+        $this->assertStringContainsString('Παπαδόπουλος Α.Ε. &amp; Σία', $html);
+    }
+
+    public function test_subject_is_not_markdown_escaped(): void
+    {
+        // The subject is a plain header, not markdown — no backslashes.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['company_name' => 'Α.Ε. [test]'])->save();
+
+        $subject = app(MailTemplateRenderer::class)
+            ->renderSubject($invoice->fresh(), '{customer_name}');
+
+        $this->assertSame('Α.Ε. [test]', $subject);
+    }
+
+    public function test_verify_url_stays_a_functional_url_not_escaped(): void
+    {
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_mark' => '400099999999999',
+            'mydata_url' => 'https://verify.aade.gr/?mark=400099999999999',
+        ])->save();
+
+        $body = app(MailTemplateRenderer::class)
+            ->renderBody($invoice->fresh(), 'Επαλήθευση: {verify_url}');
+
+        // The AADE url is a RAW placeholder — must stay usable, not backslashed.
+        $this->assertStringContainsString('https://verify.aade.gr/?mark=400099999999999', $body);
+    }
+
+    public function test_render_body_plain_does_not_escape_markdown(): void
+    {
+        // DOC-8 Finding A: the plain-text variant must NOT carry the CommonMark
+        // backslash-escaping — the text part is never parsed as markdown.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['company_name' => 'Παπαδόπουλος Α.Ε.'])->save();
+
+        $plain = app(MailTemplateRenderer::class)
+            ->renderBodyPlain($invoice->fresh(), 'Πελάτης: {customer_name}');
+
+        $this->assertSame('Πελάτης: Παπαδόπουλος Α.Ε.', $plain);
+        $this->assertStringNotContainsString('\\', $plain);
+    }
+
+    public function test_invoice_mail_plain_text_part_has_no_backslashes(): void
+    {
+        // DOC-8 Finding A end-to-end: render the real mailable and assert the
+        // plain-text MIME part shows values verbatim (no «1\.234\,56 €»). The
+        // default body template carries {total}/{issued_at} whose punctuation is
+        // escaped in the HTML part — the text part must stay clean.
+        $invoice = $this->makeInvoice();
+        $fresh = Invoice::query()->whereKey($invoice->getKey())
+            ->with(['company', 'customer', 'invoiceType'])
+            ->first();
+
+        $mailable = new InvoiceIssuedMail($fresh, 'fake-pdf-bytes');
+
+        // The text part shows the formatted total with its real comma…
+        $mailable->assertSeeInText('124,00 €');
+        // …and carries NO markdown backslash-escaping.
+        $mailable->assertDontSeeInText('\\');
     }
 
     private function makeInvoice(): Invoice

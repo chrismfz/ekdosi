@@ -18,6 +18,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Added
+- **Ιστορικό email — per-customer + γενικό (tenant-wide).** Πέρα από το per-invoice ιστορικό
+  (ViewInvoice), κάθε πελάτης έχει πλέον tab «Ιστορικό email» (όλες οι αποστολές τιμολογίων του,
+  μέσω `Customer::invoiceMailLog`), και υπάρχει read-only σελίδα «Ιστορικό email» για ΟΛΟ τον tenant
+  (`InvoiceMailLogResource`) με φίλτρα κατάστασης/τρόπου. Δείχνει παραλήπτη, θέμα, κατάσταση
+  (στάλθηκε/απέτυχε/…), χρόνους, ποιος έστειλε — read-only (γράφει μόνο το job). Νέο resource →
+  τρέξε `shield:generate` μετά το deploy.
 - **Build stamp + read-only έλεγχος ενημερώσεων.** Δίπλα στο όνομα της εφαρμογής (και στο
   `php artisan ekdosi:version`) εμφανίζεται πλέον η ταυτότητα του deployed build: `v{SemVer} ·
   2026.07.11-150101 (sha)` — το build stamp παράγεται **αυτόματα** από το git commit στο deploy
@@ -31,7 +37,17 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   χειριστής να βλέπει πάντα πόσα πρόχειρα υπάρχουν και την αξία τους — η pro-forma ουρά για μελλοντικό
   service-manager. Νέο `DashboardMetrics::draftsPipeline()`.
 
+### Security
+- **AUDIT DOC-8 — markdown injection στο σώμα του email τιμολογίου.** Το body είναι markdown mailable,
+  οπότε ένα όνομα πελάτη `[x](http://…)` γινόταν live link (το `e()` κάνει escape HTML, όχι markdown).
+  Ο `MailTemplateRenderer` κάνει πλέον backslash-escape του ASCII-punctuation στις interpolated **τιμές**
+  (όχι στο operator template ούτε στο verify_url/mark_section)· το subject (plain text) δεν αγγίζεται.
+
 ### Fixed
+- **AUDIT OPS-12 — τέλος στο διπλό email σε retry.** Κάθε αποστολή φέρει σταθερό `send_key` (uuid,
+  serialized ώστε να επιβιώνει στα retries)· αν ένα προηγούμενο attempt με το ίδιο key άφησε `sending`
+  (hard crash μετά το SMTP accept) ή `sent`, το retry ΔΕΝ ξαναστέλνει (reconcile → sent). Νέα στήλη
+  `invoice_mail_log.send_key`. Το SPF/DKIM fallback warning (tenant SMTP fail → global SMTP) έγινε actionable.
 - **AUDIT MON-5 — τα πρόχειρα δεν φουσκώνουν πια τζίρο/εισπρακτέα/ΦΠΑ/Καρτέλα.** Ένα πρόχειρο δεν είναι
   εκδοθέν παραστατικό, οπότε ένα μόλις-δημιουργημένο / WHMCS-staged / renewal draft δεν μετράει πλέον ως
   έσοδο ή εισπρακτέο. Νέο `InvoiceScope::excludeUnissuedDrafts()` σε όλα τα money surfaces (dashboard,

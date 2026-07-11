@@ -330,6 +330,44 @@ class SendInvoiceEmailTest extends TestCase
         });
     }
 
+    public function test_ops12_retry_of_the_same_dispatch_does_not_double_send(): void
+    {
+        $invoice = $this->makeFiledInvoice();
+        $job = new SendInvoiceEmail($invoice, trigger: 'auto');
+
+        // Attempt 1 sends and marks the row 'sent'.
+        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class));
+        // Attempt 2 = a RETRY of the same dispatch (same instance → same send_key):
+        // the guard sees the 'sent' row and must NOT mail the customer again.
+        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class));
+
+        Mail::assertSent(InvoiceIssuedMail::class, 1);   // exactly once, not twice
+        $this->assertSame(1, InvoiceMailLog::where('invoice_id', $invoice->id)
+            ->whereIn('status', ['sent', 'sending'])->count());
+    }
+
+    public function test_ops12_crashed_mid_send_row_is_reconciled_not_resent(): void
+    {
+        // Simulate the double-send window: attempt 1 hard-crashed (kill-9) AFTER
+        // the SMTP accept but before writing 'sent' → a 'sending' row is left with
+        // this dispatch's send_key. The retry must reconcile it, not re-send.
+        $invoice = $this->makeFiledInvoice();
+        $job = new SendInvoiceEmail($invoice, trigger: 'auto');
+        $job->sendKey = 'test-send-key-0001';
+
+        $log = InvoiceMailLog::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'recipient' => 'cust@example.com', 'trigger' => 'auto',
+            'send_key' => 'test-send-key-0001', 'status' => 'sending', 'queued_at' => now(),
+        ]);
+
+        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class));
+
+        Mail::assertNothingSent();                          // no duplicate
+        $this->assertSame('sent', $log->fresh()->status);   // reconciled
+        $this->assertStringContainsString('OPS-12', (string) $log->fresh()->error_message);
+    }
+
     private function makeFiledInvoice(): Invoice
     {
         $invoice = Invoice::create([
