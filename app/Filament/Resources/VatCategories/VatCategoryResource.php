@@ -7,6 +7,8 @@ use App\Filament\Resources\VatCategories\Pages\EditVatCategory;
 use App\Filament\Resources\VatCategories\Pages\ListVatCategories;
 use App\Filament\Resources\VatCategories\Schemas\VatCategoryForm;
 use App\Filament\Resources\VatCategories\Tables\VatCategoriesTable;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\Product;
 use App\Models\VatCategory;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -14,6 +16,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use UnitEnum;
 
@@ -28,6 +31,20 @@ class VatCategoryResource extends Resource
     protected static ?int $navigationSort = 60;
 
     protected static ?string $recordTitleAttribute = 'description';
+
+    /**
+     * SET-2: dependent-record counts that block deletion (single + bulk + force).
+     * ONE source of truth — the Edit page's guard and the table's bulk/force
+     * guards all read this map.
+     *
+     * @return array<string, int> label => count
+     */
+    public static function dependents(Model $record): array
+    {
+        return [
+            'προϊόντα' => GuardedDeleteAction::count(Product::class, 'vat_category_id', $record->id),
+        ];
+    }
 
     public static function getEloquentQuery(): Builder
     {

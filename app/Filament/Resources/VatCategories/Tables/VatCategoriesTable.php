@@ -2,12 +2,12 @@
 
 namespace App\Filament\Resources\VatCategories\Tables;
 
+use App\Filament\Resources\VatCategories\VatCategoryResource;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Support\MyData\Codes;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
@@ -87,9 +87,9 @@ class VatCategoriesTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn ($record): array => VatCategoryResource::dependents($record)),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::forceBulk(fn ($record): array => VatCategoryResource::dependents($record)),
                 ]),
             ])
             ->defaultSort('rate');

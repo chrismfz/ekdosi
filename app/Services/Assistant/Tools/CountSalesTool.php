@@ -50,6 +50,10 @@ class CountSalesTool implements AssistantTool
         $q = Invoice::query()
             ->where('company_id', $tenant->getKey())
             ->whereBetween('issued_at', [$from, $to]);
+        // MON-6: credit notes carry POSITIVE gross_total, so counting them as
+        // sales inflated both the invoice count and the turnover. Exclude them —
+        // correlated (credited_invoice_id) AND standalone/legacy (is_credit type).
+        InvoiceScope::excludeCreditNotes($q);
         InvoiceScope::live($q);
 
         $count = (clone $q)->count();

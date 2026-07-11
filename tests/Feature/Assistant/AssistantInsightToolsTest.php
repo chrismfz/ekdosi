@@ -9,6 +9,7 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\User;
 use App\Services\Assistant\ToolRegistry;
+use App\Services\Assistant\Tools\CountSalesTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\RecentInvoicesTool;
@@ -104,6 +105,81 @@ class AssistantInsightToolsTest extends TestCase
         $this->assertEqualsWithDelta(100.0, $res['net'], 0.02);
         $this->assertEqualsWithDelta(24.0, $res['vat_output'], 0.02);
         $this->assertEqualsWithDelta(124.0, $res['gross'], 0.01);
+    }
+
+    /** Issue a live credit note (positive gross) against the tenant's one sale. */
+    private function fullCreditNote(float $gross): void
+    {
+        $original = Invoice::where('company_id', $this->tenant->id)->whereNull('credited_invoice_id')->firstOrFail();
+        Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΠΙΣ'.uniqid(), 'code' => 2,
+            'invoice_type_id' => $this->type->id, 'payment_method_id' => $this->credit->id, 'customer_id' => $original->customer_id,
+            'issued_at' => now(), 'local_status' => 'active',
+            'net_total' => round($gross / 1.24, 2), 'gross_total' => $gross,
+            'credited_invoice_id' => $original->id,
+        ]);
+    }
+
+    public function test_count_sales_excludes_credit_notes(): void
+    {
+        // MON-6: a credit note carries POSITIVE gross — it must NOT be counted as
+        // a sale nor added to the turnover.
+        $this->debtor('X', 124);
+        $this->fullCreditNote(124);
+
+        $res = (new CountSalesTool)->run($this->tenant, []);
+
+        $this->assertSame(1, $res['invoice_count']);                   // credit note excluded
+        $this->assertEqualsWithDelta(124.0, $res['gross_total'], 0.01);
+    }
+
+    public function test_vat_summary_subtracts_credit_notes(): void
+    {
+        // MON-6: output VAT nets credit notes — a €124 sale fully credited is €0
+        // output VAT, not €24 (the over-declaration MON-2 documented).
+        $this->debtor('X', 124); // sale: net 100, vat 24
+        $this->fullCreditNote(124);
+
+        $res = (new VatSummaryTool)->run($this->tenant, []);
+
+        $this->assertSame(2, $res['invoice_count']);                 // both are issued output docs
+        $this->assertEqualsWithDelta(0.0, $res['net'], 0.02);
+        $this->assertEqualsWithDelta(0.0, $res['vat_output'], 0.02);
+        $this->assertEqualsWithDelta(0.0, $res['gross'], 0.01);
+    }
+
+    /** A standalone / ETL-imported legacy credit note: is_credit TYPE, NO credited_invoice_id. */
+    private function legacyCreditNote(float $gross): void
+    {
+        $creditType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΠΙΣ', 'name' => 'ΠΙΣΤΩΤΙΚΟ', 'invcount' => 1,
+            'mydata_type' => '5.1', 'is_credit' => true,
+        ]);
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Cr', 'afm' => (string) random_int(100000000, 999999999)]);
+        Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΠΙΣ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $creditType->id, 'payment_method_id' => $this->credit->id, 'customer_id' => $c->id,
+            'issued_at' => now(), 'local_status' => 'active',
+            'net_total' => round($gross / 1.24, 2), 'gross_total' => $gross,
+            // NB: NO credited_invoice_id — exactly how the ETL imports legacy ΠΙΣ.
+        ]);
+    }
+
+    public function test_tools_exclude_standalone_legacy_credit_notes(): void
+    {
+        // MON-6 (review): a credit-TYPE invoice with NO credited_invoice_id (ETL
+        // legacy import) must also be recognised as a credit note — not counted
+        // as a sale, and subtracted from output VAT.
+        $this->debtor('X', 124); // one real sale
+        $this->legacyCreditNote(124);
+
+        $count = (new CountSalesTool)->run($this->tenant, []);
+        $this->assertSame(1, $count['invoice_count']);                   // legacy credit excluded
+        $this->assertEqualsWithDelta(124.0, $count['gross_total'], 0.01);
+
+        $vat = (new VatSummaryTool)->run($this->tenant, []);
+        $this->assertEqualsWithDelta(0.0, $vat['vat_output'], 0.02);     // sale VAT netted by the credit
+        $this->assertEqualsWithDelta(0.0, $vat['gross'], 0.01);
     }
 
     public function test_registry_exposes_all_tools(): void

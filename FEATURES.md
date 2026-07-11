@@ -261,7 +261,8 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 ## 15. Ασφάλεια & λειτουργικά
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.
 - **2FA** (TOTP) + `EKDOSI_REQUIRE_2FA`.
-- **FK-aware delete guard** (`GuardedDeleteAction`) — μπλοκάρει διαγραφή lookup σε χρήση.
+- **FK-aware delete guard** (`GuardedDeleteAction`) — μπλοκάρει διαγραφή lookup σε χρήση, σε **single + bulk +
+  force** (η μαζική/οριστική διαγραφή παραλείπει τις σε-χρήση εγγραφές με σύνοψη «Διαγράφηκαν/Παραλείφθηκαν»).
 - **Off-site backup verification** (`ops:health` → `backup.companies`) — ανά tenant με
   ενεργά backups: υπάρχει προορισμός **εκτός VM** (sftp/ftp/s3); και πέτυχε η τελευταία
   off-site αποστολή; `offsite_gap` προειδοποιεί για «μένουν μόνο τοπικά» ή αποτυχημένο push·

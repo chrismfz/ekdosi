@@ -49,14 +49,23 @@ class VatSummaryTool implements AssistantTool
         $from = ! empty($input['from']) ? Carbon::parse($input['from'])->startOfDay() : now()->startOfMonth();
         $to = ! empty($input['to']) ? Carbon::parse($input['to'])->endOfDay() : now()->endOfDay();
 
-        $q = Invoice::query()
-            ->where('company_id', $tenant->getKey())
-            ->whereBetween('issued_at', [$from, $to]);
-        InvoiceScope::live($q);
+        // MON-6: output VAT genuinely NETS credit notes — a €124 sale + its full
+        // credit is €0 output VAT, not €24. Credit notes carry POSITIVE net/gross,
+        // so we SUBTRACT them (not merely exclude), mirroring
+        // DashboardMetrics::outputForVat(). The invoice count includes both (both
+        // are issued output documents in the window).
+        $base = fn () => InvoiceScope::live(
+            Invoice::query()
+                ->where('company_id', $tenant->getKey())
+                ->whereBetween('issued_at', [$from, $to])
+        );
 
-        $net = (float) (clone $q)->sum('net_total');
-        $gross = (float) (clone $q)->sum('gross_total');
-        $count = (clone $q)->count();
+        $sales = InvoiceScope::excludeCreditNotes($base());
+        $credits = InvoiceScope::onlyCreditNotes($base());
+
+        $net = (float) (clone $sales)->sum('net_total') - (float) (clone $credits)->sum('net_total');
+        $gross = (float) (clone $sales)->sum('gross_total') - (float) (clone $credits)->sum('gross_total');
+        $count = (clone $sales)->count() + (clone $credits)->count();
 
         return [
             'from' => $from->toDateString(),

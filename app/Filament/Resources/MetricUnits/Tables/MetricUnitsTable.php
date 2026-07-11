@@ -2,10 +2,10 @@
 
 namespace App\Filament\Resources\MetricUnits\Tables;
 
+use App\Filament\Resources\MetricUnits\MetricUnitResource;
+use App\Filament\Support\GuardedDeleteAction;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
@@ -43,9 +43,9 @@ class MetricUnitsTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn ($record): array => MetricUnitResource::dependents($record)),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::forceBulk(fn ($record): array => MetricUnitResource::dependents($record)),
                 ]),
             ])
             ->defaultSort('name');

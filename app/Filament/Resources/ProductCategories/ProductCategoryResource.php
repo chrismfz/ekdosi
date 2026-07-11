@@ -7,6 +7,8 @@ use App\Filament\Resources\ProductCategories\Pages\EditProductCategory;
 use App\Filament\Resources\ProductCategories\Pages\ListProductCategories;
 use App\Filament\Resources\ProductCategories\Schemas\ProductCategoryForm;
 use App\Filament\Resources\ProductCategories\Tables\ProductCategoriesTable;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\Product;
 use App\Models\ProductCategory;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -14,6 +16,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use UnitEnum;
 
@@ -28,6 +31,18 @@ class ProductCategoryResource extends Resource
     protected static ?int $navigationSort = 50;
 
     protected static ?string $recordTitleAttribute = 'description_short';
+
+    /**
+     * SET-2: dependent counts blocking deletion (single + bulk + force). One source.
+     *
+     * @return array<string, int>
+     */
+    public static function dependents(Model $record): array
+    {
+        return [
+            'προϊόντα' => GuardedDeleteAction::count(Product::class, 'product_category_id', $record->id),
+        ];
+    }
 
     public static function getEloquentQuery(): Builder
     {

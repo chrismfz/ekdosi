@@ -2,10 +2,10 @@
 
 namespace App\Filament\Resources\PaymentMethods\Tables;
 
+use App\Filament\Resources\PaymentMethods\PaymentMethodResource;
+use App\Filament\Support\GuardedDeleteAction;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
@@ -45,9 +45,9 @@ class PaymentMethodsTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn ($record): array => PaymentMethodResource::dependents($record)),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::forceBulk(fn ($record): array => PaymentMethodResource::dependents($record)),
                 ]),
             ])
             ->defaultSort('description');

@@ -2,10 +2,10 @@
 
 namespace App\Filament\Resources\BankAccounts\Tables;
 
+use App\Filament\Resources\BankAccounts\BankAccountResource;
+use App\Filament\Support\GuardedDeleteAction;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -55,9 +55,9 @@ class BankAccountsTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn ($record): array => BankAccountResource::dependents($record)),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::forceBulk(fn ($record): array => BankAccountResource::dependents($record)),
                 ]),
             ])
             ->defaultSort('bank_name');

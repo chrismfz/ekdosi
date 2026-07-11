@@ -51,6 +51,11 @@ class PaymentForm
                 TextInput::make('amount')
                     ->label('Ποσό')
                     ->numeric()
+                    // MON-8: amount is always stored POSITIVE (kind carries the
+                    // sign). This resource only creates kind='payment', so a
+                    // strictly-positive rule is correct — a negative «payment»
+                    // would bypass the refund path and mis-sign the balance.
+                    ->minValue(0.01)
                     ->required(),
 
                 DatePicker::make('pay_date')
