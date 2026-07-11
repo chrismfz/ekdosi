@@ -4,10 +4,10 @@ namespace App\Filament\Resources\Invoices\Tables;
 
 use App\Enums\LocalStatus;
 use App\Enums\PaymentStatus;
+use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Support\Tags\TagControls;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Customer;
-use App\Filament\Pages\MyDataMarkDetail;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
@@ -367,13 +367,22 @@ class InvoicesTable
                         ->color('gray')
                         ->requiresConfirmation()
                         ->modalHeading('Επαναποστολή email στους πελάτες')
-                        ->modalDescription('Μπαίνει στην ουρά ένα email με το τρέχον PDF για κάθε επιλεγμένο τιμολόγιο. Όσα δεν έχουν email πελάτη παραλείπονται.')
+                        ->modalDescription('Μπαίνει στην ουρά ένα email με το τρέχον PDF για κάθε επιλεγμένο τιμολόγιο. Παραλείπονται όσα δεν έχουν email πελάτη ή δεν είναι εκδοθέντα (πρόχειρα/ακυρωμένα).')
                         ->action(function (Collection $records): void {
                             $queued = 0;
-                            $skip = 0;
+                            $skipNoEmail = 0;
+                            $skipNotIssued = 0;
                             foreach ($records as $record) {
+                                // DOC-6: never bulk-email a draft or cancelled
+                                // document — the body claims it was issued. Same
+                                // gate as the per-invoice action + public route.
+                                if (! $record->isPubliclyViewable()) {
+                                    $skipNotIssued++;
+
+                                    continue;
+                                }
                                 if (blank($record->customer?->email)) {
-                                    $skip++;
+                                    $skipNoEmail++;
 
                                     continue;
                                 }
@@ -381,9 +390,10 @@ class InvoicesTable
                                 $queued++;
                             }
 
+                            $skipped = $skipNoEmail + $skipNotIssued;
                             Notification::make()
-                                ->title("Στην ουρά: {$queued} · Παραλείφθηκαν (χωρίς email): {$skip}")
-                                ->{$skip > 0 ? 'warning' : 'success'}()
+                                ->title("Στην ουρά: {$queued} · Παραλείφθηκαν: {$skipped} (χωρίς email: {$skipNoEmail}, μη εκδοθέντα: {$skipNotIssued})")
+                                ->{$skipped > 0 ? 'warning' : 'success'}()
                                 ->send();
                         })
                         ->deselectRecordsAfterCompletion(),

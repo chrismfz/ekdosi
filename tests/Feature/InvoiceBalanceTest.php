@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\InvoiceBalance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class InvoiceBalanceTest extends TestCase
@@ -18,9 +19,13 @@ class InvoiceBalanceTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private InvoiceType $type;
+
     private PaymentMethod $credit;
+
     private PaymentMethod $cash;
+
     private Customer $customer;
 
     protected function setUp(): void
@@ -164,6 +169,61 @@ class InvoiceBalanceTest extends TestCase
         $p->update(['invoice_id' => $b->id]);
         $this->assertSame('unpaid', $a->refresh()->payment_status);
         $this->assertSame('paid', $b->refresh()->payment_status);
+    }
+
+    /**
+     * MON-3: recompute() reads the PAYMENT sum as a LOCKING read so it bypasses a
+     * stale MVCC read view — even when it runs inside an OUTER transaction that
+     * already read the payments table (which, under REPEATABLE READ, would
+     * otherwise pin the snapshot before the invoice row was locked). (The
+     * credited-notes sum stays a plain read to avoid an invoice↔invoice deadlock;
+     * it self-heals via the observer.)
+     *
+     * The true lost-update-under-contention proof is MariaDB-only (sqlite has no
+     * FOR UPDATE / row-level MVCC), like the InvoiceNumberer concurrency probe.
+     * This test locks in the portable half: the locking code path
+     * (for(locking: true)) computes the SAME correct cache as the read-only path,
+     * and does so correctly when nested under a pre-existing read.
+     */
+    public function test_recompute_is_correct_when_nested_under_an_outer_transaction_read(): void
+    {
+        $inv = $this->invoice();
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $inv->id, 'amount' => 24, 'pay_date' => '2026-05-11',
+        ]);
+        // Observer already cached partial; wipe the cache to force a fresh recompute.
+        $inv->forceFill(['paid_total' => 0, 'payment_status' => null])->save();
+
+        DB::transaction(function () use ($inv) {
+            // Establish the outer read view FIRST (the MON-3 hazard): a plain
+            // consistent read of payments before the invoice row is locked.
+            DB::table('payments')->count();
+
+            $this->svc()->recompute($inv);
+        });
+
+        $inv->refresh();
+        $this->assertSame('24.00', (string) $inv->paid_total);
+        $this->assertSame('partial', $inv->payment_status);
+    }
+
+    public function test_for_locking_matches_non_locking_result(): void
+    {
+        $inv = $this->invoice();
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $inv->id, 'amount' => 50, 'pay_date' => '2026-05-11',
+        ]);
+        $inv->refresh();
+
+        // The locking flag must not change the arithmetic — same paid/owed/status.
+        $plain = $this->svc()->for($inv);
+        $locked = DB::transaction(fn () => $this->svc()->for($inv, locking: true));
+
+        $this->assertSame($plain->paid, $locked->paid);
+        $this->assertSame($plain->owed, $locked->owed);
+        $this->assertSame($plain->status, $locked->status);
     }
 
     public function test_non_cancelled_credit_notes_reduce_owed(): void

@@ -8,7 +8,7 @@ use App\Services\RecomputeInvoiceTotals;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
-use Illuminate\Database\Eloquent\Model;
+use Filament\Support\Enums\Width;
 
 /**
  * Edit an invoice. Restricted to DRAFTS — once mydata_state is set
@@ -29,9 +29,9 @@ class EditInvoice extends EditRecord
      * Full-width content so the Excel-style lines table uses the whole screen
      * (the default centred container squeezed the columns).
      */
-    public function getMaxContentWidth(): \Filament\Support\Enums\Width
+    public function getMaxContentWidth(): Width
     {
-        return \Filament\Support\Enums\Width::Full;
+        return Width::Full;
     }
 
     public function mount(int|string $record): void
@@ -60,8 +60,21 @@ class EditInvoice extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            // MON-4: the ΑΑ is burned at draft creation (InvoiceNumberer, under a
+            // row lock — same as the legacy INVOICE_AI trigger). Deleting a draft
+            // therefore leaves a PERMANENT gap in the per-series ΑΑ sequence: the
+            // number is NOT recycled (recycling would risk a duplicate ΑΑ on a
+            // filed document — far worse than a gap). Gaps are legally fine —
+            // myDATA identifies a document by its AADE MARK, not by a gapless ΑΑ,
+            // and the legacy app behaved identically. The confirmation makes that
+            // consequence explicit so an operator doesn't delete expecting reuse.
             DeleteAction::make()
-                ->visible(fn (Invoice $record) => $record->mydata_state === null && $record->local_status === 'draft'),
+                ->visible(fn (Invoice $record) => $record->mydata_state === null && $record->local_status === 'draft')
+                ->requiresConfirmation()
+                ->modalHeading('Διαγραφή πρόχειρου παραστατικού')
+                ->modalDescription(fn (Invoice $record) => "Το πρόχειρο {$record->invcode} θα διαγραφεί. "
+                    .'Ο αύξων αριθμός (ΑΑ) ΔΕΝ επαναχρησιμοποιείται — μένει ένα μόνιμο κενό στην αρίθμηση της σειράς '
+                    .'(νόμιμο· η myDATA ταυτοποιεί με το ΜΑΡΚ, όχι με συνεχόμενο ΑΑ). Συνέχεια;'),
         ];
     }
 

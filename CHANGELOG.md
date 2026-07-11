@@ -17,6 +17,34 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Fixed
+- **AUDIT MON-3 — stale `paid_total` κάτω από ταυτόχρονες πληρωμές.** Το `InvoiceBalance::recompute`
+  κλείδωνε το invoice row αλλά διάβαζε το SUM των πληρωμών ως plain read → κάτω από REPEATABLE READ ένα
+  read view στημένο πριν το lock (π.χ. από outer transaction) μπορούσε να σερβίρει stale άθροισμα και να
+  γράψει «χαμένη» πληρωμή. Fix: το SUM πληρωμών + το `hasRecordedPayments` τρέχουν ως **locking reads**
+  στο recompute path (`for(..., locking: true)`)· το UI `for()` μένει plain. Το SUM των πιστωτικών μένει
+  σκόπιμα plain read (self-heals μέσω observer) — locking εκεί θα έκλεινε deadlock cycle με το credit-note
+  filing. Επίσης το `recompute()` **αυτο-τυλίγεται σε transaction** όταν ο caller δεν έχει (π.χ. Filament
+  edit path), ώστε το lock να ισχύει παντού. (Adversarial-review findings: deadlock + no-op-outside-tx.)
+- **AUDIT DOC-5 — ΜΑΡΚ στο PDF ανεξάρτητα από το QR.** Ένα ETL-imported legacy παραστατικό (VALID +
+  `mydata_mark` αλλά χωρίς `mydata_url` → χωρίς QR) έβγαινε χωρίς ΜΑΡΚ και χωρίς QR. Το ΜΑΡΚ τυπώνεται
+  πλέον όποτε υπάρχει (με «ΜΑΡΚ:» label όταν λείπει το QR)· και η σειρά «Πιστοποιημένο» στο meta strip δεν
+  απαιτεί πλέον `mydata_url` (ένα VALID ΜΑΡΚ είναι πιστοποιημένο ανεξαρτήτως verify-URL).
+- **AUDIT DOC-6 — καμία αποστολή email για πρόχειρα/ακυρωμένα.** Gate με το fail-closed predicate του public
+  PDF route (`isPubliclyViewable()` = εκδοθέν + όχι AADE-cancelled) σε **ΟΛΑ** τα σημεία: manual + bulk UI
+  actions, ΚΑΙ στο ίδιο το job (`SendInvoiceEmail::handle` — ο πραγματικός choke-point, κλείνει το batch
+  sweep + το TOCTOU), ΚΑΙ στο query του `invoices:resend-failed-emails` (ώστε να μην ξανα-μπαίνει στην ουρά
+  ακυρωμένο = churn). Το mail body δηλώνει «…που εκδόθηκε…», οπότε draft/ακυρωμένο δεν στέλνεται.
+- **Batch email trigger enum** — το `invoice_mail_log.trigger` enum δεχόταν μόνο `['auto','manual']`, αλλά
+  το `invoices:resend-failed-emails` κάνει dispatch με `trigger='batch'` → το job's log-row insert έσκαγε
+  σε enum violation σε **κάθε** batch αποστολή (κρυμμένο: το test του command κάνει `Queue::fake()`).
+  Migration: το enum περιλαμβάνει πλέον `'batch'`. (Bonus finding από το DOC-6 review.)
+
+### Changed
+- **AUDIT MON-4 — ρητή πολιτική κενών ΑΑ + σκλήρυνση draft-delete.** Τεκμηριώθηκε (στο `InvoiceNumberer`)
+  ότι ο ΑΑ δεσμεύεται στη δημιουργία draft και ΔΕΝ επαναχρησιμοποιείται· η διαγραφή draft αφήνει νόμιμο
+  μόνιμο κενό (η myDATA ταυτοποιεί με ΜΑΡΚ). Το draft-delete έχει πλέον confirmation που το εξηγεί.
+
 ### Added
 - **AUDIT SET-1 companion — `php artisan ekdosi:create-admin`.** Δημιουργεί (ή κάνει `--reset`
   κωδικού) έναν **system super_admin** χωρίς τον πλήρη installer: prompt/flags για name/email/password,

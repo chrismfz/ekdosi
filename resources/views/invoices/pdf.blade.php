@@ -172,12 +172,19 @@
         </p>
     </div>
     <div class="hdr-right">
-        @if($qrDataUri)
+        {{-- DOC-5: the ΜΑΡΚ prints whenever the invoice carries one, decoupled
+             from the QR image. An ETL-imported legacy invoice is VALID with a
+             mydata_mark but NO mydata_url (→ no QR): it must still show its ΜΑΡΚ
+             (with a «ΜΑΡΚ:» label since the QR that would give it context is
+             absent) rather than come out bare. QR renders only when a url exists. --}}
+        @if($qrDataUri || $invoice->mydata_mark)
             <div class="qr-block">
-                <img src="{{ $qrDataUri }}" alt="myDATA QR">
-                <p class="qr-label">myDATA</p>
+                @if($qrDataUri)
+                    <img src="{{ $qrDataUri }}" alt="myDATA QR">
+                    <p class="qr-label">myDATA</p>
+                @endif
                 @if($invoice->mydata_mark)
-                    <p class="qr-mark">{{ $invoice->mydata_mark }}</p>
+                    <p class="qr-mark">@if(! $qrDataUri){{ $L('mark_label') }}: @endif{{ $invoice->mydata_mark }}</p>
                 @endif
             </div>
         @endif
@@ -230,8 +237,12 @@
                 <div class="meta-row"><span class="meta-label">{{ $L('mydata_type') }}:</span> {{ $invoice->invoiceType->mydata_type }}</div>
             @endif
             {{-- DOC-7: never assert «Πιστοποιημένο» on a cancelled document —
-                 a locally-voided invoice can still be VALID at AADE. --}}
-            @if($invoice->mydata_url && $invoice->mydata_state === 'VALID' && ! $isCancelledDoc)
+                 a locally-voided invoice can still be VALID at AADE.
+                 DOC-5: a VALID ΜΑΡΚ IS certified regardless of a verify URL, so
+                 this does NOT require mydata_url (an ETL-imported legacy invoice
+                 has the mark but no url). The footer «verify at URL» line stays
+                 url-gated — it legitimately needs the link. --}}
+            @if($invoice->mydata_state === 'VALID' && ! $isCancelledDoc)
                 <div class="meta-row"><span class="meta-label">{{ $L('status') }}:</span> <strong style="color:#065f46">{{ $L('certified') }}</strong></div>
             @endif
         </div>

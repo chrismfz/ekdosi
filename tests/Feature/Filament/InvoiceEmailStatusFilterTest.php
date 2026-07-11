@@ -53,6 +53,10 @@ class InvoiceEmailStatusFilterTest extends TestCase
         return Invoice::create([
             'company_id' => $this->tenant->id, 'invcode' => $invcode, 'code' => 1,
             'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            // DOC-6: the resend action only emails ISSUED (active) invoices; a
+            // «failed mail» scenario implies the invoice was issued in the first
+            // place, so these fixtures are active.
+            'local_status' => 'active',
             'issued_at' => now(), 'company_name' => 'C', 'net_total' => 100, 'gross_total' => 124,
         ]);
     }
@@ -95,6 +99,7 @@ class InvoiceEmailStatusFilterTest extends TestCase
         $noEmail = Invoice::create([
             'company_id' => $this->tenant->id, 'invcode' => 'TPY2', 'code' => 2,
             'invoice_type_id' => $this->type->id, 'customer_id' => $noEmailCustomer->id,
+            'local_status' => 'active',
             'issued_at' => now(), 'company_name' => 'NoMail', 'net_total' => 100, 'gross_total' => 124,
         ]);
         $this->log($noEmail, 'failed');
@@ -104,5 +109,30 @@ class InvoiceEmailStatusFilterTest extends TestCase
 
         Queue::assertPushed(SendInvoiceEmail::class, 1);
         Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->invoice->is($a) && $job->trigger === 'manual');
+    }
+
+    public function test_bulk_resend_skips_drafts_and_cancelled(): void
+    {
+        // DOC-6: a draft and a cancelled invoice must NOT be bulk-emailed — the
+        // mail body asserts the document «was issued». Only the active one goes out.
+        $active = $this->invoice('TPY1');
+
+        $draft = $this->invoice('TPY2');
+        $draft->forceFill(['local_status' => 'draft'])->save();
+
+        $cancelled = $this->invoice('TPY3');
+        $cancelled->forceFill(['local_status' => 'cancelled'])->save();
+
+        // Also cancelled-at-AADE (active locally but mydata_state CANCELLED) → skipped.
+        $aadeCancelled = $this->invoice('TPY4');
+        $aadeCancelled->forceFill(['mydata_state' => 'CANCELLED'])->save();
+
+        Livewire::test(ListInvoices::class)
+            ->callTableBulkAction('resend_email', [
+                $active->getKey(), $draft->getKey(), $cancelled->getKey(), $aadeCancelled->getKey(),
+            ]);
+
+        Queue::assertPushed(SendInvoiceEmail::class, 1);
+        Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->invoice->is($active));
     }
 }
