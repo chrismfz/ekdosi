@@ -18,6 +18,21 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **AUDIT SET-2 — φύλαξη bulk/force-delete στα lookups.** Η μαζική + οριστική διαγραφή σε lookup πίνακες
+  (ΦΠΑ, τύποι, τρόποι πληρωμής/αποστολής κ.λπ.) ήταν αφύλακτη — διαγραφή μιας σε-χρήση εγγραφής έσκαγε
+  σε raw 500 (`restrictOnDelete`) ή μηδένιζε σιωπηλά το FK (`nullOnDelete`, κενό Select). Νέα
+  `GuardedDeleteAction::bulk()`/`::forceBulk()` που **παραλείπουν** τις σε-χρήση εγγραφές (διαγράφοντας τις
+  ελεύθερες) με σύνοψη «Διαγράφηκαν: N · Παραλείφθηκαν: M». Ο dependent map κάθε lookup ενοποιήθηκε σε ένα
+  `Resource::dependents()` (single + bulk + force μία πηγή) σε 8 resources· έκλεισε και το κενό
+  `whmcs_default_receipt_type_id` στον InvoiceType.
+- **AUDIT MON-6 — ο AI Βοηθός δεν μετράει πια πιστωτικά ως πωλήσεις.** Το `count_sales` **εξαιρεί** τα
+  πιστωτικά· το `vat_summary` τα **αφαιρεί** (ΦΠΑ εκροών νετάρει — €124 πώληση + πλήρες πιστωτικό = €0 ΦΠΑ,
+  όχι €24). Νέα `InvoiceScope::excludeCreditNotes()`/`onlyCreditNotes()` με τον πλήρη predicate (correlated
+  `credited_invoice_id` **Ή** `invoice_types.is_credit`), ώστε να πιάνει και τα ETL-imported legacy ΠΙΣ που
+  δεν έχουν `credited_invoice_id`. (Το ίδιο πλήρες φιλτράρισμα στο Dashboard = MON-9, ξεχωριστό PR.)
+- **AUDIT MON-8 — θετική-τιμής validation στις πληρωμές.** Το `amount` αποθηκεύεται πάντα θετικό (το `kind`
+  φέρει το πρόσημο)· προστέθηκε `minValue(0.01)` στη φόρμα πληρωμής και στο «Καταχώριση πληρωμής» του
+  παραστατικού, ώστε μια αρνητική «πληρωμή» να μην παρακάμπτει τον μηχανισμό επιστροφών.
 - **AUDIT OPS-10 — τέλος στο ατέρμονο resend σε πελάτες χωρίς email.** Το `invoices:resend-failed-emails`
   ξανα-έστελνε σε κάθε sweep τα τιμολόγια πελατών χωρίς email (κάθε προσπάθεια γράφει νέο `failed` row που
   ανανεώνει το `--since` παράθυρο → αιώνια επανεπιλογή, φουσκωμένοι failure counters που κρύβουν πραγματικά

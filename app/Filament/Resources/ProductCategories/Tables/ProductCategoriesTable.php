@@ -2,10 +2,10 @@
 
 namespace App\Filament\Resources\ProductCategories\Tables;
 
+use App\Filament\Resources\ProductCategories\ProductCategoryResource;
+use App\Filament\Support\GuardedDeleteAction;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
@@ -50,9 +50,9 @@ class ProductCategoriesTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn ($record): array => ProductCategoryResource::dependents($record)),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::forceBulk(fn ($record): array => ProductCategoryResource::dependents($record)),
                 ]),
             ])
             ->defaultSort('description_short');

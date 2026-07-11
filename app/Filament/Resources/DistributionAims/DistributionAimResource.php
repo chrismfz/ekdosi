@@ -7,13 +7,18 @@ use App\Filament\Resources\DistributionAims\Pages\EditDistributionAim;
 use App\Filament\Resources\DistributionAims\Pages\ListDistributionAims;
 use App\Filament\Resources\DistributionAims\Schemas\DistributionAimForm;
 use App\Filament\Resources\DistributionAims\Tables\DistributionAimsTable;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\DeliveryNote;
 use App\Models\DistributionAim;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use UnitEnum;
 
@@ -28,6 +33,20 @@ class DistributionAimResource extends Resource
     protected static ?int $navigationSort = 40;
 
     protected static ?string $recordTitleAttribute = 'description';
+
+    /**
+     * SET-2: dependent counts blocking deletion (single + bulk + force). One source.
+     *
+     * @return array<string, int>
+     */
+    public static function dependents(Model $record): array
+    {
+        return [
+            'τιμολόγια' => GuardedDeleteAction::count(Invoice::class, 'distribution_aim_id', $record->id),
+            'δελτία αποστολής' => GuardedDeleteAction::count(DeliveryNote::class, 'distribution_aim_id', $record->id),
+            'τύποι παραστατικών (προεπιλογή)' => GuardedDeleteAction::count(InvoiceType::class, 'distribution_aim_id', $record->id),
+        ];
+    }
 
     public static function getEloquentQuery(): Builder
     {

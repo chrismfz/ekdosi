@@ -7,13 +7,16 @@ use App\Filament\Resources\MetricUnits\Pages\EditMetricUnit;
 use App\Filament\Resources\MetricUnits\Pages\ListMetricUnits;
 use App\Filament\Resources\MetricUnits\Schemas\MetricUnitForm;
 use App\Filament\Resources\MetricUnits\Tables\MetricUnitsTable;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Models\MetricUnit;
+use App\Models\Product;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use UnitEnum;
 
@@ -28,6 +31,18 @@ class MetricUnitResource extends Resource
     protected static ?int $navigationSort = 70;
 
     protected static ?string $recordTitleAttribute = 'name';
+
+    /**
+     * SET-2: dependent counts blocking deletion (single + bulk + force). One source.
+     *
+     * @return array<string, int>
+     */
+    public static function dependents(Model $record): array
+    {
+        return [
+            'προϊόντα' => GuardedDeleteAction::count(Product::class, 'metric_unit_id', $record->id),
+        ];
+    }
 
     public static function getEloquentQuery(): Builder
     {

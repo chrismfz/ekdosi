@@ -31,4 +31,35 @@ class InvoiceScope
                 ->whereNull($state)
                 ->orWhere($state, '!=', 'CANCELLED'));
     }
+
+    /**
+     * A credit note is EITHER correlated (`credited_invoice_id` set — the
+     * IssueCreditNote path) OR a standalone credit-type document
+     * (`invoice_types.is_credit` — how the ETL imports legacy ΠΙΣ/returns, which
+     * carry NO `credited_invoice_id`). Both must be recognised, otherwise a
+     * tenant with imported legacy credit notes over-counts turnover / over-
+     * declares output VAT. Mirrors `Invoice::isCreditNote()`.
+     *
+     * Works on Eloquent AND query builders (both support whereNull / a nested
+     * closure / a correlated whereExists). Assumes the query's base table is
+     * `invoices` with no alias (all call sites are).
+     */
+    public static function excludeCreditNotes($query)
+    {
+        return $query
+            ->whereNull('credited_invoice_id')
+            ->whereNotExists(fn ($q) => $q->from('invoice_types')
+                ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
+                ->where('invoice_types.is_credit', true));
+    }
+
+    /** The complement of excludeCreditNotes() — only the credit notes. */
+    public static function onlyCreditNotes($query)
+    {
+        return $query->where(fn ($q) => $q
+            ->whereNotNull('credited_invoice_id')
+            ->orWhereExists(fn ($sub) => $sub->from('invoice_types')
+                ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
+                ->where('invoice_types.is_credit', true)));
+    }
 }

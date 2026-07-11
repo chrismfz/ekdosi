@@ -226,6 +226,10 @@ class ViewInvoice extends ViewRecord
                     TextInput::make('amount')
                         ->label('Ποσό')
                         ->numeric()
+                        // MON-8: record_payment writes kind='payment' with a
+                        // positive amount — a negative value would bypass the
+                        // refund mechanism. Enforce positivity at the form.
+                        ->minValue(0.01)
                         ->required()
                         ->default(fn (Invoice $record) => number_format(max($record->balanceData()->balance, 0), 2, '.', ''))
                         ->helperText(fn (Invoice $record) => 'Υπόλοιπο: '.number_format($record->balanceData()->balance, 2, ',', '.').' €'),

@@ -2,13 +2,14 @@
 
 namespace App\Filament\Resources\InvoiceTypes\Tables;
 
+use App\Filament\Resources\InvoiceTypes\InvoiceTypeResource;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Models\InvoiceType;
+use App\Services\MyData\ConfigAuditRow;
 use App\Services\MyData\MyDataConfigAudit;
 use App\Support\MyData\InvoiceTypeClassSuggester;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -156,9 +157,9 @@ class InvoiceTypesTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn ($record): array => InvoiceTypeResource::dependents($record)),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::forceBulk(fn ($record): array => InvoiceTypeResource::dependents($record)),
                 ]),
             ])
             ->defaultSort('code');
@@ -172,11 +173,11 @@ class InvoiceTypesTable
      * doesn't touch the PK). Per-request under FPM — see the Octane note in
      * CLAUDE.md if this ever runs on a persistent worker.
      *
-     * @var array<int, \App\Services\MyData\ConfigAuditRow>
+     * @var array<int, ConfigAuditRow>
      */
     private static array $auditCache = [];
 
-    private static function auditRow(InvoiceType $record): \App\Services\MyData\ConfigAuditRow
+    private static function auditRow(InvoiceType $record): ConfigAuditRow
     {
         return self::$auditCache[$record->getKey()] ??=
             app(MyDataConfigAudit::class)->auditInvoiceType($record);
