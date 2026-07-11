@@ -26,7 +26,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   aged receivables, assistant tools) τα standalone legacy ΠΙΣ **αφαιρούνται** πλέον από το υπόλοιπο (νέος
   `InvoiceScope::onlyStandaloneCreditNotes()`), αφού δεν έχουν original με `credited_total` — ώστε **dashboard,
   per-customer table και ledger να συμφωνούν ακριβώς**. Κοινό `Customer::OUTSTANDING_BALANCE_SQL` (select/
-  onlyDebtors/CustomersTable filter μία πηγή, να μη ξαναποκλίνουν).
+  onlyDebtors/CustomersTable filter μία πηγή, να μη ξαναποκλίνουν). **Convergence sweep** στα υπόλοιπα
+  narrow-predicate sites ίδιας κλάσης: **Βιβλίο Εσόδων-Εξόδων** (`LedgerBook` — standalone ΠΙΣ πλέον
+  σημαίνεται −1, δεν υπερδηλώνει τζίρο/ΦΠΑ), **ληξιπρόθεσμα** (`Invoice::scopeOverdue` → δεν «κυνηγάει»
+  πιστωτικό στο `invoices:notify-overdue`/widget/filter), **dropdown πληρωμής** (`CustomerLedger::openInvoiceOptions`
+  → δεν αντιστοιχίζεις πληρωμή σε πιστωτικό) και **top προϊόντα** (`CustomerTopProducts`) — όλα μέσω
+  `InvoiceScope::excludeCreditNotes()`/`isCreditNote()`.
 - **AUDIT SEC-2 — ελάχιστο μήκος password (8).** Ο κωδικός χρήστη επιβάλλει πλέον `min:8` στη φόρμα (conditional
   ώστε το blank-edit «κράτα τον κωδικό» να μην απορρίπτεται) και στο `ekdosi:install` (πριν το transaction, ώστε
   ένα `--password` flag να μη σπέρνει αδύναμο super_admin).

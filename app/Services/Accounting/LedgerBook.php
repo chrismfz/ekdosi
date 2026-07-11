@@ -74,14 +74,18 @@ class LedgerBook
                 ->where('local_status', '!=', 'draft')
                 ->orWhereNotNull('legacy_id'))
             ->with([
-                'invoiceType:id,code,mydata_income_class_category',
+                'invoiceType:id,code,is_credit,mydata_income_class_category',
                 'customer:id,name,afm',
             ]);
 
         InvoiceScope::live($query);
 
         return $query->get()->map(function (Invoice $inv): LedgerRow {
-            $isCredit = $inv->credited_invoice_id !== null;
+            // MON-9: a standalone legacy ΠΙΣ is an is_credit-TYPE document with no
+            // credited_invoice_id — the narrow `credited_invoice_id !== null` counted
+            // it as POSITIVE income, over-declaring turnover/VAT in the book. Use the
+            // canonical predicate so it correctly signs negative (a credit reduces income).
+            $isCredit = $inv->isCreditNote();
             $sign = $isCredit ? -1 : 1;
             $net = $sign * (float) $inv->net_total;
             $gross = $sign * (float) $inv->gross_total;

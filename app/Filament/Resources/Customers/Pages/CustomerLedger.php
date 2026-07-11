@@ -485,9 +485,11 @@ class CustomerLedger extends Page implements HasTable
             ->where('invoices.company_id', $this->record->company_id)
             ->where('invoices.customer_id', $this->record->getKey())
             ->whereNull('invoices.deleted_at')
-            ->whereNull('invoices.credited_invoice_id')
             ->where('invoices.local_status', 'active')
             ->where('payment_methods.due_days', '>', 0);
+        // MON-9: a payment can't be allocated to a credit note — exclude both the
+        // correlated and the standalone legacy (is_credit type) shape.
+        InvoiceScope::excludeCreditNotes($q);
         InvoiceScope::live($q, 'invoices.');
 
         return $this->openInvoiceOptionsCache = $q->orderBy('invoices.issued_at')

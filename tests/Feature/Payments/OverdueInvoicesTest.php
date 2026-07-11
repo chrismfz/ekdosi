@@ -96,6 +96,21 @@ class OverdueInvoicesTest extends TestCase
         $this->assertTrue(Invoice::query()->whereKey($inv->id)->overdue()->exists());
     }
 
+    public function test_standalone_legacy_credit_note_not_overdue(): void
+    {
+        // MON-9: a standalone legacy ΠΙΣ (is_credit type, no credited_invoice_id),
+        // credit-term + past due + unpaid, must NOT read as an overdue receivable —
+        // else it gets dunned (invoices:notify-overdue).
+        $creditType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΠΙΣ', 'name' => 'ΠΙΣ',
+            'invcount' => 1, 'mydata_type' => '5.2', 'is_credit' => true,
+        ]);
+        $inv = $this->make('ΠΙΣ1', now()->subDays(40), $this->creditMethodId, extra: []);
+        $inv->update(['invoice_type_id' => $creditType->id]);
+
+        $this->assertFalse(Invoice::query()->whereKey($inv->id)->overdue()->exists());
+    }
+
     public function test_draft_and_cancelled_not_overdue(): void
     {
         $draft = $this->make('ΤΙΜ6', now()->subDays(40), $this->creditMethodId, local: 'draft');
