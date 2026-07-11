@@ -40,6 +40,7 @@ class InvoiceMailLog extends Model
         'from_address',
         'subject',
         'trigger',
+        'send_key',
         'status',
         'error_message',
         'queued_at',

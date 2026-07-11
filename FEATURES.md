@@ -33,6 +33,11 @@
   σε invoice + quote. **Στοιχεία εκδότη στην κεφαλίδα**: επωνυμία/διεύθυνση/ΑΦΜ/ΔΟΥ/τηλ/email
   + **ΓΕΜΗ** (`companies.gemi`, ν.4919/2022) + **Δραστηριότητα/ΚΑΔ** (`kad_primary`)· απαλλαγή
   ΦΠΑ (§8.3 αιτία) σε 0% γραμμές.
+- **Αποστολή τιμολογίου με email + ιστορικό** — auto (σε myDATA accept) ή χειροκίνητα· κάθε
+  προσπάθεια καταγράφεται (`invoice_mail_log`: παραλήπτης/θέμα/κατάσταση/χρόνοι/ποιος). Ιστορικό
+  **per-invoice** (ViewInvoice), **per-customer** (tab «Ιστορικό email»), και **γενικό tenant-wide**
+  (`InvoiceMailLogResource`, read-only, φίλτρα). Idempotent (OPS-12 `send_key` — όχι διπλό email σε
+  retry)· markdown-safe body (DOC-8).
 - **«Υπόλοιπο πελάτη» στο PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») — Προηγούμενο + αυτό το παραστατικό
   = Νέο υπόλοιπο, **snapshot τη στιγμή έκδοσης** (`invoices.customer_balance_snapshot`,
   σταθερό σε reprint)· opt-in ανά εταιρεία (`show_customer_balance_on_pdf`) με override ανά

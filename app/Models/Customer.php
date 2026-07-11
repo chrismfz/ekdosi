@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 
@@ -140,6 +141,23 @@ class Customer extends Model
     public function invoices(): HasMany
     {
         return $this->hasMany(Invoice::class);
+    }
+
+    /**
+     * Every invoice-email attempt for this customer, through their invoices
+     * (invoice_mail_log has no direct customer_id). Feeds the per-customer
+     * «Ιστορικό email» tab — read-only send history.
+     */
+    public function invoiceMailLog(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            InvoiceMailLog::class,
+            Invoice::class,
+            'customer_id',   // invoices.customer_id
+            'invoice_id',    // invoice_mail_log.invoice_id
+            'id',            // customers.id
+            'id',            // invoices.id
+        );
     }
 
     /**
