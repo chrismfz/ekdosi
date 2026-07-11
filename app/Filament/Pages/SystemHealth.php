@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Services\TenantRoleProvisioner;
+use App\Services\Updates\UpdateChecker;
 use App\Support\OperatorHealth\OperatorHealthReport;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -34,6 +36,9 @@ class SystemHealth extends Page
     /** @var array<string, mixed> */
     public array $report = [];
 
+    /** @var array<string, mixed> READ-ONLY update-check status (UpdateChecker). */
+    public array $update = [];
+
     /** Short TTL: cheap page-loads/re-mounts reuse the last walk; «Ανανέωση» busts it. */
     private const CACHE_KEY = 'system_health.report';
 
@@ -49,6 +54,10 @@ class SystemHealth extends Page
             self::CACHE_TTL,
             fn () => app(OperatorHealthReport::class)->build(),
         );
+
+        // Read-only update status. The checker caches its own result (6h), so a
+        // mount/poll reuses it — «Έλεγχος ενημερώσεων» forces a fresh GitHub call.
+        $this->update = app(UpdateChecker::class)->check();
     }
 
     public static function getNavigationLabel(): string
@@ -79,7 +88,7 @@ class SystemHealth extends Page
         // shield permission, which company_admin would also hold).
         return Filament::getTenant() !== null
             && $user !== null
-            && app(\App\Services\TenantRoleProvisioner::class)->isSuperAdminAnywhere($user);
+            && app(TenantRoleProvisioner::class)->isSuperAdminAnywhere($user);
     }
 
     protected function getHeaderActions(): array
@@ -90,6 +99,14 @@ class SystemHealth extends Page
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->action(fn () => $this->refreshReport()),
+
+            // Read-only: force a fresh GitHub check (busts the 6h cache). Never
+            // applies an update — the upgrade stays with deploy/update.sh.
+            Action::make('checkUpdates')
+                ->label('Έλεγχος ενημερώσεων')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->action(fn () => $this->checkUpdates()),
 
             // Re-queue every failed job (the only write on this page). Hidden when
             // nothing failed so it doesn't tempt a no-op.
@@ -110,6 +127,24 @@ class SystemHealth extends Page
         // next mount within the TTL reuses it.
         $this->report = app(OperatorHealthReport::class)->build();
         Cache::put(self::CACHE_KEY, $this->report, self::CACHE_TTL);
+    }
+
+    public function checkUpdates(): void
+    {
+        $this->update = app(UpdateChecker::class)->check(fresh: true);
+
+        $ok = ($this->update['ok'] ?? false) === true;
+        $available = $this->update['update_available'] ?? false;
+
+        Notification::make()
+            ->title(match (true) {
+                ! $ok => 'Ο έλεγχος ενημερώσεων απέτυχε',
+                $available => 'Διαθέσιμη νέα έκδοση: '.$this->update['latest_version'],
+                default => 'Είσαι στην πιο πρόσφατη έκδοση',
+            })
+            ->body($ok ? null : ($this->update['error'] ?? null))
+            ->{$ok ? ($available ? 'warning' : 'success') : 'danger'}()
+            ->send();
     }
 
     public function retryFailedJobs(): void

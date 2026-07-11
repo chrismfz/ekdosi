@@ -183,6 +183,17 @@ else
   git checkout --force "$REF"   # tag / sha → detached on purpose (pinned release)
 fi
 
+# Record the DEPLOYED build identity (App\Support\BuildInfo reads this): commit
+# sha + strict-ISO commit date + the ref we deployed. NOT tracked in git (it's
+# per-box, per-deploy) — see .gitignore. `date` stays UTC/ISO here; the app
+# formats it to the configured timezone for the Y.m.d-His build stamp.
+log "Recording build identity (storage/app/build.json)"
+mkdir -p storage/app
+printf '{"sha":"%s","committed_at":"%s","ref":"%s"}\n' \
+  "$(git rev-parse --short HEAD)" \
+  "$(git log -1 --format=%cI)" \
+  "$REF" > storage/app/build.json
+
 log "composer install (--no-dev)"
 $COMPOSER install --no-dev --optimize-autoloader --no-interaction
 

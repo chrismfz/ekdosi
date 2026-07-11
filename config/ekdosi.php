@@ -404,4 +404,26 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Update check (Phase 1: READ-ONLY)
+    |--------------------------------------------------------------------------
+    | A read-only «είναι το κουτί ενημερωμένο;» check: compares the deployed
+    | build against the repo's latest GitHub release/tag and shows «N πίσω» +
+    | a link on the super_admin System page. It NEVER applies an update — the
+    | actual upgrade stays with deploy/update.sh (snapshot → migrate →
+    | queue:restart → ops:health). A one-click apply that WRAPS that script is
+    | a deliberate later phase.
+    |
+    | Token: needed only for a PRIVATE repo (GitHub API auth). Public repos work
+    | unauthenticated within the 6h cache. Never write scope — a read-only PAT.
+    */
+    'updates' => [
+        'enabled' => (bool) env('EKDOSI_UPDATE_CHECK', true),
+        'repo' => (string) env('EKDOSI_UPDATE_REPO', 'chrismfz/ekdosi'),
+        'token' => env('EKDOSI_UPDATE_TOKEN', env('GITHUB_TOKEN')),
+        'cache_hours' => (int) env('EKDOSI_UPDATE_CACHE_HOURS', 6),
+        'timeout' => (int) env('EKDOSI_UPDATE_TIMEOUT', 8),
+    ],
+
 ];

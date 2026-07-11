@@ -4,6 +4,46 @@
         <strong>{{ $this->ago($report['generated_at'] ?? null) }}</strong> — «Ανανέωση» για φρέσκο.
     </div>
 
+    {{-- Έκδοση / ενημερώσεις (read-only — το apply μένει στο deploy/update.sh) --}}
+    <x-filament::section>
+        <x-slot name="heading">Έκδοση</x-slot>
+        @php($u = $update ?? [])
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+            <x-filament::badge color="gray">
+                {{ ($u['current_version'] ?? null) ? 'v'.$u['current_version'] : '—' }}
+            </x-filament::badge>
+            <span>
+                Build: <strong>{{ $u['current_build'] ?? '—' }}</strong>
+                @if ($u['current_sha'] ?? null)
+                    <span class="text-gray-500 dark:text-gray-400">({{ $u['current_sha'] }})</span>
+                @endif
+            </span>
+
+            @if (! ($u['enabled'] ?? true))
+                <x-filament::badge color="gray">Έλεγχος ενημερώσεων: ανενεργός</x-filament::badge>
+            @elseif (! ($u['ok'] ?? false))
+                <x-filament::badge color="warning">Έλεγχος: {{ $u['error'] ?? 'απέτυχε' }}</x-filament::badge>
+            @elseif ($u['update_available'] ?? false)
+                <x-filament::badge color="warning">
+                    Νέα έκδοση: {{ $u['latest_version'] }}@if (is_int($u['commits_behind'] ?? null) && $u['commits_behind'] > 0) · {{ $u['commits_behind'] }} commits πίσω@endif
+                </x-filament::badge>
+                @if ($u['url'] ?? null)
+                    <x-filament::button tag="a" href="{{ $u['url'] }}" target="_blank" rel="noopener" size="xs" color="gray" icon="heroicon-o-arrow-top-right-on-square">
+                        Δες τι άλλαξε
+                    </x-filament::button>
+                @endif
+            @else
+                <x-filament::badge color="success">Ενημερωμένο ({{ $u['latest_version'] }})</x-filament::badge>
+            @endif
+        </div>
+
+        @if ($u['checked_at'] ?? null)
+            <div class="mt-3 space-y-1 text-sm text-gray-500 dark:text-gray-400">
+                Τελευταίος έλεγχος: {{ $this->ago($u['checked_at']) }}@if ($u['stale'] ?? false) (παλιό αποτέλεσμα — offline;)@endif
+            </div>
+        @endif
+    </x-filament::section>
+
     {{-- OPS-4: distilled verdict banner --}}
     @php($sev = $report['severity'] ?? ['level' => 'ok', 'critical' => [], 'warnings' => []])
     @if (($sev['level'] ?? 'ok') !== 'ok')
