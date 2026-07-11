@@ -500,7 +500,9 @@ class Invoice extends Model
         if ($due === null) {
             return false;
         }
-        if ($this->local_status !== 'active' || $this->credited_invoice_id !== null) {
+        // MON-9: mirror scopeOverdue — exclude credit notes (correlated AND
+        // standalone legacy is_credit) so a ΠΙΣ never reads as overdue.
+        if ($this->local_status !== 'active' || $this->isCreditNote()) {
             return false;
         }
         if ($this->mydata_state === 'CANCELLED') {

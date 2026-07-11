@@ -108,7 +108,9 @@ class OverdueInvoicesTest extends TestCase
         $inv = $this->make('ΠΙΣ1', now()->subDays(40), $this->creditMethodId, extra: []);
         $inv->update(['invoice_type_id' => $creditType->id]);
 
+        // Both the scope AND its single-record twin must agree it's not overdue.
         $this->assertFalse(Invoice::query()->whereKey($inv->id)->overdue()->exists());
+        $this->assertFalse($inv->fresh()->isOverdue());
     }
 
     public function test_draft_and_cancelled_not_overdue(): void

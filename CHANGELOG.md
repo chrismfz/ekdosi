@@ -30,8 +30,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   narrow-predicate sites ίδιας κλάσης: **Βιβλίο Εσόδων-Εξόδων** (`LedgerBook` — standalone ΠΙΣ πλέον
   σημαίνεται −1, δεν υπερδηλώνει τζίρο/ΦΠΑ), **ληξιπρόθεσμα** (`Invoice::scopeOverdue` → δεν «κυνηγάει»
   πιστωτικό στο `invoices:notify-overdue`/widget/filter), **dropdown πληρωμής** (`CustomerLedger::openInvoiceOptions`
-  → δεν αντιστοιχίζεις πληρωμή σε πιστωτικό) και **top προϊόντα** (`CustomerTopProducts`) — όλα μέσω
-  `InvoiceScope::excludeCreditNotes()`/`isCreditNote()`.
+  → δεν αντιστοιχίζεις πληρωμή σε πιστωτικό), **top προϊόντα** (`CustomerTopProducts`), **`Invoice::isOverdue()`**
+  (single-record twin του `scopeOverdue`) και **`PaymentAllocator`** (FIFO + manual — μια πληρωμή δεν
+  auto-allocate-άρεται πια πάνω σε ΠΙΣ) — όλα μέσω `InvoiceScope::excludeCreditNotes()`/`isCreditNote()`.
+  (Εκκρεμούν ως low-priority cosmetic residual κάποια per-record UI guards — badge «Πιστωτικό», ορατότητα
+  action «καταχώριση πληρωμής»/ακύρωσης — που εμφανίζουν ένα standalone legacy ΠΙΣ σαν κανονικό τιμολόγιο·
+  εκτός money-math, δεν επηρεάζουν τζίρο/ΦΠΑ/υπόλοιπα.)
 - **AUDIT SEC-2 — ελάχιστο μήκος password (8).** Ο κωδικός χρήστη επιβάλλει πλέον `min:8` στη φόρμα (conditional
   ώστε το blank-edit «κράτα τον κωδικό» να μην απορρίπτεται) και στο `ekdosi:install` (πριν το transaction, ώστε
   ένα `--password` flag να μη σπέρνει αδύναμο super_admin).
