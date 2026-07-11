@@ -154,6 +154,16 @@ class OperatorHealthSeverity
             $warnings[] = 'myDATA αποκλίσεις: '.implode(', ', $mydataDiscrepant).'.';
         }
 
+        // SEC-3: two tenants sharing a webhook secret = forgeable cross-tenant
+        // webhooks. Not data-loss yet (verify-before-side-effect), so warn.
+        if (($data['security']['shared_webhook_secret'] ?? false) === true) {
+            $shared = array_map(
+                fn (array $slugs): string => implode('/', $slugs),
+                $data['security']['shared_webhook_secret_tenants'] ?? [],
+            );
+            $warnings[] = 'Κοινό webhook secret μεταξύ tenants (rotate): '.implode(', ', $shared).'.';
+        }
+
         $level = $critical !== [] ? 'critical' : ($warnings !== [] ? 'warning' : 'ok');
         $exit = $critical !== [] ? 2 : ($warnings !== [] ? 1 : 0);
 

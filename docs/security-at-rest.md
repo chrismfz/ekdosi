@@ -65,3 +65,48 @@ For this deployment, set in production `.env`:
 ```
 EKDOSI_SECRETS_PLAINTEXT_ACKNOWLEDGED=true
 ```
+
+---
+
+## Webhook secrets must be per-tenant (SEC-3)
+
+The WHMCS bridge authenticates every webhook with an HMAC-SHA256 over the raw
+body (push/write-back) or the `"{slug}:{id}"` canonical string (status), keyed
+by the tenant's `companies.whmcs_webhook_secret`. The signature binds the
+**secret**, not the tenant identity in the wire format — so the *only* thing
+that stops tenant A's signed webhook from being replayed against tenant B is
+that **they hold different secrets**.
+
+**Rule: never reuse a `whmcs_webhook_secret` across tenants.** Two tenants
+sharing one means either could forge the other's webhook (bounded — effects are
+idempotent + verify-before-side-effect, and the leak is read-only to a
+secret-holder — which is why this stays LOW, not a wire-format change). Each
+tenant gets its own random secret; rotate on the ekdosi side and the plugin
+side together.
+
+`php artisan ops:health` now surfaces a collision: the **Security → «Shared
+webhook secret»** row (and a warning in the verdict) lists any tenants sharing a
+secret, comparing a hash of the decrypted value so the plaintext never enters
+the report. `none` = clean.
+
+> Deferred (documented, not built): binding the slug + a timestamp/nonce into
+> the canonical string to add replay protection and make the tenant explicit on
+> the wire. That couples to a coordinated plugin-first rollout, so it waits —
+> see `docs/CLAUDE-history.md`. The per-tenant-secret rule above is the current
+> guarantee.
+
+## The public invoice-PDF signed URL never expires (SEC-4)
+
+The invoice PDF is served from a **permanently-valid** signed URL (Laravel
+`signedRoute` without an expiry) — by design, so a WHMCS-side link a customer
+was given keeps working indefinitely. Consequences to accept:
+
+- A leaked URL is **permanent** read access to *that one* invoice PDF (it is
+  per-invoice signed, not a blanket key — one leak ≠ the whole tenant).
+- The **only** revocation is rotating `APP_KEY`, which invalidates **every**
+  signed URL at once (and would need the WHMCS-side links reissued). There is no
+  per-URL revoke.
+
+Keep it in mind before pasting such a URL anywhere it could be indexed or
+logged; if one is known-leaked and the exposure matters, `APP_KEY` rotation is
+the (blunt) lever.

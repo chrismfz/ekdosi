@@ -500,7 +500,9 @@ class Invoice extends Model
         if ($due === null) {
             return false;
         }
-        if ($this->local_status !== 'active' || $this->credited_invoice_id !== null) {
+        // MON-9: mirror scopeOverdue — exclude credit notes (correlated AND
+        // standalone legacy is_credit) so a ΠΙΣ never reads as overdue.
+        if ($this->local_status !== 'active' || $this->isCreditNote()) {
             return false;
         }
         if ($this->mydata_state === 'CANCELLED') {
@@ -535,7 +537,6 @@ class Invoice extends Model
 
         $query
             ->where('invoices.local_status', 'active')
-            ->whereNull('invoices.credited_invoice_id')
             ->whereIn('invoices.payment_status', [
                 PaymentStatus::Unpaid->value,
                 PaymentStatus::Partial->value,
@@ -547,6 +548,11 @@ class Invoice extends Model
                     ->where('payment_methods.due_days', '>', 0)
                     ->whereRaw("$dueExpr < ?", [$cutoff]);
             });
+
+        // MON-9: "non-credit-note" must also drop standalone legacy ΠΙΣ (is_credit
+        // type, no credited_invoice_id) — otherwise a credit note surfaces as an
+        // overdue receivable and gets dunned (invoices:notify-overdue).
+        InvoiceScope::excludeCreditNotes($query);
 
         return InvoiceScope::live($query, 'invoices.');
     }

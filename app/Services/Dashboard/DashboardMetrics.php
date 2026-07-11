@@ -121,7 +121,6 @@ class DashboardMetrics
             ->leftJoin('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
             ->where('invoices.company_id', $this->tenant->id)
             ->whereNull('invoices.deleted_at')
-            ->whereNull('invoices.credited_invoice_id')
             ->where(function ($q) {
                 $q->where('payment_methods.due_days', '>', 0)
                     ->orWhereExists(function ($s) {
@@ -131,6 +130,12 @@ class DashboardMetrics
                     });
             });
 
+        // MON-9: credit notes aren't receivables of their own — exclude both the
+        // correlated (credited_invoice_id) and the standalone legacy (is_credit
+        // type) shape. Safe unqualified here: the only join is payment_methods,
+        // which carries neither credited_invoice_id nor invoice_type_id.
+        InvoiceScope::excludeCreditNotes($base);
+
         // Receivable base = payable_total (collectible) per row, gross_total fallback
         // for not-yet-backfilled rows. Revenue/turnover sums elsewhere stay on gross_total.
         $row = InvoiceScope::live($base, 'invoices.')
@@ -139,6 +144,23 @@ class DashboardMetrics
 
         $netOwed = (float) ($row->net_owed ?? 0);
 
+        // MON-9: standalone legacy credit notes (is_credit type, no
+        // credited_invoice_id) have no original to carry a credited_total, so the
+        // base above can't net them — subtract their payable directly, matching
+        // CustomerLedgerBuilder (which reduces the balance by EVERY credit note,
+        // regardless of payment term). Correlated credit notes are already netted
+        // via credited_total above, so they must NOT be double-counted here.
+        $standaloneCredits = (float) InvoiceScope::onlyStandaloneCreditNotes(
+            InvoiceScope::live(
+                DB::table('invoices')
+                    ->where('invoices.company_id', $this->tenant->id)
+                    ->whereNull('invoices.deleted_at'),
+                'invoices.'
+            )
+        )
+            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) AS credited')
+            ->value('credited');
+
         // Refunds count NEGATIVE — money returned raises receivables again.
         $totalPaid = (float) DB::table('payments')
             ->where('company_id', $this->tenant->id)
@@ -146,7 +168,7 @@ class DashboardMetrics
             ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS net_paid')
             ->value('net_paid');
 
-        return round($netOwed - $totalPaid, 2);
+        return round($netOwed - $standaloneCredits - $totalPaid, 2);
     }
 
     /**
@@ -266,8 +288,10 @@ class DashboardMetrics
     {
         $window = function ($q) use ($start, $end): void {
             $q->where('issued_at', '>=', $start)
-                ->where('issued_at', '<=', $end)
-                ->whereNull('credited_invoice_id');   // exclude credit notes from sales
+                ->where('issued_at', '<=', $end);
+            // MON-9: exclude credit notes from sales — correlated (credited_invoice_id)
+            // AND standalone/legacy (invoice_types.is_credit), matching the ledger.
+            InvoiceScope::excludeCreditNotes($q);
             InvoiceScope::live($q);
         };
 
@@ -680,8 +704,10 @@ class DashboardMetrics
     {
         $q = DB::table('invoices')
             ->where('company_id', $this->tenant->id)
-            ->whereNull('deleted_at')
-            ->whereNull('credited_invoice_id');
+            ->whereNull('deleted_at');
+
+        // MON-9: exclude correlated AND standalone/legacy (is_credit) credit notes.
+        InvoiceScope::excludeCreditNotes($q);
 
         return InvoiceScope::live($q);
     }
@@ -695,8 +721,10 @@ class DashboardMetrics
     {
         $q = DB::table('invoices')
             ->where('company_id', $this->tenant->id)
-            ->whereNull('deleted_at')
-            ->whereNotNull('credited_invoice_id');
+            ->whereNull('deleted_at');
+
+        // MON-9: the complement of baseInvoices() — correlated OR is_credit type.
+        InvoiceScope::onlyCreditNotes($q);
 
         return InvoiceScope::live($q);
     }

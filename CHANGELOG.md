@@ -18,6 +18,34 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **AUDIT MON-9 — το Dashboard δεν υπερδηλώνει πια τζίρο/ΦΠΑ ούτε αποκλίνει στα receivables σε tenant με legacy ΠΙΣ.**
+  Τα turnover/VAT φίλτρα του `DashboardMetrics` (`baseInvoices`, `creditNotesQuery`, top-customers) πέρασαν από
+  τον στενό `whereNull('credited_invoice_id')` στον πλήρη `InvoiceScope::excludeCreditNotes()`/`onlyCreditNotes()`
+  (πιάνουν και τα ETL-imported legacy `invoice_types.is_credit` χωρίς `credited_invoice_id`)· η «Εικόνα ΦΠΑ»
+  κληρονομεί το fix. Στα **receivables** (dashboard headline + `Customer::withOutstandingBalance` → debtor table,
+  aged receivables, assistant tools) τα standalone legacy ΠΙΣ **αφαιρούνται** πλέον από το υπόλοιπο (νέος
+  `InvoiceScope::onlyStandaloneCreditNotes()`), αφού δεν έχουν original με `credited_total` — ώστε **dashboard,
+  per-customer table και ledger να συμφωνούν ακριβώς**. Κοινό `Customer::OUTSTANDING_BALANCE_SQL` (select/
+  onlyDebtors/CustomersTable filter μία πηγή, να μη ξαναποκλίνουν). **Convergence sweep** στα υπόλοιπα
+  narrow-predicate sites ίδιας κλάσης: **Βιβλίο Εσόδων-Εξόδων** (`LedgerBook` — standalone ΠΙΣ πλέον
+  σημαίνεται −1, δεν υπερδηλώνει τζίρο/ΦΠΑ), **ληξιπρόθεσμα** (`Invoice::scopeOverdue` → δεν «κυνηγάει»
+  πιστωτικό στο `invoices:notify-overdue`/widget/filter), **dropdown πληρωμής** (`CustomerLedger::openInvoiceOptions`
+  → δεν αντιστοιχίζεις πληρωμή σε πιστωτικό), **top προϊόντα** (`CustomerTopProducts`), **`Invoice::isOverdue()`**
+  (single-record twin του `scopeOverdue`) και **`PaymentAllocator`** (FIFO + manual — μια πληρωμή δεν
+  auto-allocate-άρεται πια πάνω σε ΠΙΣ) — όλα μέσω `InvoiceScope::excludeCreditNotes()`/`isCreditNote()`.
+  (Εκκρεμούν ως low-priority cosmetic residual κάποια per-record UI guards — badge «Πιστωτικό», ορατότητα
+  action «καταχώριση πληρωμής»/ακύρωσης — που εμφανίζουν ένα standalone legacy ΠΙΣ σαν κανονικό τιμολόγιο·
+  εκτός money-math, δεν επηρεάζουν τζίρο/ΦΠΑ/υπόλοιπα.)
+- **AUDIT SEC-2 — ελάχιστο μήκος password (8).** Ο κωδικός χρήστη επιβάλλει πλέον `min:8` στη φόρμα (conditional
+  ώστε το blank-edit «κράτα τον κωδικό» να μην απορρίπτεται) και στο `ekdosi:install` (πριν το transaction, ώστε
+  ένα `--password` flag να μη σπέρνει αδύναμο super_admin).
+- **AUDIT SEC-3 (cheap) — ανίχνευση κοινού webhook secret.** Το `ops:health` προσθέτει row «Security → Shared
+  webhook secret» + warning όταν δύο tenants μοιράζονται `whmcs_webhook_secret` (συγκρίνει hash του decrypted —
+  ποτέ plaintext στο report). Ο κανόνας «ποτέ κοινό webhook secret» + το SEC-4 (μη-ληξιπρόθεσμο public PDF URL)
+  τεκμηριώθηκαν στο `docs/security-at-rest.md`. (Το slug/timestamp στο canonical παραμένει deferred.)
+- **AUDIT SEC-5 — ρητό `withoutGlobalScope` στα all-tenant sweeps.** Οι δύο cross-tenant σαρώσεις
+  (`OperatorHealthReport::mail()`, `RunScheduledCompanyBackups`) δηλώνουν πλέον ρητά `->withoutGlobalScope(CompanyScope::class)`
+  αντί να στηρίζονται στο no-op default του CompanyScope εκτός tenant context.
 - **AUDIT SET-2 — φύλαξη bulk/force-delete στα lookups.** Η μαζική + οριστική διαγραφή σε lookup πίνακες
   (ΦΠΑ, τύποι, τρόποι πληρωμής/αποστολής κ.λπ.) ήταν αφύλακτη — διαγραφή μιας σε-χρήση εγγραφής έσκαγε
   σε raw 500 (`restrictOnDelete`) ή μηδένιζε σιωπηλά το FK (`nullOnDelete`, κενό Select). Νέα

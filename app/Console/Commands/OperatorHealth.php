@@ -91,6 +91,16 @@ class OperatorHealth extends Command
         ])->all());
 
         $this->newLine();
+        $this->info('Security');
+        $sharedTenants = $data['security']['shared_webhook_secret_tenants'] ?? [];
+        $this->components->twoColumnDetail(
+            'Shared webhook secret',
+            ($data['security']['shared_webhook_secret'] ?? false)
+                ? '⚠ '.implode(', ', array_map(fn ($slugs) => implode('/', $slugs), $sharedTenants))
+                : 'none',
+        );
+
+        $this->newLine();
         $this->info('Disk usage');
         $this->table(['Area', 'Path', 'Exists', 'Used', 'Free', 'Total'], collect($data['disk'])->map(fn ($row, $area) => [
             $area, $row['path'], $row['exists'] ? 'yes' : 'no', $this->bytes($row['used_bytes']), $this->bytes($row['free_bytes']), $this->bytes($row['total_bytes']),

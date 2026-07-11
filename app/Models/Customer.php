@@ -23,6 +23,15 @@ class Customer extends Model
     use HasFactory, HasInternalNotes, HasTags, SoftDeletes, TracksActivity;
 
     /**
+     * The AR outstanding-balance expression over the join aliases created by
+     * scopeWithOutstandingBalance() (owed − standalone-credit-notes − paid).
+     * Defined once so the SELECT alias, scopeOnlyDebtors(), and the Filament
+     * CustomersTable filter can't drift apart (MON-9 added the cust_credit term).
+     * Not usable on a select alias in WHERE, so the sites repeat this expression.
+     */
+    public const OUTSTANDING_BALANCE_SQL = '(COALESCE(cust_owed.owed, 0) - COALESCE(cust_credit.credited, 0) - COALESCE(cust_paid.paid, 0))';
+
+    /**
      * Audited identity/contact/terms columns. See TracksActivity.
      *
      * @return list<string>
@@ -196,7 +205,6 @@ class Customer extends Model
             ->leftJoin('payment_methods', 'invoices.payment_method_id', '=', 'payment_methods.id')
             ->where('invoices.company_id', $companyId)
             ->whereNull('invoices.deleted_at')
-            ->whereNull('invoices.credited_invoice_id')
             ->whereNotNull('invoices.customer_id')
             // Credit-term OR a cash-term invoice with a recorded payment (the
             // money-trail exception — nets to zero against its payment). Mirrors
@@ -216,7 +224,28 @@ class Customer extends Model
             // backfilled. COALESCE each SUM separately (credited_total is NULL on
             // never-credited invoices). Mirrors DashboardMetrics::outstandingReceivables().
             ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) - COALESCE(SUM(invoices.credited_total), 0) as owed');
+        // MON-9: exclude credit notes from the receivable base — correlated
+        // (credited_invoice_id) AND standalone legacy (invoice_types.is_credit).
+        // Must match DashboardMetrics::outstandingReceivables() exactly, or the
+        // per-customer debtor table Σ diverges from the headline (the
+        // reconciliation invariant OutstandingCustomersTable/MoneyStatusConsistencyTest guard).
+        InvoiceScope::excludeCreditNotes($owed);
         $owed = InvoiceScope::live($owed, 'invoices.');
+
+        // MON-9: standalone legacy credit notes (is_credit type, no
+        // credited_invoice_id) have no original carrying a credited_total, so the
+        // base above can't net them. Subtract their payable per customer — matching
+        // DashboardMetrics::outstandingReceivables() and CustomerLedgerBuilder,
+        // which reduces the balance by EVERY credit note regardless of term.
+        $standaloneCredits = DB::table('invoices')
+            ->where('invoices.company_id', $companyId)
+            ->whereNull('invoices.deleted_at')
+            ->whereNotNull('invoices.customer_id')
+            ->groupBy('invoices.customer_id')
+            ->select('invoices.customer_id')
+            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) as credited');
+        InvoiceScope::onlyStandaloneCreditNotes($standaloneCredits);
+        $standaloneCredits = InvoiceScope::live($standaloneCredits, 'invoices.');
 
         $paid = DB::table('payments')
             ->where('company_id', $companyId)
@@ -229,9 +258,10 @@ class Customer extends Model
 
         return $query
             ->leftJoinSub($owed, 'cust_owed', 'cust_owed.customer_id', '=', 'customers.id')
+            ->leftJoinSub($standaloneCredits, 'cust_credit', 'cust_credit.customer_id', '=', 'customers.id')
             ->leftJoinSub($paid, 'cust_paid', 'cust_paid.customer_id', '=', 'customers.id')
             ->select('customers.*')
-            ->selectRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) as outstanding_balance');
+            ->selectRaw(self::OUTSTANDING_BALANCE_SQL.' as outstanding_balance');
     }
 
     /**
@@ -242,6 +272,6 @@ class Customer extends Model
      */
     public function scopeOnlyDebtors(Builder $query): Builder
     {
-        return $query->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) > 0.005');
+        return $query->whereRaw(self::OUTSTANDING_BALANCE_SQL.' > 0.005');
     }
 }

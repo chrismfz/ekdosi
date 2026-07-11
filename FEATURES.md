@@ -270,6 +270,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **`ops:health` verdict + exit code** — `OperatorHealthSeverity` αποστάζει το report σε
   **0=ok / 1=warning / 2=critical**, ώστε το deploy gate + cron `ops:health || alert` να είναι
   ζωντανά· **failed queue jobs ειδοποιούν** (`Queue::failing` → ίδιο ops email με τα exceptions).
+- **`ops:health` shared-webhook-secret detector** (SEC-3) — row «Security» + warning όταν δύο
+  tenants μοιράζονται `whmcs_webhook_secret` (forgeable cross-tenant webhooks)· συγκρίνει hash του
+  decrypted, ποτέ plaintext στο report.
 - **Deploy worker-drain** — `deploy/update.sh`/`rollback.sh` σταματούν τον queue worker πριν το
   `migrate`/restore (κανένα in-flight job σε μισο-migrated schema)· `db-snapshot` clean-slate
   (`--add-drop-database`) + snapshot μετά το `artisan down`.

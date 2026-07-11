@@ -62,4 +62,24 @@ class InvoiceScope
                 ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
                 ->where('invoice_types.is_credit', true)));
     }
+
+    /**
+     * Only STANDALONE credit notes: a credit-type document (`invoice_types.is_credit`)
+     * with NO `credited_invoice_id` — how the ETL imports legacy ΠΙΣ/returns. These
+     * are the credit notes the SQL receivables model can't net via an original's
+     * `credited_total` (there is no original), so the AR surfaces must subtract their
+     * payable directly to match `CustomerLedgerBuilder` (which reduces the balance by
+     * EVERY credit note). Correlated credit notes are deliberately NOT included here —
+     * their reduction already flows through `credited_total`.
+     *
+     * Assumes the query's base table is `invoices` with no alias (all call sites are).
+     */
+    public static function onlyStandaloneCreditNotes($query)
+    {
+        return $query
+            ->whereNull('credited_invoice_id')
+            ->whereExists(fn ($q) => $q->from('invoice_types')
+                ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
+                ->where('invoice_types.is_credit', true));
+    }
 }

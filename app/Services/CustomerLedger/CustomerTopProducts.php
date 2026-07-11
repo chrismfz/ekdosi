@@ -38,10 +38,10 @@ class CustomerTopProducts
     {
         $rows = InvoiceLine::query()
             ->whereHas('invoice', function ($q) use ($customer): void {
-                $q->where('customer_id', $customer->getKey())
-                    // Pure sales only — exclude credit notes so a return doesn't
-                    // read as "frequently bought".
-                    ->whereNull('credited_invoice_id');
+                $q->where('customer_id', $customer->getKey());
+                // Pure sales only — exclude credit notes so a return doesn't read
+                // as "frequently bought" (MON-9: incl. standalone legacy is_credit ΠΙΣ).
+                InvoiceScope::excludeCreditNotes($q);
                 InvoiceScope::live($q);
             })
             ->with(['product:id,sku,description_short,description', 'invoice:id,issued_at'])

@@ -132,6 +132,29 @@ class LedgerBookTest extends TestCase
         }
     }
 
+    public function test_standalone_legacy_credit_type_signs_negative(): void
+    {
+        // MON-9: an ETL-imported legacy ΠΙΣ is an is_credit-TYPE document with NO
+        // credited_invoice_id. The old narrow predicate signed it +1 → over-declared
+        // turnover/VAT in the book. It must sign −1 (a credit reduces income).
+        $creditType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΠΙΣ', 'name' => 'ΠΙΣ',
+            'invcount' => 0, 'is_credit' => true, 'mydata_income_class_category' => 'category1_3',
+        ]);
+
+        $this->invoice('2026-01-10 10:00:00', 100, 124);                                  // sale +100 / +24
+        $this->invoice('2026-01-20 10:00:00', 30, 37, ['invoice_type_id' => $creditType->id]); // standalone ΠΙΣ −30 / −7
+
+        $result = $this->book(bk: 'income');
+
+        $this->assertSame(70.0, $result->incomeNet());   // 100 − 30
+        $this->assertSame(17.0, $result->incomeVat());   // 24 − 7
+
+        $creditRows = array_filter($result->rows, fn ($r) => $r->isCredit);
+        $this->assertCount(1, $creditRows);
+        $this->assertLessThan(0, reset($creditRows)->net);
+    }
+
     public function test_excludes_cancelled_and_out_of_period(): void
     {
         $this->invoice('2026-01-10 10:00:00', 100, 124);                                  // counts

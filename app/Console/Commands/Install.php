@@ -76,6 +76,14 @@ class Install extends Command
             }
         }
 
+        // SEC-2: enforce the same 8-char minimum as the panel's user form, so a
+        // --password flag (or a short prompt) can't seed a weak super_admin.
+        if (mb_strlen($password) < 8) {
+            $this->error('Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες.');
+
+            return self::FAILURE;
+        }
+
         $companyName = (string) ($this->option('company') ?: $this->askIfInteractive('Επωνυμία εταιρίας', 'Η Εταιρία μου ΑΕ'));
         $slug = Str::slug((string) ($this->option('slug') ?: $companyName)) ?: 'company';
         $country = strtoupper((string) $this->option('country')) ?: 'GR';

@@ -56,6 +56,7 @@ class OperatorHealthReport
             'mail' => $this->mail(),
             'whmcs' => $this->whmcs(),
             'mydata' => $this->mydata(),
+            'security' => $this->security(),
             'disk' => $this->disk(),
         ];
 
@@ -284,11 +285,16 @@ class OperatorHealthReport
     /** @return array<string, mixed> */
     private function mail(): array
     {
+        // SEC-5: a deliberate cross-tenant health sweep (the whole point is the
+        // fleet-wide mail-failure count) — declare the intent by dropping the
+        // CompanyScope, matching the other sweeps in this report.
+        $sweep = fn () => InvoiceMailLog::query()->withoutGlobalScope(CompanyScope::class);
+
         return [
-            'failed_24h' => $this->safeCount(fn () => InvoiceMailLog::query()->where('status', 'failed')->where('failed_at', '>=', now()->subDay())->count()),
-            'failed_7d' => $this->safeCount(fn () => InvoiceMailLog::query()->where('status', 'failed')->where('failed_at', '>=', now()->subDays(7))->count()),
-            'stuck_queued_or_sending' => $this->safeCount(fn () => InvoiceMailLog::query()->whereIn('status', ['queued', 'sending'])->where('queued_at', '<', now()->subMinutes((int) config('ekdosi.schedule.mail_sweep_threshold_minutes', 15)))->count()),
-            'latest_failure_at' => $this->safeValue(fn () => optional(InvoiceMailLog::query()->where('status', 'failed')->latest('failed_at')->first())->failed_at?->toIso8601String()),
+            'failed_24h' => $this->safeCount(fn () => $sweep()->where('status', 'failed')->where('failed_at', '>=', now()->subDay())->count()),
+            'failed_7d' => $this->safeCount(fn () => $sweep()->where('status', 'failed')->where('failed_at', '>=', now()->subDays(7))->count()),
+            'stuck_queued_or_sending' => $this->safeCount(fn () => $sweep()->whereIn('status', ['queued', 'sending'])->where('queued_at', '<', now()->subMinutes((int) config('ekdosi.schedule.mail_sweep_threshold_minutes', 15)))->count()),
+            'latest_failure_at' => $this->safeValue(fn () => optional($sweep()->where('status', 'failed')->latest('failed_at')->first())->failed_at?->toIso8601String()),
         ];
     }
 
@@ -336,6 +342,44 @@ class OperatorHealthReport
                 ];
             })
             ->all(), []);
+    }
+
+    /**
+     * SEC-3: the webhook HMAC is tenant-scoped by the SHARED secret alone (the
+     * body/canonical don't bind the slug), so two tenants must NEVER share a
+     * `whmcs_webhook_secret` — otherwise either could forge the other's webhook.
+     * Surface any collision here so ops can rotate before it's ever exploitable.
+     * We report only the affected tenant slugs, never the secret itself.
+     *
+     * @return array<string, mixed>
+     */
+    private function security(): array
+    {
+        return $this->safeValue(function (): array {
+            $groups = [];
+            Company::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->whereNotNull('whmcs_webhook_secret')
+                ->where('whmcs_webhook_secret', '!=', '')
+                ->orderBy('slug')
+                ->get(['id', 'slug', 'whmcs_webhook_secret'])
+                ->each(function (Company $tenant) use (&$groups): void {
+                    // Hash the decrypted secret so equal secrets collide WITHOUT
+                    // the plaintext ever entering the report or a bucket key.
+                    $secret = (string) $tenant->whmcs_webhook_secret;
+                    if ($secret === '') {
+                        return;
+                    }
+                    $groups[hash('sha256', $secret)][] = $tenant->slug;
+                });
+
+            $shared = array_values(array_filter($groups, fn (array $slugs): bool => count($slugs) > 1));
+
+            return [
+                'shared_webhook_secret' => $shared !== [],
+                'shared_webhook_secret_tenants' => $shared,
+            ];
+        }, ['shared_webhook_secret' => false, 'shared_webhook_secret_tenants' => []]);
     }
 
     /** @return array<string, array<string, mixed>> */

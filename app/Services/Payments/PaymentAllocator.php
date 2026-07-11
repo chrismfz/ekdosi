@@ -55,10 +55,12 @@ class PaymentAllocator
                 ->where('company_id', $customer->company_id)
                 ->where('customer_id', $customer->id)
                 ->where('local_status', 'active')
-                ->whereNull('credited_invoice_id')
                 ->orderBy('issued_at')
-                ->orderBy('id')
-                ->get();
+                ->orderBy('id');
+            // MON-9: exclude credit notes (correlated AND standalone legacy is_credit)
+            // — a payment must never auto-allocate onto a ΠΙΣ.
+            InvoiceScope::excludeCreditNotes($open);
+            $open = $open->get();
 
             foreach ($open as $invoice) {
                 if ($remaining <= 0.005) {
@@ -150,13 +152,15 @@ class PaymentAllocator
 
             foreach ($clean as $line) {
                 // Each target must be THIS customer's, live and issued.
-                $invoice = InvoiceScope::live(Invoice::query())
+                // MON-9: exclude credit notes (correlated AND standalone legacy) —
+                // a payment can't be allocated to a ΠΙΣ.
+                $target = InvoiceScope::live(Invoice::query())
                     ->where('company_id', $customer->company_id)
                     ->where('customer_id', $customer->id)
                     ->where('local_status', 'active')
-                    ->whereNull('credited_invoice_id')
-                    ->whereKey($line['invoice_id'])
-                    ->first();
+                    ->whereKey($line['invoice_id']);
+                InvoiceScope::excludeCreditNotes($target);
+                $invoice = $target->first();
 
                 if ($invoice === null) {
                     throw new InvalidArgumentException('Μη έγκυρο τιμολόγιο για κατανομή (#'.$line['invoice_id'].').');
