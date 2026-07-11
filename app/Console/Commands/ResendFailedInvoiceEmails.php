@@ -94,6 +94,13 @@ class ResendFailedInvoiceEmails extends Command
             // re-selected next run). Mirrors Invoice::isPubliclyViewable().
             ->where('local_status', 'active')
             ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'))
+            // OPS-10: skip invoices whose customer has NO email — resending can
+            // never succeed, but the job still writes a fresh 'failed' row every
+            // attempt, which renews the --since window and re-selects the row
+            // forever (churning the failure counters, hiding real SMTP failures).
+            // A customer who GETS an email later is re-included automatically
+            // (the filter is on the CURRENT address, not the failure reason).
+            ->whereHas('customer', fn ($q) => $q->whereNotNull('email')->where('email', '!=', ''))
             ->whereHas('mailLog', fn ($q) => $q->where('status', 'failed')->where('created_at', '>=', $since))
             ->with('mailLog') // ordered desc by created_at on the relation
             ->latest('id')
