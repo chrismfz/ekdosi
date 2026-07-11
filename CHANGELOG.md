@@ -129,6 +129,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   Migration: το enum περιλαμβάνει πλέον `'batch'`. (Bonus finding από το DOC-6 review.)
 
 ### Changed
+- **AUDIT hygiene (SET-4/SET-6/OPS-14/DOC-9) — docs/config καθάρισμα, μηδέν ρίσκο.** `.env.example`:
+  προστέθηκαν τα missing env (νεότερα `EKDOSI_SCHEDULE_*`, όλα τα `*_CRON` overrides, `BACKUP_LOCAL_DISK`,
+  `MYDATA_INDOUBT_GRACE_MINUTES`, το νέο `EKDOSI_UPDATE_*`+`GITHUB_TOKEN`) + οδηγία log-rotation
+  (`LOG_STACK=daily`/`LOG_DAILY_DAYS`). INSTALL.md §Logs με logrotate stanza (OPS-14). Operator label
+  «Email PDF to customer» → «Αποστολή PDF στον πελάτη» (DOC-9). Ενημερώθηκαν stale docs
+  (CLAUDE.md gross-edit/auto-calc, `DeliveryNoteSubmitter` «✅ sandbox-validated» — SET-6).
 - **AUDIT MON-4 — ρητή πολιτική κενών ΑΑ + σκλήρυνση draft-delete.** Τεκμηριώθηκε (στο `InvoiceNumberer`)
   ότι ο ΑΑ δεσμεύεται στη δημιουργία draft και ΔΕΝ επαναχρησιμοποιείται· η διαγραφή draft αφήνει νόμιμο
   μόνιμο κενό (η myDATA ταυτοποιεί με ΜΑΡΚ). Το draft-delete έχει πλέον confirmation που το εξηγεί.

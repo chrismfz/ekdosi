@@ -839,6 +839,34 @@ every 15 min):
   up** (the alert is queued) and mail configured. So the earlier scheduler note
   aside, real errors DO surface without anyone tailing the log.
 
+### Logs — rotate them (OPS-14)
+
+The default log channel is `single` — **one file** (`storage/logs/laravel.log`)
+that grows forever. On a long-running host, rotate it one of two ways:
+
+- **App-native (simplest):** switch to Laravel's daily channel — in `.env`
+  set `LOG_STACK=daily` (and optionally `LOG_DAILY_DAYS=14` for retention),
+  then `php artisan config:clear`. Laravel writes a dated file per day and
+  prunes past the retention window. No OS config.
+- **OS-level (covers every file under `storage/logs/`):** an logrotate rule.
+  Create `/etc/logrotate.d/ekdosi`:
+
+  ```
+  /home/ekdosi/ekdosi/storage/logs/*.log {
+      weekly
+      rotate 8
+      compress
+      delaycompress
+      missingok
+      notifempty
+      copytruncate
+      su ekdosi ekdosi
+  }
+  ```
+
+  `copytruncate` avoids needing the app to reopen the file after rotation.
+  Adjust the path to your clone and `su` to the app user (§5a).
+
 ### Whole-DB backups (spatie/laravel-backup) — verify, don't just trust
 
 Once the scheduler cron above is in place, the **whole-DB backup** (nightly

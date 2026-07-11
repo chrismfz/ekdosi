@@ -202,7 +202,7 @@ invoice.PRICEWVAT = priceSumWVat - priceSumWVat * (DISCOUNT_inv / 100)
 invoice.VATtotal  = invoice.PRICEWVAT - invoice.PRICE    # derived, not stored
 
 # Gross-edit path (operator types a gross unit price):
-PRICE_PER_ITEM = PRICE_PER_ITEM_WVAT / (1 + VATPERCENT / 100)   # NOT yet wired in the new form
+PRICE_PER_ITEM = PRICE_PER_ITEM_WVAT / (1 + VATPERCENT / 100)   # ✅ wired (G7); MON-7 warns on the 2dp round-trip cent-loss
 
 # Withholding (FAddInvoice.cpp:819): WITHHOLD_AMOUNT = invoice.PRICE * 0.20  (flat 20%, ΠΚ-3)
 ```
@@ -304,8 +304,8 @@ against them (read-only) and flags what AADE would reject. Exit 0/1/2.
 - **PaymentMethod → myDATA payment-type map** → ✅ G9 (`payment_methods.mydata_payment_type`).
 - **SendInvoices mock-Guzzle integration test** → ✅ (`MyDataSubmitterSafetyTest`,
   full `submit()` round-trip against firebed's success stub).
-- **Still open:** auto-calc of percentage amounts (the preset helper does it on pick;
-  a live/on-save recompute from net is the next step) + curated-preset expansion.
+- **Auto-calc of percentage amounts** → ✅ live/on-save recompute from net
+  (`RecomputeInvoiceTaxes`), not just on preset-pick. **Still open:** curated-preset expansion.
 
 ### Reconciliation
 - **Phase 1 — local** (`MyDataReconciliation` page): cross-checks our two

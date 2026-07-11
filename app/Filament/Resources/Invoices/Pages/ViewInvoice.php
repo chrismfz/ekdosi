@@ -781,7 +781,7 @@ class ViewInvoice extends ViewRecord
             // require the auto-email toggle (manual is opt-in by
             // clicking).
             Action::make('resend_email')
-                ->label('Email PDF to customer')
+                ->label('Αποστολή PDF στον πελάτη')
                 ->icon('heroicon-o-envelope')
                 ->color('gray')
                 // DOC-6: only an ISSUED, non-cancelled document may be emailed —
