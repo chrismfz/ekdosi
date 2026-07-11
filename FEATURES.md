@@ -273,6 +273,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **`ops:health` shared-webhook-secret detector** (SEC-3) — row «Security» + warning όταν δύο
   tenants μοιράζονται `whmcs_webhook_secret` (forgeable cross-tenant webhooks)· συγκρίνει hash του
   decrypted, ποτέ plaintext στο report.
+- **Build stamp + read-only update check** — δίπλα στο όνομα (και `ekdosi:version`) η ταυτότητα του
+  deployed build `v{SemVer} · 2026.07.11-150101 (sha)`, παραγόμενη αυτόματα από το git commit στο
+  deploy (`storage/app/build.json`, ώρα Ελλάδας· fallback live git σε dev). Το SemVer μένει σκόπιμο
+  (`ekdosi:release`). Η «Υγεία συστήματος» δείχνει read-only αν υπάρχει νεότερη έκδοση στο GitHub
+  («N commits πίσω» + link), cached 6h, graceful offline — **ποτέ apply** (η αναβάθμιση μένει στο
+  `deploy/update.sh`). `docs/versioning-and-updates.md`.
 - **Deploy worker-drain** — `deploy/update.sh`/`rollback.sh` σταματούν τον queue worker πριν το
   `migrate`/restore (κανένα in-flight job σε μισο-migrated schema)· `db-snapshot` clean-slate
   (`--add-drop-database`) + snapshot μετά το `artisan down`.

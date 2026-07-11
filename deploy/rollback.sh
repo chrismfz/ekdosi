@@ -63,6 +63,15 @@ trap rollback_failed EXIT
 echo "▶ Checkout $REF"
 git checkout --force "$REF"
 
+# Re-stamp the deployed build identity to the rolled-back ref, else the version
+# badge keeps advertising the newer build we just rolled away from.
+echo "▶ Recording build identity (storage/app/build.json)"
+mkdir -p storage/app
+printf '{"sha":"%s","committed_at":"%s","ref":"%s"}\n' \
+  "$(git rev-parse --short HEAD)" \
+  "$(git log -1 --format=%cI)" \
+  "$REF" > storage/app/build.json
+
 echo "▶ composer install (--no-dev)"
 $COMPOSER install --no-dev --optimize-autoloader --no-interaction
 
@@ -73,6 +82,8 @@ fi
 
 echo "▶ optimize + queue restart"
 $ART optimize
+# Realign the cached update-check status with the rolled-back build (see update.sh).
+$ART cache:forget ekdosi.updates.status || true
 $ART queue:restart
 
 echo "▶ Maintenance mode OFF"

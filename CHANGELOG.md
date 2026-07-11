@@ -17,6 +17,16 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+### Added
+- **Build stamp + read-only έλεγχος ενημερώσεων.** Δίπλα στο όνομα της εφαρμογής (και στο
+  `php artisan ekdosi:version`) εμφανίζεται πλέον η ταυτότητα του deployed build: `v{SemVer} ·
+  2026.07.11-150101 (sha)` — το build stamp παράγεται **αυτόματα** από το git commit στο deploy
+  (`deploy/update.sh` → `storage/app/build.json`, ώρα Ελλάδας), χωρίς per-PR συντήρηση· fallback σε
+  live git (dev). Το SemVer μένει σκόπιμο (`ekdosi:release`). Νέα σελίδα «Υγεία συστήματος» δείχνει
+  read-only αν υπάρχει νεότερη έκδοση στο GitHub («N commits πίσω», link) — cached 6h, graceful offline,
+  **ποτέ apply** (η αναβάθμιση μένει στο `deploy/update.sh`). Config: `config/ekdosi.php → updates`.
+  Λεπτομέρειες + η απόφαση «όχι in-app file-swap updater»: `docs/versioning-and-updates.md`.
+
 ### Fixed
 - **AUDIT MON-9 — το Dashboard δεν υπερδηλώνει πια τζίρο/ΦΠΑ ούτε αποκλίνει στα receivables σε tenant με legacy ΠΙΣ.**
   Τα turnover/VAT φίλτρα του `DashboardMetrics` (`baseInvoices`, `creditNotesQuery`, top-customers) πέρασαν από

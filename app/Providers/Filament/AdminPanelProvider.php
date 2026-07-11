@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Pages\Assistant;
 use App\Filament\Pages\Dashboard;
 use App\Models\Company;
+use App\Support\BuildInfo;
 use App\Support\Settings\SystemSettings;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
@@ -89,6 +90,15 @@ class AdminPanelProvider extends PanelProvider
                 fn (): string => Assistant::assistantAvailable()
                     ? Blade::render('@livewire(\'assistant-widget\')')
                     : '',
+            )
+            // Build/version badge under the brand — the deployed identity
+            // (v{SemVer} · {build stamp}) always in view for support/diagnostics.
+            // Inline styles on purpose: the panel ships no Tailwind utility layer
+            // (see CLAUDE.md «No-build CSS»), so a utility class would render bare.
+            ->renderHook(
+                PanelsRenderHook::SIDEBAR_NAV_START,
+                fn (): string => '<div style="padding:0 .75rem .5rem;font-size:.7rem;line-height:1.2;opacity:.55;font-variant-numeric:tabular-nums;word-break:break-all" title="Έκδοση / build">'
+                    .e(app(BuildInfo::class)->label()).'</div>',
             )
             ->plugins([
                 FilamentShieldPlugin::make(),
