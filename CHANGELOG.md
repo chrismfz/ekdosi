@@ -18,6 +18,17 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **AUDIT WH-8 — κλείσιμο under-billing στη γέφυρα WHMCS.** Μια γραμμή WHMCS με ποσό αλλά **κενή
+  περιγραφή** droppαρόταν σιωπηλά από τον mapper (μια γραμμή χωρίς περιγραφή δεν είναι νόμιμη γραμμή
+  παραστατικού) → στα `createDraft`/`split` paths (που δεν τρέχουν totals-reconcile) η χρέωση χανόταν και
+  εκδιδόταν λιγότερο από το οφειλόμενο. Πλέον ο mapper την εκθέτει και το `assertPayloadFilable` (κοινό
+  και στα 3 filing paths) ΚΡΑΤΑ τη γραμμή για τον χειριστή· κενή-μηδενική γραμμή (spacer) μένει αβλαβής.
+  Επιπλέον ο splitter αποκτά **completeness assertion** (κάθε χρεώσιμη γραμμή του payload σε ακριβώς έναν
+  δικαιούχο — πιάνει missing/διπλή/orphan δρομολόγηση).
+- **AUDIT WH-6 — pagination στο `getInvoicesForClient()`.** Χρησιμοποιούσε το `limit` param που η WHMCS
+  αγνοεί (default σελίδα ~25) → το per-customer ledger έβλεπε μόνο τα ~25 νεότερα τιμολόγια του πελάτη και
+  σήμαινε τα υπόλοιπα ως «απόντα». Πλέον σελιδοποιεί με `limitstart`/`limitnum` (ίδιο σχήμα με το frozen-at-16 fix).
+
 - **AUDIT MON-3 — stale `paid_total` κάτω από ταυτόχρονες πληρωμές.** Το `InvoiceBalance::recompute`
   κλείδωνε το invoice row αλλά διάβαζε το SUM των πληρωμών ως plain read → κάτω από REPEATABLE READ ένα
   read view στημένο πριν το lock (π.χ. από outer transaction) μπορούσε να σερβίρει stale άθροισμα και να
@@ -46,6 +57,12 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   μόνιμο κενό (η myDATA ταυτοποιεί με ΜΑΡΚ). Το draft-delete έχει πλέον confirmation που το εξηγεί.
 
 ### Added
+- **AUDIT WH-7 — επανάληψη αποτυχημένης επιστροφής ΜΑΡΚ στο WHMCS.** Όταν η υποβολή στην ΑΑΔΕ πετύχει
+  αλλά η ενημέρωση του WHMCS αποτύχει, το παραστατικό έμενε `whmcs_writeback_state=failed` χωρίς σημείο
+  επανάληψης (το badge έμενε «Όχι στο AADE» μέχρι tinker). Νέα: στήλη + φίλτρο «Επιστροφή ΜΑΡΚ» στο WHMCS
+  inbox, per-row action **«Επανάληψη επιστροφής ΜΑΡΚ»**, και batch command
+  **`php artisan whmcs:retry-writebacks [--tenant=SLUG] [--dry-run]`** (δεν αγγίζει την ΑΑΔΕ — ξαναστέλνει
+  μόνο το ήδη εκδοθέν ΜΑΡΚ). Διορθώθηκε και το παραπλανητικό next-step μήνυμα στα logs.
 - **AUDIT SET-1 companion — `php artisan ekdosi:create-admin`.** Δημιουργεί (ή κάνει `--reset`
   κωδικού) έναν **system super_admin** χωρίς τον πλήρη installer: prompt/flags για name/email/password,
   τον κάνει μέλος όλων των εταιριών και του αναθέτει super_admin παντού (reuse `shield:sync-super-admin

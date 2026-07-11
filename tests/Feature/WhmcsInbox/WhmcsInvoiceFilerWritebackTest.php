@@ -8,6 +8,7 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
+use App\Services\Whmcs\WhmcsWritebackService;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -327,6 +328,104 @@ class WhmcsInvoiceFilerWritebackTest extends TestCase
             PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,
             $result->pending->fresh()->whmcs_writeback_state
         );
+    }
+
+    public function test_wh7_retry_writeback_succeeds_after_a_prior_failure(): void
+    {
+        // The bridge is down for the first (file) call, back up for the retry.
+        // A sequence is required: calling Http::fake() twice keeps the FIRST
+        // matching stub, so the retry would otherwise re-see the 500.
+        Http::fakeSequence('*ekdosi_bridge/inbound.php')
+            ->push(['error' => 'db down'], 500)
+            ->push(['status' => 'ok', 'whmcs_invoice_id' => 8888], 200);
+
+        $this->tenant->update([
+            'mydata_mode' => 'sandbox',
+            'whmcs_api_url' => 'https://whmcs.example.com/includes/api.php',
+            'whmcs_webhook_secret' => str_repeat('a', 64),
+        ]);
+        $this->seedFakeSubmitterReturningMark('999000777');
+
+        $pending = $this->makePending();
+        $result = app(WhmcsInvoiceFiler::class)->file($this->tenant, $pending, $this->customer, $this->invoiceType);
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_FAILED, $result->pending->fresh()->whmcs_writeback_state);
+
+        // Bridge is back: the retry flips it to succeeded and re-pushes the MARK.
+        $state = app(WhmcsWritebackService::class)->retryWriteback($result->pending->fresh());
+
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_SUCCEEDED, $state);
+        $fresh = $result->pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_SUCCEEDED, $fresh->whmcs_writeback_state);
+        $this->assertNull($fresh->whmcs_writeback_error);
+        // The retry actually re-hit the bridge with the SAME MARK.
+        Http::assertSent(fn ($request) => ($request->data()['mark'] ?? null) === '999000777');
+    }
+
+    public function test_wh7_retry_resolves_the_invoice_via_the_reverse_link(): void
+    {
+        // Draft-first lifecycle path: the pending row's invoice_id is NULL and the
+        // link is reverse (invoices.whmcs_pending_id). retryWriteback must still
+        // resolve the invoice + its MARK. (The other retry tests use the forward
+        // link, so this pins resolveInvoiceFor's second branch.)
+        Http::fake([
+            'https://whmcs.example.com/modules/addons/ekdosi_bridge/inbound.php' => Http::response(['status' => 'ok'], 200),
+        ]);
+        $this->tenant->update([
+            'mydata_mode'          => 'sandbox',
+            'whmcs_api_url'        => 'https://whmcs.example.com/includes/api.php',
+            'whmcs_webhook_secret' => str_repeat('a', 64),
+        ]);
+
+        $pending = $this->makePending();
+        $pending->update([
+            'status'                => PendingWhmcsInvoice::STATUS_FILED,
+            'invoice_id'            => null,   // no forward link
+            'mydata_mark'           => '400123456789',
+            'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
+            'whmcs_writeback_error' => 'bridge was down',
+        ]);
+        // The invoice carries the reverse link + the MARK.
+        $invoice = \App\Models\Invoice::create([
+            'company_id'       => $this->tenant->id,
+            'invoice_type_id'  => $this->invoiceType->id,
+            'customer_id'      => $this->customer->id,
+            'code'             => 1,
+            'invcode'          => 'ΤΠΥ1',
+            'issued_at'        => now(),
+            'local_status'     => 'active',
+            'net_total'        => 100,
+            'gross_total'      => 124,
+            'whmcs_pending_id' => $pending->id,
+        ]);
+        $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400123456789'])->save();
+
+        $state = app(WhmcsWritebackService::class)->retryWriteback($pending->fresh());
+
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_SUCCEEDED, $state);
+        Http::assertSent(fn ($request) => ($request->data()['mark'] ?? null) === '400123456789');
+    }
+
+    public function test_wh7_retry_writeback_refuses_a_split_row(): void
+    {
+        $pending = $this->makePending();
+        $pending->update([
+            'status' => PendingWhmcsInvoice::STATUS_SPLIT,
+            'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('διαχωρίστηκε');
+        app(WhmcsWritebackService::class)->retryWriteback($pending->fresh());
+    }
+
+    public function test_wh7_retry_writeback_refuses_a_non_failed_row(): void
+    {
+        $pending = $this->makePending();
+        $pending->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('δεν χρειάζεται επανάληψη');
+        app(WhmcsWritebackService::class)->retryWriteback($pending->fresh());
     }
 
     /**

@@ -118,6 +118,92 @@ class WhmcsInvoiceSplitter
     }
 
     /**
+     * WH-8(a): assert the split groups partition ALL chargeable payload lines —
+     * each real (non-zero) payload item claimed by exactly one group. Catches:
+     *   - a chargeable payload item NO group claims (routing gap → under-billing);
+     *   - an item_id claimed by TWO groups (double-billing);
+     *   - a group item_id that isn't a real payload item (stale/orphan routing).
+     * A zero-amount payload line that no group claims is harmless (ignored).
+     *
+     * @param  array<int, array<string,mixed>>  $groups
+     */
+    private function assertSplitCoversAllItems(PendingWhmcsInvoice $pending, array $groups): void
+    {
+        $items = $pending->payload['items']['item'] ?? [];
+        if (! empty($items) && ! is_array($items)) {
+            $items = [];
+        }
+        if (! empty($items) && ! array_is_list($items)) {
+            $items = [$items];   // single-item object → wrap as list
+        }
+
+        /** @var array<int, float> $payloadAmounts  payload item id → amount */
+        $payloadAmounts = [];
+        $idlessCharges = 0;   // chargeable lines with no positive id → unroutable
+        foreach ($items as $item) {
+            $id = (int) ($item['id'] ?? 0);
+            $amount = (float) ($item['amount'] ?? 0.0);
+            if ($id > 0) {
+                $payloadAmounts[$id] = $amount;
+            } elseif (abs($amount) > 0.005) {
+                // No positive id → planGroups can't assign it to any group and
+                // filterPayloadItems can't keep it, so it silently vanishes.
+                // Count it as a coverage gap rather than ignoring it.
+                $idlessCharges++;
+            }
+        }
+
+        $assigned = [];
+        $duplicated = [];
+        foreach ($groups as $group) {
+            foreach ($group['item_ids'] as $id) {
+                $id = (int) $id;
+                if (isset($assigned[$id])) {
+                    $duplicated[$id] = true;
+                }
+                $assigned[$id] = true;
+            }
+        }
+
+        // Chargeable payload lines that no group claims → would be dropped.
+        $missing = [];
+        foreach ($payloadAmounts as $id => $amount) {
+            if (! isset($assigned[$id]) && abs($amount) > 0.005) {
+                $missing[] = $id;
+            }
+        }
+        // Assigned ids with no matching payload item → stale/orphan routing.
+        $orphans = [];
+        foreach (array_keys($assigned) as $id) {
+            if (! isset($payloadAmounts[$id])) {
+                $orphans[] = $id;
+            }
+        }
+
+        if ($missing === [] && $duplicated === [] && $orphans === [] && $idlessCharges === 0) {
+            return;
+        }
+
+        $problems = [];
+        if ($missing !== [] || $idlessCharges > 0) {
+            $problems[] = (count($missing) + $idlessCharges).' χρεώσιμη/ες γραμμή/ές δεν ανήκουν σε κανέναν δικαιούχο (θα χάνονταν)';
+        }
+        if ($duplicated !== []) {
+            $problems[] = count($duplicated).' γραμμή/ές ανήκουν σε δύο δικαιούχους (διπλή χρέωση)';
+        }
+        if ($orphans !== []) {
+            $problems[] = count($orphans).' δρομολογημένη/ες γραμμή/ές δεν αντιστοιχούν σε γραμμή του τιμολογίου';
+        }
+
+        throw new RuntimeException(sprintf(
+            'Ο διαχωρισμός του WHMCS #%d δεν καλύπτει σωστά τις γραμμές: %s. Διόρθωσε τη δρομολόγηση '
+            .'(κάθε χρεώσιμη γραμμή σε ακριβώς έναν δικαιούχο) πριν τον διαχωρισμό.',
+            $pending->whmcs_invoice_id,
+            implode('· ', $problems),
+        ));
+    }
+
+    /**
      * Execute the split: create one draft invoice per resolvable party group.
      * All-or-nothing (single transaction). Refuses if any group can't resolve
      * to a customer — so we never produce a partial split.
@@ -176,6 +262,13 @@ class WhmcsInvoiceSplitter
                 ));
             }
         }
+
+        // WH-8(a): completeness — the union of the groups' item_ids must cover
+        // every chargeable payload line exactly once. Without this a routing
+        // skew between the payload items and the resolution lines silently drops
+        // a charge (under-billing) or assigns one to two groups (double-billing);
+        // per-group mapping can't see the whole picture, so assert it here.
+        $this->assertSplitCoversAllItems($pending, $groups);
 
         return DB::transaction(function () use ($tenant, $pending, $invoiceType, $receiptType, $groups, $splitByUserId) {
             $locked = PendingWhmcsInvoice::query()

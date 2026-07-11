@@ -211,6 +211,51 @@ class WhmcsFilingGuardTest extends TestCase
         $this->assertSame(1, Invoice::count());
     }
 
+    public function test_wh8_blank_description_with_amount_is_held(): void
+    {
+        // A real charge (€50) with an EMPTY description would be dropped by the
+        // mapper and silently under-bill. The WHMCS total (174) is the honest
+        // sum; assertPayloadFilable (which runs before totals-reconcile) holds it.
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ['description' => '',        'amount' => '50.00',  'taxed' => '1'],
+        ], total: '174.00');
+
+        $this->assertHeldWith($pending, 'ΚΕΝΗ περιγραφή');
+    }
+
+    public function test_wh8_blank_description_with_amount_is_held_on_create_draft(): void
+    {
+        // The money-critical path: createDraft does NOT run totals-reconcile, so
+        // WITHOUT the WH-8 mapper→guard surfacing this blank €50 charge would
+        // silently vanish into a draft billing only €124. It must be held.
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ['description' => '   ',     'amount' => '50.00',  'taxed' => '1'],
+        ], total: '174.00');
+
+        try {
+            app(WhmcsInvoiceFiler::class)->createDraft($this->tenant, $pending, $this->customer, $this->invoiceType);
+            $this->fail('Expected createDraft to refuse a blank-description charge line.');
+        } catch (LogicException $e) {
+            $this->assertStringContainsString('ΚΕΝΗ περιγραφή', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::count());
+        $this->assertNull($pending->fresh()->invoice_id);
+    }
+
+    public function test_wh8_blank_description_zero_amount_is_filable(): void
+    {
+        // A blank line with NO amount is a harmless spacer — it must not block.
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ['description' => '',        'amount' => '0.00',   'taxed' => '1'],
+        ], total: '124.00');
+
+        $this->file($pending);
+        $this->assertSame(1, Invoice::count());
+    }
+
     public function test_wh3_legacy_invoiced_row_is_held(): void
     {
         $pending = $this->makePending([['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1']]);

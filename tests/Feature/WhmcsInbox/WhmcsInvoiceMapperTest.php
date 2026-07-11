@@ -324,22 +324,32 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(124.0, $breakdown[1]['gross']);
     }
 
-    public function test_skips_empty_descriptions(): void
+    public function test_blank_description_lines_are_dropped_from_lines_but_nonzero_ones_are_surfaced(): void
     {
+        // WH-8(b): a blank-description line can't be a legal tax line, so the
+        // mapper still drops it from `lines` — BUT a blank line with a REAL
+        // amount is under-billing if it just vanishes, so its amount is now
+        // surfaced in totals for the filing guard to refuse. A blank ZERO line
+        // (spacer) stays silently dropped.
         $pending = $this->makePending([
             'invoiceid' => 1006,
             'items' => ['item' => [
                 ['description' => 'Real', 'amount' => '124.00', 'taxed' => '1'],
-                ['description' => '',     'amount' => '50.00',  'taxed' => '1'],   // skipped
-                ['description' => '   ',  'amount' => '20.00',  'taxed' => '1'],   // skipped
+                ['description' => '',     'amount' => '50.00',  'taxed' => '1'],   // real charge, no name
+                ['description' => '   ',  'amount' => '20.00',  'taxed' => '1'],   // real charge, no name
+                ['description' => '',     'amount' => '0.00',   'taxed' => '1'],   // harmless spacer
             ]],
         ]);
 
-        $lines = app(WhmcsInvoiceMapper::class)
-            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'];
+        $mapped = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType);
 
-        $this->assertCount(1, $lines);
-        $this->assertSame('Real', $lines[0]['product_descr']);
+        // Only the named line reaches the invoice…
+        $this->assertCount(1, $mapped['lines']);
+        $this->assertSame('Real', $mapped['lines'][0]['product_descr']);
+
+        // …but the two blank-with-amount charges are surfaced (the zero one is not).
+        $this->assertEqualsCanonicalizing([50.0, 20.0], $mapped['totals']['blank_description_charge_lines']);
     }
 
     public function test_rejects_cross_tenant_customer(): void

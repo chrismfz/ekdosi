@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\PendingWhmcsInvoice;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -178,6 +179,103 @@ class WhmcsWritebackService
     }
 
     /**
+     * WH-7: RETRY a write-back that previously failed (or is stuck 'pending').
+     * The AADE filing is already done; this just re-attempts the WHMCS
+     * bookkeeping that the badge/ledger depend on. Reuses pushMark(), so it only
+     * touches the two audit-freeze-whitelisted columns and re-derives the
+     * push state (cancelled vs active) from the invoice's current AADE state.
+     *
+     * Backs both the per-row Filament action and the whmcs:retry-writebacks
+     * batch command. Throws a RuntimeException (operator-facing) when the row
+     * isn't retryable — a split row, a non-failed/pending state, no linked
+     * invoice, or no MARK to push; the caller surfaces the message.
+     *
+     * @return string the resulting whmcs_writeback_state after the attempt
+     */
+    public function retryWriteback(PendingWhmcsInvoice $pending): string
+    {
+        if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
+            throw new RuntimeException(
+                'Το WHMCS #'.$pending->whmcs_invoice_id.' διαχωρίστηκε σε πολλά παραστατικά — '
+                .'η επιστροφή ΜΑΡΚ για split τιμολόγια είναι ξεχωριστός σχεδιασμός (δεν υποστηρίζεται ακόμη).'
+            );
+        }
+
+        if (! in_array($pending->whmcs_writeback_state, [
+            PendingWhmcsInvoice::WRITEBACK_FAILED,
+            PendingWhmcsInvoice::WRITEBACK_PENDING,
+        ], true)) {
+            throw new RuntimeException(
+                'Το WHMCS #'.$pending->whmcs_invoice_id.' δεν έχει αποτυχημένη/εκκρεμή επιστροφή ΜΑΡΚ '
+                .'(κατάσταση: '.($pending->whmcs_writeback_state ?? '—').') — δεν χρειάζεται επανάληψη.'
+            );
+        }
+
+        $tenant = $pending->company;
+        if ($tenant === null) {
+            throw new RuntimeException('Το WHMCS #'.$pending->whmcs_invoice_id.' δεν έχει εταιρία.');
+        }
+
+        $invoice = $this->resolveInvoiceFor($pending);
+        if ($invoice === null) {
+            throw new RuntimeException(
+                'Το WHMCS #'.$pending->whmcs_invoice_id.' δεν έχει συνδεδεμένο παραστατικό ekdosi — '
+                .'δεν υπάρχει ΜΑΡΚ για επιστροφή.'
+            );
+        }
+
+        $mark = (string) ($invoice->mydata_mark ?? $pending->mydata_mark ?? '');
+        if ($mark === '') {
+            throw new RuntimeException(
+                'Το WHMCS #'.$pending->whmcs_invoice_id.' δεν έχει ΜΑΡΚ ακόμη (δεν υποβλήθηκε στο myDATA) — '
+                .'δεν υπάρχει τίποτα να επιστραφεί.'
+            );
+        }
+
+        // Refuse (keeping the row FAILED, so it stays retryable) if the bridge
+        // isn't configured RIGHT NOW: otherwise pushMark would downgrade FAILED →
+        // SKIPPED, and neither retry surface targets SKIPPED — the MARK would be
+        // stranded once the bridge came back. Fix the bridge first, then retry.
+        try {
+            $this->bridgeFactory->for($tenant);
+        } catch (WhmcsNotConfigured $e) {
+            throw new RuntimeException(
+                'Η γέφυρα WHMCS δεν είναι ρυθμισμένη για το #'.$pending->whmcs_invoice_id.' '
+                .'('.$e->getMessage().') — ρύθμισε τη γέφυρα και ξαναπροσπάθησε.'
+            );
+        }
+
+        // Re-derive the push state from the invoice's CURRENT AADE state — a
+        // cancelled invoice must flag «ΑΚΥΡΩΜΕΝΟ», not re-assert a live MARK.
+        $state = $invoice->mydata_state === 'CANCELLED' ? 'cancelled' : 'active';
+
+        $this->pushMark($tenant, $pending, $invoice, $mark, $state);
+
+        return (string) $pending->fresh()->whmcs_writeback_state;
+    }
+
+    /**
+     * Resolve the ekdosi invoice a (non-split) pending row's MARK belongs to,
+     * covering BOTH links: forward (pending.invoice_id, the file() path) and
+     * reverse (invoices.whmcs_pending_id, the draft-first lifecycle path).
+     */
+    private function resolveInvoiceFor(PendingWhmcsInvoice $pending): ?Invoice
+    {
+        if ($pending->invoice_id !== null) {
+            $invoice = $pending->invoice()->first();
+            if ($invoice !== null) {
+                return $invoice;
+            }
+        }
+
+        return Invoice::query()
+            ->where('company_id', $pending->company_id)
+            ->where('whmcs_pending_id', $pending->id)
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
      * Push the MARK to the bridge's mod_ekdosi_invoice_marks table (NOT the
      * legacy tblinvoices.invoiced flag) via the bridge plugin and record the
      * outcome on the pending row's whmcs_writeback_* columns. The pending row
@@ -240,10 +338,12 @@ class WhmcsWritebackService
                 'mydata_mark' => $mark,
                 'ekdosi_invoice' => $invoice->invcode,
                 'error' => $e->getMessage(),
-                'next_step' => 'Re-trigger the write-back from the Ekdosi Bridge admin page '
-                    .'for WHMCS invoice '.$pending->whmcs_invoice_id
-                    .' (MARK '.$mark.') — it stores the MARK in mod_ekdosi_invoice_marks, '
-                    .'never in the legacy tblinvoices.invoiced flag.',
+                'next_step' => 'Retry from ekdosi: the WHMCS inbox row for invoice '
+                    .$pending->whmcs_invoice_id.' now shows «Επιστροφή ΜΑΡΚ: Απέτυχε» — '
+                    .'use its «Επανάληψη επιστροφής ΜΑΡΚ» action, or run '
+                    .'`php artisan whmcs:retry-writebacks --tenant='.($tenant->slug ?? '?').'`. '
+                    .'The bridge stores the MARK in mod_ekdosi_invoice_marks (never the legacy '
+                    .'tblinvoices.invoiced flag).',
             ]);
             $pending->update([
                 'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,

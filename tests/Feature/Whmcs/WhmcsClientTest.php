@@ -423,6 +423,86 @@ class WhmcsClientTest extends TestCase
         $this->assertCount(2, $rows);
     }
 
+    public function test_get_invoices_for_client_paginates_with_limitstart_limitnum(): void
+    {
+        // WH-6: GetInvoices ignores `limit` and applies a ~25 default page size,
+        // so a client with more than a page only surfaced the newest ~25. Lock
+        // the paginating walk: userid filter, limitstart/limitnum (not limit),
+        // cursor advances by the ACTUAL count, all statuses returned.
+        Http::fakeSequence('example.gr/*')
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 30, 'date' => '2026-05-30', 'status' => 'Paid'],
+                ['id' => 29, 'date' => '2026-05-29', 'status' => 'Unpaid'],
+            ]]], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 28, 'date' => '2026-05-28', 'status' => 'Cancelled'],
+            ]]], 200)
+            // Empty page → the end signal (we do NOT short-circuit on a
+            // partial page, so a limit above WHMCS's ceiling can't truncate).
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
+
+        $rows = $this->makeClient()->getInvoicesForClient(whmcsUserId: 77, limit: 2);
+
+        // All three come through regardless of status — the panel wants the full picture.
+        $this->assertSame([30, 29, 28], array_column($rows, 'id'));
+
+        // Cursor advances by the ACTUAL returned count: 0 → 2 → 3, and userid +
+        // limitnum (not limit/offset) go out on the first request.
+        $starts = [];
+        Http::assertSentInOrder([
+            function ($req) use (&$starts) {
+                $starts[] = (int) ($req->data()['limitstart'] ?? -1);
+
+                return (int) ($req->data()['userid'] ?? 0) === 77
+                    && (int) ($req->data()['limitnum'] ?? 0) === 2
+                    && ! array_key_exists('limit', $req->data())
+                    && ! array_key_exists('offset', $req->data());
+            },
+            function ($req) use (&$starts) {
+                $starts[] = (int) ($req->data()['limitstart'] ?? -1);
+
+                return true;
+            },
+            function ($req) use (&$starts) {
+                $starts[] = (int) ($req->data()['limitstart'] ?? -1);
+
+                return true;
+            },
+        ]);
+        $this->assertSame([0, 2, 3], $starts);
+    }
+
+    public function test_get_invoices_for_client_stops_at_min_date(): void
+    {
+        // DESC ordering → once a row predates minDate, everything after is older.
+        Http::fakeSequence('example.gr/*')
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 40, 'date' => '2026-05-10', 'status' => 'Paid'],
+                ['id' => 39, 'date' => '2019-01-01', 'status' => 'Paid'], // before cutoff
+                ['id' => 38, 'date' => '2018-01-01', 'status' => 'Paid'],
+            ]]], 200);
+
+        $rows = $this->makeClient()->getInvoicesForClient(whmcsUserId: 77, minDate: '2026-01-01');
+
+        $this->assertSame([40], array_column($rows, 'id'));
+    }
+
+    public function test_get_invoices_for_client_loop_guard_stops_a_nonpaginating_server(): void
+    {
+        // A server that ignores pagination returns the same page forever; the
+        // id-repeat guard must stop after the second identical page.
+        Http::fake([
+            'example.gr/*' => Http::response(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 9, 'date' => '2026-05-09', 'status' => 'Paid'],
+                ['id' => 8, 'date' => '2026-05-08', 'status' => 'Paid'],
+            ]]], 200),
+        ]);
+
+        $rows = $this->makeClient()->getInvoicesForClient(whmcsUserId: 77, limit: 2);
+
+        $this->assertSame([9, 8], array_column($rows, 'id'));
+    }
+
     public function test_get_client_returns_null_on_not_found(): void
     {
         Http::fake([

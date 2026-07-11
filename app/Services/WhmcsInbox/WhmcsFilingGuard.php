@@ -67,6 +67,23 @@ final class WhmcsFilingGuard
                 .'στο WHMCS (ή εξέδωσε πιστωτικό ξεχωριστά) και ξαναπροσπάθησε.'
             );
         }
+
+        // WH-8(b): a line with a real (non-zero) amount but a BLANK description
+        // is dropped by the mapper (a tax line needs a description) — silently
+        // under-billing on the createDraft / split paths, which don't run the
+        // totals-reconcile guard. Refuse here (path-independent) so the row is
+        // HELD instead of issued for less than the customer actually owes.
+        $blankCharges = $mapped['totals']['blank_description_charge_lines'] ?? [];
+        if ($blankCharges !== []) {
+            $sum = array_sum(array_map('abs', $blankCharges));
+            throw new LogicException(
+                'Το WHMCS #'.$pending->whmcs_invoice_id.' έχει '.count($blankCharges).' γραμμή/ές με '
+                .'ποσό αλλά ΚΕΝΗ περιγραφή (σύνολο '.number_format($sum, 2, ',', '.').' €) — μια '
+                .'χρέωση χωρίς περιγραφή δεν επιτρέπεται σε φορολογικό παραστατικό και θα χανόταν '
+                .'σιωπηλά (θα εκδιδόταν λιγότερο από το οφειλόμενο). Η γραμμή κρατείται· συμπλήρωσε '
+                .'περιγραφή στη γραμμή του WHMCS τιμολογίου και ξαναπροσπάθησε.'
+            );
+        }
     }
 
     /**

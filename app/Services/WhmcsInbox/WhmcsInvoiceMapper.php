@@ -121,6 +121,13 @@ class WhmcsInvoiceMapper
 
         $lines = $this->buildLines($linePayload, $defaultVat, $amountIncludesTax);
         $totals = $this->computeTotals($lines);
+        // WH-8(b): buildLines DROPS any blank-description line (a tax document
+        // can't carry a nameless line). A blank line with a REAL (non-zero)
+        // amount is therefore silently lost → under-billing on the paths that
+        // skip totals-reconcile (createDraft / split). Surface those amounts so
+        // the filing guard HOLDS the row for the operator instead. Scanned from
+        // the payload (not the dropped lines) — same shape as hasZeroVatLine.
+        $totals['blank_description_charge_lines'] = $this->blankDescriptionChargeLines($linePayload);
 
         return [
             'header' => [
@@ -434,6 +441,38 @@ class WhmcsInvoiceMapper
     }
 
     /**
+     * WH-8(b): amounts of WHMCS line items that have a BLANK description but a
+     * non-zero amount. buildLines() drops every blank-description line (a legal
+     * tax line needs a description), so a real charge with an empty description
+     * would vanish from the issued παραστατικό — under-billing the customer. The
+     * filing guard refuses these; a blank line with a ZERO amount (a spacer /
+     * display artifact) is harmless and stays silently dropped.
+     *
+     * @return array<int, float>
+     */
+    private function blankDescriptionChargeLines(array $payload): array
+    {
+        $items = $payload['items']['item'] ?? [];
+        if (! empty($items) && ! array_is_list($items)) {
+            $items = [$items];
+        }
+
+        $out = [];
+        foreach ($items as $item) {
+            $description = trim((string) ($item['description'] ?? ''));
+            if ($description !== '') {
+                continue;
+            }
+            $amount = (float) ($item['amount'] ?? 0.0);
+            if (abs($amount) > 0.005) {
+                $out[] = $amount;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Descriptions of lines mapped to vat_percent=0.0. These crash
      * MyDataSubmitter::vatCategoryFor (MyDataSubmitter.php:589) for
      * sandbox/production tenants — the filer must surface them to
@@ -501,9 +540,9 @@ class WhmcsInvoiceMapper
             // myDATA's XSD floors netValue/vatAmount at 0, so filing one is
             // rejected AFTER the ΑΑ is consumed (ghost invoice). Surfaced so
             // the filing guard HOLDS the row instead. (A negative line with a
-            // blank description is dropped by buildLines and instead trips the
-            // totals-reconcile guard, since our gross would exceed the WHMCS
-            // total by the omitted discount.)
+            // blank description is dropped by buildLines, but WH-8 now surfaces
+            // it via blank_description_charge_lines — held by assertPayloadFilable
+            // on ALL paths, not just the totals-reconcile ones.)
             'negative_lines' => $this->negativeLineDescriptions($lines),
         ];
     }
