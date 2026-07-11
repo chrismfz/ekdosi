@@ -18,6 +18,21 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **AUDIT MON-9 — το Dashboard δεν υπερδηλώνει πια τζίρο/ΦΠΑ σε tenant με legacy ΠΙΣ.** Και τα 4 credit-note
+  φίλτρα του `DashboardMetrics` (`baseInvoices`, `creditNotesQuery`, receivables, top-customers) πέρασαν από
+  τον στενό `whereNull('credited_invoice_id')` στον πλήρη `InvoiceScope::excludeCreditNotes()`/`onlyCreditNotes()`
+  — έτσι πιάνουν και τα ETL-imported legacy πιστωτικά (`invoice_types.is_credit`, χωρίς `credited_invoice_id`)
+  και το dashboard ευθυγραμμίζεται με τον ledger (`CustomerLedgerBuilder`). Η «Εικόνα ΦΠΑ» κληρονομεί το fix.
+- **AUDIT SEC-2 — ελάχιστο μήκος password (8).** Ο κωδικός χρήστη επιβάλλει πλέον `min:8` στη φόρμα (conditional
+  ώστε το blank-edit «κράτα τον κωδικό» να μην απορρίπτεται) και στο `ekdosi:install` (πριν το transaction, ώστε
+  ένα `--password` flag να μη σπέρνει αδύναμο super_admin).
+- **AUDIT SEC-3 (cheap) — ανίχνευση κοινού webhook secret.** Το `ops:health` προσθέτει row «Security → Shared
+  webhook secret» + warning όταν δύο tenants μοιράζονται `whmcs_webhook_secret` (συγκρίνει hash του decrypted —
+  ποτέ plaintext στο report). Ο κανόνας «ποτέ κοινό webhook secret» + το SEC-4 (μη-ληξιπρόθεσμο public PDF URL)
+  τεκμηριώθηκαν στο `docs/security-at-rest.md`. (Το slug/timestamp στο canonical παραμένει deferred.)
+- **AUDIT SEC-5 — ρητό `withoutGlobalScope` στα all-tenant sweeps.** Οι δύο cross-tenant σαρώσεις
+  (`OperatorHealthReport::mail()`, `RunScheduledCompanyBackups`) δηλώνουν πλέον ρητά `->withoutGlobalScope(CompanyScope::class)`
+  αντί να στηρίζονται στο no-op default του CompanyScope εκτός tenant context.
 - **AUDIT SET-2 — φύλαξη bulk/force-delete στα lookups.** Η μαζική + οριστική διαγραφή σε lookup πίνακες
   (ΦΠΑ, τύποι, τρόποι πληρωμής/αποστολής κ.λπ.) ήταν αφύλακτη — διαγραφή μιας σε-χρήση εγγραφής έσκαγε
   σε raw 500 (`restrictOnDelete`) ή μηδένιζε σιωπηλά το FK (`nullOnDelete`, κενό Select). Νέα

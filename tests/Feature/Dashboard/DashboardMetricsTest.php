@@ -298,6 +298,36 @@ class DashboardMetricsTest extends TestCase
         $this->assertSame(1, $fig->count);
     }
 
+    public function test_income_excludes_standalone_legacy_credit_type(): void
+    {
+        // MON-9: a legacy ΠΙΣ/return imported by the ETL is an is_credit-TYPE
+        // invoice with a NULL credited_invoice_id (no correlation row). The old
+        // whereNull('credited_invoice_id') predicate wrongly counted it as
+        // income; the InvoiceScope helper excludes it via the invoice-type flag.
+        $creditType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'name' => 'ΠΙΣ',
+            'code' => 'ΠΙΣ', 'invcount' => 1, 'payment_method_id' => $this->cash->id,
+            'is_credit' => true,
+        ]);
+
+        // A sale this month.
+        $this->makeInvoice(['net_total' => 100, 'gross_total' => 124]);
+        // A standalone legacy credit note (positive gross, NULL correlation)
+        // must NOT be counted as income.
+        $this->makeInvoice([
+            'net_total' => 80, 'gross_total' => 99,
+            'invoice_type_id' => $creditType->id,
+        ]);
+
+        $fig = (new DashboardMetrics($this->tenant))->income(
+            Carbon::parse('2026-05-01')->startOfMonth(),
+            Carbon::parse('2026-05-31')->endOfMonth(),
+        );
+
+        $this->assertSame(100.0, $fig->net);    // sale only, legacy credit excluded
+        $this->assertSame(1, $fig->count);
+    }
+
     public function test_outstanding_nets_out_valid_credit_notes(): void
     {
         // credit-term invoice of 500, with a VALID 200 credit note against it.

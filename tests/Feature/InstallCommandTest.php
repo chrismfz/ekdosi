@@ -85,6 +85,23 @@ class InstallCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_rejects_a_password_under_eight_characters(): void
+    {
+        // SEC-2: a --password flag can't seed a weak super_admin.
+        $this->withoutMockingConsoleOutput();
+
+        $exit = $this->artisan('ekdosi:install', [
+            '--email' => 'boss@acme.gr', '--password' => 'short',
+            '--company' => 'ACME', '--slug' => 'acme', '--no-interaction' => true,
+        ]);
+        $this->assertSame(1, $exit);
+
+        // Nothing was created — the guard fires before the transaction.
+        $this->assertSame(0, Company::query()->where('slug', 'acme')->count());
+        $this->assertSame(0, User::query()->where('email', 'boss@acme.gr')->count());
+    }
+
+    #[Test]
     public function no_lookups_flag_skips_seeding(): void
     {
         $this->withoutMockingConsoleOutput();

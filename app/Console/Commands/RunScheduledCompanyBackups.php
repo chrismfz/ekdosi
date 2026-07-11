@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\CompanyBackupRun;
 use App\Models\CompanyBackupSetting;
+use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Notifications\ScheduledBackupFailed;
 use App\Services\Backup\CompanyBackupRunner;
@@ -32,7 +33,11 @@ class RunScheduledCompanyBackups extends Command
 
     public function handle(CompanyBackupRunner $runner): int
     {
+        // SEC-5: a deliberate all-tenant scheduler sweep (each due backup then
+        // runs inside CompanyContext::actAs below) — declare the intent so the
+        // ambient CompanyScope no-op default isn't load-bearing here.
         $settings = CompanyBackupSetting::query()
+            ->withoutGlobalScope(CompanyScope::class)
             ->where('enabled', true)
             ->where('frequency', '!=', 'off')
             ->when($this->option('tenant'), fn ($q, $slug) => $q->whereHas('company', fn ($c) => $c->where('slug', $slug)))

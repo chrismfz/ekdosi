@@ -36,13 +36,19 @@ class UserForm
                             ->password()
                             ->revealable()
                             ->maxLength(255)
+                            // SEC-2: enforce a minimum length (the helper text
+                            // already promised «At least 8 characters» but nothing
+                            // checked it). Gate the min on a FILLED value so a blank
+                            // edit (= keep current password) isn't wrongly rejected;
+                            // on CREATE the field is required so the min always fires.
+                            ->rules(fn (?string $state): array => filled($state) ? ['min:8'] : [])
                             // Hash on save. Skip the column when the field is empty
                             // (edit page: blank password input = "don't change").
                             ->dehydrateStateUsing(fn (string $state): string => Hash::make($state))
                             ->dehydrated(fn (?string $state): bool => filled($state))
                             ->required(fn (string $operation): bool => $operation === 'create')
                             ->helperText(fn (string $operation): string => $operation === 'edit'
-                                ? 'Leave blank to keep the current password.'
+                                ? 'Leave blank to keep the current password (min 8 if changing).'
                                 : 'At least 8 characters.'),
 
                         Toggle::make('email_verified')
