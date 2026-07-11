@@ -119,6 +119,55 @@ class MoneyStatusConsistencyTest extends TestCase
         $this->assertEqualsWithDelta(104.0, $ledger, 0.001);
     }
 
+    /** A STANDALONE legacy credit note (is_credit type, NO credited_invoice_id). */
+    private function makeStandaloneCreditNote(Customer $c, int $netPerUnit): Invoice
+    {
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΠΤ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->creditType->id, 'customer_id' => $c->id,
+            'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-10 10:00:00',
+            // deliberately NO credited_invoice_id — this is how the ETL imports a
+            // legacy ΠΙΣ: a credit-TYPE document with no correlation row.
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => $netPerUnit, 'vat_percent' => 24, 'product_descr' => 'ΠΙΣ',
+        ]);
+
+        return app(RecomputeInvoiceTotals::class)($inv);
+    }
+
+    public function test_standalone_legacy_credit_note_reduces_all_three_receivables_surfaces(): void
+    {
+        // MON-9: a standalone legacy credit note has no original carrying a
+        // credited_total, so the SQL AR surfaces can't net it via credited_total —
+        // they must subtract its payable directly to match the ledger (which
+        // reduces the balance by EVERY credit note).
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'ΠΙΣ', 'afm' => '188888888']);
+
+        $this->makeSale($c, 1);                          // credit-term sale: gross/payable 124
+        $this->makeStandaloneCreditNote($c, 50)->refresh(); // standalone ΠΙΣ: gross/payable 62
+
+        // Ledger: 124 − 62 = 62.
+        $ledger = app(CustomerLedgerBuilder::class)->build($c)->stats['balance'];
+        $this->assertEqualsWithDelta(62.0, $ledger, 0.001);
+
+        // Dashboard headline: 124 owed − 62 standalone credit − 0 paid = 62.
+        $dashboard = (new DashboardMetrics($this->tenant))->outstandingReceivables();
+        $this->assertEqualsWithDelta(62.0, $dashboard, 0.001);
+
+        // Per-customer scope (powers the debtor table / CustomersTable): also 62.
+        $scoped = Customer::query()
+            ->where('customers.company_id', $this->tenant->id)
+            ->withOutstandingBalance($this->tenant->id)
+            ->where('customers.id', $c->id)
+            ->first();
+        $this->assertEqualsWithDelta(62.0, (float) $scoped->outstanding_balance, 0.001);
+
+        // And the full cross-surface invariant (dashboard == Σ ledger) holds.
+        $this->assertInvariants(collect([$c]));
+    }
+
     public function test_surfaces_stay_consistent_across_randomized_scenarios(): void
     {
         $customers = collect();
@@ -185,6 +234,13 @@ class MoneyStatusConsistencyTest extends TestCase
                 if (mt_rand(0, 3) === 0) {
                     $credit->forceFill(['mydata_state' => 'CANCELLED'])->save();   // observer reverts original
                 }
+            }
+
+            // Occasionally a standalone legacy credit note (is_credit type, no
+            // credited_invoice_id — the ETL shape). Must reduce the balance on
+            // all surfaces exactly like a correlated one.
+            if (mt_rand(0, 2) === 0) {
+                $this->makeStandaloneCreditNote($c, mt_rand(10, 80));
             }
 
             // Occasionally cancel a sale locally (detach payments →

@@ -245,7 +245,7 @@ class DashboardMetricsTest extends TestCase
         $rows = Customer::query()
             ->where('customers.company_id', $this->tenant->id)
             ->withOutstandingBalance($this->tenant->id)
-            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) > 0.005')
+            ->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' > 0.005')
             ->orderByDesc('outstanding_balance')
             ->get();
 
@@ -256,7 +256,7 @@ class DashboardMetricsTest extends TestCase
         $settledRows = Customer::query()
             ->where('customers.company_id', $this->tenant->id)
             ->withOutstandingBalance($this->tenant->id)
-            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) <= 0.005')
+            ->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' <= 0.005')
             ->pluck('customers.id')
             ->all();
 

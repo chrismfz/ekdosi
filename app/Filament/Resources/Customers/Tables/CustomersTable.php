@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Customers\Tables;
 
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Support\Tags\TagControls;
+use App\Models\Customer;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -176,9 +177,9 @@ class CustomersTable
                     ->falseLabel('Χωρίς υπόλοιπο')
                     ->queries(
                         true: fn (Builder $query): Builder => $query
-                            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) > 0.005'),
+                            ->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' > 0.005'),
                         false: fn (Builder $query): Builder => $query
-                            ->whereRaw('(COALESCE(cust_owed.owed, 0) - COALESCE(cust_paid.paid, 0)) <= 0.005'),
+                            ->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' <= 0.005'),
                         blank: fn (Builder $query): Builder => $query,
                     ),
 

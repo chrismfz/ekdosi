@@ -18,11 +18,15 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
-- **AUDIT MON-9 — το Dashboard δεν υπερδηλώνει πια τζίρο/ΦΠΑ σε tenant με legacy ΠΙΣ.** Και τα 4 credit-note
-  φίλτρα του `DashboardMetrics` (`baseInvoices`, `creditNotesQuery`, receivables, top-customers) πέρασαν από
+- **AUDIT MON-9 — το Dashboard δεν υπερδηλώνει πια τζίρο/ΦΠΑ ούτε αποκλίνει στα receivables σε tenant με legacy ΠΙΣ.**
+  Τα turnover/VAT φίλτρα του `DashboardMetrics` (`baseInvoices`, `creditNotesQuery`, top-customers) πέρασαν από
   τον στενό `whereNull('credited_invoice_id')` στον πλήρη `InvoiceScope::excludeCreditNotes()`/`onlyCreditNotes()`
-  — έτσι πιάνουν και τα ETL-imported legacy πιστωτικά (`invoice_types.is_credit`, χωρίς `credited_invoice_id`)
-  και το dashboard ευθυγραμμίζεται με τον ledger (`CustomerLedgerBuilder`). Η «Εικόνα ΦΠΑ» κληρονομεί το fix.
+  (πιάνουν και τα ETL-imported legacy `invoice_types.is_credit` χωρίς `credited_invoice_id`)· η «Εικόνα ΦΠΑ»
+  κληρονομεί το fix. Στα **receivables** (dashboard headline + `Customer::withOutstandingBalance` → debtor table,
+  aged receivables, assistant tools) τα standalone legacy ΠΙΣ **αφαιρούνται** πλέον από το υπόλοιπο (νέος
+  `InvoiceScope::onlyStandaloneCreditNotes()`), αφού δεν έχουν original με `credited_total` — ώστε **dashboard,
+  per-customer table και ledger να συμφωνούν ακριβώς**. Κοινό `Customer::OUTSTANDING_BALANCE_SQL` (select/
+  onlyDebtors/CustomersTable filter μία πηγή, να μη ξαναποκλίνουν).
 - **AUDIT SEC-2 — ελάχιστο μήκος password (8).** Ο κωδικός χρήστη επιβάλλει πλέον `min:8` στη φόρμα (conditional
   ώστε το blank-edit «κράτα τον κωδικό» να μην απορρίπτεται) και στο `ekdosi:install` (πριν το transaction, ώστε
   ένα `--password` flag να μη σπέρνει αδύναμο super_admin).

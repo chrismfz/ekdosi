@@ -144,6 +144,23 @@ class DashboardMetrics
 
         $netOwed = (float) ($row->net_owed ?? 0);
 
+        // MON-9: standalone legacy credit notes (is_credit type, no
+        // credited_invoice_id) have no original to carry a credited_total, so the
+        // base above can't net them — subtract their payable directly, matching
+        // CustomerLedgerBuilder (which reduces the balance by EVERY credit note,
+        // regardless of payment term). Correlated credit notes are already netted
+        // via credited_total above, so they must NOT be double-counted here.
+        $standaloneCredits = (float) InvoiceScope::onlyStandaloneCreditNotes(
+            InvoiceScope::live(
+                DB::table('invoices')
+                    ->where('invoices.company_id', $this->tenant->id)
+                    ->whereNull('invoices.deleted_at'),
+                'invoices.'
+            )
+        )
+            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) AS credited')
+            ->value('credited');
+
         // Refunds count NEGATIVE — money returned raises receivables again.
         $totalPaid = (float) DB::table('payments')
             ->where('company_id', $this->tenant->id)
@@ -151,7 +168,7 @@ class DashboardMetrics
             ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS net_paid')
             ->value('net_paid');
 
-        return round($netOwed - $totalPaid, 2);
+        return round($netOwed - $standaloneCredits - $totalPaid, 2);
     }
 
     /**
