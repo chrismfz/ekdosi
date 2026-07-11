@@ -82,6 +82,8 @@ fi
 
 echo "▶ optimize + queue restart"
 $ART optimize
+# Realign the cached update-check status with the rolled-back build (see update.sh).
+$ART cache:forget ekdosi.updates.status || true
 $ART queue:restart
 
 echo "▶ Maintenance mode OFF"

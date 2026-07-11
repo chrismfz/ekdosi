@@ -210,6 +210,12 @@ fi
 log "Caching config / routes / views"
 $ART optimize
 
+# Bust the cached update-check status — else the System page keeps showing the
+# pre-deploy build/«νέα έκδοση διαθέσιμη» for up to cache_hours after an upgrade
+# (the sidebar badge + ekdosi:version are already live from build.json; this just
+# realigns the health page). Key mirrors UpdateChecker::CACHE_KEY.
+$ART cache:forget ekdosi.updates.status || true
+
 # A release may add new resources/pages → create their Permission rows now, so
 # the role re-sync below (and the per-tenant role picker) has something to grant.
 # Code-driven + idempotent: a no-op when nothing new was added.
