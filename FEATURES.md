@@ -169,6 +169,10 @@
   συναλλαγής.
 - **Ληξιπρόθεσμα** — due date, badge/filter, dashboard widget, ημερήσιες ειδοποιήσεις
   (`invoices:notify-overdue`).
+- **Πρόχειρα εκτός money totals + ορατότητα** (MON-5) — τα unissued sale-drafts δεν μετρούν σε
+  τζίρο/εισπρακτέα/ΦΠΑ/Καρτέλα (`InvoiceScope::excludeUnissuedDrafts`, συνεπές σε όλα τα surfaces·
+  credit-note & legacy drafts κρατιούνται)· πλακίδιο dashboard **«Πρόχειρα (προτιμολόγια)»**
+  (count + αξία, click→drafts) — η pro-forma ουρά.
 
 ## 9. Προσφορές / Quotes
 Μη-νομικό sales offer σε **ξεχωριστούς πίνακες** (μηδέν money-path leak)· γραμμές

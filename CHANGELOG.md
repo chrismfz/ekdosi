@@ -26,8 +26,22 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   read-only αν υπάρχει νεότερη έκδοση στο GitHub («N commits πίσω», link) — cached 6h, graceful offline,
   **ποτέ apply** (η αναβάθμιση μένει στο `deploy/update.sh`). Config: `config/ekdosi.php → updates`.
   Λεπτομέρειες + η απόφαση «όχι in-app file-swap updater»: `docs/versioning-and-updates.md`.
+- **Πλακίδιο «Πρόχειρα (προτιμολόγια)» στο dashboard** (MON-5) — count + αξία των unissued sale-drafts
+  (που πλέον ΔΕΝ μετρούν στα έσοδα/εισπρακτέα), clickable στη λίστα φιλτραρισμένη σε πρόχειρα. Ώστε ο
+  χειριστής να βλέπει πάντα πόσα πρόχειρα υπάρχουν και την αξία τους — η pro-forma ουρά για μελλοντικό
+  service-manager. Νέο `DashboardMetrics::draftsPipeline()`.
 
 ### Fixed
+- **AUDIT MON-5 — τα πρόχειρα δεν φουσκώνουν πια τζίρο/εισπρακτέα/ΦΠΑ/Καρτέλα.** Ένα πρόχειρο δεν είναι
+  εκδοθέν παραστατικό, οπότε ένα μόλις-δημιουργημένο / WHMCS-staged / renewal draft δεν μετράει πλέον ως
+  έσοδο ή εισπρακτέο. Νέο `InvoiceScope::excludeUnissuedDrafts()` σε όλα τα money surfaces (dashboard,
+  `Customer::scopeWithOutstandingBalance`, `CustomerLedgerBuilder`) — παραμένουν συνεπή. **Κρατιούνται**
+  τα credit-note drafts (μειώνουν το υπόλοιπο, σκόπιμο) και τα legacy-imported drafts (πραγματικά
+  ιστορικά). Το immediate reference-number του πελάτη ήδη καλύπτεται (invcode + banner «ΠΡΟΧΕΙΡΟ»).
+- **AUDIT MON-7 — προειδοποίηση όταν η «τιμή με ΦΠΑ» δεν κάνει round-trip.** Η καθαρή τιμή αποθηκεύεται σε
+  2 δεκαδικά, οπότε 10,00€ @24% γίνεται 8,06€ καθαρό → ξαναχρεώνεται 9,99€. Η φόρμα εμφανίζει πλέον warning
+  όταν `|recomputed − entered| ≥ 0,005`, ώστε ο χειριστής να ξέρει και να προσαρμόσει το καθαρό αν θέλει
+  ακριβές μικτό. (Η γέφυρα WHMCS WH-9 — feed που εξαιρεί ήδη-φορολογημένα — στο plugin **v0.42.0**.)
 - **AUDIT MON-9 — το Dashboard δεν υπερδηλώνει πια τζίρο/ΦΠΑ ούτε αποκλίνει στα receivables σε tenant με legacy ΠΙΣ.**
   Τα turnover/VAT φίλτρα του `DashboardMetrics` (`baseInvoices`, `creditNotesQuery`, top-customers) πέρασαν από
   τον στενό `whereNull('credited_invoice_id')` στον πλήρη `InvoiceScope::excludeCreditNotes()`/`onlyCreditNotes()`

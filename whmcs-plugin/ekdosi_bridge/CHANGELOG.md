@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-07-11
+### Fixed
+- **WH-9: the `paid_unfiled` feed no longer re-walks already-filed invoices.** Post
+  legacy-cutover, `tblinvoices.invoiced` stops being maintained, so paid invoices
+  ekdosi already filed (a row in `mod_ekdosi_invoice_marks`) stayed `invoiced=0` and
+  kept reappearing in the inbox feed forever — an ever-growing, pointless O(N) walk.
+  The feed now adds `whereNotExists` on `mod_ekdosi_invoice_marks.invoiceid = tblinvoices.id`
+  to the `paid_unfiled` branch only (the explicit `Paid`/`All` diagnostics and the
+  single-invoice `fetchOne` push path are unchanged), keeping the feed bounded to the
+  genuinely-unfiled set.
+
 ## [0.41.0] — 2026-06-15
 ### Added
 - **`phonenumber` in the invoice feed** (`InvoiceFeed`) — the bridge feed now carries

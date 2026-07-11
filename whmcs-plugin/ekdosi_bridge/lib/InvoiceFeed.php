@@ -5,6 +5,7 @@ namespace WHMCS\Module\Addon\EkdosiBridge;
 use WHMCS\Database\Capsule;
 
 require_once __DIR__.'/ThirdPartyStore.php';
+require_once __DIR__.'/InvoiceMarkStore.php';
 
 /**
  * Slice 1 of the "bridge as the source of truth" design
@@ -46,7 +47,16 @@ class InvoiceFeed
         $q = Capsule::table('tblinvoices')->orderBy('id', 'desc');
         if ($status === 'paid_unfiled' || $status === '') {
             // The inbox set: paid AND not yet filed in the legacy app (invoiced=0).
-            $q->where('status', 'Paid')->where('invoiced', 0);
+            $q->where('status', 'Paid')->where('invoiced', 0)
+                // WH-9: also exclude anything ekdosi has ALREADY filed (a MARK row
+                // exists). Post-cutover `invoiced` is no longer maintained, so
+                // without this the feed re-walks every already-filed paid invoice
+                // forever. `mod_ekdosi_invoice_marks.invoiceid` = tblinvoices.id
+                // (one WHMCS DB per tenant → no tenant predicate needed).
+                ->whereNotExists(function ($sub) {
+                    $sub->from(InvoiceMarkStore::TABLE)
+                        ->whereColumn(InvoiceMarkStore::TABLE.'.invoiceid', 'tblinvoices.id');
+                });
         } elseif (in_array($status, ['Paid', 'Unpaid', 'Cancelled', 'Refunded'], true)) {
             $q->where('status', $status);
         }
