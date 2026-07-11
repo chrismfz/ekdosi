@@ -60,7 +60,10 @@ class VatSummaryTool implements AssistantTool
                 ->whereBetween('issued_at', [$from, $to])
         );
 
-        $sales = InvoiceScope::excludeCreditNotes($base());
+        // MON-5: the sales side excludes unissued drafts (matching income /
+        // DashboardMetrics::outputForVat); credit notes are kept as-is (draft
+        // credit notes reduce locally, deliberate).
+        $sales = InvoiceScope::excludeUnissuedDrafts(InvoiceScope::excludeCreditNotes($base()));
         $credits = InvoiceScope::onlyCreditNotes($base());
 
         $net = (float) (clone $sales)->sum('net_total') - (float) (clone $credits)->sum('net_total');

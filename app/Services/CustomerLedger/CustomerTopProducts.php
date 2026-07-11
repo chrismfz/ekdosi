@@ -42,6 +42,8 @@ class CustomerTopProducts
                 // Pure sales only — exclude credit notes so a return doesn't read
                 // as "frequently bought" (MON-9: incl. standalone legacy is_credit ΠΙΣ).
                 InvoiceScope::excludeCreditNotes($q);
+                // MON-5: a draft's lines aren't «bought» yet — exclude unissued sale drafts.
+                InvoiceScope::excludeUnissuedDrafts($q);
                 InvoiceScope::live($q);
             })
             ->with(['product:id,sku,description_short,description', 'invoice:id,issued_at'])
