@@ -90,6 +90,30 @@ class ResendFailedInvoiceEmailsTest extends TestCase
         Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->invoice->is($failed) && $job->trigger === 'batch');
     }
 
+    public function test_no_email_customers_are_never_requeued(): void
+    {
+        // OPS-10: a failed send to a customer with NO email can never succeed —
+        // re-queuing it every sweep just churns the failure counters forever.
+        $noMail = Customer::create(['company_id' => $this->tenant->id, 'name' => 'NoMail', 'email' => null]);
+        $orphan = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'TPY1', 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'customer_id' => $noMail->id,
+            'local_status' => 'active', 'issued_at' => now(), 'company_name' => 'NoMail',
+            'net_total' => 100, 'gross_total' => 124,
+        ]);
+        $this->log($orphan, 'failed', now()->subHour());
+
+        // A normal failed one (customer WITH email) IS re-queued (control).
+        $withMail = $this->invoice('TPY2');
+        $this->log($withMail, 'failed', now()->subHour());
+
+        $this->artisan('invoices:resend-failed-emails', ['--tenant' => $this->tenant->slug, '--since' => 7])
+            ->assertExitCode(0);
+
+        Queue::assertPushed(SendInvoiceEmail::class, 1);
+        Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->invoice->is($withMail));
+    }
+
     public function test_cancelled_invoices_are_never_requeued(): void
     {
         // DOC-6: a failed send whose invoice was later cancelled must NOT be

@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\FirebirdImportRun;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -39,6 +40,48 @@ class FirebirdImportRunTest extends TestCase
         parent::setUp();
         $this->tenant = Company::create(['name' => 'MyIP', 'slug' => 'myip']);
         $this->operator = User::factory()->create();
+    }
+
+    public function test_ops11_without_overlapping_middleware_is_keyed_by_run_id_and_drops_duplicates(): void
+    {
+        // OPS-11: retry_after (90s) < timeout (1800s) would let a 2nd worker
+        // re-run the SAME import in parallel. The middleware must prevent that,
+        // scoped per-run (distinct runs don't block each other), dropping the
+        // duplicate rather than re-queuing it into the same 90s loop.
+        $job = new RunFirebirdImport(runId: 4242, fbPassword: 'x');
+        $middleware = $job->middleware();
+
+        $this->assertCount(1, $middleware);
+        $mw = $middleware[0];
+        $this->assertInstanceOf(WithoutOverlapping::class, $mw);
+        $this->assertSame('firebird-import:4242', $mw->key);
+        $this->assertNull($mw->releaseAfter);              // dontRelease() → dropped, not re-queued
+        $this->assertSame($job->timeout + 300, $mw->expiresAfter);   // TTL outlives the run
+
+        // A different run gets a different lock key → concurrent tenant imports OK.
+        $other = (new RunFirebirdImport(runId: 99, fbPassword: 'x'))->middleware()[0];
+        $this->assertSame('firebird-import:99', $other->key);
+    }
+
+    public function test_ops11_retry_until_and_max_exceptions_avoid_a_false_failure_without_re_running(): void
+    {
+        // OPS-11 keystone: with a plain $tries=1, a 2nd worker re-reserving the
+        // still-running import at retry_after (90s) is FAILED on max-attempts
+        // BEFORE the middleware fires — flipping the run to «failed» + a false
+        // alert. retryUntil() short-circuits that check so the duplicate reaches
+        // the WithoutOverlapping gate instead; maxExceptions=1 keeps a GENUINE
+        // failure to a single attempt (retryUntil otherwise re-runs until the
+        // deadline).
+        $job = new RunFirebirdImport(runId: 7, fbPassword: 'x');
+
+        $this->assertSame(1, $job->maxExceptions);
+
+        // Deadline sits past the timeout so it never trips during a healthy run.
+        $until = $job->retryUntil();
+        $this->assertInstanceOf(\DateTimeInterface::class, $until);
+        $secondsOut = $until->getTimestamp() - now()->getTimestamp();
+        $this->assertGreaterThan($job->timeout, $secondsOut);           // beyond the run
+        $this->assertLessThanOrEqual($job->timeout + 301, $secondsOut); // but bounded (+300 buffer)
     }
 
     public function test_run_row_persists_metadata_without_password(): void

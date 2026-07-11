@@ -7,6 +7,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -75,6 +76,53 @@ class RunFirebirdImport implements ShouldQueue
      * surfaces.
      */
     public int $timeout = 1800;
+
+    /**
+     * ONE real attempt (same intent as $tries=1). $maxExceptions is what actually
+     * enforces it once retryUntil() is set below: retryUntil disables the
+     * attempt-count failure path in the worker, so without maxExceptions a genuine
+     * gbak/migrate failure would be RELEASED and retried until the deadline. With
+     * maxExceptions=1 the first thrown exception fails the job immediately (the
+     * worker fails-then-skips-release), so a real failure still stops after one go.
+     */
+    public int $maxExceptions = 1;
+
+    /**
+     * OPS-11 — the multi-worker safety trio (see middleware() for the fuller
+     * story). retryUntil is the KEYSTONE: the DB queue's `retry_after` (90s,
+     * config/queue.php) is far below this job's `timeout` (1800s), so a second
+     * worker re-reserves the still-running import after 90s. The worker's
+     * markJobAsFailedIfAlreadyExceedsMaxAttempts runs BEFORE the job (and its
+     * middleware) fires — so with a plain $tries=1 that re-reservation is failed
+     * on max-attempts, flipping the run to «failed» + firing a FALSE failure
+     * alert (OPS-9 ExceptionNotifier) while worker-1 is still importing fine.
+     * A future retryUntil short-circuits that check (Worker.php:633), letting the
+     * duplicate reach the WithoutOverlapping gate instead, which drops it cleanly.
+     * The deadline sits past the timeout so it never trips during a healthy run.
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addSeconds($this->timeout + 300);
+    }
+
+    /**
+     * OPS-11 — with retryUntil() letting the 90s re-reservation through to the
+     * job, THIS is what stops it from running gbak + migrate:firebird a SECOND
+     * time in parallel against the same tenant: keyed by the run id, the
+     * duplicate can't acquire the lock and is DROPPED (`dontRelease` — releasing
+     * would just re-enter the same 90s loop). The lock TTL sits above `timeout`
+     * so it never expires mid-run; a worker that dies without releasing frees the
+     * lock after that for a manual re-dispatch. Distinct run ids never share a
+     * key, so independent tenant imports still run concurrently.
+     */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping('firebird-import:'.$this->runId))
+                ->dontRelease()
+                ->expireAfter($this->timeout + 300),
+        ];
+    }
 
     public function __construct(public int $runId, public string $fbPassword)
     {

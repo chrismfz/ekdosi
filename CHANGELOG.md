@@ -18,6 +18,16 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 ## [Unreleased]
 
 ### Fixed
+- **AUDIT OPS-10 — τέλος στο ατέρμονο resend σε πελάτες χωρίς email.** Το `invoices:resend-failed-emails`
+  ξανα-έστελνε σε κάθε sweep τα τιμολόγια πελατών χωρίς email (κάθε προσπάθεια γράφει νέο `failed` row που
+  ανανεώνει το `--since` παράθυρο → αιώνια επανεπιλογή, φουσκωμένοι failure counters που κρύβουν πραγματικά
+  SMTP σφάλματα). Πλέον το query εξαιρεί πελάτες χωρίς email — αν αποκτήσουν αργότερα, ξαναμπαίνουν αυτόματα.
+- **AUDIT OPS-11 — προστασία του Firebird import από false-failure/παράλληλη εκτέλεση.** Το queue
+  `retry_after` (90s) είναι πολύ μικρότερο από το `timeout` του import (1800s), οπότε με 2ο worker το τρέχον
+  import ξανα-δεσμευόταν στα 90s. Με σκέτο `$tries=1` αυτό αποτύγχανε σε max-attempts ΠΡΙΝ το middleware →
+  ψευδο-«failed» run + ψευδο-alert ενώ ο import πετύχαινε. Fix (τριάδα): `retryUntil` (αφήνει τον διπλότυπο
+  να φτάσει στο gate αντί να αποτύχει), `WithoutOverlapping`+`dontRelease` (τον ρίχνει χωρίς 2η gbak/migrate),
+  `maxExceptions=1` (μία πραγματική προσπάθεια). Ασφαλές ανεξαρτήτως αριθμού workers.
 - **AUDIT WH-8 — κλείσιμο under-billing στη γέφυρα WHMCS.** Μια γραμμή WHMCS με ποσό αλλά **κενή
   περιγραφή** droppαρόταν σιωπηλά από τον mapper (μια γραμμή χωρίς περιγραφή δεν είναι νόμιμη γραμμή
   παραστατικού) → στα `createDraft`/`split` paths (που δεν τρέχουν totals-reconcile) η χρέωση χανόταν και
