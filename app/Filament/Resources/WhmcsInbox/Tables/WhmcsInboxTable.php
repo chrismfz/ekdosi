@@ -12,6 +12,7 @@ use App\Services\Whmcs\LegacyInvoicedRefresher;
 use App\Services\Whmcs\WhmcsCustomerCreateResult;
 use App\Services\Whmcs\WhmcsCustomerCreator;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
+use App\Services\Whmcs\WhmcsWritebackService;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use Filament\Actions\Action;
@@ -235,6 +236,35 @@ class WhmcsInboxTable
                     // via the column toggle.
                     ->toggleable(isToggledHiddenByDefault: true),
 
+                // WH-7: MARK write-back state. A filed row whose write-back FAILED
+                // otherwise shows a green «Καταχωρημένο» with a MARK and nothing
+                // signals the WHMCS bookkeeping is broken. «Απέτυχε» (red) is the
+                // findable signal + the retry action's trigger.
+                TextColumn::make('whmcs_writeback_state')
+                    ->label('Επιστροφή ΜΑΡΚ')
+                    ->badge()
+                    ->placeholder('—')
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->whmcs_writeback_state) {
+                        PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'Στο WHMCS',
+                        PendingWhmcsInvoice::WRITEBACK_FAILED => 'Απέτυχε',
+                        PendingWhmcsInvoice::WRITEBACK_PENDING => 'Εκκρεμεί',
+                        PendingWhmcsInvoice::WRITEBACK_SKIPPED => 'Χωρίς γέφυρα',
+                        default => null,
+                    })
+                    ->color(fn (PendingWhmcsInvoice $r): string => match ($r->whmcs_writeback_state) {
+                        PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'success',
+                        PendingWhmcsInvoice::WRITEBACK_FAILED => 'danger',
+                        PendingWhmcsInvoice::WRITEBACK_PENDING => 'warning',
+                        default => 'gray',
+                    })
+                    ->icon(fn (PendingWhmcsInvoice $r): ?string => $r->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_FAILED
+                        ? 'heroicon-o-exclamation-triangle'
+                        : null)
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_FAILED
+                        ? ($r->whmcs_writeback_error ?: 'Η επιστροφή του ΜΑΡΚ στο WHMCS απέτυχε. Το AADE είναι εντάξει· πάτα «Επανάληψη επιστροφής ΜΑΡΚ».')
+                        : null)
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 // Dual-run heads-up: this WHMCS invoice has ALSO been invoiced
                 // in the LEGACY ekdosi app (tblinvoices.invoiced != 0). Three
                 // visible states so the operator can tell a CHECK ran:
@@ -317,6 +347,16 @@ class WhmcsInboxTable
                         ? $query->whereHas('customer', fn (Builder $q) => $q->where('needs_immediate_invoice', true))
                         : $query),
 
+                // WH-7: surface failed MARK write-backs (AADE OK, WHMCS bookkeeping
+                // stuck) — the rows the «Επανάληψη επιστροφής ΜΑΡΚ» action targets.
+                SelectFilter::make('whmcs_writeback_state')
+                    ->label('Επιστροφή ΜΑΡΚ')
+                    ->options([
+                        PendingWhmcsInvoice::WRITEBACK_FAILED => 'Απέτυχε',
+                        PendingWhmcsInvoice::WRITEBACK_PENDING => 'Εκκρεμεί',
+                        PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'Στο WHMCS',
+                    ]),
+
                 SelectFilter::make('third_party')
                     ->label('Τρίτος')
                     ->options([
@@ -343,6 +383,7 @@ class WhmcsInboxTable
                 self::splitAction(),
                 ActionGroup::make([
                     self::openInvoiceAction(),
+                    self::retryWritebackAction(),
                     self::createCustomerAction(),
                     self::reResolveThirdPartyAction(),
                     self::holdAction(),
@@ -610,6 +651,50 @@ class WhmcsInboxTable
                     ->body((string) $summary)
                     ->{$exit === 0 ? 'success' : 'warning'}()
                     ->send();
+            });
+    }
+
+    /**
+     * WH-7: retry a FAILED MARK write-back for a single row. The AADE filing is
+     * already the legal truth; this re-pushes the MARK to WHMCS so the badge /
+     * ledger catch up. Visible only on a failed row; reuses the same
+     * WhmcsWritebackService::retryWriteback() the batch command uses (touches
+     * only the audit-freeze-whitelisted columns, skips split rows).
+     */
+    private static function retryWritebackAction(): Action
+    {
+        return Action::make('retry_writeback')
+            ->label('Επανάληψη επιστροφής ΜΑΡΚ')
+            ->icon('heroicon-o-arrow-path-rounded-square')
+            ->color('warning')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => $r->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_FAILED)
+            ->requiresConfirmation()
+            ->modalHeading('Επανάληψη επιστροφής ΜΑΡΚ στο WHMCS')
+            ->modalDescription('Το παραστατικό έχει ήδη υποβληθεί στην ΑΑΔΕ (το ΜΑΡΚ είναι έγκυρο) — απέτυχε μόνο η ενημέρωση του WHMCS. Ξαναστέλνει το ΜΑΡΚ στη γέφυρα. Δεν αγγίζει την ΑΑΔΕ.')
+            ->modalSubmitActionLabel('Επανάληψη τώρα')
+            ->action(function (PendingWhmcsInvoice $record) {
+                try {
+                    $state = app(WhmcsWritebackService::class)->retryWriteback($record);
+                    if ($state === PendingWhmcsInvoice::WRITEBACK_SUCCEEDED) {
+                        Notification::make()
+                            ->title('Το ΜΑΡΚ επιστράφηκε στο WHMCS')
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Η επιστροφή ΜΑΡΚ απέτυχε ξανά')
+                            ->body($record->fresh()->whmcs_writeback_error ?: 'Δες τα logs. Η γέφυρα ίσως είναι εκτός.')
+                            ->danger()
+                            ->send();
+                    }
+                } catch (Throwable $e) {
+                    Notification::make()
+                        ->title('Δεν έγινε επανάληψη')
+                        ->body($e->getMessage())
+                        ->warning()
+                        ->send();
+                }
             });
     }
 

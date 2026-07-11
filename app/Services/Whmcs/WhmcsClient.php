@@ -294,33 +294,80 @@ class WhmcsClient
      */
     public function getInvoicesForClient(int $whmcsUserId, ?string $minDate = null, int $limit = 100): array
     {
-        $resp = $this->call('GetInvoices', [
-            'userid'  => $whmcsUserId,
-            'limit'   => $limit,
-            'orderby' => 'date',
-            'order'   => 'desc',
-        ]);
-
-        $list = $resp['invoices']['invoice'] ?? [];
-        if (! empty($list) && ! array_is_list($list)) {
-            $list = [$list];
-        }
-
-        if ($minDate === null) {
-            return $list;
-        }
-
-        // DESC ordering enables early-stop on the cutoff (same shape as
-        // getPendingInvoices). Don't drop rows past the boundary - that
-        // would require iterating + filtering everything.
+        // PAGINATE (WH-6). GetInvoices ignores a `limit` param and applies its
+        // own default page size (~25) — the same class of bug as the tenant-wide
+        // "frozen at 16". A client with more than a page of invoices only ever
+        // surfaced the newest ~25, so the comparison panel mislabelled the older
+        // ones as "absent from ekdosi". Walk pages with limitstart/limitnum until
+        // the minDate cutoff, a short/empty page, or the loop guard — the exact
+        // shape getPendingInvoices() uses (this method just filters by userid
+        // instead of status, and keeps ALL statuses + ALL invoiced flags).
+        $maxPages = 2000;   // hard stop bounded by ACTUAL rows walked, not limit
         $out = [];
-        foreach ($list as $row) {
-            $rowDate = (string) ($row['date'] ?? '');
-            if ($rowDate !== '' && $rowDate < $minDate) {
+        $cursor = 0;         // advance by the ACTUAL page size WHMCS returns
+        $seenIds = [];       // loop guard against a non-paginating WHMCS
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $resp = $this->call('GetInvoices', [
+                'userid' => $whmcsUserId,
+                // limitstart/limitnum — NOT limit (silently ignored → same first
+                // page every call). DESC keeps the minDate early-stop valid.
+                'limitstart' => $cursor,
+                'limitnum'   => $limit,
+                'orderby'    => 'date',
+                'order'      => 'desc',
+            ]);
+
+            $list = $resp['invoices']['invoice'] ?? [];
+            if (! empty($list) && ! array_is_list($list)) {
+                $list = [$list];   // single-row object → wrap as list
+            }
+            $returned = count($list);
+            if ($returned === 0) {
+                break;   // no more invoices — the natural end signal
+            }
+
+            // Loop guard: a repeated first id means the server isn't honouring
+            // pagination (stripped params / a proxy) — stop instead of hanging.
+            $firstId = (int) ($list[0]['id'] ?? 0);
+            if ($firstId > 0 && isset($seenIds[$firstId])) {
                 break;
             }
-            $out[] = $row;
+
+            $crossedCutoff = false;
+            foreach ($list as $row) {
+                $id = (int) ($row['id'] ?? 0);
+                if ($id > 0) {
+                    $seenIds[$id] = true;
+                }
+                // minDate early-stop (DESC-ordered; lexicographic YYYY-MM-DD).
+                if ($minDate !== null) {
+                    $rowDate = (string) ($row['date'] ?? '');
+                    if ($rowDate !== '' && $rowDate < $minDate) {
+                        $crossedCutoff = true;
+                        break;
+                    }
+                }
+                // No status / invoiced filtering — the panel wants the FULL
+                // picture (Paid/Unpaid/Cancelled/Refunded, filed or not).
+                $out[] = $row;
+            }
+
+            if ($crossedCutoff) {
+                break;
+            }
+
+            // Advance by the ACTUAL returned count and loop; the ONLY end signals
+            // are an empty page (above) and the loop guard. We deliberately do
+            // NOT stop on a short page (returned < limit): if a caller passes a
+            // limit above WHMCS's server-side page ceiling (~100), the first full
+            // page returns the ceiling < limit and a short-page break would
+            // re-truncate to one page — the exact WH-6 bug. Terminating on the
+            // empty page costs one extra call on an exhausted client (a cold
+            // comparison panel, not a hot path) and is correct for any limit.
+            $cursor += $returned;
         }
+
         return $out;
     }
 

@@ -140,6 +140,90 @@ class WhmcsInvoiceSplitterTest extends TestCase
         $this->assertNotSame(PendingWhmcsInvoice::STATUS_SPLIT, $pending->fresh()->status);
     }
 
+    public function test_wh8_split_is_held_when_a_chargeable_payload_line_is_unrouted(): void
+    {
+        // WH-8(a): the payload has THREE chargeable lines but the resolution only
+        // routes two — item 33 (€10) belongs to no group and would silently
+        // vanish (under-billing). The completeness guard must hold the split.
+        $payload = [
+            'invoiceid' => 1234, 'userid' => 793, 'total' => 34.80, 'currencycode' => 'EUR',
+            'date' => '2026-05-28',
+            'items' => ['item' => [
+                ['id' => 11, 'description' => 'domain a.gr', 'amount' => '12.40', 'taxed' => 1],
+                ['id' => 22, 'description' => 'hosting plan', 'amount' => '12.40', 'taxed' => 1],
+                ['id' => 33, 'description' => 'orphan charge', 'amount' => '10.00', 'taxed' => 1],
+            ]],
+        ];
+        $resolution = [
+            'whmcs_invoice_id' => 1234, 'whmcs_userid' => 793, 'multi_party' => true,
+            'lines' => [
+                ['item_id' => 11, 'routed' => true, 'is_receipt' => false,
+                    'contact' => ['id' => 5, 'company_name' => 'Haris', 'gr_vatno' => '081951154']],
+                ['item_id' => 22, 'routed' => false, 'is_receipt' => false, 'contact' => null],
+                // item 33 deliberately unrouted.
+            ],
+        ];
+        $pending = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 1234, 'whmcs_userid' => 793,
+            'customer_id' => $this->reseller->id, 'payload' => $payload,
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'third_party_state' => PendingWhmcsInvoice::TP_MULTI,
+            'third_party_resolution' => $resolution,
+            'status' => PendingWhmcsInvoice::STATUS_HELD,
+        ]);
+
+        try {
+            $this->splitter()->split($this->tenant, $pending, $this->invoiceType);
+            $this->fail('Expected the split to refuse an incomplete routing.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('δεν καλύπτει σωστά τις γραμμές', $e->getMessage());
+        }
+
+        $this->assertSame(0, Invoice::count());
+        $this->assertNotSame(PendingWhmcsInvoice::STATUS_SPLIT, $pending->fresh()->status);
+    }
+
+    public function test_wh8_split_is_held_when_a_chargeable_line_has_no_usable_id(): void
+    {
+        // WH-8(a) hardening: a chargeable payload line with NO positive id can't
+        // be routed to any group (planGroups + filterPayloadItems key on id) —
+        // it would vanish silently. The completeness guard must still hold it.
+        $payload = [
+            'invoiceid' => 1234, 'userid' => 793, 'total' => 34.80, 'currencycode' => 'EUR',
+            'date' => '2026-05-28',
+            'items' => ['item' => [
+                ['id' => 11, 'description' => 'domain a.gr', 'amount' => '12.40', 'taxed' => 1],
+                ['id' => 22, 'description' => 'hosting plan', 'amount' => '12.40', 'taxed' => 1],
+                ['id' => 0, 'description' => 'id-less charge', 'amount' => '10.00', 'taxed' => 1],
+            ]],
+        ];
+        $resolution = [
+            'whmcs_invoice_id' => 1234, 'whmcs_userid' => 793, 'multi_party' => true,
+            'lines' => [
+                ['item_id' => 11, 'routed' => true, 'is_receipt' => false,
+                    'contact' => ['id' => 5, 'company_name' => 'Haris', 'gr_vatno' => '081951154']],
+                ['item_id' => 22, 'routed' => false, 'is_receipt' => false, 'contact' => null],
+            ],
+        ];
+        $pending = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 1234, 'whmcs_userid' => 793,
+            'customer_id' => $this->reseller->id, 'payload' => $payload,
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'third_party_state' => PendingWhmcsInvoice::TP_MULTI,
+            'third_party_resolution' => $resolution,
+            'status' => PendingWhmcsInvoice::STATUS_HELD,
+        ]);
+
+        try {
+            $this->splitter()->split($this->tenant, $pending, $this->invoiceType);
+            $this->fail('Expected the split to refuse an id-less chargeable line.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('δεν καλύπτει σωστά τις γραμμές', $e->getMessage());
+        }
+
+        $this->assertSame(0, Invoice::count());
+    }
+
     public function test_receipt_group_routes_to_receipt_type_and_requires_it(): void
     {
         // Haris's line is flagged απόδειξη (is_receipt=true); the reseller's is not.
