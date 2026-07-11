@@ -55,6 +55,28 @@ class UpdateChecker
         return $status;
     }
 
+    /**
+     * NON-BLOCKING read for page mounts: return the last cached result WITHOUT ever
+     * hitting the network, so opening the System page never hangs on a cold cache
+     * (a synchronous GitHub call inside mount() could block render for `timeout`).
+     * The «Έλεγχος ενημερώσεων» button calls check(fresh: true) to actually fetch.
+     *
+     * @return array<string, mixed>
+     */
+    public function cached(): array
+    {
+        if (! (bool) config('ekdosi.updates.enabled', true)) {
+            return $this->base(['enabled' => false, 'error' => 'Ο έλεγχος ενημερώσεων είναι απενεργοποιημένος.']);
+        }
+
+        $cached = Cache::get(self::CACHE_KEY);
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        return $this->base(['error' => 'Δεν έχει γίνει έλεγχος ακόμη — πάτησε «Έλεγχος ενημερώσεων».']);
+    }
+
     /** @return array<string, mixed> */
     private function fetch(): array
     {

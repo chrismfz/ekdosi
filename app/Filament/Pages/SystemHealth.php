@@ -55,9 +55,10 @@ class SystemHealth extends Page
             fn () => app(OperatorHealthReport::class)->build(),
         );
 
-        // Read-only update status. The checker caches its own result (6h), so a
-        // mount/poll reuses it — «Έλεγχος ενημερώσεων» forces a fresh GitHub call.
-        $this->update = app(UpdateChecker::class)->check();
+        // Read-only update status — NON-BLOCKING: read the last cached result only,
+        // never a synchronous GitHub call inside mount (that could hang the page for
+        // up to `timeout`). «Έλεγχος ενημερώσεων» forces a fresh fetch on demand.
+        $this->update = app(UpdateChecker::class)->cached();
     }
 
     public static function getNavigationLabel(): string

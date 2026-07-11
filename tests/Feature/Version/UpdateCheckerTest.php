@@ -151,6 +151,32 @@ class UpdateCheckerTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_cached_never_hits_the_network(): void
+    {
+        Http::fake();   // any request would be recorded
+
+        // Cold cache → returns a «not checked yet» envelope, NO request sent.
+        $cold = $this->checker()->cached();
+        Http::assertNothingSent();
+        $this->assertFalse($cold['ok']);
+        $this->assertNotNull($cold['error']);
+        $this->assertSame('1.1.0', $cold['current_version']);
+    }
+
+    public function test_cached_returns_a_prior_successful_result_without_fetching(): void
+    {
+        Http::fake([
+            'api.github.com/repos/*/releases/latest' => Http::response(['tag_name' => 'v1.5.0'], 200),
+        ]);
+
+        $this->checker()->check();          // warms the cache (1 request)
+        $peek = $this->checker()->cached(); // must reuse it, no new request
+
+        Http::assertSentCount(1);
+        $this->assertTrue($peek['ok']);
+        $this->assertSame('v1.5.0', $peek['latest_version']);
+    }
+
     public function test_fresh_bypasses_the_cache(): void
     {
         Http::fake([
