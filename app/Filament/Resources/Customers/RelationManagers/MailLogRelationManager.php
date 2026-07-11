@@ -33,6 +33,9 @@ class MailLogRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
+            // Eager-load the two relations the columns read so the list doesn't
+            // fire a query per row (invoice.invcode + triggeredByUser.name).
+            ->modifyQueryUsing(fn ($query) => $query->with(['invoice', 'triggeredByUser']))
             ->columns([
                 TextColumn::make('status')
                     ->label('Κατάσταση')

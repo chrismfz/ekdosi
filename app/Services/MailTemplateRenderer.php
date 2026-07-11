@@ -79,6 +79,19 @@ TXT;
     }
 
     /**
+     * The SAME body, but WITHOUT markdown escaping — for the plain-text MIME
+     * part (DOC-8 Finding A). The text part is not parsed by CommonMark, so the
+     * backslash-escaping renderBody() adds for the HTML part would show up as
+     * literal `\.`/`\,` in text-only clients. The injection risk that DOC-8
+     * closes is HTML-only (a live link/image), so plain text needs no escaping.
+     */
+    public function renderBodyPlain(Invoice $invoice, ?string $template): string
+    {
+        $tpl = trim((string) $template) !== '' ? $template : self::DEFAULT_BODY_TEMPLATE;
+        return $this->interpolate($tpl, $this->vars($invoice));
+    }
+
+    /**
      * Backslash-escape CommonMark ASCII punctuation so an interpolated value
      * renders LITERALLY in a markdown body (DOC-8). `\x` renders as `x` for
      * every punctuation char, so a normal name/number is displayed unchanged.

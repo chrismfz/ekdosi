@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Mail\InvoiceIssuedMail;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -224,6 +225,39 @@ class MailTemplateRendererTest extends TestCase
 
         // The AADE url is a RAW placeholder — must stay usable, not backslashed.
         $this->assertStringContainsString('https://verify.aade.gr/?mark=400099999999999', $body);
+    }
+
+    public function test_render_body_plain_does_not_escape_markdown(): void
+    {
+        // DOC-8 Finding A: the plain-text variant must NOT carry the CommonMark
+        // backslash-escaping — the text part is never parsed as markdown.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['company_name' => 'Παπαδόπουλος Α.Ε.'])->save();
+
+        $plain = app(MailTemplateRenderer::class)
+            ->renderBodyPlain($invoice->fresh(), 'Πελάτης: {customer_name}');
+
+        $this->assertSame('Πελάτης: Παπαδόπουλος Α.Ε.', $plain);
+        $this->assertStringNotContainsString('\\', $plain);
+    }
+
+    public function test_invoice_mail_plain_text_part_has_no_backslashes(): void
+    {
+        // DOC-8 Finding A end-to-end: render the real mailable and assert the
+        // plain-text MIME part shows values verbatim (no «1\.234\,56 €»). The
+        // default body template carries {total}/{issued_at} whose punctuation is
+        // escaped in the HTML part — the text part must stay clean.
+        $invoice = $this->makeInvoice();
+        $fresh = Invoice::query()->whereKey($invoice->getKey())
+            ->with(['company', 'customer', 'invoiceType'])
+            ->first();
+
+        $mailable = new InvoiceIssuedMail($fresh, 'fake-pdf-bytes');
+
+        // The text part shows the formatted total with its real comma…
+        $mailable->assertSeeInText('124,00 €');
+        // …and carries NO markdown backslash-escaping.
+        $mailable->assertDontSeeInText('\\');
     }
 
     private function makeInvoice(): Invoice
