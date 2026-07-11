@@ -67,11 +67,10 @@ use Throwable;
  * quantity + measurementUnit are valid (unlike the service-invoice path where
  * [205] forbids per-line quantity).
  *
- * NEEDS SANDBOX VALIDATION — this shape is sound per the firebed reference doc
- * but has not been round-tripped against the AADE sandbox the way the 4 invoice
- * types were (see CLAUDE.md mydata-sandbox-validation report). In particular the
- * exact required set for a value-less 9.3 (income classification optional?
- * measurementUnit mandatory?) should be confirmed live before go-live.
+ * ✅ SANDBOX-VALIDATED (2026-06-10) — the full ΔΑ lifecycle (issue/register/confirm)
+ * was round-tripped against the AADE sandbox and accepted with real MARKs (see the
+ * «Sandbox round 2» note in CLAUDE.md). The value-less 9.3 shape (quantity +
+ * measurementUnit) is confirmed live; no payload changes were needed.
  */
 class DeliveryNoteSubmitter
 {

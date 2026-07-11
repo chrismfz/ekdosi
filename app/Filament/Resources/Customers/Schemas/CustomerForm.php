@@ -158,7 +158,7 @@ class CustomerForm
                                 // G6: per-customer auto-email opt-out. On by
                                 // default; turn off for a customer who doesn't
                                 // want automatic invoice mails. The manual
-                                // "Email PDF to customer" action ignores this.
+                                // «Αποστολή PDF στον πελάτη» action ignores this.
                                 Toggle::make('auto_email_invoices')
                                     ->label('Αυτόματη αποστολή τιμολογίων με email')
                                     ->default(true)
