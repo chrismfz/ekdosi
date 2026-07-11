@@ -218,6 +218,8 @@ class ViewInvoice extends ViewRecord
                 ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
                     && $record->customer_id !== null
                     && $record->mydata_state !== 'CANCELLED'
+                    // MON-5: not on a draft — a πρόχειρο isn't a receivable yet.
+                    && $record->local_status !== 'draft'
                     && (int) ($record->paymentMethod?->due_days ?? 0) > 0)
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Καταχώριση πληρωμής')

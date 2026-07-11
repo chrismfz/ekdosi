@@ -31,10 +31,16 @@ class PaymentForm
 
                 Select::make('invoice_id')
                     ->label('Παραστατικό')
+                    // MON-5: only ISSUED invoices are payable targets. A draft
+                    // (πρόχειρο) is excluded from receivables, so attaching a payment
+                    // to it would understate the balance (phantom credit); the
+                    // operator finalises first, then pays. Mirrors PaymentAllocator /
+                    // openInvoiceOptions, which already gate on local_status='active'.
                     ->options(fn (Get $get) => $get('customer_id')
                         ? Invoice::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->where('customer_id', $get('customer_id'))
+                            ->where('local_status', '!=', 'draft')
                             ->orderByDesc('issued_at')
                             ->pluck('invcode', 'id')
                         : [])
