@@ -66,11 +66,19 @@ class LocalBackupListingTest extends TestCase
     #[Test]
     public function an_empty_or_missing_dir_reports_zero_not_an_error(): void
     {
-        // setUp created an empty dir; also cover the truly-missing case.
+        // (a) empty dir (setUp created it) → zero, dir still reported.
         $b = $this->backup();
         $this->assertSame(0, $b['local_count']);
         $this->assertSame(0, $b['local_total_bytes']);
         $this->assertSame([], $b['local_files']);
         $this->assertNull($b['latest_backup_size_bytes']);
+        $this->assertSame($this->dir, $b['local_dir']);
+
+        // (b) truly-missing dir → the is_dir=false branch: dir null, still no error.
+        File::deleteDirectory($this->dir);
+        $b = $this->backup();
+        $this->assertSame(0, $b['local_count']);
+        $this->assertSame([], $b['local_files']);
+        $this->assertNull($b['local_dir']);
     }
 }

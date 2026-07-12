@@ -275,7 +275,7 @@ class OperatorHealthReport
      * directory, every `.zip`, its size + mtime, newest first, plus count + total.
      * Safe when the dir doesn't exist yet (count 0, files []). Read-only.
      *
-     * @return array{dir: ?string, count: int, total_bytes: int, files: list<array{name: string, path: string, size_bytes: int, modified_at: string}>}
+     * @return array{dir: ?string, count: int, total_bytes: int, files: list<array{name: string, path: string, size_bytes: int, mtime: int, modified_at: string}>}
      */
     private function localBackups(): array
     {
@@ -296,16 +296,20 @@ class OperatorHealthReport
             }
             $size = $file->getSize();
             $total += $size;
+            $mtime = $file->getMTime();
             $files[] = [
                 'name' => $file->getFilename(),
                 'path' => $file->getPathname(),
                 'size_bytes' => $size,
-                'modified_at' => Carbon::createFromTimestamp($file->getMTime())->toIso8601String(),
+                'mtime' => $mtime,  // raw epoch — the sort key (offset-free, unlike the ISO string)
+                'modified_at' => Carbon::createFromTimestamp($mtime)->toIso8601String(),
             ];
         }
 
-        // Newest first (string ISO-8601 sorts chronologically).
-        usort($files, fn (array $a, array $b): int => $b['modified_at'] <=> $a['modified_at']);
+        // Newest first, sorting on the raw epoch — a DST-straddling pair can't
+        // reorder (the +02:00/+03:00 offset in the ISO string would be ignored
+        // by a string compare). usort is stable, so same-mtime files keep order.
+        usort($files, fn (array $a, array $b): int => $b['mtime'] <=> $a['mtime']);
 
         return [
             'dir' => $root,

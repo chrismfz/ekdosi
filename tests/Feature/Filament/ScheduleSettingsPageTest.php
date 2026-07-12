@@ -77,13 +77,11 @@ class ScheduleSettingsPageTest extends TestCase
 
         // The «Αρχεία αντιγράφων (Υγεία)» header action deep-links to the health
         // screen's backups anchor — the visibility bridge the operator asked for.
+        // assertActionHasUrl reads the action's REAL getUrl(), so a wrong target
+        // (or a dropped #backups fragment) fails here.
         Livewire::test(ScheduleSettings::class)
-            ->assertActionExists('viewBackups');
-
-        // The target resolves to the health page + the #backups anchor.
-        $target = SystemHealth::getUrl().'#backups';
-        $this->assertStringContainsString(SystemHealth::getUrl(), $target);
-        $this->assertStringEndsWith('#backups', $target);
+            ->assertActionExists('viewBackups')
+            ->assertActionHasUrl('viewBackups', SystemHealth::getUrl().'#backups');
     }
 
     #[Test]
