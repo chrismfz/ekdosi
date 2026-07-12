@@ -299,6 +299,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   ίδια πηγή `OperatorHealthReport`: worker heartbeat, scheduled-task last-runs, backups,
   mail, WHMCS+myDATA ανά tenant, δίσκος, **+ ιστορικό εκτελέσεων** `scheduled_task_runs`
   + pending/failed jobs + κουμπί **«Επανάληψη αποτυχημένων»**) — στο νέο nav group
+  · **Λίστα αρχείων αντιγράφων ΒΔ** (spatie): φάκελος, πλήθος, συνολικό μέγεθος + τα πιο πρόσφατα
+  με μέγεθος/timestamp (όχι μόνο «το τελευταίο είναι φρέσκο»)· ο Χρονοπρογραμματιστής έχει link
+  «Αρχεία αντιγράφων (Υγεία)» που δείχνει στο section (#backups). (Τα per-tenant runs φαίνονται στην καρτέλα κάθε εταιρίας.)
   **«Σύστημα»**. + **«Εργαλεία»** (artisan commands ως κουμπιά) +
   **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run +
   **`ekdosi:create-admin`** (create/reset system super_admin σε όλες τις εταιρίες).

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\ScheduleSettings;
+use App\Filament\Pages\SystemHealth;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
@@ -67,6 +68,20 @@ class ScheduleSettingsPageTest extends TestCase
             ->assertSet('data.mydata_reconcile_enabled', true)
             // overdue defaults OFF → toggle filled false.
             ->assertSet('data.overdue_notifications_enabled', false);
+    }
+
+    #[Test]
+    public function it_links_to_the_health_backups_section(): void
+    {
+        $this->makeSuperAdmin();
+
+        // The «Αρχεία αντιγράφων (Υγεία)» header action deep-links to the health
+        // screen's backups anchor — the visibility bridge the operator asked for.
+        // assertActionHasUrl reads the action's REAL getUrl(), so a wrong target
+        // (or a dropped #backups fragment) fails here.
+        Livewire::test(ScheduleSettings::class)
+            ->assertActionExists('viewBackups')
+            ->assertActionHasUrl('viewBackups', SystemHealth::getUrl().'#backups');
     }
 
     #[Test]
