@@ -17,6 +17,27 @@ row-lock tests ΔΕΝ τρέχουν σε CI (βλ. SET-3).
 
 ---
 
+## ✅ Audit ολοκληρώθηκε — 2026-07-12
+
+**Όλα τα ευρήματα κλειστά: 62/62 items `[x]`, μηδέν ανοιχτά.** Κάθε HIGH/MEDIUM/LOW
+διορθώθηκε με two-pass adversarial review πριν από κάθε merge, και mergαρίστηκε
+(PRs #349–#357). Test suite: ✅ **1634 passed** (1 skip, 1 risky — pre-existing).
+
+**Σκόπιμα deferred** (τεκμηριωμένα *μέσα* σε κλειστά items — flags «αν χρειαστεί»,
+όχι blockers):
+- **MYD-1** — κώδικας fixed+tested· εκκρεμεί μόνο ένα sandbox run με `discount>0`
+  ως τελική επιβεβαίωση (verification, όχι κώδικας).
+- **WH-9** — replay-nonce στα HMAC (mitigated: όλα idempotent), «re-stage» hint σε
+  held rows, EU reverse-charge με μία tenant-wide αιτία (capability gap).
+- **SEC-3** — slug+timestamp/nonce στο canonical string (coupled σε plugin-first rollout).
+- **MON-4** — εναλλακτική «gapless αρίθμηση στην οριστικοποίηση» διαθέσιμη αν
+  λογιστής απαιτήσει gapless ΑΑ.
+
+> Η αρχική ετυμηγορία («όχι ακόμη — αλλά κοντά», 2026-07-03) κρατιέται παρακάτω ως
+> ιστορικό — δεν σβήνουμε την ιστορία.
+
+---
+
 ## Ετυμηγορία (TL;DR)
 
 **Όχι ακόμη — αλλά κοντά.** Ο πυρήνας είναι αντικειμενικά production-grade:
