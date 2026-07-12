@@ -721,6 +721,167 @@ class DashboardMetrics
         ];
     }
 
+    /**
+     * Net receipts (money actually collected) per calendar month (1..12)
+     * for a single year — the CASH side, keyed on `pay_date`, NET of
+     * refunds (Payment::NET_AMOUNT_SQL flips a refund negative). Both
+     * allocated and on-account payments count (money in is money in).
+     * Dense 12-element list (empty months zeroed) so a YoY bar chart's
+     * x-axis stays continuous and the seasonal weak months are obvious.
+     *
+     * This is deliberately the COLLECTIONS view, not turnover: it answers
+     * "how much cash came in each month" (e.g. a weak summer), which the
+     * issued-invoice metrics (monthlyForYear) can't show once customers
+     * pay on credit terms.
+     *
+     * @return list<float> 12 monthly net-receipt totals, Jan..Dec
+     */
+    public function receiptsByMonth(int $year): array
+    {
+        $monthExpr = $this->monthNumberExpr('pay_date');
+
+        $rows = DB::table('payments')
+            ->where('company_id', $this->tenant->id)
+            ->whereNull('deleted_at')
+            ->whereRaw($this->yearExpr('pay_date').' = ?', [$year])
+            ->selectRaw("$monthExpr as m, COALESCE(SUM(".Payment::NET_AMOUNT_SQL.'), 0) amt')
+            ->groupBy('m')
+            ->get()
+            ->keyBy(fn ($r) => (int) $r->m);
+
+        $out = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $out[] = round((float) ($rows->get($m)->amt ?? 0), 2);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Output VAT broken down by rate × quarter for a single year — the
+     * helper an operator (or their accountant) reads to fill the periodic
+     * ΦΠΑ return. Sales lines NET of credit-note lines (a credit note
+     * refunds output VAT), header-discount applied, live documents only —
+     * the same output-VAT semantics as outputForVat(), but split per rate
+     * and per quarter instead of a single window total.
+     *
+     * Informational, NOT an official filing: figures round at the final
+     * aggregate (per rate × quarter), which can differ by a cent or two
+     * from Σ(per-invoice rounded) — immaterial for a quarterly overview,
+     * and the widget labels it βοηθητικό.
+     *
+     * @return array{
+     *   year: int,
+     *   rates: list<float>,
+     *   quarters: array<int, array{rates: array<string, array{net: float, vat: float}>, net: float, vat: float}>,
+     *   totals: array{rates: array<string, array{net: float, vat: float}>, net: float, vat: float}
+     * }
+     */
+    public function vatByRateByQuarter(int $year): array
+    {
+        // rateKey = a stable 2dp string ("24.00") so 24 and 24.00 bucket together.
+        $rateKey = fn (float $r): string => number_format($r, 2, '.', '');
+
+        // quarters[q][rateKey] = ['net'=>, 'vat'=>]; accumulate sales (+) then credits (−).
+        $quarters = [1 => [], 2 => [], 3 => [], 4 => []];
+        $rateSet = [];
+
+        $fold = function (array $rows, int $sign) use (&$quarters, &$rateSet, $rateKey): void {
+            foreach ($rows as $r) {
+                $q = (int) $r->qtr;
+                if ($q < 1 || $q > 4) {
+                    continue;
+                }
+                $key = $rateKey((float) $r->rate);
+                $rateSet[$key] = (float) $r->rate;
+                $quarters[$q][$key]['net'] = ($quarters[$q][$key]['net'] ?? 0.0) + $sign * (float) $r->net;
+                $quarters[$q][$key]['vat'] = ($quarters[$q][$key]['vat'] ?? 0.0) + $sign * (float) $r->vat;
+            }
+        };
+
+        $fold($this->vatLinesByQuarterRate($year, false), 1);
+        $fold($this->vatLinesByQuarterRate($year, true), -1);
+
+        // Rates present, ascending (24, 13, 6, 0 read top-down after we sort the
+        // labels desc in the view; keep the data ascending, let the view decide).
+        $rates = array_values($rateSet);
+        sort($rates);
+        $keys = array_map($rateKey, $rates);
+
+        // Densify + round each quarter, and roll up per-rate + quarter totals.
+        $out = [];
+        $totRates = [];
+        $grandNet = 0.0;
+        $grandVat = 0.0;
+        foreach ([1, 2, 3, 4] as $q) {
+            $qNet = 0.0;
+            $qVat = 0.0;
+            $rowRates = [];
+            foreach ($keys as $key) {
+                $net = round($quarters[$q][$key]['net'] ?? 0.0, 2);
+                $vat = round($quarters[$q][$key]['vat'] ?? 0.0, 2);
+                $rowRates[$key] = ['net' => $net, 'vat' => $vat];
+                $qNet += $net;
+                $qVat += $vat;
+                $totRates[$key]['net'] = round(($totRates[$key]['net'] ?? 0.0) + $net, 2);
+                $totRates[$key]['vat'] = round(($totRates[$key]['vat'] ?? 0.0) + $vat, 2);
+            }
+            $out[$q] = ['rates' => $rowRates, 'net' => round($qNet, 2), 'vat' => round($qVat, 2)];
+            $grandNet += $qNet;
+            $grandVat += $qVat;
+        }
+
+        return [
+            'year' => $year,
+            'rates' => $rates,
+            'quarters' => $out,
+            'totals' => ['rates' => $totRates, 'net' => round($grandNet, 2), 'vat' => round($grandVat, 2)],
+        ];
+    }
+
+    /**
+     * Raw per-(quarter, rate) net/vat aggregate over invoice lines for one
+     * year — sales side ($creditNotes=false, drafts excluded) or credit-note
+     * side ($creditNotes=true). Header discount applied in SQL; scopes mirror
+     * baseInvoices()/creditNotesQuery() so the netted figure matches
+     * outputForVat(). Base table is `invoices` (so InvoiceScope's unqualified
+     * helpers resolve correctly) joined to its lines.
+     *
+     * @return list<object{qtr: int, rate: float, net: float, vat: float}>
+     */
+    private function vatLinesByQuarterRate(int $year, bool $creditNotes): array
+    {
+        $q = DB::table('invoices')
+            ->join('invoice_lines', 'invoice_lines.invoice_id', '=', 'invoices.id')
+            ->where('invoices.company_id', $this->tenant->id)
+            ->whereNull('invoices.deleted_at')
+            ->whereRaw($this->yearExpr('issued_at').' = ?', [$year]);
+
+        if ($creditNotes) {
+            InvoiceScope::onlyCreditNotes($q);
+        } else {
+            InvoiceScope::excludeCreditNotes($q);
+            InvoiceScope::excludeUnissuedDrafts($q);
+        }
+        InvoiceScope::live($q, 'invoices.');
+
+        // 100.0 (not 100): sqlite stores decimal(5,2) with NUMERIC affinity, so a
+        // whole-number discount like 10 is an INTEGER and 10/100 floors to 0 (factor
+        // 1, discount silently ignored). Forcing real division fixes it; MariaDB is
+        // unaffected either way.
+        $factor = '(1 - COALESCE(invoices.header_discount_percent, 0) / 100.0)';
+        $qtr = $this->quarterExpr('issued_at');
+
+        return $q->selectRaw(
+            "$qtr as qtr, invoice_lines.vat_percent as rate, ".
+            "COALESCE(SUM(invoice_lines.net_price * $factor), 0) net, ".
+            "COALESCE(SUM((invoice_lines.gross_price - invoice_lines.net_price) * $factor), 0) vat"
+        )
+            ->groupBy('qtr', 'rate')
+            ->get()
+            ->all();
+    }
+
     // ---- internals ------------------------------------------------------
 
     /**
@@ -765,11 +926,11 @@ class DashboardMetrics
     }
 
     /** Numeric year expression, portable across sqlite (tests) + MariaDB. */
-    private function yearExpr(): string
+    private function yearExpr(string $col = 'issued_at'): string
     {
         return DB::connection()->getDriverName() === 'sqlite'
-            ? "CAST(strftime('%Y', issued_at) AS INTEGER)"
-            : 'YEAR(issued_at)';
+            ? "CAST(strftime('%Y', $col) AS INTEGER)"
+            : "YEAR($col)";
     }
 
     /** 'YYYY-MM' bucket expression, portable across sqlite (tests) + MariaDB. */
@@ -781,10 +942,19 @@ class DashboardMetrics
     }
 
     /** Numeric month (1..12) expression, portable across sqlite + MariaDB. */
-    private function monthNumberExpr(): string
+    private function monthNumberExpr(string $col = 'issued_at'): string
     {
         return DB::connection()->getDriverName() === 'sqlite'
-            ? "CAST(strftime('%m', issued_at) AS INTEGER)"
-            : 'MONTH(issued_at)';
+            ? "CAST(strftime('%m', $col) AS INTEGER)"
+            : "MONTH($col)";
+    }
+
+    /** Numeric quarter (1..4) expression, portable across sqlite + MariaDB. */
+    private function quarterExpr(string $col = 'issued_at'): string
+    {
+        // sqlite has no QUARTER(): integer-divide the 1-based month.
+        return DB::connection()->getDriverName() === 'sqlite'
+            ? "((CAST(strftime('%m', $col) AS INTEGER) - 1) / 3) + 1"
+            : "QUARTER($col)";
     }
 }

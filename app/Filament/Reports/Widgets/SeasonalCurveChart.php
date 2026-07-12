@@ -18,7 +18,7 @@ class SeasonalCurveChart extends ChartWidget
 {
     use InteractsWithPageFilters;
 
-    protected static ?int $sort = 5;
+    protected static ?int $sort = 7;
 
     private const MONTHS = ['Ιαν', 'Φεβ', 'Μάρ', 'Απρ', 'Μάι', 'Ιούν', 'Ιούλ', 'Αύγ', 'Σεπ', 'Οκτ', 'Νοέ', 'Δεκ'];
 
@@ -48,17 +48,17 @@ class SeasonalCurveChart extends ChartWidget
         return [
             'datasets' => [
                 [
-                    'label'       => 'Μέση εποχική (καθαρά)',
-                    'data'        => $avg,
+                    'label' => 'Μέση εποχική (καθαρά)',
+                    'data' => $avg,
                     'borderColor' => '#9ca3af',
-                    'borderDash'  => [6, 4],
-                    'fill'        => false,
+                    'borderDash' => [6, 4],
+                    'fill' => false,
                 ],
                 [
-                    'label'       => (string) $year,
-                    'data'        => $current,
+                    'label' => (string) $year,
+                    'data' => $current,
                     'borderColor' => '#3b82f6',
-                    'fill'        => false,
+                    'fill' => false,
                 ],
             ],
             'labels' => self::MONTHS,

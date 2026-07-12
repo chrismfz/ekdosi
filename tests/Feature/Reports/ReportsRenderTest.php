@@ -4,11 +4,13 @@ namespace Tests\Feature\Reports;
 
 use App\Filament\Pages\Reports;
 use App\Filament\Reports\Widgets\ProjectionChart;
+use App\Filament\Reports\Widgets\ReceiptsByMonthChart;
 use App\Filament\Reports\Widgets\ReportKpis;
 use App\Filament\Reports\Widgets\RevenueByMonthChart;
 use App\Filament\Reports\Widgets\RevenueByYearChart;
 use App\Filament\Reports\Widgets\SeasonalCurveChart;
 use App\Filament\Reports\Widgets\SeasonalityHeatmap;
+use App\Filament\Reports\Widgets\VatByRateQuarterTable;
 use App\Filament\Reports\Widgets\YearVsYearChart;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -79,8 +81,10 @@ class ReportsRenderTest extends TestCase
         $widgets = [
             ReportKpis::class,
             RevenueByMonthChart::class,
+            ReceiptsByMonthChart::class,
             YearVsYearChart::class,
             RevenueByYearChart::class,
+            VatByRateQuarterTable::class,
             SeasonalCurveChart::class,
             ProjectionChart::class,
             SeasonalityHeatmap::class,
