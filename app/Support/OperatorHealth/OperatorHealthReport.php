@@ -16,7 +16,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
-use SplFileInfo;
 use Throwable;
 
 class OperatorHealthReport
@@ -159,10 +158,14 @@ class OperatorHealthReport
         return array_values(array_filter($configured, static fn (string $d): bool => $d !== 'local'));
     }
 
+    /** How many individual backup files to list on the health screen (newest first). */
+    private const LOCAL_BACKUP_LIST_LIMIT = 12;
+
     /** @return array<string, mixed> */
     private function backup(): array
     {
-        $latest = $this->latestLocalBackup();
+        $local = $this->localBackups();
+        $latest = $local['files'][0] ?? null;
         $monitor = $this->cacheGet(HealthKeys::BACKUP_MONITOR_RESULT);
 
         return [
@@ -170,6 +173,13 @@ class OperatorHealthReport
             'latest_backup_at' => $latest['modified_at'] ?? null,
             'latest_backup_age_hours' => isset($latest['modified_at']) ? round(Carbon::parse($latest['modified_at'])->diffInMinutes(now()) / 60, 2) : null,
             'latest_backup_size_bytes' => $latest['size_bytes'] ?? null,
+            // The whole-DB (spatie) artifacts themselves: where they live, how many,
+            // total size, and the newest few with size + timestamp. So the operator
+            // can see WHAT exists, not just that the last one is fresh.
+            'local_dir' => $local['dir'],
+            'local_count' => $local['count'],
+            'local_total_bytes' => $local['total_bytes'],
+            'local_files' => array_slice($local['files'], 0, self::LOCAL_BACKUP_LIST_LIMIT),
             'monitor' => $monitor ?: ['status' => 'missing', 'checked_at' => null, 'exit_code' => null],
             // Per-tenant off-site verification: are enabled backups actually
             // leaving the VM, and did the last off-site push succeed?
@@ -260,8 +270,14 @@ class OperatorHealthReport
         }, ['offsite_gap' => false, 'books_gap' => false, 'enabled_count' => 0, 'companies' => []]);
     }
 
-    /** @return array<string, mixed>|null */
-    private function latestLocalBackup(): ?array
+    /**
+     * Enumerate the whole-DB (spatie) backup artifacts on the local disk: the
+     * directory, every `.zip`, its size + mtime, newest first, plus count + total.
+     * Safe when the dir doesn't exist yet (count 0, files []). Read-only.
+     *
+     * @return array{dir: ?string, count: int, total_bytes: int, files: list<array{name: string, path: string, size_bytes: int, modified_at: string}>}
+     */
+    private function localBackups(): array
     {
         $disk = Storage::disk('local');
         $root = $disk->path(config('backup.backup.name'));
@@ -269,27 +285,33 @@ class OperatorHealthReport
             $root = storage_path('app/'.config('backup.backup.name'));
         }
         if (! is_dir($root)) {
-            return null;
+            return ['dir' => null, 'count' => 0, 'total_bytes' => 0, 'files' => []];
         }
 
-        $latest = null;
+        $files = [];
+        $total = 0;
         foreach (File::allFiles($root) as $file) {
             if (! str_ends_with($file->getFilename(), '.zip')) {
                 continue;
             }
-            if ($latest === null || $file->getMTime() > $latest->getMTime()) {
-                $latest = $file;
-            }
+            $size = $file->getSize();
+            $total += $size;
+            $files[] = [
+                'name' => $file->getFilename(),
+                'path' => $file->getPathname(),
+                'size_bytes' => $size,
+                'modified_at' => Carbon::createFromTimestamp($file->getMTime())->toIso8601String(),
+            ];
         }
 
-        if (! $latest instanceof SplFileInfo) {
-            return null;
-        }
+        // Newest first (string ISO-8601 sorts chronologically).
+        usort($files, fn (array $a, array $b): int => $b['modified_at'] <=> $a['modified_at']);
 
         return [
-            'path' => $latest->getPathname(),
-            'modified_at' => Carbon::createFromTimestamp($latest->getMTime())->toIso8601String(),
-            'size_bytes' => $latest->getSize(),
+            'dir' => $root,
+            'count' => count($files),
+            'total_bytes' => $total,
+            'files' => $files,
         ];
     }
 

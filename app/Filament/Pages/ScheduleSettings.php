@@ -151,6 +151,14 @@ class ScheduleSettings extends Page implements HasForms
                 ->label('Αποθήκευση')
                 ->icon('heroicon-o-check')
                 ->action(fn () => $this->save()),
+
+            // Backups are toggled here but the ARTIFACTS (which files, where, how
+            // big, when) live on the health screen — link straight to that section.
+            Action::make('viewBackups')
+                ->label('Αρχεία αντιγράφων (Υγεία)')
+                ->icon('heroicon-o-archive-box')
+                ->color('gray')
+                ->url(fn (): string => SystemHealth::getUrl().'#backups'),
         ];
     }
 

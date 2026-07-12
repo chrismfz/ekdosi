@@ -122,7 +122,8 @@
     </x-filament::section>
     @endif
 
-    {{-- Backup + Mail (side by side) --}}
+    {{-- Backup + Mail (side by side). Anchor: the Χρονοπρογραμματιστής links here (#backups). --}}
+    <div id="backups" style="scroll-margin-top: 5rem;"></div>
     <div class="grid gap-6 md:grid-cols-2">
         <x-filament::section>
             <x-slot name="heading">Αντίγραφα ασφαλείας</x-slot>
@@ -131,8 +132,38 @@
                 <div><x-filament::badge :color="$this->statusColor($b['monitor']['status'] ?? null)">Monitor: {{ $this->statusLabel($b['monitor']['status'] ?? null) }}</x-filament::badge></div>
                 <div>Τελευταίο τοπικό: <strong>{{ $this->ago($b['latest_backup_at'] ?? null) }}</strong>
                     @if(isset($b['latest_backup_age_hours'])) ({{ $b['latest_backup_age_hours'] }}h) @endif</div>
-                <div>Μέγεθος: {{ $this->bytes($b['latest_backup_size_bytes'] ?? null) }}</div>
+                <div>Μέγεθος (τελευταίο): {{ $this->bytes($b['latest_backup_size_bytes'] ?? null) }}</div>
             </div>
+
+            {{-- The whole-DB (spatie) artifacts themselves: where they live, how
+                 many, total size, and the newest few with size + timestamp. --}}
+            @php($lf = $b['local_files'] ?? [])
+            @if (($b['local_count'] ?? 0) > 0)
+                <div class="mt-3 space-y-1 text-sm">
+                    <div class="text-gray-500">Αρχεία αντιγράφων ΒΔ</div>
+                    <div>Φάκελος: <span class="font-mono text-xs">{{ $b['local_dir'] }}</span></div>
+                    <div>Πλήθος: <strong>{{ $b['local_count'] }}</strong> · Σύνολο: <strong>{{ $this->bytes($b['local_total_bytes'] ?? null) }}</strong></div>
+                    <div class="mt-1 overflow-x-auto">
+                        <table class="w-full text-xs">
+                            <thead><tr class="text-left text-gray-500"><th class="py-1 pr-3">Αρχείο</th><th class="pr-3">Μέγεθος</th><th>Ημ/νία</th></tr></thead>
+                            <tbody>
+                            @foreach ($lf as $f)
+                                <tr class="border-t border-gray-100 dark:border-gray-800">
+                                    <td class="py-1 pr-3 font-mono">{{ $f['name'] }}</td>
+                                    <td class="pr-3">{{ $this->bytes($f['size_bytes'] ?? null) }}</td>
+                                    <td>{{ $this->ago($f['modified_at'] ?? null) }}</td>
+                                </tr>
+                            @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (($b['local_count'] ?? 0) > count($lf))
+                        <div class="text-gray-500">…και {{ $b['local_count'] - count($lf) }} ακόμη (τα {{ count($lf) }} πιο πρόσφατα)</div>
+                    @endif
+                </div>
+            @else
+                <div class="mt-2 text-sm text-gray-500">Κανένα τοπικό αρχείο αντιγράφου ΒΔ{{ isset($b['local_dir']) ? ' ('.$b['local_dir'].')' : '' }}.</div>
+            @endif
 
             {{-- Per-tenant off-site + books (parity with CLI ops:health) --}}
             @php($cb = $b['companies'] ?? [])
