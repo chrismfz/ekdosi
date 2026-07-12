@@ -78,6 +78,7 @@ class Company extends Model
         'invoice_audit_bcc',
         'auto_email_on_mydata_accept',
         'auto_email_on_issue',
+        'mydata_auto_fetch_expenses',
         'mail_smtp_host',
         'mail_smtp_port',
         'mail_smtp_username',
@@ -149,6 +150,7 @@ class Company extends Model
             'show_customer_balance_on_pdf' => 'boolean',
             'auto_email_on_mydata_accept' => 'boolean',
             'auto_email_on_issue' => 'boolean',
+            'mydata_auto_fetch_expenses' => 'boolean',
             'mail_smtp_port' => 'integer',
         ];
     }

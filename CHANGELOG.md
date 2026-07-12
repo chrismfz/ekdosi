@@ -28,6 +28,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
   **`suppliers:backfill-names`** για μαζική σάρωση· γεμίζει επωνυμία/ΔΟΥ/διεύθυνση σε προμηθευτές
   που είχαν δημιουργηθεί μόνο με ΑΦΜ πριν το fix (fill-only-empty, best-effort). Κοινή υπηρεσία
   `SupplierNameBackfiller`.
+- **Per-company διακόπτης «Αυτόματη άντληση εξόδων»** στις «Ρυθμίσεις εταιρείας» (ο company_admin
+  ελέγχει τον ΔΙΚΟ του tenant). Two-key με τον καθολικό διακόπτη του χρονοπρογραμματιστή: όταν τρέχει
+  η read-only εργασία `mydata:refresh-expenses --auto-only`, ανανεώνει ΜΟΝΟ τους tenants που το
+  άναψαν (`companies.mydata_auto_fetch_expenses`, default OFF). Χειροκίνητο τρέξιμο ανανεώνει όλους.
 
 ### Fixed
 - **Άντληση εξόδων από myDATA: νέος ΕΛ προμηθευτής ερχόταν χωρίς επωνυμία (μόνο ΑΦΜ → «παύλα»).**

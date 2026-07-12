@@ -55,6 +55,35 @@ class RefreshExpensesSnapshotTest extends TestCase
 XML;
     }
 
+    public function test_auto_only_refreshes_only_opted_in_tenants(): void
+    {
+        $optedIn = Company::create([
+            'name' => 'In', 'slug' => 'in-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '801280901',
+            'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
+            'mydata_auto_fetch_expenses' => true,
+        ]);
+        $optedOut = Company::create([
+            'name' => 'Out', 'slug' => 'out-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '801280902',
+            'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
+        ]);
+
+        // Exactly ONE AADE response: if --auto-only wrongly swept the opted-out
+        // tenant too, the second fetch would run the mock dry (→ non-zero exit).
+        MyDataConsoleExpenses::$testHandler = new MockHandler([new Response(200, [], $this->orphanDoc())]);
+
+        try {
+            $this->artisan('mydata:refresh-expenses', ['--auto-only' => true, '--gap' => 0])
+                ->assertExitCode(0);
+
+            $this->assertNotNull(MyDataConsoleExpenses::lastFetchAt($optedIn->id), 'opted-in tenant refreshed');
+            $this->assertNull(MyDataConsoleExpenses::lastFetchAt($optedOut->id), 'opted-out tenant skipped');
+        } finally {
+            MyDataConsoleExpenses::$testHandler = null;
+        }
+    }
+
     public function test_the_command_caches_a_snapshot_the_console_restores(): void
     {
         $tenant = $this->tenant();
