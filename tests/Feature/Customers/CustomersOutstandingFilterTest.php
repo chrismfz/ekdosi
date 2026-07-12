@@ -18,10 +18,11 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The Customers-list "Υπόλοιπο" column + "Με υπόλοιπο" filter — the
- * drill-down target of the dashboard's "Ανεξόφλητα (πιστωτικά)" card.
+ * The Customers-list "Υπόλοιπο" column + the balance_status filter
+ * (χρεωστικοί/πιστωτικοί/μηδενικό) + the open-drafts filter — the debtor
+ * option is the drill-down target of the dashboard's "Ανεξόφλητα" card.
  * Boots the real Filament list page so the modifyQueryUsing() balance
- * join, the aliased sortable column, and the filter whereRaw all run
+ * join, the aliased sortable column, and the filter queries all run
  * through the actual table builder (not just a bare query).
  */
 class CustomersOutstandingFilterTest extends TestCase
@@ -86,6 +87,32 @@ class CustomersOutstandingFilterTest extends TestCase
         return $c;
     }
 
+    /** Negative balance: an on-account payment with no invoice → they have credit. */
+    private function creditor(): Customer
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πιστωτικός', 'is_active' => true]);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $c->id,
+            'pay_date' => now(), 'amount' => 150,
+        ]);
+
+        return $c;
+    }
+
+    /** Holds one unissued sale draft (πρόχειρο) — not counted in the balance (MON-5). */
+    private function draftHolder(): Customer
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πρόχειρο', 'is_active' => true]);
+        Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DR'.uniqid(), 'code' => 3,
+            'invoice_type_id' => $this->type->id, 'customer_id' => $c->id,
+            'payment_method_id' => $this->credit->id, 'issued_at' => now(),
+            'net_total' => 50, 'gross_total' => 62, 'local_status' => 'draft',
+        ]);
+
+        return $c;
+    }
+
     public function test_list_renders_with_balance_column_and_shows_both_by_default(): void
     {
         $debtor = $this->debtor();
@@ -98,16 +125,42 @@ class CustomersOutstandingFilterTest extends TestCase
             ->assertTableColumnExists('outstanding_balance');
     }
 
-    public function test_with_balance_filter_keeps_only_debtors(): void
+    public function test_balance_filter_debtor_keeps_only_who_owes_us(): void
     {
         $debtor = $this->debtor();
         $settled = $this->settled();
+        $creditor = $this->creditor();
 
         Livewire::test(ListCustomers::class)
             ->loadTable()
-            ->filterTable('with_balance', true)
+            ->filterTable('balance_status', 'debtor')
             ->assertCanSeeTableRecords([$debtor])
-            ->assertCanNotSeeTableRecords([$settled]);
+            ->assertCanNotSeeTableRecords([$settled, $creditor]);
+    }
+
+    public function test_balance_filter_creditor_keeps_only_who_has_credit(): void
+    {
+        $debtor = $this->debtor();
+        $settled = $this->settled();
+        $creditor = $this->creditor();
+
+        Livewire::test(ListCustomers::class)
+            ->loadTable()
+            ->filterTable('balance_status', 'creditor')
+            ->assertCanSeeTableRecords([$creditor])
+            ->assertCanNotSeeTableRecords([$debtor, $settled]);
+    }
+
+    public function test_open_drafts_filter_keeps_only_customers_with_a_draft(): void
+    {
+        $withDraft = $this->draftHolder();
+        $debtor = $this->debtor();  // issued, not a draft
+
+        Livewire::test(ListCustomers::class)
+            ->loadTable()
+            ->filterTable('has_open_drafts', true)
+            ->assertCanSeeTableRecords([$withDraft])
+            ->assertCanNotSeeTableRecords([$debtor]);
     }
 
     public function test_balance_column_is_sortable_without_sql_error(): void
@@ -121,21 +174,21 @@ class CustomersOutstandingFilterTest extends TestCase
             ->assertOk();
     }
 
-    public function test_drilldown_url_carries_the_with_balance_filter(): void
+    public function test_drilldown_url_carries_the_debtor_balance_filter(): void
     {
-        // The "Ανεξόφλητα (πιστωτικά)" dashboard card links here via
+        // The «Ανεξόφλητα» dashboard card links here via
         // CustomerResource::getUrl('index', ['tableFilters' => [...]]).
         // Pin the generated URL's query-string shape: it MUST match the
-        // tableFilters[with_balance][value] state that the TernaryFilter
-        // above consumes (proven by the filterTable tests). Together they
-        // cover the card→filter contract. (The actual query-string→filter
-        // hydration is Filament-internal and only exercisable in a real
-        // browser — the headless harness can't drive it; deferFilters(false)
-        // on the table is what lets the landed URL apply immediately.)
+        // tableFilters[balance_status][value]=debtor state the SelectFilter
+        // above consumes (proven by the filterTable tests). Together they cover
+        // the card→filter contract. (The actual query-string→filter hydration is
+        // Filament-internal and only exercisable in a real browser — the
+        // headless harness can't drive it; deferFilters(false) + the sort param
+        // are what let the landed URL apply immediately.)
         $url = CustomerResource::getUrl('index', [
-            'tableFilters' => ['with_balance' => ['value' => true]],
+            'tableFilters' => ['balance_status' => ['value' => 'debtor']],
         ]);
 
-        $this->assertStringContainsString('tableFilters%5Bwith_balance%5D%5Bvalue%5D=1', $url);
+        $this->assertStringContainsString('tableFilters%5Bbalance_status%5D%5Bvalue%5D=debtor', $url);
     }
 }

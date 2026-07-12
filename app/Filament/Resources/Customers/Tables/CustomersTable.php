@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Customers\Tables;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Customer;
+use App\Support\InvoiceScope;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -16,6 +17,7 @@ use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
@@ -28,7 +30,7 @@ class CustomersTable
         return $table
             // Apply filters immediately (Filament defers them by default).
             // The dashboard's "Ανεξόφλητα (πιστωτικά)" card drills in via a
-            // ?tableFilters[with_balance][value]=1 URL; with deferred
+            // ?tableFilters[balance_status][value]=debtor URL; with deferred
             // filters that value only PRE-FILLS the form and the operator
             // would still have to click "Apply" — the list would land
             // unfiltered. deferFilters(false) makes the drill-down (and all
@@ -36,7 +38,7 @@ class CustomersTable
             ->deferFilters(false)
             // Attach the `outstanding_balance` alias (+ its cust_owed /
             // cust_paid join sub-selects) so the "Υπόλοιπο" column + the
-            // "Με υπόλοιπο" filter below can read it. Computed in SQL,
+            // balance_status filter below can read it. Computed in SQL,
             // identical math to the dashboard headline. Always applied so
             // the filter's whereRaw can reference the join aliases even
             // when the column is toggled off.
@@ -167,19 +169,39 @@ class CustomersTable
                     ->falseLabel('Batched only')
                     ->placeholder('All'),
 
-                // "Με υπόλοιπο" — the target of the dashboard's
-                // "Ανεξόφλητα (πιστωτικά)" card. Reads the join aliases
-                // attached by modifyQueryUsing() above.
-                TernaryFilter::make('with_balance')
+                // Υπόλοιπο — χρεωστικοί (μας χρωστάνε, θετικό) vs πιστωτικοί
+                // (έχουν πίστωση, αρνητικό) vs μηδενικό. Reads the join aliases
+                // attached by modifyQueryUsing() above. `debtor` is also the
+                // target of the dashboard's «Ανεξόφλητα» card drill-down (see
+                // IncomeStatsOverview) — keep the value key `debtor` stable.
+                SelectFilter::make('balance_status')
                     ->label('Υπόλοιπο')
                     ->placeholder('Όλοι')
-                    ->trueLabel('Μόνο με υπόλοιπο')
-                    ->falseLabel('Χωρίς υπόλοιπο')
+                    ->options([
+                        'debtor' => 'Χρεωστικοί (μας χρωστάνε)',
+                        'creditor' => 'Πιστωτικοί (έχουν πίστωση)',
+                        'zero' => 'Μηδενικό υπόλοιπο',
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'debtor' => $query->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' > 0.005'),
+                        'creditor' => $query->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' < -0.005'),
+                        'zero' => $query->whereRaw('ABS('.Customer::OUTSTANDING_BALANCE_SQL.') <= 0.005'),
+                        default => $query,
+                    }),
+
+                // Πελάτες με ≥1 ανοιχτό προτιμολόγιο (unissued sale draft). Same
+                // predicate as the dashboard «Πρόχειρα» pillar (MON-5), so the two
+                // agree on what a draft is.
+                TernaryFilter::make('has_open_drafts')
+                    ->label('Προτιμολόγια')
+                    ->placeholder('Όλοι')
+                    ->trueLabel('Με ανοιχτά προτιμολόγια')
+                    ->falseLabel('Χωρίς ανοιχτά προτιμολόγια')
                     ->queries(
                         true: fn (Builder $query): Builder => $query
-                            ->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' > 0.005'),
+                            ->whereHas('invoices', fn (Builder $iq) => InvoiceScope::onlyUnissuedDrafts($iq)),
                         false: fn (Builder $query): Builder => $query
-                            ->whereRaw(Customer::OUTSTANDING_BALANCE_SQL.' <= 0.005'),
+                            ->whereDoesntHave('invoices', fn (Builder $iq) => InvoiceScope::onlyUnissuedDrafts($iq)),
                         blank: fn (Builder $query): Builder => $query,
                     ),
 

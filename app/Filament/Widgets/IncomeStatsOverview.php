@@ -65,20 +65,19 @@ class IncomeStatsOverview extends StatsOverviewWidget
                 ->description('Υπόλοιπο πελατών με πίστωση — δες ποιοι')
                 ->descriptionIcon('heroicon-m-banknotes')
                 ->color($outstanding > 0 ? 'danger' : 'success')
-                // Drill into the customers who owe (the "Με υπόλοιπο"
-                // filter on the Customers list). getUrl() carries the
+                // Drill into the customers who owe (the «Χρεωστικοί» option of
+                // the balance filter on the Customers list). getUrl() carries the
                 // current tenant slug in the path automatically.
                 //
                 // The `sort` param is REQUIRED, not cosmetic: with only
-                // ?tableFilters[with_balance][value]=1 the TernaryFilter
-                // (custom queries(), deferFilters(false)) does not rehydrate
-                // from the query string on load and the list lands unfiltered
-                // — a second table-state param (the balance sort) triggers the
+                // ?tableFilters[balance_status][value]=debtor the SelectFilter
+                // (custom query(), deferFilters(false)) does not rehydrate from
+                // the query string on load and the list lands unfiltered — a
+                // second table-state param (the balance sort) triggers the
                 // rehydrate. Sorting by balance desc is also what the operator
-                // wants here (biggest debtors first). Matches the URL verified
-                // to work in the panel.
+                // wants here (biggest debtors first).
                 ->url(CustomerResource::getUrl('index', [
-                    'tableFilters' => ['with_balance' => ['value' => true]],
+                    'tableFilters' => ['balance_status' => ['value' => 'debtor']],
                     'sort' => 'outstanding_balance:desc',
                 ]))
                 ->extraAttributes(['class' => 'cursor-pointer']),
