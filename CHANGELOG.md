@@ -18,6 +18,27 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-13
+
+### Added
+- **WHMCS καρτέλα: ρητή δήλωση + ζωντανός έλεγχος «0 ημέρες πίστωσης» στους προεπιλεγμένους τύπους.**
+  Οι δύο selectors (τύπος τιμολογίου/απόδειξης αυτόματης έκδοσης) εξηγούν πλέον ΓΙΑΤΙ ο τρόπος πληρωμής
+  τους πρέπει να είναι cash-term, και μια ζωντανή προειδοποίηση ανάβει αν ο επιλεγμένος τύπος έχει
+  `due_days > 0` (τα ήδη-πληρωμένα WHMCS τιμολόγια θα εμφανίζονταν ως ανοιχτές οφειλές). Cash-term
+  (0 ημέρες Ή κανένας τρόπος) = καθαρό. Από το pre-go-live audit (finding F1).
+
+### Fixed
+- **WHMCS inbox: `whmcs:fetch-pending --limit>ceiling` δεν «παγώνει» πλέον στην 1η σελίδα.** Το
+  `WhmcsClient::getPendingInvoices` σταματούσε σε short page (`returned < limit`) — αν ο caller
+  έδινε limit πάνω από το server-side page ceiling (~100), η σελίδα 1 γύριζε ceiling < limit και
+  ο walk κοβόταν σε μία σελίδα (η κλάση WH-6 «stuck at N»). Τερματίζει πλέον μόνο σε ΚΕΝΗ σελίδα,
+  όπως το αδελφό `getInvoicesForClient`. + regression test.
+- **WHMCS ingest: concurrent webhooks δεν βγάζουν πια spurious 500 σε MariaDB.** Δύο ταυτόχρονα
+  ingest του ίδιου `(company_id, whmcs_invoice_id)` υπό REPEATABLE READ (default της MariaDB)
+  κάνουν InnoDB deadlock (όχι unique-violation) που ξέφευγε ως 500· το `DB::transaction(..., 3)`
+  κάνει retry — στο retry η γραμμή υπάρχει → clean existing-row path. Το unique index απέτρεπε
+  πάντα διπλή γραμμή· αυτό διορθώνει μόνο τον θόρυβο/500.
+
 ## [1.7.0] - 2026-07-13
 
 ### Added

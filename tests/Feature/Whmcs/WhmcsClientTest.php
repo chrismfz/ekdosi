@@ -39,10 +39,10 @@ class WhmcsClientTest extends TestCase
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'        => 'success',
-                'totalresults'  => 0,
-                'whmcsversion'  => '8.7.2',
-                'activity'      => ['entry' => []],
+                'result' => 'success',
+                'totalresults' => 0,
+                'whmcsversion' => '8.7.2',
+                'activity' => ['entry' => []],
             ], 200),
         ]);
 
@@ -51,6 +51,7 @@ class WhmcsClientTest extends TestCase
         $this->assertSame('8.7.2', $version);
         Http::assertSent(function ($request) {
             $data = $request->data();
+
             return $data['action'] === 'GetActivityLog'
                 && $data['identifier'] === 'TEST_ID'
                 && $data['secret'] === 'TEST_SECRET'
@@ -80,6 +81,7 @@ class WhmcsClientTest extends TestCase
             // asForm() sets exactly this header — verified at
             // vendor/laravel/framework/.../Http/Client/PendingRequest.php
             $contentType = $request->header('Content-Type')[0] ?? '';
+
             return str_contains($contentType, 'application/x-www-form-urlencoded');
         });
     }
@@ -97,7 +99,7 @@ class WhmcsClientTest extends TestCase
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'  => 'error',
+                'result' => 'error',
                 'message' => 'Invalid IP',
             ], 200),
         ]);
@@ -110,7 +112,7 @@ class WhmcsClientTest extends TestCase
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'  => 'error',
+                'result' => 'error',
                 'message' => 'Authentication Failed',
             ], 200),
         ]);
@@ -128,14 +130,13 @@ class WhmcsClientTest extends TestCase
      * routes to WhmcsAuthenticationFailed (not generic
      * WhmcsApiException) so the UI can surface "credentials
      * rejected" rather than the unhelpful "WHMCS error".
-     *
      */
     #[DataProvider('authErrorMessageProvider')]
     public function test_auth_error_fragments_all_route_to_authentication_failed(string $message): void
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'  => 'error',
+                'result' => 'error',
                 'message' => $message,
             ], 200),
         ]);
@@ -153,10 +154,10 @@ class WhmcsClientTest extends TestCase
         // tenant feedback. Adding a new message to
         // AUTH_ERROR_FRAGMENTS must come with a row here.
         yield 'invalid_username_or_password' => ['Invalid Username or Password'];
-        yield 'invalid_permissions'          => ['Invalid Permissions'];
-        yield 'invalid_ip'                   => ['Invalid IP'];
-        yield 'authentication_failed'        => ['Authentication Failed'];
-        yield 'invalid_credentials'          => ['Invalid Credentials'];
+        yield 'invalid_permissions' => ['Invalid Permissions'];
+        yield 'invalid_ip' => ['Invalid IP'];
+        yield 'authentication_failed' => ['Authentication Failed'];
+        yield 'invalid_credentials' => ['Invalid Credentials'];
         // Case-insensitive match — lowercase variants must also work
         yield 'lowercase_invalid_username_or_password' => ['invalid username or password'];
     }
@@ -165,7 +166,7 @@ class WhmcsClientTest extends TestCase
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'  => 'error',
+                'result' => 'error',
                 'message' => 'Action not permitted',
             ], 200),
         ]);
@@ -207,9 +208,9 @@ class WhmcsClientTest extends TestCase
         // WHMCS caps page size server-side).
         Http::fakeSequence('example.gr/*')
             ->push([
-                'result'       => 'success',
+                'result' => 'success',
                 'totalresults' => 3,
-                'invoices'     => ['invoice' => [
+                'invoices' => ['invoice' => [
                     ['id' => 1001, 'status' => 'Paid', 'invoiced' => 0, 'total' => 10.00],
                     ['id' => 1002, 'status' => 'Paid', 'invoiced' => 1, 'total' => 20.00],
                     ['id' => 1003, 'status' => 'Paid', 'invoiced' => 0, 'total' => 30.00],
@@ -230,9 +231,9 @@ class WhmcsClientTest extends TestCase
         // WHMCS returns count=1 as a single object, not a list.
         Http::fakeSequence('example.gr/*')
             ->push([
-                'result'       => 'success',
+                'result' => 'success',
                 'totalresults' => 1,
-                'invoices'     => ['invoice' => ['id' => 1001, 'invoiced' => 0]],
+                'invoices' => ['invoice' => ['id' => 1001, 'invoiced' => 0]],
             ], 200)
             ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
 
@@ -360,31 +361,54 @@ class WhmcsClientTest extends TestCase
                 ['id' => 20, 'date' => '2026-05-20', 'invoiced' => 0],
                 ['id' => 19, 'date' => '2026-05-19', 'invoiced' => 0],
             ]]], 200)
-            // Short page (1 < limitnum 2) → the natural last-page signal.
             ->push(['result' => 'success', 'invoices' => ['invoice' => [
                 ['id' => 18, 'date' => '2026-05-18', 'invoiced' => 0],
-            ]]], 200);
+            ]]], 200)
+            // The end signal is an EMPTY page, NOT a short one — a short page can
+            // just be the server's page ceiling (WH-6). See the ceiling test below.
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
 
         $rows = $this->makeClient()->getPendingInvoices(limit: 2);
 
         $this->assertSame([20, 19, 18], array_column($rows, 'id'));
 
         $starts = [];
-        Http::assertSentInOrder([
-            function ($req) use (&$starts) {
-                $starts[] = (int) ($req->data()['limitstart'] ?? -1);
-                // limitnum carries the page size; limit/offset are NOT sent.
-                return (int) ($req->data()['limitnum'] ?? 0) === 2
-                    && ! array_key_exists('offset', $req->data());
-            },
-            function ($req) use (&$starts) {
-                $starts[] = (int) ($req->data()['limitstart'] ?? -1);
+        $capture = function ($req) use (&$starts) {
+            $starts[] = (int) ($req->data()['limitstart'] ?? -1);
 
-                return true;
-            },
-        ]);
-        // 2nd page starts at 2 (the actual count returned), not at limit.
-        $this->assertSame([0, 2], $starts);
+            // limitnum carries the page size; limit/offset are NOT sent.
+            return (int) ($req->data()['limitnum'] ?? 0) === 2
+                && ! array_key_exists('offset', $req->data());
+        };
+        Http::assertSentInOrder([$capture, $capture, $capture]);
+        // Cursors advance by the ACTUAL count returned: 0 → +2 → +1.
+        $this->assertSame([0, 2, 3], $starts);
+    }
+
+    public function test_get_pending_invoices_does_not_truncate_when_limit_exceeds_page_ceiling(): void
+    {
+        // WH-6 regression: a caller may pass a limit ABOVE WHMCS's server-side
+        // page ceiling (e.g. whmcs:fetch-pending --limit=250 vs a ~100 ceiling).
+        // Page 1 then returns fewer rows than `limit` even though MORE pages
+        // exist. A short-page break would stop after page 1 and silently drop
+        // every later unfiled invoice (the "inbox frozen at N" bug). The walk
+        // must continue until an EMPTY page.
+        Http::fakeSequence('example.gr/*')
+            // Page 1: 2 rows returned though limit=100 was requested (ceiling).
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 300, 'date' => '2026-05-30', 'invoiced' => 0],
+                ['id' => 299, 'date' => '2026-05-29', 'invoiced' => 0],
+            ]]], 200)
+            // Page 2: more unfiled rows a short-page break would have missed.
+            ->push(['result' => 'success', 'invoices' => ['invoice' => [
+                ['id' => 298, 'date' => '2026-05-28', 'invoiced' => 0],
+            ]]], 200)
+            ->push(['result' => 'success', 'invoices' => ['invoice' => []]], 200);
+
+        $rows = $this->makeClient()->getPendingInvoices(limit: 100);
+
+        // All three unfiled rows across both pages — nothing truncated.
+        $this->assertSame([300, 299, 298], array_column($rows, 'id'));
     }
 
     public function test_get_pending_invoices_loop_guard_stops_a_nonpaginating_server(): void
@@ -507,7 +531,7 @@ class WhmcsClientTest extends TestCase
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'  => 'error',
+                'result' => 'error',
                 'message' => 'Client ID Not Found',
             ], 200),
         ]);
@@ -519,11 +543,11 @@ class WhmcsClientTest extends TestCase
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'      => 'success',
-                'id'          => 42,
-                'firstname'   => 'Jane',
-                'lastname'    => 'Doe',
-                'email'       => 'jane@example.com',
+                'result' => 'success',
+                'id' => 42,
+                'firstname' => 'Jane',
+                'lastname' => 'Doe',
+                'email' => 'jane@example.com',
                 'companyname' => 'Acme',
             ], 200),
         ]);
@@ -537,9 +561,9 @@ class WhmcsClientTest extends TestCase
     {
         Http::fake([
             'example.gr/*' => Http::response([
-                'result'       => 'success',
+                'result' => 'success',
                 'totalresults' => 2,
-                'clients'      => ['client' => [
+                'clients' => ['client' => [
                     ['id' => 10, 'firstname' => 'A', 'email' => 'a@x.com'],
                     ['id' => 11, 'firstname' => 'B', 'email' => 'b@x.com'],
                 ]],

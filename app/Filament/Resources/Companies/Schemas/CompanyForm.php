@@ -36,6 +36,7 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Mail\Mailables\Address;
@@ -821,7 +822,8 @@ class CompanyForm
                                                     ->toArray()
                                                 : [])
                                             ->searchable()
-                                            ->helperText('Ο τύπος για πελάτες που ζήτησαν ΤΙΜΟΛΟΓΙΟ (ή τρίτους που δεν είναι απόδειξη). Χωρίς αυτόν, η αυτόματη έκδοση παραλείπει τον tenant (δεν μαντεύει ποτέ τον τύπο). Η χειροκίνητη επιλογή στο Inbox δεν επηρεάζεται.'),
+                                            ->live()
+                                            ->helperText('Ο τύπος για πελάτες που ζήτησαν ΤΙΜΟΛΟΓΙΟ (ή τρίτους που δεν είναι απόδειξη). Χωρίς αυτόν, η αυτόματη έκδοση παραλείπει τον tenant (δεν μαντεύει ποτέ τον τύπο). Η χειροκίνητη επιλογή στο Inbox δεν επηρεάζεται. ΣΗΜΑΝΤΙΚΟ: ο τρόπος πληρωμής αυτού του τύπου να έχει 0 ημέρες πίστωσης (τα WHMCS τιμολόγια είναι ήδη πληρωμένα· με πίστωση >0 θα εμφανίζονται ως ανοιχτές οφειλές).'),
                                         Select::make('whmcs_default_receipt_type_id')
                                             ->label('Προεπιλεγμένος τύπος ΑΠΟΔΕΙΞΗΣ (προαιρετικό)')
                                             ->options(fn (?Company $record) => $record
@@ -833,7 +835,45 @@ class CompanyForm
                                                     ->toArray()
                                                 : [])
                                             ->searchable()
-                                            ->helperText('Ο τύπος «Απόδειξης λιανικής» για όταν ο πελάτης ΔΕΝ ζήτησε τιμολόγιο, ή ένας μονομερής τρίτος είναι σημασμένος ως απόδειξη. Χωρίς αυτόν, τέτοιες εγγραφές ΜΕΝΟΥΝ στο Inbox για τον χειριστή (δεν εκδίδονται ποτέ ως λάθος τύπος).'),
+                                            ->live()
+                                            ->helperText('Ο τύπος «Απόδειξης λιανικής» για όταν ο πελάτης ΔΕΝ ζήτησε τιμολόγιο, ή ένας μονομερής τρίτος είναι σημασμένος ως απόδειξη. Χωρίς αυτόν, τέτοιες εγγραφές ΜΕΝΟΥΝ στο Inbox για τον χειριστή (δεν εκδίδονται ποτέ ως λάθος τύπος). Ίδιος κανόνας πληρωμής: 0 ημέρες πίστωσης (ή κανένας τρόπος πληρωμής — και τα δύο = εξοφλημένο στην έκδοση).'),
+                                        // Live tripwire for the «paid WHMCS invoice shows as an open
+                                        // receivable» trap: warn ONLY when a chosen type's payment
+                                        // method has due_days > 0. Cash-term (due_days = 0 OR no method
+                                        // at all) is settled-at-issue → fine, no warning. Surfaced here
+                                        // so the requirement isn't buried in a runbook.
+                                        Placeholder::make('whmcs_default_type_payment_term_check')
+                                            ->label('Έλεγχος τρόπου πληρωμής')
+                                            ->content(function (Get $get, ?Company $record): HtmlString {
+                                                if (! $record) {
+                                                    return new HtmlString('');
+                                                }
+                                                $slots = [
+                                                    'whmcs_default_invoice_type_id' => 'τιμολογίου',
+                                                    'whmcs_default_receipt_type_id' => 'απόδειξης',
+                                                ];
+                                                $warnings = [];
+                                                foreach ($slots as $field => $slotLabel) {
+                                                    $id = $get($field);
+                                                    if (! $id) {
+                                                        continue;
+                                                    }
+                                                    $type = InvoiceType::query()
+                                                        ->where('company_id', $record->id)
+                                                        ->with('paymentMethod')
+                                                        ->find($id);
+                                                    $dueDays = $type?->paymentMethod?->due_days;
+                                                    if ($dueDays !== null && (int) $dueDays > 0) {
+                                                        $warnings[] = e("Ο τύπος {$slotLabel} «{$type->code} — {$type->name}» έχει τρόπο πληρωμής «{$type->paymentMethod->description}» με {$dueDays} ημέρες πίστωσης");
+                                                    }
+                                                }
+
+                                                if ($warnings === []) {
+                                                    return new HtmlString('<span style="color:#16a34a;">✓ Οι επιλεγμένοι τύποι είναι εξοφλημένοι στην έκδοση (0 ημέρες πίστωσης).</span>');
+                                                }
+
+                                                return new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ '.implode('· ', $warnings).'. Τα WHMCS τιμολόγια είναι ήδη πληρωμένα — έτσι θα εμφανίζονται ως ανοιχτές οφειλές. Βάλε τρόπο πληρωμής με 0 ημέρες πίστωσης.</span>');
+                                            }),
                                     ]),
 
                                 // T-1 (timologia v2): third-party invoicing. When ON, the

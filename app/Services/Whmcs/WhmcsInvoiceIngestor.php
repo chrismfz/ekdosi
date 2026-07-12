@@ -99,6 +99,14 @@ class WhmcsInvoiceIngestor
         // παραστατικά). Detection reads only the payload → computed here.
         $consolidatedRefs = PendingWhmcsInvoice::detectConsolidatedRefs($whmcsInvoicePayload);
 
+        // attempts=3: two concurrent ingests of the SAME missing (company_id,
+        // whmcs_invoice_id) row resolve differently by isolation level — a
+        // unique-key violation under READ COMMITTED (caught inline below) OR an
+        // InnoDB deadlock under REPEATABLE READ (MariaDB's default: both txns
+        // gap-lock the missing row, then the inserts deadlock). Laravel retries
+        // the closure on the deadlock; on the retry the row now EXISTS, so the
+        // lockForUpdate SELECT finds it and we take the clean existing-row path.
+        // Belt (retry) + suspenders (inline unique-violation catch).
         $result = DB::transaction(function () use (
             $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs
         ) {
@@ -142,16 +150,15 @@ class WhmcsInvoiceIngestor
 
                     return new IngestionResult(row: $row, created: true, auditPreserved: false);
                 } catch (QueryException $e) {
-                    // Concurrent ingest race: between our lockForUpdate
-                    // SELECT (which doesn't gap-lock under MariaDB
-                    // READ COMMITTED for missing rows) and this INSERT,
-                    // another worker created the same (company_id,
-                    // whmcs_invoice_id) row. Re-select and fall through
-                    // to the refresh path. Without this catch the
-                    // QueryException escapes to the webhook controller
-                    // as a 500 - WHMCS-side retries succeed on the next
-                    // tick but the false 500 in logs is indistinguishable
-                    // from a real bug.
+                    // Concurrent ingest race under READ COMMITTED: another worker
+                    // created the same (company_id, whmcs_invoice_id) row between
+                    // our lockForUpdate SELECT and this INSERT → a unique-key
+                    // violation. Re-select and fall through to the refresh path.
+                    // (Under MariaDB's default REPEATABLE READ the same race
+                    // deadlocks instead of dup-keying; that's NOT caught here — it
+                    // is handled by the transaction's attempts=3 retry, which
+                    // re-runs the closure and finds the now-existing row.) Without
+                    // one of the two, the QueryException escapes as a false 500.
                     if (! $this->isUniqueConstraintViolation($e)) {
                         throw $e;
                     }
@@ -209,7 +216,7 @@ class WhmcsInvoiceIngestor
             $existing->update($update);
 
             return new IngestionResult(row: $existing, created: false, auditPreserved: false);
-        });
+        }, 3);
 
         // After commit (outside the tx, so a notification hiccup can't roll back
         // the staging): ping the operators for a NEW immediate-invoice row.
