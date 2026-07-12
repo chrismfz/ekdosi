@@ -152,6 +152,11 @@ class OperatorHealthSeverity
         $mydataDiscrepant = [];
         $mydataStale = [];
         foreach (($data['mydata'] ?? []) as $row) {
+            // Precedence failed → discrepant → stale. A stale row whose last
+            // cached run had discrepancies is reported as «discrepant», not
+            // «stale» — same warning level + exit code, so the gate outcome is
+            // identical; the operator just sees the discrepancy first. Acceptable
+            // because a stale run can't have NEW discrepancies anyway.
             if (($row['status'] ?? null) === 'failed') {
                 $mydataFailed[] = $row['tenant'] ?? '?';
             } elseif ((int) ($row['discrepancies'] ?? 0) > 0) {

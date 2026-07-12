@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Companies\Pages;
 use App\Filament\Resources\Companies\CompanyResource;
 use App\Filament\Support\SendChannelFormBridge;
 use App\Services\MyData\MyDataLookupSeeder;
+use App\Support\Tenancy\CompanyContext;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -67,15 +68,31 @@ class EditCompany extends EditRecord
             return;
         }
 
-        $r = app(MyDataLookupSeeder::class)->seedStandardLookups($this->record);
+        // Pin the ambient tenant to the record BEING SEEDED. CompanyResource is
+        // NOT tenant-scoped, so a super_admin can edit company B while the panel
+        // context (TenantSet) is pinned to a DIFFERENT tenant A — and the
+        // seeder's idempotency probes (`where('company_id', B)`) would then get
+        // the CompanyScope predicate `AND company_id = A` appended → always
+        // false → duplicate rows (or an invoice_types unique-key throw). actAs
+        // makes the scope agree with the explicit where.
+        $r = app(CompanyContext::class)->actAs(
+            $this->record,
+            fn (): array => app(MyDataLookupSeeder::class)->seedStandardLookups($this->record),
+        );
 
-        if ($r['vat']['created'] === 0 && $r['types']['created'] === 0 && $r['types']['filled'] === 0) {
+        $filled = $r['types']['filled'];
+        if ($r['vat']['created'] === 0 && $r['types']['created'] === 0 && $filled === 0) {
             return;  // Nothing to seed (already had them) — stay quiet.
         }
 
+        // «filled» = myDATA classification back-filled onto pre-existing types
+        // (created can be 0 while filled > 0), so mention it or the toast reads
+        // «0 · 0» even though the switch DID complete the AADE chain.
+        $filledNote = $filled > 0 ? " · συμπληρώθηκε κατηγοριοποίηση σε {$filled} τύπους" : '';
+
         Notification::make()
             ->title('Στήθηκαν τυπικές ρυθμίσεις ΑΑΔΕ')
-            ->body("Ο πάροχος άλλαξε σε ελληνική τιμολόγηση — προστέθηκαν οι τυπικές ρυθμίσεις. Κατηγορίες ΦΠΑ: {$r['vat']['created']} · Είδη παραστατικών: {$r['types']['created']}. Προσαρμόστε τα στο Setup αν χρειάζεται.")
+            ->body("Ο πάροχος άλλαξε σε ελληνική τιμολόγηση — προστέθηκαν οι τυπικές ρυθμίσεις. Κατηγορίες ΦΠΑ: {$r['vat']['created']} · Είδη παραστατικών: {$r['types']['created']}{$filledNote}. Προσαρμόστε τα στο Setup αν χρειάζεται.")
             ->success()
             ->send();
     }

@@ -3,6 +3,7 @@
 use App\Jobs\RecordQueueHeartbeat;
 use App\Models\Company;
 use App\Support\OperatorHealth\HealthRecorder;
+use App\Support\OperatorHealth\TenantScheduleSweep;
 use App\Support\Settings\SystemSettings;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -31,25 +32,11 @@ $trackSchedule = function ($event, string $task) {
 $scheduleEnabled = fn (string $key): bool => app(SystemSettings::class)
     ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
 
-/*
- | OPS-13: run a per-tenant command across a tenant set with per-tenant isolation.
- | A plain `->each(fn ($c) => Artisan::call(...))` lets ONE tenant's uncaught
- | exception abort the whole sweep (later tenants never run) AND skip its health
- | recording — leaving a stale «ok» that still reads as healthy. Here each tenant
- | is isolated: an uncaught throw is reported AND recorded as a per-tenant failure
- | (via $onError) so it surfaces, and the sweep carries on to the next tenant.
- | Normal non-zero exits are already self-recorded by the commands themselves.
- */
-$sweepTenants = function (iterable $tenants, string $command, callable $onError): void {
-    foreach ($tenants as $tenant) {
-        try {
-            Artisan::call($command, ['--tenant' => $tenant->slug]);
-        } catch (Throwable $e) {
-            report($e);
-            $onError($tenant, $e);
-        }
-    }
-};
+// OPS-13: per-tenant sweeps with per-tenant isolation (one tenant's uncaught
+// exception must not abort the rest, and must be recorded so it surfaces). The
+// guarantee lives in TenantScheduleSweep so it's unit-testable; here we just
+// delegate.
+$sweepTenants = fn (iterable $tenants, string $command, callable $onError): int => app(TenantScheduleSweep::class)->run($tenants, $command, $onError);
 
 /*
 |--------------------------------------------------------------------------

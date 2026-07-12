@@ -6,6 +6,8 @@ use App\Filament\Resources\Companies\Pages\CreateCompany;
 use App\Filament\Resources\Companies\Pages\EditCompany;
 use App\Models\Company;
 use App\Models\User;
+use App\Services\MyData\MyDataLookupSeeder;
+use App\Support\Tenancy\CompanyContext;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -119,6 +121,43 @@ class CompanyAutoSeedTest extends TestCase
         $this->assertGreaterThan(0, DB::table('vat_categories')->where('company_id', $company->id)->count());
         $this->assertGreaterThan(0, DB::table('invoice_types')->where('company_id', $company->id)->count());
         $this->assertGreaterThan(0, DB::table('payment_methods')->where('company_id', $company->id)->count());
+    }
+
+    public function test_reseed_on_switch_is_idempotent_even_under_a_different_ambient_tenant(): void
+    {
+        // Regression: CompanyResource is NOT tenant-scoped, so a super_admin can
+        // edit company B while the panel context (CompanyContext) is pinned to a
+        // DIFFERENT tenant A. The re-seed must run against B, not intersect the
+        // scope with A — otherwise every idempotency probe (`where(company_id,B)`
+        // AND scope `company_id=A`) is false → duplicate VAT rows + an
+        // invoice_types unique-key throw. afterSave now wraps the seed in
+        // actAs($record) to keep the scope honest.
+        $b = Company::query()->withoutGlobalScopes()->create([
+            'name' => 'Beta', 'slug' => 'b-'.uniqid(),
+            'country_code' => 'GR', 'einvoice_provider' => 'none', 'mydata_mode' => 'off',
+        ]);
+        // B ALREADY has the full lookup set (e.g. ETL-imported), so the switch is
+        // a genuine RE-seed, not a first seed.
+        app(CompanyContext::class)->actAs($b, fn () => app(MyDataLookupSeeder::class)->seedStandardLookups($b));
+        $vatBefore = DB::table('vat_categories')->where('company_id', $b->id)->count();
+        $typesBefore = DB::table('invoice_types')->where('company_id', $b->id)->count();
+        $this->assertGreaterThan(0, $vatBefore);
+
+        // Pin the ambient tenant to a DIFFERENT company (A) — the mismatch.
+        $a = Company::query()->withoutGlobalScopes()->create([
+            'name' => 'Alpha', 'slug' => 'a-'.uniqid(),
+            'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        app(CompanyContext::class)->set($a);
+
+        Livewire::test(EditCompany::class, ['record' => $b->getRouteKey()])
+            ->fillForm(['country_code' => 'GR', 'send_channel' => 'mydata-off'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        // No duplicates, no throw: the re-seed ran idempotently against B.
+        $this->assertSame($vatBefore, DB::table('vat_categories')->where('company_id', $b->id)->count());
+        $this->assertSame($typesBefore, DB::table('invoice_types')->where('company_id', $b->id)->count());
     }
 
     public function test_editing_a_greek_tenant_without_changing_provider_does_not_reseed(): void
