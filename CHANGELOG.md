@@ -17,6 +17,8 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-12
+
 ### Added
 - **Ιστορικό email — per-customer + γενικό (tenant-wide).** Πέρα από το per-invoice ιστορικό
   (ViewInvoice), κάθε πελάτης έχει πλέον tab «Ιστορικό email» (όλες οι αποστολές τιμολογίων του,
