@@ -60,7 +60,9 @@ class QuickActionsWidget extends Widget
         $add(CustomerResource::canCreate(), 'Νέος Πελάτης', CustomerResource::getUrl('create'), 'heroicon-o-user-plus', 'primary');
 
         // Καθημερινός έλεγχος — gated on canViewAny() / page canAccess().
-        $add(WhmcsInboxResource::canViewAny(), 'WHMCS Εισερχόμενα', WhmcsInboxResource::getUrl('index'), 'heroicon-o-inbox-arrow-down', 'gray', $this->whmcsPending());
+        $whmcs = WhmcsInboxResource::canViewAny();
+        // Only run the pending-count query when the button will actually show.
+        $add($whmcs, 'WHMCS Εισερχόμενα', WhmcsInboxResource::getUrl('index'), 'heroicon-o-inbox-arrow-down', 'gray', $whmcs ? $this->whmcsPending() : null);
         $add(InvoiceResource::canViewAny(), 'Παραστατικά', InvoiceResource::getUrl('index'), 'heroicon-o-rectangle-stack', 'gray');
         $add(MyDataConsole::canAccess(), 'Κονσόλα myDATA', MyDataConsole::getUrl(), 'heroicon-o-cloud', 'gray');
         $add(AgedReceivables::canAccess(), 'Ηλικίωση οφειλών', AgedReceivables::getUrl(), 'heroicon-o-clock', 'gray');
