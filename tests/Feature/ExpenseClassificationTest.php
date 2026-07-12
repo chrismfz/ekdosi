@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Filament\Resources\Expenses\Pages\ViewExpense;
 use App\Models\Company;
 use App\Models\Expense;
+use App\Models\ExpenseLine;
+use App\Models\User;
 use App\Support\MyData\Codes;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -46,7 +48,7 @@ class ExpenseClassificationTest extends TestCase
             'afm' => '801280908',
         ]);
 
-        $user = \App\Models\User::create([
+        $user = User::create([
             'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
         ]);
         Gate::before(fn () => true);
@@ -87,6 +89,43 @@ class ExpenseClassificationTest extends TestCase
         $this->assertSame('E3_585_001', $expense->classification_type, 'forged code must not overwrite the valid one');
     }
 
+    public function test_notes_action_saves_on_readonly_mydata_expense_and_view_renders_links(): void
+    {
+        $tenant = Company::create([
+            'name' => 'Notes test', 'slug' => 'notes-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '801280908',
+        ]);
+        Gate::before(fn () => true);
+        $this->actingAs(User::create([
+            'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]));
+        Filament::setTenant($tenant);
+
+        // A myDATA-sourced (read-only) expense carrying the doc-level links.
+        $expense = Expense::create([
+            'company_id' => $tenant->id,
+            'mydata_mark' => '400000000000123',
+            'source' => 'sync',
+            'qr_url' => 'https://mydatapi.aade.gr/myDATA/TimologioQR/QRInfo?q=ABC',
+            'downloading_invoice_url' => 'https://einvoice.impact.gr/p/EL094468339/DEAD/F630',
+        ]);
+
+        // The View page (infolist incl. the new «Σύνδεσμοι παραστατικού» section)
+        // renders, AND the notes action writes ONLY the notes column on a doc whose
+        // full Edit is blocked — «αυτό είναι εισιτήριο Aegean».
+        Livewire::test(ViewExpense::class, ['record' => $expense->getRouteKey()])
+            ->assertOk()
+            ->assertSee('https://einvoice.impact.gr/p/EL094468339/DEAD/F630')
+            ->callAction('notes', data: ['notes' => 'Εισιτήριο Aegean'])
+            ->assertHasNoErrors();
+
+        $expense->refresh();
+        $this->assertSame('Εισιτήριο Aegean', $expense->notes);
+        // The AADE-mirrored fields are untouched by the notes write.
+        $this->assertSame('sync', $expense->source->value);
+        $this->assertSame('400000000000123', $expense->mydata_mark);
+    }
+
     public function test_classify_action_mixed_mode_sets_per_line(): void
     {
         $tenant = Company::create([
@@ -94,7 +133,7 @@ class ExpenseClassificationTest extends TestCase
             'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '801280908',
         ]);
         Gate::before(fn () => true);
-        $this->actingAs(\App\Models\User::create([
+        $this->actingAs(User::create([
             'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
         ]));
         Filament::setTenant($tenant);
@@ -105,11 +144,11 @@ class ExpenseClassificationTest extends TestCase
         // Two lines with DIFFERENT classifications → classificationIsMixed() is
         // true, so the action opens in «Μικτό» mode pre-filled per line. Submitting
         // (defaults) must persist each line distinctly and mark the doc classified.
-        $l1 = \App\Models\ExpenseLine::create([
+        $l1 = ExpenseLine::create([
             'company_id' => $tenant->id, 'expense_id' => $expense->id, 'line_number' => 1, 'net_value' => 100,
             'classification_type' => 'E3_585_001', 'classification_category' => 'category2_3',
         ]);
-        $l2 = \App\Models\ExpenseLine::create([
+        $l2 = ExpenseLine::create([
             'company_id' => $tenant->id, 'expense_id' => $expense->id, 'line_number' => 2, 'net_value' => 50,
             'classification_type' => 'E3_585_002', 'classification_category' => 'category2_4',
         ]);

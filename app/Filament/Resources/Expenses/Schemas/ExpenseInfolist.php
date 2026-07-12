@@ -64,6 +64,32 @@ class ExpenseInfolist
                         TextEntry::make('gross_total')->label('Σύνολο')->money('EUR')->weight('bold'),
                     ]),
 
+                // Doc-level links from the myDATA XML — since expense docs carry no
+                // line description, these open the actual παραστατικό (QR / issuer's
+                // e-invoice) in two clicks so the operator can see what it is and
+                // annotate it. Shown only when AADE sent them.
+                Section::make('Σύνδεσμοι παραστατικού')
+                    ->columns(2)
+                    ->visible(fn (Expense $record): bool => filled($record->qr_url) || filled($record->downloading_invoice_url))
+                    ->schema([
+                        TextEntry::make('qr_url')
+                            ->label('QR Code')
+                            ->placeholder('—')
+                            ->badge()
+                            ->color('info')
+                            ->icon('heroicon-o-qr-code')
+                            ->formatStateUsing(fn (): string => 'Άνοιγμα QR παραστατικού')
+                            ->url(fn (Expense $record): ?string => $record->qr_url, shouldOpenInNewTab: true),
+                        TextEntry::make('downloading_invoice_url')
+                            ->label('Παραστατικό εκδότη')
+                            ->placeholder('—')
+                            ->badge()
+                            ->color('success')
+                            ->icon('heroicon-o-arrow-top-right-on-square')
+                            ->formatStateUsing(fn (): string => 'Άνοιγμα παραστατικού')
+                            ->url(fn (Expense $record): ?string => $record->downloading_invoice_url, shouldOpenInNewTab: true),
+                    ]),
+
                 // Header E5 classification (set by the ViewExpense «Χαρακτηρισμός»
                 // action). Surfaced here so the operator can read back what they
                 // assigned — the per-line classification below is a separate field.
@@ -73,22 +99,33 @@ class ExpenseInfolist
                         TextEntry::make('classification_type')
                             ->label('Τύπος (E3)')
                             ->placeholder('— (αχαρακτήριστο)')
-                            ->state(fn (\App\Models\Expense $record): ?string => $record->classificationIsMixed()
+                            ->state(fn (Expense $record): ?string => $record->classificationIsMixed()
                                 ? 'Μικτός — βλ. ανά γραμμή'
                                 : ($record->classification_type === null ? null
                                     : trim($record->classification_type.' — '.(Codes::e3TypeLabel($record->classification_type) ?? ''), ' —'))),
                         TextEntry::make('classification_category')
                             ->label('Κατηγορία')
                             ->placeholder('—')
-                            ->state(fn (\App\Models\Expense $record): ?string => $record->classificationIsMixed()
+                            ->state(fn (Expense $record): ?string => $record->classificationIsMixed()
                                 ? 'Μικτός — βλ. ανά γραμμή'
                                 : ($record->classification_category === null ? null
                                     : trim($record->classification_category.' — '.(Codes::e3CategoryLabel($record->classification_category) ?? ''), ' —'))),
                         TextEntry::make('classification_state')
                             ->label('Κατάσταση')
                             ->badge()
-                            ->formatStateUsing(fn (?string $state): string => \App\Models\Expense::classificationStateLabel($state))
-                            ->color(fn (?string $state): string => \App\Models\Expense::classificationStateColor($state)),
+                            ->formatStateUsing(fn (?string $state): string => Expense::classificationStateLabel($state))
+                            ->color(fn (?string $state): string => Expense::classificationStateColor($state)),
+                    ]),
+
+                // Operator notes — visible only when set (added via the
+                // ViewExpense «Σημειώσεις» action, which works on read-only
+                // myDATA docs too). Never sent to AADE.
+                Section::make('Σημειώσεις')
+                    ->visible(fn (Expense $record): bool => filled($record->notes))
+                    ->schema([
+                        TextEntry::make('notes')
+                            ->hiddenLabel()
+                            ->columnSpanFull(),
                     ]),
 
                 RepeatableEntry::make('lines')

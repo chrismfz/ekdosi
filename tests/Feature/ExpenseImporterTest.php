@@ -2,14 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\DTOs\AadeRegistryRecord;
+use App\Exceptions\Aade\AadeUnreachable;
 use App\Models\Company;
 use App\Models\Expense;
+use App\Models\ExpenseLine;
 use App\Models\ExpenseMark;
 use App\Models\Supplier;
+use App\Services\AadeRegistryLookup;
 use App\Services\MyData\ExpenseImporter;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -38,6 +43,12 @@ class ExpenseImporterTest extends TestCase
             'mydata_aade_id_sandbox' => 'TESTUSER',
             'mydata_subscription_key_sandbox' => 'TESTKEY',
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
     }
 
     private function import(MockHandler $mock, ?string $onlyMark = null)
@@ -84,6 +95,74 @@ class ExpenseImporterTest extends TestCase
         $this->assertNotEmpty($mark->response);
     }
 
+    public function test_creates_and_gsis_enriches_a_greek_supplier_without_a_doc_name(): void
+    {
+        // Real production shape: a GR issuer whose myDATA doc carries ONLY the
+        // ΑΦΜ, no <name> ([219]/[220] forbid the domestic name). The importer must
+        // resolve the identity from GSIS so the supplier lands named, not a dash.
+        $lookup = Mockery::mock(AadeRegistryLookup::class);
+        $lookup->shouldReceive('findByAfm')
+            ->with('094468339')
+            ->andReturn(new AadeRegistryRecord(
+                afm: '094468339',
+                name: 'AEGEAN AIRLINES A.E.',
+                doy: 'ΦΑΕ ΑΘΗΝΩΝ',
+                doyCode: '1159',
+                active: true,
+                statusDescr: 'ΕΝΕΡΓΟΣ ΑΦΜ',
+                address: 'ΒΙΛΤΑΝΙΩΤΗ 31',
+                city: 'ΚΗΦΙΣΙΑ',
+                postcode: '14564',
+                activities: [['code' => '51100000', 'description' => 'ΑΕΡΟΠΟΡΙΚΕΣ ΜΕΤΑΦΟΡΕΣ', 'kind' => 'KYRIA']],
+            ));
+        $this->app->bind(AadeRegistryLookup::class, fn ($app, $params) => $lookup);
+
+        $result = $this->import(new MockHandler([
+            new Response(200, [], $this->namelessGreekIssuerDoc()),
+        ]));
+
+        $this->assertSame(1, $result->created);
+        $this->assertSame(1, $result->suppliersCreated);
+
+        // Supplier auto-created AND GSIS-enriched (name/ΔΟΥ/address/δραστηριότητα).
+        $supplier = Supplier::where('company_id', $this->tenant->id)->where('afm', '094468339')->firstOrFail();
+        $this->assertSame('AEGEAN AIRLINES A.E.', $supplier->name);
+        $this->assertSame('ΦΑΕ ΑΘΗΝΩΝ', $supplier->tax_office);
+        $this->assertSame('ΒΙΛΤΑΝΙΩΤΗ 31', $supplier->address1);
+        $this->assertSame('ΚΗΦΙΣΙΑ', $supplier->city);
+        $this->assertSame('14564', $supplier->postcode);
+        $this->assertSame('ΑΕΡΟΠΟΡΙΚΕΣ ΜΕΤΑΦΟΡΕΣ', $supplier->occupation);
+        $this->assertSame('sync', $supplier->source->value);
+
+        // The doc-level links AADE ships are extracted into their own columns so
+        // the operator can open the real παραστατικό (no line description exists).
+        $expense = Expense::first();
+        $this->assertSame($supplier->id, $expense->supplier_id);
+        $this->assertSame('https://mydatapi.aade.gr/myDATA/TimologioQR/QRInfo?q=ABC123', $expense->qr_url);
+        $this->assertSame('https://einvoice.impact.gr/p/EL094468339/DEADBEEF/F630', $expense->downloading_invoice_url);
+    }
+
+    public function test_supplier_is_created_nameless_when_gsis_enrichment_fails(): void
+    {
+        // GSIS unreachable/creds-missing must NOT abort the import — the ΑΦΜ-only
+        // supplier is still created (graceful degradation, same as before).
+        $lookup = Mockery::mock(AadeRegistryLookup::class);
+        $lookup->shouldReceive('findByAfm')->andThrow(new AadeUnreachable('GSIS down'));
+        $this->app->bind(AadeRegistryLookup::class, fn ($app, $params) => $lookup);
+
+        $result = $this->import(new MockHandler([
+            new Response(200, [], $this->namelessGreekIssuerDoc()),
+        ]));
+
+        $this->assertSame(1, $result->created);
+        $this->assertSame(1, $result->suppliersCreated);
+
+        $supplier = Supplier::where('company_id', $this->tenant->id)->where('afm', '094468339')->firstOrFail();
+        $this->assertNull($supplier->name);
+        $this->assertSame('GR', $supplier->country);
+        $this->assertSame($supplier->id, Expense::first()->supplier_id);
+    }
+
     public function test_is_idempotent_and_links_existing_supplier(): void
     {
         // Pre-existing supplier for the issuer AFM (manual) → link, not create.
@@ -104,7 +183,7 @@ class ExpenseImporterTest extends TestCase
         $this->assertSame(0, $second->created);
         $this->assertSame(1, $second->skippedExisting);
         $this->assertSame(1, Expense::where('company_id', $this->tenant->id)->count());
-        $this->assertSame(2, \App\Models\ExpenseLine::where('company_id', $this->tenant->id)->count());
+        $this->assertSame(2, ExpenseLine::where('company_id', $this->tenant->id)->count());
     }
 
     public function test_only_mark_filters_and_reports_not_found(): void
@@ -229,6 +308,48 @@ XML;
                 <totalVatAmount>36.00</totalVatAmount>
                 <totalGrossValue>186.00</totalGrossValue>
             </invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+    }
+
+    /** A GR issuer carrying ONLY its ΑΦΜ (no <name>) — the shape GSIS must fill. */
+    private function namelessGreekIssuerDoc(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400014319682524</mark>
+            <issuer>
+                <vatNumber>094468339</vatNumber>
+                <country>GR</country>
+                <branch>0</branch>
+            </issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader>
+                <series>ΑΠΕ-Κ</series>
+                <aa>8289636</aa>
+                <issueDate>2026-07-09</issueDate>
+                <invoiceType>2.1</invoiceType>
+                <currency>EUR</currency>
+            </invoiceHeader>
+            <invoiceDetails>
+                <lineNumber>1</lineNumber>
+                <netValue>102.00</netValue>
+                <vatCategory>7</vatCategory>
+                <vatExemptionCategory>11</vatExemptionCategory>
+                <vatAmount>0.00</vatAmount>
+            </invoiceDetails>
+            <invoiceSummary>
+                <totalNetValue>102.00</totalNetValue>
+                <totalVatAmount>0.00</totalVatAmount>
+                <totalGrossValue>102.00</totalGrossValue>
+            </invoiceSummary>
+            <qrCodeUrl>https://mydatapi.aade.gr/myDATA/TimologioQR/QRInfo?q=ABC123</qrCodeUrl>
+            <downloadingInvoiceUrl>https://einvoice.impact.gr/p/EL094468339/DEADBEEF/F630</downloadingInvoiceUrl>
         </invoice>
     </invoicesDoc>
 </RequestedDoc>
