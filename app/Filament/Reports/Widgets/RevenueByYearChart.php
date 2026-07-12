@@ -18,7 +18,7 @@ class RevenueByYearChart extends ChartWidget
 {
     use InteractsWithPageFilters;
 
-    protected static ?int $sort = 4;
+    protected static ?int $sort = 5;
 
     protected ?string $heading = 'Συνολικός τζίρος ανά έτος (καθαρά)';
 
@@ -41,8 +41,8 @@ class RevenueByYearChart extends ChartWidget
         return [
             'datasets' => [
                 [
-                    'label'           => 'Καθαρά',
-                    'data'            => array_column($rows, 'net'),
+                    'label' => 'Καθαρά',
+                    'data' => array_column($rows, 'net'),
                     'backgroundColor' => $colors,
                 ],
             ],

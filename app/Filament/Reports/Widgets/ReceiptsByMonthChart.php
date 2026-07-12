@@ -10,23 +10,24 @@ use Filament\Widgets\ChartWidget;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
 
 /**
- * Cumulative net income, the focus year vs ANY chosen comparison year
- * (both Reports-page selectors) — "are we ahead of where we were". The
- * current year's line flattens after the current month (no future
- * invoices) for a like-for-like read up to today.
+ * Εισπράξεις (money actually collected, net of refunds) per month, the
+ * focus year vs the comparison year — grouped bars so the operator spots
+ * the seasonally weak months (a slow summer) at a glance and knows roughly
+ * what to expect this year. The CASH twin of RevenueByMonthChart's
+ * turnover: keyed on pay_date, not issue date.
  */
-class YearVsYearChart extends ChartWidget
+class ReceiptsByMonthChart extends ChartWidget
 {
     use InteractsWithPageFilters;
 
-    protected static ?int $sort = 4;
+    protected static ?int $sort = 3;
 
     private const MONTHS = ['Ιαν', 'Φεβ', 'Μάρ', 'Απρ', 'Μάι', 'Ιούν', 'Ιούλ', 'Αύγ', 'Σεπ', 'Οκτ', 'Νοέ', 'Δεκ'];
 
     public function getHeading(): ?string
     {
-        return ReportFilters::year($this->pageFilters).' vs '
-            .ReportFilters::compareYear($this->pageFilters).' (σωρευτικά καθαρά)';
+        return 'Εισπράξεις ανά μήνα — '.ReportFilters::year($this->pageFilters)
+            .' vs '.ReportFilters::compareYear($this->pageFilters);
     }
 
     protected function getData(): array
@@ -44,15 +45,13 @@ class YearVsYearChart extends ChartWidget
             'datasets' => [
                 [
                     'label' => (string) $year,
-                    'data' => $metrics->cumulativeNetByMonth($year),
-                    'borderColor' => '#3b82f6',
-                    'fill' => false,
+                    'data' => $metrics->receiptsByMonth($year),
+                    'backgroundColor' => '#10b981',
                 ],
                 [
                     'label' => (string) $compare,
-                    'data' => $metrics->cumulativeNetByMonth($compare),
-                    'borderColor' => '#9ca3af',
-                    'fill' => false,
+                    'data' => $metrics->receiptsByMonth($compare),
+                    'backgroundColor' => '#9ca3af',
                 ],
             ],
             'labels' => self::MONTHS,
@@ -61,6 +60,6 @@ class YearVsYearChart extends ChartWidget
 
     protected function getType(): string
     {
-        return 'line';
+        return 'bar';
     }
 }

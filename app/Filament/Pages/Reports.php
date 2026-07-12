@@ -3,11 +3,13 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Reports\Widgets\ProjectionChart;
+use App\Filament\Reports\Widgets\ReceiptsByMonthChart;
 use App\Filament\Reports\Widgets\ReportKpis;
 use App\Filament\Reports\Widgets\RevenueByMonthChart;
 use App\Filament\Reports\Widgets\RevenueByYearChart;
 use App\Filament\Reports\Widgets\SeasonalCurveChart;
 use App\Filament\Reports\Widgets\SeasonalityHeatmap;
+use App\Filament\Reports\Widgets\VatByRateQuarterTable;
 use App\Filament\Reports\Widgets\YearVsYearChart;
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
@@ -79,8 +81,11 @@ class Reports extends BaseDashboard
         return [
             ReportKpis::class,
             RevenueByMonthChart::class,
+            ReceiptsByMonthChart::class,
             YearVsYearChart::class,
             RevenueByYearChart::class,
+            // ΦΠΑ εκροών ανά συντελεστή × τρίμηνο (βοηθητικό για την περιοδική δήλωση).
+            VatByRateQuarterTable::class,
             // Phase 2 — εποχικότητα + πρόβλεψη.
             SeasonalCurveChart::class,
             ProjectionChart::class,

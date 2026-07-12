@@ -8,7 +8,7 @@ use Illuminate\Support\Carbon;
  * Resolves the Reports page filter state (two year Selects: the focus
  * year + the year to compare against) into concrete ints. Shared by the
  * page and every report widget so the "what year are we looking at"
- * semantics live in ONE place — the analytics twin of PeriodFilter.
+ * semantics live in ONE place.
  *
  * Defaults: focus = current year, compare = the year before it. A blank
  * / unknown state falls back to those so a widget never renders against a

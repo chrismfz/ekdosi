@@ -17,7 +17,7 @@ use Filament\Widgets\ChartWidget;
  */
 class ProjectionChart extends ChartWidget
 {
-    protected static ?int $sort = 6;
+    protected static ?int $sort = 8;
 
     private const MONTHS = ['Ιαν', 'Φεβ', 'Μάρ', 'Απρ', 'Μάι', 'Ιούν', 'Ιούλ', 'Αύγ', 'Σεπ', 'Οκτ', 'Νοέ', 'Δεκ'];
 
@@ -67,17 +67,17 @@ class ProjectionChart extends ChartWidget
         return [
             'datasets' => [
                 [
-                    'label'       => 'Πρόβλεψη '.$p['nextYear'],
-                    'data'        => $p['monthly'],
+                    'label' => 'Πρόβλεψη '.$p['nextYear'],
+                    'data' => $p['monthly'],
                     'borderColor' => '#16a34a',
-                    'borderDash'  => [6, 4],
-                    'fill'        => false,
+                    'borderDash' => [6, 4],
+                    'fill' => false,
                 ],
                 [
-                    'label'       => (string) $p['baseYear'],
-                    'data'        => $lastYear,
+                    'label' => (string) $p['baseYear'],
+                    'data' => $lastYear,
                     'borderColor' => '#9ca3af',
-                    'fill'        => false,
+                    'fill' => false,
                 ],
             ],
             'labels' => self::MONTHS,
