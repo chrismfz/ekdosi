@@ -1,8 +1,11 @@
 # AI Assistant («Βοηθός») — feasibility + blueprint
 
-> Status: **idea / future**. Nothing built. This is the design note the user asked
-> for: how hard is an in-app chat assistant for operators, and how would it be
-> tenant- and permission-safe. Read alongside `CLAUDE.md` (tenancy + service layer).
+> Status: **Phase 1 SHIPPED** (was «idea / future» when written). The in-app «Βοηθός»
+> is live — `App\Filament\Pages\Assistant` + `AssistantRunner` + a tool registry incl.
+> write actions (with confirm), usage metering (`AiUsageLog`/`AiUsageMeter`); see
+> `FEATURES.md §16β`. The body below is the ORIGINAL design note (kept as the rationale
+> record); read it as «why it's shaped this way», not «what's left». Read alongside
+> `CLAUDE.md` (tenancy + service layer).
 
 ## Decision (locked)
 

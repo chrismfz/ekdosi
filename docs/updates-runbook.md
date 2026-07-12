@@ -52,7 +52,14 @@ git push && git push --tags            # push the commit AND the new tag
 ```
 
 `ekdosi:release` rolls `[Unreleased]` → a dated `[X.Y.Z]` heading, bumps
-`config/app.php`, and prints the exact `git tag` command.
+`config/app.php`, and prints the exact `git tag` command. With **no flag** it
+**auto-infers** minor/patch from `[Unreleased]` (`--major` explicit for a milestone).
+
+> **PR flow (the common path):** if the release commit goes through a PR, cut the
+> tag AFTER merge with **`sh tag-release.sh --tag`** (repo root) — bare `sh tag-release.sh`
+> first shows STATUS + options (version, is-it-tagged, pending). It reads the version
+> from `config/app.php`, pulls `main`, tags `vX.Y.Z`, and pushes. Use the inline
+> `git push --tags` above only when you cut the release straight on a branch you push yourself.
 
 ### 2. On the PROD box — deploy that tag
 ```bash

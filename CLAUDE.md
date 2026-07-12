@@ -61,7 +61,7 @@ after cutover.
 /                         # Laravel 13 app at repo root
   app/Console/Commands/MigrateFromFirebird.php   # re-runnable ETL, one tenant per run
   app/                                           # models, Filament panels, services, actions
-  database/migrations/                           # 75 migrations
+  database/migrations/                           # 140+ migrations
   whmcs-plugin/ekdosi_bridge/                    # OUR WHMCS-side plugin (deployed to tenant's WHMCS)
   docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md   # the AADE spec (submission)
   docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md  # ΔΑ lifecycle/tracking spec

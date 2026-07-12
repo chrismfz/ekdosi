@@ -1210,9 +1210,8 @@ After install:
 - [ ] `sudo -u ekdosi php artisan about` shows: PHP 8.4, Laravel
       13, mariadb driver, cache/session/queue all on `database`,
       Filament v5.x, Shield 4.x.
-- [ ] `sudo -u ekdosi php artisan migrate:status` shows all 25
-      migrations as `Ran` (3 Laravel defaults + 19 ekdosi + 2 spatie
-      + 1 country profile).
+- [ ] `sudo -u ekdosi php artisan migrate:status` shows all
+      migrations as `Ran` (no `Pending`).
 - [ ] `php -m | grep -E "bcmath|mbstring|pdo_mysql|intl|gd|zip|curl"`
       lists every one of them.
 - [ ] `sudo -u ekdosi php artisan route:list | grep admin` shows
