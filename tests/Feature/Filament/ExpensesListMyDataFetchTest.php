@@ -6,6 +6,7 @@ use App\Filament\Pages\MyDataConsoleExpenses;
 use App\Filament\Resources\Expenses\Pages\ListExpenses;
 use App\Models\Company;
 use App\Models\User;
+use Carbon\Carbon;
 use Filament\Facades\Filament;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response;
@@ -143,6 +144,29 @@ XML;
         // The fetch seeded the console snapshot (and imported nothing yet).
         $this->assertSame(1, MyDataConsoleExpenses::lastOrphanCount($tenant->id));
         $this->assertDatabaseMissing('expenses', ['company_id' => $tenant->id, 'mydata_mark' => '400012434052701']);
+    }
+
+    #[Test]
+    public function the_selected_period_drives_the_fetch_window(): void
+    {
+        Carbon::setTestNow('2026-07-13 10:00:00');
+        $tenant = $this->tenant();
+        $this->actAdmin($tenant);
+
+        MyDataConsoleExpenses::$testHandler = new MockHandler([new Response(200, [], $this->orphanDoc())]);
+        try {
+            // Pick «Τρέχον έτος» before fetching → the window is 1 Jan → today,
+            // not the default current quarter (1 Jul → today).
+            Livewire::test(ListExpenses::class)
+                ->set('orphanPeriod', 'year')
+                ->callAction('fetchFromMyData')
+                ->assertActionMounted('pickMyDataOrphans')
+                ->assertSet('orphanFrom', '01/01/2026')
+                ->assertSet('orphanTo', '13/07/2026');
+        } finally {
+            MyDataConsoleExpenses::$testHandler = null;
+            Carbon::setTestNow();
+        }
     }
 
     #[Test]
