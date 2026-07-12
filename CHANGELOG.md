@@ -18,6 +18,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **WHMCS καρτέλα: ρητή δήλωση + ζωντανός έλεγχος «0 ημέρες πίστωσης» στους προεπιλεγμένους τύπους.**
+  Οι δύο selectors (τύπος τιμολογίου/απόδειξης αυτόματης έκδοσης) εξηγούν πλέον ΓΙΑΤΙ ο τρόπος πληρωμής
+  τους πρέπει να είναι cash-term, και μια ζωντανή προειδοποίηση ανάβει αν ο επιλεγμένος τύπος έχει
+  `due_days > 0` (τα ήδη-πληρωμένα WHMCS τιμολόγια θα εμφανίζονταν ως ανοιχτές οφειλές). Cash-term
+  (0 ημέρες Ή κανένας τρόπος) = καθαρό. Από το pre-go-live audit (finding F1).
+
 ### Fixed
 - **WHMCS inbox: `whmcs:fetch-pending --limit>ceiling` δεν «παγώνει» πλέον στην 1η σελίδα.** Το
   `WhmcsClient::getPendingInvoices` σταματούσε σε short page (`returned < limit`) — αν ο caller
