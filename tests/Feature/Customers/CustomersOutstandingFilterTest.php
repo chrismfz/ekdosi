@@ -18,10 +18,11 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The Customers-list "Υπόλοιπο" column + "Με υπόλοιπο" filter — the
- * drill-down target of the dashboard's "Ανεξόφλητα (πιστωτικά)" card.
+ * The Customers-list "Υπόλοιπο" column + the balance_status filter
+ * (χρεωστικοί/πιστωτικοί/μηδενικό) + the open-drafts filter — the debtor
+ * option is the drill-down target of the dashboard's "Ανεξόφλητα" card.
  * Boots the real Filament list page so the modifyQueryUsing() balance
- * join, the aliased sortable column, and the filter whereRaw all run
+ * join, the aliased sortable column, and the filter queries all run
  * through the actual table builder (not just a bare query).
  */
 class CustomersOutstandingFilterTest extends TestCase
