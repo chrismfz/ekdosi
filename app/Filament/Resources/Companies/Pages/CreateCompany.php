@@ -39,18 +39,11 @@ class CreateCompany extends CreateRecord
             return;
         }
 
-        $seeder = app(MyDataLookupSeeder::class);
-        $vat = $seeder->seedVatCategories($this->record);
-        $types = $seeder->seedInvoiceTypes($this->record);
-        $seeder->seedPaymentMethods($this->record);
-        $seeder->seedDistributionAims($this->record);
-        $seeder->seedMetricUnits($this->record);
-        $seeder->seedDeliveryMethods($this->record);
-        $seeder->seedProductCategories($this->record);
+        $r = app(MyDataLookupSeeder::class)->seedStandardLookups($this->record);
 
         Notification::make()
             ->title('Στήθηκαν τυπικές ρυθμίσεις ΑΑΔΕ')
-            ->body("Κατηγορίες ΦΠΑ: {$vat['created']} · Είδη παραστατικών: {$types['created']} (με κατηγοριοποίηση myDATA) · τρόποι πληρωμής/αποστολής, σκοπός διακίνησης, μονάδες & κατηγορίες προϊόντων. Προσαρμόστε τα στο Setup αν χρειάζεται.")
+            ->body("Κατηγορίες ΦΠΑ: {$r['vat']['created']} · Είδη παραστατικών: {$r['types']['created']} (με κατηγοριοποίηση myDATA) · τρόποι πληρωμής/αποστολής, σκοπός διακίνησης, μονάδες & κατηγορίες προϊόντων. Προσαρμόστε τα στο Setup αν χρειάζεται.")
             ->success()
             ->send();
     }

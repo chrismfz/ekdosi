@@ -44,6 +44,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   (όχι στο operator template ούτε στο verify_url/mark_section)· το subject (plain text) δεν αγγίζεται.
 
 ### Fixed
+- **AUDIT SET-5 — αλλαγή παρόχου σε ελληνική τιμολόγηση σπέρνει τα lookups.** Ένας tenant που
+  δημιουργήθηκε ως «none»/PEPPOL και αργότερα γύρισε σε `gr-mydata`/`gr-provider` έμενε με άδειες
+  ρυθμίσεις (ΦΠΑ, είδη παραστατικών κ.λπ.)· τώρα το `EditCompany` τρέχει την ίδια σπορά με το
+  CreateCompany (νέα aggregate `MyDataLookupSeeder::seedStandardLookups()`, idempotent/fill-empty) όταν
+  ο πάροχος γυρίζει σε ελληνικό — notification μόνο όταν όντως προστέθηκε κάτι.
 - **AUDIT OPS-12 — τέλος στο διπλό email σε retry.** Κάθε αποστολή φέρει σταθερό `send_key` (uuid,
   serialized ώστε να επιβιώνει στα retries)· αν ένα προηγούμενο attempt με το ίδιο key άφησε `sending`
   (hard crash μετά το SMTP accept) ή `sent`, το retry ΔΕΝ ξαναστέλνει (reconcile → sent). Νέα στήλη

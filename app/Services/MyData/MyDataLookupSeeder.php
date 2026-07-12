@@ -248,6 +248,30 @@ class MyDataLookupSeeder
     }
 
     /**
+     * Run the full standard-lookup set for a Greek filing tenant in one call —
+     * the ONE ordering shared by every entry point (create, provider-switch,
+     * install). Each underlying method is idempotent + fill-empty, so this is
+     * safe to re-run: it tops up whatever's missing and never touches operator
+     * edits. Returns the VAT + invoice-type counts (the two the operator cares
+     * about — the rest are plumbing) so callers can report what actually
+     * happened and stay quiet when nothing was created.
+     *
+     * @return array{vat: array{created:int, skipped:int}, types: array{created:int, skipped:int, filled:int}}
+     */
+    public function seedStandardLookups(Company $tenant): array
+    {
+        $vat = $this->seedVatCategories($tenant);
+        $types = $this->seedInvoiceTypes($tenant);
+        $this->seedPaymentMethods($tenant);
+        $this->seedDistributionAims($tenant);
+        $this->seedMetricUnits($tenant);
+        $this->seedDeliveryMethods($tenant);
+        $this->seedProductCategories($tenant);
+
+        return ['vat' => $vat, 'types' => $types];
+    }
+
+    /**
      * Generic idempotent seeder for the description/name-keyed lookups: create
      * a row when none matches the natural key, skip otherwise (never overwrite,
      * never duplicate). company_id is stamped explicitly; the natural-key check
