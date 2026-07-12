@@ -18,6 +18,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Άντληση εξόδων από myDATA: επιλογή διαστήματος.** Το picker modal ξεκινά στο τρέχον τρίμηνο
+  (όπως πριν), αλλά έχει πλέον dropdown «Διάστημα» (τρέχον/προηγούμενο τρίμηνο, τρέχον/προηγούμενο
+  εξάμηνο, τρέχον/προηγούμενο έτος) που κάνει live re-fetch στη θέση του — ώστε αν το τρίμηνο είναι
+  κενό να φέρεις π.χ. όλη τη χρονιά χωρίς να φύγεις από το modal. Κοινός `ExpensePickerWindow` για τα
+  calendar boundaries (semester-safe).
+
 ## [1.8.0] - 2026-07-13
 
 ### Added

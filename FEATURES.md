@@ -110,7 +110,9 @@
   μόνο-ΑΦΜ, fill-only-empty· κοινός `SupplierNameBackfiller`).
 - **Εισαγωγή αδέσποτων** εξόδων από myDATA (`ExpenseImporter`/`ExpenseReconciler`) +
   self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ). **Κουμπί «Άντληση από myDATA» στη λίστα
-  Έξοδα** (one-click read-only fetch → worklist) + tip «τελευταία άντληση · X αδέσποτα» +
+  Έξοδα** (one-click read-only fetch → worklist· **επιλογή διαστήματος** στο modal —
+  τρίμηνο/εξάμηνο/έτος τρέχον ή προηγούμενο, live re-fetch, `ExpensePickerWindow`) + tip
+  «τελευταία άντληση · X αδέσποτα» +
   read-only cron **`mydata:refresh-expenses`** (καθολικός toggle στη «Ρυθμίσεις
   χρονοπρογραμματιστή», default OFF· δεν δημιουργεί εγγραφές) **+ per-company opt-in**
   «Αυτόματη άντληση εξόδων» στις «Ρυθμίσεις εταιρείας» (`--auto-only` → μόνο όσοι tenants το

@@ -6,6 +6,7 @@ use App\Enums\ExpenseSource;
 use App\Filament\BaseListRecords;
 use App\Filament\Pages\MyDataConsoleExpenses;
 use App\Filament\Resources\Expenses\ExpenseResource;
+use App\Filament\Support\ExpensePickerWindow;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Company;
 use App\Models\Expense;
@@ -18,8 +19,10 @@ use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Set;
 use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
@@ -38,6 +41,9 @@ class ListExpenses extends BaseListRecords
     public ?string $orphanTo = null;
 
     public ?string $orphanError = null;
+
+    /** Selected period preset for the picker (see App\Filament\Support\ExpensePickerWindow). */
+    public ?string $orphanPeriod = 'quarter';
 
     /**
      * «Άντληση από myDATA» — self-contained on the Έξοδα list: one click fetches
@@ -70,8 +76,10 @@ class ListExpenses extends BaseListRecords
                 ->label('Άντληση από myDATA')
                 ->icon('heroicon-o-cloud-arrow-down')
                 ->color('primary')
-                ->tooltip('Κατεβάζει τα έξοδα του τρέχοντος τριμήνου από το myDATA και ανοίγει λίστα επιλογής για καταχώριση.')
+                ->tooltip('Κατεβάζει τα έξοδα του τρέχοντος τριμήνου από το myDATA και ανοίγει λίστα επιλογής (με δυνατότητα αλλαγής διαστήματος).')
                 ->action(function (): void {
+                    // Fetch the current period (default: τρέχον τρίμηνο; retains the
+                    // last picked one within the session) then open the picker.
                     $this->loadOrphans();
                     $this->replaceMountedAction('pickMyDataOrphans');
                 });
@@ -89,39 +97,67 @@ class ListExpenses extends BaseListRecords
     {
         return Action::make('pickMyDataOrphans')
             ->modalHeading('Άντληση εξόδων από myDATA')
-            ->modalDescription('Έξοδα που υπέβαλαν προμηθευτές και δεν τα έχουμε τοπικά. Επιλέξτε ποια να καταχωριστούν — ήδη καταχωρημένα παραλείπονται.')
+            ->modalDescription('Έξοδα που υπέβαλαν προμηθευτές και δεν τα έχουμε τοπικά. Επιλέξτε ποια να καταχωριστούν — ήδη καταχωρημένα παραλείπονται. Αν δεν βρεθεί κάτι, άλλαξε διάστημα.')
             ->modalSubmitActionLabel('Καταχώριση επιλεγμένων')
             ->schema(fn (): array => $this->orphanSchema())
-            // Hide the submit button when there's nothing to import (error / empty).
-            ->modalSubmitAction(fn ($action) => filled($this->orphanOptions) ? $action : false)
             ->action(fn (array $data) => $this->importSelectedOrphans($data['marks'] ?? []));
     }
 
-    /** Build the picker modal body from the fetched αδέσποτα (or an error/empty note). */
+    /**
+     * Picker modal body: the period selector (always shown, so an empty window can
+     * be widened in place), then either an error/empty note or the αδέσποτα list.
+     */
     private function orphanSchema(): array
     {
+        $components = [$this->periodSelect()];
+
         if ($this->orphanError !== null) {
-            return [Placeholder::make('orphanError')->hiddenLabel()->content($this->orphanError)];
+            $components[] = Placeholder::make('orphanError')->hiddenLabel()->content($this->orphanError);
+
+            return $components;
         }
 
         $window = ($this->orphanFrom && $this->orphanTo) ? " ({$this->orphanFrom} – {$this->orphanTo})" : '';
 
         if ($this->orphanOptions === []) {
-            return [Placeholder::make('orphanNone')->hiddenLabel()
-                ->content('Δεν βρέθηκαν αδέσποτα έξοδα στο τρέχον τρίμηνο'.$window.'.')];
+            $components[] = Placeholder::make('orphanNone')->hiddenLabel()
+                ->content('Δεν βρέθηκαν αδέσποτα έξοδα στο επιλεγμένο διάστημα'.$window.'. Δοκίμασε μεγαλύτερο διάστημα παραπάνω.');
+
+            return $components;
         }
 
-        return [
-            CheckboxList::make('marks')
-                ->label('Αδέσποτα έξοδα προς καταχώριση'.$window)
-                ->options($this->orphanOptions)
-                ->default(array_keys($this->orphanOptions)) // all pre-checked; untick to skip
-                ->bulkToggleable()
-                ->columns(1),
-        ];
+        $components[] = CheckboxList::make('marks')
+            ->label('Αδέσποτα έξοδα προς καταχώριση'.$window)
+            ->options(fn (): array => $this->orphanOptions) // closure → refreshes on a live re-fetch
+            ->default(array_keys($this->orphanOptions)) // all pre-checked; untick to skip
+            ->bulkToggleable()
+            ->columns(1);
+
+        return $components;
     }
 
-    /** Read-only fetch of the current-quarter αδέσποτα into the picker options. */
+    /**
+     * The period preset selector. Live: changing it re-fetches the chosen window
+     * in place (one AADE call per pick) and re-ticks the new αδέσποτα.
+     */
+    private function periodSelect(): Select
+    {
+        return Select::make('period')
+            ->label('Διάστημα')
+            ->options(ExpensePickerWindow::options())
+            ->default($this->orphanPeriod)
+            ->selectablePlaceholder(false)
+            ->live()
+            ->afterStateUpdated(function ($state, Set $set): void {
+                $this->orphanPeriod = (string) $state;
+                $this->loadOrphans();
+                // Re-tick everything in the new window (default() only fires once).
+                $set('marks', array_keys($this->orphanOptions));
+            })
+            ->helperText('Ξεκινά από το τρέχον τρίμηνο. Αν δεν βρεθεί κάτι, διάλεξε μεγαλύτερο διάστημα.');
+    }
+
+    /** Read-only fetch of the selected period's αδέσποτα into the picker options. */
     private function loadOrphans(): void
     {
         $this->orphanOptions = [];
@@ -129,9 +165,7 @@ class ListExpenses extends BaseListRecords
 
         /** @var Company $tenant */
         $tenant = Filament::getTenant();
-        $now = now();
-        $from = $now->copy()->startOfQuarter();
-        $to = $now->copy();
+        [$from, $to] = ExpensePickerWindow::resolve($this->orphanPeriod ?? 'quarter');
         $this->orphanFrom = $from->format('d/m/Y');
         $this->orphanTo = $to->format('d/m/Y');
 
