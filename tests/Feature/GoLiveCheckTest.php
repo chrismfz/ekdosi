@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Company;
+use App\Models\CompanyBackupRun;
+use App\Models\CompanyBackupSetting;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
@@ -78,6 +80,62 @@ class GoLiveCheckTest extends TestCase
         $this->assertSame('pass', $this->gate($report, 'vat_default')['status']);
 
         $this->artisan('ekdosi:go-live-check', ['--tenant' => $c->slug])->assertExitCode(0);
+    }
+
+    public function test_backup_gate_warns_when_enabled_but_never_ran(): void
+    {
+        // OPS-15: «enabled» alone is not DR readiness — a toggle that has never
+        // produced a backup must NOT pass the cutover gate.
+        $c = $this->readyTenant();
+        CompanyBackupSetting::create([
+            'company_id' => $c->id, 'enabled' => true, 'frequency' => 'daily', 'bucket' => 'full',
+        ]);
+
+        $gate = $this->gate($this->report($c), 'backup');
+        $this->assertSame('warn', $gate['status']);
+        $this->assertStringContainsString('ΚΑΜΙΑ επιτυχημένη', $gate['detail']);
+    }
+
+    public function test_backup_gate_passes_with_a_recent_successful_run(): void
+    {
+        $c = $this->readyTenant();
+        CompanyBackupSetting::create([
+            'company_id' => $c->id, 'enabled' => true, 'frequency' => 'daily', 'bucket' => 'full',
+        ]);
+        CompanyBackupRun::create([
+            'company_id' => $c->id, 'status' => 'ok',
+            'bucket' => 'full',
+            'secrets_mode' => 'raw',
+            'started_at' => now()->subHours(2), 'finished_at' => now()->subHours(2),
+        ]);
+
+        $this->assertSame('pass', $this->gate($this->report($c), 'backup')['status']);
+    }
+
+    public function test_backup_gate_warns_when_last_successful_run_is_stale(): void
+    {
+        $c = $this->readyTenant();
+        CompanyBackupSetting::create([
+            'company_id' => $c->id, 'enabled' => true, 'frequency' => 'daily', 'bucket' => 'full',
+        ]);
+        // Only run is 10 days old (> BACKUP_STALE_DAYS); a failed recent one
+        // must NOT count as evidence.
+        CompanyBackupRun::create([
+            'company_id' => $c->id, 'status' => 'ok',
+            'bucket' => 'full',
+            'secrets_mode' => 'raw',
+            'started_at' => now()->subDays(10), 'finished_at' => now()->subDays(10),
+        ]);
+        CompanyBackupRun::create([
+            'company_id' => $c->id, 'status' => 'failed',
+            'bucket' => 'full',
+            'secrets_mode' => 'raw',
+            'started_at' => now()->subHour(), 'finished_at' => now()->subHour(),
+        ]);
+
+        $gate = $this->gate($this->report($c), 'backup');
+        $this->assertSame('warn', $gate['status']);
+        $this->assertStringContainsString('ημ.', $gate['detail']);
     }
 
     public function test_secrets_at_rest_gate_reflects_the_explicit_decision(): void

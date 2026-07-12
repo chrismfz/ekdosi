@@ -44,6 +44,11 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   (όχι στο operator template ούτε στο verify_url/mark_section)· το subject (plain text) δεν αγγίζεται.
 
 ### Fixed
+- **AUDIT OPS-15 — το go-live backup gate απαιτεί απόδειξη, όχι μόνο toggle.** Το
+  `ekdosi:go-live-check` per-tenant backup gate δεν περνάει πλέον με σκέτο «enabled»: ζητά πρόσφατο
+  επιτυχημένο backup run (`company_backup_runs.status=ok`)· καμία/παλιά (>8 ημ.) επιτυχία → WARN που
+  παραπέμπει σε φρέσκο backup + restore drill. Ο runbook (`docs/updates-runbook.md`) απέκτησε πίνακα
+  cadence για το restore drill (πριν go-live / τριμηνιαίο off-site / μετά από αλλαγή pipeline).
 - **AUDIT OPS-13 — ανθεκτικά per-tenant scheduled sweeps + ανίχνευση «κολλημένου» tenant.** Τα
   `whmcs-fetch-all`/`mydata-reconcile-all` δεν σταματούν πλέον σε όλους τους tenants όταν ΕΝΑΣ πετάξει
   exception — απομονώνεται, καταγράφεται ως per-tenant αποτυχία στο health, και το sweep συνεχίζει. Η

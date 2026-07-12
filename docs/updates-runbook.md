@@ -95,11 +95,25 @@ php artisan ekdosi:db-snapshot --keep=10       # prune to the 10 newest
 php artisan ekdosi:db-restore --file=…sql.gz   # DESTRUCTIVE (needs --force in production)
 ```
 
-**Restore drill (run once on a staging/dev DB):** take a snapshot → make a
-visible change → restore it → confirm the change is gone. An untested backup is
-not a backup. These local snapshots are the *rollback* layer; the *off-site*,
-scheduled, per-company archives are `spatie/laravel-backup` (see
-`docs/operator-health.md` / Company → backups).
+**Restore drill (do it — an untested backup is not a backup):** take a snapshot
+→ make a visible change → restore it → confirm the change is gone. These local
+snapshots are the *rollback* layer; the *off-site*, scheduled, per-company
+archives are `spatie/laravel-backup` (see `docs/operator-health.md` / Company →
+backups).
+
+**Cadence (OPS-15) — don't let the drill be a one-off:**
+
+| When | What to drill | Why |
+|------|---------------|-----|
+| **Before go-live** (per tenant) | Full restore drill on a *staging copy* of that tenant's real data. | The `ekdosi:go-live-check` backup gate only confirms a *recent successful backup exists* — it can't prove the archive actually restores. The drill is the human half. |
+| **Quarterly** (every ~3 months) | Restore the newest **off-site** per-company archive (`spatie`) to a scratch DB and spot-check invoices/marks. | Off-site pushes can silently rot (rotated creds, changed bucket, disk full). |
+| **After any change to** the backup pipeline, DB engine/version, or destinations | One restore of each affected tenant's archive. | A config change can break restore without breaking backup. |
+| **After the go-live-check backup gate WARNs** «καμία επιτυχημένη εκτέλεση» / «τελευταίο πριν N ημ.» | Run a fresh backup, then a restore drill, before trusting the gate. | The gate is telling you the evidence is missing or stale. |
+
+Log each drill (date, tenant, archive restored, outcome) somewhere durable — a
+passed drill is the only thing that turns «backups are enabled» into «we can
+actually recover». For a restore when the **APP_KEY is lost**, see
+`docs/dr-without-app-key.md`.
 
 ## Notes
 - `ekdosi:db-snapshot`/`-restore` use the **active DB connection's** credentials
