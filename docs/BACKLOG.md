@@ -266,6 +266,37 @@ data model + phase gates: **`PLAN.md`**.
 - **T-4 manual split tools** (transfer_invoice / relid_remover) — χαμηλή προτεραιότητα.
 - **«All of a client's third parties» 2ο dropdown** (θέλει `contacts-by-userid` bridge endpoint).
 
+## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
+_Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._
+
+**Πρόβλημα:** σήμερα ο όρος πληρωμής του εκδοθέντος τιμολογίου βγαίνει **αποκλειστικά από τον
+τύπο** (`WhmcsInvoiceMapper` → `payment_method_id = invoiceType->payment_method_id`)· το **WHMCS
+paid/unpaid status αγνοείται** και **δεν καταγράφεται Payment**. Άρα ένα ΑΠΛΗΡΩΤΟ WHMCS τιμολόγιο
+(π.χ. Α.Ε./Δημόσιο/Δημοτική που θέλει «πρώτα τιμολόγιο, μετά πληρωμή») που εκδίδεται κάτω από τον
+(cash-term) default τύπο φαίνεται λανθασμένα **εξοφλημένο**, ενώ είναι πραγματική ανοιχτή οφειλή.
+Το payload **έχει ήδη** `status`/`datepaid`/`balance` (τα διαβάζει το `CustomerWhmcsLedger`).
+
+**Phase 1 — inbound (χαμηλό ρίσκο· read-only ως προς WHMCS):**
+- Καταγραφή του WHMCS `status` (+ `datepaid`/`balance`) στο snapshot· **badge Paid/Unpaid** στο inbox.
+- Νέα ρύθμιση καρτέλας WHMCS: **«Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ WHMCS (επί πιστώσει)»**
+  (δείχνει σε τύπο με `due_days>0`) — δίπλα στους υπάρχοντες paid defaults (v1.8.0 tripwire).
+- Το «Δημιουργία Παραστατικού» **προεπιλέγει** τύπο βάσει status (Paid→cash default· Unpaid→unpaid
+  default), **πάντα με override**. Auto-issue **μένει paid-only** (δεν εκδίδει ποτέ απλήρωτα).
+- Το v1.8.0 tripwire γίνεται status-aware: warning για cash-slot με `due_days>0` (ως τώρα) +
+  «ΟΚ, επί-πιστώσει» για το unpaid-slot.
+
+**Phase 2 — outbound (money-write· opt-in· design-first):** Ekdosi payment (σε WHMCS-sourced
+τιμολόγιο) → WHMCS `AddInvoicePayment`/mark-paid, ΜΟΝΟ αν όχι-ήδη-πληρωμένο. Κίνδυνοι + δικλείδες:
+- **Διπλή πληρωμή** (ο πελάτης πλήρωσε και μέσω WHMCS gateway) → `GetInvoice` status=Unpaid **πριν** το push.
+- **Feedback loop** (WHMCS InvoicePaid hook → πίσω στο Ekdosi) → absorb από το **audit-freeze** (filed row → `touch`, όχι δεύτερη εγγραφή).
+- **Μερική πληρωμή** → push **ακριβούς ποσού**· < balance μένει Unpaid (σωστό).
+- **Retry διπλασιασμός** → **transaction_id** από το Ekdosi Payment για dedup WHMCS-side.
+- Νέο plugin op (`add_payment` σε `inbound.php`, HMAC-guarded)· native `AddInvoicePayment` για plugin-less.
+- **Opt-in per tenant** + ίσως χειροκίνητο κουμπί «Δήλωση πληρωμής στο WHMCS» αντί πλήρως αυτόματο.
+
+**Υποδομή έτοιμη:** payload έχει status· mapper/draft/CompanyForm/writeback υπάρχουν. Λείπουν: (Φ1)
+status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) το outbound payment op.
+
 ## 🆕 Settings-in-UI — widen (scheduler + global pages shipped)
 - **Role-scoped per-company knobs:** _✅ SHIPPED (trimmed) — «Ρυθμίσεις εταιρείας»
   (`CompanySettings`, `View:CompanySettings`): company_admin self-serves the SAFE subset
