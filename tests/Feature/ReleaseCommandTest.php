@@ -71,14 +71,147 @@ class ReleaseCommandTest extends TestCase
     }
 
     #[Test]
-    public function dry_run_writes_nothing(): void
+    public function dry_run_previews_without_writing(): void
+    {
+        // Drive the PREVIEW branch: seed a non-empty [Unreleased] so the command
+        // reaches the dry-run preview (an empty one aborts earlier). Assert it
+        // exits 0 and writes NOTHING. Restore the real CHANGELOG in finally so a
+        // failing assertion never leaves the repo file mutated.
+        $this->withoutMockingConsoleOutput();
+        $path = base_path('CHANGELOG.md');
+        $original = (string) file_get_contents($path);
+        $config = (string) file_get_contents(config_path('app.php'));
+
+        try {
+            $seeded = preg_replace(
+                '/## \[Unreleased\]\n/',
+                "## [Unreleased]\n\n### Fixed\n- seeded fixture entry\n\n",
+                $original,
+                1,
+            );
+            file_put_contents($path, $seeded);
+
+            $exit = $this->artisan('ekdosi:release', ['--patch' => true, '--dry-run' => true]);
+
+            $this->assertSame(0, $exit);
+            $this->assertSame($seeded, file_get_contents($path));         // preview wrote nothing
+            $this->assertSame($config, file_get_contents(config_path('app.php')));
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+
+    #[Test]
+    public function auto_mode_infers_and_previews_the_level_end_to_end(): void
+    {
+        // No flag → handle() must run inferLevel and preview the inferred bump.
+        // Seed an «Added» so it should choose minor; restore in finally.
+        $path = base_path('CHANGELOG.md');
+        $original = (string) file_get_contents($path);
+
+        try {
+            $seeded = preg_replace(
+                '/## \[Unreleased\]\n/',
+                "## [Unreleased]\n\n### Added\n- a brand new feature\n\n",
+                $original,
+                1,
+            );
+            file_put_contents($path, $seeded);
+
+            // The next version is level-specific: minor of 1.x.y is 1.(x+1).0,
+            // which patch/major could never produce — so seeing it in the preview
+            // proves auto mode inferred MINOR from the seeded «Added».
+            $next = Release::bump((string) config('app.version', '0.0.0'), 'minor');
+
+            $this->artisan('ekdosi:release', ['--dry-run' => true])
+                ->expectsOutputToContain($next)
+                ->assertExitCode(0);
+
+            $this->assertSame($seeded, file_get_contents($path));  // dry-run wrote nothing
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+
+    #[Test]
+    public function it_infers_minor_when_unreleased_has_an_added(): void
+    {
+        $md = "# CL\n\n## [Unreleased]\n\n### Added\n- A new filter\n\n### Fixed\n- a bug\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level, $reason] = Release::inferLevel($md);
+
+        $this->assertSame('minor', $level);
+        $this->assertStringContainsString('Added', $reason);
+    }
+
+    #[Test]
+    public function it_infers_patch_when_unreleased_has_only_fixes(): void
+    {
+        $md = "# CL\n\n## [Unreleased]\n\n### Fixed\n- a bug\n\n### Security\n- a hole\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level, $reason] = Release::inferLevel($md);
+
+        $this->assertSame('patch', $level);
+        $this->assertStringContainsString('Fixed', $reason);
+    }
+
+    #[Test]
+    public function it_infers_nothing_for_an_empty_unreleased(): void
+    {
+        $md = "# CL\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level] = Release::inferLevel($md);
+
+        $this->assertNull($level);
+    }
+
+    #[Test]
+    public function an_empty_added_heading_with_no_items_does_not_force_minor(): void
+    {
+        // A stray «### Added» with nothing under it must NOT bump minor — only a
+        // real feature (an item) counts. Here only Fixed has an item → patch.
+        $md = "# CL\n\n## [Unreleased]\n\n### Added\n\n### Fixed\n- a bug\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level] = Release::inferLevel($md);
+
+        $this->assertSame('patch', $level);
+    }
+
+    #[Test]
+    public function a_bare_item_without_a_subsection_falls_back_to_patch(): void
+    {
+        // Someone skipped the ### discipline and wrote a bare entry. rollChangelog
+        // would still roll it, so inferLevel must NOT report «nothing» — it falls
+        // back to patch rather than silently aborting the release.
+        $md = "# CL\n\n## [Unreleased]\n- a bare, unstructured note\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level, $reason] = Release::inferLevel($md);
+
+        $this->assertSame('patch', $level);
+        $this->assertStringContainsString('μη-δομημένες', $reason);
+    }
+
+    #[Test]
+    public function check_mode_writes_nothing_and_exits_zero(): void
     {
         $this->withoutMockingConsoleOutput();
-        $before = file_get_contents(base_path('CHANGELOG.md'));
+        $changelog = file_get_contents(base_path('CHANGELOG.md'));
+        $config = file_get_contents(config_path('app.php'));
 
-        $exit = $this->artisan('ekdosi:release', ['--patch' => true, '--dry-run' => true]);
+        $exit = $this->artisan('ekdosi:release', ['--check' => true]);
+
         $this->assertSame(0, $exit);
+        $this->assertSame($changelog, file_get_contents(base_path('CHANGELOG.md')));
+        $this->assertSame($config, file_get_contents(config_path('app.php')));
+    }
 
-        $this->assertSame($before, file_get_contents(base_path('CHANGELOG.md')));
+    #[Test]
+    public function it_rejects_more_than_one_explicit_level(): void
+    {
+        $this->withoutMockingConsoleOutput();
+
+        $exit = $this->artisan('ekdosi:release', ['--minor' => true, '--patch' => true]);
+
+        $this->assertSame(1, $exit);
     }
 }

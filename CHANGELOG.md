@@ -3,7 +3,8 @@
 Notable changes to the **ekdosi app** (Laravel + Filament). Format:
 [Keep a Changelog](https://keepachangelog.com/), **SemVer** `X.Y.Z` (app semantics:
 major = milestone, minor = a new feature, patch = fixes). New work accrues under
-`[Unreleased]`; a release is cut with `php artisan ekdosi:release {--major|--minor|--patch}`.
+`[Unreleased]`; a release is cut with `php artisan ekdosi:release` (auto-infers minor/patch
+from `[Unreleased]`; `--major` explicit for milestones).
 
 > **The WHMCS-side plugin has its own log:**
 > `whmcs-plugin/ekdosi_bridge/CHANGELOG.md`.
@@ -16,6 +17,20 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 > `[Unreleased]` to the dated/versioned heading.
 
 ## [Unreleased]
+
+## [1.3.1] - 2026-07-12
+
+### Changed
+- **`ekdosi:release` βγάζει μόνο του το επίπεδο έκδοσης.** Χωρίς flag, διαβάζει το CHANGELOG
+  `[Unreleased]` και επιλέγει **minor** αν υπάρχει `### Added`, αλλιώς **patch** (το `--major` μένει
+  ρητό για milestones· `--minor`/`--patch` παρακάμπτουν). Νέα `--check` (μη-καταστροφικό preflight —
+  μπήκε στο `clean.sh` βήμα 5 ώστε ένα ξεχασμένο bump να φαίνεται στο deploy) και `--commit --tag`
+  (κάνει και το git commit + tag, χωρίς push). Τέλος στο «διάλεξε λάθος επίπεδο» και στο «μείναμε
+  στην ίδια έκδοση».
+- **`tag-release.sh` — post-merge tagger.** Σκέτο δείχνει **κατάσταση + επιλογές** (τρέχουσα έκδοση,
+  αν υπάρχει το tag, branch, αδημοσίευτες αλλαγές)· με `--tag` κάνει pull `main` + δημιουργεί & push
+  το `vX.Y.Z` διαβάζοντας την έκδοση από το `config/app.php` (καμία πληκτρολόγηση αριθμού, idempotent).
+  Αντικαθιστά το χειροκίνητο `git checkout main && git pull && git tag … && git push --tags`.
 
 ## [1.3.0] - 2026-07-12
 

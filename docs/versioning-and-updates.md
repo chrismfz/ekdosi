@@ -4,7 +4,7 @@ Two identifiers, kept distinct on purpose:
 
 | | What it answers | Who sets it | Where |
 |---|---|---|---|
-| **SemVer `X.Y.Z`** | *What kind* of release is this (milestone / feature / fix)? | **You**, deliberately, via `php artisan ekdosi:release --major\|--minor\|--patch` | `config('app.version')` + `CHANGELOG.md` |
+| **SemVer `X.Y.Z`** | *What kind* of release is this (milestone / feature / fix)? | `php artisan ekdosi:release` — **auto-infers** minor/patch from `[Unreleased]`; `--major` explicit for a milestone | `config('app.version')` + `CHANGELOG.md` |
 | **Build stamp `2026.07.11-150101`** | *Which exact build* is on this box right now? | **Automatic**, derived from the git commit at deploy | `storage/app/build.json` (per-box, git-ignored) |
 
 The SemVer is a human judgement (a machine can't tell a milestone from a fix), so

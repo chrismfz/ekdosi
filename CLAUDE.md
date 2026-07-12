@@ -127,12 +127,20 @@ Part of "done", like tests. **Every change updates the right place:**
   one-liner under `## [Unreleased]` ([Keep a Changelog](https://keepachangelog.com/):
   `Added`/`Changed`/`Fixed`/`Removed`/`Security`).
 - **Versioning — SemVer `X.Y.Z`, app semantics** (canonical: `config('app.version')`).
-  Cut a release with **`php artisan ekdosi:release {--major|--minor|--patch}`** (rolls
-  `[Unreleased]` → dated `[X.Y.Z]`, bumps `config/app.php`, prints the `git tag` command).
-  The LEVEL is judgement — the rule of thumb:
-  - **major (X.0.0)** = a milestone/epoch (e.g. PEPPOL goes live, a cutover).
-  - **minor (x.Y.0)** = the `[Unreleased]` block contains an **`Added`** (a new feature).
-  - **patch (x.x.Z)** = only `Fixed`/`Changed`/`Security`/docs since the last tag.
+  Cut a release with **`php artisan ekdosi:release`** — with **no flag it INFERS the level
+  from `[Unreleased]`** (rolls it → dated `[X.Y.Z]`, bumps `config/app.php`). The CHANGELOG
+  is the source of truth for the level, so you don't judge it:
+  - **minor (x.Y.0)** = `[Unreleased]` has a non-empty **`### Added`** (a new feature).
+  - **patch (x.x.Z)** = only `Fixed`/`Changed`/`Security`/`Removed` — no `Added`.
+  - **major (X.0.0)** = a milestone/epoch (PEPPOL live, a cutover) — a machine can't tell,
+    so it stays **explicit `--major`**. `--minor`/`--patch` still override the inference.
+  - **`--check`** = non-destructive preflight (what would it cut? anything pending?) — wired
+    into `clean.sh` step 5 so a forgotten bump surfaces on deploy.
+  - **`--commit --tag`** = also git-commit the roll + create `vX.Y.Z` (never pushes). Handy
+    for a release cut straight on `main`; in the PR flow the tag is made post-merge instead.
+  - **Post-merge tag (PR flow)** → **`sh tag-release.sh`** (repo root): bare = STATUS + options
+    (version, is-it-tagged, pending changes); `--tag` = pull `main` + tag `vX.Y.Z` (read from
+    `config/app.php`) + push. Replaces the manual `git checkout main && git pull && git tag …`.
 - **`FEATURES.md`** (repo root) — the catalogue of WHAT ekdosi does. **A NEW feature
   (not a fix/tweak) ALSO gets a line/bullet here**, under the right section. This is
   the «μην χανόμαστε» file — keep it the truthful single source of what's built.
