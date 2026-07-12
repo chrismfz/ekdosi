@@ -32,6 +32,26 @@ $scheduleEnabled = fn (string $key): bool => app(SystemSettings::class)
     ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
 
 /*
+ | OPS-13: run a per-tenant command across a tenant set with per-tenant isolation.
+ | A plain `->each(fn ($c) => Artisan::call(...))` lets ONE tenant's uncaught
+ | exception abort the whole sweep (later tenants never run) AND skip its health
+ | recording — leaving a stale «ok» that still reads as healthy. Here each tenant
+ | is isolated: an uncaught throw is reported AND recorded as a per-tenant failure
+ | (via $onError) so it surfaces, and the sweep carries on to the next tenant.
+ | Normal non-zero exits are already self-recorded by the commands themselves.
+ */
+$sweepTenants = function (iterable $tenants, string $command, callable $onError): void {
+    foreach ($tenants as $tenant) {
+        try {
+            Artisan::call($command, ['--tenant' => $tenant->slug]);
+        } catch (Throwable $e) {
+            report($e);
+            $onError($tenant, $e);
+        }
+    }
+};
+
+/*
 |--------------------------------------------------------------------------
 | Scheduled tasks  (config: config/ekdosi.php → 'schedule')
 |--------------------------------------------------------------------------
@@ -87,12 +107,15 @@ $trackSchedule(
 // once per WHMCS-configured tenant. Operator-gated: this only STAGES,
 // it never files at AADE.
 $trackSchedule(
-    Schedule::call(function () {
-        Company::query()
-            ->whereNotNull('whmcs_api_url')
-            ->where('whmcs_api_url', '!=', '')
-            ->get()
-            ->each(fn (Company $c) => Artisan::call('whmcs:fetch-pending', ['--tenant' => $c->slug]));
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::query()
+                ->whereNotNull('whmcs_api_url')
+                ->where('whmcs_api_url', '!=', '')
+                ->get(),
+            'whmcs:fetch-pending',
+            fn (Company $c) => app(HealthRecorder::class)->recordWhmcsFetch($c, 1),
+        );
     })
         ->cron(config('ekdosi.schedule.whmcs_fetch_cron', '*/15 * * * *'))
         ->name('whmcs-fetch-all')
@@ -122,9 +145,12 @@ $trackSchedule(
 // AADE picture back). Discrepancies surface in the command output (exit 2);
 // pipe schedule output to a log for alerting.
 $trackSchedule(
-    Schedule::call(function () {
-        Company::myDataReadable()
-            ->each(fn (Company $c) => Artisan::call('mydata:reconcile-sales', ['--tenant' => $c->slug]));
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::myDataReadable(),
+            'mydata:reconcile-sales',
+            fn (Company $c) => app(HealthRecorder::class)->recordMyDataReconcile($c, 1),
+        );
     })
         ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))
         ->name('mydata-reconcile-all')

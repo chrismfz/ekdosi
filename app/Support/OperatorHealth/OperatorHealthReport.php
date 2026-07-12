@@ -10,6 +10,7 @@ use App\Models\MyDataMark;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\ScheduledTaskRun;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Settings\SystemSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +44,16 @@ class OperatorHealthReport
         'backup_cleanup' => 'backup cleanup',
         'backup_monitor' => 'backup monitor',
     ];
+
+    /**
+     * OPS-13: a per-tenant scheduled sweep (WHMCS fetch / myDATA reconcile) that
+     * hasn't recorded a run in this long — WHILE its task is enabled — is «stale»:
+     * the run silently stopped (flag flip, crash before recording, orphaned key
+     * after a slug rename), so a cached «ok» is no longer trustworthy. Generous
+     * vs the cadences (WHMCS every 15', reconcile daily) so a merely-late cron
+     * doesn't false-alarm.
+     */
+    private const TENANT_SWEEP_STALE_HOURS = 26;
 
     /** @return array<string, mixed> */
     public function build(): array
@@ -301,13 +312,16 @@ class OperatorHealthReport
     /** @return array<int, array<string, mixed>> */
     private function whmcs(): array
     {
+        $enabled = $this->scheduleEnabled('whmcs_fetch_enabled');
+
         return $this->safeValue(fn () => Company::query()
             ->whereNotNull('whmcs_api_url')
             ->where('whmcs_api_url', '!=', '')
             ->orderBy('slug')
             ->get()
-            ->map(function (Company $tenant): array {
+            ->map(function (Company $tenant) use ($enabled): array {
                 $cached = $this->cacheGet(HealthKeys::whmcsFetch((int) $tenant->id), []);
+                $checkedAt = $cached['checked_at'] ?? null;
 
                 return [
                     'tenant' => $tenant->slug,
@@ -315,6 +329,9 @@ class OperatorHealthReport
                     'last_success_at' => $cached['last_success_at'] ?? null,
                     'last_failure_at' => $cached['last_failure_at'] ?? null,
                     'last_exit_code' => $cached['exit_code'] ?? null,
+                    'checked_at' => $checkedAt,
+                    'enabled' => $enabled,
+                    'stale' => $this->sweepIsStale($checkedAt, $enabled),
                     'pending_review' => $this->safeCount(fn () => PendingWhmcsInvoice::query()->where('company_id', $tenant->id)->where('status', 'pending_review')->count()),
                 ];
             })
@@ -324,12 +341,15 @@ class OperatorHealthReport
     /** @return array<int, array<string, mixed>> */
     private function mydata(): array
     {
+        $enabled = $this->scheduleEnabled('mydata_reconcile_enabled');
+
         return $this->safeValue(fn () => Company::myDataReadable()
             ->sortBy('slug')
             ->values()
-            ->map(function (Company $tenant): array {
+            ->map(function (Company $tenant) use ($enabled): array {
                 $cached = $this->cacheGet(HealthKeys::myDataReconcile((int) $tenant->id), []);
                 $latestMark = $this->safeValue(fn () => MyDataMark::query()->where('company_id', $tenant->id)->latest('created_at')->first());
+                $checkedAt = $cached['checked_at'] ?? null;
 
                 return [
                     'tenant' => $tenant->slug,
@@ -338,10 +358,42 @@ class OperatorHealthReport
                     'last_success_at' => $cached['last_success_at'] ?? null,
                     'last_failure_at' => $cached['last_failure_at'] ?? null,
                     'last_aade_call_at' => $cached['last_aade_call_at'] ?? null,
+                    'checked_at' => $checkedAt,
+                    'enabled' => $enabled,
+                    'stale' => $this->sweepIsStale($checkedAt, $enabled),
                     'latest_mydata_mark_at' => $latestMark?->created_at?->toIso8601String(),
                 ];
             })
             ->all(), []);
+    }
+
+    /**
+     * OPS-13: mirror routes/console.php's run-time enable check (DB override wins,
+     * config/env is the default) so staleness is only judged for tasks that are
+     * actually supposed to be running — an opt-out task's silent key is expected.
+     */
+    private function scheduleEnabled(string $key): bool
+    {
+        return app(SystemSettings::class)
+            ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+    }
+
+    /**
+     * True when an ENABLED sweep last recorded longer ago than the stale window.
+     * A never-recorded key (checked_at null) stays «missing», not «stale» — that's
+     * a fresh cache / brand-new tenant, not a run that died mid-life.
+     */
+    private function sweepIsStale(?string $checkedAt, bool $enabled): bool
+    {
+        if (! $enabled || $checkedAt === null) {
+            return false;
+        }
+
+        try {
+            return Carbon::parse($checkedAt)->lt(now()->subHours(self::TENANT_SWEEP_STALE_HOURS));
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**
