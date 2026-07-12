@@ -3,8 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Company;
-use App\Models\Supplier;
-use App\Services\MyData\SupplierGsisEnricher;
+use App\Services\MyData\SupplierNameBackfiller;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 
@@ -53,59 +52,18 @@ class SuppliersBackfillNames extends Command
     {
         $limit = max(0, (int) $this->option('limit'));
 
-        // Nameless GR suppliers with an ΑΦΜ. Scope by company_id explicitly —
-        // Supplier's global scope is a no-op on the CLI. withTrashed is skipped:
-        // a soft-deleted supplier was removed on purpose, don't resurrect its name.
-        $query = Supplier::query()
-            ->where('company_id', $tenant->getKey())
-            ->where(fn ($q) => $q->where('country', 'GR')->orWhereNull('country'))
-            ->whereNotNull('afm')
-            ->where('afm', '!=', '')
-            ->where(fn ($q) => $q->whereNull('name')->orWhere('name', ''))
-            ->orderBy('id');
+        $result = (new SupplierNameBackfiller($tenant))->run($limit);
 
-        if ($limit > 0) {
-            $query->limit($limit);
-        }
-
-        $suppliers = $query->get();
-        if ($suppliers->isEmpty()) {
+        if ($result->processed === 0) {
             $this->line("• {$tenant->slug}: καμία ανώνυμη εγγραφή προμηθευτή.");
 
             return;
         }
 
-        $enricher = new SupplierGsisEnricher($tenant);
-        $enriched = 0;
-        $failed = [];
+        $this->info("✓ {$tenant->slug}: {$result->summary()}");
 
-        foreach ($suppliers as $supplier) {
-            $gsis = $enricher->enrich((string) $supplier->afm);
-            if ($gsis === null) {
-                $failed[] = $supplier->afm;
-
-                continue;
-            }
-
-            // Fill only-empty columns — never clobber an operator's manual edit.
-            $changed = false;
-            foreach ($gsis as $column => $value) {
-                if (blank($supplier->{$column})) {
-                    $supplier->{$column} = $value;
-                    $changed = true;
-                }
-            }
-
-            if ($changed) {
-                $supplier->save();
-                $enriched++;
-            }
-        }
-
-        $this->info("✓ {$tenant->slug}: συμπληρώθηκαν {$enriched}/{$suppliers->count()} προμηθευτές από ΑΑΔΕ.");
-
-        if ($failed !== []) {
-            $this->warn('  ↳ χωρίς όνομα (απέτυχε η άντληση GSIS): '.implode(', ', $failed));
+        if ($result->failures !== []) {
+            $this->warn('  ↳ χωρίς όνομα (απέτυχε η άντληση GSIS): '.implode(', ', $result->failures));
         }
     }
 

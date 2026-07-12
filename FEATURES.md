@@ -105,8 +105,9 @@
 
 ## 4. Έξοδα / Προμηθευτές / Ε3
 - **Προμηθευτές** (`Supplier`) — CRUD + «Άντληση από ΑΑΔΕ» (GSIS) + **`suppliers:sync`**
-  (μοναδικά issuer ΑΦΜ από `RequestDocs`) + **`suppliers:backfill-names`** (συμπλήρωση
-  επωνυμίας από GSIS σε παλιούς «αδέσποτους» μόνο-ΑΦΜ, fill-only-empty).
+  (μοναδικά issuer ΑΦΜ από `RequestDocs`) + **«Συμπλήρωση επωνυμιών από ΑΑΔΕ»** (κουμπί στη
+  λίστα + CLI `suppliers:backfill-names` — γεμίζει επωνυμία από GSIS σε παλιούς «αδέσποτους»
+  μόνο-ΑΦΜ, fill-only-empty· κοινός `SupplierNameBackfiller`).
 - **Εισαγωγή αδέσποτων** εξόδων από myDATA (`ExpenseImporter`/`ExpenseReconciler`) +
   self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ). **Κουμπί «Άντληση από myDATA» στη λίστα
   Έξοδα** (one-click read-only fetch → worklist) + tip «τελευταία άντληση · X αδέσποτα» +

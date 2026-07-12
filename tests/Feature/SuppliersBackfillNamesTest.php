@@ -4,10 +4,15 @@ namespace Tests\Feature;
 
 use App\DTOs\AadeRegistryRecord;
 use App\Exceptions\Aade\AadeAfmNotFound;
+use App\Filament\Resources\Suppliers\Pages\ListSuppliers;
 use App\Models\Company;
 use App\Models\Supplier;
+use App\Models\User;
 use App\Services\AadeRegistryLookup;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
+use Livewire\Livewire;
 use Mockery;
 use Tests\TestCase;
 
@@ -90,6 +95,40 @@ class SuppliersBackfillNamesTest extends TestCase
 
         $named->refresh();
         $this->assertSame('Χειροκίνητος', $named->name);
+    }
+
+    public function test_suppliers_list_button_backfills_nameless(): void
+    {
+        // The «Συμπλήρωση επωνυμιών από ΑΑΔΕ» button on the Προμηθευτές list —
+        // reachable by any operator on that screen (not the super-admin console).
+        Gate::before(fn () => true);
+        $this->actingAs(User::create([
+            'name' => 'Op', 'email' => 'op-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]));
+        Filament::setTenant($this->tenant);
+
+        $nameless = Supplier::create([
+            'company_id' => $this->tenant->id,
+            'afm' => '094468339',
+            'country' => 'GR',
+            'source' => 'sync',
+        ]);
+
+        $lookup = Mockery::mock(AadeRegistryLookup::class);
+        $lookup->shouldReceive('findByAfm')->with('094468339')->andReturn(
+            new AadeRegistryRecord(
+                afm: '094468339', name: 'AEGEAN AIRLINES A.E.', doy: 'ΦΑΕ ΑΘΗΝΩΝ', doyCode: '1159',
+                active: true, statusDescr: 'ΕΝΕΡΓΟΣ ΑΦΜ', address: 'ΒΙΛΤΑΝΙΩΤΗ 31', city: 'ΚΗΦΙΣΙΑ',
+                postcode: '14564', activities: [],
+            )
+        );
+        $this->app->bind(AadeRegistryLookup::class, fn ($app, $params) => $lookup);
+
+        Livewire::test(ListSuppliers::class)
+            ->callAction('backfillNames')
+            ->assertHasNoActionErrors();
+
+        $this->assertSame('AEGEAN AIRLINES A.E.', $nameless->refresh()->name);
     }
 
     public function test_gsis_failure_leaves_supplier_nameless(): void
