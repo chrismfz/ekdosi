@@ -270,20 +270,16 @@ it clears):
   object (a `TypeArray`, NOT an array — `array_map` over it TypeErrors and masks
   the real rejection).
 
-**Sandbox-validated types (zero rejections, no payload changes):** 1.1, 2.1,
-11.2, 5.1, + a CANCEL; reconciliation matched all. Report:
-`docs/archive/mydata-sandbox-validation-2026-05-28.md`.
+- **Additional-taxes → gross rule (`[208]`, standing):** withholding/fees/stamp/
+  otherTaxes/deductions, WHEN present, DO adjust `totalGrossValue` + the paymentMethod
+  amount — gross = net+vat + fees + stamp + otherTaxes − deductions − withheld — EXCEPT
+  the informational §8.4 withholding cats 8/9/10
+  (`WithheldPercentCategory::affectsTotalGrossValue()`; built in `AadeInvoiceDocument`).
 
-**Sandbox round 2 — ✅ 2026-06-10 (`sandbox-results.txt`):** the new taxTypes
-(χαρτόσημο 3,6% · fees · product-linked per-unit fees), the **4% override → cat 10**,
-and the full **ΔΑ lifecycle** (issue/register/confirm) all AADE-accepted (real MARKs).
-Two learnings, both fixed/expected:
-- **[208]** — withholding **DOES reduce** `totalGrossValue` (and the paymentMethod
-  amount): gross = net+vat + fees + stamp + otherTaxes − deductions − withheld,
-  EXCEPT the informational §8.4 categories 8/9/10 (via
-  `WithheldPercentCategory::affectsTotalGrossValue()`). The earlier «withholding
-  doesn't change gross» assumption was WRONG — corrected in `AadeInvoiceDocument`.
-- **[801]** — a **Completed** delivery note can't be cancelled (by design, not a bug).
+**Sandbox-validated (history):** 1.1/2.1/11.2/5.1 + CANCEL (2026-05-28) and round-2
+taxTypes / 4%-override→cat10 / full ΔΑ lifecycle (2026-06-10) all AADE-accepted with zero
+payload changes; reconciliation matched. Also learned: a **Completed** ΔΑ can't be cancelled
+(`[801]`, by design). Full reports → `docs/archive/mydata-sandbox-validation-2026-05-28.md`.
 
 **OPEN OPERATOR DECISION:** myip's ΠΙΣ maps to **5.2** (non-correlated) but the
 new `IssueCreditNote` flow always issues *from* an original, so **5.1**
@@ -297,23 +293,13 @@ helpers — the single source to refresh on spec changes.
 `php artisan mydata:preflight` audits each tenant's invoice-type / VAT config
 against them (read-only) and flags what AADE would reject. Exit 0/1/2.
 
-**Submitter payload follow-ups — ✅ ALL DONE + sandbox-validated 2026-06-10 (see
-«Sandbox round 2» above; the withholding-gross [208] case was the one fix it found):**
-- **0% / exempt** → ✅ G4: `vatCategory=7` + `vatExemptionCategory` (§8.3) from the
-  tenant's 0%-rate VatCategory.
-- **4% ambiguity** (cat 6 island vs 10 ν.5057/2023, 3%→9) → ✅ optional
-  `vat_categories.mydata_vat_category` override, scoped to the 3%/4% rates
-  (`AadeInvoiceDocument::mydataCategoryOverride`).
-- **Conditional per-line `<quantity>`** → ✅ G5 (`invoice_types.mydata_requires_quantity`).
-- **`taxesTotals`** for withholding/fees/stamp/otherTaxes/deductions → ✅ G1
-  (withholding) + #3c (the other four): amount + §8.x category per type, gross +
-  payment adjusted (`AadeInvoiceDocument::addAdditionalTaxes`). The invoice form has
-  a **«Τυπικά τέλη/φόροι» quick-fill** (`CommonTaxPresets`) over the raw fields.
-- **PaymentMethod → myDATA payment-type map** → ✅ G9 (`payment_methods.mydata_payment_type`).
-- **SendInvoices mock-Guzzle integration test** → ✅ (`MyDataSubmitterSafetyTest`,
-  full `submit()` round-trip against firebed's success stub).
-- **Auto-calc of percentage amounts** → ✅ live/on-save recompute from net
-  (`RecomputeInvoiceTaxes`), not just on preset-pick. **Still open:** curated-preset expansion.
+**Submitter payload follow-ups — ✅ ALL DONE** (sandbox-validated): 0%/exempt (`vatCategory=7`
++ exemption §8.3) · 4% cat-6-vs-10 override (`vat_categories.mydata_vat_category`) · conditional
+per-line `<quantity>` (`invoice_types.mydata_requires_quantity`) · `taxesTotals` for withholding/
+fees/stamp/otherTaxes/deductions (`AadeInvoiceDocument::addAdditionalTaxes` + «Τυπικά τέλη/φόροι»
+quick-fill/`CommonTaxPresets`) · PaymentMethod→payment-type map (`payment_methods.mydata_payment_type`)
+· auto-calc of % amounts (`RecomputeInvoiceTaxes`) · `MyDataSubmitterSafetyTest` round-trip.
+**Still open:** curated-preset expansion.
 
 ### Reconciliation
 - **Phase 1 — local** (`MyDataReconciliation` page): cross-checks our two
