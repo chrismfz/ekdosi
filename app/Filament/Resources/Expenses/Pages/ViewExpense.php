@@ -3,14 +3,18 @@
 namespace App\Filament\Resources\Expenses\Pages;
 
 use App\Filament\Resources\Expenses\ExpenseResource;
+use App\Models\ExpenseClassificationRule;
 use App\Services\MyData\ExpenseClassificationSubmitter;
 use App\Support\MyData\Codes;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Utilities\Get;
@@ -163,13 +167,13 @@ class ViewExpense extends ViewRecord
                         ->options(Codes::expenseClassCategoryOptions())
                         ->searchable()
                         ->required(),
-                    \Filament\Forms\Components\Toggle::make('only_this_type')
+                    Toggle::make('only_this_type')
                         ->label(fn (): string => 'Μόνο για τον τύπο '.($this->record->invoice_type ?: '—'))
                         ->visible(fn (): bool => filled($this->record->invoice_type))
                         ->helperText('Αλλιώς ο κανόνας ισχύει για όλους τους τύπους αυτού του προμηθευτή.'),
                 ])
                 ->action(function (array $data): void {
-                    \App\Models\ExpenseClassificationRule::create([
+                    ExpenseClassificationRule::create([
                         'company_id' => $this->record->company_id,
                         'supplier_afm' => $this->record->supplier_afm,
                         'invoice_type' => ($data['only_this_type'] ?? false) ? $this->record->invoice_type : null,
@@ -199,7 +203,7 @@ class ViewExpense extends ViewRecord
                 ->modalHeading('Υποβολή χαρακτηρισμού στην ΑΑΔΕ')
                 ->modalDescription('Στέλνει τον χαρακτηρισμό (τύπος E3 + κατηγορία) του παραστατικού στη myDATA. Μη αναστρέψιμο μέσω της εφαρμογής.')
                 ->action(function (): void {
-                    $tenant = $this->record->company ?? \Filament\Facades\Filament::getTenant();
+                    $tenant = $this->record->company ?? Filament::getTenant();
 
                     try {
                         $mark = app()->makeWith(ExpenseClassificationSubmitter::class, ['tenant' => $tenant])
@@ -215,6 +219,37 @@ class ViewExpense extends ViewRecord
                         ->body($mark !== '' ? 'ΜΑΡΚ χαρακτηρισμού: '.$mark : 'Επιτυχία.')
                         ->success()
                         ->send();
+                }),
+
+            // Operator notes (σημειώσεις) — a targeted write of ONLY the `notes`
+            // column, available on EVERY expense including the read-only
+            // myDATA-sourced ones (whose full Edit is blocked by canEdit to keep
+            // the AADE mirror intact). This is how you annotate a doc — e.g.
+            // «αυτό είναι εισιτήριο Aegean» — without touching the mirrored data.
+            Action::make('notes')
+                ->label('Σημειώσεις')
+                ->icon('heroicon-o-chat-bubble-bottom-center-text')
+                ->color('gray')
+                ->visible(fn (): bool => (bool) auth()->user()?->can('Update:Expense'))
+                ->modalHeading('Σημειώσεις εξόδου')
+                ->modalDescription('Ιδιωτικές σημειώσεις του χειριστή για αυτό το παραστατικό. Δεν αποστέλλονται στην ΑΑΔΕ.')
+                ->modalSubmitActionLabel('Αποθήκευση')
+                ->fillForm(fn (): array => ['notes' => $this->record->notes])
+                ->schema([
+                    Textarea::make('notes')
+                        ->label('Σημειώσεις')
+                        ->rows(4)
+                        ->maxLength(65535)
+                        ->placeholder('π.χ. Εισιτήριο Aegean — μετακίνηση για…'),
+                ])
+                ->action(function (array $data): void {
+                    // forceFill: only the notes column moves; the AADE-mirrored
+                    // header/totals/state are never touched here. blank() (not `?:`)
+                    // so a note of literally "0" is kept, empty → null.
+                    $note = $data['notes'] ?? null;
+                    $this->record->forceFill(['notes' => blank($note) ? null : $note])->save();
+
+                    Notification::make()->title('Οι σημειώσεις αποθηκεύτηκαν')->success()->send();
                 }),
 
             // Download the attached private document over a short-lived signed

@@ -7,9 +7,13 @@ use App\Models\Expense;
 use App\Models\Supplier;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
+use Firebed\AadeMyData\Http\MyDataGetRequest;
 use Firebed\AadeMyData\Http\RequestDocs;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
+use Firebed\AadeMyData\Models\ExpensesClassification;
+use Firebed\AadeMyData\Models\Invoice;
+use Firebed\AadeMyData\Models\InvoiceDetails;
 use Firebed\AadeMyData\Models\Party;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Facades\DB;
@@ -119,7 +123,7 @@ class ExpenseImporter
      * (source + which Party is the "supplier" + the category bucket + the audit
      * action label). The sync path is byte-identical to the original.
      *
-     * @param  array<string, \Firebed\AadeMyData\Models\Invoice>  $docs
+     * @param  array<string, Invoice>  $docs
      * @param  array<string, true>  $cancelledMarks  MARKs AADE folds as cancelled
      * @param  array<string, true>|null  $onlyMarks  restrict to this MARK set (null = all)
      */
@@ -164,21 +168,25 @@ class ExpenseImporter
             $supplierWasCreated = false;
             $createdExpense = null;
 
+            // sync: the supplier IS the issuer. self_declared: WE are the issuer,
+            // so the counterpart (when present) is the supplier. Resolve (and, for
+            // a new GR supplier, GSIS-enrich) it BEFORE opening the write
+            // transaction, so a registry SOAP lookup never holds the transaction
+            // open. A supplier row created here but orphaned by a rolled-back
+            // expense is benign — the next run links it.
+            $party = $mode === 'self_declared' ? $doc->getCounterpart() : $doc->getIssuer();
+            $supplier = $this->resolveSupplier($party, $supplierWasCreated);
+
             // Fold cancellation from both the inline <cancelledByMark> and the
             // standalone <cancelledInvoicesDoc> list (same as the reconciler), so
             // a doc we filed then cancelled isn't recorded as a live expense.
             $inlineCancel = (string) ($doc->getCancelledByMark() ?? '');
             $isCancelled = $inlineCancel !== '' || isset($cancelledMarks[$mark]);
 
-            DB::transaction(function () use ($doc, $mark, $mode, $isCancelled, &$supplierWasCreated, &$createdExpense): void {
+            DB::transaction(function () use ($doc, $mark, $mode, $isCancelled, $party, $supplier, &$createdExpense): void {
                 $header = $doc->getInvoiceHeader();
                 $summary = $doc->getInvoiceSummary();
                 $type = $header?->getInvoiceType()?->value;
-
-                // sync: the supplier IS the issuer. self_declared: WE are the
-                // issuer, so the counterpart (when present) is the supplier.
-                $party = $mode === 'self_declared' ? $doc->getCounterpart() : $doc->getIssuer();
-                $supplier = $this->resolveSupplier($party, $supplierWasCreated);
 
                 /** @var Expense $expense */
                 $expense = Expense::create([
@@ -197,6 +205,11 @@ class ExpenseImporter
                     'net_total' => $this->toDecimal($summary?->getTotalNetValue()),
                     'vat_total' => $this->toDecimal($summary?->getTotalVatAmount()),
                     'gross_total' => $this->toDecimal($summary?->getTotalGrossValue()),
+                    // Doc-level links AADE ships in the XML — myDATA expense docs
+                    // carry no line description, so these let the operator open the
+                    // real παραστατικό (QR / issuer's e-invoice) to see what it is.
+                    'qr_url' => $doc->getQrCodeUrl(),
+                    'downloading_invoice_url' => $doc->getDownloadingInvoiceUrl(),
                     // Folded from <cancelledByMark> / <cancelledInvoicesDoc> so a
                     // cancelled doc imports as CANCELLED, not as a live expense.
                     'mydata_state' => $isCancelled ? 'CANCELLED' : 'VALID',
@@ -253,10 +266,10 @@ class ExpenseImporter
      * cancelled in <cancelledInvoicesDoc>. Mirrors the reconciler's fold so a
      * cancelled doc is recorded as CANCELLED, not as a live expense.
      *
-     * @return array{0: array<string, \Firebed\AadeMyData\Models\Invoice>, 1: array<string, true>}
+     * @return array{0: array<string, Invoice>, 1: array<string, true>}
      */
     private function fetchFullDocs(
-        \Firebed\AadeMyData\Http\MyDataGetRequest $action,
+        MyDataGetRequest $action,
         string $dateFrom,
         string $dateTo
     ): array {
@@ -298,12 +311,17 @@ class ExpenseImporter
     }
 
     /**
-     * Find the party's supplier by (company_id, afm); create a minimal
-     * `source=sync` one if missing. GSIS enrichment is the supplier-sync
-     * action's job — here we just take the doc name (if any). Sets
-     * $created=true when a new row was inserted. Null when the party is absent
-     * or has no AFM (e.g. a 13.1 retail receipt) — the expense still imports,
-     * just without a supplier link.
+     * Find the party's supplier by (company_id, afm); create a `source=sync` one
+     * if missing. Sets $created=true when a new row was inserted. Null when the
+     * party is absent or has no AFM (e.g. a 13.1 retail receipt) — the expense
+     * still imports, just without a supplier link.
+     *
+     * A GR issuer's name is forbidden in the myDATA doc ([219]/[220]) — only the
+     * ΑΦΜ arrives — so a freshly-discovered GR supplier would land as a nameless
+     * «παύλα». We resolve its identity from the GSIS registry (the same source
+     * the Προμηθευτές «Άντληση από ΑΑΔΕ» and `suppliers:sync` use); best-effort,
+     * so on any GSIS failure the ΑΦΜ-only supplier is still created. Foreign
+     * docs carry name+address, so we skip the lookup for them.
      */
     private function resolveSupplier(?Party $party, bool &$created): ?Supplier
     {
@@ -326,21 +344,33 @@ class ExpenseImporter
         }
 
         $country = strtoupper(trim((string) ($party->getCountry() ?? '')));
+        $country = $country !== '' ? substr($country, 0, 2) : 'GR';
         $name = trim((string) ($party->getName() ?? ''));
 
-        $created = true;
-
-        return Supplier::create([
+        $attrs = [
             'company_id' => $this->tenant->getKey(),
             'afm' => $afm,
             'name' => $name !== '' ? $name : null,
-            'country' => $country !== '' ? substr($country, 0, 2) : 'GR',
+            'country' => $country,
             'source' => 'sync',
             'is_active' => true,
-        ]);
+        ];
+
+        // GR docs carry no issuer name — fill επωνυμία/ΔΟΥ/διεύθυνση/δραστηριότητα
+        // from GSIS so the supplier lands named, not a dash.
+        if ($name === '' && $country === 'GR') {
+            $gsis = (new SupplierGsisEnricher($this->tenant))->enrich($afm);
+            if ($gsis !== null) {
+                $attrs = array_merge($attrs, $gsis);
+            }
+        }
+
+        $created = true;
+
+        return Supplier::create($attrs);
     }
 
-    private function importLines(Expense $expense, \Firebed\AadeMyData\Models\Invoice $doc): void
+    private function importLines(Expense $expense, Invoice $doc): void
     {
         $details = $doc->getInvoiceDetails();
         if (! is_array($details)) {
@@ -386,8 +416,8 @@ class ExpenseImporter
      * recipient's discretion later).
      */
     private function firstExpenseClassification(
-        \Firebed\AadeMyData\Models\InvoiceDetails $line
-    ): ?\Firebed\AadeMyData\Models\ExpensesClassification {
+        InvoiceDetails $line
+    ): ?ExpensesClassification {
         $list = $line->getExpensesClassification();
 
         return is_array($list) && $list !== [] ? $list[0] : null;
@@ -399,7 +429,7 @@ class ExpenseImporter
      * types), so fall back to the line comments; null when neither exists (the
      * raw-XML viewer is the source of truth for everything else).
      */
-    private function lineDescription(\Firebed\AadeMyData\Models\InvoiceDetails $line): ?string
+    private function lineDescription(InvoiceDetails $line): ?string
     {
         $descr = trim((string) ($line->getItemDescr() ?? ''));
         if ($descr !== '') {

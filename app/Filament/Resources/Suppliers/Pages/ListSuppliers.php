@@ -6,7 +6,9 @@ use App\Filament\BaseListRecords;
 use App\Filament\Resources\Suppliers\SupplierResource;
 use App\Filament\Support\PartySyncWindow;
 use App\Filament\Support\Tags\TagControls;
+use App\Models\Company;
 use App\Models\Supplier;
+use App\Services\MyData\SupplierNameBackfiller;
 use App\Services\MyData\SupplierSyncFromMyData;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -50,7 +52,50 @@ class ListSuppliers extends BaseListRecords
                         ->default(true),
                 ])
                 ->action(fn (array $data) => $this->runSync($data)),
+
+            // Repair existing ΑΦΜ-only «παύλα» suppliers: fill επωνυμία/ΔΟΥ/… from
+            // GSIS on the ones already on file (the sync above only touches NEW
+            // ΑΦΜ). Reachable by any operator on the Προμηθευτές screen — unlike the
+            // super-admin-only console. Bounded per click so a web request never
+            // fans out into dozens of synchronous SOAP calls.
+            Action::make('backfillNames')
+                ->label('Συμπλήρωση επωνυμιών από ΑΑΔΕ')
+                ->icon('heroicon-o-identification')
+                ->color('gray')
+                ->visible(fn (): bool => Filament::getTenant()?->country_code === 'GR')
+                ->requiresConfirmation()
+                ->modalHeading('Συμπλήρωση επωνυμιών από ΑΑΔΕ')
+                ->modalDescription('Συμπληρώνει επωνυμία/ΔΟΥ/διεύθυνση από το μητρώο ΑΑΔΕ στους προμηθευτές που έχουν μόνο ΑΦΜ (τα ελληνικά παραστατικά δεν φέρουν όνομα). Δεν αλλάζει ό,τι έχει ήδη συμπληρωθεί.')
+                ->modalSubmitActionLabel('Συμπλήρωση')
+                ->action(fn () => $this->runBackfill()),
         ];
+    }
+
+    private function runBackfill(): void
+    {
+        /** @var Company|null $tenant */
+        $tenant = Filament::getTenant();
+        if ($tenant === null) {
+            Notification::make()->title('Λείπει το tenant context.')->warning()->send();
+
+            return;
+        }
+
+        // Bounded batch: keep each click well within the request time limit. The
+        // result flags whether more nameless rows likely remain (→ run again).
+        $result = (new SupplierNameBackfiller($tenant))->run(limit: 25);
+
+        if ($result->processed === 0) {
+            Notification::make()->title('Δεν βρέθηκαν προμηθευτές χωρίς όνομα')->success()->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title("Συμπληρώθηκαν {$result->enriched} προμηθευτές")
+            ->body($result->summary())
+            ->{$result->enriched > 0 ? 'success' : 'warning'}()
+            ->send();
     }
 
     private function runSync(array $data): void

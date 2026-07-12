@@ -74,6 +74,7 @@ class CompanySettings extends Page implements HasForms
         'auto_email_on_issue',
         'mail_from_address',
         'mail_from_name',
+        'mydata_auto_fetch_expenses',
     ];
 
     /**
@@ -166,6 +167,16 @@ class CompanySettings extends Page implements HasForms
                     ])
                     ->columns(2),
 
+                Section::make('Αυτόματη άντληση εξόδων (myDATA)')
+                    ->description('Read-only ανανέωση της λίστας «αδέσποτων εξόδων» για ΑΥΤΗ την εταιρεία, ανά λίγες ώρες. Δεν δημιουργεί εγγραφές — η καταχώριση παραμένει χειροκίνητη.')
+                    ->visible(fn (): bool => $this->tenant()->canReadMyData())
+                    ->schema([
+                        Toggle::make('mydata_auto_fetch_expenses')
+                            ->label('Αυτόματη άντληση εξόδων για αυτή την εταιρεία')
+                            ->helperText('Όταν είναι ενεργό, ο προγραμματιστής ανανεώνει αυτόματα τα «αδέσποτα έξοδα» αυτής της εταιρείας (μόνο ανανέωση λίστας, όχι καταχώριση). Ισχύει εφόσον ο διαχειριστής συστήματος έχει ενεργοποιήσει την αντίστοιχη προγραμματισμένη εργασία.')
+                            ->columnSpanFull(),
+                    ]),
+
                 Section::make('Αυτόματα αντίγραφα ασφαλείας')
                     ->description('Ενεργοποίηση + συχνότητα. Κρυπτογράφηση, συνθηματικό, απομακρυσμένοι προορισμοί και διατήρηση ρυθμίζονται από τον διαχειριστή συστήματος (καρτέλα εταιρείας).')
                     ->schema([
@@ -237,7 +248,13 @@ class CompanySettings extends Page implements HasForms
         // ── Company safe subset (explicit whitelist, never raw mass-assign) ──
         $companyUpdate = [];
         foreach (self::COMPANY_FIELDS as $field) {
-            $value = $state[$field] ?? null;
+            // A field whose section is hidden (e.g. the myDATA controls for a
+            // non-myDATA tenant) is absent from the submitted state — leave the
+            // column untouched rather than nulling a NOT NULL boolean.
+            if (! array_key_exists($field, $state)) {
+                continue;
+            }
+            $value = $state[$field];
             $companyUpdate[$field] = $value;
             if ($this->normalize($company->{$field}) !== $this->normalize($value)) {
                 $new[$field] = $this->normalize($value);

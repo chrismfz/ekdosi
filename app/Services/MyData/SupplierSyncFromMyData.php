@@ -2,15 +2,12 @@
 
 namespace App\Services\MyData;
 
-use App\Exceptions\Aade\AadeRegistryException;
 use App\Models\Company;
 use App\Models\Supplier;
-use App\Services\AadeRegistryLookup;
 use Carbon\CarbonInterface;
 use Firebed\AadeMyData\Http\RequestDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
 use Firebed\AadeMyData\Models\Issuer;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Συγχρονισμός προμηθευτών από myDATA (the "sync" provenance, E-phase).
@@ -237,45 +234,16 @@ class SupplierSyncFromMyData
     }
 
     /**
-     * GSIS lookup → supplier columns, mirroring the supplier form's
-     * "Άντληση από ΑΑΔΕ" mapping. Returns null on any failure (missing
-     * creds / not found / unreachable) so a bulk run never aborts — the
-     * AFM-only supplier is created instead and reported for manual fill.
+     * GSIS lookup → supplier columns. Delegates to the shared
+     * {@see SupplierGsisEnricher} (also used by the expense importer's
+     * auto-create) so the mapping lives in one place. Returns null on any
+     * failure — the AFM-only supplier is created instead and reported for
+     * manual fill.
      *
      * @return array<string, string>|null
      */
     private function enrichFromGsis(string $afm): ?array
     {
-        try {
-            $rec = app(AadeRegistryLookup::class, ['tenant' => $this->tenant])->findByAfm($afm);
-        } catch (AadeRegistryException $e) {
-            // Base of AadeAfmNotFound / AadeCredentialsInvalid / AadeUnreachable
-            // (SOAP faults are wrapped into these). Catching the base keeps a
-            // bulk run resilient — one bad AFM never aborts the sweep — and
-            // auto-covers any future subtype, without swallowing unrelated bugs.
-            Log::info('Supplier sync: GSIS enrichment skipped', [
-                'company_id' => $this->tenant->getKey(),
-                'afm' => $afm,
-                'reason' => class_basename($e),
-            ]);
-
-            return null;
-        }
-
-        $out = [
-            'name' => $rec->name,
-            'tax_office' => $rec->doy,
-            'address1' => $rec->address,
-            'city' => $rec->city,
-            'postcode' => $rec->postcode,
-            'country' => 'GR',
-        ];
-
-        if (($primary = $rec->primaryActivity()) !== null && ! empty($primary['description'])) {
-            $out['occupation'] = $primary['description'];
-        }
-
-        // Drop empties so we don't overwrite with blank strings.
-        return array_filter($out, static fn ($v): bool => trim((string) $v) !== '');
+        return (new SupplierGsisEnricher($this->tenant))->enrich($afm);
     }
 }

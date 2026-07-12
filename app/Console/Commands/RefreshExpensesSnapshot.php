@@ -28,6 +28,7 @@ class RefreshExpensesSnapshot extends Command
 {
     protected $signature = 'mydata:refresh-expenses
         {--tenant= : Company slug or id (default: all myDATA-readable)}
+        {--auto-only : Only tenants that opted in via companies.mydata_auto_fetch_expenses (used by the scheduler)}
         {--max-retries=3 : Times to retry a tenant after an AADE 429 (capped wait)}
         {--gap=2 : Seconds to wait between tenants (spacing to avoid the rate limit)}';
 
@@ -124,6 +125,15 @@ class RefreshExpensesSnapshot extends Command
             return $tenant ? collect([$tenant]) : collect();
         }
 
-        return Company::myDataReadable();
+        $tenants = Company::myDataReadable();
+
+        // The scheduler passes --auto-only so the AUTOMATIC refresh touches only
+        // tenants that opted in (companies.mydata_auto_fetch_expenses). A manual
+        // run without the flag still refreshes every myDATA-readable tenant.
+        if ($this->option('auto-only')) {
+            $tenants = $tenants->filter(fn (Company $c): bool => (bool) $c->mydata_auto_fetch_expenses)->values();
+        }
+
+        return $tenants;
     }
 }

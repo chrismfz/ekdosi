@@ -148,6 +148,49 @@ class CompanySettingsPageTest extends TestCase
     }
 
     #[Test]
+    public function company_admin_toggles_auto_fetch_expenses_on_a_mydata_tenant(): void
+    {
+        Gate::before(fn () => true);
+        $user = User::create(['name' => 'Admin', 'email' => 'a-'.uniqid().'@test.local', 'password' => bcrypt('x')]);
+        $this->actingAs($user);
+        // canReadMyData tenant → the «Αυτόματη άντληση εξόδων» section renders.
+        $company = Company::create([
+            'name' => 'MyData OE', 'slug' => 'md-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
+            'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
+        ]);
+        $user->companies()->attach($company->id);
+        Filament::setTenant($company);
+
+        Livewire::test(CompanySettings::class)
+            ->assertSuccessful()
+            ->assertSee('Αυτόματη άντληση εξόδων (myDATA)')
+            ->assertSet('data.mydata_auto_fetch_expenses', false)
+            ->set('data.mydata_auto_fetch_expenses', true)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertTrue((bool) $company->refresh()->mydata_auto_fetch_expenses);
+    }
+
+    #[Test]
+    public function the_mydata_section_is_hidden_for_a_non_mydata_tenant(): void
+    {
+        // mode='off' → canReadMyData() false → section not rendered, and saving
+        // must NOT null the NOT NULL column (kept at its current value).
+        $company = $this->actAsAuthorized(); // makeCompany() is mydata_mode='off'
+
+        Livewire::test(CompanySettings::class)
+            ->assertSuccessful()
+            ->assertDontSee('Αυτόματη άντληση εξόδων (myDATA)')
+            ->set('data.pdf_footer_text', 'x')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertFalse((bool) $company->refresh()->mydata_auto_fetch_expenses);
+    }
+
+    #[Test]
     public function saving_cannot_reach_a_non_whitelisted_column(): void
     {
         $company = $this->actAsAuthorized();

@@ -105,12 +105,19 @@
 
 ## 4. Έξοδα / Προμηθευτές / Ε3
 - **Προμηθευτές** (`Supplier`) — CRUD + «Άντληση από ΑΑΔΕ» (GSIS) + **`suppliers:sync`**
-  (μοναδικά issuer ΑΦΜ από `RequestDocs`).
+  (μοναδικά issuer ΑΦΜ από `RequestDocs`) + **«Συμπλήρωση επωνυμιών από ΑΑΔΕ»** (κουμπί στη
+  λίστα + CLI `suppliers:backfill-names` — γεμίζει επωνυμία από GSIS σε παλιούς «αδέσποτους»
+  μόνο-ΑΦΜ, fill-only-empty· κοινός `SupplierNameBackfiller`).
 - **Εισαγωγή αδέσποτων** εξόδων από myDATA (`ExpenseImporter`/`ExpenseReconciler`) +
   self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ). **Κουμπί «Άντληση από myDATA» στη λίστα
   Έξοδα** (one-click read-only fetch → worklist) + tip «τελευταία άντληση · X αδέσποτα» +
-  read-only cron **`mydata:refresh-expenses`** (default OFF, toggle στη «Ρυθμίσεις
-  χρονοπρογραμματιστή»· δεν δημιουργεί εγγραφές).
+  read-only cron **`mydata:refresh-expenses`** (καθολικός toggle στη «Ρυθμίσεις
+  χρονοπρογραμματιστή», default OFF· δεν δημιουργεί εγγραφές) **+ per-company opt-in**
+  «Αυτόματη άντληση εξόδων» στις «Ρυθμίσεις εταιρείας» (`--auto-only` → μόνο όσοι tenants το
+  άναψαν· ο company_admin ελέγχει τον δικό του). Νέος ΕΛ προμηθευτής **GSIS-enriched κατά
+  την εισαγωγή** (κοινός `SupplierGsisEnricher`) ώστε να μην μένει «παύλα».
+- **Σημειώσεις χειριστή** ανά έξοδο (action «Σημειώσεις», γράφει μόνο το `notes`) —
+  διαθέσιμο και στα read-only myDATA έξοδα, εμφανίζεται στην προβολή.
 - **Χειροκίνητη καταχώριση εξόδου** (`source=manual`) — για παραστατικό προμηθευτή εκτός
   myDATA (ξένος προμηθευτής, απόδειξη): φόρμα με γραμμές (header totals από τις γραμμές),
   tab «Χειροκίνητα», edit μόνο για manual (τα myDATA-sourced μένουν read-only). **Συνημμένο

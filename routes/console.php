@@ -159,10 +159,12 @@ $trackSchedule(
 );
 
 // mydata:refresh-expenses — READ-ONLY refresh of the expenses reconciliation
-// snapshot per myDATA-readable tenant (keeps the Έξοδα worklist + «Άντληση» badge
-// fresh). Creates no rows. Default OFF.
+// snapshot (keeps the Έξοδα worklist + «Άντληση» badge fresh). Creates no rows.
+// Two-key: this deploy-wide flag enables the task (default OFF), and --auto-only
+// limits the AUTOMATIC sweep to tenants that opted in via «Ρυθμίσεις εταιρείας»
+// (companies.mydata_auto_fetch_expenses) — so a company_admin controls their own.
 $trackSchedule(
-    Schedule::command('mydata:refresh-expenses')
+    Schedule::command('mydata:refresh-expenses', ['--auto-only' => true])
         ->cron(config('ekdosi.schedule.mydata_fetch_expenses_cron', '0 */6 * * *'))
         ->name('mydata-fetch-expenses-all')
         ->when(fn () => $scheduleEnabled('mydata_fetch_expenses_enabled'))
