@@ -1,6 +1,7 @@
 # E-invoice provider bridge — blueprint (GR ΥΠΑΗΕΣ + EU PEPPOL)
 
-> **Status: BLUEPRINT / deferred.** No code yet. Captures the design so the work
+> **Status: regulatory reference — PEPPOL Phase 1 DONE, provider P0–P5 shipped (`mode=off`).**
+> (Banner used to read «deferred / no code yet».) Captures the *why* so the work
 > is a known quantity if/when Greek e-invoicing **μέσω παρόχου** (Υ.ΠΑ.Η.Ε.Σ.)
 > becomes mandatory, or we decide to issue via a provider, or Estonia (Nixpal
 > OÜ) needs PEPPOL. Grounded in the AADE provider schema committed alongside

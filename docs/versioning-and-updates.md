@@ -8,7 +8,10 @@ Two identifiers, kept distinct on purpose:
 | **Build stamp `2026.07.11-150101`** | *Which exact build* is on this box right now? | **Automatic**, derived from the git commit at deploy | `storage/app/build.json` (per-box, git-ignored) |
 
 The SemVer is a human judgement (a machine can't tell a milestone from a fix), so
-it stays a deliberate command — **not** auto-bumped per PR. The build stamp is the
+it stays a deliberate command — **not** auto-bumped per PR. In the **PR flow** the
+release commit rolls the CHANGELOG + `config/app.php` on the branch, and the `vX.Y.Z`
+tag is created AFTER merge with **`sh tag-release.sh --tag`** (bare = STATUS + options;
+reads the version from `config/app.php`, pulls `main`, tags, pushes). The build stamp is the
 support/diagnostics identity and the updater's compare key, so it's automatic and
 never hand-committed (a committed timestamp is churn + wrong the moment you deploy
 at another time).

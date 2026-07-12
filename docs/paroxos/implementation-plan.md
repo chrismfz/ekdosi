@@ -1,6 +1,8 @@
 # E-invoicing Providers (ΥΠΑΗΕΣ) — implementation plan
 
-> **Status: PLAN / design-locked, no code yet.** The *why/regulatory* reference
+> **Status: P0–P5 SHIPPED (`mode=off`); P5-live + PEPPOL Phase 2 OPEN.** See §6/§11 for
+> the per-phase state (this banner used to read «no code yet» — the code now exists under
+> `app/Services/EInvoice/`). The *why/regulatory* reference
 > stays in **`regulatory-blueprint.md`** (provider role beyond myDATA,
 > the AADE provider XSD, Α.1112/2025 certification, ιδιοπάροχος). This doc is the
 > *how we build it* — it answers the three operator questions directly:

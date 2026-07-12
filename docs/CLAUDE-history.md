@@ -2235,7 +2235,7 @@ side; the submitter changes are the payload side.
 The SendInvoices submit path is now validated against the AADE **sandbox**
 for all four invoice types myip actually issues, not just the single PR #57
 retail ΑΠΥ. Report committed at the repo root:
-`docs/mydata-sandbox-validation-2026-05-28.md`.
+`docs/archive/mydata-sandbox-validation-2026-05-28.md`.
 
 **Result: zero rejections, no payload changes needed.** Filed + accepted:
 `1.1` (B2B τιμολόγιο w/ counterpart), `2.1` (service ΤΠΥ), `11.2` (retail

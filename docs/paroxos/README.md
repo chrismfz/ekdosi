@@ -23,5 +23,6 @@ B2B από Οκτ. 2026· B2G ήδη μέσω PEPPOL) σε έναν φάκελο
 (`EInvoiceSubmitter` + `EInvoiceSubmitterFactory`) **υπάρχει ήδη** — η δουλειά είναι
 ένας generic `GrProviderSubmitter` + ένας transport adapter ανά πάροχο.
 
-> **Status:** design-locked, **κανένας κώδικας ακόμη**. Σειρά υλοποίησης: βλ.
-> `implementation-plan.md` §6 (P0 factor-out → … → P5 InvoSign → P6 PEPPOL).
+> **Status:** P0–P5 **υλοποιημένα** (provider code shipped, `mode=off`): `GrProviderSubmitter`
+> + `InvoSignTransport`/`InvoSignDocument` + `ProviderPreflight`. **OPEN:** P5-live (real
+> πάροχος) + PEPPOL Phase 2. Σειρά υλοποίησης: βλ. `implementation-plan.md` §6/§11.
