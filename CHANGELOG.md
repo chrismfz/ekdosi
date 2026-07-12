@@ -18,6 +18,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **WHMCS inbox: `whmcs:fetch-pending --limit>ceiling` δεν «παγώνει» πλέον στην 1η σελίδα.** Το
+  `WhmcsClient::getPendingInvoices` σταματούσε σε short page (`returned < limit`) — αν ο caller
+  έδινε limit πάνω από το server-side page ceiling (~100), η σελίδα 1 γύριζε ceiling < limit και
+  ο walk κοβόταν σε μία σελίδα (η κλάση WH-6 «stuck at N»). Τερματίζει πλέον μόνο σε ΚΕΝΗ σελίδα,
+  όπως το αδελφό `getInvoicesForClient`. + regression test.
+- **WHMCS ingest: concurrent webhooks δεν βγάζουν πια spurious 500 σε MariaDB.** Δύο ταυτόχρονα
+  ingest του ίδιου `(company_id, whmcs_invoice_id)` υπό REPEATABLE READ (default της MariaDB)
+  κάνουν InnoDB deadlock (όχι unique-violation) που ξέφευγε ως 500· το `DB::transaction(..., 3)`
+  κάνει retry — στο retry η γραμμή υπάρχει → clean existing-row path. Το unique index απέτρεπε
+  πάντα διπλή γραμμή· αυτό διορθώνει μόνο τον θόρυβο/500.
+
 ## [1.7.0] - 2026-07-13
 
 ### Added
@@ -41,6 +53,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `ExpenseImporter` πλέον αντλεί την ταυτότητα από το μητρώο ΑΑΔΕ (GSIS) όταν δημιουργεί νέο ΕΛ
   προμηθευτή, όπως ήδη κάνει ο συγχρονισμός προμηθευτών· best-effort (σε αποτυχία GSIS δημιουργείται
   ο προμηθευτής μόνο με ΑΦΜ). Κοινός `SupplierGsisEnricher` για importer + sync.
+### Fixed
+- **WHMCS inbox: `whmcs:fetch-pending --limit>ceiling` δεν «παγώνει» πλέον στην 1η σελίδα.** Το
+  `WhmcsClient::getPendingInvoices` σταματούσε σε short page (`returned < limit`) — αν ο caller
+  έδινε limit πάνω από το server-side page ceiling (~100), η σελίδα 1 γύριζε ceiling < limit και
+  ο walk κοβόταν σε μία σελίδα (η κλάση WH-6 «stuck at N»). Τερματίζει πλέον μόνο σε ΚΕΝΗ σελίδα,
+  όπως το αδελφό `getInvoicesForClient`. + regression test.
+- **WHMCS ingest: concurrent webhooks δεν βγάζουν πια spurious 500 σε MariaDB.** Δύο ταυτόχρονα
+  ingest του ίδιου `(company_id, whmcs_invoice_id)` υπό REPEATABLE READ (default της MariaDB)
+  κάνουν InnoDB deadlock (όχι unique-violation) που ξέφευγε ως 500· το `DB::transaction(..., 3)`
+  κάνει retry — στο retry η γραμμή υπάρχει → clean existing-row path. Το unique index απέτρεπε
+  πάντα διπλή γραμμή· αυτό διορθώνει μόνο τον θόρυβο/500.
 
 ## [1.6.0] - 2026-07-12
 

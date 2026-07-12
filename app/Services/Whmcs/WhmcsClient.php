@@ -92,8 +92,7 @@ class WhmcsClient
         private readonly string $apiUrl,
         private readonly string $identifier,
         private readonly string $secret,
-    ) {
-    }
+    ) {}
 
     /**
      * Issue a one-call probe to verify the URL + credentials work.
@@ -142,7 +141,6 @@ class WhmcsClient
      *                                Typically the tenant's ekdosi-cutover
      *                                date - avoids pulling decades of
      *                                historical test invoices.
-     *
      * @return array<int, array<string, mixed>> Raw invoice rows from
      *                                          WHMCS. Caller maps to
      *                                          our domain.
@@ -156,8 +154,9 @@ class WhmcsClient
         // already-filed invoices that are NEWER than the oldest unfiled one —
         // so a single page silently drops the oldest unfiled rows (the "21 in
         // DB, 16 in inbox" gap). We walk pages from `offset` until we cross the
-        // minDate boundary (DESC ordering → everything past it is older) or a
-        // short/empty page signals the end. A safety cap bounds the walk for a
+        // minDate boundary (DESC ordering → everything past it is older) or an
+        // EMPTY page signals the end (NOT a short page — that can just be the
+        // server's page ceiling; WH-6). A safety cap bounds the walk for a
         // tenant with no minDate set.
         //
         // `limit`/`offset` are the per-page size + starting page; callers that
@@ -177,9 +176,9 @@ class WhmcsClient
                 // that hangs. This was the real "stuck at 16 / 5-min freeze"
                 // bug.). orderby/order keep DESC for the minDate early-stop.
                 'limitstart' => $cursor,
-                'limitnum'   => $limit,
-                'orderby'    => 'date',
-                'order'      => 'desc',
+                'limitnum' => $limit,
+                'orderby' => 'date',
+                'order' => 'desc',
             ]);
 
             // GetInvoices returns either:
@@ -230,13 +229,14 @@ class WhmcsClient
                 break;
             }
 
-            // Advance by what WHMCS ACTUALLY returned, not by $limit — the API
-            // caps page size server-side, so it routinely returns fewer rows
-            // than limitnum. Stop on a short page too (no more rows after it).
+            // Advance by what WHMCS ACTUALLY returned, not by $limit. The ONLY
+            // end signals are an empty page (above), the seen-id loop guard, the
+            // maxPages cap, and the minDate early-stop — deliberately NOT a short
+            // page (returned < limit): if a caller passes a limit above WHMCS's
+            // server-side page ceiling (~100), page 1 returns the ceiling < limit
+            // and a short-page break would re-truncate the walk to a single page —
+            // the WH-6 "stuck at N" freeze. Mirrors getInvoicesForClient.
             $cursor += $returned;
-            if ($returned < $limit) {
-                break;
-            }
         }
 
         return $out;
@@ -250,10 +250,10 @@ class WhmcsClient
      * build an ekdosi Invoice + InvoiceLine[]. One API call per
      * invoice - cost of having a complete audit-grade snapshot.
      *
-     * @return array<string, mixed>|null  null if WHMCS returned
-     *                                    "Invoice ID Not Found"
-     *                                    (distinguish from network /
-     *                                    auth failures)
+     * @return array<string, mixed>|null null if WHMCS returned
+     *                                   "Invoice ID Not Found"
+     *                                   (distinguish from network /
+     *                                   auth failures)
      */
     public function getInvoice(int $whmcsInvoiceId): ?array
     {
@@ -313,9 +313,9 @@ class WhmcsClient
                 // limitstart/limitnum — NOT limit (silently ignored → same first
                 // page every call). DESC keeps the minDate early-stop valid.
                 'limitstart' => $cursor,
-                'limitnum'   => $limit,
-                'orderby'    => 'date',
-                'order'      => 'desc',
+                'limitnum' => $limit,
+                'orderby' => 'date',
+                'order' => 'desc',
             ]);
 
             $list = $resp['invoices']['invoice'] ?? [];
@@ -396,8 +396,8 @@ class WhmcsClient
      * corruption on the WHMCS side), the invoice payload is returned
      * with no client merge - matcher will fall through to unmatched.
      *
-     * @return array<string, mixed>|null  null if WHMCS returned
-     *                                    "Invoice ID Not Found"
+     * @return array<string, mixed>|null null if WHMCS returned
+     *                                   "Invoice ID Not Found"
      */
     public function getInvoiceWithClient(int $whmcsInvoiceId): ?array
     {
@@ -460,17 +460,17 @@ class WhmcsClient
      * pass `stats=false` to skip the optional expensive sub-queries
      * (paid totals, last login, etc) — we only need identity.
      *
-     * @return array<string, mixed>|null  null if WHMCS returned
-     *                                    "Client ID Not Found"
-     *                                    (distinguish from network /
-     *                                    auth failures)
+     * @return array<string, mixed>|null null if WHMCS returned
+     *                                   "Client ID Not Found"
+     *                                   (distinguish from network /
+     *                                   auth failures)
      */
     public function getClient(int $whmcsClientId): ?array
     {
         try {
             return $this->call('GetClientsDetails', [
                 'clientid' => $whmcsClientId,
-                'stats'    => 'false',
+                'stats' => 'false',
             ]);
         } catch (WhmcsApiException $e) {
             // WHMCS's standard error string for missing client.
@@ -499,13 +499,14 @@ class WhmcsClient
     {
         $resp = $this->call('GetClients', [
             'search' => $needle,
-            'limit'  => $limit,
+            'limit' => $limit,
         ]);
 
         $list = $resp['clients']['client'] ?? [];
         if (! empty($list) && ! array_is_list($list)) {
             $list = [$list];
         }
+
         return $list;
     }
 
@@ -519,15 +520,14 @@ class WhmcsClient
      * Other WHMCS-side error → WhmcsApiException with WHMCS's own message
      *
      * @param  array<string, mixed>  $params
-     *
      * @return array<string, mixed>
      */
     private function call(string $action, array $params = []): array
     {
         $body = array_merge($params, [
-            'identifier'   => $this->identifier,
-            'secret'       => $this->secret,
-            'action'       => $action,
+            'identifier' => $this->identifier,
+            'secret' => $this->secret,
+            'action' => $action,
             'responsetype' => 'json',
         ]);
 
