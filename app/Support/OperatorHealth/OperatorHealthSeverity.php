@@ -127,24 +127,42 @@ class OperatorHealthSeverity
             }
         }
 
-        // --- WHMCS / myDATA per-tenant failures + discrepancies.
+        // --- WHMCS / myDATA per-tenant failures + discrepancies + staleness (OPS-13).
+        // A «stale» tenant = an enabled sweep that stopped recording (see
+        // OperatorHealthReport::sweepIsStale) → a cached «ok» that's no longer
+        // trustworthy. «failed» takes precedence (more actionable); a non-failed
+        // but stale row is warned separately.
         $whmcsFailed = [];
+        $whmcsStale = [];
         foreach (($data['whmcs'] ?? []) as $row) {
             if (($row['status'] ?? null) === 'failed') {
                 $whmcsFailed[] = $row['tenant'] ?? '?';
+            } elseif (! empty($row['stale'])) {
+                $whmcsStale[] = $row['tenant'] ?? '?';
             }
         }
         if ($whmcsFailed !== []) {
             $warnings[] = 'WHMCS fetch απέτυχε: '.implode(', ', $whmcsFailed).'.';
         }
+        if ($whmcsStale !== []) {
+            $warnings[] = 'WHMCS fetch «κόλλησε» (ενεργό αλλά καμία εκτέλεση εδώ και ώρες): '.implode(', ', $whmcsStale).'.';
+        }
 
         $mydataFailed = [];
         $mydataDiscrepant = [];
+        $mydataStale = [];
         foreach (($data['mydata'] ?? []) as $row) {
+            // Precedence failed → discrepant → stale. A stale row whose last
+            // cached run had discrepancies is reported as «discrepant», not
+            // «stale» — same warning level + exit code, so the gate outcome is
+            // identical; the operator just sees the discrepancy first. Acceptable
+            // because a stale run can't have NEW discrepancies anyway.
             if (($row['status'] ?? null) === 'failed') {
                 $mydataFailed[] = $row['tenant'] ?? '?';
             } elseif ((int) ($row['discrepancies'] ?? 0) > 0) {
                 $mydataDiscrepant[] = $row['tenant'] ?? '?';
+            } elseif (! empty($row['stale'])) {
+                $mydataStale[] = $row['tenant'] ?? '?';
             }
         }
         if ($mydataFailed !== []) {
@@ -152,6 +170,9 @@ class OperatorHealthSeverity
         }
         if ($mydataDiscrepant !== []) {
             $warnings[] = 'myDATA αποκλίσεις: '.implode(', ', $mydataDiscrepant).'.';
+        }
+        if ($mydataStale !== []) {
+            $warnings[] = 'myDATA reconcile «κόλλησε» (ενεργό αλλά καμία εκτέλεση εδώ και ώρες): '.implode(', ', $mydataStale).'.';
         }
 
         // SEC-3: two tenants sharing a webhook secret = forgeable cross-tenant

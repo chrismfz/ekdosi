@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Companies\Pages;
 use App\Filament\Resources\Companies\CompanyResource;
 use App\Filament\Support\SendChannelFormBridge;
 use App\Services\MyData\MyDataLookupSeeder;
+use App\Support\Tenancy\CompanyContext;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 
@@ -39,18 +40,20 @@ class CreateCompany extends CreateRecord
             return;
         }
 
-        $seeder = app(MyDataLookupSeeder::class);
-        $vat = $seeder->seedVatCategories($this->record);
-        $types = $seeder->seedInvoiceTypes($this->record);
-        $seeder->seedPaymentMethods($this->record);
-        $seeder->seedDistributionAims($this->record);
-        $seeder->seedMetricUnits($this->record);
-        $seeder->seedDeliveryMethods($this->record);
-        $seeder->seedProductCategories($this->record);
+        // Seed under the NEW record's own tenant context. CompanyResource isn't
+        // tenant-scoped, so the panel's ambient tenant (TenantSet) is whatever
+        // company the operator was in when they hit «New» — NOT the record being
+        // created. Without actAs the seeder's CompanyScope would filter to that
+        // other tenant (harmless while the record is empty, but a latent trap);
+        // pinning it to $this->record keeps the scope honest.
+        $r = app(CompanyContext::class)->actAs(
+            $this->record,
+            fn (): array => app(MyDataLookupSeeder::class)->seedStandardLookups($this->record),
+        );
 
         Notification::make()
             ->title('Στήθηκαν τυπικές ρυθμίσεις ΑΑΔΕ')
-            ->body("Κατηγορίες ΦΠΑ: {$vat['created']} · Είδη παραστατικών: {$types['created']} (με κατηγοριοποίηση myDATA) · τρόποι πληρωμής/αποστολής, σκοπός διακίνησης, μονάδες & κατηγορίες προϊόντων. Προσαρμόστε τα στο Setup αν χρειάζεται.")
+            ->body("Κατηγορίες ΦΠΑ: {$r['vat']['created']} · Είδη παραστατικών: {$r['types']['created']} (με κατηγοριοποίηση myDATA) · τρόποι πληρωμής/αποστολής, σκοπός διακίνησης, μονάδες & κατηγορίες προϊόντων. Προσαρμόστε τα στο Setup αν χρειάζεται.")
             ->success()
             ->send();
     }

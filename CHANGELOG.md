@@ -44,6 +44,21 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
   (όχι στο operator template ούτε στο verify_url/mark_section)· το subject (plain text) δεν αγγίζεται.
 
 ### Fixed
+- **AUDIT OPS-15 — το go-live backup gate απαιτεί απόδειξη, όχι μόνο toggle.** Το
+  `ekdosi:go-live-check` per-tenant backup gate δεν περνάει πλέον με σκέτο «enabled»: ζητά πρόσφατο
+  επιτυχημένο backup run (`company_backup_runs.status=ok`)· καμία/παλιά (>8 ημ.) επιτυχία → WARN που
+  παραπέμπει σε φρέσκο backup + restore drill. Ο runbook (`docs/updates-runbook.md`) απέκτησε πίνακα
+  cadence για το restore drill (πριν go-live / τριμηνιαίο off-site / μετά από αλλαγή pipeline).
+- **AUDIT OPS-13 — ανθεκτικά per-tenant scheduled sweeps + ανίχνευση «κολλημένου» tenant.** Τα
+  `whmcs-fetch-all`/`mydata-reconcile-all` δεν σταματούν πλέον σε όλους τους tenants όταν ΕΝΑΣ πετάξει
+  exception — απομονώνεται, καταγράφεται ως per-tenant αποτυχία στο health, και το sweep συνεχίζει. Η
+  «Υγεία συστήματος» + `ops:health` σημαίνουν πλέον έναν ενεργό sweep που **σταμάτησε να τρέχει** (>26h
+  χωρίς καταγραφή) ως «κόλλησε» (warning), ώστε ένα παλιό «ok» να μη διαβάζεται ως υγιές.
+- **AUDIT SET-5 — αλλαγή παρόχου σε ελληνική τιμολόγηση σπέρνει τα lookups.** Ένας tenant που
+  δημιουργήθηκε ως «none»/PEPPOL και αργότερα γύρισε σε `gr-mydata`/`gr-provider` έμενε με άδειες
+  ρυθμίσεις (ΦΠΑ, είδη παραστατικών κ.λπ.)· τώρα το `EditCompany` τρέχει την ίδια σπορά με το
+  CreateCompany (νέα aggregate `MyDataLookupSeeder::seedStandardLookups()`, idempotent/fill-empty) όταν
+  ο πάροχος γυρίζει σε ελληνικό — notification μόνο όταν όντως προστέθηκε κάτι.
 - **AUDIT OPS-12 — τέλος στο διπλό email σε retry.** Κάθε αποστολή φέρει σταθερό `send_key` (uuid,
   serialized ώστε να επιβιώνει στα retries)· αν ένα προηγούμενο attempt με το ίδιο key άφησε `sending`
   (hard crash μετά το SMTP accept) ή `sent`, το retry ΔΕΝ ξαναστέλνει (reconcile → sent). Νέα στήλη

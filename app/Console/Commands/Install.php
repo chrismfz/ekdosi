@@ -169,14 +169,10 @@ class Install extends Command
 
     private function seedLookups(Company $company): void
     {
-        $lookups = app(MyDataLookupSeeder::class);
-        $lookups->seedVatCategories($company);
-        $lookups->seedInvoiceTypes($company);
-        $lookups->seedPaymentMethods($company);
-        $lookups->seedDistributionAims($company);
-        $lookups->seedMetricUnits($company);
-        $lookups->seedDeliveryMethods($company);
-        $lookups->seedProductCategories($company);
+        // Same aggregate (single ordering) the create + provider-switch paths
+        // use. CLI has no ambient tenant → CompanyScope is a no-op and the
+        // seeder's explicit company_id is authoritative.
+        app(MyDataLookupSeeder::class)->seedStandardLookups($company);
     }
 
     private function askIfInteractive(string $question, string $default): string

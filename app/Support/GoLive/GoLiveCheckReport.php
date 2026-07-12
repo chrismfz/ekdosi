@@ -4,6 +4,7 @@ namespace App\Support\GoLive;
 
 use App\Enums\MyDataMode;
 use App\Models\Company;
+use App\Models\CompanyBackupRun;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\VatCategory;
@@ -39,6 +40,11 @@ class GoLiveCheckReport
      *  WARN band is ≤ 1 cent; anything strictly above is a FAIL (a 1.4-cent drift
      *  must NOT pass a legal cutover gate). The epsilon absorbs float noise. */
     private const DRIFT_TOLERANCE = 0.0101;
+
+    /** OPS-15: last successful per-tenant backup older than this (days) → WARN at
+     *  cutover. Generous vs daily/weekly cadences; a cutover check runs rarely, so
+     *  it nudges «take a FRESH backup + restore drill right before going live». */
+    private const BACKUP_STALE_DAYS = 8;
 
     public function __construct(private OperatorHealthReport $health) {}
 
@@ -340,6 +346,16 @@ class GoLiveCheckReport
     }
 
     /** @return array{key:string,label:string,status:string,detail:string} */
+    /**
+     * OPS-15: «enabled» alone is not DR readiness — a toggle that has never
+     * actually produced a backup, or whose last success is stale, is a false
+     * sense of safety at cutover. So beyond the flag we require EVIDENCE of a
+     * recent successful run (`company_backup_runs.status = ok`). No successful
+     * run ever, or the last one older than the stale window, stays WARN and
+     * nudges the operator to run a fresh backup + a restore DRILL (see
+     * docs/updates-runbook.md §Restore drill) before go-live. Explicit
+     * company_id (CLI: no ambient tenant context).
+     */
     private function backupGate(Company $tenant): array
     {
         $bs = $tenant->backupSetting;
@@ -347,7 +363,26 @@ class GoLiveCheckReport
             return $this->gate('backup', 'Αντίγραφα ασφαλείας', 'warn', 'δεν είναι ενεργά για αυτόν τον tenant');
         }
 
-        return $this->gate('backup', 'Αντίγραφα ασφαλείας', 'pass', "ενεργά ({$bs->frequency})");
+        $lastOk = CompanyBackupRun::query()
+            ->where('company_id', $tenant->id)
+            ->where('status', 'ok')
+            ->whereNotNull('finished_at')
+            ->latest('finished_at')
+            ->first();
+
+        if ($lastOk === null) {
+            return $this->gate('backup', 'Αντίγραφα ασφαλείας', 'warn',
+                "ενεργά ({$bs->frequency}) αλλά ΚΑΜΙΑ επιτυχημένη εκτέλεση ακόμα — τρέξε δοκιμαστικό backup + restore drill πριν το go-live (docs/updates-runbook.md)");
+        }
+
+        $ageDays = (int) $lastOk->finished_at->diffInDays(now());
+        if ($ageDays > self::BACKUP_STALE_DAYS) {
+            return $this->gate('backup', 'Αντίγραφα ασφαλείας', 'warn',
+                "ενεργά ({$bs->frequency})· τελευταίο επιτυχημένο backup πριν {$ageDays} ημ. — επιβεβαίωσε πρόσφατο backup + restore drill πριν το go-live");
+        }
+
+        return $this->gate('backup', 'Αντίγραφα ασφαλείας', 'pass',
+            "ενεργά ({$bs->frequency})· τελευταίο επιτυχημένο: {$lastOk->finished_at->format('d/m/Y H:i')}");
     }
 
     /**

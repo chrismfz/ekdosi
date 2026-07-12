@@ -179,7 +179,7 @@
             @foreach ($report['whmcs'] as $w)
                 <tr class="border-t border-gray-100 dark:border-gray-800">
                     <td class="py-1">{{ $w['tenant'] ?? '—' }}</td>
-                    <td><x-filament::badge :color="$this->statusColor($w['status'] ?? null)">{{ $this->statusLabel($w['status'] ?? null) }}</x-filament::badge></td>
+                    <td><x-filament::badge :color="$this->statusColor($w['status'] ?? null)">{{ $this->statusLabel($w['status'] ?? null) }}</x-filament::badge>@if ($w['stale'] ?? false) <x-filament::badge color="warning">κόλλησε</x-filament::badge>@endif</td>
                     <td>{{ $this->ago($w['last_success_at'] ?? null) }}</td>
                     <td>{{ $w['pending_review'] ?? '—' }}</td>
                 </tr>
@@ -199,7 +199,7 @@
             @foreach ($report['mydata'] as $d)
                 <tr class="border-t border-gray-100 dark:border-gray-800">
                     <td class="py-1">{{ $d['tenant'] ?? '—' }}</td>
-                    <td><x-filament::badge :color="$this->statusColor($d['status'] ?? null)">{{ $this->statusLabel($d['status'] ?? null) }}</x-filament::badge></td>
+                    <td><x-filament::badge :color="$this->statusColor($d['status'] ?? null)">{{ $this->statusLabel($d['status'] ?? null) }}</x-filament::badge>@if ($d['stale'] ?? false) <x-filament::badge color="warning">κόλλησε</x-filament::badge>@endif</td>
                     <td>{{ $d['discrepancies'] ?? '—' }}</td>
                     <td>{{ $this->ago($d['last_success_at'] ?? null) }}</td>
                 </tr>

@@ -3,6 +3,7 @@
 use App\Jobs\RecordQueueHeartbeat;
 use App\Models\Company;
 use App\Support\OperatorHealth\HealthRecorder;
+use App\Support\OperatorHealth\TenantScheduleSweep;
 use App\Support\Settings\SystemSettings;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -30,6 +31,12 @@ $trackSchedule = function ($event, string $task) {
  */
 $scheduleEnabled = fn (string $key): bool => app(SystemSettings::class)
     ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+
+// OPS-13: per-tenant sweeps with per-tenant isolation (one tenant's uncaught
+// exception must not abort the rest, and must be recorded so it surfaces). The
+// guarantee lives in TenantScheduleSweep so it's unit-testable; here we just
+// delegate.
+$sweepTenants = fn (iterable $tenants, string $command, callable $onError): int => app(TenantScheduleSweep::class)->run($tenants, $command, $onError);
 
 /*
 |--------------------------------------------------------------------------
@@ -87,12 +94,15 @@ $trackSchedule(
 // once per WHMCS-configured tenant. Operator-gated: this only STAGES,
 // it never files at AADE.
 $trackSchedule(
-    Schedule::call(function () {
-        Company::query()
-            ->whereNotNull('whmcs_api_url')
-            ->where('whmcs_api_url', '!=', '')
-            ->get()
-            ->each(fn (Company $c) => Artisan::call('whmcs:fetch-pending', ['--tenant' => $c->slug]));
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::query()
+                ->whereNotNull('whmcs_api_url')
+                ->where('whmcs_api_url', '!=', '')
+                ->get(),
+            'whmcs:fetch-pending',
+            fn (Company $c) => app(HealthRecorder::class)->recordWhmcsFetch($c, 1),
+        );
     })
         ->cron(config('ekdosi.schedule.whmcs_fetch_cron', '*/15 * * * *'))
         ->name('whmcs-fetch-all')
@@ -122,9 +132,12 @@ $trackSchedule(
 // AADE picture back). Discrepancies surface in the command output (exit 2);
 // pipe schedule output to a log for alerting.
 $trackSchedule(
-    Schedule::call(function () {
-        Company::myDataReadable()
-            ->each(fn (Company $c) => Artisan::call('mydata:reconcile-sales', ['--tenant' => $c->slug]));
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::myDataReadable(),
+            'mydata:reconcile-sales',
+            fn (Company $c) => app(HealthRecorder::class)->recordMyDataReconcile($c, 1),
+        );
     })
         ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))
         ->name('mydata-reconcile-all')

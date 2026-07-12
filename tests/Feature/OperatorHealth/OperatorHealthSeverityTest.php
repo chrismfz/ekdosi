@@ -116,6 +116,37 @@ class OperatorHealthSeverityTest extends TestCase
     }
 
     #[Test]
+    public function a_stale_per_tenant_sweep_warns(): void
+    {
+        // OPS-13: an ENABLED sweep that stopped recording is stale → warning,
+        // even though its last status was «ok».
+        $data = $this->healthy();
+        $data['whmcs'] = [['tenant' => 'a', 'status' => 'ok', 'stale' => true]];
+        $data['mydata'] = [['tenant' => 'b', 'status' => 'ok', 'discrepancies' => 0, 'stale' => true]];
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('warning', $s['level']);
+        $this->assertSame(1, $s['exit_code']);
+        $this->assertCount(2, $s['warnings']); // one per surface
+    }
+
+    #[Test]
+    public function failed_takes_precedence_over_stale(): void
+    {
+        // A row that last recorded a failure long ago is warned as «failed»
+        // (actionable), not double-counted as stale.
+        $data = $this->healthy();
+        $data['mydata'] = [['tenant' => 'b', 'status' => 'failed', 'discrepancies' => 0, 'stale' => true]];
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('warning', $s['level']);
+        $this->assertCount(1, $s['warnings']);
+        $this->assertStringContainsString('απέτυχε', $s['warnings'][0]);
+    }
+
+    #[Test]
     public function nearly_full_disk_warns_and_full_disk_is_critical(): void
     {
         $warn = $this->healthy();
