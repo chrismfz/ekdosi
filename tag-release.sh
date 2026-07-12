@@ -6,28 +6,46 @@
 #   sh tag-release.sh --help
 #
 # The version is READ from config/app.php (the canonical source `ekdosi:release`
-# bumps) so there's no number to type and no way to tag the wrong one. Tagging is
-# idempotent. We deliberately do NOT auto-tag from CI (a GitHub Action would burn
-# Actions minutes and couple releasing to CI) — this local script is the tagger.
+# bumps) so there's no number to type and no way to tag the wrong one. The remote
+# (origin) is the source of truth for «tagged» — a tag that exists locally but was
+# never pushed still counts as NOT done. Tagging is idempotent. We deliberately do
+# NOT auto-tag from CI (a GitHub Action would burn Actions minutes and couple
+# releasing to CI) — this local script is the tagger.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
+read_version() {
+    grep -oE "'version'[[:space:]]*=>[[:space:]]*'[^']+'" config/app.php \
+        | head -1 | grep -oE "'[0-9][^']*'" | tr -d "'" || true
+}
+
+# Is TAG on origin? Empty output ⇒ no (or the remote is unreachable — we fall back
+# to the local tag for the read-only status so it still works offline).
+remote_has_tag() {
+    [ -n "$(git ls-remote --tags origin "refs/tags/$1" 2>/dev/null || true)" ]
+}
+local_has_tag() {
+    git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1
+}
+
 # --- read current state (all read-only) ---
-VERSION=$(grep -oE "'version'[[:space:]]*=>[[:space:]]*'[^']+'" config/app.php \
-    | head -1 | grep -oE "'[0-9][^']*'" | tr -d "'" || true)
+VERSION=$(read_version)
 TAG="v${VERSION}"
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
 LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo '(κανένα)')
 CHANGELOG_TOP=$(grep -m1 -E '^## \[[0-9]' CHANGELOG.md 2>/dev/null || echo '(—)')
 TREE=$([ -z "$(git status --porcelain 2>/dev/null)" ] && echo 'καθαρό' || echo 'με αλλαγές')
 
-if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
-    TAG_STATE="✓ υπάρχει"
-    TAG_EXISTS=1
+if remote_has_tag "$TAG"; then
+    TAG_STATE="✓ στο origin (ταγαρισμένο)"
+    TAG_DONE=1
+elif local_has_tag "$TAG"; then
+    TAG_STATE="⚠ τοπικά μόνο — δεν έγινε push (τρέξε --tag)"
+    TAG_DONE=0
 else
     TAG_STATE="✗ ΔΕΝ υπάρχει — χρειάζεται tag"
-    TAG_EXISTS=0
+    TAG_DONE=0
 fi
 
 # Non-empty [Unreleased] ⇒ there are changes not yet cut into a version.
@@ -53,35 +71,38 @@ show_status() {
 
   Τι μπορείς να κάνεις:
 EOF
+    if [ "$BRANCH" != 'main' ]; then
+        echo "    • (είσαι σε '${BRANCH}', όχι main — το --tag κάνει checkout main μόνο του)"
+    fi
     if [ -n "$UNRELEASED" ]; then
         echo "    • php artisan ekdosi:release   → κόψε έκδοση (αυτόματο επίπεδο) ΠΡΙΝ ταγάρεις"
     fi
-    if [ "$TAG_EXISTS" -eq 0 ]; then
+    if [ "$TAG_DONE" -eq 0 ]; then
         echo "    • sh tag-release.sh --tag      → pull main + δημιουργία & push του ${TAG}"
     else
-        echo "    • (τίποτα) — το ${TAG} υπάρχει ήδη· η τρέχουσα έκδοση είναι ταγαρισμένη"
+        echo "    • (τίποτα) — το ${TAG} είναι στο origin· η τρέχουσα έκδοση είναι ταγαρισμένη"
     fi
     echo "    • sh tag-release.sh --help     → βοήθεια"
     echo
 }
 
 do_tag() {
-    if [ -z "${VERSION:-}" ]; then
-        echo "✋ Δεν βρήκα 'version' στο config/app.php — άκυρο." >&2
-        exit 1
-    fi
-
     echo "==> Sync main..."
     git checkout main
     git pull --ff-only
 
     # Re-read after the pull (main may carry a newer bump than the working copy).
-    VERSION=$(grep -oE "'version'[[:space:]]*=>[[:space:]]*'[^']+'" config/app.php \
-        | head -1 | grep -oE "'[0-9][^']*'" | tr -d "'")
+    VERSION=$(read_version)
+    if [ -z "${VERSION:-}" ]; then
+        echo "✋ Δεν βρήκα 'version' στο config/app.php μετά το pull — άκυρο." >&2
+        exit 1
+    fi
     TAG="v${VERSION}"
 
-    if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
-        echo "✓ Το tag ${TAG} υπάρχει ήδη — τίποτα να κάνω."
+    # The remote is authoritative: only «already on origin» means done. A tag that
+    # exists locally but not on origin (a prior push that failed) must still push.
+    if remote_has_tag "$TAG"; then
+        echo "✓ Το ${TAG} υπάρχει ήδη στο origin — τίποτα να κάνω."
         exit 0
     fi
     if ! grep -qE "^## \[${VERSION}\] - " CHANGELOG.md; then
@@ -89,9 +110,13 @@ do_tag() {
     fi
 
     echo "==> Tag ${TAG} στο main ($(git rev-parse --short HEAD))..."
-    git tag "${TAG}"
+    if local_has_tag "$TAG"; then
+        echo "ℹ Υπάρχει ήδη τοπικό ${TAG} — γίνεται μόνο push στο origin."
+    else
+        git tag "${TAG}"
+    fi
     git push origin "${TAG}"
-    echo "✓ Δημιουργήθηκε + έγινε push το ${TAG}."
+    echo "✓ Το ${TAG} είναι στο origin."
 }
 
 case "${1:-}" in
