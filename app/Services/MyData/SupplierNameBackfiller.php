@@ -75,8 +75,10 @@ class SupplierNameBackfiller
             processed: $suppliers->count(),
             enriched: $enriched,
             failures: $failures,
-            // Processed exactly $limit rows → more nameless ones likely remain.
-            hitLimit: $limit > 0 && $suppliers->count() === $limit,
+            // Suggest «run again» ONLY when we filled the batch AND made progress.
+            // A full batch that enriched nothing (e.g. GSIS creds missing → every
+            // ΑΦΜ fails) must NOT loop the operator on a fruitless retry.
+            hitLimit: $limit > 0 && $enriched > 0 && $suppliers->count() === $limit,
         );
     }
 }

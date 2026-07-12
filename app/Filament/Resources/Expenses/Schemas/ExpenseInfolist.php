@@ -78,7 +78,9 @@ class ExpenseInfolist
                             ->badge()
                             ->color('info')
                             ->icon('heroicon-o-qr-code')
-                            ->formatStateUsing(fn (): string => 'Άνοιγμα QR παραστατικού')
+                            // State drives the badge: null when there's no QR, so the
+                            // section can show the OTHER link without a dead badge here.
+                            ->state(fn (Expense $record): ?string => filled($record->qr_url) ? 'Άνοιγμα QR παραστατικού' : null)
                             ->url(fn (Expense $record): ?string => $record->qr_url, shouldOpenInNewTab: true),
                         TextEntry::make('downloading_invoice_url')
                             ->label('Παραστατικό εκδότη')
@@ -86,7 +88,7 @@ class ExpenseInfolist
                             ->badge()
                             ->color('success')
                             ->icon('heroicon-o-arrow-top-right-on-square')
-                            ->formatStateUsing(fn (): string => 'Άνοιγμα παραστατικού')
+                            ->state(fn (Expense $record): ?string => filled($record->downloading_invoice_url) ? 'Άνοιγμα παραστατικού' : null)
                             ->url(fn (Expense $record): ?string => $record->downloading_invoice_url, shouldOpenInNewTab: true),
                     ]),
 

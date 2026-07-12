@@ -124,6 +124,18 @@ class ExpenseClassificationTest extends TestCase
         // The AADE-mirrored fields are untouched by the notes write.
         $this->assertSame('sync', $expense->source->value);
         $this->assertSame('400000000000123', $expense->mydata_mark);
+
+        // A note of literally "0" must survive (blank(), not a falsy `?:` check).
+        Livewire::test(ViewExpense::class, ['record' => $expense->getRouteKey()])
+            ->callAction('notes', data: ['notes' => '0'])
+            ->assertHasNoErrors();
+        $this->assertSame('0', $expense->refresh()->notes);
+
+        // Emptying it stores null (not '').
+        Livewire::test(ViewExpense::class, ['record' => $expense->getRouteKey()])
+            ->callAction('notes', data: ['notes' => ''])
+            ->assertHasNoErrors();
+        $this->assertNull($expense->refresh()->notes);
     }
 
     public function test_classify_action_mixed_mode_sets_per_line(): void

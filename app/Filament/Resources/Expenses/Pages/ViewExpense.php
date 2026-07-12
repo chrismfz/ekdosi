@@ -244,8 +244,10 @@ class ViewExpense extends ViewRecord
                 ])
                 ->action(function (array $data): void {
                     // forceFill: only the notes column moves; the AADE-mirrored
-                    // header/totals/state are never touched here.
-                    $this->record->forceFill(['notes' => $data['notes'] ?: null])->save();
+                    // header/totals/state are never touched here. blank() (not `?:`)
+                    // so a note of literally "0" is kept, empty → null.
+                    $note = $data['notes'] ?? null;
+                    $this->record->forceFill(['notes' => blank($note) ? null : $note])->save();
 
                     Notification::make()->title('Οι σημειώσεις αποθηκεύτηκαν')->success()->send();
                 }),
