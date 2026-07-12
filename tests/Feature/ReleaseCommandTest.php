@@ -71,19 +71,66 @@ class ReleaseCommandTest extends TestCase
     }
 
     #[Test]
-    public function dry_run_writes_nothing(): void
+    public function dry_run_previews_without_writing(): void
     {
+        // Drive the PREVIEW branch: seed a non-empty [Unreleased] so the command
+        // reaches the dry-run preview (an empty one aborts earlier). Assert it
+        // exits 0 and writes NOTHING. Restore the real CHANGELOG in finally so a
+        // failing assertion never leaves the repo file mutated.
         $this->withoutMockingConsoleOutput();
-        $changelog = file_get_contents(base_path('CHANGELOG.md'));
-        $config = file_get_contents(config_path('app.php'));
+        $path = base_path('CHANGELOG.md');
+        $original = (string) file_get_contents($path);
+        $config = (string) file_get_contents(config_path('app.php'));
 
-        // Dry-run must never touch disk — regardless of whether [Unreleased] has
-        // anything to release (empty → it exits with a «nothing to release»
-        // notice, non-empty → it previews; neither writes).
-        $this->artisan('ekdosi:release', ['--patch' => true, '--dry-run' => true]);
+        try {
+            $seeded = preg_replace(
+                '/## \[Unreleased\]\n/',
+                "## [Unreleased]\n\n### Fixed\n- seeded fixture entry\n\n",
+                $original,
+                1,
+            );
+            file_put_contents($path, $seeded);
 
-        $this->assertSame($changelog, file_get_contents(base_path('CHANGELOG.md')));
-        $this->assertSame($config, file_get_contents(config_path('app.php')));
+            $exit = $this->artisan('ekdosi:release', ['--patch' => true, '--dry-run' => true]);
+
+            $this->assertSame(0, $exit);
+            $this->assertSame($seeded, file_get_contents($path));         // preview wrote nothing
+            $this->assertSame($config, file_get_contents(config_path('app.php')));
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+
+    #[Test]
+    public function auto_mode_infers_and_previews_the_level_end_to_end(): void
+    {
+        // No flag → handle() must run inferLevel and preview the inferred bump.
+        // Seed an «Added» so it should choose minor; restore in finally.
+        $path = base_path('CHANGELOG.md');
+        $original = (string) file_get_contents($path);
+
+        try {
+            $seeded = preg_replace(
+                '/## \[Unreleased\]\n/',
+                "## [Unreleased]\n\n### Added\n- a brand new feature\n\n",
+                $original,
+                1,
+            );
+            file_put_contents($path, $seeded);
+
+            // The next version is level-specific: minor of 1.x.y is 1.(x+1).0,
+            // which patch/major could never produce — so seeing it in the preview
+            // proves auto mode inferred MINOR from the seeded «Added».
+            $next = Release::bump((string) config('app.version', '0.0.0'), 'minor');
+
+            $this->artisan('ekdosi:release', ['--dry-run' => true])
+                ->expectsOutputToContain($next)
+                ->assertExitCode(0);
+
+            $this->assertSame($seeded, file_get_contents($path));  // dry-run wrote nothing
+        } finally {
+            file_put_contents($path, $original);
+        }
     }
 
     #[Test]
@@ -128,6 +175,20 @@ class ReleaseCommandTest extends TestCase
         [$level] = Release::inferLevel($md);
 
         $this->assertSame('patch', $level);
+    }
+
+    #[Test]
+    public function a_bare_item_without_a_subsection_falls_back_to_patch(): void
+    {
+        // Someone skipped the ### discipline and wrote a bare entry. rollChangelog
+        // would still roll it, so inferLevel must NOT report «nothing» — it falls
+        // back to patch rather than silently aborting the release.
+        $md = "# CL\n\n## [Unreleased]\n- a bare, unstructured note\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level, $reason] = Release::inferLevel($md);
+
+        $this->assertSame('patch', $level);
+        $this->assertStringContainsString('μη-δομημένες', $reason);
     }
 
     #[Test]

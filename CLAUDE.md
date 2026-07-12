@@ -137,9 +137,10 @@ Part of "done", like tests. **Every change updates the right place:**
   - **`--check`** = non-destructive preflight (what would it cut? anything pending?) — wired
     into `clean.sh` step 5 so a forgotten bump surfaces on deploy.
   - **`--commit --tag`** = also git-commit the roll + create `vX.Y.Z` (never pushes). Handy
-    for a release cut straight on `main`; in the PR flow the tag is made post-merge instead
-    (`git checkout main && git pull && git tag vX.Y.Z && git push --tags`) so it points at
-    the merged commit.
+    for a release cut straight on `main`; in the PR flow the tag is made post-merge instead.
+  - **Post-merge tag (PR flow)** → **`sh tag-release.sh`** (repo root): bare = STATUS + options
+    (version, is-it-tagged, pending changes); `--tag` = pull `main` + tag `vX.Y.Z` (read from
+    `config/app.php`) + push. Replaces the manual `git checkout main && git pull && git tag …`.
 - **`FEATURES.md`** (repo root) — the catalogue of WHAT ekdosi does. **A NEW feature
   (not a fix/tweak) ALSO gets a line/bullet here**, under the right section. This is
   the «μην χανόμαστε» file — keep it the truthful single source of what's built.

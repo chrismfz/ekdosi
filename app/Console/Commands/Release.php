@@ -206,6 +206,14 @@ class Release extends Command
         }
 
         if ($withItems === []) {
+            // No structured `### X` subsection carried an item. If there's still a
+            // bare `- item` under [Unreleased] (someone skipped the ### discipline),
+            // don't silently abort — rollChangelog() WOULD roll it, so treat it as a
+            // patch to keep the two "is there anything to release" views in agreement.
+            if (preg_match('/^\s*-\s+\S/m', $body)) {
+                return ['patch', 'μη-δομημένες αλλαγές (χωρίς ### subsection)'];
+            }
+
             return [null, 'το [Unreleased] δεν έχει καταχωρήσεις'];
         }
         if (in_array('Added', $withItems, true)) {
