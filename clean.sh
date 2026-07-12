@@ -5,7 +5,7 @@ set -euo pipefail
 BACKUP_DIR=storage/app/private/ekdosi
 MIN_BACKUP_BYTES=100000   # < 100 KB ⇒ the DB is almost certainly empty/broken
 
-echo "==> [1/4] DB backup before deploy..."
+echo "==> [1/5] DB backup before deploy..."
 if sudo -u ekdosi php artisan backup:run --only-db --disable-notifications; then
     echo "    ✓ DB backup written."
 else
@@ -13,7 +13,7 @@ else
     exit 1
 fi
 
-echo "==> [1b/4] Backup sanity (catch an already-empty/broken DB BEFORE migrating)..."
+echo "==> [1b/5] Backup sanity (catch an already-empty/broken DB BEFORE migrating)..."
 NEW=$(ls -t "$BACKUP_DIR"/*.zip 2>/dev/null | head -1 || true)
 PREV=$(ls -t "$BACKUP_DIR"/*.zip 2>/dev/null | sed -n 2p || true)
 if [ -z "$NEW" ]; then
@@ -39,14 +39,19 @@ if [ -n "$PREV" ]; then
 fi
 echo "    ✓ Backup size OK (${NEW_SZ} bytes)."
 
-echo "==> [2/4] Autoload + migrations..."
+echo "==> [2/5] Autoload + migrations..."
 sudo -u ekdosi composer dump-autoload --optimize
 sudo -u ekdosi php artisan migrate --force
 
-echo "==> [3/4] Compiled-cache refresh (NOT the app data cache)..."
+echo "==> [3/5] Compiled-cache refresh (NOT the app data cache)..."
 sudo -u ekdosi php artisan optimize:clear     # config+route+view+compiled+events
 sudo -u ekdosi php artisan optimize           # rebuild config+route caches
 
-echo "==> [4/4] Restart runtime..."
+echo "==> [4/5] Restart runtime..."
 sudo systemctl restart php-fpm                # flush opcache → new code
 sudo -u ekdosi php artisan queue:restart      # workers pick up new code
+
+echo "==> [5/5] Version reminder (advisory — never aborts)..."
+# If CHANGELOG [Unreleased] has entries, the deployed code carries changes that
+# weren't cut into a version yet — nudge to run `ekdosi:release`. Non-fatal.
+sudo -u ekdosi php artisan ekdosi:release --check || true

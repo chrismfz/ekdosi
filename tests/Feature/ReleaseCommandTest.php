@@ -74,11 +74,83 @@ class ReleaseCommandTest extends TestCase
     public function dry_run_writes_nothing(): void
     {
         $this->withoutMockingConsoleOutput();
-        $before = file_get_contents(base_path('CHANGELOG.md'));
+        $changelog = file_get_contents(base_path('CHANGELOG.md'));
+        $config = file_get_contents(config_path('app.php'));
 
-        $exit = $this->artisan('ekdosi:release', ['--patch' => true, '--dry-run' => true]);
+        // Dry-run must never touch disk — regardless of whether [Unreleased] has
+        // anything to release (empty → it exits with a «nothing to release»
+        // notice, non-empty → it previews; neither writes).
+        $this->artisan('ekdosi:release', ['--patch' => true, '--dry-run' => true]);
+
+        $this->assertSame($changelog, file_get_contents(base_path('CHANGELOG.md')));
+        $this->assertSame($config, file_get_contents(config_path('app.php')));
+    }
+
+    #[Test]
+    public function it_infers_minor_when_unreleased_has_an_added(): void
+    {
+        $md = "# CL\n\n## [Unreleased]\n\n### Added\n- A new filter\n\n### Fixed\n- a bug\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level, $reason] = Release::inferLevel($md);
+
+        $this->assertSame('minor', $level);
+        $this->assertStringContainsString('Added', $reason);
+    }
+
+    #[Test]
+    public function it_infers_patch_when_unreleased_has_only_fixes(): void
+    {
+        $md = "# CL\n\n## [Unreleased]\n\n### Fixed\n- a bug\n\n### Security\n- a hole\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level, $reason] = Release::inferLevel($md);
+
+        $this->assertSame('patch', $level);
+        $this->assertStringContainsString('Fixed', $reason);
+    }
+
+    #[Test]
+    public function it_infers_nothing_for_an_empty_unreleased(): void
+    {
+        $md = "# CL\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level] = Release::inferLevel($md);
+
+        $this->assertNull($level);
+    }
+
+    #[Test]
+    public function an_empty_added_heading_with_no_items_does_not_force_minor(): void
+    {
+        // A stray «### Added» with nothing under it must NOT bump minor — only a
+        // real feature (an item) counts. Here only Fixed has an item → patch.
+        $md = "# CL\n\n## [Unreleased]\n\n### Added\n\n### Fixed\n- a bug\n\n## [1.0.0] - 2026-01-01\n- x\n";
+
+        [$level] = Release::inferLevel($md);
+
+        $this->assertSame('patch', $level);
+    }
+
+    #[Test]
+    public function check_mode_writes_nothing_and_exits_zero(): void
+    {
+        $this->withoutMockingConsoleOutput();
+        $changelog = file_get_contents(base_path('CHANGELOG.md'));
+        $config = file_get_contents(config_path('app.php'));
+
+        $exit = $this->artisan('ekdosi:release', ['--check' => true]);
+
         $this->assertSame(0, $exit);
+        $this->assertSame($changelog, file_get_contents(base_path('CHANGELOG.md')));
+        $this->assertSame($config, file_get_contents(config_path('app.php')));
+    }
 
-        $this->assertSame($before, file_get_contents(base_path('CHANGELOG.md')));
+    #[Test]
+    public function it_rejects_more_than_one_explicit_level(): void
+    {
+        $this->withoutMockingConsoleOutput();
+
+        $exit = $this->artisan('ekdosi:release', ['--minor' => true, '--patch' => true]);
+
+        $this->assertSame(1, $exit);
     }
 }

@@ -17,6 +17,16 @@ major = milestone, minor = a new feature, patch = fixes). New work accrues under
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-07-12
+
+### Changed
+- **`ekdosi:release` βγάζει μόνο του το επίπεδο έκδοσης.** Χωρίς flag, διαβάζει το CHANGELOG
+  `[Unreleased]` και επιλέγει **minor** αν υπάρχει `### Added`, αλλιώς **patch** (το `--major` μένει
+  ρητό για milestones· `--minor`/`--patch` παρακάμπτουν). Νέα `--check` (μη-καταστροφικό preflight —
+  μπήκε στο `clean.sh` βήμα 5 ώστε ένα ξεχασμένο bump να φαίνεται στο deploy) και `--commit --tag`
+  (κάνει και το git commit + tag, χωρίς push). Τέλος στο «διάλεξε λάθος επίπεδο» και στο «μείναμε
+  στην ίδια έκδοση».
+
 ## [1.3.0] - 2026-07-12
 
 ### Added
