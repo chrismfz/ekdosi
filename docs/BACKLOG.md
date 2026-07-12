@@ -41,7 +41,9 @@ surfaced in the open-items sections further down.
   lock, **DONE/reference**).
 - **`operator-health.md`** · **`dr-without-app-key.md`** · **`go-live-usage-checks.sql.md`** —
   ops runbooks (reference).
-- **`mydata-sandbox-validation-2026-05-28.md`** — historical validation record.
+- **`archive/`** — closed historical records (the sandbox-validation reports, the
+  2026-07 production audit) — the «what happened / evidence» trail, moved out of the
+  live `docs/` tree.
 - **`aade/`** — the AADE myDATA + Delivery-Note specs.
 
 ---

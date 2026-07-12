@@ -269,7 +269,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   ΜΕΤΑ από επιτυχές POST — ενώ ένα 429 (rate-limit) και μια ρητή απόρριψη (`MyDataRejected`, χωρίς ΜΑΡΚ)
   σκόπιμα ΔΕΝ σημαίνονται (κανένα ΜΑΡΚ → ασφαλές retry). Επιβεβαιώθηκε επίσης ότι το κανάλι **παρόχου** (InvoSign) **κάνει dedup**
   + έχει real-time `invoice_status.php`, οπότε το `GrProviderSubmitter` είναι ήδη ασφαλές (καμία αλλαγή).
-  Πλήρης αναφορά: `docs/mydata-sandbox-myd2-retry-2026-07-07.md`.
+  Πλήρης αναφορά: `docs/archive/mydata-sandbox-myd2-retry-2026-07-07.md`.
 
 ### Fixed
 - **Provider cancel — καθαρή άρνηση για μη-9.3 (αντί opaque `[283]`).** Το

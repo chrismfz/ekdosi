@@ -272,7 +272,7 @@ it clears):
 
 **Sandbox-validated types (zero rejections, no payload changes):** 1.1, 2.1,
 11.2, 5.1, + a CANCEL; reconciliation matched all. Report:
-`docs/mydata-sandbox-validation-2026-05-28.md`.
+`docs/archive/mydata-sandbox-validation-2026-05-28.md`.
 
 **Sandbox round 2 — ✅ 2026-06-10 (`sandbox-results.txt`):** the new taxTypes
 (χαρτόσημο 3,6% · fees · product-linked per-unit fees), the **4% override → cat 10**,
