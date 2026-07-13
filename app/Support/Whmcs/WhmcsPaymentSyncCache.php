@@ -76,4 +76,19 @@ class WhmcsPaymentSyncCache
 
         return $at ? Carbon::parse($at) : null;
     }
+
+    /**
+     * Drop one invoice from the inbound worklist (e.g. right after the operator
+     * recorded its payment) so the row disappears immediately without waiting
+     * for the next reconcile. No-op if it isn't there.
+     */
+    public static function removeInbound(Company $company, int $invoiceId): void
+    {
+        $data = self::get($company);
+        self::put(
+            $company,
+            array_values(array_filter($data['inbound'], fn (int $id) => $id !== $invoiceId)),
+            $data['outbound'],
+        );
+    }
 }

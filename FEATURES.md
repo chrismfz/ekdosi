@@ -220,6 +220,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   money-write μόνο στο ekdosi, only-if-open + dedup. **On-demand και από το UI**: header action
   «Συγχρονισμός πληρωμών τώρα» στο inbox (bulk) + per-invoice «Έχει πληρωθεί στο WHMCS;» πάνω σε
   ανοιχτό WHMCS-συνδεδεμένο παραστατικό.
+- **Κεντρικός «Συγχρονισμός πληρωμών»** (σελίδα ομάδας Data + dashboard tile + bell): read-only
+  `whmcs:reconcile-payments` εντοπίζει ποια ανοιχτά επί-πιστώσει πληρώθηκαν στο WHMCS και τα δείχνει
+  εύκαιρα με 1-click «Καταγραφή πληρωμής» (ζωντανή επιβεβαίωση + κλείσιμο οφειλής). Cache μόνο ids,
+  ειδοποίηση για κάθε νέα εκκρεμότητα· κανένα money-write στον εντοπισμό.
 - **Ζωντανός έλεγχος όρου πληρωμής** στους προεπιλεγμένους τύπους (καρτέλα WHMCS): ρητό «γιατί» +
   προειδοποίηση αν ο paid τύπος έχει `due_days>0` (θα φαινόταν ως οφειλή) **ή** ο unpaid τύπος είναι
   cash-term (δεν θα φαινόταν ως οφειλή).

@@ -18,6 +18,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **WHMCS: κεντρικός «Συγχρονισμός πληρωμών» (Phase 1 — inbound εντοπισμός).** Νέα σελίδα
+  «Συγχρονισμός πληρωμών» (ομάδα Data) + dashboard tile που δείχνουν **εύκαιρα** ποια ανοιχτά
+  (επί πιστώσει) τιμολόγια έχει πλέον πληρώσει το WHMCS, ώστε ο χειριστής να κλείνει την οφειλή με
+  **ένα κλικ** («Καταγραφή πληρωμής» — επιβεβαιώνει ζωντανά στο WHMCS και γράφει **μόνο στο ekdosi**,
+  ίδια idempotent/only-if-open λογική). Ο εντοπισμός γίνεται από read-only `whmcs:reconcile-payments`
+  (scheduled, default OFF) που κασάρει τη worklist (μόνο invoice-ids, ποτέ ποσά) και στέλνει
+  **durable bell notification** για κάθε νέα εκκρεμότητα. Καμία εγγραφή χρήματος στον εντοπισμό —
+  και το outbound σκέλος (ekdosi → WHMCS mark-paid) έρχεται στη Φάση 2.
+
 ## [1.11.0] - 2026-07-13
 
 ### Added
