@@ -71,6 +71,25 @@ class ReleaseCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_reads_the_current_version_from_the_config_file_not_the_cache(): void
+    {
+        // The base version MUST come from config/app.php (what we bump), never
+        // config('app.version') which is the cached config and goes stale on a
+        // deploy box — the exact cause of the 1.12.0 → «1.11.1» downgrade.
+        $config = "<?php\nreturn [\n    'name' => 'ekdosi',\n    'version' => '1.12.0',\n];\n";
+        $this->assertSame('1.12.0', Release::currentVersion($config));
+
+        // Prove it's file-driven, not config(): stub config('app.version') to a
+        // wrong value and confirm the file parse still wins.
+        config(['app.version' => '1.11.0']);   // stale cache stand-in
+        $this->assertSame('1.12.0', Release::currentVersion($config));
+        $this->assertSame('1.12.1', Release::bump(Release::currentVersion($config), 'patch'));
+
+        // No literal → null (caller falls back to config()).
+        $this->assertNull(Release::currentVersion("<?php\nreturn ['name' => 'x'];\n"));
+    }
+
+    #[Test]
     public function dry_run_previews_without_writing(): void
     {
         // Drive the PREVIEW branch: seed a non-empty [Unreleased] so the command
