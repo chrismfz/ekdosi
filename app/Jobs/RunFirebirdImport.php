@@ -9,6 +9,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\Process\Process;
@@ -124,15 +125,24 @@ class RunFirebirdImport implements ShouldQueue
         ];
     }
 
-    public function __construct(public int $runId, public string $fbPassword)
+    /** Holds the Firebird password ENCRYPTED (APP_KEY) — see the constructor. */
+    public string $fbPassword;
+
+    public function __construct(public int $runId, string $fbPassword)
     {
-        // password is passed by value (in-memory only) — NOT stored on
-        // the run row. The worker serializes the job before pickup;
-        // the database queue driver stores the serialized payload
-        // including this property. Trade-off: queue payload contains
-        // plaintext, but it's transient (deleted on success) and
-        // already inside the application's trust boundary (no
-        // worker-to-third-party hop). Acceptable.
+        // The password is NOT stored on the run row. The worker serializes the
+        // job to the queue table before pickup — and on a FAILED import (tries=1)
+        // the serialized payload LANDS IN failed_jobs, which is not auto-deleted.
+        // So we encrypt it here: failed_jobs / jobs hold only ciphertext, and the
+        // plaintext exists solely in memory while handle() runs. Round-trips via
+        // password() at the point of use.
+        $this->fbPassword = Crypt::encryptString($fbPassword);
+    }
+
+    /** The plaintext Firebird password, decrypted at the point of use only. */
+    private function password(): string
+    {
+        return Crypt::decryptString($this->fbPassword);
     }
 
     public function handle(): void
@@ -214,7 +224,7 @@ class RunFirebirdImport implements ShouldQueue
                 $uploadedFullPath,
                 $tempFdbToDelete,
                 '-user', $run->fb_user,
-                '-password', $this->fbPassword,
+                '-password', $this->password(),
             ]);
             $gbak->setTimeout(600);  // 10 minutes for the restore alone
 
@@ -262,7 +272,7 @@ class RunFirebirdImport implements ShouldQueue
             '--fdb='.$fdbPathForArtisan,
             '--host='.$run->fb_host,
             '--fbuser='.$run->fb_user,
-            '--fbpass='.$this->fbPassword,
+            '--fbpass='.$this->password(),
             '--counts-out='.$countsPath,
         ], base_path());
         $artisan->setTimeout($this->timeout - 60);  // leave headroom
@@ -352,7 +362,7 @@ class RunFirebirdImport implements ShouldQueue
             '--fdb='.$run->fb_database,
             '--host='.$run->fb_host,
             '--fbuser='.$run->fb_user,
-            '--fbpass='.$this->fbPassword,
+            '--fbpass='.$this->password(),
             '--counts-out='.$countsPath,
         ], base_path());
         $artisan->setTimeout($this->timeout - 60);

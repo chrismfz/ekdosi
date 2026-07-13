@@ -303,3 +303,8 @@ $trackSchedule(
         ->withoutOverlapping(60),
     'company_backups'
 );
+
+// Hygiene: prune failed queue entries older than 14 days. Import jobs carry an
+// ENCRYPTED Firebird password (see RunFirebirdImport), so failed_jobs never holds
+// plaintext — but keeping the table bounded is still good practice.
+Schedule::command('queue:prune-failed --hours=336')->daily();

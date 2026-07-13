@@ -10,6 +10,7 @@ use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -59,7 +60,29 @@ class FirebirdLiveImportTest extends TestCase
         // Password must NOT be persisted anywhere on the row.
         $this->assertStringNotContainsString('ekdosi1234', json_encode($run->getAttributes()));
 
-        Bus::assertDispatched(RunFirebirdImport::class, fn (RunFirebirdImport $j) => $j->runId === $run->id && $j->fbPassword === 'ekdosi1234');
+        Bus::assertDispatched(RunFirebirdImport::class, function (RunFirebirdImport $j) use ($run) {
+            // Encrypted on the job — plaintext never sits in the queue/failed_jobs payload.
+            $this->assertNotSame('ekdosi1234', $j->fbPassword);
+            $this->assertStringNotContainsString('ekdosi1234', serialize($j));
+
+            return $j->runId === $run->id && Crypt::decryptString($j->fbPassword) === 'ekdosi1234';
+        });
+    }
+
+    public function test_a_file_run_is_not_detected_as_live(): void
+    {
+        // Regression for the new handle() branch: a normal upload run must never
+        // take the live path (uploaded_path set, fb_database null).
+        $run = FirebirdImportRun::create([
+            'company_id' => $this->tenant->id,
+            'source' => FirebirdImportRun::SOURCE_FIREBIRD,
+            'file_name' => 'x.fdb', 'file_size' => 10, 'file_sha256' => 'abc',
+            'uploaded_path' => 'firebird-imports/x.fdb',
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1', 'fb_user' => 'SYSDBA',
+        ]);
+
+        $this->assertFalse($run->isLiveConnection());
     }
 
     public function test_non_default_port_is_folded_into_the_host(): void

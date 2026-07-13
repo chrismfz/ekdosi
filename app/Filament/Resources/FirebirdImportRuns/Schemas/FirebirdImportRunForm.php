@@ -196,6 +196,9 @@ class FirebirdImportRunForm
                                             ->label('Διαδρομή βάσης (.fdb στον remote)')
                                             ->placeholder('/opt/Data/ekdosi-myip.fdb')
                                             ->maxLength(500)
+                                            // A ';' / newline would inject extra params into the Firebird
+                                            // DSN (firebird:dbname=host:PATH;charset=…) — block it.
+                                            ->rule('not_regex:/[;\r\n]/')
                                             ->helperText('Η απόλυτη διαδρομή του .fdb ΣΤΟΝ απομακρυσμένο διακομιστή. Συμπλήρωσέ τη για να ενεργοποιηθεί η ζωντανή σύνδεση.')
                                             ->columnSpanFull(),
                                         TextInput::make('fb_live_user')

@@ -82,8 +82,9 @@ class FirebirdConnectionTester
 
         if ($counts === []) {
             return FirebirdProbeResult::failure('no_tables',
-                'Συνδέθηκε, αλλά δεν βρέθηκε κανένας από τους αναμενόμενους legacy πίνακες ('
-                .implode(', ', self::PROBE_TABLES).'). Λάθος διαδρομή .fdb ή κενή/άσχετη βάση;');
+                'Συνδέθηκε, αλλά δεν διαβάστηκε κανένας από τους αναμενόμενους legacy πίνακες ('
+                .implode(', ', self::PROBE_TABLES).'). Πιθανή αιτία: λάθος διαδρομή .fdb, κενή/άσχετη βάση, '
+                .'ή ο χρήστης δεν έχει δικαίωμα ανάγνωσης σε αυτούς τους πίνακες.');
         }
 
         return FirebirdProbeResult::success($counts, $missing);
