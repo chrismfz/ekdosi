@@ -111,6 +111,21 @@ class WhmcsPaymentSyncerTest extends TestCase
         $this->assertSame(0, Payment::where('company_id', $this->tenant->id)->count());
     }
 
+    public function test_skips_an_aade_cancelled_invoice(): void
+    {
+        // Cancelled at AADE but not yet reconciled locally (mydata_state=CANCELLED,
+        // local_status=active) still shows balance>0 — but it's a void document, so
+        // no payment may land on it (canonical InvoiceScope::live semantics).
+        $invoice = $this->openInvoice(124.0);
+        $invoice->forceFill(['mydata_state' => 'CANCELLED'])->save();
+        $this->filedRow($invoice, 5005);
+
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid']);
+
+        $this->assertSame(0, $result->recorded);
+        $this->assertSame(0, Payment::where('company_id', $this->tenant->id)->count());
+    }
+
     public function test_is_idempotent_across_runs(): void
     {
         $invoice = $this->openInvoice(124.0);

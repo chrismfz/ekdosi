@@ -284,7 +284,11 @@ _(Το `datepaid`/`balance` snapshot δεν χρειάστηκε — το `statu
 
 **Inbound payment sync (WHMCS → ekdosi) — ✅ SHIPPED (v1.11.x):** `whmcs:sync-payments` (opt-in
 scheduled) κλείνει την οφειλή στο ekdosi όταν ένα επί-πιστώσει WHMCS τιμολόγιο πληρωθεί στο WHMCS —
-poll-based, money-write μόνο στο ekdosi, only-if-open + `transaction_id` dedup (`WhmcsPaymentSyncer`).
+poll-based, money-write μόνο στο ekdosi, only-if-open + lockForUpdate re-read + `transaction_id` dedup
++ AADE-cancel-safe (`WhmcsPaymentSyncer`). **Γνωστά όρια** (από το review): (α) σερβίρει μόνο tenants
+που φτάνουν σε `FILED` (myDATA-filing· off-mode drafts μένουν `DRAFTED` → follow-up)· (β) πριν το enable
+σε tenant με legacy on-account πληρωμές, επιβεβαίωσε ότι κανένα legacy τιμολόγιο δεν έχει `FILED` pending
+row (default OFF = συνειδητό opt-in)· (γ) bridge-only tenant χωρίς native creds εξαιρείται από το loop.
 
 **Phase 2 — outbound (money-write· opt-in· design-first):** Ekdosi payment (σε WHMCS-sourced
 τιμολόγιο) → WHMCS `AddInvoicePayment`/mark-paid, ΜΟΝΟ αν όχι-ήδη-πληρωμένο. Κίνδυνοι + δικλείδες:

@@ -3,11 +3,13 @@
 namespace App\Services\Whmcs;
 
 use App\Models\Company;
+use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\InvoiceBalance;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * Inbound payment sync (WHMCS → ekdosi). When a WHMCS invoice that we already
@@ -19,12 +21,19 @@ use Illuminate\Support\Facades\DB;
  *  - **only-if-open**: skips any invoice whose balance is already ≤ 0, so a
  *    cash-term / already-settled invoice is never over-paid. This is also the
  *    natural idempotency — once recorded the balance is 0, so a re-run skips it.
- *  - **dedup by transaction_id** (`whmcs-paid:{id}`): belt-and-suspenders against
- *    recording the same WHMCS payment twice even if the invoice later reopens
- *    (e.g. a credit note is reversed).
+ *  - **serialised write**: the balance re-read + dedup re-check + insert run under
+ *    a `lockForUpdate` on the invoice, so two concurrent runs (scheduled + a
+ *    manual `whmcs:sync-payments`) can't both pass the check and double-record —
+ *    the second blocks, then sees the now-recorded payment / zero balance.
+ *  - **dedup by transaction_id** (`whmcs-paid:{id}`): re-checked inside the lock,
+ *    so the same WHMCS payment is never recorded twice even if the invoice later
+ *    reopens (e.g. a credit note is reversed).
  *  - records the exact OUTSTANDING BALANCE (WHMCS InvoicePaid = full settlement
- *    of that document), so it settles without over/under-paying.
- *  - cancelled invoices and credit notes are skipped.
+ *    of that document), read AFRESH under the lock, so a manual payment landing
+ *    mid-run reduces (never over-pays) it.
+ *  - cancelled (locally OR at AADE) invoices and credit notes are skipped.
+ *  - one bad row (e.g. a malformed datepaid) is isolated — it can't abort the
+ *    rest of the tenant's run.
  */
 class WhmcsPaymentSyncer
 {
@@ -50,44 +59,90 @@ class WhmcsPaymentSyncer
             ->get();
 
         foreach ($rows as $row) {
-            $invoice = $row->invoice;
-            if ($invoice === null || $invoice->local_status === 'cancelled' || $invoice->isCreditNote()) {
+            try {
+                $invoice = $row->invoice;
+                if ($invoice === null || ! $this->isLiveOpen($invoice)) {
+                    continue;
+                }
+
+                // Cheap unlocked pre-filter (avoid the WHMCS call for settled rows).
+                if ($this->balance->for($invoice)->balance <= 0.005) {
+                    continue;
+                }
+                $txnId = self::transactionId((int) $row->whmcs_invoice_id);
+                if ($this->alreadyRecorded($tenant, $txnId)) {
+                    continue;
+                }
+
+                // HTTP is OUTSIDE the transaction — never hold a row lock across a
+                // network call. We only record on an authenticated 'Paid'.
+                $checked++;
+                $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
+                if (! is_array($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0) {
+                    continue;
+                }
+
+                // Serialise the actual write: lock the invoice, then RE-READ the
+                // balance + RE-CHECK dedup inside the lock so a concurrent run /
+                // manual payment can't produce a double or an over-record.
+                $amount = DB::transaction(function () use ($tenant, $invoice, $txnId, $payload, $row): float {
+                    $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();
+                    if ($locked === null || ! $this->isLiveOpen($locked)) {
+                        return 0.0;
+                    }
+                    $balance = round($this->balance->for($locked)->balance, 2);
+                    if ($balance <= 0.005 || $this->alreadyRecorded($tenant, $txnId)) {
+                        return 0.0;
+                    }
+                    Payment::create([
+                        'company_id' => $tenant->id,
+                        'customer_id' => $locked->customer_id,
+                        'invoice_id' => $locked->id,
+                        'kind' => 'payment',
+                        'amount' => $balance,
+                        'pay_date' => self::payDate($payload),
+                        'transaction_id' => $txnId,
+                        'notes' => 'Αυτόματος συγχρονισμός πληρωμής από WHMCS #'.$row->whmcs_invoice_id,
+                    ]);
+
+                    return $balance;
+                });
+
+                if ($amount > 0.005) {
+                    $recorded++;
+                    $total += $amount;
+                }
+            } catch (Throwable $e) {
+                // Isolate a single bad row (e.g. a malformed WHMCS datepaid) so it
+                // can't abort the rest of the tenant's open invoices.
+                report($e);
+
                 continue;
             }
-
-            // only-if-open: never over-pay a settled/cash-term invoice.
-            $balance = $this->balance->for($invoice)->balance;
-            if ($balance <= 0.005) {
-                continue;
-            }
-
-            $txnId = self::transactionId((int) $row->whmcs_invoice_id);
-            if (Payment::query()->where('company_id', $tenant->id)->where('transaction_id', $txnId)->exists()) {
-                continue;
-            }
-
-            $checked++;
-            $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
-            if (! is_array($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0) {
-                continue;
-            }
-
-            DB::transaction(fn () => Payment::create([
-                'company_id' => $tenant->id,
-                'customer_id' => $invoice->customer_id,
-                'invoice_id' => $invoice->id,
-                'kind' => 'payment',
-                'amount' => round($balance, 2),
-                'pay_date' => self::payDate($payload),
-                'transaction_id' => $txnId,
-                'notes' => 'Αυτόματος συγχρονισμός πληρωμής από WHMCS #'.$row->whmcs_invoice_id,
-            ]));
-
-            $recorded++;
-            $total += $balance;
         }
 
         return new PaymentSyncResult($checked, $recorded, round($total, 2));
+    }
+
+    /**
+     * A live, non-credit invoice that can carry a receivable: NOT cancelled
+     * locally AND NOT cancelled at AADE (the canonical InvoiceScope::live()
+     * predicate — a payment must never land on an AADE-void document), and not
+     * a credit note.
+     */
+    private function isLiveOpen(Invoice $invoice): bool
+    {
+        return $invoice->local_status !== 'cancelled'
+            && $invoice->mydata_state !== 'CANCELLED'
+            && ! $invoice->isCreditNote();
+    }
+
+    private function alreadyRecorded(Company $tenant, string $txnId): bool
+    {
+        return Payment::query()
+            ->where('company_id', $tenant->id)
+            ->where('transaction_id', $txnId)
+            ->exists();
     }
 
     private static function transactionId(int $whmcsInvoiceId): string
