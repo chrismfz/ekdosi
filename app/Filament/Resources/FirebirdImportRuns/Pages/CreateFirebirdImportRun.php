@@ -7,7 +7,6 @@ use App\Jobs\RunFirebirdImport;
 use App\Models\Company;
 use App\Models\FirebirdImportRun;
 use App\Services\Etl\EpsilonImporter;
-use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
@@ -54,13 +53,18 @@ class CreateFirebirdImportRun extends CreateRecord
         // needed; the files are tiny so the request handles it inline.
         $epsilonFiles = array_filter([
             'customers' => $data['customers_json'] ?? null,
-            'items'     => $data['items_json'] ?? null,
-            'services'  => $data['services_json'] ?? null,
-            'sales'     => $data['sales_json'] ?? null,
+            'items' => $data['items_json'] ?? null,
+            'services' => $data['services_json'] ?? null,
+            'sales' => $data['sales_json'] ?? null,
         ], static fn ($path): bool => filled($path));
 
         if ($epsilonFiles !== []) {
             return $this->handleEpsilon($epsilonFiles, $tenant);
+        }
+
+        // Live-connection tab: connect straight to a remote Firebird (no file).
+        if (filled($data['fb_live_database'] ?? null)) {
+            return $this->handleLive($data, $tenant);
         }
 
         $uploadedPath = $data['upload'] ?? null;
@@ -89,21 +93,21 @@ class CreateFirebirdImportRun extends CreateRecord
             throw new \RuntimeException("Upload did not land on disk: {$uploadedPath}");
         }
 
-        $fileSize   = filesize($absolutePath);
+        $fileSize = filesize($absolutePath);
         $fileSha256 = hash_file('sha256', $absolutePath);
-        $fileName   = $data['original_file_name'] ?? basename($uploadedPath);
+        $fileName = $data['original_file_name'] ?? basename($uploadedPath);
 
         $run = FirebirdImportRun::create([
-            'company_id'          => $tenant->id,
-            'source'              => FirebirdImportRun::SOURCE_FIREBIRD,
+            'company_id' => $tenant->id,
+            'source' => FirebirdImportRun::SOURCE_FIREBIRD,
             'uploaded_by_user_id' => auth()->id(),
-            'file_name'           => $fileName,
-            'file_size'           => $fileSize,
-            'file_sha256'         => $fileSha256,
-            'uploaded_path'       => $uploadedPath,
-            'status'              => FirebirdImportRun::STATUS_UPLOADED,
-            'fb_host'             => $data['fb_host'],
-            'fb_user'             => $data['fb_user'],
+            'file_name' => $fileName,
+            'file_size' => $fileSize,
+            'file_sha256' => $fileSha256,
+            'uploaded_path' => $uploadedPath,
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => $data['fb_host'],
+            'fb_user' => $data['fb_user'],
         ]);
 
         // Surface the SHA dedup hint as a notification (non-blocking)
@@ -152,6 +156,47 @@ class CreateFirebirdImportRun extends CreateRecord
     }
 
     /**
+     * Live-connection Firebird import: no upload/gbak. Records a run row keyed to
+     * the remote (host[/port] + .fdb path; NEVER the password) and dispatches the
+     * job, which detects live mode (uploaded_path null + fb_database set) and
+     * drains straight from the remote via migrate:firebird.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function handleLive(array $data, Company $tenant): Model
+    {
+        $host = trim((string) ($data['fb_live_host'] ?? ''));
+        $port = (int) ($data['fb_live_port'] ?? 3050);
+        // Fold a non-default port into the host (Firebird DSN: HOST/PORT:path).
+        $fbHost = ($port > 0 && $port !== 3050) ? "{$host}/{$port}" : $host;
+
+        $run = FirebirdImportRun::create([
+            'company_id' => $tenant->id,
+            'source' => FirebirdImportRun::SOURCE_FIREBIRD,
+            'uploaded_by_user_id' => auth()->id(),
+            'file_name' => 'Live: '.$host.':'.$data['fb_live_database'],
+            // No file for a live run — 0 bytes; sha keyed to the remote target
+            // (stable so an identical re-run still surfaces the dedup hint).
+            'file_size' => 0,
+            'file_sha256' => hash('sha256', 'live:'.$fbHost.':'.$data['fb_live_database']),
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => $fbHost,
+            'fb_user' => trim((string) ($data['fb_live_user'] ?? '')) ?: 'EKDOSI',
+            'fb_database' => (string) $data['fb_live_database'],
+        ]);
+
+        RunFirebirdImport::dispatch($run->id, (string) ($data['fb_live_password'] ?? ''));
+
+        Notification::make()
+            ->success()
+            ->title('Import queued (ζωντανή σύνδεση)')
+            ->body('Σύνδεση στο '.$host.' — η σελίδα ανανεώνεται με την κατάσταση.')
+            ->send();
+
+        return $run;
+    }
+
+    /**
      * Epsilon Smart JSON import — synchronous (the exports are tiny). Reads each
      * staged JSON file, runs EpsilonImporter (re-runnable upsert), records a
      * completed run with per-entity counts, and tidies the uploads.
@@ -161,13 +206,13 @@ class CreateFirebirdImportRun extends CreateRecord
     private function handleEpsilon(array $files, Company $tenant): Model
     {
         $baseRow = [
-            'company_id'          => $tenant->id,
-            'source'              => FirebirdImportRun::SOURCE_EPSILON,
+            'company_id' => $tenant->id,
+            'source' => FirebirdImportRun::SOURCE_EPSILON,
             'uploaded_by_user_id' => auth()->id(),
-            'file_name'           => 'Epsilon: '.implode(', ', array_keys($files)),
-            'file_sha256'         => hash('sha256', implode('|', array_values($files))),
-            'source_files_json'   => $files,
-            'started_at'          => now(),
+            'file_name' => 'Epsilon: '.implode(', ', array_keys($files)),
+            'file_sha256' => hash('sha256', implode('|', array_values($files))),
+            'source_files_json' => $files,
+            'started_at' => now(),
         ];
 
         $importer = new EpsilonImporter($tenant);
@@ -193,10 +238,10 @@ class CreateFirebirdImportRun extends CreateRecord
             $counts = $importer->import($payload);
         } catch (\Throwable $e) {
             FirebirdImportRun::create($baseRow + [
-                'file_size'     => $totalBytes,
-                'status'        => FirebirdImportRun::STATUS_FAILED,
-                'failed_step'   => 'epsilon',
-                'finished_at'   => now(),
+                'file_size' => $totalBytes,
+                'status' => FirebirdImportRun::STATUS_FAILED,
+                'failed_step' => 'epsilon',
+                'finished_at' => now(),
                 'error_message' => $e->getMessage(),
             ]);
 
@@ -206,10 +251,10 @@ class CreateFirebirdImportRun extends CreateRecord
         $warnings = $importer->warnings();
 
         $run = FirebirdImportRun::create($baseRow + [
-            'file_size'     => $totalBytes,
-            'status'        => FirebirdImportRun::STATUS_COMPLETED,
-            'finished_at'   => now(),
-            'counts_json'   => $counts,
+            'file_size' => $totalBytes,
+            'status' => FirebirdImportRun::STATUS_COMPLETED,
+            'finished_at' => now(),
+            'counts_json' => $counts,
             'error_message' => $warnings !== [] ? implode("\n", $warnings) : null,
         ]);
 

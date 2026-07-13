@@ -283,6 +283,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 ## 13. Migration / ETL
 - **`migrate:firebird`** — επαναλήψιμο ETL, μία εταιρία/run, upsert σε
   `(company_id, legacy_id)`, χειρισμός WIN1253, UI εισαγωγής (`.fdb`/`.fbk`).
+- **Ζωντανή σύνδεση Firebird** — tab «Ζωντανή σύνδεση» στη φόρμα εισαγωγής: απευθείας στη ζωντανή legacy
+  βάση (IP + διαπιστευτήρια + διαδρομή `.fdb`), χωρίς gbak/upload, με κουμπί **«Έλεγχος σύνδεσης»**
+  (μετρά CUSTOMER/INVTYPE/INVOICE/PRODUCT πριν το import· read-only· κωδικός μόνο στη μνήμη).
 
 ## 14. Backups / Portability / DR
 - **Per-company backups** (`spatie/laravel-backup`) — πρόγραμμα/διατήρηση/προορισμοί

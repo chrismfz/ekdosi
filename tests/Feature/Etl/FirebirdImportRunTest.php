@@ -9,7 +9,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Crypt;
 use Tests\TestCase;
 
 /**
@@ -87,15 +87,15 @@ class FirebirdImportRunTest extends TestCase
     public function test_run_row_persists_metadata_without_password(): void
     {
         $run = FirebirdImportRun::create([
-            'company_id'          => $this->tenant->id,
+            'company_id' => $this->tenant->id,
             'uploaded_by_user_id' => $this->operator->id,
-            'file_name'           => 'ekdosi-myip.fbk',
-            'file_size'           => 1024 * 1024 * 12,
-            'file_sha256'         => str_repeat('a', 64),
-            'uploaded_path'       => 'firebird-imports/test.fbk',
-            'status'              => FirebirdImportRun::STATUS_UPLOADED,
-            'fb_host'             => '127.0.0.1',
-            'fb_user'             => 'SYSDBA',
+            'file_name' => 'ekdosi-myip.fbk',
+            'file_size' => 1024 * 1024 * 12,
+            'file_sha256' => str_repeat('a', 64),
+            'uploaded_path' => 'firebird-imports/test.fbk',
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         $this->assertNotNull($run->id);
@@ -112,35 +112,36 @@ class FirebirdImportRunTest extends TestCase
     }
 
     /**
-     * NOTE: This test covers "no DB COLUMN holds the password",
-     * NOT "the password never reaches any DB row". The database
-     * queue driver serializes the job's public properties into
-     * the `jobs.payload` column — so the password IS in that
-     * row's blob until the job completes (when the row is
-     * deleted) or fails (when it moves to `failed_jobs.payload`).
-     * That trade-off is documented in `RunFirebirdImport`'s
-     * docblock; this test enforces the narrower invariant that
-     * no DOMAIN column ever holds it.
+     * NOTE: This test covers "no DB COLUMN holds the password". The database
+     * queue driver serializes the job's public properties into `jobs.payload`
+     * (and `failed_jobs.payload` on failure) — but the job stores the password
+     * ENCRYPTED (APP_KEY), so those blobs hold ciphertext, not plaintext (see
+     * RunFirebirdImport + its dispatch test). This test enforces the narrower
+     * invariant that no DOMAIN column ever holds it.
      */
     public function test_dispatch_does_not_serialize_password_into_the_run_row(): void
     {
         Bus::fake();
 
         $run = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'x.fbk',
-            'file_size'     => 100,
-            'file_sha256'   => str_repeat('b', 64),
+            'company_id' => $this->tenant->id,
+            'file_name' => 'x.fbk',
+            'file_size' => 100,
+            'file_sha256' => str_repeat('b', 64),
             'uploaded_path' => 'firebird-imports/x.fbk',
-            'status'        => FirebirdImportRun::STATUS_UPLOADED,
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         RunFirebirdImport::dispatch($run->id, 'super-secret-password');
 
         Bus::assertDispatched(RunFirebirdImport::class, function ($job) use ($run) {
-            return $job->runId === $run->id && $job->fbPassword === 'super-secret-password';
+            // fbPassword is stored ENCRYPTED on the job (never plaintext in the
+            // queue / failed_jobs payload); decrypt to verify it round-trips.
+            return $job->runId === $run->id
+                && Crypt::decryptString($job->fbPassword) === 'super-secret-password'
+                && $job->fbPassword !== 'super-secret-password';
         });
 
         // Row in DB has no password trace.
@@ -156,26 +157,26 @@ class FirebirdImportRunTest extends TestCase
         $sha = str_repeat('c', 64);
 
         $priorRun = FirebirdImportRun::create([
-            'company_id'   => $this->tenant->id,
-            'file_name'    => 'day0.fbk',
-            'file_size'    => 1000,
-            'file_sha256'  => $sha,
-            'status'       => FirebirdImportRun::STATUS_COMPLETED,
-            'finished_at'  => now()->subDay(),
-            'fb_host'      => '127.0.0.1',
-            'fb_user'      => 'SYSDBA',
+            'company_id' => $this->tenant->id,
+            'file_name' => 'day0.fbk',
+            'file_size' => 1000,
+            'file_sha256' => $sha,
+            'status' => FirebirdImportRun::STATUS_COMPLETED,
+            'finished_at' => now()->subDay(),
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         // Simulate uploading the same backup again.
         $newRun = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'day0-reupload.fbk',
-            'file_size'     => 1000,
-            'file_sha256'   => $sha,
+            'company_id' => $this->tenant->id,
+            'file_name' => 'day0-reupload.fbk',
+            'file_size' => 1000,
+            'file_sha256' => $sha,
             'uploaded_path' => 'firebird-imports/reup.fbk',
-            'status'        => FirebirdImportRun::STATUS_UPLOADED,
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         // The exact query the Create page runs.
@@ -200,14 +201,14 @@ class FirebirdImportRunTest extends TestCase
         // dedup hit (different tenants can hold backups that happen
         // to be byte-identical, e.g. an empty schema-only backup).
         FirebirdImportRun::create([
-            'company_id'   => $otherTenant->id,
-            'file_name'    => 'other.fbk',
-            'file_size'    => 1000,
-            'file_sha256'  => $sha,
-            'status'       => FirebirdImportRun::STATUS_COMPLETED,
-            'finished_at'  => now()->subDay(),
-            'fb_host'      => '127.0.0.1',
-            'fb_user'      => 'SYSDBA',
+            'company_id' => $otherTenant->id,
+            'file_name' => 'other.fbk',
+            'file_size' => 1000,
+            'file_sha256' => $sha,
+            'status' => FirebirdImportRun::STATUS_COMPLETED,
+            'finished_at' => now()->subDay(),
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         $found = FirebirdImportRun::query()
@@ -222,15 +223,15 @@ class FirebirdImportRunTest extends TestCase
     public function test_failed_hook_reconciles_stuck_importing_row(): void
     {
         $run = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'x.fbk',
-            'file_size'     => 100,
-            'file_sha256'   => str_repeat('e', 64),
+            'company_id' => $this->tenant->id,
+            'file_name' => 'x.fbk',
+            'file_size' => 100,
+            'file_sha256' => str_repeat('e', 64),
             'uploaded_path' => 'firebird-imports/x.fbk',
-            'status'        => FirebirdImportRun::STATUS_IMPORTING,
-            'started_at'    => now(),
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'status' => FirebirdImportRun::STATUS_IMPORTING,
+            'started_at' => now(),
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         $job = new RunFirebirdImport($run->id, 'pw');
@@ -246,15 +247,15 @@ class FirebirdImportRunTest extends TestCase
     public function test_failed_hook_is_no_op_when_row_already_terminal(): void
     {
         $run = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'x.fbk',
-            'file_size'     => 100,
-            'file_sha256'   => str_repeat('f', 64),
-            'status'        => FirebirdImportRun::STATUS_COMPLETED,
-            'started_at'    => now()->subMinute(),
-            'finished_at'   => now(),
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'company_id' => $this->tenant->id,
+            'file_name' => 'x.fbk',
+            'file_size' => 100,
+            'file_sha256' => str_repeat('f', 64),
+            'status' => FirebirdImportRun::STATUS_COMPLETED,
+            'started_at' => now()->subMinute(),
+            'finished_at' => now(),
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
         $finishedAtBefore = $run->finished_at;
 
@@ -280,21 +281,21 @@ class FirebirdImportRunTest extends TestCase
     public function test_failed_hook_records_correct_step_for_each_status(): void
     {
         $base = [
-            'company_id'  => $this->tenant->id,
-            'file_name'   => 't.fbk',
-            'file_size'   => 1,
+            'company_id' => $this->tenant->id,
+            'file_name' => 't.fbk',
+            'file_size' => 1,
             'file_sha256' => str_repeat('5', 64),
-            'fb_host'     => '127.0.0.1',
-            'fb_user'     => 'SYSDBA',
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ];
 
         foreach ([
-            FirebirdImportRun::STATUS_UPLOADED  => 'gbak',
+            FirebirdImportRun::STATUS_UPLOADED => 'gbak',
             FirebirdImportRun::STATUS_RESTORING => 'gbak',
             FirebirdImportRun::STATUS_IMPORTING => 'migrate',
         ] as $status => $expectedStep) {
             $run = FirebirdImportRun::create($base + [
-                'status'      => $status,
+                'status' => $status,
                 'file_sha256' => str_repeat($status[0], 64),  // unique per row
             ]);
 
@@ -320,14 +321,14 @@ class FirebirdImportRunTest extends TestCase
     public function test_huge_error_messages_are_head_tail_truncated(): void
     {
         $run = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'corrupt.fbk',
-            'file_size'     => 100,
-            'file_sha256'   => str_repeat('6', 64),
+            'company_id' => $this->tenant->id,
+            'file_name' => 'corrupt.fbk',
+            'file_size' => 100,
+            'file_sha256' => str_repeat('6', 64),
             'uploaded_path' => 'firebird-imports/c.fbk',
-            'status'        => FirebirdImportRun::STATUS_RESTORING,
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'status' => FirebirdImportRun::STATUS_RESTORING,
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         // Simulate gbak vomiting 50KB of stderr with the actual
@@ -368,25 +369,25 @@ class FirebirdImportRunTest extends TestCase
     public function test_file_name_extension_determines_processing_path(): void
     {
         $fbkRun = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'ekdosi-myip.fbk',
-            'file_size'     => 1000,
-            'file_sha256'   => str_repeat('a', 64),
+            'company_id' => $this->tenant->id,
+            'file_name' => 'ekdosi-myip.fbk',
+            'file_size' => 1000,
+            'file_sha256' => str_repeat('a', 64),
             'uploaded_path' => 'firebird-imports/x.fbk',
-            'status'        => FirebirdImportRun::STATUS_UPLOADED,
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         $fdbRun = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'ekdosi-myip.fdb',
-            'file_size'     => 1000,
-            'file_sha256'   => str_repeat('b', 64),
+            'company_id' => $this->tenant->id,
+            'file_name' => 'ekdosi-myip.fdb',
+            'file_size' => 1000,
+            'file_sha256' => str_repeat('b', 64),
             'uploaded_path' => 'firebird-imports/x.fdb',
-            'status'        => FirebirdImportRun::STATUS_UPLOADED,
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
 
         $this->assertSame(
@@ -401,14 +402,14 @@ class FirebirdImportRunTest extends TestCase
         // Case-insensitive detection — operators on Windows often
         // get `.FDB` (uppercase) extensions.
         $upperRun = FirebirdImportRun::create([
-            'company_id'    => $this->tenant->id,
-            'file_name'     => 'EKDOSI.FDB',
-            'file_size'     => 1000,
-            'file_sha256'   => str_repeat('c', 64),
+            'company_id' => $this->tenant->id,
+            'file_name' => 'EKDOSI.FDB',
+            'file_size' => 1000,
+            'file_sha256' => str_repeat('c', 64),
             'uploaded_path' => 'firebird-imports/x.FDB',
-            'status'        => FirebirdImportRun::STATUS_UPLOADED,
-            'fb_host'       => '127.0.0.1',
-            'fb_user'       => 'SYSDBA',
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ]);
         $this->assertSame(
             'fdb',
@@ -419,12 +420,12 @@ class FirebirdImportRunTest extends TestCase
     public function test_is_terminal_returns_true_only_for_completed_or_failed(): void
     {
         $base = [
-            'company_id'  => $this->tenant->id,
-            'file_name'   => 't.fbk',
-            'file_size'   => 1,
+            'company_id' => $this->tenant->id,
+            'file_name' => 't.fbk',
+            'file_size' => 1,
             'file_sha256' => str_repeat('1', 64),
-            'fb_host'     => '127.0.0.1',
-            'fb_user'     => 'SYSDBA',
+            'fb_host' => '127.0.0.1',
+            'fb_user' => 'SYSDBA',
         ];
 
         $this->assertFalse(FirebirdImportRun::make($base + ['status' => 'uploaded'])->isTerminal());
