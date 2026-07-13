@@ -21,7 +21,10 @@ use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
 use App\Services\Stock\StockService;
+use App\Services\Whmcs\PaymentPushResult;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
+use App\Services\Whmcs\WhmcsPaymentPusher;
+use App\Services\Whmcs\WhmcsPaymentPusherFactory;
 use App\Services\Whmcs\WhmcsPaymentSyncer;
 use App\Support\InvoiceScope;
 use Filament\Actions\Action;
@@ -320,6 +323,55 @@ class ViewInvoice extends ViewRecord
                             ->body('Το WHMCS δεν το επιστρέφει ως πληρωμένο — δεν καταγράφηκε πληρωμή.')
                             ->info()->send();
                     }
+                }),
+
+            // OUTBOUND (Phase 2): «Σήμανση Paid στο WHMCS» — for an invoice
+            // settled HERE (επί πιστώσει, πληρωμένο στο ekdosi) whose WHMCS side
+            // is still open, mark it paid in the customer's WHMCS. Writes to an
+            // EXTERNAL system, so it's gated on the tenant's outbound opt-in and
+            // carries all four brakes in WhmcsPaymentPusher (idempotent / anti-
+            // echo / live-only). Auto-push (opt-in) usually handles this; the
+            // button is the manual/retry path (e.g. a WHMCS hiccup).
+            Action::make('mark_paid_at_whmcs')
+                ->label('Σήμανση Paid στο WHMCS')
+                ->icon('heroicon-o-arrow-up-on-square')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => static::hasUnpushedWhmcsSettlement($record))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Σήμανση πληρωμένου στο WHMCS')
+                ->modalDescription('Ενημερώνει το WHMCS του πελάτη ότι το αντίστοιχο τιμολόγιο εξοφλήθηκε (AddInvoicePayment). Γράφει στο σύστημα του πελάτη — γίνεται μία φορά (idempotent).')
+                ->modalSubmitActionLabel('Σήμανση')
+                ->action(function (Invoice $record): void {
+                    $fetch = app(WhmcsInvoiceFetcher::class)->for($record->company);
+                    $push = app(WhmcsPaymentPusherFactory::class)->for($record->company);
+                    if ($fetch === null || $push === null) {
+                        Notification::make()->title('Δεν έχει ρυθμιστεί WHMCS')->warning()->send();
+
+                        return;
+                    }
+
+                    $result = app(WhmcsPaymentPusher::class)->push($record, $fetch, $push);
+
+                    match ($result) {
+                        PaymentPushResult::Pushed => Notification::make()
+                            ->title('Ενημερώθηκε το WHMCS')
+                            ->body('Το τιμολόγιο σημάνθηκε πληρωμένο στο WHMCS.')
+                            ->success()->send(),
+                        PaymentPushResult::AlreadyPaid => Notification::make()
+                            ->title('Ήταν ήδη πληρωμένο')
+                            ->body('Το WHMCS το είχε ήδη ως πληρωμένο — δεν χρειάστηκε αλλαγή.')
+                            ->info()->send(),
+                        PaymentPushResult::Failed => Notification::make()
+                            ->title('Απέτυχε η σήμανση')
+                            ->body('Το WHMCS απέρριψε το αίτημα — δοκιμάστε ξανά αργότερα.')
+                            ->danger()->persistent()->send(),
+                        PaymentPushResult::Skipped => Notification::make()
+                            ->title('Δεν έγινε σήμανση')
+                            ->body('Δεν πληροί τις προϋποθέσεις (opt-in / εξόφληση / σύνδεση WHMCS).')
+                            ->warning()->send(),
+                    };
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),
 
             // Issue a credit note (πιστωτικό) against this invoice —
@@ -920,6 +972,34 @@ class ViewInvoice extends ViewRecord
             ->where('invoice_id', $invoice->id)
             ->where('status', PendingWhmcsInvoice::STATUS_FILED)
             ->whereNotNull('whmcs_invoice_id')
+            ->exists();
+    }
+
+    /**
+     * True iff «Σήμανση Paid στο WHMCS» applies: the tenant opted into outbound,
+     * the invoice is a live, credit-term, locally-SETTLED receivable, and its
+     * FILED WHMCS link has not yet been pushed. Mirrors WhmcsPaymentPusher's
+     * eligibility (minus the anti-echo payment check, which the push itself
+     * enforces) so the button shows only when there's a real settlement to send.
+     */
+    protected static function hasUnpushedWhmcsSettlement(Invoice $invoice): bool
+    {
+        if (! (bool) $invoice->company?->whmcs_push_payments
+            || $invoice->credited_invoice_id !== null
+            || $invoice->isCreditNote()
+            || $invoice->local_status === 'cancelled'
+            || $invoice->mydata_state === 'CANCELLED'
+            || (int) ($invoice->paymentMethod?->due_days ?? 0) <= 0
+            || $invoice->balanceData()->balance > 0.005) {
+            return false;
+        }
+
+        return PendingWhmcsInvoice::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('invoice_id', $invoice->id)
+            ->where('status', PendingWhmcsInvoice::STATUS_FILED)
+            ->whereNotNull('whmcs_invoice_id')
+            ->whereNull('whmcs_payment_pushed_at')
             ->exists();
     }
 

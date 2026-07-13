@@ -91,4 +91,15 @@ class WhmcsPaymentSyncCache
             $data['outbound'],
         );
     }
+
+    /** Drop one invoice from the outbound worklist (right after a successful push). */
+    public static function removeOutbound(Company $company, int $invoiceId): void
+    {
+        $data = self::get($company);
+        self::put(
+            $company,
+            $data['inbound'],
+            array_values(array_filter($data['outbound'], fn (int $id) => $id !== $invoiceId)),
+        );
+    }
 }

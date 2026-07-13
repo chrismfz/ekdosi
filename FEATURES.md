@@ -224,6 +224,11 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   `whmcs:reconcile-payments` εντοπίζει ποια ανοιχτά επί-πιστώσει πληρώθηκαν στο WHMCS και τα δείχνει
   εύκαιρα με 1-click «Καταγραφή πληρωμής» (ζωντανή επιβεβαίωση + κλείσιμο οφειλής). Cache μόνο ids,
   ειδοποίηση για κάθε νέα εκκρεμότητα· κανένα money-write στον εντοπισμό.
+- **Outbound σήμανση πληρωμένου (ekdosi → WHMCS)** *(opt-in, `whmcs_push_payments`)*: όταν εξοφληθεί
+  επί-πιστώσει τιμολόγιο στο ekdosi, το WHMCS σημαίνεται Paid (`AddInvoicePayment`) — αυτόματα (queued
+  job) + κουμπί «Σήμανση Paid στο WHMCS» (τιμολόγιο + λίστα «Προς ενημέρωση»). Native ή bridge
+  `op=add_payment`· idempotent (marker + claim-before-write + transid), anti-echo, query-first,
+  live/credit-term-only.
 - **Ζωντανός έλεγχος όρου πληρωμής** στους προεπιλεγμένους τύπους (καρτέλα WHMCS): ρητό «γιατί» +
   προειδοποίηση αν ο paid τύπος έχει `due_days>0` (θα φαινόταν ως οφειλή) **ή** ο unpaid τύπος είναι
   cash-term (δεν θα φαινόταν ως οφειλή).

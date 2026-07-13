@@ -291,8 +291,46 @@ try {
         exit;
     }
 
+    if ($op === 'add_payment') {
+        // WRITE: mark a WHMCS invoice paid on ekdosi's behalf (the ekdosi→WHMCS
+        // «σήμανση πληρωμένου»). Delegates to WHMCS's own localAPI AddInvoicePayment
+        // so gateway logs / activity / auto-Paid transition all behave natively.
+        // Idempotency is двойная: `transid` (WHMCS rejects a duplicate transid+
+        // gateway) AND ekdosi's own pushed-marker. Only invoice-not-already-paid
+        // amounts arrive here (ekdosi queries status first).
+        $invoiceId = (int) ($payload['invoice_id'] ?? 0);
+        $amount = (float) ($payload['amount'] ?? 0);
+        $transId = (string) ($payload['transid'] ?? '');
+        $gateway = (string) ($payload['gateway'] ?? 'ekdosi');
+        $date = (string) ($payload['date'] ?? date('Y-m-d H:i:s'));
+        if ($invoiceId <= 0 || $amount <= 0 || $transId === '') {
+            http_response_code(400);
+            echo json_encode(['error' => 'bad_request', 'message' => 'add_payment requires {"invoice_id": <int>, "amount": <num>, "transid": <string>}.']);
+            exit;
+        }
+
+        $res = localAPI('AddInvoicePayment', [
+            'invoiceid' => $invoiceId,
+            'transid' => $transId,
+            'gateway' => $gateway,
+            'amount' => number_format($amount, 2, '.', ''),
+            'date' => $date,
+        ]);
+
+        if (($res['result'] ?? '') !== 'success') {
+            $bridgeLogResult = 'add_payment error: '.(string) ($res['message'] ?? 'unknown');
+            http_response_code(502);
+            echo json_encode(['error' => 'whmcs_api_error', 'message' => (string) ($res['message'] ?? 'AddInvoicePayment failed')]);
+            exit;
+        }
+
+        $bridgeLogResult = 'add_payment ok #'.$invoiceId;
+        echo json_encode(['status' => 'ok']);
+        exit;
+    }
+
     http_response_code(400);
-    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices", "invoice" or "custom_fields".']);
+    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices", "invoice", "custom_fields" or "add_payment".']);
     exit;
 } catch (\Throwable $e) {
     $bridgeLogResult = 'error: '.$e->getMessage();

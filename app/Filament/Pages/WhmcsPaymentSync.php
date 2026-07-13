@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\PaymentSync\WhmcsOutboundPaymentsTable;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -87,6 +88,16 @@ class WhmcsPaymentSync extends Page implements HasTable
             // Reuse the inbox permission — whoever may see the WHMCS inbox may
             // see (and act on) this worklist. No new permission to provision.
             && (bool) auth()->user()?->can('ViewAny:PendingWhmcsInvoice');
+    }
+
+    /**
+     * The OUTBOUND list («εξοφλήθηκαν εδώ → ενημέρωσε το WHMCS») renders below
+     * the inbound table. It's a footer widget (self-gated to opted-in tenants),
+     * kept out of app/Filament/Widgets so it never leaks onto the dashboard.
+     */
+    protected function getFooterWidgets(): array
+    {
+        return [WhmcsOutboundPaymentsTable::class];
     }
 
     protected function getHeaderActions(): array

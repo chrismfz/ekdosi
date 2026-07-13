@@ -4,6 +4,7 @@ namespace App\Services\Whmcs;
 
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\InvoiceBalance;
 use App\Support\Whmcs\WhmcsPaymentSyncCache;
@@ -45,12 +46,18 @@ class WhmcsPaymentReconciler
             ->with('invoice.paymentMethod')
             ->get();
 
+        // Outbound is only meaningful for tenants who opted into pushing to WHMCS.
+        $wantsOutbound = (bool) $tenant->whmcs_push_payments;
+
         $inbound = [];
+        $outbound = [];
 
         foreach ($rows as $row) {
             try {
                 if ($this->isInboundCandidate($row, $fetchInvoice)) {
                     $inbound[] = (int) $row->invoice_id;
+                } elseif ($wantsOutbound && $this->isOutboundCandidate($row)) {
+                    $outbound[] = (int) $row->invoice_id;
                 }
             } catch (Throwable $e) {
                 // Isolate a single bad row (malformed payload, unreachable
@@ -60,8 +67,8 @@ class WhmcsPaymentReconciler
         }
 
         $inbound = array_values(array_unique($inbound));
-        // Preserve any existing outbound list (Phase 2 owns it) untouched.
-        WhmcsPaymentSyncCache::put($tenant, $inbound, WhmcsPaymentSyncCache::outboundIds($tenant));
+        $outbound = array_values(array_unique($outbound));
+        WhmcsPaymentSyncCache::put($tenant, $inbound, $outbound);
 
         // Bell-notify only items new since the last run — an operator shouldn't
         // be re-pinged for a row they've already seen.
@@ -97,6 +104,36 @@ class WhmcsPaymentReconciler
         $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
 
         return is_array($payload) && strcasecmp((string) ($payload['status'] ?? ''), 'Paid') === 0;
+    }
+
+    /**
+     * An outbound candidate = a filed, WHMCS-linked, live, credit-term invoice
+     * that is SETTLED locally by a REAL (non-inbound) ekdosi payment and has NOT
+     * yet been pushed to WHMCS. Pure DB/PHP — no WHMCS call (the live status
+     * check happens at push time). Mirrors WhmcsPaymentPusher's eligibility.
+     */
+    private function isOutboundCandidate(PendingWhmcsInvoice $row): bool
+    {
+        $invoice = $row->invoice;
+        if ($invoice === null
+            || ! $this->isLiveOpen($invoice)
+            || $row->whmcs_payment_pushed_at !== null
+            || (int) ($invoice->paymentMethod?->due_days ?? 0) <= 0) {
+            return false;
+        }
+        if ($this->balance->for($invoice)->balance > 0.005) {
+            return false;   // still open — not a settlement to push
+        }
+
+        // Anti-echo: needs a real ekdosi-origin payment, not just an inbound sync.
+        return Payment::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('kind', 'payment')
+            ->where(function ($q) {
+                $q->whereNull('transaction_id')
+                    ->orWhere('transaction_id', 'not like', 'whmcs-paid:%');
+            })
+            ->exists();
     }
 
     /** NOT cancelled locally, NOT cancelled at AADE, and not a credit note. */

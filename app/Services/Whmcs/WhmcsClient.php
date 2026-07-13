@@ -273,6 +273,28 @@ class WhmcsClient
     }
 
     /**
+     * OUTBOUND (Phase 2): record a payment against a WHMCS invoice so WHMCS
+     * marks it Paid — the ekdosi→WHMCS «σήμανση πληρωμένου». WHMCS auto-flips
+     * the invoice to Paid once its balance reaches zero. `transid` is our
+     * idempotency handle (WHMCS rejects a duplicate transid+gateway), and we
+     * also guard on our own side (query-first + pushed marker) so the same
+     * settlement is never pushed twice.
+     *
+     * Throws WhmcsApiException / WhmcsAuthenticationFailed on a WHMCS-side
+     * rejection, WhmcsUnreachable when the endpoint is down.
+     */
+    public function addInvoicePayment(int $whmcsInvoiceId, float $amount, string $transId, ?string $date = null, string $gateway = 'ekdosi'): void
+    {
+        $this->call('AddInvoicePayment', [
+            'invoiceid' => $whmcsInvoiceId,
+            'transid' => $transId,
+            'gateway' => $gateway,
+            'amount' => number_format($amount, 2, '.', ''),
+            'date' => $date ?? now()->format('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
      * Fetch ALL invoices for a single WHMCS client (any status),
      * optionally filtered by minDate. Used by the per-customer
      * comparison panel (CustomerWhmcsLedger) - the operator picks

@@ -935,6 +935,13 @@ class CompanyForm
                                             ->label('Λήψη μέσω του bridge plugin (αντί native WHMCS API)')
                                             ->default(false)
                                             ->helperText('Με ON, το προγραμματισμένο whmcs:fetch-pending τραβά τα τιμολόγια από το δικό μας plugin (resolve.php op=invoices) — μία σελιδοποιημένη HMAC κλήση, με τη δρομολόγηση τρίτων ήδη μέσα, χωρίς τα 1+2N round-trips του native API. Απαιτεί plugin v0.20.0+. Δοκίμασέ το πρώτα χειροκίνητα: php artisan whmcs:fetch-pending --tenant=SLUG --via-bridge.'),
+
+                                        // OUTBOUND opt-in (Phase 2). Default OFF: no write ever
+                                        // lands in the customer's WHMCS unless this is on.
+                                        Toggle::make('whmcs_push_payments')
+                                            ->label('Ενημέρωση πληρωμών ΠΡΟΣ το WHMCS (mark-paid)')
+                                            ->default(false)
+                                            ->helperText('⚠ Γράφει στο σύστημα του πελάτη. Με ON, όταν ένα επί-πιστώσει τιμολόγιο εξοφληθεί ΕΔΩ, το WHMCS σημαίνεται πληρωμένο (AddInvoicePayment) — αυτόματα (queued) + με κουμπί «Σήμανση Paid στο WHMCS» ανά τιμολόγιο και στη σελίδα «Συγχρονισμός πληρωμών». Idempotent + anti-echo (δεν γυρίζει πίσω ό,τι ήρθε από το WHMCS). Για bridge tenants απαιτεί plugin με op=add_payment.'),
                                     ]),
 
                                 Section::make('Custom field mapping')

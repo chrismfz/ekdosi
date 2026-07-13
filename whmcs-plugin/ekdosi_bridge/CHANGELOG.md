@@ -10,6 +10,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-07-14
+### Added
+- **`resolve.php` op `add_payment` — outbound mark-paid (ekdosi → WHMCS).** Delegates to
+  WHMCS `localAPI('AddInvoicePayment')` so gateway logs / activity / the auto-Paid transition
+  behave natively. HMAC-signed like every resolve op; requires `{invoice_id, amount, transid}`
+  (transid = idempotency handle, WHMCS rejects a duplicate transid+gateway). Feeds the ekdosi
+  Phase-2 outbound push for **bridge tenants** (native tenants call the WHMCS API directly).
+  Only needed if `companies.whmcs_push_payments` is on for a bridge tenant.
+
 ## [0.42.0] — 2026-07-11
 ### Fixed
 - **WH-9: the `paid_unfiled` feed no longer re-walks already-filed invoices.** Post

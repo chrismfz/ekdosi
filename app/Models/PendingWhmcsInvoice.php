@@ -134,6 +134,7 @@ class PendingWhmcsInvoice extends Model
         'legacy_invoiced',
         'whmcs_writeback_state',
         'whmcs_writeback_error',
+        'whmcs_payment_pushed_at',
     ];
 
     protected function casts(): array
@@ -142,6 +143,7 @@ class PendingWhmcsInvoice extends Model
             'payload' => 'array',
             'third_party_resolution' => 'array',
             'filed_at' => 'datetime',
+            'whmcs_payment_pushed_at' => 'datetime',
             'whmcs_invoice_id' => 'integer',
             'whmcs_userid' => 'integer',
             'legacy_invoiced' => 'integer',
