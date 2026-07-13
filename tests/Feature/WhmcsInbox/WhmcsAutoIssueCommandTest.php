@@ -147,6 +147,29 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
     }
 
+    public function test_holds_an_unpaid_whmcs_row_instead_of_auto_issuing_it(): void
+    {
+        // Auto-issue is paid-only: an UNPAID WHMCS invoice (public-sector «τιμολόγιο
+        // first, pay later») must NOT be auto-filed under the cash-term default —
+        // that would record a real open receivable as SETTLED. It is held for the
+        // operator, who issues it επί πιστώσει from the inbox.
+        $tenant = $this->tenant();
+        $customer = $this->customer($tenant, grumpy: true);
+        $pending = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 7777, 'userid' => 1, 'date' => '2026-05-20', 'total' => '124.00',
+                'status' => 'Unpaid',
+                'items' => ['item' => [['description' => 'Hosting 1y', 'amount' => '124.00', 'taxed' => '1']]],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $pending->fresh();
+        $this->assertNull($fresh->invoice_id, 'unpaid row must not be auto-filed');
+        $this->assertNotSame(PendingWhmcsInvoice::STATUS_FILED, $fresh->status);
+    }
+
     public function test_skips_tenant_without_default_invoice_type(): void
     {
         $tenant = $this->tenant(['whmcs_default_invoice_type_id' => null]);

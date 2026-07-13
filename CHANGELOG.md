@@ -24,9 +24,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   νέος «Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ (επί πιστώσει)» ώστε να μείνει σωστά **ανοιχτή οφειλή**
   (π.χ. Α.Ε./Δημόσιο που θέλει πρώτα τιμολόγιο)· ΠΛΗΡΩΜΕΝΟ → cash-term τύπος (τιμολόγιο/απόδειξη κατά
   πρόθεση), εξοφλημένο στην έκδοση. Ο χειριστής πάντα κάνει override. **Badge «Πληρωμή WHMCS»
-  (Πληρωμένο/Απλήρωτο)** στο inbox· το tripwire της καρτέλας WHMCS ελέγχει τώρα και το unpaid-slot
-  (warn αν είναι cash-term). Auto-issue μένει paid-only. (Phase 2 — Ekdosi payment → WHMCS mark-paid —
-  παραμένει design-only στο BACKLOG.)
+  (Πληρωμένο/Απλήρωτο)** στο inbox + ρητό σήμα «ΑΠΛΗΡΩΤΟ» μέσα στο modal «Δημιουργία Παραστατικού»·
+  το tripwire της καρτέλας WHMCS ελέγχει τώρα και το unpaid-slot (warn αν είναι cash-term). **Το
+  `whmcs:auto-issue` πλέον ΚΡΑΤΑ (hold) ρητά τα ΑΠΛΗΡΩΤΑ rows** (paid-only enforced στον κώδικα, όχι
+  μόνο μέσω του staging feed) — ένα απλήρωτο δεν εκδίδεται ποτέ αυτόματα ως εξοφλημένο. (Phase 2 —
+  Ekdosi payment → WHMCS mark-paid — παραμένει design-only στο BACKLOG.)
 
 ## [1.9.0] - 2026-07-13
 

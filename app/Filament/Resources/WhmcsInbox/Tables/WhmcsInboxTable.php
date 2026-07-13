@@ -34,6 +34,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\HtmlString;
 use Livewire\Component;
 use Throwable;
 
@@ -119,7 +120,8 @@ class WhmcsInboxTable
                     ->badge()
                     ->state(fn (PendingWhmcsInvoice $r): ?string => match (true) {
                         $r->whmcsIsUnpaid() => 'Απλήρωτο',
-                        $r->whmcsStatus() !== null => $r->whmcsStatus(),
+                        strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 => 'Πληρωμένο',
+                        $r->whmcsStatus() !== null => $r->whmcsStatus(),   // Cancelled/Refunded raw
                         default => null,
                     })
                     ->color(fn (PendingWhmcsInvoice $r): string => $r->whmcsIsUnpaid()
@@ -997,6 +999,17 @@ class WhmcsInboxTable
                                 self::notifyCustomerCreateResult($result);
                             }),
                     ]),
+
+                // Carry the WHMCS paid/unpaid fact INTO the modal (the inbox badge
+                // is toggleable, so it can't be the only signal). Prominent only
+                // when unpaid — that's the case where the (cash-term) default type
+                // would wrongly settle a real receivable.
+                Placeholder::make('whmcs_payment_status_hint')
+                    ->hiddenLabel()
+                    ->content(fn (): HtmlString => $r->whmcsIsUnpaid()
+                        ? new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ WHMCS: ΑΠΛΗΡΩΤΟ — έκδοσε επί πιστώσει (ανοιχτή οφειλή), όχι εξοφλημένο στην έκδοση.</span>')
+                        : new HtmlString('<span style="color:#6b7280;">WHMCS: '.(strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 ? 'Πληρωμένο (εξοφλημένο στην έκδοση)' : e((string) ($r->whmcsStatus() ?? '—'))).'</span>'))
+                    ->visible(fn (): bool => $r->whmcsStatus() !== null),
 
                 Select::make('invoice_type_id')
                     ->label('Τύπος παραστατικού')
