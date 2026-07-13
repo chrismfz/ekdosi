@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-07-13
+
 ### Fixed
 - **`ekdosi:release` read the current version from the CACHED config** (`config('app.version')`), so on
   a deploy box with a stale `config:cache` it computed the wrong base — once trying to bump 1.12.0 →
