@@ -139,8 +139,12 @@ Part of "done", like tests. **Every change updates the right place:**
   - **`--commit --tag`** = also git-commit the roll + create `vX.Y.Z` (never pushes). Handy
     for a release cut straight on `main`; in the PR flow the tag is made post-merge instead.
   - **Post-merge tag (PR flow)** → **`sh tag-release.sh`** (repo root): bare = STATUS + options
-    (version, is-it-tagged, pending changes); `--tag` = pull `main` + tag `vX.Y.Z` (read from
-    `config/app.php`) + push. Replaces the manual `git checkout main && git pull && git tag …`.
+    (version, is-it-tagged, pending changes); **`--tag` = the WHOLE release in one safe step** —
+    pull `main` → (if `[Unreleased]` has changes) run `ekdosi:release` + commit → preview + confirm
+    (`-y` to skip) → push `main` → tag `vX.Y.Z` + push. It **refuses on a dirty tree** and **verifies
+    `HEAD:config/app.php` == the tag version** before tagging (so it can never tag a commit that
+    doesn't carry the bump — the failure mode that put `v1.12.0` on a `1.11.0` commit once). No more
+    manual `ekdosi:release` → `git commit` → `git tag` dance.
 - **`FEATURES.md`** (repo root) — the catalogue of WHAT ekdosi does. **A NEW feature
   (not a fix/tweak) ALSO gets a line/bullet here**, under the right section. This is
   the «μην χανόμαστε» file — keep it the truthful single source of what's built.
