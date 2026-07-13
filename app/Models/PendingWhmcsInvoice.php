@@ -295,6 +295,55 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
+     * The WHMCS invoice's payment status as WHMCS reports it ('Paid' / 'Unpaid'
+     * / 'Cancelled' / 'Refunded' / …), read straight from the stored payload.
+     * null when the payload carries no status (older snapshots / partial fetch).
+     */
+    public function whmcsStatus(): ?string
+    {
+        $status = $this->payload['status'] ?? null;
+
+        return is_string($status) && $status !== '' ? $status : null;
+    }
+
+    /**
+     * Is the source WHMCS invoice UNPAID? True only for the explicit 'Unpaid'
+     * status (the «θέλει πρώτα τιμολόγιο, μετά πληρώνει» public-sector / Α.Ε.
+     * case). Paid/Cancelled/Refunded/unknown → false (those are either settled
+     * or shouldn't be issued anyway).
+     */
+    public function whmcsIsUnpaid(): bool
+    {
+        return strcasecmp((string) $this->whmcsStatus(), 'Unpaid') === 0;
+    }
+
+    /**
+     * The invoice type the «Δημιουργία Παραστατικού» draft should PRE-SELECT for
+     * this row — a starting point the operator always overrides. Status- and
+     * intent-aware:
+     *   - UNPAID WHMCS invoice → the tenant's «επί πιστώσει» default
+     *     (`whmcs_default_unpaid_type_id`), so the issued invoice stays an OPEN
+     *     receivable; falls back to the paid invoice default if unset.
+     *   - PAID + own lines are a receipt (no ΑΦΜ / wantsinvoice=false) → the
+     *     receipt default (`whmcs_default_receipt_type_id`) when configured.
+     *   - PAID otherwise → the paid invoice default (`whmcs_default_invoice_type_id`).
+     * Never guesses a type the tenant hasn't configured (null → operator picks).
+     */
+    public function suggestedInvoiceTypeId(Company $tenant): ?int
+    {
+        if ($this->whmcsIsUnpaid()) {
+            return $tenant->whmcs_default_unpaid_type_id
+                ?? $tenant->whmcs_default_invoice_type_id;
+        }
+
+        if ($this->ownLinesAreReceipt() && $tenant->whmcs_default_receipt_type_id !== null) {
+            return $tenant->whmcs_default_receipt_type_id;
+        }
+
+        return $tenant->whmcs_default_invoice_type_id;
+    }
+
+    /**
      * For a SINGLE third-party row, the uniform receipt-vs-invoice intent of its
      * route(s): true = «Απόδειξη», false = «Τιμολόγιο», null = no routes OR mixed
      * flags (ambiguous → must go to the operator, never auto-typed). The flag is

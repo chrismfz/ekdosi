@@ -837,6 +837,19 @@ class CompanyForm
                                             ->searchable()
                                             ->live()
                                             ->helperText('Ο τύπος «Απόδειξης λιανικής» για όταν ο πελάτης ΔΕΝ ζήτησε τιμολόγιο, ή ένας μονομερής τρίτος είναι σημασμένος ως απόδειξη. Χωρίς αυτόν, τέτοιες εγγραφές ΜΕΝΟΥΝ στο Inbox για τον χειριστή (δεν εκδίδονται ποτέ ως λάθος τύπος). Ίδιος κανόνας πληρωμής: 0 ημέρες πίστωσης (ή κανένας τρόπος πληρωμής — και τα δύο = εξοφλημένο στην έκδοση).'),
+                                        Select::make('whmcs_default_unpaid_type_id')
+                                            ->label('Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ WHMCS (επί πιστώσει, προαιρετικό)')
+                                            ->options(fn (?Company $record) => $record
+                                                ? InvoiceType::query()
+                                                    ->where('company_id', $record->id)
+                                                    ->orderBy('code')
+                                                    ->get()
+                                                    ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+                                                    ->toArray()
+                                                : [])
+                                            ->searchable()
+                                            ->live()
+                                            ->helperText('Ο τύπος «επί πιστώσει» για όταν το WHMCS τιμολόγιο έρχεται ΑΠΛΗΡΩΤΟ (π.χ. Α.Ε./Δημόσιο που θέλει πρώτα τιμολόγιο, μετά πληρώνει). Το «Δημιουργία Παραστατικού» τον προ-επιλέγει όταν η εγγραφή είναι Unpaid, ώστε να μείνει σωστά ΑΝΟΙΧΤΗ ΟΦΕΙΛΗ. Εδώ ΘΕΛΕΙΣ τρόπο πληρωμής με ημέρες πίστωσης >0 (το ΑΝΤΙΘΕΤΟ από τους παραπάνω). Κενό → πέφτει πίσω στον τύπο τιμολογίου.'),
                                         // Live tripwire for the «paid WHMCS invoice shows as an open
                                         // receivable» trap: warn ONLY when a chosen type's payment
                                         // method has due_days > 0. Cash-term (due_days = 0 OR no method
@@ -864,15 +877,33 @@ class CompanyForm
                                                         ->find($id);
                                                     $dueDays = $type?->paymentMethod?->due_days;
                                                     if ($dueDays !== null && (int) $dueDays > 0) {
-                                                        $warnings[] = e("Ο τύπος {$slotLabel} «{$type->code} — {$type->name}» έχει τρόπο πληρωμής «{$type->paymentMethod->description}» με {$dueDays} ημέρες πίστωσης");
+                                                        $warnings[] = e("Ο τύπος {$slotLabel} «{$type->code} — {$type->name}» έχει τρόπο πληρωμής «{$type->paymentMethod->description}» με {$dueDays} ημέρες πίστωσης (πληρωμένο WHMCS → θα φαίνεται ως ανοιχτή οφειλή· βάλε 0 ημέρες)");
+                                                    }
+                                                }
+
+                                                // The UNPAID slot is the MIRROR: it SHOULD be credit-term
+                                                // (due_days > 0) so an unpaid WHMCS invoice stays an open
+                                                // receivable. Warn if it's cash-term (0 or no method) —
+                                                // an unpaid invoice issued under it would read as settled.
+                                                $unpaidId = $get('whmcs_default_unpaid_type_id');
+                                                if ($unpaidId) {
+                                                    $unpaidType = InvoiceType::query()
+                                                        ->where('company_id', $record->id)
+                                                        ->with('paymentMethod')
+                                                        ->find($unpaidId);
+                                                    if ($unpaidType !== null) {
+                                                        $udd = $unpaidType->paymentMethod?->due_days;
+                                                        if ($udd === null || (int) $udd === 0) {
+                                                            $warnings[] = e("Ο τύπος ΑΠΛΗΡΩΤΩΝ «{$unpaidType->code} — {$unpaidType->name}» είναι εξοφλημένος στην έκδοση (0 ημέρες/χωρίς τρόπο) — τα απλήρωτα δεν θα φαίνονται ως οφειλή· βάλε τρόπο πληρωμής με ημέρες πίστωσης >0");
+                                                        }
                                                     }
                                                 }
 
                                                 if ($warnings === []) {
-                                                    return new HtmlString('<span style="color:#16a34a;">✓ Οι επιλεγμένοι τύποι είναι εξοφλημένοι στην έκδοση (0 ημέρες πίστωσης).</span>');
+                                                    return new HtmlString('<span style="color:#16a34a;">✓ Σωστοί όροι πληρωμής: πληρωμένα = εξοφλημένα στην έκδοση, απλήρωτα = επί πιστώσει.</span>');
                                                 }
 
-                                                return new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ '.implode('· ', $warnings).'. Τα WHMCS τιμολόγια είναι ήδη πληρωμένα — έτσι θα εμφανίζονται ως ανοιχτές οφειλές. Βάλε τρόπο πληρωμής με 0 ημέρες πίστωσης.</span>');
+                                                return new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ '.implode('· ', $warnings).'.</span>');
                                             }),
                                     ]),
 

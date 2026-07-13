@@ -104,6 +104,7 @@ class Company extends Model
         'whmcs_auto_issue_immediate',
         'whmcs_default_invoice_type_id',
         'whmcs_default_receipt_type_id',
+        'whmcs_default_unpaid_type_id',
     ];
 
     /**

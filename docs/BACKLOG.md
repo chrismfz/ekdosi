@@ -276,14 +276,11 @@ paid/unpaid status αγνοείται** και **δεν καταγράφεται
 (cash-term) default τύπο φαίνεται λανθασμένα **εξοφλημένο**, ενώ είναι πραγματική ανοιχτή οφειλή.
 Το payload **έχει ήδη** `status`/`datepaid`/`balance` (τα διαβάζει το `CustomerWhmcsLedger`).
 
-**Phase 1 — inbound (χαμηλό ρίσκο· read-only ως προς WHMCS):**
-- Καταγραφή του WHMCS `status` (+ `datepaid`/`balance`) στο snapshot· **badge Paid/Unpaid** στο inbox.
-- Νέα ρύθμιση καρτέλας WHMCS: **«Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ WHMCS (επί πιστώσει)»**
-  (δείχνει σε τύπο με `due_days>0`) — δίπλα στους υπάρχοντες paid defaults (v1.8.0 tripwire).
-- Το «Δημιουργία Παραστατικού» **προεπιλέγει** τύπο βάσει status (Paid→cash default· Unpaid→unpaid
-  default), **πάντα με override**. Auto-issue **μένει paid-only** (δεν εκδίδει ποτέ απλήρωτα).
-- Το v1.8.0 tripwire γίνεται status-aware: warning για cash-slot με `due_days>0` (ως τώρα) +
-  «ΟΚ, επί-πιστώσει» για το unpaid-slot.
+**Phase 1 — inbound — ✅ SHIPPED (v1.9.x):** WHMCS `status` από το payload → badge «Πληρωμή WHMCS»
+στο inbox· νέα ρύθμιση **«Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ (επί πιστώσει)»** (`whmcs_default_unpaid_type_id`)·
+το «Δημιουργία Παραστατικού» προ-επιλέγει τύπο βάσει status+πρόθεσης (`PendingWhmcsInvoice::suggestedInvoiceTypeId`),
+override πάντα· tripwire status-aware (warn και για cash-term unpaid-slot). Auto-issue paid-only.
+_(Το `datepaid`/`balance` snapshot δεν χρειάστηκε — το `status` αρκεί· read-on-demand από το payload.)_
 
 **Phase 2 — outbound (money-write· opt-in· design-first):** Ekdosi payment (σε WHMCS-sourced
 τιμολόγιο) → WHMCS `AddInvoicePayment`/mark-paid, ΜΟΝΟ αν όχι-ήδη-πληρωμένο. Κίνδυνοι + δικλείδες:
