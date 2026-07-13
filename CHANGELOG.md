@@ -18,6 +18,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **`ekdosi:release` read the current version from the CACHED config** (`config('app.version')`), so on
+  a deploy box with a stale `config:cache` it computed the wrong base — once trying to bump 1.12.0 →
+  «1.11.1» (a downgrade). It now parses the version from `config/app.php` directly (the same file it
+  writes), cache-immune, with a `config()` fallback.
+
 ### Changed
 - **`tag-release.sh --tag` is now one safe atomic step** (was: manual `ekdosi:release` → commit →
   tag, which let you tag BEFORE committing → a tag on the wrong commit, e.g. `v1.12.0` on a `1.11.0`

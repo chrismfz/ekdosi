@@ -41,7 +41,11 @@ class Release extends Command
         $configPath = config_path('app.php');
         $changelog = (string) file_get_contents($changelogPath);
         $config = (string) file_get_contents($configPath);
-        $current = (string) config('app.version', '0.0.0');
+        // Read the CURRENT version from the file we're about to bump — not from
+        // config('app.version'), which is the CACHED config and goes stale on a
+        // deploy box (the cause of the 1.12.0 → «1.11.1» downgrade). Fall back to
+        // config() only if the literal is somehow missing.
+        $current = self::currentVersion($config) ?? (string) config('app.version', '0.0.0');
 
         // --check — deploy preflight / reminder, writes nothing.
         if ($this->option('check')) {
@@ -263,6 +267,19 @@ class Release extends Command
         );
 
         return [$new ?? $md, $hadEntries];
+    }
+
+    /**
+     * The current version parsed FROM the config/app.php contents — NOT from
+     * `config('app.version')`, which reads the cached config (`config:cache`) and
+     * on a deploy box is stale relative to the file we're about to bump. Reading
+     * the same file we write keeps the base version correct regardless of cache
+     * (a stale cache once made `ekdosi:release` try to bump 1.12.0 → «1.11.1»).
+     * Returns null if no literal is found (caller falls back to config()).
+     */
+    public static function currentVersion(string $config): ?string
+    {
+        return preg_match("/'version'\\s*=>\\s*'([^']*)'/", $config, $m) ? $m[1] : null;
     }
 
     /** Replace the `'version' => '…'` literal in config/app.php (first match). */
