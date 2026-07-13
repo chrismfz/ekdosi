@@ -4,6 +4,7 @@ namespace App\Filament\Resources\WhmcsInbox\Tables;
 
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\PickerOptions;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
@@ -33,6 +34,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\HtmlString;
 use Livewire\Component;
 use Throwable;
 
@@ -109,6 +111,23 @@ class WhmcsInboxTable
                         return number_format($total, 2, ',', '.').' '.$cur;
                     })
                     ->alignRight(),
+
+                // WHMCS payment status: Unpaid rows should be issued επί πιστώσει
+                // (open receivable), Paid rows settled at issue. Drives the draft's
+                // pre-selected type; surfaced so the operator sees it at a glance.
+                TextColumn::make('whmcs_paid_status')
+                    ->label('Πληρωμή WHMCS')
+                    ->badge()
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match (true) {
+                        $r->whmcsIsUnpaid() => 'Απλήρωτο',
+                        strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 => 'Πληρωμένο',
+                        $r->whmcsStatus() !== null => $r->whmcsStatus(),   // Cancelled/Refunded raw
+                        default => null,
+                    })
+                    ->color(fn (PendingWhmcsInvoice $r): string => $r->whmcsIsUnpaid()
+                        ? 'warning'
+                        : (strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 ? 'success' : 'gray'))
+                    ->toggleable(),
 
                 // Who the invoice is from on the WHMCS side — always shown,
                 // even for unmatched rows, so the operator has the full picture
@@ -981,6 +1000,17 @@ class WhmcsInboxTable
                             }),
                     ]),
 
+                // Carry the WHMCS paid/unpaid fact INTO the modal (the inbox badge
+                // is toggleable, so it can't be the only signal). Prominent only
+                // when unpaid — that's the case where the (cash-term) default type
+                // would wrongly settle a real receivable.
+                Placeholder::make('whmcs_payment_status_hint')
+                    ->hiddenLabel()
+                    ->content(fn (): HtmlString => $r->whmcsIsUnpaid()
+                        ? new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ WHMCS: ΑΠΛΗΡΩΤΟ — έκδοσε επί πιστώσει (ανοιχτή οφειλή), όχι εξοφλημένο στην έκδοση.</span>')
+                        : new HtmlString('<span style="color:#6b7280;">WHMCS: '.(strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 ? 'Πληρωμένο (εξοφλημένο στην έκδοση)' : e((string) ($r->whmcsStatus() ?? '—'))).'</span>'))
+                    ->visible(fn (): bool => $r->whmcsStatus() !== null),
+
                 Select::make('invoice_type_id')
                     ->label('Τύπος παραστατικού')
                     // Same favorites-first (⭐) ordering as the normal invoice form
@@ -1000,11 +1030,14 @@ class WhmcsInboxTable
                     ->required()
                     ->searchable()
                     ->live()
-                    // Pre-select the tenant's configured default WHMCS invoice
-                    // type (Setup → Company). The operator still changes it —
-                    // e.g. to a receipt type when the intent above says so.
-                    ->default(fn () => Filament::getTenant()?->whmcs_default_invoice_type_id)
-                    ->helperText('Επιλέγει σειρά + ΑΑ counter + myDATA mapping. Προ-επιλογή: ο προεπιλεγμένος τύπος WHMCS του tenant.'),
+                    // Pre-select a STATUS- and intent-aware default: unpaid WHMCS
+                    // invoice → the «επί πιστώσει» type (open receivable); paid +
+                    // receipt-intent → the receipt type; paid otherwise → the paid
+                    // invoice type. The operator always overrides.
+                    ->default(fn () => ($t = Filament::getTenant()) instanceof Company
+                        ? $r->suggestedInvoiceTypeId($t)
+                        : null)
+                    ->helperText('Επιλέγει σειρά + ΑΑ counter + myDATA mapping. Προ-επιλογή βάσει κατάστασης WHMCS (πληρωμένο/απλήρωτο) + πρόθεσης (τιμολόγιο/απόδειξη).'),
 
                 // Full preview: re-renders whenever customer / invoice
                 // type change. Calls the filer's preview() (no DB writes)

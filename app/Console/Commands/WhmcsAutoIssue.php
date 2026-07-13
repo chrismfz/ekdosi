@@ -285,6 +285,16 @@ class WhmcsAutoIssue extends Command
      */
     private function chooseType(PendingWhmcsInvoice $row, InvoiceType $invoiceType, ?InvoiceType $receiptType): array
     {
+        // Auto-issue is PAID-ONLY (this enforces it — the staging feed alone
+        // doesn't, since a manual plugin push / webhook can stage an UNPAID row).
+        // An unpaid WHMCS invoice must be issued επί πιστώσει (open receivable),
+        // which the cash-term auto-issue defaults can't express — filing it here
+        // would silently record a real receivable as SETTLED. Hold it for the
+        // operator, who gets the unpaid credit-term type pre-selected in the inbox.
+        if ($row->whmcsIsUnpaid()) {
+            return [null, 'WHMCS ΑΠΛΗΡΩΤΟ — χρειάζεται χειριστή (έκδοση επί πιστώσει, όχι αυτόματη)'];
+        }
+
         // A WHMCS consolidated/mass-pay invoice (lines reference other invoices,
         // no VAT of its own) is never auto-issued — it's a payment-grouping
         // artefact, not a sale. New rows are already ingested as 'held'; this

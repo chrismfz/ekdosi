@@ -130,6 +130,14 @@ return [
         'whmcs_auto_issue_enabled' => env('EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE', false),
         'whmcs_auto_issue_cron' => env('EKDOSI_WHMCS_AUTO_ISSUE_CRON', '*/15 * * * *'),
 
+        // whmcs:sync-payments — INBOUND payment sync: record an ekdosi Payment
+        // for a filed WHMCS-linked invoice that is still OPEN (issued επί
+        // πιστώσει) and has since been paid in WHMCS. Money-write in ekdosi only
+        // (never the customer's WHMCS); idempotent (only-if-open + dedup). OFF by
+        // default — opt in per deploy once the credit-term flow is live.
+        'whmcs_payment_sync_enabled' => env('EKDOSI_SCHEDULE_WHMCS_PAYMENT_SYNC', false),
+        'whmcs_payment_sync_cron' => env('EKDOSI_WHMCS_PAYMENT_SYNC_CRON', '*/30 * * * *'),
+
         // mydata:reconcile-sales — daily read-only local↔AADE cross-check,
         // per gr-mydata / non-Off tenant. HH:MM (server time).
         'mydata_reconcile_enabled' => env('EKDOSI_SCHEDULE_MYDATA_RECONCILE', true),

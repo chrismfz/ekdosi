@@ -212,9 +212,17 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - Ενοποιημένο plugin **`ekdosi_bridge`**, **PHP-to-PHP μέσω WHMCS API** (HMAC, όχι shared-DB).
 - **Inbox draft-first** (`WhmcsInbox`) — webhook/poll → `pending_whmcs_invoices` →
   «Δημιουργία Παραστατικού» (editable draft) → lifecycle → write-back `invoiced=MARK`.
-- **Ζωντανός έλεγχος cash-term** στους προεπιλεγμένους τύπους αυτόματης έκδοσης (καρτέλα WHMCS):
-  ρητό «γιατί» + προειδοποίηση αν ο τύπος έχει τρόπο πληρωμής με `due_days>0` (πληρωμένο WHMCS
-  τιμολόγιο θα φαινόταν ως ανοιχτή οφειλή).
+- **Paid/unpaid-aware τιμολόγηση**: badge «Πληρωμή WHMCS» (Πληρωμένο/Απλήρωτο) στο inbox· το draft
+  προ-επιλέγει τύπο βάσει κατάστασης — ΑΠΛΗΡΩΤΟ → «Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ» (επί πιστώσει →
+  ανοιχτή οφειλή), ΠΛΗΡΩΜΕΝΟ → cash-term (τιμολόγιο/απόδειξη κατά πρόθεση)· override πάντα.
+- **Inbound συγχρονισμός πληρωμών** (`whmcs:sync-payments`, opt-in scheduled): όταν ένα επί-πιστώσει
+  WHMCS τιμολόγιο πληρωθεί στο WHMCS, καταγράφεται Payment στο ekdosi που κλείνει την οφειλή —
+  money-write μόνο στο ekdosi, only-if-open + dedup. **On-demand και από το UI**: header action
+  «Συγχρονισμός πληρωμών τώρα» στο inbox (bulk) + per-invoice «Έχει πληρωθεί στο WHMCS;» πάνω σε
+  ανοιχτό WHMCS-συνδεδεμένο παραστατικό.
+- **Ζωντανός έλεγχος όρου πληρωμής** στους προεπιλεγμένους τύπους (καρτέλα WHMCS): ρητό «γιατί» +
+  προειδοποίηση αν ο paid τύπος έχει `due_days>0` (θα φαινόταν ως οφειλή) **ή** ο unpaid τύπος είναι
+  cash-term (δεν θα φαινόταν ως οφειλή).
 - **Inbox alerts**: «άμεση τιμολόγηση» rows float to top + red badge + red nav badge +
   **durable bell notification** (Filament database notifications, 30s poll) on staging· 30s
   table poll· **«Τρίτος» badge** (δικαιούχος / «Πολλοί (N)») + «Άμεσο»/«Τρίτος» filters.

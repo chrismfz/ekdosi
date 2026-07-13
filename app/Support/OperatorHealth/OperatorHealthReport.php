@@ -29,6 +29,7 @@ class OperatorHealthReport
     private const TASK_LABELS = [
         'whmcs_fetch' => 'WHMCS fetch',
         'whmcs_auto_issue' => 'WHMCS auto-issue',
+        'whmcs_payment_sync' => 'WHMCS payment sync',
         'mydata_reconcile' => 'myDATA reconcile',
         'mydata_vat_picture' => 'VAT picture refresh',
         'mydata_fetch_expenses' => 'myDATA expenses refresh',

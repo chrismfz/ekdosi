@@ -266,6 +266,42 @@ data model + phase gates: **`PLAN.md`**.
 - **T-4 manual split tools** (transfer_invoice / relid_remover) — χαμηλή προτεραιότητα.
 - **«All of a client's third parties» 2ο dropdown** (θέλει `contacts-by-userid` bridge endpoint).
 
+## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
+_Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._
+
+**Πρόβλημα:** σήμερα ο όρος πληρωμής του εκδοθέντος τιμολογίου βγαίνει **αποκλειστικά από τον
+τύπο** (`WhmcsInvoiceMapper` → `payment_method_id = invoiceType->payment_method_id`)· το **WHMCS
+paid/unpaid status αγνοείται** και **δεν καταγράφεται Payment**. Άρα ένα ΑΠΛΗΡΩΤΟ WHMCS τιμολόγιο
+(π.χ. Α.Ε./Δημόσιο/Δημοτική που θέλει «πρώτα τιμολόγιο, μετά πληρωμή») που εκδίδεται κάτω από τον
+(cash-term) default τύπο φαίνεται λανθασμένα **εξοφλημένο**, ενώ είναι πραγματική ανοιχτή οφειλή.
+Το payload **έχει ήδη** `status`/`datepaid`/`balance` (τα διαβάζει το `CustomerWhmcsLedger`).
+
+**Phase 1 — inbound — ✅ SHIPPED (v1.9.x):** WHMCS `status` από το payload → badge «Πληρωμή WHMCS»
+στο inbox· νέα ρύθμιση **«Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ (επί πιστώσει)»** (`whmcs_default_unpaid_type_id`)·
+το «Δημιουργία Παραστατικού» προ-επιλέγει τύπο βάσει status+πρόθεσης (`PendingWhmcsInvoice::suggestedInvoiceTypeId`),
+override πάντα· tripwire status-aware (warn και για cash-term unpaid-slot). Auto-issue paid-only.
+_(Το `datepaid`/`balance` snapshot δεν χρειάστηκε — το `status` αρκεί· read-on-demand από το payload.)_
+
+**Inbound payment sync (WHMCS → ekdosi) — ✅ SHIPPED (v1.11.x):** `whmcs:sync-payments` (opt-in
+scheduled) κλείνει την οφειλή στο ekdosi όταν ένα επί-πιστώσει WHMCS τιμολόγιο πληρωθεί στο WHMCS —
+poll-based, money-write μόνο στο ekdosi, only-if-open + lockForUpdate re-read + `transaction_id` dedup
++ AADE-cancel-safe (`WhmcsPaymentSyncer`). **Γνωστά όρια** (από το review): (α) σερβίρει μόνο tenants
+που φτάνουν σε `FILED` (myDATA-filing· off-mode drafts μένουν `DRAFTED` → follow-up)· (β) πριν το enable
+σε tenant με legacy on-account πληρωμές, επιβεβαίωσε ότι κανένα legacy τιμολόγιο δεν έχει `FILED` pending
+row (default OFF = συνειδητό opt-in)· (γ) bridge-only tenant χωρίς native creds εξαιρείται από το loop.
+
+**Phase 2 — outbound (money-write· opt-in· design-first):** Ekdosi payment (σε WHMCS-sourced
+τιμολόγιο) → WHMCS `AddInvoicePayment`/mark-paid, ΜΟΝΟ αν όχι-ήδη-πληρωμένο. Κίνδυνοι + δικλείδες:
+- **Διπλή πληρωμή** (ο πελάτης πλήρωσε και μέσω WHMCS gateway) → `GetInvoice` status=Unpaid **πριν** το push.
+- **Feedback loop** (WHMCS InvoicePaid hook → πίσω στο Ekdosi) → absorb από το **audit-freeze** (filed row → `touch`, όχι δεύτερη εγγραφή).
+- **Μερική πληρωμή** → push **ακριβούς ποσού**· < balance μένει Unpaid (σωστό).
+- **Retry διπλασιασμός** → **transaction_id** από το Ekdosi Payment για dedup WHMCS-side.
+- Νέο plugin op (`add_payment` σε `inbound.php`, HMAC-guarded)· native `AddInvoicePayment` για plugin-less.
+- **Opt-in per tenant** + ίσως χειροκίνητο κουμπί «Δήλωση πληρωμής στο WHMCS» αντί πλήρως αυτόματο.
+
+**Υποδομή έτοιμη:** payload έχει status· mapper/draft/CompanyForm/writeback υπάρχουν. Λείπουν: (Φ1)
+status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) το outbound payment op.
+
 ## 🆕 Settings-in-UI — widen (scheduler + global pages shipped)
 - **Role-scoped per-company knobs:** _✅ SHIPPED (trimmed) — «Ρυθμίσεις εταιρείας»
   (`CompanySettings`, `View:CompanySettings`): company_admin self-serves the SAFE subset

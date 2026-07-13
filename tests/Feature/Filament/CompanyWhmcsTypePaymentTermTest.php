@@ -87,4 +87,23 @@ class CompanyWhmcsTypePaymentTermTest extends TestCase
             ->fillForm(['whmcs_default_receipt_type_id' => $noMethodType->id])
             ->assertDontSee(self::WARNING_MARKER);
     }
+
+    // «ΑΠΛΗΡΩΤΩΝ» (all-caps genitive) is text UNIQUE to the UNPAID-slot warning.
+    private const UNPAID_WARNING_MARKER = 'ΑΠΛΗΡΩΤΩΝ';
+
+    public function test_unpaid_slot_warns_when_the_type_is_cash_term(): void
+    {
+        // The MIRROR check: the ΑΠΛΗΡΩΤΑ type SHOULD be credit-term; a cash-term
+        // (due_days=0) type there → an unpaid invoice would read as settled → warn.
+        Livewire::test(EditCompany::class, ['record' => $this->company->getRouteKey()])
+            ->fillForm(['whmcs_default_unpaid_type_id' => $this->cashType->id])
+            ->assertSee(self::UNPAID_WARNING_MARKER);
+    }
+
+    public function test_unpaid_slot_with_credit_term_type_does_not_warn(): void
+    {
+        Livewire::test(EditCompany::class, ['record' => $this->company->getRouteKey()])
+            ->fillForm(['whmcs_default_unpaid_type_id' => $this->creditType->id])
+            ->assertDontSee(self::UNPAID_WARNING_MARKER);
+    }
 }

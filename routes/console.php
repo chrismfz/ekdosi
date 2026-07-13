@@ -127,6 +127,19 @@ $trackSchedule(
     'whmcs_auto_issue'
 );
 
+// whmcs:sync-payments — INBOUND payment sync: close an ekdosi receivable when
+// its WHMCS-linked invoice (issued επί πιστώσει) gets paid in WHMCS. The command
+// loops every WHMCS-configured tenant itself. Money-write in ekdosi only +
+// idempotent (only-if-open + dedup), but OFF by default (opt-in per deploy).
+$trackSchedule(
+    Schedule::command('whmcs:sync-payments')
+        ->cron(config('ekdosi.schedule.whmcs_payment_sync_cron', '*/30 * * * *'))
+        ->name('whmcs-sync-payments-all')
+        ->when(fn () => $scheduleEnabled('whmcs_payment_sync_enabled'))
+        ->withoutOverlapping(30),
+    'whmcs_payment_sync'
+);
+
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
 // per myDATA-readable tenant (direct gr-mydata OR a provider reading its own
 // AADE picture back). Discrepancies surface in the command output (exit 2);
