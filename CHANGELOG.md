@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-07-13
+
 ### Added
 - **WHMCS γέφυρα: paid/unpaid-aware τιμολόγηση (Phase 1 — inbound).** Το «Δημιουργία Παραστατικού»
   προ-επιλέγει πλέον τον τύπο βάσει της **κατάστασης πληρωμής του WHMCS τιμολογίου**: ΑΠΛΗΡΩΤΟ →
