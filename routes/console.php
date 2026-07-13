@@ -140,6 +140,18 @@ $trackSchedule(
     'whmcs_payment_sync'
 );
 
+// whmcs:reconcile-payments — READ-ONLY detector feeding the dashboard widget +
+// «Συγχρονισμός πληρωμών» page: which open επί-πιστώσει invoices did WHMCS pay?
+// Caches the worklist + bell-notifies new items; writes no money. OFF by default.
+$trackSchedule(
+    Schedule::command('whmcs:reconcile-payments')
+        ->cron(config('ekdosi.schedule.whmcs_payment_reconcile_cron', '*/30 * * * *'))
+        ->name('whmcs-reconcile-payments-all')
+        ->when(fn () => $scheduleEnabled('whmcs_payment_reconcile_enabled'))
+        ->withoutOverlapping(30),
+    'whmcs_payment_reconcile'
+);
+
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
 // per myDATA-readable tenant (direct gr-mydata OR a provider reading its own
 // AADE picture back). Discrepancies surface in the command output (exit 2);

@@ -138,6 +138,14 @@ return [
         'whmcs_payment_sync_enabled' => env('EKDOSI_SCHEDULE_WHMCS_PAYMENT_SYNC', false),
         'whmcs_payment_sync_cron' => env('EKDOSI_WHMCS_PAYMENT_SYNC_CRON', '*/30 * * * *'),
 
+        // whmcs:reconcile-payments — READ-ONLY detector: recompute the worklist
+        // of open «επί πιστώσει» invoices that WHMCS now reports Paid, cache it
+        // for the dashboard widget + «Συγχρονισμός πληρωμών» page, and bell-notify
+        // new ones. Writes NO money (the operator closes each with one click). OFF
+        // by default — opt in to surface the worklist «εύκαιρα» without the console.
+        'whmcs_payment_reconcile_enabled' => env('EKDOSI_SCHEDULE_WHMCS_PAYMENT_RECONCILE', false),
+        'whmcs_payment_reconcile_cron' => env('EKDOSI_WHMCS_PAYMENT_RECONCILE_CRON', '*/30 * * * *'),
+
         // mydata:reconcile-sales — daily read-only local↔AADE cross-check,
         // per gr-mydata / non-Off tenant. HH:MM (server time).
         'mydata_reconcile_enabled' => env('EKDOSI_SCHEDULE_MYDATA_RECONCILE', true),
