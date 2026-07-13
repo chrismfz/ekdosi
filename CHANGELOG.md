@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Firebird import: ζωντανή σύνδεση (host/credentials) + «Έλεγχος σύνδεσης».** Πέρα από το ανέβασμα
+  `.fbk`/`.fdb`, νέο tab «Ζωντανή σύνδεση» στη φόρμα εισαγωγής που συνδέεται **απευθείας** στη ζωντανή
+  legacy Firebird (IP + διαπιστευτήρια + διαδρομή `.fdb` στον remote) — χωρίς gbak/upload. Κουμπί
+  **«Έλεγχος σύνδεσης»** που, πριν το import, επιβεβαιώνει σύνδεση/πόρτα/διαπιστευτήρια και **μετρά τους
+  βασικούς legacy πίνακες** (CUSTOMER/INVTYPE/INVOICE/PRODUCT) → «✅ X πελάτες, Y τιμολόγια», με σαφή
+  διάγνωση σφάλματος (λείπει pdo_firebird / auth / unreachable / λάθος βάση). Μόνο ανάγνωση· ο κωδικός
+  μένει στη μνήμη (ποτέ στη γραμμή εισαγωγής). Το job τρέχει `migrate:firebird --host --fdb` απευθείας.
 - **WHMCS: outbound σήμανση πληρωμένου (Phase 2 — ekdosi → WHMCS mark-paid).** Όταν ένα επί-πιστώσει
   τιμολόγιο εξοφληθεί **στο ekdosi**, το WHMCS του πελάτη σημαίνεται πληρωμένο (`AddInvoicePayment`) —
   **αυτόματα** (queued `PushWhmcsPaymentJob` μόλις κλείσει η οφειλή) **και** με κουμπί «Σήμανση Paid στο

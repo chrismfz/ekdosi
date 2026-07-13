@@ -139,15 +139,23 @@ class RunFirebirdImport implements ShouldQueue
     {
         $run = FirebirdImportRun::findOrFail($this->runId);
 
+        // Live connection: no upload, no gbak — drain straight from the remote
+        // Firebird via migrate:firebird (--host + --fdb=<remote path>).
+        if ($run->isLiveConnection()) {
+            $this->runLive($run);
+
+            return;
+        }
+
         $run->update([
-            'status'     => FirebirdImportRun::STATUS_RESTORING,
+            'status' => FirebirdImportRun::STATUS_RESTORING,
             'started_at' => now(),
         ]);
 
         $uploadedFullPath = Storage::disk('local')->path($run->uploaded_path);
         if (! is_file($uploadedFullPath)) {
             $this->failRun($run, 'gbak', "Uploaded file vanished: {$run->uploaded_path}");
-            throw new \RuntimeException("Uploaded file not found");
+            throw new \RuntimeException('Uploaded file not found');
         }
 
         // Two upload formats supported:
@@ -193,7 +201,7 @@ class RunFirebirdImport implements ShouldQueue
         if ($usingDirectFdb) {
             $fdbPathForArtisan = $uploadedFullPath;
             Log::info('firebird-import.direct-fdb', [
-                'run_id'   => $run->id,
+                'run_id' => $run->id,
                 'fdb_path' => $fdbPathForArtisan,
             ]);
         } else {
@@ -236,7 +244,7 @@ class RunFirebirdImport implements ShouldQueue
             $this->failRun(
                 $run,
                 'migrate',
-                "pdo_firebird PHP extension is not loaded on the queue worker. Install it (apt: php-firebird from ondrej/php PPA, or build against firebird-dev) and restart the worker. See CLAUDE.md env-prep section.",
+                'pdo_firebird PHP extension is not loaded on the queue worker. Install it (apt: php-firebird from ondrej/php PPA, or build against firebird-dev) and restart the worker. See CLAUDE.md env-prep section.',
             );
             if ($tempFdbToDelete) {
                 @unlink($tempFdbToDelete);
@@ -286,7 +294,7 @@ class RunFirebirdImport implements ShouldQueue
         }
 
         $run->update([
-            'status'      => FirebirdImportRun::STATUS_COMPLETED,
+            'status' => FirebirdImportRun::STATUS_COMPLETED,
             'finished_at' => now(),
             'counts_json' => $counts,
         ]);
@@ -306,9 +314,79 @@ class RunFirebirdImport implements ShouldQueue
         }
 
         Log::info('firebird-import.completed', [
-            'run_id'     => $run->id,
+            'run_id' => $run->id,
             'company_id' => $run->company_id,
-            'counts'     => $counts,
+            'counts' => $counts,
+        ]);
+    }
+
+    /**
+     * Live-connection import: no upload, no gbak restore. Drain straight from a
+     * remote Firebird by running migrate:firebird against `--host=<remote>`
+     * `--fdb=<remote .fdb path>`. Same command, counts + finalize as the file
+     * path — just no local file to restore or clean up.
+     */
+    private function runLive(FirebirdImportRun $run): void
+    {
+        if (! extension_loaded('pdo_firebird')) {
+            $this->failRun(
+                $run,
+                'migrate',
+                'pdo_firebird PHP extension is not loaded on the queue worker. Install it (apt: php-firebird from ondrej/php PPA, or build against firebird-dev) and restart the worker. See CLAUDE.md env-prep section.',
+            );
+            throw new \RuntimeException('pdo_firebird extension not available');
+        }
+
+        $run->update([
+            'status' => FirebirdImportRun::STATUS_IMPORTING,
+            'started_at' => now(),
+        ]);
+
+        $countsPath = rtrim(sys_get_temp_dir(), '/')."/ekdosi-import-{$run->id}-counts.json";
+
+        $artisan = new Process([
+            PHP_BINARY,
+            base_path('artisan'),
+            'migrate:firebird',
+            '--company-id='.$run->company_id,
+            '--fdb='.$run->fb_database,
+            '--host='.$run->fb_host,
+            '--fbuser='.$run->fb_user,
+            '--fbpass='.$this->fbPassword,
+            '--counts-out='.$countsPath,
+        ], base_path());
+        $artisan->setTimeout($this->timeout - 60);
+
+        try {
+            $artisan->run();
+        } catch (Throwable $e) {
+            $this->failRun($run, 'migrate', 'migrate:firebird execution failed: '.$e->getMessage());
+            throw $e;
+        }
+
+        if (! $artisan->isSuccessful()) {
+            $stderr = trim($artisan->getErrorOutput()) ?: trim($artisan->getOutput());
+            $this->failRun($run, 'migrate', "migrate:firebird exited {$artisan->getExitCode()}: {$stderr}");
+            throw new \RuntimeException("migrate:firebird failed: {$stderr}");
+        }
+
+        $counts = null;
+        if (is_file($countsPath)) {
+            $counts = json_decode((string) file_get_contents($countsPath), true);
+            @unlink($countsPath);
+        }
+
+        $run->update([
+            'status' => FirebirdImportRun::STATUS_COMPLETED,
+            'finished_at' => now(),
+            'counts_json' => $counts,
+        ]);
+
+        Log::info('firebird-import.completed', [
+            'run_id' => $run->id,
+            'company_id' => $run->company_id,
+            'mode' => 'live',
+            'counts' => $counts,
         ]);
     }
 
@@ -320,15 +398,15 @@ class RunFirebirdImport implements ShouldQueue
     private function failRun(FirebirdImportRun $run, string $step, string $message): void
     {
         $run->update([
-            'status'        => FirebirdImportRun::STATUS_FAILED,
-            'failed_step'   => $step,
+            'status' => FirebirdImportRun::STATUS_FAILED,
+            'failed_step' => $step,
             'error_message' => $this->truncateForLog($message),
-            'finished_at'   => now(),
+            'finished_at' => now(),
         ]);
         Log::warning('firebird-import.failed', [
             'run_id' => $run->id,
-            'step'   => $step,
-            'error'  => $message,
+            'step' => $step,
+            'error' => $message,
         ]);
     }
 
@@ -352,6 +430,7 @@ class RunFirebirdImport implements ShouldQueue
         $head = mb_substr($message, 0, $headLen);
         $tail = mb_substr($message, -$tailLen);
         $elided = mb_strlen($message) - $headLen - $tailLen;
+
         return $head."\n…\n[{$elided} chars elided]\n…\n".$tail;
     }
 
@@ -379,7 +458,7 @@ class RunFirebirdImport implements ShouldQueue
         $step = match ($run->status) {
             FirebirdImportRun::STATUS_IMPORTING => 'migrate',
             FirebirdImportRun::STATUS_RESTORING => 'gbak',
-            default                             => 'gbak',  // 'uploaded' falls here
+            default => 'gbak',  // 'uploaded' falls here
         };
         $this->failRun(
             $run,

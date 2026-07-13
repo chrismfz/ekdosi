@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -22,17 +21,21 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class FirebirdImportRun extends Model
 {
     use BelongsToCompany;
-
     use HasFactory;
 
-    public const STATUS_UPLOADED  = 'uploaded';
+    public const STATUS_UPLOADED = 'uploaded';
+
     public const STATUS_RESTORING = 'restoring';
+
     public const STATUS_IMPORTING = 'importing';
+
     public const STATUS_COMPLETED = 'completed';
-    public const STATUS_FAILED    = 'failed';
+
+    public const STATUS_FAILED = 'failed';
 
     public const SOURCE_FIREBIRD = 'firebird';
-    public const SOURCE_EPSILON  = 'epsilon';
+
+    public const SOURCE_EPSILON = 'epsilon';
 
     protected $fillable = [
         'company_id',
@@ -51,16 +54,23 @@ class FirebirdImportRun extends Model
         'failed_step',
         'fb_host',
         'fb_user',
+        'fb_database',
     ];
+
+    /** A live-connection run (direct to a remote Firebird) vs a file upload. */
+    public function isLiveConnection(): bool
+    {
+        return $this->uploaded_path === null && filled($this->fb_database);
+    }
 
     protected function casts(): array
     {
         return [
-            'started_at'  => 'datetime',
+            'started_at' => 'datetime',
             'finished_at' => 'datetime',
             'counts_json' => 'array',
             'source_files_json' => 'array',
-            'file_size'   => 'integer',
+            'file_size' => 'integer',
         ];
     }
 
@@ -84,6 +94,7 @@ class FirebirdImportRun extends Model
         if ($this->started_at === null || $this->finished_at === null) {
             return null;
         }
+
         return $this->started_at->diffInSeconds($this->finished_at);
     }
 }
