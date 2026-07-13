@@ -357,6 +357,12 @@ class ViewInvoice extends ViewRecord
 
                     $result = app(WhmcsPaymentPusher::class)->push($record, $fetch, $push);
 
+                    // Settled at WHMCS → drop it from the outbound worklist too
+                    // (parity with the console list + the auto-push job).
+                    if ($result === PaymentPushResult::Pushed || $result === PaymentPushResult::AlreadyPaid) {
+                        WhmcsPaymentSyncCache::removeOutbound($record->company, (int) $record->id);
+                    }
+
                     match ($result) {
                         PaymentPushResult::Pushed => Notification::make()
                             ->title('Ενημερώθηκε το WHMCS')
@@ -981,10 +987,10 @@ class ViewInvoice extends ViewRecord
 
     /**
      * True iff «Σήμανση Paid στο WHMCS» applies: the tenant opted into outbound,
-     * the invoice is a live, credit-term, locally-SETTLED receivable, and its
-     * FILED WHMCS link has not yet been pushed. Mirrors WhmcsPaymentPusher's
-     * eligibility (minus the anti-echo payment check, which the push itself
-     * enforces) so the button shows only when there's a real settlement to send.
+     * the invoice is a live, credit-term, locally-SETTLED receivable settled by a
+     * REAL (non-inbound) payment, and its FILED WHMCS link has not yet been
+     * pushed. Fully mirrors WhmcsPaymentPusher's eligibility (incl. the anti-echo
+     * real-payment check) so the button shows only when a push would actually act.
      */
     protected static function hasUnpushedWhmcsSettlement(Invoice $invoice): bool
     {

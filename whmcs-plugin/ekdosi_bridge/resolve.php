@@ -322,6 +322,10 @@ try {
             echo json_encode(['error' => 'invoice_not_found', 'message' => 'No WHMCS invoice '.$invoiceId.'.']);
             exit;
         }
+        // Σ amountin = payments received (refunds live in amountout — WHMCS's own
+        // paid-calc is likewise Σamountin). Not subtracting amountout means a
+        // refunded invoice reads as "more paid" → we under-pay, never over-pay:
+        // the safe direction. A refunded-then-resettled invoice is a rare corner.
         $paid = (float) Capsule::table('tblaccounts')->where('invoiceid', $invoiceId)->sum('amountin');
         $remaining = round((float) $invRow->total - $paid, 2);
         if ($remaining <= 0.005) {
