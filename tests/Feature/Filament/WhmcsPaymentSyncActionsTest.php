@@ -25,7 +25,8 @@ use Tests\TestCase;
  *  - per-invoice action «Έχει πληρωθεί στο WHMCS;» (single open receivable).
  * Both resolve the tenant's fetcher, run WhmcsPaymentSyncer, and surface the
  * result. The fetcher is faked so no HTTP goes out; the safety logic itself is
- * covered in WhmcsPaymentSyncerTest.
+ * covered in WhmcsPaymentSyncerTest. Both are money-writes, so both are gated
+ * (Update:PendingWhmcsInvoice / Invoice update) — the denial tests guard that.
  */
 class WhmcsPaymentSyncActionsTest extends TestCase
 {
@@ -42,7 +43,6 @@ class WhmcsPaymentSyncActionsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Gate::before(fn () => true);
         $this->actingAs(User::create([
             'name' => 'Admin', 'email' => 'a-'.uniqid().'@test.local', 'password' => bcrypt('x'),
         ]));
@@ -56,6 +56,21 @@ class WhmcsPaymentSyncActionsTest extends TestCase
         $this->customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Δήμος', 'afm' => '090000045']);
         $this->creditTerm = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Πίστωση', 'due_days' => 30]);
         $this->type = InvoiceType::create(['company_id' => $this->tenant->id, 'name' => 'ΤΙΜ', 'code' => 'ΤΙΜ', 'invcount' => 1]);
+    }
+
+    /** Grant every ability (the common case — a fully-permitted operator). */
+    private function allowAll(): void
+    {
+        Gate::before(fn () => true);
+    }
+
+    /**
+     * Grant page access (ViewAny etc.) but DENY the given ability — so a denial
+     * test can render the page yet find the money-write action hidden.
+     */
+    private function allowAllExcept(string $deniedAbility): void
+    {
+        Gate::before(fn ($user, string $ability) => $ability === $deniedAbility ? false : true);
     }
 
     /** Bind a fetcher that always returns the given WHMCS payload (no HTTP). */
@@ -95,6 +110,7 @@ class WhmcsPaymentSyncActionsTest extends TestCase
 
     public function test_inbox_header_action_visible_for_a_whmcs_tenant(): void
     {
+        $this->allowAll();
         Filament::setTenant($this->tenant);
 
         Livewire::test(ListWhmcsInbox::class)
@@ -103,6 +119,7 @@ class WhmcsPaymentSyncActionsTest extends TestCase
 
     public function test_inbox_header_action_hidden_for_a_non_whmcs_tenant(): void
     {
+        $this->allowAll();
         $plain = Company::create([
             'name' => 'No WHMCS', 'slug' => 'nw-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
@@ -113,8 +130,20 @@ class WhmcsPaymentSyncActionsTest extends TestCase
             ->assertActionHidden('sync_whmcs_payments');
     }
 
+    public function test_inbox_header_action_hidden_without_update_permission(): void
+    {
+        // Money-write gate: a user with inbox read access but NOT
+        // Update:PendingWhmcsInvoice must not reach the tenant-wide sync.
+        $this->allowAllExcept('Update:PendingWhmcsInvoice');
+        Filament::setTenant($this->tenant);
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->assertActionHidden('sync_whmcs_payments');
+    }
+
     public function test_inbox_header_action_records_paid_open_invoices(): void
     {
+        $this->allowAll();
         Filament::setTenant($this->tenant);
         $invoice = $this->openInvoice();
         $this->filedRow($invoice, 7001);
@@ -131,6 +160,7 @@ class WhmcsPaymentSyncActionsTest extends TestCase
 
     public function test_per_invoice_action_visible_on_an_open_linked_receivable(): void
     {
+        $this->allowAll();
         Filament::setTenant($this->tenant);
         $invoice = $this->openInvoice();
         $this->filedRow($invoice, 7002);
@@ -141,6 +171,7 @@ class WhmcsPaymentSyncActionsTest extends TestCase
 
     public function test_per_invoice_action_hidden_without_a_whmcs_link(): void
     {
+        $this->allowAll();
         Filament::setTenant($this->tenant);
         $invoice = $this->openInvoice();   // no filed pending row
 
@@ -150,6 +181,7 @@ class WhmcsPaymentSyncActionsTest extends TestCase
 
     public function test_per_invoice_action_hidden_on_a_cash_term_invoice(): void
     {
+        $this->allowAll();
         Filament::setTenant($this->tenant);
         $cash = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Μετρητά', 'due_days' => 0]);
         $invoice = $this->openInvoice($cash);
@@ -159,8 +191,22 @@ class WhmcsPaymentSyncActionsTest extends TestCase
             ->assertActionHidden('check_whmcs_paid');
     }
 
+    public function test_per_invoice_action_hidden_without_update_permission(): void
+    {
+        // Same money-write gate on the single-invoice path: view access but no
+        // Invoice `update` → the «Έχει πληρωθεί;» action is hidden.
+        $this->allowAllExcept('update');
+        Filament::setTenant($this->tenant);
+        $invoice = $this->openInvoice();
+        $this->filedRow($invoice, 7006);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionHidden('check_whmcs_paid');
+    }
+
     public function test_per_invoice_action_records_the_payment_when_paid(): void
     {
+        $this->allowAll();
         Filament::setTenant($this->tenant);
         $invoice = $this->openInvoice();
         $this->filedRow($invoice, 7004);
@@ -178,6 +224,7 @@ class WhmcsPaymentSyncActionsTest extends TestCase
 
     public function test_per_invoice_action_records_nothing_when_still_unpaid(): void
     {
+        $this->allowAll();
         Filament::setTenant($this->tenant);
         $invoice = $this->openInvoice();
         $this->filedRow($invoice, 7005);

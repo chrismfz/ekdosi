@@ -40,11 +40,6 @@ class WhmcsPaymentSyncer
     public function __construct(private readonly InvoiceBalance $balance) {}
 
     /**
-     * @param  callable(int): (array<string, mixed>|null)  $fetchInvoice  Resolves a WHMCS
-     *                                                                    invoice id to its payload (with 'status'/'datepaid') — native or bridge; null
-     *                                                                    when WHMCS can't return it (skipped, never guessed as paid).
-     */
-    /**
      * Bulk sync every filed, WHMCS-linked, still-open invoice for a tenant
      * (scheduler + the inbox «Συγχρονισμός τώρα» action).
      *
@@ -58,12 +53,15 @@ class WhmcsPaymentSyncer
         $recorded = 0;
         $total = 0.0;
 
+        // Eager-load the invoice AND its payment method — recordForRow reads
+        // paymentMethod->due_days per row (the credit-term guard), so without
+        // this it lazy-loads once per open receivable.
         $rows = PendingWhmcsInvoice::query()
             ->where('company_id', $tenant->id)
             ->where('status', PendingWhmcsInvoice::STATUS_FILED)
             ->whereNotNull('invoice_id')
             ->whereNotNull('whmcs_invoice_id')
-            ->with('invoice')
+            ->with('invoice.paymentMethod')
             ->get();
 
         foreach ($rows as $row) {
