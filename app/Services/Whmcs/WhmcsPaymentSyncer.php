@@ -129,6 +129,15 @@ class WhmcsPaymentSyncer
             return null;
         }
 
+        // Credit-term («επί πιστώσει») only — this sync exists to close OPEN
+        // receivables. A cash-term invoice is settled at issue; if it carries a
+        // residual balance (an operator logged a partial/deposit payment) that
+        // is a deliberate money-trail, NOT a WHMCS receivable to auto-close.
+        // Matches the per-invoice action's visibility gate (hasOpenWhmcsLink).
+        if ((int) ($invoice->paymentMethod?->due_days ?? 0) <= 0) {
+            return null;
+        }
+
         // Cheap unlocked pre-filter — avoid the WHMCS call for settled rows.
         if ($this->balance->for($invoice)->balance <= 0.005) {
             return null;

@@ -126,6 +126,29 @@ class WhmcsPaymentSyncerTest extends TestCase
         $this->assertSame(0, Payment::where('company_id', $this->tenant->id)->count());
     }
 
+    public function test_skips_a_cash_term_invoice_even_with_a_residual_partial_payment(): void
+    {
+        // A cash-term invoice with an operator-logged partial payment tracks a
+        // real balance>0 (InvoiceBalance stops synthesising once a payment row
+        // exists). That residual is a deliberate money-trail, NOT a WHMCS
+        // receivable — the sync (επί πιστώσει only) must leave it alone.
+        $cash = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        $invoice = $this->openInvoice(124.0, $cash);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
+            'kind' => 'payment', 'amount' => 24.0, 'pay_date' => '2026-05-21',
+        ]);
+        // Sanity: it now carries a real outstanding balance.
+        $this->assertGreaterThan(0.005, app(InvoiceBalance::class)->for($invoice->fresh())->balance);
+        $this->filedRow($invoice, 5006);
+
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid']);
+
+        $this->assertSame(0, $result->recorded);
+        // Only the manual €24 payment exists — no WHMCS-sync payment was added.
+        $this->assertSame(0, Payment::where('transaction_id', 'whmcs-paid:5006')->count());
+    }
+
     public function test_is_idempotent_across_runs(): void
     {
         $invoice = $this->openInvoice(124.0);

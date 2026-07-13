@@ -907,6 +907,7 @@ class ViewInvoice extends ViewRecord
     protected static function hasOpenWhmcsLink(Invoice $invoice): bool
     {
         if ($invoice->credited_invoice_id !== null
+            || $invoice->isCreditNote()
             || $invoice->local_status === 'cancelled'
             || $invoice->mydata_state === 'CANCELLED'
             || (int) ($invoice->paymentMethod?->due_days ?? 0) <= 0
