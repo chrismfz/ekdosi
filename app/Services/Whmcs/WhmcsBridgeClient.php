@@ -291,6 +291,25 @@ class WhmcsBridgeClient
     }
 
     /**
+     * OUTBOUND (Phase 2): mark a WHMCS invoice paid via the bridge plugin
+     * (op=add_payment → WHMCS localAPI AddInvoicePayment). The twin of
+     * WhmcsClient::addInvoicePayment for bridge-only tenants. HMAC-signed like
+     * every resolve op; `transid` is the idempotency handle. Throws
+     * WhmcsUnreachable / WhmcsApiException on failure (never guesses success).
+     */
+    public function addInvoicePayment(int $whmcsInvoiceId, float $amount, string $transId, ?string $date = null, string $gateway = 'ekdosi'): void
+    {
+        $this->postResolve([
+            'op' => 'add_payment',
+            'invoice_id' => $whmcsInvoiceId,
+            'amount' => number_format($amount, 2, '.', ''),
+            'transid' => $transId,
+            'gateway' => $gateway,
+            'date' => $date ?? now()->format('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
      * Historical backfill: one page of (whmcs_id, invoiced) links for invoices
      * the LEGACY app filed (invoiced > 0). invoiced holds the legacy ekdosi
      * INVOICE_ID, which the ETL kept as invoices.legacy_id — so the caller can

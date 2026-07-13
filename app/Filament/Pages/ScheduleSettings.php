@@ -57,6 +57,7 @@ class ScheduleSettings extends Page implements HasForms
         'whmcs_fetch_enabled' => ['WHMCS — άντληση εκκρεμών', 'Φέρνει πληρωμένα/αδήλωτα WHMCS τιμολόγια στο inbox (μόνο staging, ΔΕΝ δηλώνει στην ΑΑΔΕ).', false],
         'whmcs_auto_issue_enabled' => ['WHMCS — αυτόματη έκδοση', 'Δηλώνει ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ για πελάτες άμεσης τιμολόγησης σε οπλισμένους tenants. Διπλό κλειδί με την per-tenant ρύθμιση.', true],
         'whmcs_payment_sync_enabled' => ['WHMCS — συγχρονισμός πληρωμών', 'Όταν ένα επί-πιστώσει WHMCS τιμολόγιο πληρωθεί στο WHMCS, καταγράφει την πληρωμή στο ekdosi και κλείνει την οφειλή. Γράφει ΜΟΝΟ στο ekdosi (ποτέ στο WHMCS)· καταγράφει μόνο ανοιχτά υπόλοιπα.', false],
+        'whmcs_payment_reconcile_enabled' => ['WHMCS — εντοπισμός πληρωμών (read-only)', 'Εντοπίζει ποια ανοιχτά επί-πιστώσει τιμολόγια πληρώθηκαν στο WHMCS και τα δείχνει στο dashboard + στη σελίδα «Συγχρονισμός πληρωμών» με ειδοποίηση. ΔΕΝ γράφει χρήμα — ο χειριστής τα κλείνει με ένα κλικ.', false],
         // myDATA
         'mydata_reconcile_enabled' => ['myDATA — αντιπαραβολή πωλήσεων', 'Καθημερινός read-only έλεγχος local↔ΑΑΔΕ.', false],
         'mydata_vat_picture_enabled' => ['myDATA — εικόνα ΦΠΑ', 'Ανανεώνει το cache του widget «Εικόνα από myDATA» (βαρύ AADE pull).', false],
@@ -80,7 +81,7 @@ class ScheduleSettings extends Page implements HasForms
      */
     private const SECTIONS = [
         'Email & ουρά εργασιών' => ['mail_sweep_enabled', 'queue_heartbeat_enabled', 'resend_failed_emails_enabled'],
-        'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled'],
+        'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
         'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_console_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'service_renewals_enabled', 'service_dunning_enabled'],

@@ -292,6 +292,17 @@ class Invoice extends Model
         return $this->hasMany(self::class, 'credited_invoice_id');
     }
 
+    /**
+     * The FILED WHMCS bridge row that links this invoice to its WHMCS invoice
+     * (forward-only; at most one per invoice). Used by the WHMCS payment-sync
+     * worklist to show/act on the WHMCS side.
+     */
+    public function whmcsPending(): HasOne
+    {
+        return $this->hasOne(PendingWhmcsInvoice::class, 'invoice_id')
+            ->where('status', PendingWhmcsInvoice::STATUS_FILED);
+    }
+
     /** If this invoice IS a credit note, the original it credits. */
     public function creditedInvoice(): BelongsTo
     {

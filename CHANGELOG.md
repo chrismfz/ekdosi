@@ -18,6 +18,25 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **WHMCS: outbound σήμανση πληρωμένου (Phase 2 — ekdosi → WHMCS mark-paid).** Όταν ένα επί-πιστώσει
+  τιμολόγιο εξοφληθεί **στο ekdosi**, το WHMCS του πελάτη σημαίνεται πληρωμένο (`AddInvoicePayment`) —
+  **αυτόματα** (queued `PushWhmcsPaymentJob` μόλις κλείσει η οφειλή) **και** με κουμπί «Σήμανση Paid στο
+  WHMCS» (στο τιμολόγιο + στη λίστα «Προς ενημέρωση» της σελίδας «Συγχρονισμός πληρωμών»). Γράφει σε
+  εξωτερικό σύστημα, οπότε **opt-in ανά tenant** (`companies.whmcs_push_payments`, default OFF) με τέσσερα
+  φρένα: idempotent (marker `whmcs_payment_pushed_at` + claim-before-write + `ekdosi-paid:{id}` transid),
+  **anti-echo** (ποτέ δεν γυρίζει πίσω πληρωμή που ήρθε ΑΠΟ το WHMCS), live/credit-term-only, query-first
+  (skip αν το WHMCS το έχει ήδη Paid). Native `AddInvoicePayment` για native tenants· bridge plugin
+  `op=add_payment` (v0.43.0) για bridge tenants. Dashboard tile + σελίδα δείχνουν και τις δύο κατευθύνσεις.
+- **WHMCS: κεντρικός «Συγχρονισμός πληρωμών» (Phase 1 — inbound εντοπισμός).** Νέα σελίδα
+  «Συγχρονισμός πληρωμών» (ομάδα Data) + dashboard tile που δείχνουν **εύκαιρα** ποια ανοιχτά
+  (επί πιστώσει) τιμολόγια έχει πλέον πληρώσει το WHMCS, ώστε ο χειριστής να κλείνει την οφειλή με
+  **ένα κλικ** («Καταγραφή πληρωμής» — επιβεβαιώνει ζωντανά στο WHMCS και γράφει **μόνο στο ekdosi**,
+  ίδια idempotent/only-if-open λογική). Ο εντοπισμός γίνεται από read-only `whmcs:reconcile-payments`
+  (scheduled, default OFF) που κασάρει τη worklist (μόνο invoice-ids, ποτέ ποσά) και στέλνει
+  **durable bell notification** για κάθε νέα εκκρεμότητα. Καμία εγγραφή χρήματος στον εντοπισμό —
+  και το outbound σκέλος (ekdosi → WHMCS mark-paid) έρχεται στη Φάση 2.
+
 ## [1.11.0] - 2026-07-13
 
 ### Added

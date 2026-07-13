@@ -100,6 +100,8 @@ class Company extends Model
         'whmcs_amount_includes_tax',
         // Slice 2: fetch the inbox feed from the bridge plugin (not the native API)
         'whmcs_fetch_via_bridge',
+        // Phase 2 (outbound): push an ekdosi settlement back to WHMCS as Paid (opt-in)
+        'whmcs_push_payments',
         // G8 phase 2: άμεση-τιμολόγηση auto-issue knob + its default invoice/receipt types
         'whmcs_auto_issue_immediate',
         'whmcs_default_invoice_type_id',
@@ -146,6 +148,7 @@ class Company extends Model
             'whmcs_third_party_enabled' => 'boolean',
             'whmcs_amount_includes_tax' => 'boolean',
             'whmcs_fetch_via_bridge' => 'boolean',
+            'whmcs_push_payments' => 'boolean',
             'whmcs_auto_issue_immediate' => 'boolean',
             'mydata_send_item_descr' => 'boolean',
             'show_customer_balance_on_pdf' => 'boolean',

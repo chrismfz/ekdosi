@@ -291,8 +291,72 @@ try {
         exit;
     }
 
+    if ($op === 'add_payment') {
+        // WRITE: mark a WHMCS invoice paid on ekdosi's behalf (the ekdosi→WHMCS
+        // «σήμανση πληρωμένου»). Delegates to WHMCS's own localAPI AddInvoicePayment
+        // so gateway logs / activity / auto-Paid transition all behave natively.
+        // Idempotency is двойная: `transid` (WHMCS rejects a duplicate transid+
+        // gateway) AND ekdosi's own pushed-marker. Only invoice-not-already-paid
+        // amounts arrive here (ekdosi queries status first).
+        $invoiceId = (int) ($payload['invoice_id'] ?? 0);
+        $amount = (float) ($payload['amount'] ?? 0);
+        $transId = (string) ($payload['transid'] ?? '');
+        $gateway = (string) ($payload['gateway'] ?? 'ekdosi');
+        $date = (string) ($payload['date'] ?? date('Y-m-d H:i:s'));
+        if ($invoiceId <= 0 || $amount <= 0 || $transId === '') {
+            http_response_code(400);
+            echo json_encode(['error' => 'bad_request', 'message' => 'add_payment requires {"invoice_id": <int>, "amount": <num>, "transid": <string>}.']);
+            exit;
+        }
+
+        // CAP to the WHMCS invoice's ACTUAL remaining balance (total − already
+        // paid). ekdosi computes the amount from ITS view, which can exceed what
+        // WHMCS still owes (e.g. the customer already part-paid in WHMCS). Paying
+        // the raw amount would push the WHMCS invoice into a credit balance —
+        // so we authoritatively clamp here (the plugin is the only side that can
+        // see WHMCS's real remaining balance). remaining ≤ 0 → already settled.
+        $invRow = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['total']);
+        if ($invRow === null) {
+            $bridgeLogResult = 'add_payment invoice_not_found #'.$invoiceId;
+            http_response_code(404);
+            echo json_encode(['error' => 'invoice_not_found', 'message' => 'No WHMCS invoice '.$invoiceId.'.']);
+            exit;
+        }
+        // Σ amountin = payments received (refunds live in amountout — WHMCS's own
+        // paid-calc is likewise Σamountin). Not subtracting amountout means a
+        // refunded invoice reads as "more paid" → we under-pay, never over-pay:
+        // the safe direction. A refunded-then-resettled invoice is a rare corner.
+        $paid = (float) Capsule::table('tblaccounts')->where('invoiceid', $invoiceId)->sum('amountin');
+        $remaining = round((float) $invRow->total - $paid, 2);
+        if ($remaining <= 0.005) {
+            $bridgeLogResult = 'add_payment already_settled #'.$invoiceId;
+            echo json_encode(['status' => 'ok', 'note' => 'already_settled']);
+            exit;
+        }
+        $payAmount = min($amount, $remaining);
+
+        $res = localAPI('AddInvoicePayment', [
+            'invoiceid' => $invoiceId,
+            'transid' => $transId,
+            'gateway' => $gateway,
+            'amount' => number_format($payAmount, 2, '.', ''),
+            'date' => $date,
+        ]);
+
+        if (($res['result'] ?? '') !== 'success') {
+            $bridgeLogResult = 'add_payment error: '.(string) ($res['message'] ?? 'unknown');
+            http_response_code(502);
+            echo json_encode(['error' => 'whmcs_api_error', 'message' => (string) ($res['message'] ?? 'AddInvoicePayment failed')]);
+            exit;
+        }
+
+        $bridgeLogResult = 'add_payment ok #'.$invoiceId;
+        echo json_encode(['status' => 'ok']);
+        exit;
+    }
+
     http_response_code(400);
-    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices", "invoice" or "custom_fields".']);
+    echo json_encode(['error' => 'unknown_op', 'message' => 'op must be "resolve", "resellers", "invoiced_flags", "legacy_invoice_links", "invoices", "invoice", "custom_fields" or "add_payment".']);
     exit;
 } catch (\Throwable $e) {
     $bridgeLogResult = 'error: '.$e->getMessage();
