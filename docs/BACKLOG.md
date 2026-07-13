@@ -331,6 +331,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
+- **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
+  `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a
+  double mark-paid under a manual-vs-auto race) and releases it on a caught failure. If the worker is
+  **hard-killed** (OOM/deploy) in the µs window between the claim and the HTTP send, the marker stays set
+  but WHMCS was never paid → the invoice drops off every worklist and no UI can re-drive it (fix today =
+  manual `whmcs_payment_pushed_at = null`). Very low probability (the WHMCS `transid` dedup already makes a
+  re-push double-pay-safe). Options if it ever bites: an operator «Επανάληψη push» action that clears the
+  marker, or a reconcile pass that resets a stale-claimed row still Unpaid at WHMCS.
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
 - _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._

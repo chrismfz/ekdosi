@@ -27,6 +27,7 @@ use App\Services\Whmcs\WhmcsPaymentPusher;
 use App\Services\Whmcs\WhmcsPaymentPusherFactory;
 use App\Services\Whmcs\WhmcsPaymentSyncer;
 use App\Support\InvoiceScope;
+use App\Support\Whmcs\WhmcsPaymentSyncCache;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -312,6 +313,9 @@ class ViewInvoice extends ViewRecord
                     $amount = app(WhmcsPaymentSyncer::class)->syncInvoice($record, $fetch);
 
                     if ($amount > 0.005) {
+                        // Settled now → drop it from the worklist immediately so the
+                        // page/tile/badge don't show a phantom row until the next reconcile.
+                        WhmcsPaymentSyncCache::removeInbound($record->company, (int) $record->id);
                         Notification::make()
                             ->title('Καταγράφηκε πληρωμή')
                             ->body('Το τιμολόγιο εξοφλήθηκε — καταχωρίστηκε πληρωμή '.number_format($amount, 2, ',', '.').' €.')
@@ -991,6 +995,21 @@ class ViewInvoice extends ViewRecord
             || $invoice->mydata_state === 'CANCELLED'
             || (int) ($invoice->paymentMethod?->due_days ?? 0) <= 0
             || $invoice->balanceData()->balance > 0.005) {
+            return false;
+        }
+
+        // Anti-echo (mirror WhmcsPaymentPusher::hasRealPayment): a receivable
+        // settled ONLY by the inbound sync (whmcs-paid:*) must not offer a push
+        // back — the button would just no-op. Require a real ekdosi payment.
+        $hasRealPayment = Payment::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('kind', 'payment')
+            ->where(function ($q) {
+                $q->whereNull('transaction_id')
+                    ->orWhere('transaction_id', 'not like', 'whmcs-paid:%');
+            })
+            ->exists();
+        if (! $hasRealPayment) {
             return false;
         }
 

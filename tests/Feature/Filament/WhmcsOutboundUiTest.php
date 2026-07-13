@@ -121,6 +121,32 @@ class WhmcsOutboundUiTest extends TestCase
             ->assertActionHidden('mark_paid_at_whmcs');
     }
 
+    public function test_action_hidden_when_settled_only_by_inbound_sync(): void
+    {
+        // Anti-echo: an invoice closed ONLY by the inbound sync (whmcs-paid:*)
+        // must NOT offer a push back — the button would no-op. Build one settled
+        // purely by an inbound-origin payment.
+        Filament::setTenant($this->tenant);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΙΜ'.uniqid(), 'code' => random_int(1, 99999),
+            'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            'issued_at' => '2026-05-20 10:00:00', 'net_total' => 100.0, 'gross_total' => 124.0,
+            'local_status' => 'active', 'payment_method_id' => $this->creditTerm->id,
+        ]);
+        PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 4205, 'invoice_id' => $invoice->id,
+            'payload' => ['status' => 'Paid'], 'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
+        ]);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
+            'kind' => 'payment', 'amount' => 124.0, 'pay_date' => '2026-05-25', 'transaction_id' => 'whmcs-paid:4205',
+        ]);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->fresh()->getRouteKey()])
+            ->assertActionHidden('mark_paid_at_whmcs');
+    }
+
     public function test_action_marks_the_whmcs_invoice_paid(): void
     {
         Filament::setTenant($this->tenant);

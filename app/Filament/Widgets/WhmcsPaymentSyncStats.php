@@ -28,7 +28,7 @@ class WhmcsPaymentSyncStats extends StatsOverviewWidget
             && ($tenant->hasWhmcsIntegration() || $tenant->whmcs_fetch_via_bridge)
             && (bool) auth()->user()?->can('ViewAny:PendingWhmcsInvoice')
             && (count(WhmcsPaymentSyncCache::inboundIds($tenant)) > 0
-                || count(WhmcsPaymentSyncCache::outboundIds($tenant)) > 0);
+                || ($tenant->whmcs_push_payments && count(WhmcsPaymentSyncCache::outboundIds($tenant)) > 0));
     }
 
     protected function getStats(): array
@@ -50,7 +50,7 @@ class WhmcsPaymentSyncStats extends StatsOverviewWidget
                 ->url($url);
         }
 
-        $outbound = count(WhmcsPaymentSyncCache::outboundIds($tenant));
+        $outbound = $tenant->whmcs_push_payments ? count(WhmcsPaymentSyncCache::outboundIds($tenant)) : 0;
         if ($outbound > 0) {
             $stats[] = Stat::make('Προς ενημέρωση στο WHMCS', (string) $outbound)
                 ->description('Εξοφλήθηκαν εδώ — ενημέρωσε το WHMCS')

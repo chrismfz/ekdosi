@@ -176,6 +176,9 @@ class WhmcsPaymentSync extends Page implements HasTable
                     ->label('Καταγραφή πληρωμής')
                     ->icon('heroicon-o-banknotes')
                     ->color('success')
+                    // Money-write: same per-record gate as the invoice actions —
+                    // ViewAny (page access) is not enough to record a payment.
+                    ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                     ->requiresConfirmation()
                     ->modalHeading('Καταγραφή πληρωμής από το WHMCS')
                     ->modalDescription('Επιβεβαιώνεται ζωντανά στο WHMCS και, αν είναι πληρωμένο, κλείνει το υπόλοιπο καταγράφοντας πληρωμή στο ekdosi. Καμία αλλαγή στο WHMCS του πελάτη.')

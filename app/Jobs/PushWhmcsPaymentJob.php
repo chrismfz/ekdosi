@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Models\Invoice;
+use App\Services\Whmcs\PaymentPushResult;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentPusher;
 use App\Services\Whmcs\WhmcsPaymentPusherFactory;
+use App\Support\Whmcs\WhmcsPaymentSyncCache;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -48,6 +50,12 @@ class PushWhmcsPaymentJob implements ShouldQueue
             return;   // WHMCS not configured — nothing to push to
         }
 
-        $pusher->push($invoice, $fetch, $push);
+        $result = $pusher->push($invoice, $fetch, $push);
+
+        // Settled at WHMCS → drop it from the outbound worklist so the console
+        // list / tile don't linger until the next reconcile.
+        if ($result === PaymentPushResult::Pushed || $result === PaymentPushResult::AlreadyPaid) {
+            WhmcsPaymentSyncCache::removeOutbound($invoice->company, (int) $invoice->id);
+        }
     }
 }

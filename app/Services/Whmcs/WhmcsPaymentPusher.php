@@ -56,8 +56,15 @@ class WhmcsPaymentPusher
             return PaymentPushResult::Skipped;   // unreachable → never guess; retry later
         }
 
+        // An ambiguous payload (no status) must never be pushed — we can't tell
+        // whether WHMCS is already Paid, and guessing risks a redundant write.
+        $status = trim((string) ($payload['status'] ?? ''));
+        if ($status === '') {
+            return PaymentPushResult::Skipped;
+        }
+
         $amount = $this->pushAmount($invoice, $payload);
-        if (strcasecmp((string) ($payload['status'] ?? ''), 'Paid') === 0 || $amount <= 0.005) {
+        if (strcasecmp($status, 'Paid') === 0 || $amount <= 0.005) {
             $this->claimMarker($row);   // best-effort; nothing sent
 
             return PaymentPushResult::AlreadyPaid;
@@ -129,7 +136,17 @@ class WhmcsPaymentPusher
             ->exists();
     }
 
-    /** @param array<string, mixed> $payload */
+    /**
+     * The amount to post. Prefer WHMCS's OWN remaining balance (authoritative —
+     * the native GetInvoice always returns it), so a WHMCS invoice the customer
+     * already part-paid is topped up exactly, never over-paid. The bridge
+     * fetch (op=invoice) doesn't carry `balance`, so there we fall back to the
+     * ekdosi receivable — and the bridge plugin's op=add_payment CLAMPS the
+     * payment to WHMCS's real remaining balance, so even the fallback can never
+     * over-pay the customer's invoice.
+     *
+     * @param  array<string, mixed>  $payload
+     */
     private function pushAmount(Invoice $invoice, array $payload): float
     {
         $whmcsBalance = isset($payload['balance']) ? (float) $payload['balance'] : 0.0;
@@ -137,7 +154,7 @@ class WhmcsPaymentPusher
             return round($whmcsBalance, 2);
         }
 
-        // Fall back to the ekdosi receivable (gross − credited).
+        // Fall back to the ekdosi receivable (gross − credited); the plugin caps.
         return round((float) $invoice->payableTotal() - (float) $invoice->credited_total, 2);
     }
 

@@ -309,11 +309,33 @@ try {
             exit;
         }
 
+        // CAP to the WHMCS invoice's ACTUAL remaining balance (total − already
+        // paid). ekdosi computes the amount from ITS view, which can exceed what
+        // WHMCS still owes (e.g. the customer already part-paid in WHMCS). Paying
+        // the raw amount would push the WHMCS invoice into a credit balance —
+        // so we authoritatively clamp here (the plugin is the only side that can
+        // see WHMCS's real remaining balance). remaining ≤ 0 → already settled.
+        $invRow = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['total']);
+        if ($invRow === null) {
+            $bridgeLogResult = 'add_payment invoice_not_found #'.$invoiceId;
+            http_response_code(404);
+            echo json_encode(['error' => 'invoice_not_found', 'message' => 'No WHMCS invoice '.$invoiceId.'.']);
+            exit;
+        }
+        $paid = (float) Capsule::table('tblaccounts')->where('invoiceid', $invoiceId)->sum('amountin');
+        $remaining = round((float) $invRow->total - $paid, 2);
+        if ($remaining <= 0.005) {
+            $bridgeLogResult = 'add_payment already_settled #'.$invoiceId;
+            echo json_encode(['status' => 'ok', 'note' => 'already_settled']);
+            exit;
+        }
+        $payAmount = min($amount, $remaining);
+
         $res = localAPI('AddInvoicePayment', [
             'invoiceid' => $invoiceId,
             'transid' => $transId,
             'gateway' => $gateway,
-            'amount' => number_format($amount, 2, '.', ''),
+            'amount' => number_format($payAmount, 2, '.', ''),
             'date' => $date,
         ]);
 

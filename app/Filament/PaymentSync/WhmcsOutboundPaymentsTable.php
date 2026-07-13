@@ -73,6 +73,9 @@ class WhmcsOutboundPaymentsTable extends TableWidget
                     ->label('Σήμανση Paid στο WHMCS')
                     ->icon('heroicon-o-arrow-up-on-square')
                     ->color('success')
+                    // External money-write: same per-record gate as the invoice
+                    // action — ViewAny + opt-in alone must not authorize it.
+                    ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                     ->requiresConfirmation()
                     ->modalHeading('Σήμανση πληρωμένου στο WHMCS')
                     ->modalDescription('Ενημερώνει το WHMCS του πελάτη ότι το τιμολόγιο εξοφλήθηκε (γράφει στο σύστημα του πελάτη, μία φορά).')

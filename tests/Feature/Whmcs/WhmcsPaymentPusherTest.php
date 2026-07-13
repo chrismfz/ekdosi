@@ -194,6 +194,41 @@ class WhmcsPaymentPusherTest extends TestCase
         $this->assertCount(0, $pushed);
     }
 
+    public function test_pushes_the_whmcs_remaining_balance_not_the_ekdosi_total(): void
+    {
+        // WHMCS invoice already part-paid (€62 of €124) → status still Unpaid,
+        // balance €62. We must push €62 (WHMCS's own remaining), NOT the €124
+        // ekdosi settled — else the WHMCS invoice goes into credit balance.
+        $invoice = $this->invoice();
+        $this->filedRow($invoice, 5109);
+        $this->settle($invoice);
+        $pushed = [];
+
+        $this->pusher()->push(
+            $invoice->fresh(),
+            fn (int $id) => ['status' => 'Unpaid', 'balance' => 62.0],
+            $this->recorder($pushed),
+        );
+
+        $this->assertCount(1, $pushed);
+        $this->assertEqualsWithDelta(62.0, $pushed[0]['amt'], 0.001);
+    }
+
+    public function test_skips_an_ambiguous_payload_without_status(): void
+    {
+        // A payload with no 'status' must never be pushed (we can't tell if WHMCS
+        // is already Paid — guessing risks a redundant write).
+        $invoice = $this->invoice();
+        $this->filedRow($invoice, 5110);
+        $this->settle($invoice);
+        $pushed = [];
+
+        $result = $this->pusher()->push($invoice->fresh(), fn (int $id) => ['balance' => 124.0], $this->recorder($pushed));
+
+        $this->assertSame(PaymentPushResult::Skipped, $result);
+        $this->assertCount(0, $pushed);
+    }
+
     public function test_skips_a_cash_term_invoice(): void
     {
         $cash = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Μετρητά', 'due_days' => 0]);

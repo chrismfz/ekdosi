@@ -18,6 +18,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
   (transid = idempotency handle, WHMCS rejects a duplicate transid+gateway). Feeds the ekdosi
   Phase-2 outbound push for **bridge tenants** (native tenants call the WHMCS API directly).
   Only needed if `companies.whmcs_push_payments` is on for a bridge tenant.
+  **Clamps the payment to the WHMCS invoice's real remaining balance** (`total − Σ tblaccounts.amountin`)
+  so an ekdosi-computed amount that exceeds what WHMCS still owes can never over-pay it into a credit
+  balance; `remaining ≤ 0` returns ok (already settled), unknown id returns 404.
 
 ## [0.42.0] — 2026-07-11
 ### Fixed
