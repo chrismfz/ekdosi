@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-07-13
+
 ### Added
 - **Firebird import: ζωντανή σύνδεση (host/credentials) + «Έλεγχος σύνδεσης».** Πέρα από το ανέβασμα
   `.fbk`/`.fdb`, νέο tab «Ζωντανή σύνδεση» στη φόρμα εισαγωγής που συνδέεται **απευθείας** στη ζωντανή
