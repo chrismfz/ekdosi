@@ -18,6 +18,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **WHMCS γέφυρα: inbound συγχρονισμός πληρωμών (WHMCS → ekdosi).** Όταν ένα τιμολόγιο που εκδόθηκε
+  **επί πιστώσει** (ανοιχτή οφειλή — η ροή «τιμολόγιο πρώτα, πληρωμή μετά») πληρωθεί στο WHMCS, η
+  προγραμματισμένη `whmcs:sync-payments` **κλείνει την οφειλή στο ekdosi** καταγράφοντας Payment για
+  το ανοιχτό υπόλοιπο. Poll-based (καμία αλλαγή plugin)· money-write **μόνο στο ekdosi** (ποτέ στο
+  WHMCS του πελάτη)· idempotent (**only-if-open** — δεν over-pay-άρει ποτέ cash-term/εξοφλημένο — +
+  dedup `transaction_id`). Gated `EKDOSI_SCHEDULE_WHMCS_PAYMENT_SYNC` (default OFF, opt-in). Το
+  outbound σκέλος (ekdosi payment → WHMCS mark-paid) παραμένει design-only στο BACKLOG.
+
 ## [1.10.0] - 2026-07-13
 
 ### Added
