@@ -44,6 +44,14 @@ class WhmcsPaymentSyncer
      *                                                                    invoice id to its payload (with 'status'/'datepaid') — native or bridge; null
      *                                                                    when WHMCS can't return it (skipped, never guessed as paid).
      */
+    /**
+     * Bulk sync every filed, WHMCS-linked, still-open invoice for a tenant
+     * (scheduler + the inbox «Συγχρονισμός τώρα» action).
+     *
+     * @param  callable(int): (array<string, mixed>|null)  $fetchInvoice  Resolves a WHMCS
+     *                                                                    invoice id to its payload (with 'status'/'datepaid') — native or bridge; null
+     *                                                                    when WHMCS can't return it (skipped, never guessed as paid).
+     */
     public function syncTenant(Company $tenant, callable $fetchInvoice): PaymentSyncResult
     {
         $checked = 0;
@@ -60,54 +68,11 @@ class WhmcsPaymentSyncer
 
         foreach ($rows as $row) {
             try {
-                $invoice = $row->invoice;
-                if ($invoice === null || ! $this->isLiveOpen($invoice)) {
-                    continue;
+                $amount = $this->recordForRow($tenant, $row, $fetchInvoice);
+                if ($amount === null) {
+                    continue;   // skipped before hitting WHMCS (settled / dup / void)
                 }
-
-                // Cheap unlocked pre-filter (avoid the WHMCS call for settled rows).
-                if ($this->balance->for($invoice)->balance <= 0.005) {
-                    continue;
-                }
-                $txnId = self::transactionId((int) $row->whmcs_invoice_id);
-                if ($this->alreadyRecorded($tenant, $txnId)) {
-                    continue;
-                }
-
-                // HTTP is OUTSIDE the transaction — never hold a row lock across a
-                // network call. We only record on an authenticated 'Paid'.
                 $checked++;
-                $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
-                if (! is_array($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0) {
-                    continue;
-                }
-
-                // Serialise the actual write: lock the invoice, then RE-READ the
-                // balance + RE-CHECK dedup inside the lock so a concurrent run /
-                // manual payment can't produce a double or an over-record.
-                $amount = DB::transaction(function () use ($tenant, $invoice, $txnId, $payload, $row): float {
-                    $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();
-                    if ($locked === null || ! $this->isLiveOpen($locked)) {
-                        return 0.0;
-                    }
-                    $balance = round($this->balance->for($locked)->balance, 2);
-                    if ($balance <= 0.005 || $this->alreadyRecorded($tenant, $txnId)) {
-                        return 0.0;
-                    }
-                    Payment::create([
-                        'company_id' => $tenant->id,
-                        'customer_id' => $locked->customer_id,
-                        'invoice_id' => $locked->id,
-                        'kind' => 'payment',
-                        'amount' => $balance,
-                        'pay_date' => self::payDate($payload),
-                        'transaction_id' => $txnId,
-                        'notes' => 'Αυτόματος συγχρονισμός πληρωμής από WHMCS #'.$row->whmcs_invoice_id,
-                    ]);
-
-                    return $balance;
-                });
-
                 if ($amount > 0.005) {
                     $recorded++;
                     $total += $amount;
@@ -122,6 +87,84 @@ class WhmcsPaymentSyncer
         }
 
         return new PaymentSyncResult($checked, $recorded, round($total, 2));
+    }
+
+    /**
+     * Sync ONE ekdosi invoice on demand (the per-invoice «Έχει πληρωθεί στο
+     * WHMCS;» action). Returns the amount recorded (0.0 when nothing was — not
+     * WHMCS-linked, already settled, or still unpaid at WHMCS).
+     *
+     * @param  callable(int): (array<string, mixed>|null)  $fetchInvoice
+     */
+    public function syncInvoice(Invoice $invoice, callable $fetchInvoice): float
+    {
+        $row = PendingWhmcsInvoice::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('invoice_id', $invoice->id)
+            ->where('status', PendingWhmcsInvoice::STATUS_FILED)
+            ->whereNotNull('whmcs_invoice_id')
+            ->with('invoice')
+            ->first();
+
+        if ($row === null) {
+            return 0.0;
+        }
+
+        return max(0.0, (float) $this->recordForRow($invoice->company, $row, $fetchInvoice));
+    }
+
+    /**
+     * The shared per-row unit. Returns: null = skipped before any WHMCS call
+     * (invoice void/settled/dup); 0.0 = queried WHMCS but not Paid (or unreachable);
+     * >0 = the amount recorded. The write is serialised under a `lockForUpdate` on
+     * the invoice, re-reading balance + dedup INSIDE the lock; the HTTP fetch stays
+     * OUTSIDE the transaction (never hold a row lock across a network call).
+     *
+     * @param  callable(int): (array<string, mixed>|null)  $fetchInvoice
+     */
+    private function recordForRow(Company $tenant, PendingWhmcsInvoice $row, callable $fetchInvoice): ?float
+    {
+        $invoice = $row->invoice;
+        if ($invoice === null || ! $this->isLiveOpen($invoice)) {
+            return null;
+        }
+
+        // Cheap unlocked pre-filter — avoid the WHMCS call for settled rows.
+        if ($this->balance->for($invoice)->balance <= 0.005) {
+            return null;
+        }
+        $txnId = self::transactionId((int) $row->whmcs_invoice_id);
+        if ($this->alreadyRecorded($tenant, $txnId)) {
+            return null;
+        }
+
+        $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
+        if (! is_array($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0) {
+            return 0.0;
+        }
+
+        return DB::transaction(function () use ($tenant, $invoice, $txnId, $payload, $row): float {
+            $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();
+            if ($locked === null || ! $this->isLiveOpen($locked)) {
+                return 0.0;
+            }
+            $balance = round($this->balance->for($locked)->balance, 2);
+            if ($balance <= 0.005 || $this->alreadyRecorded($tenant, $txnId)) {
+                return 0.0;
+            }
+            Payment::create([
+                'company_id' => $tenant->id,
+                'customer_id' => $locked->customer_id,
+                'invoice_id' => $locked->id,
+                'kind' => 'payment',
+                'amount' => $balance,
+                'pay_date' => self::payDate($payload),
+                'transaction_id' => $txnId,
+                'notes' => 'Αυτόματος συγχρονισμός πληρωμής από WHMCS #'.$row->whmcs_invoice_id,
+            ]);
+
+            return $balance;
+        });
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
+use App\Models\PendingWhmcsInvoice;
 use App\Services\Cmr\CreateCmrFromSource;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\EInvoice\Transports\InvoSignDocument;
@@ -20,6 +21,8 @@ use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
 use App\Services\Stock\StockService;
+use App\Services\Whmcs\WhmcsInvoiceFetcher;
+use App\Services\Whmcs\WhmcsPaymentSyncer;
 use App\Support\InvoiceScope;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
@@ -273,6 +276,50 @@ class ViewInvoice extends ViewRecord
                     Notification::make()
                         ->title('Η πληρωμή καταχωρίστηκε')
                         ->success()->send();
+                }),
+
+            // «Έχει πληρωθεί στο WHMCS;» — on-demand check for THIS invoice.
+            // For a filed, WHMCS-linked invoice still open on credit terms, ask
+            // WHMCS whether it has been paid and, if so, close the receivable by
+            // recording a Payment for the outstanding balance (money-write in
+            // ekdosi only). Same idempotent logic as the scheduled/inbox sync —
+            // safe to click repeatedly. Shown only when there is actually
+            // something to check (open receivable with a live WHMCS link).
+            Action::make('check_whmcs_paid')
+                ->label('Έχει πληρωθεί στο WHMCS;')
+                ->icon('heroicon-o-arrow-down-on-square')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => static::hasOpenWhmcsLink($record))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Έλεγχος πληρωμής στο WHMCS')
+                ->modalDescription('Ρωτά το WHMCS αν το αντίστοιχο τιμολόγιο έχει πληρωθεί. Αν ναι, καταγράφεται εδώ πληρωμή που κλείνει το υπόλοιπο. Καμία αλλαγή δεν γίνεται στο WHMCS του πελάτη.')
+                ->modalSubmitActionLabel('Έλεγχος')
+                ->action(function (Invoice $record): void {
+                    $fetch = app(WhmcsInvoiceFetcher::class)->for($record->company);
+                    if ($fetch === null) {
+                        Notification::make()
+                            ->title('Δεν έχει ρυθμιστεί WHMCS')
+                            ->body('Ο πελάτης δεν έχει ενεργή σύνδεση WHMCS — δεν έγινε έλεγχος.')
+                            ->warning()->send();
+
+                        return;
+                    }
+
+                    $amount = app(WhmcsPaymentSyncer::class)->syncInvoice($record, $fetch);
+
+                    if ($amount > 0.005) {
+                        Notification::make()
+                            ->title('Καταγράφηκε πληρωμή')
+                            ->body('Το τιμολόγιο εξοφλήθηκε — καταχωρίστηκε πληρωμή '.number_format($amount, 2, ',', '.').' €.')
+                            ->success()->send();
+                        $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                    } else {
+                        Notification::make()
+                            ->title('Δεν έχει πληρωθεί ακόμη')
+                            ->body('Το WHMCS δεν το επιστρέφει ως πληρωμένο — δεν καταγράφηκε πληρωμή.')
+                            ->info()->send();
+                    }
                 }),
 
             // Issue a credit note (πιστωτικό) against this invoice —
@@ -848,6 +895,31 @@ class ViewInvoice extends ViewRecord
                     );
                 }),
         ];
+    }
+
+    /**
+     * True iff this invoice is a live, still-open receivable that carries a
+     * FILED WHMCS link — i.e. there is actually something for the «Έχει
+     * πληρωθεί στο WHMCS;» action to check. Cheap in-memory gates first
+     * (credit-term, non-cancelled, non-credit, balance > 0), then the single
+     * linked-row exists() query. Mirrors WhmcsPaymentSyncer's own eligibility.
+     */
+    protected static function hasOpenWhmcsLink(Invoice $invoice): bool
+    {
+        if ($invoice->credited_invoice_id !== null
+            || $invoice->local_status === 'cancelled'
+            || $invoice->mydata_state === 'CANCELLED'
+            || (int) ($invoice->paymentMethod?->due_days ?? 0) <= 0
+            || $invoice->balanceData()->balance <= 0.005) {
+            return false;
+        }
+
+        return PendingWhmcsInvoice::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('invoice_id', $invoice->id)
+            ->where('status', PendingWhmcsInvoice::STATUS_FILED)
+            ->whereNotNull('whmcs_invoice_id')
+            ->exists();
     }
 
     /** Credit invoice types for the invoice's tenant. */

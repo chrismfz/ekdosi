@@ -2,10 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Models\Company;
-use App\Services\Whmcs\WhmcsBridgeClientFactory;
-use App\Services\Whmcs\WhmcsClientFactory;
+use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentSyncer;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -30,8 +28,7 @@ class WhmcsSyncPayments extends Command
     protected $description = 'WHMCS bridge (inbound): record an ekdosi Payment for a filed, still-open WHMCS-linked invoice that has since been paid in WHMCS.';
 
     public function handle(
-        WhmcsClientFactory $factory,
-        WhmcsBridgeClientFactory $bridgeFactory,
+        WhmcsInvoiceFetcher $fetcher,
         WhmcsPaymentSyncer $syncer,
     ): int {
         $slug = (string) $this->option('tenant');
@@ -52,7 +49,7 @@ class WhmcsSyncPayments extends Command
         $totalAmount = 0.0;
 
         foreach ($tenants as $tenant) {
-            $fetch = $this->fetchInvoiceResolver($tenant, $factory, $bridgeFactory);
+            $fetch = $fetcher->for($tenant);
             if ($fetch === null) {
                 $this->warn("{$tenant->slug}: WHMCS not configured — skipped.");
 
@@ -101,40 +98,5 @@ class WhmcsSyncPayments extends Command
             ->get()
             ->filter(fn (Company $c) => $c->hasWhmcsIntegration())
             ->values();
-    }
-
-    /**
-     * A `fn(int $whmcsInvoiceId): ?array` that fetches the WHMCS payload via the
-     * tenant's chosen path (bridge plugin or native API). Returns null when the
-     * tenant isn't configured; the callable itself swallows per-invoice fetch
-     * errors → null so one unreachable invoice can't abort the tenant's run.
-     */
-    private function fetchInvoiceResolver(Company $tenant, WhmcsClientFactory $factory, WhmcsBridgeClientFactory $bridgeFactory): ?callable
-    {
-        try {
-            if ((bool) $tenant->whmcs_fetch_via_bridge) {
-                $client = $bridgeFactory->for($tenant);
-
-                return function (int $id) use ($client): ?array {
-                    try {
-                        return $client->fetchInvoice($id);
-                    } catch (Throwable) {
-                        return null;
-                    }
-                };
-            }
-
-            $client = $factory->for($tenant);
-
-            return function (int $id) use ($client): ?array {
-                try {
-                    return $client->getInvoice($id);
-                } catch (Throwable) {
-                    return null;
-                }
-            };
-        } catch (WhmcsNotConfigured) {
-            return null;
-        }
     }
 }

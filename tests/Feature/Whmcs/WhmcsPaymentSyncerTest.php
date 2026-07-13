@@ -138,4 +138,48 @@ class WhmcsPaymentSyncerTest extends TestCase
         $this->assertSame(0, $second->recorded, 'second run must not double-record');
         $this->assertSame(1, Payment::where('company_id', $this->tenant->id)->count());
     }
+
+    // --- syncInvoice(): the single-invoice path behind the per-invoice UI action.
+
+    public function test_sync_invoice_records_the_balance_for_a_paid_open_invoice(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 6001);
+
+        $amount = $this->syncer()->syncInvoice(
+            $invoice,
+            fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-05-22'],
+        );
+
+        $this->assertEqualsWithDelta(124.0, $amount, 0.001);
+        $this->assertSame(1, Payment::where('transaction_id', 'whmcs-paid:6001')->count());
+    }
+
+    public function test_sync_invoice_returns_zero_when_whmcs_still_unpaid(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 6002);
+
+        $amount = $this->syncer()->syncInvoice($invoice, fn (int $id) => ['status' => 'Unpaid']);
+
+        $this->assertSame(0.0, $amount);
+        $this->assertSame(0, Payment::where('company_id', $this->tenant->id)->count());
+    }
+
+    public function test_sync_invoice_returns_zero_when_no_filed_whmcs_link(): void
+    {
+        // An invoice with no filed pending row (e.g. issued manually, not via
+        // WHMCS) has nothing to sync — returns 0 without hitting WHMCS.
+        $invoice = $this->openInvoice(124.0);
+
+        $called = false;
+        $amount = $this->syncer()->syncInvoice($invoice, function (int $id) use (&$called) {
+            $called = true;
+
+            return ['status' => 'Paid'];
+        });
+
+        $this->assertSame(0.0, $amount);
+        $this->assertFalse($called, 'no WHMCS fetch when the invoice is not linked');
+    }
 }

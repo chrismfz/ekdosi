@@ -28,8 +28,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   WHMCS του πελάτη)· idempotent (**only-if-open** — δεν over-pay-άρει ποτέ cash-term/εξοφλημένο — +
   dedup `transaction_id`). **Ανάβει/σβήνει από το UI** («Ρυθμίσεις χρονοπρογραμματιστή», default OFF)
   — κανένας operator δεν χρειάζεται κονσόλα· η καταγεγραμμένη πληρωμή φαίνεται στην Καρτέλα/τιμολόγιο
-  και το task στο `ops:health`/health page. Το outbound σκέλος (ekdosi payment → WHMCS mark-paid)
-  παραμένει design-only στο BACKLOG.
+  και το task στο `ops:health`/health page. **Δύο on-demand κουμπιά** (χωρίς αναμονή για το cron):
+  (α) στο WHMCS inbox, header action «Συγχρονισμός πληρωμών τώρα» (bulk για τον πελάτη)· (β) στο
+  τιμολόγιο, «Έχει πληρωθεί στο WHMCS;» πάνω σε ανοιχτό (επί πιστώσει) WHMCS-συνδεδεμένο παραστατικό —
+  ίδια idempotent/only-if-open λογική, ασφαλή σε επαναλαμβανόμενο κλικ. Το outbound σκέλος (ekdosi
+  payment → WHMCS mark-paid) παραμένει design-only στο BACKLOG.
 
 ## [1.10.0] - 2026-07-13
 
