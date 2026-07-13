@@ -26,8 +26,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
   προγραμματισμένη `whmcs:sync-payments` **κλείνει την οφειλή στο ekdosi** καταγράφοντας Payment για
   το ανοιχτό υπόλοιπο. Poll-based (καμία αλλαγή plugin)· money-write **μόνο στο ekdosi** (ποτέ στο
   WHMCS του πελάτη)· idempotent (**only-if-open** — δεν over-pay-άρει ποτέ cash-term/εξοφλημένο — +
-  dedup `transaction_id`). Gated `EKDOSI_SCHEDULE_WHMCS_PAYMENT_SYNC` (default OFF, opt-in). Το
-  outbound σκέλος (ekdosi payment → WHMCS mark-paid) παραμένει design-only στο BACKLOG.
+  dedup `transaction_id`). **Ανάβει/σβήνει από το UI** («Ρυθμίσεις χρονοπρογραμματιστή», default OFF)
+  — κανένας operator δεν χρειάζεται κονσόλα· η καταγεγραμμένη πληρωμή φαίνεται στην Καρτέλα/τιμολόγιο
+  και το task στο `ops:health`/health page. Το outbound σκέλος (ekdosi payment → WHMCS mark-paid)
+  παραμένει design-only στο BACKLOG.
 
 ## [1.10.0] - 2026-07-13
 
