@@ -18,6 +18,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- **`tag-release.sh --tag` is now one safe atomic step** (was: manual `ekdosi:release` → commit →
+  tag, which let you tag BEFORE committing → a tag on the wrong commit, e.g. `v1.12.0` on a `1.11.0`
+  commit). `--tag` now: pull main → cut the release if `[Unreleased]` has changes → commit → preview
+  + confirm (`-y` skips) → push main → tag → push. Refuses on a dirty tree and verifies
+  `HEAD:config/app.php` == the tag version before tagging. Bare `sh tag-release.sh` stays read-only.
+
 ## [1.12.0] - 2026-07-13
 
 ### Added
