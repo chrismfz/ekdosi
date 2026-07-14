@@ -1,0 +1,306 @@
+@extends('install.layout')
+@section('title', 'Εγκατάσταση')
+
+@php
+    // No session here (installer boots before APP_KEY), so repopulate straight
+    // from the view data: old input wins, else the sensible default.
+    $val = fn (string $k, string $d = '') => e($old[$k] ?? $defaults[$k] ?? $d);
+    $sel = fn (string $k, string $option, string $d = '') => (($old[$k] ?? $defaults[$k] ?? $d) === $option) ? 'selected' : '';
+@endphp
+
+@section('content')
+    @if (! empty($errors))
+        <div class="alert alert-err">
+            <strong>Διόρθωσε τα παρακάτω:</strong>
+            <ul>
+                @foreach ($errors as $error)
+                    <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+
+    <form method="POST" action="{{ url('/install') }}" id="install-form">
+        {{-- Καμία CSRF: ο installer τρέχει χωρίς session· η ασφάλεια είναι ο κωδικός επιβεβαίωσης. --}}
+
+        {{-- 1. Επιβεβαίωση πρόσβασης --}}
+        <div class="card">
+            <h2>1. Επιβεβαίωση πρόσβασης στον διακομιστή</h2>
+            <p class="section-hint">Για ασφάλεια, ο οδηγός έγραψε ένα αρχείο στον διακομιστή. Άνοιξέ το (SSH ή File Manager του πάνελ), αντίγραψε τον κωδικό και επικόλλησέ τον εδώ.</p>
+
+            @if ($tokenIssued)
+                <p class="hint">Αρχείο: <span class="token-box">{{ $tokenPath }}</span></p>
+            @else
+                <div class="alert alert-warn">
+                    Δεν μπόρεσα να δημιουργήσω το αρχείο επιβεβαίωσης — ο φάκελος <code>storage/app/install/</code> δεν είναι εγγράψιμος. Δώσε δικαιώματα εγγραφής και ανανέωσε τη σελίδα.
+                </div>
+            @endif
+
+            <div class="field">
+                <label for="verify_token">Κωδικός επιβεβαίωσης <span class="req">*</span></label>
+                <input type="text" id="verify_token" name="verify_token" autocomplete="off" spellcheck="false" placeholder="π.χ. 3f9a…">
+            </div>
+        </div>
+
+        {{-- 2. Εφαρμογή --}}
+        <div class="card">
+            <h2>2. Εφαρμογή</h2>
+            <p class="section-hint">Βασικά στοιχεία. Το κλειδί κρυπτογράφησης (APP_KEY) δημιουργείται αυτόματα.</p>
+
+            <div class="row">
+                <div class="field">
+                    <label for="app_name">Όνομα εφαρμογής <span class="req">*</span></label>
+                    <input type="text" id="app_name" name="app_name" value="{{ $val('app_name') }}">
+                </div>
+                <div class="field">
+                    <label for="app_url">Διεύθυνση (URL) <span class="req">*</span></label>
+                    <input type="url" id="app_url" name="app_url" value="{{ $val('app_url') }}" placeholder="https://ekdosi.myip.gr">
+                    <p class="hint">Η πραγματική διεύθυνση του site — χρησιμοποιείται σε PDF/email/QR/webhooks.</p>
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="app_env">Περιβάλλον <span class="req">*</span></label>
+                    <select id="app_env" name="app_env">
+                        <option value="production" {{ $sel('app_env', 'production') }}>Production (παραγωγή)</option>
+                        <option value="local" {{ $sel('app_env', 'local') }}>Local (δοκιμές)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="app_locale">Γλώσσα <span class="req">*</span></label>
+                    <select id="app_locale" name="app_locale">
+                        <option value="el" {{ $sel('app_locale', 'el') }}>Ελληνικά</option>
+                        <option value="en" {{ $sel('app_locale', 'en') }}>English</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="app_timezone">Ζώνη ώρας <span class="req">*</span></label>
+                    <input type="text" id="app_timezone" name="app_timezone" value="{{ $val('app_timezone') }}">
+                </div>
+            </div>
+        </div>
+
+        {{-- 3. Βάση δεδομένων --}}
+        <div class="card">
+            <h2>3. Βάση δεδομένων (MariaDB / MySQL)</h2>
+            <p class="section-hint">Δημιούργησε πρώτα μια <strong>κενή</strong> βάση + χρήστη στο πάνελ του hosting, μετά συμπλήρωσε τα στοιχεία. Πάτα «Δοκιμή σύνδεσης» πριν συνεχίσεις.</p>
+
+            <div class="row">
+                <div class="field" style="flex: 2;">
+                    <label for="db_host">Host <span class="req">*</span></label>
+                    <input type="text" id="db_host" name="db_host" value="{{ $val('db_host') }}">
+                </div>
+                <div class="field">
+                    <label for="db_port">Port <span class="req">*</span></label>
+                    <input type="number" id="db_port" name="db_port" value="{{ $val('db_port') }}">
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="db_database">Όνομα βάσης <span class="req">*</span></label>
+                    <input type="text" id="db_database" name="db_database" value="{{ $val('db_database') }}">
+                </div>
+                <div class="field">
+                    <label for="db_username">Χρήστης <span class="req">*</span></label>
+                    <input type="text" id="db_username" name="db_username" value="{{ $val('db_username') }}">
+                </div>
+                <div class="field">
+                    <label for="db_password">Κωδικός</label>
+                    <input type="password" id="db_password" name="db_password" autocomplete="new-password">
+                </div>
+            </div>
+
+            <button type="button" class="btn-secondary" id="test-db-btn">Δοκιμή σύνδεσης</button>
+            <div id="db-test-result" class="alert hidden" style="margin-top: 12px;"></div>
+
+            <div class="field" style="margin-top: 14px;">
+                <label style="font-weight: 400; display: flex; gap: 8px; align-items: flex-start;">
+                    <input type="checkbox" name="allow_existing_db" value="1" style="width: auto; margin-top: 3px;" {{ ! empty($old['allow_existing_db']) ? 'checked' : '' }}>
+                    <span>Συνέχεια σε μη-κενή βάση (μόνο για ημιτελή προηγούμενη προσπάθεια). Κανονικά η βάση πρέπει να είναι <strong>κενή</strong>.</span>
+                </label>
+            </div>
+        </div>
+
+        {{-- 4. Email (προαιρετικό) --}}
+        <div class="card">
+            <h2>4. Email</h2>
+            <p class="section-hint">Με «Καταγραφή (log)» δεν στέλνεται τίποτα — τα email γράφονται στο log. Επίλεξε SMTP για πραγματική αποστολή (μπορείς να το ρυθμίσεις κι αργότερα).</p>
+
+            <div class="row">
+                <div class="field">
+                    <label for="mail_mailer">Τρόπος αποστολής <span class="req">*</span></label>
+                    <select id="mail_mailer" name="mail_mailer">
+                        <option value="log" {{ $sel('mail_mailer', 'log') }}>Καταγραφή (log) — δεν στέλνει</option>
+                        <option value="smtp" {{ $sel('mail_mailer', 'smtp') }}>SMTP</option>
+                        <option value="sendmail" {{ $sel('mail_mailer', 'sendmail') }}>sendmail</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="mail_from_address">Αποστολέας (email) <span class="req">*</span></label>
+                    <input type="email" id="mail_from_address" name="mail_from_address" value="{{ $val('mail_from_address') }}">
+                </div>
+                <div class="field">
+                    <label for="mail_from_name">Αποστολέας (όνομα) <span class="req">*</span></label>
+                    <input type="text" id="mail_from_name" name="mail_from_name" value="{{ $old['mail_from_name'] ?? $old['app_name'] ?? $defaults['app_name'] ?? 'ekdosi' }}">
+                </div>
+            </div>
+
+            <div id="smtp-fields" class="{{ (($old['mail_mailer'] ?? $defaults['mail_mailer']) === 'smtp') ? '' : 'hidden' }}">
+                <div class="row">
+                    <div class="field" style="flex: 2;">
+                        <label for="mail_host">SMTP host</label>
+                        <input type="text" id="mail_host" name="mail_host" value="{{ $val('mail_host') }}">
+                    </div>
+                    <div class="field">
+                        <label for="mail_port">SMTP port</label>
+                        <input type="number" id="mail_port" name="mail_port" value="{{ $old['mail_port'] ?? '587' }}">
+                    </div>
+                    <div class="field">
+                        <label for="mail_encryption">Κρυπτογράφηση</label>
+                        <select id="mail_encryption" name="mail_encryption">
+                            <option value="null" {{ $sel('mail_encryption', 'null') }}>Καμία</option>
+                            <option value="tls" {{ $sel('mail_encryption', 'tls') }}>TLS</option>
+                            <option value="ssl" {{ $sel('mail_encryption', 'ssl') }}>SSL</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="field">
+                        <label for="mail_username">SMTP χρήστης</label>
+                        <input type="text" id="mail_username" name="mail_username" value="{{ $val('mail_username') }}" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label for="mail_password">SMTP κωδικός</label>
+                        <input type="password" id="mail_password" name="mail_password" autocomplete="new-password">
+                    </div>
+                </div>
+            </div>
+            {{-- Το select mail_encryption υποβάλλεται πάντα (ακόμη κι όταν είναι κρυμμένο),
+                 με έγκυρη τιμή null/tls/ssl — καλύπτει τον κανόνα επικύρωσης χωρίς διπλό πεδίο. --}}
+        </div>
+
+        {{-- 5. Διαχειριστής & Εταιρία --}}
+        <div class="card">
+            <h2>5. Διαχειριστής & πρώτη εταιρία</h2>
+            <p class="section-hint">Ο πρώτος υπερ-διαχειριστής (super admin) και η πρώτη εταιρία (tenant). Τα κλειδιά myDATA/WHMCS/GSIS ρυθμίζονται αργότερα, ανά εταιρία, μέσα από την εφαρμογή.</p>
+
+            <div class="row">
+                <div class="field">
+                    <label for="admin_name">Όνομα διαχειριστή <span class="req">*</span></label>
+                    <input type="text" id="admin_name" name="admin_name" value="{{ $val('admin_name') }}">
+                </div>
+                <div class="field">
+                    <label for="admin_email">Email (login) <span class="req">*</span></label>
+                    <input type="email" id="admin_email" name="admin_email" value="{{ $val('admin_email') }}" autocomplete="off">
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="admin_password">Κωδικός (≥ 8 χαρακτ.) <span class="req">*</span></label>
+                    <input type="password" id="admin_password" name="admin_password" autocomplete="new-password">
+                </div>
+                <div class="field">
+                    <label for="admin_password_confirmation">Επιβεβαίωση κωδικού <span class="req">*</span></label>
+                    <input type="password" id="admin_password_confirmation" name="admin_password_confirmation" autocomplete="new-password">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="field">
+                    <label for="company_name">Επωνυμία εταιρίας <span class="req">*</span></label>
+                    <input type="text" id="company_name" name="company_name" value="{{ $val('company_name') }}">
+                </div>
+                <div class="field">
+                    <label for="company_slug">Slug (προαιρετικό)</label>
+                    <input type="text" id="company_slug" name="company_slug" value="{{ $val('company_slug') }}" placeholder="αυτόματο από την επωνυμία">
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="company_country">Χώρα <span class="req">*</span></label>
+                    <select id="company_country" name="company_country">
+                        <option value="GR" {{ $sel('company_country', 'GR') }}>Ελλάδα (myDATA)</option>
+                        <option value="EE" {{ $sel('company_country', 'EE') }}>Εσθονία (PEPPOL)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="company_afm">ΑΦΜ (προαιρετικό)</label>
+                    <input type="text" id="company_afm" name="company_afm" value="{{ $val('company_afm') }}">
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="text-align: center;">
+            <button type="submit" class="btn-primary" id="submit-btn">Εγκατάσταση</button>
+            <p class="hint" style="margin-top: 10px;">Θα δημιουργηθεί το σχήμα της βάσης, ο διαχειριστής και το αρχείο ρυθμίσεων. Μπορεί να πάρει λίγα δευτερόλεπτα.</p>
+        </div>
+    </form>
+@endsection
+
+@section('scripts')
+<script>
+    (function () {
+        // SMTP fields toggle. The mail_encryption select stays in the DOM and
+        // submits a valid value even while hidden, so no extra field is needed.
+        var mailer = document.getElementById('mail_mailer');
+        var smtp = document.getElementById('smtp-fields');
+        function toggleSmtp() {
+            smtp.classList.toggle('hidden', mailer.value !== 'smtp');
+        }
+        mailer.addEventListener('change', toggleSmtp);
+        toggleSmtp();
+
+        // Δοκιμή σύνδεσης (AJAX).
+        var btn = document.getElementById('test-db-btn');
+        var box = document.getElementById('db-test-result');
+        btn.addEventListener('click', function () {
+            var payload = {
+                verify_token: document.getElementById('verify_token').value,
+                db_host: document.getElementById('db_host').value,
+                db_port: document.getElementById('db_port').value,
+                db_database: document.getElementById('db_database').value,
+                db_username: document.getElementById('db_username').value,
+                db_password: document.getElementById('db_password').value
+            };
+            btn.disabled = true;
+            btn.textContent = 'Έλεγχος…';
+            box.className = 'alert';
+            box.classList.remove('hidden');
+            box.textContent = 'Δοκιμή σύνδεσης…';
+
+            fetch('{{ url('/install/test-db') }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
+            .then(function (res) {
+                var d = res.body;
+                if (d.ok) {
+                    box.className = 'alert alert-ok';           // connected + empty
+                } else if (d.needsOverride) {
+                    box.className = 'alert alert-warn';         // connected but non-empty
+                } else {
+                    box.className = 'alert alert-err';          // connection failed
+                }
+                box.textContent = d.message || 'Άγνωστο αποτέλεσμα.';
+            })
+            .catch(function () {
+                box.className = 'alert alert-err';
+                box.textContent = 'Αποτυχία επικοινωνίας με τον διακομιστή.';
+            })
+            .finally(function () {
+                btn.disabled = false;
+                btn.textContent = 'Δοκιμή σύνδεσης';
+            });
+        });
+
+        // Απόφυγε διπλό submit (η εγκατάσταση αργεί λίγο).
+        document.getElementById('install-form').addEventListener('submit', function () {
+            var s = document.getElementById('submit-btn');
+            s.disabled = true;
+            s.textContent = 'Εγκατάσταση… περίμενε';
+        });
+    })();
+</script>
+@endsection
