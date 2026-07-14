@@ -29,8 +29,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   pristine host into the wizard and, once an `APP_KEY` exists (or a completion marker is dropped), makes
   `/install` permanently inert (302 → `/admin`). A **filesystem-token gate** (a file written under
   `storage/app/install/`, re-verified on every POST) proves server access, and the migrate step **refuses
-  a DB that already holds a finished install**. Per-tenant secrets (myDATA/WHMCS/GSIS) stay out of the
-  installer — set later per-company in the panel.
+  any non-empty target database by default** (a foreign DB — WHMCS, another app — or a partial prior
+  attempt; explicit operator override to finish a partial). Per-tenant secrets (myDATA/WHMCS/GSIS) stay
+  out of the installer — set later per-company in the panel.
 
 ## [1.12.1] - 2026-07-13
 

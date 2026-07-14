@@ -26,22 +26,35 @@ class InstallState
         return storage_path('app/install/installed.json');
     }
 
+    /** The `.env` file whose mere existence means «someone already configured this». */
+    public function envFilePath(): string
+    {
+        return base_path('.env');
+    }
+
     /**
-     * TRUE once the app is configured. Two signals, filesystem/config only (no
-     * DB — this runs in global middleware on every request):
+     * TRUE once the app is configured. Three filesystem/config signals (no DB —
+     * this runs in global middleware on every request), any of which locks the
+     * installer:
      *
      *  1. A completion marker file (dropped on a successful web install).
-     *  2. A non-empty RESOLVED APP_KEY (`config('app.key')`). This is the
-     *     load-bearing check and it reads the resolved config, NOT the `.env`
-     *     file — so it's correct whether the key comes from `.env`, a real
-     *     server env var, or CI/phpunit env (parsing `.env` would wrongly flag
-     *     a test/CI box — which has no `.env` file — as pristine and redirect
-     *     every request to /install). An empty key is the precise «fresh drop,
-     *     nothing configured» trigger the installer exists for.
+     *  2. A `.env` FILE exists — the operator's literal «αν υπάρχει env, κάντο
+     *     άχρηστο» rule, and defense-in-depth for a host whose APP_KEY briefly
+     *     resolves empty (truncated `.env`, bad `config:cache`).
+     *  3. A non-empty RESOLVED APP_KEY (`config('app.key')`). This covers a box
+     *     configured purely via server/CI env vars with NO `.env` file — parsing
+     *     `.env` alone would wrongly flag it pristine and redirect every request
+     *     to /install (which is why CI/phpunit, key-set + file-less, stays
+     *     «installed»). An empty key + no `.env` + no marker is the precise
+     *     «fresh drop, nothing configured» trigger the installer exists for.
      */
     public function isInstalled(): bool
     {
         if (is_file($this->markerPath())) {
+            return true;
+        }
+
+        if (is_file($this->envFilePath())) {
             return true;
         }
 

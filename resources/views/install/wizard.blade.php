@@ -276,12 +276,12 @@
             .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
             .then(function (res) {
                 var d = res.body;
-                if (d.ok && !d.hasSchema) {
-                    box.className = 'alert alert-ok';
-                } else if (d.ok && d.hasSchema) {
-                    box.className = 'alert alert-warn';
+                if (d.ok) {
+                    box.className = 'alert alert-ok';           // connected + empty
+                } else if (d.needsOverride) {
+                    box.className = 'alert alert-warn';         // connected but non-empty
                 } else {
-                    box.className = 'alert alert-err';
+                    box.className = 'alert alert-err';          // connection failed
                 }
                 box.textContent = d.message || 'Άγνωστο αποτέλεσμα.';
             })

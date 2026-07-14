@@ -71,7 +71,7 @@ class InstallController
             'ok' => $result->ok,
             'reason' => $result->reason,
             'message' => $result->message,
-            'hasSchema' => $result->hasSchema,
+            'needsOverride' => $result->needsOverride,
         ]);
     }
 
@@ -105,24 +105,19 @@ class InstallController
         );
 
         // A real connection failure (auth / unreachable / unknown DB) always stops.
-        if (! $probe->ok && ! $probe->alreadyInstalled) {
+        if (! $probe->ok && ! $probe->needsOverride) {
             return $this->redisplay($request, ['Η σύνδεση στη βάση απέτυχε: '.$probe->message]);
         }
 
-        // A non-empty target DB is REFUSED by default (guards against fat-fingering
-        // a populated/wrong database). We can only ever reach here on a pristine
-        // host (no APP_KEY ⇒ no COMPLETED install — those write .env last), so a
-        // populated DB is either a foreign DB or a partial prior attempt. The
-        // operator confirms the latter with an explicit checkbox, which then
-        // completes the half-built tenant idempotently (--force below).
+        // ANY non-empty target DB is REFUSED by default — a foreign DB (WHMCS,
+        // another app) or a partial prior attempt. This guards against
+        // fat-fingering a populated/wrong database (the money-nervous ask). The
+        // operator confirms an intended non-empty DB with an explicit checkbox,
+        // which then completes a half-built tenant idempotently (--force below).
         $allowExisting = $request->boolean('allow_existing_db');
 
-        if ($probe->alreadyInstalled && ! $allowExisting) {
-            return $this->redisplay($request, [
-                'Η βάση δεν είναι κενή — φαίνεται να περιέχει ήδη δεδομένα ekdosi (υπάρχει διαχειριστής). '
-                .'Αν πρόκειται για ημιτελή προηγούμενη προσπάθεια και θέλεις να ολοκληρωθεί, τσέκαρε '
-                .'«Συνέχεια σε μη-κενή βάση» στην ενότητα της βάσης και ξαναπροσπάθησε.',
-            ]);
+        if ($probe->needsOverride && ! $allowExisting) {
+            return $this->redisplay($request, [$probe->message]);
         }
 
         // (4) Point the framework at the target DB for the rest of this request.
@@ -212,7 +207,10 @@ class InstallController
     {
         return [
             'app_name' => ['required', 'string', 'max:255'],
-            'app_url' => ['required', 'url'],
+            // Restrict to http/https — the bare `url` rule accepts javascript:/data:
+            // schemes, and this value becomes APP_URL (PDF/email/QR/webhook links)
+            // and a clickable href on the done page.
+            'app_url' => ['required', 'url:http,https'],
             'app_env' => ['required', 'in:production,local'],
             'app_locale' => ['required', 'in:el,en'],
             'app_timezone' => ['required', 'timezone'],

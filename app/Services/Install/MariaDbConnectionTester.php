@@ -70,41 +70,74 @@ class MariaDbConnectionTester
     }
 
     /**
-     * Connected → decide whether it's safe to install into. We probe the one
-     * table every ekdosi install has: `users`.
-     *  - query throws  → no `users` table → empty/fresh DB → safe.
-     *  - 0 rows        → migrated but no admin → still safe (idempotent retry).
-     *  - ≥1 row        → a finished install → REFUSE (won't overwrite).
-     *
-     * A plain `SELECT COUNT(*) FROM users` (not information_schema) keeps the
-     * probe portable to the sqlite stand-in used in tests.
+     * Connected → decide whether it's safe to install into.
+     *  - 0 tables     → EMPTY → safe to auto-proceed.
+     *  - ≥1 table     → NON-EMPTY → require the operator's override. This catches
+     *                   a foreign DB (WHMCS, another app) — NOT just another
+     *                   Laravel install — which the old `users`-only check
+     *                   reported as «empty» and would have migrated into.
+     *  - ≥1 table AND ≥1 `users` row → an existing ekdosi admin → distinct
+     *                   «already installed» message (still overridable to finish
+     *                   a partial attempt).
      */
     private function probe(PDO $pdo): MariaDbProbeResult
     {
-        try {
-            $count = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
-        } catch (Throwable) {
-            return MariaDbProbeResult::success(hasSchema: false);
+        $tableCount = $this->countTables($pdo);
+
+        if ($tableCount === 0) {
+            return MariaDbProbeResult::emptyDatabase();
         }
 
-        return $count > 0
-            ? MariaDbProbeResult::alreadyInstalled()
-            : MariaDbProbeResult::success(hasSchema: true);
+        // Non-empty. Does it already carry an ekdosi admin?
+        try {
+            $userRows = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
+        } catch (Throwable) {
+            $userRows = 0;   // no `users` table → a foreign, non-ekdosi schema
+        }
+
+        return $userRows > 0
+            ? MariaDbProbeResult::alreadyInstalled($tableCount)
+            : MariaDbProbeResult::nonEmpty($tableCount);
+    }
+
+    /**
+     * Count tables in the CURRENT database. MariaDB/MySQL via information_schema;
+     * falls back to sqlite_master so the probe stays portable to the sqlite
+     * stand-in used in tests. 0 = a truly empty database.
+     */
+    private function countTables(PDO $pdo): int
+    {
+        $queries = [
+            'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()',
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        ];
+
+        foreach ($queries as $sql) {
+            try {
+                return (int) $pdo->query($sql)->fetchColumn();
+            } catch (Throwable) {
+                continue;
+            }
+        }
+
+        return 0;
     }
 
     private function classify(Throwable $e): string
     {
         $m = strtolower($e->getMessage());
-        $code = $e->getCode();
+        // The real MySQL driver code lives in errorInfo[1] (getCode() returns the
+        // SQLSTATE string, so numeric comparisons on it never match). Fall back to
+        // message substrings when errorInfo is absent (e.g. a hand-built exception).
+        $driverCode = ($e instanceof \PDOException && is_array($e->errorInfo ?? null))
+            ? ($e->errorInfo[1] ?? null)
+            : null;
 
         return match (true) {
             str_contains($m, 'could not find driver') => 'driver_missing',
-            // MySQL 1045 = access denied (bad user/password).
-            $code === 1045 || str_contains($m, 'access denied') => 'auth',
-            // 1049 = unknown database.
-            $code === 1049 || str_contains($m, 'unknown database') => 'unknown_database',
-            // 2002/2003 = can't connect / host unreachable.
-            $code === 2002 || $code === 2003
+            $driverCode === 1045 || str_contains($m, 'access denied') => 'auth',
+            $driverCode === 1049 || str_contains($m, 'unknown database') => 'unknown_database',
+            in_array($driverCode, [2002, 2003], true)
                 || str_contains($m, "can't connect") || str_contains($m, 'connection refused')
                 || str_contains($m, 'timed out') || str_contains($m, 'no such host')
                 || str_contains($m, 'unknown mysql server host') => 'unreachable',

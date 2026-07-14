@@ -21,6 +21,18 @@ class InstallGuardTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Bind an InstallState whose `.env` signal points at an absent path, so a
+        // real `.env` on a dev box can't mask the key-based pristine simulation.
+        // «Installed?» is then driven purely by config('app.key') + the marker.
+        $this->app->instance(InstallState::class, new class extends InstallState
+        {
+            public function envFilePath(): string
+            {
+                return storage_path('app/install/__never__.env');
+            }
+        });
+
         // Never let a stray marker from another run mask the key-based gate.
         $marker = app(InstallState::class)->markerPath();
         if (is_file($marker)) {
@@ -118,35 +130,59 @@ class InstallGuardTest extends TestCase
         $this->assertTrue(app(InstallState::class)->canInstall());
     }
 
-    public function test_non_empty_db_is_refused_without_the_override_checkbox(): void
+    public function test_existing_ekdosi_db_is_refused_without_the_override_checkbox(): void
     {
         config(['app.key' => '']);
 
         $token = app(InstallTokenManager::class)->issue();
 
-        // Probe reports the DB already holds a finished install.
-        $this->app->bind(MariaDbConnectionTester::class, fn () => new MariaDbConnectionTester(
-            fn (string $dsn, string $u, string $p) => $this->pdoWithUsers(1),
-        ));
+        // Probe reports the DB already holds an ekdosi admin.
+        $this->bindProbeDb(['users' => 1, 'companies' => 1]);
 
-        // Without the checkbox → refused, wizard re-shown, nothing committed.
         $this->post('/install', $this->validPayload($token))
             ->assertStatus(422)
-            ->assertSee('Η βάση δεν είναι κενή');
+            ->assertSee('Συνέχεια σε μη-κενή βάση');
 
         $this->assertTrue(app(InstallState::class)->canInstall());
     }
 
-    private function pdoWithUsers(int $rows): \PDO
+    public function test_foreign_non_empty_db_is_refused_without_the_override_checkbox(): void
     {
-        $pdo = new \PDO('sqlite::memory:');
-        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
-        $pdo->exec('CREATE TABLE users (id INTEGER)');
-        for ($i = 0; $i < $rows; $i++) {
-            $pdo->exec("INSERT INTO users (id) VALUES ({$i})");
-        }
+        config(['app.key' => '']);
 
-        return $pdo;
+        $token = app(InstallTokenManager::class)->issue();
+
+        // A populated foreign DB (no `users` table). Must NOT be auto-migrated.
+        $this->bindProbeDb(['tblinvoices' => 5, 'tblclients' => 3]);
+
+        $this->post('/install', $this->validPayload($token))
+            ->assertStatus(422)
+            ->assertSee('Συνέχεια σε μη-κενή βάση');
+
+        $this->assertTrue(app(InstallState::class)->canInstall());
+    }
+
+    /**
+     * Bind the DB tester to a sqlite stand-in with the given tables.
+     *
+     * @param  array<string, int>  $tables
+     */
+    private function bindProbeDb(array $tables): void
+    {
+        $this->app->bind(MariaDbConnectionTester::class, fn () => new MariaDbConnectionTester(
+            function (string $dsn, string $u, string $p) use ($tables): \PDO {
+                $pdo = new \PDO('sqlite::memory:');
+                $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+                foreach ($tables as $table => $rows) {
+                    $pdo->exec("CREATE TABLE {$table} (id INTEGER)");
+                    for ($i = 0; $i < $rows; $i++) {
+                        $pdo->exec("INSERT INTO {$table} (id) VALUES ({$i})");
+                    }
+                }
+
+                return $pdo;
+            },
+        ));
     }
 
     /** A fully valid wizard submission (bar the DB, which the test stubs). */

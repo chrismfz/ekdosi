@@ -31,16 +31,24 @@ class InstallSupportTest extends TestCase
         parent::tearDown();
     }
 
-    /** InstallState with an overridable marker path (so we never touch real storage). */
+    /**
+     * InstallState with overridable marker + env paths (so we test the marker/key
+     * logic in isolation, never touching real storage or a dev box's real `.env`).
+     */
     private function state(string $markerPath): InstallState
     {
-        return new class($markerPath) extends InstallState
+        return new class($markerPath, $this->scratch.'/.env-absent') extends InstallState
         {
-            public function __construct(private string $marker) {}
+            public function __construct(private string $marker, private string $env) {}
 
             public function markerPath(): string
             {
                 return $this->marker;
+            }
+
+            public function envFilePath(): string
+            {
+                return $this->env;
             }
         };
     }

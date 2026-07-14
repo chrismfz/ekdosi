@@ -15,16 +15,22 @@ use Tests\TestCase;
  */
 class MariaDbConnectionTesterTest extends TestCase
 {
-    /** A sqlite PDO standing in for MariaDB. Pass a `users` row count, or null for «no users table». */
-    private function fakePdo(?int $userRows): PDO
+    /**
+     * A sqlite PDO standing in for MariaDB. $tables maps table name → row count.
+     * The tester's countTables() falls back to sqlite_master, so an empty map is
+     * a genuinely empty database.
+     *
+     * @param  array<string, int>  $tables
+     */
+    private function fakePdo(array $tables): PDO
     {
         $pdo = new PDO('sqlite::memory:');
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-        if ($userRows !== null) {
-            $pdo->exec('CREATE TABLE users (id INTEGER)');
-            for ($i = 0; $i < $userRows; $i++) {
-                $pdo->exec("INSERT INTO users (id) VALUES ({$i})");
+        foreach ($tables as $table => $rows) {
+            $pdo->exec("CREATE TABLE {$table} (id INTEGER)");
+            for ($i = 0; $i < $rows; $i++) {
+                $pdo->exec("INSERT INTO {$table} (id) VALUES ({$i})");
             }
         }
 
@@ -42,31 +48,50 @@ class MariaDbConnectionTesterTest extends TestCase
         });
     }
 
-    public function test_empty_database_is_ok_and_not_flagged_as_schema(): void
+    public function test_empty_database_is_ok(): void
     {
-        $result = $this->tester($this->fakePdo(null))->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
+        $result = $this->tester($this->fakePdo([]))->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
 
         $this->assertTrue($result->ok);
         $this->assertSame('ok', $result->reason);
-        $this->assertFalse($result->hasSchema);
+        $this->assertFalse($result->needsOverride);
         $this->assertFalse($result->alreadyInstalled);
     }
 
-    public function test_migrated_but_no_admin_is_safe_but_flagged_as_schema(): void
+    public function test_foreign_non_ekdosi_database_needs_override_and_is_not_auto_migrated(): void
     {
-        $result = $this->tester($this->fakePdo(0))->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
+        // A populated WHMCS-style DB: tables, but no `users` table. The old
+        // users-only probe reported this «empty» and would migrate into it.
+        $result = $this->tester($this->fakePdo(['tblinvoices' => 10, 'tblclients' => 4]))
+            ->test('127.0.0.1', 3306, 'whmcs', 'u', 'p');
 
-        $this->assertTrue($result->ok);
-        $this->assertTrue($result->hasSchema);
+        $this->assertFalse($result->ok);
+        $this->assertSame('non_empty', $result->reason);
+        $this->assertTrue($result->needsOverride);
+        $this->assertFalse($result->alreadyInstalled);
+        $this->assertSame(2, $result->tableCount);
+    }
+
+    public function test_migrated_but_no_admin_needs_override(): void
+    {
+        // A partial ekdosi migrate: tables present, `users` empty.
+        $result = $this->tester($this->fakePdo(['users' => 0, 'companies' => 0]))
+            ->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
+
+        $this->assertFalse($result->ok);
+        $this->assertSame('non_empty', $result->reason);
+        $this->assertTrue($result->needsOverride);
         $this->assertFalse($result->alreadyInstalled);
     }
 
-    public function test_existing_admin_is_refused(): void
+    public function test_existing_admin_is_already_installed(): void
     {
-        $result = $this->tester($this->fakePdo(1))->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
+        $result = $this->tester($this->fakePdo(['users' => 1, 'companies' => 1]))
+            ->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
 
         $this->assertFalse($result->ok);
         $this->assertSame('already_installed', $result->reason);
+        $this->assertTrue($result->needsOverride);
         $this->assertTrue($result->alreadyInstalled);
     }
 
