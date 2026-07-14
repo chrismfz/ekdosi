@@ -65,7 +65,7 @@ class EnvWriter
         $lines[] = 'LOG_LEVEL='.($isProd ? 'info' : 'debug');
         $lines[] = '';
         $lines[] = 'DB_CONNECTION=mariadb';
-        $lines[] = 'DB_HOST='.($v['db_host'] ?? '127.0.0.1');
+        $lines[] = 'DB_HOST='.$this->quote((string) ($v['db_host'] ?? '127.0.0.1'), '127.0.0.1');
         $lines[] = 'DB_PORT='.($v['db_port'] ?? '3306');
         $lines[] = 'DB_DATABASE='.$this->quote((string) ($v['db_database'] ?? 'ekdosi'));
         $lines[] = 'DB_USERNAME='.$this->quote((string) ($v['db_username'] ?? 'ekdosi'));
@@ -88,7 +88,7 @@ class EnvWriter
         $lines[] = 'CACHE_STORE=database';
         $lines[] = '';
         $lines[] = 'MAIL_MAILER='.($v['mail_mailer'] ?? 'log');
-        $lines[] = 'MAIL_HOST='.($v['mail_host'] ?? '127.0.0.1');
+        $lines[] = 'MAIL_HOST='.$this->quote((string) ($v['mail_host'] ?? '127.0.0.1'), '127.0.0.1');
         $lines[] = 'MAIL_PORT='.($v['mail_port'] ?? '2525');
         $lines[] = 'MAIL_USERNAME='.$this->quote((string) ($v['mail_username'] ?? ''), 'null');
         $lines[] = 'MAIL_PASSWORD='.$this->quote((string) ($v['mail_password'] ?? ''), 'null');
@@ -140,7 +140,16 @@ class EnvWriter
         }
 
         if (preg_match('/[\s#"\'=$]/', $value)) {
-            return '"'.str_replace(['\\', '"'], ['\\\\', '\\"'], $value).'"';
+            // Escape backslash + double-quote, AND fold any literal CR/newline to
+            // the two-char \r/\n escapes so the value can NEVER spill onto a
+            // second physical line (which a parser could read as a new KEY=VALUE).
+            $escaped = str_replace(
+                ['\\', '"', "\r", "\n"],
+                ['\\\\', '\\"', '\\r', '\\n'],
+                $value,
+            );
+
+            return '"'.$escaped.'"';
         }
 
         return $value;

@@ -181,6 +181,27 @@ class InstallSupportTest extends TestCase
         $this->assertStringNotContainsString('WHMCS', $body);
     }
 
+    public function test_render_quotes_host_values_to_prevent_env_injection(): void
+    {
+        // A host field carrying whitespace/newline/# must be quoted, never spill
+        // onto a second .env line (mail_host is never probed, so this is the one
+        // place such a value could reach the file verbatim).
+        $body = (new EnvWriter)->render([
+            'app_name' => 'ekdosi', 'app_env' => 'production', 'app_key' => 'base64:abc',
+            'app_url' => 'https://x.gr', 'app_locale' => 'el', 'app_timezone' => 'Europe/Athens',
+            'db_host' => "127.0.0.1\nMALICIOUS=1", 'db_port' => '3306', 'db_database' => 'ekdosi',
+            'db_username' => 'u', 'db_password' => '',
+            'mail_mailer' => 'smtp', 'mail_host' => "smtp.evil\nAPP_DEBUG=true", 'mail_port' => '587',
+            'mail_encryption' => 'tls', 'mail_from_address' => 'a@b.gr', 'mail_from_name' => 'ekdosi',
+        ]);
+
+        $this->assertStringNotContainsString("\nMALICIOUS=1", $body);
+        $this->assertStringNotContainsString("\nAPP_DEBUG=true", $body);
+        // The values survive, quoted (newline escaped inside the quoted string).
+        $this->assertStringContainsString('DB_HOST="127.0.0.1', $body);
+        $this->assertStringContainsString('MAIL_HOST="smtp.evil', $body);
+    }
+
     public function test_render_local_env_and_plain_http_omit_prod_only_lines(): void
     {
         $body = (new EnvWriter)->render([
