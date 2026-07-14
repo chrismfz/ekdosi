@@ -189,6 +189,28 @@ class InstallSupportTest extends TestCase
         $this->assertStringNotContainsString('WHMCS', $body);
     }
 
+    public function test_render_maps_mail_encryption_to_a_valid_mail_scheme(): void
+    {
+        $base = [
+            'app_name' => 'ekdosi', 'app_env' => 'production', 'app_key' => 'base64:abc',
+            'app_url' => 'https://x.gr', 'app_locale' => 'el', 'app_timezone' => 'Europe/Athens',
+            'db_host' => '127.0.0.1', 'db_port' => '3306', 'db_database' => 'ekdosi',
+            'db_username' => 'u', 'db_password' => '',
+            'mail_mailer' => 'smtp', 'mail_host' => 'smtp.gr', 'mail_port' => '587',
+            'mail_from_address' => 'a@b.gr', 'mail_from_name' => 'ekdosi',
+        ];
+        $writer = new EnvWriter;
+
+        // config/mail.php reads MAIL_SCHEME (smtp/smtps), never tls/ssl.
+        $this->assertStringContainsString('MAIL_SCHEME=smtps', $writer->render(['mail_encryption' => 'ssl'] + $base));
+        $this->assertStringContainsString('MAIL_SCHEME=smtp', $writer->render(['mail_encryption' => 'tls'] + $base));
+        // «none» writes no scheme at all — never the invalid tls/ssl.
+        $none = $writer->render(['mail_encryption' => 'null'] + $base);
+        $this->assertStringNotContainsString('MAIL_SCHEME', $none);
+        $this->assertStringNotContainsString('MAIL_SCHEME=tls', $writer->render(['mail_encryption' => 'tls'] + $base));
+        $this->assertStringNotContainsString('MAIL_SCHEME=ssl', $writer->render(['mail_encryption' => 'ssl'] + $base));
+    }
+
     public function test_render_quotes_host_values_to_prevent_env_injection(): void
     {
         // A host field carrying whitespace/newline/# must be quoted, never spill

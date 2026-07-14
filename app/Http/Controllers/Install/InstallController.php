@@ -299,7 +299,7 @@ class InstallController
 
     private function slug(array $data): string
     {
-        return Str::slug($data['company_slug'] ?: $data['company_name']) ?: 'company';
+        return Str::slug(($data['company_slug'] ?? '') ?: $data['company_name']) ?: 'company';
     }
 
     private function clearConfigCache(): void

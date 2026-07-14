@@ -92,7 +92,18 @@ class EnvWriter
         $lines[] = 'MAIL_PORT='.($v['mail_port'] ?? '2525');
         $lines[] = 'MAIL_USERNAME='.$this->quote((string) ($v['mail_username'] ?? ''), 'null');
         $lines[] = 'MAIL_PASSWORD='.$this->quote((string) ($v['mail_password'] ?? ''), 'null');
-        $lines[] = 'MAIL_SCHEME='.($v['mail_encryption'] ?? 'null');
+        // config/mail.php reads MAIL_SCHEME (Symfony: `smtp`=STARTTLS, `smtps`=TLS
+        // on connect) — NOT the old `tls`/`ssl` MAIL_ENCRYPTION values, which
+        // Symfony rejects as an unsupported scheme. Map the operator's choice;
+        // «none» leaves it unset so the port drives opportunistic STARTTLS.
+        $scheme = match ($v['mail_encryption'] ?? 'null') {
+            'ssl' => 'smtps',
+            'tls' => 'smtp',
+            default => null,
+        };
+        if ($scheme !== null) {
+            $lines[] = 'MAIL_SCHEME='.$scheme;
+        }
         $lines[] = 'MAIL_FROM_ADDRESS='.$this->quote((string) ($v['mail_from_address'] ?? 'hello@example.com'));
         $lines[] = 'MAIL_FROM_NAME='.$this->quote((string) ($v['mail_from_name'] ?? ($v['app_name'] ?? 'ekdosi')));
         $lines[] = '';
