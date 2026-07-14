@@ -358,9 +358,15 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 - **`clear:right`** σε single-word doc-types (PDF tweak).
 
 ## 🧰 Setup / onboarding helpers (from-zero — sweep 2026-06-17)
-_Ήδη: `ekdosi:install` wizard · `MyDataLookupSeeder` (VAT/invoice types/payment-delivery methods/aims/
-units, με one-click `StandardLookupSeedAction` ανά resource) · `DemoCompanySeeder` · GSIS/VIES lookup ·
-`suppliers:sync` · «Πρότυπα τελών». Ιδέες για ευκολότερο στήσιμο από το 0:_
+_Ήδη: **web installer `/install`** (from-zero σε φρέσκο host: `.env`+`APP_KEY`+`migrate`+super-admin,
+fail-closed/self-disabling, filesystem-token gate — βλ. FEATURES §17) · `ekdosi:install` wizard (CLI) ·
+`MyDataLookupSeeder` (VAT/invoice types/payment-delivery methods/aims/units, με one-click
+`StandardLookupSeedAction` ανά resource) · `DemoCompanySeeder` · GSIS/VIES lookup · `suppliers:sync` ·
+«Πρότυπα τελών». Ιδέες για ευκολότερο στήσιμο από το 0:_
+- **Web installer — follow-ups:** (α) προαιρετικό `CREATE DATABASE` όταν ο DB χρήστης έχει δικαίωμα (τώρα
+  απαιτεί προ-δημιουργημένη κενή βάση — το σωστό default σε shared hosting)· (β) auto-detect writable
+  dirs / PHP extensions ως preflight βήμα με πράσινο/κόκκινο πριν το submit· (γ) optional «γράψε το cron
+  line / systemd unit» helper αντί για απλή λίστα ελέγχου.
 - **Generic CSV importer (προϊόντα / πελάτες)** — bulk onboarding από άλλο σύστημα (έχουμε CSV *export*
   `CsvEntityExporter`· λείπει το *import*). Column-map + dry-run preview + tenant-scope. _Το μεγαλύτερο
   win για μεταφορά καταλόγου/πελατολογίου._

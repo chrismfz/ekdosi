@@ -18,6 +18,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Web-based first-run installer** (`/install`). Drop the files on a fresh host (empty VM or
+  cPanel/DirectAdmin) with only an empty DB + user created, and visiting the URL runs a wizard that
+  collects the `.env` basics (app name/URL/env/locale/timezone + DB + optional SMTP), generates the
+  `APP_KEY`, tests the DB connection live («Δοκιμή σύνδεσης»), builds the schema (`migrate`), wires
+  Shield + the standard Greek AADE lookups, and creates the first super-admin + company — then shows an
+  OS-level post-install checklist (cron, queue worker, PHP extensions). **Fail-closed & self-disabling:**
+  gated by `EnsureInstalled` global middleware that runs before the session/APP_KEY stack — it routes a
+  pristine host into the wizard and, once an `APP_KEY` exists (or a completion marker is dropped), makes
+  `/install` permanently inert (302 → `/admin`). A **filesystem-token gate** (a file written under
+  `storage/app/install/`, re-verified on every POST) proves server access, and the migrate step **refuses
+  a DB that already holds a finished install**. Per-tenant secrets (myDATA/WHMCS/GSIS) stay out of the
+  installer — set later per-company in the panel.
+
 ## [1.12.1] - 2026-07-13
 
 ### Fixed

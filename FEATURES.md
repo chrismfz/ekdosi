@@ -400,6 +400,17 @@ default/Haiku/Opus) · μηνιαίο όριο tokens · προαιρ. per-compa
 VAT categories · invoice types · payment/delivery methods · distribution aims · metric
 units · bank accounts · product categories · **tags** — όλα tenant-scoped, με
 guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμεση έκδοση.
+- **Web installer πρώτης εγκατάστασης** (`/install`) — «πέτα» τα αρχεία σε φρέσκο host (άδειο VM ή
+  cPanel/DirectAdmin) με μόνο μια κενή βάση + χρήστη· μπαίνεις στη διεύθυνση και ένας οδηγός φτιάχνει
+  `.env` (όνομα/URL/περιβάλλον/γλώσσα/ζώνη ώρας + βάση + προαιρετικό SMTP), παράγει `APP_KEY`, ελέγχει
+  ζωντανά τη σύνδεση («Δοκιμή σύνδεσης»), τρέχει `migrate` + Shield + τα ελληνικά AADE lookups, και
+  δημιουργεί τον πρώτο super-admin + εταιρία — με λίστα επόμενων βημάτων σε επίπεδο διακομιστή (cron,
+  queue worker, PHP extensions). **Fail-closed & αυτο-απενεργοποίηση:** middleware `EnsureInstalled`
+  (τρέχει πριν το session/APP_KEY stack) δρομολογεί ένα «παρθένο» σύστημα στον οδηγό και μόλις υπάρξει
+  `APP_KEY` (ή marker ολοκλήρωσης) κάνει το `/install` μόνιμα ανενεργό (→ `/admin`). **Πύλη με filesystem
+  token** (αρχείο στο `storage/app/install/`, επαλήθευση σε κάθε POST) αποδεικνύει πρόσβαση στον διακομιστή,
+  και το βήμα `migrate` **αρνείται βάση που έχει ήδη ολοκληρωμένη εγκατάσταση**. Τα per-tenant secrets
+  (myDATA/WHMCS/GSIS) μένουν εκτός — ρυθμίζονται αργότερα ανά εταιρία.
 
 ---
 
