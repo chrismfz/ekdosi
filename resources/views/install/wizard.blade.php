@@ -9,12 +9,47 @@
 @endphp
 
 @section('content')
+    @php
+        $requirements = $requirements ?? [];
+        $hasBlockers = $hasBlockers ?? false;
+        $reqIcon = ['ok' => '✓', 'warn' => '⚠', 'error' => '✗'];
+    @endphp
+
     @if (! empty($errors))
         <div class="alert alert-err">
             <strong>Διόρθωσε τα παρακάτω:</strong>
             <ul>
                 @foreach ($errors as $error)
                     <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+
+    {{-- 0. Έλεγχος συστήματος (preflight) --}}
+    @if (! empty($requirements))
+        <div class="card">
+            <h2>Έλεγχος συστήματος</h2>
+            <p class="section-hint">Ο οδηγός ελέγχει το περιβάλλον <strong>χωρίς να αλλάζει τίποτα</strong>. Τα <strong>κόκκινα</strong> είναι υποχρεωτικά — διόρθωσέ τα στον διακομιστή και ανανέωσε τη σελίδα. Τα <strong>κίτρινα</strong> είναι προειδοποιήσεις: η εφαρμογή δουλεύει, αλλά η λειτουργία που αναφέρεται όχι.</p>
+
+            @if ($hasBlockers)
+                <div class="alert alert-err">❌ Το περιβάλλον δεν είναι έτοιμο. Διόρθωσε τα κρίσιμα σημεία παρακάτω και μετά <strong>ανανέωσε τη σελίδα</strong>. Το κουμπί «Εγκατάσταση» είναι απενεργοποιημένο μέχρι τότε.</div>
+            @else
+                <div class="alert alert-ok">✅ Όλες οι υποχρεωτικές απαιτήσεις καλύπτονται.</div>
+            @endif
+
+            <ul class="reqs">
+                @foreach ($requirements as $r)
+                    <li class="req-row req-{{ $r->severity() }}">
+                        <span class="req-ico">{{ $reqIcon[$r->severity()] }}</span>
+                        <span class="req-body">
+                            <span class="req-label">{{ $r->label }}</span>
+                            <span class="req-detail">{{ $r->detail }}</span>
+                            @if (! $r->passed && $r->fix)
+                                <span class="req-fix"><code>{{ $r->fix }}</code></span>
+                            @endif
+                        </span>
+                    </li>
                 @endforeach
             </ul>
         </div>
@@ -231,8 +266,12 @@
         </div>
 
         <div class="card" style="text-align: center;">
-            <button type="submit" class="btn-primary" id="submit-btn">Εγκατάσταση</button>
-            <p class="hint" style="margin-top: 10px;">Θα δημιουργηθεί το σχήμα της βάσης, ο διαχειριστής και το αρχείο ρυθμίσεων. Μπορεί να πάρει λίγα δευτερόλεπτα.</p>
+            <button type="submit" class="btn-primary" id="submit-btn" {{ $hasBlockers ? 'disabled' : '' }}>Εγκατάσταση</button>
+            @if ($hasBlockers)
+                <p class="hint" style="margin-top: 10px;">Απενεργοποιημένο: κάλυψε πρώτα τις υποχρεωτικές απαιτήσεις στην ενότητα «Έλεγχος συστήματος».</p>
+            @else
+                <p class="hint" style="margin-top: 10px;">Θα δημιουργηθεί το σχήμα της βάσης, ο διαχειριστής και το αρχείο ρυθμίσεων. Μπορεί να πάρει λίγα δευτερόλεπτα.</p>
+            @endif
         </div>
     </form>
 @endsection
