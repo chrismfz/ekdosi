@@ -2,6 +2,8 @@
 
 namespace App\Support\Install;
 
+use App\Support\MyData\QrImage;
+
 /**
  * Read-only preflight for the web installer: inspects the PHP runtime + host
  * BEFORE anything is written, so the operator sees «τρέξε πρώτα αυτό» instead
@@ -22,26 +24,37 @@ namespace App\Support\Install;
  */
 class RequirementsChecker
 {
-    /** Extensions the app genuinely cannot serve invoices without. */
+    /**
+     * Extensions the app genuinely cannot serve without. Bar: a miss would make
+     * a normal panel/issue flow ERROR, not merely drop one feature. `intl` is
+     * here because Filament's `->money('EUR')` (used across ~every dashboard &
+     * table) throws without it; `gd`/`curl` are NOT — they degrade (see below).
+     */
     private const REQUIRED_EXTENSIONS = [
         'pdo_mysql' => 'Σύνδεση στη βάση (MariaDB/MySQL)',
         'mbstring' => 'Ελληνικά/UTF-8 σε όλη την εφαρμογή',
         'openssl' => 'Κρυπτογράφηση, HTTPS κλήσεις, APP_KEY',
         'ctype' => 'Πυρήνας Laravel',
         'tokenizer' => 'Πυρήνας Laravel',
-        'curl' => 'Κλήσεις προς myDATA / WHMCS / GSIS',
         'dom' => 'Δημιουργία/ανάγνωση XML για myDATA',
         'xml' => 'Δημιουργία/ανάγνωση XML για myDATA',
         'fileinfo' => 'Ανέβασμα αρχείων (λογότυπο, εισαγωγές)',
-        'gd' => 'QR code + PDF παραστατικών',
+        'intl' => 'Μορφοποίηση ποσών/ημερομηνιών στο πάνελ (στήλες money) — χωρίς αυτή σκάνε οι οθόνες',
         'soap' => 'Αναζήτηση ΑΦΜ/GSIS σε πελάτες & προμηθευτές',
     ];
 
-    /** Nice-to-have extensions — a miss only disables the named feature. */
+    /**
+     * Nice-to-have extensions — a miss only disables the named feature, so it
+     * WARNS and never blocks. `gd`: a QR failure is swallowed by
+     * {@see QrImage::tryDataUri()} → the invoice still
+     * issues, just without the printed QR. `curl`: Guzzle falls back to the PHP
+     * stream wrapper. Neither justifies blocking an otherwise-capable host.
+     */
     private const OPTIONAL_EXTENSIONS = [
         'pdo_firebird' => 'Εισαγωγή από την παλιά βάση Firebird (ETL) — μόνο στον host που τρέχει το migrate:firebird',
+        'gd' => 'Εικόνα QR στο PDF παραστατικού — χωρίς αυτή το παραστατικό εκδίδεται κανονικά, απλώς χωρίς το QR',
+        'curl' => 'Ταχύτερες/σταθερότερες κλήσεις προς myDATA / WHMCS / GSIS (υπάρχει fallback μέσω PHP streams)',
         'zip' => 'Αντίγραφα ασφαλείας (backups)',
-        'intl' => 'Μορφοποίηση αριθμών/ημερομηνιών & τοπικοποίηση',
         'bcmath' => 'Ταχύτητα υπολογισμών ποσών (υπάρχει fallback — δουλεύει και χωρίς)',
     ];
 

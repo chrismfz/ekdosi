@@ -63,6 +63,42 @@ class RequirementsCheckerTest extends TestCase
         $this->assertFalse($checker->hasBlockers($checker->check()), 'an optional miss alone is not a blocker');
     }
 
+    public function test_gd_is_optional_because_qr_degrades_gracefully(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->absentExtensions = ['gd'];
+
+        $reqs = $this->byKey($checker);
+
+        $this->assertFalse($reqs['ext_gd']->passed);
+        $this->assertFalse($reqs['ext_gd']->blocks(), 'gd missing must NOT block — the invoice still issues without the QR image');
+        $this->assertSame('warn', $reqs['ext_gd']->severity());
+        $this->assertFalse($checker->hasBlockers($checker->check()));
+    }
+
+    public function test_curl_is_optional_because_guzzle_has_a_stream_fallback(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->absentExtensions = ['curl'];
+
+        $reqs = $this->byKey($checker);
+
+        $this->assertFalse($reqs['ext_curl']->blocks());
+        $this->assertFalse($checker->hasBlockers($checker->check()));
+    }
+
+    public function test_intl_is_required_because_panel_money_columns_need_it(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->absentExtensions = ['intl'];
+
+        $reqs = $this->byKey($checker);
+
+        $this->assertTrue($reqs['ext_intl']->blocks(), 'intl missing must block — Filament ->money() throws without it');
+        $this->assertSame('error', $reqs['ext_intl']->severity());
+        $this->assertTrue($checker->hasBlockers($checker->check()));
+    }
+
     public function test_old_php_blocks(): void
     {
         $checker = new ConfigurableRequirementsChecker;

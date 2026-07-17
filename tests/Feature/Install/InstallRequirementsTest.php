@@ -83,7 +83,7 @@ class InstallRequirementsTest extends TestCase
         $token = app(InstallTokenManager::class)->issue();
 
         $checker = new ConfigurableRequirementsChecker;
-        $checker->absentExtensions = ['gd'];
+        $checker->absentExtensions = ['pdo_mysql'];
         $this->bindChecker($checker);
 
         $this->post('/install', $this->validPayload($token))

@@ -414,11 +414,13 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   - **Preflight «Έλεγχος συστήματος»** στην κορυφή του οδηγού — read-only έλεγχος περιβάλλοντος που **δεν
     αλλάζει τίποτα** (το `composer install`/ενεργοποίηση επεκτάσεων μένει στο shell· ο installer απλώς
     επαληθεύει το αποτέλεσμα). **Υποχρεωτικά** (PHP ≥ 8.4, εγγράψιμα `storage/`+`bootstrap/cache/`, και οι
-    επεκτάσεις χωρίς τις οποίες δεν εκδίδεται παραστατικό — `pdo_mysql`, `mbstring`, `openssl`, `ctype`,
-    `tokenizer`, `curl`, `dom`, `xml`, `fileinfo`, `gd`, `soap`) βγαίνουν κόκκινα, **κλειδώνουν το κουμπί
-    «Εγκατάσταση»** και δείχνουν την εντολή διόρθωσης· το POST τα ξαναελέγχει server-side πριν αγγίξει τη
-    βάση. **Προειδοποιήσεις** (soft) μόνο ενημερώνουν τι δεν θα δουλεύει: `pdo_firebird` → εισαγωγή
-    Firebird, `zip` → backups, `intl`/`bcmath`, `proc_open`, τα όρια upload/μνήμης για imports, HTTPS.
+    επεκτάσεις χωρίς τις οποίες σκάει κανονική ροή πάνελ/έκδοσης — `pdo_mysql`, `mbstring`, `openssl`,
+    `ctype`, `tokenizer`, `dom`, `xml`, `fileinfo`, `intl` (το Filament `->money()` σκάει χωρίς αυτή),
+    `soap`) βγαίνουν κόκκινα, **κλειδώνουν το κουμπί «Εγκατάσταση»** και δείχνουν την εντολή διόρθωσης· το
+    POST τα ξαναελέγχει server-side πριν αγγίξει τη βάση. **Προειδοποιήσεις** (soft) μόνο ενημερώνουν τι
+    δεν θα δουλεύει: `pdo_firebird` → εισαγωγή Firebird, `gd` → η εικόνα QR στο PDF (το παραστατικό
+    εκδίδεται και χωρίς αυτή), `curl` → οι κλήσεις HTTP έχουν fallback, `zip` → backups, `bcmath`,
+    `proc_open`, τα όρια upload/μνήμης για imports, HTTPS.
 
 ---
 
