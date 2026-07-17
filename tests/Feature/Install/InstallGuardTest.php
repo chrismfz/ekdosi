@@ -5,6 +5,7 @@ namespace Tests\Feature\Install;
 use App\Services\Install\MariaDbConnectionTester;
 use App\Support\Install\InstallState;
 use App\Support\Install\InstallTokenManager;
+use App\Support\Install\RequirementsChecker;
 use PDOException;
 use Tests\TestCase;
 
@@ -38,6 +39,11 @@ class InstallGuardTest extends TestCase
         if (is_file($marker)) {
             @unlink($marker);
         }
+
+        // These tests exercise the token/DB gates, not the environment preflight —
+        // pin a healthy checker so ambient extension gaps can't inject a blocker
+        // and short-circuit a POST before the code path under test.
+        $this->app->instance(RequirementsChecker::class, new ConfigurableRequirementsChecker);
     }
 
     protected function tearDown(): void

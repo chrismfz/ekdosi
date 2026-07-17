@@ -32,6 +32,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   any non-empty target database by default** (a foreign DB — WHMCS, another app — or a partial prior
   attempt; explicit operator override to finish a partial). Per-tenant secrets (myDATA/WHMCS/GSIS) stay
   out of the installer — set later per-company in the panel.
+- **Installer preflight «Έλεγχος συστήματος»** — a read-only requirements check at the top of `/install`
+  that never changes anything (the privileged `composer install`/extension-enabling stays at the shell;
+  the installer only verifies the result). **Hard** requirements (PHP ≥ 8.4, writable `storage/` +
+  `bootstrap/cache/`, and the extensions a normal panel/issue flow ERRORS without: `pdo_mysql`,
+  `mbstring`, `openssl`, `ctype`, `tokenizer`, `dom`, `xml`, `fileinfo`, `intl` — Filament `->money()`
+  throws without it — and `soap`) render red and **disable the «Εγκατάσταση» button**, with the fix
+  command shown per row; the `run()` POST re-checks them server-side and refuses before touching the DB.
+  **Soft** requirements only warn and name the one feature that won't work — `pdo_firebird` → Firebird
+  ETL, `gd` → the printed QR (the invoice still issues without it), `curl` → HTTP has a stream fallback,
+  `zip` → backups, `bcmath`, `proc_open`, the upload/memory ini ceilings for imports, HTTPS.
 
 ## [1.12.1] - 2026-07-13
 

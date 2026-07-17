@@ -6,6 +6,7 @@ use App\Services\Install\MariaDbConnectionTester;
 use App\Support\Install\EnvWriter;
 use App\Support\Install\InstallState;
 use App\Support\Install\InstallTokenManager;
+use App\Support\Install\RequirementsChecker;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -30,6 +31,7 @@ class InstallController
         private readonly InstallTokenManager $tokens,
         private readonly MariaDbConnectionTester $dbTester,
         private readonly EnvWriter $env,
+        private readonly RequirementsChecker $requirements,
     ) {}
 
     /** GET /install — render the wizard (issuing the verification token on first hit). */
@@ -37,12 +39,16 @@ class InstallController
     {
         $this->guardPristine();
 
+        $requirements = $this->requirements->check();
+
         return response()->view('install.wizard', [
             'tokenIssued' => $this->tokens->issue() !== null,
             'tokenPath' => $this->relativeTokenPath(),
             'errors' => [],
             'old' => [],
             'defaults' => $this->defaults(),
+            'requirements' => $requirements,
+            'hasBlockers' => $this->requirements->hasBlockers($requirements),
         ]);
     }
 
@@ -83,6 +89,13 @@ class InstallController
         // (1) Token gate — proof of server access, re-checked here.
         if (! $this->tokens->verify($request->input('verify_token'))) {
             return $this->redisplay($request, ['Λάθος κωδικός επιβεβαίωσης. Άνοιξε το αρχείο '.$this->relativeTokenPath().' στον διακομιστή και επικόλλησε τον κωδικό.']);
+        }
+
+        // (1b) Requirements gate — re-checked server-side (defence-in-depth: a
+        //      scripted POST can't skip the preflight the wizard shows). Hard
+        //      failures stop here, before we touch the DB or write anything.
+        if ($this->requirements->hasBlockers($this->requirements->check())) {
+            return $this->redisplay($request, ['Το περιβάλλον δεν πληροί τις ελάχιστες απαιτήσεις. Διόρθωσε τα κρίσιμα (κόκκινα) σημεία στην ενότητα «Έλεγχος συστήματος» και ξαναπροσπάθησε.']);
         }
 
         // (2) Validate.
@@ -193,12 +206,16 @@ class InstallController
     /** Re-render the wizard with errors + old input (no session → view data). */
     private function redisplay(Request $request, array $errors): Response
     {
+        $requirements = $this->requirements->check();
+
         return response()->view('install.wizard', [
             'tokenIssued' => $this->tokens->token() !== null,
             'tokenPath' => $this->relativeTokenPath(),
             'errors' => $errors,
             'old' => $request->except(['admin_password', 'admin_password_confirmation', 'db_password', 'mail_password', 'verify_token']),
             'defaults' => $this->defaults(),
+            'requirements' => $requirements,
+            'hasBlockers' => $this->requirements->hasBlockers($requirements),
         ], 422);
     }
 

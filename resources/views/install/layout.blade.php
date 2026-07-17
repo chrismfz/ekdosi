@@ -58,6 +58,19 @@
         .footer { text-align: center; color: #64748b; font-size: 12px; }
         code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
         .hidden { display: none; }
+        .reqs { list-style: none; margin: 8px 0 0; padding: 0; }
+        .req-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); }
+        .req-row:first-child { border-top: none; }
+        .req-ico { font-weight: 700; width: 18px; text-align: center; flex: none; line-height: 1.5; }
+        .req-ok .req-ico { color: var(--ok-ink); }
+        .req-warn .req-ico { color: var(--warn-ink); }
+        .req-error .req-ico { color: var(--err-ink); }
+        .req-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .req-label { font-weight: 600; font-size: 14px; }
+        .req-detail { color: var(--muted); font-size: 12.5px; }
+        .req-fix { margin-top: 3px; }
+        .req-fix code { white-space: pre-wrap; word-break: break-word; display: inline-block; }
+        button[disabled] { opacity: .5; cursor: not-allowed; }
     </style>
 </head>
 <body>
