@@ -43,6 +43,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   ETL, `gd` → the printed QR (the invoice still issues without it), `curl` → HTTP has a stream fallback,
   `zip` → backups, `bcmath`, `proc_open`, the upload/memory ini ceilings for imports, HTTPS.
 
+### Changed
+- **Domains design doc** (`docs/domains/README.md`, πυλώνας A — still pre-build): αδέσποτα
+  (un-assigned) domains ως νόμιμη κατάσταση (`customer_id` nullable, εκτός billing μέχρι ανάθεση)
+  + action «Ανάθεση σε πελάτη», νέα στήλη `transferred_at`, tab «Domains» στην καρτέλα πελάτη
+  (`DomainsRelationManager`), import που δεν μπλοκάρει σε unmatched πελάτες.
+
 ## [1.12.1] - 2026-07-13
 
 ### Fixed
