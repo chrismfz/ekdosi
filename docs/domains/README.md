@@ -134,12 +134,13 @@ Unique `(domain_tld_id, operation, years, currency)`.
 | col | σημείωση |
 |---|---|
 | `company_id`, `legacy_id` | `legacy_id` = WHMCS `tbldomains.id` (import upsert) |
-| `customer_id` | FK `restrictOnDelete` |
+| `customer_id` | FK **nullable** `restrictOnDelete` — `null` = **αδέσποτο** (imported/unmatched, βλ. σημείωση κάτω) |
 | `service_contract_id` | FK `nullOnDelete` — **το billing clock** |
 | `domain_tld_id`, `registrar_connection_id` | FK (routing· `domains` value wins, TLD = default hint) |
 | `sld`(190), `tld`(30), `fqdn`(190) | unique `(company_id, fqdn)`· `fqdn` = derived, authoritative = `sld`+`tld` |
 | `status`(30) | `active\|pending_register\|pending_transfer\|expired\|grace\|redemption\|cancelled\|deleted` |
 | `registered_at`, `expires_at` (date) | **`expires_at` = REGISTRAR truth** (sync clock) |
+| `transferred_at` (date, nullable) | πότε μπήκε σε εμάς με transfer-in — γράφεται όταν το `syncTransfer` γυρίσει `completed`· null = registered/imported απευθείας |
 | `auto_renew`, `transfer_lock`, `whois_privacy`, `dnssec_enabled`, `consent_publish` | bool |
 | `registrar_domain_id` | **Openprovider numeric `{id}`** (όχι το fqdn· resolve via `?full_name=`) |
 | `idn_script` | για .ελ / IDN |
@@ -153,6 +154,13 @@ Traits: `BelongsToCompany, HasFactory, SoftDeletes, TracksActivity, HasAttachmen
 
 **Δύο ορθογώνια clocks** (όπως `local_status` × `mydata_state`): `domains.expires_at` (registrar
 truth, pull από sync) vs `ServiceContract.next_due_date` (billing). Reconciled, ποτέ conflated.
+
+**Αδέσποτα (un-assigned) domains:** `customer_id = null` είναι νόμιμη κατάσταση — π.χ. import
+από registrar sync ή WHMCS `tbldomains` που δεν έκανε match σε πελάτη. Αδέσποτο ⇒ **χωρίς
+`ServiceContract`** ⇒ ΔΕΝ μπαίνει σε renewal billing / auto-stage (μόνο ορατό στο sync + στη
+λίστα). Στη λίστα φέρει badge/filter **«Χωρίς πελάτη»** και λύνεται με το action
+**«Ανάθεση σε πελάτη»** (§8.2), που δένει customer + δημιουργεί/συνδέει το ServiceContract
+ώστε να ξεκινήσει το billing clock.
 
 ### 3.5 `domain_nameservers` — delegation NS
 `company_id, domain_id`(cascade)`, host`(190)`, sort_order`. Τα nameservers που **χρησιμοποιεί** το
@@ -360,6 +368,15 @@ group-level toggle). Πρότυπο: `ExpenseClassificationRuleResource::canAcce
   deferred)· **IDN script**· **«Consent to Publish»** (GDPR redaction, default redacted).
 - **Registrar command actions** (1:1 με το contract): Έλεγχος διαθεσιμότητας · Καταχώρηση · Μεταφορά ·
   Ανανέωση · Modify Contacts · Get EPP Code · Request Delete · ID Protection on/off · Auto-renew Sync · Sync.
+- **Αδέσποτα + «Ανάθεση σε πελάτη»**: filter/badge «Χωρίς πελάτη» στη λίστα (default tab/ένδειξη
+  ώστε τα imported-unmatched να μη χάνονται)· action **«Ανάθεση σε πελάτη»** με customer search
+  (όνομα/ΑΦΜ/email — ίδιο UX με τη «Μεταφορά ιδιοκτησίας» §9, απλώς από null → πελάτη), που
+  δένει και το `ServiceContract` για να ξεκινήσει το renewal billing. Ημερομηνίες στη View:
+  registered / **transferred** (`transferred_at`) / expiry / next-due.
+- **Καρτέλα πελάτη — tab «Domains»**: `DomainsRelationManager` στο `CustomerResource` (ίδιο
+  pattern με invoices/contracts RMs) — ο operator βλέπει ανά πελάτη τα assigned domains του με
+  status/expiry, με link στην πλήρη View. Gated με το ίδιο `GatesOnDomainManagement` (ο tenant
+  χωρίς domain management δεν βλέπει καν το tab).
 - **Reminder history** tab (`domain_reminders`) · **API history** tab (`domain_registrar_logs`,
   «Bridge logs»-style) · shared `ActivityLog`/`Attachments`/`InternalNotes` RMs.
 - Filament-5 idioms: `Schema`/`configure`, `recordActions`/`toolbarActions`, `extends
@@ -383,11 +400,15 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
   πελάτη (όνομα/ΑΦΜ/email). **Τα ιστορικά τιμολόγια μένουν** στον παλιό (νομικό record)· προαιρετικά
   προσφέρει και αλλαγή registrant (= registrar `trade`/IRTP, όχι αυτόματα). Audit-logged.
   **≠** «Μεταφορά μητρώου/registrar» (EPP σε άλλον registrar) — ξεχωριστά ονόματα στο UI.
+  Sibling action: **«Ανάθεση σε πελάτη»** (§8.2) = η ίδια μηχανική από `customer_id=null`
+  (αδέσποτο) → πελάτη, + δέσιμο ServiceContract.
 - **Expiry reminders** — 15/10/5 ημέρες πριν, reuse του auto-email infra, sent-log στο `domain_reminders`.
 - **API history** — `domain_registrar_logs` (request/response/status ανά κλήση), «Bridge logs» tab.
 - **Import** — command `domains:import --tenant`:
   - **WHMCS `tbldomains`** (customer/τιμή/registrar/reminder linkage, upsert σε `legacy_id`),
   - **+** registrar sync (Openprovider/grEPP) για επαλήθευση expiry/status/NS.
+  - Ό,τι ΔΕΝ κάνει match σε πελάτη δεν μπλοκάρει το import — μπαίνει **αδέσποτο**
+    (`customer_id=null`, §3.4) και βγαίνει στο worklist «Χωρίς πελάτη» → «Ανάθεση σε πελάτη».
   - Import-first· manual entry (A1) = fallback, όχι main path.
 
 ---
@@ -397,7 +418,7 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 | Φάση | Τι | Gate (done-when) |
 |---|---|---|
 | **A0** Θεμέλιο | `enable_domain_management` flag + nav-gating trait + `DomainRegistrar` contract/registry/creds/Null + `ekdosi.domains.registrars` + `domain_registrar_connections` (super_admin creds) | Ενεργοποιείς tenant → βλέπεις **κενή, gated** περιοχή «Domains» |
-| **A1** Data model + manual CRUD | Όλοι οι πίνακες + `DomainResource` (rich View) + link σε `ServiceContract` + **import** (`tbldomains`) | Το υπάρχον portfolio φορτώνεται/καταχωρείται, expiry+renewals ορατά, **μηδέν registrar API** |
+| **A1** Data model + manual CRUD | Όλοι οι πίνακες + `DomainResource` (rich View) + link σε `ServiceContract` + **import** (`tbldomains`) + αδέσποτα/«Ανάθεση σε πελάτη» + Customer tab «Domains» | Το υπάρχον portfolio φορτώνεται/καταχωρείται, expiry+renewals ορατά, **μηδέν registrar API** |
 | **A2** Openprovider read-only | `checkAvailability` + WHOIS (`WhoisLookup`) + `syncDomain`/`syncTransfer` + `getTldPricing` (sandbox) | Nightly `domains:sync` + pricing-sync «ανάβουν»· καμία state-changing εγγραφή |
 | **A3** Openprovider write | register(post-pay)/renew(on-issue)/transfer(in+out, state machine)/NS/glue/contacts(handles+trade/IRTP)/DNSSEC/privacy/lock + renewal billing + grace/redemption + **idempotency + reconciler** | Πλήρης κύκλος end-to-end (sandbox→prod), operator-gated invoices |
 | **A4** grEPP (.gr) | 2ος adapter (EPP), .gr validation rules (2ετία/no-privacy/no-lock/registry-auth-code/homograph) | .gr/.ελ end-to-end· το abstraction αποδεδειγμένο (2ος registrar = adapter, όχι rewrite) |
