@@ -83,7 +83,9 @@ class SelfUpdate extends Command
         $this->persist($run);
 
         try {
-            if ($run->strategy === UpdateRun::STRATEGY_SCRIPT) {
+            if ($run->isRollback()) {
+                $this->runRollback($run);
+            } elseif ($run->strategy === UpdateRun::STRATEGY_SCRIPT) {
                 $this->runScript($run);
             } else {
                 $this->runPhp($run);
@@ -233,6 +235,130 @@ class SelfUpdate extends Command
         $this->wentDown = false;
 
         BuildInfo::flush();
+    }
+
+    // ─────────────────────────────── rollback ───────────────────────────────
+
+    /**
+     * Revert to a previous build: check out the old commit, reinstall its
+     * dependencies, and RESTORE the pre-update DB snapshot (destructive). A fresh
+     * safety snapshot of the current state is taken first, so a rollback is itself
+     * undoable.
+     *
+     * The DB restore rewinds the WHOLE database — including this `update_runs`
+     * audit table — back to the pre-update state, so it runs LATE (after the code
+     * is in place) and `reconcileAudit()` re-stamps the audit rows afterwards.
+     */
+    private function runRollback(UpdateRun $run): void
+    {
+        $php = PHP_BINARY;
+        $artisan = base_path('artisan');
+        $composer = (string) (getenv('COMPOSER') ?: 'composer');
+
+        $target = (string) $run->to_ref;
+        $snapshot = (string) $run->restore_snapshot;
+        if ($target === '') {
+            throw new \RuntimeException('Επαναφορά χωρίς target ref (to_ref).');
+        }
+        if ($snapshot === '' || ! is_file($snapshot)) {
+            throw new \RuntimeException('Το στιγμιότυπο επαναφοράς δεν βρέθηκε: '.$snapshot);
+        }
+
+        // ── preflight ───────────────────────────────────────────────────────
+        if (! function_exists('proc_open')) {
+            throw new \RuntimeException('Η PHP συνάρτηση proc_open είναι απενεργοποιημένη — αδύνατη η επαναφορά.');
+        }
+        if (! is_dir(base_path('.git'))) {
+            throw new \RuntimeException('Δεν βρέθηκε φάκελος .git — αδύνατη η επαναφορά κώδικα.');
+        }
+
+        // ── maintenance ON (idempotent — a failed apply may have left it down) ─
+        $this->step($run, 'maintenance', 'Maintenance mode ON', function () use ($run, $php, $artisan) {
+            $this->exec($run, [$php, $artisan, 'down', '--retry=15']);
+            $this->wentDown = true;
+        });
+
+        // ── safety snapshot of the CURRENT state (so the rollback is undoable) ─
+        $safety = storage_path('app/db-snapshots/rollback-'.$run->id.'-'.now()->format('Ymd-His').'.sql.gz');
+        $this->step($run, 'snapshot', 'DB snapshot (pre-rollback)', function () use ($run, $php, $artisan, $safety) {
+            $this->exec($run, [$php, $artisan, 'ekdosi:db-snapshot', '--out='.$safety, '--keep=10']);
+            $run->update(['snapshot_file' => $safety]);
+        });
+
+        // ── check out the previous code + reinstall its deps ─────────────────
+        $this->step($run, 'checkout', 'git checkout '.$target, function () use ($run, $target) {
+            $this->exec($run, ['git', 'checkout', '--force', $target], base_path());
+            $this->writeBuildStamp($run, $target);
+        });
+        $this->step($run, 'composer', 'composer install', function () use ($run, $composer) {
+            $this->exec(
+                $run,
+                [$composer, 'install', '--no-dev', '--optimize-autoloader', '--no-interaction', '--prefer-dist'],
+                base_path(),
+                ['COMPOSER_MEMORY_LIMIT' => '-1'],
+                3600,
+            );
+        });
+        $this->step($run, 'optimize', 'php artisan optimize', function () use ($run, $php, $artisan) {
+            $this->exec($run, [$php, $artisan, 'optimize']);
+        });
+        $this->step($run, 'queue_restart', 'php artisan queue:restart', function () use ($run, $php, $artisan) {
+            $this->exec($run, [$php, $artisan, 'queue:restart']);
+        });
+        $this->step($run, 'opcache', 'opcache flush (best-effort)', function () use ($run) {
+            $this->flushOpcache($run);
+        });
+
+        // ── restore the pre-update DB — LAST DB write (rewinds update_runs) ───
+        $this->step($run, 'db_restore', 'db-restore '.basename($snapshot), function () use ($run, $php, $artisan, $snapshot) {
+            $this->exec($run, [$php, $artisan, 'ekdosi:db-restore', '--file='.$snapshot, '--force']);
+        });
+
+        // ── re-stamp the audit rows the restore rewound, then lift maintenance ─
+        $this->reconcileAudit($run);
+
+        $this->step($run, 'maintenance_off', 'Maintenance mode OFF', function () use ($run, $php, $artisan) {
+            $this->exec($run, [$php, $artisan, 'up']);
+            $this->wentDown = false;
+        });
+
+        BuildInfo::flush();
+    }
+
+    /**
+     * After a rollback's DB restore, the restored snapshot's `update_runs` table
+     * is the pre-update one: it lacks THIS rollback row and shows the reverted
+     * update as mid-flight. Re-insert this run (so the generic success write +
+     * the UI find it) and flag the reverted update as rolled_back.
+     */
+    private function reconcileAudit(UpdateRun $run): void
+    {
+        UpdateRun::query()->updateOrInsert(
+            ['id' => $run->id],
+            [
+                'status' => UpdateRun::STATUS_RUNNING,
+                'kind' => UpdateRun::KIND_ROLLBACK,
+                'phase' => $run->phase,
+                'strategy' => $run->strategy,
+                'from_version' => $run->from_version,
+                'from_ref' => $run->from_ref,
+                'to_version' => $run->to_version,
+                'to_ref' => $run->to_ref,
+                'rollback_of_id' => $run->rollback_of_id,
+                'snapshot_file' => $run->snapshot_file,
+                'restore_snapshot' => $run->restore_snapshot,
+                'triggered_by_user_id' => $run->triggered_by_user_id,
+                'started_at' => $run->started_at,
+                'created_at' => $run->created_at ?? now(),
+                'updated_at' => now(),
+            ],
+        );
+
+        if ($run->rollback_of_id) {
+            UpdateRun::query()
+                ->whereKey($run->rollback_of_id)
+                ->update(['status' => UpdateRun::STATUS_ROLLED_BACK]);
+        }
     }
 
     // ───────────────────────────── step helpers ─────────────────────────────
@@ -410,6 +536,20 @@ class SelfUpdate extends Command
 
     private function fail(UpdateRun $run, string $phase, string $message): void
     {
+        // Lift maintenance so the operator can reach the panel to roll back or fix
+        // forward — an in-app updater on shared hosting has no shell fallback. The
+        // app may be in an inconsistent state (half-applied); the failure row says
+        // so and «Επαναφορά» restores the pre-update snapshot.
+        $inconsistent = $this->wentDown;
+        if ($this->wentDown) {
+            try {
+                (new Process([PHP_BINARY, base_path('artisan'), 'up'], base_path(), null, null, 60))->run();
+                $this->wentDown = false;
+            } catch (Throwable) {
+                // Couldn't lift it — leave it down; nothing safe left to do.
+            }
+        }
+
         $run->update([
             'status' => UpdateRun::STATUS_FAILED,
             'phase' => $phase,
@@ -417,8 +557,10 @@ class SelfUpdate extends Command
             'finished_at' => now(),
         ]);
         $this->append($run, "\n✗ ΑΠΟΤΥΧΙΑ στο «{$phase}»: ".$this->redact($message)."\n");
-        if ($this->wentDown) {
-            $this->append($run, "⚠ Η εφαρμογή παραμένει σε maintenance mode — χρήση «Επαναφορά» ή `php artisan up`.\n");
+        if ($inconsistent) {
+            $this->append($run, $this->wentDown
+                ? "⚠ Η εφαρμογή παραμένει σε maintenance mode — χρήση «Επαναφορά» ή `php artisan up`.\n"
+                : "⚠ Πιθανή ασυνεπής κατάσταση (μερική εφαρμογή) — χρήση «Επαναφορά» για ασφαλή επιστροφή.\n");
         }
         $this->persist($run);
         $this->error("✗ Η ενημέρωση #{$run->id} απέτυχε στο «{$phase}».");

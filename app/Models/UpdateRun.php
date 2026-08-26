@@ -34,15 +34,22 @@ class UpdateRun extends Model
 
     public const STRATEGY_SCRIPT = 'script';
 
+    public const KIND_UPDATE = 'update';
+
+    public const KIND_ROLLBACK = 'rollback';
+
     protected $fillable = [
         'status',
+        'kind',
         'phase',
         'strategy',
         'from_version',
         'from_ref',
         'to_version',
         'to_ref',
+        'rollback_of_id',
         'snapshot_file',
+        'restore_snapshot',
         'output',
         'error_message',
         'triggered_by_user_id',
@@ -61,6 +68,37 @@ class UpdateRun extends Model
     public function triggeredByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'triggered_by_user_id');
+    }
+
+    /** The update run this one reverts (rollback runs only). */
+    public function rollbackOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'rollback_of_id');
+    }
+
+    public function isRollback(): bool
+    {
+        return $this->kind === self::KIND_ROLLBACK;
+    }
+
+    /**
+     * Can this (update) run be rolled back? It must be a finished UPDATE that took
+     * a snapshot and recorded where it came from, nothing else in flight, and — the
+     * safety rule — it must be the LATEST update: restoring an older snapshot rewinds
+     * the whole DB past every newer update too, so only the most recent one is
+     * reversible (roll those back in turn).
+     */
+    public function canRollback(): bool
+    {
+        return $this->kind === self::KIND_UPDATE
+            && in_array($this->status, [self::STATUS_SUCCEEDED, self::STATUS_FAILED], true)
+            && filled($this->snapshot_file)
+            && filled($this->from_ref)
+            && ! static::hasActive()
+            && ! static::query()
+                ->where('kind', self::KIND_UPDATE)
+                ->where('id', '>', $this->id)
+                ->exists();
     }
 
     public function isTerminal(): bool

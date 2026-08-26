@@ -111,16 +111,16 @@ class SystemHealth extends Page
                 ->color('gray')
                 ->action(fn () => $this->checkUpdates()),
 
-            // In-app apply (Phase 2). OFF unless EKDOSI_UPDATE_APPLY is set — an
-            // update is a whole-app deploy, so it's opt-in per box. Only shows
-            // when a newer release is actually available and no run is in flight.
+            // In-app apply (Phase 2). No arming flag: shows whenever a newer
+            // release is actually available (for a private repo that needs a valid
+            // token, so «URL/token → yes» is natural) and no run is in flight.
             // Creates a queued UpdateRun; the cron scheduler applies it out-of-band
             // (ekdosi:self-update). See docs/versioning-and-updates.md.
             Action::make('installUpdate')
                 ->label('Εγκατάσταση ενημέρωσης')
                 ->icon('heroicon-o-arrow-up-circle')
                 ->color('primary')
-                ->visible(fn (): bool => (bool) config('ekdosi.updates.apply_enabled', false)
+                ->visible(fn (): bool => $this->applyAvailable()
                     && ($this->update['update_available'] ?? false) === true
                     && ! UpdateRun::hasActive())
                 ->requiresConfirmation()
@@ -188,11 +188,23 @@ class SystemHealth extends Page
      * `queued` UpdateRun. The web request does NOT run the deploy — the cron
      * scheduler picks the row up via `ekdosi:self-update` (out-of-band, since the
      * update restarts the app). Guarded (super_admin via canAccess + the action's
-     * apply_enabled/available/single-flight visibility); re-checked here.
+     * available/update-visible/single-flight visibility); re-checked here.
      */
+    /**
+     * In-app apply is available whenever the update check is on and a repo is set
+     * — no separate arming flag. For a private repo the «Εγκατάσταση» button only
+     * appears once a valid token makes an update visible (update_available), so
+     * the token doubles as the intent signal.
+     */
+    private function applyAvailable(): bool
+    {
+        return (bool) config('ekdosi.updates.enabled', true)
+            && filled(config('ekdosi.updates.repo'));
+    }
+
     public function installUpdate(): void
     {
-        if (! (bool) config('ekdosi.updates.apply_enabled', false)) {
+        if (! $this->applyAvailable()) {
             return;
         }
         if (UpdateRun::hasActive()) {

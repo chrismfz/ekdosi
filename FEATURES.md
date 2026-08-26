@@ -334,9 +334,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   ως ο ίδιος account user, εκτελείται out-of-band από τον cron scheduler (`ekdosi:self-update`), ώστε η
   εφαρμογή να κάνει restart τον εαυτό της με ασφάλεια. `UpdateRun` model + resource «Ενημερώσεις»
   (ζωντανή πρόοδος + στάδιο + έξοδος + ιστορικό)· signed `/internal/opcache-flush`· token-authenticated
-  `git fetch` (ένα PAT για check + pull). **OFF by default** (`EKDOSI_UPDATE_APPLY`)·
-  `EKDOSI_UPDATE_STRATEGY` = `php` (φορητό) ή `script` (wrap `deploy/update.sh` σε VPS). Το manual
-  `deploy/update.sh <tag>` παραμένει το VPS path. `docs/versioning-and-updates.md`.
+  `git fetch` (ένα PAT για check + pull). **Χωρίς arming flag** — το κουμπί εμφανίζεται όταν υπάρχει
+  διαθέσιμη έκδοση (σε private repo προϋποθέτει έγκυρο token)· super_admin-only + confirmation.
+  **Φάση Β: «Επαναφορά»** — αναιρεί μια ολοκληρωμένη (ή αποτυχημένη) ενημέρωση με checkout του
+  προηγούμενου commit + `db-restore` του pre-update snapshot (destructive· λαμβάνει safety snapshot
+  πρώτα). `EKDOSI_UPDATE_STRATEGY` = `php` (φορητό) ή `script` (wrap `deploy/update.sh` σε VPS). Το
+  manual `deploy/update.sh <tag>` παραμένει το VPS path. `docs/versioning-and-updates.md`.
 - **Deploy worker-drain** — `deploy/update.sh`/`rollback.sh` σταματούν τον queue worker πριν το
   `migrate`/restore (κανένα in-flight job σε μισο-migrated schema)· `db-snapshot` clean-slate
   (`--add-drop-database`) + snapshot μετά το `artisan down`.

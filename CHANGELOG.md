@@ -19,7 +19,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
-- **In-app updates from GitHub (Phase 2, Φάση A)** — a super_admin «Εγκατάσταση ενημέρωσης»
+- **In-app updates + one-click rollback from GitHub (Phase 2)** — a super_admin «Εγκατάσταση ενημέρωσης»
   action on «Υγεία συστήματος» applies a new release from the panel: DB snapshot → maintenance →
   `git checkout` → `composer install` (from the committed lock — never `composer update`) → `migrate`
   → `optimize` → shield → `queue:restart` → opcache flush → `ops:health`. **Shared-hosting-first:
@@ -27,9 +27,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (`ekdosi:self-update`, gated on a queued run) so the app can restart itself safely. New `UpdateRun`
   model + super_admin `UpdateRuns` resource (live-poll progress + phase + captured output + history);
   signed `/internal/opcache-flush` route; token-authenticated `git fetch` (one PAT covers the check +
-  the pull). Off by default (`EKDOSI_UPDATE_APPLY`); `EKDOSI_UPDATE_STRATEGY` = `php` (portable) or
-  `script` (wrap `deploy/update.sh` on a VPS). A failed apply leaves the app in maintenance (recover
-  via `php artisan up`; one-click rollback is Phase B). Design: `docs/versioning-and-updates.md`.
+  the pull). No arming flag — the button appears whenever an update is visible (for a private repo
+  that needs a valid token, so «URL/token → yes»); every apply is super_admin-only + confirmed.
+  `EKDOSI_UPDATE_STRATEGY` = `php` (portable) or `script` (wrap `deploy/update.sh` on a VPS). **Phase B:
+  one-click «Επαναφορά»** — reverts a finished (or failed) update by checking out the previous commit
+  and restoring the pre-update DB snapshot (destructive, red-confirmed; takes a safety snapshot first).
+  A failed apply lifts maintenance so the operator can reach the panel to roll back. Design:
+  `docs/versioning-and-updates.md`.
 - **Περισσότερες ρυθμίσεις από το UI** ώστε μια φρέσκια εγκατάσταση να μη χρειάζεται
   `.env` edit + redeploy:
   - **Σύστημα → Ρυθμίσεις συστήματος**: Ειδοποιήσεις σφαλμάτων (on/off + email + throttle),

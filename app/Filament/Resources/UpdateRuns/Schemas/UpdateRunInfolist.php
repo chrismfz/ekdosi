@@ -49,6 +49,12 @@ class UpdateRunInfolist
                             ->badge()
                             ->placeholder('—'),
 
+                        TextEntry::make('kind')
+                            ->label('Είδος')
+                            ->badge()
+                            ->color(fn (string $state): string => $state === UpdateRun::KIND_ROLLBACK ? 'warning' : 'gray')
+                            ->formatStateUsing(fn (string $state): string => $state === UpdateRun::KIND_ROLLBACK ? 'επαναφορά' : 'ενημέρωση'),
+
                         TextEntry::make('strategy')
                             ->label('Στρατηγική'),
 

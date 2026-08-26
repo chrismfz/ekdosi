@@ -41,6 +41,12 @@ class UpdateRunsTable
                         default => $state,
                     }),
 
+                TextColumn::make('kind')
+                    ->label('Είδος')
+                    ->badge()
+                    ->color(fn (string $state): string => $state === UpdateRun::KIND_ROLLBACK ? 'warning' : 'gray')
+                    ->formatStateUsing(fn (string $state): string => $state === UpdateRun::KIND_ROLLBACK ? 'επαναφορά' : 'ενημέρωση'),
+
                 TextColumn::make('phase')
                     ->label('Στάδιο')
                     ->badge()
