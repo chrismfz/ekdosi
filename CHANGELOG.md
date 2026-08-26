@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-08-26
+
 ### Changed
 - **`.env.example` σε δίαιτα (239 → 154 γραμμές).** Αφαιρέθηκε dead-weight που η app δεν διαβάζει
   ποτέ (Redis/Memcached, τα live-κενά `AWS_*`, `BROADCAST_CONNECTION`, `APP_MAINTENANCE_*`,
