@@ -142,6 +142,15 @@ down ▸ ekdosi:db-snapshot --keep=10 ▸ git fetch + checkout <sha>
      ▸ opcache flush ▸ up ▸ ops:health          (each step a subprocess; output → UpdateRun)
 ```
 
+**`composer install`, never `composer update` — deliberately.** The updater installs
+from the **committed `composer.lock`** (deterministic, identical on every box).
+`composer update` does the opposite — it bumps dependencies to newer versions and
+**rewrites `composer.lock`**, i.e. changes code that isn't in git, with no review. For
+a production money app that breaks the whole "deploy a known commit" model, so it is
+**not** exposed in the UI. Dependency bumps flow through git like everything else: run
+`composer update` on the dev box → commit the new lock → cut a release → the in-app
+updater `composer install`s it.
+
 A config knob selects the execution strategy, so the **same UI** drives both
 environments:
 
@@ -221,11 +230,22 @@ in the panel):
 
 ### Implementation order
 
-- **Phase A** — `UpdateRun` model + migration · `ekdosi:self-update --pending`
-  (`php` strategy) · the `routes/console.php` scheduler hook · the `SystemHealth`
-  action · `UpdateRuns` resource · the HMAC opcache-flush route · config keys
-  (`EKDOSI_UPDATE_STRATEGY`, …) · CHANGELOG + FEATURES entries. → a working
-  "update" button with a live phase log.
+- **Phase A ✅ BUILT** — `UpdateRun` model + migration · `ekdosi:self-update`
+  (both `php` and `script` strategies) · the `routes/console.php` scheduler hook
+  (`self_update`, gated on `hasPending()`) · the `SystemHealth` «Εγκατάσταση
+  ενημέρωσης» action · the super_admin `UpdateRuns` resource (live-poll View +
+  history) · the signed `/internal/opcache-flush` route · config keys
+  (`EKDOSI_UPDATE_APPLY` — default OFF, `EKDOSI_UPDATE_STRATEGY`,
+  `EKDOSI_SCHEDULE_SELF_UPDATE`). A working «update» button with a live phase log.
+  - **On-failure policy:** once the app has gone into maintenance, a failed apply
+    **leaves it down** (deliberate, like `deploy/update.sh`) — recover with Phase B
+    «Επαναφορά» or `php artisan up`. The snapshot is taken *after* `down` (exact
+    rollback point); a preflight failure (dirty tree / no `.git` / no `proc_open`)
+    aborts *before* `down`, so the app is never touched.
+  - **UI note:** the trigger lives on `SystemHealth`; the run detail is the
+    `UpdateRuns` resource View, which auto-polls its sections while non-terminal
+    (Filament-native `->poll('3s')`, the `FirebirdImportRun` pattern) rather than a
+    hand-built `wire:poll` blade — same live effect, no custom panel.css.
 - **Phase B** — "Επαναφορά" action (git checkout + `db-restore`) + snapshot picker.
 - **Phase C** — a dry-run/preflight preview (commits-behind + pending migrations)
-  before apply · the `script` strategy for VPS boxes that want it.
+  before apply · richer per-step checklist UI.

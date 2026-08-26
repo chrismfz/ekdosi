@@ -19,6 +19,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **In-app updates from GitHub (Phase 2, Φάση A)** — a super_admin «Εγκατάσταση ενημέρωσης»
+  action on «Υγεία συστήματος» applies a new release from the panel: DB snapshot → maintenance →
+  `git checkout` → `composer install` (from the committed lock — never `composer update`) → `migrate`
+  → `optimize` → shield → `queue:restart` → opcache flush → `ops:health`. **Shared-hosting-first:
+  NO sudo/systemd/root** — runs as the app's own user, applied out-of-band by the cron scheduler
+  (`ekdosi:self-update`, gated on a queued run) so the app can restart itself safely. New `UpdateRun`
+  model + super_admin `UpdateRuns` resource (live-poll progress + phase + captured output + history);
+  signed `/internal/opcache-flush` route; token-authenticated `git fetch` (one PAT covers the check +
+  the pull). Off by default (`EKDOSI_UPDATE_APPLY`); `EKDOSI_UPDATE_STRATEGY` = `php` (portable) or
+  `script` (wrap `deploy/update.sh` on a VPS). A failed apply leaves the app in maintenance (recover
+  via `php artisan up`; one-click rollback is Phase B). Design: `docs/versioning-and-updates.md`.
 - **Περισσότερες ρυθμίσεις από το UI** ώστε μια φρέσκια εγκατάσταση να μη χρειάζεται
   `.env` edit + redeploy:
   - **Σύστημα → Ρυθμίσεις συστήματος**: Ειδοποιήσεις σφαλμάτων (on/off + email + throttle),

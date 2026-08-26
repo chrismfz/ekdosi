@@ -326,8 +326,17 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   deployed build `v{SemVer} · 2026.07.11-150101 (sha)`, παραγόμενη αυτόματα από το git commit στο
   deploy (`storage/app/build.json`, ώρα Ελλάδας· fallback live git σε dev). Το SemVer μένει σκόπιμο
   (`ekdosi:release`). Η «Υγεία συστήματος» δείχνει read-only αν υπάρχει νεότερη έκδοση στο GitHub
-  («N commits πίσω» + link), cached 6h, graceful offline — **ποτέ apply** (η αναβάθμιση μένει στο
-  `deploy/update.sh`). `docs/versioning-and-updates.md`.
+  («N commits πίσω» + link), cached 6h, graceful offline. `docs/versioning-and-updates.md`.
+- **In-app ενημέρωση από GitHub** (Phase 2 / Φάση A) — super_admin action «Εγκατάσταση ενημέρωσης»
+  στη «Υγεία συστήματος»: εφαρμόζει νέα έκδοση από το panel (snapshot → maintenance → `git checkout` →
+  `composer install` *από το lock, ΠΟΤΕ `composer update`* → `migrate` → `optimize` → shield →
+  `queue:restart` → opcache → `ops:health`). **Shared-hosting-first — χωρίς sudo/systemd/root**: τρέχει
+  ως ο ίδιος account user, εκτελείται out-of-band από τον cron scheduler (`ekdosi:self-update`), ώστε η
+  εφαρμογή να κάνει restart τον εαυτό της με ασφάλεια. `UpdateRun` model + resource «Ενημερώσεις»
+  (ζωντανή πρόοδος + στάδιο + έξοδος + ιστορικό)· signed `/internal/opcache-flush`· token-authenticated
+  `git fetch` (ένα PAT για check + pull). **OFF by default** (`EKDOSI_UPDATE_APPLY`)·
+  `EKDOSI_UPDATE_STRATEGY` = `php` (φορητό) ή `script` (wrap `deploy/update.sh` σε VPS). Το manual
+  `deploy/update.sh <tag>` παραμένει το VPS path. `docs/versioning-and-updates.md`.
 - **Deploy worker-drain** — `deploy/update.sh`/`rollback.sh` σταματούν τον queue worker πριν το
   `migrate`/restore (κανένα in-flight job σε μισο-migrated schema)· `db-snapshot` clean-slate
   (`--add-drop-database`) + snapshot μετά το `artisan down`.

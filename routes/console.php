@@ -2,6 +2,7 @@
 
 use App\Jobs\RecordQueueHeartbeat;
 use App\Models\Company;
+use App\Models\UpdateRun;
 use App\Support\OperatorHealth\HealthRecorder;
 use App\Support\OperatorHealth\TenantScheduleSweep;
 use App\Support\Settings\ScheduleTiming;
@@ -314,6 +315,22 @@ $trackSchedule(
         ->when(fn () => $scheduleEnabled('company_backups_enabled'))
         ->withoutOverlapping(60),
     'company_backups'
+);
+
+// ekdosi:self-update — apply a queued in-app update OUT-OF-BAND (the update
+// restarts the app, so it must not run in a web request or on the queue worker
+// it restarts). Runs every minute but is a no-op unless a `queued` UpdateRun
+// exists (the «Εγκατάσταση ενημέρωσης» action creates one). Single-flight via
+// withoutOverlapping. Default ON, but nothing runs until an operator both arms
+// in-app apply (EKDOSI_UPDATE_APPLY) AND triggers an update. See
+// docs/versioning-and-updates.md.
+$trackSchedule(
+    Schedule::command('ekdosi:self-update', ['--pending' => true])
+        ->everyMinute()
+        ->name('self-update')
+        ->when(fn () => $scheduleEnabled('self_update_enabled') && UpdateRun::hasPending())
+        ->withoutOverlapping(30),
+    'self_update'
 );
 
 // Hygiene: prune failed queue entries older than 14 days. Import jobs carry an

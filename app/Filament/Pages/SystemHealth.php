@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Resources\UpdateRuns\UpdateRunResource;
+use App\Models\UpdateRun;
 use App\Services\TenantRoleProvisioner;
 use App\Services\Updates\UpdateChecker;
 use App\Support\OperatorHealth\OperatorHealthReport;
@@ -109,6 +111,28 @@ class SystemHealth extends Page
                 ->color('gray')
                 ->action(fn () => $this->checkUpdates()),
 
+            // In-app apply (Phase 2). OFF unless EKDOSI_UPDATE_APPLY is set — an
+            // update is a whole-app deploy, so it's opt-in per box. Only shows
+            // when a newer release is actually available and no run is in flight.
+            // Creates a queued UpdateRun; the cron scheduler applies it out-of-band
+            // (ekdosi:self-update). See docs/versioning-and-updates.md.
+            Action::make('installUpdate')
+                ->label('Εγκατάσταση ενημέρωσης')
+                ->icon('heroicon-o-arrow-up-circle')
+                ->color('primary')
+                ->visible(fn (): bool => (bool) config('ekdosi.updates.apply_enabled', false)
+                    && ($this->update['update_available'] ?? false) === true
+                    && ! UpdateRun::hasActive())
+                ->requiresConfirmation()
+                ->modalHeading('Εγκατάσταση ενημέρωσης')
+                ->modalDescription(fn (): string => sprintf(
+                    'Θα εγκατασταθεί η έκδοση %s (τρέχουσα: v%s). Πριν την εφαρμογή λαμβάνεται στιγμιότυπο ΒΔ και η εφαρμογή μπαίνει σε maintenance mode· η διαδικασία τρέχει από τον scheduler και μπορείς να την παρακολουθήσεις στις «Ενημερώσεις».',
+                    (string) ($this->update['latest_version'] ?? '?'),
+                    (string) ($this->update['current_version'] ?? '?'),
+                ))
+                ->modalSubmitActionLabel('Έναρξη ενημέρωσης')
+                ->action(fn () => $this->installUpdate()),
+
             // Re-queue every failed job (the only write on this page). Hidden when
             // nothing failed so it doesn't tempt a no-op.
             Action::make('retryFailedJobs')
@@ -157,6 +181,56 @@ class SystemHealth extends Page
             ->title('Οι αποτυχημένες εργασίες ξαναμπήκαν στην ουρά')
             ->success()
             ->send();
+    }
+
+    /**
+     * Queue an in-app update: lock the release the operator just saw and create a
+     * `queued` UpdateRun. The web request does NOT run the deploy — the cron
+     * scheduler picks the row up via `ekdosi:self-update` (out-of-band, since the
+     * update restarts the app). Guarded (super_admin via canAccess + the action's
+     * apply_enabled/available/single-flight visibility); re-checked here.
+     */
+    public function installUpdate(): void
+    {
+        if (! (bool) config('ekdosi.updates.apply_enabled', false)) {
+            return;
+        }
+        if (UpdateRun::hasActive()) {
+            Notification::make()
+                ->title('Υπάρχει ήδη ενημέρωση σε εξέλιξη')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $target = $this->update['latest_version'] ?? null;
+        if (! is_string($target) || $target === '') {
+            Notification::make()
+                ->title('Δεν υπάρχει διαθέσιμη έκδοση για εγκατάσταση')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $run = UpdateRun::create([
+            'status' => UpdateRun::STATUS_QUEUED,
+            'strategy' => (string) config('ekdosi.updates.strategy', UpdateRun::STRATEGY_PHP),
+            'from_version' => $this->update['current_version'] ?? null,
+            'from_ref' => $this->update['current_sha'] ?? null,
+            'to_version' => ltrim($target, 'vV'),
+            'to_ref' => $target,
+            'triggered_by_user_id' => auth()->id(),
+        ]);
+
+        Notification::make()
+            ->title('Η ενημέρωση προγραμματίστηκε')
+            ->body('Θα εφαρμοστεί από τον scheduler. Παρακολούθησε την πρόοδο εδώ.')
+            ->success()
+            ->send();
+
+        $this->redirect(UpdateRunResource::getUrl('view', ['record' => $run]));
     }
 
     // ── view helpers (one place for status → colour/label + formatting) ──
