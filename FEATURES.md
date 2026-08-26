@@ -396,6 +396,22 @@ default/Haiku/Opus) · μηνιαίο όριο tokens · προαιρ. per-compa
 (`EKDOSI_AI_PROMPT_CACHE`). Global switch `EKDOSI_AI_ENABLED` (default OFF). Engine = Laravel HTTP
 (Messages API), χωρίς SDK.
 
+## 16γ. Εξωτερικό MCP server (ίδια εργαλεία, από έξω)
+`POST /mcp` (`EkdosiMcpServer`, `laravel/mcp`) — **δεύτερο μεταφορικό πάνω στο ΙΔΙΟ registry**
+του «Βοηθού»: ό,τι δουλεύει εντός panel δουλεύει και από **εξωτερικό MCP client** (Claude Desktop,
+claude.ai connector, άλλος agent). **Universal auth**: Sanctum bearer (πάντα· `ekdosi:mcp-token
+<email> --tenant=<slug>`) ή OAuth 2.1 (claude.ai, μόλις εγκατασταθεί Passport). **Η εταιρεία είναι
+δεμένη στο token** (`tenant:{id}` ability → `McpTenantResolver`), **ΠΟΤΕ όρισμα του μοντέλου** →
+cross-tenant αδύνατο, όπως στο in-app. **Per-tool Shield permission** ισχύει (adapter
+`AssistantMcpTool` → `ToolRegistry`, ίδιο harness). Τα **write tools** (`send_customer_statement`,
+`create_reminder`) είναι **propose-only** εξωτερικά: στήνουν `AiPendingAction`, ο χειριστής
+επιβεβαιώνει **μέσα** στο ekdosi (καμία εξωτερική auto-εκτέλεση). **Νέα ops/debug tools για remote
+troubleshooting** (super_admin, read-only): `app_health` (= `ops:health`: queues/crons/backup/mail/
+WHMCS/myDATA/disk + severity), `failed_jobs` (failed queue jobs + κεφαλή exception), `log_tail`
+(Laravel log με φίλτρα level/substring). **Νέα state tools** (και στα δύο κανάλια): `app_version`
+(τρέχον build + διαθέσιμη ενημέρωση) και `recent_activity` (audit trail). Hard kill-switch
+`EKDOSI_MCP_ENABLED` (default OFF). Πλήρες: **`MCP.md`**.
+
 ## 17. Setup / lookups
 VAT categories · invoice types · payment/delivery methods · distribution aims · metric
 units · bank accounts · product categories · **tags** — όλα tenant-scoped, με

@@ -20,6 +20,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
 #[Fillable(['name', 'email', 'password', 'email_verified_at'])]
@@ -27,7 +28,10 @@ use Spatie\Permission\Traits\HasRoles;
 class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery, HasTenants
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasRoles, Notifiable;
+    // HasApiTokens (Sanctum): personal-access bearer tokens for the ekdosi MCP
+    // server (routes/ai.php). Minted with `php artisan ekdosi:mcp-token`, bound
+    // to a tenant. Never used by the Filament panel session. See MCP.md.
+    use HasApiTokens, HasFactory, HasRoles, Notifiable;
 
     /**
      * Gate panel access. Filament only HONOURS this when the model implements

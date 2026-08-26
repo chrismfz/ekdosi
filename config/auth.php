@@ -42,6 +42,18 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        // OAuth 2.1 guard for the ekdosi MCP server (routes/ai.php), backed by
+        // Laravel Passport. The 'passport' driver is only registered once
+        // laravel/passport is installed; until then nothing resolves this guard
+        // (the MCP route stays Sanctum-only, gated by class_exists in ai.php),
+        // so this entry is inert. Only needed for the claude.ai remote connector,
+        // which speaks OAuth + Dynamic Client Registration and cannot take a
+        // static bearer. See MCP.md §6.
+        'api' => [
+            'driver' => 'passport',
+            'provider' => 'users',
+        ],
     ],
 
     /*
