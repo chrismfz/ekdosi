@@ -442,19 +442,4 @@ return [
         'timeout' => (int) env('EKDOSI_UPDATE_TIMEOUT', 8),
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | External MCP server (routes/ai.php)
-    |--------------------------------------------------------------------------
-    | The `/mcp` endpoint that exposes the same tenant-safe tool registry as the
-    | in-app «Βοηθός» to external MCP clients (Claude Desktop, the claude.ai
-    | connector, another agent). Auth is per-request (Sanctum bearer or, once
-    | Passport is installed, OAuth); this flag is a hard kill-switch that unmounts
-    | the route entirely. Off by default — turn it on deliberately once a token
-    | is minted (`php artisan ekdosi:mcp-token`). See MCP.md.
-    */
-    'mcp' => [
-        'enabled' => (bool) env('EKDOSI_MCP_ENABLED', false),
-    ],
-
 ];

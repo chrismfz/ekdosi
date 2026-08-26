@@ -279,13 +279,27 @@ class OperatorHealthReport
      *
      * @return array{dir: ?string, count: int, total_bytes: int, files: list<array{name: string, path: string, size_bytes: int, mtime: int, modified_at: string}>}
      */
-    private function localBackups(): array
+    /**
+     * The on-disk backup directory. Laravel 11's `local` disk roots at
+     * storage/app/PRIVATE, so spatie writes to storage/app/private/{name} — NOT
+     * storage/app/{name}. Resolve via the disk (with a legacy fallback) and share
+     * it between localBackups() and disk() so the two never drift again (they did:
+     * disk() hard-coded storage_path('app/'.name) and reported the backups dir as
+     * "missing" while backups were landing fine under private/).
+     */
+    private function backupRoot(): string
     {
-        $disk = Storage::disk('local');
-        $root = $disk->path(config('backup.backup.name'));
+        $root = Storage::disk('local')->path(config('backup.backup.name'));
         if (! is_dir($root)) {
             $root = storage_path('app/'.config('backup.backup.name'));
         }
+
+        return $root;
+    }
+
+    private function localBackups(): array
+    {
+        $root = $this->backupRoot();
         if (! is_dir($root)) {
             return ['dir' => null, 'count' => 0, 'total_bytes' => 0, 'files' => []];
         }
@@ -469,7 +483,7 @@ class OperatorHealthReport
             'storage' => $this->diskUsage(storage_path()),
             'logs' => $this->diskUsage(storage_path('logs')),
             'temp_uploads' => $this->diskUsage(storage_path('app/livewire-tmp')),
-            'backups' => $this->diskUsage(storage_path('app/'.config('backup.backup.name'))),
+            'backups' => $this->diskUsage($this->backupRoot()),
         ];
     }
 

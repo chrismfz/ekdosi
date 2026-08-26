@@ -33,8 +33,9 @@ MCP client ──Bearer <ekdosi Sanctum token, tenant-bound>──▶  ekdosi  /
 ```
 
 - **Endpoint:** `POST /mcp`, in `routes/ai.php` (Laravel MCP auto-loads it — no
-  `bootstrap/app.php` change). Gated by `auth:sanctum` (+ `auth:api` once Passport
-  is installed) **and** a hard kill-switch `EKDOSI_MCP_ENABLED` (default OFF).
+  `bootstrap/app.php` change). Always-on, protected by `auth:sanctum` (+ `auth:api`
+  once Passport is installed): a request without a valid token is rejected, and the
+  route can't mount without `laravel/mcp` installed — so there is no enable flag.
 - **Server:** `App\Mcp\Servers\EkdosiMcpServer` (`laravel/mcp`).
 - **Adapter:** `App\Mcp\Tools\Concerns\AssistantMcpTool` — one thin base that
   makes any `AssistantTool` an MCP tool. Its `name()`/`description()`/`schema()`
@@ -55,24 +56,38 @@ application/json` and an `Accept` header listing **both** `application/json` and
 
 ---
 
-## 2. Tenancy — the company is bound to the token, never named by the model
+## 2. Tenancy — the company is named explicitly, but validated server-side
 
 cfm-web is single-tenant; ekdosi is multi-tenant, so the cardinal rule of
-`docs/ai-assistant-blueprint.md` must hold on this channel too: **the tenant is
-never an argument the model controls.** No tool has a `company` parameter.
+`docs/ai-assistant-blueprint.md` holds on this channel too — **a company is never
+trusted from free text the model invents.** But the MCP channel has no session
+tenant (unlike the panel), so the target must be *selected*. This is the cfm
+`node`/`node="all"` model applied to companies (`App\Mcp\Support\McpTenantResolver`):
+
+- **`company` (slug)** on the tenant-scoped tools → that ONE company.
+- **`company: "all"`** → fan out over every company the caller may access; the
+  adapter runs the tool per company and returns a **per-company map**
+  (`{myip: {...}, nexon: {...}}`) — no merge, no collision.
+- **omitted** → a tenant-bound Sanctum token's company; else the caller's sole
+  company; else refuse and list the options. `list_companies` reports the valid
+  slugs.
+
+Every selection is validated: a **member** reaches only their own companies; a
+**system super_admin** reaches every tenant (exactly what the panel's tenant
+switcher already gives them — no more). "nexon" from a member of only "myip" is
+refused, not leaked. So a cross-tenant read stays **impossible**, and it's
+enforced by server-side validation, not by the absence of a parameter.
 
 - `php artisan ekdosi:mcp-token <email> --tenant=<slug>` mints a **Sanctum token
-  bound to one company** (it carries a `tenant:{id}` ability).
-  `App\Mcp\Support\McpTenantResolver` reads that binding back server-side and
-  confirms the user actually belongs to that company (`canAccessTenant`) before
-  any tool runs. A user with 3 companies mints 3 tokens.
-- No binding on the token? If the user belongs to **exactly one** company, that
-  one is used; otherwise the call is refused with «bind a tenant». (A
-  multi-company claude.ai/OAuth connection lands here until per-tenant OAuth
-  binding ships — use a Sanctum token meanwhile.)
-- A cross-tenant read is therefore **structurally impossible**: "nexon" in a
-  sentence maps to no argument; the tool physically runs against the token's
-  company only.
+  LOCKED to one company** (a `tenant:{id}` ability) — it can neither fan out nor be
+  pointed elsewhere; the binding *is* the scope. Use these for desktop/CLI.
+- The **claude.ai/OAuth** connection is unbound, so `company`/`all` drive it —
+  which is how a super_admin reaches any/all companies over that connector.
+- **Writes never fan out.** `send_customer_statement` / `create_reminder` refuse
+  `company: "all"` (blast-radius) and require a specific company; they stay
+  propose-only regardless (mirrors cfm's node="all" write guard).
+- The in-app «Βοηθός» is unchanged: it keeps the session tenant and has **no**
+  `company` parameter — the selector is MCP-only.
 
 ---
 
@@ -132,18 +147,19 @@ deployment from here:**
 ```bash
 composer install                                # composer.lock already carries mcp + sanctum
 php artisan migrate --force                     # creates personal_access_tokens (migration ships in repo)
-# enable it + apply:
-#   .env →  EKDOSI_MCP_ENABLED=true
 php artisan config:clear                         # (or optimize) if config is cached
 php artisan queue:restart
 ```
+
+The endpoint is always-on once the package is installed — no env flag to set.
+Access still requires a minted token (§6), so mounting it is harmless.
 
 `routes/ai.php`, `EkdosiMcpServer`, the tools, `McpTenantResolver`, the
 `ekdosi:mcp-token` command, `HasApiTokens` on `User`, **and the
 `personal_access_tokens` migration** all ship in this repo — a plain
 `composer install` + `migrate` is enough (no `install:api` needed). All MCP code
-is `class_exists`- + `EKDOSI_MCP_ENABLED`-gated, so the app boots fine even with
-the endpoint off (it simply isn't mounted).
+is `class_exists`-gated, so the app boots fine even before the packages are
+installed (the endpoint simply isn't mounted).
 
 `composer.json` pins `laravel/mcp: ^0.9.3` and `laravel/sanctum: ^4.0`; the lock
 already carries them (`laravel/mcp` v0.9.4, `laravel/sanctum` v4.3.3).
@@ -229,19 +245,21 @@ ekdosi.
    Passport's `HasApiTokens`, which collides with Sanctum's) — add the interface
    only if the installed version requires it. The OAuth *token* path needs no
    trait on `User`.
-2. **Discovery header + tenant binding.** Confirm an unauthenticated `/mcp` still
-   returns the RFC 9728 `WWW-Authenticate` pointer claude.ai follows. And note:
-   an OAuth token has no Sanctum `tenant:{id}` ability, so a multi-company OAuth
-   user falls to the single-company default — see Roadmap for per-tenant OAuth
-   binding.
+2. **Discovery header.** Confirm an unauthenticated `/mcp` still returns the
+   RFC 9728 `WWW-Authenticate` pointer claude.ai follows. A multi-company OAuth
+   user has no `tenant:{id}` binding, so they select per call with `company` /
+   `company: "all"` (§2) — `list_companies` shows the slugs.
 
 ---
 
 ## 9. Roadmap
 
-- **Per-tenant OAuth binding.** Let the claude.ai/OAuth path pick a company (a
-  scope, or a tenant chooser on the consent screen), so multi-company operators
-  aren't limited to the single-company default. Sanctum tokens already bind.
+- **Per-company output cap on fan-out.** `company: "all"` runs the tool per
+  company; the tools already return bounded data, but a hard per-company byte cap
+  (like cfm's 64 KiB/node) would harden it if the fleet grows past a few tenants.
+- **A consent-screen company chooser** (optional): let the OAuth approval pin a
+  default company into the session, so a multi-company operator needn't pass
+  `company` each call. `company`/`all` already cover the functional need.
 - **More read tools on the same rail.** `connection_health` (WHMCS bridge
   freshness + `mydata:preflight`), a myDATA reconcile summary — each is one
   `AssistantTool`, both channels.
