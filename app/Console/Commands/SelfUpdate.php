@@ -91,7 +91,7 @@ class SelfUpdate extends Command
                 $this->runPhp($run);
             }
         } catch (Throwable $e) {
-            $this->fail($run, (string) $run->phase, $e->getMessage());
+            $this->failRun($run, (string) $run->phase, $e->getMessage());
 
             return self::FAILURE;
         }
@@ -534,7 +534,7 @@ class SelfUpdate extends Command
         return preg_replace('#(x-access-token:)[^@\s]+@#i', '$1***@', $text) ?? $text;
     }
 
-    private function fail(UpdateRun $run, string $phase, string $message): void
+    private function failRun(UpdateRun $run, string $phase, string $message): void
     {
         // Lift maintenance so the operator can reach the panel to roll back or fix
         // forward — an in-app updater on shared hosting has no shell fallback. The
