@@ -22,7 +22,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Notifications\Actions\Action as NotificationAction;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Support\Facades\URL;
@@ -352,7 +351,7 @@ class CompanyBackupActions
                     ->color($run->statusColor())
                     ->persistent()
                     ->actions([
-                        NotificationAction::make('download')
+                        Action::make('download')
                             ->label('Λήψη')
                             ->icon('heroicon-o-arrow-down-tray')
                             ->url(self::downloadUrl($run), shouldOpenInNewTab: true)

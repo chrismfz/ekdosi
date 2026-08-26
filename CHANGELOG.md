@@ -37,6 +37,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `storage/app/{name}` while spatie backups land under Laravel 11's `local` disk root
   (`storage/app/private/{name}`). Both `OperatorHealthReport::disk()` and `localBackups()` now resolve
   the path the same way (shared `backupRoot()`), so `app_health`/`ops:health` show real backup disk use.
+- **Filament 5 regression: `Filament\Notifications\Actions\Action` was removed** — three call sites
+  still imported it and threw «Class not found» when they built a bell notification with an action:
+  `invoices:notify-overdue` (failing daily on the scheduler since the Filament 5 upgrade),
+  `AiActionExecutor` (AI «Βοηθός» reminder delivery), and the per-company backup «Λήψη» notification.
+  All now use `Filament\Actions\Action` (unified actions). Added a non-dry-run regression test that
+  exercises the send path (the existing test only covered `--dry-run`, which skips the action).
 
 ## [1.13.0] - 2026-08-26
 
