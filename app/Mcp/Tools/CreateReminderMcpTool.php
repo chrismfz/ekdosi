@@ -17,4 +17,10 @@ class CreateReminderMcpTool extends AssistantMcpTool
     {
         return CreateReminderTool::class;
     }
+
+    /** A write action never fans out over "all" companies — requires a specific one. */
+    protected function allowsFanOut(): bool
+    {
+        return false;
+    }
 }
