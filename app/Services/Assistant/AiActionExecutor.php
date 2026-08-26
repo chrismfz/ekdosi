@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
 use App\Services\TenantMailerFactory;
 use App\Support\Tenancy\CompanyContext;
-use Filament\Notifications\Actions\Action;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
