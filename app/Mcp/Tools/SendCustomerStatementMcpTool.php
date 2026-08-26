@@ -20,4 +20,10 @@ class SendCustomerStatementMcpTool extends AssistantMcpTool
     {
         return SendCustomerStatementTool::class;
     }
+
+    /** A write action never fans out over "all" companies — requires a specific one. */
+    protected function allowsFanOut(): bool
+    {
+        return false;
+    }
 }

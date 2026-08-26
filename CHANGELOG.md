@@ -18,6 +18,26 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **MCP per-company selection (`company` / `company: "all"`).** The tenant-scoped MCP tools now take
+  an optional `company` (slug) — or `"all"` to fan out across every company the caller may access
+  (per-company map, no merge) — so a super_admin can drive any/all companies over one (claude.ai/OAuth)
+  connection, cfm-style (`node`/`node="all"`). Selection is validated server-side (`McpTenantResolver`,
+  member → own only, super_admin → all), never trusted from prose; a `--tenant`-bound Sanctum token
+  stays locked to its company. New `list_companies` tool lists the valid slugs. Write tools refuse
+  `"all"` (blast-radius) and stay propose-only. The in-app «Βοηθός» is unchanged (session tenant).
+
+### Changed
+- **MCP endpoint is now always-on** — removed the `EKDOSI_MCP_ENABLED` kill-switch (and its config
+  block). Access is already gated by auth (a token is required) and by `class_exists` (needs
+  `laravel/mcp`), so the flag only added a foot-gun. Delete the `.env` line; it is now ignored.
+
+### Fixed
+- **Operator health disk probe reported the backups directory as "missing".** It hard-coded
+  `storage/app/{name}` while spatie backups land under Laravel 11's `local` disk root
+  (`storage/app/private/{name}`). Both `OperatorHealthReport::disk()` and `localBackups()` now resolve
+  the path the same way (shared `backupRoot()`), so `app_health`/`ops:health` show real backup disk use.
+
 ## [1.13.0] - 2026-08-26
 
 ### Added
