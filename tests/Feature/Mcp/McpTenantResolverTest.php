@@ -89,4 +89,77 @@ class McpTenantResolverTest extends TestCase
         $this->assertNull($resolved);
         $this->assertNotNull($error);
     }
+
+    // ── resolveTargets (company / "all" selection) ──────────────────────────
+
+    public function test_all_for_a_member_returns_only_their_companies(): void
+    {
+        $user = $this->makeUser();
+        $mine1 = $this->makeCompany('m1');
+        $mine2 = $this->makeCompany('m2');
+        $this->makeCompany('other'); // exists but user is NOT a member
+        $user->companies()->attach([$mine1->id, $mine2->id]);
+
+        $r = app(McpTenantResolver::class)->resolveTargets($user, 'all');
+
+        $this->assertNull($r['error']);
+        $this->assertTrue($r['fannedOut']);
+        $ids = array_map(fn ($c) => $c->id, $r['companies']);
+        sort($ids);
+        $this->assertSame([$mine1->id, $mine2->id], $ids); // the foreign one is NOT included
+    }
+
+    public function test_explicit_company_slug_resolves_for_a_member(): void
+    {
+        $user = $this->makeUser();
+        $a = $this->makeCompany('a');
+        $user->companies()->attach($a->id);
+
+        $r = app(McpTenantResolver::class)->resolveTargets($user, $a->slug);
+
+        $this->assertNull($r['error']);
+        $this->assertFalse($r['fannedOut']);
+        $this->assertSame($a->id, $r['companies'][0]->id);
+    }
+
+    public function test_explicit_foreign_company_is_refused(): void
+    {
+        $user = $this->makeUser();
+        $mine = $this->makeCompany('mine');
+        $foreign = $this->makeCompany('foreign');
+        $user->companies()->attach($mine->id);
+
+        $r = app(McpTenantResolver::class)->resolveTargets($user, $foreign->slug);
+
+        $this->assertNotNull($r['error']);
+        $this->assertSame([], $r['companies']);
+    }
+
+    public function test_bound_token_refuses_all(): void
+    {
+        $user = $this->makeUser();
+        $a = $this->makeCompany('a');
+        $b = $this->makeCompany('b');
+        $user->companies()->attach([$a->id, $b->id]);
+        $token = $user->createToken('mcp', ['tenant:'.$b->id]);
+        $user->withAccessToken($token->accessToken);
+
+        $r = app(McpTenantResolver::class)->resolveTargets($user, 'all');
+
+        $this->assertNotNull($r['error']); // a bound token can't fan out
+    }
+
+    public function test_bound_token_refuses_a_different_company(): void
+    {
+        $user = $this->makeUser();
+        $a = $this->makeCompany('a');
+        $b = $this->makeCompany('b');
+        $user->companies()->attach([$a->id, $b->id]);
+        $token = $user->createToken('mcp', ['tenant:'.$b->id]);
+        $user->withAccessToken($token->accessToken);
+
+        $r = app(McpTenantResolver::class)->resolveTargets($user, $a->slug);
+
+        $this->assertNotNull($r['error']); // locked to B, can't ask for A
+    }
 }

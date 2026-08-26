@@ -26,6 +26,31 @@ from `[Unreleased]`; `--major` explicit for milestones).
   backup) έγιναν pointer προς «Σύστημα → Χρονοπρογραμματιστής / Ρυθμίσεις συστήματος». Locale
   defaults → `el`/`el_GR` (καθαρά ελληνική εφαρμογή· ίδια τιμή με τον installer). Μια φρέσκια
   εγκατάσταση δεν χρειάζεται `.env` edit γι' αυτά — μόνο τα core keys που γράφει ο installer.
+### Added
+- **MCP per-company selection (`company` / `company: "all"`).** The tenant-scoped MCP tools now take
+  an optional `company` (slug) — or `"all"` to fan out across every company the caller may access
+  (per-company map, no merge) — so a super_admin can drive any/all companies over one (claude.ai/OAuth)
+  connection, cfm-style (`node`/`node="all"`). Selection is validated server-side (`McpTenantResolver`,
+  member → own only, super_admin → all), never trusted from prose; a `--tenant`-bound Sanctum token
+  stays locked to its company. New `list_companies` tool lists the valid slugs. Write tools refuse
+  `"all"` (blast-radius) and stay propose-only. The in-app «Βοηθός» is unchanged (session tenant).
+
+### Changed
+- **MCP endpoint is now always-on** — removed the `EKDOSI_MCP_ENABLED` kill-switch (and its config
+  block). Access is already gated by auth (a token is required) and by `class_exists` (needs
+  `laravel/mcp`), so the flag only added a foot-gun. Delete the `.env` line; it is now ignored.
+
+### Fixed
+- **Operator health disk probe reported the backups directory as "missing".** It hard-coded
+  `storage/app/{name}` while spatie backups land under Laravel 11's `local` disk root
+  (`storage/app/private/{name}`). Both `OperatorHealthReport::disk()` and `localBackups()` now resolve
+  the path the same way (shared `backupRoot()`), so `app_health`/`ops:health` show real backup disk use.
+- **Filament 5 regression: `Filament\Notifications\Actions\Action` was removed** — three call sites
+  still imported it and threw «Class not found» when they built a bell notification with an action:
+  `invoices:notify-overdue` (failing daily on the scheduler since the Filament 5 upgrade),
+  `AiActionExecutor` (AI «Βοηθός» reminder delivery), and the per-company backup «Λήψη» notification.
+  All now use `Filament\Actions\Action` (unified actions). Added a non-dry-run regression test that
+  exercises the send path (the existing test only covered `--dry-run`, which skips the action).
 
 ## [1.13.0] - 2026-08-26
 

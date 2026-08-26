@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
-use Filament\Notifications\Actions\Action;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Console\Command;
 

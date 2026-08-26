@@ -29,18 +29,16 @@ use Laravel\Passport\Passport;
 | Passport is optional and class_exists-gated: until it is installed the endpoint
 | runs Sanctum-only; once it is, OAuth discovery/DCR routes are registered and the
 | endpoint additionally accepts OAuth access tokens. See MCP.md §6.
+|
+| Always-on: there is no enable flag. The endpoint is protected by auth (a request
+| without a valid Sanctum/OAuth token is rejected), and by class_exists (it can't
+| mount without laravel/mcp installed) — so a config toggle adds nothing but a
+| foot-gun. The in-app «Βοηθός» is unaffected either way; it doesn't use this route.
 */
 
 if (! class_exists(Mcp::class)) {
     // laravel/mcp not installed — nothing to mount. (Belt-and-braces; the
     // package provider is what loads this file, so this is effectively never hit.)
-    return;
-}
-
-if (! config('ekdosi.mcp.enabled', false)) {
-    // Hard kill-switch (EKDOSI_MCP_ENABLED): leave the endpoint unmounted until a
-    // deploy explicitly opts in. The in-app «Βοηθός» is unaffected — it doesn't
-    // use this route.
     return;
 }
 
