@@ -121,4 +121,49 @@ class ScheduleSettingsPageTest extends TestCase
 
         $this->assertDatabaseMissing('system_settings', ['key' => 'schedule.mydata_reconcile_enabled']);
     }
+
+    #[Test]
+    public function saving_a_valid_timing_deviation_stores_a_string_override(): void
+    {
+        $this->makeSuperAdmin();
+
+        Livewire::test(ScheduleSettings::class)
+            ->set('data.backup_run_cron', '0 3 * * *')       // deviate from '0 2 * * *'
+            ->set('data.mydata_reconcile_time', '07:15')     // deviate from '06:00'
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('system_settings', [
+            'key' => 'schedule.backup_run_cron', 'value' => '0 3 * * *', 'type' => 'string',
+        ]);
+        $this->assertDatabaseHas('system_settings', [
+            'key' => 'schedule.mydata_reconcile_time', 'value' => '07:15', 'type' => 'string',
+        ]);
+    }
+
+    #[Test]
+    public function an_invalid_cron_is_rejected_and_not_stored(): void
+    {
+        $this->makeSuperAdmin();
+
+        Livewire::test(ScheduleSettings::class)
+            ->set('data.backup_run_cron', 'δεν-είναι-cron')
+            ->call('save')
+            ->assertHasErrors('data.backup_run_cron');
+
+        $this->assertDatabaseMissing('system_settings', ['key' => 'schedule.backup_run_cron']);
+    }
+
+    #[Test]
+    public function an_invalid_time_is_rejected_and_not_stored(): void
+    {
+        $this->makeSuperAdmin();
+
+        Livewire::test(ScheduleSettings::class)
+            ->set('data.mydata_reconcile_time', '99:99')
+            ->call('save')
+            ->assertHasErrors('data.mydata_reconcile_time');
+
+        $this->assertDatabaseMissing('system_settings', ['key' => 'schedule.mydata_reconcile_time']);
+    }
 }

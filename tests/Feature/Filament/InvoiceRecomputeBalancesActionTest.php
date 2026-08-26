@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Filament;
 
-use App\Filament\Pages\MaintenanceTools;
+use App\Filament\Resources\Invoices\Pages\ListInvoices;
 use App\Models\Company;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -12,10 +12,11 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * The «Εργαλεία» maintenance page runs safe per-tenant commands as buttons and
- * captures their output on the page.
+ * «Επανυπολογισμός υπολοίπων» — the last button of the retired «Εργαλεία» page,
+ * rehomed as a header action on the Παραστατικά list. It runs the same safe,
+ * idempotent `invoices:recompute-balances` command scoped to the active tenant.
  */
-class MaintenanceToolsPageTest extends TestCase
+class InvoiceRecomputeBalancesActionTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -24,7 +25,7 @@ class MaintenanceToolsPageTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Gate::before(fn () => true); // authorize page access (View:MaintenanceTools)
+        Gate::before(fn () => true); // authorize list access + the View:CompanySettings gate
         $this->actingAs(User::create([
             'name' => 'Admin', 'email' => 'a-'.uniqid().'@test.local', 'password' => bcrypt('x'),
         ]));
@@ -35,20 +36,18 @@ class MaintenanceToolsPageTest extends TestCase
         Filament::setTenant($this->tenant);
     }
 
-    public function test_page_renders_and_exposes_the_command_buttons(): void
+    public function test_list_exposes_the_recompute_balances_action(): void
     {
-        Livewire::test(MaintenanceTools::class)
+        Livewire::test(ListInvoices::class)
             ->assertSuccessful()
             ->assertActionVisible('recompute_balances');
-        // (mydata_preflight → «Έλεγχος ρυθμίσεων» tab· refresh_vat_picture → «Ανανέωση όλων».)
     }
 
-    public function test_recompute_balances_button_runs_and_captures_output(): void
+    public function test_recompute_balances_action_runs_without_errors(): void
     {
-        Livewire::test(MaintenanceTools::class)
+        Livewire::test(ListInvoices::class)
             ->callAction('recompute_balances')
             ->assertHasNoActionErrors()
-            ->assertSet('lastCommand', 'invoices:recompute-balances')
-            ->assertSet('lastStatus', 'ok');
+            ->assertNotified();
     }
 }

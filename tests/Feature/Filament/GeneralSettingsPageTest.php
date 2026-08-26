@@ -131,4 +131,47 @@ class GeneralSettingsPageTest extends TestCase
 
         $this->assertDatabaseMissing('system_settings', ['key' => 'system.require_2fa']);
     }
+
+    #[Test]
+    public function it_exposes_the_ops_ai_and_update_knobs_with_effective_defaults(): void
+    {
+        $this->makeSuperAdmin();
+
+        Livewire::test(GeneralSettings::class)
+            ->assertSuccessful()
+            ->assertSee('Ειδοποιήσεις σφαλμάτων (Ops)')
+            ->assertSee('AI & Ενημερώσεις')
+            ->assertSet('data.error_alerts_enabled', (bool) config('ekdosi.error_alerts.enabled', true))
+            ->assertSet('data.ai_enabled', (bool) config('ekdosi.ai.enabled'))
+            ->assertSet('data.update_check_enabled', (bool) config('ekdosi.updates.enabled', true));
+    }
+
+    #[Test]
+    public function saving_ops_and_ai_deviations_stores_overrides(): void
+    {
+        $this->makeSuperAdmin();
+
+        // Pin the env/config defaults so each set() below is an unambiguous deviation
+        // (independent of what the test env sets for these knobs).
+        config([
+            'ekdosi.error_alerts.enabled' => true,
+            'ekdosi.ai.enabled' => false,
+            'ekdosi.updates.enabled' => true,
+        ]);
+
+        Livewire::test(GeneralSettings::class)
+            ->set('data.error_alerts_enabled', false)      // deviate from the ON default
+            ->set('data.error_alert_email', 'ops@x.gr')
+            ->set('data.error_alert_throttle_minutes', '45')
+            ->set('data.ai_enabled', true)                 // deviate from the OFF default
+            ->set('data.update_check_enabled', false)      // deviate from the ON default
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('system_settings', ['key' => 'system.error_alerts_enabled', 'value' => '0', 'type' => 'bool']);
+        $this->assertDatabaseHas('system_settings', ['key' => 'system.error_alert_email', 'value' => 'ops@x.gr', 'type' => 'string']);
+        $this->assertDatabaseHas('system_settings', ['key' => 'system.error_alert_throttle_minutes', 'value' => '45', 'type' => 'string']);
+        $this->assertDatabaseHas('system_settings', ['key' => 'system.ai_enabled', 'value' => '1', 'type' => 'bool']);
+        $this->assertDatabaseHas('system_settings', ['key' => 'system.update_check_enabled', 'value' => '0', 'type' => 'bool']);
+    }
 }

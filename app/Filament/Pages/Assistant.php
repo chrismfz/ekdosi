@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Concerns\InteractsWithAssistant;
 use App\Models\Company;
+use App\Support\Settings\SystemSettings;
 use BackedEnum;
 use Filament\Facades\Filament;
 use Filament\Pages\Page;
@@ -50,7 +51,7 @@ class Assistant extends Page
     /** Shared gate (reused by the page nav AND the floating widget injection). */
     public static function assistantAvailable(): bool
     {
-        return (bool) config('ekdosi.ai.enabled')
+        return app(SystemSettings::class)->bool('system.ai_enabled', (bool) config('ekdosi.ai.enabled'))
             && Filament::getTenant() instanceof Company
             && (bool) Filament::getTenant()?->ai_assistant_enabled
             && auth()->check();

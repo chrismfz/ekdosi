@@ -339,7 +339,8 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   · **Λίστα αρχείων αντιγράφων ΒΔ** (spatie): φάκελος, πλήθος, συνολικό μέγεθος + τα πιο πρόσφατα
   με μέγεθος/timestamp (όχι μόνο «το τελευταίο είναι φρέσκο»)· ο Χρονοπρογραμματιστής έχει link
   «Αρχεία αντιγράφων (Υγεία)» που δείχνει στο section (#backups). (Τα per-tenant runs φαίνονται στην καρτέλα κάθε εταιρίας.)
-  **«Σύστημα»**. + **«Εργαλεία»** (artisan commands ως κουμπιά) +
+  **«Σύστημα»**. + **Επανυπολογισμός υπολοίπων** (κουμπί-repair στη λίστα Παραστατικά,
+  admin-only· τρέχει `invoices:recompute-balances` για την τρέχουσα εταιρία) +
   **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run +
   **`ekdosi:create-admin`** (create/reset system super_admin σε όλες τις εταιρίες).
   Ο demo seed (`db:seed`) είναι **opt-in** (`EKDOSI_SEED_DEMO`, default OFF) — κανένας
@@ -351,13 +352,17 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (τα χειροκίνητα: Firebird usage probes + AADE production smoke-test).
 - **Scheduler + queue** (DB driver) — backups/auto-email/reconcile/WHMCS/VAT-picture,
   gated by `EKDOSI_SCHEDULE_*` **+ σελίδα «Ρυθμίσεις χρονοπρογραμματιστή»**
-  (super_admin-only): toggles ανά εργασία στο `system_settings` store, διαβάζονται
+  (super_admin-only): toggles ανά εργασία **+ ενότητα «Χρονισμός»** (cron 5 πεδίων ή
+  ΩΩ:ΛΛ ανά εργασία, validated στο save) στο `system_settings` store, διαβάζονται
   run-time από `routes/console.php` (env = προεπιλογή· αποθηκεύονται μόνο οι αποκλίσεις,
-  με audit). Νέο nav group **«Σύστημα»**.
+  με audit). Ο χρονισμός περνά από `ScheduleTiming` με ασφαλές fallback — μη έγκυρη
+  τιμή αγνοείται, δεν σπάει τον scheduler. Νέο nav group **«Σύστημα»**.
 - **Σελίδα «Ρυθμίσεις συστήματος»** (super_admin-only) — οι καθολικές knobs ως audited
   toggles στο `system_settings` (env = προεπιλογή, αποθηκεύονται μόνο οι αποκλίσεις):
   **`require_2fa`** (live — διαβάζεται από τον panel), **backup-alert on/off + email(s)**
-  (live — διαβάζεται από `company:run-scheduled-backups`). **At-rest κρυπτογράφηση** +
+  (live — `company:run-scheduled-backups`), **ειδοποιήσεις σφαλμάτων** (on/off + email +
+  throttle — `ExceptionNotifier`), **AI «Βοηθός» καθολικός διακόπτης** (`AssistantRunner`/
+  page), **έλεγχος ενημερώσεων** on/off (`UpdateChecker`). **At-rest κρυπτογράφηση** +
   **κατάσταση mailer** εμφανίζονται read-only (η αλλαγή κρυπτογράφησης γίνεται με ασφάλεια
   μέσω `secrets:reencrypt`).
 - **Σελίδα «Ρυθμίσεις εταιρείας»** (company_admin + super_admin, gated `View:CompanySettings`)
