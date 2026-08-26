@@ -142,6 +142,15 @@ down ▸ ekdosi:db-snapshot --keep=10 ▸ git fetch + checkout <sha>
      ▸ opcache flush ▸ up ▸ ops:health          (each step a subprocess; output → UpdateRun)
 ```
 
+**`composer install`, never `composer update` — deliberately.** The updater installs
+from the **committed `composer.lock`** (deterministic, identical on every box).
+`composer update` does the opposite — it bumps dependencies to newer versions and
+**rewrites `composer.lock`**, i.e. changes code that isn't in git, with no review. For
+a production money app that breaks the whole "deploy a known commit" model, so it is
+**not** exposed in the UI. Dependency bumps flow through git like everything else: run
+`composer update` on the dev box → commit the new lock → cut a release → the in-app
+updater `composer install`s it.
+
 A config knob selects the execution strategy, so the **same UI** drives both
 environments:
 
@@ -221,11 +230,36 @@ in the panel):
 
 ### Implementation order
 
-- **Phase A** — `UpdateRun` model + migration · `ekdosi:self-update --pending`
-  (`php` strategy) · the `routes/console.php` scheduler hook · the `SystemHealth`
-  action · `UpdateRuns` resource · the HMAC opcache-flush route · config keys
-  (`EKDOSI_UPDATE_STRATEGY`, …) · CHANGELOG + FEATURES entries. → a working
-  "update" button with a live phase log.
-- **Phase B** — "Επαναφορά" action (git checkout + `db-restore`) + snapshot picker.
+- **Phase A ✅ BUILT** — `UpdateRun` model + migration · `ekdosi:self-update`
+  (both `php` and `script` strategies) · the `routes/console.php` scheduler hook
+  (`self_update`, gated on `hasPending()`) · the `SystemHealth` «Εγκατάσταση
+  ενημέρωσης» action · the super_admin `UpdateRuns` resource (live-poll View +
+  history) · the signed `/internal/opcache-flush` route · config keys
+  (`EKDOSI_UPDATE_STRATEGY`, `EKDOSI_SCHEDULE_SELF_UPDATE` — no arming flag).
+  A working «update» button with a live phase log.
+  - **No arming flag.** In-app apply is offered whenever the update check is on
+    AND a repo is set — the «Εγκατάσταση ενημέρωσης» button only appears once an
+    update is actually *visible*, which for a private repo requires a valid token,
+    so «URL/token → yes» is enforced naturally (no `EKDOSI_UPDATE_APPLY`). Every
+    apply stays super_admin-only + confirmed + single-flight.
+  - **On-failure policy:** a failed apply **lifts maintenance** (`artisan up`) so
+    the operator can reach the panel to roll back or fix forward — an in-app updater
+    on shared hosting has no shell fallback. The failure row flags a possible
+    inconsistent state; «Επαναφορά» is the safe recovery. (A preflight failure —
+    dirty tree / no `.git` / no `proc_open` — aborts *before* `down`, so the app is
+    never touched.) The snapshot is taken *after* `down` (exact rollback point).
+  - **UI note:** the trigger lives on `SystemHealth`; the run detail is the
+    `UpdateRuns` resource View, which auto-polls its sections while non-terminal
+    (Filament-native `->poll('3s')`, the `FirebirdImportRun` pattern) rather than a
+    hand-built `wire:poll` blade — same live effect, no custom panel.css.
+- **Phase B ✅ BUILT** — «Επαναφορά» action on a finished (succeeded OR failed)
+  update run: queues a `kind=rollback` `UpdateRun` that takes a fresh safety
+  snapshot, `git checkout`s the previous commit (`from_ref`), `composer install`s
+  its deps, then `ekdosi:db-restore`s the pre-update snapshot (destructive — data
+  written since the update is lost, hence a red confirm). The DB restore rewinds
+  the whole DB **including `update_runs`**, so it runs last and `reconcileAudit()`
+  re-stamps the audit rows (this rollback → succeeded, the reverted update →
+  `rolled_back`) afterwards. Columns: `kind`, `rollback_of_id`, `restore_snapshot`.
 - **Phase C** — a dry-run/preflight preview (commits-behind + pending migrations)
-  before apply · the `script` strategy for VPS boxes that want it.
+  before apply · richer per-step checklist UI · the `script`-strategy rollback path
+  (`deploy/rollback.sh`).

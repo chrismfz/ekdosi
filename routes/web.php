@@ -41,3 +41,14 @@ Route::get('/company-backups/{run}/download', CompanyBackupDownloadController::c
 Route::get('/expenses/{expense}/document', ExpenseDocumentDownloadController::class)
     ->middleware(['auth', 'signed'])
     ->name('expenses.document.download');
+
+// Best-effort FPM opcache reset after an in-app update — resetting from the CLI
+// updater process can't touch the FPM pool, so `ekdosi:self-update` self-hits
+// this route (SIGNED, short-lived URL) to clear the shared opcache with no root.
+// Auth-less by design (the CLI worker has no session); the `signed` middleware
+// (HMAC over APP_KEY) makes the URL unforgeable and it only resets opcache.
+Route::get('/internal/opcache-flush', function () {
+    $reset = function_exists('opcache_reset') ? (bool) opcache_reset() : false;
+
+    return response()->json(['opcache_reset' => $reset]);
+})->middleware('signed')->name('internal.opcache-flush');

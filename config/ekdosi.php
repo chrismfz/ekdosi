@@ -109,6 +109,11 @@ return [
         // The worker is considered healthy only after the job is handled.
         'queue_heartbeat_enabled' => env('EKDOSI_SCHEDULE_QUEUE_HEARTBEAT', true),
 
+        // ekdosi:self-update — apply a queued in-app update/rollback out-of-band.
+        // No-op unless a run is actually queued, so it's safe ON by default; turn
+        // OFF to freeze in-app updates entirely.
+        'self_update_enabled' => env('EKDOSI_SCHEDULE_SELF_UPDATE', true),
+
         // invoices:resend-failed-emails — re-queue invoice emails whose last
         // send attempt failed. Default OFF: a systemic mail outage would
         // otherwise re-queue en masse every run; enable once SMTP is healthy.
@@ -440,6 +445,16 @@ return [
         'token' => env('EKDOSI_UPDATE_TOKEN', env('GITHUB_TOKEN')),
         'cache_hours' => (int) env('EKDOSI_UPDATE_CACHE_HOURS', 6),
         'timeout' => (int) env('EKDOSI_UPDATE_TIMEOUT', 8),
+
+        // Phase 2 — in-app APPLY (git checkout + composer + migrate + caches),
+        // driven from «Υγεία συστήματος». No separate flag: apply is offered
+        // whenever the update check is enabled AND a repo is set (above) — for a
+        // private repo the button only appears once a valid token makes an update
+        // actually visible, so «URL/token → yes» is enforced naturally. Every
+        // apply is still super_admin-only + confirmed + single-flight.
+        // 'php' (portable, no root — shared hosting + VPS) or 'script' (wrap
+        // deploy/update.sh on a VPS that has the shell tooling).
+        'strategy' => (string) env('EKDOSI_UPDATE_STRATEGY', 'php'),
     ],
 
 ];
