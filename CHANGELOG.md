@@ -18,6 +18,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- **«Επανυπολογισμός υπολοίπων» μετακόμισε στη λίστα Παραστατικά.** Ήταν το μοναδικό
+  κουμπί που είχε απομείνει στην άδεια σελίδα «Εργαλεία» (τα myDATA εργαλεία της είχαν
+  ήδη φύγει στην Κονσόλα myDATA)· τώρα είναι header action στη λίστα Παραστατικά, εκεί
+  που ζουν τα χρήματα. Ίδια ασφαλής/idempotent εντολή (`invoices:recompute-balances`
+  για την τρέχουσα εταιρία), gated admin-only (`View:CompanySettings` — ίδιο κοινό).
+
+### Removed
+- **Σελίδα «Εργαλεία» (`MaintenanceTools`)** + το blade της — κέλυφος με ένα κουμπί,
+  που μετακόμισε (πάνω). Μετά το deploy: `shield:generate` + `shield:sync-super-admin`
+  (φεύγει το πλέον αχρησιμοποίητο `View:MaintenanceTools` permission).
+
 ## [1.14.0] - 2026-08-26
 
 ### Changed

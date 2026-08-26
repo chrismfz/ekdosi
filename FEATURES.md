@@ -339,7 +339,8 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   · **Λίστα αρχείων αντιγράφων ΒΔ** (spatie): φάκελος, πλήθος, συνολικό μέγεθος + τα πιο πρόσφατα
   με μέγεθος/timestamp (όχι μόνο «το τελευταίο είναι φρέσκο»)· ο Χρονοπρογραμματιστής έχει link
   «Αρχεία αντιγράφων (Υγεία)» που δείχνει στο section (#backups). (Τα per-tenant runs φαίνονται στην καρτέλα κάθε εταιρίας.)
-  **«Σύστημα»**. + **«Εργαλεία»** (artisan commands ως κουμπιά) +
+  **«Σύστημα»**. + **Επανυπολογισμός υπολοίπων** (κουμπί-repair στη λίστα Παραστατικά,
+  admin-only· τρέχει `invoices:recompute-balances` για την τρέχουσα εταιρία) +
   **Δοκιμή SMTP** (per-company + global) + **`ekdosi:install`** turnkey first-run +
   **`ekdosi:create-admin`** (create/reset system super_admin σε όλες τις εταιρίες).
   Ο demo seed (`db:seed`) είναι **opt-in** (`EKDOSI_SEED_DEMO`, default OFF) — κανένας
