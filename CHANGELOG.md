@@ -18,6 +18,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- **`.env.example` σε δίαιτα (239 → 154 γραμμές).** Αφαιρέθηκε dead-weight που η app δεν διαβάζει
+  ποτέ (Redis/Memcached, τα live-κενά `AWS_*`, `BROADCAST_CONNECTION`, `APP_MAINTENANCE_*`,
+  `PHP_CLI_SERVER_WORKERS`, `VITE_APP_NAME`)· συμπτύχθηκε ο **διπλογραμμένος** `EKDOSI_SCHEDULE_*`
+  block· τα knobs που ρυθμίζονται πλέον από το UI (scheduler on/off, υποχρεωτικό 2FA, ειδοποίηση
+  backup) έγιναν pointer προς «Σύστημα → Χρονοπρογραμματιστής / Ρυθμίσεις συστήματος». Locale
+  defaults → `el`/`el_GR` (καθαρά ελληνική εφαρμογή· ίδια τιμή με τον installer). Μια φρέσκια
+  εγκατάσταση δεν χρειάζεται `.env` edit γι' αυτά — μόνο τα core keys που γράφει ο installer.
+
 ## [1.13.0] - 2026-08-26
 
 ### Added
