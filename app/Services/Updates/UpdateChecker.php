@@ -3,6 +3,7 @@
 namespace App\Services\Updates;
 
 use App\Support\BuildInfo;
+use App\Support\Settings\SystemSettings;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -29,12 +30,18 @@ class UpdateChecker
 
     public function __construct(private readonly BuildInfo $build) {}
 
+    /** Live-toggle aware: the «Ρυθμίσεις συστήματος» override wins over the env/config default. */
+    private function updatesEnabled(): bool
+    {
+        return app(SystemSettings::class)->bool('system.update_check_enabled', (bool) config('ekdosi.updates.enabled', true));
+    }
+
     /**
      * @return array<string, mixed> the update status (see fetch()/base())
      */
     public function check(bool $fresh = false): array
     {
-        if (! (bool) config('ekdosi.updates.enabled', true)) {
+        if (! $this->updatesEnabled()) {
             return $this->base(['enabled' => false, 'error' => 'Ο έλεγχος ενημερώσεων είναι απενεργοποιημένος.']);
         }
 
@@ -65,7 +72,7 @@ class UpdateChecker
      */
     public function cached(): array
     {
-        if (! (bool) config('ekdosi.updates.enabled', true)) {
+        if (! $this->updatesEnabled()) {
             return $this->base(['enabled' => false, 'error' => 'Ο έλεγχος ενημερώσεων είναι απενεργοποιημένος.']);
         }
 
@@ -230,7 +237,7 @@ class UpdateChecker
     {
         return array_merge([
             'ok' => false,
-            'enabled' => (bool) config('ekdosi.updates.enabled', true),
+            'enabled' => $this->updatesEnabled(),
             'stale' => false,
             'error' => null,
             'current_version' => $this->build->version(),

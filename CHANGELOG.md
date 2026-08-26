@@ -18,17 +18,36 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Περισσότερες ρυθμίσεις από το UI** ώστε μια φρέσκια εγκατάσταση να μη χρειάζεται
+  `.env` edit + redeploy:
+  - **Σύστημα → Ρυθμίσεις συστήματος**: Ειδοποιήσεις σφαλμάτων (on/off + email + throttle),
+    AI «Βοηθός» καθολικός διακόπτης, Έλεγχος ενημερώσεων on/off.
+  - **Σύστημα → Χρονοπρογραμματιστής**: νέα ενότητα «Χρονισμός» — cron (5 πεδίων) ή ώρα
+    ΩΩ:ΛΛ ανά εργασία, με validation στο save **και** ασφαλές fallback στο
+    `routes/console.php` (μη έγκυρη τιμή αγνοείται → προεπιλογή· μια χαλασμένη row δεν
+    σπάει τον scheduler).
+  Ίδιο μοτίβο παντού: env/config = default, DB row (`system_settings`) = override,
+  επαναφορά στην προεπιλογή σβήνει τη row, audited. Οι readers (ExceptionNotifier,
+  ExceptionAlertRecipients, AssistantRunner, Assistant, UpdateChecker, ScheduleTiming)
+  διαβάζουν όντως το override — όχι διακοσμητικοί διακόπτες.
+
 ### Changed
 - **«Επανυπολογισμός υπολοίπων» μετακόμισε στη λίστα Παραστατικά.** Ήταν το μοναδικό
   κουμπί που είχε απομείνει στην άδεια σελίδα «Εργαλεία» (τα myDATA εργαλεία της είχαν
   ήδη φύγει στην Κονσόλα myDATA)· τώρα είναι header action στη λίστα Παραστατικά, εκεί
   που ζουν τα χρήματα. Ίδια ασφαλής/idempotent εντολή (`invoices:recompute-balances`
   για την τρέχουσα εταιρία), gated admin-only (`View:CompanySettings` — ίδιο κοινό).
+- **`.env.example`**: τα knobs που πλέον έχουν UI (error-alerts, AI master switch,
+  update-check on/off) έγιναν pointers προς το UI — env = μόνο τα defaults.
 
 ### Removed
 - **Σελίδα «Εργαλεία» (`MaintenanceTools`)** + το blade της — κέλυφος με ένα κουμπί,
   που μετακόμισε (πάνω). Μετά το deploy: `shield:generate` + `shield:sync-super-admin`
   (φεύγει το πλέον αχρησιμοποίητο `View:MaintenanceTools` permission).
+- **Stale `EKDOSI_MCP_ENABLED`** από το `.env.example` — το `/mcp` endpoint είναι
+  σκόπιμα πάντα-ενεργό (auth-protected, `routes/ai.php`)· κανείς δεν διάβαζε το flag
+  (το config key ήταν ήδη αφαιρεμένο).
 
 ## [1.14.0] - 2026-08-26
 

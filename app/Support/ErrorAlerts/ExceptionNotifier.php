@@ -3,6 +3,7 @@
 namespace App\Support\ErrorAlerts;
 
 use App\Notifications\UnhandledExceptionAlert;
+use App\Support\Settings\SystemSettings;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
@@ -62,7 +63,9 @@ class ExceptionNotifier
      */
     public function notify(string $exceptionClass, string $message, string $location, string $context): void
     {
-        if (! config('ekdosi.error_alerts.enabled', true)) {
+        $settings = app(SystemSettings::class);
+
+        if (! $settings->bool('system.error_alerts_enabled', (bool) config('ekdosi.error_alerts.enabled', true))) {
             return;
         }
 
@@ -75,7 +78,7 @@ class ExceptionNotifier
             // Dedupe identical errors (class + message + location) so a tight
             // error loop sends ONE mail per throttle window, not thousands.
             $signature = sha1($exceptionClass.'|'.$message.'|'.$location);
-            $ttl = max(1, (int) config('ekdosi.error_alerts.throttle_minutes', 30)) * 60;
+            $ttl = max(1, $settings->int('system.error_alert_throttle_minutes', (int) config('ekdosi.error_alerts.throttle_minutes', 30))) * 60;
             if (! Cache::add('error-alert:'.$signature, 1, $ttl)) {
                 return;
             }

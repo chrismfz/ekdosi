@@ -5,6 +5,7 @@ namespace App\Services\Assistant;
 use App\Models\AiUsageLog;
 use App\Models\Company;
 use App\Models\User;
+use App\Support\Settings\SystemSettings;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -40,7 +41,7 @@ class AssistantRunner
      */
     public function ask(Company $tenant, User $user, string $userText, array $messages = [], ?string $conversationId = null): array
     {
-        if (! config('ekdosi.ai.enabled') || ! $tenant->ai_assistant_enabled) {
+        if (! app(SystemSettings::class)->bool('system.ai_enabled', (bool) config('ekdosi.ai.enabled')) || ! $tenant->ai_assistant_enabled) {
             return $this->refuse($messages, 'Ο βοηθός AI δεν είναι ενεργός για αυτή την εταιρεία.');
         }
 

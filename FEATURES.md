@@ -352,13 +352,17 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (τα χειροκίνητα: Firebird usage probes + AADE production smoke-test).
 - **Scheduler + queue** (DB driver) — backups/auto-email/reconcile/WHMCS/VAT-picture,
   gated by `EKDOSI_SCHEDULE_*` **+ σελίδα «Ρυθμίσεις χρονοπρογραμματιστή»**
-  (super_admin-only): toggles ανά εργασία στο `system_settings` store, διαβάζονται
+  (super_admin-only): toggles ανά εργασία **+ ενότητα «Χρονισμός»** (cron 5 πεδίων ή
+  ΩΩ:ΛΛ ανά εργασία, validated στο save) στο `system_settings` store, διαβάζονται
   run-time από `routes/console.php` (env = προεπιλογή· αποθηκεύονται μόνο οι αποκλίσεις,
-  με audit). Νέο nav group **«Σύστημα»**.
+  με audit). Ο χρονισμός περνά από `ScheduleTiming` με ασφαλές fallback — μη έγκυρη
+  τιμή αγνοείται, δεν σπάει τον scheduler. Νέο nav group **«Σύστημα»**.
 - **Σελίδα «Ρυθμίσεις συστήματος»** (super_admin-only) — οι καθολικές knobs ως audited
   toggles στο `system_settings` (env = προεπιλογή, αποθηκεύονται μόνο οι αποκλίσεις):
   **`require_2fa`** (live — διαβάζεται από τον panel), **backup-alert on/off + email(s)**
-  (live — διαβάζεται από `company:run-scheduled-backups`). **At-rest κρυπτογράφηση** +
+  (live — `company:run-scheduled-backups`), **ειδοποιήσεις σφαλμάτων** (on/off + email +
+  throttle — `ExceptionNotifier`), **AI «Βοηθός» καθολικός διακόπτης** (`AssistantRunner`/
+  page), **έλεγχος ενημερώσεων** on/off (`UpdateChecker`). **At-rest κρυπτογράφηση** +
   **κατάσταση mailer** εμφανίζονται read-only (η αλλαγή κρυπτογράφησης γίνεται με ασφάλεια
   μέσω `secrets:reencrypt`).
 - **Σελίδα «Ρυθμίσεις εταιρείας»** (company_admin + super_admin, gated `View:CompanySettings`)

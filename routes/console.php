@@ -4,6 +4,7 @@ use App\Jobs\RecordQueueHeartbeat;
 use App\Models\Company;
 use App\Support\OperatorHealth\HealthRecorder;
 use App\Support\OperatorHealth\TenantScheduleSweep;
+use App\Support\Settings\ScheduleTiming;
 use App\Support\Settings\SystemSettings;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -31,6 +32,17 @@ $trackSchedule = function ($event, string $task) {
  */
 $scheduleEnabled = fn (string $key): bool => app(SystemSettings::class)
     ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+
+/*
+ | Per-task TIMING override (same «Σύστημα» settings UI, «Χρονισμός»). The DB
+ | override wins; the config/env value is the DEFAULT. Defense-in-depth: a stored
+ | value that is NOT a valid cron / HH:MM is IGNORED (fall back to the config
+ | default) so one bad row can never break schedule:run for EVERY task — the UI
+ | validates on save, this is the belt to that braces. Run-time like the enable
+ | switch (never a DB query at file-parse time).
+ */
+$scheduleCron = fn (string $key, string $default): string => ScheduleTiming::cron($key, $default);
+$scheduleTime = fn (string $key, string $default): string => ScheduleTiming::time($key, $default);
 
 // OPS-13: per-tenant sweeps with per-tenant isolation (one tenant's uncaught
 // exception must not abort the rest, and must be recorded so it surfaces). The
@@ -83,7 +95,7 @@ $trackSchedule(
     Schedule::command('invoices:resend-failed-emails', [
         '--since' => config('ekdosi.schedule.resend_failed_emails_since_days', 3),
     ])
-        ->cron(config('ekdosi.schedule.resend_failed_emails_cron', '30 * * * *'))
+        ->cron($scheduleCron('resend_failed_emails_cron', '30 * * * *'))
         ->name('resend-failed-emails')
         ->when(fn () => $scheduleEnabled('resend_failed_emails_enabled'))
         ->withoutOverlapping(30),
@@ -104,7 +116,7 @@ $trackSchedule(
             fn (Company $c) => app(HealthRecorder::class)->recordWhmcsFetch($c, 1),
         );
     })
-        ->cron(config('ekdosi.schedule.whmcs_fetch_cron', '*/15 * * * *'))
+        ->cron($scheduleCron('whmcs_fetch_cron', '*/15 * * * *'))
         ->name('whmcs-fetch-all')
         ->when(fn () => $scheduleEnabled('whmcs_fetch_enabled'))
         ->withoutOverlapping(30),
@@ -120,7 +132,7 @@ $trackSchedule(
 // must be visible (OPS-8).
 $trackSchedule(
     Schedule::command('whmcs:auto-issue')
-        ->cron(config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'))
+        ->cron($scheduleCron('whmcs_auto_issue_cron', '*/15 * * * *'))
         ->name('whmcs-auto-issue-all')
         ->when(fn () => $scheduleEnabled('whmcs_auto_issue_enabled'))
         ->withoutOverlapping(30),
@@ -133,7 +145,7 @@ $trackSchedule(
 // idempotent (only-if-open + dedup), but OFF by default (opt-in per deploy).
 $trackSchedule(
     Schedule::command('whmcs:sync-payments')
-        ->cron(config('ekdosi.schedule.whmcs_payment_sync_cron', '*/30 * * * *'))
+        ->cron($scheduleCron('whmcs_payment_sync_cron', '*/30 * * * *'))
         ->name('whmcs-sync-payments-all')
         ->when(fn () => $scheduleEnabled('whmcs_payment_sync_enabled'))
         ->withoutOverlapping(30),
@@ -145,7 +157,7 @@ $trackSchedule(
 // Caches the worklist + bell-notifies new items; writes no money. OFF by default.
 $trackSchedule(
     Schedule::command('whmcs:reconcile-payments')
-        ->cron(config('ekdosi.schedule.whmcs_payment_reconcile_cron', '*/30 * * * *'))
+        ->cron($scheduleCron('whmcs_payment_reconcile_cron', '*/30 * * * *'))
         ->name('whmcs-reconcile-payments-all')
         ->when(fn () => $scheduleEnabled('whmcs_payment_reconcile_enabled'))
         ->withoutOverlapping(30),
@@ -164,7 +176,7 @@ $trackSchedule(
             fn (Company $c) => app(HealthRecorder::class)->recordMyDataReconcile($c, 1),
         );
     })
-        ->dailyAt(config('ekdosi.schedule.mydata_reconcile_time', '06:00'))
+        ->dailyAt($scheduleTime('mydata_reconcile_time', '06:00'))
         ->name('mydata-reconcile-all')
         ->when(fn () => $scheduleEnabled('mydata_reconcile_enabled'))
         ->withoutOverlapping(30),
@@ -176,7 +188,7 @@ $trackSchedule(
 // tenants, every few hours.
 $trackSchedule(
     Schedule::command('mydata:refresh-vat-picture')
-        ->cron(config('ekdosi.schedule.mydata_vat_picture_cron', '0 */4 * * *'))
+        ->cron($scheduleCron('mydata_vat_picture_cron', '0 */4 * * *'))
         ->name('mydata-vat-picture-all')
         ->when(fn () => $scheduleEnabled('mydata_vat_picture_enabled'))
         ->withoutOverlapping(30),
@@ -190,7 +202,7 @@ $trackSchedule(
 // (companies.mydata_auto_fetch_expenses) — so a company_admin controls their own.
 $trackSchedule(
     Schedule::command('mydata:refresh-expenses', ['--auto-only' => true])
-        ->cron(config('ekdosi.schedule.mydata_fetch_expenses_cron', '0 */6 * * *'))
+        ->cron($scheduleCron('mydata_fetch_expenses_cron', '0 */6 * * *'))
         ->name('mydata-fetch-expenses-all')
         ->when(fn () => $scheduleEnabled('mydata_fetch_expenses_enabled'))
         ->withoutOverlapping(30),
@@ -204,7 +216,7 @@ $trackSchedule(
 // tasks (it warms the same caches).
 $trackSchedule(
     Schedule::command('mydata:refresh-console')
-        ->cron(config('ekdosi.schedule.mydata_console_refresh_cron', '0 */6 * * *'))
+        ->cron($scheduleCron('mydata_console_refresh_cron', '0 */6 * * *'))
         ->name('mydata-console-refresh-all')
         ->when(fn () => $scheduleEnabled('mydata_console_refresh_enabled'))
         ->withoutOverlapping(30),
@@ -215,7 +227,7 @@ $trackSchedule(
 // tenant. Read-only, NO email; default OFF (opt-in per deploy).
 $trackSchedule(
     Schedule::command('invoices:notify-overdue')
-        ->dailyAt(config('ekdosi.schedule.overdue_notifications_time', '07:30'))
+        ->dailyAt($scheduleTime('overdue_notifications_time', '07:30'))
         ->name('invoices-notify-overdue')
         ->when(fn () => $scheduleEnabled('overdue_notifications_enabled'))
         ->withoutOverlapping(30),
@@ -231,7 +243,7 @@ $trackSchedule(
     Schedule::command('services:stage-renewals', [
         '--lead-days' => config('ekdosi.schedule.service_renewals_lead_days', 0),
     ])
-        ->dailyAt(config('ekdosi.schedule.service_renewals_time', '07:00'))
+        ->dailyAt($scheduleTime('service_renewals_time', '07:00'))
         ->name('service-renewals')
         ->when(fn () => $scheduleEnabled('service_renewals_enabled'))
         ->withoutOverlapping(),
@@ -245,7 +257,7 @@ $trackSchedule(
 // command does NOT file at AADE — it only flips contract status + provisioning.
 $trackSchedule(
     Schedule::command('services:run-dunning')
-        ->dailyAt(config('ekdosi.schedule.service_dunning_time', '08:00'))
+        ->dailyAt($scheduleTime('service_dunning_time', '08:00'))
         ->name('service-dunning')
         ->when(fn () => $scheduleEnabled('service_dunning_enabled'))
         ->withoutOverlapping(),
@@ -265,7 +277,7 @@ Schedule::command('ai:dispatch-reminders')
 // from systemd/cron directly, but tracked here when the Laravel scheduler owns them.
 $trackSchedule(
     Schedule::command('backup:run')
-        ->cron(config('ekdosi.schedule.backup_run_cron', '0 2 * * *'))
+        ->cron($scheduleCron('backup_run_cron', '0 2 * * *'))
         ->name('backup-run')
         ->when(fn () => $scheduleEnabled('backup_run_enabled'))
         ->withoutOverlapping(120),
@@ -274,7 +286,7 @@ $trackSchedule(
 
 $trackSchedule(
     Schedule::command('backup:clean')
-        ->cron(config('ekdosi.schedule.backup_cleanup_cron', '30 2 * * *'))
+        ->cron($scheduleCron('backup_cleanup_cron', '30 2 * * *'))
         ->name('backup-cleanup')
         ->when(fn () => $scheduleEnabled('backup_cleanup_enabled'))
         ->withoutOverlapping(120),
@@ -283,7 +295,7 @@ $trackSchedule(
 
 $trackSchedule(
     Schedule::command('backup:monitor')
-        ->cron(config('ekdosi.schedule.backup_monitor_cron', '0 8 * * *'))
+        ->cron($scheduleCron('backup_monitor_cron', '0 8 * * *'))
         ->name('backup-monitor')
         ->when(fn () => $scheduleEnabled('backup_monitor_enabled'))
         ->withoutOverlapping(30)
@@ -297,7 +309,7 @@ $trackSchedule(
 // own cadence (daily/weekly/monthly) at/after its configured time. Default OFF.
 $trackSchedule(
     Schedule::command('company:run-scheduled-backups')
-        ->cron(config('ekdosi.schedule.company_backups_cron', '0 * * * *'))
+        ->cron($scheduleCron('company_backups_cron', '0 * * * *'))
         ->name('company-backups')
         ->when(fn () => $scheduleEnabled('company_backups_enabled'))
         ->withoutOverlapping(60),

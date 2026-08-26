@@ -76,6 +76,36 @@ class GeneralSettings extends Page implements HasForms
             'Παραλήπτες (χωρισμένοι με κόμμα). Κενό = όλοι οι super_admin με email.',
             'string',
         ],
+        'error_alerts_enabled' => [
+            'ekdosi.error_alerts.enabled',
+            'Ειδοποιήσεις σφαλμάτων (email)',
+            'Στέλνει email στους υπεύθυνους ops όταν συμβεί ανεπίληπτη εξαίρεση (deduped/throttled). Γράφεται πάντα και στο log.',
+            'bool',
+        ],
+        'error_alert_email' => [
+            'ekdosi.error_alerts.email',
+            'Email(s) ειδοποίησης σφαλμάτων',
+            'Παραλήπτες (κόμμα). Κενό = πέφτει στην αλυσίδα των backup alerts → super_admins.',
+            'string',
+        ],
+        'error_alert_throttle_minutes' => [
+            'ekdosi.error_alerts.throttle_minutes',
+            'Throttle ειδοποιήσεων σφαλμάτων (λεπτά)',
+            'Ίδιο σφάλμα → ένα email ανά τόσα λεπτά (αποτρέπει flood από βρόχο σφαλμάτων).',
+            'string',
+        ],
+        'ai_enabled' => [
+            'ekdosi.ai.enabled',
+            'AI «Βοηθός» (καθολικός διακόπτης)',
+            'Ο master διακόπτης — ακόμη κι αν μια εταιρία τον έχει ανοιχτό, μένει κλειστός αν εδώ είναι OFF. Χρειάζεται και ANTHROPIC_API_KEY στο .env.',
+            'bool',
+        ],
+        'update_check_enabled' => [
+            'ekdosi.updates.enabled',
+            'Έλεγχος ενημερώσεων',
+            'Read-only σύγκριση του build με το τελευταίο GitHub release (φαίνεται στην Υγεία συστήματος). Ποτέ δεν εφαρμόζει ενημέρωση.',
+            'bool',
+        ],
     ];
 
     public function mount(): void
@@ -137,6 +167,36 @@ class GeneralSettings extends Page implements HasForms
                             ->helperText(self::KNOBS['backup_alert_email'][2])
                             ->placeholder('ops@example.gr, alerts@example.gr')
                             ->maxLength(500),
+                    ])->columns(1),
+                Section::make('Ειδοποιήσεις σφαλμάτων (Ops)')
+                    ->schema([
+                        Toggle::make('error_alerts_enabled')
+                            ->label(self::KNOBS['error_alerts_enabled'][1])
+                            ->helperText(self::KNOBS['error_alerts_enabled'][2])
+                            ->inline(false),
+                        TextInput::make('error_alert_email')
+                            ->label(self::KNOBS['error_alert_email'][1])
+                            ->helperText(self::KNOBS['error_alert_email'][2])
+                            ->placeholder('ops@example.gr')
+                            ->maxLength(500),
+                        TextInput::make('error_alert_throttle_minutes')
+                            ->label(self::KNOBS['error_alert_throttle_minutes'][1])
+                            ->helperText(self::KNOBS['error_alert_throttle_minutes'][2])
+                            ->numeric()
+                            ->minValue(1)
+                            ->maxValue(1440),
+                    ])->columns(1),
+                Section::make('AI & Ενημερώσεις')
+                    ->schema([
+                        Toggle::make('ai_enabled')
+                            ->label(self::KNOBS['ai_enabled'][1])
+                            ->helperText(self::KNOBS['ai_enabled'][2])
+                            ->onColor('warning')
+                            ->inline(false),
+                        Toggle::make('update_check_enabled')
+                            ->label(self::KNOBS['update_check_enabled'][1])
+                            ->helperText(self::KNOBS['update_check_enabled'][2])
+                            ->inline(false),
                     ])->columns(1),
             ])
             ->statePath('data');

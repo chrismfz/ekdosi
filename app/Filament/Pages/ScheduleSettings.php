@@ -5,8 +5,11 @@ namespace App\Filament\Pages;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Settings\SystemSettings;
 use BackedEnum;
+use Closure;
+use Cron\CronExpression;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
@@ -87,12 +90,42 @@ class ScheduleSettings extends Page implements HasForms
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'service_renewals_enabled', 'service_dunning_enabled'],
     ];
 
+    /**
+     * Timing knobs: schedule key (config/DB suffix) → [label, kind ('cron'|'time')].
+     * The config value is the DEFAULT; a valid deviation is stored, an invalid one is
+     * REJECTED on save (and, belt-and-braces, ignored by routes/console.php's
+     * $scheduleCron/$scheduleTime so a stray row can never break schedule:run).
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    private const TIMINGS = [
+        'resend_failed_emails_cron' => ['Επαναποστολή αποτυχημένων email', 'cron'],
+        'whmcs_fetch_cron' => ['WHMCS — άντληση εκκρεμών', 'cron'],
+        'whmcs_auto_issue_cron' => ['WHMCS — αυτόματη έκδοση', 'cron'],
+        'whmcs_payment_sync_cron' => ['WHMCS — συγχρονισμός πληρωμών', 'cron'],
+        'whmcs_payment_reconcile_cron' => ['WHMCS — εντοπισμός πληρωμών', 'cron'],
+        'mydata_reconcile_time' => ['myDATA — αντιπαραβολή πωλήσεων', 'time'],
+        'mydata_vat_picture_cron' => ['myDATA — εικόνα ΦΠΑ', 'cron'],
+        'mydata_fetch_expenses_cron' => ['myDATA — άντληση εξόδων', 'cron'],
+        'mydata_console_refresh_cron' => ['myDATA — ανανέωση κονσόλας', 'cron'],
+        'overdue_notifications_time' => ['Ειδοποιήσεις ληξιπρόθεσμων', 'time'],
+        'service_renewals_time' => ['Ανανεώσεις υπηρεσιών', 'time'],
+        'service_dunning_time' => ['Dunning υπηρεσιών', 'time'],
+        'backup_run_cron' => ['Backup — λήψη', 'cron'],
+        'backup_cleanup_cron' => ['Backup — καθαρισμός', 'cron'],
+        'backup_monitor_cron' => ['Backup — παρακολούθηση', 'cron'],
+        'company_backups_cron' => ['Backup ανά εταιρία', 'cron'],
+    ];
+
     public function mount(): void
     {
         $settings = app(SystemSettings::class);
         $state = [];
         foreach (array_keys(self::TASKS) as $key) {
             $state[$key] = $settings->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+        }
+        foreach (array_keys(self::TIMINGS) as $key) {
+            $state[$key] = (string) $settings->string("schedule.{$key}", (string) config("ekdosi.schedule.{$key}"));
         }
         $this->form->fill($state);
     }
@@ -112,6 +145,37 @@ class ScheduleSettings extends Page implements HasForms
             }
             $sections[] = Section::make($heading)->schema($toggles)->columns(2);
         }
+
+        $timingFields = [];
+        foreach (self::TIMINGS as $key => [$label, $kind]) {
+            $default = (string) config("ekdosi.schedule.{$key}");
+            $field = TextInput::make($key)
+                ->label($label)
+                ->placeholder($default)
+                ->helperText(($kind === 'cron' ? 'cron 5 πεδίων' : 'ώρα ΩΩ:ΛΛ').' · προεπιλογή: '.$default)
+                ->required()
+                ->maxLength(40);
+
+            if ($kind === 'cron') {
+                $field->rules([
+                    fn (): Closure => function (string $attribute, $value, Closure $fail): void {
+                        if (! CronExpression::isValidExpression((string) $value)) {
+                            $fail('Μη έγκυρη έκφραση cron (5 πεδία, π.χ. «*/15 * * * *»).');
+                        }
+                    },
+                ]);
+            } else {
+                $field->rules(['regex:/^([01]\d|2[0-3]):[0-5]\d$/'])
+                    ->validationMessages(['regex' => 'Μη έγκυρη ώρα — χρησιμοποίησε ΩΩ:ΛΛ (π.χ. 06:00).']);
+            }
+
+            $timingFields[] = $field;
+        }
+        $sections[] = Section::make('Χρονισμός (πότε τρέχει)')
+            ->description('Cron 5 πεδίων ή ώρα ΩΩ:ΛΛ. Άφησε την προεπιλογή αν δεν χρειάζεται αλλαγή· μη έγκυρη τιμή απορρίπτεται.')
+            ->schema($timingFields)
+            ->columns(2)
+            ->collapsed();
 
         return $schema->components($sections)->statePath('data');
     }
@@ -181,6 +245,24 @@ class ScheduleSettings extends Page implements HasForms
                 $settings->forget("schedule.{$key}");
             } else {
                 $settings->setBool("schedule.{$key}", $chosen, $userId);
+            }
+
+            if ($chosen !== $before) {
+                $changes[$key] = ['from' => $before, 'to' => $chosen];
+            }
+        }
+
+        foreach (array_keys(self::TIMINGS) as $key) {
+            $default = (string) config("ekdosi.schedule.{$key}");
+            $chosen = trim((string) ($state[$key] ?? ''));
+            $before = (string) $settings->string("schedule.{$key}", $default);
+
+            // Equal to (or blank →) the config default → drop the override; else store.
+            if ($chosen === '' || $chosen === $default) {
+                $settings->forget("schedule.{$key}");
+                $chosen = $default;
+            } else {
+                $settings->set("schedule.{$key}", $chosen, 'string', $userId);
             }
 
             if ($chosen !== $before) {
