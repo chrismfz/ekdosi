@@ -189,7 +189,7 @@ class AssistantWriteActionsTest extends TestCase
         $names = array_column((new ToolRegistry)->definitionsFor($this->user), 'name');
         $this->assertContains('send_customer_statement', $names);
         $this->assertContains('create_reminder', $names);
-        $this->assertCount(8, $names);
+        $this->assertCount(10, $names);
     }
 
     public function test_widget_confirm_flow_executes_the_action(): void

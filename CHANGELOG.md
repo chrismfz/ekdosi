@@ -19,6 +19,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **External MCP server** (`POST /mcp`, `EkdosiMcpServer`) — exposes the SAME tenant-safe tool
+  registry as the in-app «Βοηθός» to external MCP clients (Claude Desktop, the claude.ai connector,
+  another agent), so ekdosi is drivable from outside the panel too. Auth is universal (Sanctum bearer
+  always; OAuth 2.1 once Passport is installed), the company is **bound to the token**
+  (`ekdosi:mcp-token --tenant=slug`, `McpTenantResolver`) never named by the model, and per-tool
+  Shield permission still applies. Business tools are the existing ones over a thin adapter
+  (`AssistantMcpTool`); the two write tools are **propose-only** (stage an `AiPendingAction` the
+  operator confirms in-app). New ops/debug tools for remote troubleshooting: `app_health`
+  (`ops:health`), `failed_jobs` (exception heads), `log_tail` (level/substring filters) —
+  super_admin, read-only. New state tools `app_version` (update-available) and `recent_activity`
+  (audit trail) work on both channels. Hard kill-switch `EKDOSI_MCP_ENABLED` (default OFF). See `MCP.md`.
 - **Web-based first-run installer** (`/install`). Drop the files on a fresh host (empty VM or
   cPanel/DirectAdmin) with only an empty DB + user created, and visiting the URL runs a wizard that
   collects the `.env` basics (app name/URL/env/locale/timezone + DB + optional SMTP), generates the

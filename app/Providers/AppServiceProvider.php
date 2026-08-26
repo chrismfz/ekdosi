@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passport\Passport;
 use Spatie\Permission\PermissionRegistrar;
 
 class AppServiceProvider extends ServiceProvider
@@ -47,6 +48,21 @@ class AppServiceProvider extends ServiceProvider
          * Plain `migrate` is unaffected — deploys keep working.
          */
         DB::prohibitDestructiveCommands(! $this->app->environment('testing'));
+
+        /*
+         * ekdosi MCP server OAuth (routes/ai.php): when Laravel Passport is
+         * installed, render Laravel MCP's published consent view during the
+         * OAuth authorization step (the screen where a logged-in operator
+         * approves the claude.ai remote connector). Gated by class_exists so the
+         * app boots fine before laravel/passport is required — the MCP endpoint
+         * stays Sanctum-only until then. See MCP.md §6.
+         */
+        if (class_exists(Passport::class)
+            && view()->exists('mcp.authorize')) {
+            Passport::authorizationView(
+                fn ($parameters) => view('mcp.authorize', $parameters)
+            );
+        }
 
         /*
          * No-build panel utility CSS. The admin panel ships only Filament's

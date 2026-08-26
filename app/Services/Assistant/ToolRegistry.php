@@ -4,12 +4,14 @@ namespace App\Services\Assistant;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Services\Assistant\Tools\AppVersionTool;
 use App\Services\Assistant\Tools\AssistantTool;
 use App\Services\Assistant\Tools\CountSalesTool;
 use App\Services\Assistant\Tools\CreateReminderTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
+use App\Services\Assistant\Tools\RecentActivityTool;
 use App\Services\Assistant\Tools\RecentInvoicesTool;
 use App\Services\Assistant\Tools\SendCustomerStatementTool;
 use App\Services\Assistant\Tools\VatSummaryTool;
@@ -40,6 +42,8 @@ class ToolRegistry
             new FindCustomerTool,
             new RecentInvoicesTool,
             new VatSummaryTool,
+            new RecentActivityTool,
+            new AppVersionTool,
             // Write tools — PREPARE only; the operator confirms before execution.
             new SendCustomerStatementTool,
             new CreateReminderTool,
@@ -107,7 +111,12 @@ class ToolRegistry
         return null;
     }
 
-    private function userMay(User $user, AssistantTool $tool): bool
+    /**
+     * May this user run this tool? Shared by definitionsFor() (in-app «Βοηθός»)
+     * and the MCP adapter's shouldRegister()/run() so BOTH channels gate a tool
+     * on exactly the same Shield permission.
+     */
+    public function userMay(User $user, AssistantTool $tool): bool
     {
         $permission = $tool->permission();
         if ($permission === null) {

@@ -34,7 +34,10 @@ surfaced in the open-items sections further down.
   connectors → `payment-connectors.md`.
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 (registry seam) **DONE**;
   Phase 1 (real 2nd source) **OPEN**.
-- **`ai-assistant-blueprint.md`** — in-app «Βοηθός» / MCP-style assistant. **NOT-STARTED** (idea).
+- **`ai-assistant-blueprint.md`** — in-app «Βοηθός» + external MCP. In-app chat **DONE** (§16β);
+  **external MCP server DONE** (`MCP.md`, §16γ — same registry, tenant-bound token, propose-only
+  writes, ops/debug tools). **OPEN follow-ups:** per-tenant OAuth binding (claude.ai multi-company),
+  `connection_health` tool (WHMCS/myDATA freshness), curated-KB `knowledge_search` (item ζ below).
 - **`whmcs-legacy-plugin-map.md`** — legacy WHMCS plugins → `ekdosi_bridge`. T-1/T-2 **DONE**;
   T-3 cutover **OPEN**.
 - **`delivery-provider-split-brain.md`** — ΔΑ provider-vs-direct-myDATA routing (architecture
