@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-08-26
+
 ### Added
 - **External MCP server** (`POST /mcp`, `EkdosiMcpServer`) — exposes the SAME tenant-safe tool
   registry as the in-app «Βοηθός» to external MCP clients (Claude Desktop, the claude.ai connector,
