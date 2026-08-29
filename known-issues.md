@@ -486,4 +486,4 @@ These are not open issues:
 
 | Date | Change | Commit/PR |
 |---|---|---|
-| 2026-08-29 | Initial combined installer/myDATA/cron/dependency audit ledger | pending initial commit |
+| 2026-08-29 | Initial combined installer/myDATA/cron/dependency audit ledger | [`fe20e73`](https://github.com/chrismfz/ekdosi/commit/fe20e73dc259254698b4ed0390994a154d545fc8) |
