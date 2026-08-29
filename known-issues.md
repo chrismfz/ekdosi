@@ -53,6 +53,21 @@ Priorities:
 | OPS-003 | P2 | OPEN | Shared hosting | No cPanel/shared-hosting queue recipe or direct completion link |
 | TEST-001 | P2 | OPEN | Tests/CI | No full web installer success-path test; inspected CI was not green |
 | DEP-001 | P2 | WATCH | Dependency | firebed/aade-mydata is current; watch AADE v2.0.2 |
+| UPD-001 | P0 | OPEN | Queue safety | PHP update/rollback does not drain an in-flight worker |
+| UPD-002 | P0 | OPEN | Failure recovery | Partial apply failure lifts maintenance and can serve inconsistent code |
+| UPD-003 | P0 | OPEN | Update integrity | UI queues a mutable tag, not a verified immutable commit SHA |
+| UPD-004 | P0 | OPEN | Rollback readiness | Apply can start without a known current ref or proven rollback path |
+| UPD-005 | P1 | OPEN | Maintenance mode | Live UI and opcache self-hit are blocked while the app is down |
+| UPD-006 | P1 | OPEN | Crash recovery | A killed process can leave a permanent running row and maintenance state |
+| UPD-007 | P1 | OPEN | Health result | Critical health/advisory failures still end as succeeded |
+| UPD-008 | P1 | OPEN | Snapshot retention | PHP update/rollback snapshots are never pruned by --keep=10 |
+| UPD-009 | P1 | OPEN | Preflight | Button does not prove cron, binaries, space, permissions or clean target |
+| UPD-010 | P1 | OPEN | Script strategy | Bash deploy script is invoked through sh |
+| UPD-011 | P1 | OPEN | Tests | Apply, migration, failure and rollback paths are not executed in tests |
+| UPD-012 | P1 | OPEN | Safety controls | “Read-only” update setting also arms one-click apply |
+| UPD-013 | P2 | OPEN | Credentials | Git token remains in the updater process environment after fetch |
+| UPD-014 | P2 | OPEN | Discovery | Future GitHub Releases can mask newer tag-only releases |
+| UPD-015 | P2 | OPEN | Concurrency | Single-flight is UI/scheduler based, not an atomic command-level lock |
 
 ## Detailed issues
 
@@ -435,6 +450,333 @@ Re-check this entry when any of the following happens:
 - Composer changes the locked commit.
 - A new delivery-note lifecycle endpoint is adopted by Ekdosi.
 
+## Updater audit
+
+### Audit baseline and verdict
+
+- Audited branch/commit: [`main@b3b9243`](https://github.com/chrismfz/ekdosi/commit/b3b9243ff7a3edae59f5df7446ba4b75b92447a7)
+- Audit date: 2026-08-29
+- Current app version in `config/app.php`: `1.14.0`
+- Highest repository tag: `v1.14.0`
+- GitHub Releases currently present: none; tag fallback is therefore the active discovery path.
+
+**Verdict:** the read-only update checker and the operator-run
+[`deploy/update.sh`](deploy/update.sh) pipeline have a strong base. The default
+one-click `php` strategy is not yet safe to call production-ready for a
+multi-tenant money application with active workers. Do not rely on the UI apply
+path until UPD-001–UPD-004 are closed.
+
+### UPD-001 — PHP update and rollback do not quiesce the queue
+
+**Status:** OPEN · **Priority:** P0
+
+**Evidence**
+
+- [`SelfUpdate::runPhp()`](app/Console/Commands/SelfUpdate.php) enters
+  maintenance, snapshots, checks out code, installs dependencies and migrates
+  without stopping/draining the queue worker.
+- [`SelfUpdate::runRollback()`](app/Console/Commands/SelfUpdate.php) likewise
+  snapshots and restores the whole DB without draining the worker.
+- Laravel maintenance mode stops workers from taking **new** jobs, but it does
+  not cancel a job already executing. See
+  [Laravel 12 maintenance mode and queues](https://laravel.com/framework/docs/12.x/queues#maintenance-mode-and-queues).
+- [`deploy/update.sh`](deploy/update.sh) and [`deploy/rollback.sh`](deploy/rollback.sh)
+  already recognize this risk and implement optional queue stop/start hooks.
+- Even the shell strategy proceeds after only a warning when no stop hook/unit
+  exists.
+
+**Risk**
+
+A long import, email, myDATA reconciliation or other in-flight job can write
+during the snapshot/migration/restore window. A later rollback can then lose
+locally committed data or an AADE-related state written after the snapshot.
+
+**Required change**
+
+- Add a host-neutral queue-quiescence protocol to the PHP strategy.
+- Refuse schema migration/DB restore unless worker quiescence is proven.
+- Keep explicit VPS stop/start hooks; for shared hosting add a cooperative
+  “drain requested / active jobs = 0” handshake with a bounded timeout.
+- Make “no stop mechanism” a hard blocker for DB-changing updates, not a warning.
+
+**Acceptance**
+
+- An integration test starts a long job, requests update/rollback and proves no
+  checkout/migration/restore begins until the job exits.
+- A timeout/failure to drain aborts before code or DB mutation.
+
+### UPD-002 — Failure after partial apply fails open
+
+**Status:** OPEN · **Priority:** P0
+
+**Evidence**
+
+- [`SelfUpdate::failRun()`](app/Console/Commands/SelfUpdate.php) runs
+  `artisan up` whenever the command had entered maintenance, including failures
+  after checkout, Composer or migration.
+- It marks `wentDown=false` without checking the exit status of the `up`
+  subprocess.
+- This overrides the deliberately safer behavior documented and implemented by
+  the shell scripts: a half-applied deployment stays down.
+- The class-level comment still says failures leave the app down, while the
+  implementation and later design notes say the opposite.
+
+**Risk**
+
+The web app and workers can resume on new code with incomplete dependencies,
+half-applied migrations, stale opcache or an otherwise inconsistent schema.
+The panel that is supposed to offer rollback may itself be unable to boot.
+
+**Required change**
+
+Use phase-aware recovery:
+
+- Pre-check/snapshot failure before checkout: safe to lift maintenance.
+- Failure after checkout/composer/migrate starts: remain down, or automatically
+  restore code + DB and prove health before lifting.
+- Check every recovery subprocess exit code.
+- Persist a durable emergency recovery instruction outside the application DB/log
+  so it remains available when Laravel cannot boot.
+
+**Acceptance**
+
+Injected failures at checkout, Composer and migration never expose a partially
+applied application. Each ends either safely down or automatically restored and
+health-verified.
+
+### UPD-003 — Update target is not locked to an immutable SHA
+
+**Status:** OPEN · **Priority:** P0
+
+**Evidence**
+
+- [`UpdateChecker`](app/Services/Updates/UpdateChecker.php) returns the latest
+  tag/version but not the commit SHA behind it.
+- [`SystemHealth::installUpdate()`](app/Filament/Pages/SystemHealth.php) stores
+  the tag in `to_ref`.
+- [`SelfUpdate`](app/Console/Commands/SelfUpdate.php) force-fetches tags and
+  checks out that tag later.
+- The design document says “lock the exact SHA and re-verify”, but this is not
+  implemented.
+
+**Risk**
+
+A tag can be moved between operator confirmation and apply. The code installed
+may therefore differ from the code the operator saw/approved. The PHP strategy
+also has no downgrade/ancestry guard equivalent to `deploy/update.sh`.
+
+**Required change**
+
+- Resolve and store `target_sha` during the fresh authenticated check.
+- Immediately before checkout, resolve the remote tag again and require exact
+  equality with the stored SHA.
+- Checkout the SHA, retain the tag only as display metadata.
+- Reject unexpected ancestry/downgrades and optionally verify annotated tag or
+  commit signatures according to the release policy.
+
+### UPD-004 — Apply is offered without proven rollback readiness
+
+**Status:** OPEN · **Priority:** P0
+
+**Evidence**
+
+- `from_ref` comes from `BuildInfo::sha()` and may be null when
+  `storage/app/build.json` was never stamped.
+- The install action does not require a current SHA before queuing.
+- Rollback later requires `from_ref`, so the UI can promise a rollback point
+  that cannot restore the previous code.
+- The button does not preflight `.git`, `proc_open`, Git/Composer,
+  `mysqldump`/MySQL client, writable code/vendor/storage, free disk, readable
+  target tag, fresh scheduler heartbeat or a successful snapshot capability.
+
+**Required change**
+
+Add an explicit dry-run/preflight result and hide/block Apply until all hard
+requirements pass. Store both current and target full SHAs. Require a fresh
+scheduler heartbeat because the apply runs from `schedule:run`.
+
+**Acceptance**
+
+A queued update always has non-null full `from_sha` and `to_sha`, and the UI
+can prove that the scheduler will pick it up and a snapshot can be created.
+
+### UPD-005 — Maintenance mode blocks both live progress and opcache flush
+
+**Status:** OPEN · **Priority:** P1
+
+**Evidence**
+
+- Updater uses `artisan down --retry=15` without a bypass secret.
+- Laravel returns the maintenance 503 for all HTTP requests unless a bypass is
+  configured. See
+  [Laravel 12 maintenance mode](https://laravel.com/framework/docs/12.x/configuration#maintenance-mode).
+- Therefore the operator cannot actually watch the promised live-polling
+  `UpdateRun` page while the update is running.
+- [`flushOpcache()`](app/Console/Commands/SelfUpdate.php) self-hits the signed
+  web route **before** `artisan up`, so it normally receives 503. It logs the
+  HTTP status but does not require success.
+
+**Required change**
+
+- Provide a secure maintenance bypass/status channel for the initiating
+  super-admin, or describe progress as unavailable during maintenance.
+- Move the FPM opcache reset to a reachable point or explicitly exempt only the
+  signed route from maintenance.
+- Require HTTP 2xx plus `opcache_reset=true` when opcache timestamps cannot
+  provide a safe fallback.
+
+### UPD-006 — No recovery for a stale running update
+
+**Status:** OPEN · **Priority:** P1
+
+A power loss, killed cron process or timeout after status becomes `running`
+leaves the row active forever. `hasActive()` then blocks new update and rollback
+actions, while the scheduler only selects `queued` rows.
+
+Add a heartbeat/lease to `UpdateRun`, detect stale runs, inspect the maintenance
+and deployed-build state, and offer an explicit “resume / rollback / mark failed”
+recovery flow. Never automatically retry a migration/restore without knowing the
+last completed durable phase.
+
+### UPD-007 — Critical post-update health can still be green in history
+
+**Status:** OPEN · **Priority:** P1
+
+The PHP strategy runs `ops:health` with `allowFailure=true`; Shield generation,
+role sync and opcache are also advisory. The shell script logs a critical health
+exit but still returns success. The wrapper therefore writes `status=succeeded`
+even when the worker is dead or health is critical.
+
+Add `succeeded_with_warnings`/verification state or fail the run on critical
+health. Do not label the update complete until the new build, migrations, queue
+heartbeat and required permissions are verified.
+
+### UPD-008 — In-app snapshots bypass the retention policy
+
+**Status:** OPEN · **Priority:** P1
+
+The PHP strategy creates `update-*.sql.gz` and rollback creates
+`rollback-*.sql.gz`, while [`DbSnapshot::prune()`](app/Console/Commands/DbSnapshot.php)
+only prunes `ekdosi-*.sql.gz`. Passing `--keep=10` therefore does not prune
+either in-app naming scheme. Full DB snapshots containing business data and
+secrets accumulate indefinitely.
+
+Implement a common snapshot registry/retention policy that preserves snapshots
+still referenced by rollbackable runs and securely removes expired unreferenced
+update/rollback snapshots.
+
+### UPD-009 — Preflight exists in the design, not in the UI
+
+**Status:** OPEN · **Priority:** P1
+
+The action only checks that update checking is enabled, a repo exists, a newer
+version was cached and no active row exists. Failures such as no cron, dirty tree,
+missing Composer/client binaries, insufficient disk or unwritable vendor occur
+after the operator has already queued the run.
+
+Implement the documented dry-run preview: exact target commit, commits/migrations,
+strategy, current/target versions, dependency tools, writable paths, disk,
+snapshot probe, worker-drain capability and scheduler freshness.
+
+### UPD-010 — Script strategy invokes a Bash script with `sh`
+
+**Status:** OPEN · **Priority:** P1
+
+[`SelfUpdate::runScript()`](app/Console/Commands/SelfUpdate.php) executes
+`['sh', deploy/update.sh, target]`, but the script uses Bash-only syntax
+(`[[ ... ]]`, `set -o pipefail`, functions/conditionals) and declares a Bash
+shebang. This breaks wherever `/bin/sh` is not Bash.
+
+Invoke the executable directly after validating permissions, or explicitly call
+a discovered `bash` binary. Add a portability test.
+
+### UPD-011 — Tests do not execute the updater lifecycle
+
+**Status:** OPEN · **Priority:** P1
+
+[`SelfUpdateCommandTest`](tests/Feature/Updates/SelfUpdateCommandTest.php) covers
+only “nothing queued” and “row not queued”. No test executes checkout, snapshot,
+Composer, migration, maintenance recovery, opcache, health or DB rollback.
+Shell scripts also have no automated behavior tests.
+
+Build a disposable test harness with a temporary Git repository and MariaDB,
+replace external binaries with controlled fixtures, and inject failure at every
+durable phase. At minimum prove happy update, pre-check abort, snapshot abort,
+Composer failure, migration failure, crash recovery and full rollback.
+
+### UPD-012 — A read-only setting implicitly arms code deployment
+
+**Status:** OPEN · **Priority:** P1
+
+The setting/help text in [`GeneralSettings`](app/Filament/Pages/GeneralSettings.php),
+[`SystemHealth`](app/Filament/Pages/SystemHealth.php), the Blade view,
+configuration comments and parts of
+[`versioning-and-updates.md`](docs/versioning-and-updates.md) still describe the
+feature as read-only. In reality, enabling the check and supplying a repository
+token also exposes one-click apply; there is deliberately no separate arming flag.
+
+Separate `EKDOSI_UPDATE_CHECK` from an explicit default-OFF
+`EKDOSI_UPDATE_APPLY` capability. Update all UI/help/docs to state the actual
+behavior and show the active strategy.
+
+### UPD-013 — Git token remains in the process environment
+
+**Status:** OPEN · **Priority:** P2
+
+The temporary askpass file is removed and output is redacted correctly, but
+`makeAskpass()` calls `putenv('EKDOSI_GIT_TOKEN=...')` and never unsets it.
+Later Composer and Artisan subprocesses may inherit the token.
+
+Pass the token only in the Git process environment and unset it in a `finally`
+block. Add a test proving later subprocess environments do not contain it.
+
+### UPD-014 — A formal GitHub Release can hide newer tag-only releases
+
+**Status:** OPEN · **Priority:** P2
+
+The checker uses `releases/latest` whenever any Release exists and only falls
+back to tags on 404. The documented release flow pushes tags but does not create
+GitHub Releases. The repository currently has no Releases, so fallback works
+today; if one Release is created and later versions remain tag-only, the checker
+can stay pinned to the older Release.
+
+Fetch both signals and choose the highest valid stable SemVer, or standardize the
+release process so every production tag always creates a GitHub Release.
+
+### UPD-015 — Single-flight is not atomic at the command boundary
+
+**Status:** OPEN · **Priority:** P2
+
+The UI performs `hasActive()` followed by `create()` without a transaction or
+unique DB guard. The scheduler has `withoutOverlapping`, but a manual
+`--run=<id>` invocation does not acquire the same global lock. Two near-simultaneous
+operators or a manual command can therefore create/concurrently claim work.
+
+Claim queued rows atomically and acquire one shared update lock inside the command
+for UI, scheduler and manual invocations.
+
+### Updater verified baseline — do not regress
+
+- Update history and actions are super-admin-only and cross-tenant.
+- Web actions only queue work; the apply does not run inside the request or on
+  the worker it restarts.
+- Successful update checks are cached and network failures degrade gracefully.
+- Current repository discovery correctly falls back to tags because there are no
+  GitHub Releases; `config/app.php` and the highest tag are both `1.14.0`.
+- PHP strategy refuses a dirty working tree and requires `.git` + `proc_open`.
+- Git fetch uses an askpass helper rather than putting the token in argv or
+  `.git/config); persisted output redacts the configured token.
+- Composer installs the committed lock with `composer install`, never
+  `composer update`.
+- A local whole-DB snapshot is mandatory before code checkout.
+- Rollback is intentionally destructive and clearly warns that post-update
+  invoices/payments can be lost; it takes a fresh safety snapshot first.
+- The shell scripts drain a configured worker, snapshot, migrate, optimize,
+  restart and run health checks in the correct broad order.
+- Update output is capped in the DB and also persisted per run under
+  `storage/logs/updates/`.
+- Scheduler execution is gated on pending rows and uses an overlap lock.
+
 ## Scheduler inventory
 
 The code-side schedule exists. The current defaults below still require the
@@ -487,3 +829,4 @@ These are not open issues:
 | Date | Change | Commit/PR |
 |---|---|---|
 | 2026-08-29 | Initial combined installer/myDATA/cron/dependency audit ledger | [`fe20e73`](https://github.com/chrismfz/ekdosi/commit/fe20e73dc259254698b4ed0390994a154d545fc8) |
+| 2026-08-29 | Added full updater integrity, rollback, queue and recovery audit | pending updater audit commit |
