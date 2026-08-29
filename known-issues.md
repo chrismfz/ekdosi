@@ -829,4 +829,4 @@ These are not open issues:
 | Date | Change | Commit/PR |
 |---|---|---|
 | 2026-08-29 | Initial combined installer/myDATA/cron/dependency audit ledger | [`fe20e73`](https://github.com/chrismfz/ekdosi/commit/fe20e73dc259254698b4ed0390994a154d545fc8) |
-| 2026-08-29 | Added full updater integrity, rollback, queue and recovery audit | pending updater audit commit |
+| 2026-08-29 | Added full updater integrity, rollback, queue and recovery audit | [`d2ca379`](https://github.com/chrismfz/ekdosi/commit/d2ca3792b4a0c37f4ed7c76d8829ce7c5226b181) |
