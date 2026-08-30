@@ -18,6 +18,40 @@ This is a source audit. It confirms what the repository installs and schedules; 
 cannot prove that a particular host actually has the required OS crontab, worker,
 TLS certificate or off-site backup credentials.
 
+## Focused myDATA re-audit — 2026-08-30
+
+This pass is documentation-only. No MYD implementation should start until the
+issue-specific legal mapping, payload path and acceptance tests below are agreed.
+
+Production sources used:
+
+- [AADE production technical specifications](https://www.aade.gr/mydata/tehnikes-prodiagrafes-ekdoseis-mydata)
+- [myDATA ERP API v2.0.1](https://www.aade.gr/sites/default/files/2026-03/myDATA%20API%20Documentation%20v2.0.1_official_erp.pdf)
+- [Digital Delivery Note API v2.0.1](https://www.aade.gr/sites/default/files/2026-03/myDATA%20API%20Documentation_DeliveryNote_v2.0.1_official.pdf)
+- [AADE digital-movement FAQ](https://www.aade.gr/ypohreotiki-ilektroniki-timologisi-psifiaka-parastatika-diakinisis-syhnes-erotiseis)
+- [AADE timologio v1.5 mixed-document notes](https://www.aade.gr/mydata-ilektronika-biblia-aade/timologio/ekdosi-v150-ti-perilambanei)
+- [Current VAT Code, law 5144/2024](https://elib.aade.gr/elib/gr/act/2024/5144)
+
+Specification policy:
+
+- v2.0.1 is the current production baseline.
+- [v2.0.2 is preofficial/test-environment material](https://www.aade.gr/mydata-ilektronika-biblia-aade/mydata/dokimastiko-periballon);
+  track it under DEP-001, but do not implement production behavior from it yet.
+- Passing an XSD is not enough for legal correctness. VAT exemptions and income
+  classifications must match the actual transaction and business activity.
+
+Re-audit outcome:
+
+| ID | Verdict | Priority | Research decision |
+|---|---|---:|---|
+| MYD-001 | Confirmed | P0 | 1.3/2.3 must use E3_561_006, not E3_561_005 |
+| MYD-002 | Confirmed, wording corrected | P0 | ΤΔΑ is valid as mixed behavior; Ekdosi currently emits only ordinary 1.1 |
+| MYD-003 | Confirmed | P0 | 9.1/9.2/9.3 are movement-only and must not use the monetary invoice path |
+| MYD-004 | Confirmed, expanded | P0 | Validate actual configured VAT codes and distinguish official codes 6 and 10 |
+| MYD-005 | Confirmed as enhancement | P2 | measurementUnit is optional on ordinary invoice lines, not an XSD blocker |
+| MYD-006 | Confirmed as policy gap | P1 | No universal seed exists; onboarding must select/review the business policy |
+| MYD-007 | New confirmed issue | P0 | EU/export exemption hints and the global 0% reason model are unsafe |
+
 ## Status and priority
 
 Statuses:
@@ -39,11 +73,12 @@ Priorities:
 | ID | Priority | Status | Area | Summary |
 |---|---:|---|---|---|
 | MYD-001 | P0 | OPEN | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
-| MYD-002 | P0 | OPEN | ΤΔΑ | Seeded ΤΔΑ is not a combined invoice/delivery-note payload |
-| MYD-003 | P0 | OPEN | Delivery notes | 9.x types are exposed in the monetary invoice picker |
-| MYD-004 | P0 | OPEN | VAT validation | 3% and 0% can pass preflight but fail at submit time |
-| MYD-005 | P1 | OPEN | Quantity units | Standard invoice XML omits myDATA measurementUnit |
-| MYD-006 | P1 | OPEN | Classifications | Seed defaults are not correct for every business activity |
+| MYD-002 | P0 | OPEN | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
+| MYD-003 | P0 | OPEN | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
+| MYD-004 | P0 | OPEN | VAT validation | 3%, dual 4% codes and 0% can produce false readiness results |
+| MYD-005 | P2 | OPEN | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
+| MYD-006 | P1 | OPEN | Classifications | Readiness does not require a business-specific classification policy |
+| MYD-007 | P0 | OPEN | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
 | SETUP-003 | P1 | OPEN | Payment | Missing payment method silently becomes cash in XML |
@@ -73,154 +108,260 @@ Priorities:
 
 ### MYD-001 — Third-country sales use the wrong E3 code
 
-**Status:** OPEN · **Priority:** P0
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
 
-**Evidence**
+**Official finding**
 
-- [`Codes::TYPE_DEFAULTS`](app/Support/MyData/Codes.php) maps both 1.3 and 2.3 to
-  `E3_561_005`.
-- AADE v2.0.1 defines `E3_561_005` as external intra-community sales and
-  `E3_561_006` as external third-country sales.
-- The intra-community mappings 1.2/2.2 to `E3_561_005` are correct.
+AADE v2.0.1 distinguishes E3_561_005 for intra-community sales from
+E3_561_006 for third-country sales.
+
+**Repository evidence**
+
+- [Codes::TYPE_DEFAULTS](app/Support/MyData/Codes.php) maps both 1.3 and 2.3
+  to E3_561_005.
+- The existing 1.2/2.2 mappings to E3_561_005 are correct.
+- [MyDataLookupSeeder](app/Services/MyData/MyDataLookupSeeder.php) consumes
+  those defaults and preserves later operator edits.
 
 **Required change**
 
-- Map 1.3 and 2.3 to `E3_561_006`.
-- Add exact seeder/default tests for all four cross-border types.
-- Confirm an operator override is still preserved by the fill-empty seeding policy.
+- Map 1.3 and 2.3 to E3_561_006.
+- Add exact default/seeder tests for 1.2, 1.3, 2.2 and 2.3.
+- Preserve the fill-empty behavior for existing operator edits.
 
 **Acceptance**
 
-- A fresh GR install seeds 1.2/2.2 as `561_005` and 1.3/2.3 as `561_006`.
-- Existing operator-edited classifications are not overwritten.
+- A fresh GR install seeds 1.2/2.2 as 561_005 and 1.3/2.3 as 561_006.
+- Existing operator-edited classifications remain unchanged.
 
-### MYD-002 — Seeded ΤΔΑ is not a combined delivery document
+### MYD-002 — ΤΔΑ label exists, but the combined payload does not
 
-**Status:** OPEN · **Priority:** P0
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED, WORDING CORRECTED 2026-08-30
 
-**Evidence**
+**Official finding**
 
-- [`MyDataLookupSeeder`](app/Services/MyData/MyDataLookupSeeder.php) names ΤΔΑ
-  «Τιμολόγιο Πώλησης / Δελτίο Αποστολής» but maps it as ordinary type 1.1.
-- [`AadeInvoiceDocument`](app/Services/EInvoice/AadeInvoiceDocument.php) does not
-  emit `isDeliveryNote=true`, loading/delivery addresses, dispatch date/time,
-  vehicle or the complete goods-movement header.
-- AADE treats 1.1 with `isDeliveryNote=false` as a monetary invoice, not a
-  digital delivery document.
+ΤΔΑ is not a separate myDATA invoiceType, but combined value-and-movement
+functionality does exist. AADE documents type 1.1 with isDeliveryNote=true and
+the required dispatch, movement and address data as an invoice plus delivery
+document. Therefore the correct conclusion is not that ΤΔΑ no longer exists.
+
+**Repository evidence**
+
+- [MyDataLookupSeeder](app/Services/MyData/MyDataLookupSeeder.php) correctly
+  bases the ΤΔΑ seed on monetary type 1.1.
+- [AadeInvoiceDocument](app/Services/EInvoice/AadeInvoiceDocument.php) has no
+  combined-document state and emits neither isDeliveryNote=true nor the complete
+  movement header, loading/delivery addresses and dispatch data.
+- The current result is therefore an ordinary 1.1 invoice whose UI label promises
+  delivery-note behavior it does not perform.
 
 **Required change**
 
-Choose one explicitly:
-
-1. Implement the full combined invoice/delivery-note payload and lifecycle; or
-2. Rename/remove ΤΔΑ from the standard seed until that implementation exists.
+- Long-term: implement the complete combined payload, validation and lifecycle.
+- Safe interim: hide or clearly disable ΤΔΑ as not yet supported; do not rename
+  an ordinary 1.1 invoice as ΤΔΑ.
 
 **Acceptance**
 
-- A document labelled ΤΔΑ passes the official delivery-note XSD and sandbox
-  lifecycle, including `isDeliveryNote` and required movement data; or no such
-  label is offered to the operator.
+- A ΤΔΑ passes the official invoice and delivery-note schemas and sandbox
+  lifecycle with the required movement data; or it is not offered as available.
 
-### MYD-003 — Standalone 9.x delivery types appear in the invoice form
+### MYD-003 — Movement-only 9.x types appear in the monetary invoice form
 
-**Status:** OPEN · **Priority:** P0
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
 
-**Evidence**
+**Official finding**
 
-- Seeded ΔΑΣ/ΣΔΑ/ΔΑΠ (9.1/9.2/9.3) have `show_on_menu=true`.
-- [`PickerOptions::invoiceTypeOptions()`](app/Filament/Support/PickerOptions.php)
-  includes every visible type without excluding 9.x.
-- [`InvoiceForm`](app/Filament/Resources/Invoices/Schemas/InvoiceForm.php) uses
-  that picker.
-- Invoice submission resolves through
-  [`EInvoiceSubmitterFactory`](app/Services/EInvoiceSubmitterFactory.php) and
-  [`MyDataSubmitter`](app/Services/MyDataSubmitter.php), which build
-  [`AadeInvoiceDocument`](app/Services/EInvoice/AadeInvoiceDocument.php).
-- The correct coded quantity/unit delivery flow exists separately in
-  [`DeliveryNoteSubmitter`](app/Services/Delivery/DeliveryNoteSubmitter.php).
+AADE separates value-plus-movement documents from movement-only types
+9.1, 9.2 and 9.3. The latter belong to the Digital Delivery Note flow.
+
+**Repository evidence**
+
+- Seeded ΔΑΣ/ΣΔΑ/ΔΑΠ have show_on_menu=true.
+- [PickerOptions::invoiceTypeOptions](app/Filament/Support/PickerOptions.php)
+  includes all visible types, and [InvoiceForm](app/Filament/Resources/Invoices/Schemas/InvoiceForm.php)
+  uses that list.
+- Monetary invoice submission builds [AadeInvoiceDocument](app/Services/EInvoice/AadeInvoiceDocument.php).
+- The correct coded movement path exists separately in
+  [DeliveryNoteSubmitter](app/Services/Delivery/DeliveryNoteSubmitter.php).
 
 **Required change**
 
-- Exclude delivery-only 9.x types from monetary invoice selectors/actions.
-- Keep them available only through the Delivery Notes resource.
-- Add UI/query tests that assert the separation.
+- Exclude 9.x from every monetary invoice selector and issue action.
+- Route movement-only documents exclusively through the Delivery Notes resource.
+- Enforce the separation in domain validation as well as the UI.
 
 **Acceptance**
 
-- An operator cannot select 9.1/9.2/9.3 from Create Invoice.
-- The standalone delivery-note resource still exposes and submits the supported
-  types through `DeliveryNoteSubmitter`.
+- Create Invoice cannot select or submit 9.1/9.2/9.3.
+- Delivery Notes still exposes supported movement types and uses
+  DeliveryNoteSubmitter.
 
-### MYD-004 — VAT preflight has false-green cases
+### MYD-004 — VAT readiness checks do not prove the submitted VAT code
 
-**Status:** OPEN · **Priority:** P0
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED AND EXPANDED 2026-08-30
 
-**Evidence**
+**Official finding**
 
-- [`Codes::vatCategorySeedRows()`](app/Support/MyData/Codes.php) seeds official
-  VAT categories 1–7: 24%, 13%, 6%, 17%, 9%, 4%, 0%.
-- Fresh install does not seed code 9 (3%) or the newer code 10 (4%).
-- [`AadeInvoiceDocument::vatCategoryFor()`](app/Services/EInvoice/AadeInvoiceDocument.php)
-  has no automatic 3% mapping; 3% needs explicit `mydata_vat_category=9`.
-- [`MyDataConfigAudit`](app/Services/MyData/MyDataConfigAudit.php) can accept the
-  official 3% match without proving that the submitter can serialize it.
-- A 0% row without an exemption reason produces only a warning in readiness
-  checks but throws at actual submission.
-- [`MyDataPreflight`](app/Console/Commands/MyDataPreflight.php) exits successfully
-  when only warnings exist.
+The current official VAT table includes:
+
+| myDATA VAT code | Rate/meaning |
+|---:|---|
+| 6 | 4% |
+| 7 | 0% / without VAT; exemption reason required |
+| 9 | 3% under article 31 of law 5057/2023 |
+| 10 | 4% under article 31 of law 5057/2023 |
+
+Codes 6 and 10 have the same rate but different legal bases. A numeric percentage
+alone cannot choose safely between them.
+
+**Repository evidence**
+
+- [Codes::vatCategorySeedRows](app/Support/MyData/Codes.php) seeds codes 1–7
+  by rate, but not explicit rows for code 9 or 10.
+- The label for code 10 describes it as island 4%, which the official table does
+  not say and should be corrected.
+- [AadeInvoiceDocument](app/Services/EInvoice/AadeInvoiceDocument.php) can emit
+  3% only when an explicit override selects code 9; its rate fallback cannot.
+- [MyDataConfigAudit](app/Services/MyData/MyDataConfigAudit.php) checks rate
+  tables rather than the exact resolver/configuration used by submission.
+- Missing 0% exemption data is only a warning, and
+  [MyDataPreflight](app/Console/Commands/MyDataPreflight.php) exits successfully
+  when warnings are the only findings.
+- Invoice lines snapshot vat_percent, not the selected myDATA VAT code. That is
+  insufficient if both 4% regimes must coexist in one tenant.
 
 **Required change**
 
-- Use one shared «fileable VAT» decision in audit, go-live and submission.
-- Treat a used/configured 3% rate without explicit code 9 as failure.
-- Treat a used 0% rate without an exemption reason as failure.
-- Add an explicit guided choice for the two official 4% categories (6 vs 10);
-  never guess between them.
-- Add tests proving that green preflight implies successful XML build.
+- Use one shared VAT resolver for configuration audit, preflight and XML build.
+- Seed 3% with explicit code 9 and correct the code 10 description.
+- Require an explicit 6-versus-10 choice; never infer it from 4%.
+- Make a used 0% row without a valid exemption reason a blocking error.
+- If both 4% regimes can coexist, snapshot the chosen VAT code per invoice line.
 
 **Acceptance**
 
-- Every seeded/selected VAT rate that passes `mydata:preflight` builds valid XML.
-- 3% without code 9 and 0% without exemption reason fail before invoice issue.
+- Every VAT setup that passes preflight builds the same expected XML code.
+- 3% without code 9 and 0% without a reason fail before issue.
+- Tests cover codes 6, 7, 9 and 10, including same-rate code distinction.
 
-### MYD-005 — Standard invoice XML loses pieces/kilos semantics
+### MYD-005 — Optional measurementUnit is omitted from ordinary invoice XML
 
-**Status:** OPEN · **Priority:** P1
+**Status:** OPEN · **Priority:** P2 · **Research:** CONFIRMED AS DATA-FIDELITY ENHANCEMENT 2026-08-30
 
-**Evidence**
+**Official finding**
 
-- Standard lookups correctly seed ΤΕΜ, ΥΠΗΡΕΣΙΑ, ΩΡΑ, ΜΗΝΑΣ, ΕΤΟΣ, ΚΙΛΟ,
-  ΛΙΤΡΟ, ΜΕΤΡΟ, Μ² and Μ³.
-- Standard invoices emit numeric `quantity` when required.
-- [`AadeInvoiceDocument`](app/Services/EInvoice/AadeInvoiceDocument.php)
-  intentionally omits `measurementUnit`; the catalogue value is free text.
-- Standalone delivery notes already use the official coded quantity types.
+For ordinary myDATA invoice lines, quantity and measurementUnit are optional.
+Their omission is therefore not by itself an XSD or filing-correctness defect.
+It does, however, lose the distinction between pieces, kilos, litres and metres.
 
-AADE allows quantity and measurement unit to be omitted on ordinary invoice rows,
-so this is not necessarily an XSD rejection. It is a loss of meaning: AADE can
-receive «10» without knowing whether it means pieces or kilos.
+**Repository evidence**
 
-**Required change**
-
-- Add an explicit catalogue-unit → AADE quantity-type mapping.
-- Emit `measurementUnit` when a safe mapping exists.
-- Do not invent a code for service/time units that do not map cleanly.
-
-### MYD-006 — Classification defaults are a baseline, not universal accounting truth
-
-**Status:** OPEN · **Priority:** P1
-
-**Evidence**
-
-- Goods types default to `category1_1` (merchandise/resale).
-- A producer/manufacturer can require `category1_2` (own products).
-- Credit types currently use service-first defaults and require operator review.
+- Standard lookups seed ΤΕΜ, ΚΙΛΟ, ΛΙΤΡΟ, ΜΕΤΡΟ, Μ², Μ³ and service/time units.
+- [InvoiceLine](app/Models/InvoiceLine.php) snapshots a free-text metric_unit.
+- [AadeInvoiceDocument](app/Services/EInvoice/AadeInvoiceDocument.php) omits
+  measurementUnit on ordinary invoices.
+- Delivery notes already use official coded quantity units.
 
 **Required change**
 
-- During onboarding ask the business activity/default income category.
-- Apply that choice to the seeded document types or present a mandatory review.
-- Keep all operator edits protected from future idempotent seeds.
+- Add a reviewed catalogue-unit to official-code mapping for pieces, kilos,
+  litres, metres, M2 and M3.
+- Emit measurementUnit when a safe mapping exists.
+- Continue omitting service/time units unless an official mapping is appropriate.
+
+**Acceptance**
+
+- Supported physical units retain their meaning in generated XML.
+- Unsupported semantic units are omitted deliberately and tested.
+
+### MYD-006 — Classification defaults need a business policy
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED AS ONBOARDING/POLICY GAP 2026-08-30
+
+**Official finding**
+
+AADE income categories distinguish category1_1 for merchandise/resale,
+category1_2 for own products and category1_3 for services. There is no single
+default that is correct for every business.
+
+**Repository evidence**
+
+- Goods document types default to category1_1.
+- Product categories for Services, Merchandise and Products are seeded, but their
+  classification override fields are empty.
+- Per-category overrides exist, so the application can represent a mixed business
+  only after operator configuration.
+- Credit defaults are service-first, while a correlated credit should normally
+  inherit the original transaction/line classification.
+
+**Required change**
+
+- During onboarding require reseller, manufacturer, services or mixed selection.
+- Apply or review category defaults accordingly; mixed businesses must configure
+  per-category mappings.
+- Make correlated credits inherit classifications from the original document or
+  credited lines instead of relying on a generic credit-type default.
+
+**Acceptance**
+
+- Go-live cannot be green until the classification policy is selected/reviewed.
+- Tests cover reseller, own-product, services and correlated-credit cases.
+
+### MYD-007 — VAT exemption reasons are wrong or too global
+
+**Status:** OPEN · **Priority:** P0 · **Research:** NEW, CONFIRMED 2026-08-30
+
+**Official finding**
+
+Under the current VAT Code and myDATA exemption table:
+
+| Scenario | Expected basis |
+|---|---|
+| Export of goods outside the EU | Reason 8 / article 29 |
+| Intra-community supply of goods | Reason 14 / article 33 |
+| Small-business exemption | Reason 15 / article 44 |
+| Domestic reverse-charge cases | Reason 16 / article 45 |
+
+Cross-border services need case-specific place-of-supply analysis; they must not
+blindly inherit the goods-supply reason.
+
+**Repository evidence**
+
+- [Codes](app/Support/MyData/Codes.php) defines the intra-community exemption
+  constant as reason 16.
+- [ReverseCharge](app/Support/MyData/ReverseCharge.php),
+  [InvoiceForm](app/Filament/Resources/Invoices/Schemas/InvoiceForm.php) and
+  [VatCategoryForm](app/Filament/Resources/VatCategories/Schemas/VatCategoryForm.php)
+  recommend reason 16/article 45 for a generic EU customer with a VAT ID.
+- VatCategoryForm recommends reason 15/article 44 for export.
+- [AadeInvoiceDocument::resolveVatExemptionCategory](app/Services/EInvoice/AadeInvoiceDocument.php)
+  selects one unique tenant-wide 0% reason and applies it to all zero-rated lines.
+- [InvoiceLine](app/Models/InvoiceLine.php) snapshots vat_percent but not the
+  legally selected exemption reason.
+
+This can emit syntactically valid but legally wrong data. It also prevents one
+tenant from safely issuing, for example, both an intra-EU goods supply and a
+third-country export without global reconfiguration.
+
+**Required change**
+
+- Correct EU-goods guidance to reason 14/article 33 and export-goods guidance to
+  reason 8/article 29.
+- Keep reason 16 only for applicable domestic reverse-charge cases.
+- Do not auto-assign a goods exemption to cross-border services.
+- Model and snapshot the exemption reason per VAT selection/invoice line, with
+  controlled defaults and operator review.
+- Validate customer country, document type, goods/services nature and exemption
+  reason together before issue.
+
+**Acceptance**
+
+- Tests cover domestic reverse charge, EU goods supply, third-country goods
+  export, small-business exemption and cross-border services.
+- One invoice/tenant can represent different valid zero-VAT reasons without
+  editing a global setting between documents.
+- Preflight and submission use the same exemption resolver.
 
 ### SETUP-001 — No guided first-valid-invoice onboarding
 
@@ -830,3 +971,4 @@ These are not open issues:
 |---|---|---|
 | 2026-08-29 | Initial combined installer/myDATA/cron/dependency audit ledger | [`fe20e73`](https://github.com/chrismfz/ekdosi/commit/fe20e73dc259254698b4ed0390994a154d545fc8) |
 | 2026-08-29 | Added full updater integrity, rollback, queue and recovery audit | [`d2ca379`](https://github.com/chrismfz/ekdosi/commit/d2ca3792b4a0c37f4ed7c76d8829ce7c5226b181) |
+| 2026-08-30 | Re-researched MYD-001–MYD-006, corrected priorities/wording and added MYD-007 | Documentation-only audit |
