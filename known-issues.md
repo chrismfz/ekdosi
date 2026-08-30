@@ -52,6 +52,28 @@ Re-audit outcome:
 | MYD-006 | Confirmed as policy gap | P1 | No universal seed exists; onboarding must select/review the business policy |
 | MYD-007 | New confirmed issue | P0 | EU/export exemption hints and the global 0% reason model are unsafe |
 
+## Extended myDATA path audit — 2026-08-30
+
+This pass reviewed the paths outside the original installer/default audit:
+provider-issued credits, frozen legal snapshots, branch numbers, Digital Delivery
+Note issuance/lifecycle, inbound expense cancellation and VAT-picture aggregation.
+
+Only confirmed defects are listed. Possible future capabilities such as foreign
+currencies, reverse delivery notes, weighing and multi-classification splits were
+not promoted to issues without a currently exposed path that behaves incorrectly.
+
+| ID | Verdict | Priority | Confirmed impact |
+|---|---|---:|---|
+| MYD-008 | Confirmed | P0 | Provider-issued originals cannot be referenced by correlated credits |
+| MYD-009 | Confirmed | P0 | Customer edits can alter counterpart identity after the invoice snapshot |
+| MYD-010 | Confirmed | P0 | Branch businesses are always reported as establishment 0 |
+| MYD-011 | Confirmed | P0 | Foreign supplier/manual delivery recipients are reported as GR |
+| MYD-012 | Confirmed | P0 | 9.1 is selectable but no correlated MARK is transmitted |
+| MYD-013 | Confirmed | P1 | A non-UI caller can build RegisterTransfer without mandatory transportType |
+| MYD-014 | Confirmed | P1 | A cancelled supplier document can remain locally VALID indefinitely |
+| MYD-015 | Confirmed | P1 | 8.5 POS returns increase rather than reduce the VAT-picture totals |
+| MYD-016 | Confirmed | P1 | Bad delivery-unit data is changed to pieces instead of being rejected |
+
 ## Status and priority
 
 Statuses:
@@ -79,6 +101,15 @@ Priorities:
 | MYD-005 | P2 | OPEN | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
 | MYD-006 | P1 | OPEN | Classifications | Readiness does not require a business-specific classification policy |
 | MYD-007 | P0 | OPEN | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
+| MYD-008 | P0 | OPEN | Provider credits | Correlated credit cannot find a provider-issued original MARK |
+| MYD-009 | P0 | OPEN | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
+| MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
+| MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
+| MYD-012 | P0 | OPEN | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
+| MYD-013 | P1 | OPEN | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
+| MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
+| MYD-015 | P1 | OPEN | VAT picture | Type 8.5 POS return is added with a positive sign |
+| MYD-016 | P1 | OPEN | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
 | SETUP-003 | P1 | OPEN | Payment | Missing payment method silently becomes cash in XML |
@@ -362,6 +393,310 @@ third-country export without global reconfiguration.
 - One invoice/tenant can represent different valid zero-VAT reasons without
   editing a global setting between documents.
 - Preflight and submission use the same exemption resolver.
+
+### MYD-008 — Correlated provider credit cannot resolve the original MARK
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+A correlated credit type 5.1 carries the MARK of the original document in
+correlatedInvoices. Provider-issued documents still have an AADE MARK and must
+remain correctable through the same legal correlation.
+
+**Repository evidence**
+
+- [AadeInvoiceDocument::originalInsertMark](app/Services/EInvoice/AadeInvoiceDocument.php)
+  searches mydata_marks only where mydata_action is INSERT.
+- [GrProviderSubmitter](app/Services/EInvoice/GrProviderSubmitter.php) records a
+  successful provider issue as PROVIDER_INSERT.
+- GrProviderSubmitter uses the same AadeInvoiceDocument builder. Therefore a 5.1
+  credit against a provider-issued original throws no INSERT MARK before transport.
+- Delivery-note cancellation already demonstrates the intended cross-channel
+  pattern by accepting both INSERT and PROVIDER_INSERT.
+
+**Required change**
+
+- Resolve the original filing MARK from both INSERT and PROVIDER_INSERT.
+- Require that the MARK belongs to the same tenant and to a successful issue row.
+- Keep one shared resolver for direct and provider correction flows.
+
+**Acceptance**
+
+- A 5.1 credit correlates successfully to both a direct-issued and provider-issued
+  original.
+- Tests prove that a rejected/failed provider attempt is never accepted as the
+  original MARK.
+
+### MYD-009 — myDATA counterpart identity ignores frozen invoice fields
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+PartyType requires the VAT number and country of the legal counterpart. The
+invoice model intentionally snapshots vat_no, company_name, country and address
+so later customer edits cannot change an issued document.
+
+**Repository evidence**
+
+- [Invoice](app/Models/Invoice.php) documents the party columns as legally frozen
+  issue-time snapshots.
+- [AadeInvoiceDocument::buildCounterpart](app/Services/EInvoice/AadeInvoiceDocument.php)
+  reads the VAT number from customer.afm, not invoice.vat_no.
+- For a foreign counterpart it also reads customer.name, not invoice.company_name.
+- Country and address prefer the snapshot, producing a mixed identity assembled
+  partly from frozen data and partly from the current customer row.
+- [IssueCreditNote](app/Actions/IssueCreditNote.php) copies the original snapshot,
+  but the builder can still replace its AFM/name with today's customer values.
+
+**Required change**
+
+- Build the legal counterpart entirely from the invoice snapshot after issue.
+- Permit a live-customer fallback only for a clearly identified legacy row whose
+  snapshot is blank, and record that fallback.
+- Validate that snapshot AFM, country and foreign name/address form one coherent
+  party before submission.
+
+**Acceptance**
+
+- Editing a customer after invoice/credit creation does not change preview XML.
+- A migration/backfill or explicit blocker handles older rows with blank snapshots.
+
+### MYD-010 — All filings hard-code branch 0
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+AADE PartyType requires branch as the establishment number. Zero is correct only
+when the issuer establishment is the registered head office or no branch exists.
+
+**Repository evidence**
+
+- [AadeInvoiceDocument](app/Services/EInvoice/AadeInvoiceDocument.php) calls
+  setBranch(0) for both issuer and counterpart.
+- [DeliveryNoteSubmitter](app/Services/Delivery/DeliveryNoteSubmitter.php) does the
+  same for delivery issuer and recipient.
+- [Company](app/Models/Company.php), Invoice and DeliveryNote have no frozen
+  issuer-branch field for the actual issuing establishment.
+- DeliveryNote has startShippingBranch/completeShippingBranch, but those fields
+  describe a different loading/delivery establishment and do not replace the
+  PartyType branch of the issuer/recipient.
+
+**Required change**
+
+- Model the tenant issuing establishment and snapshot it per legal document.
+- Model counterpart branch where the transaction requires it.
+- Default to zero only after an explicit head-office/no-branch choice.
+- Add a go-live warning or blocker when the operator declares branches but no
+  document branch policy exists.
+
+**Acceptance**
+
+- Head-office documents file branch 0.
+- A configured branch document files its real registry establishment number and
+  keeps that value frozen after issue.
+
+### MYD-011 — Foreign supplier/manual delivery recipient is filed as GR
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+PartyType country must be a two-character ISO 3166 code and must describe the
+actual recipient.
+
+**Repository evidence**
+
+- [DeliveryNoteForm](app/Filament/Resources/DeliveryNotes/Schemas/DeliveryNoteForm.php)
+  can select either a customer or supplier and can also accept a manual recipient.
+- It snapshots recipient_afm, recipient_name and delivery address, but has no
+  recipient-country field.
+- A supplier selection deliberately leaves customer_id null.
+- [DeliveryNoteSubmitter::buildCounterpart](app/Services/Delivery/DeliveryNoteSubmitter.php)
+  derives country only from note.customer.country and otherwise defaults to GR.
+- Therefore every supplier/manual foreign recipient is serialized as GR. The
+  delivery normalizer also lacks the EL-to-GR and UK-to-GB aliases used by the
+  monetary invoice builder.
+
+**Required change**
+
+- Add and freeze recipient_country on the delivery note.
+- Populate it from either customer, supplier or manual operator input.
+- Use one shared ISO normalizer across invoice and delivery payloads.
+- Refuse an absent/unrecognized country instead of defaulting an external party
+  to Greece. Reserve a deliberate GR default only for verified internal movement.
+
+**Acceptance**
+
+- Customer, supplier, manual and internal-movement recipient scenarios serialize
+  the expected ISO country.
+- Tests cover GR/EL, EU, non-EU and UK/GB aliases.
+
+### MYD-012 — Seeded correlated delivery type 9.1 has no correlation model
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+AADE defines 9.1 as a correlated delivery note. The invoice header field
+correlatedInvoices carries the related document MARK values.
+
+**Repository evidence**
+
+- The standard seed exposes 9.1 and
+  [DeliveryNoteForm::deliveryTypeOptions](app/Filament/Resources/DeliveryNotes/Schemas/DeliveryNoteForm.php)
+  offers every tenant 9.x type.
+- DeliveryNote has an optional invoice_id link, but no explicit list of related
+  AADE MARKs.
+- [DeliveryNoteSubmitter::buildAadeDeliveryNote](app/Services/Delivery/DeliveryNoteSubmitter.php)
+  treats 9.1, 9.2 and 9.3 alike and never calls addCorrelatedInvoice.
+- An operator can therefore choose a document explicitly labelled correlated
+  without selecting or transmitting the correlation.
+
+**Required change**
+
+- Require one or more valid related MARKs for 9.1 and emit correlatedInvoices.
+- Define whether invoice_id is merely stock dedup metadata or an allowed source
+  of the correlation; do not infer silently.
+- Hide 9.1 until the required selection and validation exist.
+
+**Acceptance**
+
+- 9.1 cannot be issued without a valid same-tenant correlation.
+- Preview XML contains the selected MARKs; ordinary 9.3 remains uncorrelated.
+
+### MYD-013 — RegisterTransfer can omit mandatory transportType
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+Digital Delivery Note v2.0.1 marks vehicleNumber, transportType and
+carrierVatNumber as mandatory in TransportDetailType. transportType accepts 1–7;
+vehicleNumber is mandatory when transportType is not 7.
+
+**Repository evidence**
+
+- The Filament form correctly requires transport_type.
+- [DeliveryLifecycleService::registerTransfer](app/Services/Delivery/DeliveryLifecycleService.php)
+  nevertheless treats it as optional and only emits it when a valid enum happens
+  to be present.
+- A console/API/imported record can therefore reach the service without the
+  mandatory field and receive an avoidable AADE rejection.
+- An invalid value is omitted rather than rejected with an actionable local error.
+
+**Required change**
+
+- Make transportType a service-level required enum.
+- Validate vehicle rules against the selected type, including type 7.
+- Keep the UI requirement, but do not rely on UI validation as the legal gate.
+
+**Acceptance**
+
+- Every caller fails locally on missing/invalid transportType.
+- Valid types 1–7 produce the required payload and have lifecycle tests.
+
+### MYD-014 — Expense cancellations are detected but cannot be applied
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+RequestDocs returns documents, classifications and cancellations submitted by
+other users. A supplier cancellation is therefore part of the authoritative
+inbound state.
+
+**Repository evidence**
+
+- [ExpenseReconciler](app/Services/MyData/ExpenseReconciler.php) correctly folds
+  cancelledByMark and cancelledInvoicesDoc and reports a stateMismatch.
+- [ExpenseImporter](app/Services/MyData/ExpenseImporter.php) skips any existing
+  MARK, including an existing VALID expense that the supplier later cancelled.
+- [MyDataConsoleExpenses](app/Filament/Pages/MyDataConsoleExpenses.php) can import
+  missing documents but provides no operator action equivalent to
+  SyncInvoiceStateFromAade for an existing expense.
+- myDATA-sourced expenses are otherwise treated as read-only, so the mismatch can
+  remain indefinitely.
+
+**Required change**
+
+- Add an explicit audited expense-state sync from AADE.
+- Persist cancelled_by_mark and a forensic ExpenseMark state-sync row.
+- Exclude locally CANCELLED expenses consistently from local accounting views.
+- Consider safe scheduled auto-sync only after the operator flow is proven.
+
+**Acceptance**
+
+- A supplier cancellation changes an existing local expense from VALID to
+  CANCELLED without re-importing or duplicating it.
+- Re-running reconciliation moves the row from mismatch to matched.
+
+### MYD-015 — POS return type 8.5 increases the VAT-picture totals
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+AADE type 8.5 is Απόδειξη Επιστροφής POS, the return counterpart of type 8.4.
+Its economic direction is a return, not additional collection.
+
+**Repository evidence**
+
+- [Codes::INCOME_TYPE_PREFIXES](app/Support/MyData/Codes.php) classifies every
+  8.x document as income.
+- [Codes::CREDIT_NOTE_TYPES](app/Support/MyData/Codes.php) does not include 8.5,
+  so documentSign returns +1.
+- [MyDataVatAggregator](app/Services/MyData/MyDataVatAggregator.php) adds sign
+  times net/VAT/gross for every income type.
+- Consequently a positive-magnitude 8.5 returned by RequestTransmittedDocs
+  increases the displayed output totals instead of reducing them.
+
+**Required change**
+
+- Give 8.5 the correct negative reporting sign.
+- Replace prefix-only 8.x assumptions with an explicit reviewed policy for
+  8.1, 8.2, 8.4, 8.5 and 8.6.
+- Add fixture tests containing an 8.4 collection, 8.5 return and 8.6 order so
+  payment/order documents cannot distort sales totals.
+
+**Acceptance**
+
+- A 100-euro 8.4 followed by a 40-euro 8.5 contributes net 60 euros to the
+  relevant displayed bucket, never 140.
+- 8.6 zero-value orders do not create revenue.
+
+### MYD-016 — Delivery units silently become pieces
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+measurementUnit is a coded legal quantity meaning: pieces, kilos, litres, metres,
+square metres, cubic metres or other pieces. Substituting one code for another
+changes the meaning of the movement line.
+
+**Repository evidence**
+
+- The delivery form offers the official 1–7 set.
+- [DeliveryNoteSubmitter::buildAadeDeliveryNote](app/Services/Delivery/DeliveryNoteSubmitter.php)
+  defaults a missing unit to 1 and clamps every out-of-range value to 1.
+- Thus a bad/imported value intended as kilos or another unit can be filed as
+  pieces without an error or audit indication.
+
+**Required change**
+
+- Require an explicit valid 1–7 unit at the service boundary.
+- Default to pieces only when a newly-created UI line visibly starts as pieces,
+  not as a repair for persisted invalid data.
+- For unit 7, implement and validate the accompanying other-unit quantity/title
+  fields before offering it where required.
+
+**Acceptance**
+
+- Missing/out-of-range persisted units block submission with an actionable error.
+- Each supported code survives preview/submission unchanged.
 
 ### SETUP-001 — No guided first-valid-invoice onboarding
 
@@ -972,3 +1307,4 @@ These are not open issues:
 | 2026-08-29 | Initial combined installer/myDATA/cron/dependency audit ledger | [`fe20e73`](https://github.com/chrismfz/ekdosi/commit/fe20e73dc259254698b4ed0390994a154d545fc8) |
 | 2026-08-29 | Added full updater integrity, rollback, queue and recovery audit | [`d2ca379`](https://github.com/chrismfz/ekdosi/commit/d2ca3792b4a0c37f4ed7c76d8829ce7c5226b181) |
 | 2026-08-30 | Re-researched MYD-001–MYD-006, corrected priorities/wording and added MYD-007 | Documentation-only audit |
+| 2026-08-30 | Extended myDATA audit: added MYD-008–MYD-016 | Documentation-only audit |
