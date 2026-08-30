@@ -89,6 +89,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `laravel/mcp`), so the flag only added a foot-gun. Delete the `.env` line; it is now ignored.
 
 ### Fixed
+- **`clean.sh` aborted every deploy that followed a nightly backup.** The step-1b "sudden
+  collapse" guard compared the new zip against *the previous zip in the folder*, but that folder
+  holds two kinds: the nightly cron backup (files+DB, ~44 MB) and clean.sh's own pre-deploy one
+  (`--only-db`, ~1.4 MB). A db-only backup next to a full one always read as a 97% collapse →
+  false-positive abort, leaving the deploy half-applied (new code, stale caches → 500s). The guard
+  now classifies each zip (db-only = nothing but `db-dumps/` entries) and compares against the newest
+  older backup **of the same kind**.
 - **Operator health disk probe reported the backups directory as "missing".** It hard-coded
   `storage/app/{name}` while spatie backups land under Laravel 11's `local` disk root
   (`storage/app/private/{name}`). Both `OperatorHealthReport::disk()` and `localBackups()` now resolve
