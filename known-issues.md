@@ -141,6 +141,28 @@ Audit outcome:
 | PROV-011 | Vendor verification required | P1 | Public InvoSign API contract is unversioned and contains a cancellation-endpoint inconsistency |
 | PROV-012 | Confirmed scope gap | P1 | Provider capability selection does not gate public-contract or All-in-one POS use |
 | PROV-013 | Confirmed test gap | P0 | There is no complete InvoSign sandbox acceptance/failure matrix |
+| PROV-014 | Confirmed | P0 | Issue is not single-flight and remains editable/cancellable while the provider call is in flight |
+| PROV-015 | Confirmed | P0 | Provider cancellation can be falsely accepted or remotely succeed while remaining locally VALID |
+| PROV-016 | Confirmed | P0 | Cancellation/correction uses mutable current provider and environment instead of the historical issue channel |
+| PROV-017 | Confirmed | P1 | Arbitrary or plaintext provider endpoints can receive the token and full invoice payload |
+| PROV-018 | Confirmed | P1 | Full-reversal actions fail after any earlier partial credit |
+| PROV-019 | Confirmed | P0 | An unfiled draft credit is treated as legal reversal and does not block the replacement invoice |
+
+### Provider hardening sweep — 2026-08-30
+
+This additional pass audited concurrency, the post-response persistence window,
+cancellation integrity, channel/environment cutover, endpoint trust and the
+provider correction UI at commit
+[`eb158fa6aa67905b511bc580d5362b4579feb9d0`](https://github.com/chrismfz/ekdosi/commit/eb158fa6aa67905b511bc580d5362b4579feb9d0).
+It also re-checked the current InvoSign environment, status and cancellation
+pages. The provider documents separate per-customer production/demo base URLs
+and tokens; status lookup is by invoice coordinates; a successful delivery-note
+cancellation example includes a distinct `cancellationMark`.
+
+The sweep found six additional confirmed defects, PROV-014–PROV-019. They are
+code-path findings, not assumptions about InvoSign behavior. Where recovery
+requires a provider cancellation-status contract that is not public, the required
+implementation remains conditional on written vendor confirmation.
 
 ### Required correction and credit compatibility matrix
 
@@ -184,6 +206,15 @@ local PDF and local persisted metadata for every row.
 | Wrong/expired token | Authenticated preflight fails before a real invoice |
 | Header + line discounts | InvoSign document, AADE XML and Ekdosi totals are cent-identical |
 | Provider→AADE Failure_2 | Correct provider state/indication and eventual MARK adoption |
+| Two simultaneous issue requests | One durable attempt wins; only one provider POST and one legal document exist |
+| Edit/local-cancel during issue | Mutation is blocked while the attempt is active; the stored local snapshot remains byte-consistent with the sent payload |
+| DB failure after provider success | The pre-existing attempt remains in doubt and is reconciled; retry never performs a blind second POST |
+| Cancel response lost | Local state remains cancellation-pending until provider/AADE evidence resolves it; no blind double-cancel |
+| Cancel `Success` without `cancellationMark` | Treated as ambiguous/invalid, never as terminal local cancellation |
+| Provider or sandbox/production switch | Historical issue, cancel and correction continue through the explicitly approved original channel policy |
+| Partial credit followed by full reversal | Only remaining quantities are credited; no over-credit exception or duplicate quantity |
+| Draft credit plus replacement | Original is not labeled legally reversed and replacement cannot file until the credit is provider-VALID |
+| HTTP, private-network or unapproved provider endpoint | Configuration/preflight blocks submission before token or invoice data leave Ekdosi |
 | Quota near zero/exhausted | Warning and hard failure are visible before business interruption |
 | Provider document download fails | Filing stays VALID; artifact becomes pending and retries without re-filing |
 | Provider document changes remotely | Hash mismatch raises an audit alert; original local artifact is not overwritten |
@@ -242,6 +273,12 @@ Priorities:
 | PROV-011 | P1 | VERIFY | Provider API | Version support and contradictory cancellation example need written confirmation |
 | PROV-012 | P1 | OPEN | Provider scope | Public-contract/All-in-one POS capabilities are not gated from the AADE register |
 | PROV-013 | P0 | OPEN | Provider tests | Required InvoSign sandbox success/failure matrix has not been completed |
+| PROV-014 | P0 | OPEN | Provider concurrency | Issue is not single-flight and is not serialized against document mutation |
+| PROV-015 | P0 | OPEN | Provider cancellation | Missing/lost cancellation evidence can create a false or split-brain terminal state |
+| PROV-016 | P0 | OPEN | Provider cutover | Historical issue channel/environment is not frozen or used for later actions |
+| PROV-017 | P1 | OPEN | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
+| PROV-018 | P1 | OPEN | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
+| PROV-019 | P0 | OPEN | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
 | STOCK-001 | P1 | OPEN | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
@@ -1311,6 +1348,241 @@ report. It must never run against production by default and must cleanly label
 which cases require controlled provider-side fault injection rather than faking
 the HTTP response locally.
 
+### PROV-014 — Provider issue is not a single-flight state transition
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Repository evidence**
+
+- [GrProviderSubmitter::submit](app/Services/EInvoice/GrProviderSubmitter.php)
+  checks `mydata_state` before the network call, but it does not claim the invoice
+  with a row lock, compare-and-set state, distributed lock or durable attempt row.
+- [DeliveryNoteSubmitter::submit](app/Services/Delivery/DeliveryNoteSubmitter.php)
+  has the same check-then-POST shape.
+- Success persistence de-duplicates only an already-known identical MARK. There
+  is no database uniqueness rule preventing two different provider MARKs for one
+  local document, and the provider POSTs have already happened before that check.
+- The document remains locally editable and locally cancellable while the remote
+  request is in flight. A second operator/request can therefore change lines,
+  cancel locally or submit the same numbered document before the first response
+  commits.
+- A provider success followed by a database error is another unclaimed window:
+  local state remains unfiled, so the next attempt POSTs first and reconciles only
+  if that new POST throws.
+
+**Risk**
+
+Two workers/double-clicks can create two legal provider documents. A concurrent
+edit or local cancellation can also leave Ekdosi showing content/status different
+from the exact payload that received the MARK.
+
+**Required change**
+
+- Introduce a durable issue attempt/state machine
+  (`ready → issuing → in_doubt|valid|rejected`) with immutable payload hash,
+  issue coordinates, provider/environment profile and attempt ID recorded
+  **before** network I/O.
+- Atomically claim one active attempt per local document and environment. Do not
+  hold a database transaction open during the HTTP call.
+- Block document/type/series edits, local cancellation, channel changes and every
+  other submitter while `issuing` or `in_doubt`.
+- Finalize with compare-and-set semantics and database constraints; a stale
+  response must not overwrite a newer terminal state.
+- If the provider supports a client idempotency key, bind it to the durable
+  attempt. It complements rather than replaces the local claim/reconciliation.
+- Apply the same mechanism to invoices and delivery notes.
+
+**Acceptance**
+
+Parallel-process tests prove one outbound POST, one legal MARK and one immutable
+local snapshot. Separate tests cover edit/cancel during the call and database
+failure after a provider success.
+
+### PROV-015 — Provider cancellation is neither evidence-strict nor recoverable
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Repository evidence**
+
+- [InvoSignTransport::parse](app/Services/EInvoice/Transports/InvoSignTransport.php)
+  returns a successful result for a cancellation `statusCode=Success` even when
+  `cancellationMark` is empty.
+- Both [GrProviderSubmitter::cancel](app/Services/EInvoice/GrProviderSubmitter.php)
+  and
+  [DeliveryLifecycleService::cancelViaProvider](app/Services/Delivery/DeliveryLifecycleService.php)
+  substitute the original issue MARK when the cancellation MARK is absent, then
+  persist a terminal cancellation and mark the local document `CANCELLED`.
+- A timeout/connection loss writes a failure row and leaves the document
+  `VALID`; there is no durable cancellation-pending state or status recovery.
+  The provider may nevertheless have completed the cancellation.
+- The current InvoSign guide's successful example includes a distinct
+  `cancellationMark`, but it does not document a dedicated cancellation-status
+  recovery call. This part needs a written provider contract or an authoritative
+  AADE read-path reconciliation.
+
+**Risk**
+
+Ekdosi can falsely declare a document cancelled without cancellation evidence, or
+show it VALID after the provider has cancelled it. A retry can then double-cancel
+or become permanently rejected while the two systems remain split-brain.
+
+**Required change**
+
+- Persist a cancellation attempt before the POST and use
+  `cancel_pending|cancelled|cancel_rejected|cancel_in_doubt` states.
+- Require a non-empty, distinct cancellation MARK for a normal success. Never
+  store the issue MARK as cancellation evidence.
+- Treat lost/malformed responses and `Success` without a cancellation MARK as
+  ambiguous; block a new cancel until provider/AADE reconciliation resolves it.
+- Route recovery through a vendor-supported cancellation lookup or authoritative
+  AADE status, retaining raw evidence and an audited manual-resolution fallback.
+- Make terminal cancellation idempotent and single-flight across invoice and
+  delivery-note paths.
+
+**Acceptance**
+
+Tests cover lost response after remote success, delayed visibility, duplicate
+cancel clicks, `Success` without `cancellationMark` and adoption of an already
+cancelled remote document.
+
+### PROV-016 — Historical provider and environment identity is mutable
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+A successful provider audit row stores `provider_key`, but not the issuing
+environment, canonical endpoint identity, provider licence snapshot, credential
+identity/version or full issue-channel profile.
+[EInvoiceSubmitterFactory](app/Services/EInvoiceSubmitterFactory.php),
+[GrProviderSubmitter::cancel](app/Services/EInvoice/GrProviderSubmitter.php) and
+[DeliveryLifecycleService::cancelViaProvider](app/Services/Delivery/DeliveryLifecycleService.php)
+resolve the tenant's **current** provider, mode, endpoint and token when the later
+operation runs. Provider cancellation lookup also accepts historical direct
+`INSERT` rows and sends their MARK to the current provider.
+
+The same drift applies to credits/reissues: their submitter is selected from the
+company at action time, not from an explicit correction policy linked to the
+original provider filing.
+
+**Risk**
+
+After sandbox→production, direct-myDATA→provider or provider-A→provider-B
+cutover, a historical MARK can be sent to the wrong endpoint/credential owner.
+A correction may also be transmitted through a legally incompatible channel,
+while historical PDFs/metadata cannot prove the exact provider licence and
+environment used at issue.
+
+**Required change**
+
+- Freeze on every successful issue and attempt: channel, provider key/legal name,
+  sandbox/production, canonical endpoint ID/host, licence number/version,
+  non-secret credential key/version, branch and immutable issue coordinates.
+- Cancel through the historical issue channel. A direct `INSERT` follows the
+  direct-AADE rule; a provider MARK follows that provider/environment unless a
+  written migration procedure says otherwise.
+- Define and enforce the legal channel policy for correlated credits and
+  reissues. Do not silently inherit the current tenant dropdown.
+- Add an audited provider-cutover workflow with effective date, covered series/
+  branches, open attempts/documents and contract/declaration evidence.
+- Historical rendering must use the frozen snapshot, not current provider config.
+
+### PROV-017 — Provider base URL is an unrestricted data-exfiltration sink
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+Provider URL fields in
+[CompanyForm::providerCredentialFields](app/Filament/Resources/Companies/Schemas/CompanyForm.php)
+are length-limited strings only.
+[InvoSignTransport::resolve](app/Services/EInvoice/Transports/InvoSignTransport.php)
+uses the saved value directly and POSTs the provider token plus the complete
+invoice XML. There is no HTTPS requirement, approved-host check or URL-shape
+validation. [ProviderPreflight](app/Services/EInvoice/ProviderPreflight.php)
+checks only that the field is non-empty.
+
+A typo such as `http://...`, a copied URL containing userinfo/query data, or a
+compromised/misconfigured operator value can therefore disclose the provider
+token, issuer/customer data and legal payload or target internal network
+services.
+
+**Required change**
+
+- Prefer provider-managed endpoint profiles over arbitrary free-text URLs.
+  InvoSign uses per-customer URLs, so validate them against a vendor-confirmed
+  HTTPS domain/port pattern or an explicitly approved endpoint record.
+- Reject HTTP, userinfo, query/fragment components, loopback/private/link-local
+  destinations and unexpected ports; resolve and re-check DNS safely.
+- Do not follow cross-host/scheme redirects with credentials.
+- Add URL validation in the form, service/transport and provider preflight;
+  service-level enforcement must protect CLI/API callers.
+- Keep tokens out of logs/exceptions and add tests proving no request is sent for
+  every blocked URL class.
+
+### PROV-018 — Full-reversal actions break after a partial credit
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+Both `cancel_via_credit` in
+[ViewInvoice](app/Filament/Resources/Invoices/Pages/ViewInvoice.php) and
+[StornoAndReissue](app/Actions/StornoAndReissue.php) select each original line's
+full quantity. Their UI remains visible after a partial credit.
+[IssueCreditNote](app/Actions/IssueCreditNote.php) correctly subtracts already
+returned quantity and rejects a request above the remainder. The advertised
+“credit the rest”/storno path therefore fails as soon as any line has been
+partially credited.
+
+Build the reversal selection from locked, live **remaining quantities**, skip
+zero-remainder lines and fail clearly only when no remainder exists. Reuse one
+domain service for both actions and recompute under the existing original-row
+lock. Tests must cover one partially credited line, mixed full/partial lines,
+cancelled prior credits and two concurrent remainder reversals.
+
+### PROV-019 — Draft credit is confused with legal provider reversal
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Repository evidence**
+
+- Provider `cancel_via_credit` and `storno_and_reissue` default
+  `submit_now=false`; they create a local draft credit without a provider MARK.
+- [InvoiceBalance::creditedTotal](app/Services/InvoiceBalance.php) deliberately
+  counts correlated draft credits as live local reductions.
+- [Invoice::isFullyCredited](app/Models/Invoice.php) then drives the
+  “Ακυρώθηκε με πιστωτικό” presentation, hides remaining correction actions and
+  exposes `reissue_only`.
+- `storno_and_reissue` creates the replacement draft in the same local
+  transaction. If optional credit submission later fails, that replacement still
+  exists and can be filed normally; no dependency requires the credit to become
+  provider-`VALID`.
+- Success notifications use “Εκδόθηκε/Έγινε ακύρωση” even when the credit remains
+  an unsubmitted draft.
+
+**Risk**
+
+The operator can believe the original was legally reversed and send a replacement
+while the provider/AADE still sees only the original. This produces duplicate
+turnover/VAT exposure and a misleading audit/UI state.
+
+**Required change**
+
+- Separate local commercial balance allocation from legal provider correction
+  state. A draft credit may reserve quantities but must not label the original
+  legally reversed.
+- Introduce a correction bundle/state machine linking original, credit and
+  replacement. Provider cancellation wording becomes true only after the credit
+  is provider-`VALID` with its own evidence.
+- Lock replacement submission until the required credit is `VALID`; surface
+  `credit_draft|credit_pending|credit_failed|reversed|replacement_ready`.
+- If credit submission fails or is in doubt, preserve both drafts but block the
+  replacement and guide recovery. Never auto-delete legal/audit records.
+- Keep off/PDF-only tenant accounting semantics explicit rather than weakening
+  their deliberate draft-credit behavior globally.
+
+**Acceptance**
+
+Default-`submit_now=false`, failed credit submission and ambiguous credit
+response all leave the original visibly not legally reversed and make replacement
+filing impossible. A provider-VALID compatible credit unlocks the replacement
+exactly once.
+
 ### Provider path verified baseline — do not regress
 
 - InvoSign is currently licensed by AADE and publicly advertises ordinary B2B/B2C
@@ -1974,3 +2246,4 @@ These are not open issues:
 | 2026-08-30 | Extended myDATA audit: added MYD-008–MYD-016 | Documentation-only audit |
 | 2026-08-30 | Final myDATA/lifecycle pass: added MYD-017–MYD-020 and STOCK-001 | Documentation-only audit |
 | 2026-08-30 | Added Provider/InvoSign/ΥΠΑΗΕΣ audit, compatibility matrices and PROV-001–PROV-013 | Documentation-only audit |
+| 2026-08-30 | Provider hardening sweep: added PROV-014–PROV-019 and expanded the sandbox matrix | Documentation-only audit |
