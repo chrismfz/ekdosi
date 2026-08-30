@@ -145,19 +145,19 @@ Audit outcome:
 ### Required correction and credit compatibility matrix
 
 The UI and service layer must enforce this policy; a free list of every
-\`is_credit=true\` type is not sufficient.
+`is_credit=true` type is not sufficient.
 
 | Original/provider document | Allowed correction/reversal | Required relationship | Explicitly disallow in that flow |
 |---|---|---|---|
-| Wholesale sale \`1.x\` / service \`2.x\` | \`5.1\` correlated credit | Original provider MARK in \`correlatedInvoices\` | \`5.2\` as a fake “cancellation” |
-| Genuine non-document-specific turnover credit | \`5.2\` non-correlated credit | No original MARK required | Presenting it as reversal of one selected invoice |
-| Retail \`11.x\` | \`11.4\` retail credit | Preserve the retail/provider correction semantics confirmed in sandbox | Wholesale \`5.1/5.2\` selected only because \`is_credit=true\` |
-| Delivery note \`9.3\` | InvoSign \`CancelDeliveryNote\` | Existing MARK; persist returned cancellation MARK | Ordinary invoice cancellation endpoint |
+| Wholesale sale `1.x` / service `2.x` | `5.1` correlated credit | Original provider MARK in `correlatedInvoices` | `5.2` as a fake “cancellation” |
+| Genuine non-document-specific turnover credit | `5.2` non-correlated credit | No original MARK required | Presenting it as reversal of one selected invoice |
+| Retail `11.x` | `11.4` retail credit | Preserve the retail/provider correction semantics confirmed in sandbox | Wholesale `5.1/5.2` selected only because `is_credit=true` |
+| Delivery note `9.3` | InvoSign `CancelDeliveryNote` | Existing MARK; persist returned cancellation MARK | Ordinary invoice cancellation endpoint |
 | Wrong provider credit note | No blind cancel/re-credit shortcut | Accounting/provider-approved compensating flow | Pretending a provider credit can be deleted or locally cancelled |
-| Any provider-issued value document | Credit/correction, never local-only cancellation | Original and correction both retain their own MARK/UID/authentication evidence | Changing only \`local_status\` |
+| Any provider-issued value document | Credit/correction, never local-only cancellation | Original and correction both retain their own MARK/UID/authentication evidence | Changing only `local_status` |
 
 For provider originals, MYD-008 must be fixed first: original MARK lookup must
-accept both \`INSERT\` and \`PROVIDER_INSERT\`, remain tenant-scoped and select a
+accept both `INSERT` and `PROVIDER_INSERT`, remain tenant-scoped and select a
 successful issue row only.
 
 ### Mandatory InvoSign sandbox acceptance matrix
@@ -168,19 +168,19 @@ local PDF and local persisted metadata for every row.
 
 | Scenario | Required proof |
 |---|---|
-| \`1.1\` goods B2B | MARK, UID, authentication code, QR, provider document, matching amounts/classes |
-| \`2.1\` services B2B | Same evidence; quantity/unit rules remain valid |
-| \`11.1\` anonymous retail | Written/sandbox-confirmed counterpart-name/VAT convention |
-| \`11.2\` anonymous retail service | Same retail convention and provider delivery proof |
-| Full and partial \`5.1\` | Original provider MARK appears in correlation; balances and quantities reconcile |
-| \`5.2\` | Available only through an explicitly non-correlated workflow |
-| \`11.4\` | Retail correction accepted and linked/presented correctly |
-| \`9.3\` issue | Provider MARK/UID/QR and delivery data match the portal |
-| \`9.3\` cancel | Correct endpoint and persisted cancellation MARK; remote/local states agree |
+| `1.1` goods B2B | MARK, UID, authentication code, QR, provider document, matching amounts/classes |
+| `2.1` services B2B | Same evidence; quantity/unit rules remain valid |
+| `11.1` anonymous retail | Written/sandbox-confirmed counterpart-name/VAT convention |
+| `11.2` anonymous retail service | Same retail convention and provider delivery proof |
+| Full and partial `5.1` | Original provider MARK appears in correlation; balances and quantities reconcile |
+| `5.2` | Available only through an explicitly non-correlated workflow |
+| `11.4` | Retail correction accepted and linked/presented correctly |
+| `9.3` issue | Provider MARK/UID/QR and delivery data match the portal |
+| `9.3` cancel | Correct endpoint and persisted cancellation MARK; remote/local states agree |
 | Timeout after provider accepts | Status lookup adopts the existing MARK; a second issue is impossible |
 | Delayed status visibility | Durable in-doubt state blocks re-send until bounded recovery completes |
 | HTTP 200 malformed XML | Treated as ambiguous, not deterministic rejection |
-| \`Success\` without MARK | Status recovery runs; invoice remains blocked from blind retry |
+| `Success` without MARK | Status recovery runs; invoice remains blocked from blind retry |
 | Wrong/expired token | Authenticated preflight fails before a real invoice |
 | Header + line discounts | InvoSign document, AADE XML and Ekdosi totals are cent-identical |
 | Provider→AADE Failure_2 | Correct provider state/indication and eventual MARK adoption |
@@ -1001,11 +1001,11 @@ Fee and §8.6 contains categories 1=1.2%, 2=2.4%, 3=3.6%, 4=other amount.
 **Repository evidence**
 
 - [InvoSignTransport::parse](app/Services/EInvoice/Transports/InvoSignTransport.php)
-  returns \`ProviderResult::failed()\` for unreadable HTTP-200 XML and for
-  \`Success\` without a MARK.
+  returns `ProviderResult::failed()` for unreadable HTTP-200 XML and for
+  `Success` without a MARK.
 - [GrProviderSubmitter::submit](app/Services/EInvoice/GrProviderSubmitter.php)
   invokes status recovery only from the exception path. A failed result is
-  recorded as \`PROVIDER_REJECTED\` without status lookup, despite comments that
+  recorded as `PROVIDER_REJECTED` without status lookup, despite comments that
   imply recovery will run.
 - A thrown timeout/non-2xx performs only one immediate lookup. If InvoSign status
   is eventually consistent and does not yet expose the filing, no durable
@@ -1023,9 +1023,9 @@ or cannot parse the response. A later click can create a second legal document.
 - Classify validation/auth rejections separately from ambiguous transport/protocol
   outcomes.
 - Treat timeout, connection loss, non-2xx after send, malformed 2xx and
-  \`Success\` without MARK as **in doubt**.
+  `Success` without MARK as **in doubt**.
 - Persist immutable issue coordinates, exact attempted payload, attempt ID and
-  \`provider_pending_since\`.
+  `provider_pending_since`.
 - Status-check with bounded retry/backoff and block every new send while pending.
 - Allow an explicit, audited operator resolution only after provider/portal
   evidence has been checked.
@@ -1042,9 +1042,9 @@ that exactly one provider document exists and Ekdosi adopts its MARK.
 **Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
 
 [DeliveryNoteSubmitter::submitViaProvider](app/Services/Delivery/DeliveryNoteSubmitter.php)
-records \`PROVIDER_FAILED\` and throws on every transport exception. It never calls
+records `PROVIDER_FAILED` and throws on every transport exception. It never calls
 InvoSign status and never leaves a durable pending/in-doubt lock. The transport
-interface exposes status only for \`Invoice\`, even though InvoSign identifies
+interface exposes status only for `Invoice`, even though InvoSign identifies
 documents using issuer VAT, branch, type, issue date, series and AA.
 
 **Required change**
@@ -1083,7 +1083,7 @@ provider. The issuer keeps an independent accounting-record retention duty.
 
 **Required local PDF behavior**
 
-When \`mydata_action=PROVIDER_INSERT\`, Ekdosi's PDF must visibly include:
+When `mydata_action=PROVIDER_INSERT`, Ekdosi's PDF must visibly include:
 
 - “Εκδόθηκε μέσω iNVO Sign” / provider legal and commercial name;
 - provider website;
@@ -1106,13 +1106,13 @@ After a successful MARK, Ekdosi must retrieve and privately retain the official
 provider document without turning a later download failure into a failed filing.
 Persist at minimum:
 
-- \`provider_key\`, provider legal/commercial name and licence number at issue;
+- `provider_key`, provider legal/commercial name and licence number at issue;
 - MARK, UID, authentication code and cancellation MARK where applicable;
 - QR/verification URL and a separate canonical document/download URL;
 - private storage path/object key, original filename and MIME type;
 - byte size, SHA-256, downloaded timestamp and last verified timestamp;
 - retrieval HTTP status/error, artifact state
-  (\`pending|stored|verify_mismatch|unavailable\`) and source response/audit row.
+  (`pending|stored|verify_mismatch|unavailable`) and source response/audit row.
 
 Security and retention requirements:
 
@@ -1156,10 +1156,10 @@ artifact or a provider-approved, fully compliant Ekdosi representation.
 **Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
 
 [ViewInvoice::creditTypes](app/Filament/Resources/Invoices/Pages/ViewInvoice.php)
-returns every tenant type with \`is_credit=true\`.
+returns every tenant type with `is_credit=true`.
 [IssueCreditNote](app/Actions/IssueCreditNote.php) checks only that flag. The UI
-can therefore describe a provider cancellation as correlated \`5.1\` while the
-operator selects non-correlated \`5.2\` or a retail credit.
+can therefore describe a provider cancellation as correlated `5.1` while the
+operator selects non-correlated `5.2` or a retail credit.
 
 Implement the compatibility matrix in this audit in one domain service used by
 UI and action-level validation. Default the only valid type when unambiguous;
@@ -1188,14 +1188,14 @@ production invoice merely to test credentials.
 
 **Status:** VERIFY · **Priority:** P0 for retail · **Research:** VENDOR/SANDBOX
 
-The public InvoSign guide marks \`CounterpartName\` and \`CounterpartVat\` as
+The public InvoSign guide marks `CounterpartName` and `CounterpartVat` as
 required. [InvoSignDocument::invoiceCounterpartFields](app/Services/EInvoice/Transports/InvoSignDocument.php)
 can emit both empty for anonymous 11.1/11.2 retail, while the AADE core correctly
 omits a retail counterpart. Delivery notes already use an explicit internal
 fallback, but invoices do not.
 
 Obtain InvoSign's written B2C convention and prove 11.1 and 11.2 in sandbox. Do
-not invent \`000000000\` for invoices unless the provider confirms it. Provider
+not invent `000000000` for invoices unless the provider confirms it. Provider
 production retail remains blocked until accepted examples and regression tests
 exist.
 
@@ -1204,8 +1204,8 @@ exist.
 **Status:** VERIFY · **Priority:** P1 · **Research:** VENDOR/SANDBOX
 
 [InvoSignDocument::appendLineFields](app/Services/EInvoice/Transports/InvoSignDocument.php)
-derives \`api_NetPriceBeforeDiscount\`, \`api_UnitPrice\` and
-\`api_DiscountValue\` from line fields. Canonical AADE totals can additionally
+derives `api_NetPriceBeforeDiscount`, `api_UnitPrice` and
+`api_DiscountValue` from line fields. Canonical AADE totals can additionally
 allocate a header discount. The InvoSign class itself calls these semantics
 best-effort and requires sandbox confirmation.
 
@@ -1235,8 +1235,8 @@ document update and exact-once MARK adoption.
 
 **Status:** OPEN · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
 
-InvoSign returns \`invoiceUid\`, \`receptionEmails\` and
-\`remaining_invoices\`. UID is parsed but not stored in a structured column; the
+InvoSign returns `invoiceUid`, `receptionEmails` and
+`remaining_invoices`. UID is parsed but not stored in a structured column; the
 other fields are ignored. Raw XML is useful forensic evidence but cannot drive
 alerts, filtering or a readable support workflow.
 
@@ -1268,8 +1268,8 @@ AADE verification unless a supported API actually proves it.
 
 The public guide has no clear version/changelog aligned with current AADE
 production v2.0.1. Its cancellation section names
-\`iNVOSign_CancelDeliveryNote.php\`, while the example request targets
-\`invoice_status.php\`. Ekdosi uses the named CancelDeliveryNote endpoint, which
+`iNVOSign_CancelDeliveryNote.php`, while the example request targets
+`invoice_status.php`. Ekdosi uses the named CancelDeliveryNote endpoint, which
 is the plausible path but must be confirmed.
 
 Request a versioned integration contract covering:
@@ -1321,11 +1321,11 @@ the HTTP response locally.
 - Successful issue stores MARK, authentication code and QR and marks the invoice
   VALID atomically with the audit row.
 - Normal provider value invoices are not sent to a generic AADE cancel endpoint.
-  The UI directs them to credit correction; \`CancelDeliveryNote\` is restricted
+  The UI directs them to credit correction; `CancelDeliveryNote` is restricted
   to the supported 9.3 delivery-note path.
 - 9.3 cancellation persists the returned cancellation MARK.
 - Provider responses are XML-parsed with network entity resolution disabled.
-- A duplicate \`PROVIDER_INSERT\` row with the same invoice/MARK is de-duplicated.
+- A duplicate `PROVIDER_INSERT` row with the same invoice/MARK is de-duplicated.
 - Provider payload preview exists without exposing the token.
 
 ### STOCK-001 — Document cancellation does not fully compensate stock
