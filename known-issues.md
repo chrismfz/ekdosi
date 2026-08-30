@@ -1,7 +1,7 @@
 # Known issues and readiness ledger
 
 This file is the working source of truth for installer, first-run setup, myDATA,
-scheduler/queue and production-readiness work. Keep completed entries in the file:
+scheduler/queue, Provider/ΥΠΑΗΕΣ and production-readiness work. Keep completed entries in the file:
 change their status to **DONE**, add the implementing commit/PR and record the date
 in the change log.
 
@@ -90,6 +90,105 @@ numeric tax type remains correct.
 | MYD-020 | Confirmed terminology debt | P2 | UI/docs still call Digital Transaction Fee “stamp duty” and cite shifted sections |
 | STOCK-001 | Confirmed | P1 | Delivery-note and credit-note cancellation can leave stock movements active |
 
+
+## Provider / InvoSign / ΥΠΑΗΕΣ audit — 2026-08-30
+
+This pass reviewed the full Ekdosi → InvoSign → AADE lifecycle: issue and
+authentication, MARK/UID/QR persistence, provider document delivery, ambiguous
+retries, credit notes, delivery-note cancellation, preflight, outage handling and
+the October 2026 operational deadline.
+
+Sources and current external baseline:
+
+- [AADE A.1112/2025 — current Provider/ΥΠΑΗΕΣ obligations](https://www.aade.gr/sites/default/files/2025-08/a1112_2025fek.pdf)
+- [AADE mandatory e-invoicing and Digital Delivery Note FAQ](https://www.aade.gr/ypohreotiki-ilektroniki-timologisi-psifiaka-parastatika-diakinisis-syhnes-erotiseis)
+- [AADE production technical specifications](https://www.aade.gr/mydata/tehnikes-prodiagrafes-ekdoseis-mydata)
+- [AADE licensed-provider register](https://www.aade.gr/mydata/adeiodotimena-logismika-parohon-ilektronikis-timologisis)
+- [InvoSign public API guide](https://invosign.gr/site/help_site/)
+- [InvoSign provider/product page](https://invosign.gr/)
+
+Current external facts, checked 2026-08-30:
+
+- iNVO Sign is listed by AADE as provider code **030**, licence
+  **2025_05_130GVSolutions_001_iNVO Sign_V1_07052025**, with zero penalty points.
+- The AADE register does not currently mark iNVO Sign for public-contract
+  e-invoicing or All-in-one Cash Register/POS. This does not by itself prevent
+  ordinary B2B/B2C use, but those two capabilities must not be implied by Ekdosi.
+- For the second mandatory-e-invoicing period, the effective date is 2026-10-01.
+  Parallel transition through 2026-12-31 is conditional on a timely declaration
+  with a start date no later than 2026-10-01.
+- The provider normally files the start declaration within ten days of the
+  contract start; the issuer has ten days to accept/reject it. If the provider
+  misses its window, the obligation passes to the issuer for a further ten days.
+- The provider retaining the documents does not remove the issuer's independent
+  accounting-record retention obligation.
+
+Audit outcome:
+
+| ID | Verdict | Priority | Confirmed impact |
+|---|---|---:|---|
+| MYD-008 | Confirmed cross-reference | P0 | A provider original cannot currently be used by correlated credit 5.1 |
+| PROV-001 | Confirmed | P0 | Ambiguous invoice replies can be treated as a safe rejection and then re-sent |
+| PROV-002 | Confirmed | P0 | Provider delivery-note timeouts have no status recovery at all |
+| PROV-003 | Confirmed | P0 | Ekdosi emails/prints a local PDF missing mandatory provider evidence |
+| PROV-004 | Confirmed | P0 | The credit UI allows incompatible 5.1/5.2/11.4 choices |
+| PROV-005 | Confirmed | P1 | Provider preflight can be green with invalid token or missing mandatory issuer fields |
+| PROV-006 | Sandbox/vendor verification required | P0 for retail | Anonymous retail may be rejected because InvoSign marks counterpart VAT/name mandatory |
+| PROV-007 | Sandbox/vendor verification required | P1 | InvoSign print-extension discount fields may diverge from canonical totals |
+| PROV-008 | Confirmed capability gap | P1 | Transmission Failure_1/2 and offline issue/recovery are not implemented |
+| PROV-009 | Confirmed | P2 | UID, provider delivery feedback and remaining quota are not structured operational data |
+| PROV-010 | Confirmed readiness gap | P0 | Contract/declaration/activation acceptance is not a go-live gate |
+| PROV-011 | Vendor verification required | P1 | Public InvoSign API contract is unversioned and contains a cancellation-endpoint inconsistency |
+| PROV-012 | Confirmed scope gap | P1 | Provider capability selection does not gate public-contract or All-in-one POS use |
+| PROV-013 | Confirmed test gap | P0 | There is no complete InvoSign sandbox acceptance/failure matrix |
+
+### Required correction and credit compatibility matrix
+
+The UI and service layer must enforce this policy; a free list of every
+\`is_credit=true\` type is not sufficient.
+
+| Original/provider document | Allowed correction/reversal | Required relationship | Explicitly disallow in that flow |
+|---|---|---|---|
+| Wholesale sale \`1.x\` / service \`2.x\` | \`5.1\` correlated credit | Original provider MARK in \`correlatedInvoices\` | \`5.2\` as a fake “cancellation” |
+| Genuine non-document-specific turnover credit | \`5.2\` non-correlated credit | No original MARK required | Presenting it as reversal of one selected invoice |
+| Retail \`11.x\` | \`11.4\` retail credit | Preserve the retail/provider correction semantics confirmed in sandbox | Wholesale \`5.1/5.2\` selected only because \`is_credit=true\` |
+| Delivery note \`9.3\` | InvoSign \`CancelDeliveryNote\` | Existing MARK; persist returned cancellation MARK | Ordinary invoice cancellation endpoint |
+| Wrong provider credit note | No blind cancel/re-credit shortcut | Accounting/provider-approved compensating flow | Pretending a provider credit can be deleted or locally cancelled |
+| Any provider-issued value document | Credit/correction, never local-only cancellation | Original and correction both retain their own MARK/UID/authentication evidence | Changing only \`local_status\` |
+
+For provider originals, MYD-008 must be fixed first: original MARK lookup must
+accept both \`INSERT\` and \`PROVIDER_INSERT\`, remain tenant-scoped and select a
+successful issue row only.
+
+### Mandatory InvoSign sandbox acceptance matrix
+
+No production activation is accepted until the following matrix records the sent
+payload, raw response, provider portal result, AADE result, provider document,
+local PDF and local persisted metadata for every row.
+
+| Scenario | Required proof |
+|---|---|
+| \`1.1\` goods B2B | MARK, UID, authentication code, QR, provider document, matching amounts/classes |
+| \`2.1\` services B2B | Same evidence; quantity/unit rules remain valid |
+| \`11.1\` anonymous retail | Written/sandbox-confirmed counterpart-name/VAT convention |
+| \`11.2\` anonymous retail service | Same retail convention and provider delivery proof |
+| Full and partial \`5.1\` | Original provider MARK appears in correlation; balances and quantities reconcile |
+| \`5.2\` | Available only through an explicitly non-correlated workflow |
+| \`11.4\` | Retail correction accepted and linked/presented correctly |
+| \`9.3\` issue | Provider MARK/UID/QR and delivery data match the portal |
+| \`9.3\` cancel | Correct endpoint and persisted cancellation MARK; remote/local states agree |
+| Timeout after provider accepts | Status lookup adopts the existing MARK; a second issue is impossible |
+| Delayed status visibility | Durable in-doubt state blocks re-send until bounded recovery completes |
+| HTTP 200 malformed XML | Treated as ambiguous, not deterministic rejection |
+| \`Success\` without MARK | Status recovery runs; invoice remains blocked from blind retry |
+| Wrong/expired token | Authenticated preflight fails before a real invoice |
+| Header + line discounts | InvoSign document, AADE XML and Ekdosi totals are cent-identical |
+| Provider→AADE Failure_2 | Correct provider state/indication and eventual MARK adoption |
+| Quota near zero/exhausted | Warning and hard failure are visible before business interruption |
+| Provider document download fails | Filing stays VALID; artifact becomes pending and retries without re-filing |
+| Provider document changes remotely | Hash mismatch raises an audit alert; original local artifact is not overwritten |
+| Public contract / All-in-one POS request | Feature is blocked unless the current AADE register explicitly supports it |
+
 ## Status and priority
 
 Statuses:
@@ -130,6 +229,19 @@ Priorities:
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | OPEN | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
+| PROV-001 | P0 | OPEN | Provider idempotency | Ambiguous invoice response is not durably blocked/recovered before re-send |
+| PROV-002 | P0 | OPEN | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 |
+| PROV-003 | P0 | OPEN | Provider documents | Customer PDF lacks required provider evidence and no official artifact is archived |
+| PROV-004 | P0 | OPEN | Provider credits | UI/service do not enforce the 5.1/5.2/11.4 compatibility matrix |
+| PROV-005 | P1 | OPEN | Provider preflight | Reachability is not token authentication and mandatory issuer fields are unchecked |
+| PROV-006 | P0 | VERIFY | Provider retail | Anonymous InvoSign counterpart convention is not confirmed |
+| PROV-007 | P1 | VERIFY | Provider totals | Header/line discount semantics of InvoSign api_* fields are not proven |
+| PROV-008 | P1 | OPEN | Provider outage | Transmission Failure_1/2 issue and recovery lifecycle is absent |
+| PROV-009 | P2 | OPEN | Provider observability | UID, reception feedback and remaining quota are not structured/surfaced |
+| PROV-010 | P0 | OPEN | Provider activation | Contract, declaration and acceptance are not go-live gates |
+| PROV-011 | P1 | VERIFY | Provider API | Version support and contradictory cancellation example need written confirmation |
+| PROV-012 | P1 | OPEN | Provider scope | Public-contract/All-in-one POS capabilities are not gated from the AADE register |
+| PROV-013 | P0 | OPEN | Provider tests | Required InvoSign sandbox success/failure matrix has not been completed |
 | STOCK-001 | P1 | OPEN | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
@@ -881,6 +993,341 @@ Fee and §8.6 contains categories 1=1.2%, 2=2.4%, 3=3.6%, 4=other amount.
 - UI, validation and documentation use the current terminology and sections.
 - Existing stored values still emit the same correct taxType 4/category payload.
 
+
+### PROV-001 — Ambiguous invoice responses are not durably idempotent
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Repository evidence**
+
+- [InvoSignTransport::parse](app/Services/EInvoice/Transports/InvoSignTransport.php)
+  returns \`ProviderResult::failed()\` for unreadable HTTP-200 XML and for
+  \`Success\` without a MARK.
+- [GrProviderSubmitter::submit](app/Services/EInvoice/GrProviderSubmitter.php)
+  invokes status recovery only from the exception path. A failed result is
+  recorded as \`PROVIDER_REJECTED\` without status lookup, despite comments that
+  imply recovery will run.
+- A thrown timeout/non-2xx performs only one immediate lookup. If InvoSign status
+  is eventually consistent and does not yet expose the filing, no durable
+  in-doubt state prevents the operator from submitting again.
+- The direct-myDATA path already has pending/grace/adoption behavior; the provider
+  path does not provide equivalent protection.
+
+**Risk**
+
+A request can be accepted and legally issued by the provider while Ekdosi loses
+or cannot parse the response. A later click can create a second legal document.
+
+**Required change**
+
+- Classify validation/auth rejections separately from ambiguous transport/protocol
+  outcomes.
+- Treat timeout, connection loss, non-2xx after send, malformed 2xx and
+  \`Success\` without MARK as **in doubt**.
+- Persist immutable issue coordinates, exact attempted payload, attempt ID and
+  \`provider_pending_since\`.
+- Status-check with bounded retry/backoff and block every new send while pending.
+- Allow an explicit, audited operator resolution only after provider/portal
+  evidence has been checked.
+- Never reuse mutable InvoiceType/series/branch data for recovery; cross-reference
+  MYD-010 and MYD-018.
+
+**Acceptance**
+
+A test where the provider accepts the request but the response is lost proves
+that exactly one provider document exists and Ekdosi adopts its MARK.
+
+### PROV-002 — Provider delivery notes have no status recovery
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+[DeliveryNoteSubmitter::submitViaProvider](app/Services/Delivery/DeliveryNoteSubmitter.php)
+records \`PROVIDER_FAILED\` and throws on every transport exception. It never calls
+InvoSign status and never leaves a durable pending/in-doubt lock. The transport
+interface exposes status only for \`Invoice\`, even though InvoSign identifies
+documents using issuer VAT, branch, type, issue date, series and AA.
+
+**Required change**
+
+- Add provider status/recovery support for delivery notes using frozen issue
+  coordinates.
+- Apply the same durable in-doubt lock, retry/backoff and MARK adoption policy as
+  PROV-001.
+- Reconcile a successful remote filing before applying stock for a second time.
+- Add timeout-after-accept, delayed-status and duplicate-click concurrency tests.
+
+### PROV-003 — Preserve the official provider document and make Ekdosi PDF provider-aware
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official requirement**
+
+A.1112/2025 requires provider documents and their printed representation to carry
+provider/issuer evidence including date/time, MARK, document identifier/UID,
+authentication string, QR, provider site and the ΥΠΑΗΕΣ software licence number.
+It also assigns electronic delivery of the provider-issued document to the
+provider. The issuer keeps an independent accounting-record retention duty.
+
+**Repository evidence**
+
+- [InvoSignTransport](app/Services/EInvoice/Transports/InvoSignTransport.php)
+  parses MARK, UID, authentication code and QR.
+- [ProviderResult](app/Support/EInvoice/ProviderResult.php) carries UID, but
+  [MyDataMark](app/Models/MyDataMark.php) has no structured UID field.
+- [InvoicePdfRenderer](app/Services/InvoicePdfRenderer.php) and
+  [pdf.blade.php](resources/views/invoices/pdf.blade.php) print local data, MARK
+  and QR but not the provider name, provider site, licence, UID or authentication
+  string.
+- [SendInvoiceEmail](app/Jobs/SendInvoiceEmail.php) attaches that local PDF
+  directly to the customer email.
+
+**Required local PDF behavior**
+
+When \`mydata_action=PROVIDER_INSERT\`, Ekdosi's PDF must visibly include:
+
+- “Εκδόθηκε μέσω iNVO Sign” / provider legal and commercial name;
+- provider website;
+- current ΥΠΑΗΕΣ licence number;
+- MARK, UID/document identifier and authentication code;
+- provider QR/verification URL;
+- a visible/clickable **canonical provider document URL**, distinct from the
+  verification/QR URL unless InvoSign confirms they are the same;
+- issue date/time and a label making clear that the provider-hosted document is
+  the authoritative provider representation.
+
+Do not hard-code this only in a Blade file. Provider name/site/licence and
+capabilities belong in immutable provider metadata/config so another transport
+can render the correct evidence and a licence change does not silently rewrite
+historical documents.
+
+**Required failsafe provider-artifact archive**
+
+After a successful MARK, Ekdosi must retrieve and privately retain the official
+provider document without turning a later download failure into a failed filing.
+Persist at minimum:
+
+- \`provider_key\`, provider legal/commercial name and licence number at issue;
+- MARK, UID, authentication code and cancellation MARK where applicable;
+- QR/verification URL and a separate canonical document/download URL;
+- private storage path/object key, original filename and MIME type;
+- byte size, SHA-256, downloaded timestamp and last verified timestamp;
+- retrieval HTTP status/error, artifact state
+  (\`pending|stored|verify_mismatch|unavailable\`) and source response/audit row.
+
+Security and retention requirements:
+
+- private tenant-scoped storage only; never a public-disk URL;
+- HTTPS plus allowlisted provider hosts, bounded redirects, timeout and maximum
+  size to avoid SSRF/unbounded downloads;
+- validate that the returned content is the expected PDF/document type;
+- queue retries download only — never re-submit the invoice;
+- keep the first successful artifact immutable. A later remote byte difference
+  stores a new forensic version or alert and must not overwrite history;
+- include the artifact in tenant export/backup/retention policy.
+
+**Invoice-card/debugging behavior**
+
+The invoice page must show, permission-gated:
+
+- provider, licence, channel/environment and delivery state;
+- MARK, UID and authentication code;
+- QR/verification URL;
+- canonical provider document URL;
+- local archived provider document download;
+- SHA-256, size, downloaded/verified times and archive status;
+- exact sent XML and raw response;
+- a “compare” result for identity, type/series/AA/date, counterparty, net/VAT/gross
+  and line count between local snapshot, provider response/document and AADE
+  reconciliation.
+
+If no documented provider download endpoint exists, this issue remains blocked:
+obtain from InvoSign the supported document URL/download API and retention
+contract. Do not silently archive the QR landing-page HTML as if it were the
+official document.
+
+**Interim safety**
+
+Until these requirements pass, hide or clearly disable “Αποστολή PDF στον
+πελάτη” for provider documents unless the attachment is the official provider
+artifact or a provider-approved, fully compliant Ekdosi representation.
+
+### PROV-004 — Credit-type compatibility is not enforced
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+[ViewInvoice::creditTypes](app/Filament/Resources/Invoices/Pages/ViewInvoice.php)
+returns every tenant type with \`is_credit=true\`.
+[IssueCreditNote](app/Actions/IssueCreditNote.php) checks only that flag. The UI
+can therefore describe a provider cancellation as correlated \`5.1\` while the
+operator selects non-correlated \`5.2\` or a retail credit.
+
+Implement the compatibility matrix in this audit in one domain service used by
+UI and action-level validation. Default the only valid type when unambiguous;
+do not rely on helper text. Add tests for B2B full/partial 5.1, deliberate 5.2,
+retail 11.4 and an incompatible crafted action request.
+
+### PROV-005 — Provider preflight can return a false green
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+- [InvoSignTransport::ping](app/Services/EInvoice/Transports/InvoSignTransport.php)
+  performs an unauthenticated GET to the base URL; an invalid token can pass.
+- [ProviderPreflight](app/Services/EInvoice/ProviderPreflight.php) checks issuer
+  AFM only. InvoSign's extension requires issuer name, profession/activity, tax
+  office, street, postcode and city.
+- myDATA read credentials are combined across sandbox/production rather than
+  validating one complete pair for the active reconciliation environment.
+- The preflight cannot prove contract/declaration activation or remaining quota.
+
+Require an authenticated, non-issuing credential probe/status operation approved
+by InvoSign, every mandatory issuer field, active-environment credential pairing,
+compatible document types and current activation status. Never issue a dummy
+production invoice merely to test credentials.
+
+### PROV-006 — Anonymous retail counterpart convention is not confirmed
+
+**Status:** VERIFY · **Priority:** P0 for retail · **Research:** VENDOR/SANDBOX
+
+The public InvoSign guide marks \`CounterpartName\` and \`CounterpartVat\` as
+required. [InvoSignDocument::invoiceCounterpartFields](app/Services/EInvoice/Transports/InvoSignDocument.php)
+can emit both empty for anonymous 11.1/11.2 retail, while the AADE core correctly
+omits a retail counterpart. Delivery notes already use an explicit internal
+fallback, but invoices do not.
+
+Obtain InvoSign's written B2C convention and prove 11.1 and 11.2 in sandbox. Do
+not invent \`000000000\` for invoices unless the provider confirms it. Provider
+production retail remains blocked until accepted examples and regression tests
+exist.
+
+### PROV-007 — InvoSign print-extension discount semantics are unproven
+
+**Status:** VERIFY · **Priority:** P1 · **Research:** VENDOR/SANDBOX
+
+[InvoSignDocument::appendLineFields](app/Services/EInvoice/Transports/InvoSignDocument.php)
+derives \`api_NetPriceBeforeDiscount\`, \`api_UnitPrice\` and
+\`api_DiscountValue\` from line fields. Canonical AADE totals can additionally
+allocate a header discount. The InvoSign class itself calls these semantics
+best-effort and requires sandbox confirmation.
+
+Test no discount, line discount, header discount and both together, including
+rounding over multiple VAT rates. The provider document, Ekdosi PDF, sent AADE
+XML and stored totals must match to the cent. If the InvoSign extension needs a
+different allocation, derive both outputs from one canonical allocation service.
+
+### PROV-008 — Transmission Failure_1/2 lifecycle is absent
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED CAPABILITY GAP
+
+A.1112/2025 defines provider issue behavior and mandatory indications for loss of
+issuer→provider connectivity (Transmission Failure_1) and provider→AADE
+connectivity (Transmission Failure_2), with later delivery/transmission within
+the prescribed window. Ekdosi currently treats an unreachable provider as a
+failed action and has no unsigned/offline document state, indication, queue or
+recovery workflow.
+
+Design this with InvoSign before implementation. It must not be improvised from
+the direct-myDATA retry path. Retail also requires the connectivity fallback
+specified in the provider contract. Acceptance must cover issue time, immutable
+numbering, visible failure indication, one-day recovery deadline, customer
+document update and exact-once MARK adoption.
+
+### PROV-009 — Provider operational evidence is discarded
+
+**Status:** OPEN · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
+
+InvoSign returns \`invoiceUid\`, \`receptionEmails\` and
+\`remaining_invoices\`. UID is parsed but not stored in a structured column; the
+other fields are ignored. Raw XML is useful forensic evidence but cannot drive
+alerts, filtering or a readable support workflow.
+
+Persist UID and normalized provider delivery/quota data while retaining the raw
+response. Warn on delivery failure and low quota, expose the information in the
+invoice/provider console, and add a scheduled quota/health check only if InvoSign
+provides a non-issuing endpoint.
+
+### PROV-010 — Provider contract/declaration activation is not a go-live gate
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED READINESS GAP
+
+Production mode can be selected from technical configuration without proof that:
+
+- the InvoSign contract is active for the tenant and intended transaction scope;
+- the Provider submitted the start declaration within its ten-day window;
+- the issuer accepted it, or the acceptance period elapsed;
+- the declared effective date/scope covers the production issue date;
+- production token, portal access and document quota are active;
+- the issuer has completed its independent retention/backup plan.
+
+Add an onboarding checklist with evidence fields and an explicit production
+arming action. This is partly operational/manual; Ekdosi must not claim automated
+AADE verification unless a supported API actually proves it.
+
+### PROV-011 — InvoSign API contract needs written/versioned confirmation
+
+**Status:** VERIFY · **Priority:** P1 · **Research:** VENDOR
+
+The public guide has no clear version/changelog aligned with current AADE
+production v2.0.1. Its cancellation section names
+\`iNVOSign_CancelDeliveryNote.php\`, while the example request targets
+\`invoice_status.php\`. Ekdosi uses the named CancelDeliveryNote endpoint, which
+is the plausible path but must be confirmed.
+
+Request a versioned integration contract covering:
+
+- supported AADE production schema/API version and upgrade notice period;
+- production/demo endpoint and token lifecycle;
+- deterministic rejection versus ambiguous response codes;
+- status eventual-consistency window and safe retry policy;
+- invoice and delivery-note status coordinates;
+- canonical provider document/download endpoint;
+- anonymous retail counterpart rules;
+- credit-note and wrong-credit correction rules;
+- quota and recipient-delivery response semantics;
+- Transmission Failure_1/2 procedure.
+
+### PROV-012 — Provider capabilities are not gated by licensed scope
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+AADE's current register lists iNVO Sign as licensed but does not mark it for
+public-contract e-invoicing or All-in-one Cash Register/POS. Ekdosi should store
+the selected provider's current capability scope, show its checked date and block
+features that require an absent certification. Ordinary B2B/B2C capability must
+not be confused with those two special scopes.
+
+Use the official register as a reviewed input, not an unaudited runtime scraper.
+Add a renewal/revocation watch because a provider licence/capability can change.
+
+### PROV-013 — No complete InvoSign sandbox failure matrix
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED TEST GAP
+
+The HTTP-fake tests cover useful response parsing and payload shape, and previous
+delivery work records isolated sandbox validation. They do not prove the complete
+matrix listed in this audit against InvoSign plus provider portal/AADE evidence.
+
+Create a repeatable, credential-gated acceptance suite and a signed go-live
+report. It must never run against production by default and must cleanly label
+which cases require controlled provider-side fault injection rather than faking
+the HTTP response locally.
+
+### Provider path verified baseline — do not regress
+
+- InvoSign is currently licensed by AADE and publicly advertises ordinary B2B/B2C
+  API integration.
+- Provider mode uses environment-specific base URL/token fields.
+- The transport form-posts canonical AADE XML plus InvoSign's required extension.
+- Exact augmented request XML and raw response are retained.
+- Successful issue stores MARK, authentication code and QR and marks the invoice
+  VALID atomically with the audit row.
+- Normal provider value invoices are not sent to a generic AADE cancel endpoint.
+  The UI directs them to credit correction; \`CancelDeliveryNote\` is restricted
+  to the supported 9.3 delivery-note path.
+- 9.3 cancellation persists the returned cancellation MARK.
+- Provider responses are XML-parsed with network entity resolution disabled.
+- A duplicate \`PROVIDER_INSERT\` row with the same invoice/MARK is de-duplicated.
+- Provider payload preview exists without exposing the token.
+
 ### STOCK-001 — Document cancellation does not fully compensate stock
 
 **Status:** OPEN · **Priority:** P1
@@ -1526,3 +1973,4 @@ These are not open issues:
 | 2026-08-30 | Re-researched MYD-001–MYD-006, corrected priorities/wording and added MYD-007 | Documentation-only audit |
 | 2026-08-30 | Extended myDATA audit: added MYD-008–MYD-016 | Documentation-only audit |
 | 2026-08-30 | Final myDATA/lifecycle pass: added MYD-017–MYD-020 and STOCK-001 | Documentation-only audit |
+| 2026-08-30 | Added Provider/InvoSign/ΥΠΑΗΕΣ audit, compatibility matrices and PROV-001–PROV-013 | Documentation-only audit |
