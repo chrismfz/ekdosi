@@ -74,6 +74,22 @@ not promoted to issues without a currently exposed path that behaves incorrectly
 | MYD-015 | Confirmed | P1 | 8.5 POS returns increase rather than reduce the VAT-picture totals |
 | MYD-016 | Confirmed | P1 | Bad delivery-unit data is changed to pieces instead of being rejected |
 
+## Final myDATA and lifecycle pass — 2026-08-30
+
+This pass reviewed reconciliation equality, immutable filing identity, externally
+changed delivery-note state, non-VAT tax terminology and stock compensation on
+cancellation. The payload findings were checked against the production ERP v2.0.1
+specification; legacy names were not treated as payload defects when the emitted
+numeric tax type remains correct.
+
+| ID | Verdict | Priority | Confirmed impact |
+|---|---|---:|---|
+| MYD-017 | Confirmed | P0 | Reconciliation can label a different local amount/header as matched |
+| MYD-018 | Confirmed | P0 | Editing a shared series/type can change a numbered but not-yet-filed payload |
+| MYD-019 | Confirmed | P1 | Remote delivery-note cancellation updates only one of three local state fields |
+| MYD-020 | Confirmed terminology debt | P2 | UI/docs still call Digital Transaction Fee “stamp duty” and cite shifted sections |
+| STOCK-001 | Confirmed | P1 | Delivery-note and credit-note cancellation can leave stock movements active |
+
 ## Status and priority
 
 Statuses:
@@ -110,6 +126,11 @@ Priorities:
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | OPEN | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | OPEN | Delivery units | Invalid or missing coded unit is silently filed as pieces |
+| MYD-017 | P0 | OPEN | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
+| MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
+| MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
+| MYD-020 | P2 | OPEN | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
+| STOCK-001 | P1 | OPEN | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
 | SETUP-003 | P1 | OPEN | Payment | Missing payment method silently becomes cash in XML |
@@ -697,6 +718,202 @@ changes the meaning of the movement line.
 
 - Missing/out-of-range persisted units block submission with an actionable error.
 - Each supported code survives preview/submission unchanged.
+
+### MYD-017 — Reconciliation can return a false green on different content
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+RequestTransmittedDocs and RequestDocs return the document header, parties and
+summary, not only a MARK/state pair. These fields are available for a content-level
+comparison.
+
+**Repository evidence**
+
+- [SalesReconciler](app/Services/MyData/SalesReconciler.php) fetches UID,
+  series, AA, issue date, counterpart, gross and invoice type.
+- Its diff() puts a row in matched whenever the MARK exists on both sides and
+  the cancellation boolean agrees. Gross, series/AA, date, type and counterpart
+  are not compared.
+- [ExpenseReconciler](app/Services/MyData/ExpenseReconciler.php) applies the
+  same MARK/state-only rule.
+- [EnrichInvoiceFromAade](app/Services/MyData/EnrichInvoiceFromAade.php) can
+  show several field differences for one selected document, but that does not
+  protect the scheduled/global reconciliation result.
+
+**Risk**
+
+A post-filing local edit, incomplete import or wrong MARK association can still
+produce a green “matched” count even when the legally relevant local content is
+different from AADE. This is a false readiness/audit result.
+
+**Required change**
+
+- Add a separate contentMismatch bucket.
+- Compare gross with an explicit cent tolerance, invoice type, series/AA, issue
+  date and counterpart AFM where the type returns one.
+- Keep state mismatch separate so operators know which repair action applies.
+- Show which fields differ; never silently rewrite frozen values.
+
+**Acceptance**
+
+- A same-MARK/same-state row with a different gross, type or series/AA is not
+  counted as matched.
+- Unit tests cover sales and expenses, retail-without-counterpart and rounding
+  tolerance.
+
+### MYD-018 — Numbered filings still depend on mutable InvoiceType configuration
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+AADE v2.0.1 derives the document UID from issuer VAT, issue date, issuer branch,
+invoice type, series and AA (plus deviation type where present). Series and type
+are therefore filing identity, not mutable display metadata.
+
+**Repository evidence**
+
+- [AadeInvoiceDocument::build()](app/Services/EInvoice/AadeInvoiceDocument.php)
+  reads series, myDATA type, income class/category and the quantity flag from the
+  live invoiceType relation.
+- [InvoiceTypeForm](app/Filament/Resources/InvoiceTypes/Schemas/InvoiceTypeForm.php)
+  permits editing code and myDATA mappings after the row is in use.
+- The invoice's mydata_type snapshot is stored only after a successful response;
+  there is no frozen series/classification/quantity snapshot.
+- The in-doubt recovery in
+  [MyDataSubmitter](app/Services/MyDataSubmitter.php) also searches AADE using
+  the current invoiceType.code. A series rename after an ambiguous POST can
+  miss the already-created MARK and later submit a different identity.
+
+**Risk**
+
+Changing a shared lookup can alter the payload of an already-numbered draft or
+retry. The printed invcode, AADE UID search coordinates and eventual filing can
+then disagree, including a duplicate or wrongly classified filing.
+
+**Required change**
+
+- Freeze series, myDATA type, classification defaults and quantity policy when
+  the AA is allocated/finalization begins.
+- Build, retry/adoption and forensic display from those snapshots.
+- Prevent destructive edits of identity fields on an in-use series, or version
+  the series by creating a new row for future documents.
+
+**Acceptance**
+
+- Editing an InvoiceType after an invoice is numbered cannot change that
+  invoice's XML or its in-doubt lookup coordinates.
+- New documents use the new/versioned configuration; old documents retain the
+  original values.
+
+### MYD-019 — Delivery status refresh does not fully apply remote cancellation
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Official finding**
+
+GetDeliveryNoteStatus exposes the AADE delivery status and lifecycle, including
+the terminal CANCELLED state. A local refresh must not leave the document
+business-active after learning that terminal state.
+
+**Repository evidence**
+
+- [DeliveryLifecycleService::refreshStatus()](app/Services/Delivery/DeliveryLifecycleService.php)
+  updates only delivery_state.
+- A locally initiated cancellation correctly updates mydata_state=CANCELLED,
+  delivery_state=cancelled and local_status=cancelled together.
+- Therefore a cancellation performed outside Ekdosi can leave the same note as
+  delivery_state=cancelled, mydata_state=VALID, local_status=active.
+
+**Risk**
+
+Different screens/actions can make opposite decisions about the same legal
+document. A cancelled note can remain locally active, and downstream cancellation
+side effects are skipped.
+
+**Required change**
+
+When a refresh returns CANCELLED, atomically synchronize all three state fields,
+write a forensic state-sync audit event and run the same idempotent business
+compensation as a local cancellation. Do not automatically resurrect a
+business-cancelled note merely because a non-terminal remote status is returned.
+
+**Acceptance**
+
+- An AADE-side cancellation followed by refresh produces the same terminal local
+  state and audit trail as an Ekdosi-side cancellation.
+- Repeated refresh is idempotent.
+
+### MYD-020 — Digital Transaction Fee still appears as legacy stamp duty
+
+**Status:** OPEN · **Priority:** P2 · **Research:** CONFIRMED, PAYLOAD NOT MIS-MAPPED 2026-08-30
+
+**Official finding**
+
+AADE renamed stamp duty to **Digital Transaction Fee**; the v1.0.11 history states
+that this was a naming-only change. In v2.0.1, taxType=4 is Digital Transaction
+Fee and §8.6 contains categories 1=1.2%, 2=2.4%, 3=3.6%, 4=other amount.
+§8.5 is Other Taxes and §8.7 is Fees.
+
+**Repository evidence**
+
+- [AadeInvoiceDocument::addAdditionalTaxes()](app/Services/EInvoice/AadeInvoiceDocument.php)
+  emits the correct numeric structure: type 2 fees, type 3 other taxes and type 4
+  from the legacy stamp_duty_* fields.
+- Its human references are shifted: fees says §8.5, other taxes §8.6 and
+  stamp/digital fee §8.7.
+- [CommonTaxPresets](app/Support/MyData/CommonTaxPresets.php) exposes
+  “Χαρτόσημο 1,2% / 2,4% / 3,6%” instead of the current legal name.
+
+**Required change**
+
+- Rename operator-facing labels/help/errors to Ψηφιακό Τέλος Συναλλαγής.
+- Correct the references to Other Taxes §8.5, Digital Transaction Fee §8.6 and
+  Fees §8.7.
+- Keep a compatibility migration/alias for existing stamp_duty_* data rather
+  than silently dropping historical values.
+- Add XML tests asserting taxType and category for every additional-tax group.
+
+**Acceptance**
+
+- UI, validation and documentation use the current terminology and sections.
+- Existing stored values still emit the same correct taxType 4/category payload.
+
+### STOCK-001 — Document cancellation does not fully compensate stock
+
+**Status:** OPEN · **Priority:** P1
+
+**Evidence**
+
+- [StockService::recordSaleForDeliveryNote()](app/Services/Stock/StockService.php)
+  records sale stock-out for a sale-purpose delivery note.
+- [DeliveryLifecycleService::persistCancellation()](app/Services/Delivery/DeliveryLifecycleService.php)
+  changes status but does not reverse a delivery-note stock movement; the stock
+  service itself calls this a follow-up.
+- Cancelling a normal invoice has reverseSaleForInvoice().
+- Cancelling a credit note does not reverse its prior return-IN movement; the
+  observer intentionally excludes credit notes from the cancellation branch and
+  the stock service documents the edge.
+
+**Risk**
+
+On-hand stock stays too low after cancelling a delivery note that moved it, or too
+high after cancelling a credit note that returned it. Because stock is a derived
+ledger sum, the error persists until a manual adjustment.
+
+**Required change**
+
+Add idempotent compensating movements for delivery-note sale-outs and credit-note
+return-ins. Preserve the linked invoice/delivery “whichever first” rule and reverse
+only the movement actually created by the cancelled document.
+
+**Acceptance**
+
+- Issue/cancel/repeat-cancel tests leave the stock ledger at the original balance
+  for standalone delivery notes, linked invoice+delivery groups and credit notes.
+- Reconciliation-driven remote cancellation uses the same compensation path.
 
 ### SETUP-001 — No guided first-valid-invoice onboarding
 
@@ -1308,3 +1525,4 @@ These are not open issues:
 | 2026-08-29 | Added full updater integrity, rollback, queue and recovery audit | [`d2ca379`](https://github.com/chrismfz/ekdosi/commit/d2ca3792b4a0c37f4ed7c76d8829ce7c5226b181) |
 | 2026-08-30 | Re-researched MYD-001–MYD-006, corrected priorities/wording and added MYD-007 | Documentation-only audit |
 | 2026-08-30 | Extended myDATA audit: added MYD-008–MYD-016 | Documentation-only audit |
+| 2026-08-30 | Final myDATA/lifecycle pass: added MYD-017–MYD-020 and STOCK-001 | Documentation-only audit |
