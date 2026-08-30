@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-08-30
+
 ### Added
 - **In-app updates + one-click rollback from GitHub (Phase 2)** — a super_admin «Εγκατάσταση ενημέρωσης»
   action on «Υγεία συστήματος» applies a new release from the panel: DB snapshot → maintenance →
