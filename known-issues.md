@@ -91,6 +91,23 @@ numeric tax type remains correct.
 | STOCK-001 | Confirmed | P1 | Delivery-note and credit-note cancellation can leave stock movements active |
 
 
+## Critical myDATA integrity sweep — 2026-08-31
+
+This pass targeted service-boundary and crash-window defects rather than adding
+more lookup mappings. It reviewed direct myDATA invoice/delivery issue,
+cancellation evidence, tenant coherence, immutable issuer identity, delivery
+lifecycle events and retention of the legal audit trail at
+[`main@4b9bd26`](https://github.com/chrismfz/ekdosi/commit/4b9bd26a0a6a94fd8abb63d9b945ac696a016c34).
+
+| ID | Verdict | Priority | Confirmed impact |
+|---|---|---:|---|
+| MYD-021 | Confirmed | P0 | A crash after AADE acceptance can still permit a blind duplicate issue; delivery notes lack even the invoice lock |
+| MYD-022 | Confirmed | P0 | A crafted service/API/CLI call can combine tenant B's document with tenant A's issuer identity and credentials |
+| MYD-023 | Confirmed | P0 | Cancellation can become terminal without preserving the distinct AADE cancellation MARK |
+| MYD-024 | Confirmed | P0 | Historical XML, recovery coordinates and regenerated PDFs use mutable current issuer identity |
+| MYD-025 | Confirmed | P0 | Company delete/wipe can erase documents, MARKs and the legal audit trail |
+| MYD-026 | Confirmed | P1 | Delivery lifecycle calls are not single-flight or durably recoverable after an ambiguous response |
+
 ## Provider / InvoSign / ΥΠΑΗΕΣ audit — 2026-08-30
 
 This pass reviewed the full Ekdosi → InvoSign → AADE lifecycle: issue and
@@ -147,6 +164,7 @@ Audit outcome:
 | PROV-017 | Confirmed | P1 | Arbitrary or plaintext provider endpoints can receive the token and full invoice payload |
 | PROV-018 | Confirmed | P1 | Full-reversal actions fail after any earlier partial credit |
 | PROV-019 | Confirmed | P0 | An unfiled draft credit is treated as legal reversal and does not block the replacement invoice |
+| PROV-020 | Confirmed | P1 | Normal online InvoSign issue requires the current date, but Ekdosi accepts backdated/future provider documents |
 
 ### Provider hardening sweep — 2026-08-30
 
@@ -219,6 +237,9 @@ local PDF and local persisted metadata for every row.
 | Provider document download fails | Filing stays VALID; artifact becomes pending and retries without re-filing |
 | Provider document changes remotely | Hash mismatch raises an audit alert; original local artifact is not overwritten |
 | Public contract / All-in-one POS request | Feature is blocked unless the current AADE register explicitly supports it |
+| Cross-tenant document/service call | Rejected before preview, audit write or outbound request |
+| Yesterday/tomorrow issue date | Normal online issue is blocked; a documented Transmission Failure flow is used where legally applicable |
+| Tenant delete/company wipe | Filed documents, MARKs, provider artifacts and audit evidence remain immutable and exportable |
 
 ## Status and priority
 
@@ -260,6 +281,12 @@ Priorities:
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | OPEN | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
+| MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
+| MYD-022 | P0 | OPEN | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
+| MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
+| MYD-024 | P0 | OPEN | Issuer identity | Historical filings and PDFs use mutable current company identity |
+| MYD-025 | P0 | OPEN | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
+| MYD-026 | P1 | OPEN | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state |
 | PROV-001 | P0 | OPEN | Provider idempotency | Ambiguous invoice response is not durably blocked/recovered before re-send |
 | PROV-002 | P0 | OPEN | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 |
 | PROV-003 | P0 | OPEN | Provider documents | Customer PDF lacks required provider evidence and no official artifact is archived |
@@ -279,6 +306,7 @@ Priorities:
 | PROV-017 | P1 | OPEN | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
 | PROV-018 | P1 | OPEN | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
+| PROV-020 | P1 | OPEN | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
 | STOCK-001 | P1 | OPEN | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
@@ -619,6 +647,10 @@ so later customer edits cannot change an issued document.
   partly from frozen data and partly from the current customer row.
 - [IssueCreditNote](app/Actions/IssueCreditNote.php) copies the original snapshot,
   but the builder can still replace its AFM/name with today's customer values.
+- [InvoSignDocument::invoiceCounterpartFields](app/Services/EInvoice/Transports/InvoSignDocument.php)
+  mixes the invoice snapshot with live customer tax-office, phone and email
+  fields, so the provider representation is not reproducible from the frozen
+  document alone.
 
 **Required change**
 
@@ -627,11 +659,16 @@ so later customer edits cannot change an issued document.
   snapshot is blank, and record that fallback.
 - Validate that snapshot AFM, country and foreign name/address form one coherent
   party before submission.
+- Build provider counterpart fields from the same immutable snapshot. If contact
+  fields are intentionally live and non-legal, label and store that distinction
+  instead of silently mixing them into the issue document.
 
 **Acceptance**
 
 - Editing a customer after invoice/credit creation does not change preview XML.
 - A migration/backfill or explicit blocker handles older rows with blank snapshots.
+- Direct and provider previews remain identical in legal counterpart identity
+  after the customer record changes.
 
 ### MYD-010 — All filings hard-code branch 0
 
@@ -929,6 +966,12 @@ are therefore filing identity, not mutable display metadata.
   live invoiceType relation.
 - [InvoiceTypeForm](app/Filament/Resources/InvoiceTypes/Schemas/InvoiceTypeForm.php)
   permits editing code and myDATA mappings after the row is in use.
+- Line classification is resolved at send time through the live product/product
+  category, while payment-method myDATA type and zero-VAT exemption mapping are
+  also read from mutable tenant lookups.
+- [IssueCreditNote](app/Actions/IssueCreditNote.php) and
+  [ReissueInvoiceAsDraft](app/Actions/ReissueInvoiceAsDraft.php) retain product
+  references rather than a complete frozen filing-policy snapshot.
 - The invoice's mydata_type snapshot is stored only after a successful response;
   there is no frozen series/classification/quantity snapshot.
 - The in-doubt recovery in
@@ -944,8 +987,9 @@ then disagree, including a duplicate or wrongly classified filing.
 
 **Required change**
 
-- Freeze series, myDATA type, classification defaults and quantity policy when
-  the AA is allocated/finalization begins.
+- Freeze series, myDATA type, line/product classification, quantity policy,
+  payment-method mapping, VAT code and exemption reason when the AA is
+  allocated/finalization begins.
 - Build, retry/adoption and forensic display from those snapshots.
 - Prevent destructive edits of identity fields on an in-use series, or version
   the series by creating a new row for future documents.
@@ -1030,6 +1074,227 @@ Fee and §8.6 contains categories 1=1.2%, 2=2.4%, 3=3.6%, 4=other amount.
 - UI, validation and documentation use the current terminology and sections.
 - Existing stored values still emit the same correct taxType 4/category payload.
 
+
+### MYD-021 — Direct myDATA issue is not durably exactly-once
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Repository evidence**
+
+- [MyDataSubmitter::submit](app/Services/MyDataSubmitter.php) uses a 120-second
+  cache lock, but records `mydata_pending_since` only after a caught transport/
+  protocol exception.
+- A hard process kill, host failure or database outage after AADE accepts the
+  request but before success persistence/catch can therefore leave no durable
+  pre-send attempt. After the lock expires, a retry can POST blindly.
+- [DeliveryNoteSubmitter::submit](app/Services/Delivery/DeliveryNoteSubmitter.php)
+  has no equivalent lock, pending marker or status-adoption flow. Two requests
+  can issue the same local 9.x document concurrently.
+- Delivery submission also lacks a service-level guard against
+  `local_status=cancelled`; UI visibility is not protection for CLI/API callers.
+- Same-MARK de-duplication occurs only after network I/O and cannot prevent two
+  different remote MARKs.
+
+**Risk**
+
+A timeout, double click, worker overlap or crash in the acceptance/persistence
+window can create two legal AADE documents for one local invoice/delivery note.
+The local database may then preserve only one of them.
+
+**Required change**
+
+- Create one durable issue-attempt row/state before network I/O for both invoices
+  and delivery notes, containing tenant, environment, immutable coordinates,
+  payload hash and attempt ID.
+- Atomically claim one active attempt per local document; use the cache lock only
+  as an optimization, not the source of truth.
+- Reconcile every in-doubt attempt by its frozen coordinates before any new POST.
+- Block locally cancelled documents and all mutation while issuing/in-doubt.
+- Finalize by compare-and-set and preserve post-response persistence failures as
+  recoverable in-doubt attempts.
+
+**Acceptance**
+
+Parallel-submit, timeout-after-accept, process-kill-after-POST, DB-failure-after-
+success and locally-cancelled service-call tests produce at most one legal issue
+and never perform a blind retry.
+
+### MYD-022 — Filing services do not enforce tenant coherence
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Repository evidence**
+
+- MyDataSubmitter, GrProviderSubmitter, DeliveryNoteSubmitter and
+  DeliveryLifecycleService receive a `Company $tenant` independently from the
+  Invoice/DeliveryNote and do not assert matching `company_id`.
+- [AadeInvoiceDocument](app/Services/EInvoice/AadeInvoiceDocument.php) builds the
+  issuer and credentials from the injected tenant while reading the document,
+  customer, type and lines from the passed invoice.
+- [InvoSignDocument](app/Services/EInvoice/Transports/InvoSignDocument.php) reads
+  provider extension issuer fields from `$invoice->company`, so a mismatched call
+  can produce contradictory issuer identities inside one provider payload.
+- UI scopes reduce normal exposure, but service/API/CLI calls and missing
+  composite tenant foreign keys can bypass that assumption.
+
+**Risk**
+
+A programming error or crafted internal call can transmit tenant B's commercial
+data under tenant A's AFM, branch, credentials or provider contract. This is both
+a false filing and a cross-tenant confidentiality incident.
+
+**Required change**
+
+Add one central fail-closed tenant-coherence assertion before preview, submit,
+cancel and delivery lifecycle I/O. The document and every legal relation
+(customer, type, payment method, lines/products where used) must belong to the
+same company. Prefer resolving the service from the document's frozen issuer
+profile and never rely on an ambient global scope for this boundary.
+
+**Acceptance**
+
+Cross-tenant tests for every direct/provider invoice and delivery operation fail
+before payload construction, audit writes or outbound requests.
+
+### MYD-023 — Cancellation evidence is optional or stored inconsistently
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Official finding**
+
+A successful AADE cancellation returns its own `cancellationMark`; it is distinct
+evidence from the MARK of the document being cancelled.
+
+**Repository evidence**
+
+- [MyDataSubmitter::cancel](app/Services/MyDataSubmitter.php) can call terminal
+  finalisation after a `Success` response with a null cancellation MARK.
+- Its “already cancelled” error adoption records no cancellation MARK unless a
+  later read path enriches it.
+- [DeliveryLifecycleService::cancel](app/Services/Delivery/DeliveryLifecycleService.php)
+  discards the direct response's cancellation MARK and passes the original issue
+  MARK to persistence.
+- [DeliveryMark](app/Models/DeliveryMark.php) has no dedicated
+  `cancellation_mark` field.
+- External invoice-state synchronization can adopt CANCELLED without persisting
+  AADE's available `cancelledByMark`.
+- Provider cancellation has the same evidence-strictness problem under PROV-015
+  and additionally uses inconsistent generic/dedicated MARK columns.
+
+**Risk**
+
+The UI can show a terminal cancellation while the database cannot prove which
+AADE cancellation event caused it. Delivery notes can positively mislabel the
+original issue MARK as cancellation evidence.
+
+**Required change**
+
+- Require a non-empty cancellation MARK for a fresh normal `Success`; malformed
+  success remains `cancel_in_doubt`, never terminal.
+- Store issue MARK and cancellation MARK in distinct fields consistently for
+  direct/provider invoices and delivery notes.
+- Persist `cancelledByMark` when adopting an external cancellation.
+- Treat “already cancelled” as an audited remote adoption with raw proof and
+  later cancellation-MARK backfill, not as ordinary local success.
+
+**Acceptance**
+
+Tests cover valid cancellation evidence, `Success` without it, already-cancelled
+adoption and external cancellation sync for invoices and delivery notes.
+
+### MYD-024 — Issuer and filing identity are not frozen per document
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Repository evidence**
+
+- Invoice counterpart fields are partly snapshotted, but invoices/delivery notes
+  have no complete issuer snapshot.
+- AadeInvoiceDocument and DeliveryNoteSubmitter read the current company AFM,
+  legal name, address and related issuer data when building XML.
+- InvoSignDocument and the invoice/delivery PDF templates also read the current
+  Company, so regenerating a historical representation after an edit changes it.
+- In-doubt recovery searches with current issuer AFM and mutable series/type
+  coordinates; a legal-identity change can miss the existing remote document.
+
+**Risk**
+
+Changing company AFM, name, address, tax office, activity, GEMI or branch can
+rewrite historical PDFs and retries, or cause recovery to search a different
+legal identity and refile.
+
+**Required change**
+
+Freeze issuer AFM/country/branch, legal and commercial name, address, tax office,
+activity/KAD, GEMI and document series at numbering/finalization. Payload,
+recovery, provider metadata and historical PDF must use the snapshot. Company
+changes apply only to future documents through an audited effective-date/cutover
+workflow; legacy rows require a controlled backfill or filing blocker.
+
+**Acceptance**
+
+Editing any company identity field cannot change an existing numbered document's
+XML, provider extension, recovery coordinates or regenerated PDF.
+
+### MYD-025 — Legal filing evidence can be hard-deleted
+
+**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Repository evidence**
+
+- The mydata_marks and delivery_marks migrations use `cascadeOnDelete()` from
+  company and document foreign keys.
+- [Company](app/Models/Company.php) has no SoftDeletes, while
+  [EditCompany](app/Filament/Resources/Companies/Pages/EditCompany.php) exposes a
+  normal Filament `DeleteAction`.
+- [CompanyDataWiper](app/Services/Portability/CompanyDataWiper.php) explicitly
+  deletes invoices, delivery notes, marks, expenses and activity logs with
+  foreign-key checks disabled.
+- Its force gate counts only invoices whose `mydata_state=VALID`. It misses
+  CANCELLED invoices, delivery notes, provider/other mark evidence and can delete
+  everything with `--force`.
+
+**Risk**
+
+An ordinary tenant delete or maintenance import workflow can erase the local
+proof of transmitted, cancelled and provider-issued documents while the remote
+tax records continue to exist. Backups do not turn intentional hard deletion
+into an acceptable retention policy.
+
+**Required change**
+
+- Replace legal-record cascades with restricted deletion and tenant archival/
+  deactivation.
+- Block company deletion when any legal document/audit evidence exists.
+- Limit the wiper to demonstrably unfiled test/import staging data; production
+  `--force` must not delete legal marks, provider artifacts or their audit log.
+- Define immutable retention/export and restore verification for all issue,
+  cancellation, raw XML and provider artifacts.
+
+**Acceptance**
+
+Company delete, document delete and wipe tests prove that any direct/provider
+issue or cancellation evidence survives. An archived tenant remains readable and
+exportable to authorized users.
+
+### MYD-026 — Delivery lifecycle events are not single-flight or crash-recoverable
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-31
+
+[DeliveryLifecycleService](app/Services/Delivery/DeliveryLifecycleService.php)
+dispatches RegisterTransfer and ConfirmDeliveryOutcome without a durable attempt,
+lock or compare-and-set claim. A lost response can leave the remote lifecycle
+advanced while local state/history remains stale; concurrent callers can send
+duplicate or out-of-order events. A later manual status refresh can observe the
+remote state, but it is not tied to the ambiguous operation and does not make a
+blind retry safe.
+
+Give each lifecycle operation an immutable, single active attempt with request
+hash, expected prior state, transport/outcome values and recovery status.
+Reconcile the remote lifecycle/history before retry, adopt matching events
+idempotently and reject stale responses. Tests must cover two simultaneous calls,
+timeout after remote acceptance, delayed visibility and confirm-versus-cancel
+races.
 
 ### PROV-001 — Ambiguous invoice responses are not durably idempotent
 
@@ -1117,6 +1382,9 @@ provider. The issuer keeps an independent accounting-record retention duty.
   string.
 - [SendInvoiceEmail](app/Jobs/SendInvoiceEmail.php) attaches that local PDF
   directly to the customer email.
+- Provider success persistence treats MARK as the terminal hard requirement.
+  UID/authentication/QR or the official artifact can therefore be absent while
+  the document is already operationally presented as complete.
 
 **Required local PDF behavior**
 
@@ -1157,6 +1425,9 @@ Security and retention requirements:
 - HTTPS plus allowlisted provider hosts, bounded redirects, timeout and maximum
   size to avoid SSRF/unbounded downloads;
 - validate that the returned content is the expected PDF/document type;
+- a filing with a MARK remains legally VALID, but customer delivery/PDF state
+  stays `evidence_pending` until the required UID/authentication/QR/artifact is
+  complete;
 - queue retries download only — never re-submit the invoice;
 - keep the first successful artifact immutable. A later remote byte difference
   stores a new forensic version or alert and must not overwrite history;
@@ -1278,9 +1549,12 @@ other fields are ignored. Raw XML is useful forensic evidence but cannot drive
 alerts, filtering or a readable support workflow.
 
 Persist UID and normalized provider delivery/quota data while retaining the raw
-response. Warn on delivery failure and low quota, expose the information in the
-invoice/provider console, and add a scheduled quota/health check only if InvoSign
-provides a non-issuing endpoint.
+response. A MARK-only recovery may adopt the legal filing, but must set an
+explicit `evidence_pending` state when UID, authentication code, QR or provider
+artifact is incomplete; it must never refile merely to fill those fields. Warn on
+delivery failure and low quota, expose the information in the invoice/provider
+console, and add a scheduled quota/health check only if InvoSign provides a
+non-issuing endpoint.
 
 ### PROV-010 — Provider contract/declaration activation is not a go-live gate
 
@@ -1412,6 +1686,10 @@ failure after a provider success.
   [DeliveryLifecycleService::cancelViaProvider](app/Services/Delivery/DeliveryLifecycleService.php)
   substitute the original issue MARK when the cancellation MARK is absent, then
   persist a terminal cancellation and mark the local document `CANCELLED`.
+- Invoice provider cancellation stores returned cancellation evidence in the
+  generic `mark` field while direct cancellation has a dedicated
+  `cancellation_mark`; DeliveryMark has no dedicated cancellation column. This
+  prevents one consistent audit interpretation across channels.
 - A timeout/connection loss writes a failure row and leaves the document
   `VALID`; there is no durable cancellation-pending state or status recovery.
   The provider may nevertheless have completed the cancellation.
@@ -1432,6 +1710,8 @@ or become permanently rejected while the two systems remain split-brain.
   `cancel_pending|cancelled|cancel_rejected|cancel_in_doubt` states.
 - Require a non-empty, distinct cancellation MARK for a normal success. Never
   store the issue MARK as cancellation evidence.
+- Preserve the original issue MARK and returned cancellation MARK in dedicated,
+  consistently named fields across invoice/delivery and direct/provider paths.
 - Treat lost/malformed responses and `Success` without a cancellation MARK as
   ambiguous; block a new cancel until provider/AADE reconciliation resolves it.
 - Route recovery through a vendor-supported cancellation lookup or authoritative
@@ -1583,6 +1863,29 @@ response all leave the original visibly not legally reversed and make replacemen
 filing impossible. A provider-VALID compatible credit unlocks the replacement
 exactly once.
 
+### PROV-020 — Normal online InvoSign issue date is not preflighted
+
+**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-31
+
+The [InvoSign calls/responses guide](https://invosign.gr/site/help_site/?page=kliseis_apantisi)
+documents validation error 238: `IssueDate` must equal the current date for the
+normal online issue path. The same response is represented in Ekdosi's transport
+tests. Invoice and delivery forms default to now but allow an arbitrary
+`issued_at`, and ProviderPreflight/service submission does not reject yesterday
+or tomorrow before sending.
+
+Add a service-level Greece-local-date guard for ordinary provider issue, with a
+clear correction message and midnight/timezone tests. Do not silently rewrite an
+already allocated legal issue date. A genuine connectivity-delay case must enter
+the documented provider Transmission Failure procedure under PROV-008 and the
+vendor contract, not masquerade as an ordinary backdated call.
+
+**Acceptance**
+
+Invoice and delivery tests cover yesterday, tomorrow, Europe/Athens midnight and
+the agreed failure-recovery path; invalid normal issue dates make no outbound
+request.
+
 ### Provider path verified baseline — do not regress
 
 - InvoSign is currently licensed by AADE and publicly advertises ordinary B2B/B2C
@@ -1595,7 +1898,9 @@ exactly once.
 - Normal provider value invoices are not sent to a generic AADE cancel endpoint.
   The UI directs them to credit correction; `CancelDeliveryNote` is restricted
   to the supported 9.3 delivery-note path.
-- 9.3 cancellation persists the returned cancellation MARK.
+- Provider 9.3 cancellation parses a returned cancellation MARK; PROV-015 tracks
+  strict presence, recovery and consistent persistence before this can be called
+  complete.
 - Provider responses are XML-parsed with network entity resolution disabled.
 - A duplicate `PROVIDER_INSERT` row with the same invoice/MARK is de-duplicated.
 - Provider payload preview exists without exposing the token.
@@ -2247,3 +2552,4 @@ These are not open issues:
 | 2026-08-30 | Final myDATA/lifecycle pass: added MYD-017–MYD-020 and STOCK-001 | Documentation-only audit |
 | 2026-08-30 | Added Provider/InvoSign/ΥΠΑΗΕΣ audit, compatibility matrices and PROV-001–PROV-013 | Documentation-only audit |
 | 2026-08-30 | Provider hardening sweep: added PROV-014–PROV-019 and expanded the sandbox matrix | Documentation-only audit |
+| 2026-08-31 | Critical myDATA/provider integrity sweep: added MYD-021–MYD-026 and PROV-020; expanded snapshot, evidence and sandbox requirements | Documentation-only audit |
