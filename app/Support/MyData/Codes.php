@@ -102,10 +102,14 @@ final class Codes
     public const TYPE_DEFAULTS = [
         '1.1' => ['income' => 'E3_561_001', 'category' => 'category1_1', 'goods' => true],
         '1.2' => ['income' => 'E3_561_005', 'category' => 'category1_1', 'goods' => true],
-        '1.3' => ['income' => 'E3_561_005', 'category' => 'category1_1', 'goods' => true],
+        // Third-country goods export (1.3): E3_561_006 «Εξωτερικού Τρίτων Χωρών»,
+        // NOT the intra-community E3_561_005 used by 1.2 (MYD-001).
+        '1.3' => ['income' => 'E3_561_006', 'category' => 'category1_1', 'goods' => true],
         '2.1' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
         '2.2' => ['income' => 'E3_561_005', 'category' => 'category1_3', 'goods' => false],
-        '2.3' => ['income' => 'E3_561_005', 'category' => 'category1_3', 'goods' => false],
+        // Cross-border services to a third country (2.3): third-country E3_561_006
+        // (the non-EU twin of 2.2), NOT intra-community E3_561_005 (MYD-001).
+        '2.3' => ['income' => 'E3_561_006', 'category' => 'category1_3', 'goods' => false],
         '3.1' => ['income' => null, 'category' => null, 'goods' => false],
         '5.1' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
         '5.2' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],

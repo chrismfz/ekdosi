@@ -261,7 +261,7 @@ Priorities:
 
 | ID | Priority | Status | Area | Summary |
 |---|---:|---|---|---|
-| MYD-001 | P0 | OPEN | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
+| MYD-001 | P0 | DONE | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
 | MYD-002 | P0 | OPEN | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
 | MYD-003 | P0 | OPEN | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
 | MYD-004 | P0 | OPEN | VAT validation | 3%, dual 4% codes and 0% can produce false readiness results |
@@ -337,7 +337,13 @@ Priorities:
 
 ### MYD-001 — Third-country sales use the wrong E3 code
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `Codes::TYPE_DEFAULTS` maps 1.3/2.3 → `E3_561_006`; 1.2/2.2 keep
+`E3_561_005`. Seeder derives income class from `typeDefaults()` so ΕΞΑ/ΥΤΧ pick it
+up automatically. Tests in `MyDataLookupSeederTest` assert the 005-vs-006 split and
+the seeded ΕΞΑ/ΥΤΧ rows. Fill-empty behaviour unchanged (operator edits preserved).
+See `CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2553,3 +2559,4 @@ These are not open issues:
 | 2026-08-30 | Added Provider/InvoSign/ΥΠΑΗΕΣ audit, compatibility matrices and PROV-001–PROV-013 | Documentation-only audit |
 | 2026-08-30 | Provider hardening sweep: added PROV-014–PROV-019 and expanded the sandbox matrix | Documentation-only audit |
 | 2026-08-31 | Critical myDATA/provider integrity sweep: added MYD-021–MYD-026 and PROV-020; expanded snapshot, evidence and sandbox requirements | Documentation-only audit |
+| 2026-08-31 | **MYD-001 DONE** — third-country 1.3/2.3 → E3_561_006 (was 561_005); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
