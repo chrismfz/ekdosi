@@ -30,6 +30,8 @@ surfaced in the open-items sections further down.
   ΥΠΑΗΕΣ provider + EU PEPPOL. PEPPOL Phase 1 (UBL builder, `peppol:test-submit`) **DONE**;
   provider P0–P5 built/gated (mode=off); **PEPPOL Phase 2 + live provider = OPEN**.
 - **`payment-connectors.md`** — card-POS + IRIS design. **NOT-STARTED** (blueprint).
+- **`leads-mini-crm.md`** — **Leads / mini-CRM** (υποψήφιοι πελάτες + χρονολόγιο επαφών + μετατροπή
+  σε πελάτη + απολογισμός ανά χειριστή). **DESIGN, no code yet** — gates L0–L3, αποφάσεις κλειδωμένες §9.
 - **`payments` (AR)** — core **DONE** (cockpit/allocator/bank-accounts/refunds); deferred
   connectors → `payment-connectors.md`.
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 (registry seam) **DONE**;
@@ -258,6 +260,16 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   audit· **grounding** system prompt (ξέρει ότι είναι ekdosi, ποια εταιρεία, off-task refusal)·
   **υποψήφιο μοντέλο = Sonnet 4.6 default**, Haiku 4.5 cheap tier, Opus 4.8 για βαριά ανάλυση).
 - **Payment connectors** — IRIS + card-POS. `payment-connectors.md`.
+- **Leads / mini-CRM** (2026-09-01, ιδέα ιδιοκτήτη — «αποκτούμε άτομο να κυνηγάει πελάτες») —
+  ξεχωριστός `leads` πίνακας (όσα στοιχεία έχουμε, μόνο επωνυμία υποχρεωτική) + `lead_activities`
+  χρονολόγιο (τηλέφωνο/email/ραντεβού/σημείωση, append-only, ποιος/πότε/τι ειπώθηκε/επόμενο βήμα) +
+  status (νέο→…→πελάτης / χάθηκε / μην ξαναενοχλήσετε) + **dedupe warning** vs υπάρχοντες πελάτες &
+  παλιά leads («να μην ξαναζαλίζουμε κόσμο») + **`ConvertLeadToCustomer`** με αμφίδρομο link
+  (`leads.converted_customer_id`, μοτίβο quote→invoice) + section «Προέλευση» στον πελάτη +
+  **«Απολογισμός πωλήσεων»** page (τηλέφωνα/emails/μετατροπές ανά χειριστή×εβδομάδα — «δούλεψε ο
+  άνθρωπος;») + `next_action_at` reminders. **DESIGN ONLY, αποφάσεις κλειδωμένες** (§9: ρόλος =
+  `operator`, όλοι βλέπουν όλα, παντού/multi-tenant, ελεύθερη επεξεργασία, μόνο χειροκίνητα, keep it
+  simple) → `leads-mini-crm.md`. **Έτοιμο για L0 (1 PR) όταν κλείσουν τα audits.**
 
 ---
 
