@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 
@@ -132,6 +133,16 @@ class Customer extends Model
     public function referrals(): HasMany
     {
         return $this->hasMany(self::class, 'referred_by_customer_id');
+    }
+
+    /**
+     * The lead this customer came from (null for customers created directly
+     * or imported). Read side of `leads.converted_customer_id` — the «από πού
+     * ήρθε» link; filled by ConvertLeadToCustomer.
+     */
+    public function originLead(): HasOne
+    {
+        return $this->hasOne(Lead::class, 'converted_customer_id');
     }
 
     /**
