@@ -115,6 +115,11 @@ surfaced in the open-items sections further down.
   κονσόλα-Έξοδα. _(Χειροκίνητη καταχώριση + PDF/scan attachment: ✅ shipped — βλ. «Done recently».)_
 - **§8.13 quantity/units για ΔΑ αγαθών** — οι μονάδες υπάρχουν· τυχόν goods-tenant ειδικά
   (π.χ. `<quantity>` per-line σε goods invoice types) ανοίγουν μόνο αν έρθει goods tenant.
+- **measurementUnit = 7 (Τεμάχια_Λοιπές Περιπτώσεις) στα ΔΑ** — απαιτεί
+  `otherMeasurementUnitQuantity` + `otherMeasurementUnitTitle` (§8.13 note 9, υποχρεωτικά).
+  Δεν μοντελοποιούνται ακόμη → το 7 είναι σκόπιμα **μπλοκαρισμένο** (service throw) + κρυμμένο
+  από τα line pickers (MYD-016). Full support = νέες στήλες σε `delivery_note_lines` + form fields
+  + payload· άνοιξέ το αν το ζητήσει tenant με «λοιπές» μονάδες συσκευασίας (π.χ. παλέτες).
 - **CMR (διεθνής φορτωτική)** — _✅ BUILT (Φάσεις 1–4): αυτοτελές `cmr_notes`/`cmr_lines`,
   `CmrResource` (standalone) + action «Δημιουργία CMR» σε Τιμολόγιο/ΔΑ (pre-fill + μεταγραφή
   ΕΛΟΤ-743), editable draft, `CmrPdf` 24-box, αγγλικά στοιχεία εταιρείας._ **Εκκρεμεί Φάση 0**
@@ -171,6 +176,15 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   sandbox creds (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`.
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
   (InvoSign/SBZ). `paroxos/`.
+- **Provider endpoint hardening (PROV-017 follow-ups)** — το core URL guard (public-https-only,
+  no userinfo/query/port≠443, no private/loopback/link-local/CGNAT host, no credentialed redirects)
+  ✅ SHIPPED. Είναι **best-effort accident-prevention** (το URL το βάζει έμπιστος operator). Deferred
+  hardening για πλήρη anti-SSRF: (α) **resolver-consistency + IP-pin** — ανάλυση με τον ΙΔΙΟ resolver
+  (getaddrinfo/`/etc/hosts`, όχι μόνο `dns_get_record`) και POST στην ήδη-ελεγμένη IP (CURLOPT_RESOLVE),
+  ώστε να κλείσει το fail-open (κενή ανάλυση = δεν μπλοκάρει) και το TOCTOU/DNS-rebinding· (β) parse_url
+  host-confusion — ο έλεγχος γίνεται με `parse_url`, ο connect με curl (πιθανή απόκλιση σε crafted URLs)·
+  (γ) provider-managed endpoint-profile registry αντί ελεύθερου URL (vendor-confirmed hosts)· (δ)
+  μη-blocking DNS (το `dns_get_record` είναι σύγχρονο στο hot path/form-save).
 - **Bridges/Connectors Phase 1** — πραγματική 2η πηγή (WooCommerce/Blesta…). `bridges-connectors.md`.
   _Phase 0.5 ✅ (presentation-only): source-neutral «Εισερχόμενα» + source badge · «Γέφυρες» page
   (honest status, no fake toggle). Phase 1 = move `companies.whmcs_*` → `billing_connections.config`,

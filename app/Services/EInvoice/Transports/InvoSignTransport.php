@@ -7,6 +7,7 @@ use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderEndpointGuard;
 use App\Support\EInvoice\ProviderResult;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -119,7 +120,7 @@ class InvoSignTransport implements EInvoiceProviderTransport
         [$base] = $this->resolve($credentials);
 
         try {
-            Http::timeout(self::CONNECT_TIMEOUT)->get($base);
+            Http::withoutRedirecting()->timeout(self::CONNECT_TIMEOUT)->get($base);
         } catch (ConnectionException $e) {
             throw new RuntimeException('InvoSign endpoint unreachable: '.$e->getMessage(), 0, $e);
         }
@@ -142,6 +143,11 @@ class InvoSignTransport implements EInvoiceProviderTransport
             );
         }
 
+        // Constrain the operator-supplied endpoint to a public HTTPS host BEFORE any
+        // request leaves with the token + invoice XML (SSRF / data-exfil). Enforced
+        // here so CLI/API callers are covered, not only the form. PROV-017.
+        ProviderEndpointGuard::assertSafeBaseUrl($base);
+
         return [$base, $token];
     }
 
@@ -150,6 +156,7 @@ class InvoSignTransport implements EInvoiceProviderTransport
     {
         try {
             $response = Http::asForm()
+                ->withoutRedirecting()   // a rogue endpoint must not 302 the token+payload elsewhere
                 ->timeout(self::TIMEOUT)
                 ->connectTimeout(self::CONNECT_TIMEOUT)
                 ->post($url, $form);

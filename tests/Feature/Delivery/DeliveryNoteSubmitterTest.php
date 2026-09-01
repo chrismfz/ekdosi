@@ -148,6 +148,54 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('8', (string) ($line->getVatCategory()->value ?? $line->getVatCategory()));
     }
 
+    public function test_missing_measurement_unit_throws(): void
+    {
+        // A persisted line with no unit is a data error — surface it, never
+        // silently file it as pieces (MYD-016).
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => null]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/μονάδα μέτρησης/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note->fresh('lines'));
+    }
+
+    public function test_out_of_range_measurement_unit_throws(): void
+    {
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => 99]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/μονάδα μέτρησης/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note->fresh('lines'));
+    }
+
+    public function test_unit_7_other_is_blocked_until_other_unit_fields_exist(): void
+    {
+        // Unit 7 needs otherMeasurementUnitQuantity/Title (§8.13 note 9) — block
+        // it locally instead of filing a payload AADE must reject.
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => 7]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/δεν υποστηρίζεται/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note->fresh('lines'));
+    }
+
+    public function test_supported_unit_survives_unchanged(): void
+    {
+        // Kilos (2) must reach the payload as-is, not be rewritten to pieces.
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => 2]);
+
+        $aade = (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note->fresh('lines'));
+        $mu = $aade->getInvoiceDetails()[0]->getMeasurementUnit();
+        $this->assertSame('2', (string) ($mu->value ?? $mu));
+    }
+
     public function test_preview_xml_contains_delivery_markers(): void
     {
         $note = $this->makeNote();
@@ -289,6 +337,28 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('400000000000777', $fresh->mydata_mark);
         $this->assertSame('registered', $fresh->delivery_state);
         $this->assertSame('active', $fresh->local_status);
+    }
+
+    public function test_provider_delivery_note_rejects_a_backdated_issue_date(): void
+    {
+        // Provider (InvoSign) online issue requires today's date (238); a
+        // backdated note must fail locally, before any provider call (PROV-020).
+        config()->set('ekdosi.einvoice.providers.fake-delivery', FakeDeliveryProviderTransport::class);
+
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'fake-delivery',
+            'einvoice_provider_mode' => 'sandbox',
+            'einvoice_provider_config' => ['demo_base_url' => 'https://provider.test', 'demo_token' => 'tok'],
+            'mydata_mode' => 'off',
+        ])->save();
+
+        $note = $this->makeNote(['issued_at' => now()->subDay()]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/ημερομηνία έκδοσης/u');
+
+        (new DeliveryNoteSubmitter($this->tenant->fresh()))->submit($note);
     }
 
     public function test_provider_rejection_is_visible_in_delivery_history_with_request_and_response(): void

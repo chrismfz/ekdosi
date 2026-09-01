@@ -22,6 +22,7 @@ use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Services\Whmcs\WhmcsCustomerMatcher;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderEndpointGuard;
 use App\Support\EInvoice\SendChannel;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\DatePicker;
@@ -1105,6 +1106,25 @@ class CompanyForm
                     ->label($meta['label'] ?? $name)
                     ->maxLength(255)
                     ->visible(fn (callable $get) => SendChannel::providerKey((string) $get('send_channel')) === $key);
+
+                // A `url` endpoint field must be a public HTTPS host (SSRF / token+
+                // payload exfiltration, PROV-017) — surface the same guard the transport
+                // enforces at issue time, so a bad URL is caught on save.
+                if ($meta['url'] ?? false) {
+                    // Filament evaluates the OUTER closure (utility injection) and expects
+                    // it to RETURN the Laravel rule closure — passing the rule closure
+                    // directly makes Filament try to resolve $attribute as a dependency.
+                    $input->rule(fn (): \Closure => function (string $attribute, $value, \Closure $fail) {
+                        if (blank($value)) {
+                            return;
+                        }
+                        try {
+                            ProviderEndpointGuard::assertSafeBaseUrl((string) $value);
+                        } catch (\RuntimeException $e) {
+                            $fail($e->getMessage());
+                        }
+                    });
+                }
 
                 if ($meta['secret'] ?? false) {
                     $input->password()

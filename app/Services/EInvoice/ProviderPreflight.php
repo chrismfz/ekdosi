@@ -5,6 +5,8 @@ namespace App\Services\EInvoice;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Services\EInvoice\Transports\NullProviderTransport;
+use App\Support\EInvoice\ProviderEndpointGuard;
+use RuntimeException;
 
 /**
  * Read-only readiness audit for a provider (ΥΠΑΗΕΣ) tenant — the «Πάροχος Console»
@@ -56,7 +58,8 @@ class ProviderPreflight
         // actually uses (same split as InvoSignTransport::resolve), so a production
         // tenant with only sandbox creds filled fails the preflight instead of a
         // misleading green. Providers with no split (e.g. SBZ) check all fields.
-        $fields = array_keys((array) config("ekdosi.einvoice.provider_fields.{$key}", []));
+        $defs = (array) config("ekdosi.einvoice.provider_fields.{$key}", []);
+        $fields = array_keys($defs);
         $config = is_array($tenant->einvoice_provider_config) ? $tenant->einvoice_provider_config : [];
         $sandbox = ($tenant->einvoice_provider_mode ?? 'off') !== 'production';
         $hasDemoSplit = (bool) array_filter($fields, fn ($f) => str_starts_with($f, 'demo_'));
@@ -70,6 +73,23 @@ class ProviderPreflight
             $checks[] = ['status' => 'ok', 'label' => 'Στοιχεία παρόχου', 'detail' => "Συμπληρωμένα για το περιβάλλον {$env}."];
         } else {
             $checks[] = ['status' => 'fail', 'label' => 'Στοιχεία παρόχου', 'detail' => "Λείπουν στοιχεία του περιβάλλοντος {$env}: ".(implode(', ', $missing) ?: '—').'.'];
+        }
+
+        // Endpoint safety: any `url` endpoint field for the active environment must
+        // be a public HTTPS host — never http/userinfo/query/internal (SSRF /
+        // token+payload exfiltration, PROV-017). Only validate a present value; an
+        // empty one is already flagged above.
+        foreach (array_filter($relevant, fn ($f) => $defs[$f]['url'] ?? false) as $urlField) {
+            $url = (string) ($config[$urlField] ?? '');
+            if ($url === '') {
+                continue;
+            }
+            try {
+                ProviderEndpointGuard::assertSafeBaseUrl($url);
+                $checks[] = ['status' => 'ok', 'label' => 'URL παρόχου', 'detail' => 'Έγκυρο δημόσιο https endpoint.'];
+            } catch (RuntimeException $e) {
+                $checks[] = ['status' => 'fail', 'label' => 'URL παρόχου', 'detail' => $e->getMessage()];
+            }
         }
 
         // Issuer AFM (the AADE payload needs it).

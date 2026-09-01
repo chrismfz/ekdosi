@@ -10,6 +10,7 @@ use App\Models\DeliveryNote;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
@@ -177,13 +178,28 @@ class DeliveryNoteSubmitter
         foreach ($note->lines as $line) {
             // Value-less line shape per the 9.3 reference payload:
             //   quantity + measurementUnit + netValue=0 + vatCategory=8 + vatAmount=0.
-            // measurementUnit defaults to 1 (τεμάχια) when unset — the reference
-            // doc always carries it, so we never omit it for a delivery note.
-            // Clamp the unit to a valid §8.13 code (1–7) — an out-of-range value
-            // would be silently dropped by firebed's enum cast (tryFrom → null),
-            // leaving the line with no <measurementUnit>. Default 1 (τεμάχια).
-            $unit = (int) ($line->measurement_unit ?? 1);
-            $unit = ($unit >= 1 && $unit <= 7) ? $unit : 1;
+            // measurementUnit is a coded LEGAL quantity meaning (§8.13, 1–7), so a
+            // missing/out-of-range value is a data error to surface — NOT to repair
+            // by silently filing pieces (that changes what the movement line means).
+            // A new UI line starts at 1 in the form; this boundary never defaults.
+            // MYD-016.
+            $unit = $line->measurement_unit;   // model casts to ?int
+            if ($unit === null || $unit < 1 || $unit > 7) {
+                throw new RuntimeException(
+                    "Γραμμή του δελτίου {$note->invcode} έχει μη έγκυρη μονάδα μέτρησης "
+                    .'(υποστηριζόμενες §8.13: 1–6). Διορθώστε την πριν την υποβολή.'
+                );
+            }
+            // Unit 7 (Τεμάχια_Λοιπές Περιπτώσεις) needs otherMeasurementUnitQuantity/
+            // Title (§8.13 note 9, mandatory) which we do not model/emit yet, so a
+            // 7 line cannot be filed correctly — fail loudly instead of malformed.
+            if ($unit === 7) {
+                throw new RuntimeException(
+                    "Η μονάδα μέτρησης 7 (Τεμάχια_Λοιπές Περιπτώσεις) στο δελτίο {$note->invcode} "
+                    .'δεν υποστηρίζεται ακόμη (απαιτεί otherMeasurementUnitQuantity/Title) — '
+                    .'επιλέξτε 1–6 ή χωρίστε τη γραμμή.'
+                );
+            }
 
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
@@ -310,6 +326,10 @@ class DeliveryNoteSubmitter
     /** Submit the same canonical 9.x AADE XML through the tenant's ΥΠΑΗΕΣ provider. */
     private function submitViaProvider(DeliveryNote $note, string $xml): DeliveryMark
     {
+        // Normal online provider issue requires IssueDate = today (InvoSign 238);
+        // reject a backdated/future date locally before any outbound request (PROV-020).
+        ProviderIssueDateGuard::assertIssuedToday($note->issued_at, (string) $note->invcode);
+
         $transport = app(ProviderTransportRegistry::class)->for((string) $this->tenant->einvoice_provider_key);
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 

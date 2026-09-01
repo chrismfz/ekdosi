@@ -18,6 +18,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Security
+- **Περιορισμός endpoint παρόχου e-τιμολόγησης (PROV-017)** — το base URL του παρόχου
+  (InvoSign) ήταν ελεύθερο κείμενο και ο transport έστελνε εκεί το token + το πλήρες XML
+  τιμολογίου· ένα `http://`, ένα URL με `user:pass@`/query, ή ένα εσωτερικό host μπορούσε να
+  διαρρεύσει διαπιστευτήρια/δεδομένα ή να χτυπήσει εσωτερική υπηρεσία (SSRF). Νέος
+  `ProviderEndpointGuard` (μόνο public **https**, χωρίς userinfo/query/fragment, θύρα μόνο 443,
+  όχι private/loopback/link-local host) επιβάλλεται στο **service choke-point** (`InvoSignTransport::resolve`
+  — καλύπτει CLI/API), στο **provider preflight** και στη **φόρμα**. Επιπλέον, οι κλήσεις παρόχου
+  γίνονται πλέον `withoutRedirecting()` ώστε κακόβουλο endpoint να μη μπορεί να ανακατευθύνει
+  το token+payload αλλού. (Deferred hardening — TOCTOU DNS-pin, endpoint-profile registry — στο BACKLOG.)
+
 ### Changed
 - **Ορολογία «Ψηφιακό Τέλος Συναλλαγής» + σωστές §8.x παραπομπές (MYD-020)** — τα
   operator-facing labels (φόρμα προϊόντος/παραστατικού, PDF, presets «Τυπικά τέλη/φόροι»)
@@ -28,6 +39,27 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συμβατότητα δεδομένων· τα αποθηκευμένα ποσά εκπέμπουν το ίδιο σωστό taxType 4).
 
 ### Fixed
+- **Έλεγχος ημερομηνίας έκδοσης για online έκδοση μέσω παρόχου (PROV-020)** — η κανονική
+  online έκδοση μέσω InvoSign απαιτεί `IssueDate = σημερινή` (error 238), αλλά το Ekdosi
+  δεχόταν backdated/future `issued_at` και το έστελνε — εγγυημένη απόρριψη. Νέος
+  service-level guard (`ProviderIssueDateGuard`, ώρα Ελλάδας/Europe-Athens) στα provider
+  paths (τιμολόγιο + δελτίο διακίνησης): μη-σημερινή ημερομηνία **μπλοκάρεται τοπικά πριν
+  από κάθε outbound request**, με σαφές μήνυμα. Το direct myDATA (που δέχεται backdating
+  εντός ορίων AADE) δεν επηρεάζεται· η νόμιμη offline/backdated οδός (Transmission Failure)
+  παραμένει το PROV-008.
+- **Έγκυρη μονάδα μέτρησης στα δελτία διακίνησης (MYD-016)** — ο submitter «διόρθωνε»
+  σιωπηλά μια απούσα/άκυρη μονάδα σε 1 (τεμάχια), αλλάζοντας το νόημα της γραμμής (π.χ.
+  κιλά → τεμάχια). Πλέον μια απούσα ή μη υποστηριζόμενη μονάδα (εκτός §8.13 1–6)
+  **μπλοκάρει την υποβολή** με σαφές μήνυμα. Ο τύπος 7 (Τεμάχια_Λοιπές Περιπτώσεις) — που απαιτεί
+  `otherMeasurementUnitQuantity/Title` (μη υλοποιημένα) — μπλοκάρεται ρητά στον submitter
+  και δεν προσφέρεται πλέον σε νέες γραμμές (υπάρχουσες γραμμές με 7 εξακολουθούν να το
+  εμφανίζουν, ώστε ένα edit να μην το χάνει σιωπηλά)· το full support παραμένει στο BACKLOG.
+- **Υποχρεωτικός τρόπος μεταφοράς στην έναρξη διακίνησης (MYD-013)** — το
+  `DeliveryLifecycleService::registerTransfer` παρέλειπε σιωπηλά έναν άκυρο/κενό
+  `transportType` (κατέληγε σε απόρριψη από AADE) και φίλαρε placeholder αριθμό
+  μεταφορικού. Πλέον το service (και όχι μόνο η φόρμα) **απαιτεί** έγκυρο
+  transportType 1–7 και αριθμό μεταφορικού μέσου για κάθε τύπο εκτός του 7 «Άνευ»,
+  με σαφές τοπικό μήνυμα — καλύπτει και τους non-UI callers (console/API/import).
 - **Ετικέτα ΦΠΑ κωδικού 10 (MYD-004, μερικό)** — ο §8.2 κωδικός 10 εμφανιζόταν ως
   «ΦΠΑ νήσων 4%», ενώ το επίσημο table τον λέει «ΦΠΑ συντελεστής 4% (αρ.31
   ν.5057/2023)» — χωρίς «νήσων» (οι νησιωτικοί μειωμένοι είναι οι κωδικοί 4/5/6).

@@ -273,10 +273,10 @@ Priorities:
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | OPEN | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
-| MYD-013 | P1 | OPEN | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
+| MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
-| MYD-016 | P1 | OPEN | Delivery units | Invalid or missing coded unit is silently filed as pieces |
+| MYD-016 | P1 | DONE | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | OPEN | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
@@ -303,10 +303,10 @@ Priorities:
 | PROV-014 | P0 | OPEN | Provider concurrency | Issue is not single-flight and is not serialized against document mutation |
 | PROV-015 | P0 | OPEN | Provider cancellation | Missing/lost cancellation evidence can create a false or split-brain terminal state |
 | PROV-016 | P0 | OPEN | Provider cutover | Historical issue channel/environment is not frozen or used for later actions |
-| PROV-017 | P1 | OPEN | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
+| PROV-017 | P1 | DONE | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
 | PROV-018 | P1 | OPEN | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
-| PROV-020 | P1 | OPEN | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
+| PROV-020 | P1 | DONE | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
 | STOCK-001 | P1 | OPEN | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
@@ -789,7 +789,16 @@ correlatedInvoices carries the related document MARK values.
 
 ### MYD-013 — RegisterTransfer can omit mandatory transportType
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `DeliveryLifecycleService::registerTransfer` now gates the mandatory
+`TransportDetailType` fields at the service boundary (not just the Filament form):
+a null/out-of-range `transport_type` throws an actionable local error instead of
+being silently omitted (→ AADE rejection), and `vehicle_number` is required for
+every `transportType` except 7 (Άνευ), for which the explicit placeholder is kept.
+`DeliveryLifecycleServiceTest` adds missing/invalid transportType, missing-vehicle,
+type-7-without-vehicle and payload-carries-both cases. See `CHANGELOG.md`
+[Unreleased] → Fixed.
 
 **Official finding**
 
@@ -901,7 +910,21 @@ Its economic direction is a return, not additional collection.
 
 ### MYD-016 — Delivery units silently become pieces
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `DeliveryNoteSubmitter::buildAadeDeliveryNote` no longer defaults a missing
+unit or clamps an out-of-range one to 1 — a persisted `measurement_unit` outside
+§8.13 1–7 now throws an actionable local error instead of silently changing the
+line's meaning. Unit 7 (Τεμάχια_Λοιπές Περιπτώσεις) requires
+`otherMeasurementUnitQuantity/Title` (§8.13 note 9, mandatory) which are not
+modelled, so it is explicitly blocked at the service and not offered to NEW lines
+in the two delivery line-unit pickers via `Codes::selectableQuantityTypes()` (a
+line already stored as 7 still shows it — state-aware options — so an unrelated
+edit can't silently drop the value; the full `QUANTITY_TYPES` map is also kept for
+DISPLAY of legacy rows). Full unit-7 support is
+logged in `docs/BACKLOG.md`. `DeliveryNoteSubmitterTest` covers missing,
+out-of-range, unit-7-blocked and a supported unit surviving unchanged. See
+`CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -1812,7 +1835,27 @@ environment used at issue.
 
 ### PROV-017 — Provider base URL is an unrestricted data-exfiltration sink
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** new `App\Support\EInvoice\ProviderEndpointGuard::assertSafeBaseUrl()` accepts
+only a plain PUBLIC HTTPS endpoint — rejects non-https, userinfo (`user:pass@`),
+query/fragment, ports ≠ 443, and any host resolving to a private/reserved/loopback/
+link-local address (SSRF; literal IP checked directly, hostname resolved best-effort,
+DNS failure does not block). It is enforced at `InvoSignTransport::resolve()` (the
+choke-point for send/sendDelivery/cancel/status/ping — so CLI/API callers are covered),
+in `ProviderPreflight` (a bad active-env base URL is a `fail`), and on the `*base_url`
+form fields. Provider HTTP calls are now `withoutRedirecting()` so a rogue endpoint
+cannot 302 the token+payload elsewhere. Tokens stay out of the thrown messages.
+Unit tests cover every blocked URL class + valid public https; transport tests prove
+an http/private base makes NO outbound request. Deferred hardening (request-time
+DNS-rebinding pin, provider-managed endpoint-profile registry) is logged in
+`docs/BACKLOG.md`. See `CHANGELOG.md` [Unreleased] → Security.
+
+*Notes (whole-PR review):* the guard is **best-effort accident-prevention** — full
+anti-SSRF (resolver-consistency + IP-pin, parse_url-vs-curl host confusion,
+non-blocking DNS) is the deferred BACKLOG item. No live provider base URL exists to
+grandfather (provider mode is off for all tenants), and https/443 is what InvoSign
+requires anyway, so enforcing it forward is correct rather than a migration risk.
 
 Provider URL fields in
 [CompanyForm::providerCredentialFields](app/Filament/Resources/Companies/Schemas/CompanyForm.php)
@@ -1910,7 +1953,25 @@ exactly once.
 
 ### PROV-020 — Normal online InvoSign issue date is not preflighted
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-31
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-31
+
+**Fix:** new `App\Support\EInvoice\ProviderIssueDateGuard::assertIssuedToday()`
+(Europe/Athens local date) is called at both provider issue paths —
+`GrProviderSubmitter::submit` (before build/POST) and
+`DeliveryNoteSubmitter::submitViaProvider` — so a backdated/future `issued_at`
+throws an actionable local error and NO outbound request is made. The direct
+myDATA path is intentionally untouched (AADE accepts backdating within its
+window). Tests cover yesterday (with a no-outbound assertion), tomorrow and an
+Europe/Athens midnight boundary for the invoice path, plus a backdated delivery
+note. The legitimate offline/backdated route (Transmission Failure) remains
+**PROV-008** — the guard message points to it. See `CHANGELOG.md` [Unreleased] → Fixed.
+
+*Notes (review):* the guard is a pre-send preflight; recovering an in-doubt
+filing whose response was lost (adopt the existing MARK by frozen coordinates)
+is owned by **PROV-001/PROV-014**, not by re-filing on a later day. Correcting the
+date of an already-finalised (active) document is by design a revert-to-draft →
+edit → refile (EditInvoice is draft-only; the audit forbids silently rewriting an
+allocated legal issue date) — the guard message says so.
 
 The [InvoSign calls/responses guide](https://invosign.gr/site/help_site/?page=kliseis_apantisi)
 documents validation error 238: `IssueDate` must equal the current date for the
@@ -2601,3 +2662,7 @@ These are not open issues:
 | 2026-08-31 | **MYD-001 DONE** — third-country 1.3/2.3 → E3_561_006 (was 561_005); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-015 DONE** — POS return 8.5 now reduces the myDATA VAT picture (−sign); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-020 DONE** — «Ψηφιακό Τέλος Συναλλαγής» terminology + corrected §8.5/8.6/8.7 refs; payload/columns unchanged | `CHANGELOG.md` [Unreleased] → Changed |
+| 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **PROV-017 DONE** — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |

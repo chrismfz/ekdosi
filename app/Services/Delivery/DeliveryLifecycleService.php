@@ -113,21 +113,40 @@ class DeliveryLifecycleService
 
         $qrUrl = $this->requireQrUrl($note);
 
+        // transportType is MANDATORY (Delivery Note v2.0.1, TransportDetailType,
+        // accepts 1–7). The UI requires it, but this service is ALSO reached by
+        // console/API/import callers, so gate it here — a silent omission (the old
+        // behaviour) just produced an avoidable AADE rejection, and an out-of-range
+        // value was dropped rather than surfaced. MYD-013.
+        $transportType = $note->transport_type;   // model casts to ?int
+        if ($transportType === null || TransportType::tryFrom($transportType) === null) {
+            throw new RuntimeException(
+                "Το δελτίο {$note->invcode} δεν έχει έγκυρο τρόπο μεταφοράς (transportType 1–7). "
+                .'Συμπληρώστε τον πριν την έναρξη διακίνησης.'
+            );
+        }
+
+        // vehicleNumber is mandatory unless transportType = 7 (Άνευ / χωρίς
+        // μεταφορικό μέσο) — validate per the selected type, not blanket.
+        $vehicle = trim((string) ($note->vehicle_number ?? ''));
+        if ($transportType !== TransportType::WITHOUT->value && $vehicle === '') {
+            throw new RuntimeException(
+                "Το δελτίο {$note->invcode} απαιτεί αριθμό μεταφορικού μέσου για τον επιλεγμένο "
+                .'τρόπο μεταφοράς (υποχρεωτικό για κάθε τύπο εκτός του 7 «Άνευ»).'
+            );
+        }
+
         $details = (new TransportDetails)
-            ->setVehicleNumber((string) ($note->vehicle_number ?: 'ΧΩΡΙΣ ΜΕΤΑΦΟΡΙΚΟ ΜΕΣΟ'))
             ->setCarrierVatNumber(
                 $note->carrier_afm
                     ?: $this->tenant->afm
                     ?: throw new RuntimeException('Δεν υπάρχει ΑΦΜ μεταφορέα ούτε ΑΦΜ εταιρείας για τη διακίνηση.')
-            );
+            )
+            ->setTransportType($transportType);
 
-        // transport_type is OPTIONAL on our model; only set it when present + a
-        // valid §-enum value (firebed's setTransportType takes int|enum and the
-        // writer drops an out-of-range cast → null, so guard it here).
-        if ($note->transport_type !== null
-            && TransportType::tryFrom((int) $note->transport_type) !== null) {
-            $details->setTransportType((int) $note->transport_type);
-        }
+        // type 7 (Άνευ) may carry no vehicle → keep the explicit placeholder the
+        // prior behaviour used so AADE still receives a (non-empty) vehicleNumber.
+        $details->setVehicleNumber($vehicle !== '' ? $vehicle : 'ΧΩΡΙΣ ΜΕΤΑΦΟΡΙΚΟ ΜΕΣΟ');
 
         $transport = (new Transport)
             ->setQrUrl($qrUrl)

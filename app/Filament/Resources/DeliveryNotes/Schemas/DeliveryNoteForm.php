@@ -348,7 +348,13 @@ class DeliveryNoteForm
 
                             Select::make('measurement_unit')
                                 ->label('Μ.Μ.')
-                                ->options(Codes::QUANTITY_TYPES)
+                                // New lines pick 1–6 (unit 7 needs unmodelled
+                                // otherMeasurementUnit fields — MYD-016); a legacy
+                                // line already on 7 still shows it, so an unrelated
+                                // edit never silently drops the stored value.
+                                ->options(fn (Get $get) => (int) $get('measurement_unit') === 7
+                                    ? Codes::QUANTITY_TYPES
+                                    : Codes::selectableQuantityTypes())
                                 ->default(1)
                                 ->selectablePlaceholder(false)
                                 ->helperText(DeliveryGuidance::fieldHelp('measurement_unit')),

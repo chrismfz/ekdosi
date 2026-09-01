@@ -106,6 +106,46 @@ class InvoSignTransportTest extends TestCase
         });
     }
 
+    public function test_send_refuses_a_non_https_base_url_before_any_request(): void
+    {
+        // A copied/typo http:// endpoint must never receive the token + XML (PROV-017).
+        $this->tenant->forceFill([
+            'einvoice_provider_config' => ['demo_base_url' => 'http://demo.invosign.test', 'demo_token' => 'DEMO-TOKEN'],
+        ])->save();
+        $invoice = $this->makeInvoice();
+
+        Http::fake();
+
+        try {
+            (new InvoSignTransport)->send($invoice, '<InvoicesDoc/>', ProviderCredentials::fromCompany($this->tenant->fresh()));
+            $this->fail('Expected a rejection for an http base URL.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('URL', $e->getMessage());
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_send_refuses_a_private_host_base_url_before_any_request(): void
+    {
+        // An internal/loopback endpoint (SSRF) must be blocked before the POST.
+        $this->tenant->forceFill([
+            'einvoice_provider_config' => ['demo_base_url' => 'https://127.0.0.1', 'demo_token' => 'DEMO-TOKEN'],
+        ])->save();
+        $invoice = $this->makeInvoice();
+
+        Http::fake();
+
+        try {
+            (new InvoSignTransport)->send($invoice, '<InvoicesDoc/>', ProviderCredentials::fromCompany($this->tenant->fresh()));
+            $this->fail('Expected a rejection for a private-host base URL.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('URL', $e->getMessage());
+        }
+
+        Http::assertNothingSent();
+    }
+
     public function test_send_delivery_augments_with_api_invoice_details_and_normalises_prefixes(): void
     {
         Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
