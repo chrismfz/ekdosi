@@ -812,7 +812,39 @@ final class Codes
      */
     public static function allowsItemDescr(?string $code): bool
     {
-        return in_array($code, ['9.1', '9.2', '9.3'], true);
+        return self::isMovementOnlyType($code);
+    }
+
+    /**
+     * Movement-only §8.1 types — the whole `9.x` family (9.1 συσχετιζόμενο, 9.2
+     * συγκεντρωτικό, 9.3 απλό Δελτίο Αποστολής, and any future 9.x). These carry
+     * no revenue and belong to the Digital Delivery-Note flow (DeliveryNoteSubmitter)
+     * — they must NEVER appear in a monetary invoice selector or reach the monetary
+     * AADE builder (MYD-003). Prefix-based so the builder guard and the picker's SQL
+     * `not like '9.%'` stay the SAME rule and cannot drift as the code table grows.
+     */
+    public static function isMovementOnlyType(?string $code): bool
+    {
+        return $code !== null && str_starts_with($code, '9.');
+    }
+
+    /**
+     * Delivery-note types we can file CORRECTLY today — an ALLOWLIST, NOT a
+     * denylist (MYD-012). A denylist of «unsupported» types lets any NEW 9.x
+     * code (a future 9.4, say) slip through unblocked; an allowlist treats
+     * everything we haven't explicitly built as unsupported, which is the safe
+     * default for a legal document. Only 9.3 (απλό Δελτίο Αποστολής) is
+     * sandbox-validated; 9.1 (συσχετιζόμενο) needs a correlated-MARK payload and
+     * 9.2 (συγκεντρωτικό) an aggregation model — neither built. Hidden from the
+     * delivery picker AND enforced at the submitter (single source, no drift).
+     *
+     * @var list<string>
+     */
+    public const SUPPORTED_DELIVERY_TYPES = ['9.3'];
+
+    public static function isSupportedDeliveryType(?string $code): bool
+    {
+        return $code !== null && in_array($code, self::SUPPORTED_DELIVERY_TYPES, true);
     }
 
     public static function vatExemptionExists(int $code): bool

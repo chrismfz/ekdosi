@@ -77,7 +77,7 @@ class MyDataLookupSeederTest extends TestCase
         $tenant = $this->tenant();
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(15, $r['created']);
+        $this->assertSame(14, $r['created']);   // ΤΔΑ dropped (MYD-002)
 
         // Cross-border SERVICES twins exist (2.2/2.3) — not just the goods ones.
         $eny = InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '2.2')->first();
@@ -185,7 +185,7 @@ class MyDataLookupSeederTest extends TestCase
         InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΠΥ', 'name' => 'Δικό μου', 'invcount' => 50, 'mydata_type' => '2.1']);
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(14, $r['created']);    // all but the existing ΤΠΥ
+        $this->assertSame(13, $r['created']);    // all but the existing ΤΠΥ (14 total − ΤΠΥ)
         $this->assertSame(1, $r['filled']);     // ΤΠΥ income chain back-filled (type matches)
         $this->assertSame(0, $r['skipped']);
 
@@ -267,8 +267,8 @@ class MyDataLookupSeederTest extends TestCase
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
 
-        // ΤΙΜ was filled (not skipped); the other 14 are created.
-        $this->assertSame(14, $r['created']);
+        // ΤΙΜ was filled (not skipped); the other 13 are created.
+        $this->assertSame(13, $r['created']);
         $this->assertSame(1, $r['filled']);
         $this->assertSame(0, $r['skipped']);
 

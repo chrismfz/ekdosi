@@ -229,7 +229,8 @@ class DemoCompanySeeder extends Seeder
 
         // Same transaction invariant as invoice() — allocate + insert atomically.
         return DB::transaction(function () use ($demo, $type, $customer, $lines): DeliveryNote {
-            $alloc = app(InvoiceNumberer::class)->allocate($demo, $type->code);
+            // ΔΑΠ is a 9.x movement type — opt out of the monetary 9.x guard (MYD-003).
+            $alloc = app(InvoiceNumberer::class)->allocate($demo, $type->code, allowMovementType: true);
 
             $note = DeliveryNote::create([
                 'company_id' => $demo->id,

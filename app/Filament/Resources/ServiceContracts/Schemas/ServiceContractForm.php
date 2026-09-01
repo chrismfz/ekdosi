@@ -171,6 +171,9 @@ class ServiceContractForm
                         ->label('Τύπος παραστατικού ανανέωσης')
                         ->options(fn () => InvoiceType::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
+                            // A recurring renewal is a monetary invoice — never a
+                            // movement-only 9.x Δελτίο Αποστολής (MYD-003).
+                            ->monetary()
                             ->orderBy('code')
                             ->get()
                             ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])

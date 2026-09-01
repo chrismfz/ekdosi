@@ -45,7 +45,9 @@ class CreateDeliveryNote extends CreateRecord
             ->firstOrFail();
 
         return DB::transaction(function () use ($data, $tenant, $type) {
-            $allocation = app(InvoiceNumberer::class)->allocate($tenant, $type->code);
+            // allowMovementType: a Δελτίο Αποστολής legitimately carries a 9.x
+            // type, so it opts out of the numberer's monetary 9.x guard (MYD-003).
+            $allocation = app(InvoiceNumberer::class)->allocate($tenant, $type->code, allowMovementType: true);
 
             $data['code'] = $allocation->code;
             $data['invcode'] = $allocation->invcode;

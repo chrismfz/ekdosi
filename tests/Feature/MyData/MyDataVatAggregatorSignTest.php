@@ -52,6 +52,29 @@ class MyDataVatAggregatorSignTest extends TestCase
         $this->assertSame(2, $picture->outputCount);
     }
 
+    public function test_zero_value_8_6_food_order_slip_adds_no_revenue(): void
+    {
+        // An 8.6 «Δελτίο Παραγγελίας Εστίασης» is transmitted to myDATA but carries
+        // NO revenue (the actual receipt is filed separately). Alongside a real 100€
+        // sale it must be COUNTED (not silently dropped) yet contribute 0 to the
+        // Έσοδα/ΦΠΑ picture — never inflate it (MYD-015 sign policy, +1 × 0 = 0).
+        $mock = new MockHandler([
+            new Response(200, [], $this->outputWithSaleAndZeroValueFoodOrder()),
+            new Response(200, [], $this->emptyDoc()),   // input side (RequestDocs)
+        ]);
+
+        $picture = (new MyDataVatAggregator($this->tenant(), $mock))->forPeriod(
+            now()->subMonth(),
+            now(),
+        );
+
+        // The 100€ sale stands; the 8.6 order slip adds nothing.
+        $this->assertSame(100.0, $picture->outputNet);
+        $this->assertSame(24.0, $picture->outputVat);
+        $this->assertSame(124.0, $picture->outputGross);
+        $this->assertSame(2, $picture->outputCount);  // both docs counted
+    }
+
     public function test_document_sign_policy_for_section_8_and_credit_types(): void
     {
         // §8.x direction is explicit (MYD-015), not prefix-derived.
@@ -69,6 +92,91 @@ class MyDataVatAggregatorSignTest extends TestCase
         // NOT a πιστωτικό, so isCreditNoteType() must not claim it (MYD-015).
         $this->assertFalse(Codes::isCreditNoteType('8.5'));
         $this->assertTrue(Codes::isCreditNoteType('5.1'));
+    }
+
+    private function outputWithSaleAndZeroValueFoodOrder(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns:icls="https://www.aade.gr/myDATA/incomeClassificaton/v1.0" xmlns:ecls="https://www.aade.gr/myDATA/expensesClassificaton/v1.0" xmlns:pm="https://www.aade.gr/myDATA/paymentMethod/v1.0" xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+  <invoicesDoc>
+    <invoice>
+      <uid>AAA0000000000000000000000000000000000010</uid>
+      <mark>400000000000810</mark>
+      <issuer>
+        <vatNumber>800561849</vatNumber>
+        <country>GR</country>
+        <branch>0</branch>
+      </issuer>
+      <invoiceHeader>
+        <series>APY</series>
+        <aa>1</aa>
+        <issueDate>2026-05-28</issueDate>
+        <invoiceType>2.1</invoiceType>
+        <currency>EUR</currency>
+      </invoiceHeader>
+      <invoiceDetails>
+        <lineNumber>1</lineNumber>
+        <netValue>100</netValue>
+        <vatCategory>1</vatCategory>
+        <vatAmount>24</vatAmount>
+        <incomeClassification>
+          <icls:classificationType>E3_561_001</icls:classificationType>
+          <icls:classificationCategory>category1_1</icls:classificationCategory>
+          <icls:amount>100</icls:amount>
+        </incomeClassification>
+      </invoiceDetails>
+      <invoiceSummary>
+        <totalNetValue>100</totalNetValue>
+        <totalVatAmount>24</totalVatAmount>
+        <totalWithheldAmount>0</totalWithheldAmount>
+        <totalFeesAmount>0</totalFeesAmount>
+        <totalStampDutyAmount>0</totalStampDutyAmount>
+        <totalOtherTaxesAmount>0</totalOtherTaxesAmount>
+        <totalDeductionsAmount>0</totalDeductionsAmount>
+        <totalGrossValue>124</totalGrossValue>
+        <incomeClassification>
+          <icls:classificationType>E3_561_001</icls:classificationType>
+          <icls:classificationCategory>category1_1</icls:classificationCategory>
+          <icls:amount>100</icls:amount>
+        </incomeClassification>
+      </invoiceSummary>
+    </invoice>
+    <invoice>
+      <uid>AAA0000000000000000000000000000000000011</uid>
+      <mark>400000000000811</mark>
+      <issuer>
+        <vatNumber>800561849</vatNumber>
+        <country>GR</country>
+        <branch>0</branch>
+      </issuer>
+      <invoiceHeader>
+        <series>PAR</series>
+        <aa>1</aa>
+        <issueDate>2026-05-28</issueDate>
+        <invoiceType>8.6</invoiceType>
+        <currency>EUR</currency>
+      </invoiceHeader>
+      <invoiceDetails>
+        <lineNumber>1</lineNumber>
+        <netValue>0</netValue>
+        <vatCategory>1</vatCategory>
+        <vatAmount>0</vatAmount>
+      </invoiceDetails>
+      <invoiceSummary>
+        <totalNetValue>0</totalNetValue>
+        <totalVatAmount>0</totalVatAmount>
+        <totalWithheldAmount>0</totalWithheldAmount>
+        <totalFeesAmount>0</totalFeesAmount>
+        <totalStampDutyAmount>0</totalStampDutyAmount>
+        <totalOtherTaxesAmount>0</totalOtherTaxesAmount>
+        <totalDeductionsAmount>0</totalDeductionsAmount>
+        <totalGrossValue>0</totalGrossValue>
+      </invoiceSummary>
+    </invoice>
+  </invoicesDoc>
+</RequestedDoc>
+XML;
     }
 
     private function emptyDoc(): string

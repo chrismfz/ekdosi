@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Resources\Companies\Pages\EditCompany;
+use App\Filament\Resources\Companies\Schemas\CompanyForm;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
@@ -105,5 +106,30 @@ class CompanyWhmcsTypePaymentTermTest extends TestCase
         Livewire::test(EditCompany::class, ['record' => $this->company->getRouteKey()])
             ->fillForm(['whmcs_default_unpaid_type_id' => $this->creditType->id])
             ->assertDontSee(self::UNPAID_WARNING_MARKER);
+    }
+
+    public function test_whmcs_default_type_options_exclude_movement_only_types(): void
+    {
+        // The three WHMCS default-type selectors (invoice/receipt/unpaid) share one
+        // query and must never offer a movement-only 9.x Δελτίο Αποστολής (MYD-003).
+        $delivery = InvoiceType::create([
+            'company_id' => $this->company->id, 'name' => 'Δελτίο Αποστολής', 'code' => 'ΔΑΠ',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+
+        $m = new \ReflectionMethod(CompanyForm::class, 'whmcsDefaultTypeOptions');
+        $m->setAccessible(true);
+        $keys = array_keys($m->invoke(null, $this->company));
+
+        $this->assertContains($this->cashType->id, $keys, 'null mydata_type stays selectable');
+        $this->assertContains($this->creditType->id, $keys);
+        $this->assertNotContains($delivery->id, $keys, '9.x excluded from WHMCS default selectors');
+
+        // But a value the field ALREADY holds (a legacy 9.x mis-stored before
+        // MYD-003) is re-injected flagged, so the admin sees it instead of a silent
+        // blank that a save could quietly null — mirrors DeliveryNoteForm.
+        $withCurrent = $m->invoke(null, $this->company, $delivery->id);
+        $this->assertArrayHasKey($delivery->id, $withCurrent);
+        $this->assertStringContainsString('μη έγκυρο', $withCurrent[$delivery->id]);
     }
 }

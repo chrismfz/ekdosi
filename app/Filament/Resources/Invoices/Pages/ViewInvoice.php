@@ -1034,6 +1034,9 @@ class ViewInvoice extends ViewRecord
         return InvoiceType::query()
             ->where('company_id', $invoice->company_id)
             ->where('is_credit', true)
+            // Defence-in-depth: a credit type is monetary — exclude a 9.x series
+            // mis-flagged is_credit so it can never seed a credit note (MYD-003).
+            ->monetary()
             ->orderBy('code')
             ->get();
     }

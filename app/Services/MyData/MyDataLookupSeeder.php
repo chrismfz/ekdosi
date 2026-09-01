@@ -380,7 +380,10 @@ class MyDataLookupSeeder
         // carries what is series-specific: the tenant code, name, §8.1 type and
         // (for clarity) the credit flag.
         ['code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο Πώλησης', 'mydata_type' => '1.1'],
-        ['code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο Πώλησης / Δελτίο Αποστολής', 'mydata_type' => '1.1'],
+        // NB: no «ΤΔΑ» here — a combined invoice+delivery (ΤΔΑ) is a 1.1 with
+        // isDeliveryNote=true + full movement data, which the builder does not emit
+        // yet (MYD-002). Seeding a «ΤΔΑ» that files as a plain 1.1 would mislabel it;
+        // the real combined document is a BACKLOG item. Plain 1.1 sales use ΤΙΜ.
         ['code' => 'ΕΝΔ', 'name' => 'Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις', 'mydata_type' => '1.2'],
         // Goods export to third countries (the non-EU twin of ΕΝΔ).
         ['code' => 'ΕΞΑ', 'name' => 'Τιμολόγιο Πώλησης / Παραδόσεις Τρίτων Χωρών', 'mydata_type' => '1.3'],

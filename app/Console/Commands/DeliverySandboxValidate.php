@@ -130,7 +130,8 @@ class DeliverySandboxValidate extends Command
     private function createTestNote(Company $tenant, InvoiceType $type): DeliveryNote
     {
         return DB::transaction(function () use ($tenant, $type) {
-            $alloc = app(InvoiceNumberer::class)->allocate($tenant, $type->code);
+            // Δελτίο Αποστολής → 9.x type; opt out of the monetary 9.x guard (MYD-003).
+            $alloc = app(InvoiceNumberer::class)->allocate($tenant, $type->code, allowMovementType: true);
 
             $note = DeliveryNote::create([
                 'company_id' => $tenant->id,

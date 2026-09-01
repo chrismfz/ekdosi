@@ -87,6 +87,16 @@ class AadeInvoiceDocument
                 .'has no mydata_type set. Configure on the InvoiceType resource.'
             );
 
+        // Movement-only 9.x (Δελτία Αποστολής) are NOT monetary documents — they must
+        // go through DeliveryNoteSubmitter, never the monetary invoice builder. The UI
+        // picker already excludes them; this guards CLI/API/imported callers (MYD-003).
+        if (Codes::isMovementOnlyType($type)) {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} has a movement-only type ({$type}, Δελτίο Αποστολής) "
+                .'and cannot be filed as a monetary invoice — issue it through the Delivery Notes flow.'
+            );
+        }
+
         $vatBreakdown = InvoiceVatBreakdown::for($invoice);
 
         $issuer = (new Issuer)
@@ -171,6 +181,15 @@ class AadeInvoiceDocument
             // ΤΠΥ/ΤΙΜ (spec line 1287) — so Codes::allowsItemDescr() gates it by
             // document type; the knob can never produce a rejection. 256-char
             // clamp matches the product_descr column width (and WhmcsInvoiceMapper).
+            //
+            // NOTE (MYD-003): allowsItemDescr() is true ONLY for 9.x, and build()
+            // now REJECTS a 9.x type up-front (a movement note is not a monetary
+            // invoice), so this branch is currently UNREACHABLE on the monetary
+            // path — delivery-note itemDescr is emitted by DeliveryNoteSubmitter
+            // instead. It is kept as defensive code for the day a combined
+            // invoice+delivery (1.1 with isDeliveryNote=true) is modelled, at which
+            // point allowsItemDescr() must gate on that flag rather than the 9.x
+            // type. See docs/BACKLOG.md.
             if ($this->tenant->mydata_send_item_descr
                 && Codes::allowsItemDescr((string) $invoice->invoiceType?->mydata_type)
                 && filled($line->product_descr)) {

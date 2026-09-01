@@ -430,6 +430,24 @@ class WhmcsInboxTable
      * (would orphan their draft invoices), and anything carrying a MARK are
      * NEVER deletable here — reject those instead.
      */
+    /**
+     * Invoice-type options for the third-party split modal (invoice + receipt
+     * selectors). Monetary types only — a split party is always billed a real
+     * invoice/receipt, never a movement-only 9.x Δελτίο Αποστολής (MYD-003). One
+     * shared query so the two selectors cannot drift.
+     *
+     * @return array<int, string>
+     */
+    private static function splitTypeOptions(): array
+    {
+        return InvoiceType::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->monetary()
+            ->orderBy('code')
+            ->pluck('code', 'id')
+            ->all();
+    }
+
     private static function isDeletable(PendingWhmcsInvoice $r): bool
     {
         return $r->invoice_id === null
@@ -1194,20 +1212,14 @@ class WhmcsInboxTable
             ->form([
                 Select::make('invoice_type_id')
                     ->label('Τύπος τιμολογίου')
-                    ->options(fn () => InvoiceType::query()
-                        ->where('company_id', Filament::getTenant()?->getKey())
-                        ->orderBy('code')
-                        ->pluck('code', 'id'))
+                    ->options(fn () => static::splitTypeOptions())
                     ->required()
                     ->searchable()
                     ->helperText('Για τους δικαιούχους που χρειάζονται τιμολόγιο.'),
 
                 Select::make('receipt_type_id')
                     ->label('Τύπος απόδειξης')
-                    ->options(fn () => InvoiceType::query()
-                        ->where('company_id', Filament::getTenant()?->getKey())
-                        ->orderBy('code')
-                        ->pluck('code', 'id'))
+                    ->options(fn () => static::splitTypeOptions())
                     ->searchable()
                     ->helperText('Υποχρεωτικό μόνο αν κάποιος δικαιούχος έχει σημανθεί ως απόδειξη (βλ. λίστα παρακάτω).'),
 

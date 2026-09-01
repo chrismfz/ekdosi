@@ -248,6 +248,8 @@ Statuses:
 - **OPEN** — verified issue, not implemented.
 - **IN PROGRESS** — implementation has started.
 - **VERIFY** — implementation exists but acceptance criteria have not all passed.
+- **PARTIAL** — a meaningful subset is fixed and verified; the remaining hardening is
+  deliberately deferred and tracked in `docs/BACKLOG.md` (not merely pending verification).
 - **WATCH** — currently correct; re-check when an upstream dependency/spec changes.
 - **DONE** — fixed and verified; retain the entry for history.
 
@@ -262,8 +264,8 @@ Priorities:
 | ID | Priority | Status | Area | Summary |
 |---|---:|---|---|---|
 | MYD-001 | P0 | DONE | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
-| MYD-002 | P0 | OPEN | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
-| MYD-003 | P0 | OPEN | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
+| MYD-002 | P0 | DONE | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
+| MYD-003 | P0 | DONE | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
 | MYD-004 | P0 | OPEN | VAT validation | 3%, dual 4% codes and 0% can produce false readiness results |
 | MYD-005 | P2 | OPEN | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
 | MYD-006 | P1 | OPEN | Classifications | Readiness does not require a business-specific classification policy |
@@ -272,7 +274,7 @@ Priorities:
 | MYD-009 | P0 | OPEN | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
-| MYD-012 | P0 | OPEN | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
+| MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
@@ -303,7 +305,7 @@ Priorities:
 | PROV-014 | P0 | OPEN | Provider concurrency | Issue is not single-flight and is not serialized against document mutation |
 | PROV-015 | P0 | OPEN | Provider cancellation | Missing/lost cancellation evidence can create a false or split-brain terminal state |
 | PROV-016 | P0 | OPEN | Provider cutover | Historical issue channel/environment is not frozen or used for later actions |
-| PROV-017 | P1 | DONE | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
+| PROV-017 | P1 | PARTIAL | Provider endpoint security | Base URL now public-https-only (hygiene DONE); approved-host allowlist + DNS-rebinding pin OPEN → BACKLOG |
 | PROV-018 | P1 | OPEN | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
 | PROV-020 | P1 | DONE | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
@@ -371,7 +373,28 @@ E3_561_006 for third-country sales.
 
 ### MYD-002 — ΤΔΑ label exists, but the combined payload does not
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED, WORDING CORRECTED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED, WORDING CORRECTED 2026-08-30
+
+**Fix (safe interim):** the misleading «ΤΔΑ / Δελτίο Αποστολής» row is removed from
+`MyDataLookupSeeder::INVOICE_TYPE_SEED`, so a fresh install no longer offers a type
+that emits a plain 1.1 while its name promises delivery-note behaviour (the audit's
+acceptance: «or it is not offered as available»). Plain 1.1 sales use ΤΙΜ. Existing
+tenants keep their ΤΔΑ (the seeder never deletes) and can hide it — note that issuing
+under it files a **valid, correct 1.1 invoice** (the movement aspect is simply not
+emitted), so this is a cosmetic naming mismatch, not a wrong filing. The
+`InvoiceTypeClassSuggester` is intentionally left as-is: it maps a
+«Τιμολόγιο … Δελτίο Αποστολής» name to 1.1 (the correct base type) BEFORE the pure
+delivery block, so it never misclassifies such a name as a 9.3 movement note. The
+real combined document — a 1.1 with `isDeliveryNote=true` + movement/loading/delivery
+data — is a BACKLOG feature. Seeder-count tests updated (15→14). See `CHANGELOG.md`
+[Unreleased] → Fixed.
+
+**Review follow-up (post-#387):** the «Εισαγωγή τυπικών» modal
+(`ListInvoiceTypes`) still listed «Τιμολόγιο/Δελτίο Αποστολής» among the seeded set —
+a stale promise for a type no longer seeded. Corrected the modal description to the
+actual set. Per operator decision (χρησιμοποιείται ΤΔΑ ως 1.1 από συνήθεια), existing
+tenants' ΤΔΑ rows are deliberately left untouched — **no data migration**; the real
+combined 1.1+isDeliveryNote stays in BACKLOG.
 
 **Official finding**
 
@@ -403,7 +426,36 @@ document. Therefore the correct conclusion is not that ΤΔΑ no longer exists.
 
 ### MYD-003 — Movement-only 9.x types appear in the monetary invoice form
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** new `Codes::isMovementOnlyType()` (prefix `9.`). The rule now applies to
+**every** monetary invoice-type selector via a shared `InvoiceType::scopeMonetary()`
+(null-safe — a legacy type with no `mydata_type` stays selectable): the main invoice
+picker (`PickerOptions`), quote→invoice **and** quote→service conversions (`ViewQuote`),
+and the service-contract renewal type (`ServiceContractForm`). **Defence-in-depth at the
+choke-point:** `InvoiceNumberer::allocate()` — through which every creator funnels
+(CreateInvoice, IssueCreditNote, ConvertQuoteToInvoice, StageServiceRenewal,
+WhmcsInvoiceFiler) — throws for a 9.x type *before* the counter bump (no ΑΑ gap), so no
+non-UI caller can file a Δελτίο Αποστολής as a monetary invoice. `AadeInvoiceDocument::
+build()` keeps its own guard. Movement documents remain in the Delivery Notes flow
+(`DeliveryNoteSubmitter`). Tests cover the picker exclusion, the shared scope, and the
+numberer guard. See `CHANGELOG.md` [Unreleased] → Fixed.
+
+**Review follow-up (post-#387):** the initial fix only filtered `PickerOptions`; the
+quote-conversion, service-renewal and WHMCS creation paths still exposed/allowed 9.x. The
+shared `scopeMonetary` + the `InvoiceNumberer` backstop close all of them (external review).
+
+**Second review pass (2026-09-01):** a stricter read found the literal «every monetary
+selector» claim still open — the three WHMCS default-type selectors (invoice/receipt/unpaid,
+`CompanyForm`), the two third-party split selectors (`WhmcsInboxTable`) and the shared
+credit-note picker (`ViewInvoice::creditTypes`) were not yet using the scope. The security
+was already sound (the `InvoiceNumberer` backstop rejects a 9.x before the ΑΑ bump), but the
+acceptance was not literally met. Now ALL of them apply `->monetary()`; the WHMCS default and
+split queries were extracted into shared testable helpers (`CompanyForm::whmcsDefaultTypeOptions`,
+`WhmcsInboxTable::splitTypeOptions`) with reflection tests asserting 9.x exclusion. The WHMCS
+default selectors also re-inject a value the field ALREADY holds when it is no longer selectable
+(a legacy 9.x mis-stored before MYD-003), flagged «μη έγκυρο», so a save can't silently null it —
+same pattern as `DeliveryNoteForm` (final whole-PR review finding).
 
 **Official finding**
 
@@ -756,7 +808,25 @@ actual recipient.
 
 ### MYD-012 — Seeded correlated delivery type 9.1 has no correlation model
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix (safe interim):** only the sandbox-validated 9.3 is fileable. Enforced by an
+**allowlist** — `Codes::SUPPORTED_DELIVERY_TYPES = ['9.3']` / `isSupportedDeliveryType()`
+— used by BOTH the delivery-type picker (`DeliveryNoteForm::deliveryTypeOptions`) and the
+`DeliveryNoteSubmitter` guard, so picker and guard cannot drift. An allowlist (not a
+denylist of 9.1/9.2) means any NEW/future 9.x code is treated as unsupported until we
+explicitly build it — the safe default for a legal document. `defaultDeliveryTypeId()`
+also verifies the ΔΑΠ-by-code shortcut resolves to a supported type before pre-selecting
+it (a ΔΑΠ series mis-mapped to 9.1 no longer becomes an unfileable default). The types
+stay seeded (for when the models exist) but cannot be selected or filed. Implementing the
+real 9.1 correlated-MARK payload and 9.2 aggregation is logged in `docs/BACKLOG.md`. Tests
+cover the picker exclusion (incl. a future 9.4), the submitter block (9.1/9.2/9.4), and the
+ΔΑΠ→unsupported default fall-through. See `CHANGELOG.md` [Unreleased] → Fixed.
+
+**Review follow-up (post-#387):** the first fix used a denylist (`UNSUPPORTED_DELIVERY_TYPES
+= ['9.1','9.2']`) — a future 9.4 would have slipped through — and `defaultDeliveryTypeId()`
+returned the ΔΑΠ row without checking its `mydata_type`. Flipped to an allowlist and added
+the ΔΑΠ-type check (external review).
 
 **Official finding**
 
@@ -877,6 +947,12 @@ zero-value, not separately enforced). Aggregator fixture proves 100€ 8.4 + 40�
 → net 60 (never 140); a `documentSign` policy test covers 8.4/8.5/8.6, credit/sales
 regressions and that `isCreditNoteType('8.5')` stays false. `8.6` left unchanged.
 See `CHANGELOG.md` [Unreleased] → Fixed.
+
+**Review follow-up (post-#387):** added an aggregator fixture with a zero-value 8.6
+«Δελτίο Παραγγελίας Εστίασης» alongside a real 100€ sale — asserting the 8.6 is
+COUNTED (outputCount) yet contributes 0 to Έσοδα/ΦΠΑ (never inflates the picture),
+so the +sign «zero-value» stance is exercised end-to-end, not just at the sign
+policy (external review).
 
 **Official finding**
 
@@ -1835,7 +1911,10 @@ environment used at issue.
 
 ### PROV-017 — Provider base URL is an unrestricted data-exfiltration sink
 
-**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** PARTIAL 2026-08-31 — **hygiene DONE** (public-https-only guard + no
+credentialed redirects, enforced at transport/preflight/form); **approved-endpoint
+allowlist + request-time DNS-rebinding pin OPEN** → `docs/BACKLOG.md`. · **Priority:** P1 ·
+**Research:** CONFIRMED 2026-08-30
 
 **Fix:** new `App\Support\EInvoice\ProviderEndpointGuard::assertSafeBaseUrl()` accepts
 only a plain PUBLIC HTTPS endpoint — rejects non-https, userinfo (`user:pass@`),
@@ -2665,4 +2744,14 @@ These are not open issues:
 | 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |
-| 2026-08-31 | **PROV-017 DONE** — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
+| 2026-08-31 | **PROV-017 DONE** *(superseded 2026-09-01 → PARTIAL, see below)* — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
+| 2026-08-31 | **MYD-003 DONE** — movement-only 9.x excluded from the monetary invoice picker + build guard; Δελτία Αποστολής stay in the delivery flow | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-012 DONE** — unsupported ΔΑ types 9.1/9.2 hidden from the delivery picker + submitter guard (only 9.3 fileable); full model → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-002 DONE** — misleading «ΤΔΑ» dropped from the invoice-type seed (fresh installs); real combined 1.1+isDeliveryNote → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-003 extended** (review follow-up) — shared `InvoiceType::scopeMonetary()` now excludes 9.x from quote→invoice/service + renewal selectors too; `InvoiceNumberer::allocate()` backstop rejects 9.x for every creator | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-012 hardened** (review follow-up) — denylist → allowlist `Codes::SUPPORTED_DELIVERY_TYPES=['9.3']` (future 9.4 now blocked); `defaultDeliveryTypeId()` checks the ΔΑΠ shortcut resolves to a supported type | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-002 modal wording** (review follow-up) — «Εισαγωγή τυπικών» modal no longer lists the removed «ΤΔΑ» type; existing tenants' ΤΔΑ left as-is per operator decision (no migration) | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-020 doc sweep** (review follow-up) — FEATURES.md/BACKLOG.md catalogue text no longer says «χαρτόσημο»/«§8.5» for fees (→ Ψηφιακό Τέλος Συναλλαγής §8.6 / Τέλη §8.7) | `CHANGELOG.md` [Unreleased] → Changed |
+| 2026-09-01 | **MYD-015 8.6 fixture** (review follow-up) — aggregator test proves a zero-value 8.6 order slip is counted but adds 0 to the myDATA revenue picture | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **PROV-017 status → PARTIAL** (review follow-up) — hygiene (public-https-only + no credentialed redirects) DONE; approved-host allowlist + DNS-rebinding pin remain OPEN in BACKLOG (no flat-DONE) | `docs/BACKLOG.md` (§Provider endpoint hardening) |
+| 2026-09-01 | **MYD-003 second pass** (strict review) — `->monetary()` now on the remaining selectors: 3× WHMCS defaults + 2× third-party split + credit-note picker; WHMCS default/split queries extracted to shared helpers with 9.x-exclusion tests | `CHANGELOG.md` [Unreleased] → Fixed |

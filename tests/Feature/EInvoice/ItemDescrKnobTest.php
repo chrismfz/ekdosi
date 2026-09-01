@@ -9,25 +9,33 @@ use App\Models\InvoiceType;
 use App\Models\VatCategory;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
- * The opt-in <itemDescr> knob (companies.mydata_send_item_descr).
+ * The opt-in <itemDescr> knob (companies.mydata_send_item_descr) on the MONETARY
+ * builder (AadeInvoiceDocument).
  *
- * myDATA does NOT require the per-line description — the legacy app never sent
- * it (verified against imported legacy MARK XML, which carries only the E3
- * income classification per line). So default OFF keeps the request payload
- * byte-identical to the sandbox-validated shape.
+ * myDATA does NOT require the per-line description — the legacy app never sent it
+ * (verified against imported legacy MARK XML, which carries only the E3 income
+ * classification per line) — so default OFF keeps the request payload byte-identical
+ * to the sandbox-validated shape, and AADE REJECTS itemDescr on a plain ΤΠΥ/ΤΙΜ
+ * (spec line 1287). The monetary builder therefore never emits itemDescr for an
+ * ordinary invoice, knob on or off.
  *
- * AADE additionally ACCEPTS itemDescr ONLY for delivery-note / shipping types
- * (9.x) — it REJECTS it on a plain ΤΠΥ/ΤΙΜ (spec line 1287) — so even with the
- * knob on, emission is gated by document type and can never cause a rejection.
+ * AADE accepts itemDescr only for delivery-note / shipping types (9.x). Since MYD-003
+ * a 9.x type can no longer be a monetary invoice at all — AadeInvoiceDocument::build()
+ * rejects it, and those documents go through the Delivery Notes flow where
+ * DeliveryNoteSubmitter emits itemDescr. So on the monetary side the itemDescr branch
+ * is currently unreachable; the day a combined invoice+delivery (1.1 with
+ * isDeliveryNote=true) is modelled, allowsItemDescr() gates on that flag instead (see
+ * docs/BACKLOG.md). These tests pin the monetary builder's actual behaviour today.
  */
 class ItemDescrKnobTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function makeInvoice(Company $tenant, string $mydataType = '9.3', string $descr = 'Business20 - nac.gr'): Invoice
+    private function makeInvoice(Company $tenant, string $mydataType, string $descr = 'Business20 - nac.gr'): Invoice
     {
         $customer = Customer::create([
             'company_id' => $tenant->id, 'name' => 'Πελάτης ΑΕ', 'afm' => '997073525',
@@ -64,50 +72,39 @@ class ItemDescrKnobTest extends TestCase
         ]);
     }
 
-    private function xmlFor(Company $tenant, string $mydataType = '9.3', string $descr = 'Business20 - nac.gr'): string
+    private function xmlFor(Company $tenant, string $mydataType, string $descr = 'Business20 - nac.gr'): string
     {
         $doc = new AadeInvoiceDocument($tenant);
 
         return $doc->toXml($doc->build($this->makeInvoice($tenant, $mydataType, $descr)));
     }
 
-    public function test_default_omits_item_descr(): void
+    public function test_plain_monetary_invoice_omits_item_descr_with_knob_off(): void
     {
-        // Even on an eligible (9.3) type, the knob OFF means no itemDescr.
-        $xml = $this->xmlFor($this->tenant(false), '9.3');
+        $xml = $this->xmlFor($this->tenant(false), '2.1');
 
         $this->assertStringNotContainsString('<itemDescr>', $xml);
         $this->assertStringNotContainsString('Business20 - nac.gr', $xml);
     }
 
-    public function test_knob_on_emits_for_delivery_note_type(): void
+    public function test_plain_monetary_invoice_omits_item_descr_even_with_knob_on(): void
     {
-        $xml = $this->xmlFor($this->tenant(true), '9.3');
-
-        $this->assertStringContainsString('<itemDescr>Business20 - nac.gr</itemDescr>', $xml);
-    }
-
-    public function test_knob_on_omits_for_plain_invoice_type_aade_would_reject(): void
-    {
-        // 2.1 (ΤΠΥ) is NOT a delivery-note type → AADE rejects itemDescr there,
-        // so we must NOT emit it even with the knob on.
+        // 2.1 (ΤΠΥ) is a plain monetary type → AADE rejects itemDescr there, so the
+        // knob must NOT emit it. This is the only shape the monetary builder ever
+        // sees now (a 9.x can't be a monetary invoice — see below).
         $xml = $this->xmlFor($this->tenant(true), '2.1');
 
         $this->assertStringNotContainsString('<itemDescr>', $xml);
     }
 
-    public function test_knob_on_with_blank_description_omits_item_descr(): void
+    public function test_movement_only_type_cannot_be_built_as_a_monetary_invoice(): void
     {
-        $xml = $this->xmlFor($this->tenant(true), '9.3', '');
+        // MYD-003: a 9.x delivery type is rejected by the monetary builder up-front,
+        // so the old "itemDescr emits for a 9.3 invoice" path is now unreachable here
+        // — delivery-note itemDescr is emitted by DeliveryNoteSubmitter instead.
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('movement-only');
 
-        $this->assertStringNotContainsString('<itemDescr>', $xml);
-    }
-
-    public function test_knob_on_clamps_long_description_to_256_chars(): void
-    {
-        $xml = $this->xmlFor($this->tenant(true), '9.3', str_repeat('Α', 400));
-
-        $this->assertStringContainsString('<itemDescr>'.str_repeat('Α', 256).'</itemDescr>', $xml);
-        $this->assertStringNotContainsString(str_repeat('Α', 257), $xml);
+        $this->xmlFor($this->tenant(true), '9.3');
     }
 }

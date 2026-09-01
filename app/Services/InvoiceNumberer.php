@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Company;
 use App\Models\InvoiceType;
+use App\Support\MyData\Codes;
 use Illuminate\Database\ConnectionInterface;
 use RuntimeException;
 
@@ -105,8 +106,13 @@ final class InvoiceNumberer
      * MUST be called inside a DB transaction held open by the caller until
      * the invoice row is persisted. See invariant (A) on the class for
      * why this matters.
+     *
+     * $allowMovementType — this numberer is shared by the monetary invoice flow
+     * AND the Delivery Notes flow. Monetary callers use the default (false) so a
+     * movement-only 9.x type is rejected (MYD-003); the delivery-note creators
+     * pass true because a Δελτίο Αποστολής legitimately carries a 9.x type.
      */
-    public function allocate(Company $company, string $invoiceTypeCode): InvoiceAllocation
+    public function allocate(Company $company, string $invoiceTypeCode, bool $allowMovementType = false): InvoiceAllocation
     {
         if (! $this->db->transactionLevel()) {
             throw new RuntimeException(
@@ -131,6 +137,26 @@ final class InvoiceNumberer
                 $invoiceTypeCode,
                 $company->id,
                 $company->slug,
+            ));
+        }
+
+        // Defence-in-depth for MYD-003: a movement-only 9.x Δελτίο Αποστολής is
+        // NOT a monetary document — it must never be issued through the invoice
+        // flow (it belongs to DeliveryNoteSubmitter). Every MONETARY creator
+        // (CreateInvoice, IssueCreditNote, ConvertQuoteToInvoice, StageService-
+        // Renewal, WhmcsInvoiceFiler) funnels through here with the default
+        // $allowMovementType=false, so this single guard closes every monetary
+        // path even if a UI picker forgot to filter. The delivery-note flow
+        // shares this numberer and legitimately allocates a 9.x ΑΑ — it opts out
+        // with $allowMovementType=true. Thrown BEFORE the counter bump below, so
+        // a rejected type leaves no ΑΑ gap.
+        if (! $allowMovementType && Codes::isMovementOnlyType($type->mydata_type)) {
+            throw new RuntimeException(sprintf(
+                'Invoice-type code=%s (myDATA %s) is a movement-only Δελτίο '
+                . 'Αποστολής and cannot be issued as a monetary invoice. '
+                . 'Use the Delivery Notes flow instead.',
+                $type->code,
+                $type->mydata_type,
             ));
         }
 

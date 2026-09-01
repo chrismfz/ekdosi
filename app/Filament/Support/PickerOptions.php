@@ -41,6 +41,10 @@ class PickerOptions
         return InvoiceType::query()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->where('show_on_menu', true)
+            // Movement-only 9.x (Δελτία Αποστολής) are NOT monetary documents — they
+            // belong to the Delivery Notes flow, never this invoice picker. Shared
+            // InvoiceType::scopeMonetary so every monetary selector uses ONE rule (MYD-003).
+            ->monetary()
             ->orderByDesc('is_favorite')
             ->orderByDesc('invcount')
             ->orderBy('code')

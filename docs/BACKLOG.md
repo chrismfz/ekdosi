@@ -115,6 +115,21 @@ surfaced in the open-items sections further down.
   κονσόλα-Έξοδα. _(Χειροκίνητη καταχώριση + PDF/scan attachment: ✅ shipped — βλ. «Done recently».)_
 - **§8.13 quantity/units για ΔΑ αγαθών** — οι μονάδες υπάρχουν· τυχόν goods-tenant ειδικά
   (π.χ. `<quantity>` per-line σε goods invoice types) ανοίγουν μόνο αν έρθει goods tenant.
+- **Combined Τιμολόγιο–Δελτίο Αποστολής (ΤΔΑ)** — το ΤΔΑ ΔΕΝ είναι ξεχωριστός τύπος:
+  είναι ένα 1.1 με `isDeliveryNote=true` + πλήρη movement header (σκοπός, μεταφορικό,
+  διευθύνσεις φόρτωσης/παράδοσης). Ο `AadeInvoiceDocument` δεν εκπέμπει combined payload,
+  οπότε το seeded «ΤΔΑ» αφαιρέθηκε (MYD-002). Χτίσε το combined document (payload +
+  validation + lifecycle) και ξανα-πρόσφερέ το ως τύπο. **Εξάρτηση itemDescr:** το opt-in
+  `mydata_send_item_descr` στον monetary builder (`AadeInvoiceDocument`) εκπέμπει `<itemDescr>`
+  μόνο για τύπους που το επιτρέπει η ΑΑΔΕ (9.x) — αλλά υπό MYD-003 ο monetary builder
+  απορρίπτει κάθε 9.x, οπότε ο κλάδος είναι πλέον μη-προσβάσιμος (τα καθαρά ΔΑ εκπέμπουν
+  itemDescr μέσω `DeliveryNoteSubmitter`). Όταν μπει το `isDeliveryNote`, το
+  `Codes::allowsItemDescr()` πρέπει να ελέγχει ΑΥΤΟ το flag (combined 1.1) αντί του 9.x τύπου.
+- **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
+  correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
+  (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον
+  picker + μπλοκαρισμένα στον submitter (MYD-012, μόνο το 9.3 φιλάρεται μέσω allowlist).
+  Ξεμπλόκαρέ τα όταν χτιστεί το μοντέλο (προσθήκη στο `Codes::SUPPORTED_DELIVERY_TYPES`).
 - **measurementUnit = 7 (Τεμάχια_Λοιπές Περιπτώσεις) στα ΔΑ** — απαιτεί
   `otherMeasurementUnitQuantity` + `otherMeasurementUnitTitle` (§8.13 note 9, υποχρεωτικά).
   Δεν μοντελοποιούνται ακόμη → το 7 είναι σκόπιμα **μπλοκαρισμένο** (service throw) + κρυμμένο
@@ -371,7 +386,7 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 - **Curated tax-presets** expansion ανά κλάδο + **%-ανά-προϊόν** (όχι μόνο €/τεμ).
 - **Seeder «προϊόντα με θεσμικό τέλος»** — _✅ SHIPPED 2026-06-17: «Πρότυπα τελών» selective-import στη
   λίστα Προϊόντων (`LeviedProductTemplates` + `ImportLeviedProducts`) — σακούλα €0,07 / πλαστικά €0,04 /
-  ανακύκλωσης €0,08 / διαμονής, προ-ρυθμισμένα με myDATA Fees §8.5· idempotent._
+  ανακύκλωσης €0,08 / διαμονής, προ-ρυθμισμένα με myDATA Τέλη §8.7· idempotent._
 - **`clear:right`** σε single-word doc-types (PDF tweak).
 
 ## 🧰 Setup / onboarding helpers (from-zero — sweep 2026-06-17)
@@ -390,7 +405,7 @@ fail-closed/self-disabling, filesystem-token gate — βλ. FEATURES §17) · `e
 - **Setup profiles ανά κλάδο** (λιανική / εστίαση / ξενοδοχείο / υπηρεσίες) — bundle σε ένα κλικ: invoice
   types + default ΦΠΑ + σχετικά «πρότυπα τελών» (ξενοδοχείο → διαμονής· λιανική → σακούλα/ανακύκλωσης) +
   payment methods. Πάνω στο υπάρχον seeding.
-- **Curated tax-presets** (βλ. PDF/UX ideas) — withholding/χαρτόσημο presets ανά κλάδο για το per-invoice
+- **Curated tax-presets** (βλ. PDF/UX ideas) — withholding/Ψηφιακό Τέλος Συναλλαγής presets ανά κλάδο για το per-invoice
   «Τυπικά τέλη/φόροι».
 - **Κατάλογος συνήθων υπηρεσιών** (hosting/domain/SSL…) για WHMCS-style tenants — προαιρετικό template.
 
