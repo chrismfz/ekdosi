@@ -10,6 +10,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\AadeRegistryLookup;
+use App\Support\Afm;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -43,7 +44,7 @@ class WhmcsCustomerCreator
         // Operator-typed ΑΦΜ (the modal button) wins when given; else the ΑΦΜ
         // the customer set in WHMCS. Both normalised to digits-only so "EL123…"
         // and "123…" collapse to the same stored value.
-        $afm = self::normaliseAfm($afmOverride) ?? $pending->whmcsAfm();
+        $afm = Afm::normalise($afmOverride) ?? $pending->whmcsAfm();
         if ($afm === null) {
             return new WhmcsCustomerCreateResult(null, false, 'no_afm');
         }
@@ -151,17 +152,6 @@ class WhmcsCustomerCreator
     private static function norm(string $s): string
     {
         return mb_strtoupper((string) preg_replace('/\s+/u', ' ', trim($s)), 'UTF-8');
-    }
-
-    /** Strip Greek-VAT prefixes + non-digit junk; null for a blank/empty value. */
-    private static function normaliseAfm(?string $raw): ?string
-    {
-        if ($raw === null) {
-            return null;
-        }
-        $digits = preg_replace('/\D+/', '', $raw);
-
-        return ($digits === null || $digits === '') ? null : $digits;
     }
 
     /** First non-blank trimmed value, or null. */

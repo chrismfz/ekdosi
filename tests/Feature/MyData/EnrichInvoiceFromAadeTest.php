@@ -5,6 +5,7 @@ namespace Tests\Feature\MyData;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Services\MyData\EnrichInvoiceFromAade;
@@ -45,6 +46,12 @@ class EnrichInvoiceFromAadeTest extends TestCase
             'invoice_type_id' => $type->id, 'customer_id' => $customer->id, 'issued_at' => now(),
             'header_discount_percent' => 0, 'net_total' => 134.20, 'gross_total' => 166.41,
         ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $this->invoice->id,
+            'qty' => 1, 'price_per_item' => 134.20, 'vat_percent' => 24.00,
+            'net_price' => 134.20, 'gross_price' => 166.41, 'product_descr' => 'Υπηρεσία',
+        ]);
+        $this->invoice->load('lines');
         $this->invoice->forceFill(['mydata_mark' => '400013744877362', 'mydata_state' => 'VALID'])->save();
 
         MyDataMark::create([
@@ -162,5 +169,30 @@ class EnrichInvoiceFromAadeTest extends TestCase
 
         $net = collect($report['comparison'])->firstWhere('label', 'Καθαρή αξία');
         $this->assertTrue($net['match'], 'net agrees');
+    }
+
+    public function test_money_comparison_uses_integer_cents_at_every_magnitude(): void
+    {
+        // The per-invoice «Σύγκριση με ΑΑΔΕ» must use the SAME integer-cent rule as
+        // the console, else the two surfaces disagree on the same amounts. A float
+        // `abs(a-b) <= 0.01` is magnitude-dependent: an exact one-cent gap reads
+        // as equal at some totals and different at others. filed gross here = 166.41.
+        $small = app(EnrichInvoiceFromAade::class)->enrich(
+            $this->invoice->fresh(),
+            $this->aadeDoc(['grossTotal' => 166.42]) // 1 cent → within tolerance
+        );
+        $this->assertTrue(
+            collect($small['comparison'])->firstWhere('label', 'Σύνολο')['match'],
+            'a one-cent gap is within tolerance'
+        );
+
+        $big = app(EnrichInvoiceFromAade::class)->enrich(
+            $this->invoice->fresh(),
+            $this->aadeDoc(['grossTotal' => 166.43]) // 2 cents → a real difference
+        );
+        $this->assertFalse(
+            collect($big['comparison'])->firstWhere('label', 'Σύνολο')['match'],
+            'a two-cent gap is a difference'
+        );
     }
 }

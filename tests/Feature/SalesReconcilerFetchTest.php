@@ -71,6 +71,66 @@ class SalesReconcilerFetchTest extends TestCase
         // Display fields parsed off the header/summary/counterpart.
         $this->assertSame('Πελάτης Α', $byMark['400000000000001']->counterpartName);
         $this->assertSame(124.00, $byMark['400000000000001']->gross);
+        // <totalNetValue> must be parsed too — a null net would flip every
+        // reconciled invoice to contentIncomplete (mandatory field).
+        $this->assertSame(100.00, $byMark['400000000000001']->net);
+    }
+
+    public function test_blank_or_non_numeric_totals_parse_to_null_not_zero(): void
+    {
+        // A blank <totalGrossValue/> or a non-numeric total must become null
+        // (UNVERIFIED), never 0.0 — otherwise a broken/missing summary reads as a
+        // real zero-value document and can false-green. A genuine numeric '0' stays 0.
+        $xml = <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000050</mark>
+            <issuer><vatNumber>800561849</vatNumber><country>GR</country></issuer>
+            <invoiceHeader><series>Α</series><aa>50</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalNetValue>not-a-number</totalNetValue><totalGrossValue></totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+
+        $result = (new SalesReconciler($this->tenant, new MockHandler([new Response(200, [], $xml)])))
+            ->reconcile(now()->subMonth(), now());
+
+        $row = collect($result->missingLocally)->firstWhere('mark', '400000000000050');
+        $this->assertNotNull($row);
+        $this->assertNull($row->gross, 'blank <totalGrossValue/> → null, not 0.0');
+        $this->assertNull($row->net, 'non-numeric <totalNetValue> → null, not 0.0');
+    }
+
+    public function test_self_closing_summary_and_header_do_not_abort_the_fetch(): void
+    {
+        // firebed stores a self-closing <invoiceSummary/> / <invoiceHeader/> as a
+        // scalar '', and the typed ?InvoiceSummary getters coerce-and-THROW on that.
+        // Reading the container raw + instanceof must keep the fetch alive: the doc
+        // still parses (by MARK), with the unreadable fields null (UNVERIFIED).
+        $xml = <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000070</mark>
+            <invoiceHeader/>
+            <invoiceSummary/>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+
+        $result = (new SalesReconciler($this->tenant, new MockHandler([new Response(200, [], $xml)])))
+            ->reconcile(now()->subMonth(), now());   // must NOT throw
+
+        $row = collect($result->missingLocally)->firstWhere('mark', '400000000000070');
+        $this->assertNotNull($row, 'the doc still parses despite empty containers');
+        $this->assertNull($row->gross);
+        $this->assertNull($row->net);
+        $this->assertNull($row->issuedAt);
     }
 
     public function test_empty_window_response_does_not_crash(): void
@@ -129,6 +189,7 @@ XML),
         $this->assertSame('400001964394607', $row->mark);
         $this->assertSame('VALID', $row->aadeState);
         $this->assertSame(12.4, $row->gross);          // '.' decimal cast to float
+        $this->assertSame(10.0, $row->net);            // same cast on totalNetValue
         $this->assertNull($row->counterpartName);      // retail → no counterpart
         $this->assertSame('ΑΠΥ 999001', $row->invcode);
     }
@@ -285,6 +346,7 @@ XML;
                 <issueDate>2026-01-10</issueDate>
             </invoiceHeader>
             <invoiceSummary>
+                <totalNetValue>100.00</totalNetValue>
                 <totalGrossValue>124.00</totalGrossValue>
             </invoiceSummary>
         </invoice>
@@ -309,6 +371,7 @@ XML;
                 <issueDate>2026-01-11</issueDate>
             </invoiceHeader>
             <invoiceSummary>
+                <totalNetValue>161.29</totalNetValue>
                 <totalGrossValue>200.00</totalGrossValue>
             </invoiceSummary>
         </invoice>
@@ -321,6 +384,7 @@ XML;
                 <issueDate>2026-01-12</issueDate>
             </invoiceHeader>
             <invoiceSummary>
+                <totalNetValue>40.32</totalNetValue>
                 <totalGrossValue>50.00</totalGrossValue>
             </invoiceSummary>
         </invoice>

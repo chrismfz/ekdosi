@@ -16,6 +16,7 @@ use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\Whmcs\WhmcsWritebackService;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
+use App\Support\Afm;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -551,7 +552,7 @@ class WhmcsInboxTable
             if (! isset($byContact[$id])) {
                 $byContact[$id] = [
                     'name' => html_entity_decode((string) ($contact['company_name'] ?? '—'), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
-                    'afm' => preg_replace('/\D+/', '', (string) ($contact['gr_vatno'] ?? '')) ?? '',
+                    'afm' => Afm::digits($contact['gr_vatno'] ?? null),
                     'lines' => 0,
                     'is_receipt' => false,
                 ];
@@ -995,7 +996,7 @@ class WhmcsInboxTable
                             ->icon('heroicon-m-magnifying-glass')
                             ->label('Εισαγωγή από ΑΑΔΕ')
                             ->action(function (callable $get, callable $set) use ($r) {
-                                $afm = preg_replace('/\D+/', '', (string) $get('lookup_afm'));
+                                $afm = Afm::digits((string) $get('lookup_afm'));
                                 if (blank($afm)) {
                                     Notification::make()->title('Συμπλήρωσε πρώτα ΑΦΜ')->warning()->send();
 

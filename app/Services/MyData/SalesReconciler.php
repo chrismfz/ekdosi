@@ -10,6 +10,9 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
+use Firebed\AadeMyData\Models\Counterpart;
+use Firebed\AadeMyData\Models\InvoiceHeader;
+use Firebed\AadeMyData\Models\InvoiceSummary;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Collection;
 use RuntimeException;
@@ -83,7 +86,7 @@ class SalesReconciler
     {
         /** @var array<string, AadeDocSummary> $byMark */
         $byMark = [];
-        /** @var array<string, true> $cancelledMarks */
+        /** @var array<string, string> $cancelledMarks  invoiceMark => cancellationMark */
         $cancelledMarks = [];
 
         $nextPartitionKey = null;
@@ -121,9 +124,17 @@ class SalesReconciler
                         continue;
                     }
 
-                    $header = $doc->getInvoiceHeader();
-                    $summary = $doc->getInvoiceSummary();
-                    $counterpart = $doc->getCounterpart();
+                    // Read each container RAW (get()) + instanceof-guard: firebed stores
+                    // a self-closing <invoiceHeader/> / <invoiceSummary/> / <counterpart/>
+                    // as a scalar '', and the typed ?InvoiceHeader getters coerce-and-
+                    // THROW a TypeError on that BEFORE our field reads — aborting the whole
+                    // fetch. Same idiom as the invoicesDoc guard above.
+                    $header = $doc->get('invoiceHeader');
+                    $header = $header instanceof InvoiceHeader ? $header : null;
+                    $summary = $doc->get('invoiceSummary');
+                    $summary = $summary instanceof InvoiceSummary ? $summary : null;
+                    $counterpart = $doc->get('counterpart');
+                    $counterpart = $counterpart instanceof Counterpart ? $counterpart : null;
                     $cancelledByMark = $doc->getCancelledByMark();
 
                     $byMark[$mark] = new AadeDocSummary(
@@ -136,11 +147,13 @@ class SalesReconciler
                         issueDate: $header?->getIssueDate(),
                         counterpartName: $counterpart?->getName(),
                         counterpartVat: $counterpart?->getVatNumber(),
-                        // getTotalGrossValue() is parsed from XML as a
-                        // STRING (firebed declares no cast for it); make
-                        // the float explicit so a strict_types caller or
-                        // numeric comparison never trips.
-                        gross: $this->toFloat($summary?->getTotalGrossValue()),
+                        // Read the RAW attribute via get(), NOT the typed
+                        // getTotal*Value(): ?float getters — those coerce the XML
+                        // string on return and THROW a TypeError on a blank/
+                        // non-numeric total, which would abort the whole fetch.
+                        // toFloat() then maps blank/non-numeric → null (unverified).
+                        gross: $this->toFloat($summary?->get('totalGrossValue')),
+                        net: $this->toFloat($summary?->get('totalNetValue')),
                         invoiceType: $header?->getInvoiceType()?->value,
                     );
                 }
@@ -151,7 +164,9 @@ class SalesReconciler
                 foreach ($cancelledDoc as $cancelled) {
                     $m = (string) $cancelled->getInvoiceMark();
                     if ($m !== '') {
-                        $cancelledMarks[$m] = true;
+                        // Keep the cancellation MARK (not just a flag) so the folded
+                        // summary can carry it as cancelledByMark (MYD-014).
+                        $cancelledMarks[$m] = (string) $cancelled->getCancellationMark();
                     }
                 }
             }
@@ -170,22 +185,9 @@ class SalesReconciler
         // Fold the standalone cancellation list into the summaries: a
         // MARK listed in <cancelledInvoicesDoc> is cancelled even if its
         // invoice element didn't carry an inline <cancelledByMark>.
-        foreach (array_keys($cancelledMarks) as $mark) {
+        foreach ($cancelledMarks as $mark => $cancellationMark) {
             if (isset($byMark[$mark]) && ! $byMark[$mark]->cancelled) {
-                $existing = $byMark[$mark];
-                $byMark[$mark] = new AadeDocSummary(
-                    mark: $existing->mark,
-                    uid: $existing->uid,
-                    cancelled: true,
-                    cancelledByMark: $existing->cancelledByMark,
-                    series: $existing->series,
-                    aa: $existing->aa,
-                    issueDate: $existing->issueDate,
-                    counterpartName: $existing->counterpartName,
-                    counterpartVat: $existing->counterpartVat,
-                    gross: $existing->gross,
-                    invoiceType: $existing->invoiceType,
-                );
+                $byMark[$mark] = $byMark[$mark]->withCancellation($cancellationMark);
             }
         }
 
@@ -247,6 +249,8 @@ class SalesReconciler
 
         $matched = [];
         $stateMismatch = [];
+        $contentMismatch = [];
+        $contentIncomplete = [];
         $missingAtAade = [];
         $missingLocally = [];
         $duplicateLocal = [];
@@ -286,7 +290,25 @@ class SalesReconciler
             $aadeState = $aade->cancelled ? 'CANCELLED' : 'VALID';
 
             if ($localCancelled === $aade->cancelled) {
-                $matched[] = $this->rowFromLocal($invoice, aadeState: $aadeState);
+                // MYD-017: MARK + state agree, but that is NOT proof the content
+                // matches. A value CONFLICT → contentMismatch (danger); a field AADE
+                // carries but we LACK → contentIncomplete (unverified); else matched.
+                $cmp = ReconciliationContentComparator::compare($this->snapshotFrom($invoice), $aade);
+                if ($cmp->hasConflicts()) {
+                    $contentMismatch[] = $this->rowFromLocal(
+                        $invoice,
+                        aadeState: $aadeState,
+                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $cmp->conflicts),
+                    );
+                } elseif ($cmp->hasIncompletes()) {
+                    $contentIncomplete[] = $this->rowFromLocal(
+                        $invoice,
+                        aadeState: $aadeState,
+                        problem: 'Ελλιπή τοπικά στοιχεία έναντι ΑΑΔΕ: '.implode(' · ', $cmp->incompletes),
+                    );
+                } else {
+                    $matched[] = $this->rowFromLocal($invoice, aadeState: $aadeState);
+                }
 
                 continue;
             }
@@ -316,6 +338,7 @@ class SalesReconciler
                 counterpartName: $aade->counterpartName,
                 counterpartVat: $aade->counterpartVat,
                 gross: $aade->gross,
+                net: $aade->net,
                 aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
                 cancelledByMark: $aade->cancelledByMark,
                 problem: 'Υπάρχει στο AADE αλλά δεν βρέθηκε τοπικά (πιθανή υποβολή από άλλο σύστημα ή χαμένη εγγραφή).',
@@ -333,6 +356,8 @@ class SalesReconciler
             localTotal: $withMark->count(),
             matched: $matched,
             stateMismatch: $stateMismatch,
+            contentMismatch: $contentMismatch,
+            contentIncomplete: $contentIncomplete,
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,
@@ -340,9 +365,56 @@ class SalesReconciler
         );
     }
 
-    private function toFloat(?string $value): ?float
+    private function toFloat(mixed $value): ?float
     {
-        return $value === null ? null : (float) $value;
+        // Blank (<totalNetValue/>) or non-numeric → null (UNVERIFIED), never 0.0.
+        // A real zero-value document sends a numeric '0'/'0.00', which stays 0.0.
+        // $value is the RAW attribute (string|float|null) — a float is already good.
+        if (is_float($value) || is_int($value)) {
+            return (float) $value;
+        }
+        if (! is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+        if ($value === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        return (float) $value;
+    }
+
+    /**
+     * Flatten a local invoice to the fields the content comparator checks. Series
+     * comes from the type code, ΑΑ from `code`, type from the denormalised
+     * `mydata_type` cache, counterpart AFM from the FROZEN `vat_no` snapshot.
+     */
+    private function snapshotFrom(Invoice $invoice): LocalDocSnapshot
+    {
+        $filed = FiledInvoiceTotals::for($invoice);
+
+        return new LocalDocSnapshot(
+            // Money comes from FiledInvoiceTotals — the same roll-up the submitter
+            // files (per-VAT-rate rounding + the [208] adjustment), NOT the ledger
+            // columns, which round differently and never carry the adjustment.
+            // A null means "not reconstructable" → the comparator reports it as
+            // unverified instead of contradicting AADE with a number we never sent.
+            gross: $filed->gross,
+            net: $filed->net,
+            series: $invoice->invoiceType?->code,
+            aa: $invoice->code !== null ? (string) $invoice->code : null,
+            issueDate: $invoice->issued_at?->format('Y-m-d'),
+            // Fall back to the relations when the denormalised snapshot columns are
+            // null: app-issued invoices carry mydata_type/vat_no, but ETL-imported
+            // legacy invoices don't (the ETL snapshots the type onto invoice_types,
+            // not each invoice). Without the fallback every legacy invoice — matched
+            // by state against a real production MARK — would read as contentIncomplete
+            // forever (permanent exit-2 on the scheduled reconcile). The relation value
+            // is exactly what WOULD have been snapshotted, so it's authoritative, not a
+            // guess; the fallback only fires when the cache is empty (no masking).
+            counterpartVat: $invoice->vat_no ?: $invoice->customer?->afm,
+            invoiceType: $invoice->mydata_type ?: $invoice->invoiceType?->mydata_type,
+        );
     }
 
     private function rowFromLocal(
@@ -358,7 +430,11 @@ class SalesReconciler
             invcode: $invoice->invcode,
             issuedAt: $invoice->issued_at?->format('d/m/Y'),
             counterpartName: $invoice->customer?->name,
-            gross: $invoice->gross_total !== null ? (float) $invoice->gross_total : null,
+            // Same basis as the content compare — the FILED gross, nullable. NO
+            // ledger-gross fallback: showing gross_total here while the problem says
+            // the filed gross "δεν προσδιορίζεται" would put two different local
+            // grosses on one row. A null renders as «—» (the honest state).
+            gross: FiledInvoiceTotals::for($invoice)->gross,
             localState: $invoice->mydata_state,
             localStatus: $invoice->local_status,
             aadeState: $aadeState,
@@ -381,7 +457,9 @@ class SalesReconciler
             ->where('company_id', $this->tenant->getKey())
             ->whereNotNull('mydata_mark')
             ->whereBetween('issued_at', [$from, $to])
-            ->with('customer')
+            // lines → FiledInvoiceTotals (the filed net/gross roll-up); invoiceType →
+            // series/type for the content compare (MYD-017).
+            ->with('customer', 'invoiceType', 'lines')
             ->get();
     }
 

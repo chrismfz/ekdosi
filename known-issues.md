@@ -276,10 +276,10 @@ Priorities:
 | MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
-| MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
+| MYD-014 | P1 | DONE | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | DONE | Delivery units | Invalid or missing coded unit is silently filed as pieces |
-| MYD-017 | P0 | OPEN | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
+| MYD-017 | P0 | DONE | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
@@ -916,7 +916,44 @@ vehicleNumber is mandatory when transportType is not 7.
 
 ### MYD-014 — Expense cancellations are detected but cannot be applied
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-01 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** new `SyncExpenseStateFromAade` service (the expense-side twin of
+`SyncInvoiceStateFromAade`) applies AADE's live state onto an EXISTING local expense —
+`forceFill(mydata_state, cancelled_by_mark)` + a forensic `ExpenseMark` `STATE_SYNC` row —
+so a supplier cancellation (which `ExpenseImporter` skips because the MARK already exists)
+now flips our VALID expense to CANCELLED without a re-import or a duplicate. Both directions
+(CANCELLED / un-cancel back to VALID clears `cancelled_by_mark`); an unknown state throws
+(never silently wipes ours); idempotent. Wired as a batch operator action «Συγχρονισμός
+κατάστασης από ΑΑΔΕ» on `MyDataConsoleExpenses`, visible when the last fetch found
+`stateMismatch` rows, refreshing the worklist after. No migration — `expenses` already
+carry `mydata_state` + `cancelled_by_mark`; both accounting views (`LedgerBook`,
+`VatPeriodReport`) already exclude `mydata_state='CANCELLED'`, so a synced cancellation
+leaves the books immediately. Tests: the service (flip / idempotent / unknown-throws /
+un-cancel), the acceptance round-trip (stateMismatch → sync → matched, no dup), and the
+console action (visible-gating + applies the cancellation + writes the audit row). See
+`CHANGELOG.md` [Unreleased] → Fixed.
+
+**Whole-PR review follow-up (integrity hardening):** three gaps closed. (1) The reconciler
+lost the real cancellation MARK — it recorded `$cancelledMarks[$m] = true` (a boolean) despite
+firebed's `CancelledInvoice::getCancellationMark()`; it now captures `invoiceMark ⇒
+cancellationMark` and folds it as `cancelledByMark` (both the inline `<cancelledByMark>` and the
+standalone `<cancelledInvoicesDoc>` path). (2) `SyncExpenseStateFromAade` now **refuses** a
+CANCELLED sync whose cancellation MARK is null/blank (a cancellation with no evidence is never
+written; the expense is not mutated). (3) the console action stopped trusting the (up-to-12h)
+serialized snapshot: `syncStates()` runs a **fresh** `ExpenseReconciler::reconcile()` at click
+time and applies only the fresh `stateMismatch` rows, after re-checking tenant + `expense_id` +
+that the fresh row's MARK still matches the expense being mutated. Tests: cancellation-MARK
+folded (standalone `<cancelledInvoicesDoc>`), service refuses CANCELLED-without-MARK, and the
+console ignores a stale cached row that a fresh reconcile no longer reports.
+
+**Code-review hardening (same round):** `syncStates()` now isolates each row in its own
+try/catch. A single AADE-cancelled row whose cancellation MARK is missing makes the service
+throw (by design); before, that throw escaped the `foreach` and aborted the WHOLE batch —
+leaving rows already synced above half-applied and skipping the final refresh. Now such a row
+is skipped (logged + counted, surfaced in the toast as «N γραμμές παραλείφθηκαν»), the good
+rows still commit, and the worklist still refreshes. Test: a CANCELLED-without-MARK row is
+skipped without aborting the batch and without touching the expense/audit trail.
 
 **Official finding**
 
@@ -1048,7 +1085,84 @@ changes the meaning of the movement line.
 
 ### MYD-017 — Reconciliation can return a false green on different content
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-01 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** a new **`contentMismatch`** bucket, separate from `stateMismatch` (different repair).
+Both live reconcilers (`SalesReconciler`, `ExpenseReconciler`) previously routed a row to
+`matched` as soon as the MARK existed on both sides and the cancellation flag agreed. Now,
+in that same branch, they compare the legally-relevant content via one shared pure helper
+`ReconciliationContentComparator::compare(LocalDocSnapshot, AadeDocSummary)` (so sales and
+expenses can't drift): **gross** (explicit ±0.01 cent tolerance), **§8.1 type**, **series /
+ΑΑ**, **issue date** (normalised to Y-m-d), and **counterpart ΑΦΜ** (digits-only, and only
+when AADE returns one — retail 11.x has none). A value CONFLICT routes the row to
+`contentMismatch` with a Greek `problem` listing exactly which fields differ; nothing is ever
+silently rewritten. `discrepancyCount()` counts the new bucket, and both consoles render it
+(the blade defaults a missing bucket key to `[]` so a pre-deploy cache payload can't break the
+page). The expense reconciler now also captures the doc `invoiceType` so the type compare
+works on the expense side. Tests cover sales + expenses, the cent tolerance, a
+retail-without-counterpart match, and type/series/gross divergences. See `CHANGELOG.md`
+[Unreleased] → Fixed.
+
+**Whole-PR review follow-up (2 rounds → `contentIncomplete`):** the first round narrowed the
+comparator to flag a field ONLY when BOTH sides carry a value, so a null/blank LOCAL field
+wouldn't balloon the danger bucket — but that left an incomplete record reading as a green
+`matched` (still a false green). The synthesis: the comparator returns a structured
+`ContentComparison` (`conflicts` + `incompletes`); a field AADE carries but the LOCAL record
+LACKS is an **incomplete**, routed to a NEW separate warning bucket **`contentIncomplete`**
+(unverified — complete it, don't trust it), while a genuine value clash stays the danger
+`contentMismatch`. AADE-absent fields (retail 11.x ΑΦΜ) are still skipped. Both buckets count
+in `discrepancyCount()`, both render on the two consoles (warning colour for the incomplete
+one), and the `mydata:reconcile-sales` CLI lists both in its summary table + detail loop (they
+feed exit-2, so they must be visible). Tests: `contentIncomplete` on sales + expenses, the
+fixed retail test (AADE-null ΑΦΜ actually reaches the comparator via `array_merge`, not `??`).
+
+**Code-review hardening (same round):** three follow-ups on the `contentIncomplete` change.
+(1) **Relation fallback** — `SalesReconciler::snapshotFrom()` now resolves the invoice's type
+and counterpart ΑΦΜ from the relations when the denormalised caches are null
+(`mydata_type ?: invoiceType->mydata_type`, `vat_no ?: customer->afm`): app-issued invoices
+carry the snapshot columns, but ETL-imported legacy invoices don't (the ETL snapshots the type
+onto `invoice_types`, not each invoice), so without this EVERY legacy invoice — matched by
+state against a real production MARK — would read as a permanent `contentIncomplete` and flip
+the scheduled reconcile to exit-2 forever. The relation value is exactly what would have been
+snapshotted, so it never masks a real difference (fires only when the cache is empty).
+(2) **Date guard** — `normDate()` returns null (never a fabricated date) on a blank/unparseable
+value, and the issueDate branch now uses `present()` + a both-non-null-and-differ check, so an
+empty AADE `issueDate` can no longer be parsed into "today" and manufacture a one-sided
+conflict. (3) **Net/VAT split** — comparing gross catches a total divergence but not a
+same-gross/different-VAT-split one; adding net comparison is a noted follow-up (BACKLOG), not
+done here. Tests: legacy-null-caches → matched via relations.
+
+**AADE-side fail-open closed (review round 2):** the date guard above fixed a false CONFLICT
+but traded it for a false GREEN — the comparator skipped any field the AADE summary did not
+carry, so a blank/unparseable `issueDate` (or a missing gross/type/series/ΑΑ) read as `matched`,
+and a test even locked that in. Now the **mandatory** AADE header — **gross, §8.1 type, series,
+ΑΑ, issue date** — routes to `contentIncomplete` when it is absent or unreadable ("λείπει από
+την ΑΑΔΕ — ανεπαλήθευτο"): we could not verify the document, so it is never green and never a
+conflict (the local value isn't contradicted). **Counterpart ΑΦΜ stays optional** — myDATA
+legitimately omits it for retail 11.x, so an absent AADE ΑΦΜ really is "nothing to verify".
+Tests: a data-provider over all five mandatory fields, plus blank and unparseable AADE dates.
+
+**Net/VAT split + gross basis (review rounds 3–4):** gross alone cannot catch a wrong VAT
+category whose net and vat compensate to the SAME gross (100+24 local vs 110+14 at AADE), so
+**net** (`<totalNetValue>`) is now compared too, as a mandatory field with the same three-outcome
+routing. Fixing that surfaced the real basis bug — and the first attempt (`Invoice::payableTotal()`)
+was itself wrong on two counts a follow-up review caught: (a) `payableTotal()` falls back to
+`gross_total` (never null), so a null-gross invoice became a `0,00` CONFLICT instead of an
+incomplete, and it deducts withholding only when `withhold_category` is set — which the Firebird
+ETL never imports, so every legacy ΠΚ-3 invoice would STILL false-conflict; (b) `net_total`/
+`gross_total` are a different *rounding shape* (rounded once over the sum) from the FILED summary
+(`InvoiceVatBreakdown`, rounded per VAT rate), so multi-rate discounted invoices diverged by a
+cent. The correct basis is a new **`FiledInvoiceTotals::for()`** that reconstructs exactly what the
+submitter files (per-rate roll-up + the [208] adjustment); a null field (no lines, or withholding
+without its §8.4 category) is reported as **unverified** (`contentIncomplete`), never a fabricated
+conflict. `FiledInvoiceTotals` is now the single basis for the reconciler, the console «μικτό»
+column AND the per-invoice «Σύγκριση με ΑΑΔΕ» (which read `gross_total` and thus contradicted the
+console). Money tolerance is compared in **integer cents** (`abs($a-$b) > 0.01` was
+magnitude-dependent). Expenses import the AADE summary verbatim, so their columns were already the
+right basis; only `net_total` was wired in. Tests: same-gross/different-net conflict (sales +
+expenses), a withholding invoice matching the adjusted gross (with a precondition that filed vs
+ledger gross really differ), a legacy category-less ΠΚ-3 → unverified, a multi-rate discounted
+invoice that must NOT false-conflict on rounding, and the sales fold's `<totalNetValue>` parse.
 
 **Official finding**
 
@@ -2774,3 +2888,12 @@ These are not open issues:
 | 2026-09-01 | **MYD-003 second pass** (strict review) — `->monetary()` now on the remaining selectors: 3× WHMCS defaults + 2× third-party split + credit-note picker; WHMCS default/split queries extracted to shared helpers with 9.x-exclusion tests | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-008 DONE** — correlated credit (5.1) resolves the original MARK from INSERT **and** PROVIDER_INSERT (was INSERT-only), so provider-issued originals stay correctable; same-tenant scoped; rejected attempts refused | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-008 hardening** (PR #388 review) — the `MyDataMark` correlation query is now also `company_id`-scoped, so an inconsistent audit row from another tenant pointing at the same invoice_id can't be used as the MARK | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 DONE** — live reconciliation compares content (gross/type/series-ΑΑ/date/ΑΦΜ), not just MARK+state; new `contentMismatch` bucket (shared comparator, both consoles) ends the false-green | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-014 DONE** — `SyncExpenseStateFromAade` + console action apply a supplier cancellation onto an existing expense (VALID→CANCELLED, audited, no re-import/dup); books already exclude CANCELLED | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 review** (PR #389) — incomplete ≠ conflict: new warning bucket `contentIncomplete` (AADE has a field the local record lacks) alongside danger `contentMismatch`; comparator returns `ContentComparison` (conflicts+incompletes), both count + render (consoles + CLI); fixed retail test (`array_merge`, not `??`) | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-014 review** (PR #389) — integrity: reconciler keeps the real cancellation MARK (`invoiceMark ⇒ cancellationMark`, inline + standalone); `SyncExpenseStateFromAade` refuses CANCELLED without it; console `syncStates()` re-reconciles fresh at click time (no trust in the ≤12h cache) + re-verifies tenant/expense_id/MARK before mutating | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017/014 code-review round** (PR #389) — (a) `snapshotFrom()` relation fallback so legacy null-cache invoices match instead of permanent `contentIncomplete`/exit-2; (b) `normDate()` null-on-blank so an empty AADE date can't fabricate a conflict; (c) `syncStates()` per-row try/catch so one evidence-less cancellation doesn't abort the batch; net/VAT-split compare noted → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 AADE-side fail-open closed** (PR #389 review 2) — a missing/unparseable MANDATORY AADE field (gross/type/series/ΑΑ/date) is now `contentIncomplete`, not `matched`; counterpart ΑΦΜ stays optional for retail 11.x. MYD-017 → DONE | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 net/VAT split + gross basis** (PR #389 review 3) — compare `<totalNetValue>` (catches a same-gross/different-VAT-category doc); money now compared against a new `FiledInvoiceTotals` (per-VAT-rate roll-up + [208] adjustment — what the submitter actually files) instead of the `net_total`/`gross_total` columns; unreconstructable (no lines / category-less legacy withholding) → unverified, not a false conflict; integer-cent tolerance; same basis fixes the per-invoice «Σύγκριση με ΑΑΔΕ» too | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 fail-closed + cleanup** (PR #389 review 4) — `FiledInvoiceTotals` returns unverified (not 0,00 / not a thrown exception) on null-amount legacy lines and out-of-range header discounts; blank/non-numeric AADE totals read RAW (`->get()`) → null instead of firebed's typed getter throwing; money compare unified in `Support\Money::differsByCent` (fixes the per-invoice «Σύγκριση με ΑΑΔΕ» float bug), ΑΦΜ in `Support\Afm` (comparator + 4 WHMCS sites); `AadeDocSummary::withCancellation()` de-dups the fold rebuild | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 self-closing containers + AFM finish** (PR #389 review 5) — the reconcilers read the invoiceSummary/invoiceHeader/counterpart/issuer CONTAINERS raw (`->get()` + instanceof) too, so a self-closing `<invoiceSummary/>` no longer TypeErrors out of the fetch; `Support\Afm` now the single AFM source (7 sites incl. PendingWhmcsInvoice/WhmcsInboxTable) | `CHANGELOG.md` [Unreleased] → Fixed |

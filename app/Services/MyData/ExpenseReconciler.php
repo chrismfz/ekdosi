@@ -7,6 +7,8 @@ use App\Models\Expense;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Http\RequestDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
+use Firebed\AadeMyData\Models\InvoiceHeader;
+use Firebed\AadeMyData\Models\InvoiceSummary;
 use Firebed\AadeMyData\Models\Issuer;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Collection;
@@ -84,7 +86,7 @@ class ExpenseReconciler
     {
         /** @var array<string, AadeDocSummary> $byMark */
         $byMark = [];
-        /** @var array<string, true> $cancelledMarks */
+        /** @var array<string, string> $cancelledMarks  invoiceMark => cancellationMark */
         $cancelledMarks = [];
 
         $nextPartitionKey = null;
@@ -118,9 +120,16 @@ class ExpenseReconciler
                         continue;
                     }
 
-                    $header = $doc->getInvoiceHeader();
-                    $summary = $doc->getInvoiceSummary();
-                    $issuer = $doc->getIssuer();
+                    // Read each container RAW (get()) + instanceof-guard: a self-closing
+                    // <invoiceHeader/> / <invoiceSummary/> / <issuer/> is stored as a scalar
+                    // '', and the typed getters coerce-and-THROW on that before our field
+                    // reads. Same idiom as the invoicesDoc guard above.
+                    $header = $doc->get('invoiceHeader');
+                    $header = $header instanceof InvoiceHeader ? $header : null;
+                    $summary = $doc->get('invoiceSummary');
+                    $summary = $summary instanceof InvoiceSummary ? $summary : null;
+                    $issuer = $doc->get('issuer');
+                    $issuer = $issuer instanceof Issuer ? $issuer : null;
                     $cancelledByMark = $doc->getCancelledByMark();
 
                     $byMark[$mark] = new AadeDocSummary(
@@ -137,7 +146,10 @@ class ExpenseReconciler
                         counterpartVat: $issuer instanceof Issuer ? $issuer->getVatNumber() : null,
                         // getTotalGrossValue() is parsed from XML as a STRING
                         // (firebed declares no cast); make the float explicit.
-                        gross: $this->toFloat($summary?->getTotalGrossValue()),
+                        gross: $this->toFloat($summary?->get('totalGrossValue')),
+                        net: $this->toFloat($summary?->get('totalNetValue')),
+                        // §8.1 type — needed for the content compare (MYD-017).
+                        invoiceType: $header?->getInvoiceType()?->value,
                     );
                 }
             }
@@ -147,7 +159,9 @@ class ExpenseReconciler
                 foreach ($cancelledDoc as $cancelled) {
                     $m = (string) $cancelled->getInvoiceMark();
                     if ($m !== '') {
-                        $cancelledMarks[$m] = true;
+                        // Keep the cancellation MARK (not just a flag) so the folded
+                        // summary carries it as cancelledByMark — the sync persists it (MYD-014).
+                        $cancelledMarks[$m] = (string) $cancelled->getCancellationMark();
                     }
                 }
             }
@@ -162,21 +176,9 @@ class ExpenseReconciler
         } while ($token !== null && (! empty($nextPartitionKey) || ! empty($nextRowKey)));
 
         // Fold the standalone cancellation list into the summaries.
-        foreach (array_keys($cancelledMarks) as $mark) {
+        foreach ($cancelledMarks as $mark => $cancellationMark) {
             if (isset($byMark[$mark]) && ! $byMark[$mark]->cancelled) {
-                $existing = $byMark[$mark];
-                $byMark[$mark] = new AadeDocSummary(
-                    mark: $existing->mark,
-                    uid: $existing->uid,
-                    cancelled: true,
-                    cancelledByMark: $existing->cancelledByMark,
-                    series: $existing->series,
-                    aa: $existing->aa,
-                    issueDate: $existing->issueDate,
-                    counterpartName: $existing->counterpartName,
-                    counterpartVat: $existing->counterpartVat,
-                    gross: $existing->gross,
-                );
+                $byMark[$mark] = $byMark[$mark]->withCancellation($cancellationMark);
             }
         }
 
@@ -236,6 +238,8 @@ class ExpenseReconciler
 
         $matched = [];
         $stateMismatch = [];
+        $contentMismatch = [];
+        $contentIncomplete = [];
         $missingAtAade = [];
         $missingLocally = [];
         $duplicateLocal = [];
@@ -273,7 +277,26 @@ class ExpenseReconciler
             $localCancelled = $expense->mydata_state === 'CANCELLED';
 
             if ($localCancelled === $aade->cancelled) {
-                $matched[] = $this->rowFromLocal($expense, aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID');
+                // MYD-017: MARK + state agree, but compare the content too. A value
+                // CONFLICT → contentMismatch; a field AADE has but we LACK →
+                // contentIncomplete (unverified); else matched.
+                $aadeState = $aade->cancelled ? 'CANCELLED' : 'VALID';
+                $cmp = ReconciliationContentComparator::compare($this->snapshotFrom($expense), $aade);
+                if ($cmp->hasConflicts()) {
+                    $contentMismatch[] = $this->rowFromLocal(
+                        $expense,
+                        aadeState: $aadeState,
+                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $cmp->conflicts),
+                    );
+                } elseif ($cmp->hasIncompletes()) {
+                    $contentIncomplete[] = $this->rowFromLocal(
+                        $expense,
+                        aadeState: $aadeState,
+                        problem: 'Ελλιπή τοπικά στοιχεία έναντι ΑΑΔΕ: '.implode(' · ', $cmp->incompletes),
+                    );
+                } else {
+                    $matched[] = $this->rowFromLocal($expense, aadeState: $aadeState);
+                }
 
                 continue;
             }
@@ -303,6 +326,7 @@ class ExpenseReconciler
                 counterpartName: $aade->counterpartName,
                 counterpartVat: $aade->counterpartVat,
                 gross: $aade->gross,
+                net: $aade->net,
                 aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
                 cancelledByMark: $aade->cancelledByMark,
                 problem: 'Υπάρχει στο AADE (έξοδο που μας υπέβαλε προμηθευτής) αλλά δεν βρέθηκε τοπικά — απαιτείται καταχώριση.',
@@ -316,15 +340,50 @@ class ExpenseReconciler
             localTotal: $withMark->count(),
             matched: $matched,
             stateMismatch: $stateMismatch,
+            contentMismatch: $contentMismatch,
+            contentIncomplete: $contentIncomplete,
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,
         );
     }
 
-    private function toFloat(?string $value): ?float
+    private function toFloat(mixed $value): ?float
     {
-        return $value === null ? null : (float) $value;
+        // Blank (<totalNetValue/>) or non-numeric → null (UNVERIFIED), never 0.0.
+        // A real zero-value document sends a numeric '0'/'0.00', which stays 0.0.
+        // $value is the RAW attribute (string|float|null) — a float is already good.
+        if (is_float($value) || is_int($value)) {
+            return (float) $value;
+        }
+        if (! is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+        if ($value === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        return (float) $value;
+    }
+
+    /**
+     * Flatten a local expense to the fields the content comparator checks.
+     * Counterpart AFM is the supplier's, type is the recorded §8.1 `invoice_type`.
+     */
+    private function snapshotFrom(Expense $expense): LocalDocSnapshot
+    {
+        return new LocalDocSnapshot(
+            // Expenses are imported straight from the AADE summary, so gross_total
+            // already IS <totalGrossValue> (no [208] re-derivation needed here).
+            gross: $expense->gross_total !== null ? (float) $expense->gross_total : null,
+            net: $expense->net_total !== null ? (float) $expense->net_total : null,
+            series: $expense->series,
+            aa: $expense->aa,
+            issueDate: $expense->issue_date?->format('Y-m-d'),
+            counterpartVat: $expense->supplier_afm ?? $expense->supplier?->afm,
+            invoiceType: $expense->invoice_type,
+        );
     }
 
     private function rowFromLocal(

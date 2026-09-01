@@ -37,6 +37,15 @@ final readonly class SalesReconciliationResult
         public array $missingAtAade,
         public array $missingLocally,
         public array $duplicateLocal = [],
+        // MARK present both sides, states agree, but a legally-relevant field
+        // (gross / type / series-ΑΑ / date / counterpart AFM) DIFFERS — a false
+        // "matched" under the old MARK/state-only rule (MYD-017). `problem` lists
+        // which fields differ; kept SEPARATE from stateMismatch (different repair).
+        public array $contentMismatch = [],
+        // MARK present both sides, states agree, no conflict — but AADE carries a
+        // field our LOCAL record lacks (incomplete/unverified import). Not a
+        // conflict, so kept out of contentMismatch, but never "matched" either (MYD-017).
+        public array $contentIncomplete = [],
         // Whether the reconcile ran against the SANDBOX channel. ONLY then is an
         // imported (production-MARK) «missing at AADE» noise; in PRODUCTION an
         // imported MARK was filed to the SAME channel, so its absence is a REAL
@@ -88,6 +97,8 @@ final readonly class SalesReconciliationResult
     public function discrepancyCount(): int
     {
         return count($this->stateMismatch)
+            + count($this->contentMismatch)
+            + count($this->contentIncomplete)
             + count($this->realMissingAtAade())
             + count($this->missingLocally)
             + count($this->duplicateLocal);

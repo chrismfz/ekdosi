@@ -4,6 +4,7 @@ namespace App\Services\MyData;
 
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -39,8 +40,13 @@ class EnrichInvoiceFromAade
             'mydata_type' => $invoice->mydata_type,
             'mydata_state' => $invoice->mydata_state,
             'invcode' => $invoice->invcode,
-            'net_total' => (float) $invoice->net_total,
-            'gross_total' => (float) $invoice->gross_total,
+            // Compare the FILED roll-up, the same basis the reconciler uses:
+            // AADE's totals round per VAT rate and its gross carries the [208]
+            // adjustment, neither of which net_total/gross_total do. Reading the
+            // columns here made this per-invoice cross-check contradict the
+            // console for every withholding / multi-rate-discounted invoice.
+            'net_total' => FiledInvoiceTotals::for($invoice)->net,
+            'gross_total' => FiledInvoiceTotals::for($invoice)->gross,
             'lines' => $invoice->lines()->count(),
         ];
 
@@ -127,11 +133,26 @@ class EnrichInvoiceFromAade
             if ($remote === null) {
                 continue;
             }
+            // Local figure not reconstructable (no lines, or withholding with no
+            // §8.4 category): say so rather than rendering a misleading 0,00.
+            if ($local === null) {
+                $rows[] = [
+                    'label' => $label,
+                    'local' => '—',
+                    'aade' => number_format((float) $remote, 2, ',', '.').' €',
+                    'match' => false,
+                ];
+
+                continue;
+            }
             $rows[] = [
                 'label' => $label,
                 'local' => number_format((float) $local, 2, ',', '.').' €',
                 'aade' => number_format((float) $remote, 2, ',', '.').' €',
-                'match' => abs((float) $local - (float) $remote) <= 0.01,
+                // Same integer-cent rule as the reconciler, so the two surfaces
+                // never disagree about the same pair of amounts (a float 0.01
+                // tolerance is magnitude-dependent).
+                'match' => ! Money::differsByCent((float) $local, (float) $remote),
             ];
         }
 

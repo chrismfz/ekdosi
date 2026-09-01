@@ -4,6 +4,7 @@ namespace App\Services\Whmcs;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Support\Afm;
 
 /**
  * T-1b (timologia v2): turn a resolved third-party contact (a
@@ -33,7 +34,7 @@ class ContactCustomerResolver
      */
     public function resolve(Company $tenant, array $contact): ?Customer
     {
-        $afm = $this->normaliseAfm((string) ($contact['gr_vatno'] ?? ''));
+        $afm = Afm::normalise((string) ($contact['gr_vatno'] ?? ''));
         if ($afm === null) {
             return null;
         }
@@ -61,17 +62,6 @@ class ContactCustomerResolver
             'email' => $this->decode((string) ($contact['email'] ?? '')) ?: null,
             'is_active' => true,
         ]);
-    }
-
-    /**
-     * Strip Greek-VAT prefixes + non-digit junk so "EL123456789" and
-     * "123456789" collapse to the same value WhmcsCustomerMatcher stores.
-     */
-    private function normaliseAfm(string $raw): ?string
-    {
-        $digits = preg_replace('/\D+/', '', $raw);
-
-        return ($digits === null || $digits === '') ? null : $digits;
     }
 
     private function decode(string $value): string

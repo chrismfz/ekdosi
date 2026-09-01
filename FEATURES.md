@@ -78,8 +78,11 @@
 - **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3 /
   Έλεγχος ρυθμίσεων**· ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:
   τοπικό (Phase 1, ξεχωριστός «Τοπικός έλεγχος κατάστασης») + ζωντανό (Phase 2, `SalesReconciler`)·
-  matched / stateMismatch / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε
-  tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
+  matched / stateMismatch / **contentMismatch** («Διαφορά περιεχομένου» — μικτό/καθαρή αξία/τύπος/σειρά-ΑΑ/
+  ημ-νία/ΑΦΜ, κοινός `ReconciliationContentComparator`) / **contentIncomplete** («Ελλιπή τοπικά
+  στοιχεία» — πεδίο που έχει η ΑΑΔΕ αλλά λείπει τοπικά· warning, όχι σύγκρουση αλλά ούτε
+  «συμφωνεί») / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε tab κρατά
+  δικό του «τελευταία ενημέρωση» + lazy fetch.
 - **«Ανανέωση όλων»** (`MyDataConsoleRefresh`) — ένα κουμπί κατεβάζει μαζί Πωλήσεις+Έξοδα+Ε3+εικόνα
   ΦΠΑ (σειριακά) και σπέρνει την cache κάθε tab· per-step isolation + summary toast. Το per-tab
   «Έλεγχος» μένει ως δευτερεύον single-source refresh. **Auto-refresh**: stale banner όταν η cache
@@ -108,6 +111,9 @@
   (μοναδικά issuer ΑΦΜ από `RequestDocs`) + **«Συμπλήρωση επωνυμιών από ΑΑΔΕ»** (κουμπί στη
   λίστα + CLI `suppliers:backfill-names` — γεμίζει επωνυμία από GSIS σε παλιούς «αδέσποτους»
   μόνο-ΑΦΜ, fill-only-empty· κοινός `SupplierNameBackfiller`).
+- **Συγχρονισμός κατάστασης εξόδων από ΑΑΔΕ** (`SyncExpenseStateFromAade` + action
+  «Συγχρονισμός κατάστασης από ΑΑΔΕ» στην κονσόλα Εξόδων) — εφαρμόζει ακύρωση προμηθευτή
+  σε υπάρχον έξοδο (VALID↔CANCELLED, audited μέσω `ExpenseMark`, χωρίς επανεισαγωγή).
 - **Εισαγωγή αδέσποτων** εξόδων από myDATA (`ExpenseImporter`/`ExpenseReconciler`) +
   self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ). **Κουμπί «Άντληση από myDATA» στη λίστα
   Έξοδα** (one-click read-only fetch → worklist· **επιλογή διαστήματος** στο modal —

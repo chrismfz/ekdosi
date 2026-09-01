@@ -8,11 +8,13 @@ use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Expenses\ExpenseResource;
 use App\Models\Company;
+use App\Models\Expense;
 use App\Models\Supplier;
 use App\Services\MyData\ExpenseImporter;
 use App\Services\MyData\ExpenseReconciler;
 use App\Services\MyData\ExpenseReconciliationResult;
 use App\Services\MyData\ReconciliationRow;
+use App\Services\MyData\SyncExpenseStateFromAade;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
@@ -168,6 +170,20 @@ class MyDataConsoleExpenses extends Page
                     .' (δημιουργία εξόδων + γραμμών + προμηθευτών). Ήδη καταχωρημένα παραλείπονται.')
                 ->modalSubmitActionLabel('Καταχώριση')
                 ->action(fn () => $this->importOrphans()),
+
+            // Apply AADE's state to our EXISTING expenses that diverge (chiefly a
+            // supplier cancellation we can't re-import). Visible only when the last
+            // fetch found state mismatches. Audited via ExpenseMark (MYD-014).
+            Action::make('sync_states')
+                ->label('Συγχρονισμός κατάστασης από ΑΑΔΕ')
+                ->icon('heroicon-o-arrow-path')
+                ->color('warning')
+                ->visible(fn (): bool => $this->ran && ! empty($this->result['stateMismatch']))
+                ->requiresConfirmation()
+                ->modalHeading('Συγχρονισμός κατάστασης εξόδων από ΑΑΔΕ')
+                ->modalDescription('Τα τοπικά έξοδα με ασυμφωνία κατάστασης θα πάρουν την κατάσταση που δηλώνει η ΑΑΔΕ (π.χ. ακύρωση από τον προμηθευτή). Δεν δημιουργεί διπλότυπα· καταγράφεται στο ιστορικό.')
+                ->modalSubmitActionLabel('Συγχρονισμός')
+                ->action(fn () => $this->syncStates()),
         ];
     }
 
@@ -288,6 +304,84 @@ class MyDataConsoleExpenses extends Page
         }
     }
 
+    protected function syncStates(): void
+    {
+        $tenant = Filament::getTenant();
+
+        // The button's VISIBILITY rides on the (possibly 12h-old) cached snapshot,
+        // but applying a legal state change must NEVER trust that client-serialized
+        // snapshot — it re-reconciles NOW and acts only on fresh AADE truth (MYD-014
+        // review).
+        if (! $this->ran || empty($this->result['stateMismatch']) || ! $this->fromLabel || ! $this->toLabel) {
+            return;
+        }
+
+        $from = Carbon::createFromFormat('d/m/Y', $this->fromLabel)->startOfDay();
+        $to = Carbon::createFromFormat('d/m/Y', $this->toLabel)->endOfDay();
+
+        try {
+            // Fresh server-side reconcile: we sync only what AADE currently reports,
+            // with the fresh state + cancellation MARK, on server-built rows.
+            $fresh = (new ExpenseReconciler($tenant, static::$testHandler))->reconcile($from, $to);
+
+            $sync = app(SyncExpenseStateFromAade::class);
+            $changed = 0;
+            $skipped = 0;
+
+            foreach ($fresh->stateMismatch as $row) {
+                if ($row->expenseId === null || $row->aadeState === null) {
+                    continue;
+                }
+
+                $expense = Expense::query()
+                    ->where('company_id', $tenant?->getKey())
+                    ->find($row->expenseId);
+
+                // Integrity: the fresh row's MARK must still match the expense we're
+                // about to mutate (tenant + expense_id + original MARK all verified).
+                if ($expense === null || (string) $expense->mydata_mark !== (string) $row->mark) {
+                    continue;
+                }
+
+                try {
+                    if ($sync->sync($expense, $row->aadeState, $row->cancelledByMark)['changed']) {
+                        $changed++;
+                    }
+                } catch (Throwable $e) {
+                    // One row we can't safely sync (e.g. AADE reports the doc CANCELLED
+                    // but returned no cancellation MARK — the service refuses it) must
+                    // NOT throw out of the loop: that would abort the batch and leave
+                    // the rows already synced above half-applied. Skip it, keep going.
+                    $skipped++;
+                    Log::warning('myDATA expense state-sync skipped a row', [
+                        'company_id' => $tenant?->getKey(),
+                        'expense_id' => $row->expenseId,
+                        'mark' => $row->mark,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            Notification::make()
+                ->title($changed > 0 ? "Συγχρονίστηκαν {$changed} έξοδα" : 'Καμία αλλαγή')
+                ->body($skipped > 0
+                    ? "{$skipped} γραμμές παραλείφθηκαν (π.χ. ακύρωση χωρίς ΜΑΡΚ ακύρωσης από την ΑΑΔΕ)."
+                    : null)
+                ->{$changed > 0 ? 'success' : 'warning'}()
+                ->send();
+
+            // Refresh the worklist so the synced rows move mismatch → matched.
+            $this->runReconciliation($from->format('Y-m-d'), $to->format('Y-m-d'));
+        } catch (Throwable $e) {
+            Log::warning('myDATA expense state-sync failed', [
+                'company_id' => $tenant?->getKey(),
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+            Notification::make()->title('Ο συγχρονισμός απέτυχε')->body($e->getMessage())->danger()->send();
+        }
+    }
+
     /**
      * Run the reconcile for a tenant and write the snapshot into the SAME cache
      * this page restores on mount — so the read-only cron (`mydata:refresh-expenses`)
@@ -337,6 +431,8 @@ class MyDataConsoleExpenses extends Page
             'discrepancyCount' => $r->discrepancyCount(),
             'matched' => $rows($r->matched),
             'stateMismatch' => $rows($r->stateMismatch),
+            'contentMismatch' => $rows($r->contentMismatch),
+            'contentIncomplete' => $rows($r->contentIncomplete),
             'missingAtAade' => $rows($r->missingAtAade),
             'missingLocally' => $rows($r->missingLocally),
             'duplicateLocal' => $rows($r->duplicateLocal),
@@ -379,8 +475,8 @@ class MyDataConsoleExpenses extends Page
     private static function supplierNamesByAfm(Company $tenant, ExpenseReconciliationResult $r): array
     {
         $afms = collect([
-            ...$r->matched, ...$r->stateMismatch, ...$r->missingAtAade,
-            ...$r->missingLocally, ...$r->duplicateLocal,
+            ...$r->matched, ...$r->stateMismatch, ...$r->contentMismatch, ...$r->contentIncomplete,
+            ...$r->missingAtAade, ...$r->missingLocally, ...$r->duplicateLocal,
         ])->map(fn (ReconciliationRow $row) => $row->counterpartVat)
             ->filter()
             ->unique()

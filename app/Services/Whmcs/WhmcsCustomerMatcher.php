@@ -4,6 +4,7 @@ namespace App\Services\Whmcs;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Support\Afm;
 
 /**
  * Match a WHMCS client (or pending-invoice row carrying client fields)
@@ -84,7 +85,7 @@ class WhmcsCustomerMatcher
         // 2. AFM exact match. The custom field carrying VAT number
         // lives at a per-tenant configurable position; we look it
         // up via the tenant's whmcs_custom_field_map.
-        $afm = $this->normaliseAfm(
+        $afm = Afm::normalise(
             $this->extractCustomField($whmcsClient, $tenant, 'vatno')
         );
         if ($afm !== null && $afm !== '') {
@@ -146,17 +147,4 @@ class WhmcsCustomerMatcher
         return null;
     }
 
-    /**
-     * Strip Greek-VAT prefixes + non-digit junk so "EL123456789"
-     * and "123456789" both match against `customers.afm = '123456789'`.
-     * Doesn't validate; only normalises.
-     */
-    private function normaliseAfm(?string $raw): ?string
-    {
-        if ($raw === null) {
-            return null;
-        }
-        $digits = preg_replace('/\D+/', '', $raw);
-        return $digits === '' ? null : $digits;
-    }
 }
