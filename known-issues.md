@@ -262,7 +262,7 @@ Priorities:
 | ID | Priority | Status | Area | Summary |
 |---|---:|---|---|---|
 | MYD-001 | P0 | DONE | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
-| MYD-002 | P0 | OPEN | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
+| MYD-002 | P0 | DONE | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
 | MYD-003 | P0 | DONE | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
 | MYD-004 | P0 | OPEN | VAT validation | 3%, dual 4% codes and 0% can produce false readiness results |
 | MYD-005 | P2 | OPEN | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
@@ -371,7 +371,21 @@ E3_561_006 for third-country sales.
 
 ### MYD-002 — ΤΔΑ label exists, but the combined payload does not
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED, WORDING CORRECTED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED, WORDING CORRECTED 2026-08-30
+
+**Fix (safe interim):** the misleading «ΤΔΑ / Δελτίο Αποστολής» row is removed from
+`MyDataLookupSeeder::INVOICE_TYPE_SEED`, so a fresh install no longer offers a type
+that emits a plain 1.1 while its name promises delivery-note behaviour (the audit's
+acceptance: «or it is not offered as available»). Plain 1.1 sales use ΤΙΜ. Existing
+tenants keep their ΤΔΑ (the seeder never deletes) and can hide it — note that issuing
+under it files a **valid, correct 1.1 invoice** (the movement aspect is simply not
+emitted), so this is a cosmetic naming mismatch, not a wrong filing. The
+`InvoiceTypeClassSuggester` is intentionally left as-is: it maps a
+«Τιμολόγιο … Δελτίο Αποστολής» name to 1.1 (the correct base type) BEFORE the pure
+delivery block, so it never misclassifies such a name as a 9.3 movement note. The
+real combined document — a 1.1 with `isDeliveryNote=true` + movement/loading/delivery
+data — is a BACKLOG feature. Seeder-count tests updated (15→14). See `CHANGELOG.md`
+[Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2687,3 +2701,4 @@ These are not open issues:
 | 2026-08-31 | **PROV-017 DONE** — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
 | 2026-08-31 | **MYD-003 DONE** — movement-only 9.x excluded from the monetary invoice picker + build guard; Δελτία Αποστολής stay in the delivery flow | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-012 DONE** — unsupported ΔΑ types 9.1/9.2 hidden from the delivery picker + submitter guard (only 9.3 fileable); full model → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-002 DONE** — misleading «ΤΔΑ» dropped from the invoice-type seed (fresh installs); real combined 1.1+isDeliveryNote → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |

@@ -115,6 +115,11 @@ surfaced in the open-items sections further down.
   κονσόλα-Έξοδα. _(Χειροκίνητη καταχώριση + PDF/scan attachment: ✅ shipped — βλ. «Done recently».)_
 - **§8.13 quantity/units για ΔΑ αγαθών** — οι μονάδες υπάρχουν· τυχόν goods-tenant ειδικά
   (π.χ. `<quantity>` per-line σε goods invoice types) ανοίγουν μόνο αν έρθει goods tenant.
+- **Combined Τιμολόγιο–Δελτίο Αποστολής (ΤΔΑ)** — το ΤΔΑ ΔΕΝ είναι ξεχωριστός τύπος:
+  είναι ένα 1.1 με `isDeliveryNote=true` + πλήρη movement header (σκοπός, μεταφορικό,
+  διευθύνσεις φόρτωσης/παράδοσης). Ο `AadeInvoiceDocument` δεν εκπέμπει combined payload,
+  οπότε το seeded «ΤΔΑ» αφαιρέθηκε (MYD-002). Χτίσε το combined document (payload +
+  validation + lifecycle) και ξανα-πρόσφερέ το ως τύπο.
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον
