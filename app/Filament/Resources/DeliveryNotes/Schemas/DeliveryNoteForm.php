@@ -116,7 +116,18 @@ class DeliveryNoteForm
 
                     Select::make('delivery_type_id')
                         ->label('Τύπος δελτίου')
-                        ->options(fn () => static::deliveryTypeOptions())
+                        // New notes pick only supported types (9.3); an existing draft
+                        // already saved as a now-hidden 9.1/9.2 still shows its stored
+                        // type (flagged) so an edit can't silently drop it (MYD-012).
+                        ->options(function ($record) {
+                            $opts = static::deliveryTypeOptions();
+                            $current = $record?->delivery_type_id;
+                            if ($current && ! isset($opts[$current]) && ($t = InvoiceType::find($current))) {
+                                $opts[$t->id] = $t->code.' — '.$t->name.' (μη υποστηριζόμενο)';
+                            }
+
+                            return $opts;
+                        })
                         ->default(fn () => static::defaultDeliveryTypeId())
                         ->required()
                         ->searchable()
@@ -392,6 +403,10 @@ class DeliveryNoteForm
             ->where('mydata_type', 'like', '9%')
             ->orderBy('code')
             ->get()
+            // 9.1/9.2 are not yet correctly fileable (correlation/aggregation not
+            // built) — offer only the sandbox-validated 9.3 (MYD-012). Same rule the
+            // submitter guard enforces, so picker and guard cannot drift.
+            ->reject(fn (InvoiceType $t) => Codes::isUnsupportedDeliveryType($t->mydata_type))
             ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
             ->toArray();
     }
@@ -412,6 +427,9 @@ class DeliveryNoteForm
         $first = InvoiceType::query()
             ->where('company_id', $companyId)
             ->where('mydata_type', 'like', '9%')
+            // Never default to a hidden/unsupported 9.1/9.2 (MYD-012) — that would
+            // pre-select a type absent from the picker and create an unfileable draft.
+            ->whereNotIn('mydata_type', Codes::UNSUPPORTED_DELIVERY_TYPES)
             ->orderBy('code')
             ->value('id');
 

@@ -148,6 +148,28 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('8', (string) ($line->getVatCategory()->value ?? $line->getVatCategory()));
     }
 
+    public function test_correlated_9_1_delivery_type_is_blocked(): void
+    {
+        // 9.1 (συσχετιζόμενο) needs a correlated-MARK payload we don't build →
+        // block at the service, not just the picker (MYD-012).
+        $note = $this->makeNote(['mydata_type' => '9.1']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/δεν υποστηρίζεται/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
+    }
+
+    public function test_aggregate_9_2_delivery_type_is_blocked(): void
+    {
+        $note = $this->makeNote(['mydata_type' => '9.2']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/δεν υποστηρίζεται/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
+    }
+
     public function test_missing_measurement_unit_throws(): void
     {
         // A persisted line with no unit is a data error — surface it, never

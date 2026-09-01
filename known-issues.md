@@ -272,7 +272,7 @@ Priorities:
 | MYD-009 | P0 | OPEN | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
-| MYD-012 | P0 | OPEN | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
+| MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
@@ -765,7 +765,17 @@ actual recipient.
 
 ### MYD-012 — Seeded correlated delivery type 9.1 has no correlation model
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix (safe interim):** 9.1 (συσχετιζόμενο) and 9.2 (συγκεντρωτικό) are hidden from
+the delivery-type picker (`DeliveryNoteForm::deliveryTypeOptions`) and blocked at
+`DeliveryNoteSubmitter::buildAadeDeliveryNote`, leaving only the sandbox-validated
+9.3. Both use one rule — `Codes::isUnsupportedDeliveryType` / `UNSUPPORTED_DELIVERY_TYPES`
+— so picker and guard cannot drift. The types stay seeded (for when the models
+exist) but cannot be selected or filed. Implementing the real 9.1 correlated-MARK
+payload and 9.2 aggregation is logged in `docs/BACKLOG.md`. Tests cover the picker
+exclusion and the submitter block for 9.1 and 9.2. See `CHANGELOG.md` [Unreleased]
+→ Fixed.
 
 **Official finding**
 
@@ -2676,3 +2686,4 @@ These are not open issues:
 | 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **PROV-017 DONE** — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
 | 2026-08-31 | **MYD-003 DONE** — movement-only 9.x excluded from the monetary invoice picker + build guard; Δελτία Αποστολής stay in the delivery flow | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-012 DONE** — unsupported ΔΑ types 9.1/9.2 hidden from the delivery picker + submitter guard (only 9.3 fileable); full model → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |

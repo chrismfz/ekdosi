@@ -12,6 +12,7 @@ use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
+use App\Support\MyData\Codes;
 use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -107,6 +108,17 @@ class DeliveryNoteSubmitter
                 "Delivery note {$note->invcode} cannot be submitted — no mydata_type set "
                 .'(neither on the note nor its delivery type). Configure a 9.x type.'
             );
+
+        // 9.1 (συσχετιζόμενο) needs a correlated-MARK payload and 9.2 (συγκεντρωτικό)
+        // an aggregation model — neither is built, so filing one would be incomplete.
+        // The picker hides them; this guards non-UI callers (MYD-012). Only 9.3 files.
+        if (Codes::isUnsupportedDeliveryType($type)) {
+            throw new RuntimeException(
+                "Το δελτίο {$note->invcode} έχει τύπο {$type}, ο οποίος δεν υποστηρίζεται ακόμη "
+                .'(το 9.1 συσχετιζόμενο θέλει συσχετισμένα MARK, το 9.2 συγκεντρωτικό θέλει μοντέλο '
+                .'σύνοψης). Χρησιμοποιήστε 9.3 (απλό Δελτίο Αποστολής) ή χωρίστε τη διακίνηση.'
+            );
+        }
 
         $movePurpose = (int) ($note->move_purpose ?? 0);
         if ($movePurpose < 1) {

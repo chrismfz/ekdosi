@@ -103,6 +103,26 @@ class DeliveryNoteResourceTest extends TestCase
         Filament::setTenant($this->tenant);
     }
 
+    public function test_delivery_type_picker_offers_only_the_supported_9_3(): void
+    {
+        // 9.1 (συσχετιζόμενο) and 9.2 (συγκεντρωτικό) are not yet fileable → hidden;
+        // only the sandbox-validated 9.3 is offered (MYD-012).
+        $t91 = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΔΑΣ', 'name' => 'Συσχ.',
+            'invcount' => 1, 'mydata_type' => '9.1',
+        ]);
+        $t92 = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΣΔΑ', 'name' => 'Συγκ.',
+            'invcount' => 1, 'mydata_type' => '9.2',
+        ]);
+
+        $keys = array_keys(DeliveryNoteForm::deliveryTypeOptions());
+
+        $this->assertContains($this->deliveryType->id, $keys, '9.3 stays offered');
+        $this->assertNotContains($t91->id, $keys, '9.1 hidden');
+        $this->assertNotContains($t92->id, $keys, '9.2 hidden');
+    }
+
     public function test_create_page_allocates_aa_and_persists_draft_with_scenario_and_lines(): void
     {
         Livewire::test(CreateDeliveryNote::class)

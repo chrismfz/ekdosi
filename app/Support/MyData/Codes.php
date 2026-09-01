@@ -828,6 +828,23 @@ final class Codes
         return $code !== null && str_starts_with($code, '9.');
     }
 
+    /**
+     * Delivery-note types we cannot yet file CORRECTLY: 9.1 (συσχετιζόμενο) needs
+     * a correlated-MARK payload (MYD-012) and 9.2 (συγκεντρωτικό) needs an
+     * aggregation model — neither is built. Only 9.3 (απλό Δελτίο Αποστολής) is
+     * sandbox-validated. Hidden from the delivery picker AND blocked at the
+     * submitter so a non-UI caller cannot file an incomplete 9.1/9.2 (single
+     * source for both, so they cannot drift).
+     *
+     * @var list<string>
+     */
+    public const UNSUPPORTED_DELIVERY_TYPES = ['9.1', '9.2'];
+
+    public static function isUnsupportedDeliveryType(?string $code): bool
+    {
+        return $code !== null && in_array($code, self::UNSUPPORTED_DELIVERY_TYPES, true);
+    }
+
     public static function vatExemptionExists(int $code): bool
     {
         return in_array($code, self::VAT_EXEMPTION_CATEGORIES, true);
