@@ -16,6 +16,8 @@ use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\ForceDeleteAction;
 use Filament\Actions\RestoreAction;
+use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -145,26 +147,38 @@ class EditLead extends EditRecord
                         // Lands in leads.lost_reason (varchar 255) for lost/dnc.
                         ->maxLength(255)
                         ->required(fn (callable $get): bool => self::requiresReason($get('status'))),
+
+                    // «Όχι τώρα» is «ξαναδές το τότε» — it needs a date, or it
+                    // silently falls out of every worklist.
+                    DateTimePicker::make('next_action_at')
+                        ->label('Ξαναδές το στις')
+                        ->seconds(false)
+                        ->default(fn (Lead $record) => $record->next_action_at)
+                        ->visible(fn (callable $get): bool => $get('status') === LeadStatus::NotNow->value)
+                        ->required(fn (callable $get): bool => $get('status') === LeadStatus::NotNow->value),
+
+                    // A REAL confirmation for DNC (a notification is not one):
+                    // the submit is refused until the operator ticks it.
+                    Checkbox::make('confirm_dnc')
+                        ->label('Επιβεβαιώνω: μας ζήτησαν ρητά να ΜΗΝ τους ξαναενοχλήσουμε.')
+                        ->visible(fn (callable $get): bool => $get('status') === LeadStatus::DoNotContact->value)
+                        ->accepted(fn (callable $get): bool => $get('status') === LeadStatus::DoNotContact->value)
+                        ->validationMessages(['accepted' => 'Τσέκαρε την επιβεβαίωση για να σημειωθεί «Μην ξαναενοχλήσετε».']),
                 ])
                 ->action(function (Lead $record, array $data): void {
                     $status = LeadStatus::from($data['status']);
                     $comment = trim((string) ($data['reason'] ?? ''));
 
-                    if ($status === LeadStatus::DoNotContact && $record->status !== LeadStatus::DoNotContact) {
-                        // Terminal-ish: make sure it was deliberate.
-                        Notification::make()
-                            ->title('Σημειώθηκε «Μην ξαναενοχλήσετε»')
-                            ->body('Το lead θα εμφανίζεται με κόκκινη προειδοποίηση σε κάθε νέα καταχώριση με το ίδιο ΑΦΜ/email/τηλέφωνο.')
-                            ->warning()
-                            ->send();
-                    }
-
                     // The reason belongs to the lost/dnc state only — clear it on
                     // the way out so a re-opened lead doesn't carry «λόγος: …».
-                    $record->update([
+                    $updates = [
                         'status' => $status,
                         'lost_reason' => $status->requiresReason() ? $comment : null,
-                    ]);
+                    ];
+                    if ($status === LeadStatus::NotNow) {
+                        $updates['next_action_at'] = $data['next_action_at'];
+                    }
+                    $record->update($updates);
 
                     // A free comment on a non-lost change is worth a note row too.
                     if ($comment !== '' && ! $status->requiresReason()) {
@@ -182,7 +196,7 @@ class EditLead extends EditRecord
                         ->success()
                         ->send();
 
-                    $this->refreshFormData(['status', 'lost_reason']);
+                    $this->refreshFormData(['status', 'lost_reason', 'next_action_at']);
                 }),
 
             DeleteAction::make(),

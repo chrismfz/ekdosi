@@ -5,6 +5,7 @@ namespace Tests\Feature\Leads;
 use App\Enums\LeadStatus;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Services\Leads\LeadMatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -89,6 +90,43 @@ class LeadMatcherTest extends TestCase
         $this->assertTrue($dncMatch->hasDoNotContact());
 
         $this->assertSame([$trashed->id], $m->find($t->id, null, null, ['697 123 4567'])->leads->pluck('id')->all());
+    }
+
+    public function test_do_not_contact_is_found_behind_more_than_ten_newer_duplicates(): void
+    {
+        $t = $this->tenant();
+        $dnc = Lead::create(['company_id' => $t->id, 'name' => 'Παλιό DNC', 'afm' => '123456789', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'το ζήτησε']);
+        Lead::query()->whereKey($dnc->id)->update(['updated_at' => now()->subYear()]);
+
+        for ($i = 1; $i <= 12; $i++) {
+            Lead::create(['company_id' => $t->id, 'name' => "Νεότερο {$i}", 'afm' => '123456789']);
+        }
+
+        $match = app(LeadMatcher::class)->find($t->id, '123456789', null);
+
+        $this->assertCount(LeadMatcher::PREVIEW_LIMIT, $match->leads, 'The preview is capped…');
+        $this->assertFalse($match->leads->contains('id', $dnc->id), '…and the old DNC row is not in it…');
+        $this->assertTrue($match->hasDoNotContact(), '…but the DNC flag still fires (unbounded exists).');
+    }
+
+    public function test_matches_trashed_customers_secondary_email_and_contacts(): void
+    {
+        $t = $this->tenant();
+
+        $trashed = Customer::create(['company_id' => $t->id, 'name' => 'Διαγραμμένος', 'afm' => '123456789']);
+        $trashed->delete();
+
+        $secondary = Customer::create(['company_id' => $t->id, 'name' => 'Δεύτερο email', 'secondary_email' => 'Billing@Acme.gr']);
+
+        $viaContact = Customer::create(['company_id' => $t->id, 'name' => 'Μέσω επαφής']);
+        CustomerContact::create(['company_id' => $t->id, 'customer_id' => $viaContact->id, 'name' => 'Μαρία', 'email' => 'maria@acme.gr', 'phone' => '697 000 1111']);
+
+        $m = app(LeadMatcher::class);
+
+        $this->assertSame([$trashed->id], $m->find($t->id, '123456789', null)->customers->pluck('id')->all());
+        $this->assertSame([$secondary->id], $m->find($t->id, null, 'billing@acme.gr')->customers->pluck('id')->all());
+        $this->assertSame([$viaContact->id], $m->find($t->id, null, 'MARIA@acme.gr')->customers->pluck('id')->all());
+        $this->assertSame([$viaContact->id], $m->find($t->id, null, null, ['+30 6970001111'])->customers->pluck('id')->all());
     }
 
     public function test_ignores_the_lead_being_edited_and_other_tenants(): void

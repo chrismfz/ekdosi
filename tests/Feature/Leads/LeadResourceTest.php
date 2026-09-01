@@ -4,6 +4,7 @@ namespace Tests\Feature\Leads;
 
 use App\Actions\ConvertLeadToCustomer;
 use App\Enums\LeadActivityType;
+use App\Enums\LeadSource;
 use App\Enums\LeadStatus;
 use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Filament\Resources\Leads\Pages\CreateLead;
@@ -129,10 +130,96 @@ class LeadResourceTest extends TestCase
         $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);
 
         Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
-            ->callAction('changeStatus', data: ['status' => LeadStatus::DoNotContact->value, 'reason' => ''])
+            ->callAction('changeStatus', data: ['status' => LeadStatus::DoNotContact->value, 'reason' => '', 'confirm_dnc' => true])
             ->assertHasActionErrors(['reason']);
 
         $this->assertSame(LeadStatus::New, $lead->fresh()->status);
+    }
+
+    public function test_do_not_contact_needs_an_explicit_confirmation_tick(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->callAction('changeStatus', data: ['status' => LeadStatus::DoNotContact->value, 'reason' => 'το ζήτησε', 'confirm_dnc' => false])
+            ->assertHasActionErrors(['confirm_dnc']);
+        $this->assertSame(LeadStatus::New, $lead->fresh()->status, 'Refused without the tick.');
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->callAction('changeStatus', data: ['status' => LeadStatus::DoNotContact->value, 'reason' => 'το ζήτησε', 'confirm_dnc' => true])
+            ->assertHasNoActionErrors();
+        $this->assertSame(LeadStatus::DoNotContact, $lead->fresh()->status);
+    }
+
+    public function test_do_not_contact_cannot_be_set_from_the_plain_form(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->fillForm(['status' => LeadStatus::DoNotContact->value, 'lost_reason' => 'x'])
+            ->call('save')
+            ->assertHasFormErrors(['status']);
+
+        $this->assertSame(LeadStatus::New, $lead->fresh()->status);
+    }
+
+    public function test_not_now_requires_a_follow_up_date(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->callAction('changeStatus', data: ['status' => LeadStatus::NotNow->value, 'next_action_at' => null])
+            ->assertHasActionErrors(['next_action_at']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->callAction('changeStatus', data: ['status' => LeadStatus::NotNow->value, 'next_action_at' => now()->addMonth()->format('Y-m-d H:i:s')])
+            ->assertHasNoActionErrors();
+        $lead->refresh();
+        $this->assertSame(LeadStatus::NotNow, $lead->status);
+        $this->assertTrue($lead->next_action_at->isSameDay(now()->addMonth()));
+
+        // Same rule on the plain form.
+        Livewire::test(CreateLead::class)
+            ->fillForm(['name' => 'Β', 'status' => LeadStatus::NotNow->value, 'next_action_at' => null])
+            ->call('create')
+            ->assertHasFormErrors(['next_action_at']);
+    }
+
+    public function test_saving_a_duplicate_of_a_do_not_contact_lead_needs_acknowledgement(): void
+    {
+        Lead::create(['company_id' => $this->tenant->id, 'name' => 'Ενοχλημένος', 'email' => 'no@thanks.gr', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'το ζήτησε']);
+
+        Livewire::test(CreateLead::class)
+            ->fillForm(['name' => 'Ξανά', 'email' => 'NO@thanks.gr'])
+            ->assertSee('ΜΗΝ τους ξαναενοχλήσουμε')
+            ->call('create')
+            ->assertHasFormErrors(['acknowledge_dnc']);
+        $this->assertSame(0, Lead::where('name', 'Ξανά')->count(), 'Refused until acknowledged.');
+
+        Livewire::test(CreateLead::class)
+            ->fillForm(['name' => 'Ξανά', 'email' => 'NO@thanks.gr', 'acknowledge_dnc' => true])
+            ->call('create')
+            ->assertHasNoFormErrors();
+        $this->assertSame(1, Lead::where('name', 'Ξανά')->count());
+    }
+
+    public function test_creating_a_lead_that_matches_a_customer_records_the_source(): void
+    {
+        Customer::create(['company_id' => $this->tenant->id, 'name' => 'Υπάρχων', 'afm' => '123456789']);
+
+        Livewire::test(CreateLead::class)
+            ->fillForm(['name' => 'Upsell', 'afm' => '123456789'])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame(LeadSource::ExistingCustomer, Lead::where('name', 'Upsell')->first()->source);
+
+        // An explicit choice wins.
+        Livewire::test(CreateLead::class)
+            ->fillForm(['name' => 'Upsell 2', 'afm' => '123456789', 'source' => LeadSource::Referral->value])
+            ->call('create')
+            ->assertHasNoFormErrors();
+        $this->assertSame(LeadSource::Referral, Lead::where('name', 'Upsell 2')->first()->source);
     }
 
     public function test_timeline_quick_add_logs_a_call_and_advances_a_new_lead(): void

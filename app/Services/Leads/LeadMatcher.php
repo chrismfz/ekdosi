@@ -2,6 +2,7 @@
 
 namespace App\Services\Leads;
 
+use App\Enums\LeadStatus;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Support\Afm;
@@ -21,6 +22,9 @@ use Illuminate\Database\Eloquent\Builder;
 class LeadMatcher
 {
     private const PHONE_MIN_DIGITS = 6;
+
+    /** Rows returned for the banner — a preview, not the full match set. */
+    public const PREVIEW_LIMIT = 10;
 
     /**
      * Phones are compared on their trailing digits so a country prefix on
@@ -53,34 +57,61 @@ class LeadMatcher
             return LeadMatch::none();
         }
 
+        // Customers: also soft-deleted ones (a deleted customer is still someone
+        // we dealt with), their secondary email, and their named contacts'
+        // email/phone — the person who answers the phone is often a contact.
         $customers = Customer::query()
+            ->withTrashed()
             ->where('company_id', $companyId)
             ->where(function (Builder $q) use ($afm, $email, $phones): void {
-                $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2']);
+                $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email']);
+
+                if ($email !== null || $phones !== []) {
+                    // Nested group: a leading OR inside whereHas would attach to
+                    // the relation's own join predicate.
+                    $q->orWhereHas('contacts', function (Builder $c) use ($email, $phones): void {
+                        $c->where(function (Builder $cc) use ($email, $phones): void {
+                            $this->applyIdentity($cc, null, $email, $phones, ['phone'], ['email']);
+                        });
+                    });
+                }
             })
             ->orderBy('name')
-            ->limit(10)
+            ->limit(self::PREVIEW_LIMIT)
             ->get();
+
+        $leadIdentity = function (Builder $q) use ($afm, $email, $phones): void {
+            $this->applyIdentity($q, $afm, $email, $phones, ['phone', 'mobile'], ['email']);
+        };
 
         $leads = Lead::query()
             ->withTrashed()
             ->where('company_id', $companyId)
             ->when($ignoreLeadId !== null, fn (Builder $q) => $q->whereKeyNot($ignoreLeadId))
-            ->where(function (Builder $q) use ($afm, $email, $phones): void {
-                $this->applyIdentity($q, $afm, $email, $phones, ['phone', 'mobile']);
-            })
+            ->where($leadIdentity)
             ->orderByDesc('updated_at')
-            ->limit(10)
+            ->limit(self::PREVIEW_LIMIT)
             ->get();
 
-        return new LeadMatch($customers, $leads);
+        // «Μην ξαναενοχλήσετε» is decided by an UNBOUNDED exists — the preview
+        // above is capped, and a DNC lead must never hide behind newer duplicates.
+        $doNotContact = Lead::query()
+            ->withTrashed()
+            ->where('company_id', $companyId)
+            ->when($ignoreLeadId !== null, fn (Builder $q) => $q->whereKeyNot($ignoreLeadId))
+            ->where('status', LeadStatus::DoNotContact->value)
+            ->where($leadIdentity)
+            ->exists();
+
+        return new LeadMatch($customers, $leads, $doNotContact);
     }
 
     /**
      * @param  list<string>  $phones
      * @param  list<string>  $phoneColumns
+     * @param  list<string>  $emailColumns
      */
-    private function applyIdentity(Builder $q, ?string $afm, ?string $email, array $phones, array $phoneColumns): void
+    private function applyIdentity(Builder $q, ?string $afm, ?string $email, array $phones, array $phoneColumns, array $emailColumns): void
     {
         if ($afm !== null) {
             // The stored side may carry an EL/GR prefix (customers.afm is saved
@@ -89,7 +120,9 @@ class LeadMatcher
         }
 
         if ($email !== null) {
-            $q->orWhereRaw('LOWER(email) = ?', [$email]);
+            foreach ($emailColumns as $column) {
+                $q->orWhereRaw('LOWER('.$column.') = ?', [$email]);
+            }
         }
 
         foreach ($phones as $suffix) {

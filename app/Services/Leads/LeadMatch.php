@@ -2,7 +2,6 @@
 
 namespace App\Services\Leads;
 
-use App\Enums\LeadStatus;
 use App\Models\Customer;
 use App\Models\Lead;
 use Illuminate\Support\Collection;
@@ -15,17 +14,19 @@ use Illuminate\Support\Collection;
 final class LeadMatch
 {
     /**
-     * @param  Collection<int, Customer>  $customers
-     * @param  Collection<int, Lead>  $leads
+     * @param  Collection<int, Customer>  $customers  a bounded preview (LeadMatcher::PREVIEW_LIMIT)
+     * @param  Collection<int, Lead>  $leads  a bounded preview (LeadMatcher::PREVIEW_LIMIT)
+     * @param  bool  $doNotContact  UNBOUNDED: any matching lead is «μην ξαναενοχλήσετε», previewed or not
      */
     public function __construct(
         public readonly Collection $customers,
         public readonly Collection $leads,
+        public readonly bool $doNotContact = false,
     ) {}
 
     public static function none(): self
     {
-        return new self(collect(), collect());
+        return new self(collect(), collect(), false);
     }
 
     public function isEmpty(): bool
@@ -33,9 +34,13 @@ final class LeadMatch
         return $this->customers->isEmpty() && $this->leads->isEmpty();
     }
 
-    /** Someone already asked us not to contact them. */
+    /**
+     * Someone already asked us not to contact them. Comes from a dedicated
+     * unbounded EXISTS — never from the previewed rows, so a DNC lead can't
+     * hide behind newer duplicates.
+     */
     public function hasDoNotContact(): bool
     {
-        return $this->leads->contains(fn (Lead $l): bool => $l->status === LeadStatus::DoNotContact);
+        return $this->doNotContact;
     }
 }

@@ -78,9 +78,43 @@ class LeadLifecycleTest extends TestCase
         $this->assertNull($lead->fresh()->last_activity_at);
     }
 
+    public function test_last_activity_counts_only_real_contacts(): void
+    {
+        $t = $this->tenant();
+        $lead = Lead::create(['company_id' => $t->id, 'name' => 'Α']);
+
+        // A note and a status change are not contacts.
+        LeadActivity::create(['company_id' => $t->id, 'lead_id' => $lead->id, 'type' => LeadActivityType::Note, 'happened_at' => now()]);
+        $lead->update(['status' => LeadStatus::Interested]); // → status_change row at now()
+        $this->assertNull($lead->fresh()->last_activity_at, 'Notes / status rows never count as a contact.');
+
+        // A back-dated answered call that flips the status must NOT make the
+        // lead look freshly worked: last contact = the call's own date.
+        LeadActivity::create(['company_id' => $t->id, 'lead_id' => $lead->id, 'type' => LeadActivityType::Call, 'outcome' => 'answered', 'happened_at' => now()->subDays(20)]);
+        $lead->update(['status' => LeadStatus::Contacted]);
+
+        $this->assertTrue($lead->fresh()->last_activity_at->isSameDay(now()->subDays(20)));
+        $this->assertSame([$lead->id], Lead::query()->stale(14)->pluck('id')->all(), 'Still «Αδρανές».');
+    }
+
+    public function test_observer_never_writes_another_tenants_lead(): void
+    {
+        $a = $this->tenant();
+        $b = $this->tenant();
+        $leadOfB = Lead::create(['company_id' => $b->id, 'name' => 'Β']);
+
+        // Malformed row: company A, lead of company B.
+        LeadActivity::create(['company_id' => $a->id, 'lead_id' => $leadOfB->id, 'type' => LeadActivityType::Call, 'happened_at' => now()]);
+
+        $this->assertNull($leadOfB->fresh()->last_activity_at, 'The tenant-bounded write must not touch B.');
+    }
+
     public function test_won_is_never_operator_selectable(): void
     {
         $this->assertArrayNotHasKey('won', LeadStatus::options());
+        $this->assertArrayNotHasKey('won', LeadStatus::formOptions());
+        $this->assertArrayNotHasKey('do_not_contact', LeadStatus::formOptions(), 'DNC only via the confirmed action.');
+        $this->assertArrayHasKey('do_not_contact', LeadStatus::options());
         $this->assertNotContains(LeadStatus::Won, LeadStatus::selectable());
         $this->assertTrue(LeadStatus::Lost->requiresReason());
         $this->assertTrue(LeadStatus::DoNotContact->requiresReason());

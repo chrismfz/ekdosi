@@ -149,7 +149,13 @@ class CompanyImporter
         'cmr_lines' => ['cmr_note_id' => 'cmr_notes'],
     ];
 
-    private const DROP_COLUMNS = ['id', 'company_id', 'created_at', 'updated_at', 'deleted_at'];
+    /**
+     * Surrogate/lifecycle columns regenerated on import. `deleted_at` is
+     * deliberately KEPT: the exporter dumps soft-deleted rows (raw table read),
+     * and a restore must not resurrect a customer/lead/product that was
+     * deleted — e.g. a lead kept only so «μην ξαναενοχλήσετε» still matches.
+     */
+    private const DROP_COLUMNS = ['id', 'company_id', 'created_at', 'updated_at'];
 
     public function __construct(
         private readonly SecretsCodec $codec,

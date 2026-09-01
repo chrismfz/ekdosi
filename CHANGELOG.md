@@ -29,6 +29,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `quotes.lead_id`, «Νέα προσφορά» στο lead ανοίγει τη φόρμα προσυμπληρωμένη, η έκδοση γράφει γραμμή
   «Προσφορά» στο χρονολόγιο και πάει το lead σε «Στάλθηκε προσφορά»· tab «Προσφορές» στο lead· στη
   μετατροπή οι προσφορές του lead περνούν στον πελάτη. Portability rewire για `quotes.lead_id`.
+- **Leads / mini-CRM — hardening από external review**: το «Μην ξαναενοχλήσετε» κρίνεται από
+  unbounded EXISTS (δεν χάνεται πίσω από >10 νεότερα duplicates)· η «τελευταία επαφή»/«Αδρανή»
+  μετρούν μόνο πραγματικές επαφές (όχι σημειώσεις/αλλαγές κατάστασης)· DNC μόνο μέσω της
+  ενέργειας με **checkbox επιβεβαίωσης**, και αποθήκευση duplicate πάνω σε DNC μόνο με ρητή
+  αναγνώριση· «Όχι τώρα» απαιτεί ημερομηνία· dedupe καλύπτει και soft-deleted πελάτες,
+  `secondary_email`, επαφές πελατών· ο observer γράφει tenant-bounded· auto
+  `source=existing_customer` όταν το lead ταιριάζει σε πελάτη.
 - **Leads / mini-CRM (L0)** — νέο μενού «Leads» κάτω από τους Πελάτες: υποψήφιοι πελάτες με όσα
   στοιχεία έχουμε (μόνο επωνυμία υποχρεωτική), **Χρονολόγιο** επαφών (Τηλέφωνο/Email/Ραντεβού/Σημείωση
   με ποιος/πότε/κατεύθυνση/αποτέλεσμα/τι ειπώθηκε + «επόμενο βήμα»), καταστάσεις Νέο → Επικοινωνήσαμε →
@@ -38,6 +45,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (`LeadMatcher`, ΑΦΜ/email/τηλέφωνο, format-insensitive). Πίνακες `leads` + `lead_activities`,
   `Lead`/`LeadActivity` models (TracksActivity, notes/tags/attachments), `LeadPolicy`, operator
   permissions. Σχέδιο + gates: `docs/leads-mini-crm.md` (L1 μετατροπή σε πελάτη, L2 απολογισμός).
+
+### Fixed
+- **Portability: το full restore δεν «ανασταίνει» soft-deleted εγγραφές** — ο importer κρατά πλέον το
+  `deleted_at` (πετούσε τη στήλη για όλους τους πίνακες, οπότε διαγραμμένοι πελάτες/leads/προϊόντα
+  επέστρεφαν ενεργοί μετά από export→import).
 
 ### Security
 - **Περιορισμός endpoint παρόχου e-τιμολόγησης (PROV-017)** — το base URL του παρόχου

@@ -68,6 +68,25 @@ enum LeadActivityType: string implements HasColor, HasIcon, HasLabel
         return in_array($this, [self::Call, self::Email, self::Meeting, self::Note], true);
     }
 
+    /**
+     * Counts as reaching out («επαφή») for `leads.last_activity_at` / «Αδρανή»:
+     * calls, emails, meetings and quotes — NOT notes or system rows, so a
+     * note or a status change can never make a lead look worked on.
+     */
+    public function isContact(): bool
+    {
+        return in_array($this, [self::Call, self::Email, self::Meeting, self::Quote], true);
+    }
+
+    /** @return list<string> */
+    public static function contactValues(): array
+    {
+        return array_map(
+            fn (self $t): string => $t->value,
+            array_values(array_filter(self::cases(), fn (self $t): bool => $t->isContact())),
+        );
+    }
+
     /** Has a meaningful outbound/inbound direction. */
     public function hasDirection(): bool
     {
