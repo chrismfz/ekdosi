@@ -148,6 +148,54 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('8', (string) ($line->getVatCategory()->value ?? $line->getVatCategory()));
     }
 
+    public function test_missing_measurement_unit_throws(): void
+    {
+        // A persisted line with no unit is a data error — surface it, never
+        // silently file it as pieces (MYD-016).
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => null]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/μονάδα μέτρησης/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note->fresh('lines'));
+    }
+
+    public function test_out_of_range_measurement_unit_throws(): void
+    {
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => 99]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/μονάδα μέτρησης/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note->fresh('lines'));
+    }
+
+    public function test_unit_7_other_is_blocked_until_other_unit_fields_exist(): void
+    {
+        // Unit 7 needs otherMeasurementUnitQuantity/Title (§8.13 note 9) — block
+        // it locally instead of filing a payload AADE must reject.
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => 7]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/δεν υποστηρίζεται/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note->fresh('lines'));
+    }
+
+    public function test_supported_unit_survives_unchanged(): void
+    {
+        // Kilos (2) must reach the payload as-is, not be rewritten to pieces.
+        $note = $this->makeNote();
+        $note->lines()->update(['measurement_unit' => 2]);
+
+        $aade = (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note->fresh('lines'));
+        $mu = $aade->getInvoiceDetails()[0]->getMeasurementUnit();
+        $this->assertSame('2', (string) ($mu->value ?? $mu));
+    }
+
     public function test_preview_xml_contains_delivery_markers(): void
     {
         $note = $this->makeNote();

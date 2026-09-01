@@ -382,6 +382,20 @@ final class Codes
         7 => 'Τεμάχια_Λοιπές Περιπτώσεις',
     ];
 
+    /**
+     * Quantity units offered in the delivery-line pickers. Code 7 (Τεμάχια_Λοιπές
+     * Περιπτώσεις) is EXCLUDED: AADE marks otherMeasurementUnitQuantity/Title
+     * mandatory for it (§8.13 note 9) and we do not model/emit those yet, so
+     * offering 7 would only let an operator build a payload AADE must reject
+     * (MYD-016). Keep the full QUANTITY_TYPES map for DISPLAY of legacy rows.
+     *
+     * @return array<int, string>
+     */
+    public static function selectableQuantityTypes(): array
+    {
+        return array_diff_key(self::QUANTITY_TYPES, [7 => true]);
+    }
+
     public static function invoiceTypeExists(string $code): bool
     {
         return isset(self::INVOICE_TYPES[$code]);

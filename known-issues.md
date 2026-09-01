@@ -276,7 +276,7 @@ Priorities:
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
-| MYD-016 | P1 | OPEN | Delivery units | Invalid or missing coded unit is silently filed as pieces |
+| MYD-016 | P1 | DONE | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | OPEN | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
@@ -910,7 +910,21 @@ Its economic direction is a return, not additional collection.
 
 ### MYD-016 — Delivery units silently become pieces
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `DeliveryNoteSubmitter::buildAadeDeliveryNote` no longer defaults a missing
+unit or clamps an out-of-range one to 1 — a persisted `measurement_unit` outside
+§8.13 1–7 now throws an actionable local error instead of silently changing the
+line's meaning. Unit 7 (Τεμάχια_Λοιπές Περιπτώσεις) requires
+`otherMeasurementUnitQuantity/Title` (§8.13 note 9, mandatory) which are not
+modelled, so it is explicitly blocked at the service and not offered to NEW lines
+in the two delivery line-unit pickers via `Codes::selectableQuantityTypes()` (a
+line already stored as 7 still shows it — state-aware options — so an unrelated
+edit can't silently drop the value; the full `QUANTITY_TYPES` map is also kept for
+DISPLAY of legacy rows). Full unit-7 support is
+logged in `docs/BACKLOG.md`. `DeliveryNoteSubmitterTest` covers missing,
+out-of-range, unit-7-blocked and a supported unit surviving unchanged. See
+`CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2611,3 +2625,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-015 DONE** — POS return 8.5 now reduces the myDATA VAT picture (−sign); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-020 DONE** — «Ψηφιακό Τέλος Συναλλαγής» terminology + corrected §8.5/8.6/8.7 refs; payload/columns unchanged | `CHANGELOG.md` [Unreleased] → Changed |
 | 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |

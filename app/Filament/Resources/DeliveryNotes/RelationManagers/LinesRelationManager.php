@@ -12,6 +12,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -93,7 +94,11 @@ class LinesRelationManager extends RelationManager
 
                 Select::make('measurement_unit')
                     ->label('Μ.Μ.')
-                    ->options(Codes::QUANTITY_TYPES)
+                    // New lines pick 1–6; a legacy line already on unit 7 still
+                    // shows it so an edit can't silently drop it (MYD-016).
+                    ->options(fn (Get $get) => (int) $get('measurement_unit') === 7
+                        ? Codes::QUANTITY_TYPES
+                        : Codes::selectableQuantityTypes())
                     ->default(1)
                     ->selectablePlaceholder(false),
 
