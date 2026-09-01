@@ -149,6 +149,39 @@ class LeadMatcherTest extends TestCase
         $this->assertCount(1, $m->find($t->id, null, 'c@x.gr')->customers);
     }
 
+    public function test_direct_set_and_dnc_agree_whether_the_preview_is_capped_or_not(): void
+    {
+        $t = $this->tenant();
+        $m = app(LeadMatcher::class);
+
+        // Uncapped: direct derived in PHP from the banner set.
+        $live = Customer::create(['company_id' => $t->id, 'name' => 'Ζωντανός', 'afm' => 'EL 123456789']);
+        $trashed = Customer::create(['company_id' => $t->id, 'name' => 'Σβησμένος', 'afm' => '123456789']);
+        $trashed->delete();
+        $viaContact = Customer::create(['company_id' => $t->id, 'name' => 'Μέσω επαφής']);
+        CustomerContact::create(['company_id' => $t->id, 'customer_id' => $viaContact->id, 'name' => 'Μ', 'phone' => '6970001111']);
+
+        $match = $m->find($t->id, '123456789', null, ['+30 697 000 1111']);
+        $this->assertCount(3, $match->customers);
+        $this->assertSame([$live->id], $match->directCustomers->pluck('id')->all());
+
+        // Capped (>= PREVIEW_LIMIT banner rows): direct comes from its own query — same answer.
+        for ($i = 1; $i <= LeadMatcher::PREVIEW_LIMIT; $i++) {
+            CustomerContact::create(['company_id' => $t->id, 'customer_id' => Customer::create(['company_id' => $t->id, 'name' => "Επαφή {$i}"])->id, 'name' => 'Μ', 'phone' => '6970001111']);
+        }
+        $capped = $m->find($t->id, '123456789', null, ['+30 697 000 1111']);
+        $this->assertCount(LeadMatcher::PREVIEW_LIMIT, $capped->customers);
+        $this->assertSame([$live->id], $capped->directCustomers->pluck('id')->all());
+
+        // DNC: uncapped preview decides from the rows; capped falls back to EXISTS (both true here).
+        Lead::create(['company_id' => $t->id, 'name' => 'DNC', 'email' => 'a@b.gr', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+        $this->assertTrue($m->find($t->id, null, 'a@b.gr')->hasDoNotContact());
+        for ($i = 1; $i <= LeadMatcher::PREVIEW_LIMIT; $i++) {
+            Lead::create(['company_id' => $t->id, 'name' => "Νεότερο {$i}", 'email' => 'a@b.gr']);
+        }
+        $this->assertTrue($m->find($t->id, null, 'a@b.gr')->hasDoNotContact());
+    }
+
     public function test_customers_owning_afm_helper(): void
     {
         $t = $this->tenant();

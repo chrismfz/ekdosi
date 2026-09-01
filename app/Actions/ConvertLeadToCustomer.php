@@ -57,6 +57,15 @@ class ConvertLeadToCustomer
             if ($locked === null || $locked->converted_customer_id !== null) {
                 throw new RuntimeException('Το lead έχει ήδη μετατραπεί σε πελάτη.');
             }
+            if ($locked->trashed()) {
+                throw new RuntimeException('Το lead είναι διαγραμμένο — επανέφερέ το πρώτα.');
+            }
+            // «Μην ξαναενοχλήσετε» is a memory the dedupe relies on: converting
+            // would erase it silently. The operator must change the status first
+            // (a deliberate, logged step), then convert.
+            if ($locked->status === LeadStatus::DoNotContact) {
+                throw new RuntimeException('Το lead είναι «Μην ξαναενοχλήσετε» — άλλαξε πρώτα την κατάσταση (με λόγο) και μετά μετέτρεψέ το.');
+            }
 
             // From here on work on the LOCKED row: the caller's instance may be
             // stale (another operator moved the status meanwhile) and the status

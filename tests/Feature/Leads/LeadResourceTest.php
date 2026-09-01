@@ -13,6 +13,7 @@ use App\Filament\Resources\Leads\Pages\ListLeads;
 use App\Filament\Resources\Leads\RelationManagers\QuotesRelationManager;
 use App\Filament\Resources\Leads\RelationManagers\TimelineRelationManager;
 use App\Filament\Resources\Quotes\Pages\CreateQuote;
+use App\Filament\Resources\Quotes\Pages\EditQuote;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerContact;
@@ -177,6 +178,34 @@ class LeadResourceTest extends TestCase
             ->assertHasFormErrors(['status']);
 
         $this->assertSame(LeadStatus::DoNotContact, $lead->fresh()->status);
+    }
+
+    public function test_convert_is_hidden_on_a_do_not_contact_lead(): void
+    {
+        $dnc = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+        $lost = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Β', 'status' => LeadStatus::Lost, 'lost_reason' => 'x']);
+
+        Livewire::test(EditLead::class, ['record' => $dnc->getRouteKey()])->assertActionHidden('convert');
+        // A lost lead that comes back IS convertible.
+        Livewire::test(EditLead::class, ['record' => $lost->getRouteKey()])->assertActionVisible('convert');
+    }
+
+    public function test_editing_a_quote_after_the_lead_closed_keeps_the_link(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Καφενείο']);
+        VatCategory::create(['company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+        $quote = Quote::create(['company_id' => $this->tenant->id, 'lead_id' => $lead->id, 'code' => 'ΠΡ-9', 'subject' => 'Πριν', 'issued_at' => now()]);
+
+        app(ConvertLeadToCustomer::class)($lead); // lead → Won (not open any more)
+
+        Livewire::test(EditQuote::class, ['record' => $quote->getRouteKey()])
+            ->fillForm(['subject' => 'Μετά'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $quote->refresh();
+        $this->assertSame('Μετά', $quote->subject);
+        $this->assertSame($lead->id, $quote->lead_id, 'The historical lead link survives an edit.');
     }
 
     public function test_new_quote_is_hidden_on_lost_and_do_not_contact_leads(): void

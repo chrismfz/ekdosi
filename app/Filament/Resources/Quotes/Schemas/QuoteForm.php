@@ -82,7 +82,10 @@ class QuoteForm
 
                     // Leads L1: set when the quote is started from a lead
                     // («Νέα προσφορά» on the lead) — see CreateQuote::afterFill.
-                    Hidden::make('lead_id'),
+                    // Written ONCE, on create: an edit after the lead closed
+                    // (Won/Lost/DNC) must not wipe the historical link.
+                    Hidden::make('lead_id')
+                        ->dehydrated(fn (string $operation): bool => $operation === 'create'),
 
                     DatePicker::make('issued_at')
                         ->label('Ημερομηνία')

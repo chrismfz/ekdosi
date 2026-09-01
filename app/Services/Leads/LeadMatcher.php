@@ -112,17 +112,6 @@ class LeadMatcher
             return LeadMatch::none();
         }
 
-        // Direct hits: live customers matched on their OWN columns — the set the
-        // convert modal may pre-select and the create hook may act on.
-        $direct = Customer::query()
-            ->where('company_id', $companyId)
-            ->where(function (Builder $q) use ($afm, $email, $phones): void {
-                $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email']);
-            })
-            ->orderBy('name')
-            ->limit(self::PREVIEW_LIMIT)
-            ->get();
-
         // Banner set: also soft-deleted ones (a deleted customer is still someone
         // we dealt with) and their named contacts' email/phone — the person who
         // answers the phone is often a contact.
@@ -146,6 +135,21 @@ class LeadMatcher
             ->limit(self::PREVIEW_LIMIT)
             ->get();
 
+        // Direct hits: live customers matched on their OWN columns — the set the
+        // convert modal may pre-select and the create hook may act on. When the
+        // banner query wasn't capped it already holds every match, so filter in
+        // PHP; only a capped preview needs its own query.
+        $direct = $customers->count() < self::PREVIEW_LIMIT
+            ? $customers->filter(fn (Customer $c): bool => ! $c->trashed() && self::ownColumnsMatch($c, $afm, $email, $phones))->values()
+            : Customer::query()
+                ->where('company_id', $companyId)
+                ->where(function (Builder $q) use ($afm, $email, $phones): void {
+                    $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email']);
+                })
+                ->orderBy('name')
+                ->limit(self::PREVIEW_LIMIT)
+                ->get();
+
         $leadIdentity = function (Builder $q) use ($afm, $email, $phones): void {
             $this->applyIdentity($q, $afm, $email, $phones, ['phone', 'mobile'], ['email']);
         };
@@ -159,15 +163,18 @@ class LeadMatcher
             ->limit(self::PREVIEW_LIMIT)
             ->get();
 
-        // «Μην ξαναενοχλήσετε» is decided by an UNBOUNDED exists — the preview
-        // above is capped, and a DNC lead must never hide behind newer duplicates.
-        $doNotContact = Lead::query()
-            ->withTrashed()
-            ->where('company_id', $companyId)
-            ->when($ignoreLeadId !== null, fn (Builder $q) => $q->whereKeyNot($ignoreLeadId))
-            ->where('status', LeadStatus::DoNotContact->value)
-            ->where($leadIdentity)
-            ->exists();
+        // «Μην ξαναενοχλήσετε» must never hide behind newer duplicates: when the
+        // preview is capped, decide it with an UNBOUNDED exists; an uncapped
+        // preview already holds every matching lead.
+        $doNotContact = $leads->count() < self::PREVIEW_LIMIT
+            ? $leads->contains(fn (Lead $l): bool => $l->status === LeadStatus::DoNotContact)
+            : Lead::query()
+                ->withTrashed()
+                ->where('company_id', $companyId)
+                ->when($ignoreLeadId !== null, fn (Builder $q) => $q->whereKeyNot($ignoreLeadId))
+                ->where('status', LeadStatus::DoNotContact->value)
+                ->where($leadIdentity)
+                ->exists();
 
         return new LeadMatch($customers, $leads, $doNotContact, $direct);
     }
@@ -196,6 +203,36 @@ class LeadMatcher
                 $q->orWhereRaw(self::strippedSql($column).' LIKE ?', ['%'.$suffix]);
             }
         }
+    }
+
+    /**
+     * PHP twin of applyIdentity() for a customer's OWN columns — used to derive
+     * the direct set from an uncapped banner query without a second scan. Must
+     * agree with the SQL rule (ΑΦΜ digits with EL/GR tolerated, lower-cased
+     * email, trailing-digits phone).
+     *
+     * @param  list<string>  $phoneSuffixes
+     */
+    private static function ownColumnsMatch(Customer $c, ?string $afm, ?string $email, array $phoneSuffixes): bool
+    {
+        if ($afm !== null && Afm::normalise($c->afm) === $afm) {
+            return true;
+        }
+
+        if ($email !== null && in_array($email, [self::normalizeEmail($c->email), self::normalizeEmail($c->secondary_email)], true)) {
+            return true;
+        }
+
+        foreach ($phoneSuffixes as $suffix) {
+            foreach ([$c->phone1, $c->phone2] as $stored) {
+                $digits = self::normalizePhone($stored);
+                if ($digits !== null && str_ends_with($digits, $suffix)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** SQL expression stripping the usual phone/ΑΦΜ formatting from a column. */

@@ -47,21 +47,6 @@ class EditQuote extends EditRecord
         ];
     }
 
-    /**
-     * Same guard as CreateQuote: the Hidden `lead_id` must belong to this tenant.
-     *
-     * @param  array<string, mixed>  $data
-     * @return array<string, mixed>
-     */
-    protected function mutateFormDataBeforeSave(array $data): array
-    {
-        if (array_key_exists('lead_id', $data)) {
-            $data['lead_id'] = CreateQuote::tenantLeadId($data['lead_id']);
-        }
-
-        return $data;
-    }
-
     /** Recompute totals after the lines are saved. */
     protected function afterSave(): void
     {

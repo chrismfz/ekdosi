@@ -152,6 +152,26 @@ class ConvertLeadToCustomerTest extends TestCase
         $this->assertNotNull(app(ConvertLeadToCustomer::class)($lead2));
     }
 
+    public function test_refuses_a_do_not_contact_or_trashed_lead(): void
+    {
+        $t = $this->tenant();
+
+        $dnc = Lead::create(['company_id' => $t->id, 'name' => 'DNC', 'email' => 'no@thanks.gr', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+        try {
+            app(ConvertLeadToCustomer::class)($dnc);
+            $this->fail('Expected a RuntimeException.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Μην ξαναενοχλήσετε', $e->getMessage());
+        }
+        $this->assertSame(LeadStatus::DoNotContact, $dnc->fresh()->status, 'The DNC memory survives.');
+        $this->assertSame(0, Customer::where('company_id', $t->id)->count());
+
+        $trashed = Lead::create(['company_id' => $t->id, 'name' => 'Σβησμένο']);
+        $trashed->delete();
+        $this->expectException(RuntimeException::class);
+        app(ConvertLeadToCustomer::class)($trashed);
+    }
+
     public function test_refuses_a_second_conversion(): void
     {
         $t = $this->tenant();
