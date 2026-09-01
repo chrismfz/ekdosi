@@ -412,25 +412,28 @@ class MyDataSubmitterSafetyTest extends TestCase
 
     public function test_all_additional_tax_types_emit_blocks_and_totals(): void
     {
-        // #3c: fees (2) / otherTaxes (3) / stampDuty (4) / deductions (5) each emit a
-        // taxesTotals block + set the matching summary total when an amount is present.
+        // #3c: fees (2, §8.7) / otherTaxes (3, §8.5) / digital transaction fee
+        // (4, §8.6) / deductions (5) each emit a taxesTotals block carrying its
+        // taxType AND taxCategory, + set the matching summary total.
         $inv = $this->makeInvoice();
         $this->standardLine($inv);
         $inv->forceFill([
             'fees_amount' => 30, 'fees_category' => 1,
             'other_taxes_amount' => 20, 'other_taxes_category' => 1,
-            'stamp_duty_amount' => 50, 'stamp_duty_category' => 1,
+            'stamp_duty_amount' => 50, 'stamp_duty_category' => 2,   // §8.6 category 2 = 2.4%
             'deductions_amount' => 10, 'deductions_category' => 1,
         ])->save();
 
         $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
 
-        foreach (['2', '3', '4', '5'] as $taxType) {
-            $this->assertStringContainsString("<taxType>{$taxType}</taxType>", $xml);
-        }
+        // Each block pairs the right taxType with its category (order: taxType → taxCategory).
+        $this->assertMatchesRegularExpression('#<taxType>2</taxType>\s*<taxCategory>1</taxCategory>#', $xml);
+        $this->assertMatchesRegularExpression('#<taxType>3</taxType>\s*<taxCategory>1</taxCategory>#', $xml);
+        $this->assertMatchesRegularExpression('#<taxType>4</taxType>\s*<taxCategory>2</taxCategory>#', $xml);
+        $this->assertMatchesRegularExpression('#<taxType>5</taxType>\s*<taxCategory>1</taxCategory>#', $xml);
         $this->assertStringContainsString('<totalFeesAmount>30', $xml);
         $this->assertStringContainsString('<totalOtherTaxesAmount>20', $xml);
-        $this->assertStringContainsString('<totalStampDutyAmount>50', $xml);
+        $this->assertStringContainsString('<totalStampDutyAmount>50', $xml);   // legacy tag = digital transaction fee
         $this->assertStringContainsString('<totalDeductionsAmount>10', $xml);
     }
 
@@ -526,7 +529,7 @@ class MyDataSubmitterSafetyTest extends TestCase
 
     public function test_invalid_additional_tax_category_throws(): void
     {
-        // 999 is not a valid §8.5 fees category → loud-fail, don't file garbage.
+        // 999 is not a valid §8.7 fees category → loud-fail, don't file garbage.
         $inv = $this->makeInvoice();
         $this->standardLine($inv);
         $inv->forceFill(['fees_amount' => 30, 'fees_category' => 999])->save();

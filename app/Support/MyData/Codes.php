@@ -102,10 +102,14 @@ final class Codes
     public const TYPE_DEFAULTS = [
         '1.1' => ['income' => 'E3_561_001', 'category' => 'category1_1', 'goods' => true],
         '1.2' => ['income' => 'E3_561_005', 'category' => 'category1_1', 'goods' => true],
-        '1.3' => ['income' => 'E3_561_005', 'category' => 'category1_1', 'goods' => true],
+        // Third-country goods export (1.3): E3_561_006 «Εξωτερικού Τρίτων Χωρών»,
+        // NOT the intra-community E3_561_005 used by 1.2 (MYD-001).
+        '1.3' => ['income' => 'E3_561_006', 'category' => 'category1_1', 'goods' => true],
         '2.1' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
         '2.2' => ['income' => 'E3_561_005', 'category' => 'category1_3', 'goods' => false],
-        '2.3' => ['income' => 'E3_561_005', 'category' => 'category1_3', 'goods' => false],
+        // Cross-border services to a third country (2.3): third-country E3_561_006
+        // (the non-EU twin of 2.2), NOT intra-community E3_561_005 (MYD-001).
+        '2.3' => ['income' => 'E3_561_006', 'category' => 'category1_3', 'goods' => false],
         '3.1' => ['income' => null, 'category' => null, 'goods' => false],
         '5.1' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
         '5.2' => ['income' => 'E3_561_001', 'category' => 'category1_3', 'goods' => false],
@@ -172,7 +176,7 @@ final class Codes
         7 => 0.0,   // exempt — vatExemptionCategory mandatory
         8 => null,  // records without VAT
         9 => 3.0,   // αρ.31 ν.5057/2023
-        10 => 4.0,  // αρ.31 ν.5057/2023 (island) — collides with 6 at 4%
+        10 => 4.0,  // αρ.31 ν.5057/2023 — collides with 6 at 4%
     ];
 
     /**
@@ -195,13 +199,13 @@ final class Codes
         6 => 'ΦΠΑ νήσων 4%',
         7 => 'Άνευ ΦΠΑ 0%',
         9 => 'ΦΠΑ 3% (αρ.31 ν.5057/2023)',
-        10 => 'ΦΠΑ νήσων 4% (αρ.31 ν.5057/2023)',
+        10 => 'ΦΠΑ 4% (αρ.31 ν.5057/2023)',
     ];
 
     /**
      * The standard sales-line VAT categories to seed, as [rate, description]
      * rows. Skips code 8 (no rate) and code 10 (duplicate 4% of code 6 — would
-     * just create a confusing second 4% row; a tenant on the ν.5057/2023 island
+     * just create a confusing second 4% row; a tenant on the ν.5057/2023
      * regime can add it manually). Code 7 (0%) is seeded WITHOUT an exemption
      * reason — the operator sets §8.3 per their case (Setup → VAT Categories).
      *
@@ -388,7 +392,7 @@ final class Codes
      * MyDataSubmitter::vatCategoryFor() maps to an AADE vatCategory enum.
      *
      * NOTE this is a SUBSET of VAT_CATEGORY_RATES: that table lists the full
-     * §8.2 enum including codes 9 (3%) and 10 (4% island) from ν.5057/2023,
+     * §8.2 enum including codes 9 (3%) and 10 (4%) from ν.5057/2023,
      * which the submitter does NOT yet map (no match arm → it throws). So the
      * "would AADE accept a line at this rate" check (ETL warning, table flag)
      * MUST use THIS set, not the full enum — otherwise a 3% category passes the
@@ -509,26 +513,55 @@ final class Codes
     }
 
     /**
-     * §8.1 invoice types that are CREDIT NOTES (πιστωτικά) — they REDUCE the
-     * figure they relate to, so in any sum of myDATA documents their net/vat
-     * must be subtracted, not added. Covers both the income side (5.1, 5.2
-     * πιστωτικό τιμολόγιο, 11.4 πιστωτικό λιανικής) and the expense side (13.31,
-     * 14.31 πιστωτικά ημεδαπής/αλλοδαπής). Without this, a refund/return reads
-     * as extra income or extra deductible input VAT.
+     * §8.1 invoice types that are genuinely CREDIT NOTES (πιστωτικά) — they
+     * REDUCE the figure they relate to. Income side (5.1, 5.2 πιστωτικό
+     * τιμολόγιο, 11.4 πιστωτικό λιανικής) and expense side (13.31, 14.31
+     * πιστωτικά ημεδαπής/αλλοδαπής). This list is the authority for credit-note
+     * IDENTITY (isCreditNoteType) AND the expense-side subtract rule in
+     * LedgerBook / VatPeriodReport (matched against expenses.invoice_type).
+     * Keep it to real credit notes only — other "reducing" documents that are
+     * not πιστωτικά live in REDUCING_EXTRA_TYPES.
      *
      * @var list<string>
      */
     public const CREDIT_NOTE_TYPES = ['5.1', '5.2', '11.4', '13.31', '14.31'];
+
+    /**
+     * §8.1 types that are NOT credit notes but whose net/vat still REDUCE a sum
+     * of transmitted myDATA documents (MYD-015). Kept separate from
+     * CREDIT_NOTE_TYPES so credit-note identity stays exact — only documentSign()
+     * (the myDATA VAT-picture aggregator) reads this, never isCreditNoteType().
+     *
+     * Explicit §8.x reporting-sign policy — the §8.x prefix alone is NOT enough:
+     *   - 8.1 Ενοίκια-Έσοδο           → income (+)
+     *   - 8.2 Τέλος ανθεκτικότητας     → income (+)
+     *   - 8.4 Απόδειξη Είσπραξης POS   → income/collection (+)
+     *   - 8.5 Απόδειξη Επιστροφής POS  → RETURN (−) ← here
+     *   - 8.6 Δελτίο Παραγγελίας Εστίασης → order slip: sign (+); myDATA sends it
+     *         with zero value, so it adds no revenue on its own (this zero-value
+     *         expectation is not separately enforced).
+     *
+     * @var list<string>
+     */
+    public const REDUCING_EXTRA_TYPES = ['8.5'];
 
     public static function isCreditNoteType(?string $code): bool
     {
         return $code !== null && in_array($code, self::CREDIT_NOTE_TYPES, true);
     }
 
-    /** -1 for a credit note (subtract from any myDATA-document sum), else +1. */
+    /**
+     * Reporting sign for a summed myDATA document: -1 for a credit note or other
+     * reducing type (e.g. an 8.5 POS return), else +1.
+     */
     public static function documentSign(?string $code): int
     {
-        return self::isCreditNoteType($code) ? -1 : 1;
+        if ($code === null) {
+            return 1;
+        }
+
+        return in_array($code, self::CREDIT_NOTE_TYPES, true)
+            || in_array($code, self::REDUCING_EXTRA_TYPES, true) ? -1 : 1;
     }
 
     /**

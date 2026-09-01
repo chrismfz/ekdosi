@@ -11,7 +11,7 @@ use App\Support\Products\LeviedProductTemplates;
 /**
  * Imports the selected «θεσμικά τέλη» product templates (LeviedProductTemplates)
  * into a tenant as ready-to-use products carrying the right myDATA product-linked
- * fee (Fees §8.5 + category + €/unit).
+ * fee (Fees §8.7 + category + €/unit).
  *
  * Idempotent: a template already present (matched by name + tax type + category
  * for the tenant) is skipped via firstOrCreate, so re-running never duplicates.

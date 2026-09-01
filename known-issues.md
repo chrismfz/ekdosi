@@ -261,7 +261,7 @@ Priorities:
 
 | ID | Priority | Status | Area | Summary |
 |---|---:|---|---|---|
-| MYD-001 | P0 | OPEN | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
+| MYD-001 | P0 | DONE | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
 | MYD-002 | P0 | OPEN | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
 | MYD-003 | P0 | OPEN | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
 | MYD-004 | P0 | OPEN | VAT validation | 3%, dual 4% codes and 0% can produce false readiness results |
@@ -275,12 +275,12 @@ Priorities:
 | MYD-012 | P0 | OPEN | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | OPEN | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
-| MYD-015 | P1 | OPEN | VAT picture | Type 8.5 POS return is added with a positive sign |
+| MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | OPEN | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | OPEN | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
-| MYD-020 | P2 | OPEN | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
+| MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
 | MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
 | MYD-022 | P0 | OPEN | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
@@ -337,7 +337,13 @@ Priorities:
 
 ### MYD-001 — Third-country sales use the wrong E3 code
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `Codes::TYPE_DEFAULTS` maps 1.3/2.3 → `E3_561_006`; 1.2/2.2 keep
+`E3_561_005`. Seeder derives income class from `typeDefaults()` so ΕΞΑ/ΥΤΧ pick it
+up automatically. Tests in `MyDataLookupSeederTest` assert the 005-vs-006 split and
+the seeded ΕΞΑ/ΥΤΧ rows. Fill-empty behaviour unchanged (operator edits preserved).
+See `CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -429,6 +435,13 @@ AADE separates value-plus-movement documents from movement-only types
 ### MYD-004 — VAT readiness checks do not prove the submitted VAT code
 
 **Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED AND EXPANDED 2026-08-30
+
+**Partial (2026-08-31):** the code-10 label sub-item is DONE — `Codes::VAT_CATEGORY_LABELS[10]`
+now reads «ΦΠΑ 4% (αρ.31 ν.5057/2023)» to match the official §8.2 table (the
+unofficial «νήσων» is dropped; codes 4/5/6 remain the genuine island rates). The
+substantive work below (shared VAT resolver, explicit code-9 seed, mandatory
+6-vs-10 choice, 0%-without-reason blocking, per-line VAT-code snapshot) is still
+OPEN. See `CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -842,7 +855,19 @@ inbound state.
 
 ### MYD-015 — POS return type 8.5 increases the VAT-picture totals
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `8.5` added to a new `Codes::REDUCING_EXTRA_TYPES` list read only by
+`documentSign()`, so a POS return reduces the myDATA VAT picture
+(`MyDataVatAggregator`). Kept OUT of `CREDIT_NOTE_TYPES` so credit-note identity
+(`isCreditNoteType`) stays exact and the expense-side subtract rule in
+`LedgerBook`/`VatPeriodReport` (matched against `expenses.invoice_type`, where an
+income type 8.5 never appears) is untouched. The const doc-comment records the
+explicit §8.x sign policy (8.1/8.2/8.4 = +, 8.5 = −, 8.6 order slip = + but
+zero-value, not separately enforced). Aggregator fixture proves 100€ 8.4 + 40€ 8.5
+→ net 60 (never 140); a `documentSign` policy test covers 8.4/8.5/8.6, credit/sales
+regressions and that `isCreditNoteType('8.5')` stays false. `8.6` left unchanged.
+See `CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -1041,7 +1066,27 @@ business-cancelled note merely because a non-terminal remote status is returned.
 
 ### MYD-020 — Digital Transaction Fee still appears as legacy stamp duty
 
-**Status:** OPEN · **Priority:** P2 · **Research:** CONFIRMED, PAYLOAD NOT MIS-MAPPED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P2 · **Research:** CONFIRMED, PAYLOAD NOT MIS-MAPPED 2026-08-30
+
+**Fix:** Operator-facing labels/help now say «Ψηφιακό Τέλος Συναλλαγής» (taxType 4)
+instead of «Χαρτόσημο» across `ProductForm`, `InvoiceForm`, `PdfLabels` and
+`CommonTaxPresets`. A full sweep corrected the shifted additional-tax §-refs
+against the spec's own section headers — **§8.5** Λοιποί Φόροι (type 3), **§8.6**
+Ψηφιακό Τέλος (type 4), **§8.7** Τέλη (type 2) — in `AadeInvoiceDocument::
+addAdditionalTaxes()`, both the fees AND other-taxes labels in `InvoiceForm`, the
+`ProductForm` options, the levied-products cluster (`LeviedProductTemplates`,
+`ListProducts`, `ImportLeviedProducts` + test), `DemoCompanySeeder`, the
+`add_additional_taxes_to_invoices` migration comment and the tests; the bogus
+deductions «§8.8» ref (§8.8 is income classification) was dropped. Payload,
+`stamp_duty_*` columns and the `stamp_duty` preset group key are unchanged
+(compatibility → stored values still emit taxType 4). `MyDataSubmitterSafetyTest`
+now asserts the taxType↔taxCategory pairing per group. See `CHANGELOG.md`
+[Unreleased] → Changed.
+
+**Note (out of scope, follow-up):** `MyDataLookupSeeder` doc-comments still cite
+«§8.5 E3 type / §8.6 bucket» for INCOME classification — a different concept
+(income class type is §8.9, category §8.8). Left untouched here to keep this a
+pure additional-taxes fix; candidate for a tiny separate doc cleanup.
 
 **Official finding**
 
@@ -2553,3 +2598,6 @@ These are not open issues:
 | 2026-08-30 | Added Provider/InvoSign/ΥΠΑΗΕΣ audit, compatibility matrices and PROV-001–PROV-013 | Documentation-only audit |
 | 2026-08-30 | Provider hardening sweep: added PROV-014–PROV-019 and expanded the sandbox matrix | Documentation-only audit |
 | 2026-08-31 | Critical myDATA/provider integrity sweep: added MYD-021–MYD-026 and PROV-020; expanded snapshot, evidence and sandbox requirements | Documentation-only audit |
+| 2026-08-31 | **MYD-001 DONE** — third-country 1.3/2.3 → E3_561_006 (was 561_005); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-015 DONE** — POS return 8.5 now reduces the myDATA VAT picture (−sign); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-020 DONE** — «Ψηφιακό Τέλος Συναλλαγής» terminology + corrected §8.5/8.6/8.7 refs; payload/columns unchanged | `CHANGELOG.md` [Unreleased] → Changed |

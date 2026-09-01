@@ -17,7 +17,7 @@ use Tests\TestCase;
 
 /**
  * The «θεσμικά τέλη» template importer: selected templates become products
- * carrying the correct myDATA product-linked fee (Fees §8.5 + category + €/unit),
+ * carrying the correct myDATA product-linked fee (Fees §8.7 + category + €/unit),
  * idempotent on re-run.
  */
 class ImportLeviedProductsTest extends TestCase
@@ -45,7 +45,7 @@ class ImportLeviedProductsTest extends TestCase
 
         $bag = Product::where('company_id', $this->tenant->id)
             ->where('description_short', 'Πλαστική σακούλα — περιβαλλοντικό τέλος')->firstOrFail();
-        $this->assertSame(2, (int) $bag->mydata_tax_type);          // Fees §8.5
+        $this->assertSame(2, (int) $bag->mydata_tax_type);          // Fees §8.7
         $this->assertSame(8, (int) $bag->mydata_tax_category);      // TYPE_8
         $this->assertEqualsWithDelta(0.07, (float) $bag->mydata_tax_per_unit, 0.0001);
         $this->assertEqualsWithDelta(0.0, (float) $bag->sell_price, 0.001);
@@ -76,7 +76,7 @@ class ImportLeviedProductsTest extends TestCase
 
     public function test_catalogue_only_uses_fees_taxtype(): void
     {
-        // Guards the §8.5 assumption — every template is a Fees levy.
+        // Guards the §8.7 assumption — every template is a Fees levy.
         foreach (LeviedProductTemplates::all() as $t) {
             $this->assertIsInt($t['tax_category']);
             $this->assertGreaterThan(0, $t['per_unit']);

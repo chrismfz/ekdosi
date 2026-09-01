@@ -17,7 +17,7 @@ use RuntimeException;
  *     €0,07/τεμ). amount = Σ qty × per_unit over the lines whose product carries
  *     that taxType (no header discount — a per-unit levy isn't discounted).
  *  2. RATE-DRIVEN (manual-but-correct): when an invoice carries a `*_rate`
- *     (χαρτόσημο 3,6%, παρακράτηση 20%, set by the «Τυπικά τέλη/φόροι» preset),
+ *     (ψηφιακό τέλος συναλλαγής 3,6%, παρακράτηση 20%, «Τυπικά τέλη/φόροι» preset),
  *     amount = rate × base, where base = InvoiceVatBreakdown::totalNet() — the
  *     SAME net the submitter files as `underlyingValue`, so taxAmount reconciles.
  *  3. NEITHER → amount is CLEARED (0, category null). A flat one-off fee is not

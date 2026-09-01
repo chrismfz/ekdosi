@@ -707,10 +707,10 @@ class AadeInvoiceDocument
         // [amount col, category col, TaxType, enum class|null (null = deductions, no
         //  firebed enum → int>0), human §ref for the error message]
         $taxes = [
-            ['fees_amount', 'fees_category', TaxType::TYPE_2, FeesPercentCategory::class, 'τελών (§8.5)'],
-            ['other_taxes_amount', 'other_taxes_category', TaxType::TYPE_3, OtherTaxesPercentCategory::class, 'λοιπών φόρων (§8.6)'],
-            ['stamp_duty_amount', 'stamp_duty_category', TaxType::TYPE_4, StampCategory::class, 'χαρτοσήμου (§8.7)'],
-            ['deductions_amount', 'deductions_category', TaxType::TYPE_5, null, 'κρατήσεων (§8.8)'],
+            ['fees_amount', 'fees_category', TaxType::TYPE_2, FeesPercentCategory::class, 'τελών (§8.7)'],
+            ['other_taxes_amount', 'other_taxes_category', TaxType::TYPE_3, OtherTaxesPercentCategory::class, 'λοιπών φόρων (§8.5)'],
+            ['stamp_duty_amount', 'stamp_duty_category', TaxType::TYPE_4, StampCategory::class, 'Ψηφιακού Τέλους Συναλλαγής (§8.6)'],
+            ['deductions_amount', 'deductions_category', TaxType::TYPE_5, null, 'κρατήσεων'],
         ];
 
         foreach ($taxes as [$amountCol, $categoryCol, $taxType, $enum, $ref]) {

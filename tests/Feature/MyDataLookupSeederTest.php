@@ -140,11 +140,42 @@ class MyDataLookupSeederTest extends TestCase
 
         // Intra-community (ΕΝΔ): 1.2 → E3_561_005.
         $this->assertSame('E3_561_005', $by('ΕΝΔ')->mydata_income_class);
+        // Intra-community services (ΕΝΥ): 2.2 → E3_561_005 too.
+        $this->assertSame('E3_561_005', $by('ΕΝΥ')->mydata_income_class);
+
+        // Third-country goods (ΕΞΑ): 1.3 → E3_561_006, NOT the intra-EU 561_005 (MYD-001).
+        $this->assertSame('E3_561_006', $by('ΕΞΑ')->mydata_income_class);
+        $this->assertSame('category1_1', $by('ΕΞΑ')->mydata_income_class_category);
+        // Third-country services (ΥΤΧ): 2.3 → E3_561_006, NOT 561_005 (MYD-001).
+        $this->assertSame('E3_561_006', $by('ΥΤΧ')->mydata_income_class);
+        $this->assertSame('category1_3', $by('ΥΤΧ')->mydata_income_class_category);
 
         // Delivery note (ΔΑΠ, 9.3): NO income classification.
         $dap = $by('ΔΑΠ');
         $this->assertNull($dap->mydata_income_class);
         $this->assertNull($dap->mydata_income_class_category);
+    }
+
+    public function test_vat_code_10_label_is_not_islands_specific(): void
+    {
+        // MYD-004 (label): §8.2 code 10 is «ΦΠΑ συντελεστής 4% (αρ.31 ν.5057/2023)»,
+        // NOT an islands rate — the official table carries no «νήσων». Codes 4/5/6
+        // ARE the genuine island reduced rates, so they keep it.
+        $this->assertStringNotContainsString('νήσ', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('4%', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('5057', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('νήσων', Codes::VAT_CATEGORY_LABELS[6]);
+    }
+
+    public function test_cross_border_e3_codes_distinguish_intra_eu_from_third_country(): void
+    {
+        // MYD-001: 1.2/2.2 (intra-community) use E3_561_005; 1.3/2.3
+        // (third countries) use E3_561_006. A numeric-rate shortcut cannot
+        // tell them apart, so the canonical defaults must be exact.
+        $this->assertSame('E3_561_005', Codes::typeDefaults('1.2')['income']);
+        $this->assertSame('E3_561_005', Codes::typeDefaults('2.2')['income']);
+        $this->assertSame('E3_561_006', Codes::typeDefaults('1.3')['income']);
+        $this->assertSame('E3_561_006', Codes::typeDefaults('2.3')['income']);
     }
 
     public function test_invoice_type_seed_completes_income_chain_on_matching_type(): void
