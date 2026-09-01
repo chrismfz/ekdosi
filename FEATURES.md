@@ -109,6 +109,9 @@
   (μοναδικά issuer ΑΦΜ από `RequestDocs`) + **«Συμπλήρωση επωνυμιών από ΑΑΔΕ»** (κουμπί στη
   λίστα + CLI `suppliers:backfill-names` — γεμίζει επωνυμία από GSIS σε παλιούς «αδέσποτους»
   μόνο-ΑΦΜ, fill-only-empty· κοινός `SupplierNameBackfiller`).
+- **Συγχρονισμός κατάστασης εξόδων από ΑΑΔΕ** (`SyncExpenseStateFromAade` + action
+  «Συγχρονισμός κατάστασης από ΑΑΔΕ» στην κονσόλα Εξόδων) — εφαρμόζει ακύρωση προμηθευτή
+  σε υπάρχον έξοδο (VALID↔CANCELLED, audited μέσω `ExpenseMark`, χωρίς επανεισαγωγή).
 - **Εισαγωγή αδέσποτων** εξόδων από myDATA (`ExpenseImporter`/`ExpenseReconciler`) +
   self-declared (αποδείξεις/μισθοδοσία/ΔΕΚΟ). **Κουμπί «Άντληση από myDATA» στη λίστα
   Έξοδα** (one-click read-only fetch → worklist· **επιλογή διαστήματος** στο modal —

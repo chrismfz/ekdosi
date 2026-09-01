@@ -4,8 +4,11 @@ namespace Tests\Feature\MyData;
 
 use App\Filament\Pages\MyDataConsoleExpenses;
 use App\Models\Company;
+use App\Models\Expense;
 use App\Models\User;
 use Filament\Facades\Filament;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
@@ -127,9 +130,9 @@ class MyDataConsoleExpensesTest extends TestCase
 
         // Two responses: one for the import fetch, one for the refresh fetch.
         // Two responses: one for the import fetch, one for the refresh fetch.
-        MyDataConsoleExpenses::$testHandler = new \GuzzleHttp\Handler\MockHandler([
-            new \GuzzleHttp\Psr7\Response(200, [], $this->orphanDoc()),
-            new \GuzzleHttp\Psr7\Response(200, [], $this->orphanDoc()),
+        MyDataConsoleExpenses::$testHandler = new MockHandler([
+            new Response(200, [], $this->orphanDoc()),
+            new Response(200, [], $this->orphanDoc()),
         ]);
 
         try {
@@ -150,6 +153,90 @@ class MyDataConsoleExpensesTest extends TestCase
             'company_id' => $tenant->id,
             'mydata_mark' => '400012434052701',
         ]);
+    }
+
+    public function test_sync_states_action_hidden_without_state_mismatches(): void
+    {
+        $this->bootTenantUser();
+
+        Livewire::test(MyDataConsoleExpenses::class)
+            ->set('ran', true)
+            ->set('resultMode', 'both')
+            ->set('result', $this->fakeResult())   // stateMismatch is empty
+            ->assertActionHidden('sync_states');
+    }
+
+    public function test_sync_states_applies_aade_cancellation_to_the_local_expense(): void
+    {
+        // MYD-014: a supplier cancellation surfaces as a stateMismatch; the operator
+        // action flips OUR existing expense to CANCELLED (audited), no re-import.
+        $tenant = $this->bootTenantUser();
+
+        $expense = Expense::create([
+            'company_id' => $tenant->id,
+            'mydata_mark' => '400000000000001',
+            'mydata_state' => 'VALID',
+            'issue_date' => '2026-01-10',
+            'series' => 'A', 'aa' => '1', 'invoice_type' => '1.1',
+            'supplier_afm' => '998482379', 'gross_total' => '124.00',
+            'source' => 'sync',
+        ]);
+
+        $result = $this->fakeResult();
+        $result['stateMismatch'] = [[
+            'mark' => '400000000000001', 'uid' => null, 'expenseId' => $expense->id, 'invcode' => 'A 1',
+            'issuedAt' => '10/01/2026', 'counterpartName' => 'ΠΡΟΜΗΘΕΥΤΗΣ', 'afm' => '998482379', 'gross' => 124.0,
+            'localState' => 'VALID', 'localStatus' => null, 'aadeState' => 'CANCELLED',
+            'cancelledByMark' => '900000000000001', 'problem' => 'Ακυρωμένο στο AADE.', 'url' => null,
+        ]];
+        $result['missingLocally'] = [];
+        $result['discrepancyCount'] = 1;
+
+        // The post-sync refresh re-fetches AADE; return the doc as cancelled.
+        MyDataConsoleExpenses::$testHandler = new MockHandler([
+            new Response(200, [], $this->cancelledDoc()),
+        ]);
+
+        try {
+            Livewire::test(MyDataConsoleExpenses::class)
+                ->set('ran', true)
+                ->set('resultMode', 'both')
+                ->set('fromLabel', '01/01/2026')
+                ->set('toLabel', '31/01/2026')
+                ->set('result', $result)
+                ->assertActionVisible('sync_states')
+                ->callAction('sync_states')
+                ->assertHasNoErrors();
+        } finally {
+            MyDataConsoleExpenses::$testHandler = null;
+        }
+
+        $fresh = $expense->fresh();
+        $this->assertSame('CANCELLED', $fresh->mydata_state);
+        $this->assertSame('900000000000001', $fresh->cancelled_by_mark);
+        $this->assertDatabaseHas('expense_marks', [
+            'expense_id' => $expense->id,
+            'mydata_action' => 'STATE_SYNC',
+        ]);
+    }
+
+    private function cancelledDoc(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000001</mark>
+            <cancelledByMark>900000000000001</cancelledByMark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
     }
 
     private function orphanDoc(): string

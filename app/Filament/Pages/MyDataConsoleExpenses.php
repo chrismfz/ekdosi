@@ -8,11 +8,13 @@ use App\Filament\Pages\Concerns\RemembersLastFetch;
 use App\Filament\Pages\Concerns\ResolvesReconcileWindow;
 use App\Filament\Resources\Expenses\ExpenseResource;
 use App\Models\Company;
+use App\Models\Expense;
 use App\Models\Supplier;
 use App\Services\MyData\ExpenseImporter;
 use App\Services\MyData\ExpenseReconciler;
 use App\Services\MyData\ExpenseReconciliationResult;
 use App\Services\MyData\ReconciliationRow;
+use App\Services\MyData\SyncExpenseStateFromAade;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
@@ -168,6 +170,20 @@ class MyDataConsoleExpenses extends Page
                     .' (δημιουργία εξόδων + γραμμών + προμηθευτών). Ήδη καταχωρημένα παραλείπονται.')
                 ->modalSubmitActionLabel('Καταχώριση')
                 ->action(fn () => $this->importOrphans()),
+
+            // Apply AADE's state to our EXISTING expenses that diverge (chiefly a
+            // supplier cancellation we can't re-import). Visible only when the last
+            // fetch found state mismatches. Audited via ExpenseMark (MYD-014).
+            Action::make('sync_states')
+                ->label('Συγχρονισμός κατάστασης από ΑΑΔΕ')
+                ->icon('heroicon-o-arrow-path')
+                ->color('warning')
+                ->visible(fn (): bool => $this->ran && ! empty($this->result['stateMismatch']))
+                ->requiresConfirmation()
+                ->modalHeading('Συγχρονισμός κατάστασης εξόδων από ΑΑΔΕ')
+                ->modalDescription('Τα τοπικά έξοδα με ασυμφωνία κατάστασης θα πάρουν την κατάσταση που δηλώνει η ΑΑΔΕ (π.χ. ακύρωση από τον προμηθευτή). Δεν δημιουργεί διπλότυπα· καταγράφεται στο ιστορικό.')
+                ->modalSubmitActionLabel('Συγχρονισμός')
+                ->action(fn () => $this->syncStates()),
         ];
     }
 
@@ -285,6 +301,60 @@ class MyDataConsoleExpenses extends Page
                 'message' => $e->getMessage(),
             ]);
             Notification::make()->title('Η καταχώριση απέτυχε')->body('Σφάλμα κατά τη λήψη/καταχώριση από το AADE.')->danger()->send();
+        }
+    }
+
+    protected function syncStates(): void
+    {
+        $tenant = Filament::getTenant();
+
+        if (! $this->ran || empty($this->result['stateMismatch'])) {
+            return;
+        }
+
+        $sync = app(SyncExpenseStateFromAade::class);
+        $changed = 0;
+
+        try {
+            foreach ($this->result['stateMismatch'] as $row) {
+                $expenseId = $row['expenseId'] ?? null;
+                $aadeState = $row['aadeState'] ?? null;
+                if ($expenseId === null || $aadeState === null) {
+                    continue;
+                }
+
+                // Tenant-scoped load (the console runs inside the panel tenant, but
+                // scope explicitly — CLASS invariant, not the ambient no-op).
+                $expense = Expense::query()
+                    ->where('company_id', $tenant?->getKey())
+                    ->find($expenseId);
+                if ($expense === null) {
+                    continue;
+                }
+
+                if ($sync->sync($expense, $aadeState, $row['cancelledByMark'] ?? null)['changed']) {
+                    $changed++;
+                }
+            }
+
+            Notification::make()
+                ->title($changed > 0 ? "Συγχρονίστηκαν {$changed} έξοδα" : 'Καμία αλλαγή')
+                ->{$changed > 0 ? 'success' : 'warning'}()
+                ->send();
+
+            // Re-fetch so the synced rows move from mismatch → matched.
+            if ($this->fromLabel && $this->toLabel) {
+                $from = Carbon::createFromFormat('d/m/Y', $this->fromLabel)->startOfDay();
+                $to = Carbon::createFromFormat('d/m/Y', $this->toLabel)->endOfDay();
+                $this->runReconciliation($from->format('Y-m-d'), $to->format('Y-m-d'));
+            }
+        } catch (Throwable $e) {
+            Log::warning('myDATA expense state-sync failed', [
+                'company_id' => $tenant?->getKey(),
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+            Notification::make()->title('Ο συγχρονισμός απέτυχε')->body($e->getMessage())->danger()->send();
         }
     }
 

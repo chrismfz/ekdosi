@@ -276,7 +276,7 @@ Priorities:
 | MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
-| MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
+| MYD-014 | P1 | DONE | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | DONE | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | DONE | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
@@ -916,7 +916,23 @@ vehicleNumber is mandatory when transportType is not 7.
 
 ### MYD-014 — Expense cancellations are detected but cannot be applied
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-01 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** new `SyncExpenseStateFromAade` service (the expense-side twin of
+`SyncInvoiceStateFromAade`) applies AADE's live state onto an EXISTING local expense —
+`forceFill(mydata_state, cancelled_by_mark)` + a forensic `ExpenseMark` `STATE_SYNC` row —
+so a supplier cancellation (which `ExpenseImporter` skips because the MARK already exists)
+now flips our VALID expense to CANCELLED without a re-import or a duplicate. Both directions
+(CANCELLED / un-cancel back to VALID clears `cancelled_by_mark`); an unknown state throws
+(never silently wipes ours); idempotent. Wired as a batch operator action «Συγχρονισμός
+κατάστασης από ΑΑΔΕ» on `MyDataConsoleExpenses`, visible when the last fetch found
+`stateMismatch` rows, refreshing the worklist after. No migration — `expenses` already
+carry `mydata_state` + `cancelled_by_mark`; both accounting views (`LedgerBook`,
+`VatPeriodReport`) already exclude `mydata_state='CANCELLED'`, so a synced cancellation
+leaves the books immediately. Tests: the service (flip / idempotent / unknown-throws /
+un-cancel), the acceptance round-trip (stateMismatch → sync → matched, no dup), and the
+console action (visible-gating + applies the cancellation + writes the audit row). See
+`CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2791,3 +2807,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-008 DONE** — correlated credit (5.1) resolves the original MARK from INSERT **and** PROVIDER_INSERT (was INSERT-only), so provider-issued originals stay correctable; same-tenant scoped; rejected attempts refused | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-008 hardening** (PR #388 review) — the `MyDataMark` correlation query is now also `company_id`-scoped, so an inconsistent audit row from another tenant pointing at the same invoice_id can't be used as the MARK | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017 DONE** — live reconciliation compares content (gross/type/series-ΑΑ/date/ΑΦΜ), not just MARK+state; new `contentMismatch` bucket (shared comparator, both consoles) ends the false-green | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-014 DONE** — `SyncExpenseStateFromAade` + console action apply a supplier cancellation onto an existing expense (VALID→CANCELLED, audited, no re-import/dup); books already exclude CANCELLED | `CHANGELOG.md` [Unreleased] → Fixed |
