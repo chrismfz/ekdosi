@@ -1111,7 +1111,10 @@ class CompanyForm
                 // payload exfiltration, PROV-017) — surface the same guard the transport
                 // enforces at issue time, so a bad URL is caught on save.
                 if ($meta['url'] ?? false) {
-                    $input->rule(function (string $attribute, $value, \Closure $fail) {
+                    // Filament evaluates the OUTER closure (utility injection) and expects
+                    // it to RETURN the Laravel rule closure — passing the rule closure
+                    // directly makes Filament try to resolve $attribute as a dependency.
+                    $input->rule(fn (): \Closure => function (string $attribute, $value, \Closure $fail) {
                         if (blank($value)) {
                             return;
                         }
