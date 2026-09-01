@@ -30,6 +30,8 @@ class Quote extends Model
     protected $fillable = [
         'company_id',
         'customer_id',
+        // Leads L1: the lead this offer was made to (null once/unless from a lead).
+        'lead_id',
         'code',
         'legacy_id',
         'subject',
@@ -76,6 +78,12 @@ class Quote extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /** The lead this quote was issued to (Leads L1) — null when not from a lead. */
+    public function lead(): BelongsTo
+    {
+        return $this->belongsTo(Lead::class);
     }
 
     public function customer(): BelongsTo

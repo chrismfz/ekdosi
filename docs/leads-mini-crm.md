@@ -1,6 +1,7 @@
 # Leads / mini-CRM — αναλυτικό design (pre-build)
 
-> **STATUS: L0 SHIPPED (2026-09-01) — resource + χρονολόγιο + καταστάσεις + dedupe. L1/L2 OPEN (§10).**
+> **STATUS: L0 + L1 SHIPPED (2026-09-01) — resource, χρονολόγιο, καταστάσεις, dedupe, μετατροπή σε πελάτη,
+> «Προέλευση», προσφορά από lead. L2 (απολογισμός + reminders) OPEN (§10).**
 > Πλάνο + ανάλυση για να «υπάρχει κάπου» μέχρι να κλείσουν τα audits / bug-fix sessions. Twin των `docs/domains/README.md` /
 > `docs/payment-connectors.md` (design-first, gates, build-όπου-θες).
 >

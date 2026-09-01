@@ -2,13 +2,16 @@
 
 namespace App\Filament\Resources\Customers\Schemas;
 
+use App\Filament\Resources\Leads\LeadResource;
 use App\Filament\Support\AadeFormFill;
 use App\Filament\Support\Tags\TagControls;
 use App\Filament\Support\ViesFormFill;
 use App\Models\Customer;
+use App\Models\Lead;
 use App\Models\PaymentMethod;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -16,6 +19,7 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 class CustomerForm
 {
@@ -231,6 +235,16 @@ class CustomerForm
 
                         // Only meaningful when the tenant submits via PEPPOL
                         // (Estonian companies right now; future EU expansion).
+                        // Leads L1: «από πού ήρθε» — only for customers born from a lead.
+                        Tab::make('Προέλευση')
+                            ->icon('heroicon-o-funnel')
+                            ->visible(fn (?Customer $record): bool => $record?->originLead()->exists() ?? false)
+                            ->schema([
+                                Placeholder::make('origin_lead')
+                                    ->hiddenLabel()
+                                    ->content(fn (?Customer $record): HtmlString => self::originLeadSummary($record?->originLead)),
+                            ]),
+
                         Tab::make('PEPPOL')
                             ->visible(fn () => Filament::getTenant()?->einvoice_provider === 'ee-peppol')
                             ->schema([
@@ -323,5 +337,46 @@ class CustomerForm
             // address1 only when empty (we don't try to split city/postcode).
             ViesFormFill::assign($get, $set, 'address1', str_replace("\n", ', ', $result->address), overwrite: false);
         }
+    }
+
+    /**
+     * «Ήρθε από lead #N (πηγή …) · κυνηγός … · πρώτη επαφή … · μετατροπή … (X ημέρες,
+     * N τηλέφωνα, M emails)» + link to the lead's full timeline.
+     */
+    private static function originLeadSummary(?Lead $lead): HtmlString
+    {
+        if ($lead === null) {
+            return new HtmlString('');
+        }
+
+        $counts = $lead->timeline()->getQuery()->reorder()
+            ->selectRaw('type, COUNT(*) AS n')
+            ->groupBy('type')
+            ->pluck('n', 'type');
+
+        $days = $lead->converted_at && $lead->created_at
+            ? $lead->created_at->diffInDays($lead->converted_at)
+            : null;
+
+        $bits = array_filter([
+            'Πηγή: '.($lead->source?->getLabel() ?? '—'),
+            $lead->referredBy ? 'σύσταση από '.$lead->referredBy->name : null,
+            'Χειριστής: '.($lead->assignedTo?->name ?? '—'),
+            'Πρώτη επαφή: '.$lead->created_at?->format('d/m/Y'),
+            'Μετατροπή: '.($lead->converted_at?->format('d/m/Y') ?? '—').($days !== null ? " ({$days} ημέρες)" : ''),
+            'Επαφές: '.(int) ($counts['call'] ?? 0).' τηλέφωνα · '.(int) ($counts['email'] ?? 0).' emails · '.(int) ($counts['meeting'] ?? 0).' ραντεβού',
+        ]);
+
+        $url = LeadResource::getUrl('edit', ['record' => $lead]);
+
+        return new HtmlString(
+            '<div style="font-size:.875rem;line-height:1.6">'
+            .'<div style="font-weight:600">Ήρθε από lead <a href="'.e($url).'" style="text-decoration:underline">#'.$lead->id.' — '.e($lead->name).'</a></div>'
+            .'<ul style="margin:.25rem 0 0;padding-left:1.1rem">'
+            .implode('', array_map(fn (string $b): string => '<li>'.e($b).'</li>', $bits))
+            .'</ul>'
+            .'<div style="margin-top:.4rem;opacity:.75">Το πλήρες χρονολόγιο (τι ειπώθηκε, πότε) είναι στο lead.</div>'
+            .'</div>'
+        );
     }
 }

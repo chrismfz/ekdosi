@@ -8,6 +8,7 @@ use App\Filament\RelationManagers\InternalNotesRelationManager;
 use App\Filament\Resources\Leads\Pages\CreateLead;
 use App\Filament\Resources\Leads\Pages\EditLead;
 use App\Filament\Resources\Leads\Pages\ListLeads;
+use App\Filament\Resources\Leads\RelationManagers\QuotesRelationManager;
 use App\Filament\Resources\Leads\RelationManagers\TimelineRelationManager;
 use App\Filament\Resources\Leads\Schemas\LeadForm;
 use App\Filament\Resources\Leads\Tables\LeadsTable;
@@ -89,6 +90,7 @@ class LeadResource extends Resource
     {
         return [
             TimelineRelationManager::class,
+            QuotesRelationManager::class,
             InternalNotesRelationManager::class,
             AttachmentsRelationManager::class,
             ActivityLogRelationManager::class,

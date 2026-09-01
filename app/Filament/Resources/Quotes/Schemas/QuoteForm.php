@@ -2,14 +2,15 @@
 
 namespace App\Filament\Resources\Quotes\Schemas;
 
+use App\Filament\Support\PickerOptions;
+use App\Filament\Support\VatRateOptions;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductCategory;
-use App\Filament\Support\PickerOptions;
-use App\Filament\Support\VatRateOptions;
 use App\Models\VatCategory;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
@@ -78,6 +79,10 @@ class QuoteForm
                         })
                         ->helperText('Προαιρετικό — μπορείς να φτιάξεις προσφορά και χωρίς καταχωρημένο πελάτη.')
                         ->columnSpanFull(),
+
+                    // Leads L1: set when the quote is started from a lead
+                    // («Νέα προσφορά» on the lead) — see CreateQuote::afterFill.
+                    Hidden::make('lead_id'),
 
                     DatePicker::make('issued_at')
                         ->label('Ημερομηνία')

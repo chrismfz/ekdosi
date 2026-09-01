@@ -130,7 +130,7 @@ class CompanyImporter
         'invoice_mail_log' => ['invoice_id' => 'invoices', 'triggered_by_user_id' => 'users'],
         'payments' => ['customer_id' => 'customers', 'invoice_id' => 'invoices', 'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts'],
         'quotes' => [
-            'customer_id' => 'customers', 'converted_invoice_id' => 'invoices',
+            'customer_id' => 'customers', 'lead_id' => 'leads', 'converted_invoice_id' => 'invoices',
             'converted_service_contract_id' => 'service_contracts', // deferred → nulled
         ],
         'quote_lines' => ['quote_id' => 'quotes', 'product_id' => 'products'],

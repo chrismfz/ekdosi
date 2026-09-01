@@ -2,15 +2,20 @@
 
 namespace Tests\Feature\Leads;
 
+use App\Actions\ConvertLeadToCustomer;
 use App\Enums\LeadActivityType;
 use App\Enums\LeadStatus;
+use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Filament\Resources\Leads\Pages\CreateLead;
 use App\Filament\Resources\Leads\Pages\EditLead;
 use App\Filament\Resources\Leads\Pages\ListLeads;
+use App\Filament\Resources\Leads\RelationManagers\QuotesRelationManager;
 use App\Filament\Resources\Leads\RelationManagers\TimelineRelationManager;
+use App\Filament\Resources\Quotes\Pages\CreateQuote;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Lead;
+use App\Models\Quote;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
 use Filament\Facades\Filament;
@@ -232,6 +237,89 @@ class LeadResourceTest extends TestCase
         Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
             ->assertOk()
             ->assertSee('Πελάτης');
+    }
+
+    public function test_convert_action_creates_a_customer_and_redirects_to_it(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Νέος Πελάτης ΑΕ', 'afm' => '123456789']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->callAction('convert', data: ['mode' => 'new'])
+            ->assertHasNoActionErrors()
+            ->assertRedirect();
+
+        $customer = Customer::query()->where('company_id', $this->tenant->id)->where('afm', '123456789')->first();
+        $this->assertNotNull($customer);
+        $this->assertSame($customer->id, $lead->fresh()->converted_customer_id);
+        $this->assertSame(LeadStatus::Won, $lead->fresh()->status);
+    }
+
+    public function test_convert_action_defaults_to_linking_the_matching_customer(): void
+    {
+        $existing = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Ήδη Πελάτης', 'afm' => '123456789']);
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Ήδη (lead)', 'afm' => '123456789']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->mountAction('convert')
+            ->assertActionDataSet(['mode' => 'link', 'customer_id' => $existing->id])
+            ->callMountedAction()
+            ->assertHasNoActionErrors();
+
+        $this->assertSame(1, Customer::where('company_id', $this->tenant->id)->count(), 'Linked, not duplicated.');
+        $this->assertSame($existing->id, $lead->fresh()->converted_customer_id);
+    }
+
+    public function test_converted_lead_hides_convert_and_customer_shows_origin_tab(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Κερδισμένο']);
+        $customer = app(ConvertLeadToCustomer::class)($lead);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->assertActionHidden('convert')
+            ->assertActionVisible('openCustomer');
+
+        Livewire::test(EditCustomer::class, ['record' => $customer->getRouteKey()])
+            ->assertOk()
+            ->assertSee('Προέλευση')
+            ->assertSee('Ήρθε από lead');
+    }
+
+    public function test_new_quote_from_lead_is_prefilled_and_logged_on_the_lead(): void
+    {
+        $lead = Lead::create([
+            'company_id' => $this->tenant->id, 'name' => 'Καφενείο', 'afm' => '123456789',
+            'city' => 'Θεσσαλονίκη', 'status' => LeadStatus::Contacted,
+        ]);
+
+        Livewire::withQueryParams(['lead' => $lead->id])
+            ->test(CreateQuote::class)
+            ->assertOk()
+            ->assertFormSet([
+                'lead_id' => $lead->id,
+                'company_name' => 'Καφενείο',
+                'vat_no' => '123456789',
+                'city' => 'Θεσσαλονίκη',
+            ]);
+
+        // A foreign / unknown id is ignored.
+        Livewire::withQueryParams(['lead' => 999999])
+            ->test(CreateQuote::class)
+            ->assertOk()
+            ->assertFormSet(['lead_id' => null]);
+
+        // Model-level hand-off used by CreateQuote::afterCreate.
+        $quote = Quote::create(['company_id' => $this->tenant->id, 'lead_id' => $lead->id, 'code' => 'ΠΡ-7', 'subject' => 'Hosting']);
+        $lead->recordQuote($quote);
+
+        $lead->refresh();
+        $this->assertSame(LeadStatus::Quoted, $lead->status);
+        $row = $lead->timeline()->where('type', LeadActivityType::Quote->value)->first();
+        $this->assertSame($quote->id, $row->meta['quote_id']);
+        $this->assertStringContainsString('ΠΡ-7', $row->body);
+
+        Livewire::test(QuotesRelationManager::class, ['ownerRecord' => $lead, 'pageClass' => EditLead::class])
+            ->assertOk()
+            ->assertSee('ΠΡ-7');
     }
 
     public function test_note_requires_a_body(): void
