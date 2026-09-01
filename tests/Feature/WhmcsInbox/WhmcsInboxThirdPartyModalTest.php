@@ -6,6 +6,7 @@ use App\Filament\Resources\WhmcsInbox\Tables\WhmcsInboxTable;
 use App\Filament\Resources\WhmcsInbox\WhmcsInboxResource;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -136,6 +137,33 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
         $this->pendingFor($hot);
         $this->assertSame('2', WhmcsInboxResource::getNavigationBadge());
         $this->assertSame('danger', WhmcsInboxResource::getNavigationBadgeColor());
+    }
+
+    public function test_split_type_options_exclude_movement_only_types(): void
+    {
+        // The third-party split modal's invoice/receipt selectors must never offer
+        // a movement-only 9.x Δελτίο Αποστολής — a split party is always billed a
+        // real invoice/receipt (MYD-003).
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $user->companies()->attach($this->tenant->id);
+        $this->actingAs($user);
+        Filament::setTenant($this->tenant);
+
+        $monetary = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο',
+            'invcount' => 1, 'mydata_type' => '1.1',
+        ]);
+        $delivery = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΔΑΠ', 'name' => 'Δελτίο Αποστολής',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+
+        $m = new \ReflectionMethod(WhmcsInboxTable::class, 'splitTypeOptions');
+        $m->setAccessible(true);
+        $keys = array_keys($m->invoke(null));
+
+        $this->assertContains($monetary->id, $keys);
+        $this->assertNotContains($delivery->id, $keys, '9.x excluded from the split selectors');
     }
 
     private function pendingFor(Customer $c): PendingWhmcsInvoice

@@ -63,7 +63,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   monetary builder. Πλέον αποκλείονται από **κάθε** monetary selector μέσω ενός κοινού
   `InvoiceType::scopeMonetary()` (null-safe, prefix `9.`): κύριος invoice picker
   (`PickerOptions`), μετατροπή προσφοράς σε Παραστατικό **και** σε Υπηρεσία (`ViewQuote`),
-  τύπος ανανέωσης συμβολαίου (`ServiceContractForm`). Επιπλέον, **defence-in-depth στο
+  τύπος ανανέωσης συμβολαίου (`ServiceContractForm`), οι τρεις προεπιλογές τύπου WHMCS
+  (τιμολόγιο/απόδειξη/απλήρωτο, `CompanyForm`), οι δύο selectors του third-party split
+  (`WhmcsInboxTable`) και ο κοινός picker πιστωτικού (`ViewInvoice::creditTypes`). Επιπλέον, **defence-in-depth στο
   χοκ-πόιντ**: ο `InvoiceNumberer::allocate()` —απ' όπου περνούν ΟΛΟΙ οι creators
   (CreateInvoice, IssueCreditNote, ConvertQuoteToInvoice, StageServiceRenewal,
   WhmcsInvoiceFiler)— πετάει σφάλμα για τύπο 9.x πριν το bump του μετρητή (χωρίς κενό ΑΑ),

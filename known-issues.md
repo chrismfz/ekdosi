@@ -248,6 +248,8 @@ Statuses:
 - **OPEN** — verified issue, not implemented.
 - **IN PROGRESS** — implementation has started.
 - **VERIFY** — implementation exists but acceptance criteria have not all passed.
+- **PARTIAL** — a meaningful subset is fixed and verified; the remaining hardening is
+  deliberately deferred and tracked in `docs/BACKLOG.md` (not merely pending verification).
 - **WATCH** — currently correct; re-check when an upstream dependency/spec changes.
 - **DONE** — fixed and verified; retain the entry for history.
 
@@ -442,6 +444,15 @@ numberer guard. See `CHANGELOG.md` [Unreleased] → Fixed.
 **Review follow-up (post-#387):** the initial fix only filtered `PickerOptions`; the
 quote-conversion, service-renewal and WHMCS creation paths still exposed/allowed 9.x. The
 shared `scopeMonetary` + the `InvoiceNumberer` backstop close all of them (external review).
+
+**Second review pass (2026-09-01):** a stricter read found the literal «every monetary
+selector» claim still open — the three WHMCS default-type selectors (invoice/receipt/unpaid,
+`CompanyForm`), the two third-party split selectors (`WhmcsInboxTable`) and the shared
+credit-note picker (`ViewInvoice::creditTypes`) were not yet using the scope. The security
+was already sound (the `InvoiceNumberer` backstop rejects a 9.x before the ΑΑ bump), but the
+acceptance was not literally met. Now ALL of them apply `->monetary()`; the WHMCS default and
+split queries were extracted into shared testable helpers (`CompanyForm::whmcsDefaultTypeOptions`,
+`WhmcsInboxTable::splitTypeOptions`) with reflection tests asserting 9.x exclusion.
 
 **Official finding**
 
@@ -2730,7 +2741,7 @@ These are not open issues:
 | 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |
-| 2026-08-31 | **PROV-017 DONE** — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
+| 2026-08-31 | **PROV-017 DONE** *(superseded 2026-09-01 → PARTIAL, see below)* — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
 | 2026-08-31 | **MYD-003 DONE** — movement-only 9.x excluded from the monetary invoice picker + build guard; Δελτία Αποστολής stay in the delivery flow | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-012 DONE** — unsupported ΔΑ types 9.1/9.2 hidden from the delivery picker + submitter guard (only 9.3 fileable); full model → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-002 DONE** — misleading «ΤΔΑ» dropped from the invoice-type seed (fresh installs); real combined 1.1+isDeliveryNote → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
@@ -2740,3 +2751,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-020 doc sweep** (review follow-up) — FEATURES.md/BACKLOG.md catalogue text no longer says «χαρτόσημο»/«§8.5» for fees (→ Ψηφιακό Τέλος Συναλλαγής §8.6 / Τέλη §8.7) | `CHANGELOG.md` [Unreleased] → Changed |
 | 2026-09-01 | **MYD-015 8.6 fixture** (review follow-up) — aggregator test proves a zero-value 8.6 order slip is counted but adds 0 to the myDATA revenue picture | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **PROV-017 status → PARTIAL** (review follow-up) — hygiene (public-https-only + no credentialed redirects) DONE; approved-host allowlist + DNS-rebinding pin remain OPEN in BACKLOG (no flat-DONE) | `docs/BACKLOG.md` (§Provider endpoint hardening) |
+| 2026-09-01 | **MYD-003 second pass** (strict review) — `->monetary()` now on the remaining selectors: 3× WHMCS defaults + 2× third-party split + credit-note picker; WHMCS default/split queries extracted to shared helpers with 9.x-exclusion tests | `CHANGELOG.md` [Unreleased] → Fixed |

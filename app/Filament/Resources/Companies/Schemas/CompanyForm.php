@@ -814,40 +814,19 @@ class CompanyForm
                                             ->helperText('Απαιτεί ΚΑΙ τον γενικό διακόπτη του scheduler (EKDOSI_SCHEDULE_WHMCS_AUTO_ISSUE) ΚΑΙ ορισμένο προεπιλεγμένο τύπο παραστατικού παρακάτω. Με OFF (προεπιλογή) δεν εκδίδεται τίποτα αυτόματα — η εγγραφή απλώς επισημαίνεται «Άμεσο» στο Inbox.'),
                                         Select::make('whmcs_default_invoice_type_id')
                                             ->label('Προεπιλεγμένος τύπος ΤΙΜΟΛΟΓΙΟΥ (αυτόματη έκδοση)')
-                                            ->options(fn (?Company $record) => $record
-                                                ? InvoiceType::query()
-                                                    ->where('company_id', $record->id)
-                                                    ->orderBy('code')
-                                                    ->get()
-                                                    ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
-                                                    ->toArray()
-                                                : [])
+                                            ->options(fn (?Company $record) => static::whmcsDefaultTypeOptions($record))
                                             ->searchable()
                                             ->live()
                                             ->helperText('Ο τύπος για πελάτες που ζήτησαν ΤΙΜΟΛΟΓΙΟ (ή τρίτους που δεν είναι απόδειξη). Χωρίς αυτόν, η αυτόματη έκδοση παραλείπει τον tenant (δεν μαντεύει ποτέ τον τύπο). Η χειροκίνητη επιλογή στο Inbox δεν επηρεάζεται. ΣΗΜΑΝΤΙΚΟ: ο τρόπος πληρωμής αυτού του τύπου να έχει 0 ημέρες πίστωσης (τα WHMCS τιμολόγια είναι ήδη πληρωμένα· με πίστωση >0 θα εμφανίζονται ως ανοιχτές οφειλές).'),
                                         Select::make('whmcs_default_receipt_type_id')
                                             ->label('Προεπιλεγμένος τύπος ΑΠΟΔΕΙΞΗΣ (προαιρετικό)')
-                                            ->options(fn (?Company $record) => $record
-                                                ? InvoiceType::query()
-                                                    ->where('company_id', $record->id)
-                                                    ->orderBy('code')
-                                                    ->get()
-                                                    ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
-                                                    ->toArray()
-                                                : [])
+                                            ->options(fn (?Company $record) => static::whmcsDefaultTypeOptions($record))
                                             ->searchable()
                                             ->live()
                                             ->helperText('Ο τύπος «Απόδειξης λιανικής» για όταν ο πελάτης ΔΕΝ ζήτησε τιμολόγιο, ή ένας μονομερής τρίτος είναι σημασμένος ως απόδειξη. Χωρίς αυτόν, τέτοιες εγγραφές ΜΕΝΟΥΝ στο Inbox για τον χειριστή (δεν εκδίδονται ποτέ ως λάθος τύπος). Ίδιος κανόνας πληρωμής: 0 ημέρες πίστωσης (ή κανένας τρόπος πληρωμής — και τα δύο = εξοφλημένο στην έκδοση).'),
                                         Select::make('whmcs_default_unpaid_type_id')
                                             ->label('Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ WHMCS (επί πιστώσει, προαιρετικό)')
-                                            ->options(fn (?Company $record) => $record
-                                                ? InvoiceType::query()
-                                                    ->where('company_id', $record->id)
-                                                    ->orderBy('code')
-                                                    ->get()
-                                                    ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
-                                                    ->toArray()
-                                                : [])
+                                            ->options(fn (?Company $record) => static::whmcsDefaultTypeOptions($record))
                                             ->searchable()
                                             ->live()
                                             ->helperText('Ο τύπος «επί πιστώσει» για όταν το WHMCS τιμολόγιο έρχεται ΑΠΛΗΡΩΤΟ (π.χ. Α.Ε./Δημόσιο που θέλει πρώτα τιμολόγιο, μετά πληρώνει). Το «Δημιουργία Παραστατικού» τον προ-επιλέγει όταν η εγγραφή είναι Unpaid, ώστε να μείνει σωστά ΑΝΟΙΧΤΗ ΟΦΕΙΛΗ. Εδώ ΘΕΛΕΙΣ τρόπο πληρωμής με ημέρες πίστωσης >0 (το ΑΝΤΙΘΕΤΟ από τους παραπάνω). Κενό → πέφτει πίσω στον τύπο τιμολογίου.'),
@@ -1097,6 +1076,29 @@ class CompanyForm
      *
      * @return array<int, TextInput>
      */
+    /**
+     * Invoice-type options for the three WHMCS default-type selectors (paid
+     * invoice / receipt / unpaid). Monetary types only — a WHMCS auto-issue
+     * default is always a real invoice/receipt, never a movement-only 9.x Δελτίο
+     * Αποστολής (MYD-003). One shared query so the three selectors cannot drift.
+     *
+     * @return array<int, string>
+     */
+    private static function whmcsDefaultTypeOptions(?Company $record): array
+    {
+        if (! $record) {
+            return [];
+        }
+
+        return InvoiceType::query()
+            ->where('company_id', $record->id)
+            ->monetary()
+            ->orderBy('code')
+            ->get()
+            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+            ->all();
+    }
+
     private static function providerCredentialFields(): array
     {
         $fields = [];
