@@ -387,6 +387,13 @@ real combined document — a 1.1 with `isDeliveryNote=true` + movement/loading/d
 data — is a BACKLOG feature. Seeder-count tests updated (15→14). See `CHANGELOG.md`
 [Unreleased] → Fixed.
 
+**Review follow-up (post-#387):** the «Εισαγωγή τυπικών» modal
+(`ListInvoiceTypes`) still listed «Τιμολόγιο/Δελτίο Αποστολής» among the seeded set —
+a stale promise for a type no longer seeded. Corrected the modal description to the
+actual set. Per operator decision (χρησιμοποιείται ΤΔΑ ως 1.1 από συνήθεια), existing
+tenants' ΤΔΑ rows are deliberately left untouched — **no data migration**; the real
+combined 1.1+isDeliveryNote stays in BACKLOG.
+
 **Official finding**
 
 ΤΔΑ is not a separate myDATA invoiceType, but combined value-and-movement
@@ -2720,3 +2727,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-002 DONE** — misleading «ΤΔΑ» dropped from the invoice-type seed (fresh installs); real combined 1.1+isDeliveryNote → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-003 extended** (review follow-up) — shared `InvoiceType::scopeMonetary()` now excludes 9.x from quote→invoice/service + renewal selectors too; `InvoiceNumberer::allocate()` backstop rejects 9.x for every creator | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-012 hardened** (review follow-up) — denylist → allowlist `Codes::SUPPORTED_DELIVERY_TYPES=['9.3']` (future 9.4 now blocked); `defaultDeliveryTypeId()` checks the ΔΑΠ shortcut resolves to a supported type | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-002 modal wording** (review follow-up) — «Εισαγωγή τυπικών» modal no longer lists the removed «ΤΔΑ» type; existing tenants' ΤΔΑ left as-is per operator decision (no migration) | `CHANGELOG.md` [Unreleased] → Fixed |
