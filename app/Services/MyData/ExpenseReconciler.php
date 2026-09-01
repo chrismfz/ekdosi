@@ -137,8 +137,8 @@ class ExpenseReconciler
                         counterpartVat: $issuer instanceof Issuer ? $issuer->getVatNumber() : null,
                         // getTotalGrossValue() is parsed from XML as a STRING
                         // (firebed declares no cast); make the float explicit.
-                        gross: $this->toFloat($summary?->getTotalGrossValue()),
-                        net: $this->toFloat($summary?->getTotalNetValue()),
+                        gross: $this->toFloat($summary?->get('totalGrossValue')),
+                        net: $this->toFloat($summary?->get('totalNetValue')),
                         // §8.1 type — needed for the content compare (MYD-017).
                         invoiceType: $header?->getInvoiceType()?->value,
                     );
@@ -169,21 +169,7 @@ class ExpenseReconciler
         // Fold the standalone cancellation list into the summaries.
         foreach ($cancelledMarks as $mark => $cancellationMark) {
             if (isset($byMark[$mark]) && ! $byMark[$mark]->cancelled) {
-                $existing = $byMark[$mark];
-                $byMark[$mark] = new AadeDocSummary(
-                    mark: $existing->mark,
-                    uid: $existing->uid,
-                    cancelled: true,
-                    cancelledByMark: $cancellationMark !== '' ? $cancellationMark : $existing->cancelledByMark,
-                    series: $existing->series,
-                    aa: $existing->aa,
-                    issueDate: $existing->issueDate,
-                    counterpartName: $existing->counterpartName,
-                    counterpartVat: $existing->counterpartVat,
-                    gross: $existing->gross,
-                    net: $existing->net,
-                    invoiceType: $existing->invoiceType,
-                );
+                $byMark[$mark] = $byMark[$mark]->withCancellation($cancellationMark);
             }
         }
 
@@ -353,9 +339,23 @@ class ExpenseReconciler
         );
     }
 
-    private function toFloat(?string $value): ?float
+    private function toFloat(mixed $value): ?float
     {
-        return $value === null ? null : (float) $value;
+        // Blank (<totalNetValue/>) or non-numeric → null (UNVERIFIED), never 0.0.
+        // A real zero-value document sends a numeric '0'/'0.00', which stays 0.0.
+        // $value is the RAW attribute (string|float|null) — a float is already good.
+        if (is_float($value) || is_int($value)) {
+            return (float) $value;
+        }
+        if (! is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+        if ($value === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        return (float) $value;
     }
 
     /**

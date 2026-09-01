@@ -84,6 +84,35 @@ class ExpenseReconcilerTest extends TestCase
         $this->assertNull($byMark['400000000000001']->expenseId);
     }
 
+    public function test_blank_or_non_numeric_totals_parse_to_null_not_zero(): void
+    {
+        // Firebed's typed ?float getter would THROW on a blank/non-numeric total;
+        // reading the raw attribute + toFloat() maps it to null (UNVERIFIED) so a
+        // broken summary never becomes a real 0.0 (expense-side mirror of sales).
+        $xml = <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000060</mark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>Β</series><aa>60</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalNetValue></totalNetValue><totalGrossValue>xyz</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+
+        $result = $this->reconciler(new MockHandler([new Response(200, [], $xml)]))
+            ->reconcile(now()->subMonth(), now());
+
+        $row = collect($result->missingLocally)->firstWhere('mark', '400000000000060');
+        $this->assertNotNull($row);
+        $this->assertNull($row->net, 'blank <totalNetValue/> → null');
+        $this->assertNull($row->gross, 'non-numeric <totalGrossValue> → null');
+    }
+
     public function test_empty_window_is_safe(): void
     {
         $result = $this->reconciler(new MockHandler([

@@ -170,4 +170,29 @@ class EnrichInvoiceFromAadeTest extends TestCase
         $net = collect($report['comparison'])->firstWhere('label', 'Καθαρή αξία');
         $this->assertTrue($net['match'], 'net agrees');
     }
+
+    public function test_money_comparison_uses_integer_cents_at_every_magnitude(): void
+    {
+        // The per-invoice «Σύγκριση με ΑΑΔΕ» must use the SAME integer-cent rule as
+        // the console, else the two surfaces disagree on the same amounts. A float
+        // `abs(a-b) <= 0.01` is magnitude-dependent: an exact one-cent gap reads
+        // as equal at some totals and different at others. filed gross here = 166.41.
+        $small = app(EnrichInvoiceFromAade::class)->enrich(
+            $this->invoice->fresh(),
+            $this->aadeDoc(['grossTotal' => 166.42]) // 1 cent → within tolerance
+        );
+        $this->assertTrue(
+            collect($small['comparison'])->firstWhere('label', 'Σύνολο')['match'],
+            'a one-cent gap is within tolerance'
+        );
+
+        $big = app(EnrichInvoiceFromAade::class)->enrich(
+            $this->invoice->fresh(),
+            $this->aadeDoc(['grossTotal' => 166.43]) // 2 cents → a real difference
+        );
+        $this->assertFalse(
+            collect($big['comparison'])->firstWhere('label', 'Σύνολο')['match'],
+            'a two-cent gap is a difference'
+        );
+    }
 }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Webhooks;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Support\Afm;
 use App\Support\InvoiceScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -128,7 +129,7 @@ class WhmcsInvoicesByAfmController
             ->where('company_id', $tenant->id)
             ->whereNotNull('afm')
             ->get(['id', 'afm', 'name'])
-            ->keyBy(fn (Customer $c): string => $this->digits((string) $c->afm))
+            ->keyBy(fn (Customer $c): string => Afm::digits($c->afm))
             ->filter(fn (Customer $c, string $afm): bool => $afm !== '' && isset($wanted[$afm]));
 
         // ONE query for all matched customers' invoices (not one per ΑΦΜ),
@@ -223,7 +224,7 @@ class WhmcsInvoicesByAfmController
             if (! is_string($value) && ! is_int($value)) {
                 continue;
             }
-            $afm = $this->digits((string) $value);
+            $afm = Afm::digits($value);
             if ($afm === '') {
                 continue;
             }
@@ -237,17 +238,6 @@ class WhmcsInvoicesByAfmController
         // so array_keys() would otherwise hand back int|string (a typing
         // landmine for any strict === / typed downstream use).
         return array_map('strval', array_keys($clean));
-    }
-
-    /**
-     * Canonical ΑΦΜ form: digits only. Greek ΑΦΜ are numeric; strip any
-     * EL/GR prefix, spaces, dashes so both the inbound set and the stored
-     * customers.afm compare on the same shape. preg_replace returns null only
-     * on PCRE error (never for this pattern) — coalesce defensively.
-     */
-    private function digits(string $value): string
-    {
-        return preg_replace('/\D+/', '', $value) ?? '';
     }
 
     private function verifySignature(Request $request, string $secret): bool

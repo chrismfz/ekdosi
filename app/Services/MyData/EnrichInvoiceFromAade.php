@@ -4,6 +4,7 @@ namespace App\Services\MyData;
 
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -148,7 +149,10 @@ class EnrichInvoiceFromAade
                 'label' => $label,
                 'local' => number_format((float) $local, 2, ',', '.').' €',
                 'aade' => number_format((float) $remote, 2, ',', '.').' €',
-                'match' => abs((float) $local - (float) $remote) <= 0.01,
+                // Same integer-cent rule as the reconciler, so the two surfaces
+                // never disagree about the same pair of amounts (a float 0.01
+                // tolerance is magnitude-dependent).
+                'match' => ! Money::differsByCent((float) $local, (float) $remote),
             ];
         }
 

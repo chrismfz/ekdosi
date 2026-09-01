@@ -76,6 +76,34 @@ class SalesReconcilerFetchTest extends TestCase
         $this->assertSame(100.00, $byMark['400000000000001']->net);
     }
 
+    public function test_blank_or_non_numeric_totals_parse_to_null_not_zero(): void
+    {
+        // A blank <totalGrossValue/> or a non-numeric total must become null
+        // (UNVERIFIED), never 0.0 — otherwise a broken/missing summary reads as a
+        // real zero-value document and can false-green. A genuine numeric '0' stays 0.
+        $xml = <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000050</mark>
+            <issuer><vatNumber>800561849</vatNumber><country>GR</country></issuer>
+            <invoiceHeader><series>Α</series><aa>50</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalNetValue>not-a-number</totalNetValue><totalGrossValue></totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+
+        $result = (new SalesReconciler($this->tenant, new MockHandler([new Response(200, [], $xml)])))
+            ->reconcile(now()->subMonth(), now());
+
+        $row = collect($result->missingLocally)->firstWhere('mark', '400000000000050');
+        $this->assertNotNull($row);
+        $this->assertNull($row->gross, 'blank <totalGrossValue/> → null, not 0.0');
+        $this->assertNull($row->net, 'non-numeric <totalNetValue> → null, not 0.0');
+    }
+
     public function test_empty_window_response_does_not_crash(): void
     {
         // AADE returns an empty <invoicesDoc/> container when nothing

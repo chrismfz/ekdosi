@@ -40,4 +40,30 @@ final readonly class AadeDocSummary
         // instead of dumping payroll into the "αδέσποτα πωλήσεων" list.
         public ?string $invoiceType = null,
     ) {}
+
+    /**
+     * A copy marked cancelled, carrying the standalone <cancelledInvoicesDoc>
+     * cancellation MARK (falling back to any inline one). Centralising the rebuild
+     * means a new field added to this DTO is carried through the fold automatically
+     * — the hand-copied version silently dropped whatever field you forgot.
+     */
+    public function withCancellation(?string $cancellationMark): self
+    {
+        return new self(
+            mark: $this->mark,
+            uid: $this->uid,
+            cancelled: true,
+            cancelledByMark: ($cancellationMark !== null && $cancellationMark !== '')
+                ? $cancellationMark
+                : $this->cancelledByMark,
+            series: $this->series,
+            aa: $this->aa,
+            issueDate: $this->issueDate,
+            counterpartName: $this->counterpartName,
+            counterpartVat: $this->counterpartVat,
+            gross: $this->gross,
+            net: $this->net,
+            invoiceType: $this->invoiceType,
+        );
+    }
 }

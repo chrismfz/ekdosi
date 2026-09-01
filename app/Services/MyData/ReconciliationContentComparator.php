@@ -2,6 +2,8 @@
 
 namespace App\Services\MyData;
 
+use App\Support\Afm;
+use App\Support\Money;
 use Carbon\CarbonImmutable;
 use Throwable;
 
@@ -30,15 +32,12 @@ use Throwable;
  *   - counterpart ΑΦΜ is the ONE optional field: retail (11.x) legitimately has
  *     no counterpart, so an absent AADE ΑΦΜ is genuinely "nothing to verify".
  *
- * money (gross + net) is compared in whole cents with a one-cent tolerance; ΑΦΜ
- * is compared digits-only so an EL/GR
- * prefix is not a false difference; dates are normalised to Y-m-d.
+ * money (gross + net) is compared in whole cents with a one-cent tolerance (App\\Support\\Money);
+ * ΑΦΜ is compared digits-only (App\\Support\\Afm) so an EL/GR prefix is not a false difference;
+ * dates are normalised to Y-m-d.
  */
 final class ReconciliationContentComparator
 {
-    /** Money within this many CENTS is treated as equal (see moneyDiffers). */
-    private const MONEY_TOLERANCE_CENTS = 1;
-
     /** Suffix for a field AADE did not give us (so we could not verify it). */
     private const UNVERIFIED = ' — ανεπαλήθευτο)';
 
@@ -47,25 +46,11 @@ final class ReconciliationContentComparator
         $conflicts = [];
         $incompletes = [];
 
-        // gross (mandatory)
-        if ($aade->gross === null) {
-            $incompletes[] = 'μικτό (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
-        } elseif ($local->gross === null) {
-            $incompletes[] = 'μικτό (δεν προσδιορίζεται τοπικά· ΑΑΔΕ '.self::money($aade->gross).')';
-        } elseif (self::moneyDiffers($local->gross, $aade->gross)) {
-            $conflicts[] = 'μικτό: '.self::money($local->gross).' τοπικά / '.self::money($aade->gross).' ΑΑΔΕ';
-        }
-
-        // net (mandatory). Gross alone cannot catch a wrong VAT category whose net
-        // and vat compensate to the SAME gross (e.g. 100+24 locally vs 110+14 at
-        // AADE) — the VAT split is exactly what myDATA reports on, so compare it.
-        if ($aade->net === null) {
-            $incompletes[] = 'καθαρή αξία (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
-        } elseif ($local->net === null) {
-            $incompletes[] = 'καθαρή αξία (δεν προσδιορίζεται τοπικά· ΑΑΔΕ '.self::money($aade->net).')';
-        } elseif (self::moneyDiffers($local->net, $aade->net)) {
-            $conflicts[] = 'καθαρή αξία: '.self::money($local->net).' τοπικά / '.self::money($aade->net).' ΑΑΔΕ';
-        }
+        // gross + net (both mandatory). Net catches a wrong VAT category whose net
+        // and vat compensate to the SAME gross (100+24 locally vs 110+14 at AADE) —
+        // the split is exactly what myDATA reports on.
+        self::compareMoney('μικτό', $local->gross, $aade->gross, $conflicts, $incompletes);
+        self::compareMoney('καθαρή αξία', $local->net, $aade->net, $conflicts, $incompletes);
 
         // invoice type §8.1 (mandatory)
         if (! self::present($aade->invoiceType)) {
@@ -116,7 +101,7 @@ final class ReconciliationContentComparator
         if (self::present($aade->counterpartVat)) {
             if (! self::present($local->counterpartVat)) {
                 $incompletes[] = 'ΑΦΜ (λείπει τοπικά· ΑΑΔΕ '.$aade->counterpartVat.')';
-            } elseif (self::digits($aade->counterpartVat) !== self::digits($local->counterpartVat)) {
+            } elseif (Afm::digits($aade->counterpartVat) !== Afm::digits($local->counterpartVat)) {
                 $conflicts[] = 'ΑΦΜ: '.$local->counterpartVat.' τοπικά / '.$aade->counterpartVat.' ΑΑΔΕ';
             }
         }
@@ -125,14 +110,18 @@ final class ReconciliationContentComparator
     }
 
     /**
-     * Compare money in whole cents. A float `abs($a - $b) > 0.01` is
-     * magnitude-dependent — 124.00 vs 123.99 lands just above the threshold while
-     * 1240.00 vs 1239.99 lands just below — so an exact one-cent difference would
-     * be a conflict at some totals and equal at others.
+     * One mandatory money field, three outcomes: AADE-missing → unverified,
+     * local-missing → unverified, both present but differ (by >1 cent) → conflict.
      */
-    private static function moneyDiffers(float $local, float $aade): bool
+    private static function compareMoney(string $label, ?float $local, ?float $aade, array &$conflicts, array &$incompletes): void
     {
-        return abs((int) round($local * 100) - (int) round($aade * 100)) > self::MONEY_TOLERANCE_CENTS;
+        if ($aade === null) {
+            $incompletes[] = $label.' (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
+        } elseif ($local === null) {
+            $incompletes[] = $label.' (δεν προσδιορίζεται τοπικά· ΑΑΔΕ '.self::money($aade).')';
+        } elseif (Money::differsByCent($local, $aade)) {
+            $conflicts[] = $label.': '.self::money($local).' τοπικά / '.self::money($aade).' ΑΑΔΕ';
+        }
     }
 
     private static function money(float $v): string
@@ -143,11 +132,6 @@ final class ReconciliationContentComparator
     private static function present(?string $v): bool
     {
         return $v !== null && trim($v) !== '';
-    }
-
-    private static function digits(?string $v): string
-    {
-        return preg_replace('/\D+/', '', (string) $v) ?? '';
     }
 
     /** Normalise a date to Y-m-d; null (never a fabricated date) if blank/unparseable. */

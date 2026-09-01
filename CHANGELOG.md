@@ -99,6 +99,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   χωρίς κατηγορία §8.4 (κάθε ETL-imported ΠΚ-3)** — δηλώνεται **ανεπαλήθευτο**
   (`contentIncomplete`) αντί για ψευδή σύγκρουση. Η ανοχή ποσών γίνεται σε **ακέραια λεπτά**
   (το `abs($a-$b) > 0.01` εξαρτιόταν από το μέγεθος του ποσού).
+  **Fail-closed + hygiene (review):** το `FiledInvoiceTotals` επιστρέφει `null` (ανεπαλήθευτο) και όταν γραμμή έχει κενό `net_price`/`gross_price`/`vat_percent` (legacy rows μέσω query-builder) ή όταν το `header_discount_percent` είναι εκτός 0..<100 (ο `InvoiceVatBreakdown` θα έριχνε — 100% ήταν νόμιμο στο legacy UI), ώστε ένα προβληματικό παραστατικό να μη ρίχνει ΟΛΗ την αντιπαραβολή. Τα κενά/μη-αριθμητικά `<totalNetValue>`/`<totalGrossValue>` της ΑΑΔΕ διαβάζονται πλέον ΩΜΑ (`->get()`, όχι ο typed `?float` getter που ρίχνει) → `null`, όχι `0.0`. Η σύγκριση ποσών ενοποιήθηκε σε `Support\Money::differsByCent` (κοινή με τη «Σύγκριση με ΑΑΔΕ», που κρατούσε ακόμα float ανοχή), και η κανονικοποίηση ΑΦΜ σε `Support\Afm` (comparator + 4 WHMCS σημεία).
 - **Πιστωτικό (5.1) πάνω σε παραστατικό εκδομένο μέσω παρόχου (MYD-008)** — ο κοινός
   resolver `AadeInvoiceDocument::originalInsertMark()` έβρισκε το MARK του πρωτότυπου μόνο
   από `INSERT` rows, οπότε ένα συσχετιζόμενο πιστωτικό πάνω σε παραστατικό που εκδόθηκε
