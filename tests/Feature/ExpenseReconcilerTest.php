@@ -160,6 +160,48 @@ XML),
         $this->assertStringContainsString('μικτό', $result->contentMismatch[0]->problem);
     }
 
+    public function test_content_incomplete_when_local_lacks_a_field_aade_carries(): void
+    {
+        // MYD-017 review (expense side): same MARK + state, but AADE carries a field
+        // (series 'A') the local expense never captured → contentIncomplete, an
+        // unverified warning — NOT a false "matched" and NOT a hard conflict.
+        $supplier = Supplier::create([
+            'company_id' => $this->tenant->id, 'afm' => '998482379',
+            'name' => 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', 'source' => 'sync',
+        ]);
+        $this->expense('400000000000001', 'VALID', $supplier->id, ['series' => null]);
+
+        $result = $this->reconciler(new MockHandler([
+            new Response(200, [], $this->pageOne()),
+            new Response(200, [], $this->pageTwo()),
+        ]))->reconcile(now()->subMonth(), now());
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
+        $this->assertCount(1, $result->contentIncomplete);
+        $this->assertSame('400000000000001', $result->contentIncomplete[0]->mark);
+        $this->assertStringContainsString('σειρά', $result->contentIncomplete[0]->problem);
+        $this->assertTrue($result->hasDiscrepancies());
+    }
+
+    public function test_standalone_cancellation_mark_is_folded_onto_the_row(): void
+    {
+        // MYD-014: a doc cancelled via the standalone <cancelledInvoicesDoc> list
+        // (mark 003, cancellationMark 900000000000003) must carry that cancellation
+        // MARK on its row — the evidence SyncExpenseStateFromAade requires.
+        $result = $this->reconciler(new MockHandler([
+            new Response(200, [], $this->pageOne()),
+            new Response(200, [], $this->pageTwo()),
+        ]))->reconcile(now()->subMonth(), now());
+
+        $byMark = collect($result->missingLocally)->keyBy('mark');
+
+        $this->assertSame('CANCELLED', $byMark['400000000000003']->aadeState);
+        $this->assertSame('900000000000003', $byMark['400000000000003']->cancelledByMark);
+        // Inline <cancelledByMark> path still carries its own cancellation MARK.
+        $this->assertSame('900000000000002', $byMark['400000000000002']->cancelledByMark);
+    }
+
     /**
      * The unique (company_id, mydata_mark) index makes a local duplicate
      * impossible to WRITE, so we exercise the duplicateLocal branch of the

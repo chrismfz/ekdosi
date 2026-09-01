@@ -84,7 +84,7 @@ class ExpenseReconciler
     {
         /** @var array<string, AadeDocSummary> $byMark */
         $byMark = [];
-        /** @var array<string, true> $cancelledMarks */
+        /** @var array<string, string> $cancelledMarks  invoiceMark => cancellationMark */
         $cancelledMarks = [];
 
         $nextPartitionKey = null;
@@ -149,7 +149,9 @@ class ExpenseReconciler
                 foreach ($cancelledDoc as $cancelled) {
                     $m = (string) $cancelled->getInvoiceMark();
                     if ($m !== '') {
-                        $cancelledMarks[$m] = true;
+                        // Keep the cancellation MARK (not just a flag) so the folded
+                        // summary carries it as cancelledByMark — the sync persists it (MYD-014).
+                        $cancelledMarks[$m] = (string) $cancelled->getCancellationMark();
                     }
                 }
             }
@@ -164,14 +166,14 @@ class ExpenseReconciler
         } while ($token !== null && (! empty($nextPartitionKey) || ! empty($nextRowKey)));
 
         // Fold the standalone cancellation list into the summaries.
-        foreach (array_keys($cancelledMarks) as $mark) {
+        foreach ($cancelledMarks as $mark => $cancellationMark) {
             if (isset($byMark[$mark]) && ! $byMark[$mark]->cancelled) {
                 $existing = $byMark[$mark];
                 $byMark[$mark] = new AadeDocSummary(
                     mark: $existing->mark,
                     uid: $existing->uid,
                     cancelled: true,
-                    cancelledByMark: $existing->cancelledByMark,
+                    cancelledByMark: $cancellationMark !== '' ? $cancellationMark : $existing->cancelledByMark,
                     series: $existing->series,
                     aa: $existing->aa,
                     issueDate: $existing->issueDate,
@@ -240,6 +242,7 @@ class ExpenseReconciler
         $matched = [];
         $stateMismatch = [];
         $contentMismatch = [];
+        $contentIncomplete = [];
         $missingAtAade = [];
         $missingLocally = [];
         $duplicateLocal = [];
@@ -277,17 +280,25 @@ class ExpenseReconciler
             $localCancelled = $expense->mydata_state === 'CANCELLED';
 
             if ($localCancelled === $aade->cancelled) {
-                // MYD-017: MARK + state agree, but compare the content too — a
-                // difference is a contentMismatch (false green before), not a match.
-                $diffs = ReconciliationContentComparator::diffs($this->snapshotFrom($expense), $aade);
-                if ($diffs === []) {
-                    $matched[] = $this->rowFromLocal($expense, aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID');
-                } else {
+                // MYD-017: MARK + state agree, but compare the content too. A value
+                // CONFLICT → contentMismatch; a field AADE has but we LACK →
+                // contentIncomplete (unverified); else matched.
+                $aadeState = $aade->cancelled ? 'CANCELLED' : 'VALID';
+                $cmp = ReconciliationContentComparator::compare($this->snapshotFrom($expense), $aade);
+                if ($cmp->hasConflicts()) {
                     $contentMismatch[] = $this->rowFromLocal(
                         $expense,
-                        aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
-                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $diffs),
+                        aadeState: $aadeState,
+                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $cmp->conflicts),
                     );
+                } elseif ($cmp->hasIncompletes()) {
+                    $contentIncomplete[] = $this->rowFromLocal(
+                        $expense,
+                        aadeState: $aadeState,
+                        problem: 'Ελλιπή τοπικά στοιχεία έναντι ΑΑΔΕ: '.implode(' · ', $cmp->incompletes),
+                    );
+                } else {
+                    $matched[] = $this->rowFromLocal($expense, aadeState: $aadeState);
                 }
 
                 continue;
@@ -332,6 +343,7 @@ class ExpenseReconciler
             matched: $matched,
             stateMismatch: $stateMismatch,
             contentMismatch: $contentMismatch,
+            contentIncomplete: $contentIncomplete,
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,

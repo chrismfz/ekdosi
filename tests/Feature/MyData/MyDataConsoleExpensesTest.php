@@ -182,6 +182,10 @@ class MyDataConsoleExpensesTest extends TestCase
             'source' => 'sync',
         ]);
 
+        // The cached snapshot only makes the button VISIBLE; the sync itself trusts
+        // NONE of it — it re-reconciles against AADE and acts on the fresh row
+        // (MYD-014 review). The serialized stateMismatch below is deliberately
+        // present so the button shows, but its values are never applied directly.
         $result = $this->fakeResult();
         $result['stateMismatch'] = [[
             'mark' => '400000000000001', 'uid' => null, 'expenseId' => $expense->id, 'invcode' => 'A 1',
@@ -192,8 +196,10 @@ class MyDataConsoleExpensesTest extends TestCase
         $result['missingLocally'] = [];
         $result['discrepancyCount'] = 1;
 
-        // The post-sync refresh re-fetches AADE; return the doc as cancelled.
+        // TWO fetches: the fresh reconcile inside syncStates(), then the post-sync
+        // display refresh. Both return the doc as cancelled.
         MyDataConsoleExpenses::$testHandler = new MockHandler([
+            new Response(200, [], $this->cancelledDoc()),
             new Response(200, [], $this->cancelledDoc()),
         ]);
 
@@ -220,6 +226,63 @@ class MyDataConsoleExpensesTest extends TestCase
         ]);
     }
 
+    public function test_sync_states_ignores_a_stale_cached_row_absent_from_fresh_aade(): void
+    {
+        // MYD-014 review: if the (up-to-12h) cached snapshot claims a stateMismatch
+        // but a FRESH reconcile no longer reports it (supplier re-filed, MARK gone,
+        // or a tampered snapshot), NOTHING is mutated — the sync acts only on fresh
+        // AADE truth.
+        $tenant = $this->bootTenantUser();
+
+        $expense = Expense::create([
+            'company_id' => $tenant->id,
+            'mydata_mark' => '400000000000001',
+            'mydata_state' => 'VALID',
+            'issue_date' => '2026-01-10',
+            'series' => 'A', 'aa' => '1', 'invoice_type' => '1.1',
+            'supplier_afm' => '998482379', 'gross_total' => '124.00',
+            'source' => 'sync',
+        ]);
+
+        $result = $this->fakeResult();
+        $result['stateMismatch'] = [[
+            'mark' => '400000000000001', 'uid' => null, 'expenseId' => $expense->id, 'invcode' => 'A 1',
+            'issuedAt' => '10/01/2026', 'counterpartName' => 'ΠΡΟΜΗΘΕΥΤΗΣ', 'afm' => '998482379', 'gross' => 124.0,
+            'localState' => 'VALID', 'localStatus' => null, 'aadeState' => 'CANCELLED',
+            'cancelledByMark' => '900000000000001', 'problem' => 'Ακυρωμένο στο AADE.', 'url' => null,
+        ]];
+        $result['missingLocally'] = [];
+        $result['discrepancyCount'] = 1;
+
+        // Fresh AADE now reports the SAME doc as VALID (no cancellation) → no
+        // stateMismatch → no sync. Two identical responses (reconcile + refresh).
+        MyDataConsoleExpenses::$testHandler = new MockHandler([
+            new Response(200, [], $this->validDoc()),
+            new Response(200, [], $this->validDoc()),
+        ]);
+
+        try {
+            Livewire::test(MyDataConsoleExpenses::class)
+                ->set('ran', true)
+                ->set('resultMode', 'both')
+                ->set('fromLabel', '01/01/2026')
+                ->set('toLabel', '31/01/2026')
+                ->set('result', $result)
+                ->callAction('sync_states')
+                ->assertHasNoErrors();
+        } finally {
+            MyDataConsoleExpenses::$testHandler = null;
+        }
+
+        $fresh = $expense->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertNull($fresh->cancelled_by_mark);
+        $this->assertDatabaseMissing('expense_marks', [
+            'expense_id' => $expense->id,
+            'mydata_action' => 'STATE_SYNC',
+        ]);
+    }
+
     private function cancelledDoc(): string
     {
         return <<<'XML'
@@ -229,6 +292,24 @@ class MyDataConsoleExpensesTest extends TestCase
         <invoice>
             <mark>400000000000001</mark>
             <cancelledByMark>900000000000001</cancelledByMark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+    }
+
+    private function validDoc(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000001</mark>
             <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
             <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
             <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>

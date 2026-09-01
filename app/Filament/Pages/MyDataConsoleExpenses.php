@@ -308,31 +308,41 @@ class MyDataConsoleExpenses extends Page
     {
         $tenant = Filament::getTenant();
 
-        if (! $this->ran || empty($this->result['stateMismatch'])) {
+        // The button's VISIBILITY rides on the (possibly 12h-old) cached snapshot,
+        // but applying a legal state change must NEVER trust that client-serialized
+        // snapshot — it re-reconciles NOW and acts only on fresh AADE truth (MYD-014
+        // review).
+        if (! $this->ran || empty($this->result['stateMismatch']) || ! $this->fromLabel || ! $this->toLabel) {
             return;
         }
 
-        $sync = app(SyncExpenseStateFromAade::class);
-        $changed = 0;
+        $from = Carbon::createFromFormat('d/m/Y', $this->fromLabel)->startOfDay();
+        $to = Carbon::createFromFormat('d/m/Y', $this->toLabel)->endOfDay();
 
         try {
-            foreach ($this->result['stateMismatch'] as $row) {
-                $expenseId = $row['expenseId'] ?? null;
-                $aadeState = $row['aadeState'] ?? null;
-                if ($expenseId === null || $aadeState === null) {
+            // Fresh server-side reconcile: we sync only what AADE currently reports,
+            // with the fresh state + cancellation MARK, on server-built rows.
+            $fresh = (new ExpenseReconciler($tenant, static::$testHandler))->reconcile($from, $to);
+
+            $sync = app(SyncExpenseStateFromAade::class);
+            $changed = 0;
+
+            foreach ($fresh->stateMismatch as $row) {
+                if ($row->expenseId === null || $row->aadeState === null) {
                     continue;
                 }
 
-                // Tenant-scoped load (the console runs inside the panel tenant, but
-                // scope explicitly — CLASS invariant, not the ambient no-op).
                 $expense = Expense::query()
                     ->where('company_id', $tenant?->getKey())
-                    ->find($expenseId);
-                if ($expense === null) {
+                    ->find($row->expenseId);
+
+                // Integrity: the fresh row's MARK must still match the expense we're
+                // about to mutate (tenant + expense_id + original MARK all verified).
+                if ($expense === null || (string) $expense->mydata_mark !== (string) $row->mark) {
                     continue;
                 }
 
-                if ($sync->sync($expense, $aadeState, $row['cancelledByMark'] ?? null)['changed']) {
+                if ($sync->sync($expense, $row->aadeState, $row->cancelledByMark)['changed']) {
                     $changed++;
                 }
             }
@@ -342,12 +352,8 @@ class MyDataConsoleExpenses extends Page
                 ->{$changed > 0 ? 'success' : 'warning'}()
                 ->send();
 
-            // Re-fetch so the synced rows move from mismatch → matched.
-            if ($this->fromLabel && $this->toLabel) {
-                $from = Carbon::createFromFormat('d/m/Y', $this->fromLabel)->startOfDay();
-                $to = Carbon::createFromFormat('d/m/Y', $this->toLabel)->endOfDay();
-                $this->runReconciliation($from->format('Y-m-d'), $to->format('Y-m-d'));
-            }
+            // Refresh the worklist so the synced rows move mismatch → matched.
+            $this->runReconciliation($from->format('Y-m-d'), $to->format('Y-m-d'));
         } catch (Throwable $e) {
             Log::warning('myDATA expense state-sync failed', [
                 'company_id' => $tenant?->getKey(),
@@ -408,6 +414,7 @@ class MyDataConsoleExpenses extends Page
             'matched' => $rows($r->matched),
             'stateMismatch' => $rows($r->stateMismatch),
             'contentMismatch' => $rows($r->contentMismatch),
+            'contentIncomplete' => $rows($r->contentIncomplete),
             'missingAtAade' => $rows($r->missingAtAade),
             'missingLocally' => $rows($r->missingLocally),
             'duplicateLocal' => $rows($r->duplicateLocal),
@@ -450,8 +457,8 @@ class MyDataConsoleExpenses extends Page
     private static function supplierNamesByAfm(Company $tenant, ExpenseReconciliationResult $r): array
     {
         $afms = collect([
-            ...$r->matched, ...$r->stateMismatch, ...$r->contentMismatch, ...$r->missingAtAade,
-            ...$r->missingLocally, ...$r->duplicateLocal,
+            ...$r->matched, ...$r->stateMismatch, ...$r->contentMismatch, ...$r->contentIncomplete,
+            ...$r->missingAtAade, ...$r->missingLocally, ...$r->duplicateLocal,
         ])->map(fn (ReconciliationRow $row) => $row->counterpartVat)
             ->filter()
             ->unique()

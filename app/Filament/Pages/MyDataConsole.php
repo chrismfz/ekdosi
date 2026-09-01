@@ -312,6 +312,7 @@ class MyDataConsole extends Page
             'matched' => $rows($r->matched),
             'stateMismatch' => $rows($r->stateMismatch),
             'contentMismatch' => $rows($r->contentMismatch),
+            'contentIncomplete' => $rows($r->contentIncomplete),
             'missingAtAade' => $rows($r->missingAtAade),
             'missingLocally' => $rows($r->missingLocally),
             'duplicateLocal' => $rows($r->duplicateLocal),

@@ -8,79 +8,93 @@ use Throwable;
 /**
  * Content-level cross-check for a live reconciliation (MYD-017). Given a local
  * document and the AADE summary for the SAME MARK — both already known to agree
- * on cancellation state — it reports which legally-relevant fields DIFFER.
+ * on cancellation state — it reports how the legally-relevant fields diverge.
  *
  * A MARK/state pair that agrees is NOT proof the content matches: a post-filing
  * local edit, an incomplete import or a wrong MARK association can leave the
- * local gross/type/series/AA/date/counterpart different from what AADE holds,
- * yet the old reconciler counted it as "matched" — a false green.
+ * local gross/type/series/AA/date/counterpart different from — or MISSING against
+ * — what AADE holds, yet the old reconciler counted it as "matched" (a false green).
  *
  * This is a PURE read shared by BOTH SalesReconciler and ExpenseReconciler (so
- * the rule can't drift). It returns operator-facing Greek descriptions of the
- * differing fields; an empty list means the content matches. It NEVER mutates a
- * frozen value — the caller only uses the result to route a row to `matched` vs
- * the new `contentMismatch` bucket.
+ * the rule can't drift). It NEVER mutates a frozen value — the caller only uses
+ * the result to route a row to matched / contentMismatch / contentIncomplete.
  *
- * Comparison rules (each side compared only when meaningfully present):
- *   - gross: both non-null and beyond an explicit cent tolerance.
- *   - invoice type (§8.1): both present and unequal.
- *   - series / ΑΑ: only when BOTH sides carry the field (string, trimmed) — a
- *     null/blank LOCAL value is an incomplete record, not a content conflict.
- *   - issue date: both parsed to Y-m-d (raw compare if unparseable).
- *   - counterpart AFM: only when BOTH sides carry one (retail 11.x has none at
- *     AADE), compared digits-only so an EL/GR prefix is not a false difference.
+ * Per field, comparing ONLY what AADE actually reported (AADE is the source of
+ * truth for the window):
+ *   - AADE present + local present + values differ → a CONFLICT.
+ *   - AADE present + local absent                  → INCOMPLETE (unverified; the
+ *     local record never captured it — not a conflict, but not reconciled either).
+ *   - AADE absent (e.g. counterpart ΑΦΜ on retail 11.x) → skipped (nothing to
+ *     verify against).
+ *
+ * gross uses an explicit cent tolerance; ΑΦΜ is compared digits-only so an EL/GR
+ * prefix is not a false difference; dates are normalised to Y-m-d.
  */
 final class ReconciliationContentComparator
 {
     /** Gross values within this many currency units are treated as equal. */
     private const GROSS_TOLERANCE = 0.01;
 
-    /**
-     * @return list<string> Greek field-diff descriptions; empty = content matches.
-     */
-    public static function diffs(LocalDocSnapshot $local, AadeDocSummary $aade): array
+    public static function compare(LocalDocSnapshot $local, AadeDocSummary $aade): ContentComparison
     {
-        $out = [];
+        $conflicts = [];
+        $incompletes = [];
 
-        if ($local->gross !== null && $aade->gross !== null
-            && abs($local->gross - $aade->gross) > self::GROSS_TOLERANCE) {
-            $out[] = 'μικτό: '.self::money($local->gross).' τοπικά / '.self::money($aade->gross).' ΑΑΔΕ';
+        // gross
+        if ($aade->gross !== null) {
+            if ($local->gross === null) {
+                $incompletes[] = 'μικτό (λείπει τοπικά· ΑΑΔΕ '.self::money($aade->gross).')';
+            } elseif (abs($local->gross - $aade->gross) > self::GROSS_TOLERANCE) {
+                $conflicts[] = 'μικτό: '.self::money($local->gross).' τοπικά / '.self::money($aade->gross).' ΑΑΔΕ';
+            }
         }
 
-        if ($aade->invoiceType !== null && $local->invoiceType !== null
-            && $aade->invoiceType !== $local->invoiceType) {
-            $out[] = 'τύπος: '.$local->invoiceType.' τοπικά / '.$aade->invoiceType.' ΑΑΔΕ';
+        // invoice type (§8.1)
+        if ($aade->invoiceType !== null) {
+            if (! self::present($local->invoiceType)) {
+                $incompletes[] = 'τύπος (λείπει τοπικά· ΑΑΔΕ '.$aade->invoiceType.')';
+            } elseif ($aade->invoiceType !== $local->invoiceType) {
+                $conflicts[] = 'τύπος: '.$local->invoiceType.' τοπικά / '.$aade->invoiceType.' ΑΑΔΕ';
+            }
         }
 
-        // series / ΑΑ: only when BOTH sides carry the field. A null/blank LOCAL
-        // value (e.g. a legacy-imported or hand-keyed doc that never captured the
-        // series) is an INCOMPLETE record, not a content CONFLICT — flagging it
-        // would flip every such correct-but-sparse doc into the danger bucket and
-        // balloon the discrepancy count (MYD-017 review).
-        if (self::present($aade->series) && self::present($local->series)
-            && trim((string) $aade->series) !== trim((string) $local->series)) {
-            $out[] = 'σειρά: '.$local->series.' τοπικά / '.$aade->series.' ΑΑΔΕ';
+        // series
+        if (self::present($aade->series)) {
+            if (! self::present($local->series)) {
+                $incompletes[] = 'σειρά (λείπει τοπικά· ΑΑΔΕ '.$aade->series.')';
+            } elseif (trim((string) $aade->series) !== trim((string) $local->series)) {
+                $conflicts[] = 'σειρά: '.$local->series.' τοπικά / '.$aade->series.' ΑΑΔΕ';
+            }
         }
 
-        if (self::present($aade->aa) && self::present($local->aa)
-            && trim((string) $aade->aa) !== trim((string) $local->aa)) {
-            $out[] = 'ΑΑ: '.$local->aa.' τοπικά / '.$aade->aa.' ΑΑΔΕ';
+        // ΑΑ
+        if (self::present($aade->aa)) {
+            if (! self::present($local->aa)) {
+                $incompletes[] = 'ΑΑ (λείπει τοπικά· ΑΑΔΕ '.$aade->aa.')';
+            } elseif (trim((string) $aade->aa) !== trim((string) $local->aa)) {
+                $conflicts[] = 'ΑΑ: '.$local->aa.' τοπικά / '.$aade->aa.' ΑΑΔΕ';
+            }
         }
 
-        if ($aade->issueDate !== null && $local->issueDate !== null
-            && self::normDate($aade->issueDate) !== self::normDate($local->issueDate)) {
-            $out[] = 'ημ/νία: '.$local->issueDate.' τοπικά / '.$aade->issueDate.' ΑΑΔΕ';
+        // issue date
+        if ($aade->issueDate !== null) {
+            if ($local->issueDate === null) {
+                $incompletes[] = 'ημ/νία (λείπει τοπικά· ΑΑΔΕ '.$aade->issueDate.')';
+            } elseif (self::normDate($aade->issueDate) !== self::normDate($local->issueDate)) {
+                $conflicts[] = 'ημ/νία: '.$local->issueDate.' τοπικά / '.$aade->issueDate.' ΑΑΔΕ';
+            }
         }
 
-        // Counterpart ΑΦΜ: only when BOTH carry one (retail 11.x has none at AADE;
-        // a null local ΑΦΜ is incompleteness, not a conflict), compared digits-only
-        // so an EL/GR prefix is not a false difference.
-        if (self::present($aade->counterpartVat) && self::present($local->counterpartVat)
-            && self::digits($aade->counterpartVat) !== self::digits($local->counterpartVat)) {
-            $out[] = 'ΑΦΜ: '.$local->counterpartVat.' τοπικά / '.$aade->counterpartVat.' ΑΑΔΕ';
+        // counterpart ΑΦΜ — only when AADE returns one (retail 11.x has none → skip)
+        if (self::present($aade->counterpartVat)) {
+            if (! self::present($local->counterpartVat)) {
+                $incompletes[] = 'ΑΦΜ (λείπει τοπικά· ΑΑΔΕ '.$aade->counterpartVat.')';
+            } elseif (self::digits($aade->counterpartVat) !== self::digits($local->counterpartVat)) {
+                $conflicts[] = 'ΑΦΜ: '.$local->counterpartVat.' τοπικά / '.$aade->counterpartVat.' ΑΑΔΕ';
+            }
         }
 
-        return $out;
+        return new ContentComparison($conflicts, $incompletes);
     }
 
     private static function money(float $v): string

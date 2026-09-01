@@ -86,6 +86,33 @@ class SyncExpenseStateFromAadeTest extends TestCase
         (new SyncExpenseStateFromAade)->sync($this->expense('VALID'), 'WEIRD');
     }
 
+    public function test_cancellation_without_a_cancellation_mark_is_refused(): void
+    {
+        // MYD-014 review: a CANCELLED sync WITHOUT the AADE cancellation MARK must
+        // throw — never record a cancellation whose evidence (the ΜΑΡΚ ακύρωσης) is
+        // missing, and never mutate the expense on that path.
+        $expense = $this->expense('VALID');
+
+        try {
+            (new SyncExpenseStateFromAade)->sync($expense, 'CANCELLED', null);
+            $this->fail('Expected a RuntimeException for CANCELLED without a cancellation MARK.');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $fresh = $expense->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertNull($fresh->cancelled_by_mark);
+        $this->assertSame(0, ExpenseMark::query()->where('expense_id', $expense->id)->count());
+    }
+
+    public function test_cancellation_with_a_blank_cancellation_mark_is_refused(): void
+    {
+        // A whitespace-only MARK is not evidence either.
+        $this->expectException(RuntimeException::class);
+        (new SyncExpenseStateFromAade)->sync($this->expense('VALID'), 'CANCELLED', '   ');
+    }
+
     public function test_valid_direction_clears_cancelled_by_mark(): void
     {
         $expense = $this->expense('CANCELLED');

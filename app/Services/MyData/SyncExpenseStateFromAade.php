@@ -40,6 +40,16 @@ class SyncExpenseStateFromAade
             throw new RuntimeException("Μη αναμενόμενη κατάσταση ΑΑΔΕ: «{$aadeState}».");
         }
 
+        // A cancellation is a legal state change — require its evidence (the AADE
+        // cancellation MARK). Never record CANCELLED with a null/blank mark, or the
+        // audit trail can't say WHAT cancelled the document (MYD-014 review).
+        if ($aadeState === 'CANCELLED' && ($cancelledByMark === null || trim($cancelledByMark) === '')) {
+            throw new RuntimeException(
+                "Αδύνατη η καταχώριση ακύρωσης για το έξοδο (ΜΑΡΚ {$expense->mydata_mark}) "
+                .'χωρίς MARK ακύρωσης από την ΑΑΔΕ.'
+            );
+        }
+
         $fromState = $expense->mydata_state;
         // cancelled_by_mark only belongs on a CANCELLED expense; clear it on VALID.
         $toCancelledBy = $aadeState === 'CANCELLED' ? $cancelledByMark : null;

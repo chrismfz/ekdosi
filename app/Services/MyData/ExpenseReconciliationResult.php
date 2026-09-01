@@ -43,12 +43,16 @@ final readonly class ExpenseReconciliationResult
         // (gross / type / series-ΑΑ / date / counterpart AFM) DIFFERS (MYD-017).
         // `problem` lists which; separate from stateMismatch.
         public array $contentMismatch = [],
+        // AADE carries a field our LOCAL expense lacks (incomplete/unverified) —
+        // not a conflict, but never "matched" either (MYD-017).
+        public array $contentIncomplete = [],
     ) {}
 
     public function discrepancyCount(): int
     {
         return count($this->stateMismatch)
             + count($this->contentMismatch)
+            + count($this->contentIncomplete)
             + count($this->missingAtAade)
             + count($this->missingLocally)
             + count($this->duplicateLocal);

@@ -934,6 +934,19 @@ un-cancel), the acceptance round-trip (stateMismatch → sync → matched, no du
 console action (visible-gating + applies the cancellation + writes the audit row). See
 `CHANGELOG.md` [Unreleased] → Fixed.
 
+**Whole-PR review follow-up (integrity hardening):** three gaps closed. (1) The reconciler
+lost the real cancellation MARK — it recorded `$cancelledMarks[$m] = true` (a boolean) despite
+firebed's `CancelledInvoice::getCancellationMark()`; it now captures `invoiceMark ⇒
+cancellationMark` and folds it as `cancelledByMark` (both the inline `<cancelledByMark>` and the
+standalone `<cancelledInvoicesDoc>` path). (2) `SyncExpenseStateFromAade` now **refuses** a
+CANCELLED sync whose cancellation MARK is null/blank (a cancellation with no evidence is never
+written; the expense is not mutated). (3) the console action stopped trusting the (up-to-12h)
+serialized snapshot: `syncStates()` runs a **fresh** `ExpenseReconciler::reconcile()` at click
+time and applies only the fresh `stateMismatch` rows, after re-checking tenant + `expense_id` +
+that the fresh row's MARK still matches the expense being mutated. Tests: cancellation-MARK
+folded (standalone `<cancelledInvoicesDoc>`), service refuses CANCELLED-without-MARK, and the
+console ignores a stale cached row that a fresh reconcile no longer reports.
+
 **Official finding**
 
 RequestDocs returns documents, classifications and cancellations submitted by
@@ -1070,10 +1083,10 @@ changes the meaning of the movement line.
 Both live reconcilers (`SalesReconciler`, `ExpenseReconciler`) previously routed a row to
 `matched` as soon as the MARK existed on both sides and the cancellation flag agreed. Now,
 in that same branch, they compare the legally-relevant content via one shared pure helper
-`ReconciliationContentComparator::diffs(LocalDocSnapshot, AadeDocSummary)` (so sales and
+`ReconciliationContentComparator::compare(LocalDocSnapshot, AadeDocSummary)` (so sales and
 expenses can't drift): **gross** (explicit ±0.01 cent tolerance), **§8.1 type**, **series /
 ΑΑ**, **issue date** (normalised to Y-m-d), and **counterpart ΑΦΜ** (digits-only, and only
-when AADE returns one — retail 11.x has none). Any difference routes the row to
+when AADE returns one — retail 11.x has none). A value CONFLICT routes the row to
 `contentMismatch` with a Greek `problem` listing exactly which fields differ; nothing is ever
 silently rewritten. `discrepancyCount()` counts the new bucket, and both consoles render it
 (the blade defaults a missing bucket key to `[]` so a pre-deploy cache payload can't break the
@@ -1082,11 +1095,18 @@ works on the expense side. Tests cover sales + expenses, the cent tolerance, a
 retail-without-counterpart match, and type/series/gross divergences. See `CHANGELOG.md`
 [Unreleased] → Fixed.
 
-**Whole-PR review follow-up:** the comparator flags a field ONLY when BOTH sides carry a
-value — a null/blank LOCAL series/ΑΑ/ΑΦΜ (an incomplete legacy/manual record) is not a
-content conflict, so it stays `matched` rather than ballooning the danger bucket. The
-`mydata:reconcile-sales` CLI now also lists the `contentMismatch` bucket in its summary
-table + detail loop (it feeds `discrepancyCount()`/exit-2, so it must be visible).
+**Whole-PR review follow-up (2 rounds → `contentIncomplete`):** the first round narrowed the
+comparator to flag a field ONLY when BOTH sides carry a value, so a null/blank LOCAL field
+wouldn't balloon the danger bucket — but that left an incomplete record reading as a green
+`matched` (still a false green). The synthesis: the comparator returns a structured
+`ContentComparison` (`conflicts` + `incompletes`); a field AADE carries but the LOCAL record
+LACKS is an **incomplete**, routed to a NEW separate warning bucket **`contentIncomplete`**
+(unverified — complete it, don't trust it), while a genuine value clash stays the danger
+`contentMismatch`. AADE-absent fields (retail 11.x ΑΦΜ) are still skipped. Both buckets count
+in `discrepancyCount()`, both render on the two consoles (warning colour for the incomplete
+one), and the `mydata:reconcile-sales` CLI lists both in its summary table + detail loop (they
+feed exit-2, so they must be visible). Tests: `contentIncomplete` on sales + expenses, the
+fixed retail test (AADE-null ΑΦΜ actually reaches the comparator via `array_merge`, not `??`).
 
 **Official finding**
 
@@ -2814,3 +2834,5 @@ These are not open issues:
 | 2026-09-01 | **MYD-008 hardening** (PR #388 review) — the `MyDataMark` correlation query is now also `company_id`-scoped, so an inconsistent audit row from another tenant pointing at the same invoice_id can't be used as the MARK | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017 DONE** — live reconciliation compares content (gross/type/series-ΑΑ/date/ΑΦΜ), not just MARK+state; new `contentMismatch` bucket (shared comparator, both consoles) ends the false-green | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-014 DONE** — `SyncExpenseStateFromAade` + console action apply a supplier cancellation onto an existing expense (VALID→CANCELLED, audited, no re-import/dup); books already exclude CANCELLED | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 review** (PR #389) — incomplete ≠ conflict: new warning bucket `contentIncomplete` (AADE has a field the local record lacks) alongside danger `contentMismatch`; comparator returns `ContentComparison` (conflicts+incompletes), both count + render (consoles + CLI); fixed retail test (`array_merge`, not `??`) | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-014 review** (PR #389) — integrity: reconciler keeps the real cancellation MARK (`invoiceMark ⇒ cancellationMark`, inline + standalone); `SyncExpenseStateFromAade` refuses CANCELLED without it; console `syncStates()` re-reconciles fresh at click time (no trust in the ≤12h cache) + re-verifies tenant/expense_id/MARK before mutating | `CHANGELOG.md` [Unreleased] → Fixed |

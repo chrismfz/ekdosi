@@ -143,6 +143,7 @@
         @foreach ([
             ['key' => 'stateMismatch', 'title' => 'Ασυμφωνία κατάστασης', 'color' => 'warning', 'icon' => 'heroicon-o-exclamation-triangle'],
             ['key' => 'contentMismatch', 'title' => 'Διαφορά περιεχομένου (ίδιο ΜΑΡΚ)', 'color' => 'danger', 'icon' => 'heroicon-o-exclamation-circle'],
+            ['key' => 'contentIncomplete', 'title' => 'Ελλιπή τοπικά στοιχεία (ίδιο ΜΑΡΚ)', 'color' => 'warning', 'icon' => 'heroicon-o-question-mark-circle'],
             ['key' => 'duplicateLocal', 'title' => 'Διπλά ΜΑΡΚ τοπικά', 'color' => 'danger', 'icon' => 'heroicon-o-document-duplicate'],
         ] as $bucket)
             {{-- Default a missing key to []: a cache payload written before a new

@@ -110,6 +110,7 @@ class MyDataReconcileSales extends Command
                 ['Matched', count($result->matched)],
                 ['State mismatch', count($result->stateMismatch)],
                 ['Content mismatch', count($result->contentMismatch)],
+                ['Content incomplete', count($result->contentIncomplete)],
                 ['Missing at AADE', count($result->missingAtAade)],
                 ['Missing locally', count($result->missingLocally)],
                 ['Duplicate local MARK', count($result->duplicateLocal)],
@@ -119,6 +120,7 @@ class MyDataReconcileSales extends Command
         foreach ([
             'State mismatch' => $result->stateMismatch,
             'Content mismatch' => $result->contentMismatch,
+            'Content incomplete' => $result->contentIncomplete,
             'Missing at AADE' => $result->missingAtAade,
             'Missing locally' => $result->missingLocally,
             'Duplicate local MARK' => $result->duplicateLocal,

@@ -83,7 +83,7 @@ class SalesReconciler
     {
         /** @var array<string, AadeDocSummary> $byMark */
         $byMark = [];
-        /** @var array<string, true> $cancelledMarks */
+        /** @var array<string, string> $cancelledMarks  invoiceMark => cancellationMark */
         $cancelledMarks = [];
 
         $nextPartitionKey = null;
@@ -151,7 +151,9 @@ class SalesReconciler
                 foreach ($cancelledDoc as $cancelled) {
                     $m = (string) $cancelled->getInvoiceMark();
                     if ($m !== '') {
-                        $cancelledMarks[$m] = true;
+                        // Keep the cancellation MARK (not just a flag) so the folded
+                        // summary can carry it as cancelledByMark (MYD-014).
+                        $cancelledMarks[$m] = (string) $cancelled->getCancellationMark();
                     }
                 }
             }
@@ -170,14 +172,14 @@ class SalesReconciler
         // Fold the standalone cancellation list into the summaries: a
         // MARK listed in <cancelledInvoicesDoc> is cancelled even if its
         // invoice element didn't carry an inline <cancelledByMark>.
-        foreach (array_keys($cancelledMarks) as $mark) {
+        foreach ($cancelledMarks as $mark => $cancellationMark) {
             if (isset($byMark[$mark]) && ! $byMark[$mark]->cancelled) {
                 $existing = $byMark[$mark];
                 $byMark[$mark] = new AadeDocSummary(
                     mark: $existing->mark,
                     uid: $existing->uid,
                     cancelled: true,
-                    cancelledByMark: $existing->cancelledByMark,
+                    cancelledByMark: $cancellationMark !== '' ? $cancellationMark : $existing->cancelledByMark,
                     series: $existing->series,
                     aa: $existing->aa,
                     issueDate: $existing->issueDate,
@@ -248,6 +250,7 @@ class SalesReconciler
         $matched = [];
         $stateMismatch = [];
         $contentMismatch = [];
+        $contentIncomplete = [];
         $missingAtAade = [];
         $missingLocally = [];
         $duplicateLocal = [];
@@ -287,18 +290,24 @@ class SalesReconciler
             $aadeState = $aade->cancelled ? 'CANCELLED' : 'VALID';
 
             if ($localCancelled === $aade->cancelled) {
-                // MYD-017: the MARK and state agree, but that alone is NOT proof the
-                // content matches. Compare the legally-relevant fields; a difference
-                // is a contentMismatch (false green under the old rule), never matched.
-                $diffs = ReconciliationContentComparator::diffs($this->snapshotFrom($invoice), $aade);
-                if ($diffs === []) {
-                    $matched[] = $this->rowFromLocal($invoice, aadeState: $aadeState);
-                } else {
+                // MYD-017: MARK + state agree, but that is NOT proof the content
+                // matches. A value CONFLICT → contentMismatch (danger); a field AADE
+                // carries but we LACK → contentIncomplete (unverified); else matched.
+                $cmp = ReconciliationContentComparator::compare($this->snapshotFrom($invoice), $aade);
+                if ($cmp->hasConflicts()) {
                     $contentMismatch[] = $this->rowFromLocal(
                         $invoice,
                         aadeState: $aadeState,
-                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $diffs),
+                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $cmp->conflicts),
                     );
+                } elseif ($cmp->hasIncompletes()) {
+                    $contentIncomplete[] = $this->rowFromLocal(
+                        $invoice,
+                        aadeState: $aadeState,
+                        problem: 'Ελλιπή τοπικά στοιχεία έναντι ΑΑΔΕ: '.implode(' · ', $cmp->incompletes),
+                    );
+                } else {
+                    $matched[] = $this->rowFromLocal($invoice, aadeState: $aadeState);
                 }
 
                 continue;
@@ -347,6 +356,7 @@ class SalesReconciler
             matched: $matched,
             stateMismatch: $stateMismatch,
             contentMismatch: $contentMismatch,
+            contentIncomplete: $contentIncomplete,
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,

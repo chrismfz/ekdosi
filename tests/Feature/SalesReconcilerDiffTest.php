@@ -256,12 +256,15 @@ class SalesReconcilerDiffTest extends TestCase
 
         $this->assertCount(1, $result->matched);
         $this->assertCount(0, $result->contentMismatch);
+        $this->assertCount(0, $result->contentIncomplete);
     }
 
-    public function test_null_local_field_is_not_a_content_mismatch(): void
+    public function test_aade_field_absent_locally_is_content_incomplete(): void
     {
-        // Incompleteness ≠ conflict (MYD-017 review): a local doc that never captured
-        // a field (null vat_no here) must NOT be flagged just because AADE returns one.
+        // MYD-017 review: a field AADE carries but the LOCAL doc lacks (null vat_no
+        // here) is neither a clean match nor a hard conflict — it's an unverified,
+        // INCOMPLETE record. It must leave "matched" and land in contentIncomplete
+        // (a warning bucket) so it is never a false green.
         $inv = $this->invoice('450000000000001', 'VALID'); // vat_no null by default
 
         $result = (new SalesReconciler($this->tenant))->diff(
@@ -271,8 +274,12 @@ class SalesReconcilerDiffTest extends TestCase
             '31/01/2026',
         );
 
-        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->matched);
         $this->assertCount(0, $result->contentMismatch);
+        $this->assertCount(1, $result->contentIncomplete);
+        $this->assertStringContainsString('ΑΦΜ', $result->contentIncomplete[0]->problem);
+        $this->assertTrue($result->hasDiscrepancies());
+        $this->assertSame(1, $result->discrepancyCount());
     }
 
     private function invoice(?string $mark, ?string $state): Invoice
@@ -338,18 +345,30 @@ class SalesReconcilerDiffTest extends TestCase
      */
     private function aadeFor(Invoice $inv, bool $cancelled = false, array $override = []): AadeDocSummary
     {
+        // array_merge (NOT ??) so an EXPLICIT null override actually wins — the
+        // retail case (counterpartVat => null) has to reach AADE as null, not fall
+        // back to the invoice's own value.
+        $fields = array_merge([
+            'series' => $inv->invoiceType?->code,
+            'aa' => (string) $inv->code,
+            'issueDate' => $inv->issued_at?->format('Y-m-d'),
+            'counterpartVat' => $inv->vat_no,
+            'gross' => $inv->gross_total !== null ? (float) $inv->gross_total : null,
+            'invoiceType' => $inv->mydata_type,
+        ], $override);
+
         return new AadeDocSummary(
             mark: (string) $inv->mydata_mark,
             uid: 'UID-'.$inv->mydata_mark,
             cancelled: $cancelled,
             cancelledByMark: $cancelled ? '9'.$inv->mydata_mark : null,
-            series: $override['series'] ?? $inv->invoiceType?->code,
-            aa: $override['aa'] ?? (string) $inv->code,
-            issueDate: $override['issueDate'] ?? $inv->issued_at?->format('Y-m-d'),
+            series: $fields['series'],
+            aa: $fields['aa'],
+            issueDate: $fields['issueDate'],
             counterpartName: $inv->customer?->name,
-            counterpartVat: $override['counterpartVat'] ?? $inv->vat_no,
-            gross: $override['gross'] ?? ($inv->gross_total !== null ? (float) $inv->gross_total : null),
-            invoiceType: $override['invoiceType'] ?? $inv->mydata_type,
+            counterpartVat: $fields['counterpartVat'],
+            gross: $fields['gross'],
+            invoiceType: $fields['invoiceType'],
         );
     }
 }
