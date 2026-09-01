@@ -934,6 +934,12 @@ zero-value, not separately enforced). Aggregator fixture proves 100€ 8.4 + 40�
 regressions and that `isCreditNoteType('8.5')` stays false. `8.6` left unchanged.
 See `CHANGELOG.md` [Unreleased] → Fixed.
 
+**Review follow-up (post-#387):** added an aggregator fixture with a zero-value 8.6
+«Δελτίο Παραγγελίας Εστίασης» alongside a real 100€ sale — asserting the 8.6 is
+COUNTED (outputCount) yet contributes 0 to Έσοδα/ΦΠΑ (never inflates the picture),
+so the +sign «zero-value» stance is exercised end-to-end, not just at the sign
+policy (external review).
+
 **Official finding**
 
 AADE type 8.5 is Απόδειξη Επιστροφής POS, the return counterpart of type 8.4.
@@ -2729,3 +2735,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-012 hardened** (review follow-up) — denylist → allowlist `Codes::SUPPORTED_DELIVERY_TYPES=['9.3']` (future 9.4 now blocked); `defaultDeliveryTypeId()` checks the ΔΑΠ shortcut resolves to a supported type | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-002 modal wording** (review follow-up) — «Εισαγωγή τυπικών» modal no longer lists the removed «ΤΔΑ» type; existing tenants' ΤΔΑ left as-is per operator decision (no migration) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-020 doc sweep** (review follow-up) — FEATURES.md/BACKLOG.md catalogue text no longer says «χαρτόσημο»/«§8.5» for fees (→ Ψηφιακό Τέλος Συναλλαγής §8.6 / Τέλη §8.7) | `CHANGELOG.md` [Unreleased] → Changed |
+| 2026-09-01 | **MYD-015 8.6 fixture** (review follow-up) — aggregator test proves a zero-value 8.6 order slip is counted but adds 0 to the myDATA revenue picture | `CHANGELOG.md` [Unreleased] → Fixed |
