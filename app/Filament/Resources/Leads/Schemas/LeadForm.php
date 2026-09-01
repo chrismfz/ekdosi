@@ -78,7 +78,9 @@ class LeadForm
                         TextInput::make('afm')
                             ->label('ΑΦΜ')
                             ->maxLength(20)
-                            ->live(onBlur: true),
+                            ->live(onBlur: true)
+                            // Store digits only so the dedupe compare is exact.
+                            ->dehydrateStateUsing(fn ($state): ?string => LeadMatcher::normalizeAfm($state)),
 
                         TextInput::make('country')
                             ->label('Χώρα (ISO-2)')

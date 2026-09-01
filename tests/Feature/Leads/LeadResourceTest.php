@@ -185,6 +185,24 @@ class LeadResourceTest extends TestCase
         $this->assertSame(1, $lead->timeline()->count());
     }
 
+    public function test_bounced_email_does_not_advance_the_status(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);
+
+        Livewire::test(TimelineRelationManager::class, [
+            'ownerRecord' => $lead,
+            'pageClass' => EditLead::class,
+        ])
+            ->callTableAction('log_email', data: [
+                'happened_at' => now()->format('Y-m-d H:i:s'),
+                'direction' => 'outbound',
+                'outcome' => 'bounced',
+            ])
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSame(LeadStatus::New, $lead->fresh()->status, 'Nobody was reached — stays Νέο.');
+    }
+
     public function test_note_requires_a_body(): void
     {
         $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);

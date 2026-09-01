@@ -30,8 +30,8 @@ use Illuminate\Support\Carbon;
  * open a pre-typed modal; each row can carry an «επόμενο βήμα» that lands on
  * the lead's `next_action_at`.
  *
- * Small convenience: logging a real contact (an answered call, an email, a
- * meeting) on a lead that is still «Νέο» moves it to «Επικοινωνήσαμε» — the
+ * Small convenience: logging a real contact (an answered call, a replied
+ * email, a held meeting) on a lead that is still «Νέο» moves it to «Επικοινωνήσαμε» — the
  * funnel stays honest without an extra click. Status rows (auto) are shown but
  * not editable; manual rows are freely editable/deletable (owner decision).
  */
@@ -233,12 +233,13 @@ class TimelineRelationManager extends RelationManager
             ->send();
     }
 
-    /** A real two-way contact happened (not a missed call / wrong number). */
+    /** A real two-way contact happened (not a missed call / bounce / no-show). */
     private static function countsAsContact(LeadActivityType $type, ?string $outcome): bool
     {
         return match ($type) {
-            LeadActivityType::Call => $outcome === 'answered' || $outcome === 'callback',
-            LeadActivityType::Email, LeadActivityType::Meeting => true,
+            LeadActivityType::Call => in_array($outcome, ['answered', 'callback'], true),
+            LeadActivityType::Email => $outcome === 'replied',
+            LeadActivityType::Meeting => $outcome === 'held',
             default => false,
         };
     }

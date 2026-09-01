@@ -39,6 +39,11 @@ class Lead extends Model
     use SoftDeletes;
     use TracksActivity;
 
+    /** Mirror the DB default so an in-process instance is never status-less. */
+    protected $attributes = [
+        'status' => 'new',
+    ];
+
     protected $fillable = [
         'company_id',
         'name',

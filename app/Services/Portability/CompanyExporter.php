@@ -52,6 +52,7 @@ class CompanyExporter
      */
     public const TRANSACTIONAL_TABLES = [
         'customers', 'customer_contacts', 'suppliers',
+        'leads', 'lead_activities',
         'products', 'product_price_tiers', 'product_billing_prices',
         'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
         'payments',

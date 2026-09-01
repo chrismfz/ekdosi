@@ -35,6 +35,7 @@ class CompanyDataWiper
 
     /** Customers/suppliers/products — wiped unless --keep-parties. */
     public const PARTY_TABLES = [
+        'lead_activities', 'leads',
         'customer_contacts', 'customers', 'suppliers',
         'product_billing_prices', 'product_price_tiers', 'products',
     ];

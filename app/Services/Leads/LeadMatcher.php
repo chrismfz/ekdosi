@@ -11,14 +11,22 @@ use Illuminate\Database\Eloquent\Builder;
  * that share a lead's ΑΦΜ, email or phone, so the form can warn BEFORE the
  * operator picks up the phone. Pure lookup, no side effects.
  *
- * Matching is by normalised value: ΑΦΜ digits only, email lower-cased, phones
- * compared digits-only (the stored column is stripped of spaces / dashes /
- * plus / parentheses with SQL REPLACE, which exists on MariaDB and sqlite
- * alike) so «2310 123-456» matches «2310123456».
+ * Matching is by normalised value: ΑΦΜ digits only (both sides stripped of
+ * spaces/dashes, and LeadForm stores it normalised), email lower-cased, phones
+ * compared on their trailing digits (the stored column is stripped of spaces /
+ * dashes / plus / parentheses with SQL REPLACE, which exists on MariaDB and
+ * sqlite alike) so «2310 123-456» matches «+30 2310123456» in either direction.
  */
 class LeadMatcher
 {
     private const PHONE_MIN_DIGITS = 6;
+
+    /**
+     * Phones are compared on their trailing digits so a country prefix on
+     * either side («+30 2310…» vs «2310…») never hides a match. Greek numbers
+     * are 10 digits; longer national formats still share their last 10.
+     */
+    private const PHONE_SUFFIX_DIGITS = 10;
 
     /**
      * @param  list<string|null>  $phones  any of phone / mobile
@@ -32,9 +40,12 @@ class LeadMatcher
     ): LeadMatch {
         $afm = self::normalizeAfm($afm);
         $email = self::normalizeEmail($email);
-        $phones = array_values(array_unique(array_filter(
-            array_map(fn (?string $p): ?string => self::normalizePhone($p), $phones),
-            fn (?string $p): bool => $p !== null && strlen($p) >= self::PHONE_MIN_DIGITS,
+        $phones = array_values(array_unique(array_map(
+            fn (string $p): string => substr($p, -self::PHONE_SUFFIX_DIGITS),
+            array_filter(
+                array_map(fn (?string $p): ?string => self::normalizePhone($p), $phones),
+                fn (?string $p): bool => $p !== null && strlen($p) >= self::PHONE_MIN_DIGITS,
+            ),
         )));
 
         if ($afm === null && $email === null && $phones === []) {
@@ -71,22 +82,22 @@ class LeadMatcher
     private function applyIdentity(Builder $q, ?string $afm, ?string $email, array $phones, array $phoneColumns): void
     {
         if ($afm !== null) {
-            $q->orWhere('afm', $afm);
+            $q->orWhereRaw(self::strippedSql('afm').' = ?', [$afm]);
         }
 
         if ($email !== null) {
             $q->orWhereRaw('LOWER(email) = ?', [$email]);
         }
 
-        foreach ($phones as $digits) {
+        foreach ($phones as $suffix) {
             foreach ($phoneColumns as $column) {
-                $q->orWhereRaw(self::strippedPhoneSql($column).' LIKE ?', ['%'.$digits.'%']);
+                $q->orWhereRaw(self::strippedSql($column).' LIKE ?', ['%'.$suffix]);
             }
         }
     }
 
-    /** SQL expression stripping the usual phone formatting from a column. */
-    private static function strippedPhoneSql(string $column): string
+    /** SQL expression stripping the usual phone/ΑΦΜ formatting from a column. */
+    private static function strippedSql(string $column): string
     {
         $expr = $column;
         foreach ([' ', '-', '+', '(', ')', '.'] as $ch) {

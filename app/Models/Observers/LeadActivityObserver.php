@@ -15,21 +15,24 @@ class LeadActivityObserver
 {
     public function saved(LeadActivity $activity): void
     {
-        $this->refresh($activity->lead_id);
+        $this->refresh($activity->lead_id, $activity->company_id);
     }
 
     public function deleted(LeadActivity $activity): void
     {
-        $this->refresh($activity->lead_id);
+        $this->refresh($activity->lead_id, $activity->company_id);
     }
 
-    private function refresh(?int $leadId): void
+    private function refresh(?int $leadId, ?int $activityCompanyId): void
     {
-        if ($leadId === null) {
+        if ($leadId === null || $activityCompanyId === null) {
             return;
         }
 
+        // Explicit tenant predicate (CLAUDE.md CLI/observer rule) — lead_id is
+        // globally unique, but the intent must be declared, not assumed.
         $latest = LeadActivity::query()
+            ->where('company_id', $activityCompanyId)
             ->where('lead_id', $leadId)
             ->max('happened_at');
 

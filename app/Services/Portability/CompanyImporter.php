@@ -74,6 +74,7 @@ class CompanyImporter
     /** Import order for transactional (bucket C, --full): parents before children. */
     private const ORDER_TRANSACTIONAL = [
         'customers', 'customer_contacts', 'suppliers',
+        'leads', 'lead_activities',
         'products', 'product_price_tiers', 'product_billing_prices',
         'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
         'payments',
@@ -107,6 +108,10 @@ class CompanyImporter
         'servers' => ['server_group_id' => 'server_groups'],
         'customers' => ['payment_method_id' => 'payment_methods'],
         'customer_contacts' => ['customer_id' => 'customers'],
+        // Leads (mini-CRM): both customer links rewire; the operator link is a
+        // panel-global user → nulled (same rule as *_by_user_id elsewhere).
+        'leads' => ['referred_by_customer_id' => 'customers', 'converted_customer_id' => 'customers', 'assigned_user_id' => 'users'],
+        'lead_activities' => ['lead_id' => 'leads', 'user_id' => 'users'],
         'products' => ['product_category_id' => 'product_categories', 'vat_category_id' => 'vat_categories', 'metric_unit_id' => 'metric_units'],
         'product_price_tiers' => ['product_id' => 'products'],
         'product_billing_prices' => ['product_id' => 'products'],

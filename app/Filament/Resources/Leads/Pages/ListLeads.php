@@ -37,28 +37,28 @@ class ListLeads extends BaseListRecords
     {
         return [
             'open' => Tab::make('Ανοιχτά')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->open())
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->open())
                 ->badge(fn (): int => $this->count(fn (Builder $q) => $q->open())),
 
             'new' => Tab::make('Νέα')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->where('status', LeadStatus::New->value))
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('status', LeadStatus::New->value))
                 ->badge(fn (): int => $this->count(fn (Builder $q) => $q->where('status', LeadStatus::New->value))),
 
             'overdue' => Tab::make('Ληξιπρόθεσμα')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->overdue())
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->overdue())
                 ->badge(fn (): int => $this->count(fn (Builder $q) => $q->overdue()))
                 ->badgeColor('danger'),
 
             'stale' => Tab::make('Αδρανή')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->stale(self::STALE_DAYS))
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->stale(self::STALE_DAYS))
                 ->badge(fn (): int => $this->count(fn (Builder $q) => $q->stale(self::STALE_DAYS)))
                 ->badgeColor('warning'),
 
             'won' => Tab::make('Πελάτες')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->where('status', LeadStatus::Won->value)),
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('status', LeadStatus::Won->value)),
 
             'closed' => Tab::make('Χαμένα / Όχι')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->whereIn('status', [
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->whereIn('status', [
                     LeadStatus::Lost->value, LeadStatus::DoNotContact->value,
                 ])),
 

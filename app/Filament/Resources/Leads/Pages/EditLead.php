@@ -50,6 +50,8 @@ class EditLead extends EditRecord
                             ? 'Λόγος (υποχρεωτικό)'
                             : 'Σχόλιο (προαιρετικό — μπαίνει στο Χρονολόγιο)')
                         ->rows(2)
+                        // Lands in leads.lost_reason (varchar 255) for lost/dnc.
+                        ->maxLength(255)
                         ->required(fn (callable $get): bool => self::requiresReason($get('status'))),
                 ])
                 ->action(function (Lead $record, array $data): void {
@@ -65,9 +67,11 @@ class EditLead extends EditRecord
                             ->send();
                     }
 
+                    // The reason belongs to the lost/dnc state only — clear it on
+                    // the way out so a re-opened lead doesn't carry «λόγος: …».
                     $record->update([
                         'status' => $status,
-                        'lost_reason' => $status->requiresReason() ? $comment : $record->lost_reason,
+                        'lost_reason' => $status->requiresReason() ? $comment : null,
                     ]);
 
                     // A free comment on a non-lost change is worth a note row too.
@@ -93,6 +97,22 @@ class EditLead extends EditRecord
             RestoreAction::make(),
             ForceDeleteAction::make(),
         ];
+    }
+
+    /**
+     * The form hides `lost_reason` for non-lost statuses (so it never
+     * dehydrates) — null it here so a stale reason can't survive a save.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        if (! self::requiresReason($data['status'] ?? null)) {
+            $data['lost_reason'] = null;
+        }
+
+        return $data;
     }
 
     private static function requiresReason(mixed $status): bool
