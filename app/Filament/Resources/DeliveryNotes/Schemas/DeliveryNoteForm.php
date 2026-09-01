@@ -403,10 +403,10 @@ class DeliveryNoteForm
             ->where('mydata_type', 'like', '9%')
             ->orderBy('code')
             ->get()
-            // 9.1/9.2 are not yet correctly fileable (correlation/aggregation not
-            // built) — offer only the sandbox-validated 9.3 (MYD-012). Same rule the
-            // submitter guard enforces, so picker and guard cannot drift.
-            ->reject(fn (InvoiceType $t) => Codes::isUnsupportedDeliveryType($t->mydata_type))
+            // Offer only the types we can file today — an allowlist (currently just
+            // the sandbox-validated 9.3), so a future 9.x stays hidden until built
+            // (MYD-012). Same rule the submitter guard enforces → no drift.
+            ->filter(fn (InvoiceType $t) => Codes::isSupportedDeliveryType($t->mydata_type))
             ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
             ->toArray();
     }
@@ -416,20 +416,22 @@ class DeliveryNoteForm
     {
         $companyId = Filament::getTenant()?->getKey();
 
+        // Prefer ΔΑΠ (the standard Δελτίο Αποστολής) — but ONLY when its mydata_type
+        // is actually a supported/fileable type. A tenant whose ΔΑΠ series was
+        // (mis)mapped to 9.1/9.2 must not become the default, or the form would
+        // pre-select a type the picker hides → an unfileable draft (MYD-012).
         $dap = InvoiceType::query()
             ->where('company_id', $companyId)
             ->where('code', 'ΔΑΠ')
-            ->value('id');
-        if ($dap) {
-            return (int) $dap;
+            ->first();
+        if ($dap && Codes::isSupportedDeliveryType($dap->mydata_type)) {
+            return (int) $dap->id;
         }
 
+        // Else the first supported delivery type (allowlist — never a hidden 9.x).
         $first = InvoiceType::query()
             ->where('company_id', $companyId)
-            ->where('mydata_type', 'like', '9%')
-            // Never default to a hidden/unsupported 9.1/9.2 (MYD-012) — that would
-            // pre-select a type absent from the picker and create an unfileable draft.
-            ->whereNotIn('mydata_type', Codes::UNSUPPORTED_DELIVERY_TYPES)
+            ->whereIn('mydata_type', Codes::SUPPORTED_DELIVERY_TYPES)
             ->orderBy('code')
             ->value('id');
 

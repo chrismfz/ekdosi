@@ -123,8 +123,8 @@ surfaced in the open-items sections further down.
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον
-  picker + μπλοκαρισμένα στον submitter (MYD-012, μόνο το 9.3 φιλάρεται). Ξεμπλόκαρέ τα
-  όταν χτιστεί το μοντέλο (αφαίρεση από `Codes::UNSUPPORTED_DELIVERY_TYPES`).
+  picker + μπλοκαρισμένα στον submitter (MYD-012, μόνο το 9.3 φιλάρεται μέσω allowlist).
+  Ξεμπλόκαρέ τα όταν χτιστεί το μοντέλο (προσθήκη στο `Codes::SUPPORTED_DELIVERY_TYPES`).
 - **measurementUnit = 7 (Τεμάχια_Λοιπές Περιπτώσεις) στα ΔΑ** — απαιτεί
   `otherMeasurementUnitQuantity` + `otherMeasurementUnitTitle` (§8.13 note 9, υποχρεωτικά).
   Δεν μοντελοποιούνται ακόμη → το 7 είναι σκόπιμα **μπλοκαρισμένο** (service throw) + κρυμμένο

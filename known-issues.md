@@ -789,15 +789,23 @@ actual recipient.
 
 **Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
 
-**Fix (safe interim):** 9.1 (συσχετιζόμενο) and 9.2 (συγκεντρωτικό) are hidden from
-the delivery-type picker (`DeliveryNoteForm::deliveryTypeOptions`) and blocked at
-`DeliveryNoteSubmitter::buildAadeDeliveryNote`, leaving only the sandbox-validated
-9.3. Both use one rule — `Codes::isUnsupportedDeliveryType` / `UNSUPPORTED_DELIVERY_TYPES`
-— so picker and guard cannot drift. The types stay seeded (for when the models
-exist) but cannot be selected or filed. Implementing the real 9.1 correlated-MARK
-payload and 9.2 aggregation is logged in `docs/BACKLOG.md`. Tests cover the picker
-exclusion and the submitter block for 9.1 and 9.2. See `CHANGELOG.md` [Unreleased]
-→ Fixed.
+**Fix (safe interim):** only the sandbox-validated 9.3 is fileable. Enforced by an
+**allowlist** — `Codes::SUPPORTED_DELIVERY_TYPES = ['9.3']` / `isSupportedDeliveryType()`
+— used by BOTH the delivery-type picker (`DeliveryNoteForm::deliveryTypeOptions`) and the
+`DeliveryNoteSubmitter` guard, so picker and guard cannot drift. An allowlist (not a
+denylist of 9.1/9.2) means any NEW/future 9.x code is treated as unsupported until we
+explicitly build it — the safe default for a legal document. `defaultDeliveryTypeId()`
+also verifies the ΔΑΠ-by-code shortcut resolves to a supported type before pre-selecting
+it (a ΔΑΠ series mis-mapped to 9.1 no longer becomes an unfileable default). The types
+stay seeded (for when the models exist) but cannot be selected or filed. Implementing the
+real 9.1 correlated-MARK payload and 9.2 aggregation is logged in `docs/BACKLOG.md`. Tests
+cover the picker exclusion (incl. a future 9.4), the submitter block (9.1/9.2/9.4), and the
+ΔΑΠ→unsupported default fall-through. See `CHANGELOG.md` [Unreleased] → Fixed.
+
+**Review follow-up (post-#387):** the first fix used a denylist (`UNSUPPORTED_DELIVERY_TYPES
+= ['9.1','9.2']`) — a future 9.4 would have slipped through — and `defaultDeliveryTypeId()`
+returned the ΔΑΠ row without checking its `mydata_type`. Flipped to an allowlist and added
+the ΔΑΠ-type check (external review).
 
 **Official finding**
 
@@ -2711,3 +2719,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-012 DONE** — unsupported ΔΑ types 9.1/9.2 hidden from the delivery picker + submitter guard (only 9.3 fileable); full model → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-002 DONE** — misleading «ΤΔΑ» dropped from the invoice-type seed (fresh installs); real combined 1.1+isDeliveryNote → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-003 extended** (review follow-up) — shared `InvoiceType::scopeMonetary()` now excludes 9.x from quote→invoice/service + renewal selectors too; `InvoiceNumberer::allocate()` backstop rejects 9.x for every creator | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-012 hardened** (review follow-up) — denylist → allowlist `Codes::SUPPORTED_DELIVERY_TYPES=['9.3']` (future 9.4 now blocked); `defaultDeliveryTypeId()` checks the ΔΑΠ shortcut resolves to a supported type | `CHANGELOG.md` [Unreleased] → Fixed |

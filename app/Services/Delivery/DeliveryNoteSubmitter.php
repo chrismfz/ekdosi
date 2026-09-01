@@ -109,14 +109,17 @@ class DeliveryNoteSubmitter
                 .'(neither on the note nor its delivery type). Configure a 9.x type.'
             );
 
-        // 9.1 (συσχετιζόμενο) needs a correlated-MARK payload and 9.2 (συγκεντρωτικό)
-        // an aggregation model — neither is built, so filing one would be incomplete.
-        // The picker hides them; this guards non-UI callers (MYD-012). Only 9.3 files.
-        if (Codes::isUnsupportedDeliveryType($type)) {
+        // Only 9.3 (απλό Δελτίο Αποστολής) is fileable today (allowlist, MYD-012):
+        // 9.1 (συσχετιζόμενο) needs a correlated-MARK payload, 9.2 (συγκεντρωτικό)
+        // an aggregation model, and any other/future 9.x is unbuilt — all blocked
+        // so a non-UI caller can't file an incomplete note. The picker hides the
+        // same set (single source of truth, no drift).
+        if (! Codes::isSupportedDeliveryType($type)) {
             throw new RuntimeException(
                 "Το δελτίο {$note->invcode} έχει τύπο {$type}, ο οποίος δεν υποστηρίζεται ακόμη "
-                .'(το 9.1 συσχετιζόμενο θέλει συσχετισμένα MARK, το 9.2 συγκεντρωτικό θέλει μοντέλο '
-                .'σύνοψης). Χρησιμοποιήστε 9.3 (απλό Δελτίο Αποστολής) ή χωρίστε τη διακίνηση.'
+                .'(υποστηρίζεται μόνο το 9.3 — απλό Δελτίο Αποστολής· το 9.1 συσχετιζόμενο θέλει '
+                .'συσχετισμένα MARK, το 9.2 συγκεντρωτικό θέλει μοντέλο σύνοψης). '
+                .'Χρησιμοποιήστε 9.3 ή χωρίστε τη διακίνηση.'
             );
         }
 

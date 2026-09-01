@@ -170,6 +170,19 @@ class DeliveryNoteSubmitterTest extends TestCase
         (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
     }
 
+    public function test_future_9_4_delivery_type_is_blocked_by_allowlist(): void
+    {
+        // A hypothetical future 9.x we haven't built must be blocked too — the
+        // allowlist (only 9.3 today) is the point: a denylist of 9.1/9.2 would
+        // let 9.4 slip through and file an unbuilt payload (MYD-012).
+        $note = $this->makeNote(['mydata_type' => '9.4']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/δεν υποστηρίζεται/u');
+
+        (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
+    }
+
     public function test_missing_measurement_unit_throws(): void
     {
         // A persisted line with no unit is a data error — surface it, never

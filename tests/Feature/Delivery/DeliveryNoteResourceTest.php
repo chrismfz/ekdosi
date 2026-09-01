@@ -105,8 +105,10 @@ class DeliveryNoteResourceTest extends TestCase
 
     public function test_delivery_type_picker_offers_only_the_supported_9_3(): void
     {
-        // 9.1 (συσχετιζόμενο) and 9.2 (συγκεντρωτικό) are not yet fileable → hidden;
-        // only the sandbox-validated 9.3 is offered (MYD-012).
+        // Allowlist (MYD-012): 9.1 (συσχετιζόμενο) and 9.2 (συγκεντρωτικό) are not
+        // yet fileable → hidden; a hypothetical future 9.4 MUST also stay hidden
+        // (that's the whole point of an allowlist vs a denylist). Only the
+        // sandbox-validated 9.3 is offered.
         $t91 = InvoiceType::create([
             'company_id' => $this->tenant->id, 'code' => 'ΔΑΣ', 'name' => 'Συσχ.',
             'invcount' => 1, 'mydata_type' => '9.1',
@@ -115,12 +117,32 @@ class DeliveryNoteResourceTest extends TestCase
             'company_id' => $this->tenant->id, 'code' => 'ΣΔΑ', 'name' => 'Συγκ.',
             'invcount' => 1, 'mydata_type' => '9.2',
         ]);
+        $t94 = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'Δ94', 'name' => 'Μελλοντικό',
+            'invcount' => 1, 'mydata_type' => '9.4',
+        ]);
 
         $keys = array_keys(DeliveryNoteForm::deliveryTypeOptions());
 
         $this->assertContains($this->deliveryType->id, $keys, '9.3 stays offered');
         $this->assertNotContains($t91->id, $keys, '9.1 hidden');
         $this->assertNotContains($t92->id, $keys, '9.2 hidden');
+        $this->assertNotContains($t94->id, $keys, 'future 9.4 hidden (allowlist, not denylist)');
+    }
+
+    public function test_default_delivery_type_id_never_returns_dap_mapped_to_unsupported(): void
+    {
+        // The tenant's ΔΑΠ series is (mis)mapped to 9.1 — unsupported. The default
+        // must NOT return it (pre-selecting a hidden type → an unfileable draft);
+        // it falls through to a supported 9.3 type instead (MYD-012).
+        $this->deliveryType->update(['mydata_type' => '9.1']);
+
+        $supported = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΖΔΑ', 'name' => 'Απλό ΔΑ',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+
+        $this->assertSame($supported->id, DeliveryNoteForm::defaultDeliveryTypeId());
     }
 
     public function test_create_page_allocates_aa_and_persists_draft_with_scenario_and_lines(): void

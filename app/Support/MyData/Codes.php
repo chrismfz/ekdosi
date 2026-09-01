@@ -829,20 +829,22 @@ final class Codes
     }
 
     /**
-     * Delivery-note types we cannot yet file CORRECTLY: 9.1 (συσχετιζόμενο) needs
-     * a correlated-MARK payload (MYD-012) and 9.2 (συγκεντρωτικό) needs an
-     * aggregation model — neither is built. Only 9.3 (απλό Δελτίο Αποστολής) is
-     * sandbox-validated. Hidden from the delivery picker AND blocked at the
-     * submitter so a non-UI caller cannot file an incomplete 9.1/9.2 (single
-     * source for both, so they cannot drift).
+     * Delivery-note types we can file CORRECTLY today — an ALLOWLIST, NOT a
+     * denylist (MYD-012). A denylist of «unsupported» types lets any NEW 9.x
+     * code (a future 9.4, say) slip through unblocked; an allowlist treats
+     * everything we haven't explicitly built as unsupported, which is the safe
+     * default for a legal document. Only 9.3 (απλό Δελτίο Αποστολής) is
+     * sandbox-validated; 9.1 (συσχετιζόμενο) needs a correlated-MARK payload and
+     * 9.2 (συγκεντρωτικό) an aggregation model — neither built. Hidden from the
+     * delivery picker AND enforced at the submitter (single source, no drift).
      *
      * @var list<string>
      */
-    public const UNSUPPORTED_DELIVERY_TYPES = ['9.1', '9.2'];
+    public const SUPPORTED_DELIVERY_TYPES = ['9.3'];
 
-    public static function isUnsupportedDeliveryType(?string $code): bool
+    public static function isSupportedDeliveryType(?string $code): bool
     {
-        return $code !== null && in_array($code, self::UNSUPPORTED_DELIVERY_TYPES, true);
+        return $code !== null && in_array($code, self::SUPPORTED_DELIVERY_TYPES, true);
     }
 
     public static function vatExemptionExists(int $code): bool
