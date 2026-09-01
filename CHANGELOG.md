@@ -47,8 +47,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   μέσω παρόχου (`PROVIDER_INSERT`) αποτύγχανε να συσχετιστεί. Πλέον διαβάζει `INSERT`
   **και** `PROVIDER_INSERT` (ίδιος κανόνας με την ακύρωση ΔΑ), ώστε provider-issued
   originals να παραμένουν διορθώσιμα· τα απορριφθέντα (`PROVIDER_REJECTED`/`PROVIDER_FAILED`,
-  mark=null) εξαιρούνται, και το lookup του πρωτότυπου είναι tenant-scoped (δεν λύνει ποτέ
-  παραστατικό άλλης εταιρείας). Το 5.2 (μη συσχετιζόμενο) δεν καλεί καθόλου τον resolver.
+  mark=null) εξαιρούνται, και τόσο το lookup του πρωτότυπου ΟΣΟ ΚΑΙ το query του MARK είναι
+  tenant-scoped (δεν χρησιμοποιεί ποτέ παραστατικό — ούτε ασυνεπές audit row — άλλης
+  εταιρείας). Το 5.2 (μη συσχετιζόμενο) δεν καλεί καθόλου τον resolver.
 - **Αφαίρεση παραπλανητικού «ΤΔΑ» από το seed (MYD-002)** — ο seeded τύπος «ΤΔΑ /
   Δελτίο Αποστολής» υποσχόταν combined τιμολόγιο+δελτίο, αλλά εκδιδόταν ως σκέτο 1.1
   (χωρίς `isDeliveryNote`/movement data). Αφαιρέθηκε από το `INVOICE_TYPE_SEED` (fresh

@@ -518,7 +518,13 @@ class AadeInvoiceDocument
             );
         }
 
+        // Same tenant here too: invoice_id is a global PK so it already pins the
+        // invoice, but the schema does not enforce that mydata_marks.company_id
+        // agrees with its invoice's company — and the CompanyScope is a no-op
+        // off-request. Scope explicitly so an inconsistent audit row belonging to
+        // another tenant can never be used as the correlated MARK (MYD-008).
         $mark = MyDataMark::query()
+            ->where('company_id', $creditNote->company_id)
             ->where('invoice_id', $original->id)
             ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT'])
             ->whereNotNull('mark')

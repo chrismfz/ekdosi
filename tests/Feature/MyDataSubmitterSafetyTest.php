@@ -1274,6 +1274,30 @@ class MyDataSubmitterSafetyTest extends TestCase
         (new MyDataSubmitter($this->tenant))->previewXml($this->makeCorrelatedCredit($foreign, 4));
     }
 
+    public function test_correlated_credit_5_1_ignores_a_foreign_company_mark_row(): void
+    {
+        // Tenant isolation on the MARK row itself (MYD-008 review): the original is
+        // in our tenant, but an inconsistent audit row belonging to ANOTHER company
+        // points at the same invoice_id. invoice_id alone would find it; the explicit
+        // company_id filter must exclude it, leaving no usable MARK.
+        $other = Company::create([
+            'name' => 'Other co', 'slug' => 'other-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off', 'afm' => '555444333',
+        ]);
+        $original = $this->makeInvoice(code: 50);
+        MyDataMark::create([
+            'company_id' => $other->id,             // ← belongs to the WRONG tenant
+            'invoice_id' => $original->id,          // ← but points at our original
+            'mark' => '400000000000555',
+            'mydata_action' => 'PROVIDER_INSERT',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('#INSERT/PROVIDER_INSERT MARK#');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($this->makeCorrelatedCredit($original, 6));
+    }
+
     public function test_correlated_credit_5_1_refuses_a_non_numeric_mark(): void
     {
         // Contract guard (MYD-008 review): the resolver feeds addCorrelatedInvoice((int)…),
