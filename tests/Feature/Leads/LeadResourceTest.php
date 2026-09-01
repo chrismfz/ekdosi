@@ -290,7 +290,7 @@ class LeadResourceTest extends TestCase
             ->fillForm([
                 'subject' => 'Hosting',
                 'lines' => [
-                    ['product_descr' => 'Hosting 1 έτος', 'qty' => 1, 'price_per_item' => 100, 'vat_percent' => '24.00'],
+                    ['product_descr' => 'Hosting 1 έτος', 'qty' => 1, 'price_per_item' => 100, 'discount' => 0, 'vat_percent' => '24.00'],
                 ],
             ])
             ->call('create')
