@@ -39,6 +39,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συμβατότητα δεδομένων· τα αποθηκευμένα ποσά εκπέμπουν το ίδιο σωστό taxType 4).
 
 ### Fixed
+- **Τα Δελτία Αποστολής (9.x) έξω από τη ροή τιμολογίων (MYD-003)** — οι movement-only
+  τύποι 9.1/9.2/9.3 εμφανίζονταν στον picker του μηνιαίου παραστατικού και μπορούσαν να
+  σταλούν από τον monetary builder. Πλέον αποκλείονται από τον invoice picker
+  (`PickerOptions`, null-safe) και ο `AadeInvoiceDocument::build()` πετάει τοπικό σφάλμα
+  για τύπο 9.x — τα κινήσεως πάνε μόνο από τη ροή «Δελτία Αποστολής».
 - **Έλεγχος ημερομηνίας έκδοσης για online έκδοση μέσω παρόχου (PROV-020)** — η κανονική
   online έκδοση μέσω InvoSign απαιτεί `IssueDate = σημερινή` (error 238), αλλά το Ekdosi
   δεχόταν backdated/future `issued_at` και το έστελνε — εγγυημένη απόρριψη. Νέος

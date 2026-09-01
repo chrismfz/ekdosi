@@ -41,6 +41,11 @@ class PickerOptions
         return InvoiceType::query()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->where('show_on_menu', true)
+            // Movement-only 9.x (Δελτία Αποστολής) are NOT monetary documents — they
+            // belong to the Delivery Notes flow, never this invoice picker (MYD-003).
+            // Same rule as Codes::isMovementOnlyType (prefix '9.'); null-safe so a
+            // legacy type with no mydata_type stays selectable.
+            ->where(fn ($q) => $q->whereNull('mydata_type')->orWhere('mydata_type', 'not like', '9.%'))
             ->orderByDesc('is_favorite')
             ->orderByDesc('invcount')
             ->orderBy('code')

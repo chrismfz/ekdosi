@@ -108,6 +108,37 @@ class InvoicePickerPolishTest extends TestCase
         $this->assertStringStartsWith('⭐ ', PickerOptions::invoiceTypeOptions()[$tim->id]);
     }
 
+    public function test_movement_only_9x_types_are_excluded_from_the_invoice_picker(): void
+    {
+        // 9.x (Δελτία Αποστολής) are movement documents — never the monetary
+        // invoice picker (MYD-003), even with show_on_menu=true.
+        $monetary = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'Τιμολόγιο',
+            'invcount' => 1, 'show_on_menu' => true, 'mydata_type' => '2.1',
+        ]);
+        $legacyNoType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'LEG', 'name' => 'Legacy',
+            'invcount' => 1, 'show_on_menu' => true, 'mydata_type' => null,
+        ]);
+        $delivery = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΔΑΠ', 'name' => 'Δελτίο Αποστολής',
+            'invcount' => 1, 'show_on_menu' => true, 'mydata_type' => '9.3',
+        ]);
+        // A hypothetical future 9.x must ALSO be excluded (prefix rule, not a fixed
+        // set) — so the picker and the builder guard can never drift.
+        $futureMovement = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'Δ9', 'name' => 'Μελλοντικό 9.x',
+            'invcount' => 1, 'show_on_menu' => true, 'mydata_type' => '9.4',
+        ]);
+
+        $keys = array_keys(PickerOptions::invoiceTypeOptions());
+
+        $this->assertContains($monetary->id, $keys);
+        $this->assertContains($legacyNoType->id, $keys, 'a null mydata_type stays selectable');
+        $this->assertNotContains($delivery->id, $keys, '9.x is excluded from the monetary picker');
+        $this->assertNotContains($futureMovement->id, $keys, 'any 9.x is excluded (prefix rule)');
+    }
+
     public function test_customer_options_favourites_then_most_billed(): void
     {
         $type = InvoiceType::create([

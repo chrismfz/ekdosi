@@ -87,6 +87,16 @@ class AadeInvoiceDocument
                 .'has no mydata_type set. Configure on the InvoiceType resource.'
             );
 
+        // Movement-only 9.x (Δελτία Αποστολής) are NOT monetary documents — they must
+        // go through DeliveryNoteSubmitter, never the monetary invoice builder. The UI
+        // picker already excludes them; this guards CLI/API/imported callers (MYD-003).
+        if (Codes::isMovementOnlyType($type)) {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode} has a movement-only type ({$type}, Δελτίο Αποστολής) "
+                .'and cannot be filed as a monetary invoice — issue it through the Delivery Notes flow.'
+            );
+        }
+
         $vatBreakdown = InvoiceVatBreakdown::for($invoice);
 
         $issuer = (new Issuer)

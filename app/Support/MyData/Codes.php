@@ -812,7 +812,20 @@ final class Codes
      */
     public static function allowsItemDescr(?string $code): bool
     {
-        return in_array($code, ['9.1', '9.2', '9.3'], true);
+        return self::isMovementOnlyType($code);
+    }
+
+    /**
+     * Movement-only §8.1 types — the whole `9.x` family (9.1 συσχετιζόμενο, 9.2
+     * συγκεντρωτικό, 9.3 απλό Δελτίο Αποστολής, and any future 9.x). These carry
+     * no revenue and belong to the Digital Delivery-Note flow (DeliveryNoteSubmitter)
+     * — they must NEVER appear in a monetary invoice selector or reach the monetary
+     * AADE builder (MYD-003). Prefix-based so the builder guard and the picker's SQL
+     * `not like '9.%'` stay the SAME rule and cannot drift as the code table grows.
+     */
+    public static function isMovementOnlyType(?string $code): bool
+    {
+        return $code !== null && str_starts_with($code, '9.');
     }
 
     public static function vatExemptionExists(int $code): bool

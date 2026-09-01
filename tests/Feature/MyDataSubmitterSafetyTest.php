@@ -140,6 +140,21 @@ class MyDataSubmitterSafetyTest extends TestCase
         (new MyDataSubmitter($this->tenant))->previewXml($invoice);
     }
 
+    public function test_movement_only_type_cannot_be_filed_as_a_monetary_invoice(): void
+    {
+        // MYD-003: a 9.x (Δελτίο Αποστολής) must never reach the monetary builder —
+        // it belongs to the Delivery Notes flow. Guards CLI/API/imported callers
+        // that bypass the UI picker.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $this->invoiceType->forceFill(['mydata_type' => '9.3'])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/movement-only/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+    }
+
     public function test_cancel_refuses_already_cancelled(): void
     {
         $invoice = $this->makeInvoice();

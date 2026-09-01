@@ -263,7 +263,7 @@ Priorities:
 |---|---:|---|---|---|
 | MYD-001 | P0 | DONE | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
 | MYD-002 | P0 | OPEN | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
-| MYD-003 | P0 | OPEN | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
+| MYD-003 | P0 | DONE | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
 | MYD-004 | P0 | OPEN | VAT validation | 3%, dual 4% codes and 0% can produce false readiness results |
 | MYD-005 | P2 | OPEN | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
 | MYD-006 | P1 | OPEN | Classifications | Readiness does not require a business-specific classification policy |
@@ -403,7 +403,16 @@ document. Therefore the correct conclusion is not that ΤΔΑ no longer exists.
 
 ### MYD-003 — Movement-only 9.x types appear in the monetary invoice form
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** new `Codes::isMovementOnlyType()` (9.1/9.2/9.3). `PickerOptions::
+invoiceTypeOptions()` now excludes 9.x from the monetary invoice picker
+(null-safe — a legacy type with no `mydata_type` stays selectable), and
+`AadeInvoiceDocument::build()` throws for a 9.x type so a CLI/API/imported caller
+that bypasses the UI cannot file a Δελτίο Αποστολής as a monetary invoice.
+Movement documents remain in the Delivery Notes flow (`DeliveryNoteSubmitter`).
+Tests cover the picker exclusion and the build guard. See `CHANGELOG.md`
+[Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2666,3 +2675,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **PROV-017 DONE** — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
+| 2026-08-31 | **MYD-003 DONE** — movement-only 9.x excluded from the monetary invoice picker + build guard; Δελτία Αποστολής stay in the delivery flow | `CHANGELOG.md` [Unreleased] → Fixed |
