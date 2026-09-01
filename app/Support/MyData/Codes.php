@@ -513,26 +513,55 @@ final class Codes
     }
 
     /**
-     * §8.1 invoice types that are CREDIT NOTES (πιστωτικά) — they REDUCE the
-     * figure they relate to, so in any sum of myDATA documents their net/vat
-     * must be subtracted, not added. Covers both the income side (5.1, 5.2
-     * πιστωτικό τιμολόγιο, 11.4 πιστωτικό λιανικής) and the expense side (13.31,
-     * 14.31 πιστωτικά ημεδαπής/αλλοδαπής). Without this, a refund/return reads
-     * as extra income or extra deductible input VAT.
+     * §8.1 invoice types that are genuinely CREDIT NOTES (πιστωτικά) — they
+     * REDUCE the figure they relate to. Income side (5.1, 5.2 πιστωτικό
+     * τιμολόγιο, 11.4 πιστωτικό λιανικής) and expense side (13.31, 14.31
+     * πιστωτικά ημεδαπής/αλλοδαπής). This list is the authority for credit-note
+     * IDENTITY (isCreditNoteType) AND the expense-side subtract rule in
+     * LedgerBook / VatPeriodReport (matched against expenses.invoice_type).
+     * Keep it to real credit notes only — other "reducing" documents that are
+     * not πιστωτικά live in REDUCING_EXTRA_TYPES.
      *
      * @var list<string>
      */
     public const CREDIT_NOTE_TYPES = ['5.1', '5.2', '11.4', '13.31', '14.31'];
+
+    /**
+     * §8.1 types that are NOT credit notes but whose net/vat still REDUCE a sum
+     * of transmitted myDATA documents (MYD-015). Kept separate from
+     * CREDIT_NOTE_TYPES so credit-note identity stays exact — only documentSign()
+     * (the myDATA VAT-picture aggregator) reads this, never isCreditNoteType().
+     *
+     * Explicit §8.x reporting-sign policy — the §8.x prefix alone is NOT enough:
+     *   - 8.1 Ενοίκια-Έσοδο           → income (+)
+     *   - 8.2 Τέλος ανθεκτικότητας     → income (+)
+     *   - 8.4 Απόδειξη Είσπραξης POS   → income/collection (+)
+     *   - 8.5 Απόδειξη Επιστροφής POS  → RETURN (−) ← here
+     *   - 8.6 Δελτίο Παραγγελίας Εστίασης → order slip: sign (+); myDATA sends it
+     *         with zero value, so it adds no revenue on its own (this zero-value
+     *         expectation is not separately enforced).
+     *
+     * @var list<string>
+     */
+    public const REDUCING_EXTRA_TYPES = ['8.5'];
 
     public static function isCreditNoteType(?string $code): bool
     {
         return $code !== null && in_array($code, self::CREDIT_NOTE_TYPES, true);
     }
 
-    /** -1 for a credit note (subtract from any myDATA-document sum), else +1. */
+    /**
+     * Reporting sign for a summed myDATA document: -1 for a credit note or other
+     * reducing type (e.g. an 8.5 POS return), else +1.
+     */
     public static function documentSign(?string $code): int
     {
-        return self::isCreditNoteType($code) ? -1 : 1;
+        if ($code === null) {
+            return 1;
+        }
+
+        return in_array($code, self::CREDIT_NOTE_TYPES, true)
+            || in_array($code, self::REDUCING_EXTRA_TYPES, true) ? -1 : 1;
     }
 
     /**

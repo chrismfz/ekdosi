@@ -275,7 +275,7 @@ Priorities:
 | MYD-012 | P0 | OPEN | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | OPEN | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
-| MYD-015 | P1 | OPEN | VAT picture | Type 8.5 POS return is added with a positive sign |
+| MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | OPEN | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | OPEN | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
@@ -848,7 +848,19 @@ inbound state.
 
 ### MYD-015 — POS return type 8.5 increases the VAT-picture totals
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `8.5` added to a new `Codes::REDUCING_EXTRA_TYPES` list read only by
+`documentSign()`, so a POS return reduces the myDATA VAT picture
+(`MyDataVatAggregator`). Kept OUT of `CREDIT_NOTE_TYPES` so credit-note identity
+(`isCreditNoteType`) stays exact and the expense-side subtract rule in
+`LedgerBook`/`VatPeriodReport` (matched against `expenses.invoice_type`, where an
+income type 8.5 never appears) is untouched. The const doc-comment records the
+explicit §8.x sign policy (8.1/8.2/8.4 = +, 8.5 = −, 8.6 order slip = + but
+zero-value, not separately enforced). Aggregator fixture proves 100€ 8.4 + 40€ 8.5
+→ net 60 (never 140); a `documentSign` policy test covers 8.4/8.5/8.6, credit/sales
+regressions and that `isCreditNoteType('8.5')` stays false. `8.6` left unchanged.
+See `CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2560,3 +2572,4 @@ These are not open issues:
 | 2026-08-30 | Provider hardening sweep: added PROV-014–PROV-019 and expanded the sandbox matrix | Documentation-only audit |
 | 2026-08-31 | Critical myDATA/provider integrity sweep: added MYD-021–MYD-026 and PROV-020; expanded snapshot, evidence and sandbox requirements | Documentation-only audit |
 | 2026-08-31 | **MYD-001 DONE** — third-country 1.3/2.3 → E3_561_006 (was 561_005); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **MYD-015 DONE** — POS return 8.5 now reduces the myDATA VAT picture (−sign); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
