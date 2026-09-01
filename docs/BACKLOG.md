@@ -31,7 +31,7 @@ surfaced in the open-items sections further down.
   provider P0–P5 built/gated (mode=off); **PEPPOL Phase 2 + live provider = OPEN**.
 - **`payment-connectors.md`** — card-POS + IRIS design. **NOT-STARTED** (blueprint).
 - **`leads-mini-crm.md`** — **Leads / mini-CRM** (υποψήφιοι πελάτες + χρονολόγιο επαφών + μετατροπή
-  σε πελάτη + απολογισμός ανά χειριστή). **DESIGN, no code yet** — gates L0–L3, αποφάσεις κλειδωμένες §9.
+  σε πελάτη + απολογισμός ανά χειριστή). **L0 DONE**· L1 (μετατροπή) + L2 (απολογισμός) **OPEN** — gates §10.
 - **`payments` (AR)** — core **DONE** (cockpit/allocator/bank-accounts/refunds); deferred
   connectors → `payment-connectors.md`.
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 (registry seam) **DONE**;
@@ -269,7 +269,9 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   **«Απολογισμός πωλήσεων»** page (τηλέφωνα/emails/μετατροπές ανά χειριστή×εβδομάδα — «δούλεψε ο
   άνθρωπος;») + `next_action_at` reminders. **DESIGN ONLY, αποφάσεις κλειδωμένες** (§9: ρόλος =
   `operator`, όλοι βλέπουν όλα, παντού/multi-tenant, ελεύθερη επεξεργασία, μόνο χειροκίνητα, keep it
-  simple) → `leads-mini-crm.md`. **Έτοιμο για L0 (1 PR) όταν κλείσουν τα audits.**
+  simple) → `leads-mini-crm.md`. **L0 ✅ SHIPPED** (resource + χρονολόγιο + καταστάσεις + dedupe,
+  FEATURES §7β). **Μένουν: L1** (`ConvertLeadToCustomer` + `Customer::originLead()` section
+  «Προέλευση» + `quotes.lead_id`) · **L2** (`SalesActivityReport` + `leads:notify-due` + dashboard widget).
 
 ---
 

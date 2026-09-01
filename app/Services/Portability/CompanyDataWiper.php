@@ -5,6 +5,7 @@ namespace App\Services\Portability;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\Lead;
 use App\Models\Product;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -35,6 +36,7 @@ class CompanyDataWiper
 
     /** Customers/suppliers/products — wiped unless --keep-parties. */
     public const PARTY_TABLES = [
+        'lead_activities', 'leads',
         'customer_contacts', 'customers', 'suppliers',
         'product_billing_prices', 'product_price_tiers', 'products',
     ];
@@ -104,7 +106,7 @@ class CompanyDataWiper
     /**
      * Drop `taggables` rows (the HasTags morph pivot — no company_id) linking
      * this tenant's tags to the subjects being wiped: always Invoice, plus
-     * Customer/Product unless --keep-parties. The tag vocabulary itself is kept
+     * Customer/Product/Lead unless --keep-parties. The tag vocabulary itself is kept
      * (setup); only the links to deleted records die.
      */
     private function wipeTaggables(int $companyId, bool $keepParties): void
@@ -117,6 +119,7 @@ class CompanyDataWiper
         if (! $keepParties) {
             $morphTypes[] = (new Customer)->getMorphClass();
             $morphTypes[] = (new Product)->getMorphClass();
+            $morphTypes[] = (new Lead)->getMorphClass();
         }
 
         DB::table('taggables')

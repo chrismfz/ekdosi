@@ -18,6 +18,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Leads / mini-CRM (L0)** — νέο μενού «Leads» κάτω από τους Πελάτες: υποψήφιοι πελάτες με όσα
+  στοιχεία έχουμε (μόνο επωνυμία υποχρεωτική), **Χρονολόγιο** επαφών (Τηλέφωνο/Email/Ραντεβού/Σημείωση
+  με ποιος/πότε/κατεύθυνση/αποτέλεσμα/τι ειπώθηκε + «επόμενο βήμα»), καταστάσεις Νέο → Επικοινωνήσαμε →
+  Ενδιαφέρεται → Προσφορά / Χάθηκε / Όχι τώρα / Μην ξαναενοχλήσετε (κάθε αλλαγή = γραμμή στο
+  χρονολόγιο), tabs Ανοιχτά/Νέα/Ληξιπρόθεσμα/Αδρανή, και **dedupe προειδοποίηση** («Είναι ήδη
+  πελάτης» / «Υπάρχει ήδη ως lead», κόκκινη για «μην ξαναενοχλήσετε») κατά την καταχώριση
+  (`LeadMatcher`, ΑΦΜ/email/τηλέφωνο, format-insensitive). Πίνακες `leads` + `lead_activities`,
+  `Lead`/`LeadActivity` models (TracksActivity, notes/tags/attachments), `LeadPolicy`, operator
+  permissions. Σχέδιο + gates: `docs/leads-mini-crm.md` (L1 μετατροπή σε πελάτη, L2 απολογισμός).
+
 ### Security
 - **Περιορισμός endpoint παρόχου e-τιμολόγησης (PROV-017)** — το base URL του παρόχου
   (InvoSign) ήταν ελεύθερο κείμενο και ο transport έστελνε εκεί το token + το πλήρες XML
