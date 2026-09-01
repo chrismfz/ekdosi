@@ -145,7 +145,7 @@ class Lead extends Model
     /** Προσφορές issued to this lead before (or without) conversion. */
     public function quotes(): HasMany
     {
-        return $this->hasMany(Quote::class)->orderByDesc('id');
+        return $this->hasMany(Quote::class);
     }
 
     /**

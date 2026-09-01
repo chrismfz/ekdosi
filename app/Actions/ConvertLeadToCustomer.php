@@ -8,6 +8,8 @@ use App\Models\Customer;
 use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Models\Quote;
+use App\Services\Leads\LeadMatcher;
+use App\Support\Afm;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -55,6 +57,10 @@ class ConvertLeadToCustomer
             // hook logs «from → won» from the instance it is saved through.
             $lead = $locked;
 
+            if ($existing === null) {
+                $this->assertNoLiveCustomerOwnsTheAfm($lead);
+            }
+
             $customer = $existing ?? $this->createCustomer($lead);
 
             $alreadyLinked = Lead::query()
@@ -98,6 +104,30 @@ class ConvertLeadToCustomer
 
             return $customer;
         });
+    }
+
+    /**
+     * «Ποτέ διπλός πελάτης για ένα ΑΦΜ»: the modal only PRE-SELECTS «σύνδεση»;
+     * the action is the authority. A live customer with the same ΑΦΜ means
+     * the operator must link, not create.
+     */
+    private function assertNoLiveCustomerOwnsTheAfm(Lead $lead): void
+    {
+        $afm = Afm::normalise($lead->afm);
+        if ($afm === null) {
+            return;
+        }
+
+        $owner = app(LeadMatcher::class)
+            ->find($lead->company_id, $afm, null, [], $lead->id)
+            ->directCustomers
+            ->first(fn (Customer $c): bool => Afm::normalise($c->afm) === $afm);
+
+        if ($owner !== null) {
+            throw new RuntimeException(
+                'Υπάρχει ήδη πελάτης με ΑΦΜ '.$afm.' («'.$owner->name.'») — διάλεξε «Σύνδεση με υπάρχοντα πελάτη».'
+            );
+        }
     }
 
     private function createCustomer(Lead $lead): Customer

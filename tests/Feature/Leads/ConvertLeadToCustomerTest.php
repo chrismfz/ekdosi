@@ -126,6 +126,32 @@ class ConvertLeadToCustomerTest extends TestCase
         $this->assertSame(['from' => 'quoted', 'to' => 'won'], $row->meta, 'The transition is logged from the DB truth, not the stale instance.');
     }
 
+    public function test_refuses_a_new_customer_when_a_live_one_owns_the_afm(): void
+    {
+        $t = $this->tenant();
+        $owner = Customer::create(['company_id' => $t->id, 'name' => 'Κάτοχος', 'afm' => 'EL 123456789']);
+        $lead = Lead::create(['company_id' => $t->id, 'name' => 'Διπλός', 'afm' => '123456789']);
+
+        try {
+            app(ConvertLeadToCustomer::class)($lead);
+            $this->fail('Expected a RuntimeException.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Σύνδεση', $e->getMessage());
+        }
+
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count(), 'No second legal party.');
+        $this->assertNull($lead->fresh()->converted_customer_id);
+
+        // Linking to the owner is the way through.
+        $this->assertSame($owner->id, app(ConvertLeadToCustomer::class)($lead->fresh(), $owner)->id);
+
+        // A TRASHED owner does not block a new customer.
+        $t2 = $this->tenant('t2');
+        Customer::create(['company_id' => $t2->id, 'name' => 'Σβησμένος', 'afm' => '123456789'])->delete();
+        $lead2 = Lead::create(['company_id' => $t2->id, 'name' => 'Νέος', 'afm' => '123456789']);
+        $this->assertNotNull(app(ConvertLeadToCustomer::class)($lead2));
+    }
+
     public function test_refuses_a_second_conversion(): void
     {
         $t = $this->tenant();

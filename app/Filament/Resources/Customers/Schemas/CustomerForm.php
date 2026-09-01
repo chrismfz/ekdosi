@@ -233,8 +233,6 @@ class CustomerForm
                             ])
                             ->columns(2),
 
-                        // Only meaningful when the tenant submits via PEPPOL
-                        // (Estonian companies right now; future EU expansion).
                         // Leads L1: «από πού ήρθε» — only for customers born from a lead.
                         Tab::make('Προέλευση')
                             ->icon('heroicon-o-funnel')
@@ -247,6 +245,8 @@ class CustomerForm
                                     ->content(fn (?Customer $record): HtmlString => self::originLeadSummary($record?->originLead)),
                             ]),
 
+                        // Only meaningful when the tenant submits via PEPPOL
+                        // (Estonian companies right now; future EU expansion).
                         Tab::make('PEPPOL')
                             ->visible(fn () => Filament::getTenant()?->einvoice_provider === 'ee-peppol')
                             ->schema([

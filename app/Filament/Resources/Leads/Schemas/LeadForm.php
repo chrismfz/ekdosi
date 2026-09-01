@@ -106,14 +106,16 @@ class LeadForm
                             ->columnSpanFull()
                             ->content(fn (callable $get, ?Lead $record): HtmlString => self::dedupeBanner($get, $record)),
 
-                        // Saving a lead that matches a «μην ξαναενοχλήσετε» record
+                        // CREATING a lead that matches a «μην ξαναενοχλήσετε» record
                         // is refused until the operator explicitly acknowledges it.
+                        // Edit keeps the red banner but doesn't re-ask on every save —
+                        // the lead already exists; the acknowledgement was given once.
                         Checkbox::make('acknowledge_dnc')
                             ->label('Το γνωρίζω — υπάρχει «Μην ξαναενοχλήσετε» για αυτά τα στοιχεία και συνεχίζω παρόλα αυτά.')
                             ->dehydrated(false)
                             ->columnSpanFull()
-                            ->visible(fn (callable $get, ?Lead $record): bool => self::matchFor($get, $record)->hasDoNotContact())
-                            ->accepted(fn (callable $get, ?Lead $record): bool => self::matchFor($get, $record)->hasDoNotContact())
+                            ->visible(fn (callable $get, ?Lead $record): bool => $record === null && self::matchFor($get, $record)->hasDoNotContact())
+                            ->accepted(fn (callable $get, ?Lead $record): bool => $record === null && self::matchFor($get, $record)->hasDoNotContact())
                             ->validationMessages(['accepted' => 'Υπάρχει «Μην ξαναενοχλήσετε» για αυτά τα στοιχεία — τσέκαρε ότι το γνωρίζεις για να αποθηκευτεί.']),
                     ]),
 

@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Actions\ConvertLeadToCustomer;
 use App\Actions\ConvertQuoteToInvoice;
 use App\Enums\QuoteStatus;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\Lead;
 use App\Models\Quote;
 use App\Models\QuoteLine;
 use App\Services\QuoteNumberer;
@@ -23,7 +25,9 @@ class QuoteTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private Customer $customer;
+
     private InvoiceType $type;
 
     protected function setUp(): void
@@ -127,6 +131,26 @@ class QuoteTest extends TestCase
         // Bidirectional link.
         $this->assertSame($invoice->id, $quote->fresh()->converted_invoice_id);
         $this->assertSame($quote->id, $invoice->convertedFromQuote?->id);
+    }
+
+    public function test_a_leads_quote_cannot_become_an_invoice_before_the_lead_is_converted(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Lead']);
+        $quote = $this->makeQuote(['lead_id' => $lead->id, 'status' => QuoteStatus::Accepted]);
+        QuoteLine::create(['quote_id' => $quote->id, 'product_descr' => 'X', 'qty' => 1, 'price_per_item' => 10, 'vat_percent' => 24]);
+
+        try {
+            app(ConvertQuoteToInvoice::class)($quote->fresh(), $this->type);
+            $this->fail('Expected a RuntimeException.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Μετατροπή σε πελάτη', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::where('company_id', $this->tenant->id)->count(), 'No customer-less invoice.');
+
+        // Converting the lead back-fills the quote's customer → invoice allowed.
+        $customer = app(ConvertLeadToCustomer::class)($lead);
+        $invoice = app(ConvertQuoteToInvoice::class)($quote->fresh(), $this->type);
+        $this->assertSame($customer->id, $invoice->customer_id);
     }
 
     public function test_convert_is_idempotent(): void

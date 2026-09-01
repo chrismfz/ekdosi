@@ -107,14 +107,6 @@ enum LeadStatus: string implements HasColor, HasLabel
             ->all();
     }
 
-    /** @return array<string, string> every case, for read-only display */
-    public static function allOptions(): array
-    {
-        return collect(self::cases())
-            ->mapWithKeys(fn (self $s): array => [$s->value => $s->getLabel()])
-            ->all();
-    }
-
     /** @return list<string> */
     public static function openValues(): array
     {

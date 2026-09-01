@@ -19,6 +19,7 @@ use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Models\Quote;
 use App\Models\User;
+use App\Models\VatCategory;
 use App\Services\Leads\LeadMatcher;
 use App\Services\TenantRoleProvisioner;
 use Filament\Facades\Filament;
@@ -262,6 +263,47 @@ class LeadResourceTest extends TestCase
             ->call('create')
             ->assertHasNoFormErrors();
         $this->assertSame(1, Lead::where('name', 'Ξανά')->count());
+    }
+
+    public function test_editing_an_acknowledged_lead_does_not_re_ask_for_the_tick(): void
+    {
+        Lead::create(['company_id' => $this->tenant->id, 'name' => 'Ενοχλημένος', 'email' => 'no@thanks.gr', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'το ζήτησε']);
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Ξανά', 'email' => 'no@thanks.gr']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->assertSee('ΜΗΝ τους ξαναενοχλήσουμε')
+            ->fillForm(['phone' => '2310123456'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('2310123456', $lead->fresh()->phone);
+    }
+
+    public function test_quote_created_from_a_lead_end_to_end(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Καφενείο', 'status' => LeadStatus::Contacted]);
+        // The line's ΦΠΑ % select is fed by the tenant's VAT categories.
+        VatCategory::create(['company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+
+        Livewire::withQueryParams(['lead' => $lead->id])
+            ->test(CreateQuote::class)
+            ->fillForm([
+                'subject' => 'Hosting',
+                'lines' => [
+                    ['product_descr' => 'Hosting 1 έτος', 'qty' => 1, 'price_per_item' => 100, 'vat_percent' => '24.00'],
+                ],
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $quote = Quote::query()->where('company_id', $this->tenant->id)->where('lead_id', $lead->id)->first();
+        $this->assertNotNull($quote, 'lead_id persisted through the real create path');
+        $this->assertSame('Καφενείο', $quote->company_name);
+
+        $lead->refresh();
+        $this->assertSame(LeadStatus::Quoted, $lead->status);
+        $row = $lead->timeline()->where('type', LeadActivityType::Quote->value)->first();
+        $this->assertSame($quote->id, $row->meta['quote_id']);
     }
 
     public function test_creating_a_lead_that_matches_a_customer_records_the_source(): void
