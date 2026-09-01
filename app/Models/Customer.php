@@ -142,7 +142,10 @@ class Customer extends Model
      */
     public function originLead(): HasOne
     {
-        return $this->hasOne(Lead::class, 'converted_customer_id');
+        // withTrashed: the link is a fact of history — a soft-deleted lead must
+        // still show in «Προέλευση» / «Από lead» and still block a second link
+        // (ConvertLeadToCustomer checks without scopes).
+        return $this->hasOne(Lead::class, 'converted_customer_id')->withTrashed();
     }
 
     /**

@@ -20,6 +20,7 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
+use WeakMap;
 
 class CustomerForm
 {
@@ -238,7 +239,9 @@ class CustomerForm
                         // Leads L1: «από πού ήρθε» — only for customers born from a lead.
                         Tab::make('Προέλευση')
                             ->icon('heroicon-o-funnel')
-                            ->visible(fn (?Customer $record): bool => $record?->originLead()->exists() ?? false)
+                            // `$record->originLead` (the relation, not ->exists()) loads once
+                            // and is cached on the model for the Placeholder below.
+                            ->visible(fn (?Customer $record): bool => $record?->originLead !== null)
                             ->schema([
                                 Placeholder::make('origin_lead')
                                     ->hiddenLabel()
@@ -343,10 +346,25 @@ class CustomerForm
      * «Ήρθε από lead #N (πηγή …) · κυνηγός … · πρώτη επαφή … · μετατροπή … (X ημέρες,
      * N τηλέφωνα, M emails)» + link to the lead's full timeline.
      */
+    /**
+     * Memo keyed by the Lead INSTANCE (WeakMap — dies with the object, never
+     * leaks across requests/tests); `$record->originLead` is the same cached
+     * instance on every re-render of the form within a request.
+     *
+     * @var WeakMap<Lead, HtmlString>|null
+     */
+    private static ?WeakMap $originSummaryMemo = null;
+
     private static function originLeadSummary(?Lead $lead): HtmlString
     {
         if ($lead === null) {
             return new HtmlString('');
+        }
+
+        self::$originSummaryMemo ??= new WeakMap;
+
+        if (isset(self::$originSummaryMemo[$lead])) {
+            return self::$originSummaryMemo[$lead];
         }
 
         $counts = $lead->timeline()->getQuery()->reorder()
@@ -354,8 +372,9 @@ class CustomerForm
             ->groupBy('type')
             ->pluck('n', 'type');
 
+        // Carbon 3 diffInDays() is a float — whole days only.
         $days = $lead->converted_at && $lead->created_at
-            ? $lead->created_at->diffInDays($lead->converted_at)
+            ? (int) floor($lead->created_at->diffInDays($lead->converted_at))
             : null;
 
         $bits = array_filter([
@@ -369,7 +388,7 @@ class CustomerForm
 
         $url = LeadResource::getUrl('edit', ['record' => $lead]);
 
-        return new HtmlString(
+        return self::$originSummaryMemo[$lead] = new HtmlString(
             '<div style="font-size:.875rem;line-height:1.6">'
             .'<div style="font-weight:600">Ήρθε από lead <a href="'.e($url).'" style="text-decoration:underline">#'.$lead->id.' — '.e($lead->name).'</a></div>'
             .'<ul style="margin:.25rem 0 0;padding-left:1.1rem">'

@@ -322,6 +322,27 @@ class LeadResourceTest extends TestCase
             ->assertSee('ΠΡ-7');
     }
 
+    public function test_quote_lead_id_from_another_tenant_is_dropped_on_create(): void
+    {
+        $other = Company::create(['name' => 'B', 'slug' => 'b-'.uniqid(), 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off']);
+        $foreign = Lead::create(['company_id' => $other->id, 'name' => 'Ξένο']);
+
+        $this->assertNull(CreateQuote::tenantLeadId($foreign->id));
+        $this->assertNull(CreateQuote::tenantLeadId(999999));
+        $mine = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Δικό μας']);
+        $this->assertSame($mine->id, CreateQuote::tenantLeadId($mine->id));
+    }
+
+    public function test_origin_survives_a_soft_deleted_lead(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Σβησμένο μετά']);
+        $customer = app(ConvertLeadToCustomer::class)($lead);
+        $lead->delete();
+
+        $this->assertSame($lead->id, $customer->fresh()->originLead?->id);
+        $this->assertSame(1, Customer::query()->whereHas('originLead')->where('company_id', $this->tenant->id)->count());
+    }
+
     public function test_note_requires_a_body(): void
     {
         $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);

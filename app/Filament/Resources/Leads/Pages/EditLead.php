@@ -22,6 +22,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Throwable;
+use WeakMap;
 
 /**
  * Lead edit page = the lead's «cockpit»: the form on top, the Χρονολόγιο
@@ -206,9 +207,24 @@ class EditLead extends EditRecord
         return $data;
     }
 
+    /**
+     * Memo keyed by the record INSTANCE (WeakMap: dies with the object, so it
+     * can't leak across requests/workers or tests) — the modal asks twice
+     * (Radio + Select defaults) and the matcher runs two REPLACE()-heavy scans.
+     *
+     * @var WeakMap<Lead, int|null>|null
+     */
+    private static ?WeakMap $matchMemo = null;
+
     /** The customer the dedupe matcher points at (ΑΦΜ / email / phone), if any. */
     private static function matchingCustomerId(Lead $record): ?int
     {
+        self::$matchMemo ??= new WeakMap;
+
+        if (isset(self::$matchMemo[$record])) {
+            return self::$matchMemo[$record];
+        }
+
         $match = app(LeadMatcher::class)->find(
             $record->company_id,
             $record->afm,
@@ -217,7 +233,7 @@ class EditLead extends EditRecord
             $record->id,
         );
 
-        return $match->customers->first()?->id;
+        return self::$matchMemo[$record] = $match->customers->first()?->id;
     }
 
     private static function requiresReason(mixed $status): bool

@@ -58,7 +58,7 @@ class CreateQuote extends CreateRecord
             return;
         }
 
-        $this->form->fill(array_merge($this->data ?? [], [
+        $prefill = [
             'lead_id' => $lead->id,
             'company_name' => $lead->name,
             'vat_no' => $lead->afm,
@@ -67,7 +67,40 @@ class CreateQuote extends CreateRecord
             'city' => $lead->city,
             'postcode' => $lead->postcode,
             'country' => $lead->country ?: 'GR',
-        ]));
+        ];
+
+        // Only these paths — never re-hydrate the whole form (the lines Repeater).
+        $this->form->fillPartially($prefill, array_keys($prefill));
+    }
+
+    /**
+     * `lead_id` arrives from a Hidden input — never trust it: keep it only when
+     * it names a lead of THIS tenant (a tampered payload is nulled, not saved).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        $data['lead_id'] = self::tenantLeadId($data['lead_id'] ?? null);
+
+        return $data;
+    }
+
+    public static function tenantLeadId(mixed $id): ?int
+    {
+        $id = (int) $id;
+        if ($id <= 0) {
+            return null;
+        }
+
+        $exists = Lead::query()
+            ->withTrashed()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->whereKey($id)
+            ->exists();
+
+        return $exists ? $id : null;
     }
 
     private function leadFromRequest(): ?Lead

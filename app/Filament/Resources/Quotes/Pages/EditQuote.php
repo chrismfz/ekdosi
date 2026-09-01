@@ -7,6 +7,7 @@ use App\Services\QuoteTotals;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Support\Enums\Width;
 
 /**
  * Edit a quote. Allowed any time UNTIL it's been converted to an invoice —
@@ -20,9 +21,9 @@ class EditQuote extends EditRecord
      * Full-width content so the Excel-style lines table uses the whole screen
      * (the default centred container squeezed the columns).
      */
-    public function getMaxContentWidth(): \Filament\Support\Enums\Width
+    public function getMaxContentWidth(): Width
     {
-        return \Filament\Support\Enums\Width::Full;
+        return Width::Full;
     }
 
     public function mount(int|string $record): void
@@ -44,6 +45,21 @@ class EditQuote extends EditRecord
         return [
             DeleteAction::make(),
         ];
+    }
+
+    /**
+     * Same guard as CreateQuote: the Hidden `lead_id` must belong to this tenant.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        if (array_key_exists('lead_id', $data)) {
+            $data['lead_id'] = CreateQuote::tenantLeadId($data['lead_id']);
+        }
+
+        return $data;
     }
 
     /** Recompute totals after the lines are saved. */
