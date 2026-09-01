@@ -1,7 +1,7 @@
 # Leads / mini-CRM — αναλυτικό design (pre-build)
 
-> **STATUS: DESIGN — pre-build, NO code yet.** Πλάνο + ανάλυση για να «υπάρχει κάπου»
-> μέχρι να κλείσουν τα audits / bug-fix sessions. Twin των `docs/domains/README.md` /
+> **STATUS: DESIGN — αποφάσεις κλειδωμένες (2026-09-01), έτοιμο για L0 όταν ανοίξει χώρος.**
+> Πλάνο + ανάλυση για να «υπάρχει κάπου» μέχρι να κλείσουν τα audits / bug-fix sessions. Twin των `docs/domains/README.md` /
 > `docs/payment-connectors.md` (design-first, gates, build-όπου-θες).
 >
 > **Γείωση:** κάθε αναφορά σε υπάρχον ekdosi symbol παρακάτω είναι πραγματική (ελέγχθηκε
@@ -19,7 +19,8 @@
 ποιος τον έφερε, πότε), και μία **σελίδα απολογισμού ανά χειριστή/εβδομάδα** (πόσα τηλέφωνα, πόσα
 emails, πόσες μετατροπές) — η απάντηση στο «δούλεψε ο άνθρωπος;». Πατά σε ό,τι ήδη υπάρχει
 (`BelongsToCompany`, `TracksActivity`, `HasInternalNotes`, `HasTags`, `HasAttachments`, Quotes χωρίς
-πελάτη, DB-notification reminders, `TenantRoleProvisioner`). **Ό,τι ΔΕΝ είναι πωλήσεις (email sync,
+πελάτη, DB-notification reminders). **Keep it simple:** ρόλος = ο υπάρχων `operator`, όλοι βλέπουν
+όλα, ελεύθερη επεξεργασία, μόνο χειροκίνητη καταχώρηση. **Ό,τι ΔΕΝ είναι πωλήσεις (email sync,
 kanban, lead scoring, shared `Contact`) μένει εκτός v1.** Χτίζεται σε **4 gates L0–L3**.
 
 ---
@@ -37,18 +38,21 @@ kanban, lead scoring, shared `Contact`) μένει εκτός v1.** Χτίζετ
 **Τι ΔΕΝ είναι:** δεν αγγίζει money-path, myDATA, παραστατικά. Δεν αντικαθιστά τις
 `customer_contacts`. Δεν συγχρονίζει mailbox. Δεν είναι pipeline με drag-drop (v1).
 
-**Κλειδωμένες προτάσεις (προς επιβεβαίωση από τον ιδιοκτήτη — βλ. §9):**
+**Κλειδωμένες αποφάσεις (Q&A με τον ιδιοκτήτη 2026-09-01 — βλ. §9):**
 
-| Θέμα | Πρόταση |
+| Θέμα | Απόφαση |
 |---|---|
 | Οντότητα | Ξεχωριστός πίνακας `leads` (ΟΧΙ flag `is_lead` στους `customers`) — οι πελάτες έχουν money-semantics (Καρτέλα, receivables, sync από myDATA) που ένας υποψήφιος δεν πρέπει να «μολύνει» |
 | Χρονολόγιο | Ξεχωριστός πίνακας `lead_activities` (ΟΧΙ reuse του `notes`) — θέλει τύπο/κατεύθυνση/αποτέλεσμα/ημερομηνία για να βγαίνει το reporting· τα free-form `HasInternalNotes` μένουν ΚΑΙ αυτά διαθέσιμα |
 | Δεσμός lead↔customer | Μία στήλη `leads.converted_customer_id` (unique) — ίδιο μοτίβο με `quotes.converted_invoice_id` / `Invoice::convertedFromQuote()`: μία εγγραφή, δύο κατευθύνσεις, καμία νέα στήλη στους `customers` |
 | Μετατροπή | Action `ConvertLeadToCustomer` σε transaction, idempotent· ή **σύνδεση με υπάρχοντα** πελάτη αν ταιριάζει ΑΦΜ (ποτέ διπλός πελάτης) |
-| Ρόλος | Νέος tenant-ρόλος **`sales`** (Leads πλήρως + Customer View + Quote Create) — ο κυνηγός ΔΕΝ είναι operator και δεν βλέπει Καρτέλες/υπόλοιπα |
+| Ρόλος | **Ο υπάρχων `operator`** — κανένας νέος ρόλος. Leads = ένα ακόμα resource στο `OPERATOR_PERMISSION_MAP` |
 | Reporting | Read-only page «Απολογισμός πωλήσεων» πάνω στο `lead_activities` (group by user × εβδομάδα) — ΟΧΙ νέος πίνακας |
 | Reminders | `leads.next_action_at` + scheduled `leads:notify-due` → Filament DB notification στον `assigned_user_id` (μοτίβο `invoices:notify-overdue` / `ai:dispatch-reminders`) |
-| Immutability | Γραμμές χρονολογίου: edit **μόνο από τον συντάκτη** και **μόνο 24h**· delete μόνο `company_admin`· όλα μέσω `TracksActivity` — για να έχει νόημα ως λογοδοσία |
+| Immutability | **Ελεύθερη** επεξεργασία/διαγραφή γραμμών χρονολογίου (καμία policy) — η λογοδοσία καλύπτεται από το `TracksActivity` (ποιος άλλαξε/έσβησε τι φαίνεται στο «Ιστορικό» + `ActivityFeed`) |
+| Ορατότητα | **Όλοι βλέπουν όλα** τα leads του tenant — κάποιος συμπληρώνει επικοινωνία πάνω σε lead άλλου όταν λείπει/είναι σε άδεια. Το `assigned_user_id` είναι πληροφορία, όχι φραγή |
+| Εταιρείες | **Παντού** (multi-tenant, `company_id`) — χωρίς toggle ανά εταιρεία |
+| Είσοδος | **Μόνο χειροκίνητα** — χωρίς CSV/Excel import (όχι τώρα) |
 
 ---
 
@@ -124,8 +128,8 @@ new ──► contacted ──► interested ──► quoted ──► won  (= 
   Χάθηκε · Όχι τώρα · **Μην ξαναενοχλήσετε**.
 - `won` γράφεται ΜΟΝΟ από το `ConvertLeadToCustomer` (όχι χειροκίνητα) — ίδια αρχή με το
   `local_status` που το γράφει ο submitter.
-- `lost` → `contacted` επιτρέπεται (re-open)· `do_not_contact` δεν ξανανοίγει από `sales`, μόνο
-  από `company_admin` (με activity row).
+- `lost` / `not_now` / `do_not_contact` → `contacted` επιτρέπεται (re-open) — απλώς γράφει
+  `status_change` γραμμή στο χρονολόγιο· το `do_not_contact` ζητά επιβεβαίωση στο modal.
 - Κάθε αλλαγή status = αυτόματη `status_change` γραμμή στο χρονολόγιο (observer στο `Lead::updated`
   όταν `isDirty('status')`) — ώστε το χρονολόγιο να είναι η πλήρης ιστορία, όχι μόνο οι επαφές.
 
@@ -183,16 +187,15 @@ unit-testable, ίδια normalisation τηλεφώνου/ΑΦΜ με ό,τι χ�
 - **Λίστα:** tabs ανά status (μοτίβο `ListCustomers`) + «Όλα» + «**Ληξιπρόθεσμα**»
   (`next_action_at < now`, όχι won/lost/dnc) + «**Αδρανή**» (`last_activity_at < now-14d`).
   Στήλες: Επωνυμία · Επαφή · Κατάσταση (badge) · Χειριστής · Τελευταία επαφή (diff-for-humans) ·
-  Επόμενο βήμα (κόκκινο αν πέρασε) · #επαφών · Πηγή · tags. Φίλτρα: χειριστής (default «εγώ» για
-  ρόλο `sales`), πηγή, tags, «ήδη πελάτες». Global search: `name`, `afm`, `email`, `phone`.
+  Επόμενο βήμα (κόκκινο αν πέρασε) · #επαφών · Πηγή · tags. Φίλτρα: χειριστής, πηγή, tags, «ήδη πελάτες». Global search: `name`, `afm`, `email`, `phone`.
 - **Φόρμα (create/edit):** ένα Section «Στοιχεία» (όλα optional εκτός επωνυμίας) + Section
   «Παρακολούθηση» (status, χειριστής, πηγή, σύσταση από, επόμενο βήμα, lost_reason conditional).
   Dedupe banner (§4) ως `Placeholder` live.
 - **Χρονολόγιο:** `ActivitiesRelationManager` πάνω στην edit σελίδα, ταξινομημένο `happened_at desc`,
   **quick-add header actions** «📞 Τηλέφωνο» / «✉ Email» / «🤝 Ραντεβού» / «📝 Σημείωση» — κάθε ένα
   modal με προ-επιλεγμένο `type`, `direction`, `outcome`, `happened_at` (=τώρα), `body`, και
-  προαιρετικό «Επόμενο βήμα στις …» που γράφει `lead.next_action_at`. Χωρίς edit εκτός 24h/συντάκτη
-  (policy). Μία γραμμή = ένα γεγονός· «στυλ calendar απλό σε γραμμές».
+  προαιρετικό «Επόμενο βήμα στις …» που γράφει `lead.next_action_at`. Ελεύθερη επεξεργασία/διαγραφή.
+  Μία γραμμή = ένα γεγονός· «στυλ calendar απλό σε γραμμές».
 - **Header actions edit:** «Αλλαγή κατάστασης» (select + λόγος), «**Μετατροπή σε πελάτη**»
   (§5, hidden αν won), «Νέα προσφορά» (L1 — ανοίγει `CreateQuote` με `lead_id` + prefill).
 - Reuse: `InternalNotesRelationManager`, `AttachmentsRelationManager`, `ActivityLogRelationManager`
@@ -207,7 +210,7 @@ unit-testable, ίδια normalisation τηλεφώνου/ΑΦΜ με ό,τι χ�
 ## 7. Απολογισμός — «δούλεψε ο άνθρωπος;»
 
 Page **«Απολογισμός πωλήσεων»** (`app/Filament/Pages/SalesActivityReport.php`, perm
-`View:SalesActivityReport`, ΟΧΙ για `sales`): read-only πίνακας πάνω στο `lead_activities` +
+`View:SalesActivityReport` — `company_admin`+ by default, δίνεται και σε operator αν θέλουμε): read-only πίνακας πάνω στο `lead_activities` +
 `leads`, φίλτρο περιόδου (presets: σήμερα / εβδομάδα / μήνας — reuse των period presets του
 Βιβλίου) × χειριστή:
 
@@ -224,38 +227,30 @@ Page **«Απολογισμός πωλήσεων»** (`app/Filament/Pages/SalesA
 
 ---
 
-## 8. Ρόλοι & δικαιώματα
+## 8. Ρόλοι & δικαιώματα (απλά)
 
-- `shield:generate` → `ViewAny/View/Create/Update/Delete:Lead`, `…:LeadActivity` (αν γίνει resource —
-  αλλιώς μόνο μέσω relation manager του Lead), `View:SalesActivityReport`.
-- **`OPERATOR_PERMISSION_MAP`**: `'Lead' => ['ViewAny','View','Create','Update']` (οι υπάρχοντες
-  operators βλέπουν/γράφουν leads).
-- **ΝΕΟΣ ρόλος `sales`** στο `TenantRoleProvisioner` (`SALES_PERMISSION_MAP`, ίδιο explicit-map
-  μοτίβο): `Lead` πλήρως (χωρίς Delete), `Customer` → `ViewAny`,`View` (να μη δημιουργεί διπλούς
-  με το χέρι — μόνο μέσω μετατροπής), `Quote` → `ViewAny`,`View`,`Create`,`Update`, τίποτα από
-  Invoice/Payment/Καρτέλα/Reports. Το `CustomerLedger` page και τα money widgets ήδη γκετάρουν σε
-  δικά τους permissions → δεν τα βλέπει. Provision στο ίδιο post-deploy βήμα
-  (`shield:sync-super-admin` / role-picker).
-- Policy `LeadActivityPolicy::update`: `user_id === auth()->id() && created_at > now()-24h`·
-  `delete`: `company_admin`+.
-- `assigned_user_id` picker: μόνο users με ρόλο στο tenant (query του υπάρχοντος user-role join).
+- `shield:generate` → `ViewAny/View/Create/Update/Delete:Lead` + `View:SalesActivityReport`. Οι
+  γραμμές χρονολογίου ζουν ΜΟΝΟ μέσω του relation manager του Lead (κανένα δικό τους resource/perm).
+- **`OPERATOR_PERMISSION_MAP`**: `'Lead' => ['ViewAny','View','Create','Update']` — ο κυνηγός παίρνει
+  τον υπάρχοντα ρόλο `operator`, τέλος. Ο `company_admin` τα έχει όλα ούτως ή άλλως.
+- Καμία policy ορατότητας/ιδιοκτησίας: το tenant scoping (`CompanyScope`) είναι το μόνο όριο.
+- `assigned_user_id` picker: users με ρόλο στο tenant (query του υπάρχοντος user-role join).
+- Post-deploy: `shield:generate` + `shield:sync-super-admin` (όπως κάθε νέο resource).
 
 ---
 
-## 9. Ανοιχτές ερωτήσεις (θέλουν απόφαση ιδιοκτήτη πριν το L0)
+## 9. Αποφάσεις ιδιοκτήτη (2026-09-01) — κλειδωμένες
 
-1. **Ρόλος:** ξεχωριστός `sales` (πρόταση) ή απλά `operator`; Ο `operator` βλέπει τιμολόγια,
-   πληρωμές, Καρτέλες — θέλουμε να τα βλέπει ο εξωτερικός κυνηγός;
-2. **Ορατότητα leads μεταξύ χειριστών:** όλοι βλέπουν όλα (πρόταση — ο ιδιοκτήτης θέλει την
-   πλήρη εικόνα) ή ο `sales` μόνο τα δικά του; (Αν το δεύτερο: query scope στο resource, όχι policy.)
-3. **Ποιες εταιρείες:** μόνο MyIP ή και οι άλλες δύο; (Τεχνικά αδιάφορο — `company_id` — αλλά
-   επηρεάζει το αν το μενού εμφανίζεται παντού· μπορεί να γίνει `companies.enable_leads` toggle
-   όπως το `enable_domain_management` του domains design.)
-4. **Ονόματα καταστάσεων / πηγών:** τα παραπάνω είναι πρόταση — αλλάζουν ελεύθερα πριν το L0
-   (μετά = migration).
-5. **Immutability χρονολογίου:** 24h/συντάκτης (πρόταση) ή πλήρως append-only;
-6. **Bulk import:** θα φέρει ο άνθρωπος λίστα (Excel) να τη «φορτώσουμε»; Αν ναι, το L3 CSV import
-   ανεβαίνει σε L0.5 (και κουμπώνει με τον «Generic CSV importer» του BACKLOG).
+| # | Ερώτηση | Απόφαση |
+|---|---|---|
+| 1 | Ρόλος | **`operator`** — όχι νέος ρόλος `sales` |
+| 2 | Ορατότητα leads μεταξύ χειριστών | **Όλοι βλέπουν όλα** (κάλυψη αδειών/απουσιών) |
+| 3 | Ποιες εταιρείες | **Οποιαδήποτε** — multi-tenant, χωρίς toggle |
+| 4 | Ονόματα καταστάσεων/πηγών | Τα προτεινόμενα· δεν είμαστε production, breaking changes/migrations δεν ενοχλούν |
+| 5 | Immutability χρονολογίου | **Ελεύθερο** — καμία policy, audit μέσω `TracksActivity` |
+| 6 | Bulk import (Excel) | **Όχι τώρα** — μόνο χειροκίνητη καταχώρηση |
+
+Γενική οδηγία: **keep things simple.**
 
 ---
 
@@ -263,13 +258,13 @@ Page **«Απολογισμός πωλήσεων»** (`app/Filament/Pages/SalesA
 
 | Gate | Παραδοτέο | Μέγεθος |
 |---|---|---|
-| **L0 — MVP** | Migrations (`leads`, `lead_activities`) · enums · `Lead`/`LeadActivity` models + observer (`last_activity_at`, auto `status_change`) · `LeadResource` (λίστα/tabs/φόρμα) · `ActivitiesRelationManager` με τα 4 quick-add · dedupe warning (§4, `LeadMatcher` + tests) · Shield perms + `OPERATOR_PERMISSION_MAP` · `FEATURES.md` §7β + CHANGELOG | 1 PR |
+| **L0 — MVP** | Migrations (`leads`, `lead_activities`) · enums · `Lead`/`LeadActivity` models + observer (`last_activity_at`, auto `status_change`) · `LeadResource` (λίστα/tabs/φόρμα) · `ActivitiesRelationManager` με τα 4 quick-add · dedupe warning (§4, `LeadMatcher` + tests) · Shield perms + `OPERATOR_PERMISSION_MAP` · `FEATURES.md` §7β + CHANGELOG + `shield:generate` | 1 PR |
 | **L1 — Μετατροπή** | `ConvertLeadToCustomer` (+ «σύνδεση με υπάρχοντα») · `Customer::originLead()` + section «Προέλευση» · `quotes.lead_id` + «Νέα προσφορά» από lead + prefill · feature test: convert → customer created, link both ways, idempotent, tags copied, quotes re-pointed | 1 PR |
-| **L2 — Λογοδοσία** | Ρόλος `sales` · `SalesActivityReport` page + CSV · `leads:notify-due` (scheduled, gated flag, DB notification) · dashboard widget · προαιρετικό weekly digest email | 1 PR |
-| **L3 — Προαιρετικά** | CSV import leads (column-map + dry-run) · αποστολή email ΑΠΟ τον lead (template μέσω `MailTemplateRenderer`/`TenantMailerFactory`, auto-log γραμμή `email/sent` — μοτίβο `QuoteMailLog`) · kanban όψη · AI «Βοηθός» read tool `lead_summary` (ίδιο grounding pattern) | κατά ζήτηση |
+| **L2 — Λογοδοσία** | `SalesActivityReport` page + CSV export · `leads:notify-due` (scheduled, gated flag, DB notification) · dashboard widget · προαιρετικό weekly digest email | 1 PR |
+| **L3 — Προαιρετικά (όχι τώρα)** | αποστολή email ΑΠΟ τον lead (template μέσω `MailTemplateRenderer`/`TenantMailerFactory`, auto-log γραμμή `email/sent` — μοτίβο `QuoteMailLog`) · kanban όψη · AI «Βοηθός» read tool `lead_summary` (ίδιο grounding pattern) | κατά ζήτηση |
 
 Tests που πρέπει να υπάρχουν από L0: `LeadMatcherTest` (ΑΦΜ/email/phone normalisation, match σε
-customer vs lead vs dnc), `LeadStatusTransitionTest` (won μόνο μέσω action, dnc terminal για sales),
+customer vs lead vs dnc), `LeadStatusTransitionTest` (won μόνο μέσω action, auto status_change row),
 `LeadActivityObserverTest` (`last_activity_at` cache, auto status_change row). Από L1:
 `ConvertLeadToCustomerTest`. Money-consistency test **δεν επηρεάζεται** (καμία money στήλη).
 
@@ -280,7 +275,8 @@ customer vs lead vs dnc), `LeadStatusTransitionTest` (won μόνο μέσω acti
 - **Όχι shared `Contact` entity** — ήδη DEFERRED στο BACKLOG («ERP-parity ideas»)· ο lead έχει
   flat `contact_person`/`phone`/`email` όπως είχε ο legacy πελάτης. Αν αργότερα γίνει το shared
   Contact, ο lead απλά αποκτά relation.
-- **Όχι IMAP/email sync, όχι click-to-call, όχι lead scoring, όχι external CRM sync.**
+- **Όχι IMAP/email sync, όχι click-to-call, όχι lead scoring, όχι external CRM sync, όχι CSV import
+  (όχι τώρα), όχι νέος ρόλος, όχι policies ορατότητας/ιδιοκτησίας.**
 - **Όχι** `is_lead` flag στους `customers` (§1) και **όχι** reuse του `notes` για το χρονολόγιο.
 - **Όχι** επανα-χρήση του `ai_pending_actions` reminder ως lead-reminder — είναι AI-confirm staging·
   ο lead θέλει απλό `next_action_at` + scheduled sweeper.
