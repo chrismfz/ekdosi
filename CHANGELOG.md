@@ -41,6 +41,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   εκπέμπουν το ίδιο σωστό taxType 4).
 
 ### Fixed
+- **Πιστωτικό (5.1) πάνω σε παραστατικό εκδομένο μέσω παρόχου (MYD-008)** — ο κοινός
+  resolver `AadeInvoiceDocument::originalInsertMark()` έβρισκε το MARK του πρωτότυπου μόνο
+  από `INSERT` rows, οπότε ένα συσχετιζόμενο πιστωτικό πάνω σε παραστατικό που εκδόθηκε
+  μέσω παρόχου (`PROVIDER_INSERT`) αποτύγχανε να συσχετιστεί. Πλέον διαβάζει `INSERT`
+  **και** `PROVIDER_INSERT` (ίδιος κανόνας με την ακύρωση ΔΑ), ώστε provider-issued
+  originals να παραμένουν διορθώσιμα· τα απορριφθέντα (`PROVIDER_REJECTED`/`PROVIDER_FAILED`,
+  mark=null) εξαιρούνται, και το lookup του πρωτότυπου είναι tenant-scoped (δεν λύνει ποτέ
+  παραστατικό άλλης εταιρείας). Το 5.2 (μη συσχετιζόμενο) δεν καλεί καθόλου τον resolver.
 - **Αφαίρεση παραπλανητικού «ΤΔΑ» από το seed (MYD-002)** — ο seeded τύπος «ΤΔΑ /
   Δελτίο Αποστολής» υποσχόταν combined τιμολόγιο+δελτίο, αλλά εκδιδόταν ως σκέτο 1.1
   (χωρίς `isDeliveryNote`/movement data). Αφαιρέθηκε από το `INVOICE_TYPE_SEED` (fresh

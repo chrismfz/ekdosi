@@ -1189,6 +1189,109 @@ class MyDataSubmitterSafetyTest extends TestCase
         );
     }
 
+    public function test_correlated_credit_5_1_resolves_a_direct_insert_mark(): void
+    {
+        // Baseline: a 5.1 credit correlates to a directly-filed original via its
+        // INSERT MARK (regression guard for MYD-008).
+        $original = $this->makeInvoice(code: 10);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $original->id,
+            'mark' => '400000000000111',
+            'mydata_action' => 'INSERT',
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($this->makeCorrelatedCredit($original, 1))->request;
+
+        $this->assertStringContainsString('<correlatedInvoices>', $xml);
+        $this->assertStringContainsString('400000000000111', $xml);
+    }
+
+    public function test_correlated_credit_5_1_resolves_a_provider_insert_mark(): void
+    {
+        // MYD-008: a 5.1 credit against a PROVIDER-issued original must correlate via
+        // its PROVIDER_INSERT MARK, exactly like a direct INSERT — the resolver reads
+        // both actions so a provider-issued document stays correctable.
+        $original = $this->makeInvoice(code: 20);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $original->id,
+            'mark' => '400000000000222',
+            'mydata_action' => 'PROVIDER_INSERT',
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($this->makeCorrelatedCredit($original, 2))->request;
+
+        $this->assertStringContainsString('<correlatedInvoices>', $xml);
+        $this->assertStringContainsString('400000000000222', $xml);
+    }
+
+    public function test_correlated_credit_5_1_ignores_a_rejected_provider_attempt(): void
+    {
+        // A failed/rejected provider attempt (PROVIDER_REJECTED, null mark) must NEVER
+        // be accepted as the original MARK (MYD-008 acceptance).
+        $original = $this->makeInvoice(code: 30);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $original->id,
+            'mark' => null,
+            'mydata_action' => 'PROVIDER_REJECTED',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('#INSERT/PROVIDER_INSERT MARK#');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($this->makeCorrelatedCredit($original, 3));
+    }
+
+    public function test_correlated_credit_5_1_refuses_a_cross_tenant_original(): void
+    {
+        // Same-tenant enforcement (MYD-008): a credited_invoice_id pointing at another
+        // tenant's invoice must not resolve its MARK — the CompanyScope is a no-op
+        // off-request, so the explicit company filter is what blocks the leak.
+        $other = Company::create([
+            'name' => 'Other co', 'slug' => 'other-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off', 'afm' => '999888777',
+        ]);
+        $otherType = InvoiceType::create([
+            'company_id' => $other->id, 'code' => 'TPY', 'name' => 'x', 'invcount' => 1, 'mydata_type' => '1.1',
+        ]);
+        $otherCustomer = Customer::create(['company_id' => $other->id, 'name' => 'x', 'afm' => '111222333']);
+        $foreign = Invoice::create([
+            'company_id' => $other->id, 'invcode' => 'TPY99', 'code' => 99,
+            'invoice_type_id' => $otherType->id, 'customer_id' => $otherCustomer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        MyDataMark::create([
+            'company_id' => $other->id, 'invoice_id' => $foreign->id,
+            'mark' => '400000000000999', 'mydata_action' => 'INSERT',
+        ]);
+
+        // The credit is created in $this->tenant but points at the foreign original.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/missing original invoice/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($this->makeCorrelatedCredit($foreign, 4));
+    }
+
+    public function test_correlated_credit_5_1_refuses_a_non_numeric_mark(): void
+    {
+        // Contract guard (MYD-008 review): the resolver feeds addCorrelatedInvoice((int)…),
+        // so a non-numeric MARK must fail loudly, never be silently truncated to a wrong doc.
+        $original = $this->makeInvoice(code: 40);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $original->id,
+            'mark' => 'NOT-A-NUMBER',
+            'mydata_action' => 'PROVIDER_INSERT',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/non-numeric filing MARK/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($this->makeCorrelatedCredit($original, 5));
+    }
+
     public function test_rejected_submission_throws_mydatarejected_and_records_forensic_row(): void
     {
         $invoice = $this->makeInvoice();
@@ -1420,5 +1523,38 @@ XML;
             'issued_at' => now(),
             'header_discount_percent' => 0,
         ]);
+    }
+
+    /**
+     * A 5.1 (correlated) credit note against $original, in $this->tenant. The 5.1
+     * type is shared across calls; the credited_invoice_id drives correlation.
+     */
+    private function makeCorrelatedCredit(Invoice $original, int $code): Invoice
+    {
+        $creditType = InvoiceType::firstOrCreate(
+            ['company_id' => $this->tenant->id, 'code' => 'PIS'],
+            ['name' => 'Πιστωτικό Συσχ.', 'invcount' => 1, 'mydata_type' => '5.1', 'is_credit' => true],
+        );
+
+        $credit = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'PIS'.$code,
+            'code' => $code,
+            'invoice_type_id' => $creditType->id,
+            'customer_id' => $this->customer->id,
+            'issued_at' => now(),
+            'header_discount_percent' => 0,
+            'credited_invoice_id' => $original->id,
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $credit->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'net_price' => 100,
+            'gross_price' => 124,
+        ]);
+
+        return $credit->fresh('lines');
     }
 }

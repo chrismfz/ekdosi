@@ -492,14 +492,26 @@ class AadeInvoiceDocument
     }
 
     /**
-     * The original invoice's INSERT MARK, for correlating a credit note.
-     * Mirrors cancel()'s "read MARK from the audit history, not the
-     * mirror column" reasoning. Refuses if the original was never filed
-     * (can't correlate a credit to an unfiled document).
+     * The original invoice's filing MARK, for correlating a credit note (5.1).
+     * Resolves from BOTH a direct INSERT and a provider PROVIDER_INSERT row, so a
+     * credit against a provider-issued original correlates exactly like one against
+     * a directly-filed original (MYD-008). This is the ONE shared resolver used by
+     * both the direct (MyDataSubmitter) and provider (GrProviderSubmitter) flows —
+     * both build through AadeInvoiceDocument. Mirrors cancel()'s "read the MARK from
+     * the audit history, not the mirror column" reasoning and the delivery-note
+     * cancel resolver's INSERT/PROVIDER_INSERT rule. `whereNotNull('mark')` excludes
+     * rejected/failed attempts (PROVIDER_REJECTED / PROVIDER_FAILED carry a null
+     * mark). Refuses if the original was never successfully filed.
      */
     private function originalInsertMark(Invoice $creditNote): string
     {
-        $original = Invoice::query()->whereKey($creditNote->credited_invoice_id)->first();
+        // Same-tenant: the original must belong to the credit note's company. The
+        // CompanyScope is a no-op off-request (queue/CLI submit), so scope explicitly
+        // — a credited_invoice_id pointing at another tenant must never resolve (MYD-008).
+        $original = Invoice::query()
+            ->where('company_id', $creditNote->company_id)
+            ->whereKey($creditNote->credited_invoice_id)
+            ->first();
         if (! $original) {
             throw new RuntimeException(
                 "Credit note {$creditNote->invcode} references a missing original invoice."
@@ -508,7 +520,7 @@ class AadeInvoiceDocument
 
         $mark = MyDataMark::query()
             ->where('invoice_id', $original->id)
-            ->where('mydata_action', 'INSERT')
+            ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT'])
             ->whereNotNull('mark')
             ->orderByDesc('id')
             ->value('mark');
@@ -516,7 +528,19 @@ class AadeInvoiceDocument
         if (! $mark) {
             throw new RuntimeException(
                 "Cannot file credit note for invoice {$original->invcode} — the original has no "
-                .'INSERT MARK on file (never submitted to myDATA). File the original first.'
+                .'INSERT/PROVIDER_INSERT MARK on file (never successfully submitted to myDATA, '
+                .'direct or via provider). File the original first.'
+            );
+        }
+
+        // The caller feeds this to addCorrelatedInvoice((int) …); guarantee a pure-numeric
+        // MARK so a malformed value fails loudly instead of being silently truncated by the
+        // cast (AADE MARKs are ~15-digit numerics — this just makes the contract explicit,
+        // now that a provider MARK is also a valid source).
+        if (! ctype_digit((string) $mark)) {
+            throw new RuntimeException(
+                "Original invoice {$original->invcode} has a non-numeric filing MARK ({$mark}) — "
+                .'cannot correlate a credit note to it.'
             );
         }
 

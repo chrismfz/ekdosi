@@ -270,7 +270,7 @@ Priorities:
 | MYD-005 | P2 | OPEN | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
 | MYD-006 | P1 | OPEN | Classifications | Readiness does not require a business-specific classification policy |
 | MYD-007 | P0 | OPEN | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
-| MYD-008 | P0 | OPEN | Provider credits | Correlated credit cannot find a provider-issued original MARK |
+| MYD-008 | P0 | DONE | Provider credits | Correlated credit cannot find a provider-issued original MARK |
 | MYD-009 | P0 | OPEN | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
@@ -659,7 +659,21 @@ third-country export without global reconfiguration.
 
 ### MYD-008 — Correlated provider credit cannot resolve the original MARK
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-01 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `AadeInvoiceDocument::originalInsertMark()` — the ONE shared resolver used by
+both the direct (`MyDataSubmitter`) and provider (`GrProviderSubmitter`) flows — now
+reads the original filing MARK from BOTH `INSERT` **and** `PROVIDER_INSERT` rows (was
+`INSERT` only), so a 5.1 credit against a provider-issued original correlates exactly
+like one against a directly-filed original. `whereNotNull('mark')` still excludes
+rejected/failed attempts (`PROVIDER_REJECTED`/`PROVIDER_FAILED` carry a null mark). The
+original lookup is now scoped to the credit note's `company_id` (the `CompanyScope` is a
+no-op off-request), so a `credited_invoice_id` pointing at another tenant can never
+resolve. 5.2 (non-correlated) never calls the resolver, so it is unaffected. The resolver also
+guards that the MARK is pure-numeric before the `addCorrelatedInvoice((int) …)` cast, so a
+malformed MARK fails loudly rather than being silently truncated. Tests cover direct +
+provider correlation, a rejected-attempt refusal, the cross-tenant refusal, and the
+non-numeric-MARK refusal. See `CHANGELOG.md` [Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2755,3 +2769,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-015 8.6 fixture** (review follow-up) — aggregator test proves a zero-value 8.6 order slip is counted but adds 0 to the myDATA revenue picture | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **PROV-017 status → PARTIAL** (review follow-up) — hygiene (public-https-only + no credentialed redirects) DONE; approved-host allowlist + DNS-rebinding pin remain OPEN in BACKLOG (no flat-DONE) | `docs/BACKLOG.md` (§Provider endpoint hardening) |
 | 2026-09-01 | **MYD-003 second pass** (strict review) — `->monetary()` now on the remaining selectors: 3× WHMCS defaults + 2× third-party split + credit-note picker; WHMCS default/split queries extracted to shared helpers with 9.x-exclusion tests | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-008 DONE** — correlated credit (5.1) resolves the original MARK from INSERT **and** PROVIDER_INSERT (was INSERT-only), so provider-issued originals stay correctable; same-tenant scoped; rejected attempts refused | `CHANGELOG.md` [Unreleased] → Fixed |
