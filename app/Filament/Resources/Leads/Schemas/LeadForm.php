@@ -123,11 +123,11 @@ class LeadForm
                         Select::make('status')
                             ->label('Κατάσταση')
                             // Won (conversion only) and DoNotContact (the action, with
-                            // a confirmation tick) are not pickable here — but a record
-                            // already IN one of them must still display its label.
-                            ->options(fn (?Lead $record): array => in_array($record?->status, [LeadStatus::Won, LeadStatus::DoNotContact], true)
-                                ? LeadStatus::allOptions()
-                                : LeadStatus::formOptions())
+                            // a confirmation tick) are not pickable here — a record
+                            // already IN one of them gets ONLY its own value added, so
+                            // it displays its label without unlocking the other.
+                            ->options(fn (?Lead $record): array => LeadStatus::formOptions()
+                                + ($record?->status ? [$record->status->value => $record->status->getLabel()] : []))
                             ->default(LeadStatus::New->value)
                             ->required()
                             ->live()

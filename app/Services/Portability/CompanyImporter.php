@@ -405,6 +405,9 @@ class CompanyImporter
 
             if (isset($index[$key])) {
                 $id = $index[$key];
+                // Merge keeps the LOCAL soft-delete state: a row deleted here
+                // after the export must not be resurrected by its bundle twin.
+                unset($data['deleted_at']);
                 DB::table($table)->where('id', $id)->update($data);
             } else {
                 $id = DB::table($table)->insertGetId($data);
@@ -492,7 +495,9 @@ class CompanyImporter
      */
     private function rowSignature(array $row): string
     {
-        foreach ([...self::DROP_COLUMNS, 'legacy_id'] as $col) {
+        // deleted_at is lifecycle, not identity: a locally soft-deleted row must
+        // still match its bundle twin (else merge inserts a live duplicate).
+        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at'] as $col) {
             unset($row[$col]);
         }
         ksort($row);

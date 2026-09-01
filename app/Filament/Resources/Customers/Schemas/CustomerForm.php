@@ -20,7 +20,6 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
-use WeakMap;
 
 class CustomerForm
 {
@@ -344,27 +343,13 @@ class CustomerForm
 
     /**
      * «Ήρθε από lead #N (πηγή …) · κυνηγός … · πρώτη επαφή … · μετατροπή … (X ημέρες,
-     * N τηλέφωνα, M emails)» + link to the lead's full timeline.
+     * N τηλέφωνα, M emails)» + link to the lead's full timeline. Evaluated once
+     * per render (Placeholder content) — no memo needed.
      */
-    /**
-     * Memo keyed by the Lead INSTANCE (WeakMap — dies with the object, never
-     * leaks across requests/tests); `$record->originLead` is the same cached
-     * instance on every re-render of the form within a request.
-     *
-     * @var WeakMap<Lead, HtmlString>|null
-     */
-    private static ?WeakMap $originSummaryMemo = null;
-
     private static function originLeadSummary(?Lead $lead): HtmlString
     {
         if ($lead === null) {
             return new HtmlString('');
-        }
-
-        self::$originSummaryMemo ??= new WeakMap;
-
-        if (isset(self::$originSummaryMemo[$lead])) {
-            return self::$originSummaryMemo[$lead];
         }
 
         $counts = $lead->timeline()->getQuery()->reorder()
@@ -388,7 +373,7 @@ class CustomerForm
 
         $url = LeadResource::getUrl('edit', ['record' => $lead]);
 
-        return self::$originSummaryMemo[$lead] = new HtmlString(
+        return new HtmlString(
             '<div style="font-size:.875rem;line-height:1.6">'
             .'<div style="font-weight:600">Ήρθε από lead <a href="'.e($url).'" style="text-decoration:underline">#'.$lead->id.' — '.e($lead->name).'</a></div>'
             .'<ul style="margin:.25rem 0 0;padding-left:1.1rem">'

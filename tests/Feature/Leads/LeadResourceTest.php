@@ -15,9 +15,11 @@ use App\Filament\Resources\Leads\RelationManagers\TimelineRelationManager;
 use App\Filament\Resources\Quotes\Pages\CreateQuote;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Models\Quote;
 use App\Models\User;
+use App\Services\Leads\LeadMatcher;
 use App\Services\TenantRoleProvisioner;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -161,6 +163,65 @@ class LeadResourceTest extends TestCase
             ->assertHasFormErrors(['status']);
 
         $this->assertSame(LeadStatus::New, $lead->fresh()->status);
+    }
+
+    public function test_do_not_contact_record_cannot_be_saved_as_won_from_the_form(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->assertOk()
+            ->assertSee('Μην ξαναενοχλήσετε')
+            ->fillForm(['status' => LeadStatus::Won->value])
+            ->call('save')
+            ->assertHasFormErrors(['status']);
+
+        $this->assertSame(LeadStatus::DoNotContact, $lead->fresh()->status);
+    }
+
+    public function test_new_quote_is_hidden_on_lost_and_do_not_contact_leads(): void
+    {
+        $dnc = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+        $open = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Β', 'status' => LeadStatus::Interested]);
+
+        Livewire::test(EditLead::class, ['record' => $dnc->getRouteKey()])->assertActionHidden('newQuote');
+        Livewire::test(EditLead::class, ['record' => $open->getRouteKey()])->assertActionVisible('newQuote');
+    }
+
+    public function test_convert_default_ignores_trashed_and_contact_only_hits_and_prefers_afm(): void
+    {
+        // Trashed AFM twin → no default (must not pre-select a deleted customer).
+        $trashed = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Σβησμένος', 'afm' => '123456789']);
+        $trashed->delete();
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α', 'afm' => '123456789', 'phone' => '6970001111']);
+
+        // «Άλφα» only shares a CONTACT phone; «Βήτα» owns the ΑΦΜ → Βήτα, not Άλφα.
+        $alpha = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Άλφα']);
+        CustomerContact::create(['company_id' => $this->tenant->id, 'customer_id' => $alpha->id, 'name' => 'Λογιστής', 'phone' => '697 000 1111']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->mountAction('convert')
+            ->assertActionDataSet(['mode' => 'new', 'customer_id' => null]);
+
+        app(LeadMatcher::class)->flush();
+        $beta = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Βήτα', 'afm' => '123456789']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->mountAction('convert')
+            ->assertActionDataSet(['mode' => 'link', 'customer_id' => $beta->id]);
+    }
+
+    public function test_auto_source_only_on_a_direct_live_customer_hit(): void
+    {
+        $alpha = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Άλφα']);
+        CustomerContact::create(['company_id' => $this->tenant->id, 'customer_id' => $alpha->id, 'name' => 'Λογιστής', 'phone' => '6970001111']);
+
+        Livewire::test(CreateLead::class)
+            ->fillForm(['name' => 'Ίδιος λογιστής', 'phone' => '6970001111'])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertNull(Lead::where('name', 'Ίδιος λογιστής')->first()->source, 'A contact-only hit is not an upsell.');
     }
 
     public function test_not_now_requires_a_follow_up_date(): void

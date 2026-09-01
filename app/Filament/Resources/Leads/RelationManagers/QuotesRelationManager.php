@@ -64,7 +64,7 @@ class QuotesRelationManager extends RelationManager
                 Action::make('newQuote')
                     ->label('Νέα προσφορά')
                     ->icon('heroicon-o-plus')
-                    ->visible(fn (): bool => ! $this->getOwnerRecord()->isConverted())
+                    ->visible(fn (): bool => $this->getOwnerRecord()->isOpen() && ! $this->getOwnerRecord()->trashed())
                     ->url(fn (): string => QuoteResource::getUrl('create', ['lead' => $this->getOwnerRecord()->getKey()])),
             ])
             ->recordActions([

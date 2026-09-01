@@ -38,7 +38,9 @@ class CreateLead extends CreateRecord
                 $data['email'] ?? null,
                 [$data['phone'] ?? null, $data['mobile'] ?? null],
             );
-            if ($match->customers->isNotEmpty()) {
+            // Direct hits only — a shared accountant's phone on a customer's
+            // contact card, or a long-deleted customer, doesn't make this an upsell.
+            if ($match->directCustomers->isNotEmpty()) {
                 $data['source'] = LeadSource::ExistingCustomer->value;
             }
         }

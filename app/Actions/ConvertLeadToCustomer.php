@@ -50,6 +50,11 @@ class ConvertLeadToCustomer
                 throw new RuntimeException('Το lead έχει ήδη μετατραπεί σε πελάτη.');
             }
 
+            // From here on work on the LOCKED row: the caller's instance may be
+            // stale (another operator moved the status meanwhile) and the status
+            // hook logs «from → won» from the instance it is saved through.
+            $lead = $locked;
+
             $customer = $existing ?? $this->createCustomer($lead);
 
             $alreadyLinked = Lead::query()

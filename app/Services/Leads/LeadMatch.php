@@ -22,11 +22,13 @@ final class LeadMatch
         public readonly Collection $customers,
         public readonly Collection $leads,
         public readonly bool $doNotContact = false,
+        /** Non-trashed customers matched on THEIR OWN afm/email/phone (not via a contact) — safe to act on. */
+        public readonly Collection $directCustomers = new Collection,
     ) {}
 
     public static function none(): self
     {
-        return new self(collect(), collect(), false);
+        return new self(collect(), collect(), false, collect());
     }
 
     public function isEmpty(): bool

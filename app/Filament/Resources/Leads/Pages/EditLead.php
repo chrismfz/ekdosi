@@ -12,6 +12,7 @@ use App\Filament\Support\PickerOptions;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Services\Leads\LeadMatcher;
+use App\Support\Afm;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\ForceDeleteAction;
@@ -70,7 +71,7 @@ class EditLead extends EditRecord
                         ->default(fn (Lead $record): ?int => self::matchingCustomerId($record))
                         ->visible(fn (callable $get): bool => $get('mode') === 'link')
                         ->required(fn (callable $get): bool => $get('mode') === 'link')
-                        ->helperText('Προεπιλέγεται ο πελάτης που ταιριάζει σε ΑΦΜ/email/τηλέφωνο, αν υπάρχει.'),
+                        ->helperText('Προεπιλέγεται ο πελάτης που ταιριάζει σε ΑΦΜ (ή email/τηλέφωνο) όταν είναι μοναδικός.'),
                 ])
                 ->action(function (Lead $record, array $data): void {
                     $existing = null;
@@ -113,11 +114,13 @@ class EditLead extends EditRecord
                     : null),
 
             // «Νέα προσφορά» — opens the quote form pre-filled from the lead.
+            // Only while the lead is being worked — never on a lost / «μην
+            // ξαναενοχλήσετε» lead (a quote is a contact).
             Action::make('newQuote')
                 ->label('Νέα προσφορά')
                 ->icon('heroicon-o-document-text')
                 ->color('warning')
-                ->visible(fn (Lead $record): bool => ! $record->isConverted() && ! $record->trashed())
+                ->visible(fn (Lead $record): bool => $record->isOpen() && ! $record->trashed())
                 ->url(fn (Lead $record): string => QuoteResource::getUrl('create', ['lead' => $record->id])),
 
             // Αλλαγή κατάστασης — one modal, any → any (Won excluded: only the
@@ -247,7 +250,17 @@ class EditLead extends EditRecord
             $record->id,
         );
 
-        return self::$matchMemo[$record] = $match->customers->first()?->id;
+        // Only live customers matched on their own columns; prefer the ΑΦΜ hit
+        // (a legal identity) and pre-select ONLY when the answer is unambiguous.
+        $candidates = $match->directCustomers;
+        if ($record->afm !== null) {
+            $byAfm = $candidates->filter(fn (Customer $c): bool => Afm::normalise($c->afm) === Afm::normalise($record->afm));
+            if ($byAfm->isNotEmpty()) {
+                $candidates = $byAfm;
+            }
+        }
+
+        return self::$matchMemo[$record] = $candidates->count() === 1 ? $candidates->first()->id : null;
     }
 
     private static function requiresReason(mixed $status): bool

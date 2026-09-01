@@ -70,4 +70,28 @@ class LeadsBundleTest extends TestCase
         $this->assertNull(Customer::where('company_id', $company->id)->where('afm', '999999999')->first());
         $this->assertTrue(Customer::withTrashed()->where('company_id', $company->id)->where('afm', '999999999')->firstOrFail()->trashed());
     }
+
+    public function test_merge_reimport_keeps_a_locally_soft_deleted_lead_deleted_without_duplicating(): void
+    {
+        $src = Company::create([
+            'name' => 'Merge OE', 'slug' => 'merge', 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'afm' => '800561849',
+        ]);
+        $lead = Lead::create(['company_id' => $src->id, 'name' => 'Θα σβηστεί μετά', 'email' => 'x@y.gr']);
+        $customer = Customer::create(['company_id' => $src->id, 'name' => 'Θα σβηστεί κι αυτός', 'afm' => '801280908']);
+
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+
+        // Deleted locally AFTER the export…
+        $lead->delete();
+        $customer->delete();
+
+        // …then the same bundle is merged back into the same company.
+        app(CompanyImporter::class)->run($bundle, ['into' => 'merge', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $this->assertSame(1, Lead::withTrashed()->where('company_id', $src->id)->count(), 'no live duplicate inserted');
+        $this->assertTrue(Lead::withTrashed()->where('company_id', $src->id)->first()->trashed(), 'stays deleted');
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $src->id)->count());
+        $this->assertTrue(Customer::withTrashed()->where('company_id', $src->id)->first()->trashed(), 'legacy_id-keyed merge does not resurrect either');
+    }
 }

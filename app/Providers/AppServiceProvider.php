@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Services\Leads\LeadMatcher;
 use App\Support\ErrorAlerts\ExceptionNotifier;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
@@ -26,6 +27,10 @@ class AppServiceProvider extends ServiceProvider
         // Ambient tenant for the CompanyScope global scope. Singleton so the
         // current company id lives for the whole request / command.
         $this->app->singleton(CompanyContext::class);
+
+        // Leads dedupe lookup — request-scoped so one form render shares a single
+        // lookup across banner / DNC rule / create hook (memo inside the class).
+        $this->app->scoped(LeadMatcher::class);
 
         // Deploy-wide settings store — singleton so the loaded map is shared
         // (one DB/cache read per process; the scheduler reads it on every tick).

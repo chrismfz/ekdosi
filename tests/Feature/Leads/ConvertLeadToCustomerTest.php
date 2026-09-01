@@ -9,6 +9,7 @@ use App\Enums\LeadStatus;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Lead;
+use App\Models\LeadActivity;
 use App\Models\Quote;
 use App\Models\Tag;
 use App\Models\User;
@@ -109,6 +110,20 @@ class ConvertLeadToCustomerTest extends TestCase
         $this->assertSame(0, $existing->contacts()->count());
         $this->assertSame($existing->id, $lead->fresh()->converted_customer_id);
         $this->assertTrue($lead->timeline()->where('type', LeadActivityType::Converted->value)->first()->meta['linked_existing']);
+    }
+
+    public function test_writes_through_the_locked_row_not_a_stale_instance(): void
+    {
+        $t = $this->tenant();
+        $stale = Lead::create(['company_id' => $t->id, 'name' => 'Α', 'status' => LeadStatus::Contacted]);
+
+        // Another operator moved it on meanwhile.
+        Lead::query()->whereKey($stale->id)->update(['status' => LeadStatus::Quoted->value]);
+
+        app(ConvertLeadToCustomer::class)($stale);
+
+        $row = LeadActivity::query()->where('lead_id', $stale->id)->where('type', LeadActivityType::StatusChange->value)->first();
+        $this->assertSame(['from' => 'quoted', 'to' => 'won'], $row->meta, 'The transition is logged from the DB truth, not the stale instance.');
     }
 
     public function test_refuses_a_second_conversion(): void

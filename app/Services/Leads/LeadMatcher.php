@@ -34,6 +34,21 @@ class LeadMatcher
     private const PHONE_SUFFIX_DIGITS = 10;
 
     /**
+     * Per-instance memo. The matcher is a request-scoped singleton (see
+     * AppServiceProvider), so the banner, the DNC acknowledgement (visible +
+     * rule), the create hook and the convert modal share ONE lookup per set of
+     * inputs instead of re-running the REPLACE()-scan queries each time.
+     *
+     * @var array<string, LeadMatch>
+     */
+    private array $memo = [];
+
+    public function flush(): void
+    {
+        $this->memo = [];
+    }
+
+    /**
      * @param  list<string|null>  $phones  any of phone / mobile
      */
     public function find(
@@ -43,6 +58,16 @@ class LeadMatcher
         array $phones = [],
         ?int $ignoreLeadId = null,
     ): LeadMatch {
+        $key = md5(json_encode([$companyId, self::normalizeAfm($afm), self::normalizeEmail($email), array_map([self::class, 'normalizePhone'], $phones), $ignoreLeadId]));
+
+        return $this->memo[$key] ??= $this->lookup($companyId, $afm, $email, $phones, $ignoreLeadId);
+    }
+
+    /**
+     * @param  list<string|null>  $phones
+     */
+    private function lookup(int $companyId, ?string $afm, ?string $email, array $phones, ?int $ignoreLeadId): LeadMatch
+    {
         $afm = self::normalizeAfm($afm);
         $email = self::normalizeEmail($email);
         $phones = array_values(array_unique(array_map(
@@ -57,9 +82,20 @@ class LeadMatcher
             return LeadMatch::none();
         }
 
-        // Customers: also soft-deleted ones (a deleted customer is still someone
-        // we dealt with), their secondary email, and their named contacts'
-        // email/phone — the person who answers the phone is often a contact.
+        // Direct hits: live customers matched on their OWN columns — the set the
+        // convert modal may pre-select and the create hook may act on.
+        $direct = Customer::query()
+            ->where('company_id', $companyId)
+            ->where(function (Builder $q) use ($afm, $email, $phones): void {
+                $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email']);
+            })
+            ->orderBy('name')
+            ->limit(self::PREVIEW_LIMIT)
+            ->get();
+
+        // Banner set: also soft-deleted ones (a deleted customer is still someone
+        // we dealt with) and their named contacts' email/phone — the person who
+        // answers the phone is often a contact.
         $customers = Customer::query()
             ->withTrashed()
             ->where('company_id', $companyId)
@@ -103,7 +139,7 @@ class LeadMatcher
             ->where($leadIdentity)
             ->exists();
 
-        return new LeadMatch($customers, $leads, $doNotContact);
+        return new LeadMatch($customers, $leads, $doNotContact, $direct);
     }
 
     /**
