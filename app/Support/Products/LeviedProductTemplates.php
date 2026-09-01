@@ -7,7 +7,7 @@ namespace App\Support\Products;
  * that ride on a product/service, pre-mapped to the correct myDATA fee so an
  * operator can IMPORT them ready-made instead of looking up §8.x codes + amounts.
  *
- * All are myDATA **Fees (§8.5)** (`mydata_tax_type = 2`) with a fixed €/unit
+ * All are myDATA **Fees (§8.7)** (`mydata_tax_type = 2`) with a fixed €/unit
  * amount (`mydata_tax_per_unit`) and the matching FeesPercentCategory value
  * (`mydata_tax_category`). `fixed=false` flags a levy whose amount varies (the
  * operator must adjust it after import).
@@ -18,7 +18,7 @@ namespace App\Support\Products;
  */
 class LeviedProductTemplates
 {
-    /** myDATA fee taxType for every levy here: Fees §8.5. */
+    /** myDATA fee taxType for every levy here: Fees §8.7. */
     public const TAX_TYPE_FEES = 2;
 
     /**

@@ -6,10 +6,10 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * The remaining myDATA taxesTotals taxTypes beyond withholding (G1, taxType=1):
- *   2 = Τέλη (fees, §8.5)            — e.g. τέλος ανθεκτικότητας/διαμονής
- *   3 = Λοιποί φόροι (otherTaxes, §8.6)
- *   4 = Χαρτόσημο (stamp duty, §8.7)
- *   5 = Κρατήσεις (deductions, §8.8)
+ *   2 = Τέλη (fees, §8.7)            — e.g. τέλος ανθεκτικότητας/διαμονής
+ *   3 = Λοιποί φόροι (otherTaxes, §8.5)
+ *   4 = Ψηφιακό Τέλος Συναλλαγής (digital transaction fee, §8.6)
+ *   5 = Κρατήσεις (deductions)
  *
  * Each carries an amount + a category code (mirrors withhold_amount/withhold_category).
  * The submitter emits a taxesTotals block + sets the matching summary total when the

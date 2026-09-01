@@ -338,7 +338,7 @@
                     <td>{{ $L('total_value') }}</td>
                     <td class="value">{{ number_format($totals['totalGross'], 2, ',', '.') }} €</td>
                 </tr>
-                {{-- Additional taxes (τέλη/χαρτόσημο/παρακράτηση…): + charges, − reductions.
+                {{-- Additional taxes (τέλη/ψηφιακό τέλος συναλλαγής/παρακράτηση…): + charges, − reductions.
                      «Πληρωτέο» shows the collectible whenever it differs from the gross. --}}
                 @if($totals['fees'] > 0)
                     <tr class="withhold"><td class="label">{{ $L('fees') }}</td><td class="value">+{{ number_format($totals['fees'], 2, ',', '.') }} €</td></tr>

@@ -9,8 +9,11 @@ namespace App\Support\MyData;
  * percentage-based ones) so the amount can be auto-computed from the invoice net.
  * Flat presets (rate null) leave the amount for the operator.
  *
- * PREVIEW scope — a small representative set (stamp duty %, accommodation fee,
- * services withholding). Extend `all()` as real tenant needs surface.
+ * PREVIEW scope — a small representative set (digital transaction fee %,
+ * accommodation fee, services withholding). Extend `all()` as real tenant needs
+ * surface. NB: the `stamp_duty` group key / columns are the legacy names for the
+ * AADE Digital Transaction Fee (taxType 4) — kept for data compatibility; only
+ * the operator-facing labels use the current «Ψηφιακό Τέλος Συναλλαγής» term.
  */
 class CommonTaxPresets
 {
@@ -29,9 +32,9 @@ class CommonTaxPresets
     public static function all(): array
     {
         return [
-            'stamp_3_6' => ['label' => 'Χαρτόσημο 3,6%', 'group' => 'stamp_duty', 'category' => 3, 'rate' => 3.6],
-            'stamp_2_4' => ['label' => 'Χαρτόσημο 2,4%', 'group' => 'stamp_duty', 'category' => 2, 'rate' => 2.4],
-            'stamp_1_2' => ['label' => 'Χαρτόσημο 1,2%', 'group' => 'stamp_duty', 'category' => 1, 'rate' => 1.2],
+            'stamp_3_6' => ['label' => 'Ψηφιακό Τέλος Συναλλαγής 3,6%', 'group' => 'stamp_duty', 'category' => 3, 'rate' => 3.6],
+            'stamp_2_4' => ['label' => 'Ψηφιακό Τέλος Συναλλαγής 2,4%', 'group' => 'stamp_duty', 'category' => 2, 'rate' => 2.4],
+            'stamp_1_2' => ['label' => 'Ψηφιακό Τέλος Συναλλαγής 1,2%', 'group' => 'stamp_duty', 'category' => 1, 'rate' => 1.2],
             'withhold_20' => ['label' => 'Παρακράτηση 20% (αμοιβές συμβούλων)', 'group' => 'withhold', 'category' => 3, 'rate' => 20.0],
             'accommodation' => ['label' => 'Τέλος διαμονής παρεπιδημούντων (σταθερό ποσό)', 'group' => 'fees', 'category' => 18, 'rate' => null],
         ];

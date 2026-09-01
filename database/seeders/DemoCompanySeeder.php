@@ -107,7 +107,7 @@ class DemoCompanySeeder extends Seeder
         $cable = $this->product($cid, $cat->id, $vat24, $unit, 'Καλώδιο UTP cat6 (DEMO)', 0.80);
         $hosting = $this->product($cid, $cat->id, $vat24, null, 'Φιλοξενία ιστοσελίδας (DEMO)', 120.00);
         $consult = $this->product($cid, $cat->id, $vat24, null, 'Συμβουλευτικές υπηρεσίες (DEMO)', 300.00);
-        // A SERVICE with a bound per-unit fee (myDATA taxType 2 / §8.5 cat 18, τέλος διαμονής):
+        // A SERVICE with a bound per-unit fee (myDATA taxType 2 / §8.7 cat 18, τέλος διαμονής):
         $night = $this->product($cid, $cat->id, $vat13, $unit, 'Διανυκτέρευση (DEMO)', 70.00, [
             'mydata_tax_type' => 2, 'mydata_tax_category' => 18, 'mydata_tax_per_unit' => 1.50,
         ]);
