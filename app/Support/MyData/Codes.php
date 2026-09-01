@@ -176,7 +176,7 @@ final class Codes
         7 => 0.0,   // exempt — vatExemptionCategory mandatory
         8 => null,  // records without VAT
         9 => 3.0,   // αρ.31 ν.5057/2023
-        10 => 4.0,  // αρ.31 ν.5057/2023 (island) — collides with 6 at 4%
+        10 => 4.0,  // αρ.31 ν.5057/2023 — collides with 6 at 4%
     ];
 
     /**
@@ -199,13 +199,13 @@ final class Codes
         6 => 'ΦΠΑ νήσων 4%',
         7 => 'Άνευ ΦΠΑ 0%',
         9 => 'ΦΠΑ 3% (αρ.31 ν.5057/2023)',
-        10 => 'ΦΠΑ νήσων 4% (αρ.31 ν.5057/2023)',
+        10 => 'ΦΠΑ 4% (αρ.31 ν.5057/2023)',
     ];
 
     /**
      * The standard sales-line VAT categories to seed, as [rate, description]
      * rows. Skips code 8 (no rate) and code 10 (duplicate 4% of code 6 — would
-     * just create a confusing second 4% row; a tenant on the ν.5057/2023 island
+     * just create a confusing second 4% row; a tenant on the ν.5057/2023
      * regime can add it manually). Code 7 (0%) is seeded WITHOUT an exemption
      * reason — the operator sets §8.3 per their case (Setup → VAT Categories).
      *
@@ -392,7 +392,7 @@ final class Codes
      * MyDataSubmitter::vatCategoryFor() maps to an AADE vatCategory enum.
      *
      * NOTE this is a SUBSET of VAT_CATEGORY_RATES: that table lists the full
-     * §8.2 enum including codes 9 (3%) and 10 (4% island) from ν.5057/2023,
+     * §8.2 enum including codes 9 (3%) and 10 (4%) from ν.5057/2023,
      * which the submitter does NOT yet map (no match arm → it throws). So the
      * "would AADE accept a line at this rate" check (ETL warning, table flag)
      * MUST use THIS set, not the full enum — otherwise a 3% category passes the

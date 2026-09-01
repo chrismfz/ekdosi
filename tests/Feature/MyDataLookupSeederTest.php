@@ -156,6 +156,17 @@ class MyDataLookupSeederTest extends TestCase
         $this->assertNull($dap->mydata_income_class_category);
     }
 
+    public function test_vat_code_10_label_is_not_islands_specific(): void
+    {
+        // MYD-004 (label): §8.2 code 10 is «ΦΠΑ συντελεστής 4% (αρ.31 ν.5057/2023)»,
+        // NOT an islands rate — the official table carries no «νήσων». Codes 4/5/6
+        // ARE the genuine island reduced rates, so they keep it.
+        $this->assertStringNotContainsString('νήσ', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('4%', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('5057', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('νήσων', Codes::VAT_CATEGORY_LABELS[6]);
+    }
+
     public function test_cross_border_e3_codes_distinguish_intra_eu_from_third_country(): void
     {
         // MYD-001: 1.2/2.2 (intra-community) use E3_561_005; 1.3/2.3

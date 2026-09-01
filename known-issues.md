@@ -436,6 +436,13 @@ AADE separates value-plus-movement documents from movement-only types
 
 **Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED AND EXPANDED 2026-08-30
 
+**Partial (2026-08-31):** the code-10 label sub-item is DONE — `Codes::VAT_CATEGORY_LABELS[10]`
+now reads «ΦΠΑ 4% (αρ.31 ν.5057/2023)» to match the official §8.2 table (the
+unofficial «νήσων» is dropped; codes 4/5/6 remain the genuine island rates). The
+substantive work below (shared VAT resolver, explicit code-9 seed, mandatory
+6-vs-10 choice, 0%-without-reason blocking, per-line VAT-code snapshot) is still
+OPEN. See `CHANGELOG.md` [Unreleased] → Fixed.
+
 **Official finding**
 
 The current official VAT table includes:
