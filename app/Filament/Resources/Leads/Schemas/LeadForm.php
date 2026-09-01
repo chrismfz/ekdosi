@@ -10,6 +10,7 @@ use App\Models\Lead;
 use App\Models\User;
 use App\Services\Leads\LeadMatch;
 use App\Services\Leads\LeadMatcher;
+use App\Support\Afm;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Placeholder;
@@ -80,7 +81,7 @@ class LeadForm
                             ->maxLength(20)
                             ->live(onBlur: true)
                             // Store digits only so the dedupe compare is exact.
-                            ->dehydrateStateUsing(fn ($state): ?string => LeadMatcher::normalizeAfm($state)),
+                            ->dehydrateStateUsing(fn ($state): ?string => Afm::normalise($state)),
 
                         TextInput::make('country')
                             ->label('Χώρα (ISO-2)')
@@ -110,7 +111,11 @@ class LeadForm
                     ->schema([
                         Select::make('status')
                             ->label('Κατάσταση')
-                            ->options(LeadStatus::options())
+                            // Won is not pickable, but a converted lead must still
+                            // SHOW «Πελάτης» in the disabled control.
+                            ->options(fn (?Lead $record): array => $record?->status === LeadStatus::Won
+                                ? collect(LeadStatus::cases())->mapWithKeys(fn (LeadStatus $s): array => [$s->value => $s->getLabel()])->all()
+                                : LeadStatus::options())
                             ->default(LeadStatus::New->value)
                             ->required()
                             ->live()

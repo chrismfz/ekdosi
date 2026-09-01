@@ -4,6 +4,7 @@ namespace App\Services\Leads;
 
 use App\Models\Customer;
 use App\Models\Lead;
+use App\Support\Afm;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -82,7 +83,9 @@ class LeadMatcher
     private function applyIdentity(Builder $q, ?string $afm, ?string $email, array $phones, array $phoneColumns): void
     {
         if ($afm !== null) {
-            $q->orWhereRaw(self::strippedSql('afm').' = ?', [$afm]);
+            // The stored side may carry an EL/GR prefix (customers.afm is saved
+            // as typed) — accept the digits with or without it.
+            $q->orWhereRaw('UPPER('.self::strippedSql('afm').') IN (?, ?, ?)', [$afm, 'EL'.$afm, 'GR'.$afm]);
         }
 
         if ($email !== null) {
@@ -107,11 +110,10 @@ class LeadMatcher
         return $expr;
     }
 
+    /** The ONE ΑΦΜ rule (App\Support\Afm) — never a second implementation. */
     public static function normalizeAfm(?string $afm): ?string
     {
-        $digits = preg_replace('/\D+/', '', (string) $afm) ?? '';
-
-        return $digits === '' ? null : $digits;
+        return Afm::normalise($afm);
     }
 
     public static function normalizeEmail(?string $email): ?string

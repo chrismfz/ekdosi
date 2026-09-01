@@ -60,6 +60,17 @@ class LeadMatcherTest extends TestCase
         $this->assertSame([$byPhone->id], $m->find($t->id, null, null, ['+30 2310123456'])->customers->pluck('id')->all());
     }
 
+    public function test_matches_customer_afm_stored_with_el_prefix(): void
+    {
+        $t = $this->tenant();
+        $c = Customer::create(['company_id' => $t->id, 'name' => 'Με πρόθεμα', 'afm' => 'EL123456789']);
+        $lower = Customer::create(['company_id' => $t->id, 'name' => 'Με μικρό πρόθεμα', 'afm' => 'gr 123 456 789']);
+
+        $ids = app(LeadMatcher::class)->find($t->id, '123456789', null)->customers->pluck('id')->sort()->values()->all();
+
+        $this->assertSame([$c->id, $lower->id], $ids);
+    }
+
     public function test_matches_other_leads_including_lost_do_not_contact_and_trashed(): void
     {
         $t = $this->tenant();

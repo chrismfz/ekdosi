@@ -203,6 +203,37 @@ class LeadResourceTest extends TestCase
         $this->assertSame(LeadStatus::New, $lead->fresh()->status, 'Nobody was reached — stays Νέο.');
     }
 
+    public function test_editing_a_call_into_a_note_clears_direction_and_outcome(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);
+        $row = $lead->timeline()->create([
+            'company_id' => $this->tenant->id, 'user_id' => $this->user->id,
+            'type' => LeadActivityType::Call->value, 'direction' => 'outbound', 'outcome' => 'answered',
+            'happened_at' => now(), 'body' => 'x',
+        ]);
+
+        Livewire::test(TimelineRelationManager::class, [
+            'ownerRecord' => $lead,
+            'pageClass' => EditLead::class,
+        ])
+            ->callTableAction('edit', $row, data: ['type' => LeadActivityType::Note->value, 'body' => 'τώρα σημείωση'])
+            ->assertHasNoTableActionErrors();
+
+        $row->refresh();
+        $this->assertSame(LeadActivityType::Note, $row->type);
+        $this->assertNull($row->direction);
+        $this->assertNull($row->outcome);
+    }
+
+    public function test_won_lead_edit_page_shows_the_status(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Κερδισμένο', 'status' => LeadStatus::Won]);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->assertOk()
+            ->assertSee('Πελάτης');
+    }
+
     public function test_note_requires_a_body(): void
     {
         $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);

@@ -134,7 +134,20 @@ class TimelineRelationManager extends RelationManager
             ])
             ->recordActions([
                 EditAction::make()
-                    ->visible(fn (LeadActivity $record): bool => $record->type?->isManual() ?? false),
+                    ->visible(fn (LeadActivity $record): bool => $record->type?->isManual() ?? false)
+                    // Hidden Selects don't dehydrate — clear them explicitly when
+                    // the new type has no direction/outcome (Call → Note).
+                    ->mutateDataUsing(function (array $data): array {
+                        $type = self::typeOf($data['type'] ?? null);
+                        if (! ($type?->hasDirection() ?? false)) {
+                            $data['direction'] = null;
+                        }
+                        if (($type?->outcomes() ?? []) === []) {
+                            $data['outcome'] = null;
+                        }
+
+                        return $data;
+                    }),
                 DeleteAction::make(),
             ])
             ->toolbarActions([

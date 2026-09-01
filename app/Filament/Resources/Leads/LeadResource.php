@@ -40,8 +40,10 @@ class LeadResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    // Customers carry no explicit sort (→ first); 0 lands right after them.
-    protected static ?int $navigationSort = 0;
+    // Filament maps a null sort to -1; the unsorted resources (Customers,
+    // Products, …) all sit there, ordered by discovery (alphabetical). -1 keeps
+    // Leads in that leading block, right after Customers.
+    protected static ?int $navigationSort = -1;
 
     /**
      * @return array<int, string>
