@@ -50,11 +50,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
   Δελτίων Αποστολής (μένει μόνο το sandbox-validated 9.3) και ο `DeliveryNoteSubmitter`
   τα μπλοκάρει τοπικά (κοινός κανόνας `Codes::isUnsupportedDeliveryType`, ώστε picker &
   guard να μη διαφωνούν). Το πλήρες 9.1/9.2 → BACKLOG.
-- **Τα Δελτία Αποστολής (9.x) έξω από τη ροή τιμολογίων (MYD-003)** — οι movement-only
-  τύποι 9.1/9.2/9.3 εμφανίζονταν στον picker του μηνιαίου παραστατικού και μπορούσαν να
-  σταλούν από τον monetary builder. Πλέον αποκλείονται από τον invoice picker
-  (`PickerOptions`, null-safe) και ο `AadeInvoiceDocument::build()` πετάει τοπικό σφάλμα
-  για τύπο 9.x — τα κινήσεως πάνε μόνο από τη ροή «Δελτία Αποστολής».
+- **Τα Δελτία Αποστολής (9.x) έξω από _όλη_ τη ροή τιμολογίων (MYD-003)** — οι movement-only
+  τύποι 9.x εμφανίζονταν στον picker του παραστατικού και μπορούσαν να σταλούν από τον
+  monetary builder. Πλέον αποκλείονται από **κάθε** monetary selector μέσω ενός κοινού
+  `InvoiceType::scopeMonetary()` (null-safe, prefix `9.`): κύριος invoice picker
+  (`PickerOptions`), μετατροπή προσφοράς σε Παραστατικό **και** σε Υπηρεσία (`ViewQuote`),
+  τύπος ανανέωσης συμβολαίου (`ServiceContractForm`). Επιπλέον, **defence-in-depth στο
+  χοκ-πόιντ**: ο `InvoiceNumberer::allocate()` —απ' όπου περνούν ΟΛΟΙ οι creators
+  (CreateInvoice, IssueCreditNote, ConvertQuoteToInvoice, StageServiceRenewal,
+  WhmcsInvoiceFiler)— πετάει σφάλμα για τύπο 9.x πριν το bump του μετρητή (χωρίς κενό ΑΑ),
+  ώστε ούτε non-UI caller να μπορεί να εκδώσει κίνηση ως τιμολόγιο. Ο
+  `AadeInvoiceDocument::build()` κρατά τον δικό του guard. Τα κινήσεως πάνε μόνο από τη
+  ροή «Δελτία Αποστολής».
 - **Έλεγχος ημερομηνίας έκδοσης για online έκδοση μέσω παρόχου (PROV-020)** — η κανονική
   online έκδοση μέσω InvoSign απαιτεί `IssueDate = σημερινή` (error 238), αλλά το Ekdosi
   δεχόταν backdated/future `issued_at` και το έστελνε — εγγυημένη απόρριψη. Νέος

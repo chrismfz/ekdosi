@@ -139,6 +139,40 @@ class InvoicePickerPolishTest extends TestCase
         $this->assertNotContains($futureMovement->id, $keys, 'any 9.x is excluded (prefix rule)');
     }
 
+    public function test_scope_monetary_excludes_movement_only_types(): void
+    {
+        // The ONE shared predicate behind every monetary invoice-type selector
+        // (PickerOptions, ViewQuote convert actions, ServiceContractForm renewal
+        // type) — so those surfaces can't drift on the 9.x rule (MYD-003).
+        $monetary = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'Τιμολόγιο',
+            'invcount' => 1, 'mydata_type' => '1.1',
+        ]);
+        $legacyNoType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'LEG', 'name' => 'Legacy',
+            'invcount' => 1, 'mydata_type' => null,
+        ]);
+        $del93 = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΔΑΠ', 'name' => 'Δελτίο 9.3',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+        $del94 = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'Δ9', 'name' => 'Μελλοντικό 9.4',
+            'invcount' => 1, 'mydata_type' => '9.4',
+        ]);
+
+        $ids = InvoiceType::query()
+            ->where('company_id', $this->tenant->id)
+            ->monetary()
+            ->pluck('id')
+            ->all();
+
+        $this->assertContains($monetary->id, $ids);
+        $this->assertContains($legacyNoType->id, $ids, 'a null mydata_type stays selectable');
+        $this->assertNotContains($del93->id, $ids, '9.3 is a delivery note, not a monetary type');
+        $this->assertNotContains($del94->id, $ids, 'any 9.x excluded (prefix rule)');
+    }
+
     public function test_customer_options_favourites_then_most_billed(): void
     {
         $type = InvoiceType::create([

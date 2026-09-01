@@ -419,14 +419,22 @@ document. Therefore the correct conclusion is not that ΤΔΑ no longer exists.
 
 **Status:** DONE 2026-08-31 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
 
-**Fix:** new `Codes::isMovementOnlyType()` (9.1/9.2/9.3). `PickerOptions::
-invoiceTypeOptions()` now excludes 9.x from the monetary invoice picker
-(null-safe — a legacy type with no `mydata_type` stays selectable), and
-`AadeInvoiceDocument::build()` throws for a 9.x type so a CLI/API/imported caller
-that bypasses the UI cannot file a Δελτίο Αποστολής as a monetary invoice.
-Movement documents remain in the Delivery Notes flow (`DeliveryNoteSubmitter`).
-Tests cover the picker exclusion and the build guard. See `CHANGELOG.md`
-[Unreleased] → Fixed.
+**Fix:** new `Codes::isMovementOnlyType()` (prefix `9.`). The rule now applies to
+**every** monetary invoice-type selector via a shared `InvoiceType::scopeMonetary()`
+(null-safe — a legacy type with no `mydata_type` stays selectable): the main invoice
+picker (`PickerOptions`), quote→invoice **and** quote→service conversions (`ViewQuote`),
+and the service-contract renewal type (`ServiceContractForm`). **Defence-in-depth at the
+choke-point:** `InvoiceNumberer::allocate()` — through which every creator funnels
+(CreateInvoice, IssueCreditNote, ConvertQuoteToInvoice, StageServiceRenewal,
+WhmcsInvoiceFiler) — throws for a 9.x type *before* the counter bump (no ΑΑ gap), so no
+non-UI caller can file a Δελτίο Αποστολής as a monetary invoice. `AadeInvoiceDocument::
+build()` keeps its own guard. Movement documents remain in the Delivery Notes flow
+(`DeliveryNoteSubmitter`). Tests cover the picker exclusion, the shared scope, and the
+numberer guard. See `CHANGELOG.md` [Unreleased] → Fixed.
+
+**Review follow-up (post-#387):** the initial fix only filtered `PickerOptions`; the
+quote-conversion, service-renewal and WHMCS creation paths still exposed/allowed 9.x. The
+shared `scopeMonetary` + the `InvoiceNumberer` backstop close all of them (external review).
 
 **Official finding**
 
@@ -2702,3 +2710,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-003 DONE** — movement-only 9.x excluded from the monetary invoice picker + build guard; Δελτία Αποστολής stay in the delivery flow | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-012 DONE** — unsupported ΔΑ types 9.1/9.2 hidden from the delivery picker + submitter guard (only 9.3 fileable); full model → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-002 DONE** — misleading «ΤΔΑ» dropped from the invoice-type seed (fresh installs); real combined 1.1+isDeliveryNote → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-003 extended** (review follow-up) — shared `InvoiceType::scopeMonetary()` now excludes 9.x from quote→invoice/service + renewal selectors too; `InvoiceNumberer::allocate()` backstop rejects 9.x for every creator | `CHANGELOG.md` [Unreleased] → Fixed |

@@ -91,6 +91,40 @@ class InvoiceNumbererTest extends TestCase
             ->allocate($this->company, 'DOES_NOT_EXIST'));
     }
 
+    public function test_allocate_rejects_movement_only_delivery_type(): void
+    {
+        // A movement-only 9.x Δελτίο Αποστολής must never be issued through the
+        // monetary invoice flow, whichever creator calls allocate() (MYD-003).
+        // 9.3 is the FILEABLE delivery type, yet still not a money document —
+        // the guard rejects the whole 9.x family, not just the unsupported ones.
+        $delivery = InvoiceType::create([
+            'company_id' => $this->company->id,
+            'code' => 'ΔΑΠ',
+            'name' => 'Δελτίο Αποστολής',
+            'invcount' => 7,
+            'mydata_type' => '9.3',
+        ]);
+
+        try {
+            DB::transaction(fn () => app(InvoiceNumberer::class)
+                ->allocate($this->company, 'ΔΑΠ'));
+            $this->fail('Expected a RuntimeException for a movement-only delivery type.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('movement-only', $e->getMessage());
+        }
+
+        // Guard throws BEFORE the counter bump → no wasted ΑΑ / no gap.
+        $this->assertSame(7, $delivery->fresh()->invcount);
+
+        // The Delivery Notes flow shares this numberer and MUST be able to
+        // allocate a 9.x ΑΑ — it opts out of the monetary guard.
+        $alloc = DB::transaction(fn () => app(InvoiceNumberer::class)
+            ->allocate($this->company, 'ΔΑΠ', allowMovementType: true));
+        $this->assertSame(7, $alloc->code);
+        $this->assertSame('ΔΑΠ7', $alloc->invcode);
+        $this->assertSame(8, $delivery->fresh()->invcount);
+    }
+
     public function test_allocate_is_scoped_per_tenant(): void
     {
         // A second tenant with the same invoice-type code keeps its own counter.

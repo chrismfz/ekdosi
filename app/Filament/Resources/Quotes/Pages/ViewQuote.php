@@ -118,6 +118,8 @@ class ViewQuote extends ViewRecord
                         ->options(fn (Quote $record) => InvoiceType::query()
                             ->where('company_id', $record->company_id)
                             ->where('show_on_menu', true)
+                            // Never offer a movement-only 9.x Δελτίο Αποστολής here (MYD-003).
+                            ->monetary()
                             ->orderBy('code')
                             ->get()
                             ->mapWithKeys(fn ($t) => [$t->id => $t->code.' — '.$t->name])
@@ -169,6 +171,8 @@ class ViewQuote extends ViewRecord
                         ->options(fn (Quote $record) => InvoiceType::query()
                             ->where('company_id', $record->company_id)
                             ->where('show_on_menu', true)
+                            // Never offer a movement-only 9.x Δελτίο Αποστολής here (MYD-003).
+                            ->monetary()
                             ->orderBy('code')
                             ->get()
                             ->mapWithKeys(fn ($t) => [$t->id => $t->code.' — '.$t->name])
