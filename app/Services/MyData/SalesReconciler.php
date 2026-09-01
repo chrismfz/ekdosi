@@ -247,6 +247,7 @@ class SalesReconciler
 
         $matched = [];
         $stateMismatch = [];
+        $contentMismatch = [];
         $missingAtAade = [];
         $missingLocally = [];
         $duplicateLocal = [];
@@ -286,7 +287,19 @@ class SalesReconciler
             $aadeState = $aade->cancelled ? 'CANCELLED' : 'VALID';
 
             if ($localCancelled === $aade->cancelled) {
-                $matched[] = $this->rowFromLocal($invoice, aadeState: $aadeState);
+                // MYD-017: the MARK and state agree, but that alone is NOT proof the
+                // content matches. Compare the legally-relevant fields; a difference
+                // is a contentMismatch (false green under the old rule), never matched.
+                $diffs = ReconciliationContentComparator::diffs($this->snapshotFrom($invoice), $aade);
+                if ($diffs === []) {
+                    $matched[] = $this->rowFromLocal($invoice, aadeState: $aadeState);
+                } else {
+                    $contentMismatch[] = $this->rowFromLocal(
+                        $invoice,
+                        aadeState: $aadeState,
+                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $diffs),
+                    );
+                }
 
                 continue;
             }
@@ -333,6 +346,7 @@ class SalesReconciler
             localTotal: $withMark->count(),
             matched: $matched,
             stateMismatch: $stateMismatch,
+            contentMismatch: $contentMismatch,
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,
@@ -343,6 +357,23 @@ class SalesReconciler
     private function toFloat(?string $value): ?float
     {
         return $value === null ? null : (float) $value;
+    }
+
+    /**
+     * Flatten a local invoice to the fields the content comparator checks. Series
+     * comes from the type code, ΑΑ from `code`, type from the denormalised
+     * `mydata_type` cache, counterpart AFM from the FROZEN `vat_no` snapshot.
+     */
+    private function snapshotFrom(Invoice $invoice): LocalDocSnapshot
+    {
+        return new LocalDocSnapshot(
+            gross: $invoice->gross_total !== null ? (float) $invoice->gross_total : null,
+            series: $invoice->invoiceType?->code,
+            aa: $invoice->code !== null ? (string) $invoice->code : null,
+            issueDate: $invoice->issued_at?->format('Y-m-d'),
+            counterpartVat: $invoice->vat_no,
+            invoiceType: $invoice->mydata_type,
+        );
     }
 
     private function rowFromLocal(
@@ -381,7 +412,7 @@ class SalesReconciler
             ->where('company_id', $this->tenant->getKey())
             ->whereNotNull('mydata_mark')
             ->whereBetween('issued_at', [$from, $to])
-            ->with('customer')
+            ->with('customer', 'invoiceType')  // invoiceType → series/type for the content compare (MYD-017)
             ->get();
     }
 

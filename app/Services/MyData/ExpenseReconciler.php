@@ -138,6 +138,8 @@ class ExpenseReconciler
                         // getTotalGrossValue() is parsed from XML as a STRING
                         // (firebed declares no cast); make the float explicit.
                         gross: $this->toFloat($summary?->getTotalGrossValue()),
+                        // §8.1 type — needed for the content compare (MYD-017).
+                        invoiceType: $header?->getInvoiceType()?->value,
                     );
                 }
             }
@@ -176,6 +178,7 @@ class ExpenseReconciler
                     counterpartName: $existing->counterpartName,
                     counterpartVat: $existing->counterpartVat,
                     gross: $existing->gross,
+                    invoiceType: $existing->invoiceType,
                 );
             }
         }
@@ -236,6 +239,7 @@ class ExpenseReconciler
 
         $matched = [];
         $stateMismatch = [];
+        $contentMismatch = [];
         $missingAtAade = [];
         $missingLocally = [];
         $duplicateLocal = [];
@@ -273,7 +277,18 @@ class ExpenseReconciler
             $localCancelled = $expense->mydata_state === 'CANCELLED';
 
             if ($localCancelled === $aade->cancelled) {
-                $matched[] = $this->rowFromLocal($expense, aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID');
+                // MYD-017: MARK + state agree, but compare the content too — a
+                // difference is a contentMismatch (false green before), not a match.
+                $diffs = ReconciliationContentComparator::diffs($this->snapshotFrom($expense), $aade);
+                if ($diffs === []) {
+                    $matched[] = $this->rowFromLocal($expense, aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID');
+                } else {
+                    $contentMismatch[] = $this->rowFromLocal(
+                        $expense,
+                        aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
+                        problem: 'Διαφορές με ΑΑΔΕ (ίδιο ΜΑΡΚ & κατάσταση): '.implode(' · ', $diffs),
+                    );
+                }
 
                 continue;
             }
@@ -316,6 +331,7 @@ class ExpenseReconciler
             localTotal: $withMark->count(),
             matched: $matched,
             stateMismatch: $stateMismatch,
+            contentMismatch: $contentMismatch,
             missingAtAade: $missingAtAade,
             missingLocally: $missingLocally,
             duplicateLocal: $duplicateLocal,
@@ -325,6 +341,22 @@ class ExpenseReconciler
     private function toFloat(?string $value): ?float
     {
         return $value === null ? null : (float) $value;
+    }
+
+    /**
+     * Flatten a local expense to the fields the content comparator checks.
+     * Counterpart AFM is the supplier's, type is the recorded §8.1 `invoice_type`.
+     */
+    private function snapshotFrom(Expense $expense): LocalDocSnapshot
+    {
+        return new LocalDocSnapshot(
+            gross: $expense->gross_total !== null ? (float) $expense->gross_total : null,
+            series: $expense->series,
+            aa: $expense->aa,
+            issueDate: $expense->issue_date?->format('Y-m-d'),
+            counterpartVat: $expense->supplier_afm ?? $expense->supplier?->afm,
+            invoiceType: $expense->invoice_type,
+        );
     }
 
     private function rowFromLocal(

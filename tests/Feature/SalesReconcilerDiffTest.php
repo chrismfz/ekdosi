@@ -69,8 +69,8 @@ class SalesReconcilerDiffTest extends TestCase
         $missingAtAade = $this->invoice('400000000000005', 'VALID');
 
         $aadeDocs = [
-            $this->aade('400000000000001', cancelled: false),
-            $this->aade('400000000000002', cancelled: true),
+            $this->aadeFor($matchedValid, cancelled: false),
+            $this->aadeFor($matchedCancelled, cancelled: true),
             $this->aade('400000000000003', cancelled: true),  // AADE cancelled, local active
             $this->aade('400000000000004', cancelled: false), // AADE valid, local cancelled
             // 400000000000005 deliberately absent → missing at AADE
@@ -131,10 +131,10 @@ class SalesReconcilerDiffTest extends TestCase
     {
         // Draft (never filed) — no mydata_mark. Must not appear anywhere.
         $this->invoice(null, null);
-        $this->invoice('600000000000001', 'VALID');
+        $filed = $this->invoice('600000000000001', 'VALID');
 
         $result = (new SalesReconciler($this->tenant))->diff(
-            [$this->aade('600000000000001', cancelled: false)],
+            [$this->aadeFor($filed, cancelled: false)],
             $this->localCollection(),
             '01/01/2026',
             '31/01/2026',
@@ -149,11 +149,11 @@ class SalesReconcilerDiffTest extends TestCase
     {
         // Two local invoices sharing one MARK — a data-integrity fault
         // the console must surface (keyBy would otherwise hide one).
-        $this->invoice('800000000000001', 'VALID');
+        $first = $this->invoice('800000000000001', 'VALID');
         $this->invoice('800000000000001', 'VALID');
 
         $result = (new SalesReconciler($this->tenant))->diff(
-            [$this->aade('800000000000001', cancelled: false)],
+            [$this->aadeFor($first, cancelled: false)],
             $this->localCollection(),
             '01/01/2026',
             '31/01/2026',
@@ -169,13 +169,13 @@ class SalesReconcilerDiffTest extends TestCase
 
     public function test_no_discrepancies_when_everything_agrees(): void
     {
-        $this->invoice('700000000000001', 'VALID');
-        $this->invoice('700000000000002', 'CANCELLED');
+        $a = $this->invoice('700000000000001', 'VALID');
+        $b = $this->invoice('700000000000002', 'CANCELLED');
 
         $result = (new SalesReconciler($this->tenant))->diff(
             [
-                $this->aade('700000000000001', cancelled: false),
-                $this->aade('700000000000002', cancelled: true),
+                $this->aadeFor($a, cancelled: false),
+                $this->aadeFor($b, cancelled: true),
             ],
             $this->localCollection(),
             '01/01/2026',
@@ -184,6 +184,78 @@ class SalesReconcilerDiffTest extends TestCase
 
         $this->assertFalse($result->hasDiscrepancies());
         $this->assertCount(2, $result->matched);
+    }
+
+    public function test_same_mark_and_state_but_different_gross_is_a_content_mismatch(): void
+    {
+        // MYD-017: MARK + state agree, but the gross differs beyond the cent
+        // tolerance → contentMismatch, NOT a false "matched".
+        $inv = $this->invoice('410000000000001', 'VALID');
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['gross' => 999.00])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(1, $result->contentMismatch);
+        $this->assertStringContainsString('μικτό', $result->contentMismatch[0]->problem);
+        $this->assertTrue($result->hasDiscrepancies());
+        $this->assertSame(1, $result->discrepancyCount());
+    }
+
+    public function test_gross_within_a_cent_still_matches(): void
+    {
+        $inv = $this->invoice('420000000000001', 'VALID'); // gross_total 124.00
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['gross' => 124.009])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
+    }
+
+    public function test_different_type_or_series_is_a_content_mismatch(): void
+    {
+        $inv = $this->invoice('430000000000001', 'VALID');
+        $inv->forceFill(['mydata_type' => '1.1'])->save(); // so the type compare runs
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['invoiceType' => '2.1', 'series' => 'ZZZ'])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(1, $result->contentMismatch);
+        $problem = $result->contentMismatch[0]->problem;
+        $this->assertStringContainsString('τύπος', $problem);
+        $this->assertStringContainsString('σειρά', $problem);
+    }
+
+    public function test_retail_without_counterpart_afm_still_matches(): void
+    {
+        // Retail (11.x): AADE returns no counterpart. A local vat_no with no AADE
+        // AFM to compare against is NOT a content difference.
+        $inv = $this->invoice('440000000000001', 'VALID');
+        $inv->forceFill(['vat_no' => '123456789'])->save();
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['counterpartVat' => null])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
     }
 
     private function invoice(?string $mark, ?string $state): Invoice
@@ -218,10 +290,14 @@ class SalesReconcilerDiffTest extends TestCase
         return Invoice::query()
             ->where('company_id', $this->tenant->id)
             ->whereNotNull('mydata_mark')
-            ->with('customer')
+            ->with('customer', 'invoiceType')
             ->get();
     }
 
+    /**
+     * An AADE summary NOT backed by a local invoice (missing-locally rows, or
+     * state-mismatch rows whose content is never compared). Content is arbitrary.
+     */
     private function aade(string $mark, bool $cancelled): AadeDocSummary
     {
         return new AadeDocSummary(
@@ -235,6 +311,28 @@ class SalesReconcilerDiffTest extends TestCase
             counterpartName: 'Πελάτης ΑΕ',
             counterpartVat: '123456789',
             gross: 124.00,
+        );
+    }
+
+    /**
+     * An AADE summary that MIRRORS a local invoice's content — used for matched
+     * rows so the MYD-017 content compare sees no difference. Pass overrides to
+     * force a specific field to diverge (→ contentMismatch).
+     */
+    private function aadeFor(Invoice $inv, bool $cancelled = false, array $override = []): AadeDocSummary
+    {
+        return new AadeDocSummary(
+            mark: (string) $inv->mydata_mark,
+            uid: 'UID-'.$inv->mydata_mark,
+            cancelled: $cancelled,
+            cancelledByMark: $cancelled ? '9'.$inv->mydata_mark : null,
+            series: $override['series'] ?? $inv->invoiceType?->code,
+            aa: $override['aa'] ?? (string) $inv->code,
+            issueDate: $override['issueDate'] ?? $inv->issued_at?->format('Y-m-d'),
+            counterpartName: $inv->customer?->name,
+            counterpartVat: $override['counterpartVat'] ?? $inv->vat_no,
+            gross: $override['gross'] ?? ($inv->gross_total !== null ? (float) $inv->gross_total : null),
+            invoiceType: $override['invoiceType'] ?? $inv->mydata_type,
         );
     }
 }

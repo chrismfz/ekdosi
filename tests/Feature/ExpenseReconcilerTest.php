@@ -5,10 +5,12 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\Expense;
 use App\Models\Supplier;
+use App\Services\MyData\AadeDocSummary;
 use App\Services\MyData\ExpenseReconciler;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
@@ -27,6 +29,11 @@ class ExpenseReconcilerTest extends TestCase
     {
         parent::setUp();
 
+        // The AADE XML fixtures carry fixed Jan-2026 issue dates; freeze "now" into
+        // that window so the now-relative reconcile window includes the local
+        // expenses AND their dates line up with AADE for the content compare (MYD-017).
+        Carbon::setTestNow('2026-01-15 12:00:00');
+
         $this->tenant = Company::create([
             'name' => 'Exp recon',
             'slug' => 'exprecon-'.uniqid(),
@@ -37,6 +44,12 @@ class ExpenseReconcilerTest extends TestCase
             'mydata_aade_id_sandbox' => 'TESTUSER',
             'mydata_subscription_key_sandbox' => 'TESTKEY',
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
     }
 
     private function reconciler(MockHandler $mock): ExpenseReconciler
@@ -126,6 +139,27 @@ XML),
         $this->assertTrue($result->hasDiscrepancies());
     }
 
+    public function test_content_mismatch_when_local_gross_differs_from_aade(): void
+    {
+        // MYD-017 (expense side): same MARK + state as AADE, but a different local
+        // gross → contentMismatch, not a false "matched".
+        $supplier = Supplier::create([
+            'company_id' => $this->tenant->id, 'afm' => '998482379',
+            'name' => 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', 'source' => 'sync',
+        ]);
+        $this->expense('400000000000001', 'VALID', $supplier->id, ['gross_total' => '999.00']);
+
+        $result = $this->reconciler(new MockHandler([
+            new Response(200, [], $this->pageOne()),
+            new Response(200, [], $this->pageTwo()),
+        ]))->reconcile(now()->subMonth(), now());
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(1, $result->contentMismatch);
+        $this->assertSame('400000000000001', $result->contentMismatch[0]->mark);
+        $this->assertStringContainsString('μικτό', $result->contentMismatch[0]->problem);
+    }
+
     /**
      * The unique (company_id, mydata_mark) index makes a local duplicate
      * impossible to WRITE, so we exercise the duplicateLocal branch of the
@@ -134,10 +168,17 @@ XML),
      */
     public function test_duplicate_local_via_pure_diff(): void
     {
-        $a = (new Expense)->forceFill(['id' => 1, 'mydata_mark' => '400000000000007', 'mydata_state' => 'VALID']);
-        $b = (new Expense)->forceFill(['id' => 2, 'mydata_mark' => '400000000000007', 'mydata_state' => 'VALID']);
+        // Content mirrors the AADE summary below so the collapsed survivor is a
+        // clean match — the test targets the duplicateLocal branch, not content.
+        $content = [
+            'mydata_mark' => '400000000000007', 'mydata_state' => 'VALID',
+            'series' => 'A', 'aa' => '7', 'issue_date' => '2026-01-10',
+            'gross_total' => '124.00', 'supplier_afm' => '998482379',
+        ];
+        $a = (new Expense)->forceFill(['id' => 1] + $content);
+        $b = (new Expense)->forceFill(['id' => 2] + $content);
 
-        $aade = [new \App\Services\MyData\AadeDocSummary(
+        $aade = [new AadeDocSummary(
             mark: '400000000000007', uid: 'U', cancelled: false, cancelledByMark: null,
             series: 'A', aa: '7', issueDate: '2026-01-10',
             counterpartName: 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', counterpartVat: '998482379', gross: 124.0,
@@ -153,18 +194,23 @@ XML),
         $this->assertCount(1, $result->matched);
     }
 
-    private function expense(string $mark, ?string $state, int $supplierId): Expense
+    private function expense(string $mark, ?string $state, int $supplierId, array $override = []): Expense
     {
-        return Expense::create([
+        // Defaults mirror the AADE pageOne mark-001 doc so a matched row has no
+        // CONTENT difference (MYD-017); pass $override to force a divergence.
+        return Expense::create(array_merge([
             'company_id' => $this->tenant->id,
             'supplier_id' => $supplierId,
             'mydata_mark' => $mark,
             'mydata_state' => $state,
-            'issue_date' => now()->subDays(3)->toDateString(),
+            'issue_date' => '2026-01-10',
             'supplier_afm' => '998482379',
             'gross_total' => '124.00',
+            'series' => 'A',
+            'aa' => '1',
+            'invoice_type' => '1.1',
             'source' => 'sync',
-        ]);
+        ], $override));
     }
 
     private function pageOne(): string

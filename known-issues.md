@@ -279,7 +279,7 @@ Priorities:
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | DONE | Delivery units | Invalid or missing coded unit is silently filed as pieces |
-| MYD-017 | P0 | OPEN | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
+| MYD-017 | P0 | DONE | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
@@ -1048,7 +1048,23 @@ changes the meaning of the movement line.
 
 ### MYD-017 — Reconciliation can return a false green on different content
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-01 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** a new **`contentMismatch`** bucket, separate from `stateMismatch` (different repair).
+Both live reconcilers (`SalesReconciler`, `ExpenseReconciler`) previously routed a row to
+`matched` as soon as the MARK existed on both sides and the cancellation flag agreed. Now,
+in that same branch, they compare the legally-relevant content via one shared pure helper
+`ReconciliationContentComparator::diffs(LocalDocSnapshot, AadeDocSummary)` (so sales and
+expenses can't drift): **gross** (explicit ±0.01 cent tolerance), **§8.1 type**, **series /
+ΑΑ**, **issue date** (normalised to Y-m-d), and **counterpart ΑΦΜ** (digits-only, and only
+when AADE returns one — retail 11.x has none). Any difference routes the row to
+`contentMismatch` with a Greek `problem` listing exactly which fields differ; nothing is ever
+silently rewritten. `discrepancyCount()` counts the new bucket, and both consoles render it
+(the blade defaults a missing bucket key to `[]` so a pre-deploy cache payload can't break the
+page). The expense reconciler now also captures the doc `invoiceType` so the type compare
+works on the expense side. Tests cover sales + expenses, the cent tolerance, a
+retail-without-counterpart match, and type/series/gross divergences. See `CHANGELOG.md`
+[Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2774,3 +2790,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-003 second pass** (strict review) — `->monetary()` now on the remaining selectors: 3× WHMCS defaults + 2× third-party split + credit-note picker; WHMCS default/split queries extracted to shared helpers with 9.x-exclusion tests | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-008 DONE** — correlated credit (5.1) resolves the original MARK from INSERT **and** PROVIDER_INSERT (was INSERT-only), so provider-issued originals stay correctable; same-tenant scoped; rejected attempts refused | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-008 hardening** (PR #388 review) — the `MyDataMark` correlation query is now also `company_id`-scoped, so an inconsistent audit row from another tenant pointing at the same invoice_id can't be used as the MARK | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 DONE** — live reconciliation compares content (gross/type/series-ΑΑ/date/ΑΦΜ), not just MARK+state; new `contentMismatch` bucket (shared comparator, both consoles) ends the false-green | `CHANGELOG.md` [Unreleased] → Fixed |

@@ -78,8 +78,9 @@
 - **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3 /
   Έλεγχος ρυθμίσεων**· ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:
   τοπικό (Phase 1, ξεχωριστός «Τοπικός έλεγχος κατάστασης») + ζωντανό (Phase 2, `SalesReconciler`)·
-  matched / stateMismatch / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε
-  tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
+  matched / stateMismatch / **contentMismatch** («Διαφορά περιεχομένου» — μικτό/τύπος/σειρά-ΑΑ/
+  ημ-νία/ΑΦΜ, κοινός `ReconciliationContentComparator`) / missingAtAade / **αδέσποτα**
+  (ομαδοποιημένα ανά οικονομική φύση). Κάθε tab κρατά δικό του «τελευταία ενημέρωση» + lazy fetch.
 - **«Ανανέωση όλων»** (`MyDataConsoleRefresh`) — ένα κουμπί κατεβάζει μαζί Πωλήσεις+Έξοδα+Ε3+εικόνα
   ΦΠΑ (σειριακά) και σπέρνει την cache κάθε tab· per-step isolation + summary toast. Το per-tab
   «Έλεγχος» μένει ως δευτερεύον single-source refresh. **Auto-refresh**: stale banner όταν η cache

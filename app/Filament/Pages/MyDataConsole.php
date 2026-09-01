@@ -311,6 +311,7 @@ class MyDataConsole extends Page
             'sandbox' => $tenant->mydata_mode_enum === MyDataMode::Sandbox,
             'matched' => $rows($r->matched),
             'stateMismatch' => $rows($r->stateMismatch),
+            'contentMismatch' => $rows($r->contentMismatch),
             'missingAtAade' => $rows($r->missingAtAade),
             'missingLocally' => $rows($r->missingLocally),
             'duplicateLocal' => $rows($r->duplicateLocal),

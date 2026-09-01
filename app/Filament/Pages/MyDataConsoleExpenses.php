@@ -337,6 +337,7 @@ class MyDataConsoleExpenses extends Page
             'discrepancyCount' => $r->discrepancyCount(),
             'matched' => $rows($r->matched),
             'stateMismatch' => $rows($r->stateMismatch),
+            'contentMismatch' => $rows($r->contentMismatch),
             'missingAtAade' => $rows($r->missingAtAade),
             'missingLocally' => $rows($r->missingLocally),
             'duplicateLocal' => $rows($r->duplicateLocal),
@@ -379,7 +380,7 @@ class MyDataConsoleExpenses extends Page
     private static function supplierNamesByAfm(Company $tenant, ExpenseReconciliationResult $r): array
     {
         $afms = collect([
-            ...$r->matched, ...$r->stateMismatch, ...$r->missingAtAade,
+            ...$r->matched, ...$r->stateMismatch, ...$r->contentMismatch, ...$r->missingAtAade,
             ...$r->missingLocally, ...$r->duplicateLocal,
         ])->map(fn (ReconciliationRow $row) => $row->counterpartVat)
             ->filter()

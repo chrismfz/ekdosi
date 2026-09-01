@@ -84,10 +84,14 @@
 
         @foreach ([
             ['key' => 'stateMismatch', 'title' => 'Ασυμφωνία κατάστασης', 'color' => 'warning', 'icon' => 'heroicon-o-exclamation-triangle'],
+            ['key' => 'contentMismatch', 'title' => 'Διαφορά περιεχομένου (ίδιο ΜΑΡΚ)', 'color' => 'danger', 'icon' => 'heroicon-o-exclamation-circle'],
             ['key' => 'missingAtAade', 'title' => 'Λείπουν από το AADE', 'color' => 'danger', 'icon' => 'heroicon-o-x-circle'],
             ['key' => 'duplicateLocal', 'title' => 'Διπλά ΜΑΡΚ τοπικά', 'color' => 'danger', 'icon' => 'heroicon-o-document-duplicate'],
         ] as $bucket)
-            @if (count($result[$bucket['key']]) > 0)
+            {{-- Default a missing key to []: a cache payload written before a new
+                 bucket shipped (e.g. contentMismatch) must not break the render. --}}
+            @php($bucketRows = $result[$bucket['key']] ?? [])
+            @if (count($bucketRows) > 0)
                 <x-filament::section :collapsible="true">
                     <x-slot name="heading">
                         <span class="flex items-center gap-2">
@@ -97,12 +101,12 @@
                                 'text-danger-500' => $bucket['color'] === 'danger',
                             ]) />
                             {{ $bucket['title'] }}
-                            <x-filament::badge :color="$bucket['color']">{{ count($result[$bucket['key']]) }}</x-filament::badge>
+                            <x-filament::badge :color="$bucket['color']">{{ count($bucketRows) }}</x-filament::badge>
                         </span>
                     </x-slot>
 
                     @include('filament.pages.partials.reconciliation-table', [
-                        'rows' => $result[$bucket['key']],
+                        'rows' => $bucketRows,
                         'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'afm', 'gross', 'localState', 'aadeState', 'problem', 'open'],
                     ])
                 </x-filament::section>
