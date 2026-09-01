@@ -12,7 +12,6 @@ use App\Filament\Support\PickerOptions;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Services\Leads\LeadMatcher;
-use App\Support\Afm;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\ForceDeleteAction;
@@ -237,15 +236,10 @@ class EditLead extends EditRecord
             $record->id,
         );
 
-        // Only live customers matched on their own columns; prefer the ΑΦΜ hit
-        // (a legal identity) and pre-select ONLY when the answer is unambiguous.
-        $candidates = $match->directCustomers;
-        if ($record->afm !== null) {
-            $byAfm = $candidates->filter(fn (Customer $c): bool => Afm::normalise($c->afm) === Afm::normalise($record->afm));
-            if ($byAfm->isNotEmpty()) {
-                $candidates = $byAfm;
-            }
-        }
+        // Only live customers matched on their own columns; the ΑΦΜ owner (a
+        // legal identity) wins, and we pre-select ONLY when unambiguous.
+        $byAfm = $match->customersOwningAfm($record->afm);
+        $candidates = $byAfm->isNotEmpty() ? $byAfm : $match->directCustomers;
 
         return $candidates->count() === 1 ? $candidates->first()->id : null;
     }

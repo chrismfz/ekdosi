@@ -20,7 +20,6 @@ use App\Models\Lead;
 use App\Models\Quote;
 use App\Models\User;
 use App\Models\VatCategory;
-use App\Services\Leads\LeadMatcher;
 use App\Services\TenantRoleProvisioner;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -204,7 +203,7 @@ class LeadResourceTest extends TestCase
             ->mountAction('convert')
             ->assertActionDataSet(['mode' => 'new', 'customer_id' => null]);
 
-        app(LeadMatcher::class)->flush();
+        // No manual flush: the matcher memo is invalidated by the Customer write.
         $beta = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Βήτα', 'afm' => '123456789']);
 
         Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
@@ -491,11 +490,23 @@ class LeadResourceTest extends TestCase
                 'city' => 'Θεσσαλονίκη',
             ]);
 
-        // A foreign / unknown id is ignored.
+        // A foreign / unknown id is ignored — and so is a lead that must not be
+        // contacted any more (URL / bookmark route, not only the hidden button).
         Livewire::withQueryParams(['lead' => 999999])
             ->test(CreateQuote::class)
             ->assertOk()
             ->assertFormSet(['lead_id' => null]);
+
+        $dnc = Lead::create(['company_id' => $this->tenant->id, 'name' => 'DNC', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+        Livewire::withQueryParams(['lead' => $dnc->id])
+            ->test(CreateQuote::class)
+            ->assertOk()
+            ->assertFormSet(['lead_id' => null, 'company_name' => null]);
+        $this->assertNull(CreateQuote::tenantLeadId($dnc->id), 'tampered lead_id of a DNC lead is dropped');
+
+        $trashedLead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Σβησμένο']);
+        $trashedLead->delete();
+        $this->assertNull(CreateQuote::tenantLeadId($trashedLead->id));
 
         // Model-level hand-off used by CreateQuote::afterCreate.
         $quote = Quote::create(['company_id' => $this->tenant->id, 'lead_id' => $lead->id, 'code' => 'ΠΡ-7', 'subject' => 'Hosting']);

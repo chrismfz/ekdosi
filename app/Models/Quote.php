@@ -86,6 +86,18 @@ class Quote extends Model
         return $this->belongsTo(Lead::class);
     }
 
+    /**
+     * Issued to a lead that has not become a customer yet — no customer to bill,
+     * so neither an invoice nor a service contract can be made from it. The ONE
+     * rule both conversion actions check.
+     */
+    public function isAwaitingLeadConversion(): bool
+    {
+        return $this->lead_id !== null && $this->customer_id === null;
+    }
+
+    public const AWAITING_LEAD_MESSAGE = 'Η προσφορά ανήκει σε lead που δεν έχει γίνει πελάτης — κάνε πρώτα «Μετατροπή σε πελάτη» στο lead.';
+
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);

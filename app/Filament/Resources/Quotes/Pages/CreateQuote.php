@@ -87,6 +87,12 @@ class CreateQuote extends CreateRecord
         return $data;
     }
 
+    /**
+     * Keep `lead_id` only for an OPEN, live lead of THIS tenant. A lost /
+     * «μην ξαναενοχλήσετε» / trashed lead must not receive a quote (a quote is
+     * a contact) — the button is hidden for those, and this closes the URL /
+     * tampered-payload route as well.
+     */
     public static function tenantLeadId(mixed $id): ?int
     {
         $id = (int) $id;
@@ -95,7 +101,7 @@ class CreateQuote extends CreateRecord
         }
 
         $exists = Lead::query()
-            ->withTrashed()
+            ->open()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->whereKey($id)
             ->exists();
@@ -110,7 +116,9 @@ class CreateQuote extends CreateRecord
             return null;
         }
 
+        // Same rule as tenantLeadId(): only an open, live lead takes a quote.
         return Lead::query()
+            ->open()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->find($id);
     }

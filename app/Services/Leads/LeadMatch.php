@@ -4,6 +4,7 @@ namespace App\Services\Leads;
 
 use App\Models\Customer;
 use App\Models\Lead;
+use App\Support\Afm;
 use Illuminate\Support\Collection;
 
 /**
@@ -29,6 +30,22 @@ final class LeadMatch
     public static function none(): self
     {
         return new self(collect(), collect(), false, collect());
+    }
+
+    /**
+     * Live customers (direct hits) whose ΑΦΜ equals the given one — the legal
+     * owner(s) of the identity. Empty for a lead without a usable ΑΦΜ.
+     *
+     * @return Collection<int, Customer>
+     */
+    public function customersOwningAfm(?string $afm): Collection
+    {
+        $afm = Afm::normalise($afm);
+        if ($afm === null) {
+            return collect();
+        }
+
+        return $this->directCustomers->filter(fn (Customer $c): bool => Afm::normalise($c->afm) === $afm)->values();
     }
 
     public function isEmpty(): bool

@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Enums\LeadActivityType;
 use App\Enums\LeadStatus;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerContact;
 use App\Models\Lead;
@@ -46,6 +47,11 @@ class ConvertLeadToCustomer
         }
 
         return DB::transaction(function () use ($lead, $existing): Customer {
+            // Serialise conversions per tenant: two operators converting two
+            // leads that share an ΑΦΜ must not both pass the owner check below
+            // (customers has no unique on afm; a gap can't be row-locked).
+            Company::query()->whereKey($lead->company_id)->lockForUpdate()->first();
+
             // Re-check under a row lock: a double-submit can't make two customers.
             $locked = Lead::query()->withoutGlobalScopes()->whereKey($lead->id)->lockForUpdate()->first();
             if ($locked === null || $locked->converted_customer_id !== null) {
@@ -109,7 +115,8 @@ class ConvertLeadToCustomer
     /**
      * «Ποτέ διπλός πελάτης για ένα ΑΦΜ»: the modal only PRE-SELECTS «σύνδεση»;
      * the action is the authority. A live customer with the same ΑΦΜ means
-     * the operator must link, not create.
+     * the operator must link, not create. Read straight from the DB under the
+     * transaction (never the request memo) and lock the owner row(s).
      */
     private function assertNoLiveCustomerOwnsTheAfm(Lead $lead): void
     {
@@ -118,10 +125,10 @@ class ConvertLeadToCustomer
             return;
         }
 
-        $owner = app(LeadMatcher::class)
-            ->find($lead->company_id, $afm, null, [], $lead->id)
-            ->directCustomers
-            ->first(fn (Customer $c): bool => Afm::normalise($c->afm) === $afm);
+        $owner = LeadMatcher::whereAfm(
+            Customer::query()->where('company_id', $lead->company_id),
+            $afm,
+        )->lockForUpdate()->first();
 
         if ($owner !== null) {
             throw new RuntimeException(

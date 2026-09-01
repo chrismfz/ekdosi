@@ -4,6 +4,7 @@ namespace App\Services\Leads;
 
 use App\Enums\LeadStatus;
 use App\Models\Customer;
+use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Support\Afm;
 use Illuminate\Database\Eloquent\Builder;
@@ -46,6 +47,35 @@ class LeadMatcher
     public function flush(): void
     {
         $this->memo = [];
+    }
+
+    /**
+     * Invalidate the memo whenever the matched data changes in-process (a batch
+     * job creating several leads in a loop, tests). Registered once from
+     * AppServiceProvider::boot(); no-op when the matcher was never resolved.
+     */
+    public static function listenForWrites(): void
+    {
+        $flush = static function (): void {
+            if (app()->resolved(self::class)) {
+                app(self::class)->flush();
+            }
+        };
+
+        foreach ([Lead::class, Customer::class, CustomerContact::class] as $model) {
+            $model::saved($flush);
+            $model::deleted($flush);
+            $model::restored($flush);
+        }
+    }
+
+    /**
+     * The ΑΦΜ equality predicate (digits, EL/GR prefix tolerated on the stored
+     * side) — public so a caller that must LOCK the rows can reuse the rule.
+     */
+    public static function whereAfm(Builder $q, string $afm): Builder
+    {
+        return $q->whereRaw('UPPER('.self::strippedSql('afm').') IN (?, ?, ?)', [$afm, 'EL'.$afm, 'GR'.$afm]);
     }
 
     /**
@@ -152,7 +182,7 @@ class LeadMatcher
         if ($afm !== null) {
             // The stored side may carry an EL/GR prefix (customers.afm is saved
             // as typed) — accept the digits with or without it.
-            $q->orWhereRaw('UPPER('.self::strippedSql('afm').') IN (?, ?, ?)', [$afm, 'EL'.$afm, 'GR'.$afm]);
+            $q->orWhere(fn (Builder $qq) => self::whereAfm($qq, $afm));
         }
 
         if ($email !== null) {

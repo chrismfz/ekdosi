@@ -129,6 +129,40 @@ class LeadMatcherTest extends TestCase
         $this->assertSame([$viaContact->id], $m->find($t->id, null, null, ['+30 6970001111'])->customers->pluck('id')->all());
     }
 
+    public function test_memo_is_invalidated_by_writes_in_the_same_process(): void
+    {
+        $t = $this->tenant();
+        $m = app(LeadMatcher::class);
+
+        $this->assertTrue($m->find($t->id, null, 'late@dnc.gr')->isEmpty());
+
+        // A batch job creating a DNC lead after the first lookup must be seen
+        // by the very next lookup (scoped memo + saved/deleted listeners).
+        $dnc = Lead::create(['company_id' => $t->id, 'name' => 'Αργότερα', 'email' => 'late@dnc.gr', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+        $this->assertTrue($m->find($t->id, null, 'late@dnc.gr')->hasDoNotContact());
+
+        $dnc->forceDelete();
+        $this->assertFalse($m->find($t->id, null, 'late@dnc.gr')->hasDoNotContact());
+
+        $this->assertSame([], $m->find($t->id, null, 'c@x.gr')->customers->all());
+        Customer::create(['company_id' => $t->id, 'name' => 'Νέος', 'email' => 'c@x.gr']);
+        $this->assertCount(1, $m->find($t->id, null, 'c@x.gr')->customers);
+    }
+
+    public function test_customers_owning_afm_helper(): void
+    {
+        $t = $this->tenant();
+        $owner = Customer::create(['company_id' => $t->id, 'name' => 'Κάτοχος', 'afm' => 'EL123456789']);
+        $byPhone = Customer::create(['company_id' => $t->id, 'name' => 'Μόνο τηλέφωνο', 'phone1' => '2310123456']);
+
+        $match = app(LeadMatcher::class)->find($t->id, '123456789', null, ['2310123456']);
+
+        $this->assertSame([$owner->id, $byPhone->id], $match->directCustomers->pluck('id')->sort()->values()->all());
+        $this->assertSame([$owner->id], $match->customersOwningAfm(' 123-456-789')->pluck('id')->all());
+        $this->assertTrue($match->customersOwningAfm('EL')->isEmpty(), 'A prefix-only ΑΦΜ never selects the no-ΑΦΜ hits.');
+        $this->assertTrue($match->customersOwningAfm(null)->isEmpty());
+    }
+
     public function test_ignores_the_lead_being_edited_and_other_tenants(): void
     {
         $t = $this->tenant('a');

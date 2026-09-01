@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Actions\ConvertLeadToCustomer;
 use App\Actions\ConvertQuoteToInvoice;
+use App\Actions\ConvertQuoteToServiceContract;
+use App\Enums\BillingCycle;
 use App\Enums\QuoteStatus;
 use App\Models\Company;
 use App\Models\Customer;
@@ -151,6 +153,20 @@ class QuoteTest extends TestCase
         $customer = app(ConvertLeadToCustomer::class)($lead);
         $invoice = app(ConvertQuoteToInvoice::class)($quote->fresh(), $this->type);
         $this->assertSame($customer->id, $invoice->customer_id);
+    }
+
+    public function test_a_leads_quote_cannot_become_a_service_contract_before_the_lead_is_converted(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Lead']);
+        $quote = $this->makeQuote(['lead_id' => $lead->id, 'status' => QuoteStatus::Accepted]);
+        QuoteLine::create(['quote_id' => $quote->id, 'product_descr' => 'X', 'qty' => 1, 'price_per_item' => 10, 'vat_percent' => 24]);
+
+        try {
+            app(ConvertQuoteToServiceContract::class)($quote->fresh(), $this->type, BillingCycle::Monthly, 10.0);
+            $this->fail('Expected a RuntimeException.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Μετατροπή σε πελάτη', $e->getMessage(), 'The Greek guard, not an SQL NOT NULL error.');
+        }
     }
 
     public function test_convert_is_idempotent(): void

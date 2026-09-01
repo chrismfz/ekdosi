@@ -214,7 +214,7 @@ class Lead extends Model
             ->where('next_action_at', '<', now());
     }
 
-    /** Open leads with no timeline row (or creation) in the last N days. */
+    /** Open leads with no real contact (call/email/meeting/quote) — or creation — in the last N days. */
     public function scopeStale(Builder $query, int $days = 14): Builder
     {
         $cutoff = now()->subDays($days);

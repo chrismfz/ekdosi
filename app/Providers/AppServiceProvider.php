@@ -39,6 +39,8 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        LeadMatcher::listenForWrites();
+
         /*
          * Hard block on destructive DB commands (db:wipe, migrate:fresh,
          * migrate:refresh) anywhere EXCEPT the automated test suite.

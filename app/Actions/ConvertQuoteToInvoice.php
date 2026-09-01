@@ -56,10 +56,8 @@ class ConvertQuoteToInvoice
         // Leads L1: a quote issued to a lead has no customer yet. An invoice
         // without a customer has no Καρτέλα and no myDATA counterpart — convert
         // the lead first (that back-fills the quote's customer_id).
-        if ($quote->lead_id !== null && $quote->customer_id === null) {
-            throw new RuntimeException(
-                'Η προσφορά ανήκει σε lead που δεν έχει γίνει πελάτης — κάνε πρώτα «Μετατροπή σε πελάτη» στο lead.'
-            );
+        if ($quote->isAwaitingLeadConversion()) {
+            throw new RuntimeException(Quote::AWAITING_LEAD_MESSAGE);
         }
 
         $quote->loadMissing('lines');
