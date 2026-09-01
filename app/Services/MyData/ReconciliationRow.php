@@ -30,6 +30,7 @@ final readonly class ReconciliationRow
         public ?string $counterpartName = null,
         public ?string $counterpartVat = null,   // issuer/customer AFM
         public ?float $gross = null,
+        public ?float $net = null,
         public ?string $localState = null,   // invoices.mydata_state
         public ?string $localStatus = null,  // invoices.local_status
         public ?string $aadeState = null,    // 'VALID' | 'CANCELLED' | null

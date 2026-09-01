@@ -30,6 +30,11 @@ final readonly class AadeDocSummary
         public ?string $counterpartName,
         public ?string $counterpartVat,
         public ?float $gross,
+        // <totalNetValue> from the AADE summary — see LocalDocSnapshot::$net.
+        // REQUIRED (no default) on purpose: the comparator treats net as a
+        // mandatory field, so a construction site that forgot it would silently
+        // flip every row of that reconciler to contentIncomplete.
+        public ?float $net,
         // §8.1 invoice type (e.g. '1.1', '14.3', '17.1') — lets the console
         // bucket an orphan as income / supplier-expense / accounting-entry
         // instead of dumping payroll into the "αδέσποτα πωλήσεων" list.

@@ -141,6 +141,7 @@ class SalesReconciler
                         // the float explicit so a strict_types caller or
                         // numeric comparison never trips.
                         gross: $this->toFloat($summary?->getTotalGrossValue()),
+                        net: $this->toFloat($summary?->getTotalNetValue()),
                         invoiceType: $header?->getInvoiceType()?->value,
                     );
                 }
@@ -186,6 +187,7 @@ class SalesReconciler
                     counterpartName: $existing->counterpartName,
                     counterpartVat: $existing->counterpartVat,
                     gross: $existing->gross,
+                    net: $existing->net,
                     invoiceType: $existing->invoiceType,
                 );
             }
@@ -338,6 +340,7 @@ class SalesReconciler
                 counterpartName: $aade->counterpartName,
                 counterpartVat: $aade->counterpartVat,
                 gross: $aade->gross,
+                net: $aade->net,
                 aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
                 cancelledByMark: $aade->cancelledByMark,
                 problem: 'Υπάρχει στο AADE αλλά δεν βρέθηκε τοπικά (πιθανή υποβολή από άλλο σύστημα ή χαμένη εγγραφή).',
@@ -376,8 +379,16 @@ class SalesReconciler
      */
     private function snapshotFrom(Invoice $invoice): LocalDocSnapshot
     {
+        $filed = FiledInvoiceTotals::for($invoice);
+
         return new LocalDocSnapshot(
-            gross: $invoice->gross_total !== null ? (float) $invoice->gross_total : null,
+            // Money comes from FiledInvoiceTotals — the same roll-up the submitter
+            // files (per-VAT-rate rounding + the [208] adjustment), NOT the ledger
+            // columns, which round differently and never carry the adjustment.
+            // A null means "not reconstructable" → the comparator reports it as
+            // unverified instead of contradicting AADE with a number we never sent.
+            gross: $filed->gross,
+            net: $filed->net,
             series: $invoice->invoiceType?->code,
             aa: $invoice->code !== null ? (string) $invoice->code : null,
             issueDate: $invoice->issued_at?->format('Y-m-d'),
@@ -407,7 +418,9 @@ class SalesReconciler
             invcode: $invoice->invcode,
             issuedAt: $invoice->issued_at?->format('d/m/Y'),
             counterpartName: $invoice->customer?->name,
-            gross: $invoice->gross_total !== null ? (float) $invoice->gross_total : null,
+            // Same basis as the content compare, so the column and the problem text
+            // can't quote two different "local gross" figures on one row.
+            gross: FiledInvoiceTotals::for($invoice)->gross ?? ($invoice->gross_total !== null ? (float) $invoice->gross_total : null),
             localState: $invoice->mydata_state,
             localStatus: $invoice->local_status,
             aadeState: $aadeState,
@@ -430,7 +443,9 @@ class SalesReconciler
             ->where('company_id', $this->tenant->getKey())
             ->whereNotNull('mydata_mark')
             ->whereBetween('issued_at', [$from, $to])
-            ->with('customer', 'invoiceType')  // invoiceType → series/type for the content compare (MYD-017)
+            // lines → FiledInvoiceTotals (the filed net/gross roll-up); invoiceType →
+            // series/type for the content compare (MYD-017).
+            ->with('customer', 'invoiceType', 'lines')
             ->get();
     }
 

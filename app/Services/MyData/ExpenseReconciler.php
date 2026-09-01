@@ -138,6 +138,7 @@ class ExpenseReconciler
                         // getTotalGrossValue() is parsed from XML as a STRING
                         // (firebed declares no cast); make the float explicit.
                         gross: $this->toFloat($summary?->getTotalGrossValue()),
+                        net: $this->toFloat($summary?->getTotalNetValue()),
                         // §8.1 type — needed for the content compare (MYD-017).
                         invoiceType: $header?->getInvoiceType()?->value,
                     );
@@ -180,6 +181,7 @@ class ExpenseReconciler
                     counterpartName: $existing->counterpartName,
                     counterpartVat: $existing->counterpartVat,
                     gross: $existing->gross,
+                    net: $existing->net,
                     invoiceType: $existing->invoiceType,
                 );
             }
@@ -329,6 +331,7 @@ class ExpenseReconciler
                 counterpartName: $aade->counterpartName,
                 counterpartVat: $aade->counterpartVat,
                 gross: $aade->gross,
+                net: $aade->net,
                 aadeState: $aade->cancelled ? 'CANCELLED' : 'VALID',
                 cancelledByMark: $aade->cancelledByMark,
                 problem: 'Υπάρχει στο AADE (έξοδο που μας υπέβαλε προμηθευτής) αλλά δεν βρέθηκε τοπικά — απαιτείται καταχώριση.',
@@ -362,7 +365,10 @@ class ExpenseReconciler
     private function snapshotFrom(Expense $expense): LocalDocSnapshot
     {
         return new LocalDocSnapshot(
+            // Expenses are imported straight from the AADE summary, so gross_total
+            // already IS <totalGrossValue> (no [208] re-derivation needed here).
             gross: $expense->gross_total !== null ? (float) $expense->gross_total : null,
+            net: $expense->net_total !== null ? (float) $expense->net_total : null,
             series: $expense->series,
             aa: $expense->aa,
             issueDate: $expense->issue_date?->format('Y-m-d'),

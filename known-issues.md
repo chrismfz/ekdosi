@@ -1142,6 +1142,28 @@ conflict (the local value isn't contradicted). **Counterpart ΑΦΜ stays option
 legitimately omits it for retail 11.x, so an absent AADE ΑΦΜ really is "nothing to verify".
 Tests: a data-provider over all five mandatory fields, plus blank and unparseable AADE dates.
 
+**Net/VAT split + gross basis (review rounds 3–4):** gross alone cannot catch a wrong VAT
+category whose net and vat compensate to the SAME gross (100+24 local vs 110+14 at AADE), so
+**net** (`<totalNetValue>`) is now compared too, as a mandatory field with the same three-outcome
+routing. Fixing that surfaced the real basis bug — and the first attempt (`Invoice::payableTotal()`)
+was itself wrong on two counts a follow-up review caught: (a) `payableTotal()` falls back to
+`gross_total` (never null), so a null-gross invoice became a `0,00` CONFLICT instead of an
+incomplete, and it deducts withholding only when `withhold_category` is set — which the Firebird
+ETL never imports, so every legacy ΠΚ-3 invoice would STILL false-conflict; (b) `net_total`/
+`gross_total` are a different *rounding shape* (rounded once over the sum) from the FILED summary
+(`InvoiceVatBreakdown`, rounded per VAT rate), so multi-rate discounted invoices diverged by a
+cent. The correct basis is a new **`FiledInvoiceTotals::for()`** that reconstructs exactly what the
+submitter files (per-rate roll-up + the [208] adjustment); a null field (no lines, or withholding
+without its §8.4 category) is reported as **unverified** (`contentIncomplete`), never a fabricated
+conflict. `FiledInvoiceTotals` is now the single basis for the reconciler, the console «μικτό»
+column AND the per-invoice «Σύγκριση με ΑΑΔΕ» (which read `gross_total` and thus contradicted the
+console). Money tolerance is compared in **integer cents** (`abs($a-$b) > 0.01` was
+magnitude-dependent). Expenses import the AADE summary verbatim, so their columns were already the
+right basis; only `net_total` was wired in. Tests: same-gross/different-net conflict (sales +
+expenses), a withholding invoice matching the adjusted gross (with a precondition that filed vs
+ledger gross really differ), a legacy category-less ΠΚ-3 → unverified, a multi-rate discounted
+invoice that must NOT false-conflict on rounding, and the sales fold's `<totalNetValue>` parse.
+
 **Official finding**
 
 RequestTransmittedDocs and RequestDocs return the document header, parties and
@@ -2872,3 +2894,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-014 review** (PR #389) — integrity: reconciler keeps the real cancellation MARK (`invoiceMark ⇒ cancellationMark`, inline + standalone); `SyncExpenseStateFromAade` refuses CANCELLED without it; console `syncStates()` re-reconciles fresh at click time (no trust in the ≤12h cache) + re-verifies tenant/expense_id/MARK before mutating | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017/014 code-review round** (PR #389) — (a) `snapshotFrom()` relation fallback so legacy null-cache invoices match instead of permanent `contentIncomplete`/exit-2; (b) `normDate()` null-on-blank so an empty AADE date can't fabricate a conflict; (c) `syncStates()` per-row try/catch so one evidence-less cancellation doesn't abort the batch; net/VAT-split compare noted → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017 AADE-side fail-open closed** (PR #389 review 2) — a missing/unparseable MANDATORY AADE field (gross/type/series/ΑΑ/date) is now `contentIncomplete`, not `matched`; counterpart ΑΦΜ stays optional for retail 11.x. MYD-017 → DONE | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 net/VAT split + gross basis** (PR #389 review 3) — compare `<totalNetValue>` (catches a same-gross/different-VAT-category doc); money now compared against a new `FiledInvoiceTotals` (per-VAT-rate roll-up + [208] adjustment — what the submitter actually files) instead of the `net_total`/`gross_total` columns; unreconstructable (no lines / category-less legacy withholding) → unverified, not a false conflict; integer-cent tolerance; same basis fixes the per-invoice «Σύγκριση με ΑΑΔΕ» too | `CHANGELOG.md` [Unreleased] → Fixed |

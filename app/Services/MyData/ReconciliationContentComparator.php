@@ -26,17 +26,18 @@ use Throwable;
  *   - AADE absent/unreadable on a MANDATORY field → INCOMPLETE too. We could not
  *     verify the document at all, so it must never read green just because the
  *     source side was empty (that is fail-OPEN). The mandatory header per AADE is
- *     gross, §8.1 type, series, ΑΑ and issue date.
+ *     gross, NET, §8.1 type, series, ΑΑ and issue date.
  *   - counterpart ΑΦΜ is the ONE optional field: retail (11.x) legitimately has
  *     no counterpart, so an absent AADE ΑΦΜ is genuinely "nothing to verify".
  *
- * gross uses an explicit cent tolerance; ΑΦΜ is compared digits-only so an EL/GR
+ * money (gross + net) is compared in whole cents with a one-cent tolerance; ΑΦΜ
+ * is compared digits-only so an EL/GR
  * prefix is not a false difference; dates are normalised to Y-m-d.
  */
 final class ReconciliationContentComparator
 {
-    /** Gross values within this many currency units are treated as equal. */
-    private const GROSS_TOLERANCE = 0.01;
+    /** Money within this many CENTS is treated as equal (see moneyDiffers). */
+    private const MONEY_TOLERANCE_CENTS = 1;
 
     /** Suffix for a field AADE did not give us (so we could not verify it). */
     private const UNVERIFIED = ' — ανεπαλήθευτο)';
@@ -50,9 +51,20 @@ final class ReconciliationContentComparator
         if ($aade->gross === null) {
             $incompletes[] = 'μικτό (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
         } elseif ($local->gross === null) {
-            $incompletes[] = 'μικτό (λείπει τοπικά· ΑΑΔΕ '.self::money($aade->gross).')';
-        } elseif (abs($local->gross - $aade->gross) > self::GROSS_TOLERANCE) {
+            $incompletes[] = 'μικτό (δεν προσδιορίζεται τοπικά· ΑΑΔΕ '.self::money($aade->gross).')';
+        } elseif (self::moneyDiffers($local->gross, $aade->gross)) {
             $conflicts[] = 'μικτό: '.self::money($local->gross).' τοπικά / '.self::money($aade->gross).' ΑΑΔΕ';
+        }
+
+        // net (mandatory). Gross alone cannot catch a wrong VAT category whose net
+        // and vat compensate to the SAME gross (e.g. 100+24 locally vs 110+14 at
+        // AADE) — the VAT split is exactly what myDATA reports on, so compare it.
+        if ($aade->net === null) {
+            $incompletes[] = 'καθαρή αξία (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
+        } elseif ($local->net === null) {
+            $incompletes[] = 'καθαρή αξία (δεν προσδιορίζεται τοπικά· ΑΑΔΕ '.self::money($aade->net).')';
+        } elseif (self::moneyDiffers($local->net, $aade->net)) {
+            $conflicts[] = 'καθαρή αξία: '.self::money($local->net).' τοπικά / '.self::money($aade->net).' ΑΑΔΕ';
         }
 
         // invoice type §8.1 (mandatory)
@@ -110,6 +122,17 @@ final class ReconciliationContentComparator
         }
 
         return new ContentComparison($conflicts, $incompletes);
+    }
+
+    /**
+     * Compare money in whole cents. A float `abs($a - $b) > 0.01` is
+     * magnitude-dependent — 124.00 vs 123.99 lands just above the threshold while
+     * 1240.00 vs 1239.99 lands just below — so an exact one-cent difference would
+     * be a conflict at some totals and equal at others.
+     */
+    private static function moneyDiffers(float $local, float $aade): bool
+    {
+        return abs((int) round($local * 100) - (int) round($aade * 100)) > self::MONEY_TOLERANCE_CENTS;
     }
 
     private static function money(float $v): string

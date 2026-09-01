@@ -47,6 +47,7 @@ class SyncExpenseStateFromAadeTest extends TestCase
             'aa' => '1',
             'invoice_type' => '1.1',
             'supplier_afm' => '998482379',
+            'net_total' => '100.00',
             'gross_total' => '124.00',
             'source' => 'sync',
         ]);
@@ -134,7 +135,7 @@ class SyncExpenseStateFromAadeTest extends TestCase
         $aadeCancelled = new AadeDocSummary(
             mark: '400000000000001', uid: 'U', cancelled: true, cancelledByMark: '900000000000001',
             series: 'A', aa: '1', issueDate: '2026-01-10',
-            counterpartName: 'ΠΡΟΜΗΘΕΥΤΗΣ', counterpartVat: '998482379', gross: 124.0, invoiceType: '1.1',
+            counterpartName: 'ΠΡΟΜΗΘΕΥΤΗΣ', counterpartVat: '998482379', gross: 124.0, net: 100.0, invoiceType: '1.1',
         );
 
         $before = (new ExpenseReconciler($this->tenant))->diff(

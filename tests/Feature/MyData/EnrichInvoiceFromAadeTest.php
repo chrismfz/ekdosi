@@ -5,6 +5,7 @@ namespace Tests\Feature\MyData;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Services\MyData\EnrichInvoiceFromAade;
@@ -45,6 +46,12 @@ class EnrichInvoiceFromAadeTest extends TestCase
             'invoice_type_id' => $type->id, 'customer_id' => $customer->id, 'issued_at' => now(),
             'header_discount_percent' => 0, 'net_total' => 134.20, 'gross_total' => 166.41,
         ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $this->invoice->id,
+            'qty' => 1, 'price_per_item' => 134.20, 'vat_percent' => 24.00,
+            'net_price' => 134.20, 'gross_price' => 166.41, 'product_descr' => 'Υπηρεσία',
+        ]);
+        $this->invoice->load('lines');
         $this->invoice->forceFill(['mydata_mark' => '400013744877362', 'mydata_state' => 'VALID'])->save();
 
         MyDataMark::create([

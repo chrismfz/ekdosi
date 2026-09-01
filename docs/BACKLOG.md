@@ -102,13 +102,6 @@ surfaced in the open-items sections further down.
 ---
 
 ## 🟠 myDATA / expenses completeness
-- **Reconciliation content compare — net/VAT split** — ο `ReconciliationContentComparator`
-  (MYD-017) συγκρίνει **μικτό** (±0,01), τύπο, σειρά/ΑΑ, ημ/νία, ΑΦΜ — **όχι** το καθαρό/ΦΠΑ.
-  Ένα παραστατικό με **ίδιο μικτό αλλά διαφορετική ανάλυση ΦΠΑ** (π.χ. λάθος κατηγορία 24%↔13%
-  με αντισταθμιζόμενο net) περνά ακόμη ως «συμφωνεί». Πρόσθεσε `net` στο `AadeDocSummary`
-  (`summary->getTotalNetValue()`, ήδη σε χρήση από `ExpenseImporter`/`MyDataVatAggregator`) +
-  στο `LocalDocSnapshot` (`net_total`) και σύγκρινε με την ίδια ανοχή/routing (conflict vs
-  incomplete). _Follow-up από το code-review του PR #389._
 - **`invoice_taxes` table** — πολλές κατηγορίες ανά taxType σε **ΕΝΑ** τιμολόγιο (σήμερα μία/τύπο
   αλλιώς throw). **Χαμηλή προτεραιότητα/σπάνιο** — το ΦΠΑ ανά γραμμή παίζει ήδη· αυτό αφορά
   μόνο 2+ διαφορετικές κατηγορίες **ειδικού τέλους** (§8.x) στο ίδιο παραστατικό. _(Η money-core

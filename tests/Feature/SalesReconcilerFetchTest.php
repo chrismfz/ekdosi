@@ -71,6 +71,9 @@ class SalesReconcilerFetchTest extends TestCase
         // Display fields parsed off the header/summary/counterpart.
         $this->assertSame('Πελάτης Α', $byMark['400000000000001']->counterpartName);
         $this->assertSame(124.00, $byMark['400000000000001']->gross);
+        // <totalNetValue> must be parsed too — a null net would flip every
+        // reconciled invoice to contentIncomplete (mandatory field).
+        $this->assertSame(100.00, $byMark['400000000000001']->net);
     }
 
     public function test_empty_window_response_does_not_crash(): void
@@ -129,6 +132,7 @@ XML),
         $this->assertSame('400001964394607', $row->mark);
         $this->assertSame('VALID', $row->aadeState);
         $this->assertSame(12.4, $row->gross);          // '.' decimal cast to float
+        $this->assertSame(10.0, $row->net);            // same cast on totalNetValue
         $this->assertNull($row->counterpartName);      // retail → no counterpart
         $this->assertSame('ΑΠΥ 999001', $row->invcode);
     }
@@ -285,6 +289,7 @@ XML;
                 <issueDate>2026-01-10</issueDate>
             </invoiceHeader>
             <invoiceSummary>
+                <totalNetValue>100.00</totalNetValue>
                 <totalGrossValue>124.00</totalGrossValue>
             </invoiceSummary>
         </invoice>
@@ -309,6 +314,7 @@ XML;
                 <issueDate>2026-01-11</issueDate>
             </invoiceHeader>
             <invoiceSummary>
+                <totalNetValue>161.29</totalNetValue>
                 <totalGrossValue>200.00</totalGrossValue>
             </invoiceSummary>
         </invoice>
@@ -321,6 +327,7 @@ XML;
                 <issueDate>2026-01-12</issueDate>
             </invoiceHeader>
             <invoiceSummary>
+                <totalNetValue>40.32</totalNetValue>
                 <totalGrossValue>50.00</totalGrossValue>
             </invoiceSummary>
         </invoice>

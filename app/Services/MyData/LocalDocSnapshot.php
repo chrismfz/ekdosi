@@ -15,6 +15,10 @@ final readonly class LocalDocSnapshot
 {
     public function __construct(
         public ?float $gross,
+        // Net (pre-VAT) total. Compared alongside gross so a same-gross /
+        // different-VAT-split document (a wrong VAT category whose net and vat
+        // compensate) can't pass as matched.
+        public ?float $net,
         public ?string $series,
         public ?string $aa,
         public ?string $issueDate,        // Y-m-d

@@ -78,7 +78,7 @@
 - **Κονσόλα myDATA** — ένα μενού (cluster) με tabs **Πωλήσεις / Έξοδα / Επισκόπηση Ε3 /
   Έλεγχος ρυθμίσεων**· ζωντανός συγχρονισμός (`RequestTransmittedDocs`) + **reconciliation**:
   τοπικό (Phase 1, ξεχωριστός «Τοπικός έλεγχος κατάστασης») + ζωντανό (Phase 2, `SalesReconciler`)·
-  matched / stateMismatch / **contentMismatch** («Διαφορά περιεχομένου» — μικτό/τύπος/σειρά-ΑΑ/
+  matched / stateMismatch / **contentMismatch** («Διαφορά περιεχομένου» — μικτό/καθαρή αξία/τύπος/σειρά-ΑΑ/
   ημ-νία/ΑΦΜ, κοινός `ReconciliationContentComparator`) / **contentIncomplete** («Ελλιπή τοπικά
   στοιχεία» — πεδίο που έχει η ΑΑΔΕ αλλά λείπει τοπικά· warning, όχι σύγκρουση αλλά ούτε
   «συμφωνεί») / missingAtAade / **αδέσποτα** (ομαδοποιημένα ανά οικονομική φύση). Κάθε tab κρατά

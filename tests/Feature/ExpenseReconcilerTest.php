@@ -160,6 +160,27 @@ XML),
         $this->assertStringContainsString('μικτό', $result->contentMismatch[0]->problem);
     }
 
+    public function test_same_gross_but_different_net_is_a_content_mismatch(): void
+    {
+        // MYD-017 (expense side): gross agrees, but the net/VAT split does not.
+        // Proves the expense fold reads <totalNetValue> and the snapshot compares it.
+        $supplier = Supplier::create([
+            'company_id' => $this->tenant->id, 'afm' => '998482379',
+            'name' => 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', 'source' => 'sync',
+        ]);
+        $this->expense('400000000000001', 'VALID', $supplier->id, ['net_total' => '80.00']);
+
+        $result = $this->reconciler(new MockHandler([
+            new Response(200, [], $this->pageOne()),
+            new Response(200, [], $this->pageTwo()),
+        ]))->reconcile(now()->subMonth(), now());
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(1, $result->contentMismatch);
+        $this->assertStringContainsString('καθαρή αξία', $result->contentMismatch[0]->problem);
+        $this->assertStringNotContainsString('μικτό', $result->contentMismatch[0]->problem);
+    }
+
     public function test_content_incomplete_when_local_lacks_a_field_aade_carries(): void
     {
         // MYD-017 review (expense side): same MARK + state, but AADE carries a field
@@ -215,7 +236,7 @@ XML),
         $content = [
             'mydata_mark' => '400000000000007', 'mydata_state' => 'VALID',
             'series' => 'A', 'aa' => '7', 'issue_date' => '2026-01-10',
-            'gross_total' => '124.00', 'supplier_afm' => '998482379',
+            'gross_total' => '124.00', 'net_total' => '100.00', 'supplier_afm' => '998482379',
             'invoice_type' => '1.1',
         ];
         $a = (new Expense)->forceFill(['id' => 1] + $content);
@@ -224,7 +245,7 @@ XML),
         $aade = [new AadeDocSummary(
             mark: '400000000000007', uid: 'U', cancelled: false, cancelledByMark: null,
             series: 'A', aa: '7', issueDate: '2026-01-10',
-            counterpartName: 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', counterpartVat: '998482379', gross: 124.0,
+            counterpartName: 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', counterpartVat: '998482379', gross: 124.0, net: 100.0,
             invoiceType: '1.1',
         )];
 
@@ -249,6 +270,7 @@ XML),
             'mydata_state' => $state,
             'issue_date' => '2026-01-10',
             'supplier_afm' => '998482379',
+            'net_total' => '100.00',
             'gross_total' => '124.00',
             'series' => 'A',
             'aa' => '1',
@@ -277,7 +299,7 @@ XML),
             </issuer>
             <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
             <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
-            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+            <invoiceSummary><totalNetValue>100.00</totalNetValue><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
         </invoice>
     </invoicesDoc>
 </RequestedDoc>
@@ -297,7 +319,7 @@ XML;
             <issuer><vatNumber>998482379</vatNumber><country>GR</country></issuer>
             <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
             <invoiceHeader><series>A</series><aa>2</aa><issueDate>2026-01-11</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
-            <invoiceSummary><totalGrossValue>200.00</totalGrossValue></invoiceSummary>
+            <invoiceSummary><totalNetValue>161.29</totalNetValue><totalGrossValue>200.00</totalGrossValue></invoiceSummary>
         </invoice>
         <invoice>
             <uid>UID3</uid>
@@ -305,7 +327,7 @@ XML;
             <issuer><vatNumber>802438394</vatNumber><country>GR</country></issuer>
             <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
             <invoiceHeader><series>B</series><aa>3</aa><issueDate>2026-01-12</issueDate><invoiceType>2.1</invoiceType></invoiceHeader>
-            <invoiceSummary><totalGrossValue>50.00</totalGrossValue></invoiceSummary>
+            <invoiceSummary><totalNetValue>40.32</totalNetValue><totalGrossValue>50.00</totalGrossValue></invoiceSummary>
         </invoice>
     </invoicesDoc>
     <cancelledInvoicesDoc>

@@ -178,7 +178,7 @@ class MyDataConsoleExpensesTest extends TestCase
             'mydata_state' => 'VALID',
             'issue_date' => '2026-01-10',
             'series' => 'A', 'aa' => '1', 'invoice_type' => '1.1',
-            'supplier_afm' => '998482379', 'gross_total' => '124.00',
+            'supplier_afm' => '998482379', 'net_total' => '100.00', 'gross_total' => '124.00',
             'source' => 'sync',
         ]);
 
@@ -240,7 +240,7 @@ class MyDataConsoleExpensesTest extends TestCase
             'mydata_state' => 'VALID',
             'issue_date' => '2026-01-10',
             'series' => 'A', 'aa' => '1', 'invoice_type' => '1.1',
-            'supplier_afm' => '998482379', 'gross_total' => '124.00',
+            'supplier_afm' => '998482379', 'net_total' => '100.00', 'gross_total' => '124.00',
             'source' => 'sync',
         ]);
 
@@ -295,7 +295,7 @@ class MyDataConsoleExpensesTest extends TestCase
             <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
             <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
             <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
-            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+            <invoiceSummary><totalNetValue>100.00</totalNetValue><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
         </invoice>
     </invoicesDoc>
 </RequestedDoc>
@@ -316,7 +316,7 @@ XML;
             'mydata_state' => 'VALID',
             'issue_date' => '2026-01-10',
             'series' => 'A', 'aa' => '1', 'invoice_type' => '1.1',
-            'supplier_afm' => '998482379', 'gross_total' => '124.00',
+            'supplier_afm' => '998482379', 'net_total' => '100.00', 'gross_total' => '124.00',
             'source' => 'sync',
         ]);
 
@@ -373,7 +373,7 @@ XML;
             <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
             <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
             <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
-            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+            <invoiceSummary><totalNetValue>100.00</totalNetValue><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
         </invoice>
     </invoicesDoc>
     <cancelledInvoicesDoc>
@@ -397,7 +397,7 @@ XML;
             <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
             <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
             <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
-            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+            <invoiceSummary><totalNetValue>100.00</totalNetValue><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
         </invoice>
     </invoicesDoc>
 </RequestedDoc>

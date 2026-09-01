@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Services\MyData\AadeDocSummary;
+use App\Services\MyData\FiledInvoiceTotals;
 use App\Services\MyData\SalesReconciler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
@@ -364,6 +366,7 @@ class SalesReconcilerDiffTest extends TestCase
     {
         return [
             'gross' => [['gross' => null], 'μικτό'],
+            'net' => [['net' => null], 'καθαρή αξία'],
             'invoiceType' => [['invoiceType' => null], 'τύπος'],
             'series' => [['series' => null], 'σειρά'],
             'aa' => [['aa' => null], 'ΑΑ'],
@@ -390,8 +393,125 @@ class SalesReconcilerDiffTest extends TestCase
         $this->assertTrue($result->hasDiscrepancies());
     }
 
-    private function invoice(?string $mark, ?string $state, ?Customer $customer = null): Invoice
+    public function test_same_gross_but_different_net_is_a_content_mismatch(): void
     {
+        // MYD-017: the VAT-split false green. Gross agrees to the cent, but the
+        // net/VAT split does not (100+24 locally vs 110+14 at AADE) — a wrong VAT
+        // category that compensates in gross. Comparing gross alone called this
+        // "matched"; comparing net catches it.
+        $inv = $this->invoice('510000000000001', 'VALID'); // net 100.00, gross 124.00
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['net' => 110.00])], // same gross 124.00
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(1, $result->contentMismatch);
+        $this->assertStringContainsString('καθαρή αξία', $result->contentMismatch[0]->problem);
+        // The gross itself is NOT reported as differing — only the split is.
+        $this->assertStringNotContainsString('μικτό', $result->contentMismatch[0]->problem);
+    }
+
+    public function test_withholding_invoice_matches_the_aade_adjusted_gross(): void
+    {
+        // Regression: AADE's <totalGrossValue> carries the [208] additional-tax
+        // adjustment (here −200 withholding). The comparable local figure is the
+        // FILED roll-up + that same adjustment — not gross_total, which stays
+        // net+VAT. Comparing gross_total made every withholding invoice (the ΠΚ-3
+        // 20% case) a FALSE contentMismatch.
+        $inv = $this->invoice('520000000000001', 'VALID', lineNet: 1000.00, lineGross: 1240.00);
+        $inv->forceFill([
+            'withhold_amount' => 200.00,
+            'withhold_category' => 3,   // §8.4 cat 3 — DOES reduce totalGrossValue
+        ])->save();
+        $inv->refresh()->load('lines');
+
+        $filed = FiledInvoiceTotals::for($inv);
+        // Precondition: the filed gross really differs from the ledger gross, so
+        // the test cannot pass by coincidence.
+        $this->assertSame(1040.0, $filed->gross);
+        $this->assertSame(1240.0, round((float) $inv->gross_total, 2));
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['gross' => 1040.00, 'net' => 1000.00])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
+        $this->assertCount(0, $result->contentIncomplete);
+    }
+
+    public function test_legacy_withholding_without_a_category_is_unverified_not_a_conflict(): void
+    {
+        // The Firebird ETL copies WITHHOLD_AMOUNT but NO §8.4 category, and whether
+        // AADE reduced the gross depends on that category (8/9/10 do not). So the
+        // filed gross is genuinely unknowable for an imported ΠΚ-3 invoice: it must
+        // read as contentIncomplete (unverified), NOT as a false conflict against a
+        // number we never sent — and not as a false green either.
+        $inv = $this->invoice('530000000000001', 'VALID', lineNet: 1000.00, lineGross: 1240.00);
+        $inv->forceFill([
+            'withhold_amount' => 200.00,
+            'withhold_category' => null,   // exactly what the ETL leaves behind
+        ])->save();
+        $inv->refresh()->load('lines');
+
+        $filed = FiledInvoiceTotals::for($inv);
+        $this->assertNull($filed->gross, 'gross is not reconstructable without the category');
+        $this->assertSame(1000.0, $filed->net, 'net is still reconstructable');
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['gross' => 1040.00, 'net' => 1000.00])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
+        $this->assertCount(1, $result->contentIncomplete);
+        $this->assertStringContainsString('δεν προσδιορίζεται τοπικά', $result->contentIncomplete[0]->problem);
+    }
+
+    public function test_multi_rate_discounted_invoice_does_not_false_conflict_on_rounding(): void
+    {
+        // The ledger columns round ONCE over the whole sum; the filed summary rounds
+        // PER VAT RATE. On a multi-rate invoice with a header discount the two shapes
+        // differ by a cent or two, which would report a byte-correct document as a
+        // content conflict. Comparing the FILED roll-up removes that whole class.
+        $inv = $this->invoice('540000000000001', 'VALID', lineNet: 10.05, lineGross: 12.46);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 10.05, 'vat_percent' => 13.00,
+            'net_price' => 10.05, 'gross_price' => 11.36, 'product_descr' => 'Δεύτερος συντελεστής',
+        ]);
+        $inv->forceFill(['header_discount_percent' => 50])->save();
+        $inv->refresh()->load('lines');
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv)],   // mirrors the FILED roll-up
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
+    }
+
+    private function invoice(
+        ?string $mark,
+        ?string $state,
+        ?Customer $customer = null,
+        float $lineNet = 100.00,
+        float $lineGross = 124.00,
+    ): Invoice {
         $this->code++;
 
         $invoice = Invoice::create([
@@ -402,8 +522,24 @@ class SalesReconcilerDiffTest extends TestCase
             'customer_id' => ($customer ?? $this->customer)->id,
             'issued_at' => now(),
             'header_discount_percent' => 0,
-            'gross_total' => 124.00,
+            'net_total' => $lineNet,
+            'gross_total' => $lineGross,
         ]);
+
+        // A real line: the money comparison reconstructs the FILED totals from
+        // InvoiceVatBreakdown, so a line-less fixture would exercise only the
+        // "not reconstructable" path. 100.00 net + 24% = 124.00 gross.
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'qty' => 1,
+            'price_per_item' => $lineNet,
+            'vat_percent' => 24.00,
+            'net_price' => $lineNet,
+            'gross_price' => $lineGross,
+            'product_descr' => 'Υπηρεσία',
+        ]);
+        $invoice->load('lines');
 
         if ($mark !== null) {
             $invoice->forceFill([
@@ -422,7 +558,7 @@ class SalesReconcilerDiffTest extends TestCase
         return Invoice::query()
             ->where('company_id', $this->tenant->id)
             ->whereNotNull('mydata_mark')
-            ->with('customer', 'invoiceType')
+            ->with('customer', 'invoiceType', 'lines')
             ->get();
     }
 
@@ -443,6 +579,7 @@ class SalesReconcilerDiffTest extends TestCase
             counterpartName: 'Πελάτης ΑΕ',
             counterpartVat: '123456789',
             gross: 124.00,
+            net: 100.00,
         );
     }
 
@@ -464,7 +601,8 @@ class SalesReconcilerDiffTest extends TestCase
             'aa' => (string) $inv->code,
             'issueDate' => $inv->issued_at?->format('Y-m-d'),
             'counterpartVat' => $inv->vat_no ?: $inv->customer?->afm,
-            'gross' => $inv->gross_total !== null ? (float) $inv->gross_total : null,
+            'gross' => FiledInvoiceTotals::for($inv)->gross,
+            'net' => FiledInvoiceTotals::for($inv)->net,
             'invoiceType' => $inv->mydata_type ?: $inv->invoiceType?->mydata_type,
         ], $override);
 
@@ -479,6 +617,7 @@ class SalesReconcilerDiffTest extends TestCase
             counterpartName: $inv->customer?->name,
             counterpartVat: $fields['counterpartVat'],
             gross: $fields['gross'],
+            net: $fields['net'],
             invoiceType: $fields['invoiceType'],
         );
     }
