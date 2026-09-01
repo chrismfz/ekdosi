@@ -1851,6 +1851,12 @@ an http/private base makes NO outbound request. Deferred hardening (request-time
 DNS-rebinding pin, provider-managed endpoint-profile registry) is logged in
 `docs/BACKLOG.md`. See `CHANGELOG.md` [Unreleased] → Security.
 
+*Notes (whole-PR review):* the guard is **best-effort accident-prevention** — full
+anti-SSRF (resolver-consistency + IP-pin, parse_url-vs-curl host confusion,
+non-blocking DNS) is the deferred BACKLOG item. No live provider base URL exists to
+grandfather (provider mode is off for all tenants), and https/443 is what InvoSign
+requires anyway, so enforcing it forward is correct rather than a migration risk.
+
 Provider URL fields in
 [CompanyForm::providerCredentialFields](app/Filament/Resources/Companies/Schemas/CompanyForm.php)
 are length-limited strings only.

@@ -177,9 +177,14 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
   (InvoSign/SBZ). `paroxos/`.
 - **Provider endpoint hardening (PROV-017 follow-ups)** — το core URL guard (public-https-only,
-  no userinfo/query/port≠443, no private/loopback host, no credentialed redirects) ✅ SHIPPED.
-  Deferred: (α) request-time DNS-rebinding (TOCTOU) pin — ανάλυση host → POST στην ήδη-ελεγμένη IP·
-  (β) provider-managed endpoint-profile registry αντί ελεύθερου URL (vendor-confirmed hosts).
+  no userinfo/query/port≠443, no private/loopback/link-local/CGNAT host, no credentialed redirects)
+  ✅ SHIPPED. Είναι **best-effort accident-prevention** (το URL το βάζει έμπιστος operator). Deferred
+  hardening για πλήρη anti-SSRF: (α) **resolver-consistency + IP-pin** — ανάλυση με τον ΙΔΙΟ resolver
+  (getaddrinfo/`/etc/hosts`, όχι μόνο `dns_get_record`) και POST στην ήδη-ελεγμένη IP (CURLOPT_RESOLVE),
+  ώστε να κλείσει το fail-open (κενή ανάλυση = δεν μπλοκάρει) και το TOCTOU/DNS-rebinding· (β) parse_url
+  host-confusion — ο έλεγχος γίνεται με `parse_url`, ο connect με curl (πιθανή απόκλιση σε crafted URLs)·
+  (γ) provider-managed endpoint-profile registry αντί ελεύθερου URL (vendor-confirmed hosts)· (δ)
+  μη-blocking DNS (το `dns_get_record` είναι σύγχρονο στο hot path/form-save).
 - **Bridges/Connectors Phase 1** — πραγματική 2η πηγή (WooCommerce/Blesta…). `bridges-connectors.md`.
   _Phase 0.5 ✅ (presentation-only): source-neutral «Εισερχόμενα» + source badge · «Γέφυρες» page
   (honest status, no fake toggle). Phase 1 = move `companies.whmcs_*` → `billing_connections.config`,
