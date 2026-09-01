@@ -273,7 +273,7 @@ Priorities:
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | OPEN | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
-| MYD-013 | P1 | OPEN | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
+| MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | OPEN | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | OPEN | Delivery units | Invalid or missing coded unit is silently filed as pieces |
@@ -789,7 +789,16 @@ correlatedInvoices carries the related document MARK values.
 
 ### MYD-013 — RegisterTransfer can omit mandatory transportType
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** `DeliveryLifecycleService::registerTransfer` now gates the mandatory
+`TransportDetailType` fields at the service boundary (not just the Filament form):
+a null/out-of-range `transport_type` throws an actionable local error instead of
+being silently omitted (→ AADE rejection), and `vehicle_number` is required for
+every `transportType` except 7 (Άνευ), for which the explicit placeholder is kept.
+`DeliveryLifecycleServiceTest` adds missing/invalid transportType, missing-vehicle,
+type-7-without-vehicle and payload-carries-both cases. See `CHANGELOG.md`
+[Unreleased] → Fixed.
 
 **Official finding**
 
@@ -2601,3 +2610,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-001 DONE** — third-country 1.3/2.3 → E3_561_006 (was 561_005); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-015 DONE** — POS return 8.5 now reduces the myDATA VAT picture (−sign); tests added | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-020 DONE** — «Ψηφιακό Τέλος Συναλλαγής» terminology + corrected §8.5/8.6/8.7 refs; payload/columns unchanged | `CHANGELOG.md` [Unreleased] → Changed |
+| 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |

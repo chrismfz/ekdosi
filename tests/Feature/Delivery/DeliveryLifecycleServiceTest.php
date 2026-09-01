@@ -189,6 +189,87 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->service($this->registerTransferResponse())->registerTransfer($note);
     }
 
+    public function test_register_transfer_throws_on_missing_transport_type(): void
+    {
+        // Non-UI caller (console/API/import) with no transportType: fail locally,
+        // never silently omit a mandatory field and let AADE reject it (MYD-013).
+        $note = $this->makeFiledNote();
+        $note->transport_type = null;
+        $note->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/τρόπο μεταφοράς/u');
+
+        $this->service($this->registerTransferResponse())->registerTransfer($note->fresh('lines'));
+    }
+
+    public function test_register_transfer_throws_on_invalid_transport_type(): void
+    {
+        $note = $this->makeFiledNote();
+        $note->transport_type = 99;   // out of the 1–7 enum
+        $note->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/τρόπο μεταφοράς/u');
+
+        $this->service($this->registerTransferResponse())->registerTransfer($note->fresh('lines'));
+    }
+
+    public function test_register_transfer_requires_vehicle_for_non_without_type(): void
+    {
+        // transportType 2 (φορτηγό ΙΧ) needs a vehicleNumber; empty → local error.
+        $note = $this->makeFiledNote();
+        $note->transport_type = 2;
+        $note->vehicle_number = null;
+        $note->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/μεταφορικού μέσου/u');
+
+        $this->service($this->registerTransferResponse())->registerTransfer($note->fresh('lines'));
+    }
+
+    public function test_register_transfer_rejects_whitespace_only_vehicle(): void
+    {
+        // A blank-looking «   » is not a vehicle number (trim() is load-bearing).
+        $note = $this->makeFiledNote();
+        $note->transport_type = 2;
+        $note->vehicle_number = '   ';
+        $note->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/μεταφορικού μέσου/u');
+
+        $this->service($this->registerTransferResponse())->registerTransfer($note->fresh('lines'));
+    }
+
+    public function test_register_transfer_allows_type_7_without_vehicle(): void
+    {
+        // Type 7 (Άνευ) may carry no vehicle → must NOT throw; a placeholder
+        // vehicleNumber is still emitted so AADE gets the required element.
+        $note = $this->makeFiledNote();
+        $note->transport_type = 7;
+        $note->vehicle_number = null;
+        $note->save();
+
+        $mark = $this->service($this->registerTransferResponse())->registerTransfer($note->fresh('lines'));
+
+        $this->assertSame('in_transit', $note->fresh()->delivery_state);
+        $this->assertStringContainsString('<transportType>7</transportType>', $mark->request);
+        $this->assertStringContainsString('<vehicleNumber>', $mark->request);
+    }
+
+    public function test_register_transfer_payload_carries_transport_type_and_vehicle(): void
+    {
+        // A valid type produces the mandatory transportType + vehicleNumber payload.
+        $note = $this->makeFiledNote();   // transport_type 2, vehicle ΙΑΒ1234
+
+        $mark = $this->service($this->registerTransferResponse())->registerTransfer($note);
+
+        $this->assertStringContainsString('<transportType>2</transportType>', $mark->request);
+        $this->assertStringContainsString('<vehicleNumber>ΙΑΒ1234</vehicleNumber>', $mark->request);
+    }
+
     // ---- confirmDelivery ----------------------------------------------
 
     public function test_confirm_full_delivery_moves_to_delivered(): void
