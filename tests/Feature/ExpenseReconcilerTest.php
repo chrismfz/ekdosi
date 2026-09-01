@@ -113,6 +113,35 @@ XML;
         $this->assertNull($row->gross, 'non-numeric <totalGrossValue> → null');
     }
 
+    public function test_self_closing_containers_do_not_abort_the_fetch(): void
+    {
+        // Expense-side mirror: a self-closing <invoiceHeader/> / <invoiceSummary/> /
+        // <issuer/> must not throw out of the fetch. The doc still parses by MARK.
+        $xml = <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000071</mark>
+            <issuer/>
+            <invoiceHeader/>
+            <invoiceSummary/>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+
+        $result = $this->reconciler(new MockHandler([new Response(200, [], $xml)]))
+            ->reconcile(now()->subMonth(), now());   // must NOT throw
+
+        $row = collect($result->missingLocally)->firstWhere('mark', '400000000000071');
+        $this->assertNotNull($row);
+        $this->assertNull($row->gross);
+        $this->assertNull($row->net);
+        $this->assertNull($row->counterpartName);
+        $this->assertNull($row->counterpartVat);
+    }
+
     public function test_empty_window_is_safe(): void
     {
         $result = $this->reconciler(new MockHandler([

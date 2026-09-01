@@ -10,6 +10,9 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
+use Firebed\AadeMyData\Models\Counterpart;
+use Firebed\AadeMyData\Models\InvoiceHeader;
+use Firebed\AadeMyData\Models\InvoiceSummary;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Collection;
 use RuntimeException;
@@ -121,9 +124,17 @@ class SalesReconciler
                         continue;
                     }
 
-                    $header = $doc->getInvoiceHeader();
-                    $summary = $doc->getInvoiceSummary();
-                    $counterpart = $doc->getCounterpart();
+                    // Read each container RAW (get()) + instanceof-guard: firebed stores
+                    // a self-closing <invoiceHeader/> / <invoiceSummary/> / <counterpart/>
+                    // as a scalar '', and the typed ?InvoiceHeader getters coerce-and-
+                    // THROW a TypeError on that BEFORE our field reads — aborting the whole
+                    // fetch. Same idiom as the invoicesDoc guard above.
+                    $header = $doc->get('invoiceHeader');
+                    $header = $header instanceof InvoiceHeader ? $header : null;
+                    $summary = $doc->get('invoiceSummary');
+                    $summary = $summary instanceof InvoiceSummary ? $summary : null;
+                    $counterpart = $doc->get('counterpart');
+                    $counterpart = $counterpart instanceof Counterpart ? $counterpart : null;
                     $cancelledByMark = $doc->getCancelledByMark();
 
                     $byMark[$mark] = new AadeDocSummary(

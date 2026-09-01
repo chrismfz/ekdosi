@@ -7,6 +7,8 @@ use App\Models\Expense;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Http\RequestDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
+use Firebed\AadeMyData\Models\InvoiceHeader;
+use Firebed\AadeMyData\Models\InvoiceSummary;
 use Firebed\AadeMyData\Models\Issuer;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Collection;
@@ -118,9 +120,16 @@ class ExpenseReconciler
                         continue;
                     }
 
-                    $header = $doc->getInvoiceHeader();
-                    $summary = $doc->getInvoiceSummary();
-                    $issuer = $doc->getIssuer();
+                    // Read each container RAW (get()) + instanceof-guard: a self-closing
+                    // <invoiceHeader/> / <invoiceSummary/> / <issuer/> is stored as a scalar
+                    // '', and the typed getters coerce-and-THROW on that before our field
+                    // reads. Same idiom as the invoicesDoc guard above.
+                    $header = $doc->get('invoiceHeader');
+                    $header = $header instanceof InvoiceHeader ? $header : null;
+                    $summary = $doc->get('invoiceSummary');
+                    $summary = $summary instanceof InvoiceSummary ? $summary : null;
+                    $issuer = $doc->get('issuer');
+                    $issuer = $issuer instanceof Issuer ? $issuer : null;
                     $cancelledByMark = $doc->getCancelledByMark();
 
                     $byMark[$mark] = new AadeDocSummary(

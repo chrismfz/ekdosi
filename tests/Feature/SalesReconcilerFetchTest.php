@@ -104,6 +104,35 @@ XML;
         $this->assertNull($row->net, 'non-numeric <totalNetValue> → null, not 0.0');
     }
 
+    public function test_self_closing_summary_and_header_do_not_abort_the_fetch(): void
+    {
+        // firebed stores a self-closing <invoiceSummary/> / <invoiceHeader/> as a
+        // scalar '', and the typed ?InvoiceSummary getters coerce-and-THROW on that.
+        // Reading the container raw + instanceof must keep the fetch alive: the doc
+        // still parses (by MARK), with the unreadable fields null (UNVERIFIED).
+        $xml = <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000070</mark>
+            <invoiceHeader/>
+            <invoiceSummary/>
+        </invoice>
+    </invoicesDoc>
+</RequestedDoc>
+XML;
+
+        $result = (new SalesReconciler($this->tenant, new MockHandler([new Response(200, [], $xml)])))
+            ->reconcile(now()->subMonth(), now());   // must NOT throw
+
+        $row = collect($result->missingLocally)->firstWhere('mark', '400000000000070');
+        $this->assertNotNull($row, 'the doc still parses despite empty containers');
+        $this->assertNull($row->gross);
+        $this->assertNull($row->net);
+        $this->assertNull($row->issuedAt);
+    }
+
     public function test_empty_window_response_does_not_crash(): void
     {
         // AADE returns an empty <invoicesDoc/> container when nothing

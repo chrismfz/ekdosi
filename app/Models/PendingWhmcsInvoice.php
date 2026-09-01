@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Observers\PendingWhmcsInvoiceObserver;
+use App\Support\Afm;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -369,13 +370,7 @@ class PendingWhmcsInvoice extends Model
     /** The ΑΦΜ the customer entered in WHMCS (role 'vatno'), digits only. */
     public function whmcsAfm(): ?string
     {
-        $raw = $this->whmcsCustomField('vatno');
-        if ($raw === null) {
-            return null;
-        }
-        $digits = preg_replace('/\D+/', '', $raw);
-
-        return $digits === '' ? null : $digits;
+        return Afm::normalise($this->whmcsCustomField('vatno'));
     }
 
     public function whmcsTaxOffice(): ?string

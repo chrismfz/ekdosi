@@ -44,8 +44,9 @@ final readonly class AadeDocSummary
     /**
      * A copy marked cancelled, carrying the standalone <cancelledInvoicesDoc>
      * cancellation MARK (falling back to any inline one). Centralising the rebuild
-     * means a new field added to this DTO is carried through the fold automatically
-     * — the hand-copied version silently dropped whatever field you forgot.
+     * in ONE place means a new DTO field is updated here once, instead of in the
+     * fold of every reconciler — where the hand-copied version silently dropped
+     * whatever field you forgot (adding `net` had to touch both folds).
      */
     public function withCancellation(?string $cancellationMark): self
     {
