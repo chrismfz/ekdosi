@@ -50,8 +50,9 @@ class DeliveryNoteModelTest extends TestCase
 
     public function test_numberer_allocates_a_delivery_series(): void
     {
+        // 'DA' is a 9.x delivery series → opt out of the monetary 9.x guard (MYD-003).
         $allocation = DB::transaction(
-            fn () => app(InvoiceNumberer::class)->allocate($this->tenant, 'DA'),
+            fn () => app(InvoiceNumberer::class)->allocate($this->tenant, 'DA', allowMovementType: true),
         );
 
         $this->assertSame(1, $allocation->code);
