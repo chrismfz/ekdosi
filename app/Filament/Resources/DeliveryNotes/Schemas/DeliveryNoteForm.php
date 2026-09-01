@@ -3,10 +3,12 @@
 namespace App\Filament\Resources\DeliveryNotes\Schemas;
 
 use App\Models\Customer;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Product;
 use App\Models\Supplier;
+use App\Support\IsoCountry;
 use App\Support\MyData\Codes;
 use App\Support\MyData\DeliveryCodes;
 use App\Support\MyData\DeliveryGuidance;
@@ -175,6 +177,14 @@ class DeliveryNoteForm
                             $set('customer_id', $party['customer_id']);
                             $set('recipient_afm', $party['afm']);
                             $set('recipient_name', $party['name']);
+                            // Freeze the picked party's country — a supplier/manual
+                            // recipient has no FK to read it back from (MYD-011).
+                            // Set UNCONDITIONALLY (unlike the address fields below):
+                            // the ΑΦΜ and name are being replaced by this pick, so
+                            // keeping the PREVIOUS party's country would file the new
+                            // recipient under the old one's country. Clearing it is
+                            // safe — required() then forces the operator to choose.
+                            $set('recipient_country', $party['country']);
                             // Default the delivery address from the chosen party.
                             if ($party['street'] !== null) {
                                 $set('delivery_street', $party['street']);
@@ -194,12 +204,47 @@ class DeliveryNoteForm
                     // submitter accepts a raw ΑΦΜ + name.
                     TextInput::make('recipient_name')
                         ->label('Επωνυμία παραλήπτη')
+                        // live so the Χώρα field's required() marker appears as soon as
+                        // there IS a recipient, not only at submit.
+                        ->live(onBlur: true)
                         ->maxLength(120),
 
                     TextInput::make('recipient_afm')
                         ->label('ΑΦΜ παραλήπτη')
+                        ->live(onBlur: true)
                         ->maxLength(20)
                         ->helperText('Άφησέ το κενό για ενδοδιακίνηση (συμπληρώνεται 000000000).'),
+
+                    // MYD-011: the recipient's country is FROZEN on the note. Only a
+                    // customer recipient had one (via the FK), so a supplier/manual
+                    // foreign party used to be filed as GR. The FULL ISO table is
+                    // offered — the submitter refuses a country it can't resolve, so
+                    // a shortlist would make a shipment to an omitted country unissuable.
+                    Select::make('recipient_country')
+                        ->label('Χώρα παραλήπτη')
+                        ->options(IsoCountry::options())
+                        ->searchable()
+                        // Required for ANY recipient identity — a linked customer, a
+                        // typed name, or an ΑΦΜ other than the ενδοδιακίνηση sentinel.
+                        // Only a bare ενδοδιακίνηση (no identity at all) is exempt,
+                        // because that is the one case the submitter answers itself.
+                        //
+                        // Earlier rounds exempted a linked customer, on the grounds
+                        // that it resolves through its own country. It does not always:
+                        // customers.country is nullable free text, so it can be blank
+                        // or unrecognisable, and the note may name a DIFFERENT party
+                        // over a stale customer link. (Legacy Greek spellings are NOT
+                        // the problem — IsoCountry resolves «ΙΤΑΛΙΑ», «ΕΛΛΑΣ» and the
+                        // rest.) The draft then saved and failed at «Έκδοση», so catch
+                        // it here, where there is a form to fix it in — a filed note is
+                        // no longer editable.
+                        ->required(fn (Get $get): bool => filled($get('customer_id'))
+                            || filled($get('recipient_name'))
+                            || (
+                                filled($get('recipient_afm'))
+                                && trim((string) $get('recipient_afm')) !== DeliveryNote::INTERNAL_MOVEMENT_AFM
+                            ))
+                        ->helperText('ISO 2 γραμμάτων. Άφησέ το κενό ΜΟΝΟ για ενδοδιακίνηση (χωρίς παραλήπτη) — ξένος παραλήπτης δεν δηλώνεται ποτέ ως GR.'),
 
                     // Kept so a customer recipient links the Καρτέλα; hidden field.
                     Hidden::make('customer_id'),
@@ -490,7 +535,7 @@ class DeliveryNoteForm
      * Resolve a prefixed recipient pick (c:ID / s:ID) into a normalised party
      * snapshot. customer_id is set ONLY for a customer (the FK is customers-only).
      *
-     * @return array{customer_id: int|null, afm: string|null, name: string|null, street: string|null, postcode: string|null, city: string|null}|null
+     * @return array{customer_id: int|null, afm: string|null, name: string|null, country: string|null, street: string|null, postcode: string|null, city: string|null}|null
      */
     public static function resolveRecipient(string $value): ?array
     {
@@ -511,6 +556,9 @@ class DeliveryNoteForm
                 'customer_id' => $c->id,
                 'afm' => $c->afm,
                 'name' => $c->name,
+                // customers.country is free text ("Greece"/"EL"/…) — normalise to
+                // the ISO-2 the payload needs, null if unrecognised (MYD-011).
+                'country' => IsoCountry::tryNormalise($c->country),
                 'street' => $c->address1,
                 'postcode' => $c->postcode,
                 'city' => $c->city,
@@ -527,6 +575,9 @@ class DeliveryNoteForm
                 'customer_id' => null,
                 'afm' => $s->afm,
                 'name' => $s->name,
+                // suppliers.country is already ISO-2; normalise anyway so an
+                // 'EL'/'UK' row can't reach the payload as a non-ISO code.
+                'country' => IsoCountry::tryNormalise($s->country),
                 'street' => $s->address1,
                 'postcode' => $s->postcode,
                 'city' => $s->city,

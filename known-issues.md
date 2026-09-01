@@ -67,7 +67,7 @@ not promoted to issues without a currently exposed path that behaves incorrectly
 | MYD-008 | Confirmed | P0 | Provider-issued originals cannot be referenced by correlated credits |
 | MYD-009 | Confirmed | P0 | Customer edits can alter counterpart identity after the invoice snapshot |
 | MYD-010 | Confirmed | P0 | Branch businesses are always reported as establishment 0 |
-| MYD-011 | Confirmed | P0 | Foreign supplier/manual delivery recipients are reported as GR |
+| MYD-011 | DONE | P0 | Foreign supplier/manual delivery recipients are reported as GR |
 | MYD-012 | Confirmed | P0 | 9.1 is selectable but no correlated MARK is transmitted |
 | MYD-013 | Confirmed | P1 | A non-UI caller can build RegisterTransfer without mandatory transportType |
 | MYD-014 | Confirmed | P1 | A cancelled supplier document can remain locally VALID indefinitely |
@@ -273,7 +273,7 @@ Priorities:
 | MYD-008 | P0 | DONE | Provider credits | Correlated credit cannot find a provider-issued original MARK |
 | MYD-009 | P0 | OPEN | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
-| MYD-011 | P0 | OPEN | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
+| MYD-011 | P0 | DONE | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
 | MYD-014 | P1 | DONE | Expense sync | Supplier cancellation is detected but cannot update an existing local expense |
@@ -789,7 +789,169 @@ when the issuer establishment is the registered head office or no branch exists.
 
 ### MYD-011 — Foreign supplier/manual delivery recipient is filed as GR
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-01 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** the recipient's country is now FROZEN on the note (`delivery_notes.recipient_country`,
+ISO-2, nullable) instead of being re-derived from a relation that only a *customer* recipient
+has. `DeliveryNoteForm` snapshots it from whichever party the any-party picker resolved
+(customer **or supplier**, both normalised on the way out) and requires it whenever there is an
+external recipient at all — ΑΦΜ **or** a linked customer **or** a typed name, mirroring the
+submitter's own test so the form can't save a note the submitter will then refuse. The picker
+offers the **full ISO table** (`IsoCountry::options()`), not a shortlist: since an unresolvable
+country is now refused, an omitted country would make that shipment unissuable.
+
+`DeliveryNoteSubmitter::buildCounterpart()` no longer reads `customer?->country ?: 'GR'`. It
+calls `recipientCountry()`, which resolves `recipient_country` (falling back to the linked
+customer for notes predating the column) through the shared normaliser and then applies the
+policy the finding demands: **an external recipient with no resolvable country is REFUSED**
+with an actionable Greek error, never silently filed as GR. The single sanctioned GR default is
+an **ενδοδιακίνηση**, and detecting it correctly took two corrections from review: the explicit
+`000000000` sentinel (written by the seeder, promised by the form/infolist text, and treated as
+internal by the PDF) must NOT read as an external ΑΦΜ, and keying on the ΑΦΜ *alone* would have
+let a **named foreign recipient with no ΑΦΜ** ("Müller GmbH", a non-VAT/private party) fall
+through to the GR default — the same misreport. Internal now means no recipient identity at
+all: no external ΑΦΜ, no `recipient_name`, no `customer_id` — and an explicitly stored sentinel
+wins outright, without falling back to a linked customer's ΑΦΜ (which would file a *different*
+legal counterpart than the one the operator declared).
+
+All four readers now share ONE definition, on the model
+(`DeliveryNote::externalRecipientAfm()` / `isInternalMovement()` / `recipientCountryIso()`): the
+AADE payload, the **PDF** (whose local heuristic called a named foreign recipient without an ΑΦΜ
+an ενδοδιακίνηση, so the printed δελτίο contradicted what was filed), the **CMR**, and the
+**InvoSign provider document** (which carried its own `000000000` chain and could send one
+document asserting two different recipient ΑΦΜ).
+
+`IsoCountry` validates the alpha-2 result against a real code table rather than a bare
+`strlen === 2 && ctype_alpha` passthrough — otherwise `ZZ`/`XX` would sail through (the column
+is `varchar(2)`, so *every* storable 2-letter value would have passed) and the "unrecognised"
+refusal would be practically unreachable. That table is firebed's `CountryCode` enum **plus
+`EXTRA_ISO`**: firebed's list is a snapshot missing several current ISO codes (SS, CW, SX, BQ),
+so validating against it alone would have REJECTED real countries the old passthrough accepted —
+tightening the *invoice* path into a regression. Option labels come from the enum's own Greek
+names (all 247), so the picker is searchable by name, and the table is memoised.
+
+**Keeping domestic notes issuable — without guessing.** A blanket refusal would break the common
+case: `customers.country` is nullable free text and is often blank, so pre-existing domestic notes
+would become unissuable. Two mechanisms cover them, and neither infers a country:
+
+1. the **name index** — `IsoCountry` resolves the spellings the data actually holds, so far fewer
+   notes reach the refusal at all (see below);
+2. the migration **backfill** — `recipient_country` is filled from each note's linked customer
+   where that country resolves. Notes with no customer, an unusable country, an already-filed
+   MARK, or a recipient that isn't that customer are deliberately left null: those are exactly
+   the ones an operator must decide.
+
+An `Afm::isGreek()` checksum test was a third mechanism for two rounds — a valid Greek ΑΦΜ read as
+positive evidence of a Greek party. It was **removed in round 8** (and with it the helper, so
+`Afm` is untouched by this change): a bare 9-digit foreign VAT id satisfies mod-11 about 1 time in
+10, and a foreign private individual looks identical. It also had to avoid digit-stripping, since
+`digits('DE811234567')` is `'811234567'`, which passes the checksum — caught by a `php -r` probe,
+not by the diff looking right.
+
+The same frozen country now also feeds the **CMR** consignment note (`CreateCmrFromSource`),
+which still read `customer?->country ?: 'GR'` and printed GR for a foreign consignee on the very
+document that exists for international transport. It is surfaced in the ΔΑ infolist, on the PDF
+for a non-GR recipient, and in the activity log (`loggedAttributes`), so a wrong value is
+visible before issuing and auditable after.
+
+The duplicated country normaliser is gone: **`App\Support\IsoCountry`** is now the one
+implementation shared by the monetary-invoice and delivery payloads, so they can no longer
+drift on the `EL→GR` / `UK→GB` aliases the delivery copy was missing (a 2-letter `EL`/`UK`
+used to pass straight through as a non-ISO code). It exposes `normalise()` (throws — the
+invoice path) and `tryNormalise()` (null — so a caller can refuse rather than default).
+
+**Operational note:** a delivery note with an external recipient must now carry a country. The
+form enforces it for new notes; an older draft whose customer has no country will be refused at
+submit with a message naming the fix, rather than misreporting the party.
+
+**Country resolution order** (seven review rounds to settle; each earlier order had a hole):
+1. **ενδοδιακίνηση** — no recipient identity of any kind → GR (the issuer's own country).
+   First, so nothing can override it: not a customer's country, and not a stale
+   `recipient_country` left by a party pick the operator then cleared. An earlier round put the
+   explicit country first to rescue "named foreign party stored with the `000000000`
+   placeholder"; that case no longer classifies as internal (see the sentinel note below), so
+   this order costs nothing;
+2. the note's own `recipient_country`, else the linked **customer's** country — whichever
+   **normalises** to a real ISO code;
+3. otherwise **refuse**, quoting the offending value.
+
+**There is no third source.** Two narrow GR inferences for customer-linked recipients (filing
+the `000000000` placeholder → GR; a mod-11-valid Greek ΑΦΜ → GR) existed to spare legacy domestic
+notes whose `customers.country` is blank, and both were removed in round 8. Round 7 had already
+caught them firing over *recorded* country data (a customer reading «Italy» with no ΑΦΜ was filed
+as **GR**); narrowing them to absent-only was not enough, because neither is evidence in the
+first place — a foreign private individual, or a foreign customer with thin legacy data, has a
+blank country and a 9-digit number that satisfies mod-11 about 1 time in 10. **The filing
+boundary does not guess.** Legacy domestic notes get their country from the migration backfill
+or an operator edit — a data fix, not a misreport.
+
+**The submitter FREEZES the country it filed.** A note can be issued with the country resolved
+from its linked customer, and nothing wrote that back — while the same `forceFill` set
+`mydata_sent`, which makes `hasBeenFiled()` true and cuts off exactly that fallback. So the
+country AADE holds went invisible the moment it was filed (no «Χώρα» line on the PDF, «δεν
+καταγράφηκε» in the infolist, and the CMR quietly reading the LIVE customer country instead —
+the very leak the gate below exists to close). Both persist paths now write
+`recipient_country`, which is what finally makes the column true to its documented name. It
+records the RESOLVER's answer, not the column's prior value: an ενδοδιακίνηση files GR whatever
+the column holds, so trusting a non-empty column froze «DE» onto a note AADE holds as GR — and a
+filed note is no longer editable, so that would have been permanent. Freezing through the resolver
+also stores the normalised code («EL» → «GR»).
+
+**A country prefix on an ΑΦΜ is evidence, not noise.** The linked-customer identity check compares
+ΑΦΜ with separators and case folded but **letters kept** — `Afm::digits()` would turn
+«DE811234567» into «811234567», which matches a Greek customer's ΑΦΜ, so the note would inherit
+that customer's country and file a German party as GR with its own DE prefix in the same
+counterpart. Keeping letters also matches the migration's exact SQL comparison, so the two mirrors
+of the predicate agree; an «EL»-prefixed ΑΦΜ against a bare one is the one false negative, and it
+fails safe (refusal until someone sets a country).
+
+**A filed note stops inheriting the customer's country — on write AND on read.** The column is a
+snapshot of what was SUBMITTED while `customers.country` is live, so a customer who has since
+moved (or simply had the field filled in later) would otherwise put a country the AADE record
+never carried onto the PDF, the infolist and the CMR, presented as the filed one. So: the
+migration backfill skips filed notes, *and* `recipientCountryIso()` cuts off the customer
+fallback once `hasBeenFiled()` — guarding only the write left the read wide open (round 8). The
+predicate is `mydata_sent || mydata_mark`, shared by both, because a rejected-then-repaired note
+can carry the flag without a MARK. A filed note is never re-submitted (a cancellation carries no
+counterpart), so null is honest; recovering the true historical value means reading
+`delivery_marks.request`, a separate job. The **CMR** deliberately keeps the fallback — it is
+paper, editable before printing, and a blank country line on a cross-border consignment note is
+worse than a stale one.
+
+**The refusal is only as safe as the normaliser.** Every country name `IsoCountry` fails to
+resolve is a note an operator cannot issue, so it matches the vendor enum's Greek labels for all
+247 (accent-folded, so legacy «ΙΤΑΛΙΑ» meets the label «Ιταλία»), Latin names, alpha-3 codes, and
+the colloquial spellings people actually type (ΑΓΓΛΙΑ, ΗΠΑ, ΣΚΟΠΙΑ, ΚΑΤΩ ΧΩΡΕΣ, ΤΣΕΧΙΚΗ
+ΔΗΜΟΚΡΑΤΙΑ). A unit test asserts every one of the 247 labels round-trips to its own code, so no
+name can be shadowed by another.
+
+The `000000000` sentinel is treated as "this party has no ΑΦΜ", **not** as an override — the UI
+offers no other placeholder, so letting it force an internal classification misreported named
+foreign recipients. `isInternalMovement()` therefore means *no identity of any kind*, and the
+AADE payload, the PDF, the CMR and the InvoSign document all share that one definition.
+
+**Known limit (→ BACKLOG):** `suppliers.country` defaults to `'GR'` (DB + form) and
+`customers.country` is nullable free text, so the *source* data can still say GR for a foreign
+party. Converting those forms to the shared ISO picker was **tried inside this change and
+reverted**: a plain `Select` attaches an implicit `in` rule, and the stored value is compared
+raw — so every record holding «ΙΤΑΛΙΑ» became unsaveable even though `IsoCountry` now resolves
+that string, because nothing normalises it on *load*. The ETL also rewrites the raw string on
+every re-run. It needs a normalise-on-load + a column backfill + ETL alignment, so it is logged
+as a follow-up rather than shipped half-done.
+
+Tests: customer / supplier / manual / non-EU recipients serialize their own ISO code, `EL`→GR
+and `UK`→GB, the customer fallback for pre-column notes, internal movement → `000000000` + GR,
+the explicit-sentinel internal case, a named foreign recipient with no ΑΦΜ (refused without a
+country, filed as DE with one), and both refusal paths (absent and unrecognised `ZZ` — a value
+that actually fits the `varchar(2)` column, unlike a 3-char one that only "passes" on sqlite).
+Plus `IsoCountry` unit tests (ISO validation, full-table options, every option round-trips, the
+Greek/Latin/alpha-3 name index, and that an unknown name still resolves to null), a
+`resolveRecipient()` test proving the picker carries the country for both party kinds, CMR tests
+asserting a supplier recipient's country reaches the consignment note and that the paper document
+follows the SAME `isInternalMovement()`/`externalRecipientAfm()` helpers as the payload, and
+`RecipientCountryBackfillTest` for the migration's data half (drafts backfilled incl. legacy free
+text, filed notes never touched, unresolvable left null, existing values not overwritten,
+re-runnable).
 
 **Official finding**
 
@@ -2897,3 +3059,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-017 net/VAT split + gross basis** (PR #389 review 3) — compare `<totalNetValue>` (catches a same-gross/different-VAT-category doc); money now compared against a new `FiledInvoiceTotals` (per-VAT-rate roll-up + [208] adjustment — what the submitter actually files) instead of the `net_total`/`gross_total` columns; unreconstructable (no lines / category-less legacy withholding) → unverified, not a false conflict; integer-cent tolerance; same basis fixes the per-invoice «Σύγκριση με ΑΑΔΕ» too | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017 fail-closed + cleanup** (PR #389 review 4) — `FiledInvoiceTotals` returns unverified (not 0,00 / not a thrown exception) on null-amount legacy lines and out-of-range header discounts; blank/non-numeric AADE totals read RAW (`->get()`) → null instead of firebed's typed getter throwing; money compare unified in `Support\Money::differsByCent` (fixes the per-invoice «Σύγκριση με ΑΑΔΕ» float bug), ΑΦΜ in `Support\Afm` (comparator + 4 WHMCS sites); `AadeDocSummary::withCancellation()` de-dups the fold rebuild | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017 self-closing containers + AFM finish** (PR #389 review 5) — the reconcilers read the invoiceSummary/invoiceHeader/counterpart/issuer CONTAINERS raw (`->get()` + instanceof) too, so a self-closing `<invoiceSummary/>` no longer TypeErrors out of the fetch; `Support\Afm` now the single AFM source (7 sites incl. PendingWhmcsInvoice/WhmcsInboxTable) | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-011 DONE** — delivery recipient country frozen on the note (`recipient_country`), populated from customer/supplier/manual; external recipient without a resolvable country is REFUSED (GR default reserved for ενδοδιακίνηση); one shared `Support\IsoCountry` normaliser across invoice + delivery (adds the missing EL→GR / UK→GB to delivery) | `CHANGELOG.md` [Unreleased] → Fixed |

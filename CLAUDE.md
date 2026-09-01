@@ -121,6 +121,30 @@ after cutover.
   buries your change. **Only Pint the files you touched** (pass them explicitly); revert
   any stray reformats before committing.
 
+## Review discipline — the gate runs until it's GREEN (not once)
+
+Every change ends with a **whole-PR adversarial review** (`/code-review`, high effort).
+The rule, learned the hard way on MYD-017 and MYD-011:
+
+- **Re-run the gate after fixing.** A round of fixes is NOT the end — it is a new
+  diff that has never been reviewed. On both of those issues the *fix itself*
+  introduced the next bug (a date guard that traded a false conflict for a false
+  green; a `payableTotal()` basis that was wrong twice; an internal-movement rule
+  that broke the `000000000` sentinel and let a named foreign party through as GR).
+  Keep looping: **review → fix → review** until a round comes back clean.
+- **"I fixed the findings" is not "the review passed."** Never report a gate as
+  passed on a state that was never reviewed. Say which commit was reviewed, how many
+  findings came back, and whether the post-fix state has been re-checked.
+- **Every finding gets an explicit disposition** — fixed, or consciously deferred
+  with a reason recorded in `docs/BACKLOG.md`. Silently dropping one is not allowed.
+- **Sanity-check a fix against real values before trusting it.** The Greek-ΑΦΜ
+  inference "worked" until a 10-second `php -r` showed `DE811234567` validating as
+  Greek (the digit-strip ate the prefix). A cheap probe beats a plausible-looking diff.
+- **Don't let a fix widen into a new regression.** Refusing bad data is right, but
+  check what *legitimate* existing data the refusal breaks (the blanket
+  no-country refusal would have made every domestic note with a blank
+  `customers.country` unissuable) — find the positive-evidence path instead.
+
 ## Changelog + features discipline (keep these current — we were losing track)
 Part of "done", like tests. **Every change updates the right place:**
 - **`CHANGELOG.md`** (repo root) — the ekdosi **app** (Laravel/Filament). Add a

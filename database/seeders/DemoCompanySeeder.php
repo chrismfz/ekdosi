@@ -248,6 +248,11 @@ class DemoCompanySeeder extends Seeder
                 'delivery_street' => 'Παράδοσης', 'delivery_number' => '5', 'delivery_postcode' => (string) $customer->postcode, 'delivery_city' => (string) $customer->city,
                 'recipient_name' => $customer->name,
                 'recipient_afm' => $customer->afm ?: '000000000',
+                // MYD-011: an external recipient with no resolvable country is
+                // REFUSED at issue, so a seeded note without this is dead on
+                // arrival — the demo tenant is exactly where someone clicks
+                // «Έκδοση» to see what happens.
+                'recipient_country' => 'GR',
                 'local_status' => 'active',
             ]);
 

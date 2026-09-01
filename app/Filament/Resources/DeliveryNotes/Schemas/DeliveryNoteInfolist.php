@@ -43,6 +43,52 @@ class DeliveryNoteInfolist
                 ->schema([
                     TextEntry::make('recipient_name')->label('Επωνυμία')->placeholder('— (ενδοδιακίνηση)'),
                     TextEntry::make('recipient_afm')->label('ΑΦΜ')->placeholder('000000000'),
+                    // MYD-011: part of the legally-filed counterpart — an operator
+                    // investigating a wrong-country AADE record must be able to see
+                    // what was reported, and spot a wrong value BEFORE issuing.
+                    // Rendered through the same accessor the payload uses, NOT the raw
+                    // column: an unnormalised «Italy» displayed verbatim reads like a
+                    // recorded country while the submitter refuses the note, and an
+                    // inherited customer country is invisible in the column entirely.
+                    TextEntry::make('recipient_country')
+                        ->label('Χώρα')
+                        ->state(function ($record): string {
+                            if ($record->isInternalMovement()) {
+                                return 'GR (ενδοδιακίνηση)';
+                            }
+
+                            if ($iso = $record->recipientCountryIso()) {
+                                return $iso;
+                            }
+
+                            // Every branch warns — the issue is REFUSED in all of
+                            // them, so this must not read as "it will sort itself
+                            // out". They differ in WHICH field to fix, and are ordered
+                            // exactly like DeliveryNoteSubmitter's message so the two
+                            // surfaces never disagree: the note's own value first,
+                            // because setting it resolves every state below.
+                            if (filled($record->recipient_country)) {
+                                return "«{$record->recipient_country}» — μη έγκυρος κωδικός ISO, η έκδοση θα απορριφθεί";
+                            }
+
+                            // A filed note whose country was never recorded: the
+                            // customer's live country is deliberately NOT shown (it
+                            // may differ from what was submitted) — the MARK is the
+                            // record.
+                            if ($record->hasBeenFiled()) {
+                                return '— (δεν καταγράφηκε· βλ. MARK)';
+                            }
+
+                            if ($record->customer_id !== null && ! $record->recipientIsTheLinkedCustomer()) {
+                                return '— ο παραλήπτης δεν είναι ο συνδεδεμένος πελάτης· απαιτείται δική του χώρα';
+                            }
+
+                            if (filled($record->customer?->country)) {
+                                return "«{$record->customer?->country}» στον πελάτη — μη έγκυρος κωδικός ISO";
+                            }
+
+                            return '— λείπει· απαιτείται πριν την έκδοση';
+                        }),
                 ]),
 
             Section::make('Διευθύνσεις')
