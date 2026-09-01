@@ -28,6 +28,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συμβατότητα δεδομένων· τα αποθηκευμένα ποσά εκπέμπουν το ίδιο σωστό taxType 4).
 
 ### Fixed
+- **Έλεγχος ημερομηνίας έκδοσης για online έκδοση μέσω παρόχου (PROV-020)** — η κανονική
+  online έκδοση μέσω InvoSign απαιτεί `IssueDate = σημερινή` (error 238), αλλά το Ekdosi
+  δεχόταν backdated/future `issued_at` και το έστελνε — εγγυημένη απόρριψη. Νέος
+  service-level guard (`ProviderIssueDateGuard`, ώρα Ελλάδας/Europe-Athens) στα provider
+  paths (τιμολόγιο + δελτίο διακίνησης): μη-σημερινή ημερομηνία **μπλοκάρεται τοπικά πριν
+  από κάθε outbound request**, με σαφές μήνυμα. Το direct myDATA (που δέχεται backdating
+  εντός ορίων AADE) δεν επηρεάζεται· η νόμιμη offline/backdated οδός (Transmission Failure)
+  παραμένει το PROV-008.
 - **Έγκυρη μονάδα μέτρησης στα δελτία διακίνησης (MYD-016)** — ο submitter «διόρθωνε»
   σιωπηλά μια απούσα/άκυρη μονάδα σε 1 (τεμάχια), αλλάζοντας το νόημα της γραμμής (π.χ.
   κιλά → τεμάχια). Πλέον μια απούσα ή μη υποστηριζόμενη μονάδα (εκτός §8.13 1–6)

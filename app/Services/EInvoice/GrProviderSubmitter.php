@@ -11,6 +11,7 @@ use App\Models\MyDataMark;
 use App\Services\MyDataRejected;
 use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -51,6 +52,9 @@ class GrProviderSubmitter implements EInvoiceSubmitter
     public function submit(Invoice $invoice): MyDataMark
     {
         $this->assertNotAlreadyFiled($invoice);
+        // Normal online provider issue requires IssueDate = today (InvoSign 238);
+        // reject a backdated/future date locally before any outbound request (PROV-020).
+        ProviderIssueDateGuard::assertIssuedToday($invoice->issued_at, (string) $invoice->invcode);
 
         $document = new AadeInvoiceDocument($this->tenant);
         $payload = $document->build($invoice);

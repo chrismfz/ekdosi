@@ -339,6 +339,28 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('active', $fresh->local_status);
     }
 
+    public function test_provider_delivery_note_rejects_a_backdated_issue_date(): void
+    {
+        // Provider (InvoSign) online issue requires today's date (238); a
+        // backdated note must fail locally, before any provider call (PROV-020).
+        config()->set('ekdosi.einvoice.providers.fake-delivery', FakeDeliveryProviderTransport::class);
+
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'fake-delivery',
+            'einvoice_provider_mode' => 'sandbox',
+            'einvoice_provider_config' => ['demo_base_url' => 'https://provider.test', 'demo_token' => 'tok'],
+            'mydata_mode' => 'off',
+        ])->save();
+
+        $note = $this->makeNote(['issued_at' => now()->subDay()]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/ημερομηνία έκδοσης/u');
+
+        (new DeliveryNoteSubmitter($this->tenant->fresh()))->submit($note);
+    }
+
     public function test_provider_rejection_is_visible_in_delivery_history_with_request_and_response(): void
     {
         config()->set('ekdosi.einvoice.providers.fake-rejecting-delivery', FakeRejectingDeliveryProviderTransport::class);

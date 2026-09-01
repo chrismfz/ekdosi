@@ -76,6 +76,36 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertTrue((bool) $fresh->mydata_sent);
     }
 
+    public function test_rejects_a_backdated_issue_date_before_any_outbound_request(): void
+    {
+        // Normal online provider issue requires IssueDate = today (InvoSign 238);
+        // a yesterday date must fail locally and reach no transport (PROV-020).
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['issued_at' => now()->subDay()])->save();
+
+        try {
+            (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
+            $this->fail('Expected a backdated-issue-date rejection.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ημερομηνία έκδοσης', $e->getMessage());
+        }
+
+        // No outbound: not even a forensic PROVIDER_* row — the guard ran first.
+        $this->assertSame(0, MyDataMark::where('invoice_id', $invoice->id)->count());
+        $this->assertNull($invoice->fresh()->mydata_state);
+    }
+
+    public function test_rejects_a_future_issue_date(): void
+    {
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['issued_at' => now()->addDay()])->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/ημερομηνία έκδοσης/u');
+
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
+    }
+
     public function test_provider_rejection_throws_and_records_forensic_row_without_filing(): void
     {
         $invoice = $this->makeInvoice();

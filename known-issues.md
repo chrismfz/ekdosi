@@ -306,7 +306,7 @@ Priorities:
 | PROV-017 | P1 | OPEN | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
 | PROV-018 | P1 | OPEN | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
-| PROV-020 | P1 | OPEN | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
+| PROV-020 | P1 | DONE | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
 | STOCK-001 | P1 | OPEN | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock |
 | SETUP-001 | P1 | OPEN | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
@@ -1933,7 +1933,25 @@ exactly once.
 
 ### PROV-020 — Normal online InvoSign issue date is not preflighted
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-31
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-31
+
+**Fix:** new `App\Support\EInvoice\ProviderIssueDateGuard::assertIssuedToday()`
+(Europe/Athens local date) is called at both provider issue paths —
+`GrProviderSubmitter::submit` (before build/POST) and
+`DeliveryNoteSubmitter::submitViaProvider` — so a backdated/future `issued_at`
+throws an actionable local error and NO outbound request is made. The direct
+myDATA path is intentionally untouched (AADE accepts backdating within its
+window). Tests cover yesterday (with a no-outbound assertion), tomorrow and an
+Europe/Athens midnight boundary for the invoice path, plus a backdated delivery
+note. The legitimate offline/backdated route (Transmission Failure) remains
+**PROV-008** — the guard message points to it. See `CHANGELOG.md` [Unreleased] → Fixed.
+
+*Notes (review):* the guard is a pre-send preflight; recovering an in-doubt
+filing whose response was lost (adopt the existing MARK by frozen coordinates)
+is owned by **PROV-001/PROV-014**, not by re-filing on a later day. Correcting the
+date of an already-finalised (active) document is by design a revert-to-draft →
+edit → refile (EditInvoice is draft-only; the audit forbids silently rewriting an
+allocated legal issue date) — the guard message says so.
 
 The [InvoSign calls/responses guide](https://invosign.gr/site/help_site/?page=kliseis_apantisi)
 documents validation error 238: `IssueDate` must equal the current date for the
@@ -2626,3 +2644,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-020 DONE** — «Ψηφιακό Τέλος Συναλλαγής» terminology + corrected §8.5/8.6/8.7 refs; payload/columns unchanged | `CHANGELOG.md` [Unreleased] → Changed |
 | 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |

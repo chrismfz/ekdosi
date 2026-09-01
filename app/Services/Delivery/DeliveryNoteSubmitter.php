@@ -10,6 +10,7 @@ use App\Models\DeliveryNote;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
@@ -325,6 +326,10 @@ class DeliveryNoteSubmitter
     /** Submit the same canonical 9.x AADE XML through the tenant's ΥΠΑΗΕΣ provider. */
     private function submitViaProvider(DeliveryNote $note, string $xml): DeliveryMark
     {
+        // Normal online provider issue requires IssueDate = today (InvoSign 238);
+        // reject a backdated/future date locally before any outbound request (PROV-020).
+        ProviderIssueDateGuard::assertIssuedToday($note->issued_at, (string) $note->invcode);
+
         $transport = app(ProviderTransportRegistry::class)->for((string) $this->tenant->einvoice_provider_key);
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 
