@@ -10,6 +10,7 @@ use App\Services\MyData\AadeDocSummary;
 use App\Services\MyData\SalesReconciler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -315,10 +316,12 @@ class SalesReconcilerDiffTest extends TestCase
         $this->assertCount(0, $result->contentMismatch);
     }
 
-    public function test_blank_aade_issue_date_is_not_a_false_conflict(): void
+    public function test_blank_aade_issue_date_is_content_incomplete_not_matched(): void
     {
-        // MYD-017 review: an empty (present-but-blank) AADE issueDate must never be
-        // parsed into "today" and manufacture a date conflict against the local date.
+        // MYD-017 (AADE-side fail-open): an empty/unparseable AADE issueDate must be
+        // neither a conflict (parsing '' as "today" would fabricate one) NOR a green
+        // "matched" — we simply could not verify a MANDATORY header field, so the row
+        // is contentIncomplete (unverified).
         $inv = $this->invoice('470000000000001', 'VALID');
 
         $result = (new SalesReconciler($this->tenant))->diff(
@@ -328,11 +331,63 @@ class SalesReconcilerDiffTest extends TestCase
             '31/01/2026',
         );
 
-        // Blank AADE date → the field is skipped (not a conflict), everything else
-        // mirrors → matched.
-        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->matched);
         $this->assertCount(0, $result->contentMismatch);
-        $this->assertCount(0, $result->contentIncomplete);
+        $this->assertCount(1, $result->contentIncomplete);
+        $this->assertStringContainsString('ημ/νία', $result->contentIncomplete[0]->problem);
+        $this->assertStringContainsString('ΑΑΔΕ', $result->contentIncomplete[0]->problem);
+    }
+
+    public function test_unparseable_aade_issue_date_is_content_incomplete(): void
+    {
+        // Same rule for a present-but-garbage date: unverifiable, never green.
+        $inv = $this->invoice('480000000000001', 'VALID');
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['issueDate' => 'not-a-date'])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(0, $result->matched);
+        $this->assertCount(1, $result->contentIncomplete);
+    }
+
+    /**
+     * Every MANDATORY AADE header field, when the summary does not carry it, must
+     * route the row to contentIncomplete instead of silently reading as matched
+     * (the AADE-side fail-open). Counterpart ΑΦΜ is deliberately NOT in this list —
+     * retail 11.x legitimately has none (covered by its own test).
+     */
+    public static function mandatoryAadeFieldProvider(): array
+    {
+        return [
+            'gross' => [['gross' => null], 'μικτό'],
+            'invoiceType' => [['invoiceType' => null], 'τύπος'],
+            'series' => [['series' => null], 'σειρά'],
+            'aa' => [['aa' => null], 'ΑΑ'],
+            'issueDate' => [['issueDate' => null], 'ημ/νία'],
+        ];
+    }
+
+    #[DataProvider('mandatoryAadeFieldProvider')]
+    public function test_missing_mandatory_aade_field_is_content_incomplete(array $override, string $label): void
+    {
+        $inv = $this->invoice('490000000000001', 'VALID');
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: $override)],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(0, $result->matched, "{$label}: must not be a false green");
+        $this->assertCount(0, $result->contentMismatch, "{$label}: absence is not a conflict");
+        $this->assertCount(1, $result->contentIncomplete);
+        $this->assertStringContainsString($label, $result->contentIncomplete[0]->problem);
+        $this->assertTrue($result->hasDiscrepancies());
     }
 
     private function invoice(?string $mark, ?string $state, ?Customer $customer = null): Invoice

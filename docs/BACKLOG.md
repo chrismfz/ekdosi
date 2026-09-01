@@ -351,6 +351,23 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   (UI + `companies.whmcs_auto_issue_immediate`). Widen only if a real per-tenant admin
   needs a specific credential delegated — don't bulk-move secrets into company_admin reach.
 
+## 🔐 `UpdateRun` authorization boundary (ΜΗ shield-generated policy)
+- Το `UpdateRun` (ιστορικό deploy updates) είναι **global, cross-tenant, super-admin-only,
+  immutable** resource — αλλά **δεν** έχει policy και **δεν** είναι στο `ADMIN_FORBIDDEN_RESOURCES`.
+  Σήμερα το προστατεύουν μόνο τα Filament overrides της σελίδας (δεν βρέθηκε εκμεταλλεύσιμο route),
+  όμως **οποιοδήποτε `Gate::authorize()` πάνω στο model θα εγκρίνει λάθος τους company admins**.
+  ⚠️ **ΜΗΝ** πέσει σκέτο `shield:generate` policy εδώ: το stock template δίνει όλα τα CRUD βάσει
+  `*:UpdateRun` permissions, που ο `TenantRoleProvisioner` μοιράζει στον `company_admin` (ακριβώς
+  αυτό απορρίφθηκε στο review του PR #389). Σωστή λύση: policy που **απαιτεί super admin**,
+  επιστρέφει `false` σε κάθε mutation (create/update/delete/restore/forceDelete/replicate/reorder),
+  **+ προσθήκη του `UpdateRun` στο `ADMIN_FORBIDDEN_RESOURCES`**, με Gate-level tests (company_admin
+  → denied). Ίδιος έλεγχος αξίζει και για τα υπόλοιπα global ops resources.
+  **Σημείωση για το «γιατί ξαναεμφανίζεται»:** το `shield:generate` τρέχει μέσα στον seeder
+  (βλ. `DatabaseSeederTest`), οπότε **κάθε run της σουίτας ξαναγράφει** το
+  `app/Policies/UpdateRunPolicy.php` ως untracked αρχείο. Θα επανεμφανίζεται μέχρι να κλείσει
+  το παραπάνω boundary (ή να μπει το resource στο shield exclusion list) — μη το commit-άρεις
+  ως έχει επειδή «εμφανίστηκε ξανά».
+
 ## 🔒 Backup / DR / Portability
 - **Durable native portable key (μετά το legacy_id sunset).** Ο `CompanyImporter` κλειδώνει
   το idempotent matching σε `legacy_id` (+ content-signature fallback). Όταν σβήσει το legacy

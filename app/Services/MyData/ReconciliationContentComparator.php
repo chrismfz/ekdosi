@@ -19,13 +19,16 @@ use Throwable;
  * the rule can't drift). It NEVER mutates a frozen value — the caller only uses
  * the result to route a row to matched / contentMismatch / contentIncomplete.
  *
- * Per field, comparing ONLY what AADE actually reported (AADE is the source of
- * truth for the window):
- *   - AADE present + local present + values differ → a CONFLICT.
- *   - AADE present + local absent                  → INCOMPLETE (unverified; the
- *     local record never captured it — not a conflict, but not reconciled either).
- *   - AADE absent (e.g. counterpart ΑΦΜ on retail 11.x) → skipped (nothing to
- *     verify against).
+ * Three outcomes per field, and "unverifiable" is deliberately NOT "matched":
+ *   - both sides present + values differ → a CONFLICT (danger).
+ *   - AADE present + local absent        → INCOMPLETE (the local record never
+ *     captured it — not a conflict, but not reconciled either).
+ *   - AADE absent/unreadable on a MANDATORY field → INCOMPLETE too. We could not
+ *     verify the document at all, so it must never read green just because the
+ *     source side was empty (that is fail-OPEN). The mandatory header per AADE is
+ *     gross, §8.1 type, series, ΑΑ and issue date.
+ *   - counterpart ΑΦΜ is the ONE optional field: retail (11.x) legitimately has
+ *     no counterpart, so an absent AADE ΑΦΜ is genuinely "nothing to verify".
  *
  * gross uses an explicit cent tolerance; ΑΦΜ is compared digits-only so an EL/GR
  * prefix is not a false difference; dates are normalised to Y-m-d.
@@ -35,65 +38,69 @@ final class ReconciliationContentComparator
     /** Gross values within this many currency units are treated as equal. */
     private const GROSS_TOLERANCE = 0.01;
 
+    /** Suffix for a field AADE did not give us (so we could not verify it). */
+    private const UNVERIFIED = ' — ανεπαλήθευτο)';
+
     public static function compare(LocalDocSnapshot $local, AadeDocSummary $aade): ContentComparison
     {
         $conflicts = [];
         $incompletes = [];
 
-        // gross
-        if ($aade->gross !== null) {
-            if ($local->gross === null) {
-                $incompletes[] = 'μικτό (λείπει τοπικά· ΑΑΔΕ '.self::money($aade->gross).')';
-            } elseif (abs($local->gross - $aade->gross) > self::GROSS_TOLERANCE) {
-                $conflicts[] = 'μικτό: '.self::money($local->gross).' τοπικά / '.self::money($aade->gross).' ΑΑΔΕ';
+        // gross (mandatory)
+        if ($aade->gross === null) {
+            $incompletes[] = 'μικτό (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
+        } elseif ($local->gross === null) {
+            $incompletes[] = 'μικτό (λείπει τοπικά· ΑΑΔΕ '.self::money($aade->gross).')';
+        } elseif (abs($local->gross - $aade->gross) > self::GROSS_TOLERANCE) {
+            $conflicts[] = 'μικτό: '.self::money($local->gross).' τοπικά / '.self::money($aade->gross).' ΑΑΔΕ';
+        }
+
+        // invoice type §8.1 (mandatory)
+        if (! self::present($aade->invoiceType)) {
+            $incompletes[] = 'τύπος (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
+        } elseif (! self::present($local->invoiceType)) {
+            $incompletes[] = 'τύπος (λείπει τοπικά· ΑΑΔΕ '.$aade->invoiceType.')';
+        } elseif (trim((string) $aade->invoiceType) !== trim((string) $local->invoiceType)) {
+            $conflicts[] = 'τύπος: '.$local->invoiceType.' τοπικά / '.$aade->invoiceType.' ΑΑΔΕ';
+        }
+
+        // series (mandatory)
+        if (! self::present($aade->series)) {
+            $incompletes[] = 'σειρά (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
+        } elseif (! self::present($local->series)) {
+            $incompletes[] = 'σειρά (λείπει τοπικά· ΑΑΔΕ '.$aade->series.')';
+        } elseif (trim((string) $aade->series) !== trim((string) $local->series)) {
+            $conflicts[] = 'σειρά: '.$local->series.' τοπικά / '.$aade->series.' ΑΑΔΕ';
+        }
+
+        // ΑΑ (mandatory)
+        if (! self::present($aade->aa)) {
+            $incompletes[] = 'ΑΑ (λείπει από την ΑΑΔΕ'.self::UNVERIFIED;
+        } elseif (! self::present($local->aa)) {
+            $incompletes[] = 'ΑΑ (λείπει τοπικά· ΑΑΔΕ '.$aade->aa.')';
+        } elseif (trim((string) $aade->aa) !== trim((string) $local->aa)) {
+            $conflicts[] = 'ΑΑ: '.$local->aa.' τοπικά / '.$aade->aa.' ΑΑΔΕ';
+        }
+
+        // issue date (mandatory). A blank or unparseable AADE date is UNVERIFIED,
+        // never "matched": CarbonImmutable::parse('') would return TODAY, so it must
+        // not reach the comparison — but skipping it silently was the fail-open bug.
+        $aadeDate = self::present($aade->issueDate) ? self::normDate($aade->issueDate) : null;
+        if ($aadeDate === null) {
+            $incompletes[] = 'ημ/νία (λείπει ή δεν αναγνωρίζεται από την ΑΑΔΕ'.self::UNVERIFIED;
+        } elseif (! self::present($local->issueDate)) {
+            $incompletes[] = 'ημ/νία (λείπει τοπικά· ΑΑΔΕ '.$aade->issueDate.')';
+        } else {
+            $localDate = self::normDate($local->issueDate);
+            if ($localDate === null) {
+                $incompletes[] = 'ημ/νία (μη αναγνώσιμη τοπικά· ΑΑΔΕ '.$aade->issueDate.')';
+            } elseif ($aadeDate !== $localDate) {
+                $conflicts[] = 'ημ/νία: '.$local->issueDate.' τοπικά / '.$aade->issueDate.' ΑΑΔΕ';
             }
         }
 
-        // invoice type (§8.1)
-        if ($aade->invoiceType !== null) {
-            if (! self::present($local->invoiceType)) {
-                $incompletes[] = 'τύπος (λείπει τοπικά· ΑΑΔΕ '.$aade->invoiceType.')';
-            } elseif ($aade->invoiceType !== $local->invoiceType) {
-                $conflicts[] = 'τύπος: '.$local->invoiceType.' τοπικά / '.$aade->invoiceType.' ΑΑΔΕ';
-            }
-        }
-
-        // series
-        if (self::present($aade->series)) {
-            if (! self::present($local->series)) {
-                $incompletes[] = 'σειρά (λείπει τοπικά· ΑΑΔΕ '.$aade->series.')';
-            } elseif (trim((string) $aade->series) !== trim((string) $local->series)) {
-                $conflicts[] = 'σειρά: '.$local->series.' τοπικά / '.$aade->series.' ΑΑΔΕ';
-            }
-        }
-
-        // ΑΑ
-        if (self::present($aade->aa)) {
-            if (! self::present($local->aa)) {
-                $incompletes[] = 'ΑΑ (λείπει τοπικά· ΑΑΔΕ '.$aade->aa.')';
-            } elseif (trim((string) $aade->aa) !== trim((string) $local->aa)) {
-                $conflicts[] = 'ΑΑ: '.$local->aa.' τοπικά / '.$aade->aa.' ΑΑΔΕ';
-            }
-        }
-
-        // issue date — only when AADE actually returns one (present(), so a blank
-        // string doesn't reach normDate, where CarbonImmutable::parse('') would
-        // return TODAY and manufacture a conflict against every local date).
-        if (self::present($aade->issueDate)) {
-            if (! self::present($local->issueDate)) {
-                $incompletes[] = 'ημ/νία (λείπει τοπικά· ΑΑΔΕ '.$aade->issueDate.')';
-            } else {
-                $aadeDate = self::normDate($aade->issueDate);
-                $localDate = self::normDate($local->issueDate);
-                // Conflict only when BOTH normalise to a real date and they differ —
-                // an unparseable AADE date is never one-sided noise in the danger bucket.
-                if ($aadeDate !== null && $localDate !== null && $aadeDate !== $localDate) {
-                    $conflicts[] = 'ημ/νία: '.$local->issueDate.' τοπικά / '.$aade->issueDate.' ΑΑΔΕ';
-                }
-            }
-        }
-
-        // counterpart ΑΦΜ — only when AADE returns one (retail 11.x has none → skip)
+        // counterpart ΑΦΜ — the ONE optional field: myDATA omits the counterpart for
+        // retail (11.x), so an absent AADE ΑΦΜ really is "nothing to verify".
         if (self::present($aade->counterpartVat)) {
             if (! self::present($local->counterpartVat)) {
                 $incompletes[] = 'ΑΦΜ (λείπει τοπικά· ΑΑΔΕ '.$aade->counterpartVat.')';

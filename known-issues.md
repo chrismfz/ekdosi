@@ -1130,7 +1130,17 @@ value, and the issueDate branch now uses `present()` + a both-non-null-and-diffe
 empty AADE `issueDate` can no longer be parsed into "today" and manufacture a one-sided
 conflict. (3) **Net/VAT split** — comparing gross catches a total divergence but not a
 same-gross/different-VAT-split one; adding net comparison is a noted follow-up (BACKLOG), not
-done here. Tests: legacy-null-caches → matched via relations; blank AADE date → not a conflict.
+done here. Tests: legacy-null-caches → matched via relations.
+
+**AADE-side fail-open closed (review round 2):** the date guard above fixed a false CONFLICT
+but traded it for a false GREEN — the comparator skipped any field the AADE summary did not
+carry, so a blank/unparseable `issueDate` (or a missing gross/type/series/ΑΑ) read as `matched`,
+and a test even locked that in. Now the **mandatory** AADE header — **gross, §8.1 type, series,
+ΑΑ, issue date** — routes to `contentIncomplete` when it is absent or unreadable ("λείπει από
+την ΑΑΔΕ — ανεπαλήθευτο"): we could not verify the document, so it is never green and never a
+conflict (the local value isn't contradicted). **Counterpart ΑΦΜ stays optional** — myDATA
+legitimately omits it for retail 11.x, so an absent AADE ΑΦΜ really is "nothing to verify".
+Tests: a data-provider over all five mandatory fields, plus blank and unparseable AADE dates.
 
 **Official finding**
 
@@ -2861,3 +2871,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-017 review** (PR #389) — incomplete ≠ conflict: new warning bucket `contentIncomplete` (AADE has a field the local record lacks) alongside danger `contentMismatch`; comparator returns `ContentComparison` (conflicts+incompletes), both count + render (consoles + CLI); fixed retail test (`array_merge`, not `??`) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-014 review** (PR #389) — integrity: reconciler keeps the real cancellation MARK (`invoiceMark ⇒ cancellationMark`, inline + standalone); `SyncExpenseStateFromAade` refuses CANCELLED without it; console `syncStates()` re-reconciles fresh at click time (no trust in the ≤12h cache) + re-verifies tenant/expense_id/MARK before mutating | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017/014 code-review round** (PR #389) — (a) `snapshotFrom()` relation fallback so legacy null-cache invoices match instead of permanent `contentIncomplete`/exit-2; (b) `normDate()` null-on-blank so an empty AADE date can't fabricate a conflict; (c) `syncStates()` per-row try/catch so one evidence-less cancellation doesn't abort the batch; net/VAT-split compare noted → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017 AADE-side fail-open closed** (PR #389 review 2) — a missing/unparseable MANDATORY AADE field (gross/type/series/ΑΑ/date) is now `contentIncomplete`, not `matched`; counterpart ΑΦΜ stays optional for retail 11.x. MYD-017 → DONE | `CHANGELOG.md` [Unreleased] → Fixed |

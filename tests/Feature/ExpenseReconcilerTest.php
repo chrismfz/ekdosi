@@ -216,6 +216,7 @@ XML),
             'mydata_mark' => '400000000000007', 'mydata_state' => 'VALID',
             'series' => 'A', 'aa' => '7', 'issue_date' => '2026-01-10',
             'gross_total' => '124.00', 'supplier_afm' => '998482379',
+            'invoice_type' => '1.1',
         ];
         $a = (new Expense)->forceFill(['id' => 1] + $content);
         $b = (new Expense)->forceFill(['id' => 2] + $content);
@@ -224,6 +225,7 @@ XML),
             mark: '400000000000007', uid: 'U', cancelled: false, cancelledByMark: null,
             series: 'A', aa: '7', issueDate: '2026-01-10',
             counterpartName: 'ΠΡΟΜΗΘΕΥΤΗΣ ΑΕ', counterpartVat: '998482379', gross: 124.0,
+            invoiceType: '1.1',
         )];
 
         $result = (new ExpenseReconciler($this->tenant))->diff(
