@@ -255,6 +255,10 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertStringContainsString('category3', $xml);
         // Value-less: no payment methods on a delivery note.
         $this->assertStringNotContainsString('<paymentMethods>', $xml);
+        // Per-line <itemDescr> IS carried for a delivery note (AADE accepts it for
+        // 9.x) — this is the live itemDescr path now that a 9.x can't be a monetary
+        // invoice (MYD-003); the monetary knob branch is unreachable (ItemDescrKnobTest).
+        $this->assertStringContainsString('<itemDescr>Κιβώτια</itemDescr>', $xml);
     }
 
     public function test_endodiakinisi_recipient_is_nine_zeros(): void

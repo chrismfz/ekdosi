@@ -119,7 +119,12 @@ surfaced in the open-items sections further down.
   είναι ένα 1.1 με `isDeliveryNote=true` + πλήρη movement header (σκοπός, μεταφορικό,
   διευθύνσεις φόρτωσης/παράδοσης). Ο `AadeInvoiceDocument` δεν εκπέμπει combined payload,
   οπότε το seeded «ΤΔΑ» αφαιρέθηκε (MYD-002). Χτίσε το combined document (payload +
-  validation + lifecycle) και ξανα-πρόσφερέ το ως τύπο.
+  validation + lifecycle) και ξανα-πρόσφερέ το ως τύπο. **Εξάρτηση itemDescr:** το opt-in
+  `mydata_send_item_descr` στον monetary builder (`AadeInvoiceDocument`) εκπέμπει `<itemDescr>`
+  μόνο για τύπους που το επιτρέπει η ΑΑΔΕ (9.x) — αλλά υπό MYD-003 ο monetary builder
+  απορρίπτει κάθε 9.x, οπότε ο κλάδος είναι πλέον μη-προσβάσιμος (τα καθαρά ΔΑ εκπέμπουν
+  itemDescr μέσω `DeliveryNoteSubmitter`). Όταν μπει το `isDeliveryNote`, το
+  `Codes::allowsItemDescr()` πρέπει να ελέγχει ΑΥΤΟ το flag (combined 1.1) αντί του 9.x τύπου.
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον
