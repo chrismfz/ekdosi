@@ -18,6 +18,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Security
+- **Περιορισμός endpoint παρόχου e-τιμολόγησης (PROV-017)** — το base URL του παρόχου
+  (InvoSign) ήταν ελεύθερο κείμενο και ο transport έστελνε εκεί το token + το πλήρες XML
+  τιμολογίου· ένα `http://`, ένα URL με `user:pass@`/query, ή ένα εσωτερικό host μπορούσε να
+  διαρρεύσει διαπιστευτήρια/δεδομένα ή να χτυπήσει εσωτερική υπηρεσία (SSRF). Νέος
+  `ProviderEndpointGuard` (μόνο public **https**, χωρίς userinfo/query/fragment, θύρα μόνο 443,
+  όχι private/loopback/link-local host) επιβάλλεται στο **service choke-point** (`InvoSignTransport::resolve`
+  — καλύπτει CLI/API), στο **provider preflight** και στη **φόρμα**. Επιπλέον, οι κλήσεις παρόχου
+  γίνονται πλέον `withoutRedirecting()` ώστε κακόβουλο endpoint να μη μπορεί να ανακατευθύνει
+  το token+payload αλλού. (Deferred hardening — TOCTOU DNS-pin, endpoint-profile registry — στο BACKLOG.)
+
 ### Changed
 - **Ορολογία «Ψηφιακό Τέλος Συναλλαγής» + σωστές §8.x παραπομπές (MYD-020)** — τα
   operator-facing labels (φόρμα προϊόντος/παραστατικού, PDF, presets «Τυπικά τέλη/φόροι»)

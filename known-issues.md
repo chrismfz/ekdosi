@@ -303,7 +303,7 @@ Priorities:
 | PROV-014 | P0 | OPEN | Provider concurrency | Issue is not single-flight and is not serialized against document mutation |
 | PROV-015 | P0 | OPEN | Provider cancellation | Missing/lost cancellation evidence can create a false or split-brain terminal state |
 | PROV-016 | P0 | OPEN | Provider cutover | Historical issue channel/environment is not frozen or used for later actions |
-| PROV-017 | P1 | OPEN | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
+| PROV-017 | P1 | DONE | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
 | PROV-018 | P1 | OPEN | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
 | PROV-020 | P1 | DONE | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
@@ -1835,7 +1835,21 @@ environment used at issue.
 
 ### PROV-017 — Provider base URL is an unrestricted data-exfiltration sink
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** new `App\Support\EInvoice\ProviderEndpointGuard::assertSafeBaseUrl()` accepts
+only a plain PUBLIC HTTPS endpoint — rejects non-https, userinfo (`user:pass@`),
+query/fragment, ports ≠ 443, and any host resolving to a private/reserved/loopback/
+link-local address (SSRF; literal IP checked directly, hostname resolved best-effort,
+DNS failure does not block). It is enforced at `InvoSignTransport::resolve()` (the
+choke-point for send/sendDelivery/cancel/status/ping — so CLI/API callers are covered),
+in `ProviderPreflight` (a bad active-env base URL is a `fail`), and on the `*base_url`
+form fields. Provider HTTP calls are now `withoutRedirecting()` so a rogue endpoint
+cannot 302 the token+payload elsewhere. Tokens stay out of the thrown messages.
+Unit tests cover every blocked URL class + valid public https; transport tests prove
+an http/private base makes NO outbound request. Deferred hardening (request-time
+DNS-rebinding pin, provider-managed endpoint-profile registry) is logged in
+`docs/BACKLOG.md`. See `CHANGELOG.md` [Unreleased] → Security.
 
 Provider URL fields in
 [CompanyForm::providerCredentialFields](app/Filament/Resources/Companies/Schemas/CompanyForm.php)
@@ -2645,3 +2659,4 @@ These are not open issues:
 | 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-08-31 | **PROV-017 DONE** — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |

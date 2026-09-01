@@ -366,16 +366,19 @@ return [
         | einvoice_provider_config blob. Tweak per provider's real API.
         */
         'provider_fields' => [
+            // `url => true` marks an endpoint field validated by ProviderEndpointGuard
+            // (public https only, no SSRF) at the form, preflight and transport — so a
+            // renamed/new URL field is guarded by declaration, not a name-suffix guess.
             'invosign' => [
                 // Production (the «Παραγωγή» channel uses these).
-                'base_url' => ['label' => 'Base URL (Παραγωγή)', 'secret' => false],
+                'base_url' => ['label' => 'Base URL (Παραγωγή)', 'secret' => false, 'url' => true],
                 'token' => ['label' => 'Token (Παραγωγή)', 'secret' => true],
                 // Sandbox / demo (the «Δοκιμαστικό» channel uses these).
-                'demo_base_url' => ['label' => 'Base URL (Δοκιμαστικό)', 'secret' => false],
+                'demo_base_url' => ['label' => 'Base URL (Δοκιμαστικό)', 'secret' => false, 'url' => true],
                 'demo_token' => ['label' => 'Token (Δοκιμαστικό)', 'secret' => true],
             ],
             'sbz' => [
-                'base_url' => ['label' => 'Base URL', 'secret' => false],
+                'base_url' => ['label' => 'Base URL', 'secret' => false, 'url' => true],
                 'api_key' => ['label' => 'API Key', 'secret' => true],
             ],
         ],

@@ -176,6 +176,10 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   sandbox creds (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`.
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
   (InvoSign/SBZ). `paroxos/`.
+- **Provider endpoint hardening (PROV-017 follow-ups)** — το core URL guard (public-https-only,
+  no userinfo/query/port≠443, no private/loopback host, no credentialed redirects) ✅ SHIPPED.
+  Deferred: (α) request-time DNS-rebinding (TOCTOU) pin — ανάλυση host → POST στην ήδη-ελεγμένη IP·
+  (β) provider-managed endpoint-profile registry αντί ελεύθερου URL (vendor-confirmed hosts).
 - **Bridges/Connectors Phase 1** — πραγματική 2η πηγή (WooCommerce/Blesta…). `bridges-connectors.md`.
   _Phase 0.5 ✅ (presentation-only): source-neutral «Εισερχόμενα» + source badge · «Γέφυρες» page
   (honest status, no fake toggle). Phase 1 = move `companies.whmcs_*` → `billing_connections.config`,
