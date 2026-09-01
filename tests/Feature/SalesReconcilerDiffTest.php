@@ -261,11 +261,17 @@ class SalesReconcilerDiffTest extends TestCase
 
     public function test_aade_field_absent_locally_is_content_incomplete(): void
     {
-        // MYD-017 review: a field AADE carries but the LOCAL doc lacks (null vat_no
-        // here) is neither a clean match nor a hard conflict — it's an unverified,
-        // INCOMPLETE record. It must leave "matched" and land in contentIncomplete
-        // (a warning bucket) so it is never a false green.
-        $inv = $this->invoice('450000000000001', 'VALID'); // vat_no null by default
+        // MYD-017 review: a field AADE carries but the LOCAL doc genuinely lacks —
+        // even after the relation fallback — is neither a clean match nor a hard
+        // conflict; it's an unverified, INCOMPLETE record. Here the customer has NO
+        // ΑΦΜ and vat_no is null, so counterpartVat can't be recovered, yet AADE
+        // returns one → contentIncomplete (a warning), never a false green.
+        $noAfm = Customer::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Πελάτης χωρίς ΑΦΜ',
+            'afm' => null,
+        ]);
+        $inv = $this->invoice('450000000000001', 'VALID', $noAfm); // vat_no null, customer afm null
 
         $result = (new SalesReconciler($this->tenant))->diff(
             [$this->aadeFor($inv, override: ['counterpartVat' => '123456789'])],
@@ -282,7 +288,54 @@ class SalesReconcilerDiffTest extends TestCase
         $this->assertSame(1, $result->discrepancyCount());
     }
 
-    private function invoice(?string $mark, ?string $state): Invoice
+    public function test_legacy_invoice_with_null_caches_matches_via_relations(): void
+    {
+        // MYD-017 review (regression): an ETL-imported invoice carries a real MARK but
+        // null denormalised caches (invoices.mydata_type / vat_no) — the ETL snapshots
+        // the type onto invoice_types, not each invoice. The comparator must recover
+        // the type from the invoiceType relation and the ΑΦΜ from the customer, so the
+        // invoice reads as `matched`, NOT a permanent contentIncomplete (which would
+        // flip the scheduled reconcile to exit-2 forever on every legacy tenant).
+        $inv = $this->invoice('460000000000001', 'VALID'); // mydata_type + vat_no both null
+
+        $this->assertNull($inv->mydata_type);
+        $this->assertNull($inv->vat_no);
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            // AADE returns the type ('1.1' — the type relation's mydata_type) and the
+            // customer's ΑΦΜ; both are recoverable locally via the relations.
+            [$this->aadeFor($inv, override: ['invoiceType' => '1.1', 'counterpartVat' => '123456789'])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->contentIncomplete);
+        $this->assertCount(0, $result->contentMismatch);
+    }
+
+    public function test_blank_aade_issue_date_is_not_a_false_conflict(): void
+    {
+        // MYD-017 review: an empty (present-but-blank) AADE issueDate must never be
+        // parsed into "today" and manufacture a date conflict against the local date.
+        $inv = $this->invoice('470000000000001', 'VALID');
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['issueDate' => ''])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        // Blank AADE date → the field is skipped (not a conflict), everything else
+        // mirrors → matched.
+        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
+        $this->assertCount(0, $result->contentIncomplete);
+    }
+
+    private function invoice(?string $mark, ?string $state, ?Customer $customer = null): Invoice
     {
         $this->code++;
 
@@ -291,7 +344,7 @@ class SalesReconcilerDiffTest extends TestCase
             'invcode' => 'TPY'.$this->code,
             'code' => $this->code,
             'invoice_type_id' => $this->type->id,
-            'customer_id' => $this->customer->id,
+            'customer_id' => ($customer ?? $this->customer)->id,
             'issued_at' => now(),
             'header_discount_percent' => 0,
             'gross_total' => 124.00,
@@ -348,13 +401,16 @@ class SalesReconcilerDiffTest extends TestCase
         // array_merge (NOT ??) so an EXPLICIT null override actually wins — the
         // retail case (counterpartVat => null) has to reach AADE as null, not fall
         // back to the invoice's own value.
+        // Mirror the SAME relation fallback snapshotFrom() uses (vat_no ?: customer
+        // afm, mydata_type ?: type's mydata_type) so a "matched" invoice reconciles
+        // even when its denormalised caches are null (legacy/ETL invoices).
         $fields = array_merge([
             'series' => $inv->invoiceType?->code,
             'aa' => (string) $inv->code,
             'issueDate' => $inv->issued_at?->format('Y-m-d'),
-            'counterpartVat' => $inv->vat_no,
+            'counterpartVat' => $inv->vat_no ?: $inv->customer?->afm,
             'gross' => $inv->gross_total !== null ? (float) $inv->gross_total : null,
-            'invoiceType' => $inv->mydata_type,
+            'invoiceType' => $inv->mydata_type ?: $inv->invoiceType?->mydata_type,
         ], $override);
 
         return new AadeDocSummary(

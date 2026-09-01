@@ -381,8 +381,16 @@ class SalesReconciler
             series: $invoice->invoiceType?->code,
             aa: $invoice->code !== null ? (string) $invoice->code : null,
             issueDate: $invoice->issued_at?->format('Y-m-d'),
-            counterpartVat: $invoice->vat_no,
-            invoiceType: $invoice->mydata_type,
+            // Fall back to the relations when the denormalised snapshot columns are
+            // null: app-issued invoices carry mydata_type/vat_no, but ETL-imported
+            // legacy invoices don't (the ETL snapshots the type onto invoice_types,
+            // not each invoice). Without the fallback every legacy invoice — matched
+            // by state against a real production MARK — would read as contentIncomplete
+            // forever (permanent exit-2 on the scheduled reconcile). The relation value
+            // is exactly what WOULD have been snapshotted, so it's authoritative, not a
+            // guess; the fallback only fires when the cache is empty (no masking).
+            counterpartVat: $invoice->vat_no ?: $invoice->customer?->afm,
+            invoiceType: $invoice->mydata_type ?: $invoice->invoiceType?->mydata_type,
         );
     }
 

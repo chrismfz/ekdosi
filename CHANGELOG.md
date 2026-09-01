@@ -56,6 +56,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
   αυτό (καμία ακύρωση χωρίς αποδεικτικό)· και η action **δεν εμπιστεύεται** το (έως 12h) cached
   snapshot — κάνει **φρέσκια αντιπαραβολή** τη στιγμή της εκτέλεσης και εφαρμόζει μόνο ό,τι
   επιβεβαιώνει η ΑΑΔΕ τώρα, με έλεγχο ταύτισης tenant + expense_id + ΜΑΡΚ πριν από κάθε μεταβολή.
+  **Code-review hardening:** το `syncStates()` απομονώνει κάθε γραμμή σε δικό της try/catch —
+  μια ακύρωση χωρίς ΜΑΡΚ ακύρωσης (που η υπηρεσία σωστά απορρίπτει) πλέον **παραλείπεται**
+  (logged + «N γραμμές παραλείφθηκαν» στο toast) αντί να ρίχνει και να ακυρώνει όλο το batch
+  αφήνοντας μισοεφαρμοσμένες τις προηγούμενες.
 - **Έλεγχος περιεχομένου στη ζωντανή αντιπαραβολή myDATA (MYD-017)** — η αντιπαραβολή
   (πωλήσεις & έξοδα) θεωρούσε ένα παραστατικό «συμφωνεί» μόλις υπήρχε το ΜΑΡΚ και στις δύο
   πλευρές και ταίριαζε η κατάσταση (VALID/CANCELLED), **χωρίς** να συγκρίνει το περιεχόμενο —
@@ -70,7 +74,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   νέο, ξεχωριστό κάδο **«Ελλιπή τοπικά στοιχεία»** (`contentIncomplete`, warning): μη
   επαληθευμένο, όχι ψευδές πράσινο. Ο comparator επιστρέφει πλέον δομημένο `ContentComparison`
   (conflicts + incompletes)· και οι δύο κάδοι μετρούν στο `discrepancyCount()` και εμφανίζονται
-  στις κονσόλες + στο CLI (`mydata:reconcile-sales`).
+  στις κονσόλες + στο CLI (`mydata:reconcile-sales`). **Code-review hardening:** ο
+  `snapshotFrom()` ανακτά τύπο/ΑΦΜ από τα relations όταν τα denormalised caches είναι null
+  (`mydata_type ?: invoiceType->mydata_type`, `vat_no ?: customer->afm`), ώστε τα ETL-imported
+  legacy τιμολόγια να «συμφωνούν» αντί για μόνιμο `contentIncomplete`/exit-2· και ο `normDate()`
+  επιστρέφει null σε κενή/μη-parse-άρσιμη ημ/νία (κενή ημ/νία ΑΑΔΕ δεν γίνεται πια «σήμερα» →
+  ψευδής σύγκρουση). Σύγκριση net/VAT-split → BACKLOG.
 - **Πιστωτικό (5.1) πάνω σε παραστατικό εκδομένο μέσω παρόχου (MYD-008)** — ο κοινός
   resolver `AadeInvoiceDocument::originalInsertMark()` έβρισκε το MARK του πρωτότυπου μόνο
   από `INSERT` rows, οπότε ένα συσχετιζόμενο πιστωτικό πάνω σε παραστατικό που εκδόθηκε

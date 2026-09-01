@@ -326,6 +326,7 @@ class MyDataConsoleExpenses extends Page
 
             $sync = app(SyncExpenseStateFromAade::class);
             $changed = 0;
+            $skipped = 0;
 
             foreach ($fresh->stateMismatch as $row) {
                 if ($row->expenseId === null || $row->aadeState === null) {
@@ -342,13 +343,30 @@ class MyDataConsoleExpenses extends Page
                     continue;
                 }
 
-                if ($sync->sync($expense, $row->aadeState, $row->cancelledByMark)['changed']) {
-                    $changed++;
+                try {
+                    if ($sync->sync($expense, $row->aadeState, $row->cancelledByMark)['changed']) {
+                        $changed++;
+                    }
+                } catch (Throwable $e) {
+                    // One row we can't safely sync (e.g. AADE reports the doc CANCELLED
+                    // but returned no cancellation MARK — the service refuses it) must
+                    // NOT throw out of the loop: that would abort the batch and leave
+                    // the rows already synced above half-applied. Skip it, keep going.
+                    $skipped++;
+                    Log::warning('myDATA expense state-sync skipped a row', [
+                        'company_id' => $tenant?->getKey(),
+                        'expense_id' => $row->expenseId,
+                        'mark' => $row->mark,
+                        'message' => $e->getMessage(),
+                    ]);
                 }
             }
 
             Notification::make()
                 ->title($changed > 0 ? "Συγχρονίστηκαν {$changed} έξοδα" : 'Καμία αλλαγή')
+                ->body($skipped > 0
+                    ? "{$skipped} γραμμές παραλείφθηκαν (π.χ. ακύρωση χωρίς ΜΑΡΚ ακύρωσης από την ΑΑΔΕ)."
+                    : null)
                 ->{$changed > 0 ? 'success' : 'warning'}()
                 ->send();
 

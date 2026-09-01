@@ -76,12 +76,20 @@ final class ReconciliationContentComparator
             }
         }
 
-        // issue date
-        if ($aade->issueDate !== null) {
-            if ($local->issueDate === null) {
+        // issue date — only when AADE actually returns one (present(), so a blank
+        // string doesn't reach normDate, where CarbonImmutable::parse('') would
+        // return TODAY and manufacture a conflict against every local date).
+        if (self::present($aade->issueDate)) {
+            if (! self::present($local->issueDate)) {
                 $incompletes[] = 'ημ/νία (λείπει τοπικά· ΑΑΔΕ '.$aade->issueDate.')';
-            } elseif (self::normDate($aade->issueDate) !== self::normDate($local->issueDate)) {
-                $conflicts[] = 'ημ/νία: '.$local->issueDate.' τοπικά / '.$aade->issueDate.' ΑΑΔΕ';
+            } else {
+                $aadeDate = self::normDate($aade->issueDate);
+                $localDate = self::normDate($local->issueDate);
+                // Conflict only when BOTH normalise to a real date and they differ —
+                // an unparseable AADE date is never one-sided noise in the danger bucket.
+                if ($aadeDate !== null && $localDate !== null && $aadeDate !== $localDate) {
+                    $conflicts[] = 'ημ/νία: '.$local->issueDate.' τοπικά / '.$aade->issueDate.' ΑΑΔΕ';
+                }
             }
         }
 
@@ -112,13 +120,18 @@ final class ReconciliationContentComparator
         return preg_replace('/\D+/', '', (string) $v) ?? '';
     }
 
-    /** Normalise a date to Y-m-d; fall back to the trimmed raw value if unparseable. */
-    private static function normDate(string $v): string
+    /** Normalise a date to Y-m-d; null (never a fabricated date) if blank/unparseable. */
+    private static function normDate(string $v): ?string
     {
+        $v = trim($v);
+        if ($v === '') {
+            return null;
+        }
+
         try {
             return CarbonImmutable::parse($v)->format('Y-m-d');
         } catch (Throwable) {
-            return trim($v);
+            return null;
         }
     }
 }

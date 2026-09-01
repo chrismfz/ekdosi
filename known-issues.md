@@ -947,6 +947,14 @@ that the fresh row's MARK still matches the expense being mutated. Tests: cancel
 folded (standalone `<cancelledInvoicesDoc>`), service refuses CANCELLED-without-MARK, and the
 console ignores a stale cached row that a fresh reconcile no longer reports.
 
+**Code-review hardening (same round):** `syncStates()` now isolates each row in its own
+try/catch. A single AADE-cancelled row whose cancellation MARK is missing makes the service
+throw (by design); before, that throw escaped the `foreach` and aborted the WHOLE batch —
+leaving rows already synced above half-applied and skipping the final refresh. Now such a row
+is skipped (logged + counted, surfaced in the toast as «N γραμμές παραλείφθηκαν»), the good
+rows still commit, and the worklist still refreshes. Test: a CANCELLED-without-MARK row is
+skipped without aborting the batch and without touching the expense/audit trail.
+
 **Official finding**
 
 RequestDocs returns documents, classifications and cancellations submitted by
@@ -1107,6 +1115,22 @@ in `discrepancyCount()`, both render on the two consoles (warning colour for the
 one), and the `mydata:reconcile-sales` CLI lists both in its summary table + detail loop (they
 feed exit-2, so they must be visible). Tests: `contentIncomplete` on sales + expenses, the
 fixed retail test (AADE-null ΑΦΜ actually reaches the comparator via `array_merge`, not `??`).
+
+**Code-review hardening (same round):** three follow-ups on the `contentIncomplete` change.
+(1) **Relation fallback** — `SalesReconciler::snapshotFrom()` now resolves the invoice's type
+and counterpart ΑΦΜ from the relations when the denormalised caches are null
+(`mydata_type ?: invoiceType->mydata_type`, `vat_no ?: customer->afm`): app-issued invoices
+carry the snapshot columns, but ETL-imported legacy invoices don't (the ETL snapshots the type
+onto `invoice_types`, not each invoice), so without this EVERY legacy invoice — matched by
+state against a real production MARK — would read as a permanent `contentIncomplete` and flip
+the scheduled reconcile to exit-2 forever. The relation value is exactly what would have been
+snapshotted, so it never masks a real difference (fires only when the cache is empty).
+(2) **Date guard** — `normDate()` returns null (never a fabricated date) on a blank/unparseable
+value, and the issueDate branch now uses `present()` + a both-non-null-and-differ check, so an
+empty AADE `issueDate` can no longer be parsed into "today" and manufacture a one-sided
+conflict. (3) **Net/VAT split** — comparing gross catches a total divergence but not a
+same-gross/different-VAT-split one; adding net comparison is a noted follow-up (BACKLOG), not
+done here. Tests: legacy-null-caches → matched via relations; blank AADE date → not a conflict.
 
 **Official finding**
 
@@ -2836,3 +2860,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-014 DONE** — `SyncExpenseStateFromAade` + console action apply a supplier cancellation onto an existing expense (VALID→CANCELLED, audited, no re-import/dup); books already exclude CANCELLED | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-017 review** (PR #389) — incomplete ≠ conflict: new warning bucket `contentIncomplete` (AADE has a field the local record lacks) alongside danger `contentMismatch`; comparator returns `ContentComparison` (conflicts+incompletes), both count + render (consoles + CLI); fixed retail test (`array_merge`, not `??`) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-014 review** (PR #389) — integrity: reconciler keeps the real cancellation MARK (`invoiceMark ⇒ cancellationMark`, inline + standalone); `SyncExpenseStateFromAade` refuses CANCELLED without it; console `syncStates()` re-reconciles fresh at click time (no trust in the ≤12h cache) + re-verifies tenant/expense_id/MARK before mutating | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **MYD-017/014 code-review round** (PR #389) — (a) `snapshotFrom()` relation fallback so legacy null-cache invoices match instead of permanent `contentIncomplete`/exit-2; (b) `normDate()` null-on-blank so an empty AADE date can't fabricate a conflict; (c) `syncStates()` per-row try/catch so one evidence-less cancellation doesn't abort the batch; net/VAT-split compare noted → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |

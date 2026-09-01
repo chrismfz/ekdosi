@@ -302,6 +302,90 @@ class MyDataConsoleExpensesTest extends TestCase
 XML;
     }
 
+    public function test_sync_states_skips_a_cancellation_without_a_mark_without_aborting(): void
+    {
+        // MYD-014 review (finding 1): AADE reports the doc CANCELLED via the standalone
+        // list but WITHOUT a cancellation MARK. SyncExpenseStateFromAade refuses that
+        // (no evidence); syncStates() must SKIP the row — not let the throw abort the
+        // whole batch — leaving the expense untouched and no audit row written.
+        $tenant = $this->bootTenantUser();
+
+        $expense = Expense::create([
+            'company_id' => $tenant->id,
+            'mydata_mark' => '400000000000001',
+            'mydata_state' => 'VALID',
+            'issue_date' => '2026-01-10',
+            'series' => 'A', 'aa' => '1', 'invoice_type' => '1.1',
+            'supplier_afm' => '998482379', 'gross_total' => '124.00',
+            'source' => 'sync',
+        ]);
+
+        $result = $this->fakeResult();
+        $result['stateMismatch'] = [[
+            'mark' => '400000000000001', 'uid' => null, 'expenseId' => $expense->id, 'invcode' => 'A 1',
+            'issuedAt' => '10/01/2026', 'counterpartName' => 'ΠΡΟΜΗΘΕΥΤΗΣ', 'afm' => '998482379', 'gross' => 124.0,
+            'localState' => 'VALID', 'localStatus' => null, 'aadeState' => 'CANCELLED',
+            'cancelledByMark' => null, 'problem' => 'Ακυρωμένο στο AADE.', 'url' => null,
+        ]];
+        $result['missingLocally'] = [];
+        $result['discrepancyCount'] = 1;
+
+        // Fresh reconcile + refresh: both report CANCELLED-without-cancellation-MARK.
+        MyDataConsoleExpenses::$testHandler = new MockHandler([
+            new Response(200, [], $this->cancelledNoMarkDoc()),
+            new Response(200, [], $this->cancelledNoMarkDoc()),
+        ]);
+
+        try {
+            Livewire::test(MyDataConsoleExpenses::class)
+                ->set('ran', true)
+                ->set('resultMode', 'both')
+                ->set('fromLabel', '01/01/2026')
+                ->set('toLabel', '31/01/2026')
+                ->set('result', $result)
+                ->callAction('sync_states')
+                ->assertHasNoErrors();   // the batch did NOT abort
+        } finally {
+            MyDataConsoleExpenses::$testHandler = null;
+        }
+
+        // The evidence-less row was skipped: expense untouched, no audit row.
+        $fresh = $expense->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertNull($fresh->cancelled_by_mark);
+        $this->assertDatabaseMissing('expense_marks', [
+            'expense_id' => $expense->id,
+            'mydata_action' => 'STATE_SYNC',
+        ]);
+    }
+
+    private function cancelledNoMarkDoc(): string
+    {
+        // The doc is present as VALID in <invoicesDoc>, then listed in
+        // <cancelledInvoicesDoc> with NO <cancellationMark> — so the fold marks it
+        // cancelled but carries a null cancelledByMark (the evidence-less case).
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+    <invoicesDoc>
+        <invoice>
+            <mark>400000000000001</mark>
+            <issuer><vatNumber>998482379</vatNumber><country>GR</country><name>ΠΡΟΜΗΘΕΥΤΗΣ</name></issuer>
+            <counterpart><vatNumber>801280908</vatNumber><country>GR</country></counterpart>
+            <invoiceHeader><series>A</series><aa>1</aa><issueDate>2026-01-10</issueDate><invoiceType>1.1</invoiceType></invoiceHeader>
+            <invoiceSummary><totalGrossValue>124.00</totalGrossValue></invoiceSummary>
+        </invoice>
+    </invoicesDoc>
+    <cancelledInvoicesDoc>
+        <cancelledInvoice>
+            <invoiceMark>400000000000001</invoiceMark>
+            <cancellationDate>2026-01-13</cancellationDate>
+        </cancelledInvoice>
+    </cancelledInvoicesDoc>
+</RequestedDoc>
+XML;
+    }
+
     private function validDoc(): string
     {
         return <<<'XML'
