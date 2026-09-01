@@ -258,6 +258,23 @@ class SalesReconcilerDiffTest extends TestCase
         $this->assertCount(0, $result->contentMismatch);
     }
 
+    public function test_null_local_field_is_not_a_content_mismatch(): void
+    {
+        // Incompleteness ≠ conflict (MYD-017 review): a local doc that never captured
+        // a field (null vat_no here) must NOT be flagged just because AADE returns one.
+        $inv = $this->invoice('450000000000001', 'VALID'); // vat_no null by default
+
+        $result = (new SalesReconciler($this->tenant))->diff(
+            [$this->aadeFor($inv, override: ['counterpartVat' => '123456789'])],
+            $this->localCollection(),
+            '01/01/2026',
+            '31/01/2026',
+        );
+
+        $this->assertCount(1, $result->matched);
+        $this->assertCount(0, $result->contentMismatch);
+    }
+
     private function invoice(?string $mark, ?string $state): Invoice
     {
         $this->code++;

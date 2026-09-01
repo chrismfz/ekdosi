@@ -1082,6 +1082,12 @@ works on the expense side. Tests cover sales + expenses, the cent tolerance, a
 retail-without-counterpart match, and type/series/gross divergences. See `CHANGELOG.md`
 [Unreleased] → Fixed.
 
+**Whole-PR review follow-up:** the comparator flags a field ONLY when BOTH sides carry a
+value — a null/blank LOCAL series/ΑΑ/ΑΦΜ (an incomplete legacy/manual record) is not a
+content conflict, so it stays `matched` rather than ballooning the danger bucket. The
+`mydata:reconcile-sales` CLI now also lists the `contentMismatch` bucket in its summary
+table + detail loop (it feeds `discrepancyCount()`/exit-2, so it must be visible).
+
 **Official finding**
 
 RequestTransmittedDocs and RequestDocs return the document header, parties and

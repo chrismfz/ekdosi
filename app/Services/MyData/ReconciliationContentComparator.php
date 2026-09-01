@@ -24,10 +24,11 @@ use Throwable;
  * Comparison rules (each side compared only when meaningfully present):
  *   - gross: both non-null and beyond an explicit cent tolerance.
  *   - invoice type (§8.1): both present and unequal.
- *   - series / ΑΑ: each only when AADE returns it (string, trimmed).
+ *   - series / ΑΑ: only when BOTH sides carry the field (string, trimmed) — a
+ *     null/blank LOCAL value is an incomplete record, not a content conflict.
  *   - issue date: both parsed to Y-m-d (raw compare if unparseable).
- *   - counterpart AFM: only when AADE returns one (retail 11.x has none),
- *     compared digits-only so an EL/GR prefix is not a false difference.
+ *   - counterpart AFM: only when BOTH sides carry one (retail 11.x has none at
+ *     AADE), compared digits-only so an EL/GR prefix is not a false difference.
  */
 final class ReconciliationContentComparator
 {
@@ -51,12 +52,19 @@ final class ReconciliationContentComparator
             $out[] = 'τύπος: '.$local->invoiceType.' τοπικά / '.$aade->invoiceType.' ΑΑΔΕ';
         }
 
-        if ($aade->series !== null && trim((string) $aade->series) !== trim((string) $local->series)) {
-            $out[] = 'σειρά: '.self::orDash($local->series).' τοπικά / '.$aade->series.' ΑΑΔΕ';
+        // series / ΑΑ: only when BOTH sides carry the field. A null/blank LOCAL
+        // value (e.g. a legacy-imported or hand-keyed doc that never captured the
+        // series) is an INCOMPLETE record, not a content CONFLICT — flagging it
+        // would flip every such correct-but-sparse doc into the danger bucket and
+        // balloon the discrepancy count (MYD-017 review).
+        if (self::present($aade->series) && self::present($local->series)
+            && trim((string) $aade->series) !== trim((string) $local->series)) {
+            $out[] = 'σειρά: '.$local->series.' τοπικά / '.$aade->series.' ΑΑΔΕ';
         }
 
-        if ($aade->aa !== null && trim((string) $aade->aa) !== trim((string) $local->aa)) {
-            $out[] = 'ΑΑ: '.self::orDash($local->aa).' τοπικά / '.$aade->aa.' ΑΑΔΕ';
+        if (self::present($aade->aa) && self::present($local->aa)
+            && trim((string) $aade->aa) !== trim((string) $local->aa)) {
+            $out[] = 'ΑΑ: '.$local->aa.' τοπικά / '.$aade->aa.' ΑΑΔΕ';
         }
 
         if ($aade->issueDate !== null && $local->issueDate !== null
@@ -64,9 +72,12 @@ final class ReconciliationContentComparator
             $out[] = 'ημ/νία: '.$local->issueDate.' τοπικά / '.$aade->issueDate.' ΑΑΔΕ';
         }
 
-        if ($aade->counterpartVat !== null && $aade->counterpartVat !== ''
+        // Counterpart ΑΦΜ: only when BOTH carry one (retail 11.x has none at AADE;
+        // a null local ΑΦΜ is incompleteness, not a conflict), compared digits-only
+        // so an EL/GR prefix is not a false difference.
+        if (self::present($aade->counterpartVat) && self::present($local->counterpartVat)
             && self::digits($aade->counterpartVat) !== self::digits($local->counterpartVat)) {
-            $out[] = 'ΑΦΜ: '.self::orDash($local->counterpartVat).' τοπικά / '.$aade->counterpartVat.' ΑΑΔΕ';
+            $out[] = 'ΑΦΜ: '.$local->counterpartVat.' τοπικά / '.$aade->counterpartVat.' ΑΑΔΕ';
         }
 
         return $out;
@@ -77,9 +88,9 @@ final class ReconciliationContentComparator
         return number_format($v, 2, ',', '.');
     }
 
-    private static function orDash(?string $v): string
+    private static function present(?string $v): bool
     {
-        return ($v === null || $v === '') ? '—' : $v;
+        return $v !== null && trim($v) !== '';
     }
 
     private static function digits(?string $v): string
