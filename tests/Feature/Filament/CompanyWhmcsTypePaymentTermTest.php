@@ -124,5 +124,12 @@ class CompanyWhmcsTypePaymentTermTest extends TestCase
         $this->assertContains($this->cashType->id, $keys, 'null mydata_type stays selectable');
         $this->assertContains($this->creditType->id, $keys);
         $this->assertNotContains($delivery->id, $keys, '9.x excluded from WHMCS default selectors');
+
+        // But a value the field ALREADY holds (a legacy 9.x mis-stored before
+        // MYD-003) is re-injected flagged, so the admin sees it instead of a silent
+        // blank that a save could quietly null — mirrors DeliveryNoteForm.
+        $withCurrent = $m->invoke(null, $this->company, $delivery->id);
+        $this->assertArrayHasKey($delivery->id, $withCurrent);
+        $this->assertStringContainsString('μη έγκυρο', $withCurrent[$delivery->id]);
     }
 }

@@ -452,7 +452,10 @@ credit-note picker (`ViewInvoice::creditTypes`) were not yet using the scope. Th
 was already sound (the `InvoiceNumberer` backstop rejects a 9.x before the ΑΑ bump), but the
 acceptance was not literally met. Now ALL of them apply `->monetary()`; the WHMCS default and
 split queries were extracted into shared testable helpers (`CompanyForm::whmcsDefaultTypeOptions`,
-`WhmcsInboxTable::splitTypeOptions`) with reflection tests asserting 9.x exclusion.
+`WhmcsInboxTable::splitTypeOptions`) with reflection tests asserting 9.x exclusion. The WHMCS
+default selectors also re-inject a value the field ALREADY holds when it is no longer selectable
+(a legacy 9.x mis-stored before MYD-003), flagged «μη έγκυρο», so a save can't silently null it —
+same pattern as `DeliveryNoteForm` (final whole-PR review finding).
 
 **Official finding**
 
