@@ -381,7 +381,7 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 - **Curated tax-presets** expansion ανά κλάδο + **%-ανά-προϊόν** (όχι μόνο €/τεμ).
 - **Seeder «προϊόντα με θεσμικό τέλος»** — _✅ SHIPPED 2026-06-17: «Πρότυπα τελών» selective-import στη
   λίστα Προϊόντων (`LeviedProductTemplates` + `ImportLeviedProducts`) — σακούλα €0,07 / πλαστικά €0,04 /
-  ανακύκλωσης €0,08 / διαμονής, προ-ρυθμισμένα με myDATA Fees §8.5· idempotent._
+  ανακύκλωσης €0,08 / διαμονής, προ-ρυθμισμένα με myDATA Τέλη §8.7· idempotent._
 - **`clear:right`** σε single-word doc-types (PDF tweak).
 
 ## 🧰 Setup / onboarding helpers (from-zero — sweep 2026-06-17)
@@ -400,7 +400,7 @@ fail-closed/self-disabling, filesystem-token gate — βλ. FEATURES §17) · `e
 - **Setup profiles ανά κλάδο** (λιανική / εστίαση / ξενοδοχείο / υπηρεσίες) — bundle σε ένα κλικ: invoice
   types + default ΦΠΑ + σχετικά «πρότυπα τελών» (ξενοδοχείο → διαμονής· λιανική → σακούλα/ανακύκλωσης) +
   payment methods. Πάνω στο υπάρχον seeding.
-- **Curated tax-presets** (βλ. PDF/UX ideas) — withholding/χαρτόσημο presets ανά κλάδο για το per-invoice
+- **Curated tax-presets** (βλ. PDF/UX ideas) — withholding/Ψηφιακό Τέλος Συναλλαγής presets ανά κλάδο για το per-invoice
   «Τυπικά τέλη/φόροι».
 - **Κατάλογος συνήθων υπηρεσιών** (hosting/domain/SSL…) για WHMCS-style tenants — προαιρετικό template.
 
