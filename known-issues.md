@@ -303,7 +303,7 @@ Priorities:
 | PROV-014 | P0 | OPEN | Provider concurrency | Issue is not single-flight and is not serialized against document mutation |
 | PROV-015 | P0 | OPEN | Provider cancellation | Missing/lost cancellation evidence can create a false or split-brain terminal state |
 | PROV-016 | P0 | OPEN | Provider cutover | Historical issue channel/environment is not frozen or used for later actions |
-| PROV-017 | P1 | DONE | Provider endpoint security | Base URL is not constrained to HTTPS and an approved provider host |
+| PROV-017 | P1 | PARTIAL | Provider endpoint security | Base URL now public-https-only (hygiene DONE); approved-host allowlist + DNS-rebinding pin OPEN → BACKLOG |
 | PROV-018 | P1 | OPEN | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
 | PROV-020 | P1 | DONE | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
@@ -1897,7 +1897,10 @@ environment used at issue.
 
 ### PROV-017 — Provider base URL is an unrestricted data-exfiltration sink
 
-**Status:** DONE 2026-08-31 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** PARTIAL 2026-08-31 — **hygiene DONE** (public-https-only guard + no
+credentialed redirects, enforced at transport/preflight/form); **approved-endpoint
+allowlist + request-time DNS-rebinding pin OPEN** → `docs/BACKLOG.md`. · **Priority:** P1 ·
+**Research:** CONFIRMED 2026-08-30
 
 **Fix:** new `App\Support\EInvoice\ProviderEndpointGuard::assertSafeBaseUrl()` accepts
 only a plain PUBLIC HTTPS endpoint — rejects non-https, userinfo (`user:pass@`),
@@ -2736,3 +2739,4 @@ These are not open issues:
 | 2026-09-01 | **MYD-002 modal wording** (review follow-up) — «Εισαγωγή τυπικών» modal no longer lists the removed «ΤΔΑ» type; existing tenants' ΤΔΑ left as-is per operator decision (no migration) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-09-01 | **MYD-020 doc sweep** (review follow-up) — FEATURES.md/BACKLOG.md catalogue text no longer says «χαρτόσημο»/«§8.5» for fees (→ Ψηφιακό Τέλος Συναλλαγής §8.6 / Τέλη §8.7) | `CHANGELOG.md` [Unreleased] → Changed |
 | 2026-09-01 | **MYD-015 8.6 fixture** (review follow-up) — aggregator test proves a zero-value 8.6 order slip is counted but adds 0 to the myDATA revenue picture | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-01 | **PROV-017 status → PARTIAL** (review follow-up) — hygiene (public-https-only + no credentialed redirects) DONE; approved-host allowlist + DNS-rebinding pin remain OPEN in BACKLOG (no flat-DONE) | `docs/BACKLOG.md` (§Provider endpoint hardening) |
