@@ -311,6 +311,42 @@ class MergeCustomersTest extends TestCase
         $this->assertTrue(app(MergeCustomers::class)->suggestKeeper($trashed, $live)->is($live));
     }
 
+    public function test_it_works_on_the_pre_migration_schema_where_the_operator_actually_runs_it(): void
+    {
+        // The merge is what unblocks the UNIQUE(company_id, afm_key) migration,
+        // so it must run BEFORE that column exists — the model's saving hook
+        // (which always writes afm_key) must never be in the write path.
+        $keep = $this->customer(['name' => 'Κρατάμε']);
+        $drop = $this->customer(['name' => 'Χάνεται', 'whmcs_client_id' => 793]);
+        $this->invoiceFor($drop, 'ΤΠΥ70');
+
+        Schema::table('customers', function (Blueprint $t): void {
+            $t->dropUnique('customers_company_afm_key_unique');
+            $t->dropColumn('afm_key');
+        });
+
+        $result = app(MergeCustomers::class)($keep->fresh(), $drop->fresh());
+
+        $this->assertSame(1, $result->moves['invoices']);
+        $this->assertNull(Customer::withTrashed()->find($drop->id));
+        $this->assertSame(793, (int) DB::table('customers')->where('id', $keep->id)->value('whmcs_client_id'));
+    }
+
+    public function test_the_panel_refreshes_the_adopted_keys_so_a_later_save_keeps_them(): void
+    {
+        $keep = $this->customer(['name' => 'Κρατάμε']);
+        $drop = $this->customer(['name' => 'Χάνεται', 'whmcs_client_id' => 793]);
+
+        Livewire::test(EditCustomer::class, ['record' => $keep->id])
+            ->callAction('merge_customer', ['drop_id' => $drop->id])
+            ->assertHasNoActionErrors()
+            // A plain Save on the still-open form must not write the adoption back to null.
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame(793, (int) $keep->fresh()->whmcs_client_id);
+    }
+
     public function test_the_command_previews_refuses_and_merges(): void
     {
         $keep = $this->customer(['name' => 'Κρατάμε', 'afm' => '123456789']);

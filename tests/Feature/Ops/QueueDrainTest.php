@@ -91,6 +91,18 @@ class QueueDrainTest extends TestCase
         Sleep::assertSleptTimes(3); // 6s / POLL_SECONDS
     }
 
+    public function test_a_stale_reserved_row_can_be_overridden_so_deploys_are_never_stuck(): void
+    {
+        // A hard-killed worker leaves reserved_at set until retry_after elapses;
+        // without an override that row would block every deploy forever.
+        config(['queue.default' => 'database']);
+        $this->job('-10 minutes');
+
+        $this->artisan('ops:queue-drain --timeout=4 --assume-idle')
+            ->expectsOutputToContain('με δική σου ευθύνη')
+            ->assertExitCode(0);
+    }
+
     public function test_a_driver_we_cannot_inspect_refuses_rather_than_green_lighting_a_migrate(): void
     {
         config(['queue.default' => 'redis', 'queue.connections.redis.driver' => 'redis']);

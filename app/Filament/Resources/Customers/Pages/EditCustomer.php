@@ -270,7 +270,12 @@ class EditCustomer extends EditRecord
                         ->success()
                         ->send();
 
-                    $this->refreshFormData(['name']);
+                    // The merge may have ADOPTED the loser's identity keys, but it
+                    // writes through its OWN locked instance — this page's record
+                    // is stale, and a plain Save would write the old (empty)
+                    // values straight back. Re-read, then refill the form.
+                    $record->refresh();
+                    $this->refreshFormData(['name', 'legacy_id', 'whmcs_client_id']);
                 }),
 
             DeleteAction::make(),

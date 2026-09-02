@@ -98,8 +98,10 @@ start_queue_worker() {
     log "Starting queue worker (QUEUE_START_CMD)"; eval "${QUEUE_START_CMD}" || true
   elif [[ "$_stopped_by" == "systemd" ]]; then
     log "Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true
+  elif _have_unit && systemctl start "${QUEUE_SERVICE}" 2>/dev/null; then
+    log "Started queue worker (systemd: ${QUEUE_SERVICE}) — QUEUE_START_CMD is not set"
   else
-    # QUEUE_STOP_CMD stopped it and there is no START hook: say so loudly —
+    # QUEUE_STOP_CMD stopped it and we cannot start it back: say so loudly —
     # a silently dead worker is worse than the deploy failing.
     fail "QUEUE_STOP_CMD stopped the worker but QUEUE_START_CMD is not set — START IT YOURSELF NOW."
   fi

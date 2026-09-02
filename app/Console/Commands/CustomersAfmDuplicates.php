@@ -146,6 +146,14 @@ class CustomersAfmDuplicates extends Command
                 ];
             }
 
+            // A merge needs a LIVE survivor: an all-trashed group is a restore
+            // job first, so print that instead of a command that gets refused.
+            if (collect($g['customers'])->every(fn (Customer $c): bool => $c->trashed())) {
+                $hints[] = "  (ΑΦΜ {$g['afm_key']}: όλοι διαγραμμένοι — επανάφερε αυτόν που κρατάς και ξανατρέξε)";
+
+                continue;
+            }
+
             $others = collect($g['customers'])->reject(fn (Customer $c): bool => (int) $c->id === $suggested);
             foreach ($others as $other) {
                 $hints[] = "  php artisan customers:merge {$suggested} {$other->id} --dry-run";

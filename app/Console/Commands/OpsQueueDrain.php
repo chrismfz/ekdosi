@@ -115,9 +115,18 @@ class OpsQueueDrain extends Command
             }
         }
 
+        // A hard-killed worker leaves `reserved_at` set until the job's
+        // retry_after elapses — that stale row must not block deploys forever.
+        if ($this->option('assume-idle')) {
+            $this->warn("--assume-idle: {$running} job(s) δείχνουν ακόμη «σε εξέλιξη» — προχωράμε με δική σου ευθύνη.");
+
+            return self::SUCCESS;
+        }
+
         $this->error("Μετά από {$timeout}s τρέχουν ακόμη {$running} job(s) — ΜΗΝ κάνεις migrate.");
         $this->line('  Δες τα: SELECT id, queue, attempts, reserved_at FROM '.$table.' WHERE reserved_at IS NOT NULL;');
         $this->line('  Περίμενε να τελειώσουν (π.χ. μεγάλο import) ή ανέβασε το --timeout.');
+        $this->line('  Αν ο worker σκοτώθηκε βίαια, η γραμμή είναι μπαγιάτικη: QUEUE_DRAIN_ARGS=--assume-idle');
 
         return self::FAILURE;
     }

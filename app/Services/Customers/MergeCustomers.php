@@ -78,6 +78,13 @@ class MergeCustomers
         'whmcs_client_id' => 'WHMCS client id',
         'legacy_id' => 'legacy_id',
         'peppol_endpoint' => 'PEPPOL endpoint',
+        // Business terms die with the loser too — the note is the only record.
+        'discount' => 'Έκπτωση %',
+        'withhold_tax' => 'Παρακράτηση',
+        'vat_vies' => 'VIES',
+        'payment_method_id' => 'Τρόπος πληρωμής (id)',
+        'kad_primary' => 'ΚΑΔ',
+        'website' => 'Website',
     ];
 
     /**
@@ -182,6 +189,9 @@ class MergeCustomers
             $this->releaseSharedTags($keep, $drop);
 
             foreach (self::MORPHS as $table => [$typeColumn, $idColumn]) {
+                if (! $this->usable($table, $idColumn)) {
+                    continue;
+                }
                 $this->morphQuery($table, $typeColumn, $idColumn, $drop)->update([$idColumn => $keep->getKey()]);
             }
 
@@ -207,7 +217,11 @@ class MergeCustomers
                 }
             }
             if ($adopt !== []) {
-                $keep->forceFill($adopt)->save();
+                // Query builder, NOT $keep->save(): the model's saving hook always
+                // writes `afm_key`, which does not exist on the pre-migration
+                // schema — exactly where update.sh sends the operator.
+                DB::table('customers')->where('id', $keep->getKey())->update($adopt);
+                $keep->forceFill($adopt)->syncOriginal();
             }
 
             return $result;
@@ -308,7 +322,7 @@ class MergeCustomers
      */
     private function releaseSharedTags(Customer $keep, Customer $drop): void
     {
-        if (! Schema::hasTable('taggables')) {
+        if (! $this->usable('taggables', 'taggable_id')) {
             return;
         }
 
@@ -331,6 +345,10 @@ class MergeCustomers
     /** Two primary contacts cannot coexist — keep the survivor's own. */
     private function dedupePrimaryContact(Customer $keep): void
     {
+        if (! $this->usable('customer_contacts', 'is_primary')) {
+            return;
+        }
+
         $query = DB::table('customer_contacts')
             ->where('company_id', $keep->company_id)
             ->where('customer_id', $keep->getKey())
@@ -392,6 +410,9 @@ class MergeCustomers
     {
         $out = [];
         foreach (self::COMPARED_FIELDS as $column => $label) {
+            if (! Schema::hasColumn('customers', $column)) {
+                continue;
+            }
             $a = $this->normalise($keep->{$column});
             $b = $this->normalise($drop->{$column});
             if ($b === null || $a === $b) {

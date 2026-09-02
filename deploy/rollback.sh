@@ -54,6 +54,7 @@ start_queue_worker() {
   [[ -z "$_stopped_by" ]] && return 0
   if [[ -n "${QUEUE_START_CMD:-}" ]]; then echo "▶ Starting queue worker"; eval "${QUEUE_START_CMD}" || true;
   elif [[ "$_stopped_by" == "systemd" ]]; then echo "▶ Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true;
+  elif _have_unit && systemctl start "${QUEUE_SERVICE}" 2>/dev/null; then echo "▶ Started queue worker (systemd: ${QUEUE_SERVICE})";
   else echo "✗ QUEUE_STOP_CMD stopped the worker but QUEUE_START_CMD is not set — START IT YOURSELF NOW." >&2; fi
 }
 
