@@ -26,6 +26,7 @@ use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentPusher;
 use App\Services\Whmcs\WhmcsPaymentPusherFactory;
 use App\Services\Whmcs\WhmcsPaymentSyncer;
+use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\InvoiceScope;
 use App\Support\Whmcs\WhmcsPaymentSyncCache;
 use Filament\Actions\Action;
@@ -78,6 +79,67 @@ class ViewInvoice extends ViewRecord
                     Notification::make()->success()->title('Δημιουργήθηκε προσχέδιο CMR')->send();
 
                     return redirect(CmrResource::getUrl('edit', ['record' => $cmr]));
+                }),
+
+            // «Επεξεργασία» — straight into the full edit environment (date, type,
+            // customer, lines, product, price, add/remove rows). Only on an
+            // unissued draft: EditInvoice refuses anything else, so the button
+            // mirrors that predicate rather than bouncing the operator. This is
+            // the primary in-app entry to editing a draft — the table has the twin
+            // pencil, but an operator who lands on the invoice needs it here too.
+            Action::make('edit_draft')
+                ->label('Επεξεργασία')
+                ->icon('heroicon-o-pencil-square')
+                ->color('primary')
+                ->visible(fn (Invoice $record) => $record->mydata_state === null
+                    && $record->local_status === 'draft')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->url(fn (Invoice $record) => static::getResource()::getUrl('edit', [
+                    'record' => $record,
+                    'tenant' => $record->company,
+                ])),
+
+            // «Ημερομηνία έκδοσης → σήμερα» — the one-click resolution for the
+            // provider's «issue date must be today» rule (InvoSign 238). Only on a
+            // provider-channel draft whose date is not already today: for direct
+            // myDATA the date is editable in the form and AADE accepts a backdate
+            // within its window, so the shortcut would be noise there. A draft's ΑΑ
+            // is burned at creation, not per-date, so moving issued_at is safe and
+            // creates no gap.
+            Action::make('set_issue_date_today')
+                ->label('Ημερομηνία έκδοσης → σήμερα')
+                ->icon('heroicon-o-calendar-days')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $isProviderChannel
+                    && $record->mydata_state === null
+                    && $record->local_status === 'draft'
+                    && ! static::issuedToday($record))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Ενημέρωση ημερομηνίας έκδοσης')
+                ->modalDescription(fn (Invoice $record) => 'Η ημερομηνία έκδοσης θα γίνει η σημερινή ('
+                    .now()->setTimezone(ProviderIssueDateGuard::TZ)->format('d/m/Y')
+                    .'). Απαιτείται για online έκδοση μέσω παρόχου. Ο αύξων αριθμός (ΑΑ) δεν αλλάζει.')
+                ->modalSubmitActionLabel('Ενημέρωση')
+                ->action(function (Invoice $record) {
+                    // Guard mirrors visibility — mountAction does NOT re-check
+                    // visible(), and a filed/finalised invoice must never have its
+                    // issue date rewritten from here.
+                    if ($record->mydata_state !== null || $record->local_status !== 'draft') {
+                        Notification::make()
+                            ->title('Δεν επιτρέπεται')
+                            ->body('Η ημερομηνία αλλάζει μόνο σε πρόχειρο, μη υποβληθέν παραστατικό.')
+                            ->danger()->send();
+
+                        return;
+                    }
+
+                    $record->update(['issued_at' => now()]);
+                    Notification::make()
+                        ->title('Ενημερώθηκε η ημερομηνία έκδοσης')
+                        ->body('Νέα ημερομηνία: '.now()->format('d/m/Y').'. Μπορείτε τώρα να το στείλετε στον πάροχο.')
+                        ->success()->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),
 
             // --- Local lifecycle: Πρόχειρο → Ενεργό → Ακυρωμένο.
@@ -1026,6 +1088,23 @@ class ViewInvoice extends ViewRecord
             ->whereNotNull('whmcs_invoice_id')
             ->whereNull('whmcs_payment_pushed_at')
             ->exists();
+    }
+
+    /**
+     * Is the invoice's issue date already today in Greece-local time? Uses the
+     * SAME timezone as ProviderIssueDateGuard so the button hides exactly when the
+     * guard would pass — no off-by-a-timezone mismatch between the two.
+     */
+    protected static function issuedToday(Invoice $invoice): bool
+    {
+        if ($invoice->issued_at === null) {
+            return false;
+        }
+
+        $tz = ProviderIssueDateGuard::TZ;
+
+        return $invoice->issued_at->copy()->setTimezone($tz)->toDateString()
+            === now()->setTimezone($tz)->toDateString();
     }
 
     /** Credit invoice types for the invoice's tenant. */

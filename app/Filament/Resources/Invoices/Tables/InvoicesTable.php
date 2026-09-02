@@ -13,6 +13,7 @@ use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
+use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -303,6 +304,18 @@ class InvoicesTable
             ])
             ->recordActions([
                 ViewAction::make(),
+
+                // Edit is offered ONLY on an unissued draft — the one state the
+                // EditInvoice form (and its lines repeater) actually accepts. A
+                // finalised, filed, or cancelled invoice is legally frozen, so the
+                // page refuses it anyway; without this gate the pencil would just
+                // bounce the operator with an error. This is the sole in-app entry
+                // point to the full edit environment (date / type / lines / price),
+                // so it must exist here and mirror EditInvoice::mount()'s predicate
+                // exactly.
+                EditAction::make()
+                    ->visible(fn (Invoice $record) => $record->mydata_state === null
+                        && $record->local_status === 'draft'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

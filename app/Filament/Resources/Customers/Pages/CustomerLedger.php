@@ -110,6 +110,16 @@ class CustomerLedger extends Page implements HasTable
      */
     public array $topProducts = [];
 
+    /**
+     * This customer's UNISSUED drafts (πρόχειρα) — deliberately OUT of the money
+     * ledger (a draft is not a movement or a receivable, so it must never touch
+     * the running balance), but operators still need to FIND «that draft I made
+     * for this customer». This is the findability surface the ledger cannot be.
+     *
+     * @var array<int, array{id: int, invcode: ?string, type: ?string, issued_at: ?string, gross: float, view_url: string, edit_url: ?string}>
+     */
+    public array $draftInvoices = [];
+
     public ?CustomerWhmcsLedgerResult $whmcsLedger = null;
 
     /**
@@ -163,7 +173,49 @@ class CustomerLedger extends Page implements HasTable
 
         $this->cachedStatsBlock = app(CustomerLedgerBuilder::class)->buildStatsBlock($this->record);
         $this->topProducts = app(CustomerTopProducts::class)->for($this->record);
+        $this->draftInvoices = $this->loadDraftInvoices();
         $this->loadDimensionLookups();
+    }
+
+    /**
+     * The customer's unissued sale drafts, newest first. Uses the SAME
+     * `onlyUnissuedDrafts` scope the dashboard's «Πρόχειρα» figure uses, so «drafts»
+     * means one thing everywhere: a local draft, new-app (not legacy-imported), not
+     * a credit note. Explicit company_id + no ambient scope reliance (this runs in a
+     * panel request, but the query is explicit for the same reason the ledger's is).
+     *
+     * @return array<int, array{id: int, invcode: ?string, type: ?string, issued_at: ?string, gross: float, view_url: string, edit_url: ?string}>
+     */
+    private function loadDraftInvoices(): array
+    {
+        $canEdit = auth()->user()?->can('update', $this->record) ?? false;
+
+        $query = Invoice::query()
+            ->with('invoiceType')
+            ->where('company_id', $this->record->company_id)
+            ->where('customer_id', $this->record->getKey())
+            ->whereNull('deleted_at');
+
+        InvoiceScope::onlyUnissuedDrafts($query);
+
+        return $query
+            ->orderByDesc('issued_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (Invoice $invoice): array => [
+                'id' => (int) $invoice->getKey(),
+                'invcode' => $invoice->invcode,
+                'type' => $invoice->invoiceType?->name ?? $invoice->invoiceType?->code,
+                'issued_at' => $invoice->issued_at?->toDateString(),
+                'gross' => (float) $invoice->gross_total,
+                'view_url' => InvoiceResource::getUrl('view', ['record' => $invoice, 'tenant' => $this->record->company]),
+                // Edit only when the operator can actually update — the button
+                // mirrors the invoice page's own gate rather than 403-ing on click.
+                'edit_url' => $canEdit
+                    ? InvoiceResource::getUrl('edit', ['record' => $invoice, 'tenant' => $this->record->company])
+                    : null,
+            ])
+            ->all();
     }
 
     public function getTitle(): string
