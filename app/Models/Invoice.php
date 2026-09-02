@@ -295,10 +295,20 @@ class Invoice extends Model
         }
 
         $afm = trim((string) $this->vat_no);
-        if ($afm !== '' && Afm::comparisonKey($afm) !== Afm::comparisonKey($customer->afm)) {
-            return false;
+
+        if ($afm !== '') {
+            // The ΑΦΜ is the identity. When it matches, the party IS this customer —
+            // a differing NAME is a rename or a spelling correction, not a different
+            // taxpayer, and treating it as fatal made a routine customer rename turn
+            // every legacy invoice with a blank country into an unissuable document
+            // (and its credit notes with it, since IssueCreditNote copies the pair).
+            return Afm::comparisonKey($afm) === Afm::comparisonKey($customer->afm);
         }
 
+        // With no ΑΦΜ on the document there is nothing stronger to go on, so the name
+        // has to carry it. (The delivery-note twin stays stricter on purpose: its
+        // recipient name is operator-typed free text on a document whose whole point
+        // is naming a party, and refusing there costs only an edit.)
         $name = trim((string) $this->company_name);
 
         return $name === '' || $name === trim((string) $customer->name);
@@ -474,21 +484,19 @@ class Invoice extends Model
             'country' => [$country, 60],
         ];
 
-        // The address is part of the counterpart ONLY for a non-GR party (AADE
-        // forbids it for a GR one). Freeze exactly what was filed: freezing it for a
-        // domestic party would record something never reported, and NOT freezing it
-        // for a foreign one left the filed document unable to reproduce its own
-        // counterpart — it threw "requires a full address" while AADE held the real
-        // one. The identity gate alone missed this, because a document can have a
-        // complete identity snapshot and a blank address.
-        if ($country !== 'GR') {
-            $candidates += [
-                'address1' => [$live?->address1, 60],
-                'city' => [$live?->city, 60],
-                'postcode' => [$live?->postcode, 10],
-                'occupation' => [$live?->occupation, 120],
-            ];
-        }
+        // The address is frozen for EVERY counterpart, not just a foreign one. AADE
+        // omits it for a GR party, but the PROVIDER document carries it either way
+        // (InvoSign prints it) and so does our own PDF — so a GR invoice that did not
+        // freeze it could not reproduce its own provider payload afterwards, which is
+        // the same "unreadable once filed" failure, one surface over. Not freezing it
+        // for a foreign party had already produced the harder version of that bug:
+        // a re-render threw "requires a full address" while AADE held the real one.
+        $candidates += [
+            'address1' => [$live?->address1, 60],
+            'city' => [$live?->city, 60],
+            'postcode' => [$live?->postcode, 10],
+            'occupation' => [$live?->occupation, 120],
+        ];
 
         $frozen = [];
         foreach ($candidates as $column => [$resolved, $width]) {

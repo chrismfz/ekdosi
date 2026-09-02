@@ -176,9 +176,10 @@ class DeliveryNote extends Model
      *  - SQL is looser on the NAME, since `utf8mb4_unicode_ci` is case- and
      *    accent-insensitive («ΑΦΟΙ ΠΑΠΑΔΟΠΟΥΛΟΥ ΑΕ» = «Αφοί Παπαδόπουλου ΑΕ») → it
      *    pre-fills for the same party spelled differently, which is right.
-     * A prefixed ΑΦΜ («EL…», or the Greek-letter «ΕΛ…») against a bare one is a
-     * deliberate false negative: the note is refused until someone sets a country,
-     * rather than inheriting one on a guess.
+     * An «EL…»/«ΕΛ…» prefixed ΑΦΜ against a bare one is the SAME taxpayer and matches
+     * (comparisonKey canonicalises first) — `customers.afm` legitimately carries the
+     * prefix, since the VIES form-fill seeds a full VAT id. A FOREIGN prefix survives
+     * canonicalisation, so «DE811234567» still does not match a Greek «811234567».
      */
     public function recipientIsTheLinkedCustomer(): bool
     {

@@ -7,7 +7,6 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
-use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
 use Firebed\AadeMyData\Models\Counterpart;
@@ -15,7 +14,6 @@ use Firebed\AadeMyData\Models\InvoiceHeader;
 use Firebed\AadeMyData\Models\InvoiceSummary;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Support\Collection;
-use RuntimeException;
 
 /**
  * Phase 2 — LIVE myDATA sales reconciliation.
@@ -412,6 +410,15 @@ class SalesReconciler
             // forever (permanent exit-2 on the scheduled reconcile). The relation value
             // is exactly what WOULD have been snapshotted, so it's authoritative, not a
             // guess; the fallback only fires when the cache is empty (no masking).
+            // Deliberately NOT Invoice::counterpartAfm() (MYD-009): that helper cuts
+            // the live-customer fallback off once a document is filed, which is right
+            // when BUILDING a payload — a filed document must report only what it
+            // froze. Reconciliation is the opposite problem: every row here is filed
+            // by definition, and for an ETL row with a blank snapshot the customer's
+            // ΑΦΜ is the best available evidence of what that MARK actually carried.
+            // Routing this through the helper made all eight legacy-row reconciliation
+            // tests fail as contentIncomplete — the exact permanent exit-2 the comment
+            // above warns about.
             counterpartVat: $invoice->vat_no ?: $invoice->customer?->afm,
             invoiceType: $invoice->mydata_type ?: $invoice->invoiceType?->mydata_type,
         );

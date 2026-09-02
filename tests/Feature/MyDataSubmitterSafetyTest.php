@@ -1845,24 +1845,6 @@ XML;
         $this->assertSame('20100', $frozen['postcode']);
     }
 
-    public function test_a_domestic_counterpart_does_not_freeze_an_address_it_never_filed(): void
-    {
-        // AADE forbids the address for a GR counterpart, so freezing one would record
-        // something that was never reported (and the PDF would start printing it).
-        $this->customer->forceFill(['address1' => 'Πατησίων 1', 'city' => 'Αθήνα', 'postcode' => '11111'])->save();
-
-        $invoice = $this->makeInvoice();
-        $invoice->forceFill([
-            'vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR',
-            'address1' => null, 'city' => null, 'postcode' => null,
-        ])->save();
-
-        $frozen = $invoice->fresh()->frozenPartyColumns();
-
-        $this->assertArrayNotHasKey('address1', $frozen);
-        $this->assertArrayNotHasKey('city', $frozen);
-    }
-
     public function test_an_unresolvable_snapshot_country_is_not_replaced_by_the_customers(): void
     {
         // ROUND-2 P2. counterpartCountryIso() fell through to the customer, so a
@@ -1897,6 +1879,88 @@ XML;
         $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
 
         $this->assertStringContainsString('<vatNumber>997073525</vatNumber>', $xml);
+    }
+
+    public function test_every_eu_vat_shape_counts_as_foreign_evidence_not_just_the_digits_only_ones(): void
+    {
+        // ROUND-3 P0. The prefix test matched «two letters then digits», but a real
+        // EU VAT id is rarely that shape — ATU12345678, CY12345678L, NL123456789B01,
+        // IE1234567FA, ESX1234567X. Half of Europe fell through and was filed as GR
+        // with no name and no address; the IT case (digits-only) was the only one the
+        // tests covered.
+        $shapes = [
+            'ATU12345678' => 'AT',
+            'CY12345678L' => 'CY',
+            'NL123456789B01' => 'NL',
+            'IE1234567FA' => 'IE',
+            'ESX1234567X' => 'ES',
+            'FRK7399859412' => 'FR',
+        ];
+
+        $n = 300;
+        foreach ($shapes as $vat => $expected) {
+            $invoice = $this->makeInvoice(code: $n++);
+            $this->standardLine($invoice);
+            $invoice->forceFill([
+                'customer_id' => null,
+                'vat_no' => $vat,
+                'company_name' => 'Foreign Co',
+                'country' => null,
+            ])->save();
+
+            try {
+                $xml = (string) (new MyDataSubmitter($this->tenant))
+                    ->previewXml($invoice->fresh('lines'))->request;
+                $this->fail("{$vat} was filed instead of refused: ".$xml);
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString("{$expected} VAT identifier", $e->getMessage());
+            }
+        }
+    }
+
+    public function test_a_renamed_customer_does_not_make_a_legacy_invoice_unissuable(): void
+    {
+        // ROUND-3 P1. The identity check treated a NAME difference as fatal even when
+        // the ΑΦΜ matched exactly — so a routine customer rename made every legacy
+        // invoice with a blank country unissuable (and its credit notes with it). The
+        // ΑΦΜ is the identity; a name change is a rename, not a different taxpayer.
+        $this->customer->forceFill(['afm' => '997073525', 'country' => 'GR', 'name' => 'Πελάτης ΑΕ (νέα επωνυμία)'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => '997073525',
+            'company_name' => 'Πελάτης ΑΕ',   // the name as it was at issue
+            'country' => null,
+        ])->save();
+
+        $this->assertTrue($invoice->fresh()->counterpartIsTheLinkedCustomer());
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<country>GR</country>', $xml);
+    }
+
+    public function test_a_domestic_counterpart_freezes_its_address_for_the_provider_document(): void
+    {
+        // AADE omits the address for a GR party, but the PROVIDER document carries it
+        // and so does our PDF — so a GR invoice that froze no address could not
+        // reproduce its own provider payload once filed.
+        $this->customer->forceFill([
+            'afm' => '997073525', 'country' => 'GR',
+            'address1' => 'Πατησίων 1', 'city' => 'Αθήνα', 'postcode' => '11111',
+        ])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR',
+            'address1' => null, 'city' => null, 'postcode' => null,
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('Πατησίων 1', $frozen['address1']);
+        $this->assertSame('Αθήνα', $frozen['city']);
     }
 
     private function makeInvoice(int $code = 1): Invoice

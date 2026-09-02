@@ -286,14 +286,15 @@ class InvoSignDocument
         if ($invoice->filesNoCounterpart()) {
             $name = (string) ($invoice->company_name ?: $invoice->customer?->name ?? '');
 
-            return array_merge(self::counterpartContactFields($invoice), [
-                'CounterpartName' => $name,
-                'CounterpartVat' => (string) ($invoice->vat_no ?: $invoice->customer?->afm ?? ''),
-                'CounterpartProfession' => (string) ($invoice->occupation ?: $invoice->customer?->occupation ?? ''),
-                'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $invoice->customer?->address1 ?? ''),
-                'CounterpartAddressPostalCode' => (string) ($invoice->postcode ?: $invoice->customer?->postcode ?? ''),
-                'CounterpartAddressCity' => (string) ($invoice->city ?: $invoice->customer?->city ?? ''),
-            ]);
+            return self::counterpartFields(
+                $name,
+                (string) ($invoice->vat_no ?: $invoice->customer?->afm ?? ''),
+                (string) ($invoice->occupation ?: $invoice->customer?->occupation ?? ''),
+                (string) ($invoice->address1 ?: $invoice->customer?->address1 ?? ''),
+                (string) ($invoice->postcode ?: $invoice->customer?->postcode ?? ''),
+                (string) ($invoice->city ?: $invoice->customer?->city ?? ''),
+                $invoice,
+            );
         }
 
         $name = $invoice->counterpartName() ?? '';
@@ -306,30 +307,52 @@ class InvoSignDocument
             );
         }
 
-        return array_merge(self::counterpartContactFields($invoice), [
-            'CounterpartName' => $name,
-            'CounterpartVat' => (string) ($invoice->counterpartAfm() ?? ''),
-            'CounterpartProfession' => (string) ($invoice->occupation ?: $legalFallback?->occupation ?? ''),
-            'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $legalFallback?->address1 ?? ''),
-            'CounterpartAddressPostalCode' => (string) ($invoice->postcode ?: $legalFallback?->postcode ?? ''),
-            'CounterpartAddressCity' => (string) ($invoice->city ?: $legalFallback?->city ?? ''),
-        ]);
+        return self::counterpartFields(
+            $name,
+            (string) ($invoice->counterpartAfm() ?? ''),
+            (string) ($invoice->occupation ?: $legalFallback?->occupation ?? ''),
+            (string) ($invoice->address1 ?: $legalFallback?->address1 ?? ''),
+            (string) ($invoice->postcode ?: $legalFallback?->postcode ?? ''),
+            (string) ($invoice->city ?: $legalFallback?->city ?? ''),
+            $invoice,
+        );
     }
 
     /**
-     * Contact details — NOT legal identity, absent from the AADE payload, used by
-     * InvoSign for delivery and printing. Live on purpose: reaching today's customer
-     * to email today's copy is correct. Shared by both branches above so the two
-     * cannot drift.
+     * Assemble API_Counterpart in InvoSign's own field ORDER (vendor reference §2c,
+     * and the same order deliveryCounterpartFields() emits): name, vat, profession,
+     * tax office, address, phone, email.
+     *
+     * Order matters here — this file already documents InvoSign as a
+     * namespace-prefix-strict parser — and splitting the block into two array_merge
+     * branches had quietly moved the contact fields to the front.
+     *
+     * The three CONTACT values are not part of the legal identity: they are absent
+     * from the AADE payload and InvoSign uses them for delivery and printing, so they
+     * read the LIVE customer on purpose — sending today's copy to today's address is
+     * correct. The legal values are passed in by the caller from the frozen snapshot.
      *
      * @return array<string, string>
      */
-    private static function counterpartContactFields(Invoice $invoice): array
-    {
+    private static function counterpartFields(
+        string $name,
+        string $vat,
+        string $profession,
+        string $street,
+        string $postalCode,
+        string $city,
+        Invoice $invoice,
+    ): array {
         $contact = $invoice->customer;
 
         return [
+            'CounterpartName' => $name,
+            'CounterpartVat' => $vat,
+            'CounterpartProfession' => $profession,
             'CounterpartTaxOffice' => (string) ($contact?->tax_office ?? ''),
+            'CounterpartAddressStreet' => $street,
+            'CounterpartAddressPostalCode' => $postalCode,
+            'CounterpartAddressCity' => $city,
             'CounterpartPhone' => (string) ($contact?->phone ?? ''),
             'CounterpartEmail' => (string) ($contact?->email ?? ''),
         ];

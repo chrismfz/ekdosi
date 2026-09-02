@@ -87,7 +87,15 @@ final class Afm
     public static function countryPrefix(?string $raw): ?string
     {
         $value = self::canonicalVat($raw);
-        if ($value === null || preg_match('/^([A-Za-z]{2})\d+$/u', $value, $m) !== 1) {
+
+        // A real EU VAT id is NOT «two letters then digits»: AT is ATU12345678, CY
+        // is CY12345678L, NL is NL123456789B01, IE is IE1234567FA, ES is ESX1234567X.
+        // The first cut matched only the digits-only shape, so half of Europe fell
+        // through and was filed as GR — the very misreport this evidence exists to
+        // stop. Accept any alphanumeric body, but REQUIRE at least one digit in it so
+        // free text that happens to start with two letters («ΙΤΑΛΙΑ ΑΕ» → «ITALIASRL»)
+        // is not read as a country claim.
+        if ($value === null || preg_match('/^([A-Za-z]{2})(?=[A-Za-z0-9]*\d)[A-Za-z0-9]+$/u', $value, $m) !== 1) {
             return null;
         }
 

@@ -849,6 +849,38 @@ the payload, the provider document and the freeze.
   filing AADE had accepted. Fixed at the source by widening the column (migration), with the
   per-column truncation kept as a guard.
 
+**Round-3 review corrections:**
+
+- **Half of Europe was still filed as GR.** The ΑΦΜ country-prefix test matched «two
+  letters then digits», but a real EU VAT id is rarely that shape — ATU12345678, CY12345678L,
+  NL123456789B01, IE1234567FA, ESX1234567X. Only the digits-only form (IT) was recognised, and
+  it was the only one a test covered. Worse, for a soft-deleted customer this was a strict
+  REGRESSION: `origin/main` refused, the new code filed GR silently. The matcher now accepts any
+  alphanumeric body but requires a digit in it, so free text starting with two letters
+  («ΙΤΑΛΙΑ ΑΕ») is not read as a country claim.
+- **A routine customer rename made legacy invoices unissuable.** The identity check treated a
+  NAME difference as fatal even when the ΑΦΜ matched exactly, so every legacy row with a blank
+  country (the majority, by the code's own comment) — and every credit note against one — was
+  refused. The ΑΦΜ is the identity; a rename is not a different taxpayer, so a matching ΑΦΜ now
+  short-circuits the name comparison. (The delivery-note twin stays stricter on purpose: its
+  recipient name is operator-typed free text on a document whose whole point is naming a party.)
+- **The provider's `API_Counterpart` field order had changed.** Splitting the block into two
+  `array_merge` branches moved tax office / phone / email to the front, against the vendor
+  reference and against the delivery twin — in a file that already documents InvoSign as a
+  picky parser. Both branches now go through one assembler that emits the documented order.
+- **The address is frozen for a GR counterpart too.** AADE omits it there, but the provider
+  document carries it and so does our PDF, so a domestic invoice that froze no address could not
+  reproduce its own provider payload once filed — the same "unreadable once filed" failure, one
+  surface over.
+
+**Consciously declined:** routing `SalesReconciler` through `Invoice::counterpartAfm()`. The
+helper cuts the live-customer fallback off once a document is filed, which is right when
+BUILDING a payload; reconciliation is the opposite problem — every row there is filed by
+definition, and for an ETL row with a blank snapshot the customer's ΑΦΜ is the best available
+evidence of what that MARK carried. Making the change failed all eight legacy-row reconciliation
+tests as `contentIncomplete`, which is the permanent exit-2 that code's own comment warns about.
+The reason is recorded at the call site.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never
