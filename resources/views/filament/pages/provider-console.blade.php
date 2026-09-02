@@ -45,7 +45,10 @@
                         @foreach ($marks as $mark)
                             <tr class="border-t border-gray-100 dark:border-white/10">
                                 <td class="py-1 pr-4 whitespace-nowrap">{{ $mark->mydata_action }}</td>
-                                <td class="py-1 pr-4 whitespace-nowrap font-mono">{{ $mark->mark ?: '—' }}</td>
+                                {{-- MYD-023: a CANCEL row carries the cancelled document's MARK in
+                                     `mark` and AADE's own cancellation MARK in its own column. Show
+                                     both, or the cancellation number appears nowhere on this console. --}}
+                                <td class="py-1 pr-4 whitespace-nowrap font-mono">{{ $mark->mark ?: '—' }}@if($mark->cancellation_mark)<br>ακύρωση: {{ $mark->cancellation_mark }}@endif</td>
                                 <td class="py-1 pr-4 whitespace-nowrap">{{ $mark->provider_key ?: '—' }}</td>
                                 <td class="py-1 pr-4 whitespace-nowrap font-mono">{{ \Illuminate\Support\Str::limit($mark->authentication_code, 12) ?: '—' }}</td>
                                 <td class="py-1 pr-4 whitespace-nowrap">{{ $mark->delivery_state ?: '—' }}</td>

@@ -439,6 +439,16 @@ class DeliveryLifecycleServiceTest extends TestCase
         // δελτίο on 2026-06-09, and no invoice has ever been cancelled at AADE.
         $this->assertSame('400001234599399', $mark->cancellation_mark, 'the cancel act itself');
         $this->assertStringContainsString('λάθος παραλήπτης', (string) $mark->request);
+
+        $this->assertDatabaseHas('delivery_marks', [
+            'delivery_note_id' => $note->id,
+            'mydata_action' => 'CANCEL',
+        ]);
+
+        $fresh = $note->fresh();
+        $this->assertSame('CANCELLED', $fresh->mydata_state);
+        $this->assertSame('cancelled', $fresh->delivery_state);
+        $this->assertSame('cancelled', $fresh->local_status);
     }
 
     /**
@@ -456,16 +466,6 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertSame('480301204040191', $mark->mark, 'still records WHAT was cancelled');
         $this->assertNull($mark->cancellation_mark);
         $this->assertSame('CANCELLED', $note->fresh()->mydata_state, 'the cancellation still stands');
-
-        $this->assertDatabaseHas('delivery_marks', [
-            'delivery_note_id' => $note->id,
-            'mydata_action' => 'CANCEL',
-        ]);
-
-        $fresh = $note->fresh();
-        $this->assertSame('CANCELLED', $fresh->mydata_state);
-        $this->assertSame('cancelled', $fresh->delivery_state);
-        $this->assertSame('cancelled', $fresh->local_status);
     }
 
     public function test_cancel_refuses_already_cancelled(): void
