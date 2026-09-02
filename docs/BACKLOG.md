@@ -470,6 +470,37 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **STOCK-001 follow-ups — remainder-aware, recompute-style stock reversal** _(P2 survivors of the
+  STOCK-001 review; the reachable P1 order-regression was fixed in that PR)._ Three residual edges, all
+  the SAME root — the reversal fires incremental deltas at each cancel event while the "correct"
+  reverse for one document depends on the LIVE state of others (the money side avoids this by
+  recomputing from the live set, e.g. `RecomputeReturnedQuantities`):
+  (a) **δελτίο double-count** — `reverseSaleForDeliveryNote` reverses the full line qty with no
+  `qty_returned` remainder check, because a returned qty is tracked on the linked INVOICE line, not the
+  δελτίο line. If a Πώληση δελτίο *carried* the sale (issued before its linked invoice) AND a credit
+  note against the linked invoice returned the goods, cancelling the δελτίο double-counts the return.
+  Contrived (δελτίο-first sale group + credit against the linked invoice + δελτίο-only cancel = an
+  already-inconsistent business state).
+  (b) **soft-delete-a-credit-note path** _(pre-existing, unchanged by STOCK-001)._ `deleted()` runs
+  `RecomputeReturnedQuantities` (which frees `qty_returned`, LIVE-scoped) but does NOT reverse the
+  credit note's `+qty` return movement (the reversal is wired to the `local_status='cancelled'`
+  transition, not to `deleted()/restored()`), so delete-credit-then-cancel-invoice can inflate. Needs
+  the delete/restore path to compensate stock too (or a recompute).
+  (c) **unify the three reversal loops** — `reverseSaleForInvoice` / `reverseSaleForDeliveryNote` /
+  `reverseReturnForCreditNote` are near-identical (iterate lines · skip untracked · guard on
+  source-reason + REASON_CANCEL · record REASON_CANCEL). A single `reverseLineMovement(source, reason,
+  sign, remainderFn)` — or better, a recompute-from-live-documents pass — collapses the divergence and
+  makes (a)/(b) impossible to forget.
+  (d) **trigger-predicate asymmetry** — the return-reversal fires on the credit note's
+  `local_status='cancelled'` observer transition, but `qty_returned` is freed on the broader
+  `InvoiceScope::live()` (which ALSO excludes an AADE-only-cancelled doc, `mydata_state=CANCELLED`
+  with `local_status` still active). If a credit note ever reached that divergent state, `qty_returned`
+  would free while the `+qty` return-IN stayed → a later original-cancel could inflate. Latent: no
+  in-app path flips `mydata_state` without `local_status` (both cancel choke-points sync the two). The
+  `reverseReturnForCreditNote` skip-when-original-cancelled guard has the mirror caveat: it assumes the
+  INVOICE owns the sale (false for a δελτίο-first linked group → overstate). A recompute closes all of
+  these. Stock is informational (never blocks a sale, self-corrects with a manual adjustment), so these
+  are genuinely P2.
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
   `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a

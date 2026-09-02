@@ -158,10 +158,12 @@ class StockService
      * unguarded myDATA path even when a credit note exists). A line already fully
      * returned reverses nothing.
      *
-     * KNOWN edge (rare, documented): cancelling the CREDIT NOTE itself does not
-     * void its return movement (qty_returned is a running total IssueCreditNote
-     * never decrements) — a cancel-the-credit-note-then-cancel-the-invoice
-     * sequence can leave stock off; correct manually if it ever happens.
+     * The mirror case — cancelling the CREDIT NOTE itself — is handled by
+     * reverseReturnForCreditNote() (STOCK-001): it reverses the return-IN, while
+     * RecomputeReturnedQuantities (MON-1) frees `qty_returned` from the now-cancelled
+     * credit note (LIVE-scoped Σ). The two move together, so a
+     * cancel-the-credit-note-then-cancel-the-invoice sequence nets correctly — this
+     * reversal then sees the freed remainder and reverses the full sale.
      */
     public function reverseSaleForInvoice(Invoice $invoice): void
     {
@@ -190,6 +192,104 @@ class StockService
             }
 
             $this->record($product, $reverseQty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης');
+        }
+    }
+
+    /**
+     * Reverse the sale-OUT of a cancelled Πώληση δελτίο (goods come back) — the
+     * delivery-note twin of reverseSaleForInvoice(). Per line of a track_stock
+     * product: reverse ONLY a line that THIS note actually moved as a sale (+qty,
+     * REASON_CANCEL); idempotent (won't reverse twice). If the LINKED invoice moved
+     * the product instead (whichever-first), this note's line has no sale movement
+     * → not reversed here, and cancelling the invoice reverses it symmetrically.
+     *
+     * No `qty_returned` remainder logic (unlike the invoice path): a δελτίο has no
+     * credit notes returning against its lines, so the whole moved quantity is the
+     * reversible quantity. Keyed off the DeliveryNoteLine's own REASON_SALE
+     * movement, so a move_purpose≠1 note (which never recorded a sale-out) is a
+     * natural no-op. STOCK-001.
+     *
+     * Called from DeliveryLifecycleService::persistCancellation (local + provider
+     * cancel) and — being idempotent — reused by a reconciliation-driven remote
+     * cancellation (MYD-019).
+     */
+    public function reverseSaleForDeliveryNote(DeliveryNote $note): void
+    {
+        foreach ($note->lines()->get() as $line) {
+            $product = $line->product;
+            if (! $product || ! $product->track_stock) {
+                continue;
+            }
+            if (! $this->lineHasMovement($product->company_id, DeliveryNoteLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
+                continue; // this note never moved it (e.g. the linked invoice did) — nothing to reverse
+            }
+            if ($this->lineHasMovement($product->company_id, DeliveryNoteLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
+                continue; // already reversed
+            }
+
+            $this->record($product, (float) $line->qty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης δελτίου');
+        }
+    }
+
+    /**
+     * Reverse the return-IN of a cancelled credit note (the returned goods did not
+     * actually come back) — the mirror of recordReturnForCreditNote(). Per line
+     * that produced a return movement → −qty back out (REASON_CANCEL); idempotent
+     * (won't reverse twice).
+     *
+     * This MUST move together with the `qty_returned` bookkeeping. When a credit
+     * note is cancelled, RecomputeReturnedQuantities (MON-1) frees the returned
+     * quantity (LIVE-scoped Σ, run from the observer's recomputeOriginal), so a
+     * LATER cancel of the ORIGINAL invoice reverses the FULL sale again. WITHOUT
+     * reversing the return-IN here, that combination silently inflates stock (sell
+     * 3, credit 3, cancel the credit note, cancel the invoice → +3 counted twice =
+     * 13 instead of 10). Reversing the return-IN keeps the ledger consistent with
+     * the freed `qty_returned`. STOCK-001.
+     */
+    public function reverseReturnForCreditNote(Invoice $creditNote): void
+    {
+        if ($creditNote->credited_invoice_id === null) {
+            return; // not a credit note — it never produced a return-IN
+        }
+
+        // If the ORIGINAL invoice is itself cancelled, its sale-reversal already
+        // owns the net: reverseSaleForInvoice reversed `qty − qty_returned`, i.e. it
+        // deliberately did NOT reverse the part this credit note returned, counting
+        // on the return to stand. Undoing the return here on top would strand that
+        // deferred sale portion and UNDERSTATE stock — and it made the two cancel
+        // orders disagree (cancel-invoice-then-credit vs credit-then-invoice). Skip
+        // when the original is cancelled; when it is still live we DO reverse (the
+        // return is simply undone, the sale stands). Keyed on local_status='cancelled'
+        // — the exact predicate that gated reverseSaleForInvoice — so an AADE-only
+        // cancel of the ORIGINAL (mydata_state CANCELLED, local_status still active,
+        // sale NOT reversed) still reverses here, correctly.
+        //
+        // Two P2 edges of this premise are parked in docs/BACKLOG.md (STOCK-001):
+        // (a) if a linked δελτίο (not the invoice) owned the sale-out, the
+        // invoice-cancel reversed nothing, so skipping here can overstate; and the
+        // return-reversal fires on the credit note's local_status transition, which
+        // is narrower than the qty_returned-free predicate (InvoiceScope::live).
+        // Neither is reachable through today's in-app cancel paths (both choke-points
+        // sync local_status + mydata_state together, and the δελτίο-first-with-credit
+        // combination is an already-inconsistent business state).
+        $original = Invoice::find($creditNote->credited_invoice_id);
+        if ($original !== null && $original->local_status === 'cancelled') {
+            return;
+        }
+
+        foreach ($creditNote->lines()->get() as $line) {
+            $product = $line->product;
+            if (! $product || ! $product->track_stock) {
+                continue;
+            }
+            if (! $this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
+                continue; // this line never returned (untracked at the time, etc.) — nothing to reverse
+            }
+            if ($this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
+                continue; // already reversed
+            }
+
+            $this->record($product, -(float) $line->qty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης πιστωτικού');
         }
     }
 

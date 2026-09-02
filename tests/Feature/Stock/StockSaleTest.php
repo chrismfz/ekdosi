@@ -237,6 +237,111 @@ class StockSaleTest extends TestCase
         $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
     }
 
+    public function test_delivery_note_cancel_reverses_the_sale(): void
+    {
+        // STOCK-001: cancelling a Πώληση δελτίο returns its goods to stock.
+        $note = $this->makeNote(movePurpose: 1, qty: 2);
+        app(StockService::class)->recordSaleForDeliveryNote($note);       // −2 → 8
+        $this->assertSame(8.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        app(StockService::class)->reverseSaleForDeliveryNote($note->fresh('lines')); // +2 → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        // idempotent: reversing again is a no-op.
+        app(StockService::class)->reverseSaleForDeliveryNote($note->fresh('lines'));
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+    }
+
+    public function test_delivery_note_cancel_reverses_nothing_when_linked_invoice_moved_the_sale(): void
+    {
+        // whichever-first: the invoice recorded the sale, the linked δελτίο skipped.
+        // Cancelling the δελτίο must reverse NOTHING — the sale belongs to the invoice.
+        $inv = $this->draftInvoice();
+        $this->line($inv, $this->tracked, 3);
+        $inv->update(['local_status' => 'active']);                       // −3 via invoice → 7
+
+        $note = $this->makeNote(movePurpose: 1, qty: 3, invoiceId: $inv->id);
+        app(StockService::class)->recordSaleForDeliveryNote($note);       // no-op (group already moved)
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        app(StockService::class)->reverseSaleForDeliveryNote($note->fresh('lines'));
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh())); // unchanged
+    }
+
+    public function test_credit_note_cancel_reverses_the_return(): void
+    {
+        // STOCK-001: cancelling a credit note reverses its return-IN (goods did not
+        // actually come back). Driven through the observer's cancelled branch.
+        $original = $this->draftInvoice();
+        $this->line($original, $this->tracked, 3);
+        $original->update(['local_status' => 'active']);                  // sale −3 → 7
+
+        $credit = $this->draftInvoice(creditedId: $original->id);
+        $this->line($credit, $this->tracked, 3);
+        $credit->update(['local_status' => 'active']);                    // return +3 → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $credit->update(['local_status' => 'cancelled']);                // reverse return −3 → 7
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        // idempotent
+        app(StockService::class)->reverseReturnForCreditNote($credit->fresh());
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+    }
+
+    public function test_cancel_credit_note_then_cancel_invoice_does_not_inflate_stock(): void
+    {
+        // THE interaction repro. Without reversing the credit note's return-IN, the
+        // freed qty_returned (MON-1) lets the invoice-cancel reverse the FULL sale
+        // again → inflates 10→13. Both moves together must net to the opening 10.
+        $inv = $this->draftInvoice();
+        $line = $this->line($inv, $this->tracked, 3);
+        $inv->update(['local_status' => 'active']);                       // sale −3 → 7
+
+        $credit = $this->draftInvoice(creditedId: $inv->id);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $credit->id, 'product_id' => $this->tracked->id,
+            'qty' => 3, 'price_per_item' => 10, 'vat_percent' => 24,
+            'original_line_id' => $line->id,                              // so MON-1 tracks qty_returned
+        ]);
+        $credit->update(['local_status' => 'active']);                    // return +3 → 10, qty_returned=3
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+        $this->assertSame(3.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'));
+
+        $credit->update(['local_status' => 'cancelled']);                // reverse return −3 → 7, qty_returned freed → 0
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+        $this->assertSame(0.0, (float) (ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned') ?? 0));
+
+        $inv->update(['local_status' => 'cancelled']);                   // reverse full sale 3−0=3 → +3 → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+    }
+
+    public function test_cancel_invoice_then_cancel_credit_note_does_not_understate_stock(): void
+    {
+        // MIRROR order of the test above (P1 regression guard). Cancelling the
+        // ORIGINAL first defers its sale-reversal (remainder 0 while the return is
+        // live); cancelling the credit note afterwards must NOT strand that sale —
+        // reverseReturnForCreditNote skips when the original is cancelled. Reachable
+        // in prod: the myDATA-side cancel («Ακύρωση μέσω myDATA») is NOT gated on a
+        // live credit note the way the local cancel is. Stock must stay at opening 10.
+        $inv = $this->draftInvoice();
+        $line = $this->line($inv, $this->tracked, 3);
+        $inv->update(['local_status' => 'active']);                       // sale −3 → 7
+
+        $credit = $this->draftInvoice(creditedId: $inv->id);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $credit->id, 'product_id' => $this->tracked->id,
+            'qty' => 3, 'price_per_item' => 10, 'vat_percent' => 24, 'original_line_id' => $line->id,
+        ]);
+        $credit->update(['local_status' => 'active']);                    // return +3 → 10, qty_returned=3
+
+        $inv->update(['local_status' => 'cancelled']);                    // sale reversal deferred (remainder 0) → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $credit->update(['local_status' => 'cancelled']);                // must SKIP (original cancelled) → stays 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+    }
+
     private function makeNote(int $movePurpose, float $qty, ?int $invoiceId = null): DeliveryNote
     {
         $note = DeliveryNote::create([

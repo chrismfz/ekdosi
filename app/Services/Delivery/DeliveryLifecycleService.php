@@ -8,6 +8,7 @@ use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteEvent;
 use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
@@ -524,8 +525,8 @@ class DeliveryLifecycleService
         // '' is not evidence — see CancellationMark for why this is one shared rule.
         $cancellationMark = CancellationMark::clean($cancellationMark);
 
-        return DB::transaction(function () use ($note, $mark, $cancellationMark, $reason, $responseXml, $providerKey) {
-            $audit = DeliveryMark::create(array_filter([
+        $audit = DB::transaction(function () use ($note, $mark, $cancellationMark, $reason, $responseXml, $providerKey) {
+            $row = DeliveryMark::create(array_filter([
                 'company_id' => $note->company_id,
                 'delivery_note_id' => $note->id,
                 'mark' => $mark,
@@ -544,8 +545,25 @@ class DeliveryLifecycleService
                 'local_status' => 'cancelled',
             ])->save();
 
-            return $audit;
+            return $row;
         });
+
+        // STOCK-001: a cancelled Πώληση δελτίο returns its goods to stock. BEST-EFFORT
+        // and OUTSIDE the state transaction — the AADE/provider cancel already
+        // succeeded, so a stock-write hiccup must never surface as a false «cancel
+        // failed» (mirrors recordSaleForDeliveryNote on the issue side). Idempotent:
+        // a repeat cancel, or a reconciliation-driven remote cancellation (MYD-019),
+        // reruns it safely. A no-op for any σκοπός that never moved stock.
+        try {
+            app(StockService::class)->reverseSaleForDeliveryNote($note);
+        } catch (Throwable $e) {
+            Log::warning('Stock reversal after delivery-note cancel failed (the cancel succeeded)', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $audit;
     }
 
     // ---- internals ----------------------------------------------------

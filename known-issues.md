@@ -501,9 +501,9 @@ Priorities:
 | MYD-023 | P0 | PARTIAL | B | Cancellation evidence | Issue/cancellation MARKs now in distinct fields on every path (#404); strict-refusal half → BACKLOG |
 | MYD-024 | P2 | PARTIAL | B | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
 | MYD-025 | P1 | DONE | — | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
-| MYD-026 | P1 | OPEN | B | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state — do before the ΔΑ deadline |
+| MYD-026 | P1 | OPEN | B/WATCH | Delivery lifecycle | **Research-first.** The durable recovery/CAS wraps RegisterTransfer/ConfirmDeliveryOutcome — **the exact calls v2.0.2 reshapes** (packaging at initiation/transshipments). A protocol-agnostic single-flight cache-lock is the only safe subset now; the durable attempt-record/reconcile part waits for v2.0.2 production + live lifecycle validation (single gate: DEP-001) |
 | PROV-001 | P2 | OPEN | B | Provider idempotency | InvoSign **de-dups** + real-time status (sandbox 2026-07-07) ⇒ no duplicate document possible on this provider. **Re-raise to P0 on a provider that does not de-dup** |
-| PROV-002 | P0 | OPEN | B | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 — do before the ΔΑ deadline |
+| PROV-002 | P0→P2 | OPEN | B/WATCH | Provider delivery notes | **De-risked & deferred (research-first).** Same finding as PROV-001: InvoSign **de-dups** (sandbox 2026-07-07) ⇒ a duplicate 9.3 is not possible on this provider (re-raise to P0 on a non-dedup provider). Our GR tenants also hold myDATA read creds ⇒ the existing adopt-via-`RequestTransmittedDocs` path already recovers in-doubt δελτία. Remaining work = structured provider status-recovery, which is **v2.0.2-sensitive** (new receiving-note types 10.1/10.2 + `CancelReceivingNote` reshape the provider delivery surface). Hold until v2.0.2 is production + provider ΔΑ path is live-validated (single gate: DEP-001) |
 | PROV-003 | P0 | PARTIAL | A✓/B | Provider documents | Print half DONE (#406). Licence/identity snapshot per document + invoice-page evidence DONE (this PR). Remaining bucket B: official-artifact archive — **BLOCKED, InvoSign exposes no download API** (only the QR landing page, which the spec forbids archiving); needs a provider download/retention endpoint → BACKLOG |
 | PROV-004 | P0 | OPEN | C | Provider credits | UI/service do not enforce the 5.1/5.2/11.4 compatibility matrix |
 | PROV-005 | P1 | OPEN | B | Provider preflight | Reachability is not token authentication and mandatory issuer fields are unchecked |
@@ -522,7 +522,7 @@ Priorities:
 | PROV-018 | P1 | OPEN | B | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | B | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
 | PROV-020 | P1 | DONE | — | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
-| STOCK-001 | P1 | OPEN | B | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock — with the ΔΑ work |
+| STOCK-001 | P1 | DONE | — | Stock ledger | **Fixed (this PR).** `reverseSaleForDeliveryNote()` (wired in `DeliveryLifecycleService::persistCancellation`, direct+provider) and `reverseReturnForCreditNote()` (wired in `InvoiceObserver` cancelled branch) — idempotent, whichever-first; the credit-note reversal moves together with MON-1's freed `qty_returned` (no stock inflation). Reused by MYD-019 |
 | SETUP-001 | P1 | OPEN | C | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | C | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
 | SETUP-003 | P2 | OPEN | D | Payment | An *unmapped* method already warns + shows in preflight; only a null method defaults to cash. Hard-blocking a filing over this is worse than type 3 |
@@ -3413,9 +3413,21 @@ request.
 
 ### STOCK-001 — Document cancellation does not fully compensate stock
 
-**Status:** OPEN · **Priority:** P1
+**Status:** ✅ DONE (this PR) · **Priority:** P1
 
-**Evidence**
+**Resolution.** `StockService::reverseSaleForDeliveryNote()` reverses a cancelled
+Πώληση δελτίο's sale-out (wired best-effort in `DeliveryLifecycleService::persistCancellation`,
+the shared direct+provider cancel choke-point). `StockService::reverseReturnForCreditNote()`
+reverses a cancelled credit note's return-IN (wired in `InvoiceObserver`'s cancelled
+branch). Both are idempotent (REASON_CANCEL guard) and whichever-first (reverse only
+the movement the cancelled document itself created). The credit-note reversal moves
+together with MON-1's `RecomputeReturnedQuantities` freeing `qty_returned`, so the
+cancel-credit-then-cancel-invoice sequence nets to the opening balance instead of
+inflating stock. Being idempotent, `reverseSaleForDeliveryNote()` is the compensation
+path a reconciliation-driven remote cancellation (MYD-019) reuses. Covered by
+`StockSaleTest` (ledger) + `DeliveryLifecycleServiceTest` (cancel wiring).
+
+**Evidence** *(pre-fix)*
 
 - [StockService::recordSaleForDeliveryNote()](app/Services/Stock/StockService.php)
   records sale stock-out for a sale-purpose delivery note.
@@ -3674,10 +3686,28 @@ Notes:
   [test environment](https://www.aade.gr/mydata-ilektronika-biblia-aade/mydata/dokimastiko-periballon).
   Keep this item in WATCH until v2.0.2 becomes production/final and the package
   publishes corresponding support.
+- **v2.0.2 reshapes the delivery/movement domain specifically:** new «is-delivery»
+  invoice types (1.4/3.1/3.2/11.5), receiving notes 10.1/10.2 (issue-reason
+  mandatory, 10.1↔10.2 correlation, ERP-channel cancel), a new provider-channel
+  `CancelReceivingNote`, and packaging declared by the transporter at initiation /
+  transshipments (i.e. inside RegisterTransfer). Building durable
+  provider-status-recovery or lifecycle-CAS on top of the current v2.0.1 shapes now
+  would be building on a moving target.
+
+**DEP-001 is the single trip-wire for the ΔΑ items parked on v2.0.2.** When v2.0.2
+becomes production (and firebed ships the XSDs), revisit — in this order — the items
+that were deliberately deferred *because of* it, so none is re-opened before the gate:
+
+- **PROV-002** — structured provider delivery-note status-recovery (also de-risked:
+  InvoSign de-dups ⇒ no duplicate 9.3 today).
+- **MYD-026** — durable single-flight/recovery for RegisterTransfer /
+  ConfirmDeliveryOutcome (the exact v2.0.2-reshaped calls).
+- The **delivery half of MYD-023** (strict-refusal on a terminal cancel with no
+  cancellation MARK) rides along the same lifecycle re-validation.
 
 Re-check this entry when any of the following happens:
 
-- AADE changes the production technical-specification version.
+- AADE changes the production technical-specification version (→ triggers the ΔΑ items above).
 - `firebed/aade-mydata` publishes a new tag.
 - Composer changes the locked commit.
 - A new delivery-note lifecycle endpoint is adopted by Ekdosi.

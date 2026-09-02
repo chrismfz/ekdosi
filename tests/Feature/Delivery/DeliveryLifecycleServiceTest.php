@@ -8,7 +8,12 @@ use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteLine;
 use App\Models\InvoiceType;
+use App\Models\Product;
+use App\Models\ProductCategory;
+use App\Models\StockMovement;
+use App\Models\VatCategory;
 use App\Services\Delivery\DeliveryLifecycleService;
+use App\Services\Stock\StockService;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
@@ -449,6 +454,43 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertSame('CANCELLED', $fresh->mydata_state);
         $this->assertSame('cancelled', $fresh->delivery_state);
         $this->assertSame('cancelled', $fresh->local_status);
+    }
+
+    public function test_cancel_returns_sold_stock_to_the_ledger(): void
+    {
+        // STOCK-001: persistCancellation reverses a Πώληση δελτίο's sale-out. Proves
+        // the wiring (the ledger logic itself is covered in StockSaleTest).
+        $cat = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'HW', 'markup' => 0]);
+        $vat = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+        $product = Product::create([
+            'company_id' => $this->tenant->id, 'description_short' => 'SSD',
+            'product_category_id' => $cat->id, 'vat_category_id' => $vat->id, 'track_stock' => true,
+        ]);
+        app(StockService::class)->record($product, 10, StockMovement::REASON_INITIAL);
+
+        // makeFiledNote is an ενδοδιακίνηση (move_purpose 8) with a product-less line;
+        // turn it into a real Πώληση of the tracked product so a sale-out exists.
+        $note = $this->makeFiledNote();
+        $note->forceFill(['move_purpose' => 1])->save();
+        $note->lines()->delete();
+        DeliveryNoteLine::create([
+            'company_id' => $this->tenant->id, 'delivery_note_id' => $note->id,
+            'product_id' => $product->id, 'qty' => 4, 'measurement_unit' => 1,
+        ]);
+        $note = $note->fresh('lines');
+
+        app(StockService::class)->recordSaleForDeliveryNote($note);       // −4 → 6
+        $this->assertSame(6.0, app(StockService::class)->currentStock($product->fresh()));
+
+        $this->service($this->cancelResponse())->cancel($note, 'επιστροφή');
+
+        $this->assertSame(10.0, app(StockService::class)->currentStock($product->fresh()), 'goods returned on cancel');
+        $this->assertDatabaseHas('stock_movements', [
+            'product_id' => $product->id,
+            'reason' => StockMovement::REASON_CANCEL,
+            'source_type' => DeliveryNoteLine::class,
+        ]);
+        $this->assertSame('cancelled', $note->fresh()->delivery_state);
     }
 
     /**
