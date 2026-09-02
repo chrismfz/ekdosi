@@ -134,6 +134,9 @@ class IssueCreditNote
                     'price_per_item' => $line->price_per_item,
                     'discount' => $line->discount,
                     'vat_percent' => $line->vat_percent,
+                    // MYD-007: a credit note inherits the original line's §8.3 reason,
+                    // so a credit of a 0% document files the SAME exemption reason.
+                    'vat_exemption_category' => $line->vat_exemption_category,
                     'product_descr' => $line->product_descr,
                     'metric_unit' => $line->metric_unit,
                     'notes' => $line->notes,

@@ -315,25 +315,56 @@ class InvoicePdfRenderer
     }
 
     /**
-     * DOC-1 (AUDIT): a 0% παραστατικό must PRINT the exempting provision
-     * (ΕΛΠ ν.4308/2014 άρθρο 9 — e.g. «Χωρίς ΦΠΑ - άρθρο 45» for an
-     * intra-community supply), not just file it to myDATA. Same source as
-     * the submitter (the tenant's 0%-rate VatCategory §8.3 code), but
-     * NON-throwing: a draft/preview PDF on an unconfigured tenant renders
-     * without the note instead of crashing — the submitter + preflight are
-     * the loud guards for filing.
+     * DOC-1 / MYD-007: the §8.3 exemption citation(s) for the 0% lines, derived
+     * from the SAME per-line reason that was filed to AADE
+     * (invoice_lines.vat_exemption_category) — so the printed legal citation can't
+     * diverge from the filed document, and an invoice with several 0% reasons
+     * cites each. A line with no per-line snapshot (legacy/imported) falls back to
+     * the tenant's single 0%-category reason. Non-throwing: a draft/preview on an
+     * unconfigured tenant renders without the note.
      *
-     * @return array{code:int,label:string}|null
+     * @return list<array{code:int,label:string}>|null distinct reasons, in use order
      */
     private function vatExemptionView(Invoice $invoice): ?array
     {
-        $hasZeroVatLine = $invoice->lines->contains(
+        $zeroLines = $invoice->lines->filter(
             fn ($line) => abs((float) $line->vat_percent) < 0.01
         );
-        if (! $hasZeroVatLine) {
+        if ($zeroLines->isEmpty()) {
             return null;
         }
 
+        $fallback = $this->tenantSingleZeroReason($invoice);
+
+        $codes = $zeroLines
+            ->map(function ($line) use ($fallback) {
+                $c = $line->vat_exemption_category;
+
+                return ($c !== null && $c !== '') ? (int) $c : $fallback;
+            })
+            ->filter(fn ($c) => $c !== null && Codes::vatExemptionExists((int) $c))
+            ->map(fn ($c) => (int) $c)
+            ->unique()
+            ->values();
+
+        if ($codes->isEmpty()) {
+            return null;
+        }
+
+        return $codes->map(fn (int $code) => [
+            'code' => $code,
+            'label' => Codes::VAT_EXEMPTION_LABELS[$code] ?? ('Κατηγορία '.$code),
+        ])->all();
+    }
+
+    /**
+     * The tenant's SINGLE configured 0%-category §8.3 reason, or null when none or
+     * several exist — the fallback for a 0% line without its own per-line reason.
+     * Non-throwing (mirrors the submitter's tenant-wide fallback, but the PDF must
+     * render regardless of misconfiguration).
+     */
+    private function tenantSingleZeroReason(Invoice $invoice): ?int
+    {
         $codes = VatCategory::query()
             ->where('company_id', $invoice->company_id)
             ->where('rate', 0)
@@ -343,18 +374,7 @@ class InvoicePdfRenderer
             ->unique()
             ->values();
 
-        // Unconfigured or ambiguous → omit the note (preflight/submitter
-        // surface the misconfiguration; the PDF must still render).
-        if ($codes->count() !== 1) {
-            return null;
-        }
-
-        $code = (int) $codes->first();
-
-        return [
-            'code' => $code,
-            'label' => Codes::VAT_EXEMPTION_LABELS[$code] ?? ('Κατηγορία '.$code),
-        ];
+        return $codes->count() === 1 ? (int) $codes->first() : null;
     }
 
     /**

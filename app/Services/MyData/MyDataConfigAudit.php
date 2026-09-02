@@ -167,8 +167,19 @@ class MyDataConfigAudit
         $matches = Codes::vatCategoriesForRate($rate);
 
         if ($rate === 0.0) {
-            $findings[] = new ConfigAuditFinding('warn',
-                '0% → κατηγορία AADE 7· απαιτείται κατηγορία απαλλαγής (vatExemptionCategory).', '217');
+            // MYD-007 / MYD-004: a 0% (AADE category 7) row filed WITHOUT a valid
+            // §8.3 exemption reason is rejected by AADE ([217]) — so a reason-less
+            // 0% category is a BLOCKING error, not a warning (the old warning let
+            // preflight exit green — the exact false-green MYD-004 flagged). The
+            // helper tells the operator which reason: υπηρεσία ΕΕ→4, αγαθά ΕΕ→14,
+            // εξαγωγή→8 (App\Support\MyData\VatExemptionGuidance).
+            $reason = $vat->vat_exemption_category;
+            if ($reason === null || $reason === '' || ! Codes::vatExemptionExists((int) $reason)) {
+                $findings[] = new ConfigAuditFinding('error',
+                    '0% χωρίς έγκυρη αιτία απαλλαγής §8.3 — η ΑΑΔΕ απορρίπτει [217]. '
+                    .'Όρισε αιτία: ενδοκοιν. υπηρεσία→4 (άρθρο 18), ενδοκοιν. αγαθά→14 (άρθρο 33), '
+                    .'εξαγωγή→8 (άρθρο 29), εγχώριο reverse-charge→16 (άρθρο 45).', '217');
+            }
         } elseif (empty($matches)) {
             $findings[] = new ConfigAuditFinding('error',
                 "Ο συντελεστής {$rate}% δεν αντιστοιχεί σε καμία κατηγορία ΦΠΑ AADE (§8.2).");

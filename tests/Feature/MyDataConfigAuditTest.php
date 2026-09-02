@@ -112,24 +112,33 @@ class MyDataConfigAuditTest extends TestCase
         $this->assertCount(2, $row->messages()); // missing type + missing category
     }
 
-    public function test_zero_and_ambiguous_vat_warn(): void
+    public function test_zero_without_reason_is_error_with_reason_is_ok(): void
     {
         $c = $this->tenant();
         $audit = app(MyDataConfigAudit::class);
 
-        $zero = $audit->auditVatCategory(VatCategory::create([
+        // MYD-007 / MYD-004: a 0% category with NO §8.3 reason is now a BLOCKING
+        // error (AADE rejects [217]) — not a warning that let preflight pass.
+        $zeroNoReason = $audit->auditVatCategory(VatCategory::create([
             'company_id' => $c->id, 'description' => 'Άνευ', 'rate' => 0, 'is_default' => false,
         ]));
+        $this->assertSame('error', $zeroNoReason->status());
+        $this->assertStringContainsString('[217]', $zeroNoReason->messages()[0]);
+
+        // …with a valid §8.3 reason it is clean.
+        $zeroWithReason = $audit->auditVatCategory(VatCategory::create([
+            'company_id' => $c->id, 'description' => '0% ενδοκοιν.', 'rate' => 0,
+            'vat_exemption_category' => 4, 'is_default' => false,
+        ]));
+        $this->assertSame('ok', $zeroWithReason->status());
+
         $four = $audit->auditVatCategory(VatCategory::create([
             'company_id' => $c->id, 'description' => 'Νησιά', 'rate' => 4, 'is_default' => false,
         ]));
         $std = $audit->auditVatCategory(VatCategory::create([
             'company_id' => $c->id, 'description' => 'Καν.', 'rate' => 24, 'is_default' => true,
         ]));
-
-        $this->assertSame('warn', $zero->status());
-        $this->assertStringContainsString('[217]', $zero->messages()[0]);
-        $this->assertSame('warn', $four->status());
+        $this->assertSame('warn', $four->status()); // 4% is ambiguous (codes 6/10)
         $this->assertSame('ok', $std->status());
     }
 
@@ -178,13 +187,12 @@ class MyDataConfigAuditTest extends TestCase
         $c = $this->tenant();
         $this->type($c);                                   // ok
         $this->type($c, ['mydata_type' => '99.9']);        // 1 error
-        VatCategory::create(['company_id' => $c->id, 'description' => '0%', 'rate' => 0, 'is_default' => false]); // 1 warn
+        VatCategory::create(['company_id' => $c->id, 'description' => '0%', 'rate' => 0, 'is_default' => false]); // MYD-007: now 1 error (no §8.3 reason)
         VatCategory::create(['company_id' => $c->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]); // ok
 
         $result = app(MyDataConfigAudit::class)->audit($c);
 
-        $this->assertSame(1, $result->errorCount());
-        $this->assertGreaterThanOrEqual(1, $result->warnCount());
+        $this->assertSame(2, $result->errorCount()); // MYD-007: 99.9 type + reason-less 0%
         $this->assertFalse($result->isClean());
         $this->assertCount(2, $result->invoiceTypes);
         $this->assertCount(2, $result->vatCategories);

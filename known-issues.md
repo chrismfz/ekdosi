@@ -472,10 +472,10 @@ Priorities:
 | MYD-001 | P0 | DONE | — | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
 | MYD-002 | P0 | DONE | — | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
 | MYD-003 | P0 | DONE | — | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
-| MYD-004 | P0 | OPEN | A | VAT validation | 0%-without-reason must block preflight (the intra-community case). 3%/dual-4% half is C |
+| MYD-004 | P0 | PARTIAL | A | VAT validation | **0%-without-reason now BLOCKS preflight** (was warning/false-green). 3%/dual-4% code-distinction half → C |
 | MYD-005 | P2 | OPEN | B | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
 | MYD-006 | P1 | OPEN | A | Classifications | Readiness does not require a business-specific classification policy |
-| MYD-007 | P0 | OPEN | A | VAT exemption | The ~12% 0% is intra-community (ενδοκοινοτικό, from import); confirm exact §8.3 reason + make it the default (accountant) |
+| MYD-007 | P0 | PARTIAL | A | VAT exemption | **Per-line §8.3 snapshot + guidance helper + form field + preflight block DONE** (PR for MYD-007 rest). Accountant to confirm codes; existing-tenant category cleanup via preflight |
 | MYD-008 | P0 | DONE | — | Provider credits | Correlated credit cannot find a provider-issued original MARK |
 | MYD-009 | P0 | DONE | — | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P2 | WATCH | C | Branches | Issuer and counterpart branch are always filed as head office 0 |
@@ -811,7 +811,24 @@ default that is correct for every business.
 
 ### MYD-007 — VAT exemption reasons are wrong or too global
 
-**Status:** OPEN · **Priority:** P0 · **Bucket:** A · **Research:** NEW, CONFIRMED 2026-08-30 · **Operator mapping added 2026-09-02**
+**Status:** PARTIAL 2026-09-02 (per-line model + guidance + preflight DONE; accountant sign-off + existing-tenant cleanup pending) · **Priority:** P0 · **Bucket:** A · **Research:** NEW, CONFIRMED 2026-08-30 · **Operator mapping added 2026-09-02**
+
+> **DONE (PR for MYD-007 rest):** the exemption reason is now chosen and snapshotted
+> **per line** (`invoice_lines.vat_exemption_category`), not one tenant-wide value; the
+> submitter reads it per line (legacy fallback only for lines without a snapshot). A
+> guidance helper (`App\Support\MyData\VatExemptionGuidance`) encodes the corrected
+> mapping (intra-EU service→4, goods→14, export→8, domestic RC→16, small biz→15, +OSS/
+> IOSS/Tax-Free) and drives an auto-suggested, required per-line «Αιτία απαλλαγής»
+> field on the invoice form; the VatCategory-form helper text is corrected (was wrongly
+> «16 for intracommunity / 15 for export»). A 0% category with no valid §8.3 reason is
+> now a **blocking** preflight error (also closes MYD-004's 0% half). Credit notes
+> inherit the original line's reason.
+>
+> **Still open:** (a) accountant confirmation of the encoded codes against ν.5144/2024;
+> (b) existing tenants' reason-less/wrong 0% categories are FLAGGED by preflight for
+> operator review (no auto-guess of historical reasons); (c) type↔reason cross-check at
+> issue (e.g. reason 4 on a domestic 1.1) → BACKLOG; (d) the WHMCS inbox mapper doesn't
+> yet set a per-line reason on 0% lines (falls back to tenant-wide) → BACKLOG.
 
 > **Operator-confirmed mapping (2026-09-02) — the concrete target for this tenant.**
 > There is NO single «intracommunity» code; goods and services diverge, and the

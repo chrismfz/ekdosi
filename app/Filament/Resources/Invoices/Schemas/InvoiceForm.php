@@ -18,6 +18,7 @@ use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use App\Support\MyData\CommonTaxPresets;
 use App\Support\MyData\ReverseCharge;
+use App\Support\MyData\VatExemptionGuidance;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
@@ -197,8 +198,8 @@ class InvoiceForm
                                     ->title('Ενδοκοινοτική παράδοση (reverse charge)')
                                     ->body('Πελάτης ΕΕ ('.strtoupper((string) $customer->country).') με ΑΦΜ/ΦΠΑ. '
                                         .($autoDefaults
-                                            ? 'Οι νέες γραμμές προεπιλέγονται σε 0% ΦΠΑ (αιτία «16 — άρθρο 45»). Αλλάξτε ανά γραμμή αν χρειάζεται.'
-                                            : 'Συνήθως 0% ΦΠΑ με αιτία «16 — άρθρο 45» — ρυθμίστε ΜΙΑ 0% κατηγορία ΦΠΑ με αιτία εξαίρεσης (Setup → VAT Categories) για αυτόματη προεπιλογή.'))
+                                            ? 'Οι νέες γραμμές προεπιλέγονται σε 0% ΦΠΑ· η αιτία §8.3 ορίζεται ανά γραμμή από τον τύπο (υπηρεσία 2.2→«4 — άρθρο 18», αγαθά 1.2→«14 — άρθρο 33»). Αλλάξτε ανά γραμμή αν χρειάζεται.'
+                                            : 'Συνήθως 0% ΦΠΑ (ενδοκοινοτικό) — ρυθμίστε μια 0% κατηγορία ΦΠΑ με αιτία εξαίρεσης (Setup → VAT Categories) για αυτόματη προεπιλογή. Η αιτία διαφέρει: υπηρεσία→4, αγαθά→14.'))
                                     ->info()->send();
                             }
                         })
@@ -304,13 +305,29 @@ class InvoiceForm
                                     // rate — the operator can still override per line.
                                     // $get('../../customer_id') reads the parent invoice's
                                     // customer from inside the lines repeater.
-                                    $vat = self::reverseChargeApplies($get('../../customer_id'))
+                                    $reverseCharge = self::reverseChargeApplies($get('../../customer_id'));
+                                    $vat = $reverseCharge
                                         ? 0.0
                                         : (float) ($product->vatCategory?->rate ?? 24);
                                     $set('product_descr', $product->description_short);
                                     $set('price_per_item', $net);
                                     // Normalised so the value matches a VAT-rate Select option.
                                     $set('vat_percent', VatRateOptions::normalize($vat));
+                                    // MYD-007: a $set() on vat_percent does NOT fire that Select's
+                                    // afterStateUpdated, so keep the per-line §8.3 reason in sync
+                                    // here — for ANY 0% result (reverse charge OR a 0%-rated
+                                    // product). Suggest from the invoice TYPE only when it's blank,
+                                    // so re-picking a product never CLOBBERS an operator's manual
+                                    // reason; clear it when the line is no longer 0%.
+                                    if ((float) $vat === 0.0) {
+                                        if (blank($get('vat_exemption_category'))) {
+                                            $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
+                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                            ));
+                                        }
+                                    } else {
+                                        $set('vat_exemption_category', null);
+                                    }
                                     // G7: keep the VAT-inclusive mirror in sync.
                                     $set('price_per_item_wvat', self::grossFromNet($net, $vat));
                                     $set('metric_unit', $product->metricUnit?->name);
@@ -407,10 +424,42 @@ class InvoiceForm
                                 ->live()
                                 // G7: changing the rate re-derives the gross mirror
                                 // from the (unchanged) stored net price.
-                                ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
-                                    'price_per_item_wvat',
-                                    self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($state))
-                                )),
+                                ->afterStateUpdated(function ($state, callable $set, Get $get) {
+                                    $set(
+                                        'price_per_item_wvat',
+                                        self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($state))
+                                    );
+                                    // MYD-007: switching a line TO 0% auto-suggests the §8.3
+                                    // reason from the invoice type (if none picked yet); leaving
+                                    // 0% clears it, so a rate change can't strand a stale reason.
+                                    // Done here (on the actual rate change) rather than as a
+                                    // new-record default, so an EXISTING line switched to 0% gets
+                                    // the suggestion too — and the type lookup runs only on the
+                                    // switch, not per repeater row.
+                                    if ((float) ($state ?? 0) === 0.0) {
+                                        if (blank($get('vat_exemption_category'))) {
+                                            $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
+                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                            ));
+                                        }
+                                    } else {
+                                        $set('vat_exemption_category', null);
+                                    }
+                                }),
+
+                            // MYD-007: the §8.3 exemption reason for a 0% line — shown ONLY when
+                            // the line is 0%, required then (AADE [217]). The value is suggested
+                            // from the invoice type by the rate handler above; always dehydrated
+                            // but nulled for non-0% lines so a rate change clears a stale reason.
+                            Select::make('vat_exemption_category')
+                                ->label('Αιτία απαλλαγής ΦΠΑ (§8.3)')
+                                ->options(Codes::vatExemptionOptions())
+                                ->searchable()
+                                ->hidden(fn (Get $get) => (float) ($get('vat_percent') ?? 0) !== 0.0)
+                                ->required(fn (Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0)
+                                ->helperText('Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).')
+                                ->dehydrated()
+                                ->dehydrateStateUsing(fn ($state, Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0 ? $state : null),
 
                             TextInput::make('notes')
                                 ->label('Σημείωση γραμμής'),

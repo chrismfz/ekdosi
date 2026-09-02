@@ -17,9 +17,13 @@ namespace App\Support\MyData;
  * 33), and a third-country goods EXPORT is code 8 (άρθρο 29). Goods and services
  * diverge, and the reason must be chosen per case — not globally.
  *
- * SINGLE HOME: the VatCategory form's 0% helper, onboarding, and the invoice-form
- * auto-suggestion all read `SCENARIOS` / `recommendForType()` here. When a code
- * mapping changes, this is the one file to edit — guarded by VatExemptionGuidanceTest.
+ * WHAT IS WIRED TODAY: `recommendForType()` drives the invoice form's per-line
+ * auto-suggestion, and the VatCategory-form helper text summarises the mapping.
+ * `SCENARIOS` (+ `scenarioOptions()` / `INTRO` / `labelForCode()`) is the encoded,
+ * comprehensive reference — kept deliberately «για clarity» and guarded by
+ * VatExemptionGuidanceTest; a scenario-PICKER UI that reads `scenarioOptions()`
+ * is a tracked follow-up (docs/BACKLOG.md). When a code mapping changes, this is
+ * the one file to edit.
  *
  * The §8.3 code numbers are cross-checked against {@see Codes::VAT_EXEMPTION_LABELS}
  * (verbatim from the spec); this file only adds the plain-Greek «when to use it».
@@ -71,6 +75,36 @@ class VatExemptionGuidance
             'exemption_code' => 15, // άρθρο 44
             'invoice_types' => ['1.1', '2.1'],
             'hint' => 'Καθεστώς απαλλαγής μικρών επιχειρήσεων. ΦΠΑ 0%, αιτία 15 (άρθρο 44).',
+        ],
+        // Cross-border B2C digital/telecom/hosting — OSS/IOSS. Distinct from the
+        // B2B reverse-charge cases above: here ο ΠΩΛΗΤΗΣ αποδίδει τον ΦΠΑ της χώρας
+        // του καταναλωτή μέσω OSS/IOSS, και το ελληνικό παραστατικό βγαίνει 0%.
+        'oss_eu_consumer' => [
+            'label' => 'Πώληση σε ΙΔΙΩΤΗ άλλης χώρας ΕΕ μέσω OSS (ενωσιακό καθεστώς)',
+            'exemption_code' => 30, // άρθρο 57 — OSS ενωσιακό
+            'invoice_types' => ['1.1', '2.1'],
+            'hint' => '⚠️ Για B2C (ιδιώτη, ΟΧΙ επιχείρηση) σε άλλη χώρα ΕΕ — π.χ. hosting σε ιδιώτη. '
+                .'Αποδίδεις τον ΦΠΑ της χώρας του πελάτη μέσω OSS· το ελληνικό παραστατικό 0%, αιτία 30 '
+                .'(άρθρο 57). Διαφέρει από το B2B (εκείνο = 4, reverse charge). Θέλει εγγραφή στο OSS.',
+        ],
+        'oss_non_eu' => [
+            'label' => 'Πώληση σε ιδιώτη ΕΕ — μη ενωσιακό καθεστώς OSS',
+            'exemption_code' => 29, // άρθρο 56 — OSS μη ενωσιακό
+            'invoice_types' => ['1.1', '2.1'],
+            'hint' => 'OSS μη ενωσιακό καθεστώς (για μη εγκατεστημένους στην ΕΕ). 0%, αιτία 29 (άρθρο 56). '
+                .'Επιβεβαίωσε με λογιστή ότι αυτό είναι το καθεστώς σου.',
+        ],
+        'ioss' => [
+            'label' => 'Εισαγωγή αγαθών χαμηλής αξίας σε ιδιώτη ΕΕ (IOSS)',
+            'exemption_code' => 31, // άρθρο 58 — IOSS
+            'invoice_types' => ['1.1'],
+            'hint' => 'IOSS — αγαθά ≤150€ σε ιδιώτη ΕΕ με απόδοση ΦΠΑ μέσω IOSS. 0%, αιτία 31 (άρθρο 58).',
+        ],
+        'tax_free' => [
+            'label' => 'Λιανική σε ταξιδιώτη εκτός ΕΕ (Tax Free)',
+            'exemption_code' => 28, // άρθρο 29 περ. β' (Tax Free)
+            'invoice_types' => ['11.1', '11.2'],
+            'hint' => 'Πώληση λιανικής σε ταξιδιώτη κάτοικο τρίτης χώρας (Tax Free). 0%, αιτία 28.',
         ],
     ];
 
