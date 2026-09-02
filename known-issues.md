@@ -32,6 +32,37 @@ ledger below against that date. **It is authoritative for what gets worked on;
 the per-issue sections stay as the technical record.**
 
 Triaged at [`e6c7899`](https://github.com/chrismfz/ekdosi/commit/e6c78995a95d4bbaef7bcacc4680c212c0572a2e).
+**Corrected 2026-09-02 (operator)** — see «Operator corrections» below; the scope
+claims were wrong in one important direction and are fixed in place.
+
+### Operator corrections (2026-09-02)
+
+The first cut of this triage read the *new* app's live data as the business's whole
+scope. That was wrong. The record:
+
+- **These tenants DO issue delivery notes (δελτία αποστολής) and retail receipts
+  (αποδείξεις λιανικής)** — routinely, in the **legacy** program. They have simply
+  not *cut over* those document types into the new app yet. «Not yet issued in
+  ekdosi» is not «out of business scope», and I conflated the two.
+- **Ψηφιακή διακίνηση (digital delivery notes) becomes mandatory too**, on its own
+  AADE deadline, exactly like the provider. The 9.x family is *coming*, not
+  *excluded*. It moves from bucket C to bucket B, and it must be real before that
+  deadline — not before 1 Oct.
+- **PROV-010 is DONE.** The contract, «Δήλωση Έναρξης» and issuer acceptance for
+  iNVO Sign are in place; the environment in view is the dev/test one we are
+  rehearsing on.
+- **The «cutover dry-run» is in progress** — it is precisely what the dev/test
+  environment is for. Keep it as the gate, but it is not an unstarted task.
+- **MYD-007's ~12% is intra-community (ενδοκοινοτικό)**, established from the
+  Firebird import. The legacy program had no field to declare the exemption reason,
+  so it was never recorded — which is why the seeded hint governs by default. So the
+  fact is now known; the open question is only the exact §8.3 reason code, with the
+  accountant.
+
+What survives unchanged: the method critique (per-issue rating, never against date ×
+business), the provider-dedup runtime evidence, PROV-014 being already-DONE, and the
+genuinely-out-of-scope C items (multi-branch, island/ν.5057 VAT, B2G/POS scopes,
+fresh-install onboarding, the UPD-* family).
 
 ### Why a re-triage was needed
 
@@ -47,11 +78,18 @@ moves real findings:
    explicitly **not** on the provider path. Findings written from source alone
    re-raise a duplicate-legal-document risk that was measured away two months
    earlier.
-2. **What these two tenants actually issue.** Live data, 2026-09-02: myip **840
-   documents / 12 months** (€133k gross), nexon **15**. The mix is **ΤΠΥ (2.1)**,
-   with some **ΤΙΜ (1.1)** and **ΠΙΣ (5.x)** — domestic Greek B2B/B2C services.
-   No 9.x δελτία αποστολής, no 3%/island VAT, no goods exports. Whole families of
-   findings describe documents these tenants do not issue.
+2. **What flows through the new app on day one — versus the whole business.** Live
+   data, 2026-09-02: the mix *already cut in ekdosi* is **ΤΠΥ (2.1)**, some **ΤΙΜ
+   (1.1)** and **ΠΙΣ (5.x)** — domestic Greek B2B/B2C services (myip **840 docs /
+   12 months**, €133k; nexon **15**). **But the business also issues δελτία
+   αποστολής and αποδείξεις λιανικής** in the legacy program — those are in scope,
+   just not cut over yet — and **digital delivery becomes mandatory** on its own
+   deadline. So the right cut is by **timeline**, not by «do they issue it»:
+   invoices+retail at the 1 Oct provider cutover, delivery notes at the digital-
+   delivery deadline. What genuinely does NOT apply here is narrower than the first
+   draft claimed: 3%/island VAT, ν.5057 4%, goods exports, multi-branch, B2G/POS.
+   *(Corrected from the first draft, which wrongly read «not yet in the new app» as
+   «out of scope» — see «Operator corrections».)*
 3. **The deployment already exists and is healthy.** `ops:health` on the live host,
    2026-09-02: worker heartbeat 1.3 min old, 0 pending / 0 failed jobs, scheduler
    green on every enabled task, nightly backup 44 MB, mail clean. Every
@@ -66,22 +104,29 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 
 | Bucket | Meaning | Count |
 |---|---|---:|
-| **A — BLOCKER** | Must be true before the first live document on 1 Oct | 6 + 1 rehearsal |
-| **B — AFTER** | Real, do it after cutover, no legal exposure meanwhile | 14 |
-| **C — NOT-FOR-US** | Correct finding, out of these tenants' business scope. **Re-raise if the scope changes** | 17 (+15 already-disarmed UPD-*) |
+| **A — BLOCKER** | Must be true before the first live document on 1 Oct | 4 + 1 rehearsal (PROV-010 now DONE, dry-run in progress) |
+| **B — AFTER** | Real, do it after the 1 Oct cutover (incl. the whole delivery-note family, due at the digital-delivery deadline) | ~21 |
+| **C — NOT-FOR-US** | Genuinely out of these tenants' scope (island/ν.5057 VAT, multi-branch, B2G/POS, fresh-install). **Re-raise if the scope changes** | ~9 (+15 already-disarmed UPD-*) |
 | **D — STALE** | The ledger says OPEN; the code already fixes it | 2 |
+
+> The delivery-note family (MYD-013 ✅, MYD-016 ✅, MYD-019, MYD-026, PROV-002,
+> STOCK-001, delivery half of MYD-023) is **B, not C** — these tenants issue δελτία
+> αποστολής today in the legacy app and digital delivery becomes mandatory on its
+> own deadline. Retail 11.x via the provider (PROV-006) is **A-conditional** — see
+> the A table.
 
 ### A — BLOCKERS (the whole list; nothing else is)
 
 | ID | Why it blocks | Shape of the work |
 |---|---|---|
-| **PROV-010** | Contract + «Δήλωση Έναρξης» + issuer acceptance are a **legal** precondition for filing through iNVO Sign on 1 Oct. No code change makes up for a missing declaration, and its window is measured in ten-day steps. | Operational. Confirm the contract is active for both ΑΦΜ, the provider filed the start declaration, and it was accepted. **Start this first — it has the longest lead time and it is not ours to accelerate.** |
+| ~~**PROV-010**~~ **DONE** | Contract + «Δήλωση Έναρξης» + issuer acceptance for iNVO Sign are **in place** (operator confirmed 2026-09-02); the environment in view is the dev/test one. No longer a blocker. | — |
+| **PROV-006** *(A-conditional)* | Retail (αποδείξεις λιανικής, 11.x) **is** part of the business. IF retail is filed through the provider at the 1 Oct cutover, the anonymous-counterpart convention must be sandbox-confirmed first: the public InvoSign guide marks `CounterpartName`/`CounterpartVat` required, and ekdosi can emit both empty for 11.1/11.2. | Prove 11.1 + 11.2 in the dev sandbox now (part of the dry-run). If retail stays on the direct-myDATA path at cutover and moves to the provider later, this drops to B. **Decide which channel retail uses on day one.** |
 | **PROV-003** (print half only) | A.1112/2025 requires the *printed representation* of a provider document to carry provider identity, licence number, UID, authentication code and QR. The PDF today prints MARK + QR only. Every invoice we email a customer from 1 Oct is non-conforming. | Small: one block in `resources/views/invoices/pdf.blade.php`, fed from immutable provider metadata, shown when `mydata_action=PROVIDER_INSERT`. **The archive half of PROV-003 is bucket B** — see below. |
-| **MYD-007** | ~12% of myip's net is not at 24% (`vat_summary`: €107,264 net → €22,671 VAT ≈ 21.1%). If that is zero-rated cross-border service, the seeded hint (reason **16 / άρθρο 45**, domestic reverse charge) is the wrong legal basis for it, and it is applied tenant-wide. Wrong on ~100 documents/year from day one. | **First determine the facts** (which lines, which customers, and — decisive — what the *legacy* app actually filed for them: the imported MARK request XML in `mydata_marks` is the ground truth, and it is already in the database). Then fix the hint and let the reason vary per VAT row. Note the likely answer for a services tenant is neither of the audit's two candidates: cross-border **B2B services** are zero-rated on **place of supply** (ex-άρθρο 14 → **άρθρο 17 = reason 3** under ν.5144/2024), not on the intra-community **goods** rule (άρθρο 33 = 14) and not on domestic reverse charge (άρθρο 45 = 16). **Confirm with the accountant before changing anything.** Do not build the full per-line exemption model for this. |
+| **MYD-007** | ~12% of myip's net is not at 24% (`vat_summary`: €107,264 net → €22,671 VAT ≈ 21.1%). Operator-confirmed: this is **intra-community (ενδοκοινοτικό)**, established from the Firebird import. The legacy program had **no field** to record the exemption reason, so it was never declared — which is why whatever the seeded 0% hint says governs by default, tenant-wide. | The fact is now known, so this is smaller than the first draft implied. Remaining work: (1) confirm the exact §8.3 reason with the accountant — intra-community **services** (B2B, recipient self-accounts) vs intra-community **goods** (άρθρο 33 = reason 14) land on different codes, and the current seed points at reason 16/άρθρο 45; (2) make the chosen reason the tenant/VAT-row default so it stops depending on a global; (3) spot-check a few imported ενδοκοινοτικά documents' `mydata_marks` request XML to see what, if anything, was filed. **Confirm with the accountant before changing the code.** No per-line exemption model needed. |
 | **MYD-004** (0% half only) | Same root as MYD-007: a 0% row used with no exemption reason is only a **warning** and `mydata:preflight` exits 0 on warnings alone. That is the false-green that lets a wrong filing through. | Make «0% row in use without a reason» a **blocking** preflight error. The 3%/code-9/6-vs-10 half is bucket C — these tenants have no island or ν.5057 rate. |
 | **MYD-006** (config, not code) | Classification is already resolvable per line (`AadeInvoiceDocument::resolveIncomeClass`, product-category override). What is missing is that **someone chose** the values for ΤΠΥ / ΤΙΜ / ΠΙΣ on these two tenants. | ~30 minutes of configuration review + `mydata:preflight`. No feature. |
 | **OBS-001** *(new — not in the ledger)* | Not legally required. It is the item that decides whether a day-one problem costs minutes or a day: today nothing outside the panel can answer «γιατί απορρίφθηκε αυτό;». The evidence is already stored — see the OBS-001 section — so this is access, not instrumentation. | Five small read-only MCP tools on the existing `SuperAdminMcpTool` pattern. `invoice_filing` alone covers most of it. |
-| **Cutover dry-run** *(new — not in the ledger)* | The last ekdosi-side MARK is **2026-06-10** (myip) / **2026-06-16** (nexon). Nothing has been filed from this app in three months, and `ops:health` reports **92 / 2** open myDATA discrepancies. Going live on 1 Oct without a rehearsal is the largest single risk on this list, and it is the only item that would find the others. | File one ΤΠΥ, one ΤΙΜ and one ΠΙΣ through the **provider** channel end-to-end (issue → PDF → reconcile), then clear the discrepancy list so day-one noise is real signal. |
+| **Cutover dry-run** *(in progress — this is what dev/test is for)* | The last *production* ekdosi MARK is **2026-06-10** (myip) / **2026-06-16** (nexon), and `ops:health` on prod reports **92 / 2** open myDATA discrepancies. The rehearsal on the dev/test environment is already the gate; keep it explicit so nothing ships un-rehearsed. | Cover every day-one document type end-to-end on the provider sandbox — ΤΠΥ, ΤΙΜ, ΠΙΣ **and αποδείξεις λιανικής 11.x** (issue → PDF → reconcile). Then, on prod, clear the 92/2 discrepancy backlog so day-one noise is real signal. Delivery notes 9.x join this rehearsal ahead of the digital-delivery deadline, not 1 Oct. |
 
 ### B — AFTER cutover (real, but nothing burns on 1 Oct)
 
@@ -94,25 +139,17 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 | PROV-011 | **P2** | Ask InvoSign for a versioned contract. The cancellation-endpoint ambiguity is already resolved empirically (`[283]`, sandbox 2026-07-07). |
 | PROV-018 | **P2** | Full reversal after a partial credit. Real bug, low frequency (ΠΙΣ is a handful of documents a year), no wrong data — it fails loudly. |
 | PROV-019 | **P1, after** | «Draft credit treated as legal reversal» matters once credits are routine on the provider channel. |
-| MYD-023 | **P1, after** (invoice half **already met**) | `mydata_marks.cancellation_mark` exists and `MyDataSubmitter::cancel` uses it. The genuine gap is `DeliveryMark`, which has no such column — and delivery notes are bucket C. |
+| MYD-023 | **P1, after** (invoice half **already met**) | `mydata_marks.cancellation_mark` exists and `MyDataSubmitter::cancel` uses it. The genuine gap is `DeliveryMark`, which has no such column — do it with the delivery-note work below, ahead of the digital-delivery deadline. |
 | MYD-024 | already PARTIAL | Series is frozen (MYD-018); ΑΦΜ/ΓΕΜΗ edits warn. Snapshotting issuer name/address is a nicety at two single-branch tenants. |
+| **Delivery-note family** — MYD-019, MYD-026, PROV-002, STOCK-001, delivery half of MYD-023 | **P1, before the digital-delivery deadline** | These tenants issue δελτία αποστολής today (legacy) and digital delivery becomes mandatory on its own AADE deadline. Real work, correctly scoped — just **not gated on 1 Oct**. MYD-013 and MYD-016 in this family are already DONE. Do the rest as one block before the ΔΑ deadline, with a sandbox rehearsal of 9.3 issue/register/confirm/cancel. |
 | MYD-005, SETUP-004, OPS-002, OPS-003, TEST-001, DEP-001 | unchanged P2/WATCH | Correctly parked already. |
 
-### C — NOT FOR US (correct findings, wrong business)
-
-**Δελτία αποστολής / ΔΑ (9.x) — the whole family.** These tenants sell services and
-do not issue movement documents. Nothing here can fire.
-→ **MYD-019, MYD-026, PROV-002, STOCK-001**, plus the delivery half of MYD-023 and
-the delivery rows of the sandbox matrix. (MYD-013 and MYD-016 are already DONE —
-work that was spent on documents these tenants do not issue.)
-*Re-raise the moment a tenant issues a first 9.3.*
-
-**Retail / anonymous 11.x via provider.** → **PROV-006**. No 11.x in the live mix.
-*Re-raise before the first ΑΛΠ/ΑΠΥ through the provider.*
+### C — NOT FOR US (genuinely out of these tenants' scope)
 
 **Exotic VAT regimes.** 3% (code 9), island 4% (code 6) vs ν.5057 4% (code 10),
 goods export exemptions. → the **non-0% half of MYD-004** and the goods rows of
-MYD-007. No island or ν.5057 activity here.
+MYD-007. No island or ν.5057 activity here. *(The intra-community 0% case IS in
+scope — that is MYD-007, bucket A.)*
 
 **Multi-branch.** → **MYD-010** (already WATCH, correctly). Both tenants are
 single-establishment; `branch=0` is the truth, not a shortcut.
@@ -165,11 +202,14 @@ once, by us, to a known InvoSign host.)*
 
 ### What this means in practice
 
-Seven items, of which **one is a phone call (PROV-010), one is a Blade block
-(PROV-003 print), two are configuration (MYD-006, MYD-007 fact-finding), one is a
-one-line preflight severity change (MYD-004 0%), one is five small read-only MCP
-tools (OBS-001), and one is a rehearsal**. That is days of work, not the ~45 open
-items the board implies.
+With PROV-010 done and the dry-run already running on dev/test, the day-one list
+is: **one Blade block (PROV-003 print), the intra-community VAT reason (MYD-007 —
+accountant, then a default), a one-line preflight severity change (MYD-004 0%), a
+classification config review (MYD-006), five small read-only MCP tools (OBS-001),
+and — IF retail files via the provider at cutover — a sandbox proof of 11.x
+(PROV-006)**, all inside the rehearsal. The delivery-note family (MYD-019/026,
+PROV-002, STOCK-001, MYD-023 delivery half) is the *next* deadline's block, not
+this one. Still days of work, not the ~45 open items the board implies.
 
 The gate discipline in `CLAUDE.md` — «merge when strictly better than main, no
 known P0/P1, suite green, reversible» — was written for **changes**. This ledger
@@ -432,10 +472,10 @@ Priorities:
 | MYD-001 | P0 | DONE | — | Classification | Third-country 1.3/2.3 use the intra-EU E3 code |
 | MYD-002 | P0 | DONE | — | ΤΔΑ | Seeded label promises a combined invoice/delivery payload that is not emitted |
 | MYD-003 | P0 | DONE | — | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
-| MYD-004 | P0 | OPEN | A | VAT validation | 3%, dual 4% codes and 0% can produce false readiness results |
+| MYD-004 | P0 | OPEN | A | VAT validation | 0%-without-reason must block preflight (the intra-community case). 3%/dual-4% half is C |
 | MYD-005 | P2 | OPEN | B | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
 | MYD-006 | P1 | OPEN | A | Classifications | Readiness does not require a business-specific classification policy |
-| MYD-007 | P0 | OPEN | A | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
+| MYD-007 | P0 | OPEN | A | VAT exemption | The ~12% 0% is intra-community (ενδοκοινοτικό, from import); confirm exact §8.3 reason + make it the default (accountant) |
 | MYD-008 | P0 | DONE | — | Provider credits | Correlated credit cannot find a provider-issued original MARK |
 | MYD-009 | P0 | DONE | — | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P2 | WATCH | C | Branches | Issuer and counterpart branch are always filed as head office 0 |
@@ -447,24 +487,24 @@ Priorities:
 | MYD-016 | P1 | DONE | — | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | DONE | — | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | DONE | — | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
-| MYD-019 | P1 | OPEN | C | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
+| MYD-019 | P1 | OPEN | B | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged — do before the ΔΑ deadline |
 | MYD-020 | P2 | DONE | — | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
 | MYD-021 | P0 | DONE | — | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
 | MYD-022 | P0 | DONE | — | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | B | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
 | MYD-024 | P2 | PARTIAL | B | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
 | MYD-025 | P1 | DONE | — | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
-| MYD-026 | P1 | OPEN | C | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state |
+| MYD-026 | P1 | OPEN | B | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state — do before the ΔΑ deadline |
 | PROV-001 | P2 | OPEN | B | Provider idempotency | InvoSign **de-dups** + real-time status (sandbox 2026-07-07) ⇒ no duplicate document possible on this provider. **Re-raise to P0 on a provider that does not de-dup** |
-| PROV-002 | P0 | OPEN | C | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 |
+| PROV-002 | P0 | OPEN | B | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 — do before the ΔΑ deadline |
 | PROV-003 | P0 | OPEN | A | Provider documents | Customer PDF lacks required provider evidence and no official artifact is archived |
 | PROV-004 | P0 | OPEN | C | Provider credits | UI/service do not enforce the 5.1/5.2/11.4 compatibility matrix |
 | PROV-005 | P1 | OPEN | B | Provider preflight | Reachability is not token authentication and mandatory issuer fields are unchecked |
-| PROV-006 | P0 | VERIFY | C | Provider retail | Anonymous InvoSign counterpart convention is not confirmed |
+| PROV-006 | P0 | VERIFY | A? | Provider retail | Retail IS in scope; confirm the anonymous 11.x counterpart convention in sandbox IF retail files via provider at cutover |
 | PROV-007 | P1 | VERIFY | C | Provider totals | Header/line discount semantics of InvoSign api_* fields are not proven |
 | PROV-008 | P1 | OPEN | C | Provider outage | Transmission Failure_1/2 issue and recovery lifecycle is absent |
 | PROV-009 | P2 | OPEN | B | Provider observability | UID, reception feedback and remaining quota are not structured/surfaced |
-| PROV-010 | P0 | OPEN | A | Provider activation | Contract, declaration and acceptance are not go-live gates |
+| PROV-010 | P0 | DONE | — | Provider activation | Contract + «Δήλωση Έναρξης» + acceptance in place (operator-confirmed 2026-09-02) |
 | PROV-011 | P1 | VERIFY | B | Provider API | Version support and contradictory cancellation example need written confirmation |
 | PROV-012 | P1 | OPEN | C | Provider scope | Public-contract/All-in-one POS capabilities are not gated from the AADE register |
 | PROV-013 | P0 | OPEN | C | Provider tests | Required InvoSign sandbox success/failure matrix has not been completed |
@@ -475,7 +515,7 @@ Priorities:
 | PROV-018 | P1 | OPEN | B | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
 | PROV-019 | P0 | OPEN | B | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
 | PROV-020 | P1 | DONE | — | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
-| STOCK-001 | P1 | OPEN | C | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock |
+| STOCK-001 | P1 | OPEN | B | Stock ledger | Cancelling delivery/credit documents does not fully compensate stock — with the ΔΑ work |
 | SETUP-001 | P1 | OPEN | C | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | C | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
 | SETUP-003 | P2 | OPEN | D | Payment | An *unmapped* method already warns + shows in preflight; only a null method defaults to cash. Hard-blocking a filing over this is worse than type 3 |
@@ -3939,4 +3979,5 @@ These are not open issues:
 | 2026-09-02 | **PROV-001 P0 → P2** — InvoSign de-dups + real-time status (sandbox 2026-07-07); a duplicate legal document is not reachable on this provider. Re-raise on a non-de-duping provider | `docs/archive/mydata-sandbox-myd2-retry-2026-07-07.md` |
 | 2026-09-02 | **PROV-014 → DONE** — the ledger was behind the code: single-flight locks landed in `97c23de` (invoices) / `23b1fa4` (delivery). Mutation-during-issue remains → BACKLOG | `known-issues.md` §PROV-014 |
 | 2026-09-02 | **SETUP-003 P1 → P2** — an unmapped method already warns + surfaces in preflight; hard-blocking a filing over it is worse than type 3 | `known-issues.md` §SETUP-003 |
+| 2026-09-02 | **Operator corrections** — PROV-010 **DONE** (contract/declaration/acceptance in place); delivery notes + retail are in scope (issued in legacy, digital delivery becomes mandatory) so the 9.x family + PROV-006 move **C→B/A**, not out; MYD-007's 12% confirmed **intra-community**; dry-run is in progress on dev/test | `known-issues.md` §Operator corrections |
 | 2026-09-02 | **OBS-001 raised (P1, bucket A)** — filing forensics are already captured (byte-exact XML + rejection rows + activity trail) but unreachable over MCP; 5 read-only tools proposed. No extra logging needed | `known-issues.md` §OBS-001 |
