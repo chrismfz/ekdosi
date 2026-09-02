@@ -109,7 +109,11 @@ class DeliveryNote extends Model
     {
         $stored = trim((string) $this->recipient_afm);
 
-        if ($stored === self::INTERNAL_MOVEMENT_AFM) {
+        // Any all-zeros value, not only the exact nine-zero sentinel: «0» meant the
+        // same thing to the operator, and Afm::canonicalVat() already reads it that
+        // way — leaving the two strictnesses apart let «0» read as a real ΑΦΜ here
+        // while every identity comparison treated it as absent.
+        if ($stored !== '' && Afm::canonicalVat($stored) === null) {
             return null;
         }
 

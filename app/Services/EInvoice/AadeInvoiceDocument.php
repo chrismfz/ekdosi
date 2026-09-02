@@ -8,6 +8,7 @@ use App\Models\InvoiceLine;
 use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\InvoiceVatBreakdown;
+use App\Support\Afm;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -650,7 +651,7 @@ class AadeInvoiceDocument
             $reason = match (true) {
                 $invoice->hasBeenFiled() => ' (the document is already filed, so its snapshot is the only source).',
                 $invoice->customer === null => ' and no customer is set.',
-                filled($invoice->customer->afm) && ! $invoice->counterpartIsTheLinkedCustomer() => ' — the '
+                filled(Afm::canonicalVat($invoice->customer->afm)) && ! $invoice->counterpartIsTheLinkedCustomer() => ' — the '
                     .'linked customer has one, but the invoice names a different party, so it cannot be borrowed.',
                 default => ' and its customer has none either.',
             };

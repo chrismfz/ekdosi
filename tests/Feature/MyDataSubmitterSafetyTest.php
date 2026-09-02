@@ -2107,6 +2107,48 @@ XML;
         $this->assertSame('GB', Afm::countryPrefix('XI123456789'));
     }
 
+    public function test_a_placeholder_vat_no_is_replaced_by_what_was_actually_filed(): void
+    {
+        // ROUND-7 P1, and a defect the round-6 fix created: the freeze gates on
+        // blank(), but «000000000» is not blank — while canonicalVat() now reads it as
+        // "no ΑΦΜ". So the payload filed the customer's real ΑΦΜ and the column kept
+        // the placeholder: a half-frozen legal identity, manufactured by MYD-009's own
+        // freeze. The PDF would print one party while AADE held another, and the row
+        // was unrecoverable (a filed invoice is not editable, credit notes copy it).
+        $this->customer->forceFill(['afm' => '997073525', 'name' => 'Πελάτης ΑΕ', 'country' => 'GR'])->save();
+
+        foreach (['000000000', '0'] as $i => $placeholder) {
+            $invoice = $this->makeInvoice(code: 900 + $i);
+            $invoice->forceFill([
+                'vat_no' => $placeholder,
+                'company_name' => null,
+                'country' => null,
+            ])->save();
+
+            $frozen = $invoice->fresh()->frozenPartyColumns();
+
+            $this->assertSame('997073525', $frozen['vat_no'] ?? null, "«{$placeholder}» must be replaced");
+        }
+    }
+
+    public function test_a_placeholder_customer_afm_is_not_reported_as_borrowable(): void
+    {
+        // ROUND-7 P2: the arm tested raw filled(), so a customer whose ΑΦΜ is itself a
+        // placeholder was described as having one to borrow.
+        $this->customer->forceFill(['afm' => '000000000', 'name' => 'Άλλος ΑΕ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => null, 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR'])->save();
+
+        try {
+            (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+            $this->fail('expected a refusal');
+        } catch (\RuntimeException $e) {
+            $this->assertStringNotContainsString('linked customer has one', $e->getMessage());
+        }
+    }
+
     private function makeInvoice(int $code = 1): Invoice
     {
         return Invoice::create([

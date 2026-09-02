@@ -529,12 +529,34 @@ class Invoice extends Model
 
         $frozen = [];
         foreach ($candidates as $column => [$resolved, $width]) {
-            if (blank($this->{$column}) && filled($resolved)) {
+            if ($this->partyColumnNeedsFreezing($column) && filled($resolved)) {
                 $frozen[$column] = mb_substr((string) $resolved, 0, $width);
             }
         }
 
         return $frozen;
+    }
+
+    /**
+     * Does this snapshot column carry nothing USABLE, so the resolved value should be
+     * written into it?
+     *
+     * `blank()` alone is not that question for `vat_no`. Once canonicalVat() started
+     * reading an all-zeros placeholder as "no ΑΦΜ", a snapshot holding «000000000»
+     * was no longer blank yet no longer an identity either — so the payload filed the
+     * customer's real ΑΦΜ while the column kept the placeholder. That is precisely the
+     * half-frozen legal identity this whole issue exists to eliminate, manufactured by
+     * its own freeze: the PDF then printed one party while AADE held another, every
+     * later render threw, and the row was unrecoverable because a filed invoice is not
+     * editable and credit notes copy the column verbatim.
+     */
+    private function partyColumnNeedsFreezing(string $column): bool
+    {
+        if ($column === 'vat_no') {
+            return Afm::canonicalVat($this->vat_no) === null;
+        }
+
+        return blank($this->{$column});
     }
 
     /**

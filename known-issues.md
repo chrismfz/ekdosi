@@ -943,6 +943,24 @@ The reason is recorded at the call site.
   default this code always used), so short real shapes (a two-digit RO id, an old IE format, a GB
   government id) are knowingly given up to keep junk out.
 
+**Round-7 review correction (P1 — created by round 6's own fix):**
+
+- **A placeholder `vat_no` was never replaced by what was actually filed.** Round 6 taught
+  `canonicalVat()` to read «000000000»/«0» as "no ΑΦΜ", but the freeze gates on `blank()` — and a
+  placeholder is not blank. So the payload filed the customer's real ΑΦΜ while the column kept
+  the placeholder: a half-frozen legal identity, manufactured by MYD-009's own freeze. The PDF
+  printed one party while AADE held another, every later render threw, and the row was
+  unrecoverable (a filed invoice is not editable and credit notes copy the column verbatim).
+  Round 6's test passed because it only asserted the resolvers, never the freeze.
+- Two P2s of the same shape: the ΑΦΜ refusal tested `filled($customer->afm)` raw, so a customer
+  whose ΑΦΜ is itself a placeholder was described as having one to borrow; and
+  `DeliveryNote::externalRecipientAfm()` recognised ONLY the exact nine-zero sentinel while the
+  normaliser recognised any all-zeros value — two strictnesses for one convention, now unified.
+
+**Deferred (recorded in `docs/BACKLOG.md`):** `PeppolInvoiceDocument` still builds the buyer from
+the live customer. Not a bug today — a tenant is either `gr-mydata` or `ee-peppol`, so no single
+document can disagree with itself — but it becomes the same defect the day PEPPOL goes live.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never

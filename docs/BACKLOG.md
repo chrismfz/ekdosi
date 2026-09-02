@@ -104,6 +104,14 @@ surfaced in the open-items sections further down.
 ---
 
 ## 🟠 myDATA / expenses completeness
+- **PEPPOL buyer = ζωντανός πελάτης, όχι snapshot (follow-up MYD-009)** — ο
+  `PeppolInvoiceDocument` χτίζει τον αγοραστή εξ ολοκλήρου από το `customer`, ενώ η ελληνική
+  διαδρομή (AADE + πάροχος) χτίζει πλέον τη νομική ταυτότητα από το **παγωμένο snapshot** του
+  τιμολογίου. Δεν είναι bug σήμερα: ένας tenant είναι είτε `gr-mydata` είτε `ee-peppol`, οπότε
+  κανένα μεμονωμένο παραστατικό δεν μπορεί να διαφωνεί με τον εαυτό του. Γίνεται όμως πραγματικό
+  θέμα **μόλις ζωντανέψει το PEPPOL** (αλλαγή στοιχείων πελάτη θα ξαναγράφει την ταυτότητα
+  περασμένου τιμολογίου). Θέλει τα ίδια helpers — `counterpartAfm()/counterpartName()/
+  counterpartCountryForFiling()` — και το `frozenPartyColumns()` στο persist του PEPPOL submitter.
 - **Στοιχεία επικοινωνίας αντισυμβαλλόμενου στο InvoSign — ζωντανά by design (follow-up MYD-009)** —
   τα νομικά πεδία (επωνυμία/ΑΦΜ/επάγγελμα/διεύθυνση) χτίζονται πλέον από το **παγωμένο snapshot**
   του τιμολογίου, αλλά τα `CounterpartTaxOffice` / `CounterpartPhone` / `CounterpartEmail`
