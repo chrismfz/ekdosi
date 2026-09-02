@@ -165,6 +165,23 @@ class DraftInvoiceEditFlowTest extends TestCase
         $this->assertSame(now()->toDateString(), $invoice->fresh()->issued_at->toDateString());
     }
 
+    public function test_set_today_is_hidden_once_filed(): void
+    {
+        // Never offer a date rewrite on a filed invoice — it is legally frozen.
+        // (The action body ALSO re-checks under a row lock, mirroring
+        // EditInvoice::beforeSave, for the genuine concurrency window where a
+        // filing commits mid-request; that race is not unit-testable in-process,
+        // same as the EditInvoice lock — CLAUDE.md notes row-lock tests are
+        // MariaDB-only. This asserts the visibility guard, the first line.)
+        $tenant = $this->tenant('gr-provider', 'sandbox');
+        $this->bootPanel($tenant);
+        $invoice = $this->draft($tenant, $this->customer($tenant), now()->subDays(10));
+        $invoice->forceFill(['mydata_state' => 'VALID', 'local_status' => 'active'])->save();
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+            ->assertActionHidden('set_issue_date_today');
+    }
+
     // ---- C: drafts findable on the customer καρτέλα -----------------------
 
     public function test_customer_ledger_lists_the_customers_drafts(): void
@@ -180,6 +197,29 @@ class DraftInvoiceEditFlowTest extends TestCase
         $this->assertCount(1, $rows);
         $this->assertSame($draft->id, $rows[0]['id']);
         $this->assertSame('TIM3', $rows[0]['invcode']);
+        // A clean draft carries an edit link.
+        $this->assertNotNull($rows[0]['edit_url']);
+    }
+
+    public function test_customer_ledger_draft_edit_link_mirrors_the_unfiled_gate(): void
+    {
+        // A draft-status row that somehow carries a MARK is NOT editable (the
+        // invoice edit gate requires mydata_state === null). It may still list —
+        // onlyUnissuedDrafts is the shared «draft» definition — but its edit link
+        // must be null rather than a link that bounces at EditInvoice::mount.
+        $tenant = $this->tenant();
+        $this->bootPanel($tenant);
+        $customer = $this->customer($tenant);
+
+        $draft = $this->draft($tenant, $customer);
+        $draft->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400013829677137'])->save();
+
+        $rows = Livewire::test(CustomerLedger::class, ['record' => $customer->id])
+            ->get('draftInvoices');
+
+        $this->assertCount(1, $rows);
+        $this->assertNull($rows[0]['edit_url']);
+        $this->assertNotNull($rows[0]['view_url']);
     }
 
     public function test_customer_ledger_drafts_exclude_issued_and_cancelled(): void

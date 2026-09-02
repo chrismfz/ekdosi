@@ -188,7 +188,7 @@ class CustomerLedger extends Page implements HasTable
      */
     private function loadDraftInvoices(): array
     {
-        $canEdit = auth()->user()?->can('update', $this->record) ?? false;
+        $user = auth()->user();
 
         $query = Invoice::query()
             ->with('invoiceType')
@@ -209,9 +209,13 @@ class CustomerLedger extends Page implements HasTable
                 'issued_at' => $invoice->issued_at?->toDateString(),
                 'gross' => (float) $invoice->gross_total,
                 'view_url' => InvoiceResource::getUrl('view', ['record' => $invoice, 'tenant' => $this->record->company]),
-                // Edit only when the operator can actually update — the button
-                // mirrors the invoice page's own gate rather than 403-ing on click.
-                'edit_url' => $canEdit
+                // Edit link mirrors EditInvoice::mount's gate EXACTLY so it never
+                // 403s/bounces: the INVOICE's own update permission (not the
+                // customer's — a distinct 'Update:Invoice' policy) AND
+                // mydata_state === null (onlyUnissuedDrafts already guarantees the
+                // local_status='draft' half). A row that is draft-status but
+                // somehow filed shows no edit link rather than a bouncing one.
+                'edit_url' => ($invoice->mydata_state === null && ($user?->can('update', $invoice) ?? false))
                     ? InvoiceResource::getUrl('edit', ['record' => $invoice, 'tenant' => $this->record->company])
                     : null,
             ])

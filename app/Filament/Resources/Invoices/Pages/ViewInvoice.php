@@ -122,22 +122,46 @@ class ViewInvoice extends ViewRecord
                     .'). Απαιτείται για online έκδοση μέσω παρόχου. Ο αύξων αριθμός (ΑΑ) δεν αλλάζει.')
                 ->modalSubmitActionLabel('Ενημέρωση')
                 ->action(function (Invoice $record) {
-                    // Guard mirrors visibility — mountAction does NOT re-check
-                    // visible(), and a filed/finalised invoice must never have its
-                    // issue date rewritten from here.
-                    if ($record->mydata_state !== null || $record->local_status !== 'draft') {
+                    // Re-check under a ROW LOCK on a fresh read, not on the
+                    // in-memory $record. mountAction does not re-run visible(), and
+                    // a concurrent MyDataSubmitter could have filed this invoice
+                    // (VALID) between page render and this click — rewriting a
+                    // filed invoice's issue date is exactly the legal-freeze write
+                    // EditInvoice::beforeSave locks against. Same lockForUpdate
+                    // pattern, so the guard holds until the UPDATE commits. Channel
+                    // is re-derived from the record's own company (the closure's
+                    // captured $isProviderChannel is a page-load snapshot).
+                    $ok = DB::transaction(function () use ($record): bool {
+                        $current = Invoice::query()
+                            ->whereKey($record->getKey())
+                            ->lockForUpdate()
+                            ->first();
+
+                        if ($current === null
+                            || $current->mydata_state !== null
+                            || $current->local_status !== 'draft'
+                            || ! (bool) $current->company?->isLiveProviderTenant()) {
+                            return false;
+                        }
+
+                        $current->update(['issued_at' => now()]);
+
+                        return true;
+                    });
+
+                    if (! $ok) {
                         Notification::make()
                             ->title('Δεν επιτρέπεται')
-                            ->body('Η ημερομηνία αλλάζει μόνο σε πρόχειρο, μη υποβληθέν παραστατικό.')
+                            ->body('Η ημερομηνία αλλάζει μόνο σε πρόχειρο, μη υποβληθέν παραστατικό παρόχου.')
                             ->danger()->send();
 
                         return;
                     }
 
-                    $record->update(['issued_at' => now()]);
                     Notification::make()
                         ->title('Ενημερώθηκε η ημερομηνία έκδοσης')
-                        ->body('Νέα ημερομηνία: '.now()->format('d/m/Y').'. Μπορείτε τώρα να το στείλετε στον πάροχο.')
+                        ->body('Νέα ημερομηνία: '.now()->setTimezone(ProviderIssueDateGuard::TZ)->format('d/m/Y')
+                            .'. Μπορείτε τώρα να το στείλετε στον πάροχο.')
                         ->success()->send();
                     $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),
