@@ -104,7 +104,7 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 
 | Bucket | Meaning | Count |
 |---|---|---:|
-| **A — BLOCKER** | Must be true before the first live document on 1 Oct | 4 + 1 rehearsal (PROV-010, OBS-001, PROV-003-print now DONE; dry-run in progress). Remaining: MYD-004, MYD-006, MYD-007, PROV-006(conditional) |
+| **A — BLOCKER** | Must be true before the first live document on 1 Oct | 4 + 1 rehearsal (PROV-010, OBS-001, PROV-003-print, MYD-006, MYD-007 now DONE; dry-run in progress). Remaining: MYD-004 (largely closed by MYD-007), PROV-006(conditional) |
 | **B — AFTER** | Real, do it after the 1 Oct cutover (incl. the whole delivery-note family, due at the digital-delivery deadline) | ~21 |
 | **C — NOT-FOR-US** | Genuinely out of these tenants' scope (island/ν.5057 VAT, multi-branch, B2G/POS, fresh-install). **Re-raise if the scope changes** | ~9 (+15 already-disarmed UPD-*) |
 | **D — STALE** | The ledger says OPEN; the code already fixes it | 2 |
@@ -249,7 +249,7 @@ Re-audit outcome:
 | MYD-003 | Confirmed | P0 | 9.1/9.2/9.3 are movement-only and must not use the monetary invoice path |
 | MYD-004 | Confirmed, expanded | P0 | Validate actual configured VAT codes and distinguish official codes 6 and 10 |
 | MYD-005 | Confirmed as enhancement | P2 | measurementUnit is optional on ordinary invoice lines, not an XSD blocker |
-| MYD-006 | Confirmed as policy gap | P1 | No universal seed exists; onboarding must select/review the business policy |
+| MYD-006 | DONE 2026-09-02 | P1 | Policy field + guidance + go-live gate + credit inheritance shipped; per-tenant selection is the remaining config step |
 | MYD-007 | New confirmed issue | P0 | EU/export exemption hints and the global 0% reason model are unsafe |
 
 ## Extended myDATA path audit — 2026-08-30
@@ -474,7 +474,7 @@ Priorities:
 | MYD-003 | P0 | DONE | — | Delivery notes | 9.x movement-only types are exposed in the monetary invoice picker |
 | MYD-004 | P0 | PARTIAL | A | VAT validation | **0%-without-reason now BLOCKS preflight** (was warning/false-green). 3%/dual-4% code-distinction half → C |
 | MYD-005 | P2 | OPEN | B | Quantity units | Ordinary invoice XML omits optional myDATA measurementUnit |
-| MYD-006 | P1 | OPEN | A | Classifications | Readiness does not require a business-specific classification policy |
+| MYD-006 | P1 | DONE | A | Classifications | **business_activity_type + ClassificationGuidance + go-live gate + credit inheritance DONE.** Per-tenant selection is the remaining config step |
 | MYD-007 | P0 | PARTIAL | A | VAT exemption | **Per-line §8.3 snapshot + guidance helper + form field + preflight block DONE** (PR for MYD-007 rest). Accountant to confirm codes; existing-tenant category cleanup via preflight |
 | MYD-008 | P0 | DONE | — | Provider credits | Correlated credit cannot find a provider-issued original MARK |
 | MYD-009 | P0 | DONE | — | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
@@ -778,7 +778,23 @@ It does, however, lose the distinction between pieces, kilos, litres and metres.
 
 ### MYD-006 — Classification defaults need a business policy
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED AS ONBOARDING/POLICY GAP 2026-08-30
+**Status:** DONE 2026-09-02 (policy field + guidance + go-live gate + credit inheritance shipped; per-tenant selection is the remaining config step) · **Priority:** P1 · **Research:** CONFIRMED AS ONBOARDING/POLICY GAP 2026-08-30
+
+> **DONE (this PR):** a per-tenant **`companies.business_activity_type`**
+> (reseller/manufacturer/services/mixed) + **`App\Support\MyData\ClassificationGuidance`**
+> encode the business→§8.6 goods-bucket policy. `AadeInvoiceDocument::resolveIncomeClass`
+> applies it where a goods line would otherwise take the merchandise default
+> (category1_1): a manufacturer files own products as category1_2; a reseller keeps
+> category1_1; services/mixed/unset are unchanged; an explicit per-product-category
+> override still wins. **Credit notes inherit the ORIGINAL document's classification**
+> (`baseClassificationFor`) instead of the credit type's generic E3_561_001/category1_3.
+> The **go-live gate** (`classificationPolicyGate`) FAILS the cutover until a policy is
+> chosen (existing tenants included — pick «Υπηρεσίες» for a services business). Picker on
+> «Ρυθμίσεις εταιρείας» (self-service) + the Company resource. Tests: reseller / manufacturer /
+> own-product override / services / correlated + non-correlated credit inheritance +
+> go-live gate. **Remaining (config, not code):** each live tenant selects its activity type
+> (the ~30-minute review MYD-006 was scoped as); the full per-LINE income-class snapshot
+> (for free-text goods credit lines whose original type is gone) → `docs/BACKLOG.md`.
 
 **Official finding**
 

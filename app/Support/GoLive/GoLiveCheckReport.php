@@ -7,7 +7,9 @@ use App\Models\Company;
 use App\Models\CompanyBackupRun;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyData\Codes;
 use App\Support\OperatorHealth\OperatorHealthReport;
 use App\Support\Settings\SystemSettings;
@@ -65,6 +67,7 @@ class GoLiveCheckReport
         $gates = [
             $this->providerGate($tenant),
             $this->invoiceTypesGate($tenant, $filesToAade),
+            $this->classificationPolicyGate($tenant, $filesToAade),
             $this->vatDefaultGate($tenant),
             $this->vatRatesGate($tenant, $filesToAade),
             $this->productionCredsGate($tenant, $isGrMyData),
@@ -148,6 +151,58 @@ class GoLiveCheckReport
 
         return $this->gate('invoice_types', 'Τύποι παραστατικών (ΑΑΔΕ)', 'pass',
             "{$filable->count()} τύπος/οι έτοιμοι για ΑΑΔΕ");
+    }
+
+    /**
+     * MYD-006: the tenant's income-classification policy must be a CONSCIOUS
+     * choice before a live filing. Goods lines file under §8.6 category1_1
+     * (εμπορεύματα) or category1_2 (δικά μας προϊόντα) depending on whether the
+     * entity resells or manufactures — there is no correct default, so an unchosen
+     * `business_activity_type` FAILS the cutover (existing tenants included: pick
+     * «Υπηρεσίες» for a services business — a 10-second review, not a code change).
+     * A `mixed` tenant PASSES the selection gate but is reminded to classify its
+     * goods per product-category (the per-category detail is guidance, not a hard
+     * block — an all-services product set legitimately needs no override).
+     *
+     * @return array{key:string,label:string,status:string,detail:string}
+     */
+    private function classificationPolicyGate(Company $tenant, bool $filesToAade): array
+    {
+        $label = 'Πολιτική κατηγοριοποίησης εσόδων';
+
+        if (! $filesToAade) {
+            return $this->gate('classification_policy', $label, 'skip', 'δεν υποβάλλει σε ΑΑΔΕ');
+        }
+
+        $type = $tenant->business_activity_type;
+        if (! ClassificationGuidance::isValid($type)) {
+            return $this->gate('classification_policy', $label, 'fail',
+                'δεν έχει επιλεγεί είδος δραστηριότητας (μεταπωλητής/παραγωγός/υπηρεσίες/μικτή) — ορίζει την '
+                .'κατηγορία εσόδων §8.6 των αγαθών (εμπορεύματα=category1_1 vs προϊόντα=category1_2)· χωρίς '
+                .'αυτό η ταξινόμηση αγαθών είναι εικασία. Όρισέ το στη «Ρυθμίσεις εταιρείας».');
+        }
+
+        // A `mixed` tenant PASSES the selection gate (the required act is done) but
+        // is reminded to classify its GOODS categories per product-category. We do
+        // NOT WARN on a count of null-override categories: a services category is
+        // legitimately null (it files category1_3 from the type), so counting all
+        // null overrides would fire on essentially every mixed tenant — noise, not
+        // signal. The reminder is in the detail; the per-category form is where the
+        // operator acts.
+        if (ClassificationGuidance::requiresPerCategoryConfig($type)) {
+            $classifiedGoods = ProductCategory::query()
+                ->where('company_id', $tenant->id)
+                ->whereIn('mydata_income_class_category', ['category1_1', 'category1_2'])
+                ->exists();
+
+            return $this->gate('classification_policy', $label, 'pass',
+                'μικτή δραστηριότητα'.($classifiedGoods ? '' : ' — θύμισε: όρισε κατηγορία εσόδων στις κατηγορίες '
+                    .'ΑΓΑΘΩΝ (Setup → Κατηγορίες προϊόντων· εμπορεύματα=category1_1, δικά μας προϊόντα=category1_2· '
+                    .'οι υπηρεσίες μένουν category1_3 από τον τύπο)'));
+        }
+
+        return $this->gate('classification_policy', $label, 'pass',
+            ClassificationGuidance::labelFor($type) ?? (string) $type);
     }
 
     /** @return array{key:string,label:string,status:string,detail:string} */
