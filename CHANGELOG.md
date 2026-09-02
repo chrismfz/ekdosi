@@ -19,6 +19,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **MCP/Βοηθός: `leads_pulse`** — «ασχολήθηκε κανείς με τα leads;» με μια κλήση: ανοιχτά / νέα /
+  ληξιπρόθεσμα / αδρανή / χωρίς επόμενο βήμα, τι έκανε **κάθε χειριστής** στην περίοδο (τηλέφωνα,
+  emails, ραντεβού, προσφορές, μετατροπές — ο αδρανής εμφανίζεται με μηδενικά), **ποιος άνοιξε** τα
+  τελευταία leads και πότε (από το ιστορικό — δεν υπάρχει στήλη created_by), και οι τελευταίες
+  κινήσεις. Πάνω στο ίδιο `SalesActivityReport` με τη σελίδα, ώστε τα νούμερα να συμφωνούν.
 - **`php artisan roles:reprovision [--tenant=] [--dry-run] [--prune] [--force]`** — συγχρονίζει τους
   ρόλους `company_admin`/`operator` ΚΑΘΕ tenant με τον κανονικό χάρτη δικαιωμάτων. Έλειπε: το
   `shield:generate` φτιάχνει τα permissions ενός νέου resource και το `shield:sync-super-admin` τα δίνει

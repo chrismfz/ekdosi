@@ -9,6 +9,7 @@ use App\Services\Assistant\Tools\AssistantTool;
 use App\Services\Assistant\Tools\CountSalesTool;
 use App\Services\Assistant\Tools\CreateReminderTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
+use App\Services\Assistant\Tools\LeadsPulseTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
 use App\Services\Assistant\Tools\RecentActivityTool;
@@ -43,6 +44,7 @@ class ToolRegistry
             new RecentInvoicesTool,
             new VatSummaryTool,
             new RecentActivityTool,
+            new LeadsPulseTool,
             new AppVersionTool,
             // Write tools — PREPARE only; the operator confirms before execution.
             new SendCustomerStatementTool,
