@@ -180,6 +180,23 @@ class SelfUpdate extends Command
             throw new \RuntimeException("Το working tree δεν είναι καθαρό — ματαίωση:\n".$dirty);
         }
 
+        // ── fetch — still UP, so a network failure costs no downtime (same
+        //    order as deploy/update.sh: fetch, then resolve, then go down) ────
+        $target = (string) $run->to_ref;
+        if ($target === '') {
+            throw new \RuntimeException('Δεν έχει οριστεί target ref (to_ref) στην ενημέρωση.');
+        }
+        $this->step($run, 'fetch', 'git fetch', function () use ($run) {
+            $this->gitFetch($run);
+        });
+
+        // Copy aside anything the checkout would replace — needs the ref FETCHED
+        // (to know what it ships) and must run BEFORE maintenance, so its
+        // abort-on-failed-backup never strands the app down with no shell.
+        $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $target) {
+            $this->protectUntracked($run, $target);
+        });
+
         // ── maintenance ON — from here on, a failure leaves the app DOWN ─────
         $this->step($run, 'maintenance', 'Maintenance mode ON', function () use ($run, $php, $artisan) {
             $this->exec($run, [$php, $artisan, 'down', '--retry=15']);
@@ -193,16 +210,8 @@ class SelfUpdate extends Command
             $run->update(['snapshot_file' => $snapshot]);
         });
 
-        // ── fetch + checkout the target ref ─────────────────────────────────
-        $target = (string) $run->to_ref;
-        if ($target === '') {
-            throw new \RuntimeException('Δεν έχει οριστεί target ref (to_ref) στην ενημέρωση.');
-        }
-        $this->step($run, 'fetch', 'git fetch', function () use ($run) {
-            $this->gitFetch($run);
-        });
+        // ── checkout the target ref ─────────────────────────────────────────
         $this->step($run, 'checkout', 'git checkout '.$target, function () use ($run, $target) {
-            $this->protectUntracked($run, $target);
             $this->exec($run, ['git', 'checkout', '--force', $target], base_path());
             $this->writeBuildStamp($run, $target);
         });
@@ -330,7 +339,6 @@ class SelfUpdate extends Command
 
         // ── check out the previous code + reinstall its deps ─────────────────
         $this->step($run, 'checkout', 'git checkout '.$target, function () use ($run, $target) {
-            $this->protectUntracked($run, $target);
             $this->exec($run, ['git', 'checkout', '--force', $target], base_path());
             $this->writeBuildStamp($run, $target);
         });
@@ -449,7 +457,6 @@ class SelfUpdate extends Command
         }
     }
 
-    /** Run a subprocess and RETURN its stdout (no streaming) — for tiny probes. */
     /**
      * `checkout --force` REPLACES an untracked file whose path the target ref
      * ships as a tracked one — usually a generated artefact, which is exactly
@@ -487,6 +494,7 @@ class SelfUpdate extends Command
         }
     }
 
+    /** Run a subprocess and RETURN its stdout (no streaming) — for tiny probes. */
     private function capture(array $cmd, ?string $cwd = null): string
     {
         $process = new Process($cmd, $cwd ?? base_path(), null, null, 60);

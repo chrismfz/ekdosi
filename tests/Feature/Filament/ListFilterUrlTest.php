@@ -117,20 +117,26 @@ class ListFilterUrlTest extends TestCase
         $other = User::create(['name' => 'Άλλος', 'email' => 'o-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
         $this->tenant->users()->attach($other);
 
-        $mine = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Δικό μου', 'assigned_user_id' => $this->user->id]);
-        $theirs = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Άλλου', 'assigned_user_id' => $other->id]);
+        // A past next step, so both leads land in the «open» AND the «overdue» tab.
+        $mine = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Δικό μου',
+            'assigned_user_id' => $this->user->id, 'next_action_at' => now()->subDay()]);
+        $theirs = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Άλλου',
+            'assigned_user_id' => $other->id, 'next_action_at' => now()->subDay()]);
 
         $page = Livewire::test(LeadsCalendar::class)->set('operator', (string) $this->user->id);
-        $url = $page->instance()->openLeadsUrl();
 
-        Livewire::withQueryParams($this->paramsOf($url))
-            ->test(ListLeads::class)
-            ->assertCanSeeTableRecords([$mine])
-            ->assertCanNotSeeTableRecords([$theirs]);
+        // BOTH banner links — the overdue one was operator-blind under an
+        // operator-filtered count.
+        foreach (['open', 'overdue'] as $tab) {
+            Livewire::withQueryParams($this->paramsOf($page->instance()->leadsListUrl($tab)))
+                ->test(ListLeads::class)
+                ->assertCanSeeTableRecords([$mine])
+                ->assertCanNotSeeTableRecords([$theirs]);
+        }
 
         // No operator selected → no filter param at all (everyone's leads).
         $page->set('operator', '');
-        $this->assertArrayNotHasKey(TableFilterUrl::KEY, $this->paramsOf($page->instance()->openLeadsUrl()));
+        $this->assertArrayNotHasKey(TableFilterUrl::KEY, $this->paramsOf($page->instance()->leadsListUrl('open')));
     }
 
     private function invoice(Customer $customer, float $gross, string $status = 'active'): Invoice

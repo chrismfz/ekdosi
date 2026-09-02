@@ -9,9 +9,10 @@
         $withoutStep = $this->withoutNextStep();
         $tenant = \Filament\Facades\Filament::getTenant();
         $editUrl = fn ($id) => \App\Filament\Resources\Leads\LeadResource::getUrl('edit', ['record' => $id, 'tenant' => $tenant]);
-        $overdueUrl = \App\Filament\Resources\Leads\LeadResource::getUrl('index', ['tab' => 'overdue', 'tenant' => $tenant]);
-        // Same operator the banner counted, so the count and the list agree.
-        $openUrl = $this->openLeadsUrl();
+        // Same operator the banners counted, so every count and the list it links
+        // to agree (both were operator-blind links under operator-filtered counts).
+        $overdueUrl = $this->leadsListUrl('overdue');
+        $openUrl = $this->leadsListUrl('open');
         $today = now()->toDateString();
         $dayNames = ['Δευ', 'Τρί', 'Τετ', 'Πέμ', 'Παρ', 'Σάβ', 'Κυρ'];
     @endphp

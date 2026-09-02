@@ -163,14 +163,15 @@ class LeadsCalendar extends Page
     }
 
     /**
-     * The «δες τα ανοιχτά στη λίστα» link next to that count — carrying the SAME
-     * operator filter, so the number and the list the operator lands on agree.
+     * A link into the leads LIST carrying the SAME operator filter this page is
+     * showing, so every count on the page and the list it links to agree (the
+     * banner counts are operator-filtered; an unfiltered link contradicted them).
      * The filter key comes from TableFilterUrl (`filters`; `tableFilters` is the
      * property name and binds to nothing).
      */
-    public function openLeadsUrl(): string
+    public function leadsListUrl(string $tab): string
     {
-        $params = ['tab' => 'open', 'tenant' => Filament::getTenant()];
+        $params = ['tab' => $tab, 'tenant' => Filament::getTenant()];
 
         $operatorId = match (true) {
             ctype_digit($this->operator) => $this->operator,
