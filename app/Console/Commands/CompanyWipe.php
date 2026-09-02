@@ -39,7 +39,7 @@ class CompanyWipe extends Command
         $execute = (bool) $this->option('execute');
 
         $plan = $wiper->plan($company, $keepParties);
-        $filed = $wiper->filedAtAadeCount($company);
+        $evidence = $wiper->legalEvidence($company);
 
         $this->line(($execute ? 'ΔΙΑΓΡΑΦΗ' : 'ΠΡΟΕΠΙΣΚΟΠΗΣΗ (dry-run)').' — «'.$company->slug.'»'
             .($keepParties ? ' (κρατά πελάτες/προμηθευτές/προϊόντα)' : ''));
@@ -52,8 +52,12 @@ class CompanyWipe extends Command
             return self::SUCCESS;
         }
 
-        if ($filed > 0) {
-            $this->warn("⚠ {$filed} παραστατικά είναι ΥΠΟΒΛΗΜΕΝΑ στην ΑΑΔΕ (VALID) — η τοπική διαγραφή ΔΕΝ τα ακυρώνει εκεί.");
+        if ($evidence->exists()) {
+            // MYD-025: name what dies. The old warning counted only VALID invoices,
+            // so a tenant whose documents were all cancelled — or that had only
+            // delivery notes — was wiped with no warning at all.
+            $this->warn('⚠ ΥΠΟΒΕΒΛΗΜΕΝΑ ΣΤΗΝ ΑΑΔΕ: '.$evidence->describe());
+            $this->warn('  Η τοπική διαγραφή ΔΕΝ τα ακυρώνει εκεί — χάνεται μόνο η τοπική απόδειξη.');
             if ($execute && ! $this->option('force')) {
                 $this->error('Διακοπή: χρειάζεται --force για διαγραφή ενώ υπάρχουν υποβλημένα στην ΑΑΔΕ.');
 
