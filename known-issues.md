@@ -901,6 +901,28 @@ The reason is recorded at the call site.
   so a legacy invoice gained a partial address at filing. Both are frozen now — and the customer
   column is `vat_vies`, not `vies_vat`, which the first cut had wrong so it always froze null.
 
+**Round-5 review corrections (no P0/P1 — the main action was REMOVING a round-4 check):**
+
+- **The coherence refusal was wrong and is gone.** Throwing when the recorded country disagrees
+  with the ΑΦΜ's prefix blocked legitimate documents — Monaco files under an FR VAT id, the Isle
+  of Man under GB, Northern Ireland under XI — and told the operator to "correct" values that
+  were already right, with no truthful way to proceed. A RECORDED country is the operator's
+  explicit statement about the party; the prefix is an inference from a free-text column. The
+  prefix stays what it should always have been: evidence for the case where nothing is recorded.
+- **The prefix matcher accepted any ISO-2 code**, so «AE997073525» — a real nine-digit ΑΦΜ with
+  two stray letters — read as the UAE and, combined with that refusal, made an ordinary domestic
+  invoice unissuable. It is now restricted to prefixes actually used in front of a VAT id (EU +
+  GB/XI/CH/NO), which also let the digit floor drop to 6 so Romania's short id (RO361902) keeps
+  its evidence.
+- **A «GR» prefix answered the question but was discarded**, falling through to a refusal that
+  demanded a country the document already implied.
+- **`vies_vat` froze truncated** (varchar(20) against `customers.vat_vies` varchar(30)) — the
+  column is widened, and the migration's docblock no longer claims that only `company_name`
+  diverged.
+- **The missing-ΑΦΜ message named the wrong remedy**: it said "its customer has none either"
+  even when the customer HAS one and the fallback is closed because the invoice names a
+  different party — telling the operator to fill a field that was already filled.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never

@@ -642,13 +642,23 @@ class AadeInvoiceDocument
         // original's snapshot had it overwritten again by today's customer row.
         $afm = $invoice->counterpartAfm();
         if ($afm === null) {
-            $hasCustomer = $invoice->customer !== null;
+            // THREE distinguishable states, and the operator needs the right one: the
+            // document is filed; there is no customer; or there IS a customer with an
+            // ΑΦΜ but it describes a different party, so the fallback is closed. The
+            // first cut reported the second message for the third state, telling the
+            // operator to fill an ΑΦΜ that was already filled.
+            $reason = match (true) {
+                $invoice->hasBeenFiled() => ' (the document is already filed, so its snapshot is the only source).',
+                $invoice->customer === null => ' and no customer is set.',
+                ! $invoice->counterpartIsTheLinkedCustomer() => ' — the linked customer has one, but the '
+                    .'invoice names a different party, so it cannot be borrowed.',
+                default => ' and its customer has none either.',
+            };
+
             throw new RuntimeException(
                 "Invoice {$invoice->invcode} (type $type) requires a counterpart ΑΦΜ, but the "
                 .'invoice carries none'
-                .($invoice->hasBeenFiled()
-                    ? ' (the document is already filed, so its snapshot is the only source).'
-                    : ($hasCustomer ? ' and its customer has none either.' : ' and no customer is set.'))
+                .$reason
                 .' Fill «ΑΦΜ» on the invoice (or the customer, before issue), or change the '
                 .'invoice type to a retail variant (11.x).'
             );

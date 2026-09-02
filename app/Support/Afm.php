@@ -10,6 +10,17 @@ namespace App\Support;
  */
 final class Afm
 {
+    /**
+     * The country prefixes that actually appear in front of a VAT identifier: the
+     * EU member states (EL for Greece), plus GB/XI, CH and NO. Deliberately NOT
+     * "any ISO-3166 code" — see countryPrefix().
+     */
+    private const VAT_PREFIXES = [
+        'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR', 'GR',
+        'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO', 'SE',
+        'SI', 'SK', 'GB', 'XI', 'CH', 'NO',
+    ];
+
     /** Digits only; '' when the input carries none. */
     public static function digits(?string $raw): string
     {
@@ -91,17 +102,24 @@ final class Afm
         // A real EU VAT id is NOT «two letters then digits»: AT is ATU12345678, CY is
         // CY12345678L, NL is NL123456789B01, IE is IE1234567FA, ES is ESX1234567X.
         // Matching only the digits-only shape let half of Europe be filed as GR.
-        //
-        // But the body must also LOOK like a VAT id, or free text in this free-text
-        // column starts making country claims: «INV-2024-01» read as India, «VAT123»
-        // as the Vatican, «LTD 12» as Lithuania — each one refusing an invoice that
-        // has nothing wrong with it. The shortest EU body is Ireland's seven digits
-        // (IE1234567FA), so seven is the floor; every junk value above falls under it.
         if ($value === null || preg_match('/^([A-Za-z]{2})([A-Za-z0-9]+)$/u', $value, $m) !== 1) {
             return null;
         }
 
-        if (preg_match_all('/\d/', $m[2]) < 7) {
+        // Only prefixes that are actually USED as VAT prefixes count. Accepting any
+        // ISO-2 code made ordinary domestic values claim a country — «AE997073525»
+        // (a real nine-digit ΑΦΜ with two stray letters) read as the UAE, «INV…» as
+        // India, «SA 1» as Saudi Arabia — and once that evidence could refuse a
+        // filing, a perfectly good domestic invoice became unissuable.
+        if (! in_array(strtoupper($m[1]), self::VAT_PREFIXES, true)) {
+            return null;
+        }
+
+        // …and the body must still look like an identifier rather than free text
+        // («LTD 12» would otherwise read as Lithuania). Six digits keeps every modern
+        // EU format; the rare short legacy ones (an old IE, a GB government id) lose
+        // their prefix evidence and fall back to the recorded country.
+        if (preg_match_all('/\d/', $m[2]) < 6) {
             return null;
         }
 

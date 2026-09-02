@@ -20,9 +20,10 @@ use Illuminate\Support\Facades\Schema;
  * Widening removes the conflict at the source; the per-column truncation in
  * Invoice::frozenPartyColumns() stays as a belt-and-braces guard.
  *
- * ONLY this column diverged — every other frozen column already matches its
- * customer counterpart exactly (address1 60, city 60, postcode 10, occupation 120).
- * Widening a varchar is an in-place, additive change.
+ * `vies_vat` diverged the same way (varchar(20) against `customers.vat_vies`
+ * varchar(30)), so it is widened too. The rest already match their customer
+ * counterparts exactly (address1 60, address2 60, city 60, postcode 10,
+ * occupation 120). Widening a varchar is an in-place, additive change.
  */
 return new class extends Migration
 {
@@ -30,6 +31,7 @@ return new class extends Migration
     {
         Schema::table('invoices', function (Blueprint $table): void {
             $table->string('company_name', 191)->nullable()->change();
+            $table->string('vies_vat', 30)->nullable()->change();
         });
     }
 
@@ -40,6 +42,7 @@ return new class extends Migration
         // the honest outcome.
         Schema::table('invoices', function (Blueprint $table): void {
             $table->string('company_name', 120)->nullable()->change();
+            $table->string('vies_vat', 20)->nullable()->change();
         });
     }
 };

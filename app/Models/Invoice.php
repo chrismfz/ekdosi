@@ -328,7 +328,9 @@ class Invoice extends Model
      */
     public function counterpartAfm(): ?string
     {
-        if ($frozen = Afm::canonicalVat($this->vat_no)) {
+        // filled(), not truthiness: a vat_no of «0» is as present as any other value,
+        // and this block otherwise spelled "empty" three different ways.
+        if (filled($frozen = Afm::canonicalVat($this->vat_no))) {
             return $frozen;
         }
 
@@ -396,22 +398,16 @@ class Invoice extends Model
     {
         $prefix = Afm::countryPrefix($this->counterpartAfm());
 
+        // A RECORDED country wins, even when the ΑΦΜ's prefix names a different one.
+        // Round 4 threw on that disagreement as a "coherence" check and it was wrong:
+        // the two legitimately differ (Monaco files under an FR VAT id, the Isle of
+        // Man under GB, Northern Ireland under XI), and the recorded country is the
+        // operator's explicit statement about the party while the prefix is an
+        // inference from a free-text column. Refusing there blocked correct documents
+        // and told the operator to "correct" a value that was already right. The
+        // prefix stays what it should always have been: evidence for the case where
+        // NOTHING is recorded, below.
         if ($iso = $this->counterpartCountryIso()) {
-            // COHERENCE (the ticket's own acceptance criterion): ΑΦΜ and country must
-            // describe ONE party. They routinely disagree in practice because both
-            // CreateInvoice and the WHMCS mapper default a blank customer country to
-            // «GR» — so a «DE811234567» customer whose country was never filled in
-            // gets a GR snapshot, and the prefix evidence never even gets consulted
-            // because a country IS recorded. That is the original MYD-009 defect
-            // wearing a different hat: a reported party assembled from two sources.
-            if ($prefix !== null && $prefix !== $iso) {
-                throw new RuntimeException(
-                    "Invoice {$this->invcode} reports country «{$iso}» but its ΑΦΜ "
-                    ."«{$this->counterpartAfm()}» is a {$prefix} VAT identifier. "
-                    .'Correct «Χώρα» or «ΑΦΜ» — the two must describe the same party.'
-                );
-            }
-
             return $iso;
         }
 
@@ -420,16 +416,19 @@ class Invoice extends Model
             return IsoCountry::normalise($this->country);
         }
 
-        // The ΑΦΜ says the party is foreign, whatever the country columns do (or
-        // don't) say. Never default that to GR.
+        // Nothing is recorded, so the ΑΦΜ is the only thing that knows. A GR prefix is
+        // positive evidence and ANSWERS the question — falling through to the refusal
+        // below discarded it and demanded a country the document already implied.
         if ($prefix !== null) {
-            if ($prefix !== 'GR') {
-                throw new RuntimeException(
-                    "Invoice {$this->invcode} records no counterpart country, but its ΑΦΜ "
-                    ."«{$this->counterpartAfm()}» is a {$prefix} VAT identifier. "
-                    .'Set «Χώρα» on the invoice — a foreign party must not be filed as GR.'
-                );
+            if ($prefix === 'GR') {
+                return 'GR';
             }
+
+            throw new RuntimeException(
+                "Invoice {$this->invcode} records no counterpart country, but its ΑΦΜ "
+                ."«{$this->counterpartAfm()}» is a {$prefix} VAT identifier. "
+                .'Set «Χώρα» on the invoice — a foreign party must not be filed as GR.'
+            );
         }
 
         // A country exists on the linked customer that this document may not use.
@@ -517,7 +516,7 @@ class Invoice extends Model
             'city' => [$live?->city, 60],
             'postcode' => [$live?->postcode, 10],
             'occupation' => [$live?->occupation, 120],
-            'vies_vat' => [$live?->vat_vies, 20],
+            'vies_vat' => [$live?->vat_vies, 30],
         ];
 
         $frozen = [];

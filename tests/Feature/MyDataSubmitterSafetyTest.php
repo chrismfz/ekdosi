@@ -1994,25 +1994,60 @@ XML;
         $this->assertSame('IE', Afm::countryPrefix('IE1234567FA'));
     }
 
-    public function test_a_country_that_contradicts_the_vat_prefix_is_refused(): void
+    public function test_a_recorded_country_wins_over_a_disagreeing_vat_prefix(): void
     {
-        // ROUND-4 P2, and the ticket's own acceptance criterion: ΑΦΜ and country must
-        // describe ONE party. Both CreateInvoice and the WHMCS mapper default a blank
-        // customer country to «GR», so a German customer whose country was never
-        // filled in gets a GR snapshot — and because a country IS recorded, the
-        // prefix evidence was never consulted. A mixed party again, in a new hat.
+        // Round 4 threw on this disagreement as a "coherence" check; round 5 removed
+        // it, because the two legitimately differ — Monaco files under an FR VAT id,
+        // the Isle of Man under GB, Northern Ireland under XI — and the recorded
+        // country is the operator's explicit statement while the prefix is an
+        // inference from a free-text column. Refusing blocked correct documents and
+        // told the operator to fix a value that was already right.
+        // MC is a third country, so the document must be a 1.3 and carry the foreign
+        // counterpart's name + address that AADE requires.
+        $this->invoiceType->forceFill(['mydata_type' => '1.3'])->save();
+
         $invoice = $this->makeInvoice();
         $this->standardLine($invoice);
         $invoice->forceFill([
-            'vat_no' => 'DE811234567',
-            'company_name' => 'Lieferant GmbH',
-            'country' => 'GR',
+            'vat_no' => 'FR12345678901',
+            'company_name' => 'Monaco SARL',
+            'country' => 'MC',
+            'address1' => 'Rue Grimaldi 1', 'city' => 'Monaco', 'postcode' => '98000',
         ])->save();
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/is a DE VAT identifier/');
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
 
-        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+        $this->assertStringContainsString('<country>MC</country>', $xml);
+        $this->assertStringContainsString('Monaco SARL', $xml);
+    }
+
+    public function test_a_greek_vat_prefix_answers_the_country_question(): void
+    {
+        // With nothing recorded, a GR/EL prefix IS the answer. Falling through to the
+        // refusal discarded positive evidence the document already carried.
+        $this->customer->forceFill(['country' => null, 'name' => 'Άλλος ΑΕ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => 'EL12345678',      // not 9 digits, so the prefix survives
+            'company_name' => 'Πελάτης ΑΕ',
+            'country' => null,
+        ])->save();
+
+        $this->assertSame('GR', $invoice->fresh()->counterpartCountryForFiling());
+    }
+
+    public function test_a_domestic_afm_with_stray_letters_is_not_a_country_claim(): void
+    {
+        // «AE997073525» is a real nine-digit ΑΦΜ with two stray letters. Accepting any
+        // ISO-2 code as a VAT prefix read it as the UAE; only prefixes actually used
+        // in front of a VAT id count.
+        foreach (['AE997073525', 'SA997073525', 'MO997073525', 'INV20240001'] as $value) {
+            $this->assertNull(Afm::countryPrefix($value), "«{$value}» must not claim a country");
+        }
+
+        $this->assertSame('RO', Afm::countryPrefix('RO361902'));
     }
 
     public function test_a_punctuation_only_afm_does_not_pass_two_parties_as_one(): void
