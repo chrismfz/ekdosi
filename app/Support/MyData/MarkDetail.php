@@ -72,7 +72,9 @@ final class MarkDetail
             'uid' => null,
             'invoiceType' => $type,
             'invoiceTypeLabel' => $type !== null ? (Codes::INVOICE_TYPES[$type] ?? null) : null,
-            'series' => $invoice->invoiceType?->code,
+            // MYD-018: as FILED, not as the lookup reads today — same rule as the
+            // counterpart snapshot columns below.
+            'series' => $invoice->filedSeries(),
             'aa' => $invoice->code,
             'invcode' => $invoice->invcode,
             // ISO for machine use + a human form for the header.

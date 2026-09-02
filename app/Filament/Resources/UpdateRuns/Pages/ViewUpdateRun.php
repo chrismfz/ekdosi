@@ -28,7 +28,9 @@ class ViewUpdateRun extends ViewRecord
                 ->label('Επαναφορά')
                 ->icon('heroicon-o-arrow-uturn-left')
                 ->color('danger')
-                ->visible(fn (): bool => $this->record instanceof UpdateRun && $this->record->canRollback())
+                ->visible(fn (): bool => UpdateRun::inAppApplyEnabled()
+                    && $this->record instanceof UpdateRun
+                    && $this->record->canRollback())
                 ->requiresConfirmation()
                 ->modalHeading('Επαναφορά στην προηγούμενη έκδοση')
                 ->modalDescription(fn (): string => sprintf(
@@ -45,9 +47,19 @@ class ViewUpdateRun extends ViewRecord
         /** @var UpdateRun $original */
         $original = $this->record;
 
-        if (! $original->canRollback()) {
+        // Hard guard as well as ->visible(): mountAction does not re-check
+        // visibility (CLAUDE.md). The arming flag is a SEPARATE term on purpose —
+        // canRollback() answers whether the run is structurally reversible, which
+        // arming does not change — so it must be tested here explicitly. Even if
+        // it were missed, SelfUpdate refuses the queued rollback; the host path is
+        // deploy/rollback.sh.
+        if (! UpdateRun::inAppApplyEnabled() || ! $original->canRollback()) {
             Notification::make()
                 ->title('Δεν είναι δυνατή η επαναφορά αυτής της ενημέρωσης')
+                ->body(UpdateRun::inAppApplyEnabled()
+                    ? null
+                    : 'Η εφαρμογή ενημερώσεων μέσα από το panel είναι απενεργοποιημένη. '
+                      .'Η επαναφορά γίνεται από τον server με deploy/rollback.sh.')
                 ->warning()
                 ->send();
 

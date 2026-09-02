@@ -7,6 +7,7 @@ use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\TracksActivity;
 use App\Support\Afm;
+use App\Support\DocumentSeries;
 use App\Support\IsoCountry;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -59,6 +60,7 @@ class DeliveryNote extends Model
         'company_id',
         'legacy_id',
         'invcode',
+        'series',
         'code',
         'delivery_type_id',
         'customer_id',
@@ -270,6 +272,52 @@ class DeliveryNote extends Model
             'printed' => 'boolean',
             'mydata_sent' => 'boolean',
         ];
+    }
+
+    /**
+     * Freeze the FILED series on create (MYD-018 / MYD-024).
+     *
+     * Deliberately ONE choke point rather than a line in each of the eight
+     * creators (the Filament pages, the four Actions, the WHMCS filer/splitter,
+     * the delivery page and the sandbox command). A creator that forgot it would
+     * leave the document reading the live, editable `invoice_types.code` again — the
+     * exact defect this closes — and nothing would notice until a rename.
+     *
+     * Derived from `invcode`, not from the type relation: `invcode` is already
+     * frozen and IS `series . code`, so this records what the document actually
+     * claims to be, and the ETL's imported legacy rows get their true historical
+     * series for free. A shape the helper cannot read leaves the column null,
+     * and the readers fall back to the live type code — i.e. today's behaviour.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $model): void {
+            if (blank($model->series)) {
+                $model->series = DocumentSeries::fromInvcode($model->invcode, $model->code);
+            }
+        });
+    }
+
+    /**
+     * The series this document is FILED under — the frozen value, falling back to
+     * the live type code only for rows numbered before it was frozen.
+     *
+     * Every reader (the AADE header, the provider payload, the in-doubt recovery
+     * search) must go through here: reading `deliveryType->code` directly is what let a
+     * lookup rename change an already-numbered document, and made recovery look
+     * for a (series, ΑΑ) that AADE had never seen.
+     */
+    public function filedSeries(): ?string
+    {
+        // filled(), NOT `?:` — '0' is a legitimate series in a numeric scheme and
+        // is falsy, so `?:` would silently discard the FROZEN value and fall back
+        // to the live lookup: the exact bug this method exists to close.
+        $series = filled($this->series) ? $this->series : $this->deliveryType?->code;
+
+        // Normalise a blank type code to null so the readers' own fail-closed
+        // guards fire, rather than filing a document under an empty series that
+        // could never be matched back — at AADE or by the in-doubt recovery.
+        return blank($series) ? null : (string) $series;
     }
 
     public function company(): BelongsTo

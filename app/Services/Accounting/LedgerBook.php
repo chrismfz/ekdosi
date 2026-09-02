@@ -95,8 +95,10 @@ class LedgerBook
             return new LedgerRow(
                 book: 'income',
                 date: $inv->issued_at,
-                docType: $inv->invoiceType?->code ?? '',
-                doc: $inv->invcode ?: (($inv->invoiceType?->code ?? '').$inv->code),
+                // MYD-018: the FROZEN series — a historical book must not be
+                // rewritten by renaming a lookup.
+                docType: $inv->filedSeries() ?? '',
+                doc: $inv->invcode ?: (($inv->filedSeries() ?? '').$inv->code),
                 counterparty: $inv->customer?->name,
                 afm: $inv->customer?->afm,
                 categoryCode: $code,

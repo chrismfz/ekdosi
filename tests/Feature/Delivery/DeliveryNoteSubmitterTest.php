@@ -196,6 +196,23 @@ class DeliveryNoteSubmitterTest extends TestCase
         return (string) $aade->getCounterpart()->getCountry();
     }
 
+    public function test_the_delivery_payload_uses_the_frozen_series_after_a_rename(): void
+    {
+        // MYD-018: the series was read live from the delivery type, so renaming it
+        // rewrote what an already-numbered ΔΑ claimed to be — including notes AADE
+        // already holds under the original series.
+        $note = $this->makeNote();
+        $this->assertSame('DA', $note->series, 'series frozen at create');
+
+        $this->deliveryType->update(['code' => 'DANEW']);
+
+        $header = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note->fresh())
+            ->getInvoiceHeader();
+
+        $this->assertSame('DA', $header->getSeries());
+    }
+
     public function test_supplier_or_manual_foreign_recipient_keeps_its_country(): void
     {
         // THE BUG: a supplier/manual recipient leaves customer_id null, and the old

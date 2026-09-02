@@ -8,6 +8,8 @@ use App\Services\Etl\BackupNoteSync;
 use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
+use App\Support\DocumentSeries;
+use App\Support\FiledSeriesBackfill;
 use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -166,6 +168,11 @@ class MigrateFromFirebird extends Command
             $this->copyReturnExtras();
             $this->copyPayments();
             $this->copyMarks();
+            // AFTER copyMarks(): the legacy MARK table carries the REQUEST XML the
+            // legacy app submitted, which is the authoritative series — but it only
+            // exists locally once the marks are imported, so this cannot run inside
+            // copyInvoices().
+            $this->upgradeSeriesFromFiledMarks();
 
             // --- config / whmcs bridge ---
             $this->copyConfParams();
@@ -880,7 +887,22 @@ class MigrateFromFirebird extends Command
                     'local_status' => $localStatus,
                     'updated_at' => now(),
                 ],
-                ['created_at' => $issuedAt ?? now()],
+                [
+                    'created_at' => $issuedAt ?? now(),
+                    // MYD-018: freeze the series the legacy document was ISSUED
+                    // under. This is a query-builder upsert, so the model's
+                    // creating hook never fires — derive it from the same helper
+                    // so an imported row and an app-created one can't disagree.
+                    //
+                    // INSERT-ONLY, deliberately. On a re-run the migration's value
+                    // is already there and may have come from a better source (the
+                    // request XML of the MARK we actually filed), so refreshing it
+                    // from `invcode` every run would either downgrade it or — when
+                    // fromInvcode() cannot parse the pair — write NULL and un-freeze
+                    // the row. The series never changes for a given document, so
+                    // there is nothing legitimate to refresh.
+                    'series' => DocumentSeries::fromInvcode($this->fld($r, 'INVCODE'), $r['CODE'] ?? 0),
+                ],
             );
             $this->map['invoices'][(int) $r['INVOICE_ID']] = $id;
             // Defensive `?? null` for older `.fbk` snapshots that
@@ -993,6 +1015,34 @@ class MigrateFromFirebird extends Command
                 ],
                 ['created_at' => now()],
             );
+        }
+    }
+
+    /**
+     * MYD-018: upgrade each imported invoice's frozen series to what it was
+     * ACTUALLY FILED as, now that the legacy MARK rows (and their REQUEST XML)
+     * are local.
+     *
+     * copyInvoices() freezes the series from `invcode`, which is right for a
+     * legacy row — the trigger built INVCODE as `INVTYPE_ID || INVCOUNT`, and
+     * INVTYPE_ID is the legacy PK, so a rename between numbering and filing is
+     * not really reachable there. But the claim the migration makes must hold
+     * here too: a stored value and a recovered one cannot disagree. Shared
+     * definition, so the two can never drift apart.
+     */
+    private function upgradeSeriesFromFiledMarks(): void
+    {
+        $corrected = FiledSeriesBackfill::apply(
+            'invoices',
+            $this->companyId,
+            // Legacy-imported rows ONLY. The ETL's locked contract is that a
+            // Filament-created row (legacy_id null) is never touched — the
+            // migration's own unscoped pass already covers those.
+            fn ($query) => $query->whereNotNull('invoices.legacy_id'),
+        );
+
+        if ($corrected > 0) {
+            $this->line("  series -> corrected from the filed MARK XML on {$corrected} invoice(s)");
         }
     }
 

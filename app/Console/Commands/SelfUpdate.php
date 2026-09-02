@@ -67,6 +67,42 @@ class SelfUpdate extends Command
             return self::SUCCESS;
         }
 
+        // UPD-001…015 (triage 2026-09-02): applying code from inside the app is
+        // OFF by default. FAIL the row rather than skipping it — the scheduler runs
+        // this every minute while anything is queued, so a silent skip would spin
+        // forever and the operator would never learn why nothing happened.
+        if (! UpdateRun::inAppApplyEnabled()) {
+            // The host command differs by KIND. Telling an operator to run
+            // deploy/update.sh for a queued ROLLBACK would check out the old code
+            // WITHOUT restoring the pre-update DB snapshot — a worse state than the
+            // one they were trying to leave.
+            $command = $run->isRollback()
+                ? 'deploy/rollback.sh'
+                : 'deploy/update.sh '.($run->to_ref ?: '<tag>');
+
+            $message = 'Η εφαρμογή ενημερώσεων μέσα από το panel είναι απενεργοποιημένη '
+                .'(ekdosi.updates.allow_in_app_apply = false). Κάνε την ενέργεια από τον '
+                .'server: '.$command;
+
+            $run->update([
+                'status' => UpdateRun::STATUS_FAILED,
+                'finished_at' => now(),
+                'phase' => 'disabled',
+                'error_message' => $message,
+                'output' => trim((string) $run->output."\n".$message)."\n",
+            ]);
+
+            $this->warn($message);
+
+            // SUCCESS, not FAILURE: the RUN failed (recorded on the row above), but
+            // the scheduled TASK did exactly what it should. $trackSchedule's
+            // onFailure would otherwise stamp `self_update => failed` in the health
+            // record, and since the task never runs again once nothing is queued,
+            // ops:health would report «Απέτυχε προγραμματισμένη εργασία: self-update»
+            // and exit 1 forever over a correct, intentional state.
+            return self::SUCCESS;
+        }
+
         $this->buffer = (string) $run->output;
         $run->update([
             'status' => UpdateRun::STATUS_RUNNING,

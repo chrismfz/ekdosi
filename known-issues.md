@@ -272,7 +272,7 @@ Priorities:
 | MYD-007 | P0 | OPEN | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
 | MYD-008 | P0 | DONE | Provider credits | Correlated credit cannot find a provider-issued original MARK |
 | MYD-009 | P0 | DONE | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
-| MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
+| MYD-010 | P2 | WATCH | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | DONE | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
@@ -280,13 +280,13 @@ Priorities:
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | DONE | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | DONE | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
-| MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
+| MYD-018 | P0 | DONE | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
 | MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
 | MYD-022 | P0 | OPEN | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
-| MYD-024 | P0 | OPEN | Issuer identity | Historical filings and PDFs use mutable current company identity |
+| MYD-024 | P2 | PARTIAL | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
 | MYD-025 | P0 | OPEN | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
 | MYD-026 | P1 | OPEN | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state |
 | PROV-001 | P0 | OPEN | Provider idempotency | Ambiguous invoice response is not durably blocked/recovered before re-send |
@@ -319,21 +319,21 @@ Priorities:
 | OPS-003 | P2 | OPEN | Shared hosting | No cPanel/shared-hosting queue recipe or direct completion link |
 | TEST-001 | P2 | OPEN | Tests/CI | No full web installer success-path test; inspected CI was not green |
 | DEP-001 | P2 | WATCH | Dependency | firebed/aade-mydata is current; watch AADE v2.0.2 |
-| UPD-001 | P0 | OPEN | Queue safety | PHP update/rollback does not drain an in-flight worker |
-| UPD-002 | P0 | OPEN | Failure recovery | Partial apply failure lifts maintenance and can serve inconsistent code |
-| UPD-003 | P0 | OPEN | Update integrity | UI queues a mutable tag, not a verified immutable commit SHA |
-| UPD-004 | P0 | OPEN | Rollback readiness | Apply can start without a known current ref or proven rollback path |
-| UPD-005 | P1 | OPEN | Maintenance mode | Live UI and opcache self-hit are blocked while the app is down |
-| UPD-006 | P1 | OPEN | Crash recovery | A killed process can leave a permanent running row and maintenance state |
-| UPD-007 | P1 | OPEN | Health result | Critical health/advisory failures still end as succeeded |
-| UPD-008 | P1 | OPEN | Snapshot retention | PHP update/rollback snapshots are never pruned by --keep=10 |
-| UPD-009 | P1 | OPEN | Preflight | Button does not prove cron, binaries, space, permissions or clean target |
-| UPD-010 | P1 | OPEN | Script strategy | Bash deploy script is invoked through sh |
-| UPD-011 | P1 | OPEN | Tests | Apply, migration, failure and rollback paths are not executed in tests |
-| UPD-012 | P1 | OPEN | Safety controls | “Read-only” update setting also arms one-click apply |
-| UPD-013 | P2 | OPEN | Credentials | Git token remains in the updater process environment after fetch |
-| UPD-014 | P2 | OPEN | Discovery | Future GitHub Releases can mask newer tag-only releases |
-| UPD-015 | P2 | OPEN | Concurrency | Single-flight is UI/scheduler based, not an atomic command-level lock |
+| UPD-001 | P2 | DISARMED | Queue safety | PHP update/rollback does not drain an in-flight worker |
+| UPD-002 | P2 | DISARMED | Failure recovery | Partial apply failure lifts maintenance and can serve inconsistent code |
+| UPD-003 | P2 | DISARMED | Update integrity | UI queues a mutable tag, not a verified immutable commit SHA |
+| UPD-004 | P2 | DISARMED | Rollback readiness | Apply can start without a known current ref or proven rollback path |
+| UPD-005 | P2 | DISARMED | Maintenance mode | Live UI and opcache self-hit are blocked while the app is down |
+| UPD-006 | P2 | DISARMED | Crash recovery | A killed process can leave a permanent running row and maintenance state |
+| UPD-007 | P2 | DISARMED | Health result | Critical health/advisory failures still end as succeeded |
+| UPD-008 | P2 | DISARMED | Snapshot retention | PHP update/rollback snapshots are never pruned by --keep=10 |
+| UPD-009 | P2 | DISARMED | Preflight | Button does not prove cron, binaries, space, permissions or clean target |
+| UPD-010 | P2 | DISARMED | Script strategy | Bash deploy script is invoked through sh |
+| UPD-011 | P2 | DISARMED | Tests | Apply, migration, failure and rollback paths are not executed in tests |
+| UPD-012 | P2 | DISARMED | Safety controls | “Read-only” update setting also arms one-click apply |
+| UPD-013 | P2 | DISARMED | Credentials | Git token remains in the updater process environment after fetch |
+| UPD-014 | P2 | DISARMED | Discovery | Future GitHub Releases can mask newer tag-only releases |
+| UPD-015 | P2 | DISARMED | Concurrency | Single-flight is UI/scheduler based, not an atomic command-level lock |
 
 ## Detailed issues
 
@@ -1006,7 +1006,26 @@ overwrites.
 
 ### MYD-010 — All filings hard-code branch 0
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** WATCH 2026-09-02 (was OPEN/P0) · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
+
+**Downgrade (triage 2026-09-02):** the finding is factually right and the code is
+**currently correct**. AADE's own rule is that branch `0` is right when the issuing
+establishment is the registered head office — and there is no branch concept anywhere in
+this system to contradict it: no `Branch` model, no branch column on `companies`, no branch
+field on any document or customer, and all three tenants are head-office-only. So `0` is
+not a hard-coded guess here, it is the accurate value for every document we can currently
+issue, and «freeze the issuing establishment per document» would be freezing a field that
+does not exist yet.
+
+Building the branch model now would be speculative: it needs a real multi-establishment
+tenant to define what a branch IS (its own numbering? its own myDATA credentials? its own
+address on the PDF?), and getting that wrong is worse than the current honest constant.
+
+**Re-open when** a tenant actually registers a branch at ΑΑΔΕ — that is the trigger, and it
+is visible: the go-live check and `mydata:preflight` are the natural places to surface it.
+Until then this is WATCH, not OPEN: nothing is being filed incorrectly today.
+`DeliveryNote.startShippingBranch`/`completeShippingBranch` remain unrelated (they describe
+loading/delivery locations, not the PartyType branch).
 
 **Official finding**
 
@@ -1620,7 +1639,49 @@ different from AADE. This is a false readiness/audit result.
 
 ### MYD-018 — Numbered filings still depend on mutable InvoiceType configuration
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-02 (series) · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** the **series** — the half of this finding that could cause a DOUBLE FILING — is now
+frozen per document (`invoices.series`, `delivery_notes.series`). Everything that identifies a
+document to AADE now reads `Invoice::filedSeries()` / `DeliveryNote::filedSeries()` instead of
+the live `invoice_types.code`: the payload header (`AadeInvoiceDocument`, `DeliveryNoteSubmitter`),
+the **in-doubt recovery** (`MyDataSubmitter::adoptExistingMarkIfPresent`), the provider status
+lookup (`InvoSignTransport::status`), the reconciler snapshot (`SalesReconciler`), the MARK detail
+audit view and the accounting ledger.
+
+The recovery path was the real P0: it searched AADE for the CURRENT `invoiceType->code`, so a
+series rename after an ambiguous POST made it look for a (series, ΑΑ) AADE had never seen. Finding
+nothing, it concluded the earlier POST was lost and filed the document a **second time** — and
+AADE does not dedup (proven on the sandbox 2026-07-07: the same invoiceUid yielded two MARKs).
+`MyDataSubmitInDoubtTest::test_recovery_searches_the_series_the_document_was_filed_under` pins it;
+reverting the one-line fix makes that test attempt exactly that second POST.
+
+Existing rows did not have to be guessed. For a document already FILED, the request XML stored on
+its issue MARK is authoritative — literally what we sent. Everything else falls back to `invcode`,
+which is itself frozen and is exactly `series . code` (legacy `GET_INV_CODE` concatenates with no
+padding or separator; `InvoiceNumberer` reproduces that). The two disagree in one real case, which
+is why the MARK is consulted first: a draft numbered under «ΤΠΥ», the type renamed to «ΤΠΥ2», and
+only then filed — AADE holds ΤΠΥ2 while `invcode` still says ΤΠΥ, so freezing the invcode value
+there would turn a row the reconciler currently MATCHES into a permanent conflict, this fix causing
+the very problem it exists to prevent. Only issue marks (INSERT / PROVIDER_INSERT) that carry a
+real MARK are read (a CANCEL row's `request` is a free-text reason, a dry-run or rejection was never
+accepted), oldest first so a re-file cannot rewrite an identity. `App\Support\DocumentSeries` +
+`App\Support\FiledSeriesBackfill` are the ONE definition, shared by the migration backfill, both
+models' `creating` hooks, the Firebird ETL and the Epsilon importer (both query-builder writers, so
+no model hook fires there) — a stored value and a recovered one cannot disagree. The ETL runs the
+filed-XML pass AFTER `copyMarks()`, since the legacy `MARK.REQUEST` XML is not local until then. A pair it cannot
+read stays null and falls back to the live type code, i.e. exactly today's behaviour, so no row is
+made worse. Two traps found while building it: cutting `invcode` with a BYTE offset while counting
+CHARACTERS sliced «ΤΠΥ» in half (the series is routinely Greek), and reading the frozen column with
+`?:` would have discarded a legitimate `'0'` series and silently fallen back to the live lookup.
+
+**Deliberately NOT frozen here (deferred, see `docs/BACKLOG.md`):** myDATA type, per-line
+income classification, the quantity flag, payment-method mapping and the VAT/exemption code.
+Those change a payload's *content*, not its *identity* — they cannot cause a duplicate filing or a
+missed recovery, they are deliberate configuration acts, and `mydata:preflight` already audits them.
+Freezing `mydata_type` in particular is not a one-liner: `SalesReconciler` documents a load-bearing
+fallback keyed on it being null for ETL-imported rows, so writing it earlier would need that path
+reworked in the same change. Kept out to keep this fix minimal and reversible.
 
 **Official finding**
 
@@ -1893,7 +1954,39 @@ adoption and external cancellation sync for invoices and delivery notes.
 
 ### MYD-024 — Issuer and filing identity are not frozen per document
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** PARTIAL 2026-09-02 (series DONE; remainder P2) · **Priority:** P0 → P2 · **Research:** CONFIRMED 2026-08-31
+
+**Triage 2026-09-02 — the finding overstates the invoice case.** The AADE issuer block on an
+invoice is **only** `vatNumber` + `country` + `branch` (`[219]`/`[220]` actively FORBID name and
+address for a GR party — that is why `AadeInvoiceDocument` does not send them). So changing a
+company's legal name, commercial name, address, ΔΟΥ or ΚΑΔ **cannot** rewrite a filed invoice's
+payload: those fields are not in it. The finding's «rewrite historical XML» risk applies to the
+9.x **delivery note** (which does carry issuer name+address) and to regenerated **PDFs**, not to
+monetary filings.
+
+Of the fields the finding lists, the one that was genuinely filing identity is the **series** —
+and it was the dangerous one, because the in-doubt recovery searched by it. **That is now frozen
+per document (see MYD-018), which closes the duplicate-filing half of this item.**
+
+**ΑΦΜ and ΓΕΜΗ: a warning, not a snapshot.** The ΑΦΜ is both the issuer identity and the
+myDATA/provider **credential** identity — change it and nothing authenticates, every existing MARK
+belongs to a different legal entity, and the correct operation is «new company», not «edit». A
+snapshot column would not help: it would let the two diverge silently. The company form now shows
+an advisory on `afm` and `gemi` once anything has been filed under the current value
+(`Company::filedDocumentCount()`, `CompanyForm::identityChangeWarning()`), stating how many
+documents are already filed and that a change normally means a new company. Deliberately NOT a
+block — fixing a typo before the first filing is legitimate.
+
+**Deferred to P2 (`docs/BACKLOG.md`):** freezing issuer **name + address** on 9.x delivery notes
+and on regenerated PDFs. Real but bounded: it changes a *representation* of a past document, not
+its filed identity, the remote record is unaffected, and no tenant has moved premises yet.
+
+**Acceptance (revised)**
+
+- Editing an InvoiceType cannot change an existing numbered document's XML or its in-doubt
+  lookup coordinates. ✅ (MYD-018)
+- Editing ΑΦΜ/ΓΕΜΗ on a company with filed documents warns the operator with the count. ✅
+- Delivery-note issuer address and regenerated PDFs still read the live Company. ⏳ P2.
 
 **Repository evidence**
 
@@ -2913,9 +3006,34 @@ one-click `php` strategy is not yet safe to call production-ready for a
 multi-tenant money application with active workers. Do not rely on the UI apply
 path until UPD-001–UPD-004 are closed.
 
+**Resolution (triage 2026-09-02): the audit's own advice, enforced in code.** The
+verdict above said «do not rely on the UI apply path» — so it is now **OFF by
+default** (`ekdosi.updates.allow_in_app_apply`, env `EKDOSI_UPDATE_IN_APP_APPLY`),
+and the supported upgrade is `deploy/update.sh <tag>` on the host, with
+`deploy/rollback.sh` behind it (`docs/updates-runbook.md`).
+
+The **CHECK stays on** — it is read-only, genuinely useful, and «Υγεία συστήματος»
+now prints the exact command to run (`deploy/update.sh vX.Y.Z`) instead of leaving
+the operator hunting for a button that is deliberately not there.
+
+`UpdateRun::inAppApplyEnabled()` is the ONE definition. It hides the «Εγκατάσταση
+ενημέρωσης» button and the «Επαναφορά» action, but the guarantee is not a hidden
+button: **`ekdosi:self-update` refuses any queued run** — update or rollback,
+scheduler or `--run=` — and FAILS the row with the command to use instead, rather
+than skipping it (the scheduler fires every minute while something is queued, so a
+silent skip would spin forever and never explain itself). Covered by
+`tests/Feature/Updates/InAppApplyDisarmedTest.php`.
+
+**This disarms the machinery, it does not delete it.** UPD-001…015 below stay
+**accurate** — they describe real defects in code that still exists and that a
+deploy can re-arm with one env var. Their PRIORITY drops to P2 because nothing
+reaches them in the shipped configuration: they are a **precondition for turning
+the flag back on**, not a cutover blocker. Fix UPD-001…004 before anyone sets
+`EKDOSI_UPDATE_IN_APP_APPLY=true`.
+
 ### UPD-001 — PHP update and rollback do not quiesce the queue
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -2954,7 +3072,7 @@ locally committed data or an AADE-related state written after the snapshot.
 
 ### UPD-002 — Failure after partial apply fails open
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -2993,7 +3111,7 @@ health-verified.
 
 ### UPD-003 — Update target is not locked to an immutable SHA
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -3023,7 +3141,7 @@ also has no downgrade/ancestry guard equivalent to `deploy/update.sh`.
 
 ### UPD-004 — Apply is offered without proven rollback readiness
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -3049,7 +3167,7 @@ can prove that the scheduler will pick it up and a snapshot can be created.
 
 ### UPD-005 — Maintenance mode blocks both live progress and opcache flush
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 **Evidence**
 
@@ -3074,7 +3192,7 @@ can prove that the scheduler will pick it up and a snapshot can be created.
 
 ### UPD-006 — No recovery for a stale running update
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 A power loss, killed cron process or timeout after status becomes `running`
 leaves the row active forever. `hasActive()` then blocks new update and rollback
@@ -3087,7 +3205,7 @@ last completed durable phase.
 
 ### UPD-007 — Critical post-update health can still be green in history
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The PHP strategy runs `ops:health` with `allowFailure=true`; Shield generation,
 role sync and opcache are also advisory. The shell script logs a critical health
@@ -3100,7 +3218,7 @@ heartbeat and required permissions are verified.
 
 ### UPD-008 — In-app snapshots bypass the retention policy
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The PHP strategy creates `update-*.sql.gz` and rollback creates
 `rollback-*.sql.gz`, while [`DbSnapshot::prune()`](app/Console/Commands/DbSnapshot.php)
@@ -3114,7 +3232,7 @@ update/rollback snapshots.
 
 ### UPD-009 — Preflight exists in the design, not in the UI
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The action only checks that update checking is enabled, a repo exists, a newer
 version was cached and no active row exists. Failures such as no cron, dirty tree,
@@ -3127,7 +3245,7 @@ snapshot probe, worker-drain capability and scheduler freshness.
 
 ### UPD-010 — Script strategy invokes a Bash script with `sh`
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 [`SelfUpdate::runScript()`](app/Console/Commands/SelfUpdate.php) executes
 `['sh', deploy/update.sh, target]`, but the script uses Bash-only syntax
@@ -3139,7 +3257,7 @@ a discovered `bash` binary. Add a portability test.
 
 ### UPD-011 — Tests do not execute the updater lifecycle
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 [`SelfUpdateCommandTest`](tests/Feature/Updates/SelfUpdateCommandTest.php) covers
 only “nothing queued” and “row not queued”. No test executes checkout, snapshot,
@@ -3153,7 +3271,7 @@ Composer failure, migration failure, crash recovery and full rollback.
 
 ### UPD-012 — A read-only setting implicitly arms code deployment
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The setting/help text in [`GeneralSettings`](app/Filament/Pages/GeneralSettings.php),
 [`SystemHealth`](app/Filament/Pages/SystemHealth.php), the Blade view,
@@ -3168,7 +3286,7 @@ behavior and show the active strategy.
 
 ### UPD-013 — Git token remains in the process environment
 
-**Status:** OPEN · **Priority:** P2
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P2 → P2
 
 The temporary askpass file is removed and output is redacted correctly, but
 `makeAskpass()` calls `putenv('EKDOSI_GIT_TOKEN=...')` and never unsets it.
@@ -3179,7 +3297,7 @@ block. Add a test proving later subprocess environments do not contain it.
 
 ### UPD-014 — A formal GitHub Release can hide newer tag-only releases
 
-**Status:** OPEN · **Priority:** P2
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P2 → P2
 
 The checker uses `releases/latest` whenever any Release exists and only falls
 back to tags on 404. The documented release flow pushes tags but does not create
@@ -3192,7 +3310,7 @@ release process so every production tag always creates a GitHub Release.
 
 ### UPD-015 — Single-flight is not atomic at the command boundary
 
-**Status:** OPEN · **Priority:** P2
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P2 → P2
 
 The UI performs `hasActive()` followed by `create()` without a transaction or
 unique DB guard. The scheduler has `withoutOverlapping`, but a manual

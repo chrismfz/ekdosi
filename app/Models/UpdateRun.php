@@ -82,11 +82,35 @@ class UpdateRun extends Model
     }
 
     /**
+     * Is applying code from inside the app armed? (UPD-001…015, triage 2026-09-02.)
+     *
+     * OFF by default. The update CHECK stays on — it is read-only and useful — but
+     * the APPLY is not something a web request should drive: the audit found it
+     * does not drain the queue worker it restarts, fails open after a partial apply
+     * (maintenance lifted over inconsistent code), targets a mutable tag rather than
+     * a verified SHA, and can start without a proven rollback path. The supported
+     * upgrade is `deploy/update.sh <tag>` on the host.
+     *
+     * ONE definition, deliberately: the same flag hides the install button and the
+     * rollback action, and — the part that actually matters — SelfUpdate refuses
+     * any queued run, so nothing can be applied even if a row is created some other
+     * way. Kept OUT of canRollback(), which answers a different question (is this
+     * run structurally reversible) that arming does not change.
+     */
+    public static function inAppApplyEnabled(): bool
+    {
+        return (bool) config('ekdosi.updates.allow_in_app_apply', false);
+    }
+
+    /**
      * Can this (update) run be rolled back? It must be a finished UPDATE that took
      * a snapshot and recorded where it came from, nothing else in flight, and — the
      * safety rule — it must be the LATEST update: restoring an older snapshot rewinds
      * the whole DB past every newer update too, so only the most recent one is
      * reversible (roll those back in turn).
+     *
+     * Purely STRUCTURAL: whether the in-app applier is armed is a separate question
+     * (inAppApplyEnabled()) that the callers test alongside this one.
      */
     public function canRollback(): bool
     {

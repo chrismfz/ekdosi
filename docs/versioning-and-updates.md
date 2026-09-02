@@ -230,6 +230,32 @@ in the panel):
 
 ### Implementation order
 
+> ### ⚠ In-app apply is DISARMED by default (triage 2026-09-02)
+>
+> Everything described below is **built and still present**, but the in-app APPLY
+> is **off by default**: `ekdosi.updates.allow_in_app_apply`, env
+> `EKDOSI_UPDATE_IN_APP_APPLY`. The **check** stays on.
+>
+> Why: the updater audit's own verdict was «do not rely on the UI apply path until
+> UPD-001–UPD-004 are closed» — it does not drain the queue worker it restarts,
+> fails open after a partial apply (maintenance lifted over inconsistent code),
+> targets a mutable tag rather than a verified commit SHA, and can start without a
+> proven rollback path. That advice is now enforced in code instead of being a note
+> in a document.
+>
+> **The supported upgrade is `deploy/update.sh <tag>` on the host**, with
+> `deploy/rollback.sh` behind it — see `docs/updates-runbook.md`. «Υγεία
+> συστήματος» prints the exact command when a release is available.
+>
+> `UpdateRun::inAppApplyEnabled()` is the one definition: it hides the
+> «Εγκατάσταση ενημέρωσης» button and «Επαναφορά», and `ekdosi:self-update`
+> **refuses any queued run** (update or rollback) and fails the row with the
+> command to use instead. So a row created some other way still cannot apply.
+>
+> Re-arming is a deliberate act and a **precondition, not a default**: close
+> UPD-001…004 first. The sections below document the machinery as designed, and
+> the «no arming flag» note in Phase A is superseded by this flag.
+
 - **Phase A ✅ BUILT** — `UpdateRun` model + migration · `ekdosi:self-update`
   (both `php` and `script` strategies) · the `routes/console.php` scheduler hook
   (`self_update`, gated on `hasPending()`) · the `SystemHealth` «Εγκατάσταση

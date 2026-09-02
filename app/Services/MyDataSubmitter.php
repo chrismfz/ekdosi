@@ -615,7 +615,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
     private function adoptExistingMarkIfPresent(Invoice $invoice): ?MyDataMark
     {
         $invoice->loadMissing('invoiceType');
-        $series = $invoice->invoiceType?->code;
+        // MYD-018: recovery MUST search the series the document was FILED under.
+        // Reading the live lookup meant a rename made this look for a (series, ΑΑ)
+        // AADE had never seen — so the existing MARK went unfound and the invoice
+        // was filed a SECOND time.
+        $series = $invoice->filedSeries();
         $aa = (string) $invoice->code;
         if (blank($series) || (int) $invoice->code < 1) {
             // Can't reconcile without a concrete (series, ΑΑ) — let the normal

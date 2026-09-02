@@ -456,14 +456,30 @@ return [
         'cache_hours' => (int) env('EKDOSI_UPDATE_CACHE_HOURS', 6),
         'timeout' => (int) env('EKDOSI_UPDATE_TIMEOUT', 8),
 
-        // Phase 2 — in-app APPLY (git checkout + composer + migrate + caches),
-        // driven from «Υγεία συστήματος». No separate flag: apply is offered
-        // whenever the update check is enabled AND a repo is set (above) — for a
-        // private repo the button only appears once a valid token makes an update
-        // actually visible, so «URL/token → yes» is enforced naturally. Every
-        // apply is still super_admin-only + confirmed + single-flight.
+        // In-app APPLY — OFF by default (UPD-001…015, triage 2026-09-02).
+        //
+        // The CHECK above stays on: knowing a release exists is useful and
+        // read-only. Applying one from a web request is not: the audit found the
+        // orchestration does not drain the queue worker it restarts, fails open
+        // after a partial apply (maintenance lifted over inconsistent code),
+        // targets a MUTABLE tag rather than a verified commit SHA, and can start
+        // without a proven rollback path. Those are deploy-time correctness
+        // problems, not UI polish.
+        //
+        // The SUPPORTED upgrade path is `deploy/update.sh <tag>` on the host,
+        // which already owns the snapshot → maintenance → checkout → composer →
+        // migrate → optimize → shield → queue:restart → ops:health sequence, with
+        // deploy/rollback.sh behind it. «Υγεία συστήματος» now says exactly that
+        // when a release is available.
+        //
+        // Turning this on re-arms the in-app button and the scheduler's apply of a
+        // queued run. Only do that once UPD-001…004 are actually fixed — the flag
+        // exists so the machinery is not deleted, not because it is ready.
+        'allow_in_app_apply' => (bool) env('EKDOSI_UPDATE_IN_APP_APPLY', false),
+
         // 'php' (portable, no root — shared hosting + VPS) or 'script' (wrap
-        // deploy/update.sh on a VPS that has the shell tooling).
+        // deploy/update.sh on a VPS that has the shell tooling). Only consulted
+        // when allow_in_app_apply is on.
         'strategy' => (string) env('EKDOSI_UPDATE_STRATEGY', 'php'),
     ],
 

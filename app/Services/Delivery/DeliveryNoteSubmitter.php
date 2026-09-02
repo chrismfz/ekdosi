@@ -157,7 +157,8 @@ class DeliveryNoteSubmitter
         // movement IS the document; the 9.x type already marks it as a δελτίο).
         // <thirdPartyCollection> is sent ONLY when true ([214] forbids false).
         $header = (new InvoiceHeader)
-            ->setSeries($note->deliveryType?->code ?? '0')
+            // MYD-018: the FROZEN series, never the editable lookup.
+            ->setSeries($note->filedSeries() ?? '0')
             ->setAa((string) $note->code)
             ->setIssueDate(Carbon::parse($note->issued_at)->toDateString())
             ->setInvoiceType($type)

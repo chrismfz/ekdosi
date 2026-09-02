@@ -37,6 +37,23 @@
             @endif
         </div>
 
+        {{-- UPD triage 2026-09-02: ο έλεγχος είναι in-app, η ΕΦΑΡΜΟΓΗ όχι. Αν
+             υπάρχει νέα έκδοση, πες ρητά τι να τρέξει ο χειριστής — αλλιώς η
+             σελίδα λέει «υπάρχει ενημέρωση» και ψάχνει κουμπί που δεν υπάρχει. --}}
+        @if (($u['update_available'] ?? false) && ! $this->inAppApplyArmed() && $this->updateCommand())
+            <div class="mt-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-950/40 dark:text-warning-400">
+                <div class="font-medium">Η αναβάθμιση γίνεται από τον server, όχι από εδώ.</div>
+                <div class="mt-1">Σύνδεση στον server και:</div>
+                <pre class="mt-2 overflow-x-auto rounded bg-gray-900 p-2 text-xs text-gray-100">{{ $this->updateCommand() }}</pre>
+                <div class="mt-2">
+                    Το script κάνει στιγμιότυπο ΒΔ → maintenance → checkout → composer →
+                    migrate → optimize → shield → queue:restart → ops:health, με
+                    <code>deploy/rollback.sh</code> για επαναφορά. Λεπτομέρειες:
+                    <code>docs/updates-runbook.md</code>.
+                </div>
+            </div>
+        @endif
+
         @if ($u['checked_at'] ?? null)
             <div class="mt-3 space-y-1 text-sm text-gray-500 dark:text-gray-400">
                 Τελευταίος έλεγχος: {{ $this->ago($u['checked_at']) }}@if ($u['stale'] ?? false) (παλιό αποτέλεσμα — offline;)@endif

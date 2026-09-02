@@ -111,11 +111,13 @@ class SystemHealth extends Page
                 ->color('gray')
                 ->action(fn () => $this->checkUpdates()),
 
-            // In-app apply (Phase 2). No arming flag: shows whenever a newer
-            // release is actually available (for a private repo that needs a valid
-            // token, so «URL/token → yes» is natural) and no run is in flight.
-            // Creates a queued UpdateRun; the cron scheduler applies it out-of-band
-            // (ekdosi:self-update). See docs/versioning-and-updates.md.
+            // In-app apply (Phase 2) — DISARMED by default (UPD triage 2026-09-02):
+            // applyAvailable() now requires EKDOSI_UPDATE_IN_APP_APPLY on top of the
+            // check being on, a repo being set, a release actually being available
+            // and no run in flight. When armed it creates a queued UpdateRun that
+            // the cron scheduler applies out-of-band (ekdosi:self-update). Otherwise
+            // the «upgrade from the server» box below takes its place.
+            // See docs/versioning-and-updates.md.
             Action::make('installUpdate')
                 ->label('Εγκατάσταση ενημέρωσης')
                 ->icon('heroicon-o-arrow-up-circle')
@@ -167,7 +169,12 @@ class SystemHealth extends Page
                 $available => 'Διαθέσιμη νέα έκδοση: '.$this->update['latest_version'],
                 default => 'Είσαι στην πιο πρόσφατη έκδοση',
             })
-            ->body($ok ? null : ($this->update['error'] ?? null))
+            ->body(match (true) {
+                ! $ok => $this->update['error'] ?? null,
+                $available && ! $this->applyAvailable() => 'Η αναβάθμιση γίνεται από τον server: '
+                    .($this->updateCommand() ?? 'deploy/update.sh <tag>'),
+                default => null,
+            })
             ->{$ok ? ($available ? 'warning' : 'success') : 'danger'}()
             ->send();
     }
@@ -184,24 +191,51 @@ class SystemHealth extends Page
     }
 
     /**
+     * In-app apply is OFF by default (UPD-001…015, triage 2026-09-02) — the
+     * supported upgrade is `deploy/update.sh <tag>` on the host. The check above
+     * stays on; only the apply is disarmed. See UpdateRun::inAppApplyEnabled().
+     */
+    private function applyAvailable(): bool
+    {
+        return UpdateRun::inAppApplyEnabled()
+            && (bool) config('ekdosi.updates.enabled', true)
+            && filled(config('ekdosi.updates.repo'));
+    }
+
+    /**
+     * Public twin of applyAvailable() for the blade — the «upgrade from the server»
+     * box and the install button are alternatives, never both. (applyAvailable() is
+     * private and a blade cannot reach it.)
+     */
+    public function inAppApplyArmed(): bool
+    {
+        return $this->applyAvailable();
+    }
+
+    /**
+     * The upgrade command an operator should actually run, with the release they
+     * just saw filled in. Shown wherever we report that a new version exists — the
+     * page must not just say «there is an update» and leave them looking for a
+     * button that is deliberately not there.
+     */
+    public function updateCommand(): ?string
+    {
+        $target = $this->update['latest_version'] ?? null;
+
+        if (! is_string($target) || $target === '') {
+            return null;
+        }
+
+        return 'deploy/update.sh v'.ltrim($target, 'vV');
+    }
+
+    /**
      * Queue an in-app update: lock the release the operator just saw and create a
      * `queued` UpdateRun. The web request does NOT run the deploy — the cron
      * scheduler picks the row up via `ekdosi:self-update` (out-of-band, since the
      * update restarts the app). Guarded (super_admin via canAccess + the action's
      * available/update-visible/single-flight visibility); re-checked here.
      */
-    /**
-     * In-app apply is available whenever the update check is on and a repo is set
-     * — no separate arming flag. For a private repo the «Εγκατάσταση» button only
-     * appears once a valid token makes an update visible (update_available), so
-     * the token doubles as the intent signal.
-     */
-    private function applyAvailable(): bool
-    {
-        return (bool) config('ekdosi.updates.enabled', true)
-            && filled(config('ekdosi.updates.repo'));
-    }
-
     public function installUpdate(): void
     {
         if (! $this->applyAvailable()) {

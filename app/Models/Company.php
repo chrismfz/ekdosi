@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Casts\MaybeEncrypted;
 use App\Enums\MyDataMode;
+use App\Models\Scopes\CompanyScope;
 use App\Observers\CompanyObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -504,5 +505,44 @@ class Company extends Model
     public function backupRuns(): HasMany
     {
         return $this->hasMany(CompanyBackupRun::class)->latest('started_at');
+    }
+
+    /**
+     * How many legal documents this company has already FILED (MYD-024).
+     *
+     * The AADE issuer block on an invoice is only vatNumber + country + branch, so
+     * a name/address change cannot alter a filed invoice's payload — but the ΑΦΜ
+     * can, and it is also the credential identity: changing it means the myDATA
+     * account, the provider credentials and every MARK already filed belong to a
+     * DIFFERENT legal entity. In practice a new ΑΦΜ or ΓΕΜΗ means a new company,
+     * not an edit. Used to warn the operator rather than to block them.
+     *
+     * Counts marks, not documents: a MARK is the proof a filing happened at all,
+     * and it survives the document being cancelled (a cancellation is itself a
+     * filing under the current identity).
+     *
+     * ONLY rows carrying a real MARK. `mydata_marks` also stores forensic rows with
+     * a null mark — DRY_RUN, REJECTED, PROVIDER_FAILED — and counting those would
+     * make a `mydata:test-submit` dry-run, or an AADE rejection, raise the warning
+     * during exactly the pre-first-filing phase it must stay silent in. Worse, it
+     * would warn against fixing the ΑΦΜ typo that caused the rejection.
+     */
+    public function filedDocumentCount(): int
+    {
+        // withoutGlobalScope, DECLARING the intent (CLAUDE.md rule (c)): this asks
+        // about a NAMED company, not the ambient one. Both mark models carry
+        // CompanyScope, and CompanyResource is panel-global — so a super_admin
+        // editing any company other than the currently selected tenant would get 0
+        // and the warning would silently never render. The explicit company_id
+        // below is what scopes this; the ambient context must not narrow it further.
+        // (EditCompany::afterSave() documents the same hazard.)
+        $filed = fn (string $model): int => $model::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $this->getKey())
+            ->whereNotNull('mark')
+            ->where('mark', '!=', '')
+            ->count();
+
+        return $filed(MyDataMark::class) + $filed(DeliveryMark::class);
     }
 }

@@ -108,7 +108,10 @@ class AadeInvoiceDocument
         $counterpart = $this->buildCounterpart($invoice, $type);
 
         $header = (new InvoiceHeader)
-            ->setSeries($invoice->invoiceType->code)
+            // MYD-018: the FROZEN series, never the editable lookup.
+            ->setSeries($invoice->filedSeries() ?? throw new RuntimeException(
+                "Invoice {$invoice->invcode} has no series to file under."
+            ))
             ->setAa((string) $invoice->code)
             ->setIssueDate(Carbon::parse($invoice->issued_at)->toDateString())
             ->setInvoiceType($type)
