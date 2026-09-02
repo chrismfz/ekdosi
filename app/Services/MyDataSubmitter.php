@@ -226,18 +226,34 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // (see vendor/firebed/aade-mydata/src/Http/Traits/HasResponseDom.php).
         $action = new SendInvoices;
 
+        // MYD-021: ARM the in-doubt marker BEFORE the POST, not in the catch arms.
+        //
+        // A catch only runs if this process survives. A hard kill (OOM, deploy,
+        // host failure) between AADE accepting the request and our catch/persist
+        // left NO durable trace at all: the 120s cache lock then expired and the
+        // next attempt POSTed blindly into a filing that already existed — the
+        // exact double-declared income the in-doubt gate exists to prevent.
+        // Arming first inverts the default: the window is protected unless we
+        // positively learn the POST created nothing (the disarm calls below), so
+        // a crash anywhere inside it is safe by construction.
+        //
+        // Deliberately NOT best-effort: if we cannot record the marker we must not
+        // POST, because an unrecorded POST is precisely the unprotected case.
+        $this->armInDoubt($invoice);
+
         try {
             $response = $action->handle($payload);
         } catch (MyDataAuthenticationException $e) {
+            // 401 — AADE refused before processing, so no MARK exists. Disarm, or
+            // a fixed credential would sit out the grace window for nothing.
+            $this->disarmInDoubt($invoice);
             $this->logFailure($invoice, 'auth', $e);
             throw new RuntimeException('myDATA rejected credentials. Check Company → myDATA submission tab.', 0, $e);
         } catch (MyDataTimeoutException|MyDataConnectionException $e) {
-            // MYD-2 (σκέλος γ): a transport failure leaves the filing AMBIGUOUS —
-            // the request may have reached AADE and produced a MARK whose response
-            // we never saw. Flag the invoice "in-doubt" so the next submit()
-            // reconciles (adopt-or-file) instead of blindly re-POSTing (which
-            // AADE does NOT dedup → double income). mydata_state stays null.
-            $this->markInDoubt($invoice);
+            // AMBIGUOUS — the request may have reached AADE and produced a MARK
+            // whose response we never saw. STAYS ARMED (MYD-021): the next submit()
+            // reconciles (adopt-or-file) instead of blindly re-POSTing, which AADE
+            // does NOT dedup → double income. mydata_state stays null.
             $this->logFailure($invoice, 'transport', $e);
             throw new RuntimeException('myDATA endpoint unreachable. Try again later.', 0, $e);
         } catch (RateLimitExceededException $e) {
@@ -245,6 +261,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // created, so a later retry is safe and must NOT be gated. (Caught
             // before the InvalidResponse/TransmissionFailed arm below, which it
             // subclasses.)
+            $this->disarmInDoubt($invoice);
             $this->logFailure($invoice, 'rate-limit', $e);
             throw new RuntimeException('myDATA rate limit exceeded. Try again shortly.', 0, $e);
         } catch (InvalidResponseException|TransmissionFailedException $e) {
@@ -254,24 +271,23 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // AADE and created a MARK whose response we never saw. These subclass
             // MyDataException, so without this arm they slipped through the generic
             // MyDataException arm UNFLAGGED → blind retry → double-declared income
-            // (AADE does NOT dedup the ERP channel). Flag in-doubt like transport.
-            $this->markInDoubt($invoice);
+            // (AADE does NOT dedup the ERP channel). STAYS ARMED like transport.
             $this->logFailure($invoice, 'ambiguous-response', $e);
             throw new RuntimeException('myDATA returned an unusable response. Try again later.', 0, $e);
         } catch (MyDataException $e) {
             // Any OTHER firebed protocol error (e.g. UnsupportedChannelException,
-            // thrown before the POST) means no MARK was created → not in-doubt.
+            // thrown before the POST) means no MARK was created → disarm.
+            $this->disarmInDoubt($invoice);
             $this->logFailure($invoice, 'protocol', $e);
             throw new RuntimeException('myDATA submission failed: '.$e->getMessage(), 0, $e);
         } catch (Throwable $e) {
             // MYD-2 (σκέλος γ): any UNEXPECTED error during the POST is ambiguous
             // too — e.g. a 2xx that DID create a MARK at AADE but whose response
             // firebed failed to parse (a PHP \Error, not a firebed exception). Treat
-            // it like the transport bucket: flag in-doubt so the next submit()
+            // it like the transport bucket: STAYS ARMED so the next submit()
             // reconciles (adopt-or-file) instead of blindly re-POSTing. Worst case
             // for a genuinely pre-send bug is one grace-window delay — cheap
             // insurance against a double-declared income.
-            $this->markInDoubt($invoice);
             $this->logFailure($invoice, 'other', $e);
             throw new RuntimeException('myDATA submission failed unexpectedly.', 0, $e);
         }
@@ -288,9 +304,15 @@ class MyDataSubmitter implements EInvoiceSubmitter
         try {
             $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
         } catch (MyDataRejected $e) {
-            throw $e; // genuine AADE rejection — no MARK created, not in-doubt
+            // A genuine AADE rejection: it processed the document and refused it,
+            // so no MARK exists. Disarm — otherwise an operator who fixes the data
+            // would be refused by the grace window for something already known not
+            // to have been filed.
+            $this->disarmInDoubt($invoice);
+            throw $e;
         } catch (Throwable $e) {
-            $this->markInDoubt($invoice);
+            // The POST SUCCEEDED and AADE has the document; only recording it
+            // locally failed. STAYS ARMED so the retry adopts the existing MARK.
             $this->logFailure($invoice, 'persist', $e);
             throw new RuntimeException(
                 'myDATA filed at AADE but recording it locally failed — flagged for reconcile on the next attempt.',
@@ -597,18 +619,47 @@ class MyDataSubmitter implements EInvoiceSubmitter
     }
 
     /**
-     * MYD-2 (σκέλος γ): flag an invoice "in-doubt" after a transport failure.
-     * Best-effort — an audit-write hiccup must not mask the transport error the
-     * caller is about to re-throw. mydata_state is deliberately left untouched
-     * (stays null) so every existing "is it filed?" predicate is unchanged; only
-     * submit()'s own pre-check reads mydata_pending_since.
+     * MYD-021: record the in-doubt marker BEFORE the POST.
+     *
+     * `mydata_state` is deliberately left untouched (stays null) so every existing
+     * "is it filed?" predicate is unchanged; only submit()'s own pre-check reads
+     * `mydata_pending_since`.
+     *
+     * Unlike disarmInDoubt() this THROWS. The marker is what makes the acceptance
+     * window survivable, so a POST we could not record is exactly the case we are
+     * trying to eliminate — failing here costs one refused attempt; proceeding
+     * without it risks a second legal document at AADE.
      */
-    private function markInDoubt(Invoice $invoice): void
+    private function armInDoubt(Invoice $invoice): void
     {
         try {
             $invoice->forceFill(['mydata_pending_since' => now()])->save();
         } catch (Throwable $e) {
-            Log::warning('myDATA: failed to set in-doubt flag after transport failure', [
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode}: δεν μπόρεσε να καταγραφεί η σήμανση «σε εξέλιξη» "
+                .'πριν την υποβολή, οπότε ΔΕΝ υποβάλλουμε — μια υποβολή χωρίς αυτήν δεν θα '
+                .'μπορούσε να ανακτηθεί σε περίπτωση διακοπής. Δοκίμασε ξανά.',
+                0,
+                $e,
+            );
+        }
+    }
+
+    /**
+     * Clear the marker after an outcome that PROVES no MARK was created (401, 429,
+     * a pre-send protocol error, an explicit AADE rejection).
+     *
+     * Best-effort, unlike arming: the caller is about to re-throw the real error,
+     * and a stuck marker only costs one grace window — it never risks a double
+     * filing. Failing loudly here would replace an actionable error with a
+     * misleading one.
+     */
+    private function disarmInDoubt(Invoice $invoice): void
+    {
+        try {
+            $invoice->forceFill(['mydata_pending_since' => null])->save();
+        } catch (Throwable $e) {
+            Log::warning('myDATA: failed to clear the in-doubt flag after a no-MARK outcome', [
                 'invoice_id' => $invoice->id,
                 'error' => $e->getMessage(),
             ]);

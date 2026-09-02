@@ -262,6 +262,7 @@ class DeliveryNote extends Model
     protected function casts(): array
     {
         return [
+            'mydata_pending_since' => 'datetime',
             'issued_at' => 'datetime',
             'dispatch_at' => 'datetime',
             'move_purpose' => 'integer',

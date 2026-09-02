@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Services\MyData\SalesReconciler;
 use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
@@ -39,6 +40,7 @@ use Firebed\AadeMyData\Models\Response;
 use Firebed\AadeMyData\Models\ResponseDoc;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
 use GuzzleHttp\Handler\MockHandler;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -298,6 +300,66 @@ class DeliveryNoteSubmitter
         // outbound request — a tenant mismatch must never reach the wire.
         TenantCoherence::assertDeliveryNote($this->tenant, $note);
 
+        // MYD-021: a 9.x δελτίο is filed through the same AADE channel and is just
+        // as legally binding as an invoice, but this path had NONE of the invoice
+        // path's protections — no lock, no in-doubt marker, no adopt-or-file. Two
+        // concurrent requests (double click, two tabs, an overlapping worker) could
+        // each POST the same local note and create TWO AADE documents; AADE does
+        // not dedup. Mirror the invoice gate exactly rather than invent a second
+        // shape for the same problem.
+        //
+        // A cache lock, NOT a DB row lock: a row lock must not be held across the
+        // AADE HTTP call (the orphan-MARK rule). It auto-expires so a crashed
+        // process cannot wedge the note permanently.
+        $lock = Cache::lock('delivery-submit:'.$note->getKey(), 120);
+        if (! $lock->get()) {
+            throw new RuntimeException(
+                "Δελτίο {$note->invcode}: μια υποβολή στο myDATA είναι ήδη σε εξέλιξη — "
+                .'περίμενε να ολοκληρωθεί πριν ξαναδοκιμάσεις.'
+            );
+        }
+
+        try {
+            // Re-read FRESH under the lock: a submit that just finished on another
+            // worker may have flipped mydata_state to VALID, and the in-memory $note
+            // (read before the lock) would be stale — the guards below must see the
+            // committed state to refuse a second filing.
+            $note->refresh();
+
+            if ($note->mydata_pending_since !== null && $note->mydata_state === null) {
+                $adopted = $this->adoptExistingMarkIfPresent($note);
+                if ($adopted !== null) {
+                    return $adopted;
+                }
+
+                // AADE showed nothing for this (series, ΑΑ), which is ambiguous: the
+                // earlier POST may never have landed, OR it landed and the
+                // RequestTransmittedDocs feed has not surfaced it yet (it lags a
+                // fresh filing by a minute or two — sandbox-observed 2026-07-07 on
+                // the invoice side, where an immediate re-check missed the MARK and
+                // a naive resubmit produced a SECOND one). Refuse inside the grace
+                // window; only once it has elapsed with AADE still empty do we
+                // accept the POST was lost.
+                $graceMinutes = (int) config('ekdosi.einvoice.in_doubt_grace_minutes', 10);
+                if ($note->mydata_pending_since->gt(now()->subMinutes($graceMinutes))) {
+                    throw new RuntimeException(
+                        "Δελτίο {$note->invcode}: μια προηγούμενη υποβολή στο myDATA διακόπηκε "
+                        ."και η ΑΑΔΕ δεν δείχνει ακόμη ΜΑΡΚ γι' αυτό το δελτίο. Επειδή το feed "
+                        .'της ΑΑΔΕ καθυστερεί λίγα λεπτά, ΔΕΝ ξαναϋποβάλλουμε τυφλά (κίνδυνος '
+                        ."διπλής έκδοσης). Περίμενε ~{$graceMinutes} λεπτά και ξαναδοκίμασε — "
+                        .'αν εν τω μεταξύ βρεθεί ΜΑΡΚ, θα υιοθετηθεί αυτόματα.'
+                    );
+                }
+            }
+
+            return $this->performSubmit($note);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function performSubmit(DeliveryNote $note): DeliveryMark
+    {
         if ($note->mydata_state === 'VALID') {
             throw new RuntimeException(
                 "Delivery note {$note->invcode} was already filed at myDATA (MARK "
@@ -317,8 +379,27 @@ class DeliveryNoteSubmitter
             );
         }
 
+        // MYD-021: never file a locally-voided δελτίο. The business cancelled this
+        // movement; filing it would create a live AADE document the ledger does not
+        // recognise. Guarded at SERVICE level so every caller is covered — the UI
+        // hiding the button is not protection for a CLI, API or automation caller,
+        // which is exactly where this would go unnoticed. (Twin of the invoice
+        // guard in MyDataSubmitter::performSubmit.)
+        if ($note->local_status === 'cancelled') {
+            throw new RuntimeException(
+                "Δελτίο {$note->invcode}: είναι ακυρωμένο τοπικά — δεν υποβάλλεται στο myDATA. "
+                .'Επανάφερέ το πρώτα, αν η ακύρωση ήταν λάθος.'
+            );
+        }
+
         $payload = $this->buildAadeDeliveryNote($note);
         $xml = $this->payloadToXml($payload);
+
+        // MYD-021: ARM before ANY outbound call — provider or direct. A catch only
+        // runs if this process survives; a hard kill between AADE accepting the
+        // request and our catch would otherwise leave no trace, and the next
+        // attempt would POST blindly into a filing that already existed.
+        $this->armInDoubt($note);
 
         if ($this->tenant->isLiveProviderTenant()) {
             return $this->submitViaProvider($note, $xml);
@@ -331,15 +412,23 @@ class DeliveryNoteSubmitter
         try {
             $response = $action->handle($payload);
         } catch (MyDataAuthenticationException $e) {
+            // 401 — AADE refused before processing, so no MARK exists.
+            $this->disarmInDoubt($note);
             $this->logFailure($note, 'auth', $e);
             throw new RuntimeException('myDATA rejected credentials. Check Company → myDATA submission tab.', 0, $e);
         } catch (MyDataTimeoutException|MyDataConnectionException $e) {
+            // AMBIGUOUS — the request may have reached AADE and produced a MARK we
+            // never saw. STAYS ARMED so the next submit adopts instead of re-POSTing.
             $this->logFailure($note, 'transport', $e);
             throw new RuntimeException('myDATA endpoint unreachable. Try again later.', 0, $e);
         } catch (MyDataException $e) {
+            // A firebed protocol error thrown before the POST → no MARK.
+            $this->disarmInDoubt($note);
             $this->logFailure($note, 'protocol', $e);
             throw new RuntimeException('myDATA delivery-note submission failed: '.$e->getMessage(), 0, $e);
         } catch (Throwable $e) {
+            // Any unexpected error during the POST is ambiguous too (e.g. a 2xx that
+            // DID create a MARK but whose response failed to parse). STAYS ARMED.
             $this->logFailure($note, 'other', $e);
             throw new RuntimeException('myDATA delivery-note submission failed unexpectedly.', 0, $e);
         }
@@ -371,6 +460,11 @@ class DeliveryNoteSubmitter
         }
 
         if (! $result->success) {
+            // The provider processed the document and refused it → no MARK. Disarm,
+            // or an operator who fixes the data would sit out the grace window for
+            // something already known not to have been filed. (A provider TRANSPORT
+            // failure above stays armed — that one is genuinely ambiguous.)
+            $this->disarmInDoubt($note);
             $this->recordProviderRejection($note, $transport->key(), $xml, $result);
             throw new DeliveryNoteRejected(
                 'E-invoice provider rejected the delivery note: '.$result->errorMessage(),
@@ -380,6 +474,152 @@ class DeliveryNoteSubmitter
         }
 
         return $this->persistProviderSuccess($note, $transport->key(), $xml, $result);
+    }
+
+    /**
+     * MYD-021: record the in-doubt marker BEFORE any outbound call.
+     *
+     * THROWS on failure, deliberately: a filing we could not record is exactly the
+     * unrecoverable case this exists to eliminate. Failing costs one refused
+     * attempt; proceeding risks a second legal document at AADE.
+     */
+    private function armInDoubt(DeliveryNote $note): void
+    {
+        try {
+            $note->forceFill(['mydata_pending_since' => now()])->save();
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Δελτίο {$note->invcode}: δεν μπόρεσε να καταγραφεί η σήμανση «σε εξέλιξη» "
+                .'πριν την υποβολή, οπότε ΔΕΝ υποβάλλουμε — μια υποβολή χωρίς αυτήν δεν θα '
+                .'μπορούσε να ανακτηθεί σε περίπτωση διακοπής. Δοκίμασε ξανά.',
+                0,
+                $e,
+            );
+        }
+    }
+
+    /**
+     * Clear the marker after an outcome that PROVES no MARK was created (401, a
+     * pre-send protocol error, an explicit provider rejection).
+     *
+     * Best-effort, unlike arming: the caller is about to re-throw the real error,
+     * and a stuck marker only costs one grace window — it never risks a double
+     * filing.
+     */
+    private function disarmInDoubt(DeliveryNote $note): void
+    {
+        try {
+            $note->forceFill(['mydata_pending_since' => null])->save();
+        } catch (Throwable $e) {
+            Log::warning('Delivery: failed to clear the in-doubt flag after a no-MARK outcome', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Before resubmitting an in-doubt δελτίο, ask AADE whether the earlier
+     * (ambiguous) POST actually landed, and adopt the MARK instead of filing a
+     * second one.
+     *
+     * Reuses SalesReconciler: RequestTransmittedDocs does NOT filter by type, so a
+     * 9.x δελτίο appears there exactly like an invoice, matched on the same frozen
+     * (series, ΑΑ). Reusing the proven reader beats a second implementation of the
+     * same lookup.
+     *
+     * A tenant that cannot READ myDATA (no read credentials at all) gets null —
+     * the caller then refuses inside the grace window rather than retrying blindly.
+     * That is the honest outcome: we cannot verify, so we do not gamble. The
+     * provider-side durable-idempotency story is PROV-001.
+     */
+    private function adoptExistingMarkIfPresent(DeliveryNote $note): ?DeliveryMark
+    {
+        $series = $note->filedSeries();
+        $aa = (string) $note->code;
+
+        if (blank($series) || (int) $note->code < 1 || ! $this->tenant->canReadMyData()) {
+            return null;
+        }
+
+        $issued = Carbon::parse($note->issued_at);
+        $from = $issued->copy()->min(now())->subDay();
+        $to = $issued->copy()->max(now())->addDay();
+
+        try {
+            $this->initFirebed();
+            $docs = (new SalesReconciler($this->tenant, $this->mockHandler))
+                ->fetchAadeDocs($from->format('d/m/Y'), $to->format('d/m/Y'));
+        } catch (Throwable $e) {
+            // Cannot reach AADE to verify → must NOT resubmit blindly (that is the
+            // whole risk). Re-throw; the note stays in-doubt for the next attempt.
+            Log::warning('Delivery in-doubt: reconcile lookup failed — NOT resubmitting blindly', [
+                'company_id' => $this->tenant->getKey(),
+                'delivery_note_id' => $note->id,
+                'invcode' => $note->invcode,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new RuntimeException(
+                "Δελτίο {$note->invcode}: μια προηγούμενη υποβολή διακόπηκε και το myDATA δεν "
+                .'είναι προσβάσιμο για να επιβεβαιωθεί αν είχε καταχωρηθεί. Δεν ξαναϋποβάλλουμε '
+                .'τυφλά — ξαναδοκίμασε όταν η ΑΑΔΕ είναι διαθέσιμη.',
+                0,
+                $e,
+            );
+        }
+
+        $matches = array_values(array_filter(
+            $docs,
+            fn ($d): bool => (string) $d->series === (string) $series
+                && (string) $d->aa === $aa
+                && ! $d->cancelled
+        ));
+
+        if ($matches === []) {
+            return null;
+        }
+
+        if (count($matches) > 1) {
+            Log::warning('Delivery in-doubt: MULTIPLE live MARKs at AADE for one (series, ΑΑ) — adopting the first', [
+                'company_id' => $this->tenant->getKey(),
+                'delivery_note_id' => $note->id,
+                'marks' => array_map(fn ($d) => $d->mark, $matches),
+            ]);
+        }
+
+        $found = $matches[0];
+        $mark = (string) $found->mark;
+
+        return DB::transaction(function () use ($note, $mark) {
+            $row = DeliveryMark::query()
+                ->where('delivery_note_id', $note->id)
+                ->where('mark', $mark)
+                ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT'])
+                ->first()
+                ?? DeliveryMark::create($this->deliveryMarkPayload([
+                    'company_id' => $note->company_id,
+                    'delivery_note_id' => $note->id,
+                    'mark' => $mark,
+                    'mydata_action' => 'INSERT',
+                    'request' => null,
+                    'response' => 'Adopted via RequestTransmittedDocs (MYD-021 in-doubt self-heal).',
+                    'mark_date' => now()->toDateString(),
+                    'mark_time' => now()->toTimeString(),
+                ]));
+
+            $note->forceFill([
+                'mydata_sent' => true,
+                'mydata_state' => 'VALID',
+                'mydata_mark' => $mark,
+                'recipient_country' => $this->filedCountry($note),
+                'delivery_state' => 'registered',
+                'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
+                'mydata_pending_since' => null,
+            ])->save();
+
+            return $row;
+        });
     }
 
     private function recordProviderFailure(DeliveryNote $note, string $providerKey, string $requestXml, string $error): void
@@ -467,6 +707,8 @@ class DeliveryNoteSubmitter
                 'recipient_country' => $this->filedCountry($note),
                 'delivery_state' => 'registered',
                 'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
+                // MYD-021: the filing is no longer in doubt — it is recorded.
+                'mydata_pending_since' => null,
             ])->save();
 
             return $row;
@@ -788,6 +1030,10 @@ class DeliveryNoteSubmitter
             // Persist a forensic REJECTED row so the rejection is visible in the
             // δελτίο's «Ιστορικό myDATA» UI (not only in the CLI report), then
             // carry the XML on the throw. Mirrors MyDataSubmitter::recordRejection.
+            // MYD-021: AADE processed the δελτίο and refused it → no MARK exists.
+            // Disarm, or an operator who fixes the data would be blocked by the
+            // grace window over something already known not to have been filed.
+            $this->disarmInDoubt($note);
             $this->recordRejection($note, $xml, $responseXml);
             throw new DeliveryNoteRejected(
                 "myDATA rejected the delivery note: {$errors}",
@@ -840,6 +1086,8 @@ class DeliveryNoteSubmitter
                 'recipient_country' => $this->filedCountry($note),
                 'delivery_state' => 'registered',
                 'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
+                // MYD-021: the filing is no longer in doubt — it is recorded.
+                'mydata_pending_since' => null,
             ])->save();
 
             return $row;

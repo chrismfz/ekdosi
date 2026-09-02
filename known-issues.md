@@ -283,7 +283,7 @@ Priorities:
 | MYD-018 | P0 | DONE | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
-| MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
+| MYD-021 | P0 | DONE | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
 | MYD-022 | P0 | DONE | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
 | MYD-024 | P2 | PARTIAL | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
@@ -1827,7 +1827,49 @@ Fee and §8.6 contains categories 1=1.2%, 2=2.4%, 3=3.6%, 4=other amount.
 
 ### MYD-021 — Direct myDATA issue is not durably exactly-once
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** DONE 2026-09-02 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Fix, in two halves.**
+
+**Invoices — the marker is now ARMED BEFORE the POST.** The in-doubt mechanism existed and was
+sandbox-proven, but `mydata_pending_since` was written only inside a `catch`, so it existed only
+if the process SURVIVED. A hard kill (OOM, deploy, host failure) between AADE accepting the
+request and our catch left no durable trace; the 120s cache lock then expired and the next
+attempt POSTed blindly into a filing that already existed. Arming first inverts the default: the
+acceptance window is protected unless we positively learn the POST created nothing. `armInDoubt()`
+deliberately THROWS (a filing we cannot record is exactly the unrecoverable case), while the new
+`disarmInDoubt()` clears it on the four outcomes that PROVE no MARK — 401, 429, a pre-send
+protocol error, and an explicit AADE rejection. That last one matters in the other direction: an
+operator who fixes rejected data must be able to retry at once, not sit out the grace window.
+
+**Delivery notes — they had NOTHING, and now mirror the invoice gate exactly.** No lock, no
+marker, no adopt-or-file, and no service-level cancelled guard: two concurrent requests could each
+POST and create two AADE documents for one local δελτίο. Added: the same 120s cache lock (never a
+DB row lock — it must not be held across the AADE call), a fresh re-read under it, the same
+arm/disarm around every outbound call (provider branch included), `delivery_notes.mydata_pending_since`,
+and adopt-or-file via `SalesReconciler` — `RequestTransmittedDocs` does not filter by type, so a
+9.x δελτίο appears there exactly like an invoice and is matched on the same frozen (series, ΑΑ).
+Reusing the proven reader beat writing the lookup a second time. A tenant that cannot READ myDATA,
+or an unreachable AADE, yields a REFUSAL rather than a blind retry — if we cannot verify, we do
+not gamble.
+
+Also added the missing **service-level `local_status=cancelled` guard** the finding called out:
+the UI hiding the button is not protection for a CLI, API or automation caller, which is exactly
+where it would go unnoticed.
+
+**Deliberately NOT built: the `issue_attempts` table** the finding asks for (attempt id, payload
+hash, frozen coordinates). The acceptance criteria — parallel submit, timeout after accept,
+process kill after POST, DB failure after success, locally-cancelled service call — are all met by
+the existing marker moved before the POST, at a fraction of the risk of introducing a new table
+into a legal path. Revisit only if a real failure shows the single timestamp is not enough.
+
+The **provider** side's durable idempotency is PROV-001 and stays open; this change gives that
+path the lock, the cancelled guard and the arm/disarm, but not provider-side reconciliation.
+
+Tests: `DeliveryNoteExactlyOnceTest` (9) + three added to `MyDataSubmitInDoubtTest`. Both
+arming tests read `mydata_pending_since` **through the query builder from inside the outbound
+call** — the way a different process would see it after a kill — and both fail when the arming
+line is removed.
 
 **Repository evidence**
 
