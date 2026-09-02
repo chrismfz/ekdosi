@@ -275,8 +275,23 @@ class InvoSignDocument
         $legalFallback = $invoice->mayFallBackToLiveCustomer() ? $invoice->customer : null;
         $contact = $invoice->customer;
 
+        // A GR counterpart carries no name in the AADE payload, so an empty one gets
+        // that far — but InvoSign hard-rejects it with «[88-001] Λείπει το
+        // υποχρεωτικό πεδίο: CounterpartName». Refuse here with the field to fill
+        // instead of shipping "" and reading an opaque provider error. (Falling back
+        // to the live customer is what MYD-009 removed: it is the wrong party.)
+        $name = $invoice->filesNoCounterpart() ? '' : ($invoice->counterpartName() ?? '');
+        if ($name === '' && ! $invoice->filesNoCounterpart()) {
+            throw new RuntimeException(
+                "InvoSign requires a counterpart name on invoice {$invoice->invcode}, but the "
+                .'document records none'
+                .($invoice->hasBeenFiled() ? ' and is already filed.' : '.')
+                .' Fill «Επωνυμία» on the invoice.'
+            );
+        }
+
         return [
-            'CounterpartName' => (string) ($invoice->counterpartName() ?? ''),
+            'CounterpartName' => $name,
             'CounterpartVat' => (string) ($invoice->counterpartAfm() ?? ''),
             'CounterpartProfession' => (string) ($invoice->occupation ?: $legalFallback?->occupation ?? ''),
             'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $legalFallback?->address1 ?? ''),

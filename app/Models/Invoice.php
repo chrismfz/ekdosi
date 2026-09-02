@@ -303,16 +303,23 @@ class Invoice extends Model
         return $name === '' || $name === trim((string) $customer->name);
     }
 
-    /** The counterpart's ΑΦΜ as filed: the frozen snapshot, else the legacy fallback. */
+    /**
+     * The counterpart's ΑΦΜ as filed: the frozen snapshot, else the legacy fallback.
+     *
+     * CANONICALISED on the way out (Afm::canonicalVat) — `invoices.vat_no` is free
+     * text (a bare TextInput, and an ETL copy of the legacy column), so filing it
+     * verbatim sent «IT 12345678901» / «EL123456789» to AADE and earned an opaque
+     * rejection. The old code filed `customers.afm`, which the customer form and the
+     * GSIS/VIES lookups keep clean; reading the snapshot must not lose that.
+     */
     public function counterpartAfm(): ?string
     {
-        $frozen = trim((string) $this->vat_no);
-        if ($frozen !== '') {
+        if ($frozen = Afm::canonicalVat($this->vat_no)) {
             return $frozen;
         }
 
         return $this->mayFallBackToLiveCustomer()
-            ? (trim((string) $this->customer?->afm) ?: null)
+            ? Afm::canonicalVat($this->customer?->afm)
             : null;
     }
 
@@ -363,37 +370,72 @@ class Invoice extends Model
     /**
      * The party-snapshot columns to FREEZE at the moment this invoice is filed.
      *
-     * A legacy/ETL row can reach submission with `vat_no`/`company_name`/`country`
-     * blank, so the counterpart is resolved from the linked customer — and the same
-     * write sets `mydata_sent`, which CLOSES that fallback. Without freezing, the
-     * party we actually reported would become unreadable the instant it was filed,
-     * exactly as the delivery-note country did before MYD-011.
+     * A legacy/ETL row can reach submission with the snapshot blank, so the
+     * counterpart is resolved from the linked customer — and the same write sets
+     * `mydata_sent`, which CLOSES that fallback. Without freezing, the party we
+     * actually reported becomes unreadable the instant it is filed, exactly as the
+     * delivery-note country did before MYD-011.
+     *
+     * Covers the ADDRESS too, not just the identity: a non-GR counterpart files
+     * street/city/postcode, so freezing only ΑΦΜ/name/country left a filed document
+     * unable to reproduce its own counterpart (it then threw "requires a full
+     * address" on re-render, while AADE held the real one).
+     *
+     * Skipped entirely for a RETAIL (11.x) document: AADE files no counterpart at
+     * all there, so stamping one into the "what we reported" columns would assert a
+     * party that was never declared — and would make the PDF start printing it.
      *
      * Fills ONLY blanks; never overwrites a value the document already carries.
+     * Every value is truncated to its column width: `customers.name` is varchar(191)
+     * while `company_name` is varchar(120), and MySQL runs in strict mode, so an
+     * over-long copy would raise inside the same transaction as the MARK audit row —
+     * rolling back a filing AADE had already accepted and leaving the invoice
+     * permanently stuck.
+     *
      * Returned as columns so a submitter can merge them into the SAME forceFill as
-     * the MARK, rather than doing a second, racy save. Both the direct myDATA and
-     * the provider path use this one definition.
+     * the MARK rather than doing a second, racy save. Both the direct myDATA and the
+     * provider path use this one definition.
      *
      * @return array<string, string>
      */
     public function frozenPartyColumns(): array
     {
-        if (! $this->counterpartResolvedFromLiveCustomer()) {
+        if (! $this->counterpartResolvedFromLiveCustomer() || $this->filesNoCounterpart()) {
             return [];
         }
 
+        $live = $this->customer;
+
+        // column => [resolved value, column width]
+        $candidates = [
+            'vat_no' => [$this->counterpartAfm(), 20],
+            'company_name' => [$this->counterpartName(), 120],
+            'country' => [$this->counterpartCountryIso(), 60],
+            'address1' => [$live?->address1, 60],
+            'city' => [$live?->city, 60],
+            'postcode' => [$live?->postcode, 10],
+            'occupation' => [$live?->occupation, 120],
+        ];
+
         $frozen = [];
-        foreach ([
-            'vat_no' => $this->counterpartAfm(),
-            'company_name' => $this->counterpartName(),
-            'country' => $this->counterpartCountryIso(),
-        ] as $column => $resolved) {
+        foreach ($candidates as $column => [$resolved, $width]) {
             if (blank($this->{$column}) && filled($resolved)) {
-                $frozen[$column] = $resolved;
+                $frozen[$column] = mb_substr((string) $resolved, 0, $width);
             }
         }
 
         return $frozen;
+    }
+
+    /**
+     * Does this document file NO counterpart at all? True for retail (11.x), where
+     * AADE forbids one even when the customer has an ΑΦΜ.
+     */
+    public function filesNoCounterpart(): bool
+    {
+        $type = (string) ($this->mydata_type ?: $this->invoiceType?->mydata_type);
+
+        return str_starts_with($type, '11.');
     }
 
     public function paymentMethod(): BelongsTo

@@ -789,6 +789,31 @@ details, absent from the AADE payload and used by InvoSign for delivery/printing
 LIVE deliberately, and that distinction is now stated in code rather than being an accident of
 a per-field fallback chain.
 
+**Round-1 review corrections (the fix's own bugs, caught by the gate):**
+
+- **The country chain was re-implemented in the builder instead of using the helper**, and
+  «blank → GR» was applied to the result of a CLOSED fallback — so "no country evidence
+  anywhere" and "a country exists but this document may not read it" gave the same answer. An
+  Italian party whose customer link had drifted was filed as **GR with no name and no address**,
+  where the previous code loudly refused. That is the MYD-011 round-7 misreport reintroduced on
+  the invoice side; the three outcomes are now explicitly distinct.
+- **The ΑΦΜ was filed verbatim from free text.** `invoices.vat_no` is a bare TextInput and an
+  ETL copy of the legacy column, so «IT 12345678901» / «EL123456789» reached AADE. The old code
+  filed `customers.afm`, which the form and GSIS/VIES keep canonical — new `Afm::canonicalVat()`
+  restores that (separators dropped, letters kept, a Greek prefix removed only when what remains
+  is a bare nine-digit ΑΦΜ, so a foreign id stays intact).
+- **The freeze was incomplete**: it covered ΑΦΜ/name/country but not the ADDRESS, which a non-GR
+  counterpart actually files — so a filed foreign document could no longer reproduce its own
+  counterpart and threw "requires a full address" while AADE held the real one.
+- **The freeze could roll back a successful filing.** `customers.name` is varchar(191) and
+  `invoices.company_name` varchar(120) under MySQL strict mode, so an over-long copy raised
+  inside the SAME transaction as the MARK audit row — discarding the record of a filing AADE had
+  already accepted and leaving the invoice permanently stuck. Values are truncated per column.
+- **Retail (11.x) froze a party that was never declared** (AADE files no counterpart there), and
+  the PDF keys its counterpart block on `vat_no`, so a receipt would have started printing one.
+- **The provider could receive an empty `CounterpartName`** (legal for a GR counterpart in the
+  AADE payload, rejected by InvoSign as `[88-001]`) — it now refuses with the field to fill.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never
