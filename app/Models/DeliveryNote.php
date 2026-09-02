@@ -142,6 +142,17 @@ class DeliveryNote extends Model
      */
     public function isInternalMovement(): bool
     {
+        // Junk in the ΑΦΜ («-», «.») is an identity ATTEMPT that failed, not the
+        // «this party has no ΑΦΜ» declaration — so it must never classify the note as
+        // an ενδοδιακίνηση. Without this, a note carrying junk and no other identity
+        // was filed as "the issuer moved its own goods" (discarding the country the
+        // form MADE the operator pick) where it used to be refused outright. Only a
+        // blank or an all-zeros value is the declaration.
+        $stored = trim((string) $this->recipient_afm);
+        if ($stored !== '' && ! Afm::isZeroPlaceholder($stored)) {
+            return false;
+        }
+
         // The sentinel is NOT an override — it is simply "no ΑΦΜ", and it is the
         // only placeholder the UI offers for a party that has none. Treating a
         // stored 000000000 as an unconditional internal declaration filed a NAMED

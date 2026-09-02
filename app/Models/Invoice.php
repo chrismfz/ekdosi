@@ -563,7 +563,10 @@ class Invoice extends Model
         // counterpart again, the exact failure this freeze exists to prevent. Mirror
         // the selector instead of guessing at it.
         if (in_array($column, ['address1', 'address2', 'city', 'postcode', 'occupation', 'vies_vat'], true)) {
-            return ! (bool) trim((string) $this->{$column});
+            // EXACTLY `?:`, not an approximation of it: `?:` is falsy for '' and '0'
+            // but NOT for ' ', so trimming here froze the customer's real street while
+            // the provider payload carried the blank one.
+            return ($this->{$column} ?: '') === '';
         }
 
         return blank($this->{$column});

@@ -2171,6 +2171,25 @@ XML;
         $this->assertSame('10115', $frozen['postcode'] ?? null, '«0» must freeze like a blank');
     }
 
+    public function test_a_whitespace_address_column_freezes_like_the_selector_sees_it(): void
+    {
+        // ROUND-9 P2. `?:` is falsy for '' and '0' but NOT for ' ', so trimming in the
+        // gate froze the customer's real street while the provider payload carried the
+        // blank one — document and snapshot disagreeing, which is what the freeze
+        // exists to prevent.
+        $this->customer->forceFill(['afm' => '997073525', 'country' => 'GR', 'address1' => 'Ermou 5'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR',
+            'address1' => ' ',
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertArrayNotHasKey('address1', $frozen, 'a space is what the selector files, so freeze nothing');
+    }
+
     private function makeInvoice(int $code = 1): Invoice
     {
         return Invoice::create([

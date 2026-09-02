@@ -966,7 +966,10 @@ document can disagree with itself — but it becomes the same defect the day PEP
 - **Junk in an ΑΦΜ is not a declaration.** Round 7 widened "all zeros = no ΑΦΜ" to "anything
   unusable", which swept «-» and «.» in with it — so a delivery note that previously REFUSED was
   now silently filed as an ενδοδιακίνηση, and a linked customer's KNOWN ΑΦΜ was replaced by the
-  «no ΑΦΜ» placeholder. That is a change to merged MYD-011 semantics in the GUESS direction,
+  «no ΑΦΜ» placeholder. (Round 8 fixed only the linked-customer half: `isInternalMovement()`
+  requires `customer_id === null`, so a note with junk and NO other identity kept being declared
+  internal — discarding the country the form MADE the operator pick. Round 9 closed that half
+  too: junk now blocks the internal classification outright.) That is a change to merged MYD-011 semantics in the GUESS direction,
   made inside an invoice PR. All-zeros is a DECLARATION (AADE's convention for ενδοδιακίνηση);
   junk is an accident, and an accident falls through to the real identity
   (`Afm::isZeroPlaceholder()` now separates them).
@@ -980,6 +983,21 @@ document can disagree with itself — but it becomes the same defect the day PEP
 - **`EnrichInvoiceFromAade` skipped exactly the rows that need it.** It gates on `blank(vat_no)`,
   so an all-zeros placeholder — now officially "not an identity" — was treated as filled, and the
   ONE tool that can repair an already-filed legacy row would not touch it.
+
+**Round-9 review (no P0/P1 — the gate's stopping condition under the recalibrated rule in
+`CLAUDE.md`). Three P2s, all fixed in the same pass rather than deferred, because two were
+genuine misreports and all three were one-liners:**
+
+- **Junk + no other identity was still declared an ενδοδιακίνηση** — the other half of the
+  round-8 fix (see above). The claim in this file that the refusal had been "restored" was only
+  half-true and is corrected.
+- **`isZeroPlaceholder()` and `canonicalVat()` disagreed about a PREFIXED all-zeros value.**
+  «EL000000000» is the same declaration as «000000000», but only the latter stripped the prefix —
+  so the prefixed form took the junk path and was replaced by the linked customer's real ΑΦΜ, i.e.
+  the placeholder filed as an identity: the exact conflation the helper exists to prevent.
+- **The address freeze gate mirrored `?:` for «0» but not for whitespace.** `?:` is falsy for
+  `''` and `'0'` only, so a single space froze the customer's real street while the provider
+  payload carried the blank one.
 
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped

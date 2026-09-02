@@ -102,9 +102,17 @@ final class Afm
      */
     public static function isZeroPlaceholder(?string $raw): bool
     {
-        $digits = preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '';
+        // Strip a Greek VAT prefix FIRST, exactly as canonicalVat() does: «EL000000000»
+        // is the same declaration as «000000000». Testing the raw value let the two
+        // helpers disagree, so a prefixed placeholder took the "junk" path and was
+        // replaced by the linked customer's real ΑΦΜ — the placeholder filed as an
+        // identity, which is the conflation this helper exists to prevent.
+        $value = preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '';
+        if (preg_match('/^(EL|GR|ΕΛ)(\d+)$/ui', $value, $m) === 1) {
+            $value = $m[2];
+        }
 
-        return $digits !== '' && trim($digits, '0') === '';
+        return $value !== '' && trim($value, '0') === '';
     }
 
     /**
