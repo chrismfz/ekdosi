@@ -10,6 +10,7 @@ use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
+use App\Filament\Pages\MyDataCodeGuide;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Services\AadeRegistryLookup;
@@ -224,8 +225,10 @@ class CompanyForm
                                         ['gr-mydata', 'gr-provider'],
                                         true,
                                     ))
-                                    ->helperText(fn (?string $state): string => ClassificationGuidance::hintFor($state)
-                                        ?? 'Ορίζει την §8.6 κατηγορία εσόδων των αγαθών (εμπορεύματα vs δικά μας προϊόντα). Απαιτείται πριν το go-live.'),
+                                    ->helperText(fn (?string $state): HtmlString => MyDataCodeGuide::helperText(
+                                        ClassificationGuidance::hintFor($state)
+                                            ?? 'Ορίζει την §8.6 κατηγορία εσόδων των αγαθών (εμπορεύματα vs δικά μας προϊόντα). Απαιτείται πριν το go-live.'
+                                    )),
 
                                 TextInput::make('gemi')
                                     ->label('ΓΕΜΗ')

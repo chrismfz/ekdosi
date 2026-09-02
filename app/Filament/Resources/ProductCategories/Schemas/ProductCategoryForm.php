@@ -2,12 +2,14 @@
 
 namespace App\Filament\Resources\ProductCategories\Schemas;
 
+use App\Filament\Pages\MyDataCodeGuide;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyDataOptions;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 class ProductCategoryForm
 {
@@ -51,7 +53,10 @@ class ProductCategoryForm
                     // shared with the product info block + the list columns.
                     ->options(ClassificationGuidance::bucketOptions())
                     ->native(false)
-                    ->helperText('Το κύριο πεδίο για μικτά τιμολόγια: π.χ. «Εμπορεύματα» → αγαθά, «Υπηρεσίες» → υπηρεσίες. Κάθε γραμμή προϊόντος αυτής της κατηγορίας δηλώνεται έτσι. Κενό = κληρονομεί τον τύπο παραστατικού.')
+                    ->helperText(fn (): HtmlString => MyDataCodeGuide::helperText(
+                        'Το κύριο πεδίο για μικτά τιμολόγια: π.χ. «Εμπορεύματα» → αγαθά, «Υπηρεσίες» → υπηρεσίες. '
+                        .'Κάθε γραμμή προϊόντος αυτής της κατηγορίας δηλώνεται έτσι. Κενό = κληρονομεί τον τύπο παραστατικού.'
+                    ))
                     ->columnSpan(2),
 
                 Select::make('mydata_income_class')

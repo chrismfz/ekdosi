@@ -578,6 +578,10 @@ fan-out (`"all"` απαγορεύεται — blast-radius). **Always-on** (χω
 VAT categories · invoice types · payment/delivery methods · distribution aims · metric
 units · bank accounts · product categories · **tags** — όλα tenant-scoped, με
 guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμεση έκδοση.
+- **«Οδηγός κωδικών myDATA»** (`MyDataCodeGuide`, `CodeReference`) — read-only γλωσσάρι §8: τι είναι
+  κάθε κωδικός (τύποι παραστατικών §8.1 π.χ. 2.1, κατηγορίες εσόδων §8.6, ΦΠΑ §8.2, αιτίες απαλλαγής
+  §8.3, είδη δραστηριότητας) + πού χρησιμοποιείται, σε απλά ελληνικά. Οι φόρμες παραπέμπουν με link
+  «📖 Οδηγός κωδικών». Ανοιχτό σε κάθε χειριστή (help).
 - **Web installer πρώτης εγκατάστασης** (`/install`) — «πέτα» τα αρχεία σε φρέσκο host (άδειο VM ή
   cPanel/DirectAdmin) με μόνο μια κενή βάση + χρήστη· μπαίνεις στη διεύθυνση και ένας οδηγός φτιάχνει
   `.env` (όνομα/URL/περιβάλλον/γλώσσα/ζώνη ώρας + βάση + προαιρετικό SMTP), παράγει `APP_KEY`, ελέγχει

@@ -20,6 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 /**
  * «Ρυθμίσεις εταιρείας» — the SELF-SERVICE subset of a tenant's own settings, so a
@@ -123,8 +124,10 @@ class CompanySettings extends Page implements HasForms
                             ->options(ClassificationGuidance::options())
                             ->placeholder('— δεν έχει επιλεγεί (απαιτείται πριν το go-live) —')
                             ->native(false)
-                            ->helperText(fn (?string $state): string => ClassificationGuidance::hintFor($state)
-                                ?? 'Επίλεξε το είδος για να ταξινομούνται σωστά τα αγαθά στην ΑΑΔΕ (§8.6). Απαιτείται πριν το go-live.')
+                            ->helperText(fn (?string $state): HtmlString => MyDataCodeGuide::helperText(
+                                ClassificationGuidance::hintFor($state)
+                                    ?? 'Επίλεξε το είδος για να ταξινομούνται σωστά τα αγαθά στην ΑΑΔΕ (§8.6). Απαιτείται πριν το go-live.'
+                            ))
                             ->live()
                             ->columnSpanFull(),
                     ]),
