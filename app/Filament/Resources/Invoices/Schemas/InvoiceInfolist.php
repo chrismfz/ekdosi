@@ -275,19 +275,41 @@ class InvoiceInfolist
                             ->url(fn (?string $state) => $state)
                             ->openUrlInNewTab()
                             ->placeholder('—')
+                            // For a provider document this URL is the durable pointer to
+                            // the provider's OFFICIAL copy — with the MARK, an operator
+                            // reaches the authoritative ΥΠΑΗΕΣ document even if our PDF is
+                            // lost. (For direct myDATA it is the AADE QR verification URL.)
+                            ->hint(fn ($record) => $record->providerEvidence() !== null
+                                ? 'Επίσημο έγγραφο παρόχου'
+                                : null)
                             ->limit(60),
 
-                        // Provider-only (null for direct myDATA filings): which provider
-                        // + its authentication seal, read from the latest provider mark.
-                        TextEntry::make('provider_key')
+                        // Provider evidence (null for direct myDATA / cancelled / no
+                        // licence). Read off the SAME memoised resolver the PDF uses
+                        // (Invoice::providerEvidence) — identical gates, frozen-snapshot
+                        // identity, one query — so the screen matches the printed PDF.
+                        TextEntry::make('provider_name')
                             ->label('Πάροχος')
-                            ->state(fn ($record) => $record->mydataMarks()->whereNotNull('provider_key')->latest('id')->value('provider_key'))
-                            ->visible(fn ($record) => filled($record->mydataMarks()->whereNotNull('provider_key')->latest('id')->value('provider_key'))),
+                            ->state(fn ($record) => $record->providerEvidence()['commercial_name'] ?? null)
+                            ->visible(fn ($record) => $record->providerEvidence() !== null),
+
+                        TextEntry::make('provider_licence')
+                            ->label('Αριθμός Αδειοδότησης')
+                            ->state(fn ($record) => $record->providerEvidence()['licence_no'] ?? null)
+                            ->visible(fn ($record) => $record->providerEvidence() !== null)
+                            ->copyable(),
+
+                        TextEntry::make('provider_uid')
+                            ->label('Αναγνωριστικό (UID)')
+                            ->state(fn ($record) => $record->providerEvidence()['uid'] ?? null)
+                            ->visible(fn ($record) => filled($record->providerEvidence()['uid'] ?? null))
+                            ->copyable()
+                            ->limit(40),
 
                         TextEntry::make('authentication_code')
-                            ->label('Authentication code')
-                            ->state(fn ($record) => $record->mydataMarks()->whereNotNull('authentication_code')->latest('id')->value('authentication_code'))
-                            ->visible(fn ($record) => filled($record->mydataMarks()->whereNotNull('authentication_code')->latest('id')->value('authentication_code')))
+                            ->label('Υπογραφή')
+                            ->state(fn ($record) => $record->providerEvidence()['auth_code'] ?? null)
+                            ->visible(fn ($record) => filled($record->providerEvidence()['auth_code'] ?? null))
                             ->copyable()
                             ->limit(40),
                     ])

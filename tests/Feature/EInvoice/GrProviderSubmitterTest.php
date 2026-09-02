@@ -76,6 +76,45 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertTrue((bool) $fresh->mydata_sent);
     }
 
+    public function test_persist_snapshots_the_provider_identity_in_force(): void
+    {
+        // PROV-003 (b): freeze the identity IN FORCE at issue on the mark, so a
+        // later config/licence rotation can't rewrite this document's evidence.
+        config(['ekdosi.einvoice.provider_identity.fake' => [
+            'commercial_name' => 'Fake Provider',
+            'legal_name' => 'Fake LLC',
+            'site' => 'fake.example',
+            'aade_code' => '999',
+            'licence_no' => 'LIC_AT_ISSUE_V1',
+        ]]);
+
+        $invoice = $this->makeInvoice();
+        $mark = (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice);
+
+        $snapshot = $mark->fresh()->provider_identity;
+        $this->assertIsArray($snapshot);
+        $this->assertSame('LIC_AT_ISSUE_V1', $snapshot['licence_no']);
+        $this->assertSame('Fake Provider', $snapshot['commercial_name']);
+        $this->assertSame('999', $snapshot['aade_code']);
+    }
+
+    public function test_an_incomplete_identity_is_not_frozen_so_it_can_recover(): void
+    {
+        // PROV-003: a config row present but with a BLANK licence at issue must NOT
+        // be frozen — otherwise snapshot-wins would strand the document with a blank
+        // licence forever, un-printable even after the config is fixed. No snapshot
+        // → the reader falls back to config, which is the recoverable state.
+        config(['ekdosi.einvoice.provider_identity.fake' => [
+            'commercial_name' => 'Fake Provider',
+            'licence_no' => '',
+        ]]);
+
+        $invoice = $this->makeInvoice();
+        $mark = (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice);
+
+        $this->assertNull($mark->fresh()->provider_identity);
+    }
+
     public function test_rejects_a_backdated_issue_date_before_any_outbound_request(): void
     {
         // Normal online provider issue requires IssueDate = today (InvoSign 238);

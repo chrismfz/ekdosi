@@ -6,13 +6,10 @@ use App\Models\BankAccount;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\VatCategory;
-use App\Support\EInvoice\ProviderIdentity;
 use App\Support\MyData\Codes;
 use App\Support\MyData\QrImage;
-use App\Support\Pdf\InvoiceBannerState;
 use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\FilesystemException;
 
@@ -155,66 +152,10 @@ class InvoicePdfRenderer
      */
     private function providerEvidenceView(Invoice $invoice): ?array
     {
-        // SINGLE source of the show/hide decision (the blade just checks the result):
-        // only a live, certified, non-cancelled document that is CURRENTLY filed
-        // through a provider gets the block. The VALID + not-cancelled gate also
-        // skips the query on drafts/cancelled/unfiled (the batch/auto-email path
-        // where most invoices never touched a provider).
-        if ($invoice->mydata_state !== 'VALID'
-            || blank($invoice->mydata_mark)
-            || InvoiceBannerState::for($invoice)['kind'] === 'cancelled') {
-            return null;
-        }
-
-        $mark = $invoice->mydataMarks()
-            ->where('mydata_action', 'PROVIDER_INSERT')
-            ->whereNotNull('mark')
-            ->orderByDesc('mark_date')
-            ->orderByDesc('mark_time')
-            ->orderByDesc('id')
-            ->first();
-
-        if ($mark === null) {
-            return null;
-        }
-
-        // Tie the block to the CURRENT filing, not merely to "a provider MARK ever
-        // existed". After a provider→direct re-file (cancel a 9.3, re-issue direct;
-        // or a migrated tenant), the live mirror MARK is the DIRECT one — printing
-        // the old provider MARK here would put two conflicting MARKs on one legal
-        // document and falsely assert provider issuance. Only render when the
-        // provider MARK IS the document's current MARK.
-        if ((string) $mark->mark !== (string) $invoice->mydata_mark) {
-            return null;
-        }
-
-        // The ΥΠΑΗΕΣ licence number is the legally-critical field of this block
-        // (A.1112/2025). If the provider's identity — or just its licence — isn't
-        // configured, do NOT print a half-complete compliance block that asserts
-        // provider issuance without the licence: suppress it and surface the gap
-        // loudly (go-live/preflight should also gate this). The document's MARK
-        // still prints via the normal QR/mark block.
-        $identity = ProviderIdentity::forKey($mark->provider_key);
-        if ($identity === null || $identity->licenceNo === '') {
-            Log::warning('PROV-003: missing provider_identity/licence for provider_key — provider PDF block suppressed.', [
-                'company_id' => $invoice->company_id,
-                'invoice_id' => $invoice->getKey(),
-                'provider_key' => $mark->provider_key,
-            ]);
-
-            return null;
-        }
-
-        return [
-            'commercial_name' => $identity?->commercialName ?: (string) $mark->provider_key,
-            'legal_name' => $identity?->legalName ?: '',
-            'site' => $identity?->site ?: '',
-            'aade_code' => $identity?->aadeCode ?: '',
-            'licence_no' => $identity?->licenceNo ?: '',
-            'mark' => (string) $mark->mark,
-            'uid' => (string) ($mark->uid ?? ''),
-            'auth_code' => (string) ($mark->authentication_code ?? ''),
-        ];
+        // ONE resolver, shared with the invoice page, so print and screen apply
+        // identical gates (VALID, not-cancelled, current provider mark, licence
+        // present) and never diverge. Memoised on the invoice.
+        return $invoice->providerEvidence();
     }
 
     /**
