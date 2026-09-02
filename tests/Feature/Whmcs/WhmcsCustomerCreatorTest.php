@@ -155,6 +155,7 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertSame('existing', $result->source);
         $this->assertSame('Νικητής', $result->customer->name);
         $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count());
+        $this->assertSame(558, $result->customer->fresh()->whmcs_client_id, 'the winner is linked exactly like an owner found up-front');
     }
 
     public function test_deleted_owner_is_reported_not_recreated(): void

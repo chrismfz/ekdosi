@@ -384,7 +384,7 @@ class CompanyImporter
                 $afmIndex = $existing ? $this->afmKeyIndex($existing->id) : [];
                 $twinIds = $this->twinIds($rows, $index);
                 // …it must REFUSE exactly what execute would refuse…
-                $this->assertNoCustomerAfmConflicts($rows, $index, $afmIndex, $twinIds);
+                $this->assertNoCustomerAfmConflicts($rows, $index, $afmIndex, $twinIds, $existing ? $this->customerOwners($existing->id) : []);
                 // …and count exactly what execute does: twins give up their keys
                 // first, so a key held only by a twin does NOT make another row a merge.
                 $afmIndex = array_filter($afmIndex, fn (int $id): bool => ! isset($twinIds[$id]));
@@ -427,7 +427,8 @@ class CompanyImporter
         $legacyById = [];
         if ($table === 'customers') {
             $twinIds = $this->twinIds($rows, $index);
-            $this->assertNoCustomerAfmConflicts($rows, $index, $this->afmKeyIndex($companyId), $twinIds);
+            $owners = $this->customerOwners($companyId);
+            $this->assertNoCustomerAfmConflicts($rows, $index, $this->afmKeyIndex($companyId), $twinIds, $owners);
 
             if ($twinIds !== []) {
                 DB::table('customers')->whereIn('id', array_keys($twinIds))->update(['afm_key' => null]);
@@ -435,7 +436,11 @@ class CompanyImporter
 
             $afmIndex = $this->afmKeyIndex($companyId);
             $keyById = array_flip($afmIndex);
-            $legacyById = DB::table('customers')->where('company_id', $companyId)->whereNotNull('legacy_id')->pluck('legacy_id', 'id')->all();
+            foreach ($owners as $id => $owner) {
+                if ($owner['legacy_id'] !== null) {
+                    $legacyById[$id] = $owner['legacy_id'];
+                }
+            }
         }
 
         foreach ($rows as $row) {
@@ -463,15 +468,12 @@ class CompanyImporter
                     // legacy_id (the ETL's re-run key) on an ΑΦΜ-merge: keep the
                     // local one; adopt the bundle's when the local row has none
                     // (no other local row holds it — it would have been the
-                    // natural-key twin); two DIFFERENT ones are a real conflict.
+                    // natural-key twin). Two DIFFERENT ones were already refused
+                    // up-front (assertNoCustomerAfmConflicts) — this is the last net.
                     $localLegacy = $legacyById[$id] ?? null;
                     $bundleLegacy = $data['legacy_id'] ?? null;
                     if ($bundleLegacy !== null && $localLegacy !== null && (string) $bundleLegacy !== (string) $localLegacy) {
-                        throw new RuntimeException(
-                            'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «'.($row['name'] ?? '?').'» '
-                            ."(ΑΦΜ {$afmKey}, legacy_id {$bundleLegacy}) ταιριάζει στον τοπικό πελάτη #{$id} που έχει legacy_id {$localLegacy}. "
-                            .'Δύο διαφορετικές legacy ταυτότητες για ένα ΑΦΜ — διόρθωσε πρώτα τοπικά.'
-                        );
+                        throw new RuntimeException($this->legacyConflictMessage((string) ($row['name'] ?? '?'), (string) $afmKey, (string) $bundleLegacy, $id, (string) $localLegacy));
                     }
                     if ($bundleLegacy === null) {
                         unset($data['legacy_id']);
@@ -587,22 +589,30 @@ class CompanyImporter
     }
 
     /**
-     * Two things cannot be written and are refused up-front (same check in
-     * plan() and in importTable(), so the dry-run reports exactly what execute
-     * would refuse):
+     * What cannot be written is refused up-front — the SAME check in plan()
+     * and in importTable(), so the dry-run reports exactly what execute would
+     * refuse, and nothing is ever refused mid-transaction:
      *   - two bundle rows on ONE ΑΦΜ identity: the second would silently merge
      *     into whatever the first became (a bundle from a pre-unique release
      *     may carry the duplicate the migration would have refused);
      *   - a natural-key twin whose NEW ΑΦΜ is owned by a local row that is NOT
      *     a twin of any bundle row (twins release their keys first, non-twins
-     *     never do).
+     *     never do);
+     *   - an ΑΦΜ-merge (no natural twin) into a SOFT-DELETED local owner while
+     *     the bundle row is live: every other surface (form, WHMCS, leads)
+     *     says «restore first» — the importer must not quietly rewire a live
+     *     party and its invoices onto a trashed customer;
+     *   - an ΑΦΜ-merge where the bundle row and the local owner carry two
+     *     DIFFERENT legacy_ids (the ETL's re-run key) — two legacy identities
+     *     for one ΑΦΜ is a real conflict to resolve locally first.
      *
      * @param  list<array<string,mixed>>  $rows
      * @param  array<string,int>  $index  natural-key => local id
      * @param  array<string,int>  $afmIndex  afm_key => local id
      * @param  array<int,true>  $twinIds
+     * @param  array<int,array{legacy_id:?string,trashed:bool}>  $owners  local id => state
      */
-    private function assertNoCustomerAfmConflicts(array $rows, array $index, array $afmIndex, array $twinIds): void
+    private function assertNoCustomerAfmConflicts(array $rows, array $index, array $afmIndex, array $twinIds, array $owners): void
     {
         $seen = [];
         foreach ($rows as $row) {
@@ -610,29 +620,72 @@ class CompanyImporter
             if ($afmKey === null) {
                 continue;
             }
+            $name = (string) ($row['name'] ?? '?');
 
             if (isset($seen[$afmKey])) {
                 throw new RuntimeException(
                     'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: το bundle περιέχει δύο πελάτες με το ίδιο ΑΦΜ '
-                    ."{$afmKey} («{$seen[$afmKey]}» και «".($row['name'] ?? '?').'»). '
+                    ."{$afmKey} («{$seen[$afmKey]}» και «{$name}»). "
                     .'Συγχώνευσέ τους στην εταιρεία-πηγή (php artisan customers:afm-duplicates) και ξαναεξήγαγε.'
                 );
             }
-            $seen[$afmKey] = (string) ($row['name'] ?? '?');
+            $seen[$afmKey] = $name;
+
+            $owner = $afmIndex[$afmKey] ?? null;
+            if ($owner === null || isset($twinIds[$owner])) {
+                continue; // free key, or held by a twin that releases it first
+            }
 
             $twin = $index[$this->naturalKey('customers', $row)] ?? null;
-            if ($twin === null) {
+            if ($twin !== null) {
+                if ($owner !== $twin) {
+                    throw new RuntimeException(
+                        "Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «{$name}» "
+                        ."(ΑΦΜ {$afmKey}) αντιστοιχεί στον τοπικό πελάτη #{$twin}, αλλά το ΑΦΜ το έχει ήδη ο #{$owner}. "
+                        .'Διόρθωσε/συγχώνευσε τους δύο τοπικούς πελάτες (php artisan customers:afm-duplicates) και ξαναπροσπάθησε.'
+                    );
+                }
+
                 continue;
             }
-            $owner = $afmIndex[$afmKey] ?? null;
-            if ($owner !== null && $owner !== $twin && ! isset($twinIds[$owner])) {
+
+            // ΑΦΜ-merge into a non-twin local owner.
+            $state = $owners[$owner] ?? ['legacy_id' => null, 'trashed' => false];
+            if ($state['trashed'] && ($row['deleted_at'] ?? null) === null) {
                 throw new RuntimeException(
-                    'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «'.($row['name'] ?? '?').'» '
-                    ."(ΑΦΜ {$afmKey}) αντιστοιχεί στον τοπικό πελάτη #{$twin}, αλλά το ΑΦΜ το έχει ήδη ο #{$owner}. "
-                    .'Διόρθωσε/συγχώνευσε τους δύο τοπικούς πελάτες (php artisan customers:afm-duplicates) και ξαναπροσπάθησε.'
+                    "Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «{$name}» (ΑΦΜ {$afmKey}) "
+                    ."αντιστοιχεί στον ΔΙΑΓΡΑΜΜΕΝΟ τοπικό πελάτη #{$owner}. "
+                    .'Επανέφερέ τον (ή διάγραψέ τον οριστικά) και ξαναπροσπάθησε — δεν συγχωνεύεται ζωντανός πελάτης σε διαγραμμένο.'
                 );
             }
+            $bundleLegacy = $row['legacy_id'] ?? null;
+            if ($bundleLegacy !== null && $state['legacy_id'] !== null && (string) $bundleLegacy !== (string) $state['legacy_id']) {
+                throw new RuntimeException($this->legacyConflictMessage($name, $afmKey, (string) $bundleLegacy, $owner, (string) $state['legacy_id']));
+            }
         }
+    }
+
+    private function legacyConflictMessage(string $name, string $afmKey, string $bundleLegacy, int $localId, string $localLegacy): string
+    {
+        return "Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «{$name}» "
+            ."(ΑΦΜ {$afmKey}, legacy_id {$bundleLegacy}) ταιριάζει στον τοπικό πελάτη #{$localId} που έχει legacy_id {$localLegacy}. "
+            .'Δύο διαφορετικές legacy ταυτότητες για ένα ΑΦΜ — διόρθωσε πρώτα τοπικά.';
+    }
+
+    /**
+     * @return array<int,array{legacy_id:?string,trashed:bool}> local customer id => state (soft-deleted included)
+     */
+    private function customerOwners(int $companyId): array
+    {
+        $owners = [];
+        foreach (DB::table('customers')->where('company_id', $companyId)->get(['id', 'legacy_id', 'deleted_at']) as $c) {
+            $owners[(int) $c->id] = [
+                'legacy_id' => $c->legacy_id !== null ? (string) $c->legacy_id : null,
+                'trashed' => $c->deleted_at !== null,
+            ];
+        }
+
+        return $owners;
     }
 
     /**

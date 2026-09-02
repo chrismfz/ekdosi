@@ -226,5 +226,13 @@ class WhmcsInvoicesByAfmWebhookTest extends TestCase
         $this->call_afm($t->slug, ['afms' => ['10259033']])
             ->assertOk()
             ->assertJsonPath('afms.10259033', null);
+
+        // A 9-digit query IS a Greek ΑΦΜ: with no Greek owner it is null — never
+        // the German customer whose VAT happens to share the nine digits.
+        $t2 = $this->tenant();
+        $this->customer($t2, 'DE123456789', 'Γερμανός');
+        $this->call_afm($t2->slug, ['afms' => ['123456789']])
+            ->assertOk()
+            ->assertJsonPath('afms.123456789', null);
     }
 }

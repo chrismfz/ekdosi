@@ -118,9 +118,11 @@ class WhmcsInvoicesByAfmController
         // VAT keeps its letters), so an identity resolves to exactly ONE
         // customer — no «keep the last» guess. The plugin sends digits only, so
         // a foreign VAT («CY10259033P») arrives as «10259033»: resolve those by
-        // the digits of a LETTERED key as a second step, and only when the
-        // digits are unambiguous (two foreign keys folding to the same digits
-        // → null, never a coin toss). A pure-digit key is never shadowed.
+        // the digits of a LETTERED key as a second step, and only when (a) the
+        // query is NOT a 9-digit Greek form — a Greek ΑΦΜ must never be answered
+        // with a German/Estonian/Portuguese customer whose VAT shares the nine
+        // digits — and (b) the digits are unambiguous (two foreign keys folding
+        // to the same digits → null, never a coin toss).
         $byKey = Customer::query()
             ->where('company_id', $tenant->id)
             ->whereNotNull('afm_key')
@@ -142,7 +144,7 @@ class WhmcsInvoicesByAfmController
 
         $customers = collect();
         foreach ($afms as $afm) {
-            $hit = $byKey->get($afm) ?? (ctype_digit($afm) ? ($byDigits[$afm] ?? null) : null);
+            $hit = $byKey->get($afm) ?? ((ctype_digit($afm) && strlen($afm) !== 9) ? ($byDigits[$afm] ?? null) : null);
             if ($hit !== null) {
                 $customers[$afm] = $hit;
             }

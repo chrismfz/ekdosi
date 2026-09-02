@@ -52,6 +52,10 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertSame('123456789', Afm::uniqueKey('ΕΛ 123456789'), 'Greek-keyboard «ΕΛ» prefix folds to EL.');
         $this->assertSame('123456789', Afm::uniqueKey('ΑΦΜ ΕL123456789'), 'a Greek label is dropped');
         $this->assertSame('EE123456789', Afm::uniqueKey('ee 123456789'), 'Estonian EE+9 digits stays a foreign VAT');
+        $this->assertSame('123456789', Afm::uniqueKey('123456789 ΕΛΛΑΔΑ'), 'Greek text AFTER the number is dropped, never folded to Latin');
+        $this->assertSame('CY10259033P', Afm::uniqueKey('CY10259033P ΕΛ'), 'a trailing «ΕΛ» is stray text, not a prefix');
+        $this->assertSame('CY10259033P', Afm::uniqueKey('ΔΕΛΤΑ CY10259033P'), 'an «ΕΛ» inside a leading Greek word is not a prefix');
+        $this->assertSame('123456789', Afm::uniqueKey('ΑΦΜ: ΕΛ 123456789'), 'the prefix folds after a label');
         $this->assertNull(Afm::uniqueKey('N/A'), 'letters-only text is a free-text placeholder');
         $this->assertNull(Afm::uniqueKey('NONE'));
         $this->assertNull(Afm::uniqueKey('EL'));
@@ -270,11 +274,13 @@ class CustomerAfmKeyTest extends TestCase
         $bundle2 = app(CompanyExporter::class)->build($src2, 'passphrase', 'p@ss', true);
         $c->forceFill(['legacy_id' => 8])->save(); // locally the same party is legacy 8
 
-        try {
-            app(CompanyImporter::class)->run($bundle2, ['into' => 'src5', 'execute' => true, 'passphrase' => 'p@ss']);
-            $this->fail('Expected a RuntimeException.');
-        } catch (\RuntimeException $e) {
-            $this->assertStringContainsString('legacy', $e->getMessage());
+        foreach ([false, true] as $execute) {
+            try {
+                app(CompanyImporter::class)->run($bundle2, ['into' => 'src5', 'execute' => $execute, 'passphrase' => 'p@ss']);
+                $this->fail('Expected a RuntimeException (execute='.var_export($execute, true).') — the dry-run must refuse what execute refuses.');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('legacy', $e->getMessage());
+            }
         }
         $this->assertSame(8, (int) $c->fresh()->legacy_id, 'nothing overwritten');
     }
@@ -547,5 +553,35 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertNull($c->fresh()->afm_key, 'a blanked ΑΦΜ owns no identity');
         // …so a NEW customer with that ΑΦΜ is no longer refused.
         $this->assertNotNull(Customer::create(['company_id' => $t->id, 'name' => 'Νέος κάτοχος', 'afm' => '123456789'])->id);
+    }
+
+    public function test_importer_refuses_to_merge_a_live_bundle_customer_into_a_trashed_local_owner(): void
+    {
+        // Every other surface says «restore first»; the importer must not quietly
+        // rewire a live party (and its invoices) onto a soft-deleted customer.
+        $src = Company::create(['name' => 'Src', 'slug' => 'src10', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $live = Customer::create(['company_id' => $src->id, 'name' => 'Ζωντανός', 'afm' => '123456789']);
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+        $live->forceDelete();
+        // Locally a DIFFERENT (panel-made, later edited) customer owns the ΑΦΜ and is trashed.
+        $trashed = Customer::create(['company_id' => $src->id, 'name' => 'Σβησμένος', 'afm' => '123456789', 'city' => 'Πάτρα']);
+        $trashed->delete();
+
+        foreach ([false, true] as $execute) {
+            try {
+                app(CompanyImporter::class)->run($bundle, ['into' => 'src10', 'execute' => $execute, 'passphrase' => 'p@ss']);
+                $this->fail('Expected a RuntimeException (execute='.var_export($execute, true).').');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('ΔΙΑΓΡΑΜΜΕΝΟ', $e->getMessage());
+            }
+        }
+        $this->assertSame('Σβησμένος', $trashed->fresh()->name, 'nothing written');
+        $this->assertNotNull($trashed->fresh()->deleted_at);
+
+        // Restored → the merge is the normal ΑΦΜ-merge again.
+        $trashed->restore();
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src10', 'execute' => true, 'passphrase' => 'p@ss']);
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $src->id)->count());
+        $this->assertSame('Ζωντανός', $trashed->fresh()->name);
     }
 }

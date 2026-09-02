@@ -36,9 +36,12 @@ final class Afm
     public static function uniqueKey(?string $raw): ?string
     {
         // A Greek-keyboard slip on the country prefix («ΕL», «ΕΛ», «EΛ» with a
-        // Greek Ε/Λ) must not mint a new identity: fold it to «EL» first. Every
-        // other Greek letter (an «ΑΦΜ» label, stray text) is simply dropped.
-        $upper = strtr(mb_strtoupper((string) $raw), ['ΕΛ' => 'EL', 'ΕL' => 'EL', 'EΛ' => 'EL']);
+        // Greek Ε/Λ) must not mint a new identity: fold a LEADING one to «EL»
+        // (after any label/separators — «ΑΦΜ: ΕΛ123…»). Only the prefix: any
+        // other Greek text («123456789 ΕΛΛΑΔΑ», an «ΑΦΜ» label) is simply
+        // dropped below, never folded into Latin letters.
+        $upper = mb_strtoupper((string) $raw);
+        $upper = preg_replace('/^[^\p{L}\d]*(?:ΑΦΜ)?[^\p{L}\d]*(?:ΕΛ|ΕL|EΛ)/u', 'EL', $upper) ?? $upper;
         $key = preg_replace('/[^A-Z0-9]+/', '', $upper) ?? '';
         // Every real ΑΦΜ/VAT carries digits; letters-only text («N/A», «NONE»,
         // a bare «EL») is a free-text placeholder, not an identity.

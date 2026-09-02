@@ -58,17 +58,8 @@ class WhmcsCustomerCreator
             ->where('company_id', $tenant->id)
             ->whereAfmKeyOf($afm)
             ->first();
-        if ($existing !== null && $existing->trashed()) {
-            return new WhmcsCustomerCreateResult($existing, false, 'deleted_owner');
-        }
         if ($existing !== null) {
-            // Establish the operator-confirmed WHMCS link if missing; never
-            // overwrite an existing one.
-            if (blank($existing->whmcs_client_id) && $pending->whmcs_userid) {
-                $existing->forceFill(['whmcs_client_id' => $pending->whmcs_userid])->save();
-            }
-
-            return new WhmcsCustomerCreateResult($existing, false, 'existing');
+            return $this->existingResult($existing, $pending);
         }
 
         // Authoritative GSIS lookup; degrade to WHMCS-typed data on any failure.
@@ -114,7 +105,7 @@ class WhmcsCustomerCreator
                 throw new RuntimeException('Ο πελάτης με ΑΦΜ '.$afm.' δημιουργήθηκε ταυτόχρονα από άλλον χειριστή — ξαναπροσπάθησε.');
             }
 
-            return new WhmcsCustomerCreateResult($winner, false, $winner->trashed() ? 'deleted_owner' : 'existing');
+            return $this->existingResult($winner, $pending);
         }
 
         // When GSIS resolved, surface fields where the OFFICIAL value differed
@@ -125,6 +116,25 @@ class WhmcsCustomerCreator
             : [];
 
         return new WhmcsCustomerCreateResult($customer, true, $source, $discrepancies);
+    }
+
+    /**
+     * The ΑΦΜ already has an owner (found up-front, or the winner of a create
+     * race — same outcome either way): a trashed owner is reported, never
+     * linked; a live one gets the operator-confirmed WHMCS link if missing
+     * (never overwriting an existing one).
+     */
+    private function existingResult(Customer $existing, PendingWhmcsInvoice $pending): WhmcsCustomerCreateResult
+    {
+        if ($existing->trashed()) {
+            return new WhmcsCustomerCreateResult($existing, false, 'deleted_owner');
+        }
+
+        if (blank($existing->whmcs_client_id) && $pending->whmcs_userid) {
+            $existing->forceFill(['whmcs_client_id' => $pending->whmcs_userid])->save();
+        }
+
+        return new WhmcsCustomerCreateResult($existing, false, 'existing');
     }
 
     /**

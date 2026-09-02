@@ -290,7 +290,9 @@ class PendingWhmcsInvoice extends Model
      */
     public function ownLinesAreReceipt(): bool
     {
-        if (blank($this->customer?->afm)) {
+        // Identity, not text: a placeholder («000000000») on the linked
+        // customer is no ΑΦΜ either — same rule as whmcsAfm().
+        if (Afm::uniqueKey($this->customer?->afm) === null) {
             return true;
         }
 
@@ -420,7 +422,7 @@ class PendingWhmcsInvoice extends Model
             return false;
         }
 
-        $hasAfm = filled($this->customer?->afm) || filled($this->whmcsAfm());
+        $hasAfm = Afm::uniqueKey($this->customer?->afm) !== null || filled($this->whmcsAfm());
 
         return ! $hasAfm;
     }

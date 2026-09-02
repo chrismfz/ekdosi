@@ -67,7 +67,7 @@ class WhmcsAutoIssueCommandTest extends TestCase
         return Customer::create([
             'company_id' => $tenant->id,
             'name' => $grumpy ? 'Γκρινιάρης' : 'Ήσυχος',
-            'afm' => '111111111',
+            'afm' => '111111112',
             'needs_immediate_invoice' => $grumpy,
         ]);
     }

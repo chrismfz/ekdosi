@@ -348,8 +348,10 @@ class MigrateFromFirebird extends Command
         }
 
         $lines = [];
+        $inSource = 0;
         foreach (array_filter($byKey, fn (array $ids): bool => count($ids) > 1) as $key => $ids) {
             $lines[] = "  ΑΦΜ {$key} (μέσα στη legacy βάση): ".implode(' | ', $ids);
+            $inSource++;
         }
 
         // The TARGET side (the parallel-run week): a local row that owns one of
@@ -383,9 +385,22 @@ class MigrateFromFirebird extends Command
             return;
         }
 
+        // Be precise about WHERE each kind is fixed: an in-source duplicate can
+        // only be resolved in the legacy Firebird DB (merge the two CUST_IDs, or
+        // blank/correct one ΑΦΜ there — the legacy app is still live until
+        // cutover); a target-side owner is resolved in ekdosi. The ETL never
+        // picks a winner on its own — the choice is legally significant.
+        $howTo = [];
+        if ($inSource > 0) {
+            $howTo[] = 'τα διπλά ΜΕΣΑ στη legacy βάση διορθώνονται ΣΤΗ LEGACY (συγχώνευση CUST_IDs ή διόρθωση/κένωση του ενός ΑΦΜ εκεί)';
+        }
+        if (count($lines) > $inSource) {
+            $howTo[] = 'οι τοπικοί κάτοχοι διορθώνονται στο ekdosi (php artisan customers:afm-duplicates)';
+        }
+
         throw new RuntimeException(
             "Σύγκρουση ΑΦΜ πελατών — τίποτα δεν γράφτηκε:\n".implode("\n", $lines)
-            ."\nΣυγχώνευσε/διόρθωσε (legacy ή ekdosi) και ξανατρέξε — ο στόχος επιβάλλει UNIQUE(company_id, afm_key)."
+            ."\n".ucfirst(implode('· ', $howTo)).' και ξανατρέξε — ο στόχος επιβάλλει UNIQUE(company_id, afm_key).'
         );
     }
 
