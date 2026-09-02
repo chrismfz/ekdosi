@@ -6,6 +6,7 @@ use App\Actions\ConvertLeadToCustomer;
 use App\Enums\LeadActivityType;
 use App\Enums\LeadSource;
 use App\Enums\LeadStatus;
+use App\Enums\QuoteStatus;
 use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Filament\Resources\Leads\Pages\CreateLead;
 use App\Filament\Resources\Leads\Pages\EditLead;
@@ -14,6 +15,7 @@ use App\Filament\Resources\Leads\RelationManagers\QuotesRelationManager;
 use App\Filament\Resources\Leads\RelationManagers\TimelineRelationManager;
 use App\Filament\Resources\Quotes\Pages\CreateQuote;
 use App\Filament\Resources\Quotes\Pages\EditQuote;
+use App\Filament\Resources\Quotes\Pages\ViewQuote;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerContact;
@@ -42,6 +44,9 @@ class LeadResourceTest extends TestCase
 
     private User $user;
 
+    /** Flip to simulate a role that may edit leads but NOT create customers. */
+    private bool $denyCustomerCreate = false;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -53,7 +58,10 @@ class LeadResourceTest extends TestCase
         $this->user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
         $this->tenant->users()->attach($this->user);
 
-        Gate::before(fn () => true);
+        // Allow-all, except the one ability a test may deliberately deny.
+        Gate::before(fn ($user, string $ability, array $args = []): bool => ! (
+            $this->denyCustomerCreate && $ability === 'create' && ($args[0] ?? null) === Customer::class
+        ));
         $this->actingAs($this->user);
         Filament::setTenant($this->tenant);
     }
@@ -178,6 +186,34 @@ class LeadResourceTest extends TestCase
             ->assertHasFormErrors(['status']);
 
         $this->assertSame(LeadStatus::DoNotContact, $lead->fresh()->status);
+    }
+
+    public function test_convert_requires_the_customer_create_permission(): void
+    {
+        // Update:Lead but NOT Create:Customer → the action is not offered.
+        $this->denyCustomerCreate = true;
+
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Α']);
+
+        Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])
+            ->assertActionHidden('convert');
+
+        $this->assertNull($lead->fresh()->converted_customer_id);
+        $this->assertSame(0, Customer::where('company_id', $this->tenant->id)->count());
+    }
+
+    public function test_send_email_is_offered_for_a_leads_quote(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Lead', 'email' => 'lead@x.gr']);
+        $quote = Quote::create(['company_id' => $this->tenant->id, 'lead_id' => $lead->id, 'code' => 'ΠΡ-3', 'issued_at' => now()]);
+
+        Livewire::test(ViewQuote::class, ['record' => $quote->getRouteKey()])
+            ->assertActionVisible('send_email');
+
+        $noEmail = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Χωρίς email']);
+        $quote2 = Quote::create(['company_id' => $this->tenant->id, 'lead_id' => $noEmail->id, 'code' => 'ΠΡ-4', 'issued_at' => now()]);
+        Livewire::test(ViewQuote::class, ['record' => $quote2->getRouteKey()])
+            ->assertActionHidden('send_email');
     }
 
     public function test_convert_is_hidden_on_a_do_not_contact_lead(): void
@@ -328,7 +364,20 @@ class LeadResourceTest extends TestCase
         $this->assertNotNull($quote, 'lead_id persisted through the real create path');
         $this->assertSame('Καφενείο', $quote->company_name);
 
+        // Creating the DRAFT is not a contact — nothing moves on the lead yet.
         $lead->refresh();
+        $this->assertSame(LeadStatus::Contacted, $lead->status);
+        $this->assertSame(0, $lead->timeline()->count());
+        $this->assertNull($lead->last_activity_at);
+
+        // «Σήμανση ως απεσταλμένη» is: Sent + the contact on the lead.
+        Livewire::test(ViewQuote::class, ['record' => $quote->getRouteKey()])
+            ->assertActionVisible('mark_sent')
+            ->callAction('mark_sent')
+            ->assertHasNoActionErrors();
+
+        $lead->refresh();
+        $this->assertSame(QuoteStatus::Sent, $quote->fresh()->status);
         $this->assertSame(LeadStatus::Quoted, $lead->status);
         $row = $lead->timeline()->where('type', LeadActivityType::Quote->value)->first();
         $this->assertSame($quote->id, $row->meta['quote_id']);
@@ -500,6 +549,20 @@ class LeadResourceTest extends TestCase
             ->assertOk()
             ->assertSee('Προέλευση')
             ->assertSee('Ήρθε από lead');
+    }
+
+    public function test_origin_first_contact_is_the_earliest_real_contact(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Παλιά επαφή']);
+        // A note two months ago is not a contact; the call 20 days ago is.
+        $lead->timeline()->create(['company_id' => $this->tenant->id, 'type' => LeadActivityType::Note->value, 'happened_at' => now()->subMonths(2), 'body' => 'σημ.']);
+        $lead->timeline()->create(['company_id' => $this->tenant->id, 'type' => LeadActivityType::Call->value, 'outcome' => 'answered', 'happened_at' => now()->subDays(20)]);
+        $customer = app(ConvertLeadToCustomer::class)($lead);
+
+        Livewire::test(EditCustomer::class, ['record' => $customer->getRouteKey()])
+            ->assertOk()
+            ->assertSee('Πρώτη επαφή: '.now()->subDays(20)->format('d/m/Y'))
+            ->assertSee('(20 ημέρες)');
     }
 
     public function test_new_quote_from_lead_is_prefilled_and_logged_on_the_lead(): void

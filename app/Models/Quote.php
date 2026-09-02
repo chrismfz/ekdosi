@@ -98,6 +98,36 @@ class Quote extends Model
 
     public const AWAITING_LEAD_MESSAGE = 'Η προσφορά ανήκει σε lead που δεν έχει γίνει πελάτης — κάνε πρώτα «Μετατροπή σε πελάτη» στο lead.';
 
+    /**
+     * Where the offer goes: the customer's email, or — for a quote issued to a
+     * lead that is not a customer yet — the lead's. Null when neither has one.
+     */
+    public function recipientEmail(): ?string
+    {
+        $email = trim((string) ($this->customer?->email ?: $this->lead?->email ?: ''));
+
+        return $email === '' ? null : $email;
+    }
+
+    /**
+     * «Στάλθηκε»: the moment the offer actually reached the other side — after
+     * a successful email, or by the explicit «Σήμανση ως απεσταλμένη» action.
+     * Moves Draft → Sent and, for a lead's quote, logs the contact on the lead
+     * (timeline row + «Στάλθηκε προσφορά»). Creating a draft never does this.
+     * Idempotent: a second send changes nothing.
+     */
+    public function markSent(): void
+    {
+        if ($this->status === QuoteStatus::Draft) {
+            $this->update(['status' => QuoteStatus::Sent]);
+        }
+
+        if ($this->lead_id !== null) {
+            $lead = Lead::query()->where('company_id', $this->company_id)->find($this->lead_id);
+            $lead?->recordQuote($this);
+        }
+    }
+
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);

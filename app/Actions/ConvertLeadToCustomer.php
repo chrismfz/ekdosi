@@ -134,15 +134,17 @@ class ConvertLeadToCustomer
             return;
         }
 
+        // withTrashed: a soft-deleted owner could be restored later and become
+        // the second live party — restore + link is the honest path.
         $owner = LeadMatcher::whereAfm(
-            Customer::query()->where('company_id', $lead->company_id),
+            Customer::query()->withTrashed()->where('company_id', $lead->company_id),
             $afm,
         )->lockForUpdate()->first();
 
         if ($owner !== null) {
-            throw new RuntimeException(
-                'Υπάρχει ήδη πελάτης με ΑΦΜ '.$afm.' («'.$owner->name.'») — διάλεξε «Σύνδεση με υπάρχοντα πελάτη».'
-            );
+            throw new RuntimeException($owner->trashed()
+                ? 'Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με ΑΦΜ '.$afm.' («'.$owner->name.'») — επανέφερέ τον και διάλεξε «Σύνδεση με υπάρχοντα πελάτη».'
+                : 'Υπάρχει ήδη πελάτης με ΑΦΜ '.$afm.' («'.$owner->name.'») — διάλεξε «Σύνδεση με υπάρχοντα πελάτη».');
         }
     }
 

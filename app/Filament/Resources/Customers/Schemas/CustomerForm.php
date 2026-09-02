@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Customers\Schemas;
 
+use App\Enums\LeadActivityType;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Filament\Support\AadeFormFill;
 use App\Filament\Support\Tags\TagControls;
@@ -19,6 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\HtmlString;
 
 class CustomerForm
@@ -358,15 +360,22 @@ class CustomerForm
             ->pluck('n', 'type');
 
         // Carbon 3 diffInDays() is a float — whole days only.
-        $days = $lead->converted_at && $lead->created_at
-            ? (int) floor($lead->created_at->diffInDays($lead->converted_at))
+        // «Πρώτη επαφή» = the earliest REAL contact row (call/email/meeting/
+        // quote), falling back to the lead's creation when none was logged.
+        $firstContactRaw = $lead->timeline()->getQuery()->reorder()
+            ->whereIn('type', LeadActivityType::contactValues())
+            ->min('happened_at');
+        $firstContact = $firstContactRaw ? Carbon::parse($firstContactRaw) : $lead->created_at;
+
+        $days = $lead->converted_at && $firstContact
+            ? (int) floor($firstContact->diffInDays($lead->converted_at))
             : null;
 
         $bits = array_filter([
             'Πηγή: '.($lead->source?->getLabel() ?? '—'),
             $lead->referredBy ? 'σύσταση από '.$lead->referredBy->name : null,
             'Χειριστής: '.($lead->assignedTo?->name ?? '—'),
-            'Πρώτη επαφή: '.$lead->created_at?->format('d/m/Y'),
+            'Πρώτη επαφή: '.($firstContact?->format('d/m/Y') ?? '—'),
             'Μετατροπή: '.($lead->converted_at?->format('d/m/Y') ?? '—').($days !== null ? " ({$days} ημέρες)" : ''),
             'Επαφές: '.(int) ($counts['call'] ?? 0).' τηλέφωνα · '.(int) ($counts['email'] ?? 0).' emails · '.(int) ($counts['meeting'] ?? 0).' ραντεβού',
         ]);

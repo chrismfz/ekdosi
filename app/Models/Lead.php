@@ -149,11 +149,23 @@ class Lead extends Model
     }
 
     /**
-     * A quote was issued to this lead: log it on the timeline and, if the lead
-     * is still early in the funnel, move it to «Στάλθηκε προσφορά».
+     * A quote was SENT to this lead (Quote::markSent — after a successful
+     * email or the explicit action; never on draft creation): log the contact
+     * on the timeline and, if the lead is still early in the funnel, move it
+     * to «Στάλθηκε προσφορά».
      */
     public function recordQuote(Quote $quote): void
     {
+        // Once per quote — a re-send or a manual «Σήμανση» after an email
+        // must not log a second contact.
+        $already = $this->timeline()
+            ->where('type', LeadActivityType::Quote->value)
+            ->get()
+            ->contains(fn (LeadActivity $row): bool => (int) ($row->meta['quote_id'] ?? 0) === $quote->id);
+        if ($already) {
+            return;
+        }
+
         $this->timeline()->create([
             'company_id' => $this->company_id,
             'user_id' => auth()->id(),

@@ -145,11 +145,18 @@ class ConvertLeadToCustomerTest extends TestCase
         // Linking to the owner is the way through.
         $this->assertSame($owner->id, app(ConvertLeadToCustomer::class)($lead->fresh(), $owner)->id);
 
-        // A TRASHED owner does not block a new customer.
+        // A TRASHED owner blocks too (it could be restored → two live parties);
+        // the message says restore + link.
         $t2 = $this->tenant('t2');
         Customer::create(['company_id' => $t2->id, 'name' => 'Σβησμένος', 'afm' => '123456789'])->delete();
         $lead2 = Lead::create(['company_id' => $t2->id, 'name' => 'Νέος', 'afm' => '123456789']);
-        $this->assertNotNull(app(ConvertLeadToCustomer::class)($lead2));
+        try {
+            app(ConvertLeadToCustomer::class)($lead2);
+            $this->fail('Expected a RuntimeException.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ΔΙΑΓΡΑΜΜΕΝΟΣ', $e->getMessage());
+        }
+        $this->assertSame(0, Customer::where('company_id', $t2->id)->count());
     }
 
     public function test_refuses_a_do_not_contact_or_trashed_lead(): void

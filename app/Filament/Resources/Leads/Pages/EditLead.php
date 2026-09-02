@@ -23,6 +23,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\Gate;
 use Throwable;
 
 /**
@@ -46,6 +47,9 @@ class EditLead extends EditRecord
                 ->visible(fn (Lead $record): bool => ! $record->isConverted()
                     && ! $record->trashed()
                     && $record->status !== LeadStatus::DoNotContact)
+                // Creates a Customer (+ contact) / re-points quotes: Update:Lead
+                // alone is not enough — the customer permission decides.
+                ->authorize(fn (): bool => Gate::allows('create', Customer::class))
                 ->modalHeading('Μετατροπή σε πελάτη')
                 ->modalDescription('Το lead γίνεται «Πελάτης» και συνδέεται με τον πελάτη — ο πελάτης «θυμάται» από πού ήρθε. Σημειώσεις/συνημμένα μένουν στο lead, οι προσφορές του περνούν στον πελάτη.')
                 ->modalSubmitActionLabel('Μετατροπή')
@@ -74,6 +78,13 @@ class EditLead extends EditRecord
                         ->helperText('Προεπιλέγεται ο πελάτης που ταιριάζει σε ΑΦΜ (ή email/τηλέφωνο) όταν είναι μοναδικός.'),
                 ])
                 ->action(function (Lead $record, array $data): void {
+                    // Re-checked in the body: mountAction doesn't re-run visible/authorize.
+                    if (! Gate::allows('create', Customer::class)) {
+                        Notification::make()->title('Δεν έχεις δικαίωμα δημιουργίας πελάτη.')->danger()->send();
+
+                        return;
+                    }
+
                     $existing = null;
                     if (($data['mode'] ?? 'new') === 'link') {
                         $existing = Customer::query()

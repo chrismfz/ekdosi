@@ -123,16 +123,13 @@ class CreateQuote extends CreateRecord
             ->find($id);
     }
 
-    /** Recompute totals once the Repeater has persisted the lines; log on the lead. */
+    /**
+     * Recompute totals once the Repeater has persisted the lines. A DRAFT is
+     * not a contact: the lead is notified by Quote::markSent() — after a
+     * successful email or the explicit «Σήμανση ως απεσταλμένη».
+     */
     protected function afterCreate(): void
     {
         app(QuoteTotals::class)($this->record);
-
-        if ($this->record->lead_id !== null) {
-            $lead = Lead::query()
-                ->where('company_id', $this->record->company_id)
-                ->find($this->record->lead_id);
-            $lead?->recordQuote($this->record);
-        }
     }
 }

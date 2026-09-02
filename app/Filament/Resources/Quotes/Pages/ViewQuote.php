@@ -266,15 +266,33 @@ class ViewQuote extends ViewRecord
                     );
                 }),
 
-            // Email the quote PDF to the customer (queued; history below).
+            // «Σήμανση ως απεσταλμένη» — handed over outside the app (printed,
+            // told on the phone, sent from a personal mailbox). Draft → Sent and,
+            // for a lead's quote, the contact lands on the lead.
+            Action::make('mark_sent')
+                ->label('Σήμανση ως απεσταλμένη')
+                ->icon('heroicon-o-paper-airplane')
+                ->color('gray')
+                ->visible(fn (Quote $record) => $record->status === QuoteStatus::Draft)
+                ->requiresConfirmation()
+                ->modalHeading('Σήμανση ως απεσταλμένη')
+                ->modalDescription('Η προσφορά δόθηκε στον παραλήπτη με άλλο τρόπο. Σημειώνεται «Απεσταλμένη»· αν αφορά lead, καταγράφεται ως επαφή στο χρονολόγιό του.')
+                ->action(function (Quote $record) {
+                    $record->markSent();
+                    Notification::make()->title('Η προσφορά σημειώθηκε ως απεσταλμένη')->success()->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                }),
+
+            // Email the quote PDF to the customer — or to the lead it was issued
+            // to (queued; history below).
             Action::make('send_email')
                 ->label('Αποστολή με email')
                 ->icon('heroicon-o-envelope')
                 ->color('gray')
-                ->visible(fn (Quote $record) => $record->customer?->email !== null && $record->customer?->email !== '')
+                ->visible(fn (Quote $record) => $record->recipientEmail() !== null)
                 ->requiresConfirmation()
                 ->modalHeading('Αποστολή προσφοράς με email')
-                ->modalDescription(fn (Quote $record) => 'Μπαίνει στην ουρά email με το PDF συνημμένο. Προς: '.($record->customer?->email ?? '—').'. Δείτε το «Ιστορικό αποστολών» πιο κάτω για την κατάσταση.')
+                ->modalDescription(fn (Quote $record) => 'Μπαίνει στην ουρά email με το PDF συνημμένο. Προς: '.($record->recipientEmail() ?? '—').($record->customer_id === null && $record->lead_id !== null ? ' (lead)' : '').'. Δείτε το «Ιστορικό αποστολών» πιο κάτω για την κατάσταση.')
                 ->modalSubmitActionLabel('Αποστολή')
                 ->action(function (Quote $record) {
                     SendQuoteEmail::dispatch(
