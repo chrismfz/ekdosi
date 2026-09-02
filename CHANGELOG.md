@@ -19,6 +19,25 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Συγχώνευση διπλών πελατών.** `php artisan customers:merge <keep> <drop> [--dry-run] [--keep=] [--force]`
+  + action «Συγχώνευση με άλλον πελάτη» στη σελίδα πελάτη: μεταφέρει παραστατικά/πληρωμές/προσφορές/
+  επαφές/ΔΑ/συμβόλαια/WHMCS/leads/σημειώσεις/συνημμένα/ετικέτες/ιστορικό σε ΜΙΑ transaction, γράφει τα
+  στοιχεία που διέφεραν ως καρφιτσωμένη σημείωση στον επιζώντα και **διαγράφει οριστικά** τον άλλο
+  (soft-delete θα κρατούσε το ΑΦΜ κάτω από το UNIQUE). Αρνείται (χωρίς μισή δουλειά) σε άλλη εταιρεία,
+  διαγραμμένο επιζώντα ή δύο leads προέλευσης. **Αυτό έλειπε** όταν το migration του unique ΑΦΜ
+  σταματούσε τον χειριστή χωρίς τρόπο να λύσει το πρόβλημα.
+- **`php artisan ops:queue-drain`** — άδειασμα ουράς **χωρίς root**: `queue:restart` + αναμονή μέχρι να
+  μην τρέχει κανένα job. Το `deploy/update.sh` / `rollback.sh` δοκιμάζουν πλέον hook → systemd →
+  ops:queue-drain, οπότε δουλεύουν και σε cPanel/Plesk/DirectAdmin/shared ή με cron worker· abort μόνο
+  αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`, default 60s).
+
+### Changed
+- **`customers:afm-duplicates`**: δείχνει τι κρέμεται από κάθε διπλό (παραστατικά/πληρωμές/…), σημειώνει
+  με ✓ ποιον θα κρατούσε η συγχώνευση και τυπώνει έτοιμη την εντολή `customers:merge`.
+- **`deploy/update.sh`**: ο read-only έλεγχος διπλών ΑΦΜ τρέχει και **πριν** το maintenance mode (μηδέν
+  downtime όταν βρει πρόβλημα)· τα μηνύματα δείχνουν τη συγχώνευση αντί για SQL στο χέρι.
+
+### Added (συνέχεια)
 - **Leads / mini-CRM (L3) — όψεις.** «Πίνακας leads» (kanban ανά κατάσταση, drag-and-drop = αλλαγή
   κατάστασης μέσα από τον ίδιο hook, «Όχι τώρα» με ημερομηνία, perm `View:LeadsBoard`) και «Ημερολόγιο
   leads» (μηνιαίο πλέγμα των επόμενων βημάτων, drag σε άλλη μέρα = μετάθεση, perm `View:LeadsCalendar`)·

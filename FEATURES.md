@@ -169,8 +169,13 @@
 - **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ».
 - **Ένας πελάτης ανά ΑΦΜ (DB-enforced)**: `customers.afm_key` (`Afm::uniqueKey`: ψηφία για GR με/χωρίς
   EL/GR, γράμματα για ξένο VAT, NULL για placeholder/κενό) + `UNIQUE(company_id, afm_key)` και σε
-  soft-deleted· φιλικό validation στη φόρμα· `customers:afm-duplicates` audit· ETL/importer/sync/WHMCS
-  όλα μέσω `whereAfmKeyOf`.
+  soft-deleted· φιλικό validation στη φόρμα· ETL/importer/sync/WHMCS όλα μέσω `whereAfmKeyOf`.
+- **Διπλοί πελάτες: εντοπισμός + συγχώνευση.** `customers:afm-duplicates` (read-only audit· δείχνει τι
+  κρέμεται από κάθε γραμμή και ✓ ποιον να κρατήσεις) και **`customers:merge <keep> <drop>`** /
+  action «Συγχώνευση με άλλον πελάτη»: όλα (παραστατικά, πληρωμές, προσφορές, επαφές, ΔΑ, συμβόλαια,
+  WHMCS, leads, σημειώσεις, συνημμένα, ετικέτες, ιστορικό) περνούν στον επιζώντα σε μία transaction,
+  τα στοιχεία που διέφεραν μένουν ως καρφιτσωμένη σημείωση, ο άλλος διαγράφεται οριστικά. `--dry-run`
+  δείχνει ακριβώς τι θα γίνει.
 - **Συγχρονισμός πελατών από myDATA** (`CustomerSyncFromMyData` / `customers:sync`) — bulk discovery
   από τα ΑΦΜ συναλλασσομένων στις πωλήσεις μας + GSIS enrichment· lookback presets 3/12/24 μήνες
   (καθρέφτης του `suppliers:sync`).
@@ -376,9 +381,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   τοπικό gzip στιγμιότυπο όλης της ΒΔ ως rollback point (creds από .env, password
   μέσω `MYSQL_PWD`). Restore guarded (production → `--force`). Το rollback layer
   των updates (ξεχωριστό από τα off-site spatie αρχεία).
-- **Ασφαλή updates** — `deploy/update.sh <tag>` (snapshot→maintenance→checkout→
-  composer→migrate→optimize→shield→queue:restart→ops:health) + `deploy/rollback.sh`·
-  version tags via `ekdosi:release`. Runbook: `docs/updates-runbook.md`.
+- **Ασφαλή updates** — `deploy/update.sh <tag>` (read-only data pre-flight→snapshot→maintenance→
+  queue drain→checkout→composer→migrate→optimize→shield→queue:restart→ops:health) +
+  `deploy/rollback.sh`· version tags via `ekdosi:release`. Runbook: `docs/updates-runbook.md`.
+- **Queue drain χωρίς root** (`ops:queue-drain`) — hook → systemd → portable (`queue:restart` +
+  αναμονή μέχρι να μην τρέχει job). Δουλεύει και σε cPanel/Plesk/DirectAdmin/shared ή με cron worker·
+  το deploy σταματά μόνο αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`).
 
 ## 15. Ασφάλεια & λειτουργικά
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.

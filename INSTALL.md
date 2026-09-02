@@ -806,6 +806,41 @@ sudo systemctl enable --now ekdosi-queue
 sudo systemctl status ekdosi-queue
 ```
 
+> **⚠ Never add `--force` to `ExecStart`.** A worker started with `--force`
+> ignores maintenance mode and keeps consuming jobs DURING a deploy — the one
+> thing the drain below exists to prevent.
+
+**Let the deploy user drain the worker (recommended).** `deploy/update.sh` and
+`deploy/rollback.sh` stop the worker before `migrate`/restore. Without this the
+unit is root-only, `systemctl stop` fails, and they fall back to the slower
+portable drain. One sudoers drop-in fixes it:
+
+```bash
+sudo tee /etc/sudoers.d/ekdosi-queue >/dev/null <<'EOF'
+ekdosi ALL=(root) NOPASSWD: /usr/bin/systemctl stop ekdosi-queue, /usr/bin/systemctl start ekdosi-queue
+EOF
+sudo chmod 440 /etc/sudoers.d/ekdosi-queue
+# and, once, in the ekdosi user's ~/.bash_profile:
+export QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'
+export QUEUE_START_CMD='sudo systemctl start ekdosi-queue'
+```
+
+### No systemd / no root (cPanel, Plesk, DirectAdmin, shared hosting)
+
+There is nothing to configure — the deploy scripts fall back to
+`php artisan ops:queue-drain`, which needs no privileges: it broadcasts
+`queue:restart` (each worker finishes its current job and exits) and then waits
+until no job is reserved. Combined with maintenance mode — already on at that
+point — a worker that a supervisor or cron brings back simply sleeps until the
+deploy is over. Run the worker however the host allows, e.g. a cron line:
+
+```
+* * * * * cd /home/USER/ekdosi && /usr/bin/php artisan queue:work --stop-when-empty --max-time=55 >/dev/null 2>&1
+```
+
+`QUEUE_DRAIN_TIMEOUT` (default 60s) is how long the deploy waits for an
+in-flight job; raise it on a box that runs the long Firebird import.
+
 (Future: when the WHMCS pull / myDATA-resend backlog warrants it,
 switch `QUEUE_CONNECTION=redis` and add `redis` to the install list.
 Database driver is fine for ~3 tenants.)

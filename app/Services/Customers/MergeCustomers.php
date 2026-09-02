@@ -1,0 +1,354 @@
+<?php
+
+namespace App\Services\Customers;
+
+use App\Models\Customer;
+use App\Models\Note;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use RuntimeException;
+
+/**
+ * «Συγχώνευση πελατών» — two rows, one legal party (the same ΑΦΜ entered
+ * twice, a legacy row + a panel/WHMCS one, …). Everything that hangs off the
+ * losing row is repointed to the surviving one inside ONE transaction, the
+ * fields that differ are written as an internal note on the survivor («τι
+ * ήταν ο άλλος»), and the loser is FORCE-deleted (owner decision: no ghost
+ * row behind the UNIQUE(company_id, afm_key) index).
+ *
+ * Never guesses which row is the party: the caller decides (the command
+ * defaults to the one carrying the most records — see suggestKeeper()).
+ * Documents are legally significant, so the whole thing is one transaction
+ * and refuses rather than half-merges.
+ */
+class MergeCustomers
+{
+    /**
+     * Plain FK sites: table => column. Every one is ALSO scoped to the
+     * tenant's company_id, so a merge can never reach another company's row.
+     *
+     * @var array<string, string>
+     */
+    public const FOREIGN_KEYS = [
+        'invoices' => 'customer_id',
+        'payments' => 'customer_id',
+        'quotes' => 'customer_id',
+        'customer_contacts' => 'customer_id',
+        'delivery_notes' => 'customer_id',
+        'service_contracts' => 'customer_id',
+        'pending_whmcs_invoices' => 'customer_id',
+        'ai_pending_actions' => 'customer_id',
+        'cmr_notes' => 'customer_id',
+        'invoice_types' => 'default_customer_id',
+        'customers' => 'referred_by_customer_id',
+        'leads' => 'referred_by_customer_id',
+    ];
+
+    /**
+     * Polymorphic sites: table => [type column, id column]. `taggables` and
+     * `activity_log` carry no company_id, so they are scoped by the id alone
+     * (the id already belongs to the tenant's customer).
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    public const MORPHS = [
+        'notes' => ['notable_type', 'notable_id'],
+        'attachments' => ['attachable_type', 'attachable_id'],
+        'taggables' => ['taggable_type', 'taggable_id'],
+        'activity_log' => ['subject_type', 'subject_id'],
+    ];
+
+    /** Identity fields compared for the «what the other row said» note. */
+    public const COMPARED_FIELDS = [
+        'name' => 'Επωνυμία',
+        'afm' => 'ΑΦΜ',
+        'type' => 'Τύπος',
+        'occupation' => 'Δραστηριότητα',
+        'tax_office' => 'ΔΟΥ',
+        'address1' => 'Διεύθυνση',
+        'address2' => 'Διεύθυνση 2',
+        'city' => 'Πόλη',
+        'postcode' => 'Τ.Κ.',
+        'country' => 'Χώρα',
+        'phone1' => 'Τηλέφωνο',
+        'phone2' => 'Τηλέφωνο 2',
+        'fax' => 'Fax',
+        'email' => 'Email',
+        'secondary_email' => 'Email 2',
+        'whmcs_client_id' => 'WHMCS client id',
+        'legacy_id' => 'legacy_id',
+        'peppol_endpoint' => 'PEPPOL endpoint',
+    ];
+
+    /**
+     * What a merge WOULD do — counts per table + the differing fields. Never
+     * writes. The same numbers the command's --dry-run and the panel modal show.
+     */
+    public function preview(Customer $keep, Customer $drop): MergeCustomersResult
+    {
+        $this->assertMergeable($keep, $drop);
+
+        $moves = [];
+        foreach (self::FOREIGN_KEYS as $table => $column) {
+            $count = $this->fkQuery($table, $column, $drop)->count();
+            if ($count > 0) {
+                $moves[$table] = $count;
+            }
+        }
+        foreach (self::MORPHS as $table => [$typeColumn, $idColumn]) {
+            $query = $this->morphQuery($table, $typeColumn, $idColumn, $drop);
+            if ($table === 'taggables') {
+                // A tag the survivor already carries is dropped, not moved.
+                $query->whereNotIn('tag_id', DB::table('taggables')
+                    ->where('taggable_type', Customer::class)
+                    ->where('taggable_id', $keep->getKey())
+                    ->pluck('tag_id'));
+            }
+            $count = $query->count();
+            if ($count > 0) {
+                $moves[$table] = ($moves[$table] ?? 0) + $count;
+            }
+        }
+
+        return new MergeCustomersResult(
+            keepId: (int) $keep->getKey(),
+            keepName: (string) $keep->name,
+            dropId: (int) $drop->getKey(),
+            dropName: (string) $drop->name,
+            moves: $moves,
+            differences: $this->differences($keep, $drop),
+        );
+    }
+
+    /**
+     * Do it. Returns what was moved (the same shape as preview()).
+     */
+    public function __invoke(Customer $keep, Customer $drop): MergeCustomersResult
+    {
+        $this->assertMergeable($keep, $drop);
+
+        return DB::transaction(function () use ($keep, $drop): MergeCustomersResult {
+            // Re-read under a lock: the counts in the operator's modal may be
+            // minutes old, and another operator may have moved documents since.
+            $keep = Customer::query()->withTrashed()->whereKey($keep->getKey())->lockForUpdate()->firstOrFail();
+            $drop = Customer::query()->withTrashed()->whereKey($drop->getKey())->lockForUpdate()->firstOrFail();
+            $this->assertMergeable($keep, $drop);
+
+            $result = $this->preview($keep, $drop);
+
+            foreach (self::FOREIGN_KEYS as $table => $column) {
+                $this->fkQuery($table, $column, $drop)->update([$column => $keep->getKey()]);
+            }
+
+            // leads.converted_customer_id is UNIQUE: only ONE lead may point at
+            // the survivor. assertMergeable() refuses when both sides have one,
+            // so at most one row moves here.
+            if (Schema::hasTable('leads')) {
+                DB::table('leads')
+                    ->where('company_id', $keep->company_id)
+                    ->where('converted_customer_id', $drop->getKey())
+                    ->update(['converted_customer_id' => $keep->getKey()]);
+            }
+
+            // Tags first: `taggables` has a UNIQUE(tag_id, taggable_*) pivot, so a
+            // tag BOTH rows carry must be dropped from the loser BEFORE the move
+            // (updating into it would violate the index mid-transaction).
+            $this->releaseSharedTags($keep, $drop);
+
+            foreach (self::MORPHS as $table => [$typeColumn, $idColumn]) {
+                $this->morphQuery($table, $typeColumn, $idColumn, $drop)->update([$idColumn => $keep->getKey()]);
+            }
+
+            // At most one primary contact survives (the model's own rule).
+            $this->dedupePrimaryContact($keep);
+
+            $this->writeMergeNote($keep, $drop, $result);
+
+            // Force-delete: a soft-deleted twin would still hold the ΑΦΜ under
+            // UNIQUE(company_id, afm_key) — the whole point of the merge.
+            $drop->forceDelete();
+
+            return $result;
+        });
+    }
+
+    /**
+     * Which row should survive: the one carrying the most records; a tie goes
+     * to the older id (the row the documents were first filed against).
+     */
+    public function suggestKeeper(Customer $a, Customer $b): Customer
+    {
+        $countFor = function (Customer $c): int {
+            $n = 0;
+            foreach (self::FOREIGN_KEYS as $table => $column) {
+                $n += $this->fkQuery($table, $column, $c)->count();
+            }
+
+            return $n;
+        };
+
+        $na = $countFor($a);
+        $nb = $countFor($b);
+        if ($na === $nb) {
+            return $a->getKey() <= $b->getKey() ? $a : $b;
+        }
+
+        return $na > $nb ? $a : $b;
+    }
+
+    private function assertMergeable(Customer $keep, Customer $drop): void
+    {
+        if ($keep->getKey() === $drop->getKey()) {
+            throw new RuntimeException('Ο ίδιος πελάτης — δεν συγχωνεύεται με τον εαυτό του.');
+        }
+        if ((int) $keep->company_id !== (int) $drop->company_id) {
+            throw new RuntimeException('Οι δύο πελάτες ανήκουν σε διαφορετικές εταιρείες.');
+        }
+        if ($keep->trashed()) {
+            throw new RuntimeException('Ο πελάτης που κρατάμε (#'.$keep->getKey().') είναι διαγραμμένος — επανέφερέ τον πρώτα.');
+        }
+
+        // leads.converted_customer_id is unique: two origin leads cannot both
+        // point at the survivor, and silently dropping one erases the «από πού
+        // ήρθε» link. The operator resolves it on the lead first.
+        if (Schema::hasTable('leads')) {
+            $leads = DB::table('leads')
+                ->where('company_id', $keep->company_id)
+                ->whereIn('converted_customer_id', [$keep->getKey(), $drop->getKey()])
+                ->count();
+            if ($leads > 1) {
+                throw new RuntimeException(
+                    'Και οι δύο πελάτες προέρχονται από lead (leads.converted_customer_id είναι μοναδικό). '
+                    .'Αποσύνδεσε πρώτα το ένα lead και ξαναπροσπάθησε.'
+                );
+            }
+        }
+    }
+
+    private function fkQuery(string $table, string $column, Customer $customer)
+    {
+        $query = DB::table($table)->where($column, $customer->getKey());
+
+        // Every one of these tables is tenant-owned; the extra predicate makes
+        // a cross-tenant write impossible even if an id were guessed.
+        if (Schema::hasColumn($table, 'company_id')) {
+            $query->where('company_id', $customer->company_id);
+        }
+
+        return $query;
+    }
+
+    private function morphQuery(string $table, string $typeColumn, string $idColumn, Customer $customer)
+    {
+        return DB::table($table)
+            ->where($typeColumn, Customer::class)
+            ->where($idColumn, $customer->getKey());
+    }
+
+    /**
+     * Tags both rows carry: drop them from the LOSER so the move can't violate
+     * the pivot's UNIQUE(tag_id, taggable_type, taggable_id). The survivor keeps
+     * its own row, so no tag is lost.
+     */
+    private function releaseSharedTags(Customer $keep, Customer $drop): void
+    {
+        if (! Schema::hasTable('taggables')) {
+            return;
+        }
+
+        $keepTagIds = DB::table('taggables')
+            ->where('taggable_type', Customer::class)
+            ->where('taggable_id', $keep->getKey())
+            ->pluck('tag_id');
+
+        if ($keepTagIds->isEmpty()) {
+            return;
+        }
+
+        DB::table('taggables')
+            ->where('taggable_type', Customer::class)
+            ->where('taggable_id', $drop->getKey())
+            ->whereIn('tag_id', $keepTagIds)
+            ->delete();
+    }
+
+    /** Two primary contacts cannot coexist — keep the survivor's own. */
+    private function dedupePrimaryContact(Customer $keep): void
+    {
+        $primaries = DB::table('customer_contacts')
+            ->where('company_id', $keep->company_id)
+            ->where('customer_id', $keep->getKey())
+            ->where('is_primary', true)
+            ->orderBy('id')
+            ->pluck('id');
+
+        if ($primaries->count() > 1) {
+            DB::table('customer_contacts')
+                ->whereIn('id', $primaries->slice(1)->all())
+                ->update(['is_primary' => false]);
+        }
+    }
+
+    /**
+     * The merged row's identity, kept as an internal note on the survivor —
+     * «τι έλεγε ο άλλος» (επωνυμία, email, …) plus what moved. Pinned: it is
+     * the explanation of a destructive act.
+     */
+    private function writeMergeNote(Customer $keep, Customer $drop, MergeCustomersResult $result): void
+    {
+        $lines = ['Συγχώνευση πελάτη #'.$drop->getKey().' «'.$drop->name.'» σε αυτόν τον πελάτη ('.now()->format('d/m/Y H:i').').'];
+
+        if ($result->differences !== []) {
+            $lines[] = '';
+            $lines[] = 'Στοιχεία που διέφεραν (κρατήθηκαν του #'.$keep->getKey().'):';
+            foreach ($result->differences as $label => $pair) {
+                $lines[] = '• '.$label.': «'.($pair['keep'] ?? '—').'» ← ο συγχωνευμένος είχε «'.($pair['drop'] ?? '—').'»';
+            }
+        }
+
+        if ($result->moves !== []) {
+            $lines[] = '';
+            $lines[] = 'Μεταφέρθηκαν: '.$result->movesLabel().'.';
+        }
+
+        Note::create([
+            'company_id' => $keep->company_id,
+            'notable_type' => Customer::class,
+            'notable_id' => $keep->getKey(),
+            'body' => implode("\n", $lines),
+            'is_pinned' => true,
+            'author_user_id' => auth()->id(),
+        ]);
+    }
+
+    /**
+     * Fields where the two rows disagree (both non-empty and different, or the
+     * loser had one the survivor lacks). Label => ['keep' => …, 'drop' => …].
+     *
+     * @return array<string, array{keep: ?string, drop: ?string}>
+     */
+    private function differences(Customer $keep, Customer $drop): array
+    {
+        $out = [];
+        foreach (self::COMPARED_FIELDS as $column => $label) {
+            $a = $this->normalise($keep->{$column});
+            $b = $this->normalise($drop->{$column});
+            if ($b === null || $a === $b) {
+                continue;   // the loser adds nothing here
+            }
+            $out[$label] = ['keep' => $a, 'drop' => $b];
+        }
+
+        return $out;
+    }
+
+    private function normalise(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $text = trim((string) $value);
+
+        return $text === '' ? null : $text;
+    }
+}
