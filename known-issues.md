@@ -881,6 +881,26 @@ evidence of what that MARK carried. Making the change failed all eight legacy-ro
 tests as `contentIncomplete`, which is the permanent exit-2 that code's own comment warns about.
 The reason is recorded at the call site.
 
+**Round-4 review corrections (no P0/P1 — the fixes below close the remaining P2s):**
+
+- **The ticket's own acceptance criterion — «ΑΦΜ, χώρα και όνομα σχηματίζουν ΕΝΑ πρόσωπο» — was
+  still unmet.** Both `CreateInvoice` and the WHMCS mapper default a blank customer country to
+  `'GR'`, so a «DE811234567» customer whose country was never filled in gets a GR snapshot — and
+  because a country IS recorded, the ΑΦΜ's prefix evidence was never consulted. The original
+  MYD-009 defect wearing a different hat. A recorded country that CONTRADICTS the VAT prefix is
+  now refused, naming both values.
+- **Free text in `vat_no` was read as a country claim.** The column is an unvalidated TextInput
+  and a raw ETL copy, so «INV-2024-01» resolved to India, «VAT123» to the Vatican, «LTD 12» to
+  Lithuania — each refusing an invoice with nothing wrong with it. A real VAT body carries at
+  least seven digits (Ireland is the shortest), which every junk value falls under.
+- **A punctuation-only ΑΦΜ passed two parties as one.** «-» trims non-empty but canonicalises to
+  nothing, and an empty key equals a null customer ΑΦΜ, so the name check was skipped entirely.
+- **Two definitions of "is this retail?"** — `filesNoCounterpart()` read the cache first while
+  the builder files from the relation. It now reads the relation first, matching the builder.
+- **The freeze covered a subset of what the PDF prints** (`address2`, `vies_vat` were missing),
+  so a legacy invoice gained a partial address at filing. Both are frozen now — and the customer
+  column is `vat_vies`, not `vies_vat`, which the first cut had wrong so it always froze null.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never

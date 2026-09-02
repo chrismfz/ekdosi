@@ -296,7 +296,10 @@ class Invoice extends Model
 
         $afm = trim((string) $this->vat_no);
 
-        if ($afm !== '') {
+        // A punctuation-only value («-», «.») trims non-empty but canonicalises to
+        // NOTHING, and an empty key equals a null customer ΑΦΜ — which let two
+        // different parties short-circuit past the name check entirely.
+        if ($afm !== '' && Afm::comparisonKey($afm) !== '') {
             // The ΑΦΜ is the identity. When it matches, the party IS this customer —
             // a differing NAME is a rename or a spelling correction, not a different
             // taxpayer, and treating it as fatal made a routine customer rename turn
@@ -391,7 +394,24 @@ class Invoice extends Model
      */
     public function counterpartCountryForFiling(): string
     {
+        $prefix = Afm::countryPrefix($this->counterpartAfm());
+
         if ($iso = $this->counterpartCountryIso()) {
+            // COHERENCE (the ticket's own acceptance criterion): ΑΦΜ and country must
+            // describe ONE party. They routinely disagree in practice because both
+            // CreateInvoice and the WHMCS mapper default a blank customer country to
+            // «GR» — so a «DE811234567» customer whose country was never filled in
+            // gets a GR snapshot, and the prefix evidence never even gets consulted
+            // because a country IS recorded. That is the original MYD-009 defect
+            // wearing a different hat: a reported party assembled from two sources.
+            if ($prefix !== null && $prefix !== $iso) {
+                throw new RuntimeException(
+                    "Invoice {$this->invcode} reports country «{$iso}» but its ΑΦΜ "
+                    ."«{$this->counterpartAfm()}» is a {$prefix} VAT identifier. "
+                    .'Correct «Χώρα» or «ΑΦΜ» — the two must describe the same party.'
+                );
+            }
+
             return $iso;
         }
 
@@ -402,7 +422,7 @@ class Invoice extends Model
 
         // The ΑΦΜ says the party is foreign, whatever the country columns do (or
         // don't) say. Never default that to GR.
-        if ($prefix = Afm::countryPrefix($this->counterpartAfm())) {
+        if ($prefix !== null) {
             if ($prefix !== 'GR') {
                 throw new RuntimeException(
                     "Invoice {$this->invcode} records no counterpart country, but its ΑΦΜ "
@@ -493,9 +513,11 @@ class Invoice extends Model
         // a re-render threw "requires a full address" while AADE held the real one.
         $candidates += [
             'address1' => [$live?->address1, 60],
+            'address2' => [$live?->address2, 60],
             'city' => [$live?->city, 60],
             'postcode' => [$live?->postcode, 10],
             'occupation' => [$live?->occupation, 120],
+            'vies_vat' => [$live?->vat_vies, 20],
         ];
 
         $frozen = [];
@@ -514,7 +536,10 @@ class Invoice extends Model
      */
     public function filesNoCounterpart(): bool
     {
-        $type = (string) ($this->mydata_type ?: $this->invoiceType?->mydata_type);
+        // The RELATION first, because that is what AadeInvoiceDocument::build() files
+        // from — reading the cache first gave a second, divergent definition of "is
+        // this retail?" inside a change whose whole thesis is one definition.
+        $type = (string) ($this->invoiceType?->mydata_type ?: $this->mydata_type);
 
         return str_starts_with($type, '11.');
     }

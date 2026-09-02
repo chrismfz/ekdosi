@@ -14,6 +14,7 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\MyDataRejected;
 use App\Services\MyDataSubmitter;
+use App\Support\Afm;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -1961,6 +1962,71 @@ XML;
 
         $this->assertSame('Πατησίων 1', $frozen['address1']);
         $this->assertSame('Αθήνα', $frozen['city']);
+    }
+
+    public function test_a_bare_greek_afm_with_no_country_anywhere_files_as_gr(): void
+    {
+        // The ordinary Greek/WHMCS shape: a plain nine-digit ΑΦΜ, no «EL» prefix, and
+        // no country recorded on either side. It must file as GR without any guard
+        // getting in the way — every tightening in this issue has to keep this true.
+        $this->customer->forceFill(['afm' => '997073525', 'country' => null])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => null])->save();
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatNumber>997073525</vatNumber>', $xml);
+        $this->assertStringContainsString('<country>GR</country>', $xml);
+    }
+
+    public function test_free_text_in_the_vat_column_is_not_read_as_a_country_claim(): void
+    {
+        // ROUND-4 P2. vat_no is an unvalidated TextInput and a raw ETL copy, so it
+        // holds things like «INV-2024-01» — which the first prefix matcher read as
+        // India and refused. A VAT body carries at least seven digits (Ireland is the
+        // shortest); junk falls under that floor.
+        foreach (['INV-2024-01', 'ID 044123', 'VAT123', 'LTD 12'] as $junk) {
+            $this->assertNull(Afm::countryPrefix($junk), "«{$junk}» must not claim a country");
+        }
+
+        $this->assertSame('IE', Afm::countryPrefix('IE1234567FA'));
+    }
+
+    public function test_a_country_that_contradicts_the_vat_prefix_is_refused(): void
+    {
+        // ROUND-4 P2, and the ticket's own acceptance criterion: ΑΦΜ and country must
+        // describe ONE party. Both CreateInvoice and the WHMCS mapper default a blank
+        // customer country to «GR», so a German customer whose country was never
+        // filled in gets a GR snapshot — and because a country IS recorded, the
+        // prefix evidence was never consulted. A mixed party again, in a new hat.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => 'DE811234567',
+            'company_name' => 'Lieferant GmbH',
+            'country' => 'GR',
+        ])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/is a DE VAT identifier/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+    }
+
+    public function test_a_punctuation_only_afm_does_not_pass_two_parties_as_one(): void
+    {
+        // ROUND-4 P2. «-» trims non-empty but canonicalises to nothing, and an empty
+        // key equals a null customer ΑΦΜ — so the name check was skipped entirely and
+        // a different party's country/address could be borrowed.
+        $this->customer->forceFill(['afm' => null, 'name' => 'ΠΕΛΑΤΗΣ ΜΟΥ ΑΕ', 'country' => 'IT'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '-', 'company_name' => 'ΑΛΛΟΣ ΠΕΛΑΤΗΣ ΑΕ', 'country' => null])->save();
+
+        $this->assertFalse($invoice->fresh()->counterpartIsTheLinkedCustomer());
+        $this->assertNull($invoice->fresh()->counterpartCountryIso());
     }
 
     private function makeInvoice(int $code = 1): Invoice

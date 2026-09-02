@@ -88,14 +88,20 @@ final class Afm
     {
         $value = self::canonicalVat($raw);
 
-        // A real EU VAT id is NOT «two letters then digits»: AT is ATU12345678, CY
-        // is CY12345678L, NL is NL123456789B01, IE is IE1234567FA, ES is ESX1234567X.
-        // The first cut matched only the digits-only shape, so half of Europe fell
-        // through and was filed as GR — the very misreport this evidence exists to
-        // stop. Accept any alphanumeric body, but REQUIRE at least one digit in it so
-        // free text that happens to start with two letters («ΙΤΑΛΙΑ ΑΕ» → «ITALIASRL»)
-        // is not read as a country claim.
-        if ($value === null || preg_match('/^([A-Za-z]{2})(?=[A-Za-z0-9]*\d)[A-Za-z0-9]+$/u', $value, $m) !== 1) {
+        // A real EU VAT id is NOT «two letters then digits»: AT is ATU12345678, CY is
+        // CY12345678L, NL is NL123456789B01, IE is IE1234567FA, ES is ESX1234567X.
+        // Matching only the digits-only shape let half of Europe be filed as GR.
+        //
+        // But the body must also LOOK like a VAT id, or free text in this free-text
+        // column starts making country claims: «INV-2024-01» read as India, «VAT123»
+        // as the Vatican, «LTD 12» as Lithuania — each one refusing an invoice that
+        // has nothing wrong with it. The shortest EU body is Ireland's seven digits
+        // (IE1234567FA), so seven is the floor; every junk value above falls under it.
+        if ($value === null || preg_match('/^([A-Za-z]{2})([A-Za-z0-9]+)$/u', $value, $m) !== 1) {
+            return null;
+        }
+
+        if (preg_match_all('/\d/', $m[2]) < 7) {
             return null;
         }
 
