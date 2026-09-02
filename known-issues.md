@@ -2119,6 +2119,21 @@ latest exchange for a MARK, so a CANCEL row now hides the original filing XML �
 that is how the direct path has always behaved, so this change made the provider path
 *consistent* rather than introducing a regression.
 
+**Review round 2 (one P1, in the round-1 FIX) — all four fixed.** The backfill looked
+for a sibling `PROVIDER_INSERT` only, while both `cancel()` paths deliberately read
+the MARK from `['PROVIDER_INSERT','INSERT']` — so a tenant migrated
+gr-mydata → gr-provider that cancels a directly-filed document through the provider
+found no sibling and kept its inverted evidence (P1). Also: the sibling lookup gained a
+`where('id','<',…)` bound, so a later adoption/recovery INSERT cannot be adopted as the
+cancelled document; the companion migration's `down()` now REFUSES to drop the column
+while it holds a cancellation MARK that exists nowhere else (a routine
+`migrate:rollback` would have silently destroyed it — the snapshot path is unaffected);
+and the `''` normalisation turned out to be missing at a THIRD persist site
+(`MyDataSubmitter::finaliseCancellation` — firebed returns `''`, not null, for an empty
+element). Per the «fix at the ROOT» rule that third occurrence was not patched locally:
+the policy is now one definition, `App\Support\MyData\CancellationMark`, with
+`clean()` for transport values and `fromUntrusted()` for the client-writable path.
+
 **Deferred — strict refusal on a markless `Success` (→ `docs/BACKLOG.md`).** The
 finding also asks that a fresh normal `Success` without a cancellation MARK stay
 non-terminal. Not done, and not a small change in isolation: the direct-invoice path

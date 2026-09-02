@@ -5,6 +5,7 @@ namespace App\Services\MyData;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\MyData\CancellationMark;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -61,7 +62,9 @@ class SyncInvoiceStateFromAade
         // would abort the sync on a column-length error instead. A MARK is a
         // numeric AADE identifier; anything else is not one, so it is recorded as
         // «no evidence» rather than as evidence of something we cannot vouch for.
-        $cancelledByMark = $aadeState === 'CANCELLED' ? self::cleanMark($cancelledByMark) : null;
+        $cancelledByMark = $aadeState === 'CANCELLED'
+            ? CancellationMark::fromUntrusted($cancelledByMark)
+            : null;
 
         $fromState = $invoice->mydata_state;
         $fromLocal = $invoice->local_status;
@@ -126,19 +129,5 @@ class SyncInvoiceStateFromAade
         }
 
         return ['changed' => true, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $toLocal];
-    }
-
-    /**
-     * A MARK we are willing to record as evidence, or null.
-     *
-     * AADE MARKs are numeric strings (15 digits today); the column holds 40. Both
-     * bounds are checked so neither a crafted value nor a future-longer MARK can
-     * turn into a truncation or a write error at the audit boundary.
-     */
-    private static function cleanMark(?string $mark): ?string
-    {
-        $mark = trim((string) $mark);
-
-        return preg_match('/^\d{1,40}$/', $mark) === 1 ? $mark : null;
     }
 }

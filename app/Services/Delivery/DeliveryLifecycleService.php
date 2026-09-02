@@ -9,6 +9,7 @@ use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteEvent;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
@@ -520,13 +521,8 @@ class DeliveryLifecycleService
         ?string $providerKey = null,
         ?string $cancellationMark = null,
     ): DeliveryMark {
-        // '' is not evidence. `array_filter(…, fn ($v) => $v !== null)` below strips
-        // only nulls, so an empty MARK from either channel would persist as '' and
-        // read as «we have a cancellation MARK» — the exact confusion this change
-        // exists to remove. Normalise here, at the one place both paths meet.
-        $cancellationMark = is_string($cancellationMark) && trim($cancellationMark) !== ''
-            ? trim($cancellationMark)
-            : null;
+        // '' is not evidence — see CancellationMark for why this is one shared rule.
+        $cancellationMark = CancellationMark::clean($cancellationMark);
 
         return DB::transaction(function () use ($note, $mark, $cancellationMark, $reason, $responseXml, $providerKey) {
             $audit = DeliveryMark::create(array_filter([

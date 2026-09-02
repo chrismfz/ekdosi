@@ -13,6 +13,7 @@ use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
+use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -260,10 +261,8 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 // becomes mandatory. `mydata_marks.cancellation_mark` already
                 // existed for the direct path; it was simply not used here.
                 'mark' => (string) $mark,
-                // '' is not evidence — normalise it away (see the delivery twin).
-                'cancellation_mark' => is_string($result->cancellationMark) && trim($result->cancellationMark) !== ''
-                    ? trim($result->cancellationMark)
-                    : null,
+                // '' is not evidence — see CancellationMark.
+                'cancellation_mark' => CancellationMark::clean($result->cancellationMark),
                 'mydata_action' => 'PROVIDER_CANCEL',
                 'provider_key' => $this->transport->key(),
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,

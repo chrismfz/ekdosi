@@ -38,11 +38,18 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // Both issue actions, because that is what `cancel()` itself reads
+        // `$markToCancel` from: a tenant migrated gr-mydata → gr-provider mid-life
+        // can cancel a DIRECTLY filed (INSERT) document through the provider, and
+        // looking only for PROVIDER_INSERT would find no sibling and silently
+        // leave that row's evidence inverted. Safe to widen: the candidate set is
+        // already provider-only (action PROVIDER_CANCEL), so no direct-cancel row
+        // can be pulled in.
         $this->backfill(
             table: 'mydata_marks',
             documentKey: 'invoice_id',
             cancelActions: ['PROVIDER_CANCEL'],
-            issueActions: ['PROVIDER_INSERT'],
+            issueActions: ['PROVIDER_INSERT', 'INSERT'],
         );
 
         // Delivery notes: only the PROVIDER path could invert them — the direct
@@ -52,7 +59,7 @@ return new class extends Migration
             table: 'delivery_marks',
             documentKey: 'delivery_note_id',
             cancelActions: ['CANCEL'],
-            issueActions: ['PROVIDER_INSERT'],
+            issueActions: ['PROVIDER_INSERT', 'INSERT'],
             providerOnly: true,
         );
     }
@@ -90,9 +97,15 @@ return new class extends Migration
             ->get(['id', $documentKey, 'mark']);
 
         foreach ($candidates as $row) {
+            // Only an issue row that EXISTED when the cancellation was written can
+            // be the MARK that was cancelled. Without this bound, a later
+            // adoption/recovery INSERT (the §14.4 path — the services already warn
+            // about «multiple INSERT MARKs») would be adopted as the cancelled
+            // document, naming a MARK that was never cancelled.
             $issueMark = DB::table($table)
                 ->where($documentKey, $row->{$documentKey})
                 ->whereIn('mydata_action', $issueActions)
+                ->where('id', '<', $row->id)
                 ->whereNotNull('mark')
                 ->where('mark', '!=', '')
                 ->orderByDesc('id')

@@ -125,6 +125,43 @@ class BackfillInvertedCancellationMarksTest extends TestCase
         $this->assertNull($row->cancellation_mark);
     }
 
+    /**
+     * A tenant migrated gr-mydata → gr-provider can cancel a DIRECTLY filed
+     * (INSERT) document through the provider — `cancel()` reads the MARK from
+     * `['PROVIDER_INSERT','INSERT']` for exactly that reason. Looking only for
+     * PROVIDER_INSERT found no sibling and silently left the evidence inverted.
+     */
+    public function test_a_directly_filed_document_cancelled_via_the_provider_is_un_inverted(): void
+    {
+        $this->mark(['mark' => '400013829677137', 'mydata_action' => 'INSERT']);
+        $id = $this->mark(['mark' => '400001964598454', 'mydata_action' => 'PROVIDER_CANCEL']);
+
+        $this->runBackfill();
+
+        $row = DB::table('mydata_marks')->find($id);
+        $this->assertSame('400013829677137', $row->mark);
+        $this->assertSame('400001964598454', $row->cancellation_mark);
+    }
+
+    /**
+     * Only an issue row that existed WHEN the cancellation was written can be the
+     * MARK that was cancelled. A later adoption/recovery INSERT (the §14.4 path
+     * the services warn about with «multiple INSERT MARKs») must not be adopted as
+     * the cancelled document — that would name a MARK never cancelled.
+     */
+    public function test_an_issue_row_created_after_the_cancellation_is_ignored(): void
+    {
+        $this->mark(['mark' => '400013829677137', 'mydata_action' => 'PROVIDER_INSERT']);
+        $id = $this->mark(['mark' => '400001964598454', 'mydata_action' => 'PROVIDER_CANCEL']);
+        $this->mark(['mark' => '400099999999999', 'mydata_action' => 'PROVIDER_INSERT']); // adopted later
+
+        $this->runBackfill();
+
+        $row = DB::table('mydata_marks')->find($id);
+        $this->assertSame('400013829677137', $row->mark, 'the MARK that actually existed to be cancelled');
+        $this->assertSame('400001964598454', $row->cancellation_mark);
+    }
+
     /** Rows the NEW code wrote are already correct — and re-running must not churn them. */
     public function test_rows_written_by_the_new_code_are_idempotent(): void
     {
