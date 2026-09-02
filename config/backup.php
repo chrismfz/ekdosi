@@ -359,44 +359,44 @@ return [
          */
         'strategy' => DefaultStrategy::class,
 
+        /*
+         * Retention policy (env-tunable — the crons are already env-driven, so
+         * the sizing that goes with them is too). The tiers are CUMULATIVE: each
+         * one starts where the previous ended, and anything older than the last
+         * non-zero tier is deleted. The newest backup is NEVER deleted. Applied
+         * when `backup:clean` runs (default 02:30). Set a tier to 0 to skip it.
+         *
+         * Shipped default = "light + a few months of history": keep EVERYTHING
+         * for 7 days → one-per-day up to 30 days → (no weekly tier) → one-per-month
+         * up to 6 months → nothing older (~7-month horizon). This is much lighter
+         * than the old 2-year default, which let `private/<app>/` grow unbounded
+         * (a legal invoicing DB whose dumps carry the full mydata_marks XML).
+         *
+         * For an even leaner "7 days + 1 month only" box, drop the monthly tier:
+         *   BACKUP_KEEP_MONTHLY_MONTHS=0  (env, no code change).
+         */
         'default_strategy' => [
-            /*
-             * The number of days for which backups must be kept.
-             */
-            'keep_all_backups_for_days' => 7,
+            // Keep every backup made in the last N days (no thinning).
+            'keep_all_backups_for_days' => (int) env('BACKUP_KEEP_ALL_DAYS', 7),
+
+            // Then keep the most recent backup per day, up to N days total.
+            'keep_daily_backups_for_days' => (int) env('BACKUP_KEEP_DAILY_DAYS', 30),
+
+            // Then keep the most recent backup per week, for N weeks (0 = skip).
+            'keep_weekly_backups_for_weeks' => (int) env('BACKUP_KEEP_WEEKLY_WEEKS', 0),
+
+            // Then keep the most recent backup per month, for N months.
+            'keep_monthly_backups_for_months' => (int) env('BACKUP_KEEP_MONTHLY_MONTHS', 6),
+
+            // Then keep the most recent backup per year, for N years (0 = skip).
+            'keep_yearly_backups_for_years' => (int) env('BACKUP_KEEP_YEARLY_YEARS', 0),
 
             /*
-             * After the "keep_all_backups_for_days" period is over, the most recent backup
-             * of that day will be kept. Older backups within the same day will be removed.
-             * If you create backups only once a day, no backups will be removed yet.
+             * Hard size cap: after tiered cleanup, keep deleting the OLDEST backup
+             * until total storage is under this many MB. An empty/non-numeric env
+             * value means null = unlimited (only the tiers above apply).
              */
-            'keep_daily_backups_for_days' => 16,
-
-            /*
-             * After the "keep_daily_backups_for_days" period is over, the most recent backup
-             * of that week will be kept. Older backups within the same week will be removed.
-             * If you create backups only once a week, no backups will be removed yet.
-             */
-            'keep_weekly_backups_for_weeks' => 8,
-
-            /*
-             * After the "keep_weekly_backups_for_weeks" period is over, the most recent backup
-             * of that month will be kept. Older backups within the same month will be removed.
-             */
-            'keep_monthly_backups_for_months' => 4,
-
-            /*
-             * After the "keep_monthly_backups_for_months" period is over, the most recent backup
-             * of that year will be kept. Older backups within the same year will be removed.
-             */
-            'keep_yearly_backups_for_years' => 2,
-
-            /*
-             * After cleaning up the backups remove the oldest backup until
-             * this amount of megabytes has been reached.
-             * Set null for unlimited size.
-             */
-            'delete_oldest_backups_when_using_more_megabytes_than' => 5000,
+            'delete_oldest_backups_when_using_more_megabytes_than' => is_numeric($mb = env('BACKUP_MAX_STORAGE_MB', 5000)) ? (int) $mb : null,
         ],
 
         /*

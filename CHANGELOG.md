@@ -266,6 +266,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   το token+payload αλλού. (Deferred hardening — TOCTOU DNS-pin, endpoint-profile registry — στο BACKLOG.)
 
 ### Changed
+- **Πολιτική διατήρησης καθολικών backups: env-tunable + ελαφρύτερο default.** Οι βαθμίδες
+  του spatie `DefaultStrategy` (`config/backup.php`) ήταν hard-coded και κρατούσαν ΕΩΣ 2 χρόνια,
+  με αποτέλεσμα ο φάκελος `storage/app/private/<APP_NAME>/` να μεγαλώνει ασυγκράτητα (κάθε νυχτερινό
+  dump φέρει το πλήρες `mydata_marks` XML). Τώρα ρυθμίζονται από env
+  (`BACKUP_KEEP_ALL_DAYS`/`DAILY_DAYS`/`WEEKLY_WEEKS`/`MONTHLY_MONTHS`/`YEARLY_YEARS` +
+  `BACKUP_MAX_STORAGE_MB`) και το shipped default έγινε «ελαφρύ + λίγοι μήνες»: όλα 7 μέρες → 1/μέρα
+  ως 30 μέρες → 1/μήνα ως 6 μήνες → τίποτα παλιότερο (~7 μήνες ορίζοντας, από ~2 χρόνια). Καμία
+  αλλαγή στο πότε τρέχει το `backup:clean`· το πιο πρόσφατο backup δεν διαγράφεται ποτέ. Ξεχωριστό
+  από τα per-company backups (`company:run-scheduled-backups`, δική τους διατήρηση).
 - **`known-issues.md` — «Go-live triage 2026-09-02» + `Bucket` στήλη στο work board.** Το ledger
   γράφτηκε από διαδοχικά **source audits**: βαθμολογούν κάθε εύρημα μόνο του, ποτέ απέναντι σε
   επιχειρηματικό scope ή ημερομηνία — γι' αυτό ένα P0 που δεν μπορεί να συμβεί εδώ προσπερνούσε ένα
