@@ -328,8 +328,8 @@ class Invoice extends Model
      */
     public function counterpartAfm(): ?string
     {
-        // filled(), not truthiness: a vat_no of «0» is as present as any other value,
-        // and this block otherwise spelled "empty" three different ways.
+        // canonicalVat() maps an all-zeros placeholder to null, so «0» falls through
+        // to the customer instead of becoming the reported party.
         if (filled($frozen = Afm::canonicalVat($this->vat_no))) {
             return $frozen;
         }
@@ -431,14 +431,22 @@ class Invoice extends Model
             );
         }
 
-        // A country exists on the linked customer that this document may not use.
+        // A country exists on the linked customer that this document cannot use. THREE
+        // reasons reach here and they need different remedies — an earlier cut offered
+        // only two, so an unresolvable customer country was reported as a party
+        // mismatch that did not exist, and (unlike the code this replaced) the
+        // offending value was not even named.
         if (filled($this->customer?->country)) {
+            $raw = $this->customer->country;
+
             throw new RuntimeException(
                 "Invoice {$this->invcode} records no counterpart country of its own, and its "
                 ."linked customer's country cannot be used for it — "
-                .($this->hasBeenFiled()
-                    ? 'the document is already filed, so its own snapshot is the only source.'
-                    : 'the invoice names a different party than that customer.')
+                .match (true) {
+                    $this->hasBeenFiled() => 'the document is already filed, so its own snapshot is the only source.',
+                    ! $this->counterpartIsTheLinkedCustomer() => 'the invoice names a different party than that customer.',
+                    default => "the customer's «{$raw}» is not a country this system recognises.",
+                }
                 .' Set «Χώρα» on the invoice — filing it as GR on a guess is exactly what this refuses.'
             );
         }

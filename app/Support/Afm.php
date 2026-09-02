@@ -58,10 +58,14 @@ final class Afm
         }
 
         if (preg_match('/^(EL|GR|ΕΛ)(\d{9})$/ui', $value, $m) === 1) {
-            return $m[2];
+            $value = $m[2];
         }
 
-        return $value;
+        // An all-zeros value («0», «000000000») is a PLACEHOLDER meaning "no ΑΦΜ" —
+        // the convention the delivery-note sentinel already uses — not an identity.
+        // Returning it let «0» become a reported counterpart, and made every identity
+        // comparison call that document a different party from its own customer.
+        return trim($value, '0') === '' ? null : $value;
     }
 
     /**
@@ -111,18 +115,26 @@ final class Afm
         // (a real nine-digit ΑΦΜ with two stray letters) read as the UAE, «INV…» as
         // India, «SA 1» as Saudi Arabia — and once that evidence could refuse a
         // filing, a perfectly good domestic invoice became unissuable.
-        if (! in_array(strtoupper($m[1]), self::VAT_PREFIXES, true)) {
+        $prefix = strtoupper($m[1]);
+        if (! in_array($prefix, self::VAT_PREFIXES, true)) {
             return null;
         }
 
         // …and the body must still look like an identifier rather than free text
-        // («LTD 12» would otherwise read as Lithuania). Six digits keeps every modern
-        // EU format; the rare short legacy ones (an old IE, a GB government id) lose
-        // their prefix evidence and fall back to the recorded country.
+        // («LTD 12» would otherwise read as Lithuania). Six digits is a deliberately
+        // ASYMMETRIC trade: a false positive REFUSES a good domestic invoice, while a
+        // false negative only falls back to the recorded country (or, with nothing
+        // recorded, to the same GR default this code has always used). So the short
+        // real shapes — a two-digit Romanian id, an old IE format, a GB government
+        // id — are knowingly given up to keep junk out.
         if (preg_match_all('/\d/', $m[2]) < 6) {
             return null;
         }
 
-        return IsoCountry::tryNormalise($m[1]);
+        // «XI» is a VAT jurisdiction (Northern Ireland), not an ISO-3166 country, so
+        // IsoCountry does not know it and the allowlist entry was inert — the round-5
+        // commit cited XI as a reason to trust the recorded country while the code
+        // never produced that prefix at all. Its country IS GB.
+        return $prefix === 'XI' ? 'GB' : IsoCountry::tryNormalise($prefix);
     }
 }

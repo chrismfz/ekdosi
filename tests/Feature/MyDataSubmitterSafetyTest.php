@@ -2064,6 +2064,49 @@ XML;
         $this->assertNull($invoice->fresh()->counterpartCountryIso());
     }
 
+    public function test_an_unresolvable_customer_country_says_so_instead_of_blaming_a_party_mismatch(): void
+    {
+        // ROUND-6 P2. Three reasons reach that refusal; only two were offered, so an
+        // unresolvable customer country was reported as a party mismatch that did not
+        // exist — and unlike the code it replaced, the offending value was not named.
+        $this->customer->forceFill(['afm' => '997073525', 'name' => 'Πελάτης ΑΕ', 'country' => 'ΗΝ. ΒΑΣΙΛΕΙΟ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => null])->save();
+
+        $this->assertTrue($invoice->fresh()->counterpartIsTheLinkedCustomer());
+
+        try {
+            $invoice->fresh()->counterpartCountryForFiling();
+            $this->fail('expected a refusal');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('ΗΝ. ΒΑΣΙΛΕΙΟ', $e->getMessage());
+            $this->assertStringNotContainsString('different party', $e->getMessage());
+        }
+    }
+
+    public function test_an_all_zeros_vat_no_is_a_placeholder_not_an_identity(): void
+    {
+        // ROUND-6 observation. «0» / «000000000» mean "no ΑΦΜ" — the same convention
+        // the delivery-note sentinel uses — so they must fall through to the customer
+        // rather than become the reported party (and close its country fallback).
+        $this->customer->forceFill(['afm' => '997073525', 'country' => 'GR'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '0', 'company_name' => null, 'country' => null])->save();
+
+        $this->assertSame('997073525', $invoice->fresh()->counterpartAfm());
+        $this->assertSame('GR', $invoice->fresh()->counterpartCountryForFiling());
+    }
+
+    public function test_northern_ireland_vat_resolves_to_gb(): void
+    {
+        // ROUND-6 P2. «XI» is a VAT jurisdiction, not an ISO country, so IsoCountry
+        // never knew it and the allowlist entry was inert — the round-5 commit cited
+        // XI as a reason while the code never produced that prefix at all.
+        $this->assertSame('GB', Afm::countryPrefix('XI123456789'));
+    }
+
     private function makeInvoice(int $code = 1): Invoice
     {
         return Invoice::create([

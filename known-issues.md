@@ -923,6 +923,26 @@ The reason is recorded at the call site.
   even when the customer HAS one and the fallback is closed because the invoice names a
   different party — telling the operator to fill a field that was already filled.
 
+**Round-6 review corrections (no P0/P1 — diagnosis accuracy plus one real placeholder bug):**
+
+- **`vat_no = '0'` became an identity.** An all-zeros value is a PLACEHOLDER meaning "no ΑΦΜ" —
+  the convention the delivery-note sentinel already uses — but it was reported as the
+  counterpart AND closed the country fallback, because it matched no customer. Fixed in the one
+  normaliser (`Afm::canonicalVat()` → null) so every consumer agrees; the first cut patched a
+  single call site and the tests caught it immediately.
+- **`XI` was inert, and the round-5 commit message cited it as a reason.** «XI» is a VAT
+  jurisdiction, not an ISO country, so `IsoCountry` never knew it and the allowlist entry never
+  produced a prefix. Its country is GB and it now maps there. (Monaco/FR and Isle-of-Man/GB were
+  real; XI was not.)
+- **Two refusal messages named the wrong cause.** The country refusal reported "the invoice names
+  a different party" even when the linked customer WAS the counterpart and only its country was
+  unrecognisable — and, unlike the code it replaced, it did not name the offending value. The
+  ΑΦΜ refusal claimed "the linked customer has one" without checking that it does.
+- **The six-digit floor is documented as the ASYMMETRIC trade it is**: a false positive refuses a
+  good domestic invoice, a false negative only falls back to the recorded country (or the same GR
+  default this code always used), so short real shapes (a two-digit RO id, an old IE format, a GB
+  government id) are knowingly given up to keep junk out.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never
