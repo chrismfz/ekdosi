@@ -533,6 +533,73 @@ class WhmcsClient
     }
 
     /**
+     * The WHMCS product catalogue (GetProducts), for the income-classification
+     * mapping page (MYD-006 bridge). Returns a flat list of products, each with
+     * its group id + names, so ekdosi presents groups with their packages and the
+     * operator maps a whole group at once. Standard WHMCS API — works for every
+     * tenant with API creds, independent of the invoice-feed path (bridge/native).
+     *
+     * @return array<int, array{pid:int, gid:int, name:string, groupname:string}>
+     */
+    public function getProducts(): array
+    {
+        // PAGINATE defensively (WH-6 class of bug): several WHMCS list actions
+        // silently cap results (the "frozen at 16" inbox bug). GetProducts usually
+        // returns the whole catalogue, but walking limitstart/limitnum with a
+        // seen-pid loop guard is correct whether it paginates or ignores the params
+        // (a non-paginating WHMCS returns the same first page → the guard stops it),
+        // so a large catalogue can't be silently truncated on the mapping page.
+        $maxPages = 500;
+        $limit = 250;
+        $out = [];
+        $cursor = 0;
+        $seenPids = [];
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $resp = $this->call('GetProducts', [
+                'limitstart' => $cursor,
+                'limitnum' => $limit,
+            ]);
+
+            $list = $resp['products']['product'] ?? [];
+            if (! empty($list) && ! array_is_list($list)) {
+                $list = [$list]; // single-row object → wrap as list
+            }
+            $returned = count($list);
+            if ($returned === 0) {
+                break;
+            }
+
+            // Loop guard: a repeated first pid means WHMCS isn't honouring the
+            // pagination params — stop before re-adding the same page.
+            $firstPid = (int) ($list[0]['pid'] ?? 0);
+            if ($firstPid > 0 && isset($seenPids[$firstPid])) {
+                break;
+            }
+
+            foreach ($list as $p) {
+                $pid = (int) ($p['pid'] ?? 0);
+                if ($pid > 0) {
+                    $seenPids[$pid] = true;
+                }
+                $out[] = [
+                    'pid' => $pid,
+                    'gid' => (int) ($p['gid'] ?? 0),
+                    'name' => (string) ($p['name'] ?? ''),
+                    'groupname' => (string) ($p['groupname'] ?? ''),
+                ];
+            }
+
+            if ($returned < $limit) {
+                break; // short page → the last one
+            }
+            $cursor += $returned;
+        }
+
+        return $out;
+    }
+
+    /**
      * Single point of contact with the WHMCS API. All actions go
      * through here so auth, encoding, error mapping, and retry
      * policy are uniform.

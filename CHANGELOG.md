@@ -19,6 +19,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **WHMCS «Εισερχόμενα»: αυτόματη κατηγορία εσόδων ανά ομάδα προϊόντων (MYD-006 bridge).** Οι γραμμές
+  του inbox ταξινομούνται πλέον στη σωστή §8.6 κατηγορία εσόδων μέσω χάρτη **ανά ομάδα προϊόντων WHMCS**
+  («Web Hosting → υπηρεσία»): τα νέα πακέτα της ομάδας κληρονομούν την επιλογή χωρίς επανα-αντιστοίχιση.
+  - **Σελίδα «Αντιστοίχιση WHMCS (έσοδα)»** (`WhmcsIncomeMapping`, super_admin + WHMCS ρυθμισμένο):
+    αντλεί τον κατάλογο (`WhmcsClient::getProducts` → WHMCS `GetProducts`), δείχνει τις ομάδες με τα
+    πακέτα τους, ο χειριστής ορίζει §8.6 bucket ανά ομάδα, τα μη-ορισμένα highlighted.
+  - **Per-line snapshot**: νέες στήλες `invoice_lines.mydata_income_class(+_category)`· ο
+    `AadeInvoiceDocument::resolveIncomeClass` τις διαβάζει **πρώτες** (πριν product category / τύπο /
+    πολιτική). Ο mapper τις γεμίζει από τον χάρτη (`WhmcsIncomeClassifier`, product override → group).
+  - **Guardrail**: το ποσό/η περιγραφή της γραμμής μένουν **πάντα** οι τιμές του WHMCS (νομικό στοιχείο)·
+    ο χάρτης μόνο «ταμπελώνει» τι είναι. (Το plugin `ekdosi_bridge` v0.44.0 εμπλουτίζει τη ροή με
+    `whmcs_product_id`/`whmcs_group_id` ανά γραμμή — απαιτεί deploy του plugin.)
 - **«Οδηγός κωδικών myDATA» — γλωσσάρι κωδικών ΑΑΔΕ (§8).** «Δεν είναι όλοι λογιστές»: μια read-only
   σελίδα (Setup) που εξηγεί σε απλά ελληνικά ΤΙ ΕΙΝΑΙ κάθε κωδικός και ΠΟΥ ΧΡΗΣΙΜΟΠΟΙΕΙΤΑΙ — τύποι
   παραστατικών §8.1 (π.χ. 2.1 → Τιμολόγιο Παροχής), κατηγορίες εσόδων §8.6 (εμπορεύματα/προϊόντα/

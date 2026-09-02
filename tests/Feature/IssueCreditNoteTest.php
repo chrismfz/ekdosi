@@ -94,6 +94,31 @@ class IssueCreditNoteTest extends TestCase
         $this->assertSame('124.00', (string) $original->credited_total);   // cache updated
     }
 
+    public function test_credit_note_copies_the_income_class_snapshot(): void
+    {
+        // MYD-006: a credit reverses the SAME §8.6 income category as the original
+        // line (the WHMCS-bridge per-line snapshot), not the credit type's default.
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-10 10:00:00', 'mydata_state' => 'VALID',
+        ]);
+        $line = InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 2, 'price_per_item' => 50, 'vat_percent' => 24, 'product_descr' => 'HW',
+            'mydata_income_class' => 'E3_561_001', 'mydata_income_class_category' => 'category1_1',
+        ]);
+        app(RecomputeInvoiceTotals::class)($inv);
+
+        $credit = app(IssueCreditNote::class)($inv->fresh(['lines']), $this->creditType, [
+            ['line_id' => $line->id, 'qty' => 2],
+        ]);
+
+        $creditLine = $credit->lines->first();
+        $this->assertSame('E3_561_001', $creditLine->mydata_income_class);
+        $this->assertSame('category1_1', $creditLine->mydata_income_class_category);
+    }
+
     public function test_partial_credit_reduces_owed(): void
     {
         $original = $this->originalWithLine();        // gross 124, qty 2

@@ -312,6 +312,13 @@ class WhmcsInvoiceMapper
         $zeroVat = $this->hasZeroVatLine($payload)
             ? $this->resolveZeroVatCategory($defaultVat)
             : null;
+
+        // MYD-006 bridge: stamp each line's §8.6 income classification from the
+        // tenant's WHMCS group/product map (the bridge feed enriches lines with
+        // `whmcs_product_id` + `whmcs_group_id`). Product override wins over group;
+        // an unmapped line (or an old plugin with no ids) stamps nothing and the
+        // submitter resolves it the usual way. Loaded once for the whole invoice.
+        $classifier = WhmcsIncomeClassifier::forCompany((int) $defaultVat->company_id);
         $out = [];
         foreach ($items as $item) {
             // Clamp to the invoice_lines.product_descr column length (VARCHAR 256).
@@ -372,8 +379,19 @@ class WhmcsInvoiceMapper
             // from the inputs on every save (overwrites any value passed),
             // so the values we set here are advisory — present for the
             // preview modal which doesn't trigger the hook.
+            [$incomeClass, $incomeCategory] = $classifier->resolve(
+                (int) ($item['whmcs_product_id'] ?? 0),
+                (int) ($item['whmcs_group_id'] ?? 0),
+            );
+
             $out[] = [
                 'product_id' => null,
+                // MYD-006 bridge: the §8.6 classification snapshot from the WHMCS
+                // group/product map. null (unmapped / old plugin) leaves the
+                // submitter's product/type/policy resolution untouched. The AMOUNT
+                // + description remain the WHMCS figures — this only tags «τι είναι».
+                'mydata_income_class' => $incomeClass,
+                'mydata_income_class_category' => $incomeCategory,
                 // The invoice_lines COLUMN is `product_descr` — emit that exact
                 // key so InvoiceLine::create (mass-assignment, array_merge in the
                 // filer) actually persists it. Emitting 'description' (the WHMCS

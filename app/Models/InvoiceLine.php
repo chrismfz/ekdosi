@@ -119,6 +119,12 @@ class InvoiceLine extends Model
         // Null on non-0% lines and on legacy/imported lines (they fall back to the
         // tenant's single 0% category).
         'vat_exemption_category',
+        // MYD-006: optional per-line §8.6 income-classification snapshot. Set by the
+        // WHMCS bridge from the group/product map; read FIRST by
+        // AadeInvoiceDocument::resolveIncomeClass. Null → product/type/policy
+        // resolution (the default for every manual invoice).
+        'mydata_income_class',
+        'mydata_income_class_category',
         'net_price',
         'gross_price',
         'product_descr',

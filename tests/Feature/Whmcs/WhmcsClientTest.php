@@ -35,6 +35,39 @@ class WhmcsClientTest extends TestCase
         );
     }
 
+    public function test_get_products_returns_the_catalogue_with_group_ids(): void
+    {
+        // MYD-006 bridge: GetProducts feeds the income-classification mapping page.
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result' => 'success',
+                'products' => ['product' => [
+                    ['pid' => 42, 'gid' => 3, 'name' => 'Personal2', 'groupname' => 'Web Hosting'],
+                    ['pid' => 43, 'gid' => 3, 'name' => 'Business', 'groupname' => 'Web Hosting'],
+                ]],
+            ], 200),
+        ]);
+
+        $products = $this->makeClient()->getProducts();
+
+        $this->assertCount(2, $products);
+        $this->assertSame(['pid' => 42, 'gid' => 3, 'name' => 'Personal2', 'groupname' => 'Web Hosting'], $products[0]);
+        Http::assertSent(fn ($r) => $r->data()['action'] === 'GetProducts');
+    }
+
+    public function test_get_products_normalises_a_single_product_object(): void
+    {
+        // WHMCS returns an OBJECT (not a list) when there's exactly one product.
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result' => 'success',
+                'products' => ['product' => ['pid' => 1, 'gid' => 2, 'name' => 'Only', 'groupname' => 'G']],
+            ], 200),
+        ]);
+
+        $this->assertCount(1, $this->makeClient()->getProducts());
+    }
+
     public function test_test_connection_returns_whmcs_version_on_success(): void
     {
         Http::fake([
