@@ -445,6 +445,10 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `.fbk` shows the pattern — `SELECT afm FROM customers WHERE afm REGEXP '^(VAT|AFM|TIN)[0-9]'`.
   (b) `CompanyImporter` reads the tenant's customers 3× per phase (existingIndex / afmKeyIndex /
   customerOwners) — one `get()` could feed all three; only matters at tens of thousands of customers.
+- **Operator picker helper** _(P2 από το review του Leads L3)._ Το `$tenant->users()->orderBy('name')
+  ->pluck('users.name','users.id')` ζει σε ~6 σημεία (LeadForm/LeadsTable/SalesActivityReport ×2/
+  `InteractsWithLeadViews`)· το LeadForm προσθέτει και τον τρέχοντα super_admin (δεν είναι στο pivot).
+  Ένα `Company::operatorOptions()` όταν ξαναπιαστεί κάποιο από αυτά.
 - **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables::exportCsv` και
   `SalesActivityReport::exportCsv` κουβαλούν το ίδιο BOM + formula-guard + `fputcsv(';')`· το
   `AgedReceivables` δεν περνά `escape:` (E_DEPRECATED ανά γραμμή σε PHP 8.4). Ένα κοινό
