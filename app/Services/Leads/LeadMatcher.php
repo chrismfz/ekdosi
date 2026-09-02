@@ -70,10 +70,10 @@ class LeadMatcher
     }
 
     /**
-     * The ΑΦΜ equality predicate (digits, EL/GR prefix tolerated on the stored
-     * side) — public so a caller that must LOCK the rows can reuse the rule.
+     * The ΑΦΜ equality predicate for LEADS (digits, EL/GR prefix tolerated on
+     * the stored side). Customers carry `afm_key` and use whereAfmKeyOf().
      */
-    public static function whereAfm(Builder $q, string $afm): Builder
+    private static function whereLeadAfm(Builder $q, string $afm): Builder
     {
         return $q->whereRaw('UPPER('.self::strippedSql('afm').') IN (?, ?, ?)', [$afm, 'EL'.$afm, 'GR'.$afm]);
     }
@@ -119,14 +119,14 @@ class LeadMatcher
             ->withTrashed()
             ->where('company_id', $companyId)
             ->where(function (Builder $q) use ($afm, $email, $phones): void {
-                $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email']);
+                $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email'], customers: true);
 
                 if ($email !== null || $phones !== []) {
                     // Nested group: a leading OR inside whereHas would attach to
                     // the relation's own join predicate.
                     $q->orWhereHas('contacts', function (Builder $c) use ($email, $phones): void {
                         $c->where(function (Builder $cc) use ($email, $phones): void {
-                            $this->applyIdentity($cc, null, $email, $phones, ['phone'], ['email']);
+                            $this->applyIdentity($cc, null, $email, $phones, ['phone'], ['email'], customers: false);
                         });
                     });
                 }
@@ -144,14 +144,14 @@ class LeadMatcher
             : Customer::query()
                 ->where('company_id', $companyId)
                 ->where(function (Builder $q) use ($afm, $email, $phones): void {
-                    $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email']);
+                    $this->applyIdentity($q, $afm, $email, $phones, ['phone1', 'phone2'], ['email', 'secondary_email'], customers: true);
                 })
                 ->orderBy('name')
                 ->limit(self::PREVIEW_LIMIT)
                 ->get();
 
         $leadIdentity = function (Builder $q) use ($afm, $email, $phones): void {
-            $this->applyIdentity($q, $afm, $email, $phones, ['phone', 'mobile'], ['email']);
+            $this->applyIdentity($q, $afm, $email, $phones, ['phone', 'mobile'], ['email'], customers: false);
         };
 
         $leads = Lead::query()
@@ -184,12 +184,19 @@ class LeadMatcher
      * @param  list<string>  $phoneColumns
      * @param  list<string>  $emailColumns
      */
-    private function applyIdentity(Builder $q, ?string $afm, ?string $email, array $phones, array $phoneColumns, array $emailColumns): void
+    private function applyIdentity(Builder $q, ?string $afm, ?string $email, array $phones, array $phoneColumns, array $emailColumns, bool $customers): void
     {
         if ($afm !== null) {
-            // The stored side may carry an EL/GR prefix (customers.afm is saved
-            // as typed) — accept the digits with or without it.
-            $q->orWhere(fn (Builder $qq) => self::whereAfm($qq, $afm));
+            // Customers: the indexed identity column. Leads: the stored digits,
+            // EL/GR prefix tolerated (older/imported rows may carry one).
+            if ($customers) {
+                $key = Afm::uniqueKey($afm);
+                if ($key !== null) {
+                    $q->orWhere('afm_key', $key);
+                }
+            } else {
+                $q->orWhere(fn (Builder $qq) => self::whereLeadAfm($qq, $afm));
+            }
         }
 
         if ($email !== null) {
@@ -215,7 +222,7 @@ class LeadMatcher
      */
     private static function ownColumnsMatch(Customer $c, ?string $afm, ?string $email, array $phoneSuffixes): bool
     {
-        if ($afm !== null && Afm::normalise($c->afm) === $afm) {
+        if ($afm !== null && $c->afm_key !== null && $c->afm_key === Afm::uniqueKey($afm)) {
             return true;
         }
 

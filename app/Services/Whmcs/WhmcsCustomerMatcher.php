@@ -91,7 +91,7 @@ class WhmcsCustomerMatcher
         if ($afm !== null && $afm !== '') {
             $byAfm = Customer::query()
                 ->where('company_id', $tenant->getKey())
-                ->where('afm', $afm)
+                ->whereAfmKeyOf($afm)
                 ->first();
             if ($byAfm !== null) {
                 return new MatchResult($byAfm, 'afm', $whmcsClientId);
@@ -144,7 +144,7 @@ class WhmcsCustomerMatcher
                 return trim((string) ($field['value'] ?? ''));
             }
         }
+
         return null;
     }
-
 }

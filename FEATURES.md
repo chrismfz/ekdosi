@@ -167,6 +167,10 @@
 
 ## 7. Πελάτες & Καρτέλα
 - **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ».
+- **Ένας πελάτης ανά ΑΦΜ (DB-enforced)**: `customers.afm_key` (`Afm::uniqueKey`: ψηφία για GR με/χωρίς
+  EL/GR, γράμματα για ξένο VAT, NULL για placeholder/κενό) + `UNIQUE(company_id, afm_key)` και σε
+  soft-deleted· φιλικό validation στη φόρμα· `customers:afm-duplicates` audit· ETL/importer/sync/WHMCS
+  όλα μέσω `whereAfmKeyOf`.
 - **Συγχρονισμός πελατών από myDATA** (`CustomerSyncFromMyData` / `customers:sync`) — bulk discovery
   από τα ΑΦΜ συναλλασσομένων στις πωλήσεις μας + GSIS enrichment· lookback presets 3/12/24 μήνες
   (καθρέφτης του `suppliers:sync`).

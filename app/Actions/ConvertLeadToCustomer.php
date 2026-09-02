@@ -9,7 +9,6 @@ use App\Models\Customer;
 use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Models\Quote;
-use App\Services\Leads\LeadMatcher;
 use App\Support\Afm;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -49,7 +48,7 @@ class ConvertLeadToCustomer
         return DB::transaction(function () use ($lead, $existing): Customer {
             // Serialise conversions per tenant: two operators converting two
             // leads that share an ΑΦΜ must not both pass the owner check below
-            // (customers has no unique on afm; a gap can't be row-locked).
+            // (the UNIQUE index would only surface the loser as a raw error).
             Company::query()->whereKey($lead->company_id)->lockForUpdate()->first();
 
             // Re-check under a row lock: a double-submit can't make two customers.
@@ -135,11 +134,14 @@ class ConvertLeadToCustomer
         }
 
         // withTrashed: a soft-deleted owner could be restored later and become
-        // the second live party — restore + link is the honest path.
-        $owner = LeadMatcher::whereAfm(
-            Customer::query()->withTrashed()->where('company_id', $lead->company_id),
-            $afm,
-        )->lockForUpdate()->first();
+        // the second live party — restore + link is the honest path. The
+        // UNIQUE(company_id, afm_key) index is the last net behind this check.
+        $owner = Customer::query()
+            ->withTrashed()
+            ->where('company_id', $lead->company_id)
+            ->whereAfmKeyOf($afm)
+            ->lockForUpdate()
+            ->first();
 
         if ($owner !== null) {
             throw new RuntimeException($owner->trashed()

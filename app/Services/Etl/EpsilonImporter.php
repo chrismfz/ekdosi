@@ -361,7 +361,7 @@ class EpsilonImporter
                 $existing = Customer::query()
                     ->withoutGlobalScopes()
                     ->where('company_id', $this->companyId)
-                    ->where('afm', $afm)
+                    ->whereAfmKeyOf($afm)
                     ->first();
 
                 if ($existing !== null) {
@@ -606,7 +606,7 @@ class EpsilonImporter
         $id = Customer::query()
             ->withoutGlobalScopes()
             ->where('company_id', $this->companyId)
-            ->where('afm', $afm)
+            ->whereAfmKeyOf($afm)
             ->value('id');
         if ($id === null) {
             $this->warn("Δημιουργήθηκε πελάτης από πώληση (ΑΦΜ {$afm}) — εισήγαγε πρώτα τους πελάτες για πλήρη στοιχεία.");

@@ -23,4 +23,33 @@ final class Afm
 
         return $digits === '' ? null : $digits;
     }
+
+    /**
+     * The IDENTITY key behind `customers.afm_key` (unique per tenant):
+     *   - upper-case alphanumerics only («EL 123-456-789» → «EL123456789»);
+     *   - a Greek ΑΦΜ (9 digits, optional EL/GR prefix) collapses to its digits,
+     *     so «EL123456789», «123 456 789» and «123456789» are one customer;
+     *   - a foreign VAT keeps its letters («CY10259033P», «EE123456789»);
+     *   - placeholders (all-same-digit: 000000000, 999999999) and blanks → null,
+     *     i.e. NOT an identity — many retail customers may share them.
+     */
+    public static function uniqueKey(?string $raw): ?string
+    {
+        $key = strtoupper(preg_replace('/[^A-Za-z0-9]+/', '', (string) $raw) ?? '');
+        if ($key === '') {
+            return null;
+        }
+
+        if (preg_match('/^(?:EL|GR)?(\d{9})$/', $key, $m) === 1) {
+            $key = $m[1];
+        }
+
+        return self::isPlaceholder($key) ? null : $key;
+    }
+
+    /** A dummy ΑΦΜ (000000000, 999999999, …) that identifies nobody. */
+    public static function isPlaceholder(string $key): bool
+    {
+        return ctype_digit($key) && $key !== '' && count(array_unique(str_split($key))) === 1;
+    }
 }

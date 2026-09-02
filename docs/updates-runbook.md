@@ -77,6 +77,18 @@ A snapshot failure is a clean abort (maintenance lifted, worker restarted,
 nothing deployed). `ops:health` now returns a real exit code (0/1/2), so a
 non-zero tail on the deploy flags a real issue.
 
+## Release-specific pre-flight: the customer ΑΦΜ unique constraint
+
+The release that adds `UNIQUE(customers.company_id, afm_key)` **refuses to migrate** while any
+tenant has two customers with the same ΑΦΜ (soft-deleted included). Before `update.sh`:
+
+```bash
+php artisan customers:afm-duplicates          # exit 0 = clean, 1 = duplicates listed
+```
+
+Resolve each group (fix the wrong ΑΦΜ, or move its documents and delete the duplicate), then
+deploy. Placeholder ΑΦΜ (000000000 …) and blanks are NOT identities and never collide.
+
 ## Rollback
 
 Every `update.sh` run takes a snapshot first into `storage/app/db-snapshots/`

@@ -7,6 +7,7 @@ use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
+use App\Support\Afm;
 use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -103,6 +104,34 @@ class Customer extends Model
             'show_balance_on_pdf' => 'boolean',
             'whmcs_reseller_routes' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // `afm_key` is the ΑΦΜ IDENTITY (App\Support\Afm::uniqueKey) behind the
+        // UNIQUE(company_id, afm_key) constraint — derived on every save, never
+        // typed. Query-builder writers (ETL, importer) set it themselves.
+        static::saving(function (self $customer): void {
+            $customer->afm_key = Afm::uniqueKey($customer->afm);
+        });
+    }
+
+    /**
+     * Customers sharing this ΑΦΜ identity (any formatting, EL/GR prefix or not).
+     * A value with no identity (placeholder like 000000000, or blank) falls back
+     * to exact-text equality — the pre-constraint behaviour of every lookup, so
+     * importers stay idempotent on placeholder rows; blank matches nobody.
+     */
+    public function scopeWhereAfmKeyOf(Builder $query, ?string $afm): Builder
+    {
+        $key = Afm::uniqueKey($afm);
+        if ($key !== null) {
+            return $query->where('afm_key', $key);
+        }
+
+        $raw = trim((string) $afm);
+
+        return $raw === '' ? $query->whereRaw('1 = 0') : $query->where('afm', $raw);
     }
 
     /**

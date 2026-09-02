@@ -7,10 +7,12 @@ use App\Models\User;
 use App\Services\Etl\BackupNoteSync;
 use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
+use App\Support\Afm;
 use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use PDO;
+use RuntimeException;
 
 /**
  * Re-runnable ETL: legacy Firebird .fdb  ->  multi-tenant MariaDB.
@@ -281,7 +283,7 @@ class MigrateFromFirebird extends Command
     {
         $exists = DB::table('companies')->where('id', $id)->exists();
         if (! $exists) {
-            throw new \RuntimeException("Tenant with id={$id} does not exist. Cannot import into a non-existent tenant.");
+            throw new RuntimeException("Tenant with id={$id} does not exist. Cannot import into a non-existent tenant.");
         }
 
         return $id;
@@ -323,6 +325,35 @@ class MigrateFromFirebird extends Command
     private function fbAll(string $sql): array
     {
         return $this->fb->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows  legacy CUSTOMER rows
+     */
+    private function assertNoDuplicateLegacyAfm(array $rows): void
+    {
+        $byKey = [];
+        foreach ($rows as $r) {
+            $key = Afm::uniqueKey($this->fld($r, 'AFM'));
+            if ($key !== null) {
+                $byKey[$key][] = (int) $r['CUST_ID'].' '.($this->fld($r, 'NAME') ?? '');
+            }
+        }
+
+        $dupes = array_filter($byKey, fn (array $ids): bool => count($ids) > 1);
+        if ($dupes === []) {
+            return;
+        }
+
+        $lines = [];
+        foreach ($dupes as $key => $ids) {
+            $lines[] = "  ΑΦΜ {$key}: ".implode(' | ', $ids);
+        }
+
+        throw new RuntimeException(
+            "Η πηγή Firebird έχει πελάτες με το ίδιο ΑΦΜ (CUST_ID επωνυμία):\n".implode("\n", $lines)
+            ."\nΣυγχώνευσε/διόρθωσέ τους στη legacy βάση και ξανατρέξε — ο στόχος επιβάλλει UNIQUE(company_id, afm_key)."
+        );
     }
 
     /**
@@ -482,7 +513,15 @@ class MigrateFromFirebird extends Command
     private function copyCustomers(): void
     {
         $this->line('  CUSTOMER -> customers');
-        foreach ($this->fbAll('SELECT * FROM CUSTOMER') as $r) {
+        $rows = $this->fbAll('SELECT * FROM CUSTOMER');
+
+        // UNIQUE(company_id, afm_key) on the target: two legacy customers with
+        // the same real ΑΦΜ would make the second upsert fail mid-run. Stop
+        // BEFORE writing, with the list, so the operator merges them in the
+        // legacy DB (placeholders like 000000000 are not identities and pass).
+        $this->assertNoDuplicateLegacyAfm($rows);
+
+        foreach ($rows as $r) {
             // Filament-managed columns (is_active, needs_immediate_invoice,
             // peppol_endpoint, whmcs_client_id) are written ONLY on first
             // insert. On re-runs they stay untouched so operator
@@ -493,6 +532,8 @@ class MigrateFromFirebird extends Command
                 [
                     'type' => $this->fld($r, 'TYPE'),
                     'afm' => $this->fld($r, 'AFM'),
+                    // Query-builder write → the model hook doesn't run; derive here.
+                    'afm_key' => Afm::uniqueKey($this->fld($r, 'AFM')),
                     'name' => $this->fld($r, 'NAME') ?? '(no name)',
                     'address1' => $this->fld($r, 'ADDRESS1'),
                     'address2' => $this->fld($r, 'ADDRESS2'),

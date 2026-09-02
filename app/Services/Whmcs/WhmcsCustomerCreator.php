@@ -51,7 +51,7 @@ class WhmcsCustomerCreator
 
         $existing = Customer::query()
             ->where('company_id', $tenant->id)
-            ->where('afm', $afm)
+            ->whereAfmKeyOf($afm)
             ->first();
         if ($existing !== null) {
             // Establish the operator-confirmed WHMCS link if missing; never

@@ -41,7 +41,7 @@ class ContactCustomerResolver
 
         $existing = Customer::query()
             ->where('company_id', $tenant->getKey())
-            ->where('afm', $afm)
+            ->whereAfmKeyOf($afm)
             ->first();
         if ($existing !== null) {
             return $existing;

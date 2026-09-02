@@ -65,11 +65,11 @@ class LeadMatcherTest extends TestCase
     {
         $t = $this->tenant();
         $c = Customer::create(['company_id' => $t->id, 'name' => 'Με πρόθεμα', 'afm' => 'EL123456789']);
-        $lower = Customer::create(['company_id' => $t->id, 'name' => 'Με μικρό πρόθεμα', 'afm' => 'gr 123 456 789']);
+        $this->assertSame([$c->id], app(LeadMatcher::class)->find($t->id, '123456789', null)->customers->pluck('id')->all());
 
-        $ids = app(LeadMatcher::class)->find($t->id, '123456789', null)->customers->pluck('id')->sort()->values()->all();
-
-        $this->assertSame([$c->id, $lower->id], $ids);
+        // Same identity, another spelling (one customer per ΑΦΜ per tenant now).
+        $c->update(['afm' => 'gr 123 456 789']);
+        $this->assertSame([$c->id], app(LeadMatcher::class)->find($t->id, ' 123-456-789 ', null)->customers->pluck('id')->all());
     }
 
     public function test_matches_other_leads_including_lost_do_not_contact_and_trashed(): void
@@ -154,9 +154,10 @@ class LeadMatcherTest extends TestCase
         $t = $this->tenant();
         $m = app(LeadMatcher::class);
 
-        // Uncapped: direct derived in PHP from the banner set.
+        // Uncapped: direct derived in PHP from the banner set. The trashed one
+        // matches on its OWN phone (a trashed AFM twin can't exist any more).
         $live = Customer::create(['company_id' => $t->id, 'name' => 'Ζωντανός', 'afm' => 'EL 123456789']);
-        $trashed = Customer::create(['company_id' => $t->id, 'name' => 'Σβησμένος', 'afm' => '123456789']);
+        $trashed = Customer::create(['company_id' => $t->id, 'name' => 'Σβησμένος', 'phone1' => '6970001111']);
         $trashed->delete();
         $viaContact = Customer::create(['company_id' => $t->id, 'name' => 'Μέσω επαφής']);
         CustomerContact::create(['company_id' => $t->id, 'customer_id' => $viaContact->id, 'name' => 'Μ', 'phone' => '6970001111']);

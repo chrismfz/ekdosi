@@ -94,15 +94,12 @@ class CustomerSyncFromMyData
         $gsisFailures = [];
 
         foreach ($byAfm as $afm => $docName) {
-            // Dedup is APP-LEVEL: unlike suppliers, `customers` has no
-            // unique(company_id, afm) constraint (afm is a non-unique index +
-            // legitimately NULL for retail), so this exists-check + the per-run
-            // $byAfm map are the guard — fine for the single-operator flow, not a
-            // concurrency lock. withTrashed: a soft-deleted customer with this AFM
-            // was removed on purpose → never silently resurrect.
+            // Identity check on `afm_key` (the UNIQUE(company_id, afm_key)
+            // constraint is the final guard). withTrashed: a soft-deleted
+            // customer with this AFM was removed on purpose → never resurrect.
             $exists = Customer::withTrashed()
                 ->where('company_id', $this->tenant->getKey())
-                ->where('afm', $afm)
+                ->whereAfmKeyOf($afm)
                 ->exists();
 
             if ($exists) {

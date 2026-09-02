@@ -4,6 +4,7 @@ namespace App\Services\Portability;
 
 use App\Models\Company;
 use App\Services\TenantRoleProvisioner;
+use App\Support\Afm;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -403,8 +404,17 @@ class CompanyImporter
             $data = $this->rowData($table, $row, $companyId, $maps);
             $key = $this->naturalKey($table, $row);
 
-            if (isset($index[$key])) {
-                $id = $index[$key];
+            // customers: a bundle row with no natural-key twin but the SAME ΑΦΜ
+            // identity as a local row IS that customer (UNIQUE(company_id, afm_key)
+            // would reject the insert anyway) — merge into it.
+            $existingId = $index[$key] ?? (
+                $table === 'customers' && ! empty($data['afm_key'])
+                    ? DB::table('customers')->where('company_id', $companyId)->where('afm_key', $data['afm_key'])->value('id')
+                    : null
+            );
+
+            if ($existingId !== null) {
+                $id = (int) $existingId;
                 // Merge keeps the LOCAL soft-delete state: a row deleted here
                 // after the export must not be resurrected by its bundle twin.
                 unset($data['deleted_at']);
@@ -443,6 +453,12 @@ class CompanyImporter
         // otherwise the row keeps a stale source_type with a null source_id.
         if ($table === 'cmr_notes' && ($row['source_id'] ?? null) === null) {
             $row['source_type'] = null;
+        }
+
+        // customers.afm_key is derived, never trusted from a bundle (older
+        // bundles lack the column entirely).
+        if ($table === 'customers') {
+            $row['afm_key'] = Afm::uniqueKey($row['afm'] ?? null);
         }
 
         $row['created_at'] = now();
