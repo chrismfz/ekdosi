@@ -315,17 +315,6 @@ class InvoicePdfRenderer
     }
 
     /**
-     * DOC-1 (AUDIT): a 0% παραστατικό must PRINT the exempting provision
-     * (ΕΛΠ ν.4308/2014 άρθρο 9 — e.g. «Χωρίς ΦΠΑ - άρθρο 45» for an
-     * intra-community supply), not just file it to myDATA. Same source as
-     * the submitter (the tenant's 0%-rate VatCategory §8.3 code), but
-     * NON-throwing: a draft/preview PDF on an unconfigured tenant renders
-     * without the note instead of crashing — the submitter + preflight are
-     * the loud guards for filing.
-     *
-     * @return array{code:int,label:string}|null
-     */
-    /**
      * DOC-1 / MYD-007: the §8.3 exemption citation(s) for the 0% lines, derived
      * from the SAME per-line reason that was filed to AADE
      * (invoice_lines.vat_exemption_category) — so the printed legal citation can't

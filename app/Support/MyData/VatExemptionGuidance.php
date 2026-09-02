@@ -17,9 +17,13 @@ namespace App\Support\MyData;
  * 33), and a third-country goods EXPORT is code 8 (άρθρο 29). Goods and services
  * diverge, and the reason must be chosen per case — not globally.
  *
- * SINGLE HOME: the VatCategory form's 0% helper, onboarding, and the invoice-form
- * auto-suggestion all read `SCENARIOS` / `recommendForType()` here. When a code
- * mapping changes, this is the one file to edit — guarded by VatExemptionGuidanceTest.
+ * WHAT IS WIRED TODAY: `recommendForType()` drives the invoice form's per-line
+ * auto-suggestion, and the VatCategory-form helper text summarises the mapping.
+ * `SCENARIOS` (+ `scenarioOptions()` / `INTRO` / `labelForCode()`) is the encoded,
+ * comprehensive reference — kept deliberately «για clarity» and guarded by
+ * VatExemptionGuidanceTest; a scenario-PICKER UI that reads `scenarioOptions()`
+ * is a tracked follow-up (docs/BACKLOG.md). When a code mapping changes, this is
+ * the one file to edit.
  *
  * The §8.3 code numbers are cross-checked against {@see Codes::VAT_EXEMPTION_LABELS}
  * (verbatim from the spec); this file only adds the plain-Greek «when to use it».
