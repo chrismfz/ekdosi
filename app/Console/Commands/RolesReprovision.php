@@ -125,20 +125,26 @@ class RolesReprovision extends Command
             // Teams mode: permission writes go through the role row we already
             // resolved with an explicit company_id, so no ambient team leaks in.
             DB::transaction(function () use ($role, $row, $prune, &$granted, &$revoked): void {
-                // Count what WE actually attach: ensureManagedRolesExist() may have
-                // backfilled a just-created role, and reporting the planned set
-                // would overstate the run.
                 $held = $role->permissions()->pluck('name');
+
                 $toGrant = array_values(array_diff($row['missing'], $held->all()));
                 if ($toGrant !== []) {
                     $role->givePermissionTo($toGrant);
-                    $granted += count($toGrant);
                 }
 
                 $toRevoke = $prune ? array_values(array_intersect($row['extra'], $held->all())) : [];
                 foreach ($toRevoke as $name) {
                     $role->revokePermissionTo($name);
                 }
+
+                // Count the whole planned set, not just our own writes: on a role
+                // row that did not exist yet, ensureManagedRolesExist() above
+                // BACKFILLED the permissions a moment ago, so $toGrant is empty —
+                // and reporting 0 right under a table listing what was missing
+                // read like the command had done nothing. Everything in
+                // ['missing'] is attached by the time this run ends, whichever of
+                // the two attached it.
+                $granted += count($row['missing']);
                 $revoked += count($toRevoke);
             });
         }

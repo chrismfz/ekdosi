@@ -6,6 +6,7 @@ use App\Filament\Pages\Concerns\InteractsWithLeadViews;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Models\Company;
 use App\Models\Lead;
+use App\Support\TableFilterUrl;
 use BackedEnum;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
@@ -159,6 +160,29 @@ class LeadsCalendar extends Page
             ->where('next_action_at', '<', $from)
             ->forOperator($this->operator)
             ->count();
+    }
+
+    /**
+     * The «δες τα ανοιχτά στη λίστα» link next to that count — carrying the SAME
+     * operator filter, so the number and the list the operator lands on agree.
+     * The filter key comes from TableFilterUrl (`filters`; `tableFilters` is the
+     * property name and binds to nothing).
+     */
+    public function openLeadsUrl(): string
+    {
+        $params = ['tab' => 'open', 'tenant' => Filament::getTenant()];
+
+        $operatorId = match (true) {
+            ctype_digit($this->operator) => $this->operator,
+            $this->operator === 'me' => (string) auth()->id(),
+            default => null,
+        };
+
+        if ($operatorId !== null) {
+            $params = TableFilterUrl::with(['assigned_user_id' => ['value' => $operatorId]], $params);
+        }
+
+        return LeadResource::getUrl('index', $params);
     }
 
     /**

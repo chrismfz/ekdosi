@@ -11,13 +11,7 @@
         $editUrl = fn ($id) => \App\Filament\Resources\Leads\LeadResource::getUrl('edit', ['record' => $id, 'tenant' => $tenant]);
         $overdueUrl = \App\Filament\Resources\Leads\LeadResource::getUrl('index', ['tab' => 'overdue', 'tenant' => $tenant]);
         // Same operator the banner counted, so the count and the list agree.
-        $openUrl = \App\Filament\Resources\Leads\LeadResource::getUrl('index', array_filter([
-            'tab' => 'open',
-            'tenant' => $tenant,
-            'tableFilters' => ctype_digit($this->operator)
-                ? ['assigned_user_id' => ['value' => $this->operator]]
-                : (($this->operator === 'me') ? ['assigned_user_id' => ['value' => (string) auth()->id()]] : null),
-        ]));
+        $openUrl = $this->openLeadsUrl();
         $today = now()->toDateString();
         $dayNames = ['Δευ', 'Τρί', 'Τετ', 'Πέμ', 'Παρ', 'Σάβ', 'Κυρ'];
     @endphp

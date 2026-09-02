@@ -226,7 +226,10 @@ actually recover». For a restore when the **APP_KEY is lost**, see
   `shield:generate` then deadlocked every later deploy — `git stash` does not clear
   untracked files). Note the checkout is `--force`, so an untracked file whose path
   the target ref ships as a tracked file gets replaced by the release's version; the
-  pre-flight names those separately before anything changes.
+  pre-flight names those separately and **copies them to
+  `storage/app/deploy-untracked/<timestamp>/`** first (and aborts if that copy fails),
+  so the deploy never stops and nothing is destroyed unseen. Delete those copies once
+  you've checked them.
 - **On failure, `update.sh`/`rollback.sh` STAY in maintenance mode** on purpose
   (a half-applied update must not be served). They print the rollback command;
   bring the app back with `php artisan up` only once it's healthy.

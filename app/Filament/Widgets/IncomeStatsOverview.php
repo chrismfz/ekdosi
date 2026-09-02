@@ -7,6 +7,7 @@ use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Widgets\Concerns\FormatsDashboardValues;
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
+use App\Support\TableFilterUrl;
 use Filament\Facades\Filament;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
@@ -67,19 +68,16 @@ class IncomeStatsOverview extends StatsOverviewWidget
                 ->color($outstanding > 0 ? 'danger' : 'success')
                 // Drill into the customers who owe (the «Χρεωστικοί» option of
                 // the balance filter on the Customers list). getUrl() carries the
-                // current tenant slug in the path automatically.
-                //
-                // The `sort` param is REQUIRED, not cosmetic: with only
-                // ?tableFilters[balance_status][value]=debtor the SelectFilter
-                // (custom query(), deferFilters(false)) does not rehydrate from
-                // the query string on load and the list lands unfiltered — a
-                // second table-state param (the balance sort) triggers the
-                // rehydrate. Sorting by balance desc is also what the operator
-                // wants here (biggest debtors first).
-                ->url(CustomerResource::getUrl('index', [
-                    'tableFilters' => ['balance_status' => ['value' => 'debtor']],
-                    'sort' => 'outstanding_balance:desc',
-                ]))
+                // current tenant slug in the path automatically; TableFilterUrl
+                // knows the query-string key (`filters`, NOT `tableFilters` — the
+                // old key bound to nothing and this card landed unfiltered; the
+                // `sort` below was added as a workaround for that misdiagnosis).
+                // The sort stays because it is what the operator wants here:
+                // biggest debtors first.
+                ->url(CustomerResource::getUrl('index', TableFilterUrl::with(
+                    ['balance_status' => ['value' => 'debtor']],
+                    ['sort' => 'outstanding_balance:desc'],
+                )))
                 ->extraAttributes(['class' => 'cursor-pointer']),
 
             $this->invoiceCountStat($tenant, $metrics, $thisMonth->count),
@@ -94,9 +92,9 @@ class IncomeStatsOverview extends StatsOverviewWidget
                 ->description('Αξία (μικτά): '.$this->eur($drafts['gross']).' • δεν μετρούν στα έσοδα')
                 ->descriptionIcon('heroicon-m-document')
                 ->color('gray')
-                ->url(InvoiceResource::getUrl('index', [
-                    'tableFilters' => ['local_status' => ['value' => 'draft']],
-                ]))
+                ->url(InvoiceResource::getUrl('index', TableFilterUrl::with(
+                    ['local_status' => ['value' => 'draft']],
+                )))
                 ->extraAttributes(['class' => 'cursor-pointer']);
         }
 

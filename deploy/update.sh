@@ -11,7 +11,8 @@
 # current HEAD) is refused unless ALLOW_DOWNGRADE=1.
 #
 # What it does, in order (safe + idempotent):
-#   1. pre-flight: no uncommitted TRACKED changes (untracked files only warn)
+#   1. pre-flight: no uncommitted TRACKED changes (untracked files only warn;
+#      any the release ships as tracked are copied to storage/app/deploy-untracked/)
 #   2. fetch tags/commits
 #   3. DB snapshot (rollback point)  →  storage/app/db-snapshots/
 #   4. maintenance mode ON
@@ -155,29 +156,50 @@ TARGET_SHA="$(git rev-parse --verify "${TARGET_REF}^{commit}" 2>/dev/null)" \
   || { fail "Unknown ref: $REF"; exit 1; }
 echo "Current: $CURRENT   →   Target: $REF ($(git rev-parse --short "$TARGET_SHA"))"
 
-# --- untracked files: report, never refuse ----------------------------------
+# --- untracked files: report + protect, never refuse -------------------------
 # They USED to be a hard stop, and that deadlocked the box: `shield:generate`
 # (step 10) writes a policy file for any resource that ships without one, so one
 # deploy left an untracked artefact behind and EVERY later deploy refused — with
 # no way out from inside the script (`git stash` does not touch untracked files,
-# and the operator is told not to edit code on prod). So we only report them.
-# Caveat worth printing: the checkout below is `--force`, so an untracked file
-# whose path IS tracked in the target ref gets REPLACED by the release's version
-# (exactly what should happen to a generated stub) — name those separately.
-_untracked="$(git ls-files --others --exclude-standard)"
-if [[ -n "$_untracked" ]]; then
-  _clobbered=""
-  while IFS= read -r f; do
-    if [[ -n "$f" ]] && git cat-file -e "${TARGET_SHA}:${f}" 2>/dev/null; then
-      _clobbered+="$f"$'\n'
+# and the operator is told not to edit code on prod). So we report them instead.
+# The checkout below is `--force`, so an untracked file whose path IS tracked in
+# the target ref gets REPLACED by the release's version (exactly what should
+# happen to a generated stub). Those we name separately AND copy aside first, so
+# the deploy never stops and nothing is ever destroyed unseen.
+# NUL-separated + quotePath=off: git C-quotes non-ASCII paths by default
+# («Πελάτες.md» → "\316\240…"), which would break the cat-file probe below on a
+# Greek filename — exactly the kind we have.
+_untracked=()
+while IFS= read -r -d '' f; do
+  _untracked+=("$f")
+done < <(git -c core.quotePath=false ls-files --others --exclude-standard -z)
+
+if [[ ${#_untracked[@]} -gt 0 ]]; then
+  _clobbered=()
+  for f in "${_untracked[@]}"; do
+    if git cat-file -e "${TARGET_SHA}:${f}" 2>/dev/null; then
+      _clobbered+=("$f")
     fi
-  done <<< "$_untracked"
+  done
+
   warn "Untracked files present — this deploy leaves them alone:"
-  printf '%s\n' "$_untracked" | sed 's/^/    /'
-  if [[ -n "$_clobbered" ]]; then
-    warn "…except these, which $REF ships as tracked files and the checkout will OVERWRITE:"
-    printf '%s' "$_clobbered" | sed 's/^/    /'
-    echo  "  Back them up now if they are not generated artefacts (Ctrl-C aborts — nothing has changed yet)."
+  printf '    %s\n' "${_untracked[@]}"
+
+  if [[ ${#_clobbered[@]} -gt 0 ]]; then
+    # These the checkout WILL replace (it is `--force`). For a generated artefact
+    # that is exactly right, and it must not stop the deploy — that rigidity is
+    # what deadlocked prod. But we never destroy an operator's file blind: copy
+    # them aside FIRST, and abort if the copy fails.
+    _backup="storage/app/deploy-untracked/$(date -u +%Y%m%d-%H%M%S)"
+    warn "…except these, which $REF ships as tracked files — the checkout REPLACES them:"
+    printf '    %s\n' "${_clobbered[@]}"
+    for f in "${_clobbered[@]}"; do
+      if ! mkdir -p "$_backup/$(dirname "$f")" || ! cp -p "$f" "$_backup/$f"; then
+        fail "Could not back up '$f' to $_backup — refusing to overwrite it. Nothing was deployed."
+        exit 1
+      fi
+    done
+    ok "Copies kept in $_backup/ (delete them once you've checked)."
   fi
 fi
 
