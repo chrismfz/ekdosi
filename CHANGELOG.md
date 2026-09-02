@@ -92,6 +92,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   permissions. Σχέδιο + gates: `docs/leads-mini-crm.md` (L1 μετατροπή σε πελάτη, L2 απολογισμός).
 
 ### Fixed
+- **Το deploy μπλόκαρε στον εαυτό του (`app/Policies/UpdateRunPolicy.php`).** Το `UpdateRun` ήταν το
+  ΜΟΝΟ resource χωρίς committed policy, οπότε το `shield:generate` (βήμα 10 του `update.sh`, αλλά και
+  ο seeder σε κάθε run της σουίτας) το έγραφε ως **untracked** αρχείο· το pre-flight «καθαρό working
+  tree» έβλεπε untracked αρχεία και **αρνιόταν κάθε επόμενο deploy**, χωρίς το `git stash` να μπορεί
+  να το καθαρίσει. Τρεις διορθώσεις: **committed policy** (γραμμένη στο χέρι — βλ. Security), το
+  pre-flight κοιτάει πλέον **μόνο tracked** αλλαγές (`--untracked-files=no`) και **αναφέρει** τα
+  untracked αντί να σταματά (ονομάζοντας ξεχωριστά όσα το `checkout --force` θα αντικαταστήσει), και
+  test που πιάνει **οποιοδήποτε** resource χωρίς policy πριν ξαναγίνει το ίδιο.
 - **Υποβολή ακριβώς μία φορά — και για τα δελτία αποστολής (MYD-021)** — η σήμανση «σε εξέλιξη»
   γραφόταν **μόνο μέσα σε `catch`**, άρα υπήρχε μόνο αν επιζούσε η διεργασία: ένα hard kill (OOM,
   deploy, πτώση host) ανάμεσα στην αποδοχή από την ΑΑΔΕ και το catch δεν άφηνε κανένα ίχνος, το
@@ -165,6 +173,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   επέστρεφαν ενεργοί μετά από export→import).
 
 ### Security
+- **Όριο εξουσιοδότησης `UpdateRun` (ιστορικό deploy).** Το cross-tenant, immutable ιστορικό
+  ενημερώσεων δεν είχε policy και **δεν** ήταν στο `ADMIN_FORBIDDEN_RESOURCES`, οπότε κάθε
+  `company_admin` κρατούσε `*:UpdateRun` — ένα οποιοδήποτε `Gate::authorize()` πάνω στο model θα τους
+  ενέκρινε (μέχρι τώρα το έσωζαν μόνο τα Filament overrides της σελίδας). Πλέον: **hand-written
+  `UpdateRunPolicy`** (view μόνο για system super admin, **κάθε** mutation `false` — ποτέ το stock
+  Shield template, που δίνει CRUD βάσει ακριβώς αυτών των permissions) **+** το `UpdateRun` μπήκε στο
+  `ADMIN_FORBIDDEN_RESOURCES`, ώστε να μη μοιράζονται καν τα δικαιώματα. Gate-level tests
+  (company_admin / operator / απλός χρήστης → denied, ακόμη κι αν τους δοθούν τα permissions).
 - **Περιορισμός endpoint παρόχου e-τιμολόγησης (PROV-017)** — το base URL του παρόχου
   (InvoSign) ήταν ελεύθερο κείμενο και ο transport έστελνε εκεί το token + το πλήρες XML
   τιμολογίου· ένα `http://`, ένα URL με `user:pass@`/query, ή ένα εσωτερικό host μπορούσε να

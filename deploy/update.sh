@@ -11,7 +11,7 @@
 # current HEAD) is refused unless ALLOW_DOWNGRADE=1.
 #
 # What it does, in order (safe + idempotent):
-#   1. pre-flight: working tree must be clean
+#   1. pre-flight: no uncommitted TRACKED changes (untracked files only warn)
 #   2. fetch tags/commits
 #   3. DB snapshot (rollback point)  →  storage/app/db-snapshots/
 #   4. maintenance mode ON
@@ -41,6 +41,7 @@ REF="${1:-}"
 log()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; }
+warn() { printf '\n\033[1;33m! %s\033[0m\n' "$*"; }
 
 # --- queue worker drain (OPS-6) --------------------------------------------
 # A long-running in-flight job (e.g. the 30-min Firebird import) would otherwise
@@ -118,10 +119,13 @@ start_queue_worker() {
 }
 
 # --- pre-flight -------------------------------------------------------------
-if [[ -n "$(git status --porcelain)" ]]; then
+# TRACKED changes are a hard stop: the checkout below would clobber real edits.
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   fail "Working tree not clean — commit/stash changes on the server first (don't edit code on prod)."
+  git status --short --untracked-files=no | sed 's/^/    /' >&2
   exit 1
 fi
+
 
 log "Fetching tags + commits"
 git fetch --all --tags --prune
@@ -150,6 +154,32 @@ fi
 TARGET_SHA="$(git rev-parse --verify "${TARGET_REF}^{commit}" 2>/dev/null)" \
   || { fail "Unknown ref: $REF"; exit 1; }
 echo "Current: $CURRENT   →   Target: $REF ($(git rev-parse --short "$TARGET_SHA"))"
+
+# --- untracked files: report, never refuse ----------------------------------
+# They USED to be a hard stop, and that deadlocked the box: `shield:generate`
+# (step 10) writes a policy file for any resource that ships without one, so one
+# deploy left an untracked artefact behind and EVERY later deploy refused — with
+# no way out from inside the script (`git stash` does not touch untracked files,
+# and the operator is told not to edit code on prod). So we only report them.
+# Caveat worth printing: the checkout below is `--force`, so an untracked file
+# whose path IS tracked in the target ref gets REPLACED by the release's version
+# (exactly what should happen to a generated stub) — name those separately.
+_untracked="$(git ls-files --others --exclude-standard)"
+if [[ -n "$_untracked" ]]; then
+  _clobbered=""
+  while IFS= read -r f; do
+    if [[ -n "$f" ]] && git cat-file -e "${TARGET_SHA}:${f}" 2>/dev/null; then
+      _clobbered+="$f"$'\n'
+    fi
+  done <<< "$_untracked"
+  warn "Untracked files present — this deploy leaves them alone:"
+  printf '%s\n' "$_untracked" | sed 's/^/    /'
+  if [[ -n "$_clobbered" ]]; then
+    warn "…except these, which $REF ships as tracked files and the checkout will OVERWRITE:"
+    printf '%s' "$_clobbered" | sed 's/^/    /'
+    echo  "  Back them up now if they are not generated artefacts (Ctrl-C aborts — nothing has changed yet)."
+  fi
+fi
 
 # --- early data pre-flight (read-only, NO downtime) -------------------------
 # The cheap checks run on the CURRENT checkout, before maintenance mode and
