@@ -57,6 +57,14 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertSame('CY10259033P', Afm::uniqueKey('ΔΕΛΤΑ CY10259033P'), 'an «ΕΛ» inside a leading Greek word is not a prefix');
         $this->assertSame('123456789', Afm::uniqueKey('ΑΦΜ: ΕΛ 123456789'), 'the prefix folds after a label');
         $this->assertNull(Afm::uniqueKey('N/A'), 'letters-only text is a free-text placeholder');
+        $this->assertNull(Afm::uniqueKey('N/A 000'), 'free text with a stray digit is not an identity');
+        $this->assertNull(Afm::uniqueKey('ΔΕΝ ΕΧΕΙ 0'));
+        $this->assertNull(Afm::uniqueKey('12345'), 'too short to be any VAT');
+        $this->assertSame('IE1234567T', Afm::uniqueKey('ie 1234567 t'), 'the shortest EU form (7 digits) is an identity');
+        $this->assertSame('123456789', Afm::leadAfm('EL 123-456-789'), 'leads store the identity…');
+        $this->assertSame('000000000', Afm::leadAfm('000000000'), '…or the operator\'s text when there is none');
+        $this->assertSame('N/A', Afm::leadAfm(' N/A '));
+        $this->assertNull(Afm::leadAfm('  '));
         $this->assertNull(Afm::uniqueKey('NONE'));
         $this->assertNull(Afm::uniqueKey('EL'));
         $this->assertNull(Afm::uniqueKey('ΑΦΜ'));
@@ -396,10 +404,30 @@ class CustomerAfmKeyTest extends TestCase
         $lead = Lead::create(['company_id' => $t->id, 'name' => 'Παλιό', 'afm' => '10259033']);
         DB::table('leads')->where('id', $lead->id)->update(['afm' => 'EL 123-456-789']); // pre-release form
 
+        $placeholder = Lead::create(['company_id' => $t->id, 'name' => 'Λιανική', 'afm' => 'x']);
+        DB::table('leads')->where('id', $placeholder->id)->update(['afm' => '000000000']);
+        $note = Lead::create(['company_id' => $t->id, 'name' => 'Χωρίς', 'afm' => 'x']);
+        DB::table('leads')->where('id', $note->id)->update(['afm' => 'N/A']);
+
         $migration = require base_path('database/migrations/2026_09_03_000001_add_afm_key_unique_to_customers.php');
         $migration->up(); // idempotent re-run
 
         $this->assertSame('123456789', $lead->fresh()->afm);
+        $this->assertSame('000000000', $placeholder->fresh()->afm, 'a placeholder is the operator\'s answer — normalised, never blanked');
+        $this->assertSame('N/A', $note->fresh()->afm);
+
+        // A refused migration (duplicate customers) rewrites NO lead row.
+        DB::table('leads')->where('id', $lead->id)->update(['afm' => 'EL 123-456-789']);
+        Customer::create(['company_id' => $t->id, 'name' => 'Α', 'afm' => '555555556']);
+        $dup = Customer::create(['company_id' => $t->id, 'name' => 'Β', 'afm' => '555555557']);
+        DB::table('customers')->where('id', $dup->id)->update(['afm' => '555555556', 'afm_key' => null]);
+        Schema::table('customers', fn ($table) => $table->dropUnique('customers_company_afm_key_unique'));
+        try {
+            $migration->up();
+            $this->fail('Expected the duplicate refusal.');
+        } catch (\RuntimeException) {
+        }
+        $this->assertSame('EL 123-456-789', $lead->fresh()->afm, 'nothing rewritten by a refused migration');
     }
 
     public function test_importer_normalises_lead_afm_so_a_restored_dnc_lead_still_blocks(): void

@@ -65,20 +65,6 @@ return new class extends Migration
                 }
             });
 
-        // leads.afm carries the same identity form from now on (LeadForm stores
-        // Afm::uniqueKey) — bring existing lead rows in line so lead↔customer and
-        // lead↔lead dedupe compare like with like.
-        if (Schema::hasTable('leads')) {
-            DB::table('leads')->select('id', 'afm')->whereNotNull('afm')->orderBy('id')->chunkById(500, function ($rows): void {
-                foreach ($rows as $row) {
-                    $key = Afm::uniqueKey($row->afm);
-                    if ($key !== $row->afm) {
-                        DB::table('leads')->where('id', $row->id)->update(['afm' => $key]);
-                    }
-                }
-            });
-        }
-
         $duplicates = app(CustomerAfmDuplicates::class)->find();
         if ($duplicates->isNotEmpty()) {
             throw new RuntimeException(
@@ -86,6 +72,23 @@ return new class extends Migration
                 .app(CustomerAfmDuplicates::class)->describe($duplicates)
                 ."\nΔιόρθωσε/συγχώνευσε τους διπλούς (php artisan customers:afm-duplicates) και ξανατρέξε migrate."
             );
+        }
+
+        // leads.afm carries the same identity form from now on (LeadForm stores
+        // Afm::leadAfm) — bring existing lead rows in line so lead↔customer and
+        // lead↔lead dedupe compare like with like. NORMALISE, never blank: text
+        // with no identity («000000000», «N/A») is the operator's answer and is
+        // kept as typed. Runs after the duplicate check so a refused migration
+        // rewrites nothing.
+        if (Schema::hasTable('leads')) {
+            DB::table('leads')->select('id', 'afm')->whereNotNull('afm')->orderBy('id')->chunkById(500, function ($rows): void {
+                foreach ($rows as $row) {
+                    $key = Afm::leadAfm($row->afm);
+                    if ($key !== $row->afm) {
+                        DB::table('leads')->where('id', $row->id)->update(['afm' => $key]);
+                    }
+                }
+            });
         }
 
         if (! Schema::hasIndex('customers', self::UNIQUE)) {

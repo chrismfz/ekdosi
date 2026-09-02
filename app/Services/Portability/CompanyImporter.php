@@ -428,13 +428,15 @@ class CompanyImporter
         if ($table === 'customers') {
             $twinIds = $this->twinIds($rows, $index);
             $owners = $this->customerOwners($companyId);
-            $this->assertNoCustomerAfmConflicts($rows, $index, $this->afmKeyIndex($companyId), $twinIds, $owners);
+            $afmIndex = $this->afmKeyIndex($companyId);
+            $this->assertNoCustomerAfmConflicts($rows, $index, $afmIndex, $twinIds, $owners);
 
             if ($twinIds !== []) {
                 DB::table('customers')->whereIn('id', array_keys($twinIds))->update(['afm_key' => null]);
+                // The in-memory index mirrors the release (same as plan()) — no second scan.
+                $afmIndex = array_filter($afmIndex, fn (int $id): bool => ! isset($twinIds[$id]));
             }
 
-            $afmIndex = $this->afmKeyIndex($companyId);
             $keyById = array_flip($afmIndex);
             foreach ($owners as $id => $owner) {
                 if ($owner['legacy_id'] !== null) {
@@ -561,7 +563,7 @@ class CompanyImporter
         }
 
         foreach ($rows as &$row) {
-            $row['afm'] = Afm::uniqueKey($row['afm'] ?? null);
+            $row['afm'] = Afm::leadAfm($row['afm'] ?? null);
         }
         unset($row);
 

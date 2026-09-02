@@ -82,9 +82,10 @@ class LeadForm
                             ->maxLength(20)
                             ->live(onBlur: true)
                             // Store the ΑΦΜ IDENTITY (same rule as customers.afm_key: digits
-                            // for GR, letters kept for a foreign VAT, null for placeholders)
-                            // so the dedupe compare is exact.
-                            ->dehydrateStateUsing(fn ($state): ?string => Afm::uniqueKey($state)),
+                            // for GR, letters kept for a foreign VAT) so the dedupe compare is
+                            // exact; text with no identity («000000000», «N/A») is the
+                            // operator's note — kept as typed, it matches nothing.
+                            ->dehydrateStateUsing(fn ($state): ?string => Afm::leadAfm($state)),
 
                         TextInput::make('country')
                             ->label('Χώρα (ISO-2)')

@@ -49,7 +49,10 @@ use Symfony\Component\HttpFoundation\Response;
  * filtered on company_id). Caps both the requested AFM count and the
  * returned invoice count so a crafted request can't ask for the world.
  *
- * Response (200 OK):
+ * Response (200 OK) — `afms` is keyed by the NORMALISED request value (a
+ * Greek ΑΦΜ → its 9 digits, so «EL 998482379» comes back as «998482379»; a
+ * foreign VAT keeps its letters, «cy 10259033 p» → «CY10259033P»; a value
+ * with no identity keeps its digits); a key with no matching customer → null:
  *   {
  *     "found": true,
  *     "afms": {
@@ -225,9 +228,14 @@ class WhmcsInvoicesByAfmController
     }
 
     /**
-     * Clean the inbound ΑΦΜ list: strip non-digits (WHMCS tax_id fields are
-     * free-text and pick up spaces / "EL" prefixes / dashes), drop empties,
-     * de-dupe, cap. Returns a list<string> of bare numeric ΑΦΜ.
+     * Clean the inbound ΑΦΜ list: each value becomes its IDENTITY key
+     * (Afm::uniqueKey — WHMCS tax_id fields are free-text and pick up spaces /
+     * "EL" prefixes / dashes; a Greek ΑΦΜ → its 9 digits, a foreign VAT keeps
+     * its letters upper-cased), or its bare digits when it has no identity (a
+     * placeholder like «000000000» stays in the response as an honest null);
+     * empties dropped, de-duped, capped. The response is keyed by exactly these
+     * strings — for the digits-only values the plugin sends, the key equals
+     * what was sent.
      *
      * @return list<string>
      */
