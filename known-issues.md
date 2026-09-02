@@ -104,7 +104,7 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 
 | Bucket | Meaning | Count |
 |---|---|---:|
-| **A — BLOCKER** | Must be true before the first live document on 1 Oct | 4 + 1 rehearsal (PROV-010, OBS-001, PROV-003-print, MYD-006, MYD-007 now DONE; dry-run in progress). Remaining: MYD-004 (largely closed by MYD-007), PROV-006(conditional) |
+| **A — BLOCKER** | Must be true before the first live document on 1 Oct | **All code DONE** (PROV-010, OBS-001, PROV-003-print, MYD-004, MYD-006, MYD-007) + **PROV-006 retail-via-provider sandbox-verified 2026-09-03**. Remaining: only the cutover dry-run + clearing the prod discrepancy backlog (operational) |
 | **B — AFTER** | Real, do it after the 1 Oct cutover (incl. the whole delivery-note family, due at the digital-delivery deadline) | ~21 |
 | **C — NOT-FOR-US** | Genuinely out of these tenants' scope (island/ν.5057 VAT, multi-branch, B2G/POS, fresh-install). **Re-raise if the scope changes** | ~9 (+15 already-disarmed UPD-*) |
 | **D — STALE** | The ledger says OPEN; the code already fixes it | 2 |
@@ -112,15 +112,15 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 > The delivery-note family (MYD-013 ✅, MYD-016 ✅, MYD-019, MYD-026, PROV-002,
 > STOCK-001, delivery half of MYD-023) is **B, not C** — these tenants issue δελτία
 > αποστολής today in the legacy app and digital delivery becomes mandatory on its
-> own deadline. Retail 11.x via the provider (PROV-006) is **A-conditional** — see
-> the A table.
+> own deadline. Retail 11.x via the provider (PROV-006) is **DONE** — sandbox-verified
+> 2026-09-03 (11.1 accepted, MARK 400001970206125).
 
 ### A — BLOCKERS (the whole list; nothing else is)
 
 | ID | Why it blocks | Shape of the work |
 |---|---|---|
 | ~~**PROV-010**~~ **DONE** | Contract + «Δήλωση Έναρξης» + issuer acceptance for iNVO Sign are **in place** (operator confirmed 2026-09-02); the environment in view is the dev/test one. No longer a blocker. | — |
-| **PROV-006** *(A-conditional)* | Retail (αποδείξεις λιανικής, 11.x) **is** part of the business. IF retail is filed through the provider at the 1 Oct cutover, the anonymous-counterpart convention must be sandbox-confirmed first: the public InvoSign guide marks `CounterpartName`/`CounterpartVat` required, and ekdosi can emit both empty for 11.1/11.2. | Prove 11.1 + 11.2 in the dev sandbox now (part of the dry-run). If retail stays on the direct-myDATA path at cutover and moves to the provider later, this drops to B. **Decide which channel retail uses on day one.** |
+| ~~**PROV-006** *(A-conditional)*~~ **DONE (sandbox-verified 2026-09-03)** | Retail (αποδείξεις λιανικής, 11.x) **is** filed through the provider at cutover (operator-confirmed). A real InvoSign sandbox 11.1 (ΑΛΠ) was **accepted → VALID, MARK 400001970206125**: the AADE core omitted `<counterpart>`, the InvoSign `API_Counterpart` carried the named customer, InvoSign accepted it. The truly-anonymous (no-name) ΑΛΠ edge is untested and not this tenant's workflow. | — |
 | ~~**PROV-003** (print half)~~ **DONE (#406)** | A.1112/2025 requires the *printed representation* of a provider document to carry provider identity, licence number, UID, authentication code and QR. **Shipped:** the PDF renders the «Εκδόθηκε μέσω παρόχου (ΥΠΑΗΕΣ)» block on any `PROVIDER_INSERT` invoice, from immutable `ProviderIdentity` config, and the UID is now persisted. No emailed document is non-conforming any more. **The archive half of PROV-003 is bucket B** — see below. | — |
 | ~~**MYD-007**~~ **DONE (code, #410)** | ~12% of myip's net is not at 24% (`vat_summary`: €107,264 net → €22,671 VAT ≈ 21.1%). Operator-confirmed **intra-community (ενδοκοινοτικό)**, from the Firebird import. The legacy program had **no field** for the exemption reason. **Shipped:** per-line §8.3 snapshot (`invoice_lines.vat_exemption_category`) + `VatExemptionGuidance` (intra-EU service→4, goods→14, export→8, …) + a required auto-suggested per-line «Αιτία απαλλαγής» field; credit notes inherit it. | **Code done.** Remaining is **config/confirmation, not a blocker's code:** accountant to confirm the exact §8.3 code against ν.5144/2024, and existing tenants' reason-less/wrong 0% rows are FLAGGED by preflight for operator review (no auto-guess). |
 | ~~**MYD-004** (0% half)~~ **DONE (#410)** | Same root as MYD-007: a 0% row used with no exemption reason used to be only a **warning** and `mydata:preflight` exited 0 on warnings alone — the false-green that let a wrong filing through. **Shipped:** «0% row in use without a §8.3 reason» is now a **blocking** preflight error (exit 2). | Done. The 3%/code-9/6-vs-10 half is bucket C — these tenants have no island or ν.5057 rate. |
@@ -206,8 +206,8 @@ With PROV-010 done and the dry-run already running on dev/test, the day-one list
 is: **one Blade block (PROV-003 print), the intra-community VAT reason (MYD-007 —
 accountant, then a default), a one-line preflight severity change (MYD-004 0%), a
 classification config review (MYD-006), five small read-only MCP tools (OBS-001),
-and — IF retail files via the provider at cutover — a sandbox proof of 11.x
-(PROV-006)**, all inside the rehearsal. The delivery-note family (MYD-019/026,
+and a sandbox proof of retail 11.x via the provider (PROV-006 — DONE, verified
+2026-09-03)**, all inside the rehearsal. The delivery-note family (MYD-019/026,
 PROV-002, STOCK-001, MYD-023 delivery half) is the *next* deadline's block, not
 this one. Still days of work, not the ~45 open items the board implies.
 
@@ -507,7 +507,7 @@ Priorities:
 | PROV-003 | P0 | PARTIAL | A✓/B | Provider documents | Print half DONE (#406). Licence/identity snapshot per document + invoice-page evidence DONE (this PR). Remaining bucket B: official-artifact archive — **BLOCKED, InvoSign exposes no download API** (only the QR landing page, which the spec forbids archiving); needs a provider download/retention endpoint → BACKLOG |
 | PROV-004 | P0 | OPEN | C | Provider credits | UI/service do not enforce the 5.1/5.2/11.4 compatibility matrix |
 | PROV-005 | P1 | OPEN | B | Provider preflight | Reachability is not token authentication and mandatory issuer fields are unchecked |
-| PROV-006 | P0 | VERIFY | A? | Provider retail | Retail IS in scope; confirm the anonymous 11.x counterpart convention in sandbox IF retail files via provider at cutover |
+| PROV-006 | P0 | DONE | — | Provider retail | **Sandbox-verified 2026-09-03:** retail 11.1 (ΑΛΠ) via InvoSign accepted → VALID, MARK 400001970206125 (named counterpart). Truly-anonymous ΑΛΠ (no name) untested — not this tenant's workflow |
 | PROV-007 | P1 | VERIFY | C | Provider totals | Header/line discount semantics of InvoSign api_* fields are not proven |
 | PROV-008 | P1 | OPEN | C | Provider outage | Transmission Failure_1/2 issue and recovery lifecycle is absent |
 | PROV-009 | P2 | OPEN | B | Provider observability | UID, reception feedback and remaining quota are not structured/surfaced |
@@ -2936,20 +2936,33 @@ by InvoSign, every mandatory issuer field, active-environment credential pairing
 compatible document types and current activation status. Never issue a dummy
 production invoice merely to test credentials.
 
-### PROV-006 — Anonymous retail counterpart convention is not confirmed
+### PROV-006 — Retail via provider: SANDBOX-VERIFIED
 
-**Status:** VERIFY · **Priority:** P0 for retail · **Research:** VENDOR/SANDBOX
+**Status:** DONE 2026-09-03 (sandbox-verified) · **Priority:** P0 for retail · **Research:** VENDOR/SANDBOX
 
-The public InvoSign guide marks `CounterpartName` and `CounterpartVat` as
-required. [InvoSignDocument::invoiceCounterpartFields](app/Services/EInvoice/Transports/InvoSignDocument.php)
-can emit both empty for anonymous 11.1/11.2 retail, while the AADE core correctly
-omits a retail counterpart. Delivery notes already use an explicit internal
-fallback, but invoices do not.
+**Decision + verification (operator, 2026-09-03).** Retail (αποδείξεις λιανικής) IS
+filed through the provider at cutover, and a real InvoSign **sandbox** submission
+proved it: a **11.1 (ΑΛΠ)** retail receipt was **accepted → VALID, MARK
+`400001970206125`**. The AADE core correctly omitted `<counterpart>`; the InvoSign
+`API_Counterpart` extension carried the customer name (a NAMED retail customer),
+and InvoSign accepted it. So the «required CounterpartName/Vat» concern is resolved
+for the tenant's real workflow — retail receipts carry a named customer.
 
-Obtain InvoSign's written B2C convention and prove 11.1 and 11.2 in sandbox. Do
-not invent `000000000` for invoices unless the provider confirms it. Provider
-production retail remains blocked until accepted examples and regression tests
-exist.
+Original concern (below) was that
+[InvoSignDocument::invoiceCounterpartFields](app/Services/EInvoice/Transports/InvoSignDocument.php)
+can emit both empty for a TRULY anonymous 11.x (no customer/name). That edge stays
+untested and is NOT this tenant's workflow (they attach a named retail customer);
+if a nameless ΑΛΠ is ever issued via the provider it would ship an empty
+`CounterpartName` and likely draw InvoSign `[88-001]` — carry that to BACKLOG only
+if the workflow changes. Do NOT invent `000000000` for invoices unless the provider
+confirms a convention.
+
+Sandbox-payload notes (not blockers): the accepted document's
+`API_Counterpart/CounterpartVat` rendered as `0000000` (the test customer's stored
+value, passed through verbatim; AADE core omits it for retail, so unvalidated); and
+a web-hosting SERVICE line was typed 11.1 (ΑΛΠ) rather than 11.2 (ΑΠΥ) — AADE
+accepted it, but 11.2 is the tighter type for a pure service (tenant invoice-type
+config, MYD-006).
 
 ### PROV-007 — InvoSign print-extension discount semantics are unproven
 
@@ -4197,3 +4210,4 @@ These are not open issues:
 | 2026-09-02 | **SETUP-003 P1 → P2** — an unmapped method already warns + surfaces in preflight; hard-blocking a filing over it is worse than type 3 | `known-issues.md` §SETUP-003 |
 | 2026-09-02 | **Operator corrections** — PROV-010 **DONE** (contract/declaration/acceptance in place); delivery notes + retail are in scope (issued in legacy, digital delivery becomes mandatory) so the 9.x family + PROV-006 move **C→B/A**, not out; MYD-007's 12% confirmed **intra-community**; dry-run is in progress on dev/test | `known-issues.md` §Operator corrections |
 | 2026-09-02 | **OBS-001 raised (P1, bucket A)** — filing forensics are already captured (byte-exact XML + rejection rows + activity trail) but unreachable over MCP; 5 read-only tools proposed. No extra logging needed | `known-issues.md` §OBS-001 |
+| 2026-09-03 | **PROV-006 → DONE (sandbox-verified)** — retail 11.1 (ΑΛΠ) via InvoSign sandbox accepted → VALID, MARK 400001970206125 (named counterpart; AADE core omits `<counterpart>`, InvoSign `API_Counterpart` carries the name). Retail files via provider at cutover. **A-bucket now code-complete; only the dry-run + prod discrepancy cleanup remain** | `known-issues.md` §PROV-006 |
