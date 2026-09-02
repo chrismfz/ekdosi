@@ -1937,9 +1937,22 @@ being written twice. P2: an adopted row always claimed a direct `INSERT`, mislab
 filing in the δελτίο's history; it now records `PROVIDER_INSERT` + `provider_key` when the tenant
 files through a provider.
 
-Tests: `DeliveryNoteExactlyOnceTest` (20), `TenantCoherenceTest` (20), + four added to
-`MyDataSubmitInDoubtTest`. Every fix across all four rounds was verified to make its test fail when
-reverted. Both
+**Review round 5** found NOTHING in the round-4 diff. Its three findings were pre-existing
+exposure: the provider invoice path was the last filing entry point with no lock (added here — same
+key as the direct path, so a tenant switching channel cannot race itself), and two genuinely
+provider-side items — a durable pre-POST marker there is useless without provider-side verification,
+and a provider-filed 9.x δελτίο reaches AADE only after the ΥΠΑΗΕΣ relay, so the 10-minute grace
+(tuned for the direct ERP feed) may be short. Both are **PROV-001**, recorded in `docs/BACKLOG.md`
+with the reason; `EInvoiceProviderTransport::status()` already exists, so that work is mostly wiring.
+A P2 on the adoption row's provider label was fixed.
+
+Tests: `DeliveryNoteExactlyOnceTest` (20), `TenantCoherenceTest` (21), + four added to
+`MyDataSubmitInDoubtTest`. Every fix across all five rounds was verified to make its test fail when
+reverted.
+
+**Still open on the provider path** (PROV-001): a hard kill mid-POST on a `gr-provider` tenant
+leaves no durable marker. The lock covers the concurrent case, `unverifiableInDoubt()` covers the
+window; the crash case needs the provider status query. Both
 arming tests read `mydata_pending_since` **through the query builder from inside the outbound
 call** — the way a different process would see it after a kill — and both fail when the arming
 line is removed.

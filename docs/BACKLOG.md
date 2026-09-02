@@ -473,6 +473,17 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   μονόγραμμη**: ο `SalesReconciler` τεκμηριώνει fallback που στηρίζεται στο ότι είναι null για
   ETL-imported γραμμές, οπότε το να γράφεται νωρίτερα απαιτεί να ξαναγίνει κι εκείνο το μονοπάτι
   στην ίδια αλλαγή. Ξανα-άνοιγμα αν χειριστής αλλάξει `mydata_type` σε τύπο με ανοιχτά πρόχειρα.
+- **Provider-side exactly-once — το υπόλοιπο του MYD-021 (→ PROV-001)** _(από το review round 5 του
+  MYD-021/022)._ Το `GrProviderSubmitter` πήρε **lock** (κλείνει το double-click/overlapping
+  auto-issue), αλλά **όχι** τον durable pre-POST marker: εκεί ο marker είναι άχρηστος χωρίς
+  **provider-side επαλήθευση** — δεν έχει νόημα να σημάνεις «σε αμφιβολία» αν δεν μπορείς να
+  ρωτήσεις τον πάροχο τι έγινε. Το `EInvoiceProviderTransport::status()` **υπάρχει ήδη** (InvoSign
+  `invoice_status.php`), οπότε το PROV-001 είναι κυρίως wiring. Δεύτερο σκέλος: το **9.x δελτίο μέσω
+  παρόχου** ανακτάται σήμερα διαβάζοντας **ΑΑΔΕ**, αλλά ένα provider-filed δελτίο φτάνει εκεί μετά
+  το relay του ΥΠΑΗΕΣ — άρα το grace των 10' (κουρδισμένο για το άμεσο ERP feed) μπορεί να είναι
+  μικρό και να οδηγήσει σε δεύτερη έκδοση. Το `status()` δέχεται `Invoice`, οπότε χρειάζεται
+  delivery-note δίδυμο. **Μέχρι τότε**: το lock + το `unverifiableInDoubt()` (άρνηση μέσα στο
+  παράθυρο) καλύπτουν το ρεαλιστικό σενάριο· ένα hard kill σε provider tenant παραμένει ακάλυπτο.
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
 - _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._

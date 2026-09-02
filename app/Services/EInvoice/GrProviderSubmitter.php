@@ -14,6 +14,7 @@ use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use App\Support\Tenancy\TenantCoherence;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -58,6 +59,39 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         // so a mismatched call yields ONE payload asserting TWO different issuers.
         TenantCoherence::assertInvoice($this->tenant, $invoice);
 
+        // MYD-021: the same single-flight lock the direct and delivery paths take.
+        // This was the last filing entry point without one, so a double-click or an
+        // overlapping auto-issue could let two requests both pass
+        // assertNotAlreadyFiled() and both POST — two MARKs for one (series, ΑΑ).
+        // The SAME lock key as MyDataSubmitter on purpose: a tenant that switches
+        // channel mid-flight must still serialise on the invoice, not race itself.
+        //
+        // The lock closes the concurrent case. It does NOT make the provider path
+        // durably exactly-once — a hard kill still leaves no marker here, because
+        // the pre-POST marker needs provider-side verification to be recoverable at
+        // all. That is PROV-001; see docs/BACKLOG.md.
+        $lock = Cache::lock('mydata-submit:'.$invoice->getKey(), 120);
+        if (! $lock->get()) {
+            throw new RuntimeException(
+                "Invoice {$invoice->invcode}: μια υποβολή είναι ήδη σε εξέλιξη — "
+                .'περίμενε να ολοκληρωθεί πριν ξαναδοκιμάσεις.'
+            );
+        }
+
+        try {
+            // Re-read FRESH under the lock: a submit that just finished on another
+            // worker may have flipped mydata_state, and the in-memory $invoice would
+            // be stale — assertNotAlreadyFiled must see the committed state.
+            $invoice->refresh();
+
+            return $this->performSubmit($invoice);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function performSubmit(Invoice $invoice): MyDataMark
+    {
         $this->assertNotAlreadyFiled($invoice);
         // Normal online provider issue requires IssueDate = today (InvoSign 238);
         // reject a backdated/future date locally before any outbound request (PROV-020).

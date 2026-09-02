@@ -22,6 +22,7 @@ use App\Support\Tenancy\CompanyContext;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -476,6 +477,28 @@ class TenantCoherenceTest extends TestCase
         }
 
         $this->assertSame(0, $mock->count());
+    }
+
+    public function test_the_provider_invoice_path_is_single_flight(): void
+    {
+        // This was the last filing entry point without a lock: a double-click or an
+        // overlapping auto-issue could let two requests both pass
+        // assertNotAlreadyFiled() and both POST — two MARKs for one (series, ΑΑ).
+        // The lock key is shared with the direct path on purpose, so a tenant that
+        // switches channel cannot race itself.
+        $invoice = $this->invoiceFor($this->issuer);
+
+        $lock = Cache::lock('mydata-submit:'.$invoice->getKey(), 120);
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('ήδη σε εξέλιξη');
+
+            (new GrProviderSubmitter($this->issuer, new NullProviderTransport))->submit($invoice);
+        } finally {
+            $lock->release();
+        }
     }
 
     // ───────────────────────── the other direction ────────────────────────

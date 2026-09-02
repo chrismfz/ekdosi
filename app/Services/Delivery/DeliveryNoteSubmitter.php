@@ -659,9 +659,19 @@ class DeliveryNoteSubmitter
         // arms the marker too, so a provider tenant reaches this path — recording it
         // as a plain INSERT would label a ΥΠΑΗΕΣ filing «Καταχώρηση» instead of
         // «Καταχώρηση (πάροχος)» in the δελτίο's history.
+        //
+        // Read from the tenant's channel, which is the best evidence available: the
+        // MARK itself does not say which relay produced it. A tenant that switched
+        // channel between the ambiguous attempt and this retry would be labelled by
+        // TODAY's channel — accepted, because the alternative (guessing from the
+        // absence of a provider row) is no better and the label is forensic, not
+        // legal. blank() → NULL, never the empty string, so the column stays a clean
+        // "no provider" marker.
         $viaProvider = $this->tenant->isLiveProviderTenant();
         $action = $viaProvider ? 'PROVIDER_INSERT' : 'INSERT';
-        $providerKey = $viaProvider ? (string) $this->tenant->einvoice_provider_key : null;
+        $providerKey = $viaProvider && filled($this->tenant->einvoice_provider_key)
+            ? (string) $this->tenant->einvoice_provider_key
+            : null;
 
         $adopted = DB::transaction(function () use ($note, $found, $mark, $action, $providerKey) {
             $row = DeliveryMark::query()
