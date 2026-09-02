@@ -25,9 +25,10 @@ use Spatie\Permission\PermissionRegistrar;
  * the first few names, linking to the Leads list) — meant to run daily
  * (default OFF — config/ekdosi.php → schedule.leads_notify_due_enabled).
  *
- * Read-only: never touches the lead. «Due» is `next_action_at <= end of today`
- * so a step planned for later today is in the morning digest; the list's
- * «Ληξιπρόθεσμα» tab (next_action_at < now) is the always-on surface.
+ * Read-only: never touches the lead. «Due» = Lead::scopeDue (`next_action_at
+ * <= end of today`) so a step planned for later today is in the morning
+ * digest; the list's «Για σήμερα» tab is the same predicate — the link never
+ * hides what the bell listed.
  */
 class NotifyDueLeads extends Command
 {
@@ -59,9 +60,7 @@ class NotifyDueLeads extends Command
         foreach ($companies as $company) {
             $due = Lead::query()
                 ->where('company_id', $company->id)
-                ->open()
-                ->whereNotNull('next_action_at')
-                ->where('next_action_at', '<=', now()->endOfDay())
+                ->due()
                 ->orderBy('next_action_at')
                 ->get(['id', 'name', 'assigned_user_id', 'next_action_at']);
 
@@ -130,8 +129,10 @@ class NotifyDueLeads extends Command
             ->actions([
                 Action::make('view')
                     ->label('Προβολή')
-                    // ListRecords binds its active tab to `?tab=`.
-                    ->url(LeadResource::getUrl('index', ['tab' => $overdue > 0 ? 'overdue' : 'open'], tenant: $company))
+                    // The «Για σήμερα» tab = exactly this digest's predicate (Lead::due),
+                    // so nothing listed here disappears on click. (?tab= is what
+                    // ListRecords reads.)
+                    ->url(LeadResource::getUrl('index', ['tab' => 'due'], tenant: $company))
                     ->markAsRead(),
             ])
             ->sendToDatabase($user);

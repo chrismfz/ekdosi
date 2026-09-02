@@ -159,7 +159,7 @@
     {{-- Ημερολόγιο --}}
     <x-filament::section>
         <x-slot name="heading">Ημερολόγιο</x-slot>
-        <x-slot name="description">Κάθε γραμμή χρονολογίου της περιόδου, νεότερη πρώτη{{ $result->logTruncated ? ' (οι '.\App\Services\Leads\SalesActivityReport::LOG_LIMIT.' πιο πρόσφατες — στένεψε την περίοδο ή πάρε το CSV)' : '' }}.</x-slot>
+        <x-slot name="description">Κάθε γραμμή χρονολογίου της περιόδου, νεότερη πρώτη{{ $result->logTruncated() ? ' — εδώ οι '.\App\Services\Leads\SalesActivityReport::LOG_LIMIT.' πιο πρόσφατες από '.$result->log->count().' (το CSV τις έχει όλες)' : '' }}.</x-slot>
         @if ($result->log->isEmpty())
             <div class="sa-empty">Τίποτα στην περίοδο.</div>
         @else
@@ -175,7 +175,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach ($result->log as $row)
+                        @foreach ($result->logPreview() as $row)
                             <tr>
                                 <td class="sa-nowrap">{{ $row->happened_at?->format('d/m/Y H:i') }}</td>
                                 <td class="sa-nowrap">{{ $row->user?->name ?? 'Σύστημα' }}</td>

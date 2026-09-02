@@ -24,6 +24,9 @@ class LeadsStats extends StatsOverviewWidget
 
     protected ?string $heading = 'Leads';
 
+    // Four COUNTs per refresh — 60s like the neighbouring cards, not Filament's 5s default.
+    protected ?string $pollingInterval = '60s';
+
     public static function canView(): bool
     {
         return Filament::getTenant() instanceof Company

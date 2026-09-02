@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\DB;
  * operator: new leads, calls (answered), emails (replied), meetings (held),
  * quotes, conversions, lost — plus the operator's OPEN leads right now (a
  * snapshot, not a period figure), a funnel (leads per status, snapshot) and
- * the day log (every timeline row of the period, newest first, capped).
+ * the day log (every timeline row of the period, newest first — the CSV gets
+ * ALL of it, the page shows the first LOG_LIMIT).
  *
  * The timeline is small per tenant (a handful of rows per lead), so the
  * period's rows are read once and reduced in PHP — one query, no JSON-path
@@ -27,7 +28,7 @@ use Illuminate\Support\Facades\DB;
  */
 class SalesActivityReport
 {
-    /** Day-log cap: the page is a report, not a browser of the whole history. */
+    /** Day-log cap for the PAGE only (the CSV is complete). */
     public const LOG_LIMIT = 300;
 
     public function build(Company $company, CarbonInterface $from, CarbonInterface $to, ?int $userId = null): SalesActivityResult
@@ -44,8 +45,16 @@ class SalesActivityReport
             ->with(['lead:id,name', 'user:id,name'])
             ->get(['id', 'lead_id', 'user_id', 'type', 'direction', 'outcome', 'happened_at', 'body', 'meta']);
 
+        // Every user of the tenant starts with a ZERO row (or only the selected
+        // one): «δούλεψε ο άνθρωπος;» must show the operator who did nothing.
         /** @var array<int|string, array<string, int>> $per */
         $per = [];
+        $tenantUsers = $company->users()->pluck('users.name', 'users.id')->all();
+        foreach ($tenantUsers as $uid => $name) {
+            if ($userId === null || (int) $uid === $userId) {
+                $per[(int) $uid] = SalesActivityResult::emptyCounters();
+            }
+        }
         $bump = function (?int $uid, string $key) use (&$per): void {
             $k = $uid ?? 0;
             $per[$k] ??= SalesActivityResult::emptyCounters();
@@ -116,10 +125,10 @@ class SalesActivityReport
             $per[$k]['open'] = (int) $count;
         }
 
-        // Operator names: the tenant's users (a user who left keeps their rows
-        // under their name if still resolvable, else «#id»).
-        $names = User::query()
-            ->whereIn('id', array_filter(array_keys($per), fn ($k): bool => $k !== 0))
+        // Operator names: the tenant's users, plus anyone who left but still
+        // has rows in the period (resolvable by id, else «#id»).
+        $names = $tenantUsers + User::query()
+            ->whereIn('id', array_filter(array_keys($per), fn ($k): bool => $k !== 0 && ! isset($tenantUsers[$k])))
             ->pluck('name', 'id')
             ->all();
 
@@ -149,8 +158,7 @@ class SalesActivityReport
             to: $to,
             operators: $operators,
             funnel: $funnel,
-            log: $rows->take(self::LOG_LIMIT)->values(),
-            logTruncated: $rows->count() > self::LOG_LIMIT,
+            log: $rows,
         );
     }
 }

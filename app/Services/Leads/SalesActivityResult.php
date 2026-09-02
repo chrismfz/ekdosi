@@ -30,7 +30,7 @@ final class SalesActivityResult
     /**
      * @param  list<SalesOperatorRow>  $operators
      * @param  array<string, int>  $funnel  status value => count (snapshot)
-     * @param  Collection<int, LeadActivity>  $log  the period's rows, newest first (capped)
+     * @param  Collection<int, LeadActivity>  $log  ALL the period's rows, newest first (the CSV)
      */
     public function __construct(
         public readonly CarbonInterface $from,
@@ -38,8 +38,22 @@ final class SalesActivityResult
         public readonly array $operators,
         public readonly array $funnel,
         public readonly Collection $log,
-        public readonly bool $logTruncated = false,
     ) {}
+
+    /**
+     * What the page renders: the first SalesActivityReport::LOG_LIMIT rows.
+     *
+     * @return Collection<int, LeadActivity>
+     */
+    public function logPreview(): Collection
+    {
+        return $this->log->take(SalesActivityReport::LOG_LIMIT)->values();
+    }
+
+    public function logTruncated(): bool
+    {
+        return $this->log->count() > SalesActivityReport::LOG_LIMIT;
+    }
 
     /** @return array<string, int> */
     public static function emptyCounters(): array

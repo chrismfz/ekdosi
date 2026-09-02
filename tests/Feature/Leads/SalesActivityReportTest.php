@@ -125,7 +125,63 @@ class SalesActivityReportTest extends TestCase
         $this->assertSame(3, $result->funnel['new']);
         $this->assertSame(0, $result->funnel['won']);
         $this->assertCount(10, $result->log, 'the day log carries every row of the period (the note too), not the old one');
-        $this->assertFalse($result->logTruncated);
+        $this->assertFalse($result->logTruncated());
+    }
+
+    public function test_every_tenant_user_gets_a_row_even_with_zero_activity(): void
+    {
+        $idle = User::create(['name' => 'Αδρανής', 'email' => 'idle-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
+        $this->tenant->users()->attach($idle);
+        $stranger = User::create(['name' => 'Ξένος', 'email' => 'x-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
+        $this->seedWeek();
+
+        $result = app(SalesActivityReport::class)->build($this->tenant, now()->startOfWeek(), now()->endOfWeek());
+        $names = array_map(fn ($r) => $r->name, $result->operators);
+        $this->assertContains('Αδρανής', $names, 'the operator who did nothing is the whole point of the report');
+        $this->assertNotContains('Ξένος', $names, 'not a member of the tenant');
+        $this->assertSame(0, collect($result->operators)->firstWhere('name', 'Αδρανής')->get('calls'));
+        $this->assertSame(['Άννα', 'Αδρανής', 'Νίκος', '— χωρίς χειριστή —'], $names, 'alphabetical, no-operator last');
+
+        // Filtered to one operator → only that one row (even at zero).
+        $only = app(SalesActivityReport::class)->build($this->tenant, now()->startOfWeek(), now()->endOfWeek(), $idle->id);
+        $this->assertCount(1, $only->operators);
+        $this->assertSame('Αδρανής', $only->operators[0]->name);
+    }
+
+    public function test_csv_is_complete_while_the_page_shows_the_first_300(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Πολυάσχολο']);
+        $limit = SalesActivityReport::LOG_LIMIT;
+        $rows = [];
+        for ($i = 0; $i < $limit + 5; $i++) {
+            $rows[] = [
+                'company_id' => $this->tenant->id, 'lead_id' => $lead->id, 'user_id' => $this->anna->id,
+                'type' => 'note', 'happened_at' => now()->subMinutes($i), 'body' => 'row-'.$i,
+                'created_at' => now(), 'updated_at' => now(),
+            ];
+        }
+        LeadActivity::query()->insert($rows);
+
+        $result = app(SalesActivityReport::class)->build($this->tenant, now()->startOfWeek(), now()->endOfWeek());
+        $this->assertCount($limit + 5, $result->log, 'the service keeps everything');
+        $this->assertCount($limit, $result->logPreview());
+        $this->assertTrue($result->logTruncated());
+
+        // The page renders the newest LOG_LIMIT and says so; the oldest row is not on screen…
+        Livewire::test(ReportPage::class)
+            ->assertSee('το CSV τις έχει όλες')
+            ->assertSee('row-0')
+            ->assertDontSee('row-'.($limit + 4));
+
+        // …but IS in the CSV.
+        $page = app(ReportPage::class);
+        $page->mount();
+        $method = new \ReflectionMethod($page, 'exportCsv');
+        ob_start();
+        $method->invoke($page)->sendContent();
+        $csv = ob_get_clean();
+        $this->assertStringContainsString('row-'.($limit + 4), $csv, 'the CSV is never cut where the page is');
+        $this->assertSame($limit + 5, substr_count($csv, ';row-'), 'every row of the period, once');
     }
 
     public function test_operator_filter_and_conversions_and_tenant_isolation(): void

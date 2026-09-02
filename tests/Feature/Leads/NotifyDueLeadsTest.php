@@ -76,8 +76,11 @@ class NotifyDueLeadsTest extends TestCase
         $this->assertSame('Επόμενο βήμα σε 3 leads', $annaData['title']);
         $this->assertStringContainsString('Ληξιπρόθεσμο της Άννας', $annaData['body']);
         $this->assertStringContainsString('2 ληξιπρόθεσμα', $annaData['body']);
-        $this->assertStringContainsString('tab=overdue', $annaData['actions'][0]['url']);
+        $this->assertStringContainsString('tab=due', $annaData['actions'][0]['url'], 'lands on the tab with the SAME predicate (today\'s step must not vanish on click)');
         $this->assertStringNotContainsString('activeTab', $annaData['actions'][0]['url'], 'ListRecords reads ?tab=, not ?activeTab=');
+        // The «Για σήμερα» tab lists exactly what the bell listed — including the step later today.
+        $listed = Lead::query()->where('company_id', $this->tenant->id)->due()->pluck('name')->all();
+        $this->assertEqualsCanonicalizing(['Ληξιπρόθεσμο της Άννας', 'Σήμερα της Άννας', 'Χωρίς χειριστή'], $listed);
 
         $nikosData = $this->nikos->notifications()->first()->data;
         $this->assertSame('Επόμενο βήμα σε lead', $nikosData['title']);
