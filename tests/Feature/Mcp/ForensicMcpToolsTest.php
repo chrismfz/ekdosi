@@ -4,7 +4,10 @@ namespace Tests\Feature\Mcp;
 
 use App\Mcp\Servers\EkdosiMcpServer;
 use App\Mcp\Tools\InvoiceFilingMcpTool;
+use App\Mcp\Tools\MyDataDiscrepanciesMcpTool;
 use App\Mcp\Tools\MyDataFailuresMcpTool;
+use App\Mcp\Tools\MyDataPreflightMcpTool;
+use App\Mcp\Tools\StuckDocumentsMcpTool;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -144,6 +147,46 @@ class ForensicMcpToolsTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('229');
+    }
+
+    public function test_stuck_documents_flags_an_in_doubt_invoice(): void
+    {
+        $company = $this->company('acme');
+        $invoice = $this->rejectedInvoice($company);
+        // Arm the in-doubt limbo: pending_since set, state never resolved.
+        $invoice->forceFill(['mydata_pending_since' => now()->subMinutes(3)])->save();
+
+        $response = EkdosiMcpServer::actingAs($this->superAdmin($company))
+            ->tool(StuckDocumentsMcpTool::class, []);
+
+        $response->assertOk();
+        $response->assertSee($invoice->invcode);
+    }
+
+    public function test_mydata_discrepancies_reports_a_local_state_contradiction(): void
+    {
+        $company = $this->company('acme');
+        $invoice = $this->rejectedInvoice($company);
+        // Locally voided but VALID at AADE — the classic phase-1 contradiction.
+        $invoice->forceFill(['local_status' => 'cancelled', 'mydata_state' => 'VALID'])->save();
+
+        $response = EkdosiMcpServer::actingAs($this->superAdmin($company))
+            ->tool(MyDataDiscrepanciesMcpTool::class, ['company' => $company->slug]);
+
+        $response->assertOk();
+        $response->assertSee($invoice->invcode);
+    }
+
+    public function test_preflight_runs_the_readiness_audit(): void
+    {
+        $company = $this->company('acme');
+        $this->rejectedInvoice($company); // gives the tenant a type + VAT-less setup to audit
+
+        $response = EkdosiMcpServer::actingAs($this->superAdmin($company))
+            ->tool(MyDataPreflightMcpTool::class, ['company' => $company->slug]);
+
+        $response->assertOk();
+        $response->assertSee($company->slug);
     }
 
     public function test_forensic_tools_are_not_offered_to_a_tenant_member(): void
