@@ -31,7 +31,8 @@ surfaced in the open-items sections further down.
   provider P0–P5 built/gated (mode=off); **PEPPOL Phase 2 + live provider = OPEN**.
 - **`payment-connectors.md`** — card-POS + IRIS design. **NOT-STARTED** (blueprint).
 - **`leads-mini-crm.md`** — **Leads / mini-CRM** (υποψήφιοι πελάτες + χρονολόγιο επαφών + μετατροπή
-  σε πελάτη + απολογισμός ανά χειριστή). **L0 + L1 + L2 DONE** (§10)· L3 = κατά ζήτηση.
+  σε πελάτη + απολογισμός ανά χειριστή). **L0 + L1 + L2 + L3-όψεις (kanban/ημερολόγιο) DONE** (§10)·
+  email-από-lead + AI `lead_summary` = **συνειδητά ΟΧΙ** (owner 2026-09-02: «too much»).
 - **`payments` (AR)** — core **DONE** (cockpit/allocator/bank-accounts/refunds); deferred
   connectors → `payment-connectors.md`.
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 (registry seam) **DONE**;
@@ -305,8 +306,8 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   simple) → `leads-mini-crm.md`. **L0 + L1 ✅ SHIPPED** (resource + χρονολόγιο + καταστάσεις + dedupe +
   μετατροπή σε πελάτη + «Προέλευση» + προσφορά από lead, FEATURES §7β). **L2 ✅ SHIPPED**
   (`SalesActivityReport` + CSV, `leads:notify-due`, dashboard widget). **Μένει (προαιρετικά):** εβδομαδιαίο
-  digest email του απολογισμού στον company_admin (μοτίβο backup-failure alert) · L3 (§10: kanban, AI
-  `lead_summary`) — κατά ζήτηση.
+  digest email του απολογισμού στον company_admin (μοτίβο backup-failure alert). **L3 όψεις (kanban +
+  ημερολόγιο) ✅ SHIPPED**· email-από-lead + AI `lead_summary` = συνειδητά ΟΧΙ (owner: «too much»).
 
 ---
 
@@ -444,6 +445,10 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `.fbk` shows the pattern — `SELECT afm FROM customers WHERE afm REGEXP '^(VAT|AFM|TIN)[0-9]'`.
   (b) `CompanyImporter` reads the tenant's customers 3× per phase (existingIndex / afmKeyIndex /
   customerOwners) — one `get()` could feed all three; only matters at tens of thousands of customers.
+- **Operator picker helper** _(P2 από το review του Leads L3)._ Το `$tenant->users()->orderBy('name')
+  ->pluck('users.name','users.id')` ζει σε ~6 σημεία (LeadForm/LeadsTable/SalesActivityReport ×2/
+  `InteractsWithLeadViews`)· το LeadForm προσθέτει και τον τρέχοντα super_admin (δεν είναι στο pivot).
+  Ένα `Company::operatorOptions()` όταν ξαναπιαστεί κάποιο από αυτά.
 - **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables::exportCsv` και
   `SalesActivityReport::exportCsv` κουβαλούν το ίδιο BOM + formula-guard + `fputcsv(';')`· το
   `AgedReceivables` δεν περνά `escape:` (E_DEPRECATED ανά γραμμή σε PHP 8.4). Ένα κοινό

@@ -191,6 +191,35 @@ class Lead extends Model
             ->orderByDesc('id');
     }
 
+    /**
+     * THE status transition (the «Αλλαγή κατάστασης» modal, the kanban drop,
+     * the «Όχι τώρα» modal — one definition): the reason belongs to the
+     * lost/dnc states only and is cleared on the way out; «Όχι τώρα» carries
+     * its «ξαναδές το» date. Won is never set here (ConvertLeadToCustomer).
+     * The updated() hook above turns the change into the timeline row.
+     */
+    public function changeStatus(LeadStatus $to, ?string $reason = null, ?\DateTimeInterface $nextActionAt = null): void
+    {
+        if ($to === LeadStatus::Won) {
+            throw new \InvalidArgumentException('«Πελάτης» γράφεται μόνο από τη μετατροπή.');
+        }
+        if ($to->requiresReason() && trim((string) $reason) === '') {
+            throw new \InvalidArgumentException($to->getLabel().' απαιτεί λόγο.');
+        }
+        if ($to === LeadStatus::NotNow && $nextActionAt === null) {
+            throw new \InvalidArgumentException('«Όχι τώρα» απαιτεί ημερομηνία επόμενου βήματος.');
+        }
+
+        $updates = [
+            'status' => $to,
+            'lost_reason' => $to->requiresReason() ? trim((string) $reason) : null,
+        ];
+        if ($to === LeadStatus::NotNow) {
+            $updates['next_action_at'] = $nextActionAt;
+        }
+        $this->update($updates);
+    }
+
     // ── State ──────────────────────────────────────────────────────────────
 
     public function isConverted(): bool
@@ -212,6 +241,17 @@ class Lead extends Model
     }
 
     // ── Scopes ─────────────────────────────────────────────────────────────
+
+    /**
+     * The operator filter shared by the leads views: '' = everyone, 'me' =
+     * the current user, or a user id.
+     */
+    public function scopeForOperator(Builder $query, ?string $operator): Builder
+    {
+        return $query
+            ->when($operator === 'me', fn (Builder $q) => $q->where('assigned_user_id', auth()->id()))
+            ->when($operator !== null && $operator !== '' && ctype_digit($operator), fn (Builder $q) => $q->where('assigned_user_id', (int) $operator));
+    }
 
     public function scopeOpen(Builder $query): Builder
     {

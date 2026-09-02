@@ -4,8 +4,11 @@ namespace App\Filament\Resources\Leads\Pages;
 
 use App\Enums\LeadStatus;
 use App\Filament\BaseListRecords;
+use App\Filament\Pages\LeadsBoard;
+use App\Filament\Pages\LeadsCalendar;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Models\Lead;
+use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -21,6 +24,18 @@ class ListLeads extends BaseListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('board')
+                ->label('Πίνακας')
+                ->icon('heroicon-o-view-columns')
+                ->color('gray')
+                ->visible(fn (): bool => LeadsBoard::canAccess())
+                ->url(LeadsBoard::getUrl()),
+            Action::make('calendar')
+                ->label('Ημερολόγιο')
+                ->icon('heroicon-o-calendar-days')
+                ->color('gray')
+                ->visible(fn (): bool => LeadsCalendar::canAccess())
+                ->url(LeadsCalendar::getUrl()),
             CreateAction::make()->label('Νέο lead'),
         ];
     }

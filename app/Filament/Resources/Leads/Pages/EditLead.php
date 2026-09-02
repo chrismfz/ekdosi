@@ -23,6 +23,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Throwable;
 
@@ -183,16 +184,13 @@ class EditLead extends EditRecord
                     $status = LeadStatus::from($data['status']);
                     $comment = trim((string) ($data['reason'] ?? ''));
 
-                    // The reason belongs to the lost/dnc state only — clear it on
-                    // the way out so a re-opened lead doesn't carry «λόγος: …».
-                    $updates = [
-                        'status' => $status,
-                        'lost_reason' => $status->requiresReason() ? $comment : null,
-                    ];
-                    if ($status === LeadStatus::NotNow) {
-                        $updates['next_action_at'] = $data['next_action_at'];
-                    }
-                    $record->update($updates);
+                    // One definition of the transition (Lead::changeStatus) —
+                    // shared with the kanban board.
+                    $record->changeStatus(
+                        $status,
+                        $comment,
+                        $status === LeadStatus::NotNow ? Carbon::parse($data['next_action_at']) : null,
+                    );
 
                     // A free comment on a non-lost change is worth a note row too.
                     if ($comment !== '' && ! $status->requiresReason()) {
