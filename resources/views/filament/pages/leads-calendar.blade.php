@@ -6,9 +6,18 @@
         $canMove = $this->canMove();
         $monthStart = $this->monthStart();
         $overdueBefore = $this->overdueBeforeGrid();
+        $withoutStep = $this->withoutNextStep();
         $tenant = \Filament\Facades\Filament::getTenant();
         $editUrl = fn ($id) => \App\Filament\Resources\Leads\LeadResource::getUrl('edit', ['record' => $id, 'tenant' => $tenant]);
         $overdueUrl = \App\Filament\Resources\Leads\LeadResource::getUrl('index', ['tab' => 'overdue', 'tenant' => $tenant]);
+        // Same operator the banner counted, so the count and the list agree.
+        $openUrl = \App\Filament\Resources\Leads\LeadResource::getUrl('index', array_filter([
+            'tab' => 'open',
+            'tenant' => $tenant,
+            'tableFilters' => ctype_digit($this->operator)
+                ? ['assigned_user_id' => ['value' => $this->operator]]
+                : (($this->operator === 'me') ? ['assigned_user_id' => ['value' => (string) auth()->id()]] : null),
+        ]));
         $today = now()->toDateString();
         $dayNames = ['Δευ', 'Τρί', 'Τετ', 'Πέμ', 'Παρ', 'Σάβ', 'Κυρ'];
     @endphp
@@ -71,11 +80,16 @@
             </label>
         </div>
         <p class="lc-note">
-            Τα «επόμενα βήματα» των ανοιχτών leads ανά ημέρα· κόκκινο = πέρασε.
+            Δείχνει <strong>μόνο τα leads που έχουν «επόμενο βήμα»</strong> μέσα στις εμφανιζόμενες εβδομάδες
+            (Δευ–Κυρ, μαζί με τις μέρες των γειτονικών μηνών)· κόκκινο = πέρασε.
+            Ένα lead χωρίς ημερομηνία επόμενου βήματος δεν εμφανίζεται εδώ (είναι ατζέντα ενεργειών, όχι λίστα leads).
             @if ($canMove) Σύρε ένα lead σε άλλη μέρα για να το μεταθέσεις (κρατά την ώρα). @else Μόνο ανάγνωση. @endif
         </p>
         @if ($overdueBefore > 0)
             <p class="lc-warn">⚠ {{ $overdueBefore }} ληξιπρόθεσμα βήματα πριν από αυτόν τον μήνα — <a href="{{ $overdueUrl }}">δες τα στη λίστα</a>.</p>
+        @endif
+        @if ($withoutStep > 0)
+            <p class="lc-warn">📋 {{ $withoutStep }} ανοιχτά leads <strong>χωρίς επόμενο βήμα</strong> — δεν φαίνονται στο ημερολόγιο· <a href="{{ $openUrl }}">δες τα ανοιχτά στη λίστα</a> και βάλ' τους ημερομηνία.</p>
         @endif
     </x-filament::section>
 

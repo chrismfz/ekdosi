@@ -8,6 +8,7 @@ use App\Mcp\Tools\CountSalesMcpTool;
 use App\Mcp\Tools\CreateReminderMcpTool;
 use App\Mcp\Tools\FailedJobsTool;
 use App\Mcp\Tools\FindCustomerMcpTool;
+use App\Mcp\Tools\LeadsPulseMcpTool;
 use App\Mcp\Tools\ListCompaniesTool;
 use App\Mcp\Tools\ListTopDebtorsMcpTool;
 use App\Mcp\Tools\LogTailTool;
@@ -55,6 +56,10 @@ Business (tenant-scoped, offered only if your user holds the permission):
 - outstanding_receivables / list_top_debtors / find_customer — money owed & customers.
 - recent_activity — the audit trail (who changed which invoice/customer/payment, and
   what) for the company; good for "what changed" and light debugging.
+- leads_pulse — the mini-CRM at a glance: open/new/overdue/stale leads, what EACH
+  operator did in the period (calls, emails, meetings, quotes, conversions), who
+  opened the newest leads and when, and the latest timeline rows. For "did anyone
+  work the leads?".
 - app_version — deployed build + whether an update is available (read-only).
 - send_customer_statement / create_reminder — WRITE actions that are PROPOSE-ONLY here:
   they stage a pending action and return its id; nothing is sent/armed until an operator
@@ -87,6 +92,7 @@ class EkdosiMcpServer extends Server
         ListTopDebtorsMcpTool::class,
         FindCustomerMcpTool::class,
         RecentActivityMcpTool::class,
+        LeadsPulseMcpTool::class,
         AppVersionMcpTool::class,
         // Business — write (PROPOSE-ONLY; operator confirms in-app).
         SendCustomerStatementMcpTool::class,
