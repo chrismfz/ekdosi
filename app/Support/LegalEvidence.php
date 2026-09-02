@@ -34,6 +34,15 @@ use Illuminate\Support\Facades\Schema;
  */
 final class LegalEvidence
 {
+    /**
+     * Expense-mark actions that represent OUR OWN submission to AADE.
+     *
+     * Everything else on `expense_marks` is a supplier's MARK we pulled down and
+     * stored — their filing, not ours. Written by
+     * `ExpenseClassificationSubmitter`.
+     */
+    private const OUR_EXPENSE_ACTIONS = ['SendExpensesClassification'];
+
     private function __construct(
         public readonly int $invoiceMarks,
         public readonly int $deliveryMarks,
@@ -147,13 +156,18 @@ final class LegalEvidence
             ->where('mark', '!=', '');
 
         if ($table === 'expense_marks') {
-            // An expense mark is usually the SUPPLIER's MARK, pulled down by
-            // SyncExpenseStateFromAade with action STATE_SYNC. That is somebody
-            // else's filing recorded locally, not ours — counting it told a
+            // Most expense marks are the SUPPLIER's MARK recorded locally, not our
+            // filing: ExpenseImporter writes RequestDocs / RequestTransmittedDocs
+            // and SyncExpenseStateFromAade writes STATE_SYNC. Counting those told a
             // pull-only tenant it had «filed expense classifications» and made the
-            // wipe refuse without --force over data it never submitted. Only our
-            // own classification submissions are our evidence.
-            $query->where('mydata_action', '!=', 'STATE_SYNC');
+            // wipe refuse over data it never submitted.
+            //
+            // An ALLOW-LIST, not a deny-list: excluding STATE_SYNC alone still let
+            // the two importer actions through, and the next reader added would
+            // silently become «evidence» again. Also note a deny-list drops
+            // NULL-action rows entirely (SQL three-valued logic), which an
+            // allow-list handles explicitly.
+            $query->whereIn('mydata_action', self::OUR_EXPENSE_ACTIONS);
         }
 
         $count = (clone $query)->count();

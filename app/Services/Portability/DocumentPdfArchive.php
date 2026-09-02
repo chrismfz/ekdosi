@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Delivery\DeliveryNotePdf;
 use App\Services\InvoicePdfRenderer;
+use App\Support\Tenancy\CompanyContext;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -59,18 +60,47 @@ class DocumentPdfArchive
      */
     public function build(Company $company, string $path, ?callable $progress = null): array
     {
+        // actAs is the ROOT fix for the tenant context, and it replaces a narrower
+        // attempt that only unscoped the relations THIS class eager-loads. The
+        // renderers lazy-load several more of their own — company, paymentMethod,
+        // bankAccount, credit notes, delivery-note events and marks — and each of
+        // those goes through CompanyScope, so in a super_admin panel action for a
+        // company other than the selected tenant the PDFs came out missing IBANs,
+        // payment method and related documents. Setting the ambient tenant to the
+        // company being exported fixes every one of them, including the ones a
+        // future renderer adds.
+        //
+        // The driving queries below still carry an explicit company_id and drop the
+        // scope themselves: which documents are in the archive must not depend on
+        // ambient state at all.
+        return app(CompanyContext::class)->actAs(
+            $company,
+            fn (): array => $this->buildArchive($company, $path, $progress),
+        );
+    }
+
+    /**
+     * @param  callable(string):void|null  $progress
+     * @return array{invoices:int, delivery_notes:int, failed:int, bytes:int, path:string}
+     */
+    private function buildArchive(Company $company, string $path, ?callable $progress): array
+    {
         if (! is_dir($dir = dirname($path)) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
             throw new RuntimeException("Αδυναμία δημιουργίας φακέλου: {$dir}");
         }
 
-        $zip = new ZipArchive;
-        if ($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            throw new RuntimeException("Αδυναμία εγγραφής zip: {$path}");
-        }
-
+        // Temp dir BEFORE the zip: anything failing between open() and the try
+        // below would leave an unclosed archive the catch never reaches.
         $tmpDir = storage_path('app/tmp/pdf-archive-'.$company->slug.'-'.uniqid());
         if (! is_dir($tmpDir) && ! mkdir($tmpDir, 0775, true) && ! is_dir($tmpDir)) {
             throw new RuntimeException("Αδυναμία δημιουργίας προσωρινού φακέλου: {$tmpDir}");
+        }
+
+        $zip = new ZipArchive;
+        if ($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            @rmdir($tmpDir);
+
+            throw new RuntimeException("Αδυναμία εγγραφής zip: {$path}");
         }
 
         $counts = ['invoices' => 0, 'delivery_notes' => 0, 'failed' => 0];
@@ -89,11 +119,7 @@ class DocumentPdfArchive
                 Invoice::query()
                     ->withoutGlobalScope(CompanyScope::class)
                     ->where('company_id', $company->getKey())
-                    // The EAGER LOADS need the same escape: dropping the scope on
-                    // the outer query only means that inside a panel action for
-                    // another tenant every document renders with no lines, no
-                    // customer and no type — a zip full of blank PDFs, silently.
-                    ->with(self::unscoped(['customer', 'lines', 'invoiceType']))
+                    ->with(['customer', 'lines', 'invoiceType'])
                     // chunkById pages by ID, so it must be ORDERED by id: an
                     // orderBy('issued_at') on top made a single backdated row shift
                     // the window and drop documents from the archive without so much
@@ -109,7 +135,7 @@ class DocumentPdfArchive
                 DeliveryNote::query()
                     ->withoutGlobalScope(CompanyScope::class)
                     ->where('company_id', $company->getKey())
-                    ->with(self::unscoped(['customer', 'lines', 'deliveryType']))
+                    ->with(['customer', 'lines', 'deliveryType'])
                     ->orderBy('id'),
                 fn (DeliveryNote $doc): string => $this->deliveryNotes->render($doc),
             );
@@ -130,10 +156,12 @@ class DocumentPdfArchive
                 );
             }
         } catch (Throwable $e) {
-            // A ZipArchive left open holds a partial file that looks valid; close
-            // it so the failure is visible as a missing/short archive rather than
-            // a silently truncated one the operator would hand over.
+            // Close, then DELETE. Closing alone left a readable, complete-looking
+            // zip at the operator's output path with no index.csv and no
+            // errors.txt — precisely the archive that gets handed over as final.
+            // A failed export must leave nothing to mistake for a good one.
             @$zip->close();
+            @unlink($path);
             $this->cleanUp($tmpFiles, $tmpDir);
 
             throw $e;
@@ -145,27 +173,6 @@ class DocumentPdfArchive
             'bytes' => is_file($path) ? (filesize($path) ?: 0) : 0,
             'path' => $path,
         ];
-    }
-
-    /**
-     * Eager loads that also drop CompanyScope.
-     *
-     * `with(['lines'])` builds its own query, which the scope filters by the
-     * AMBIENT tenant — null on the CLI (harmless) but the WRONG tenant in a
-     * super_admin panel action, where it silently returns nothing.
-     *
-     * @param  array<int, string>  $relations
-     * @return array<string, callable>
-     */
-    private static function unscoped(array $relations): array
-    {
-        $out = [];
-
-        foreach ($relations as $relation) {
-            $out[$relation] = fn ($query) => $query->withoutGlobalScope(CompanyScope::class);
-        }
-
-        return $out;
     }
 
     /**

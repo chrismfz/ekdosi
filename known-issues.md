@@ -2231,6 +2231,23 @@ Writing the paging test taught its own lesson: the first version backdated a row
 and is harmless, so it passed with and without the fix. It reproduces only when the row with the
 LOWEST id sorts LAST by date.
 
+**Review round 2** found four, one P1 — the round-1 fix landing short of its own goal. Excluding
+`STATE_SYNC` alone still let `ExpenseImporter`'s `RequestDocs` / `RequestTransmittedDocs` marks
+through, so a pull-only tenant was STILL mis-warned and blocked; it is now an **allow-list** of our
+own actions, which also handles NULL-action rows that a deny-list drops through SQL three-valued
+logic. And the round-1 scope fix only reached the relations THIS class eager-loads — the renderers
+lazy-load `company`, `paymentMethod`, `bankAccount`, credit notes, delivery-note events and marks
+themselves, so the panel PDFs still came out missing IBANs and related documents; wrapping the whole
+build in `CompanyContext::actAs()` is the root fix and replaced the per-relation helper. Also: a
+failed export left a readable, complete-looking archive at the operator's output path (now deleted,
+and the temp dir is created BEFORE the zip so an early failure leaves nothing at all), and
+`humanBytes()` int-divided a 1.5 GB archive down to «1 GB».
+
+That cleanup test took **three** attempts to make honest: it passed with and without the fix twice —
+first because a render failure is caught per document, then because deleting every temp file left
+`close()` with nothing to write. It reproduces only when one PDF is already in the archive and the
+NEXT write fails. Same trap as the round-1 paging test; a test that cannot fail is worse than none.
+
 **Deliberately NOT done, recorded in `docs/BACKLOG.md`:** DB-level `restrictOnDelete` on the mark
 tables and tenant archival/soft-delete. A DRY_RUN mark would make an ordinary draft undeletable, so
 restrict needs a more precise rule than the FK can express, and archival is a feature rather than a

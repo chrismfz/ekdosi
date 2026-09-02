@@ -85,11 +85,16 @@ class CompanyExportPdfs extends Command
 
     private function humanBytes(int $bytes): string
     {
+        // float, not int, division: casting at each step reported a 1.5 GB archive
+        // as «1 GB», which matters when the number is how an operator decides
+        // whether the handover fits on the medium they are using.
+        $size = (float) $bytes;
+
         foreach (['B', 'KB', 'MB', 'GB'] as $unit) {
-            if ($bytes < 1024 || $unit === 'GB') {
-                return round($bytes, 1).' '.$unit;
+            if ($size < 1024 || $unit === 'GB') {
+                return round($size, 1).' '.$unit;
             }
-            $bytes = (int) ($bytes / 1024);
+            $size /= 1024;
         }
 
         return $bytes.' B';

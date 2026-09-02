@@ -227,6 +227,58 @@ class DocumentPdfArchiveTest extends TestCase
         $this->assertStringNotContainsString(',=HYPERLINK', $csv);
     }
 
+    public function test_a_failed_export_leaves_no_archive_to_mistake_for_a_good_one(): void
+    {
+        // Closing the zip on failure left a READABLE, complete-looking file at the
+        // operator's output path — no index.csv, no errors.txt — which is exactly
+        // the archive that gets handed over as final.
+        $c = $this->company();
+        $this->invoice($c, 'ΤΠΥ1', 1);
+        $this->invoice($c, 'ΤΠΥ2', 2);
+
+        // A render failure is CAUGHT per document (that is the errors.txt path), so
+        // reaching the fatal branch needs the WRITE to fail — and it has to fail
+        // AFTER at least one PDF is already in the archive, otherwise close() has
+        // nothing to write and the file would be absent anyway, which is how the
+        // first version of this test passed without the fix.
+        //
+        // Simulate a disk that goes away mid-run: the second render removes the
+        // temp directory. Same observable as a full disk, which cannot be
+        // simulated here because the suite runs as root.
+        $this->app->bind(InvoicePdfRenderer::class, fn () => new class extends InvoicePdfRenderer
+        {
+            private int $calls = 0;
+
+            public function __construct() {}
+
+            public function render(Invoice $invoice): string
+            {
+                $this->calls++;
+
+                if ($this->calls > 1) {
+                    // Make THIS document's target path a directory: file_put_contents
+                    // then fails with EISDIR even as root, while the FIRST document's
+                    // temp file survives — so close() really does write an archive
+                    // with content, which is the state the unlink has to clean up.
+                    foreach (glob(storage_path('app/tmp/pdf-archive-*')) ?: [] as $dir) {
+                        @mkdir($dir.'/invoices-'.$invoice->getKey().'.pdf');
+                    }
+                }
+
+                return '%PDF-1.4 fake';
+            }
+        });
+
+        try {
+            app(DocumentPdfArchive::class)->build($c, $this->out);
+            $this->fail('expected the export to fail');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertFileDoesNotExist($this->out);
+    }
+
     public function test_a_company_with_nothing_still_produces_a_readable_archive(): void
     {
         $result = app(DocumentPdfArchive::class)->build($this->company(), $this->out);

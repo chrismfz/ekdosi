@@ -212,6 +212,18 @@ class LegalEvidenceTest extends TestCase
 
         $this->assertFalse(LegalEvidence::for($c)->exists(), 'their filing, not ours');
 
+        // The IMPORTER's actions are somebody else's filing too — excluding only
+        // STATE_SYNC left these through, so the fix landed short of its own goal.
+        foreach (['RequestDocs', 'RequestTransmittedDocs'] as $i => $action) {
+            DB::table('expense_marks')->insert([
+                'company_id' => $c->id, 'mark' => '40000000000002'.$i,
+                'mydata_action' => $action,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        $this->assertFalse(LegalEvidence::for($c)->exists(), 'pulled supplier MARKs are not ours');
+
         // Our OWN classification submission is evidence.
         DB::table('expense_marks')->insert([
             'company_id' => $c->id, 'mark' => '400000000000010',
