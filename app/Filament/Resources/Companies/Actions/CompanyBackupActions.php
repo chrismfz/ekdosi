@@ -385,7 +385,7 @@ class CompanyBackupActions
                     ->helperText('⚠ Μόνο πριν από Firebird import — αλλιώς το επόμενο ΑΑ μπορεί να συγκρουστεί με ήδη υποβλημένο στην ΑΑΔΕ.')
                     ->default(false),
                 Toggle::make('force')
-                    ->label('Διαγραφή ακόμη κι αν υπάρχουν υποβλημένα στην ΑΑΔΕ (VALID)')->default(false),
+                    ->label('Διαγραφή ακόμη κι αν υπάρχουν υποβεβλημένα στην ΑΑΔΕ')->default(false),
                 Toggle::make('execute')
                     ->label('Εκτέλεση (αλλιώς προεπισκόπηση)')->default(false),
             ])
@@ -393,7 +393,7 @@ class CompanyBackupActions
                 $wiper = app(CompanyDataWiper::class);
                 $keepParties = (bool) ($data['keep_parties'] ?? false);
                 $plan = $wiper->plan($record, $keepParties);
-                $filed = $wiper->filedAtAadeCount($record);
+                $evidence = $wiper->legalEvidence($record);
 
                 if ($plan === []) {
                     Notification::make()->title('Δεν υπάρχουν δεδομένα για διαγραφή')->info()->send();
@@ -410,9 +410,11 @@ class CompanyBackupActions
                     return;
                 }
 
-                if ($filed > 0 && ! ($data['force'] ?? false)) {
+                if ($evidence->exists() && ! ($data['force'] ?? false)) {
                     Notification::make()->title('Διακοπή')->danger()
-                        ->body("{$filed} παραστατικά είναι υποβλημένα στην ΑΑΔΕ (VALID). Ενεργοποίησε «Διαγραφή ακόμη κι αν…» για να συνεχίσεις.")
+                        ->body('Υποβεβλημένα στην ΑΑΔΕ: '.$evidence->describe()
+                            .'. Η τοπική διαγραφή ΔΕΝ τα ακυρώνει εκεί. Κράτησε αντίγραφο και '
+                            .'ενεργοποίησε «Διαγραφή ακόμη κι αν…» για να συνεχίσεις.')
                         ->send();
 
                     return;

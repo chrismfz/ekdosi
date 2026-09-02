@@ -495,6 +495,17 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   μικρό και να οδηγήσει σε δεύτερη έκδοση. Το `status()` δέχεται `Invoice`, οπότε χρειάζεται
   delivery-note δίδυμο. **Μέχρι τότε**: το lock + το `unverifiableInDoubt()` (άρνηση μέσα στο
   παράθυρο) καλύπτουν το ρεαλιστικό σενάριο· ένα hard kill σε provider tenant παραμένει ακάλυπτο.
+- **`ExpenseClassificationSubmitter` γράφει μη-fillable `'date'`** _(από το review round 3 του MYD-025)._
+  Το `expense_marks.mark_date` μένει έτσι πάντα NULL για **δικές μας** υποβολές χαρακτηρισμού, οπότε
+  δεν συνεισφέρουν στο εύρος ημερομηνιών του `LegalEvidence::describe()`. Κοσμητικό (η μέτρηση είναι
+  σωστή), αλλά είναι γνήσιο bug στον submitter — μία γραμμή, εκτός scope του MYD-025.
+- **Legal-retention hardening — το υπόλοιπο του MYD-025 (P2)** _(η σιωπηλή διαγραφή έκλεισε
+  2026-09-02)._ Δεν έγιναν: (α) **`restrictOnDelete`** στα `mydata_marks`/`delivery_marks` αντί για
+  cascade — χρειάζεται πιο ακριβή κανόνα απ' ό,τι εκφράζει ένα FK, γιατί ένα **DRY_RUN mark** θα
+  έκανε ένα απλό πρόχειρο αδιάγραφο· (β) **archival/soft-delete tenant** (ο finding ζητά «αρχειοθέτηση
+  αντί διαγραφής») — είναι feature, όχι δικλείδα, και η διαγραφή είναι πλέον συνειδητή· (γ) UI action
+  για το `company:export-pdfs` (σήμερα CLI — σωστά, γιατί χιλιάδες PDF δεν χωράνε σε HTTP request·
+  θα ήθελε queued job + download). Ξανα-άνοιγμα αν χρειαστεί αρχειοθέτηση tenant χωρίς διαγραφή.
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
 - _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._

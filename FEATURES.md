@@ -415,6 +415,11 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   deploy (`storage/app/build.json`, ώρα Ελλάδας· fallback live git σε dev). Το SemVer μένει σκόπιμο
   (`ekdosi:release`). Η «Υγεία συστήματος» δείχνει read-only αν υπάρχει νεότερη έκδοση στο GitHub
   («N commits πίσω» + link), cached 6h, graceful offline. `docs/versioning-and-updates.md`.
+- **Εξαγωγή παραστατικών σε PDF (παράδοση σε εταιρεία που φεύγει)** — `company:export-pdfs
+  --tenant=SLUG`: όλα τα τιμολόγια + δελτία αποστολής σε PDF, ένα zip ανά έτος/είδος, με
+  `index.csv` (ΜΑΡΚ, ημερομηνία, πελάτης, σύνολο) και README. Συμπληρωματικό του `company:export`
+  (bundle επαναφοράς, μόνο για άλλο ekdosi) — αυτό διαβάζεται από άνθρωπο και λογιστή χωρίς την
+  εφαρμογή. Η **διαγραφή εταιρείας** δείχνει τι υποβεβλημένο χάνεται και δείχνει και τα δύο.
 - **In-app ενημέρωση από GitHub — ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΗ by default** (`EKDOSI_UPDATE_IN_APP_APPLY=false`,
   triage 2026-09-02). Ο **έλεγχος** ενημερώσεων μένει ενεργός· η αναβάθμιση γίνεται από τον server με
   **`deploy/update.sh <tag>`** (και `deploy/rollback.sh` για επαναφορά) — η «Υγεία συστήματος» δείχνει

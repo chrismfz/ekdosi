@@ -287,7 +287,7 @@ Priorities:
 | MYD-022 | P0 | DONE | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
 | MYD-024 | P2 | PARTIAL | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
-| MYD-025 | P0 | OPEN | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
+| MYD-025 | P1 | DONE | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
 | MYD-026 | P1 | OPEN | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state |
 | PROV-001 | P0 | OPEN | Provider idempotency | Ambiguous invoice response is not durably blocked/recovered before re-send |
 | PROV-002 | P0 | OPEN | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 |
@@ -2174,7 +2174,95 @@ XML, provider extension, recovery coordinates or regenerated PDF.
 
 ### MYD-025 — Legal filing evidence can be hard-deleted
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** DONE 2026-09-02 · **Priority:** P0 → P1 · **Research:** CONFIRMED 2026-08-31
+
+**Triage: the finding's remedy is wrong for this system.** It asks to «block company deletion when
+any legal document/audit evidence exists» and to replace the cascades with restricted deletion.
+That would break a routine, legitimate operation: a tenant sharing a host outgrows it, is exported,
+restored on its own VM, and the old copy must then be removed **completely**. A company that can
+never be deleted is its own operational failure — the same over-strictness that made the first cut
+of MYD-021 strand provider tenants permanently. Deletion stays possible, and stays a hard delete.
+
+**The real defect is that it was SILENT, not that it was possible.** Three concrete holes:
+
+1. The `--force` gate counted only `invoices.mydata_state = 'VALID'`. A document carrying a **real
+   MARK whose state cache was never written** was invisible to it, as was **every CANCELLED
+   invoice** and **every delivery note** — a tenant made of those was wiped with no warning at all.
+   `CompanyWipeTest`'s own fixture turned out to be exactly that case: a real MARK, no state, and
+   the wipe went through. That is the finding's substance and it is fixed.
+2. The company-delete confirmation said nothing about what it was about to destroy.
+3. A departing tenant had no way to take its παραστατικά in readable form.
+
+**Fix.** `App\Support\LegalEvidence` is ONE definition of what a tenant has actually filed — real
+MARKs across all three mark tables, plus VALID/CANCELLED documents, plus the date range — shared by
+the wiper gate and the delete confirmation, so the number the operator is warned about is the number
+the guard counts. Query-builder with an explicit `company_id`, never Eloquent: the mark models carry
+`CompanyScope`, which is a no-op on the CLI and the WRONG tenant in a super_admin panel action.
+Forensic rows (DRY_RUN/REJECTED, null mark) are deliberately NOT evidence — counting them would
+block a clean-slate re-import over a dry run, the workflow the wiper exists for.
+
+The company-delete action now names the evidence, states that **AADE keeps its records either way**
+(the risk is losing local proof, not un-filing anything), requires two acknowledgements, and links
+to the export tools. Deliberately **no forced backup**: the operator has usually just taken one —
+this follows an export→restore migration — and a guard that makes them sit through a second copy is
+one they learn to route around.
+
+New **`php artisan company:export-pdfs --tenant=SLUG`** (`DocumentPdfArchive`) renders every invoice
+and delivery note to PDF into one zip with an `index.csv` (Excel-safe BOM) and a README — the
+handover artifact for a tenant that will no longer have this system. A command, not a panel
+download: tens of thousands of documents must not sit in an HTTP request. Memory is bounded to one
+PDF (temp file + `ZipArchive::addFile`, never `addFromString`), and one unrenderable document is
+listed in `errors.txt` rather than costing the operator the other 9,999.
+
+**Review round 1 found seven, all but two in the brand-new `DocumentPdfArchive`.** The worst was
+the one the class exists to prevent: `chunkById` pages by `id > lastId`, so the `orderBy('issued_at')`
+layered on top let a page end on a low id and the next window jump straight past everything between
+— measured at **119 of 120 documents**, absent from the zip AND from `errors.txt`. Ordering is now
+by id and chronology is restored when the index is written. Also: the eager loads kept
+`CompanyScope`, so in the panel path every PDF would have rendered with no lines, no customer and no
+type — a zip of blank documents, silently; unchecked `file_put_contents`/`close()` reported success
+over a truncated archive on a full disk; `index.csv` dropped the formula-injection guard that two
+other exporters in this repo apply, to names that are operator- and WHMCS-sourced and will be opened
+in Excel by someone outside the organisation; and `LegalEvidence` counted `expense_marks` written by
+`SyncExpenseStateFromAade` — the **supplier's** MARK, not ours — so a pull-only tenant was told it
+had filed expense classifications and the wipe refused over data it never submitted.
+
+Writing the paging test taught its own lesson: the first version backdated a row, which sorts FIRST
+and is harmless, so it passed with and without the fix. It reproduces only when the row with the
+LOWEST id sorts LAST by date.
+
+**Review round 2** found four, one P1 — the round-1 fix landing short of its own goal. Excluding
+`STATE_SYNC` alone still let `ExpenseImporter`'s `RequestDocs` / `RequestTransmittedDocs` marks
+through, so a pull-only tenant was STILL mis-warned and blocked; it is now an **allow-list** of our
+own actions, which also handles NULL-action rows that a deny-list drops through SQL three-valued
+logic. And the round-1 scope fix only reached the relations THIS class eager-loads — the renderers
+lazy-load `company`, `paymentMethod`, `bankAccount`, credit notes, delivery-note events and marks
+themselves, so the panel PDFs still came out missing IBANs and related documents; wrapping the whole
+build in `CompanyContext::actAs()` is the root fix and replaced the per-relation helper. Also: a
+failed export left a readable, complete-looking archive at the operator's output path (now deleted,
+and the temp dir is created BEFORE the zip so an early failure leaves nothing at all), and
+`humanBytes()` int-divided a 1.5 GB archive down to «1 GB».
+
+That cleanup test took **three** attempts to make honest: it passed with and without the fix twice —
+first because a render failure is caught per document, then because deleting every temp file left
+`close()` with nothing to write. It reproduces only when one PDF is already in the archive and the
+NEXT write fails. Same trap as the round-1 paging test; a test that cannot fail is worse than none.
+
+**Review round 3 came back with no P0/P1** — the gate closed there. Two of its five P2s were fixed
+anyway because both silently lose data, the class of bug this whole change is about:
+`ZipArchive::addFile` defaults to FL_OVERWRITE, so two documents whose sanitised names collide
+collapsed into ONE entry while the counts and `index.csv` still claimed two; and `cleanUp()` replayed
+a list of files it remembered writing, so any stray entry left the temp directory behind (the suite
+was leaking one per failed export) — it now scans the directory, which cannot miss and made the
+tracking list redundant. Also fixed: a docblock claiming a panel action that this same PR lists as
+not built, and a test `catch (\Throwable)` that would have swallowed its own `fail()`. The
+`expense_marks.mark_date` NULL (a non-fillable `'date'` key in `ExpenseClassificationSubmitter`) is a
+real but cosmetic bug outside this change — `docs/BACKLOG.md`.
+
+**Deliberately NOT done, recorded in `docs/BACKLOG.md`:** DB-level `restrictOnDelete` on the mark
+tables and tenant archival/soft-delete. A DRY_RUN mark would make an ordinary draft undeletable, so
+restrict needs a more precise rule than the FK can express, and archival is a feature rather than a
+guard. Priority drops to P1: the silent path is closed and the remaining items are hardening.
 
 **Repository evidence**
 
