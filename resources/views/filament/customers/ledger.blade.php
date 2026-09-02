@@ -178,6 +178,60 @@
             )
         @endif
 
+        {{-- ============= Πρόχειρα (unissued drafts) =============
+             Deliberately its OWN section, above the ledger and outside every money
+             figure: a draft is not a movement, so it must not touch the balance —
+             but the operator still needs to find it. Warning-toned so it never
+             reads as an issued document. --}}
+        @if (count($this->draftInvoices) > 0)
+            <x-filament::section>
+                <x-slot name="heading">
+                    Πρόχειρα ({{ count($this->draftInvoices) }})
+                </x-slot>
+                <x-slot name="description">
+                    Μη οριστικοποιημένα/μη υποβληθέντα — δεν μετρούν στο υπόλοιπο. Ανοίξτε για επεξεργασία και έκδοση.
+                </x-slot>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left fi-color-gray border-b border-gray-200 dark:border-white/10">
+                                <th class="py-2 pr-3 font-medium">Κωδικός</th>
+                                <th class="py-2 px-3 font-medium">Τύπος</th>
+                                <th class="py-2 px-3 font-medium whitespace-nowrap">Ημ/νία</th>
+                                <th class="py-2 px-3 font-medium text-right">Αξία (με ΦΠΑ)</th>
+                                <th class="py-2 pl-3 font-medium text-right">Ενέργειες</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($this->draftInvoices as $draft)
+                                <tr class="border-b border-gray-100 dark:border-white/5">
+                                    <td class="py-2 pr-3">
+                                        <x-filament::badge color="warning" size="sm">Πρόχειρο</x-filament::badge>
+                                        <span class="font-mono">{{ $draft['invcode'] ?: '—' }}</span>
+                                    </td>
+                                    <td class="py-2 px-3">{{ $draft['type'] ?: '—' }}</td>
+                                    <td class="py-2 px-3 font-mono whitespace-nowrap fi-color-gray">
+                                        {{ $draft['issued_at'] ? \Illuminate\Support\Carbon::parse($draft['issued_at'])->format('d/m/Y') : '—' }}
+                                    </td>
+                                    <td class="py-2 px-3 text-right font-mono whitespace-nowrap">
+                                        {{ number_format($draft['gross'], 2) }} €
+                                    </td>
+                                    <td class="py-2 pl-3 text-right whitespace-nowrap">
+                                        <x-filament::link :href="$draft['view_url']" size="sm">Άνοιγμα</x-filament::link>
+                                        @if ($draft['edit_url'])
+                                            <span class="fi-color-gray">·</span>
+                                            <x-filament::link :href="$draft['edit_url']" size="sm">Επεξεργασία</x-filament::link>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </x-filament::section>
+        @endif
+
         {{-- ============= Καρτέλα κινήσεων (the main table) ============= --}}
         <x-filament::section>
             <x-slot name="heading">Καρτέλα κινήσεων</x-slot>
