@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\InvoiceTypes\Schemas;
 
+use App\Filament\Pages\MyDataCodeGuide;
 use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\DistributionAim;
@@ -77,8 +78,9 @@ class InvoiceTypeForm
                                     // (display-only — the operator still picks it).
                                     ->helperText(function ($state, $get): string|HtmlString {
                                         $base = 'AADE classification code that determines how this series is filed at myDATA. e.g. "1.1" sales invoice, "2.1" service invoice, "11.2" ΑΠΥ.';
+                                        $guide = ' · '.MyDataCodeGuide::hintLink('Τι σημαίνει ο κωδικός;')->toHtml();
                                         if (filled($state)) {
-                                            return $base;
+                                            return new HtmlString(e($base).$guide);
                                         }
                                         $s = InvoiceTypeClassSuggester::suggest(
                                             (string) $get('name'),
@@ -87,8 +89,8 @@ class InvoiceTypeForm
                                         );
 
                                         return $s
-                                            ? new HtmlString('<span class="fi-color-warning-600">Προτεινόμενη βάσει ονόματος: <strong>'.e($s['code']).'</strong> — '.e($s['label']).'</span> · '.$base)
-                                            : $base;
+                                            ? new HtmlString('<span class="fi-color-warning-600">Προτεινόμενη βάσει ονόματος: <strong>'.e($s['code']).'</strong> — '.e($s['label']).'</span> · '.e($base).$guide)
+                                            : new HtmlString(e($base).$guide);
                                     })
                                     // One-click apply: sets the suggested §8.1 type AND back-fills
                                     // the income chain (only the empty fields) so the operator
