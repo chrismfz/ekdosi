@@ -2248,6 +2248,17 @@ first because a render failure is caught per document, then because deleting eve
 `close()` with nothing to write. It reproduces only when one PDF is already in the archive and the
 NEXT write fails. Same trap as the round-1 paging test; a test that cannot fail is worse than none.
 
+**Review round 3 came back with no P0/P1** — the gate closed there. Two of its five P2s were fixed
+anyway because both silently lose data, the class of bug this whole change is about:
+`ZipArchive::addFile` defaults to FL_OVERWRITE, so two documents whose sanitised names collide
+collapsed into ONE entry while the counts and `index.csv` still claimed two; and `cleanUp()` replayed
+a list of files it remembered writing, so any stray entry left the temp directory behind (the suite
+was leaking one per failed export) — it now scans the directory, which cannot miss and made the
+tracking list redundant. Also fixed: a docblock claiming a panel action that this same PR lists as
+not built, and a test `catch (\Throwable)` that would have swallowed its own `fail()`. The
+`expense_marks.mark_date` NULL (a non-fillable `'date'` key in `ExpenseClassificationSubmitter`) is a
+real but cosmetic bug outside this change — `docs/BACKLOG.md`.
+
 **Deliberately NOT done, recorded in `docs/BACKLOG.md`:** DB-level `restrictOnDelete` on the mark
 tables and tenant archival/soft-delete. A DRY_RUN mark would make an ordinary draft undeletable, so
 restrict needs a more precise rule than the FK can express, and archival is a feature rather than a

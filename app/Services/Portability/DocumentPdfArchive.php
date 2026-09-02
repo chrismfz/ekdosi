@@ -106,11 +106,12 @@ class DocumentPdfArchive
         $counts = ['invoices' => 0, 'delivery_notes' => 0, 'failed' => 0];
         $errors = [];
         $index = [];
-        $tmpFiles = [];
+        /** Entry names already in the zip — addFile would silently OVERWRITE. */
+        $usedEntries = [];
 
         try {
             $this->addDocuments(
-                $zip, $tmpDir, $tmpFiles, $counts, $errors, $index, $progress,
+                $zip, $tmpDir, $counts, $errors, $index, $usedEntries, $progress,
                 'invoices',
                 // withoutGlobalScope + explicit company_id: this runs from a command
                 // or a queued job, where the ambient tenant context is a no-op, and
@@ -130,7 +131,7 @@ class DocumentPdfArchive
             );
 
             $this->addDocuments(
-                $zip, $tmpDir, $tmpFiles, $counts, $errors, $index, $progress,
+                $zip, $tmpDir, $counts, $errors, $index, $usedEntries, $progress,
                 'delivery_notes',
                 DeliveryNote::query()
                     ->withoutGlobalScope(CompanyScope::class)
@@ -162,12 +163,12 @@ class DocumentPdfArchive
             // A failed export must leave nothing to mistake for a good one.
             @$zip->close();
             @unlink($path);
-            $this->cleanUp($tmpFiles, $tmpDir);
+            $this->cleanUp($tmpDir);
 
             throw $e;
         }
 
-        $this->cleanUp($tmpFiles, $tmpDir);
+        $this->cleanUp($tmpDir);
 
         return $counts + [
             'bytes' => is_file($path) ? (filesize($path) ?: 0) : 0,
@@ -176,19 +177,19 @@ class DocumentPdfArchive
     }
 
     /**
-     * @param  array<int, string>  $tmpFiles
      * @param  array<string, int>  $counts
      * @param  array<int, string>  $errors
      * @param  array<int, array<int, string>>  $index
+     * @param  array<string, true>  $usedEntries
      * @param  callable(string):void|null  $progress
      */
     private function addDocuments(
         ZipArchive $zip,
         string $tmpDir,
-        array &$tmpFiles,
         array &$counts,
         array &$errors,
         array &$index,
+        array &$usedEntries,
         ?callable $progress,
         string $bucket,
         $query,
@@ -197,7 +198,7 @@ class DocumentPdfArchive
         $folder = $bucket === 'invoices' ? 'παραστατικά' : 'δελτία-αποστολής';
 
         $query->chunkById(self::CHUNK, function ($documents) use (
-            $zip, $tmpDir, &$tmpFiles, &$counts, &$errors, &$index, $progress, $bucket, $folder, $render
+            $zip, $tmpDir, &$counts, &$errors, &$index, &$usedEntries, $progress, $bucket, $folder, $render
         ): void {
             foreach ($documents as $document) {
                 $label = (string) ($document->invcode ?: 'χωρίς-κωδικό-'.$document->getKey());
@@ -230,11 +231,28 @@ class DocumentPdfArchive
                     );
                 }
 
-                $tmpFiles[] = $file;
-
                 // addFile, not addFromString: ZipArchive reads the path at close(),
                 // so only one PDF is ever in memory.
-                $zip->addFile($file, "{$folder}/{$year}/".$this->safeName($label).'.pdf');
+                //
+                // The entry name carries the document id when it would otherwise
+                // collide: addFile defaults to FL_OVERWRITE, so two documents whose
+                // safeName() output matches — same invcode in the same year after
+                // the character strip, or two rows with no invcode at all —
+                // collapsed into ONE zip entry while index.csv and the counts still
+                // claimed two. Same silent-loss class as the paging bug.
+                $entry = "{$folder}/{$year}/".$this->safeName($label).'.pdf';
+
+                if (isset($usedEntries[$entry])) {
+                    $entry = "{$folder}/{$year}/".$this->safeName($label).'-'.$document->getKey().'.pdf';
+                }
+
+                $usedEntries[$entry] = true;
+
+                if ($zip->addFile($file, $entry) !== true) {
+                    throw new RuntimeException(
+                        "Αδυναμία προσθήκης του «{$label}» στο αρχείο — η εξαγωγή διακόπηκε."
+                    );
+                }
 
                 $counts[$bucket]++;
                 $index[] = [
@@ -324,11 +342,23 @@ class DocumentPdfArchive
         return trim($safe) !== '' ? trim($safe) : 'έγγραφο';
     }
 
-    /** @param array<int, string> $tmpFiles */
-    private function cleanUp(array $tmpFiles, string $tmpDir): void
+    /**
+     * Empty and remove the temp directory, whatever ended up in it.
+     *
+     * Deliberately scans the directory rather than replaying a list of files we
+     * remember writing: rmdir fails on a non-empty directory, so ANY stray entry —
+     * a partial file from a failed write, something a concurrent run left — leaked
+     * the whole directory under storage/app/tmp on every failed export. Tracking
+     * paths and hoping the list is complete is how that happened; this cannot miss.
+     */
+    private function cleanUp(string $tmpDir): void
     {
-        foreach ($tmpFiles as $file) {
-            @unlink($file);
+        if (! is_dir($tmpDir)) {
+            return;
+        }
+
+        foreach (glob($tmpDir.'/*') ?: [] as $entry) {
+            is_dir($entry) ? @rmdir($entry) : @unlink($entry);
         }
 
         @rmdir($tmpDir);

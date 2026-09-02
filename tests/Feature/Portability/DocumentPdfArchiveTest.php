@@ -260,7 +260,9 @@ class DocumentPdfArchiveTest extends TestCase
                     // then fails with EISDIR even as root, while the FIRST document's
                     // temp file survives — so close() really does write an archive
                     // with content, which is the state the unlink has to clean up.
-                    foreach (glob(storage_path('app/tmp/pdf-archive-*')) ?: [] as $dir) {
+                    // The trailing slash keeps this off the output zip, which
+                    // sits in the same directory and matches the same prefix.
+                    foreach (glob(storage_path('app/tmp/pdf-archive-*'), GLOB_ONLYDIR) ?: [] as $dir) {
                         @mkdir($dir.'/invoices-'.$invoice->getKey().'.pdf');
                     }
                 }
@@ -272,11 +274,75 @@ class DocumentPdfArchiveTest extends TestCase
         try {
             app(DocumentPdfArchive::class)->build($c, $this->out);
             $this->fail('expected the export to fail');
-        } catch (\Throwable) {
-            // expected
+        } catch (RuntimeException) {
+            // expected — catching Throwable here would swallow fail()'s own
+            // assertion exception and report the wrong diagnostic on a regression.
         }
 
         $this->assertFileDoesNotExist($this->out);
+    }
+
+    public function test_two_documents_that_normalise_to_one_name_both_survive(): void
+    {
+        // addFile defaults to FL_OVERWRITE, so two entries under one name collapse
+        // into ONE while the counts and index.csv still claim two — a document
+        // silently missing from a handover archive, the same class as the paging
+        // bug. safeName() strips «/» and «:», so these two collide.
+        $c = $this->company();
+        $this->invoice($c, 'ΤΠΥ/1', 1);
+        $this->invoice($c, 'ΤΠΥ:1', 2);
+
+        $result = app(DocumentPdfArchive::class)->build($c, $this->out);
+
+        $this->assertSame(2, $result['invoices']);
+
+        $pdfs = array_filter(
+            $this->entries($this->out),
+            static fn (string $e): bool => str_ends_with($e, '.pdf'),
+        );
+
+        $this->assertCount(2, $pdfs, 'the zip must hold as many PDFs as the count claims');
+    }
+
+    public function test_a_failed_export_leaves_no_temp_directory_behind(): void
+    {
+        // rmdir fails on a non-empty directory, and the file whose write failed was
+        // never registered for cleanup — so every failed export leaked a directory
+        // under storage/app/tmp. The suite itself was doing it.
+        $before = glob(storage_path('app/tmp/pdf-archive-*'), GLOB_ONLYDIR) ?: [];
+
+        $c = $this->company();
+        $this->invoice($c, 'ΤΠΥ1', 1);
+        $this->invoice($c, 'ΤΠΥ2', 2);
+
+        $this->app->bind(InvoicePdfRenderer::class, fn () => new class extends InvoicePdfRenderer
+        {
+            private int $calls = 0;
+
+            public function __construct() {}
+
+            public function render(Invoice $invoice): string
+            {
+                $this->calls++;
+
+                if ($this->calls > 1) {
+                    foreach (glob(storage_path('app/tmp/pdf-archive-*'), GLOB_ONLYDIR) ?: [] as $dir) {
+                        @mkdir($dir.'/invoices-'.$invoice->getKey().'.pdf');
+                    }
+                }
+
+                return '%PDF-1.4 fake';
+            }
+        });
+
+        try {
+            app(DocumentPdfArchive::class)->build($c, $this->out);
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $after = glob(storage_path('app/tmp/pdf-archive-*'), GLOB_ONLYDIR) ?: [];
+        $this->assertSame($before, $after, 'a failed export must not leak a temp directory');
     }
 
     public function test_a_company_with_nothing_still_produces_a_readable_archive(): void

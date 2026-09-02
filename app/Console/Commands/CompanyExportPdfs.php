@@ -18,7 +18,8 @@ use Throwable;
  *
  * Deliberately a COMMAND rather than a panel download: a tenant can hold tens of
  * thousands of documents and DomPDF is not fast, so this runs for minutes and must
- * not sit inside an HTTP request. The panel action queues this same service.
+ * not sit inside an HTTP request. A panel action would need a queued job plus a
+ * download route; that is in `docs/BACKLOG.md`, not built.
  *
  *   php artisan company:export-pdfs --tenant=myip
  *   php artisan company:export-pdfs --tenant=myip --out=/backup/myip-docs.zip

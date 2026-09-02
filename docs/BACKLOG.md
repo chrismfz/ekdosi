@@ -495,6 +495,10 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   μικρό και να οδηγήσει σε δεύτερη έκδοση. Το `status()` δέχεται `Invoice`, οπότε χρειάζεται
   delivery-note δίδυμο. **Μέχρι τότε**: το lock + το `unverifiableInDoubt()` (άρνηση μέσα στο
   παράθυρο) καλύπτουν το ρεαλιστικό σενάριο· ένα hard kill σε provider tenant παραμένει ακάλυπτο.
+- **`ExpenseClassificationSubmitter` γράφει μη-fillable `'date'`** _(από το review round 3 του MYD-025)._
+  Το `expense_marks.mark_date` μένει έτσι πάντα NULL για **δικές μας** υποβολές χαρακτηρισμού, οπότε
+  δεν συνεισφέρουν στο εύρος ημερομηνιών του `LegalEvidence::describe()`. Κοσμητικό (η μέτρηση είναι
+  σωστή), αλλά είναι γνήσιο bug στον submitter — μία γραμμή, εκτός scope του MYD-025.
 - **Legal-retention hardening — το υπόλοιπο του MYD-025 (P2)** _(η σιωπηλή διαγραφή έκλεισε
   2026-09-02)._ Δεν έγιναν: (α) **`restrictOnDelete`** στα `mydata_marks`/`delivery_marks` αντί για
   cascade — χρειάζεται πιο ακριβή κανόνα απ' ό,τι εκφράζει ένα FK, γιατί ένα **DRY_RUN mark** θα
