@@ -113,11 +113,23 @@ class DeliveryNote extends Model
         // same thing to the operator, and Afm::canonicalVat() already reads it that
         // way — leaving the two strictnesses apart let «0» read as a real ΑΦΜ here
         // while every identity comparison treated it as absent.
-        if ($stored !== '' && Afm::canonicalVat($stored) === null) {
+        if (Afm::isZeroPlaceholder($stored)) {
             return null;
         }
 
-        return $stored !== '' ? $stored : ($this->customer?->afm ?: null);
+        // JUNK («-», «.») is NOT that declaration. Treating it as one turned a hard
+        // refusal into a silently-filed ενδοδιακίνηση, and made a linked customer's
+        // KNOWN ΑΦΜ be replaced by the «no ΑΦΜ» placeholder — a guess, where MYD-011's
+        // whole posture is to refuse. It falls through to the real identity instead.
+        if ($stored !== '' && Afm::canonicalVat($stored) === null) {
+            $stored = '';
+        }
+
+        return $stored !== ''
+            ? $stored
+            // Canonicalised: a customer row holding «00000» is the same placeholder,
+            // and reading it verbatim here filed it as though it were an ΑΦΜ.
+            : (Afm::isZeroPlaceholder($this->customer?->afm) ? null : ($this->customer?->afm ?: null));
     }
 
     /**

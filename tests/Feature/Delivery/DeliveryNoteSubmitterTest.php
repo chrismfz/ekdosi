@@ -68,6 +68,35 @@ class DeliveryNoteSubmitterTest extends TestCase
         ]);
     }
 
+    public function test_junk_in_the_recipient_afm_is_not_a_declaration_of_internal_movement(): void
+    {
+        // ROUND-8 P2-B (MYD-009's round-7 fix reached into MYD-011). Widening "all
+        // zeros = no ΑΦΜ" to "anything unusable" swept «-» in with it — turning a
+        // hard refusal into a silently-filed ενδοδιακίνηση, and replacing a linked
+        // customer's KNOWN ΑΦΜ with the «no ΑΦΜ» placeholder. All-zeros is a
+        // DECLARATION; junk is an accident, and an accident falls through.
+        $note = $this->makeNote([
+            'recipient_afm' => '-',
+            'recipient_name' => null,
+            'recipient_country' => null,
+        ]);
+
+        // customer_id is still set by makeNote, so this is NOT an internal movement.
+        $this->assertFalse($note->isInternalMovement());
+        $this->assertSame($this->recipient->afm, $note->externalRecipientAfm());
+    }
+
+    public function test_an_all_zeros_customer_afm_is_not_filed_as_an_identity(): void
+    {
+        // The customer-fallback branch was not canonicalised, so a customer row
+        // holding «00000» was read verbatim as a real ΑΦΜ.
+        $this->recipient->forceFill(['afm' => '00000'])->save();
+
+        $note = $this->makeNote(['recipient_afm' => null]);
+
+        $this->assertNull($note->fresh()->externalRecipientAfm());
+    }
+
     private function makeNote(array $overrides = []): DeliveryNote
     {
         $note = DeliveryNote::create(array_merge([

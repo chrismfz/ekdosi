@@ -4,6 +4,7 @@ namespace App\Services\MyData;
 
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Support\Afm;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -88,7 +89,11 @@ class EnrichInvoiceFromAade
                 $set['company_name'] = $aade['counterpartName'];
                 $filled[] = 'επωνυμία αντισυμβαλλόμενου';
             }
-            if ($outbound && blank($invoice->vat_no) && filled($aade['counterpartVat'] ?? null)) {
+            // MYD-009: an all-zeros «000000000» is a PLACEHOLDER, not an identity, so
+            // it must be repairable from what AADE reports. Gating on blank() alone
+            // made this self-heal — the one tool that can fix a FILED legacy row —
+            // skip exactly the rows that need it.
+            if ($outbound && Afm::canonicalVat($invoice->vat_no) === null && filled($aade['counterpartVat'] ?? null)) {
                 $set['vat_no'] = $aade['counterpartVat'];
                 $filled[] = 'ΑΦΜ αντισυμβαλλόμενου';
             }

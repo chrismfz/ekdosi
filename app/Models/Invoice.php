@@ -556,6 +556,16 @@ class Invoice extends Model
             return Afm::canonicalVat($this->vat_no) === null;
         }
 
+        // The address-ish columns are selected with `?:` by BOTH the AADE builder and
+        // the provider document, and `?:` treats the string «0» as absent while
+        // blank() does not. That disagreement filed the customer's postcode while the
+        // freeze kept the «0» — leaving the filed document unable to render its own
+        // counterpart again, the exact failure this freeze exists to prevent. Mirror
+        // the selector instead of guessing at it.
+        if (in_array($column, ['address1', 'address2', 'city', 'postcode', 'occupation', 'vies_vat'], true)) {
+            return ! (bool) trim((string) $this->{$column});
+        }
+
         return blank($this->{$column});
     }
 

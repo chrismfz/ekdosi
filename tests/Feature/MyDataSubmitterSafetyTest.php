@@ -2149,6 +2149,28 @@ XML;
         }
     }
 
+    public function test_a_zero_string_address_column_is_frozen_like_a_blank_one(): void
+    {
+        // ROUND-8 P2-A. Both the AADE builder and the provider document select the
+        // address with `?:`, which treats the string «0» as absent — while blank()
+        // does not. So the payload filed the customer's postcode and the freeze kept
+        // the «0», leaving the filed document unable to render its own counterpart.
+        $this->customer->forceFill([
+            'afm' => 'DE811234567', 'name' => 'Lieferant GmbH', 'country' => 'DE',
+            'address1' => 'Hauptstr 1', 'city' => 'Berlin', 'postcode' => '10115',
+        ])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => 'DE811234567', 'company_name' => 'Lieferant GmbH', 'country' => 'DE',
+            'address1' => null, 'city' => null, 'postcode' => '0',
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('10115', $frozen['postcode'] ?? null, '«0» must freeze like a blank');
+    }
+
     private function makeInvoice(int $code = 1): Invoice
     {
         return Invoice::create([

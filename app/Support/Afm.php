@@ -92,6 +92,22 @@ final class Afm
     }
 
     /**
+     * Is this value the ALL-ZEROS placeholder — «0», «000000000» — as opposed to
+     * merely unusable junk like «-» or «.»?
+     *
+     * The two must not be conflated. All-zeros is a DECLARATION ("this party has no
+     * ΑΦΜ", the convention AADE gives ενδοδιακίνηση); junk is an accident, and the
+     * right response to an accident is to fall through to whatever real identity is
+     * available rather than to declare something.
+     */
+    public static function isZeroPlaceholder(?string $raw): bool
+    {
+        $digits = preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '';
+
+        return $digits !== '' && trim($digits, '0') === '';
+    }
+
+    /**
      * The ISO-3166-1 alpha-2 country prefix carried by a VAT identifier, when it has
      * one that names a real country — «IT12345678901» → «IT». Null for a bare ΑΦΜ.
      *

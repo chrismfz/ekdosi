@@ -961,6 +961,26 @@ The reason is recorded at the call site.
 the live customer. Not a bug today — a tenant is either `gr-mydata` or `ee-peppol`, so no single
 document can disagree with itself — but it becomes the same defect the day PEPPOL goes live.
 
+**Round-8 review corrections (no P0/P1 — one of them a wrong DIRECTION, not a wrong value):**
+
+- **Junk in an ΑΦΜ is not a declaration.** Round 7 widened "all zeros = no ΑΦΜ" to "anything
+  unusable", which swept «-» and «.» in with it — so a delivery note that previously REFUSED was
+  now silently filed as an ενδοδιακίνηση, and a linked customer's KNOWN ΑΦΜ was replaced by the
+  «no ΑΦΜ» placeholder. That is a change to merged MYD-011 semantics in the GUESS direction,
+  made inside an invoice PR. All-zeros is a DECLARATION (AADE's convention for ενδοδιακίνηση);
+  junk is an accident, and an accident falls through to the real identity
+  (`Afm::isZeroPlaceholder()` now separates them).
+- **`blank()` and `?:` disagree about the string «0».** Both the AADE builder and the provider
+  document select the address with `?:`, which treats «0» as absent, while the freeze gated on
+  `blank()`, which does not — so the payload filed the customer's postcode and the freeze kept
+  the «0», leaving the filed document unable to render its own counterpart. The gate now mirrors
+  the selector.
+- **The customer-fallback branch was not canonicalised**, so a customer row holding «00000» was
+  read verbatim as a real ΑΦΜ — on the very path round 7's commit said it had fixed.
+- **`EnrichInvoiceFromAade` skipped exactly the rows that need it.** It gates on `blank(vat_no)`,
+  so an all-zeros placeholder — now officially "not an identity" — was treated as filled, and the
+  ONE tool that can repair an already-filed legacy row would not touch it.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never
