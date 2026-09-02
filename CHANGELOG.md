@@ -19,6 +19,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **`php artisan roles:reprovision [--tenant=] [--dry-run] [--prune] [--force]`** — συγχρονίζει τους
+  ρόλους `company_admin`/`operator` ΚΑΘΕ tenant με τον κανονικό χάρτη δικαιωμάτων. Έλειπε: το
+  `shield:generate` φτιάχνει τα permissions ενός νέου resource και το `shield:sync-super-admin` τα δίνει
+  στον super_admin, αλλά οι χειριστές τα έπαιρναν μόνο με χειροκίνητη επανάθεση ρόλου — γι' αυτό κάθε νέο
+  resource (π.χ. τα Leads) έμενε αόρατο για αυτούς. **Προσθετική** από προεπιλογή (ποτέ δεν αφαιρεί
+  χειροκίνητες προσαρμογές)· `--prune` για πλήρη ευθυγράμμιση. Τρέχει και από το `deploy/update.sh`.
 - **Συγχώνευση διπλών πελατών.** `php artisan customers:merge <keep> <drop> [--dry-run] [--keep=] [--force]`
   + action «Συγχώνευση με άλλον πελάτη» στη σελίδα πελάτη: μεταφέρει παραστατικά/πληρωμές/προσφορές/
   επαφές/ΔΑ/συμβόλαια/WHMCS/leads/σημειώσεις/συνημμένα/ετικέτες/ιστορικό σε ΜΙΑ transaction, γράφει τα
@@ -164,6 +170,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
   το token+payload αλλού. (Deferred hardening — TOCTOU DNS-pin, endpoint-profile registry — στο BACKLOG.)
 
 ### Changed
+- **Ημερολόγιο leads**: λέει ρητά ότι δείχνει ΜΟΝΟ leads με «επόμενο βήμα» και πόσα ανοιχτά leads δεν
+  έχουν καθόλου ημερομηνία (με link στη λίστα) — αλλιώς έμοιαζε άδειο/χαλασμένο.
 - **`customers:afm-duplicates`**: δείχνει τι κρέμεται από κάθε διπλό (παραστατικά/πληρωμές/…), σημειώνει
   με ✓ ποιον θα κρατούσε η συγχώνευση και τυπώνει έτοιμη την εντολή `customers:merge`.
 - **`deploy/update.sh` / `rollback.sh`**: ο read-only έλεγχος διπλών ΑΦΜ τρέχει και **πριν** το

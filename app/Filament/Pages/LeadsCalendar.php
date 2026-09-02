@@ -161,6 +161,24 @@ class LeadsCalendar extends Page
             ->count();
     }
 
+    /**
+     * Open leads with NO «επόμενο βήμα» at all — invisible on a calendar by
+     * definition (it is an agenda of next steps, not a list of leads), so the
+     * page says how many are hiding rather than letting the operator wonder.
+     */
+    public function withoutNextStep(): int
+    {
+        /** @var Company $tenant */
+        $tenant = Filament::getTenant();
+
+        return Lead::query()
+            ->where('company_id', $tenant->id)
+            ->open()
+            ->whereNull('next_action_at')
+            ->forOperator($this->operator)
+            ->count();
+    }
+
     /** Drop handler: move a lead's next step to another day, keeping its time of day. */
     public function reschedule(int $leadId, string $date): void
     {

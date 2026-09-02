@@ -252,7 +252,8 @@ Design + gates: `docs/leads-mini-crm.md`. **Χτισμένο (L0):**
 - **«Ημερολόγιο leads»** (`View:LeadsCalendar`, operator+): μηνιαίο πλέγμα Δευ–Κυρ με τα επόμενα βήματα των
   ανοιχτών leads (κόκκινο = πέρασε, σήμερα τονισμένο), πλοήγηση μήνα, φίλτρο χειριστή, ένδειξη «Ν ληξιπρόθεσμα
   πριν από αυτόν τον μήνα» → λίστα. **Drag σε άλλη μέρα = μετάθεση** του επόμενου βήματος (κρατά την ώρα).
-- Λίστα ↔ Πίνακας ↔ Ημερολόγιο: κουμπιά-links στο header των τριών σελίδων.
+- Λίστα ↔ Πίνακας ↔ Ημερολόγιο: κουμπιά-links στο header των τριών σελίδων. Το ημερολόγιο δηλώνει ότι
+  δείχνει μόνο leads **με** επόμενο βήμα και πόσα ανοιχτά δεν έχουν (με link στη λίστα).
 
 ## 8. Πληρωμές & Είσπραξη (AR)
 - **`InvoiceBalance` = μοναδική πηγή** για paid/credited/balance/status (cross-surface
@@ -384,6 +385,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Ασφαλή updates** — `deploy/update.sh <tag>` (read-only data pre-flight→snapshot→maintenance→
   queue drain→checkout→composer→migrate→optimize→shield→queue:restart→ops:health) +
   `deploy/rollback.sh`· version tags via `ekdosi:release`. Runbook: `docs/updates-runbook.md`.
+- **`roles:reprovision`** — δίνει τα δικαιώματα κάθε ΝΕΟΥ resource στους ρόλους `company_admin`/`operator`
+  όλων των tenants (προσθετικά· `--prune` για πλήρη ευθυγράμμιση, `--dry-run` για προεπισκόπηση). Μέρος του
+  `deploy/update.sh` μετά το `shield:generate` — χωρίς αυτό κάθε νέο resource έμενε αόρατο για τους χειριστές.
 - **Queue drain χωρίς root** (`ops:queue-drain`) — hook → systemd → portable (`queue:restart` +
   αναμονή μέχρι να μην τρέχει job). Δουλεύει και σε cPanel/Plesk/DirectAdmin/shared ή με cron worker·
   το deploy σταματά μόνο αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`).
