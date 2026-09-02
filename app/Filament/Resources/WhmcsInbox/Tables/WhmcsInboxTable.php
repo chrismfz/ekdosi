@@ -532,7 +532,7 @@ class WhmcsInboxTable
      * receipt flag. Empty when nothing routed (or no resolution stored) — the
      * modal placeholder is hidden in that case.
      *
-     * @return list<array{name: string, afm: string, lines: int, is_receipt: bool}>
+     * @return list<array{name: string, afm: ?string, lines: int, is_receipt: bool}>
      */
     private static function routedBeneficiaries(PendingWhmcsInvoice $r): array
     {
@@ -552,7 +552,7 @@ class WhmcsInboxTable
             if (! isset($byContact[$id])) {
                 $byContact[$id] = [
                     'name' => html_entity_decode((string) ($contact['company_name'] ?? '—'), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
-                    'afm' => Afm::digits($contact['gr_vatno'] ?? null),
+                    'afm' => Afm::uniqueKey($contact['gr_vatno'] ?? null),
                     'lines' => 0,
                     'is_receipt' => false,
                 ];
@@ -935,7 +935,7 @@ class WhmcsInboxTable
                         $rows = self::routedBeneficiaries($r);
                         $out = ['Ο πελάτης έχει δρομολογήσει γραμμές σε:'];
                         foreach ($rows as $b) {
-                            $afm = $b['afm'] !== '' ? ' (ΑΦΜ '.$b['afm'].')' : ' (χωρίς ΑΦΜ)';
+                            $afm = filled($b['afm']) ? ' (ΑΦΜ '.$b['afm'].')' : ' (χωρίς ΑΦΜ)';
                             $doc = $b['is_receipt'] ? ' — απόδειξη' : '';
                             $out[] = '• '.$b['name'].$afm.' → '.$b['lines'].' γραμμή(ές)'.$doc;
                         }

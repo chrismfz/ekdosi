@@ -375,22 +375,18 @@ class CompanyImporter
             if ($rows === [] || ! Schema::hasTable($table)) {
                 continue;
             }
+            $rows = $this->normaliseBundleRows($table, $rows);
             $index = $existing ? $this->existingIndex($table, $existing->id) : [];
             // customers also merge by ΑΦΜ identity (see importTable) — the dry-run
             // must say so, or the operator approves inserts that become overwrites.
-            $afmIndex = ($existing && $table === 'customers') ? $this->afmKeyIndex($existing->id) : [];
-            if ($existing && $table === 'customers') {
-                // …and it must REFUSE exactly what execute would refuse…
-                $this->assertNoCustomerAfmConflicts($rows, $existing->id, $index);
+            $afmIndex = [];
+            if ($table === 'customers') {
+                $afmIndex = $existing ? $this->afmKeyIndex($existing->id) : [];
+                $twinIds = $this->twinIds($rows, $index);
+                // …it must REFUSE exactly what execute would refuse…
+                $this->assertNoCustomerAfmConflicts($rows, $index, $afmIndex, $twinIds);
                 // …and count exactly what execute does: twins give up their keys
                 // first, so a key held only by a twin does NOT make another row a merge.
-                $twinIds = [];
-                foreach ($rows as $row) {
-                    $twin = $index[$this->naturalKey($table, $row)] ?? null;
-                    if ($twin !== null) {
-                        $twinIds[$twin] = true;
-                    }
-                }
                 $afmIndex = array_filter($afmIndex, fn (int $id): bool => ! isset($twinIds[$id]));
             }
             $insert = 0;
@@ -416,6 +412,7 @@ class CompanyImporter
             return $map;
         }
 
+        $rows = $this->normaliseBundleRows($table, $rows);
         $index = $this->existingIndex($table, $companyId);
 
         // customers: the ΑΦΜ identity map (afm_key → id, and id → afm_key for
@@ -423,20 +420,15 @@ class CompanyImporter
         // every natural-key twin gives up its key BEFORE any row is written, so a
         // move or swap of ΑΦΜ between twins can never trip the unique index and
         // the dump order is irrelevant. A true conflict (a twin's new ΑΦΜ owned
-        // by a NON-twin local row) is detected up-front, never mid-transaction.
+        // by a NON-twin local row, or two bundle rows on one ΑΦΜ) is detected
+        // up-front, never mid-transaction.
         $afmIndex = [];
         $keyById = [];
         $legacyById = [];
         if ($table === 'customers') {
-            $this->assertNoCustomerAfmConflicts($rows, $companyId, $index);
+            $twinIds = $this->twinIds($rows, $index);
+            $this->assertNoCustomerAfmConflicts($rows, $index, $this->afmKeyIndex($companyId), $twinIds);
 
-            $twinIds = [];
-            foreach ($rows as $row) {
-                $twin = $index[$this->naturalKey($table, $row)] ?? null;
-                if ($twin !== null) {
-                    $twinIds[$twin] = true;
-                }
-            }
             if ($twinIds !== []) {
                 DB::table('customers')->whereIn('id', array_keys($twinIds))->update(['afm_key' => null]);
             }
@@ -543,12 +535,6 @@ class CompanyImporter
             $row['afm_key'] = Afm::uniqueKey($row['afm'] ?? null);
         }
 
-        // leads.afm carries the same identity form (LeadMatcher compares it
-        // exactly) — a pre-release bundle may still hold «EL 123-456-789».
-        if ($table === 'leads') {
-            $row['afm'] = Afm::uniqueKey($row['afm'] ?? null);
-        }
-
         $row['created_at'] = now();
         $row['updated_at'] = now();
 
@@ -556,15 +542,38 @@ class CompanyImporter
     }
 
     /**
-     * A natural-key twin whose NEW ΑΦΜ is owned by a local row that is NOT a
-     * twin of any bundle row cannot be written (twins release their keys
-     * first, non-twins never do). Same check in plan() and in importTable(),
-     * so the dry-run reports exactly what execute would refuse.
+     * Bundle rows are normalised ONCE, before any identity (natural key /
+     * content signature) is computed from them: leads.afm carries the same
+     * identity form LeadMatcher compares exactly, and a pre-release bundle may
+     * still hold «EL 123-456-789». Normalising later (in rowData) would store
+     * «123456789» while the signature was hashed on the raw text — the next
+     * re-import of the same bundle then finds no twin and inserts a duplicate.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @return list<array<string,mixed>>
+     */
+    private function normaliseBundleRows(string $table, array $rows): array
+    {
+        if ($table !== 'leads') {
+            return $rows;
+        }
+
+        foreach ($rows as &$row) {
+            $row['afm'] = Afm::uniqueKey($row['afm'] ?? null);
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Local ids that are the natural-key twin of some bundle row.
      *
      * @param  list<array<string,mixed>>  $rows
      * @param  array<string,int>  $index  natural-key => local id
+     * @return array<int,true>
      */
-    private function assertNoCustomerAfmConflicts(array $rows, int $companyId, array $index): void
+    private function twinIds(array $rows, array $index): array
     {
         $twinIds = [];
         foreach ($rows as $row) {
@@ -574,11 +583,45 @@ class CompanyImporter
             }
         }
 
-        $afmIndex = $this->afmKeyIndex($companyId);
+        return $twinIds;
+    }
+
+    /**
+     * Two things cannot be written and are refused up-front (same check in
+     * plan() and in importTable(), so the dry-run reports exactly what execute
+     * would refuse):
+     *   - two bundle rows on ONE ΑΦΜ identity: the second would silently merge
+     *     into whatever the first became (a bundle from a pre-unique release
+     *     may carry the duplicate the migration would have refused);
+     *   - a natural-key twin whose NEW ΑΦΜ is owned by a local row that is NOT
+     *     a twin of any bundle row (twins release their keys first, non-twins
+     *     never do).
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @param  array<string,int>  $index  natural-key => local id
+     * @param  array<string,int>  $afmIndex  afm_key => local id
+     * @param  array<int,true>  $twinIds
+     */
+    private function assertNoCustomerAfmConflicts(array $rows, array $index, array $afmIndex, array $twinIds): void
+    {
+        $seen = [];
         foreach ($rows as $row) {
-            $twin = $index[$this->naturalKey('customers', $row)] ?? null;
             $afmKey = Afm::uniqueKey($row['afm'] ?? null);
-            if ($twin === null || $afmKey === null) {
+            if ($afmKey === null) {
+                continue;
+            }
+
+            if (isset($seen[$afmKey])) {
+                throw new RuntimeException(
+                    'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: το bundle περιέχει δύο πελάτες με το ίδιο ΑΦΜ '
+                    ."{$afmKey} («{$seen[$afmKey]}» και «".($row['name'] ?? '?').'»). '
+                    .'Συγχώνευσέ τους στην εταιρεία-πηγή (php artisan customers:afm-duplicates) και ξαναεξήγαγε.'
+                );
+            }
+            $seen[$afmKey] = (string) ($row['name'] ?? '?');
+
+            $twin = $index[$this->naturalKey('customers', $row)] ?? null;
+            if ($twin === null) {
                 continue;
             }
             $owner = $afmIndex[$afmKey] ?? null;

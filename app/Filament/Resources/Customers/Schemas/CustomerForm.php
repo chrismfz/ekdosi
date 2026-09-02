@@ -68,14 +68,13 @@ class CustomerForm
                                     // EL/GR prefix or not; soft-deleted included). A friendly
                                     // message instead of the UNIQUE(company_id, afm_key) error.
                                     ->rule(fn (?Customer $record) => function (string $attribute, mixed $value, \Closure $fail) use ($record): void {
-                                        $key = Afm::uniqueKey($value);
-                                        if ($key === null) {
-                                            return;
+                                        if (Afm::uniqueKey($value) === null) {
+                                            return; // blank / placeholder = no identity to collide on
                                         }
 
                                         $other = Customer::withTrashed()
                                             ->where('company_id', Filament::getTenant()?->getKey())
-                                            ->where('afm_key', $key)
+                                            ->whereAfmKeyOf($value)
                                             ->when($record, fn ($q) => $q->whereKeyNot($record->getKey()))
                                             ->first();
 

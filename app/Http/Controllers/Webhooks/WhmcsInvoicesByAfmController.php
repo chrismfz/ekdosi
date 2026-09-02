@@ -113,24 +113,40 @@ class WhmcsInvoicesByAfmController
             ], Response::HTTP_BAD_REQUEST);
         }
 
-        // Match customers by ΑΦΜ — NORMALISED on BOTH sides. customers.afm is
-        // imported verbatim from legacy Firebird (free-text: may carry an
-        // EL/GR prefix, spaces, or INTERIOR dashes like "12-345-6789"), so a
-        // raw whereIn — or even a LIKE prefilter — against the digits-only
-        // inbound set silently misses those rows (a LIKE can't bridge a
-        // separator in the middle). Portable, driver-agnostic fix: load the
-        // tenant's customers once (a single company_id-scoped query — ~1k rows
-        // for a profile card) and re-key by the digits-only canonical ΑΦΜ in
-        // PHP, keeping only the ones we asked for. A duplicate ΑΦΜ across
-        // customers is unusual but possible (data-entry); keyBy keeps the last
-        // — acceptable for a visibility card.
-        $wanted = array_flip($afms);   // digits-only ΑΦΜ => position
-        $customers = Customer::query()
+        // Match customers by ΑΦΜ IDENTITY — the key UNIQUE(company_id, afm_key)
+        // is built on (Afm::uniqueKey: prefix/spaces/dashes folded, a foreign
+        // VAT keeps its letters), so an identity resolves to exactly ONE
+        // customer — no «keep the last» guess. The plugin sends digits only, so
+        // a foreign VAT («CY10259033P») arrives as «10259033»: resolve those by
+        // the digits of a LETTERED key as a second step, and only when the
+        // digits are unambiguous (two foreign keys folding to the same digits
+        // → null, never a coin toss). A pure-digit key is never shadowed.
+        $byKey = Customer::query()
             ->where('company_id', $tenant->id)
-            ->whereNotNull('afm')
-            ->get(['id', 'afm', 'name'])
-            ->keyBy(fn (Customer $c): string => Afm::digits($c->afm))
-            ->filter(fn (Customer $c, string $afm): bool => $afm !== '' && isset($wanted[$afm]));
+            ->whereNotNull('afm_key')
+            ->get(['id', 'afm', 'afm_key', 'name'])
+            ->keyBy(fn (Customer $c): string => (string) $c->afm_key);
+
+        $byDigits = [];
+        foreach ($byKey as $key => $customer) {
+            $key = (string) $key;
+            if (ctype_digit($key)) {
+                continue;
+            }
+            $digits = Afm::digits($key);
+            if ($digits === '') {
+                continue;
+            }
+            $byDigits[$digits] = array_key_exists($digits, $byDigits) ? null : $customer;
+        }
+
+        $customers = collect();
+        foreach ($afms as $afm) {
+            $hit = $byKey->get($afm) ?? (ctype_digit($afm) ? ($byDigits[$afm] ?? null) : null);
+            if ($hit !== null) {
+                $customers[$afm] = $hit;
+            }
+        }
 
         // ONE query for all matched customers' invoices (not one per ΑΦΜ),
         // globally capped, then grouped per customer in PHP. The aggregate
@@ -224,7 +240,9 @@ class WhmcsInvoicesByAfmController
             if (! is_string($value) && ! is_int($value)) {
                 continue;
             }
-            $afm = Afm::digits($value);
+            // The identity key; a placeholder («000000000») has none but stays
+            // in the response as an honest null instead of turning into a 400.
+            $afm = Afm::uniqueKey((string) $value) ?? Afm::digits($value);
             if ($afm === '') {
                 continue;
             }

@@ -38,6 +38,11 @@ return new class extends Migration
         // (key = afm); everything else (prefixes, spaces, foreign VAT, blanks)
         // goes through the ONE PHP rule (App\Support\Afm::uniqueKey), grouped
         // by resulting key so a chunk costs a handful of UPDATEs, not one per row.
+        // A row whose ΑΦΜ was blanked since (e.g. while resolving a duplicate
+        // with raw SQL) must lose its stale key — the two backfill steps below
+        // only touch rows WITH an ΑΦΜ.
+        DB::table('customers')->where(fn ($q) => $q->whereNull('afm')->orWhere('afm', ''))->update(['afm_key' => null]);
+
         $nineDigits = DB::getDriverName() === 'sqlite'
             ? "afm GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'"
             : "afm REGEXP '^[0-9]{9}$'";

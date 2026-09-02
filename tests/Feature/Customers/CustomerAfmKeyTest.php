@@ -479,4 +479,73 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertSame('Από bundle', $merged->name, 'bundle values applied onto the local owner');
         $this->assertSame('123456789', $merged->afm_key);
     }
+
+    public function test_importer_refuses_a_bundle_carrying_two_customers_with_one_afm(): void
+    {
+        // A bundle exported by a pre-unique release can carry the very duplicate
+        // the migration would have refused; the second row must not silently
+        // merge into the first — refuse (dry-run AND execute), nothing written.
+        $src = Company::create(['name' => 'Src', 'slug' => 'src8', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $a = Customer::create(['company_id' => $src->id, 'name' => 'Πρώτος', 'afm' => '123456789']);
+        $b = Customer::create(['company_id' => $src->id, 'name' => 'Δεύτερος', 'afm' => '987654321']);
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+        foreach ($bundle['data']['customers'] as &$row) {
+            if ($row['name'] === 'Δεύτερος') {
+                $row['afm'] = 'EL 123-456-789';
+            }
+        }
+        unset($row);
+        $a->forceDelete();
+        $b->forceDelete();
+
+        foreach ([false, true] as $execute) {
+            try {
+                app(CompanyImporter::class)->run($bundle, ['into' => 'src8', 'execute' => $execute, 'passphrase' => 'p@ss']);
+                $this->fail('Expected a RuntimeException (execute='.var_export($execute, true).').');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('δύο πελάτες με το ίδιο ΑΦΜ', $e->getMessage());
+            }
+        }
+        $this->assertSame(0, Customer::withTrashed()->where('company_id', $src->id)->count(), 'nothing written');
+    }
+
+    public function test_importer_lead_reimport_converges_after_normalisation(): void
+    {
+        // The lead's identity is its content signature; the bundle carries the
+        // ΑΦΜ as typed. Normalising AFTER hashing would store «123456789» while
+        // the signature was hashed on «EL 123-456-789» → the second run of the
+        // same bundle finds no twin and inserts a duplicate lead.
+        $src = Company::create(['name' => 'Src', 'slug' => 'src9', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $lead = Lead::create(['company_id' => $src->id, 'name' => 'Παλιό lead', 'afm' => '123456789']);
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+        foreach ($bundle['data']['leads'] as &$row) {
+            $row['afm'] = 'EL 123-456-789';
+        }
+        unset($row);
+        $lead->forceDelete();
+
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src9', 'execute' => true, 'passphrase' => 'p@ss']);
+        $plan = app(CompanyImporter::class)->run($bundle, ['into' => 'src9', 'execute' => false, 'passphrase' => 'p@ss']);
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src9', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $this->assertSame(1, Lead::withTrashed()->where('company_id', $src->id)->count(), 'the re-import converged on the same lead');
+        $this->assertSame('123456789', Lead::withTrashed()->where('company_id', $src->id)->value('afm'));
+        $this->assertSame(['insert' => 0, 'update' => 1], $plan['tables']['leads'], 'the dry-run said update, not insert');
+    }
+
+    public function test_migration_rerun_clears_a_stale_key_of_a_blanked_afm(): void
+    {
+        $t = $this->tenant();
+        $c = Customer::create(['company_id' => $t->id, 'name' => 'Ξεγραμμένο ΑΦΜ', 'afm' => '123456789']);
+        // A raw-SQL fix (or a pre-column row) blanked the ΑΦΜ but left the key.
+        DB::table('customers')->where('id', $c->id)->update(['afm' => null]);
+        $this->assertSame('123456789', $c->fresh()->afm_key);
+
+        $migration = require base_path('database/migrations/2026_09_03_000001_add_afm_key_unique_to_customers.php');
+        $migration->up();
+
+        $this->assertNull($c->fresh()->afm_key, 'a blanked ΑΦΜ owns no identity');
+        // …so a NEW customer with that ΑΦΜ is no longer refused.
+        $this->assertNotNull(Customer::create(['company_id' => $t->id, 'name' => 'Νέος κάτοχος', 'afm' => '123456789'])->id);
+    }
 }
