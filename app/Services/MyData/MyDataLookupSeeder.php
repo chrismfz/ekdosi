@@ -46,9 +46,15 @@ class MyDataLookupSeeder
                 ->exists();
 
             foreach (Codes::vatCategorySeedRows() as $row) {
+                // MYD-007: 0% now seeds SEVERAL rows (one per §8.3 reason), so dedup
+                // by (rate, exemption) — not rate alone — else only the first 0% row
+                // would ever seed. Positive rates carry no reason (whereNull).
+                $exemption = $row['vat_exemption_category'] ?? null;
                 $exists = VatCategory::query()
                     ->where('company_id', $tenant->getKey())
                     ->where('rate', $row['rate'])
+                    ->when($exemption !== null, fn ($q) => $q->where('vat_exemption_category', $exemption))
+                    ->when($exemption === null, fn ($q) => $q->whereNull('vat_exemption_category'))
                     ->exists();
 
                 if ($exists) {
@@ -64,6 +70,7 @@ class MyDataLookupSeeder
                     'company_id' => $tenant->getKey(),
                     'description' => $row['description'],
                     'rate' => $row['rate'],
+                    'vat_exemption_category' => $exemption,
                     'is_default' => $isDefault,
                 ]);
 

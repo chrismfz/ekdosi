@@ -408,25 +408,39 @@ class InvoiceForm
                                 ->live()
                                 // G7: changing the rate re-derives the gross mirror
                                 // from the (unchanged) stored net price.
-                                ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
-                                    'price_per_item_wvat',
-                                    self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($state))
-                                )),
+                                ->afterStateUpdated(function ($state, callable $set, Get $get) {
+                                    $set(
+                                        'price_per_item_wvat',
+                                        self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($state))
+                                    );
+                                    // MYD-007: switching a line TO 0% auto-suggests the §8.3
+                                    // reason from the invoice type (if none picked yet); leaving
+                                    // 0% clears it, so a rate change can't strand a stale reason.
+                                    // Done here (on the actual rate change) rather than as a
+                                    // new-record default, so an EXISTING line switched to 0% gets
+                                    // the suggestion too — and the type lookup runs only on the
+                                    // switch, not per repeater row.
+                                    if ((float) ($state ?? 0) === 0.0) {
+                                        if (blank($get('vat_exemption_category'))) {
+                                            $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
+                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                            ));
+                                        }
+                                    } else {
+                                        $set('vat_exemption_category', null);
+                                    }
+                                }),
 
-                            // MYD-007: the §8.3 exemption reason for a 0% line — shown
-                            // ONLY when the line is 0%, required then (AADE [217]), and
-                            // auto-suggested from the invoice type (2.2→4, 1.2→14, 1.3→8).
-                            // Always dehydrated but nulled for non-0% lines, so switching a
-                            // line off 0% clears a stale reason rather than keeping it.
+                            // MYD-007: the §8.3 exemption reason for a 0% line — shown ONLY when
+                            // the line is 0%, required then (AADE [217]). The value is suggested
+                            // from the invoice type by the rate handler above; always dehydrated
+                            // but nulled for non-0% lines so a rate change clears a stale reason.
                             Select::make('vat_exemption_category')
                                 ->label('Αιτία απαλλαγής ΦΠΑ (§8.3)')
                                 ->options(Codes::vatExemptionOptions())
                                 ->searchable()
                                 ->hidden(fn (Get $get) => (float) ($get('vat_percent') ?? 0) !== 0.0)
                                 ->required(fn (Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0)
-                                ->default(fn (Get $get) => VatExemptionGuidance::recommendForType(
-                                    InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
-                                ))
                                 ->helperText('Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).')
                                 ->dehydrated()
                                 ->dehydrateStateUsing(fn ($state, Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0 ? $state : null),

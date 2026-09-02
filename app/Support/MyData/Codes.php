@@ -203,21 +203,45 @@ final class Codes
     ];
 
     /**
-     * The standard sales-line VAT categories to seed, as [rate, description]
-     * rows. Skips code 8 (no rate) and code 10 (duplicate 4% of code 6 — would
-     * just create a confusing second 4% row; a tenant on the ν.5057/2023
-     * regime can add it manually). Code 7 (0%) is seeded WITHOUT an exemption
-     * reason — the operator sets §8.3 per their case (Setup → VAT Categories).
+     * The common 0%-rate categories to seed, each WITH its §8.3 reason (MYD-007) —
+     * the cross-border cases a Greek services/goods business actually hits. Seeded
+     * WITH the reason so a fresh tenant is correct out of the box (a reason-less 0%
+     * row would fail preflight, MYD-004). The operator adds more via the guided
+     * form; the per-line reason field picks which one per document. They all share
+     * rate 0, so the line rate-picker shows a single «0%» — the per-line «Αιτία
+     * απαλλαγής» disambiguates.
      *
-     * @return list<array{rate: float, description: string}>
+     * @var list<array{code: int, description: string}>
+     */
+    public const ZERO_RATE_SEED = [
+        ['code' => 4, 'description' => 'Άνευ ΦΠΑ 0% — Ενδοκοινοτική παροχή υπηρεσιών (άρθρο 18)'],
+        ['code' => 14, 'description' => 'Άνευ ΦΠΑ 0% — Ενδοκοινοτική παράδοση αγαθών (άρθρο 33)'],
+        ['code' => 8, 'description' => 'Άνευ ΦΠΑ 0% — Εξαγωγή αγαθών εκτός ΕΕ (άρθρο 29)'],
+    ];
+
+    /**
+     * The standard sales-line VAT categories to seed. Positive rates (24/13/6/17/
+     * 9/4) carry no exemption; the 0% rows come from {@see ZERO_RATE_SEED} WITH
+     * their §8.3 reason. Skips code 8 (no rate) and code 10 (duplicate 4% of code
+     * 6 — a ν.5057/2023-regime tenant adds it manually).
+     *
+     * @return list<array{rate: float, description: string, vat_exemption_category?: int}>
      */
     public static function vatCategorySeedRows(): array
     {
         $rows = [];
-        foreach ([1, 2, 3, 4, 5, 6, 7] as $code) {
+        // Positive rates only (skip code 7 / 0% here — seeded below with a reason).
+        foreach ([1, 2, 3, 4, 5, 6] as $code) {
             $rows[] = [
                 'rate' => (float) self::VAT_CATEGORY_RATES[$code],
                 'description' => self::VAT_CATEGORY_LABELS[$code],
+            ];
+        }
+        foreach (self::ZERO_RATE_SEED as $zero) {
+            $rows[] = [
+                'rate' => 0.0,
+                'description' => $zero['description'],
+                'vat_exemption_category' => $zero['code'],
             ];
         }
 

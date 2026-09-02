@@ -866,14 +866,6 @@ class AadeInvoiceDocument
     }
 
     /**
-     * G4: resolve the VAT exemption reason (§8.3, 1–31) for this tenant's 0%
-     * lines. Because invoice_lines store only vat_percent (no per-line VAT
-     * category), the reason lives on the tenant's 0%-rate VatCategory. We take
-     * the single configured exemption; if none is set, or several 0% categories
-     * disagree, we throw with operator guidance rather than file a wrong/blank
-     * reason. Memoised per submit.
-     */
-    /**
      * MYD-007: the §8.3 exemption reason for a 0% LINE. The per-line snapshot
      * (`invoice_lines.vat_exemption_category`, chosen at issue) wins — the reason
      * differs by case, so it is captured per line, not tenant-wide. Only when a
