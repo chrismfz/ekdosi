@@ -1,7 +1,7 @@
 # Leads / mini-CRM — αναλυτικό design (pre-build)
 
 > **STATUS: L0 + L1 SHIPPED (2026-09-01) — resource, χρονολόγιο, καταστάσεις, dedupe, μετατροπή σε πελάτη,
-> «Προέλευση», προσφορά από lead. L2 (απολογισμός + reminders) OPEN (§10).**
+> «Προέλευση», προσφορά από lead. L2 ✅ SHIPPED — «Απολογισμός πωλήσεων» + CSV, `leads:notify-due`, dashboard widget (weekly digest email = προαιρετικό, BACKLOG). L3 κατά ζήτηση (§10).**
 > Πλάνο + ανάλυση για να «υπάρχει κάπου» μέχρι να κλείσουν τα audits / bug-fix sessions. Twin των `docs/domains/README.md` /
 > `docs/payment-connectors.md` (design-first, gates, build-όπου-θες).
 >

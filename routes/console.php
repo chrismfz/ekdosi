@@ -235,6 +235,18 @@ $trackSchedule(
     'overdue_notifications'
 );
 
+// leads:notify-due — daily «bell» digest of leads whose «επόμενο βήμα» is due
+// today / overdue, per tenant (assigned → its operator, unassigned → everyone).
+// Read-only, NO email; default OFF (opt-in per deploy).
+$trackSchedule(
+    Schedule::command('leads:notify-due')
+        ->dailyAt($scheduleTime('leads_notify_due_time', '08:00'))
+        ->name('leads-notify-due')
+        ->when(fn () => $scheduleEnabled('leads_notify_due_enabled'))
+        ->withoutOverlapping(30),
+    'leads_notify_due'
+);
+
 // services:stage-renewals — stage DRAFT renewal invoices for due service
 // contracts, once per tenant (the command loops tenants itself). Default OFF:
 // it creates real draft documents. Operator-gated downstream — drafts NEVER
