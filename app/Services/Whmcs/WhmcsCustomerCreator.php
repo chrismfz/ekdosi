@@ -42,9 +42,10 @@ class WhmcsCustomerCreator
         ?string $afmOverride = null,
     ): WhmcsCustomerCreateResult {
         // Operator-typed ΑΦΜ (the modal button) wins when given; else the ΑΦΜ
-        // the customer set in WHMCS. Both normalised to digits-only so "EL123…"
-        // and "123…" collapse to the same stored value.
-        $afm = Afm::normalise($afmOverride) ?? $pending->whmcsAfm();
+        // the customer set in WHMCS. Both reduced to the ΑΦΜ IDENTITY (Afm::uniqueKey:
+        // "EL123…" and "123…" collapse, a foreign VAT keeps its letters, a
+        // placeholder is no ΑΦΜ at all).
+        $afm = Afm::uniqueKey($afmOverride) ?? $pending->whmcsAfm();
         if ($afm === null) {
             return new WhmcsCustomerCreateResult(null, false, 'no_afm');
         }

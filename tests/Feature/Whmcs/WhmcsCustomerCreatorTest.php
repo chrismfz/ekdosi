@@ -92,7 +92,9 @@ class WhmcsCustomerCreatorTest extends TestCase
     public function test_falls_back_to_whmcs_data_when_gsis_fails(): void
     {
         $t = $this->tenant();
-        $row = $this->pending($t, '999999999');
+        // (999999999 is an all-same-digit PLACEHOLDER — not an identity — so a
+        // real-looking ΑΦΜ is used here.)
+        $row = $this->pending($t, '999999998');
         $this->mockGsis(null, new AadeAfmNotFound('AFM not found'));
 
         $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
@@ -100,7 +102,7 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertTrue($result->created);
         $this->assertSame('whmcs', $result->source);
         $this->assertSame('ACME WHMCS OE', $result->customer->name);   // WHMCS name
-        $this->assertSame('999999999', $result->customer->afm);
+        $this->assertSame('999999998', $result->customer->afm);
         $this->assertSame('Οδός 1', $result->customer->address1);
     }
 
@@ -117,6 +119,19 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertSame('existing', $result->source);
         $this->assertSame($existing->id, $result->customer->id);
         $this->assertSame(555, $existing->fresh()->whmcs_client_id);   // link stamped
+    }
+
+    public function test_foreign_vat_matches_the_existing_customer_by_identity(): void
+    {
+        $t = $this->tenant();
+        $cy = Customer::create(['company_id' => $t->id, 'name' => 'Κύπριος', 'afm' => 'CY10259033P']);
+        $row = $this->pending($t, 'cy 10259033 p', userId: 557);
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertSame('existing', $result->source);
+        $this->assertSame($cy->id, $result->customer->id, 'letters kept — never a digits-only twin');
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count());
     }
 
     public function test_deleted_owner_is_reported_not_recreated(): void

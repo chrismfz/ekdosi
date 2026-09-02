@@ -5,6 +5,7 @@ namespace Tests\Feature\Customers;
 use App\Filament\Resources\Customers\Pages\CreateCustomer;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Lead;
 use App\Models\User;
 use App\Services\Customers\CustomerAfmDuplicates;
 use App\Services\Portability\CompanyExporter;
@@ -43,6 +44,10 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertSame('123456789', Afm::uniqueKey('gr123456789'));
         $this->assertSame('123456789', Afm::uniqueKey('ΑΦΜ: 123 456 789'));
         $this->assertSame('CY10259033P', Afm::uniqueKey('cy 10259033 p'), 'Foreign VAT keeps its letters.');
+        $this->assertSame('123456789', Afm::uniqueKey('ΕL123456789'), 'Greek Ε look-alike does not mint a new identity.');
+        $this->assertSame('123456789', Afm::uniqueKey('ΕΛ 123456789'), 'Greek-keyboard «ΕΛ» prefix folds to EL.');
+        $this->assertSame('123456789', Afm::uniqueKey('ΑΦΜ ΕL123456789'), 'a Greek label is dropped');
+        $this->assertSame('EE123456789', Afm::uniqueKey('ee 123456789'), 'Estonian EE+9 digits stays a foreign VAT');
         $this->assertSame('EE123456789', Afm::uniqueKey('EE123456789'), 'Only EL/GR collapse to digits.');
         $this->assertNull(Afm::uniqueKey('000000000'), 'Placeholder is not an identity.');
         $this->assertNull(Afm::uniqueKey('999 999 999'));
@@ -126,6 +131,27 @@ class CustomerAfmKeyTest extends TestCase
             ->fillForm(['name' => 'Λιανική', 'afm' => '000000000'])
             ->call('create')
             ->assertHasNoFormErrors();
+    }
+
+    public function test_duplicates_audit_works_before_the_column_exists(): void
+    {
+        $t = $this->tenant();
+        Customer::create(['company_id' => $t->id, 'name' => 'Α', 'afm' => '123456789']);
+
+        // Simulate the pre-migration world: the column (and its index) are gone,
+        // and a twin with another spelling exists.
+        Schema::table('customers', fn ($table) => $table->dropUnique('customers_company_afm_key_unique'));
+        Schema::table('customers', fn ($table) => $table->dropColumn('afm_key'));
+        DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Β', 'afm' => 'EL 123-456-789', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Λιανική', 'afm' => '000000000', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Λιανική 2', 'afm' => '000000000', 'created_at' => now(), 'updated_at' => now()]);
+
+        $groups = app(CustomerAfmDuplicates::class)->find();
+        $this->assertCount(1, $groups, 'placeholders never group');
+        $this->assertSame('123456789', $groups[0]['afm_key']);
+        $this->assertSame(['Α', 'Β'], $groups[0]['customers']->pluck('name')->all());
+
+        $this->artisan('customers:afm-duplicates')->assertExitCode(1);
     }
 
     public function test_duplicates_audit_service_and_command(): void
@@ -238,6 +264,42 @@ class CustomerAfmKeyTest extends TestCase
             $this->assertStringContainsString('legacy', $e->getMessage());
         }
         $this->assertSame(8, (int) $c->fresh()->legacy_id, 'nothing overwritten');
+    }
+
+    public function test_importer_result_does_not_depend_on_bundle_order(): void
+    {
+        // Bundle: B (no legacy_id, ΑΦΜ K2, created FIRST → lower id, earlier in
+        // the dump) and A (legacy 7, ΑΦΜ K1). Locally A still holds K2.
+        $src = Company::create(['name' => 'Src', 'slug' => 'src6', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $b = Customer::create(['company_id' => $src->id, 'name' => 'B', 'afm' => '222222223']);
+        $a = Customer::create(['company_id' => $src->id, 'name' => 'A', 'afm' => '111111112']);
+        $a->forceFill(['legacy_id' => 7])->save();
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+        // Force the adverse order (the dump's order is not a contract).
+        usort($bundle['data']['customers'], fn (array $x, array $y): int => strcmp($y['name'], $x['name']));
+        $this->assertSame(['B', 'A'], array_column($bundle['data']['customers'], 'name'), 'B precedes A in the dump');
+
+        $b->forceDelete();
+        $a->update(['afm' => '222222223']);
+
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src6', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $rows = Customer::withTrashed()->where('company_id', $src->id)->orderBy('id')->get();
+        $this->assertSame(['A', 'B'], $rows->pluck('name')->all(), 'B is a new row; A kept its identity and got K1');
+        $this->assertSame(['111111112', '222222223'], $rows->pluck('afm_key')->all());
+        $this->assertSame(7, (int) $rows[0]->legacy_id);
+    }
+
+    public function test_migration_backfills_lead_afm_to_the_identity_form(): void
+    {
+        $t = $this->tenant();
+        $lead = Lead::create(['company_id' => $t->id, 'name' => 'Παλιό', 'afm' => '10259033']);
+        DB::table('leads')->where('id', $lead->id)->update(['afm' => 'EL 123-456-789']); // pre-release form
+
+        $migration = require base_path('database/migrations/2026_09_03_000001_add_afm_key_unique_to_customers.php');
+        $migration->up(); // idempotent re-run
+
+        $this->assertSame('123456789', $lead->fresh()->afm);
     }
 
     public function test_importer_merges_a_bundle_customer_into_the_local_owner_of_the_same_afm(): void

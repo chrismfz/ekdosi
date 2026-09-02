@@ -46,7 +46,9 @@ return new class extends Migration
 
         DB::table('customers')
             ->select('id', 'afm')
-            ->whereRaw("NOT (afm IS NOT NULL AND {$nineDigits} AND afm NOT IN ({$placeholders}))")
+            ->whereNotNull('afm')
+            ->where('afm', '<>', '')
+            ->whereRaw("NOT ({$nineDigits} AND afm NOT IN ({$placeholders}))")
             ->orderBy('id')
             ->chunkById(500, function ($rows): void {
                 $byKey = [];
@@ -57,6 +59,20 @@ return new class extends Migration
                     DB::table('customers')->whereIn('id', $ids)->update(['afm_key' => $key === '' ? null : $key]);
                 }
             });
+
+        // leads.afm carries the same identity form from now on (LeadForm stores
+        // Afm::uniqueKey) — bring existing lead rows in line so lead↔customer and
+        // lead↔lead dedupe compare like with like.
+        if (Schema::hasTable('leads')) {
+            DB::table('leads')->select('id', 'afm')->whereNotNull('afm')->orderBy('id')->chunkById(500, function ($rows): void {
+                foreach ($rows as $row) {
+                    $key = Afm::uniqueKey($row->afm);
+                    if ($key !== $row->afm) {
+                        DB::table('leads')->where('id', $row->id)->update(['afm' => $key]);
+                    }
+                }
+            });
+        }
 
         $duplicates = app(CustomerAfmDuplicates::class)->find();
         if ($duplicates->isNotEmpty()) {

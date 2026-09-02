@@ -370,7 +370,8 @@ class PendingWhmcsInvoice extends Model
     /** The ΑΦΜ the customer entered in WHMCS (role 'vatno'), digits only. */
     public function whmcsAfm(): ?string
     {
-        return Afm::normalise($this->whmcsCustomField('vatno'));
+        // The ΑΦΜ IDENTITY (letters kept for a foreign VAT, null for a placeholder).
+        return Afm::uniqueKey($this->whmcsCustomField('vatno'));
     }
 
     public function whmcsTaxOffice(): ?string

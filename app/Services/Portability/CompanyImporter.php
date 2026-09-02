@@ -411,6 +411,13 @@ class CompanyImporter
             ? DB::table('customers')->where('company_id', $companyId)->whereNotNull('legacy_id')->pluck('legacy_id', 'id')->all()
             : [];
 
+        // customers: natural-key twins FIRST (their updates release any ΑΦΜ they
+        // gave up), then the rest — so an ΑΦΜ-merge can never land on a row that
+        // a later bundle row owns by legacy_id, whatever the dump order.
+        if ($table === 'customers') {
+            usort($rows, fn (array $a, array $b): int => (int) isset($index[$this->naturalKey($table, $b)]) <=> (int) isset($index[$this->naturalKey($table, $a)]));
+        }
+
         foreach ($rows as $row) {
             $oldId = $row['id'] ?? null;
             $data = $this->rowData($table, $row, $companyId, $maps);

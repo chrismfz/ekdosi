@@ -35,7 +35,11 @@ final class Afm
      */
     public static function uniqueKey(?string $raw): ?string
     {
-        $key = strtoupper(preg_replace('/[^A-Za-z0-9]+/', '', (string) $raw) ?? '');
+        // A Greek-keyboard slip on the country prefix («ΕL», «ΕΛ», «EΛ» with a
+        // Greek Ε/Λ) must not mint a new identity: fold it to «EL» first. Every
+        // other Greek letter (an «ΑΦΜ» label, stray text) is simply dropped.
+        $upper = strtr(mb_strtoupper((string) $raw), ['ΕΛ' => 'EL', 'ΕL' => 'EL', 'EΛ' => 'EL']);
+        $key = preg_replace('/[^A-Z0-9]+/', '', $upper) ?? '';
         if ($key === '') {
             return null;
         }

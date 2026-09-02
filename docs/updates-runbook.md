@@ -85,6 +85,8 @@ tenant has two customers with the same ΑΦΜ (soft-deleted included). Before `u
 ```bash
 php artisan customers:afm-duplicates          # exit 0 = clean, 1 = duplicates listed
 ```
+The command works on the NEW code **before** `migrate` (it derives the identity in PHP while
+the `afm_key` column doesn't exist yet), so run it right after checking out the tag.
 
 Resolve each group (fix the wrong ΑΦΜ, or move its documents and delete the duplicate), then
 deploy. Placeholder ΑΦΜ (000000000 …) and blanks are NOT identities and never collide.

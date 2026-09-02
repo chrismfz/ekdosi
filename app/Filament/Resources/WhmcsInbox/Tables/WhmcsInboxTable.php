@@ -1244,9 +1244,10 @@ class WhmcsInboxTable
                         $tenant = Filament::getTenant();
                         try {
                             $groups = app(WhmcsInvoiceSplitter::class)->planGroups($tenant, $r);
-                        } catch (Throwable $e) {
-                            // e.g. a routed contact whose ΑΦΜ belongs to a soft-deleted
-                            // customer — show the guidance, don't break the modal.
+                        } catch (\RuntimeException $e) {
+                            // The resolver's GUIDED message (e.g. a routed contact whose
+                            // ΑΦΜ belongs to a soft-deleted customer) — show it, don't
+                            // break the modal. Anything else propagates.
                             return '⚠ '.$e->getMessage();
                         }
                         if ($groups === []) {

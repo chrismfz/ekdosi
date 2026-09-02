@@ -35,7 +35,7 @@ class ContactCustomerResolver
      */
     public function resolve(Company $tenant, array $contact): ?Customer
     {
-        $afm = Afm::normalise((string) ($contact['gr_vatno'] ?? ''));
+        $afm = Afm::uniqueKey((string) ($contact['gr_vatno'] ?? ''));
         if ($afm === null) {
             return null;
         }

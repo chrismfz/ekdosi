@@ -353,9 +353,8 @@ class MigrateFromFirebird extends Command
         // The TARGET side (the parallel-run week): a local row that owns one of
         // the source ΑΦΜ and would NOT be released by this run — i.e. it has no
         // legacy_id (made in the panel) or its legacy_id no longer exists in the
-        // source. A row whose own source twin merely changed ΑΦΜ is fine: the
-        // update pass (existing legacy_ids first) releases the key before any
-        // insert needs it.
+        // source. Rows that ARE in the source get their afm_key released before
+        // the upserts (see copyCustomers), so moves and swaps are fine.
         if ($keyByCustId !== []) {
             foreach (array_chunk(array_map('strval', array_keys($byKey)), 500) as $keys) {
                 $owners = DB::table('customers')
@@ -364,10 +363,8 @@ class MigrateFromFirebird extends Command
                     ->get(['id', 'name', 'afm_key', 'legacy_id', 'deleted_at']);
                 foreach ($owners as $o) {
                     $ownerLegacy = $o->legacy_id !== null ? (int) $o->legacy_id : null;
-                    $stillInSource = $ownerLegacy !== null && array_key_exists($ownerLegacy, $keyByCustId);
-                    $sameParty = $stillInSource && $keyByCustId[$ownerLegacy] === (string) $o->afm_key;
-                    if ($sameParty || $stillInSource) {
-                        continue; // its own source row will keep or release the key
+                    if ($ownerLegacy !== null && array_key_exists($ownerLegacy, $keyByCustId)) {
+                        continue; // rewritten by this run → its key is released first
                     }
                     $claimant = array_search((string) $o->afm_key, $keyByCustId, true);
                     $lines[] = "  ΑΦΜ {$o->afm_key}: υπάρχει ήδη στο ekdosi ως #{$o->id} «{$o->name}»"
@@ -553,16 +550,13 @@ class MigrateFromFirebird extends Command
         // legacy DB (placeholders like 000000000 are not identities and pass).
         $this->assertNoDuplicateLegacyAfm($rows);
 
-        // Updates BEFORE inserts: a legacy row whose ΑΦΜ moved to another
-        // CUST_ID releases the key (unique index) before the new row claims it.
-        $known = DB::table('customers')
+        // Release every ΑΦΜ held by a row this run will rewrite (inside the
+        // import transaction): an ΑΦΜ that moved between CUST_IDs — or swapped —
+        // can then be re-claimed in any order without hitting the unique index.
+        DB::table('customers')
             ->where('company_id', $this->companyId)
-            ->whereNotNull('legacy_id')
-            ->pluck('legacy_id')
-            ->map(fn ($v): int => (int) $v)
-            ->flip()
-            ->all();
-        usort($rows, fn (array $a, array $b): int => (int) isset($known[(int) $b['CUST_ID']]) <=> (int) isset($known[(int) $a['CUST_ID']]));
+            ->whereIn('legacy_id', array_map(fn (array $r): int => (int) $r['CUST_ID'], $rows))
+            ->update(['afm_key' => null]);
 
         foreach ($rows as $r) {
             // Filament-managed columns (is_active, needs_immediate_invoice,
