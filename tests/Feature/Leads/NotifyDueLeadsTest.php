@@ -8,6 +8,7 @@ use App\Models\Lead;
 use App\Models\User;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
 use Tests\TestCase;
 
 /**
@@ -34,7 +35,16 @@ class NotifyDueLeadsTest extends TestCase
         $this->anna = User::create(['name' => 'Άννα', 'email' => 'anna-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
         $this->nikos = User::create(['name' => 'Νίκος', 'email' => 'nikos-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
         $this->tenant->users()->attach([$this->anna->id, $this->nikos->id]);
+
+        // Allow-all gate (roles are provisioned in production); a test may deny.
+        Gate::before(fn ($user, string $ability): bool => ! in_array($ability, $this->deny, true) && ! in_array($user->id, $this->denyUsers, true));
     }
+
+    /** @var list<string> */
+    private array $deny = [];
+
+    /** @var list<int> user ids who may see nothing */
+    private array $denyUsers = [];
 
     private function lead(string $name, ?\DateTimeInterface $next, ?User $assignee = null, LeadStatus $status = LeadStatus::New): Lead
     {
@@ -66,7 +76,8 @@ class NotifyDueLeadsTest extends TestCase
         $this->assertSame('Επόμενο βήμα σε 3 leads', $annaData['title']);
         $this->assertStringContainsString('Ληξιπρόθεσμο της Άννας', $annaData['body']);
         $this->assertStringContainsString('2 ληξιπρόθεσμα', $annaData['body']);
-        $this->assertStringContainsString('activeTab=overdue', $annaData['actions'][0]['url']);
+        $this->assertStringContainsString('tab=overdue', $annaData['actions'][0]['url']);
+        $this->assertStringNotContainsString('activeTab', $annaData['actions'][0]['url'], 'ListRecords reads ?tab=, not ?activeTab=');
 
         $nikosData = $this->nikos->notifications()->first()->data;
         $this->assertSame('Επόμενο βήμα σε lead', $nikosData['title']);
@@ -84,6 +95,28 @@ class NotifyDueLeadsTest extends TestCase
         $this->assertSame(0, $gone->notifications()->count());
         $this->assertSame(1, $this->anna->notifications()->count());
         $this->assertSame(1, $this->nikos->notifications()->count());
+    }
+
+    public function test_users_without_lead_permission_never_get_the_bell(): void
+    {
+        $this->lead('Της Άννας', now()->subDay(), $this->anna);
+        $this->lead('Χωρίς χειριστή', now()->subDay());
+        $this->denyUsers = [$this->nikos->id]; // e.g. an accounting-only role
+
+        $this->artisan('leads:notify-due')->assertExitCode(0);
+
+        $this->assertSame(1, $this->anna->notifications()->count());
+        $this->assertSame(0, $this->nikos->notifications()->count(), 'no bell whose «Προβολή» would 403');
+
+        // An assignee who may not see leads: the lead falls back to everyone who may.
+        $this->denyUsers = [$this->anna->id];
+        $this->artisan('leads:notify-due')->assertExitCode(0);
+        $this->assertSame(1, $this->anna->notifications()->count(), 'nothing new for Άννα');
+        $this->assertSame(1, $this->nikos->notifications()->count(), 'Νίκος (allowed now) hears about both');
+
+        // Nobody may see leads → quiet, nothing sent.
+        $this->denyUsers = [$this->anna->id, $this->nikos->id];
+        $this->artisan('leads:notify-due')->expectsOutputToContain('κανένας χρήστης με δικαίωμα')->assertExitCode(0);
     }
 
     public function test_dry_run_sends_nothing_and_a_missing_tenant_fails(): void

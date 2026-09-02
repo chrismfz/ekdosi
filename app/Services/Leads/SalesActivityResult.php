@@ -47,11 +47,6 @@ final class SalesActivityResult
         return array_fill_keys(array_keys(self::COLUMNS), 0);
     }
 
-    public function isEmpty(): bool
-    {
-        return $this->operators === [] && $this->log->isEmpty();
-    }
-
     /** Column totals across operators. @return array<string, int> */
     public function totals(): array
     {

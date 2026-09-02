@@ -444,6 +444,10 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `.fbk` shows the pattern — `SELECT afm FROM customers WHERE afm REGEXP '^(VAT|AFM|TIN)[0-9]'`.
   (b) `CompanyImporter` reads the tenant's customers 3× per phase (existingIndex / afmKeyIndex /
   customerOwners) — one `get()` could feed all three; only matters at tens of thousands of customers.
+- **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables::exportCsv` και
+  `SalesActivityReport::exportCsv` κουβαλούν το ίδιο BOM + formula-guard + `fputcsv(';')`· το
+  `AgedReceivables` δεν περνά `escape:` (E_DEPRECATED ανά γραμμή σε PHP 8.4). Ένα κοινό
+  `App\Support\Csv::stream()` όταν προστεθεί τρίτη σελίδα με CSV.
 - **ETL (`migrate:firebird`) — διπλό ΑΦΜ ΜΕΣΑ στη legacy πηγή = hard stop** _(από το review του
   ΑΦΜ unique constraint, PR #394)._ Το `assertNoDuplicateLegacyAfm` σταματά όλο το run (τίποτα δεν γράφεται)
   αν δύο CUST_IDs μοιράζονται ένα ΑΦΜ· λύνεται μόνο στη legacy βάση (συγχώνευση/διόρθωση εκεί — η legacy

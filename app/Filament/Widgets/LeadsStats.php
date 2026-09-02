@@ -47,7 +47,8 @@ class LeadsStats extends StatsOverviewWidget
             ->whereBetween('happened_at', [now()->startOfMonth(), now()->endOfMonth()])
             ->count();
 
-        $url = fn (string $tab): string => LeadResource::getUrl('index', ['activeTab' => $tab]);
+        // ListRecords binds its active tab to `?tab=` (#[Url(as: 'tab')]).
+        $url = fn (string $tab): string => LeadResource::getUrl('index', ['tab' => $tab]);
 
         return [
             Stat::make('Ανοιχτά leads', (string) $open)

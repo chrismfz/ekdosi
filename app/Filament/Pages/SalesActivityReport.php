@@ -43,6 +43,9 @@ class SalesActivityReport extends Page
 
     private ?SalesActivityResult $result = null;
 
+    /** @var array<int, string>|null */
+    private ?array $operatorOptions = null;
+
     public function getTitle(): string
     {
         return 'Απολογισμός πωλήσεων';
@@ -113,10 +116,14 @@ class SalesActivityReport extends Page
      */
     public function getOperatorOptions(): array
     {
+        if ($this->operatorOptions !== null) {
+            return $this->operatorOptions;
+        }
+
         /** @var Company $tenant */
         $tenant = Filament::getTenant();
 
-        return $tenant->users()->orderBy('name')->pluck('users.name', 'users.id')->all();
+        return $this->operatorOptions = $tenant->users()->orderBy('name')->pluck('users.name', 'users.id')->all();
     }
 
     /** Memoised per request. A malformed date falls back to the current week. */
@@ -171,15 +178,15 @@ class SalesActivityReport extends Page
         return response()->streamDownload(function () use ($result, $safe): void {
             $h = fopen('php://output', 'w');
             fwrite($h, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
-            fputcsv($h, ['Περίοδος', $result->periodLabel()], ';');
-            fputcsv($h, [], ';');
-            fputcsv($h, ['Χειριστής', ...array_values(SalesActivityResult::COLUMNS)], ';');
+            fputcsv($h, ['Περίοδος', $result->periodLabel()], ';', escape: '');
+            fputcsv($h, [], ';', escape: '');
+            fputcsv($h, ['Χειριστής', ...array_values(SalesActivityResult::COLUMNS)], ';', escape: '');
             foreach ($result->operators as $row) {
-                fputcsv($h, [$safe($row->name), ...array_values($row->counters)], ';');
+                fputcsv($h, [$safe($row->name), ...array_values($row->counters)], ';', escape: '');
             }
-            fputcsv($h, ['Σύνολα', ...array_values($result->totals())], ';');
-            fputcsv($h, [], ';');
-            fputcsv($h, ['Ημερολόγιο', 'Πότε', 'Χειριστής', 'Lead', 'Τύπος', 'Κατεύθυνση', 'Αποτέλεσμα', 'Κείμενο'], ';');
+            fputcsv($h, ['Σύνολα', ...array_values($result->totals())], ';', escape: '');
+            fputcsv($h, [], ';', escape: '');
+            fputcsv($h, ['Ημερολόγιο', 'Πότε', 'Χειριστής', 'Lead', 'Τύπος', 'Κατεύθυνση', 'Αποτέλεσμα', 'Κείμενο'], ';', escape: '');
             foreach ($result->log as $row) {
                 fputcsv($h, [
                     '',
@@ -190,7 +197,7 @@ class SalesActivityReport extends Page
                     $row->directionLabel() ?? '',
                     $row->outcomeLabel() ?? '',
                     $safe($row->body),
-                ], ';');
+                ], ';', escape: '');
             }
             fclose($h);
         }, $name, ['Content-Type' => 'text/csv; charset=UTF-8']);
