@@ -84,6 +84,29 @@ class SyncInvoiceStateFromAadeTest extends TestCase
         ]);
     }
 
+    /**
+     * The only caller passes this from a public Livewire property, which is
+     * client-writable. An arbitrary string must never become «AADE's cancellation
+     * MARK» in the legal audit trail, and an over-long one must not abort the
+     * sync on a column-length error either.
+     */
+    public function test_a_value_that_is_not_a_mark_is_recorded_as_no_evidence(): void
+    {
+        foreach (['<script>x</script>', '400001964598454; DROP', '40000196459845X', str_repeat('9', 41)] as $junk) {
+            $invoice = $this->invoice('VALID', 'active');
+
+            $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, 'CANCELLED', $junk);
+
+            $this->assertTrue($result['changed'], "sync must still succeed for: {$junk}");
+            $this->assertSame('CANCELLED', $invoice->fresh()->mydata_state);
+            $this->assertDatabaseHas('mydata_marks', [
+                'invoice_id' => $invoice->id,
+                'mydata_action' => 'STATE_SYNC',
+                'cancellation_mark' => null,
+            ]);
+        }
+    }
+
     /** A cancellation mark is meaningless on a VALID sync — never carried over. */
     public function test_valid_sync_does_not_store_a_cancellation_mark(): void
     {

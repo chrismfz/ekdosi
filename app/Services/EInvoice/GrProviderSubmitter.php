@@ -260,7 +260,10 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 // becomes mandatory. `mydata_marks.cancellation_mark` already
                 // existed for the direct path; it was simply not used here.
                 'mark' => (string) $mark,
-                'cancellation_mark' => $result->cancellationMark,
+                // '' is not evidence — normalise it away (see the delivery twin).
+                'cancellation_mark' => is_string($result->cancellationMark) && trim($result->cancellationMark) !== ''
+                    ? trim($result->cancellationMark)
+                    : null,
                 'mydata_action' => 'PROVIDER_CANCEL',
                 'provider_key' => $this->transport->key(),
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,

@@ -439,6 +439,23 @@ class DeliveryLifecycleServiceTest extends TestCase
         // δελτίο on 2026-06-09, and no invoice has ever been cancelled at AADE.
         $this->assertSame('400001234599399', $mark->cancellation_mark, 'the cancel act itself');
         $this->assertStringContainsString('λάθος παραλήπτης', (string) $mark->request);
+    }
+
+    /**
+     * A cancellation MARK of '' must be stored as NULL, not as ''. The audit row
+     * is built with `array_filter(…, fn ($v) => $v !== null)`, which strips only
+     * nulls — so an empty MARK would persist and read as «we hold a cancellation
+     * MARK», the exact confusion the column split exists to remove.
+     */
+    public function test_an_empty_cancellation_mark_is_stored_as_no_evidence(): void
+    {
+        $note = $this->makeFiledNote();
+
+        $mark = $this->service($this->cancelResponseWithoutMark())->cancel($note, '');
+
+        $this->assertSame('480301204040191', $mark->mark, 'still records WHAT was cancelled');
+        $this->assertNull($mark->cancellation_mark);
+        $this->assertSame('CANCELLED', $note->fresh()->mydata_state, 'the cancellation still stands');
 
         $this->assertDatabaseHas('delivery_marks', [
             'delivery_note_id' => $note->id,
@@ -606,6 +623,20 @@ XML;
 <ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <response>
         <cancellationMark>400001234599399</cancellationMark>
+        <statusCode>Success</statusCode>
+    </response>
+</ResponseDoc>
+XML;
+    }
+
+    /** Success, but AADE named no cancellation MARK — '' is not evidence. */
+    private function cancelResponseWithoutMark(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <cancellationMark></cancellationMark>
         <statusCode>Success</statusCode>
     </response>
 </ResponseDoc>

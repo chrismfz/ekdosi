@@ -2104,6 +2104,21 @@ strand the very document it exists to fix.
 delivery-note PDF audit table and the delivery/invoice mark relation managers. The
 invoice `cancellation_mark` column had existed for three months and was never rendered.
 
+**Review round 1 (no P0/P1) — three fixed, one deferred.** Fixed: the state-sync
+cancellation MARK is now shape-checked before it reaches the audit trail (its only
+caller passes it from a client-writable Livewire property, so an arbitrary string
+would have become fabricated «AADE evidence», and one over 40 chars would have
+aborted the sync on a column error); an empty `cancellationMark` normalises to NULL
+on both cancel persists (`array_filter` strips only nulls, so `''` would have
+persisted and read as evidence); and a companion migration un-inverts any historical
+provider CANCEL row whose `mark` holds the *cancellation* MARK, separating the two
+kinds against the document's own INSERT row and refusing to guess when that row is
+absent (expected to touch zero rows — no tenant has filed through a provider in
+production yet). Deferred to `docs/BACKLOG.md`: the MARK page's XML panel shows the
+latest exchange for a MARK, so a CANCEL row now hides the original filing XML — but
+that is how the direct path has always behaved, so this change made the provider path
+*consistent* rather than introducing a regression.
+
 **Deferred — strict refusal on a markless `Success` (→ `docs/BACKLOG.md`).** The
 finding also asks that a fresh normal `Success` without a cancellation MARK stay
 non-terminal. Not done, and not a small change in isolation: the direct-invoice path

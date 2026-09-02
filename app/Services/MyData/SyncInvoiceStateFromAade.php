@@ -53,9 +53,15 @@ class SyncInvoiceStateFromAade
         // route that recovers an invoice whose cancellation we learned about
         // late, and refusing the sync over missing evidence would strand exactly
         // the document it exists to repair.
-        $cancelledByMark = $aadeState === 'CANCELLED' && $cancelledByMark !== null && trim($cancelledByMark) !== ''
-            ? trim($cancelledByMark)
-            : null;
+        //
+        // SHAPE-CHECKED, though. The only caller reaches this from a public
+        // Livewire property, which is client-writable: without this an arbitrary
+        // string would be written into the legal audit trail as «AADE's
+        // cancellation MARK» — fabricated evidence — and anything over 40 chars
+        // would abort the sync on a column-length error instead. A MARK is a
+        // numeric AADE identifier; anything else is not one, so it is recorded as
+        // «no evidence» rather than as evidence of something we cannot vouch for.
+        $cancelledByMark = $aadeState === 'CANCELLED' ? self::cleanMark($cancelledByMark) : null;
 
         $fromState = $invoice->mydata_state;
         $fromLocal = $invoice->local_status;
@@ -120,5 +126,19 @@ class SyncInvoiceStateFromAade
         }
 
         return ['changed' => true, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $toLocal];
+    }
+
+    /**
+     * A MARK we are willing to record as evidence, or null.
+     *
+     * AADE MARKs are numeric strings (15 digits today); the column holds 40. Both
+     * bounds are checked so neither a crafted value nor a future-longer MARK can
+     * turn into a truncation or a write error at the audit boundary.
+     */
+    private static function cleanMark(?string $mark): ?string
+    {
+        $mark = trim((string) $mark);
+
+        return preg_match('/^\d{1,40}$/', $mark) === 1 ? $mark : null;
     }
 }
