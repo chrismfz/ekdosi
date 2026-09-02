@@ -12,6 +12,20 @@ use Spatie\Backup\Tasks\Cleanup\Strategies\DefaultStrategy;
 use Spatie\Backup\Tasks\Monitor\HealthChecks\MaximumAgeInDays;
 use Spatie\Backup\Tasks\Monitor\HealthChecks\MaximumStorageInMegabytes;
 
+/*
+ | Retention values are env-tunable. A blank env value ("KEY=") must fall back to
+ | the shipped default, NOT silently become 0 — env()'s own default only covers an
+ | ABSENT key, and (int) '' is 0. So guard with is_numeric() (a real "0" still wins,
+ | e.g. to skip a tier). Invoked inline to produce plain ints, so `config:cache`
+ | still serializes the resolved array cleanly (no closure is stored as a value).
+ */
+$backupIntEnv = static fn (string $key, int $default): int => is_numeric($v = env($key, $default)) ? (int) $v : $default;
+
+// Size cap in MB: a POSITIVE int is the ceiling; 0 / blank / non-numeric = null =
+// unlimited. 0 must NOT mean a literal 0-MB cap (that would delete every backup but
+// the newest on the next backup:clean) — treat it as "no cap", the intuitive reading.
+$backupMaxStorageMb = (is_numeric($mb = env('BACKUP_MAX_STORAGE_MB', 5000)) && (int) $mb > 0) ? (int) $mb : null;
+
 return [
 
     'backup' => [
@@ -359,44 +373,44 @@ return [
          */
         'strategy' => DefaultStrategy::class,
 
+        /*
+         * Retention policy (env-tunable — the crons are already env-driven, so
+         * the sizing that goes with them is too). The tiers are CUMULATIVE: each
+         * one starts where the previous ended, and anything older than the last
+         * non-zero tier is deleted. The newest backup is NEVER deleted. Applied
+         * when `backup:clean` runs (default 02:30). Set a tier to 0 to skip it.
+         *
+         * Each tier's window is ADDITIVE to the ones before it (spatie builds the
+         * daily Period as [now-(keep_all+keep_daily) .. now-keep_all]). Shipped
+         * default = "light + a few months of history": keep EVERYTHING for 7 days
+         * → then a FURTHER 30 days at one-per-day → (no weekly tier) → then 6 months
+         * at one-per-month → nothing older. Total horizon ≈ 7 days + 30 days + 6
+         * months ≈ 7 months — much lighter than the old 2-year default, which let
+         * `private/<app>/` grow unbounded (a legal invoicing DB whose dumps carry
+         * the full mydata_marks XML).
+         *
+         * For an even leaner "7 days + a month of dailies" box, drop the monthly
+         * tier: BACKUP_KEEP_MONTHLY_MONTHS=0 (env, no code change).
+         */
         'default_strategy' => [
-            /*
-             * The number of days for which backups must be kept.
-             */
-            'keep_all_backups_for_days' => 7,
+            // Keep EVERY backup from the last N days (no thinning).
+            'keep_all_backups_for_days' => $backupIntEnv('BACKUP_KEEP_ALL_DAYS', 7),
 
-            /*
-             * After the "keep_all_backups_for_days" period is over, the most recent backup
-             * of that day will be kept. Older backups within the same day will be removed.
-             * If you create backups only once a day, no backups will be removed yet.
-             */
-            'keep_daily_backups_for_days' => 16,
+            // Then, for a FURTHER N days beyond that, keep the most recent per day.
+            'keep_daily_backups_for_days' => $backupIntEnv('BACKUP_KEEP_DAILY_DAYS', 30),
 
-            /*
-             * After the "keep_daily_backups_for_days" period is over, the most recent backup
-             * of that week will be kept. Older backups within the same week will be removed.
-             * If you create backups only once a week, no backups will be removed yet.
-             */
-            'keep_weekly_backups_for_weeks' => 8,
+            // Then, for a further N weeks, keep the most recent per week (0 = skip).
+            'keep_weekly_backups_for_weeks' => $backupIntEnv('BACKUP_KEEP_WEEKLY_WEEKS', 0),
 
-            /*
-             * After the "keep_weekly_backups_for_weeks" period is over, the most recent backup
-             * of that month will be kept. Older backups within the same month will be removed.
-             */
-            'keep_monthly_backups_for_months' => 4,
+            // Then, for a further N months, keep the most recent per month.
+            'keep_monthly_backups_for_months' => $backupIntEnv('BACKUP_KEEP_MONTHLY_MONTHS', 6),
 
-            /*
-             * After the "keep_monthly_backups_for_months" period is over, the most recent backup
-             * of that year will be kept. Older backups within the same year will be removed.
-             */
-            'keep_yearly_backups_for_years' => 2,
+            // Then, for a further N years, keep the most recent per year (0 = skip).
+            'keep_yearly_backups_for_years' => $backupIntEnv('BACKUP_KEEP_YEARLY_YEARS', 0),
 
-            /*
-             * After cleaning up the backups remove the oldest backup until
-             * this amount of megabytes has been reached.
-             * Set null for unlimited size.
-             */
-            'delete_oldest_backups_when_using_more_megabytes_than' => 5000,
+            // Hard size ceiling AFTER tiered cleanup (MB). null = unlimited — see
+            // $backupMaxStorageMb above for the 0/blank handling.
+            'delete_oldest_backups_when_using_more_megabytes_than' => $backupMaxStorageMb,
         ],
 
         /*

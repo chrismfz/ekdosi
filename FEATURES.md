@@ -382,6 +382,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 ## 14. Backups / Portability / DR
 - **Per-company backups** (`spatie/laravel-backup`) — πρόγραμμα/διατήρηση/προορισμοί
   (Τοπικά/SFTP/FTP/S3), «Αντίγραφο/Λήψη τώρα».
+- **Διατήρηση καθολικών (whole-DB) backups — env-tunable** (`BACKUP_KEEP_ALL_DAYS`/`DAILY_DAYS`/
+  `WEEKLY_WEEKS`/`MONTHLY_MONTHS`/`YEARLY_YEARS` + `BACKUP_MAX_STORAGE_MB`, `config/backup.php`).
+  Default «ελαφρύ + λίγοι μήνες»: όλα 7 μέρες → άλλες 30 μέρες 1/μέρα → 6 μήνες 1/μήνα (προσθετικές
+  βαθμίδες, ~7 μήνες σύνολο)· το πιο πρόσφατο δεν σβήνεται ποτέ. Ξεχωριστό από τα per-company παραπάνω.
 - **Export/Import εταιρίας** — settings+setup ή πλήρες· **χωρίς υποχρεωτικό κωδικό**
   (passphrase ή raw, με σαφή plaintext προειδοποίηση στο raw)· `company:export`/`company:import`
   + panel actions. Η κατάσταση κρυπτογράφησης **καθολικών** αντιγράφων (env `BACKUP_ARCHIVE_PASSWORD`)
