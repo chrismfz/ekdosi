@@ -3601,9 +3601,10 @@ Re-check this entry when any of the following happens:
 > capped counts and the error-code extraction). The acceptance below is met: from a
 > cold start, with only MCP, `invoice_filing` returns a document's local×myDATA state
 > plus its full `mydata_marks` history and — on request — one attempt's raw
-> request/response XML. The ONE thing deliberately left is the optional «cheap»
-> per-success INFO log line (below, under «Also worth doing») — it was never part of
-> the acceptance and is recorded in `docs/BACKLOG.md` as an OBS-001 tail.
+> request/response XML. The optional «cheap» per-success INFO log line (below, under
+> «Also worth doing») has now ALSO shipped — `App\Support\EInvoice\FilingLog::filed`,
+> called from both submitters — so `log_tail --contains=<invcode>` finds successful
+> filings too, not just failures.
 
 > Not legally required, unlike the other five blockers. It is here because it is
 > what decides whether a day-one problem costs minutes or a day.
@@ -3656,10 +3657,12 @@ for myip** and offers no way to see a single one of them.
 5. **`preflight`** — the existing `mydata:preflight` / `ekdosi:go-live-check`
    output over MCP, so readiness is checkable without a shell.
 
-**Also worth doing (cheap):** the submitters log failures but not successes. One
-structured INFO line per filing outcome (channel, type, series/ΑΑ, MARK,
-duration) makes `log_tail --contains=<invcode>` work even when the DB write is
-the thing that failed.
+**Also worth doing (cheap) — ✅ DONE.** The submitters logged failures but not
+successes. `App\Support\EInvoice\FilingLog::filed` now emits one structured INFO
+line per successful filing (channel, type, series/ΑΑ, MARK, duration), from the
+single success choke-point in each submitter's `performSubmit`, with the invcode
+and MARK in the message text — so `log_tail --contains=<invcode>` works for a
+filing that WORKED, not only when the DB write is the thing that failed.
 
 **Explicitly not needed:** extra activity-log coverage, verbose/debug logging, or a
 second audit store. All three would add noise to a trail that already contains the

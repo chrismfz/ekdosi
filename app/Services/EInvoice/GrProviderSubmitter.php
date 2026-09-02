@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\MyDataRejected;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\EInvoice\FilingLog;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
@@ -103,6 +104,9 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         $xml = $document->toXml($payload);
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 
+        // Wall-clock from just before the outbound send to the success log below.
+        $startedAt = microtime(true);
+
         try {
             $result = $this->transport->send($invoice, $xml, $credentials);
         } catch (Throwable $e) {
@@ -143,6 +147,12 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         }
 
         $mark = $this->persistSuccess($invoice, $xml, $result);
+
+        // OBS-001: one structured success line so `log_tail --contains=<invcode>`
+        // finds a provider filing that WORKED, not just the ones that failed. The
+        // recovery/adopt path logs its own (warning) line naming the MARK.
+        FilingLog::filed($invoice, (string) $mark->mark, $this->transport->key(), $startedAt);
+
         $this->syncWhmcsFiled($invoice, $mark);
 
         return $mark;
