@@ -814,6 +814,41 @@ a per-field fallback chain.
 - **The provider could receive an empty `CounterpartName`** (legal for a GR counterpart in the
   AADE payload, rejected by InvoSign as `[88-001]`) — it now refuses with the field to fill.
 
+**Round-2 review corrections (the same root cause, twice):**
+
+The round-1 fix left the country policy in TWO places — a helper on the model and a copy in the
+builder — and the copies disagreed. That is what produced the round-1 P0 and produced another
+here, so the policy is now a single method (`Invoice::counterpartCountryForFiling()`) called by
+the payload, the provider document and the freeze.
+
+- **A foreign party was still filed as GR when the customer was unreadable.** The "nothing
+  recorded anywhere" test was `blank($customer?->country)`, which is also true for a
+  soft-deleted or absent customer — so «IT12345678901» with a deleted customer filed as
+  domestic, with no name and no address. The GR default now yields to CONTRARY EVIDENCE, and
+  that includes the ΑΦΜ's own country prefix (`Afm::countryPrefix()`): an «IT…» identifier says
+  the party is not Greek whatever the country columns do or don't say.
+- **The sanctioned GR default was never frozen.** It lived only in the builder, so a filed
+  invoice recorded no country — and an operator later filling `customers.country`, a routine
+  edit, made that already-filed document un-renderable.
+- **The freeze gate inspected only the identity columns.** A foreign invoice with a complete
+  identity but a blank address filed the live customer's address and froze nothing, then threw
+  "requires a full address" on re-render while AADE held the real one. The address is now frozen
+  exactly when it is filed — non-GR only, since AADE forbids it for a GR counterpart and
+  recording it there would assert something never reported.
+- **Every retail document would have been rejected by the provider.** The empty-name guard was
+  applied to 11.x too, but retail has no legal counterpart to protect — only a printable name —
+  and InvoSign hard-rejects an empty `CounterpartName` with `[88-001]`.
+- **`canonicalVat()` and `comparisonKey()` contradicted each other inside one commit**: one
+  stripped the «EL» prefix on the way out, the other kept it when deciding whether two parties
+  are the same — so one taxpayer read as two and an invoice that used to file was refused.
+  `customers.afm` legitimately carries the prefix (the VIES form-fill seeds a full VAT id).
+- **An unresolvable snapshot country was silently replaced by the customer's** — «Germania»
+  became the customer's «GR», breaking the recorded-value-is-evidence rule again.
+- **`invoices.company_name` was varchar(120) against `customers.name` varchar(191)**, so the
+  freeze could raise under strict mode inside the MARK transaction — discarding the record of a
+  filing AADE had accepted. Fixed at the source by widening the column (migration), with the
+  per-column truncation kept as a guard.
+
 **Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
 a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
 party does not inherit the linked customer's country; the freeze fills blanks only and never

@@ -25,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\URL;
+use RuntimeException;
 
 /**
  * Issued invoice (παραστατικό). Mirrors legacy INVOICE.
@@ -337,14 +338,18 @@ class Invoice extends Model
     }
 
     /**
-     * The counterpart's country as a normalised ISO-3166-1 alpha-2, or null when
-     * it cannot be resolved. Shares App\Support\IsoCountry with the delivery
-     * payload, so the two surfaces agree on «ΙΤΑΛΙΑ» / «EL» / «UK».
+     * The counterpart's country as a normalised ISO-3166-1 alpha-2, or null when it
+     * cannot be resolved from a source this document is allowed to read.
+     *
+     * A country PRESENT on the document is authoritative even when it does not
+     * normalise: falling through to the customer there let a snapshot reading
+     * «Germania» be quietly replaced by the customer's «GR», which is the
+     * recorded-value-is-evidence rule (MYD-011 round 7) broken again.
      */
     public function counterpartCountryIso(): ?string
     {
-        if ($iso = IsoCountry::tryNormalise($this->country)) {
-            return $iso;
+        if (filled($this->country)) {
+            return IsoCountry::tryNormalise($this->country);
         }
 
         return $this->mayFallBackToLiveCustomer()
@@ -353,18 +358,64 @@ class Invoice extends Model
     }
 
     /**
-     * Is any part of the legal counterpart ACTUALLY being resolved from the live
-     * customer row right now?
+     * THE country this document files — one definition, used by the AADE payload,
+     * the provider payload and the freeze, so they cannot drift (the first cut kept
+     * this policy in the builder and a second copy in the helper, and the two
+     * disagreed within one commit).
      *
-     * True only when the snapshot is incomplete AND the fallback is permitted (an
-     * unfiled document whose customer really is the counterpart). The submitter
-     * uses it to FREEZE what it resolved at the moment it files, so the column
-     * stops being a half-truth from then on.
+     * Three outcomes, and telling them apart is the whole point:
+     *
+     *  - resolvable from a source we may read → that country;
+     *  - NO country evidence of any kind → «GR». Unlike a delivery note (MYD-011)
+     *    this default is safe: the per-type check in the builder still enforces the
+     *    domestic/EU/third-country split, and `invoices.country` is blank on most
+     *    legacy domestic rows, which would otherwise all become unissuable;
+     *  - evidence exists but this document may not use it → THROW.
+     *
+     * "Evidence" deliberately includes the ΑΦΜ's own country prefix. An invoice
+     * whose snapshot reads «IT12345678901» with a soft-deleted customer has no
+     * country column anywhere — but it is plainly not a domestic party, and filing
+     * it as GR is the misreport this whole issue exists to stop.
+     *
+     * @throws RuntimeException when a country exists that this document must not read
      */
-    public function counterpartResolvedFromLiveCustomer(): bool
+    public function counterpartCountryForFiling(): string
     {
-        return $this->mayFallBackToLiveCustomer()
-            && (blank($this->vat_no) || blank($this->company_name) || blank($this->country));
+        if ($iso = $this->counterpartCountryIso()) {
+            return $iso;
+        }
+
+        // Present on the document but unresolvable — throw with the offending value.
+        if (filled($this->country)) {
+            return IsoCountry::normalise($this->country);
+        }
+
+        // The ΑΦΜ says the party is foreign, whatever the country columns do (or
+        // don't) say. Never default that to GR.
+        if ($prefix = Afm::countryPrefix($this->counterpartAfm())) {
+            if ($prefix !== 'GR') {
+                throw new RuntimeException(
+                    "Invoice {$this->invcode} records no counterpart country, but its ΑΦΜ "
+                    ."«{$this->counterpartAfm()}» is a {$prefix} VAT identifier. "
+                    .'Set «Χώρα» on the invoice — a foreign party must not be filed as GR.'
+                );
+            }
+        }
+
+        // A country exists on the linked customer that this document may not use.
+        if (filled($this->customer?->country)) {
+            throw new RuntimeException(
+                "Invoice {$this->invcode} records no counterpart country of its own, and its "
+                ."linked customer's country cannot be used for it — "
+                .($this->hasBeenFiled()
+                    ? 'the document is already filed, so its own snapshot is the only source.'
+                    : 'the invoice names a different party than that customer.')
+                .' Set «Χώρα» on the invoice — filing it as GR on a guess is exactly what this refuses.'
+            );
+        }
+
+        // Nothing anywhere — the one sanctioned default.
+        return 'GR';
     }
 
     /**
@@ -400,22 +451,44 @@ class Invoice extends Model
      */
     public function frozenPartyColumns(): array
     {
-        if (! $this->counterpartResolvedFromLiveCustomer() || $this->filesNoCounterpart()) {
+        if ($this->filesNoCounterpart()) {
             return [];
         }
 
-        $live = $this->customer;
+        try {
+            $country = $this->counterpartCountryForFiling();
+        } catch (RuntimeException) {
+            // The document is about to be refused anyway — freeze nothing.
+            return [];
+        }
 
-        // column => [resolved value, column width]
+        $live = $this->mayFallBackToLiveCustomer() ? $this->customer : null;
+
+        // column => [resolved value, column width]. The COUNTRY is taken from the
+        // filing policy, not from counterpartCountryIso(): the sanctioned «GR»
+        // default lives only there, so leaving it unfrozen meant a later, routine
+        // edit to customers.country made an ALREADY FILED invoice un-renderable.
         $candidates = [
             'vat_no' => [$this->counterpartAfm(), 20],
-            'company_name' => [$this->counterpartName(), 120],
-            'country' => [$this->counterpartCountryIso(), 60],
-            'address1' => [$live?->address1, 60],
-            'city' => [$live?->city, 60],
-            'postcode' => [$live?->postcode, 10],
-            'occupation' => [$live?->occupation, 120],
+            'company_name' => [$this->counterpartName(), 191],
+            'country' => [$country, 60],
         ];
+
+        // The address is part of the counterpart ONLY for a non-GR party (AADE
+        // forbids it for a GR one). Freeze exactly what was filed: freezing it for a
+        // domestic party would record something never reported, and NOT freezing it
+        // for a foreign one left the filed document unable to reproduce its own
+        // counterpart — it threw "requires a full address" while AADE held the real
+        // one. The identity gate alone missed this, because a document can have a
+        // complete identity snapshot and a blank address.
+        if ($country !== 'GR') {
+            $candidates += [
+                'address1' => [$live?->address1, 60],
+                'city' => [$live?->city, 60],
+                'postcode' => [$live?->postcode, 10],
+                'occupation' => [$live?->occupation, 120],
+            ];
+        }
 
         $frozen = [];
         foreach ($candidates as $column => [$resolved, $width]) {

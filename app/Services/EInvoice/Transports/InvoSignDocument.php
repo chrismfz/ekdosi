@@ -273,15 +273,31 @@ class InvoSignDocument
         //    chain. If they ever need to be reproducible, they need snapshot
         //    columns of their own, not a silent freeze here.
         $legalFallback = $invoice->mayFallBackToLiveCustomer() ? $invoice->customer : null;
-        $contact = $invoice->customer;
 
         // A GR counterpart carries no name in the AADE payload, so an empty one gets
         // that far — but InvoSign hard-rejects it with «[88-001] Λείπει το
         // υποχρεωτικό πεδίο: CounterpartName». Refuse here with the field to fill
         // instead of shipping "" and reading an opaque provider error. (Falling back
         // to the live customer is what MYD-009 removed: it is the wrong party.)
-        $name = $invoice->filesNoCounterpart() ? '' : ($invoice->counterpartName() ?? '');
-        if ($name === '' && ! $invoice->filesNoCounterpart()) {
+        // RETAIL (11.x) has no legal counterpart to protect — AADE files none — but
+        // InvoSign still needs a printable name, and shipping "" for every ΑΛΠ/ΑΠΥ
+        // would have every one of them rejected. Keep the pre-MYD-009 chain there;
+        // the snapshot rule applies where there IS a legal party to get wrong.
+        if ($invoice->filesNoCounterpart()) {
+            $name = (string) ($invoice->company_name ?: $invoice->customer?->name ?? '');
+
+            return array_merge(self::counterpartContactFields($invoice), [
+                'CounterpartName' => $name,
+                'CounterpartVat' => (string) ($invoice->vat_no ?: $invoice->customer?->afm ?? ''),
+                'CounterpartProfession' => (string) ($invoice->occupation ?: $invoice->customer?->occupation ?? ''),
+                'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $invoice->customer?->address1 ?? ''),
+                'CounterpartAddressPostalCode' => (string) ($invoice->postcode ?: $invoice->customer?->postcode ?? ''),
+                'CounterpartAddressCity' => (string) ($invoice->city ?: $invoice->customer?->city ?? ''),
+            ]);
+        }
+
+        $name = $invoice->counterpartName() ?? '';
+        if ($name === '') {
             throw new RuntimeException(
                 "InvoSign requires a counterpart name on invoice {$invoice->invcode}, but the "
                 .'document records none'
@@ -290,13 +306,29 @@ class InvoSignDocument
             );
         }
 
-        return [
+        return array_merge(self::counterpartContactFields($invoice), [
             'CounterpartName' => $name,
             'CounterpartVat' => (string) ($invoice->counterpartAfm() ?? ''),
             'CounterpartProfession' => (string) ($invoice->occupation ?: $legalFallback?->occupation ?? ''),
             'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $legalFallback?->address1 ?? ''),
             'CounterpartAddressPostalCode' => (string) ($invoice->postcode ?: $legalFallback?->postcode ?? ''),
             'CounterpartAddressCity' => (string) ($invoice->city ?: $legalFallback?->city ?? ''),
+        ]);
+    }
+
+    /**
+     * Contact details — NOT legal identity, absent from the AADE payload, used by
+     * InvoSign for delivery and printing. Live on purpose: reaching today's customer
+     * to email today's copy is correct. Shared by both branches above so the two
+     * cannot drift.
+     *
+     * @return array<string, string>
+     */
+    private static function counterpartContactFields(Invoice $invoice): array
+    {
+        $contact = $invoice->customer;
+
+        return [
             'CounterpartTaxOffice' => (string) ($contact?->tax_office ?? ''),
             'CounterpartPhone' => (string) ($contact?->phone ?? ''),
             'CounterpartEmail' => (string) ($contact?->email ?? ''),

@@ -66,6 +66,31 @@ final class Afm
      */
     public static function comparisonKey(?string $raw): string
     {
-        return mb_strtoupper(preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '');
+        // Canonicalise FIRST: «EL997073525» and «997073525» are the same taxpayer, and
+        // `customers.afm` legitimately carries the prefix (the VIES form-fill seeds it
+        // as a full VAT id). Comparing the raw strings called them different parties
+        // and refused an invoice that used to file — while canonicalVat() was
+        // simultaneously stripping that same prefix on the way out, so one commit
+        // contradicted itself. A FOREIGN prefix survives canonicalisation, so
+        // «DE811234567» still does not match a Greek «811234567».
+        return mb_strtoupper(self::canonicalVat($raw) ?? '');
+    }
+
+    /**
+     * The ISO-3166-1 alpha-2 country prefix carried by a VAT identifier, when it has
+     * one that names a real country — «IT12345678901» → «IT». Null for a bare ΑΦΜ.
+     *
+     * This is EVIDENCE about the party, not decoration: an invoice whose only
+     * counterpart data is «IT…» must never be filed as a domestic Greek document
+     * just because no country column happens to be populated.
+     */
+    public static function countryPrefix(?string $raw): ?string
+    {
+        $value = self::canonicalVat($raw);
+        if ($value === null || preg_match('/^([A-Za-z]{2})\d+$/u', $value, $m) !== 1) {
+            return null;
+        }
+
+        return IsoCountry::tryNormalise($m[1]);
     }
 }

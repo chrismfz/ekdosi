@@ -8,7 +8,6 @@ use App\Models\InvoiceLine;
 use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\InvoiceVatBreakdown;
-use App\Support\IsoCountry;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -655,7 +654,9 @@ class AadeInvoiceDocument
             );
         }
 
-        $country = $this->counterpartCountry($invoice);
+        // ONE definition of the filing country, on the model — shared with the
+        // provider payload and the freeze so the three cannot drift (MYD-009).
+        $country = $invoice->counterpartCountryForFiling();
 
         // MYD-6: pre-empt AADE's opaque [242]-[244] ("counterpart country for this
         // invoice type must be Greece / EU-not-Greece / non-EU") with a clear error.
@@ -705,55 +706,6 @@ class AadeInvoiceDocument
         }
 
         return $counterpart;
-    }
-
-    /**
-     * The counterpart's country, resolved through the SAME frozen source as its
-     * identity (MYD-009).
-     *
-     * Three outcomes, and telling them apart is the whole point:
-     *
-     *  - a country we may read and can resolve → that country;
-     *  - NO country recorded anywhere → «GR». Unlike a delivery note (MYD-011) this
-     *    default is safe here: the per-type check below still enforces the
-     *    domestic/EU/third-country split, and `invoices.country` is blank on most
-     *    legacy domestic rows;
-     *  - a country that EXISTS but this document must not read — because it belongs
-     *    to a customer who is not this counterpart, or because the document is
-     *    already filed — → REFUSE.
-     *
-     * Collapsing the last case into the second is what the first cut of MYD-009 did:
-     * a foreign party whose snapshot country was blank and whose customer link had
-     * drifted was filed as «GR» with no name and no address, where the previous code
-     * had loudly refused. That is the MYD-011 round-7 misreport, reintroduced on the
-     * invoice side — so the two are kept distinct here.
-     */
-    private function counterpartCountry(Invoice $invoice): string
-    {
-        if ($iso = $invoice->counterpartCountryIso()) {
-            return $iso;
-        }
-
-        // Present but unresolvable on the document itself: throw with the value, as
-        // before. Never turn «Neverland» into a confident domestic filing.
-        if (filled($invoice->country)) {
-            return IsoCountry::normalise($invoice->country);
-        }
-
-        // Nothing recorded anywhere — the sanctioned GR default.
-        if (blank($invoice->customer?->country)) {
-            return 'GR';
-        }
-
-        // A country exists on the linked customer, but this document may not read it.
-        throw new RuntimeException(
-            "Invoice {$invoice->invcode} records no counterpart country of its own, and its "
-            .'linked customer\'s country cannot be used for it — '
-            .($invoice->hasBeenFiled()
-                ? 'the document is already filed, so its own snapshot is the only source.'
-                : 'the invoice names a different party than that customer.')
-            .' Set «Χώρα» on the invoice — filing it as GR on a guess is exactly what this refuses.'
-        );
     }
 
     /**
