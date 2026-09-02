@@ -49,27 +49,28 @@ class ReverseChargeHelperTest extends TestCase
         $this->assertFalse(ReverseCharge::appliesTo($nonEu));
     }
 
-    public function test_should_default_zero_vat_only_with_single_exempt_category(): void
+    public function test_should_default_zero_vat_with_at_least_one_exempt_category(): void
     {
         $tenant = Company::factory()->create();
         $eu = Customer::create(['company_id' => $tenant->id, 'name' => 'AT', 'country' => 'AT', 'vat_vies' => 'ATU18522105']);
 
-        // No 0% category configured → no auto-default (would throw at submit).
+        // No 0% category configured → no auto-default (0% isn't a fileable rate).
         $this->assertFalse(ReverseCharge::shouldDefaultZeroVat($tenant, $eu));
 
-        // Exactly one 0% category WITH an exemption reason → auto-default on.
+        // One 0% category WITH an exemption reason → auto-default on.
         VatCategory::create([
-            'company_id' => $tenant->id, 'description' => '0% ενδοκοινοτικό',
-            'rate' => 0, 'vat_exemption_category' => Codes::VAT_EXEMPTION_INTRACOMMUNITY,
+            'company_id' => $tenant->id, 'description' => '0% ενδοκοινοτική υπηρεσία',
+            'rate' => 0, 'vat_exemption_category' => 4,
         ]);
         $this->assertTrue(ReverseCharge::shouldDefaultZeroVat($tenant, $eu));
 
-        // A SECOND 0% exempt category → ambiguous → no auto-default.
+        // MYD-007: a SECOND 0% category no longer disables the default — the per-line
+        // reason (set from the invoice type) disambiguates, so 0% still defaults.
         VatCategory::create([
-            'company_id' => $tenant->id, 'description' => '0% εξαγωγή',
-            'rate' => 0, 'vat_exemption_category' => 15,
+            'company_id' => $tenant->id, 'description' => '0% ενδοκοινοτικά αγαθά',
+            'rate' => 0, 'vat_exemption_category' => 14,
         ]);
-        $this->assertFalse(ReverseCharge::shouldDefaultZeroVat($tenant, $eu));
+        $this->assertTrue(ReverseCharge::shouldDefaultZeroVat($tenant, $eu));
     }
 
     public function test_should_not_default_for_greek_customer_even_with_category(): void

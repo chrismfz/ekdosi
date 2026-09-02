@@ -348,9 +348,11 @@
                 {{-- DOC-1: a 0% παραστατικό must cite the exempting provision (ΕΛΠ
                      ν.4308/2014 αρ.9). The citation is the verbatim §8.3 legal text. --}}
                 @if(!empty($totals['vatExemption']))
-                    <tr class="discount-note">
-                        <td colspan="2">{{ $L('vat_exemption') }}: {{ $totals['vatExemption']['label'] }} (myDATA §8.3-{{ $totals['vatExemption']['code'] }})</td>
-                    </tr>
+                    @foreach($totals['vatExemption'] as $ex)
+                        <tr class="discount-note">
+                            <td colspan="2">{{ $L('vat_exemption') }}: {{ $ex['label'] }} (myDATA §8.3-{{ $ex['code'] }})</td>
+                        </tr>
+                    @endforeach
                 @endif
                 <tr class="subtotal">
                     <td class="label">{{ $L('net_value') }}</td>

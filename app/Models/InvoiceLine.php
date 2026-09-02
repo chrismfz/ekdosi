@@ -114,6 +114,11 @@ class InvoiceLine extends Model
         'price_per_item',
         'discount',
         'vat_percent',
+        // MYD-007: the §8.3 exemption reason for a 0% line, snapshotted per line
+        // (the reason differs by case — intra-EU service 4 vs goods 14 vs export 8).
+        // Null on non-0% lines and on legacy/imported lines (they fall back to the
+        // tenant's single 0% category).
+        'vat_exemption_category',
         'net_price',
         'gross_price',
         'product_descr',
@@ -128,6 +133,7 @@ class InvoiceLine extends Model
             'price_per_item' => 'decimal:2',
             'discount' => 'decimal:4',
             'vat_percent' => 'decimal:2',
+            'vat_exemption_category' => 'integer',
             'net_price' => 'decimal:2',
             'gross_price' => 'decimal:2',
         ];

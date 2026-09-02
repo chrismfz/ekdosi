@@ -95,6 +95,30 @@ class InvoicePdfVatExemptionTest extends TestCase
         $this->assertStringContainsString('§8.3-16', $html);
     }
 
+    public function test_per_line_reason_is_cited_even_with_multiple_zero_categories(): void
+    {
+        // MYD-007: with SEVERAL 0% categories (now the seeded default), the printed
+        // citation comes from the LINE's own reason — the tenant-wide fallback would
+        // be ambiguous. Here the line was filed under reason 4 (άρθρο 18), not 16.
+        VatCategory::create([
+            'company_id' => $this->tenant->id, 'description' => '0% RC', 'rate' => 0, 'vat_exemption_category' => 16,
+        ]);
+        VatCategory::create([
+            'company_id' => $this->tenant->id, 'description' => '0% ενδοκοιν. υπ.', 'rate' => 0, 'vat_exemption_category' => 4,
+        ]);
+        $inv = $this->invoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 0, 'price_per_item' => 100, 'vat_exemption_category' => 4,
+        ]);
+
+        $html = $this->renderHtml($inv->fresh());
+
+        $this->assertStringContainsString('§8.3-4', $html);          // the LINE's reason
+        $this->assertStringContainsString('άρθρο 18 του Κώδικα ΦΠΑ', $html);
+        $this->assertStringNotContainsString('§8.3-16', $html);      // NOT the other category
+    }
+
     public function test_unconfigured_exemption_renders_without_the_note(): void
     {
         // No 0%-rate VatCategory with a reason — the PDF must still render
