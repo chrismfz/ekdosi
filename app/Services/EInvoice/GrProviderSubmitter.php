@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\MyDataRejected;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\EInvoice\FilingLog;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
@@ -103,6 +104,9 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         $xml = $document->toXml($payload);
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 
+        // Wall-clock from just before the outbound send to the success log below.
+        $startedAt = microtime(true);
+
         try {
             $result = $this->transport->send($invoice, $xml, $credentials);
         } catch (Throwable $e) {
@@ -143,6 +147,16 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         }
 
         $mark = $this->persistSuccess($invoice, $xml, $result);
+
+        // OBS-001: one structured success line so `log_tail --contains=<invcode>`
+        // finds a provider filing that WORKED, not just the ones that failed. Only
+        // on a FRESH insert (persistSuccess adopts an existing row idempotently on
+        // a retry). The recovery/adopt path returns earlier and logs its own
+        // invcode-bearing line.
+        if ($mark->wasRecentlyCreated) {
+            FilingLog::filed($invoice, (string) $mark->mark, $this->transport->key(), $startedAt);
+        }
+
         $this->syncWhmcsFiled($invoice, $mark);
 
         return $mark;
@@ -346,6 +360,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         } catch (Throwable $e) {
             Log::info('Provider status-check after a failed send found nothing to adopt.', [
                 'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
                 'send_error' => $original->getMessage(),
                 'status_error' => $e->getMessage(),
             ]);
@@ -359,6 +374,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
         Log::warning('Provider send failed but status-check found an existing MARK — adopting (avoided double-file).', [
             'invoice_id' => $invoice->id,
+            'invcode' => $invoice->invcode,
             'mark' => $status->mark,
         ]);
 

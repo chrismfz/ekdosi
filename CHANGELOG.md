@@ -147,6 +147,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   HTTP request. Η μνήμη μένει σε **ένα** PDF (προσωρινό αρχείο + `ZipArchive::addFile`), και ένα
   έγγραφο που δεν παράγεται γράφεται στο `errors.txt` αντί να ρίξει όλη την εξαγωγή.
 ### Fixed
+- **Δομημένη γραμμή log σε κάθε επιτυχή υποβολή (OBS-001 tail).** Οι submitters λογάριζαν μόνο
+  αποτυχίες, οπότε μια υποβολή που **πέτυχε** δεν άφηνε ίχνος στο application log και το
+  `log_tail --contains=<invcode>` γύρναγε άδειο γι' αυτήν. Νέο `App\Support\EInvoice\FilingLog::filed`,
+  από το ένα success choke-point κάθε submitter (απευθείας myDATA + πάροχος), **μόνο σε φρέσκια
+  καταχώριση**: invcode **και** ΜΑΡΚ στο μήνυμα (grep σε οποιοδήποτε), κανάλι/τύπος (το πραγματικά
+  διαβιβασθέν)/διάρκεια στο context. Ποτέ δεν πετάει — ένα log δεν χαλάει υποβολή που ήδη πέτυχε. Οι
+  διαδρομές recovery/adopt του παρόχου φέρουν πλέον κι αυτές invcode.
 - **MYD-004 (0%-χωρίς-αιτία) — το preflight ΜΠΛΟΚΑΡΕΙ πλέον (ήταν warning → false-green).** Μια
   κατηγορία ΦΠΑ 0% χωρίς έγκυρη αιτία §8.3 ήταν προειδοποίηση και το `mydata:preflight` έβγαινε 0·
   τώρα είναι **blocking error** (η ΑΑΔΕ απορρίπτει [217]), οπότε το preflight αποτυγχάνει μέχρι να

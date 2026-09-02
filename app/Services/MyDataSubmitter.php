@@ -12,6 +12,7 @@ use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\MyData\AadeDocSummary;
 use App\Services\MyData\SalesReconciler;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\EInvoice\FilingLog;
 use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
 use Carbon\Carbon;
@@ -246,6 +247,10 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // POST, because an unrecorded POST is precisely the unprotected case.
         $this->armInDoubt($invoice);
 
+        // Wall-clock from just before the POST to the success log below — the
+        // meaningful «how long did filing take» (POST + parse + local persist).
+        $startedAt = microtime(true);
+
         try {
             $response = $action->handle($payload);
         } catch (MyDataAuthenticationException $e) {
@@ -322,6 +327,15 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 0,
                 $e,
             );
+        }
+
+        // OBS-001: one structured success line so `log_tail --contains=<invcode>`
+        // finds a filing that WORKED, not just the ones that failed. Only on a
+        // FRESH insert — the idempotent branch (an already-recorded MARK returned on
+        // a retry) has its own «already recorded» line, and a second «filed (Nms)»
+        // there would imply a fresh file that didn't happen.
+        if ($mark->wasRecentlyCreated) {
+            FilingLog::filed($invoice, (string) $mark->mark, 'mydata', $startedAt);
         }
 
         // WHMCS write-back on the draft-first LIFECYCLE path. A draft created
@@ -940,6 +954,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         if ($existing) {
             Log::info('myDATA submit: idempotent — MARK already recorded locally', [
                 'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
                 'mark' => $mark,
             ]);
 

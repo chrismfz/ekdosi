@@ -18,6 +18,7 @@ use App\Support\Afm;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 /**
@@ -105,6 +106,35 @@ class MyDataSubmitterSafetyTest extends TestCase
             'mark' => '480301204040191',
             'mydata_action' => 'INSERT',
         ]);
+    }
+
+    public function test_a_successful_filing_logs_a_greppable_success_line(): void
+    {
+        // OBS-001 tail: the submitters logged only failures, so a filing that
+        // WORKED left no application-log trace and `log_tail --contains=<invcode>`
+        // came back empty for it. A successful submit must now emit one structured
+        // INFO line carrying the invcode AND the MARK.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+        $invcode = (string) $inv->invcode;
+
+        $xml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $mock = new MockHandler([new GuzzleResponse(200, [], $xml)]);
+
+        Log::spy();
+
+        (new MyDataSubmitter($this->tenant, $mock))->submit($inv->fresh('lines'));
+
+        Log::shouldHaveReceived('info')
+            ->withArgs(function ($message, $context = []) use ($invcode) {
+                return is_string($message)
+                    && str_contains($message, 'e-invoice filed')
+                    && str_contains($message, $invcode)              // greppable by invcode
+                    && ($context['mark'] ?? null) === '480301204040191'
+                    && ($context['channel'] ?? null) === 'mydata'
+                    && array_key_exists('duration_ms', $context);
+            })
+            ->once();
     }
 
     public function test_submit_refuses_already_valid_invoice(): void

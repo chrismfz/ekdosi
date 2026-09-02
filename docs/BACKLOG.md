@@ -612,9 +612,10 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
 `mydata_discrepancies`, `preflight`, βάση `ForensicMcpTool`) — βλ. `CHANGELOG.md` [Unreleased] +
 `FEATURES.md §16γ` + `MCP.md`. Τα στοιχεία υπήρχαν ήδη (byte-exact XML ανά προσπάθεια)· προστέθηκε η
 πρόσβαση. **Μένει (προαιρετικό, φθηνό):**
-- **δομημένη INFO γραμμή ανά ΕΠΙΤΥΧΗ έκβαση** στους submitters (κανάλι, τύπος, series/ΑΑ, ΜΑΡΚ,
-  διάρκεια) — τώρα λογάρουν μόνο αποτυχίες· θα κάνει το `log_tail --contains=<invcode>` χρήσιμο ακόμη
-  κι όταν αυτό που απέτυχε είναι το ίδιο το DB write μετά από επιτυχές POST.
+- _(**δομημένη INFO γραμμή ανά ΕΠΙΤΥΧΗ έκβαση**: ✅ SHIPPED — `App\Support\EInvoice\FilingLog::filed`,
+  καλείται από το ένα success choke-point κάθε submitter (direct myDATA + πάροχος): invcode+ΜΑΡΚ στο
+  ίδιο το μήνυμα (grep σε οποιοδήποτε), κανάλι/τύπος/διάρκεια στο context. Τώρα το
+  `log_tail --contains=<invcode>` βρίσκει και τις ΕΠΙΤΥΧΕΙΣ υποβολές, όχι μόνο τις αποτυχίες.)_
 - **delivery-mark forensics**: το `invoice_filing`/`mydata_failures` καλύπτουν τα `mydata_marks`
   (τιμολόγια)· τα `delivery_marks` (ΔΑ) έχουν δικό τους ιστορικό — να επεκταθούν όταν μπει η ΔΑ ροή.
 
