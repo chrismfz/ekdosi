@@ -21,10 +21,13 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\IncomeClassificationCategory;
 use Firebed\AadeMyData\Enums\MovePurpose;
+use Firebed\AadeMyData\Exceptions\InvalidResponseException;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
 use Firebed\AadeMyData\Exceptions\MyDataException;
 use Firebed\AadeMyData\Exceptions\MyDataTimeoutException;
+use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
+use Firebed\AadeMyData\Exceptions\TransmissionFailedException;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Http\SendInvoices;
 use Firebed\AadeMyData\Models\Address;
@@ -395,12 +398,6 @@ class DeliveryNoteSubmitter
         $payload = $this->buildAadeDeliveryNote($note);
         $xml = $this->payloadToXml($payload);
 
-        // MYD-021: ARM before ANY outbound call — provider or direct. A catch only
-        // runs if this process survives; a hard kill between AADE accepting the
-        // request and our catch would otherwise leave no trace, and the next
-        // attempt would POST blindly into a filing that already existed.
-        $this->armInDoubt($note);
-
         if ($this->tenant->isLiveProviderTenant()) {
             return $this->submitViaProvider($note, $xml);
         }
@@ -408,6 +405,18 @@ class DeliveryNoteSubmitter
         $this->initFirebed();
 
         $action = new SendInvoices;
+
+        // MYD-021: ARM immediately before the outbound call — a catch only runs if
+        // this process survives, so a hard kill between AADE accepting the request
+        // and our catch would otherwise leave no trace and the next attempt would
+        // POST blindly into a filing that already existed.
+        //
+        // AFTER the local pre-flight (initFirebed, and the provider branch's own
+        // issue-date guard), not before: those throw without sending anything, and
+        // arming there would lock the note out of the grace window over an error
+        // the operator can fix in seconds. Arm as late as possible, but strictly
+        // before the first byte leaves.
+        $this->armInDoubt($note);
 
         try {
             $response = $action->handle($payload);
@@ -421,8 +430,23 @@ class DeliveryNoteSubmitter
             // never saw. STAYS ARMED so the next submit adopts instead of re-POSTing.
             $this->logFailure($note, 'transport', $e);
             throw new RuntimeException('myDATA endpoint unreachable. Try again later.', 0, $e);
+        } catch (RateLimitExceededException $e) {
+            // 429: AADE throttled BEFORE processing → no MARK. Caught before the
+            // InvalidResponse/TransmissionFailed arm below, which it subclasses.
+            $this->disarmInDoubt($note);
+            $this->logFailure($note, 'rate-limit', $e);
+            throw new RuntimeException('myDATA rate limit exceeded. Try again shortly.', 0, $e);
+        } catch (InvalidResponseException|TransmissionFailedException $e) {
+            // AMBIGUOUS: an empty/invalid HTTP-200 body, or a non-2xx transmission
+            // failure (5xx). The POST may have reached AADE and created a MARK whose
+            // response we never saw. These SUBCLASS MyDataException, so without this
+            // dedicated arm they fell into the generic one below and DISARMED —
+            // handing the next attempt a blind re-POST. The invoice path has had
+            // this arm since MYD-2; the delivery twin was missing it. STAYS ARMED.
+            $this->logFailure($note, 'ambiguous-response', $e);
+            throw new RuntimeException('myDATA returned an unusable response. Try again later.', 0, $e);
         } catch (MyDataException $e) {
-            // A firebed protocol error thrown before the POST → no MARK.
+            // Any OTHER firebed protocol error is thrown before the POST → no MARK.
             $this->disarmInDoubt($note);
             $this->logFailure($note, 'protocol', $e);
             throw new RuntimeException('myDATA delivery-note submission failed: '.$e->getMessage(), 0, $e);
@@ -447,6 +471,11 @@ class DeliveryNoteSubmitter
 
         $transport = app(ProviderTransportRegistry::class)->for((string) $this->tenant->einvoice_provider_key);
         $credentials = ProviderCredentials::fromCompany($this->tenant);
+
+        // MYD-021: arm here, after the issue-date guard and transport resolution
+        // above (both throw locally without sending anything) and immediately
+        // before the outbound call.
+        $this->armInDoubt($note);
 
         try {
             $result = $transport->sendDelivery($note, $xml, $credentials);
@@ -538,8 +567,23 @@ class DeliveryNoteSubmitter
         $series = $note->filedSeries();
         $aa = (string) $note->code;
 
-        if (blank($series) || (int) $note->code < 1 || ! $this->tenant->canReadMyData()) {
+        if (blank($series) || (int) $note->code < 1) {
+            // No concrete (series, ΑΑ) to search by — the caller's own guards give a
+            // clearer error than anything we could say here.
             return null;
+        }
+
+        if (! $this->tenant->canReadMyData()) {
+            // NOT the same as "AADE has nothing": we never asked. Returning null
+            // here would let the caller treat an unverifiable note as verified-empty
+            // and re-POST once the grace window passed. Refuse instead — the same
+            // answer as an unreachable AADE below, for the same reason.
+            throw new RuntimeException(
+                "Δελτίο {$note->invcode}: μια προηγούμενη υποβολή διακόπηκε, αλλά η εταιρεία δεν "
+                .'έχει διαπιστευτήρια ανάγνωσης myDATA για να επιβεβαιωθεί αν είχε καταχωρηθεί. '
+                .'Δεν ξαναϋποβάλλουμε τυφλά — έλεγξε την κατάσταση στο myDATA και, αν δεν υπάρχει '
+                .'ΜΑΡΚ, καθάρισε τη σήμανση «σε εξέλιξη».'
+            );
         }
 
         $issued = Carbon::parse($note->issued_at);
@@ -591,7 +635,7 @@ class DeliveryNoteSubmitter
         $found = $matches[0];
         $mark = (string) $found->mark;
 
-        return DB::transaction(function () use ($note, $mark) {
+        $adopted = DB::transaction(function () use ($note, $found, $mark) {
             $row = DeliveryMark::query()
                 ->where('delivery_note_id', $note->id)
                 ->where('mark', $mark)
@@ -612,6 +656,11 @@ class DeliveryNoteSubmitter
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
                 'mydata_mark' => $mark,
+                // AADE's own QR url, carried through from RequestTransmittedDocs.
+                // Without it the lifecycle («Έναρξη διακίνησης») refuses the note for
+                // having no qrUrl and tells the operator to RE-ISSUE — the exact
+                // double-filing this adoption exists to prevent.
+                'mydata_url' => $found->qrCodeUrl ?: $note->mydata_url,
                 'recipient_country' => $this->filedCountry($note),
                 'delivery_state' => 'registered',
                 'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
@@ -620,6 +669,21 @@ class DeliveryNoteSubmitter
 
             return $row;
         });
+
+        // Same post-commit side effect both success paths perform: an adopted
+        // δελτίο πώλησης is as filed as a freshly-submitted one, so its stock must
+        // move too. Best-effort exactly like the other two — a stock hiccup must not
+        // undo an adoption that has already reconciled a real AADE document.
+        try {
+            app(StockService::class)->recordSaleForDeliveryNote($note);
+        } catch (Throwable $e) {
+            Log::warning('Delivery adoption: stock movement failed', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $adopted;
     }
 
     private function recordProviderFailure(DeliveryNote $note, string $providerKey, string $requestXml, string $error): void

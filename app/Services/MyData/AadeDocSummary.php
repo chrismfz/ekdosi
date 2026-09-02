@@ -39,6 +39,14 @@ final readonly class AadeDocSummary
         // bucket an orphan as income / supplier-expense / accounting-entry
         // instead of dumping payroll into the "αδέσποτα πωλήσεων" list.
         public ?string $invoiceType = null,
+        /**
+         * AADE's QR/verification URL (spec §qrCodeUrl), present on
+         * RequestTransmittedDocs. Carried so an in-doubt ADOPTION can stamp it onto
+         * the local document: without it a self-healed δελτίο has no qrUrl and the
+         * lifecycle («Έναρξη διακίνησης») refuses it, inviting exactly the re-issue
+         * the adoption exists to prevent (MYD-021 review).
+         */
+        public ?string $qrCodeUrl = null,
     ) {}
 
     /**
@@ -65,6 +73,7 @@ final readonly class AadeDocSummary
             gross: $this->gross,
             net: $this->net,
             invoiceType: $this->invoiceType,
+            qrCodeUrl: $this->qrCodeUrl,
         );
     }
 }

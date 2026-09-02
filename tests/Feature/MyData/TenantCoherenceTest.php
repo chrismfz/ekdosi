@@ -16,6 +16,7 @@ use App\Services\Delivery\DeliveryNoteSubmitter;
 use App\Services\EInvoice\GrProviderSubmitter;
 use App\Services\EInvoice\Transports\NullProviderTransport;
 use App\Services\MyDataSubmitter;
+use App\Support\Tenancy\CompanyContext;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -296,6 +297,50 @@ class TenantCoherenceTest extends TestCase
             fn () => (new MyDataSubmitter($this->issuer, $mock))->submit($invoice->fresh('lines')),
             $mock,
         );
+    }
+
+    public function test_a_foreign_relation_is_caught_inside_the_panel_too(): void
+    {
+        // The relation half of this guard was decorative in the panel. CompanyScope
+        // filters a lazy load by the AMBIENT tenant, so a cross-tenant customer_id
+        // resolved to NULL — and a null relation is legitimately allowed (an invoice
+        // may simply have no payment method). So it fired from CLI and queue but
+        // stayed silent exactly where an operator sits: the opposite of the
+        // context-independence this class promises. Reading past the scope makes the
+        // foreign row visible so it can be refused.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<ok/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+
+        $foreignCustomer = Customer::create([
+            'company_id' => $this->other->id, 'name' => 'Ξένος', 'afm' => '123456789',
+        ]);
+        $invoice->forceFill(['customer_id' => $foreignCustomer->id])->save();
+
+        // Ambient tenant set, exactly as Filament sets it on TenantSet.
+        app(CompanyContext::class)->actAs($this->issuer, function () use ($invoice, $mock): void {
+            $this->assertRefusedBeforeAnything(
+                fn () => (new MyDataSubmitter($this->issuer, $mock))->submit($invoice->fresh('lines')),
+                $mock,
+            );
+        });
+    }
+
+    public function test_a_missing_relation_is_not_a_tenant_failure(): void
+    {
+        // The other direction: reading past the scope must not turn "no payment
+        // method" into a refusal. A broken FK is likewise not a tenant leak — the
+        // payload builders report that far better than a coherence error would.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<nonsense/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+        $invoice->forceFill(['payment_method_id' => null])->save();
+
+        try {
+            (new MyDataSubmitter($this->issuer, $mock))->submit($invoice->fresh('lines'));
+        } catch (RuntimeException $e) {
+            $this->assertStringNotContainsString('Tenant mismatch', $e->getMessage());
+        }
+
+        $this->assertSame(0, $mock->count(), 'a document with no payment method must still reach the wire');
     }
 
     // ───────────────────────── the other direction ────────────────────────

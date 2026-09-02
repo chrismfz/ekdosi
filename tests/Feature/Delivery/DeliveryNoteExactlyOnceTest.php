@@ -86,6 +86,7 @@ class DeliveryNoteExactlyOnceTest extends TestCase
           <invoicesDoc>
             <invoice>
               <mark>{$mark}</mark>
+              <qrCodeUrl>https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted</qrCodeUrl>
               <issuer><vatNumber>800561849</vatNumber><country>GR</country><branch>0</branch></issuer>
               <invoiceHeader>
                 <series>{$series}</series>
@@ -269,6 +270,101 @@ class DeliveryNoteExactlyOnceTest extends TestCase
     }
 
     // ───────────────────── outcomes that prove no MARK ────────────────────
+
+    public function test_an_ambiguous_response_keeps_the_marker_armed(): void
+    {
+        // The P0 of the first review round. InvalidResponseException and
+        // TransmissionFailedException SUBCLASS MyDataException, so a generic
+        // `catch (MyDataException) { disarm }` swallowed them — and those two are
+        // precisely the AMBIGUOUS cases: an empty HTTP-200 body, or a 5xx after
+        // AADE may already have accepted the POST. Disarming there hands the next
+        // attempt a blind re-POST and a second δελτίο.
+        //
+        // A 502 is a TransmissionFailedException in firebed.
+        $mock = new MockHandler([new GuzzleResponse(502, [], 'Bad Gateway')]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+            $this->fail('Expected the transmission failure to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNotNull(
+            $this->note->fresh()->mydata_pending_since,
+            'an ambiguous response must STAY armed — the POST may have created a MARK',
+        );
+    }
+
+    public function test_an_empty_200_body_keeps_the_marker_armed(): void
+    {
+        // The other half of the same P0: a 200 with an unusable body
+        // (InvalidResponseException) is equally ambiguous.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '')]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+            $this->fail('Expected the invalid response to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNotNull($this->note->fresh()->mydata_pending_since);
+    }
+
+    public function test_a_local_preflight_failure_does_not_lock_the_note_out(): void
+    {
+        // Arming too early is its own bug: a local error that never sent anything
+        // would strand the note for the whole grace window. Blank credentials fail
+        // inside initFirebed, before any byte leaves.
+        $this->tenant->forceFill([
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant->fresh(), new MockHandler([])))->submit($this->note);
+            $this->fail('Expected the missing credentials to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNull(
+            $this->note->fresh()->mydata_pending_since,
+            'nothing was sent, so the note must stay immediately retryable',
+        );
+    }
+
+    public function test_an_adopted_note_can_start_its_movement(): void
+    {
+        // Adoption must produce a USABLE δελτίο. Without AADE's qrUrl the lifecycle
+        // refuses it and tells the operator to re-issue — the very double-filing
+        // the adoption prevents.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', '400001965177931')]);
+        (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertNotNull($this->note->fresh()->mydata_url, 'the adopted note needs AADE\'s QR url');
+    }
+
+    public function test_a_tenant_that_cannot_read_mydata_is_refused_not_re_posted(): void
+    {
+        // "We never asked" is not "AADE has nothing". Past the grace window this
+        // used to fall through to a blind re-POST.
+        // The realistic shape: a PROVIDER tenant that files through ΥΠΑΗΕΣ and holds
+        // no myDATA read credentials of its own, so mydataReadMode() is null.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'off',
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+        $this->assertFalse($this->tenant->fresh()->canReadMyData());
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(30)])->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Δεν ξαναϋποβάλλουμε τυφλά');
+
+        (new DeliveryNoteSubmitter($this->tenant->fresh(), new MockHandler([])))->submit($this->note->fresh('lines'));
+    }
 
     public function test_a_rejection_clears_the_marker_so_a_fix_can_be_retried(): void
     {

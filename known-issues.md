@@ -1866,7 +1866,29 @@ into a legal path. Revisit only if a real failure shows the single timestamp is 
 The **provider** side's durable idempotency is PROV-001 and stays open; this change gives that
 path the lock, the cancelled guard and the arm/disarm, but not provider-side reconciliation.
 
-Tests: `DeliveryNoteExactlyOnceTest` (9) + three added to `MyDataSubmitInDoubtTest`. Both
+**Review round 1 found six issues, ALL in the delivery half** — the invoice half was correct.
+The P0 is the sharpest lesson: `InvalidResponseException` and `TransmissionFailedException`
+SUBCLASS `MyDataException`, so the delivery path's generic `catch (MyDataException) { disarm }`
+swallowed exactly the two AMBIGUOUS cases (empty 200 body; 5xx after AADE may already have
+accepted) and cleared the marker → blind re-POST → two δελτία. `MyDataSubmitter` has had a
+dedicated arm for those since MYD-2; mirroring the gate meant mirroring the catch ORDER too, and
+that is what «mirror the invoice path» has to mean. Also fixed: arming ran before `initFirebed()`
+and the provider issue-date guard, so a local pre-flight error that never sent anything locked the
+note out for the whole grace window (now armed as late as possible, strictly before the first
+byte); an adopted note got no `mydata_url`, so «Έναρξη διακίνησης» refused it and invited the
+re-issue adoption exists to prevent (AADE's `qrCodeUrl` is in the RequestTransmittedDocs response
+and was simply dropped by `AadeDocSummary` — now carried); adoption skipped the stock movement both
+other success paths perform; and «this tenant cannot READ myDATA» returned the same `null` as
+«AADE verified empty», so past the grace window a provider tenant re-POSTed blindly (now a refusal).
+
+The sixth was in `TenantCoherence`: the RELATION checks were decorative inside the panel.
+`CompanyScope` filters a lazy load by the ambient tenant, so a cross-tenant `customer_id` resolved
+to NULL — and a null relation is legitimately allowed. It fired from CLI and queue but stayed
+silent exactly where an operator sits, the opposite of the context-independence the class promises.
+Relations are now resolved `withoutGlobalScope`.
+
+Tests: `DeliveryNoteExactlyOnceTest` (14) + three added to `MyDataSubmitInDoubtTest`, and
+`TenantCoherenceTest` (14). Both
 arming tests read `mydata_pending_since` **through the query builder from inside the outbound
 call** — the way a different process would see it after a kill — and both fail when the arming
 line is removed.
@@ -1916,7 +1938,7 @@ and never perform a blind retry.
 **Status:** DONE 2026-09-02 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
 
 **Fix:** `App\Support\Tenancy\TenantCoherence` — ONE fail-closed assertion, called at all
-**12** outbound entry points before payload construction, audit writes or any request:
+**11** outbound entry points before payload construction, audit writes or any request:
 `MyDataSubmitter` submit/cancel/previewXml, `GrProviderSubmitter` submit/cancel,
 `DeliveryNoteSubmitter` submit/previewXml, and all four `DeliveryLifecycleService`
 operations (registerTransfer / confirmDelivery / refreshStatus / cancel).

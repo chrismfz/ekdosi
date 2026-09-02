@@ -5,6 +5,7 @@ namespace App\Support\Tenancy;
 use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 
@@ -49,9 +50,9 @@ final class TenantCoherence
 
         $label = (string) $invoice->invcode;
 
-        self::assertOwned($tenant, $invoice->customer, 'customer', $label);
-        self::assertOwned($tenant, $invoice->invoiceType, 'invoice type', $label);
-        self::assertOwned($tenant, $invoice->paymentMethod, 'payment method', $label);
+        self::assertRelation($tenant, $invoice, 'customer', 'customer', $label);
+        self::assertRelation($tenant, $invoice, 'invoiceType', 'invoice type', $label);
+        self::assertRelation($tenant, $invoice, 'paymentMethod', 'payment method', $label);
 
         // relationLoaded, not the accessor: touching ->lines here would issue a
         // query on every submit just to re-check what the payload is about to load
@@ -74,14 +75,39 @@ final class TenantCoherence
 
         $label = (string) $note->invcode;
 
-        self::assertOwned($tenant, $note->customer, 'recipient', $label);
-        self::assertOwned($tenant, $note->deliveryType, 'delivery type', $label);
+        self::assertRelation($tenant, $note, 'customer', 'recipient', $label);
+        self::assertRelation($tenant, $note, 'deliveryType', 'delivery type', $label);
 
         if ($note->relationLoaded('lines')) {
             foreach ($note->lines as $line) {
                 self::assertOwned($tenant, $line, 'delivery note line', $label);
             }
         }
+    }
+
+    /**
+     * Resolve one relation WITHOUT the tenant scope, then check it.
+     *
+     * The scope is why this needs its own method. `CompanyScope` filters a lazy
+     * load by the ambient tenant, so inside the panel a cross-tenant `customer_id`
+     * resolves to NULL rather than to the foreign row — and a null relation is
+     * legitimately allowed (an invoice may simply have no payment method). The
+     * relation half of this guard therefore fired from CLI and queue but stayed
+     * silent in the panel: the exact opposite of the context-independence this
+     * class promises. Reading past the scope makes the foreign row visible so it
+     * can be refused.
+     *
+     * A foreign key pointing at a row that does not exist at all still resolves to
+     * null and still passes — that is a broken FK, not a tenant leak, and the
+     * payload builders report it far better than a coherence error would.
+     */
+    private static function assertRelation(Company $tenant, Model $document, string $relation, string $what, string $documentLabel): void
+    {
+        $related = $document->{$relation}()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->first();
+
+        self::assertOwned($tenant, $related, $what, $documentLabel);
     }
 
     /**
