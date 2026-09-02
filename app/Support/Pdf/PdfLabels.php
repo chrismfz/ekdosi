@@ -119,10 +119,14 @@ class PdfLabels
             'Εκδόθηκε μέσω παρόχου ηλεκτρονικής τιμολόγησης (ΥΠΑΗΕΣ)',
             'Issued via an accredited e-invoicing provider (ΥΠΑΗΕΣ)',
         ],
+        // Labels mirror the provider's OWN official document vocabulary
+        // («Αριθμός Αδειοδότησης», «Αναγνωριστικό», «Υπογραφή») so an operator
+        // cross-referencing our representation against the provider's copy reads
+        // the same words for the same fields.
         'provider_name' => ['Πάροχος', 'Provider'],
-        'provider_licence' => ['Αρ. αδείας ΥΠΑΗΕΣ', 'ΥΠΑΗΕΣ licence no.'],
-        'provider_uid' => ['UID παραστατικού', 'Document UID'],
-        'provider_auth' => ['Κωδικός αυθεντικοποίησης', 'Authentication code'],
+        'provider_licence' => ['Αριθμός Αδειοδότησης', 'ΥΠΑΗΕΣ licence no.'],
+        'provider_uid' => ['Αναγνωριστικό (UID)', 'Document UID'],
+        'provider_auth' => ['Υπογραφή', 'Authentication code'],
 
         // Footer
         'mydata_verify' => [

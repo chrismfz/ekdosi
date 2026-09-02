@@ -89,6 +89,51 @@ class InvoicePdfProviderEvidenceTest extends TestCase
         $this->assertStringContainsString('AUTHCODE-DEADBEEF-1234', $html); // authentication code
     }
 
+    public function test_provider_licence_is_frozen_per_document_via_the_snapshot(): void
+    {
+        // PROV-003 (b): the mark carries the identity IN FORCE at issue. Even after
+        // the config licence rotates, reprinting an old invoice must show its
+        // ORIGINAL licence — not the current one.
+        $invoice = $this->invoice($this->tenant());
+        MyDataMark::create([
+            'company_id' => $invoice->company_id, 'invoice_id' => $invoice->id,
+            'mark' => '400001999999999', 'mydata_action' => 'PROVIDER_INSERT',
+            'provider_key' => 'invosign',
+            'provider_identity' => [
+                'key' => 'invosign',
+                'commercial_name' => 'iNVO Sign',
+                'legal_name' => 'GV Solutions',
+                'site' => 'invosign.gr',
+                'aade_code' => '030',
+                'licence_no' => 'FROZEN_LICENCE_V1_ORIGINAL',
+            ],
+            'authentication_code' => 'A', 'uid' => 'U',
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+
+        // Rotate the config licence AFTER the document was issued.
+        config(['ekdosi.einvoice.provider_identity.invosign.licence_no' => 'ROTATED_LICENCE_V2_NEW']);
+
+        $html = app(InvoicePdfRenderer::class)->renderHtml($invoice);
+
+        $this->assertStringContainsString('FROZEN_LICENCE_V1_ORIGINAL', $html);       // snapshot wins
+        $this->assertStringNotContainsString('ROTATED_LICENCE_V2_NEW', $html);        // config rotation ignored
+        $this->assertStringNotContainsString('2025_05_130GVSolutions', $html);        // even the real config licence is overridden
+    }
+
+    public function test_without_a_snapshot_the_block_falls_back_to_config(): void
+    {
+        // Legacy / pre-migration provider marks carry no snapshot — the block must
+        // still render, from the current config identity.
+        $invoice = $this->invoice($this->tenant());
+        $this->providerMark($invoice); // sets no provider_identity
+
+        $html = app(InvoicePdfRenderer::class)->renderHtml($invoice);
+
+        $this->assertStringContainsString('2025_05_130GVSolutions', $html); // config licence
+        $this->assertStringContainsString('iNVO Sign', $html);
+    }
+
     public function test_direct_mydata_invoice_has_no_provider_block(): void
     {
         $invoice = $this->invoice($this->tenant());

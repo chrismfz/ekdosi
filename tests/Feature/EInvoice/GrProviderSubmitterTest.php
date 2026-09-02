@@ -76,6 +76,28 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertTrue((bool) $fresh->mydata_sent);
     }
 
+    public function test_persist_snapshots_the_provider_identity_in_force(): void
+    {
+        // PROV-003 (b): freeze the identity IN FORCE at issue on the mark, so a
+        // later config/licence rotation can't rewrite this document's evidence.
+        config(['ekdosi.einvoice.provider_identity.fake' => [
+            'commercial_name' => 'Fake Provider',
+            'legal_name' => 'Fake LLC',
+            'site' => 'fake.example',
+            'aade_code' => '999',
+            'licence_no' => 'LIC_AT_ISSUE_V1',
+        ]]);
+
+        $invoice = $this->makeInvoice();
+        $mark = (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice);
+
+        $snapshot = $mark->fresh()->provider_identity;
+        $this->assertIsArray($snapshot);
+        $this->assertSame('LIC_AT_ISSUE_V1', $snapshot['licence_no']);
+        $this->assertSame('Fake Provider', $snapshot['commercial_name']);
+        $this->assertSame('999', $snapshot['aade_code']);
+    }
+
     public function test_rejects_a_backdated_issue_date_before_any_outbound_request(): void
     {
         // Normal online provider issue requires IssueDate = today (InvoSign 238);

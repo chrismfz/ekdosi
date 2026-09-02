@@ -859,6 +859,51 @@ class Invoice extends Model
         return $this->hasMany(MyDataMark::class);
     }
 
+    /** Request-scoped memo for latestProviderMark() (not an attribute). */
+    private bool $providerMarkResolved = false;
+
+    private ?MyDataMark $providerMarkCache = null;
+
+    /**
+     * The CURRENT provider filing's mark, or null (PROV-003).
+     *
+     * «Current» = a PROVIDER_INSERT mark whose MARK equals the live mirror
+     * `mydata_mark`. After a provider→direct re-file the mirror MARK is the direct
+     * one, so a stale provider mark must not be presented as this document's
+     * provider evidence. This is the ONE selector the PDF renderer and the invoice
+     * page share, so print and screen never disagree — and it resolves the whole
+     * provider-evidence block from a single query instead of one per field.
+     *
+     * Memoised per instance (the infolist reads several fields off it in one
+     * render). The private cache is request-scoped — never part of $attributes,
+     * so it doesn't serialise or leak into fresh()/replicate().
+     */
+    public function latestProviderMark(): ?MyDataMark
+    {
+        if ($this->providerMarkResolved) {
+            return $this->providerMarkCache;
+        }
+        $this->providerMarkResolved = true;
+
+        if (blank($this->mydata_mark)) {
+            return $this->providerMarkCache = null;
+        }
+
+        $mark = $this->mydataMarks()
+            ->where('mydata_action', 'PROVIDER_INSERT')
+            ->whereNotNull('mark')
+            ->orderByDesc('mark_date')
+            ->orderByDesc('mark_time')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($mark === null || (string) $mark->mark !== (string) $this->mydata_mark) {
+            return $this->providerMarkCache = null;
+        }
+
+        return $this->providerMarkCache = $mark;
+    }
+
     /**
      * Outbound mail send log — one row per attempt (queued / sending /
      * sent / failed). Surfaces on the ViewInvoice page as a relation

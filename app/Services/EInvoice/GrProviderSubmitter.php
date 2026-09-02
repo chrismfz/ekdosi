@@ -12,6 +12,7 @@ use App\Services\MyDataRejected;
 use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\EInvoice\FilingLog;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderIdentity;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use App\Support\MyData\CancellationMark;
@@ -429,13 +430,20 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         // audit is partial and a reconciliation pass should backfill it.
         $deliveryState = $result->deliveryState ?? ($viaRecovery ? 'ADOPTED' : null);
 
-        return DB::transaction(function () use ($invoice, $xml, $result, $mark, $deliveryState) {
+        // PROV-003: freeze the provider identity (name/site/AADE code/ΥΠΑΗΕΣ
+        // licence) IN FORCE right now, so a later config/licence rotation can't
+        // rewrite this document's printed evidence. null when the key has no config
+        // row — the reader then falls back to the current config identity.
+        $providerIdentity = ProviderIdentity::forKey($this->transport->key())?->toArray();
+
+        return DB::transaction(function () use ($invoice, $xml, $result, $mark, $deliveryState, $providerIdentity) {
             $audit = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
                 'mark' => $mark,
                 'mydata_action' => 'PROVIDER_INSERT',
                 'provider_key' => $this->transport->key(),
+                'provider_identity' => $providerIdentity,
                 'authentication_code' => $result->authenticationCode,
                 // PROV-003: persist the provider document UID (was parsed, then
                 // dropped). Needed on the printed representation (A.1112/2025) and

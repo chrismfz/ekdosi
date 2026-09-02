@@ -166,25 +166,14 @@ class InvoicePdfRenderer
             return null;
         }
 
-        $mark = $invoice->mydataMarks()
-            ->where('mydata_action', 'PROVIDER_INSERT')
-            ->whereNotNull('mark')
-            ->orderByDesc('mark_date')
-            ->orderByDesc('mark_time')
-            ->orderByDesc('id')
-            ->first();
+        // The CURRENT provider filing's mark (its MARK equals the live mirror) —
+        // the same selector the invoice page uses, so print and screen agree. It
+        // returns null after a provider→direct re-file, where the mirror MARK is
+        // the direct one and the stale provider MARK must not be printed as this
+        // document's provider evidence.
+        $mark = $invoice->latestProviderMark();
 
         if ($mark === null) {
-            return null;
-        }
-
-        // Tie the block to the CURRENT filing, not merely to "a provider MARK ever
-        // existed". After a provider→direct re-file (cancel a 9.3, re-issue direct;
-        // or a migrated tenant), the live mirror MARK is the DIRECT one — printing
-        // the old provider MARK here would put two conflicting MARKs on one legal
-        // document and falsely assert provider issuance. Only render when the
-        // provider MARK IS the document's current MARK.
-        if ((string) $mark->mark !== (string) $invoice->mydata_mark) {
             return null;
         }
 
@@ -194,7 +183,10 @@ class InvoicePdfRenderer
         // provider issuance without the licence: suppress it and surface the gap
         // loudly (go-live/preflight should also gate this). The document's MARK
         // still prints via the normal QR/mark block.
-        $identity = ProviderIdentity::forKey($mark->provider_key);
+        // Resolve the identity from the mark's FROZEN snapshot when present
+        // (PROV-003), else the current config — so an old invoice reprints with the
+        // licence in force when it was issued, not a later rotated one.
+        $identity = ProviderIdentity::forMark($mark);
         if ($identity === null || $identity->licenceNo === '') {
             Log::warning('PROV-003: missing provider_identity/licence for provider_key — provider PDF block suppressed.', [
                 'company_id' => $invoice->company_id,

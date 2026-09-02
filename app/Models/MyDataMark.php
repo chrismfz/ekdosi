@@ -40,6 +40,11 @@ class MyDataMark extends Model
         // Provider-side audit (P1; filled by GrProviderSubmitter in P2, null for
         // direct myDATA filings). See docs/paroxos/implementation-plan.md §5.
         'provider_key',
+        // The provider identity (name/site/AADE code/ΥΠΑΗΕΣ licence) frozen AT
+        // ISSUE, so a later config/licence rotation can't rewrite the evidence on
+        // an already-filed document. Null for direct myDATA + legacy rows (they
+        // fall back to the current config identity). PROV-003.
+        'provider_identity',
         'authentication_code',
         // Provider document UID (invoiceUid) — distinct from the AADE MARK.
         // Parsed from a provider filing; null for direct-myDATA marks. PROV-003.
@@ -56,6 +61,9 @@ class MyDataMark extends Model
     {
         return [
             'mark_date' => 'date',
+            // The frozen provider-identity snapshot (PROV-003) — a small assoc
+            // array {key, commercial_name, legal_name, site, aade_code, licence_no}.
+            'provider_identity' => 'array',
             // mark_time is stored as TIME (HH:MM:SS). Leaving it as a
             // plain string avoids Carbon synthesising today's date,
             // which would silently break date-based comparisons

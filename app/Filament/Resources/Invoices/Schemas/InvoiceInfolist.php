@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Invoices\Schemas;
 use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Support\EInvoice\ProviderIdentity;
 use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -275,19 +276,55 @@ class InvoiceInfolist
                             ->url(fn (?string $state) => $state)
                             ->openUrlInNewTab()
                             ->placeholder('—')
+                            // For a provider document this URL is the durable pointer to
+                            // the provider's OFFICIAL copy — with the MARK, an operator
+                            // reaches the authoritative ΥΠΑΗΕΣ document even if our PDF is
+                            // lost. (For direct myDATA it is the AADE QR verification URL.)
+                            ->hint(fn ($record) => $record->latestProviderMark() !== null
+                                ? 'Επίσημο έγγραφο παρόχου'
+                                : null)
                             ->limit(60),
 
-                        // Provider-only (null for direct myDATA filings): which provider
-                        // + its authentication seal, read from the latest provider mark.
-                        TextEntry::make('provider_key')
+                        // Provider evidence (null for direct myDATA). All read off the
+                        // memoised current-provider-mark accessor — ONE query for the whole
+                        // block, and identity resolved via the frozen snapshot (PROV-003),
+                        // so the screen matches the printed PDF exactly.
+                        TextEntry::make('provider_name')
                             ->label('Πάροχος')
-                            ->state(fn ($record) => $record->mydataMarks()->whereNotNull('provider_key')->latest('id')->value('provider_key'))
-                            ->visible(fn ($record) => filled($record->mydataMarks()->whereNotNull('provider_key')->latest('id')->value('provider_key'))),
+                            ->state(function ($record) {
+                                $mark = $record->latestProviderMark();
+
+                                return $mark === null
+                                    ? null
+                                    : (ProviderIdentity::forMark($mark)?->commercialName ?: $mark->provider_key);
+                            })
+                            ->visible(fn ($record) => $record->latestProviderMark() !== null),
+
+                        TextEntry::make('provider_licence')
+                            ->label('Αριθμός Αδειοδότησης')
+                            ->state(function ($record) {
+                                $mark = $record->latestProviderMark();
+
+                                return $mark === null ? null : (ProviderIdentity::forMark($mark)?->licenceNo ?: null);
+                            })
+                            ->visible(function ($record) {
+                                $mark = $record->latestProviderMark();
+
+                                return $mark !== null && filled(ProviderIdentity::forMark($mark)?->licenceNo);
+                            })
+                            ->copyable(),
+
+                        TextEntry::make('provider_uid')
+                            ->label('Αναγνωριστικό (UID)')
+                            ->state(fn ($record) => $record->latestProviderMark()?->uid)
+                            ->visible(fn ($record) => filled($record->latestProviderMark()?->uid))
+                            ->copyable()
+                            ->limit(40),
 
                         TextEntry::make('authentication_code')
-                            ->label('Authentication code')
-                            ->state(fn ($record) => $record->mydataMarks()->whereNotNull('authentication_code')->latest('id')->value('authentication_code'))
-                            ->visible(fn ($record) => filled($record->mydataMarks()->whereNotNull('authentication_code')->latest('id')->value('authentication_code')))
+                            ->label('Υπογραφή')
+                            ->state(fn ($record) => $record->latestProviderMark()?->authentication_code)
+                            ->visible(fn ($record) => filled($record->latestProviderMark()?->authentication_code))
                             ->copyable()
                             ->limit(40),
                     ])
