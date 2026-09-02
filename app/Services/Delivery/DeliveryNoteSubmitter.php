@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Services\MyData\FirebedCredentials;
 use App\Services\MyData\SalesReconciler;
 use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
@@ -619,7 +620,16 @@ class DeliveryNoteSubmitter
         $to = $issued->copy()->max(now())->addDay();
 
         try {
-            $this->initFirebed();
+            // FirebedCredentials, NOT initFirebed(): this is a READ, and the two
+            // resolve different environments. initFirebed() primes the SUBMISSION
+            // mode (`mydata_mode_enum`), which for a provider tenant is 'off' with
+            // no credentials — so the lookup would either throw forever (stranding
+            // the note, the very bug round 2 fixed, reached by another door) or, if
+            // sandbox creds happen to exist, verify against the AADE DEV endpoint,
+            // see nothing, and file a second δελτίο past the grace window.
+            // mydataReadMode() — which canReadMyData() above already gated on — is
+            // what FirebedCredentials resolves.
+            FirebedCredentials::init($this->tenant, $this->mockHandler);
             $docs = (new SalesReconciler($this->tenant, $this->mockHandler))
                 ->fetchAadeDocs($from->format('d/m/Y'), $to->format('d/m/Y'));
         } catch (Throwable $e) {
@@ -674,6 +684,9 @@ class DeliveryNoteSubmitter
                     'delivery_note_id' => $note->id,
                     'mark' => $mark,
                     'mydata_action' => 'INSERT',
+                    // Both normal success paths store this; without it the adopted
+                    // δελτίο's «Ιστορικό myDATA» row shows no QR link.
+                    'invoice_url' => $found->qrCodeUrl,
                     'request' => null,
                     'response' => 'Adopted via RequestTransmittedDocs (MYD-021 in-doubt self-heal).',
                     'mark_date' => now()->toDateString(),

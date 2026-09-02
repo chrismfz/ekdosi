@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Delivery;
 
+use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DeliveryMark;
@@ -368,6 +369,54 @@ class DeliveryNoteExactlyOnceTest extends TestCase
             $this->note->fresh()->mydata_pending_since,
             'no response is not a rejection — it must stay armed',
         );
+    }
+
+    public function test_a_provider_tenant_verifies_against_its_read_credentials(): void
+    {
+        // The in-doubt lookup is a READ, and read mode ≠ submission mode. A provider
+        // tenant's `mydata_mode` is 'off' (it does not submit directly) while its
+        // read credentials live in the sandbox/production slot. Priming with the
+        // SUBMISSION mode meant either a permanent throw (stranding the note — the
+        // round-2 bug reached through another door) or, worse, verifying against the
+        // AADE DEV endpoint, seeing nothing, and filing a second δελτίο.
+        //
+        // The sharp shape: read credentials live in the PRODUCTION slot, the sandbox
+        // slot is empty, and `mydata_mode` is off. Read mode resolves to production;
+        // the submission mode resolves to the empty sandbox slot.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_mode' => 'production',
+            'mydata_mode' => 'off',
+            'mydata_aade_id_production' => 'U', 'mydata_subscription_key_production' => 'K',
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+        $tenant = $this->tenant->fresh();
+
+        $this->assertTrue($tenant->canReadMyData(), 'read credentials are present');
+        $this->assertSame(MyDataMode::Production, $tenant->mydataReadMode());
+        $this->assertNull($tenant->mydataCredentials()[0], 'but the SUBMISSION mode resolves to an empty slot');
+
+        $adopted = '400001965177931';
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', $adopted)]);
+
+        $mark = (new DeliveryNoteSubmitter($tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame($adopted, (string) $mark->mark);
+        $this->assertSame(0, $mock->count(), 'the lookup ran and adopted — no second filing');
+    }
+
+    public function test_an_adopted_mark_row_carries_the_qr_link(): void
+    {
+        // Both normal success paths store invoice_url on the mark row; without it
+        // the self-healed δελτίο's «Ιστορικό myDATA» shows no QR link.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', '400001965177931')]);
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame('https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted', $mark->invoice_url);
     }
 
     public function test_a_read_less_tenant_is_not_stranded_forever(): void

@@ -786,6 +786,9 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'invoice_id' => $invoice->id,
                 'mark' => $mark,
                 'mydata_action' => 'INSERT',
+                // As the normal success path does; without it the adopted invoice's
+                // «Ιστορικό myDATA» row shows no QR link.
+                'invoice_url' => $qrCodeUrl,
                 'request' => null,
                 'response' => 'Adopted via RequestTransmittedDocs (MYD-2 in-doubt self-heal). AADE uid='.($uid ?? '?'),
                 'mark_date' => now()->toDateString(),

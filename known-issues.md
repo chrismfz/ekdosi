@@ -1903,8 +1903,22 @@ document carrying `''` skipped adopt-or-file entirely; and `TenantCoherence` did
 `lines.product.productCategory`, which drives the per-line E3 classification — now checked in ONE
 query per level, not one per line.
 
-Tests: `DeliveryNoteExactlyOnceTest` (16), `TenantCoherenceTest` (17), + four added to
-`MyDataSubmitInDoubtTest`. Both
+**Review round 3** found three, no P0. The one that mattered: the delivery in-doubt lookup is a
+**READ**, but it primed firebed with `initFirebed()`, which resolves the **SUBMISSION** mode. For a
+provider tenant those differ — `mydata_mode` is `off` while the read credentials sit in the
+sandbox/production slot — so the lookup either threw forever (stranding the note: the round-2 bug
+reached through another door) or verified against the AADE **dev** endpoint, saw nothing, and filed
+a second δελτίο past the grace window. Now `FirebedCredentials::init()`, which is documented as THE
+place for read access and resolves `mydataReadMode()` — the same predicate `canReadMyData()` gates
+on two lines earlier. Also: `TenantCoherence` gated the line/product branch on `relationLoaded()`,
+so on the panel's own submit paths (ViewInvoice, the invoices bulk action, ViewDeliveryNote) the
+whole line + E3 check was inert — the same «decorative in the panel» shape as the `CompanyScope`
+finding — now `loadMissing('lines')`, which `AadeInvoiceDocument::build()` does a moment later
+anyway; and an adopted mark row carried no `invoice_url`, so the self-healed document's «Ιστορικό
+myDATA» showed no QR link (both services).
+
+Tests: `DeliveryNoteExactlyOnceTest` (18), `TenantCoherenceTest` (18), + four added to
+`MyDataSubmitInDoubtTest`. Each fix was verified to make its test fail when reverted. Both
 arming tests read `mydata_pending_since` **through the query builder from inside the outbound
 call** — the way a different process would see it after a kill — and both fail when the arming
 line is removed.

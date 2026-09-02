@@ -57,17 +57,19 @@ final class TenantCoherence
         self::assertRelation($tenant, $invoice, 'invoiceType', 'invoice type', $label);
         self::assertRelation($tenant, $invoice, 'paymentMethod', 'payment method', $label);
 
-        // relationLoaded, not the accessor: touching ->lines here would issue a
-        // query on every submit just to re-check what the payload is about to load
-        // anyway. When they ARE loaded (every real filing path loads them), check
-        // them; the line-level company_id is also enforced by the schema.
-        if ($invoice->relationLoaded('lines')) {
-            foreach ($invoice->lines as $line) {
-                self::assertOwned($tenant, $line, 'invoice line', $label);
-            }
+        // loadMissing, NOT relationLoaded: the panel's submit paths (ViewInvoice,
+        // the invoices table bulk action, ViewDeliveryNote) pass a model with no
+        // lines loaded, so gating on relationLoaded() made this whole branch —
+        // including the E3 product/category check — silently inert exactly where an
+        // operator sits. `AadeInvoiceDocument::build()` loads the same relations a
+        // moment later, so on the paths that DID have them this costs nothing.
+        $invoice->loadMissing('lines');
 
-            self::assertLineProducts($tenant, $invoice->lines->pluck('product_id')->all(), $label);
+        foreach ($invoice->lines as $line) {
+            self::assertOwned($tenant, $line, 'invoice line', $label);
         }
+
+        self::assertLineProducts($tenant, $invoice->lines->pluck('product_id')->all(), $label);
     }
 
     /**
@@ -126,11 +128,13 @@ final class TenantCoherence
         self::assertRelation($tenant, $note, 'customer', 'recipient', $label);
         self::assertRelation($tenant, $note, 'deliveryType', 'delivery type', $label);
 
-        if ($note->relationLoaded('lines')) {
-            foreach ($note->lines as $line) {
-                self::assertOwned($tenant, $line, 'delivery note line', $label);
-            }
+        $note->loadMissing('lines');
+
+        foreach ($note->lines as $line) {
+            self::assertOwned($tenant, $line, 'delivery note line', $label);
         }
+
+        self::assertLineProducts($tenant, $note->lines->pluck('product_id')->all(), $label);
     }
 
     /**

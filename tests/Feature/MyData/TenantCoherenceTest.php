@@ -364,6 +364,27 @@ class TenantCoherenceTest extends TestCase
         ]);
     }
 
+    public function test_the_line_check_runs_even_when_lines_are_not_preloaded(): void
+    {
+        // The panel's submit paths (ViewInvoice, the invoices bulk action,
+        // ViewDeliveryNote) pass a model with NO lines loaded. Gating the branch on
+        // relationLoaded() made the whole line + E3 product check silently inert
+        // exactly where an operator sits — the same class of "decorative in the
+        // panel" bug as the CompanyScope one above.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<ok/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+        $invoice->lines()->update(['product_id' => $this->productFor($this->other)->id]);
+
+        // Deliberately NOT ->fresh('lines') — a bare model, as the panel passes it.
+        $bare = Invoice::withoutGlobalScopes()->findOrFail($invoice->id);
+        $this->assertFalse($bare->relationLoaded('lines'));
+
+        $this->assertRefusedBeforeAnything(
+            fn () => (new MyDataSubmitter($this->issuer, $mock))->submit($bare),
+            $mock,
+        );
+    }
+
     public function test_a_line_product_from_another_tenant_is_refused(): void
     {
         // AadeInvoiceDocument resolves the per-line E3 income classification through
