@@ -18,6 +18,7 @@ use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use App\Support\MyData\CommonTaxPresets;
 use App\Support\MyData\ReverseCharge;
+use App\Support\MyData\VatExemptionGuidance;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
@@ -411,6 +412,24 @@ class InvoiceForm
                                     'price_per_item_wvat',
                                     self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($state))
                                 )),
+
+                            // MYD-007: the §8.3 exemption reason for a 0% line — shown
+                            // ONLY when the line is 0%, required then (AADE [217]), and
+                            // auto-suggested from the invoice type (2.2→4, 1.2→14, 1.3→8).
+                            // Always dehydrated but nulled for non-0% lines, so switching a
+                            // line off 0% clears a stale reason rather than keeping it.
+                            Select::make('vat_exemption_category')
+                                ->label('Αιτία απαλλαγής ΦΠΑ (§8.3)')
+                                ->options(Codes::vatExemptionOptions())
+                                ->searchable()
+                                ->hidden(fn (Get $get) => (float) ($get('vat_percent') ?? 0) !== 0.0)
+                                ->required(fn (Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0)
+                                ->default(fn (Get $get) => VatExemptionGuidance::recommendForType(
+                                    InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                ))
+                                ->helperText('Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).')
+                                ->dehydrated()
+                                ->dehydrateStateUsing(fn ($state, Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0 ? $state : null),
 
                             TextInput::make('notes')
                                 ->label('Σημείωση γραμμής'),

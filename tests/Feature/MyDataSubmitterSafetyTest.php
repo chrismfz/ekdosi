@@ -390,8 +390,9 @@ class MyDataSubmitterSafetyTest extends TestCase
 
     public function test_zero_percent_vat_throws_when_exemption_reason_ambiguous(): void
     {
-        // Two 0%-rate categories with different reasons → the line can't say
-        // which, so refuse rather than guess.
+        // Two 0%-rate categories with different reasons AND a line with NO per-line
+        // §8.3 snapshot → the tenant-wide fallback can't say which, so refuse rather
+        // than guess. (A line WITH a per-line reason bypasses this — MYD-007.)
         foreach ([5, 12] as $i => $code) {
             VatCategory::create([
                 'company_id' => $this->tenant->id,
@@ -405,9 +406,32 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->zeroVatLine($inv);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/different exemption reasons/');
+        $this->expectExceptionMessageMatches('/ambiguous/');
 
         (new MyDataSubmitter($this->tenant))->previewXml($inv);
+    }
+
+    public function test_per_line_exemption_reason_is_filed_even_with_multiple_zero_categories(): void
+    {
+        // MYD-007: even with TWO 0%-rate categories (ambiguous tenant-wide), a line
+        // carrying its own §8.3 reason files THAT reason — no throw, no guessing.
+        foreach ([4, 14] as $i => $code) {
+            VatCategory::create([
+                'company_id' => $this->tenant->id, 'description' => '0% #'.$i,
+                'rate' => 0, 'vat_exemption_category' => $code, 'is_default' => false,
+            ]);
+        }
+        $inv = $this->makeInvoice();
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 0, 'net_price' => 100, 'gross_price' => 100,
+            'vat_exemption_category' => 4, // ενδοκοιν. υπηρεσία (άρθρο 18)
+        ]);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        // firebed serialises VatExemptionCategory 4 as <vatExemptionCategory>4</…>.
+        $this->assertStringContainsString('<vatExemptionCategory>4</vatExemptionCategory>', $xml);
     }
 
     public function test_withholding_emits_taxestotals_block(): void

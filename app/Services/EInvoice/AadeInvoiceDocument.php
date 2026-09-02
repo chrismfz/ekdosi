@@ -204,7 +204,7 @@ class AadeInvoiceDocument
             // code AADE requires ([217] forbids category 7 without it). The
             // reason lives on the tenant's 0%-rate VatCategory; resolve once.
             if (abs($rate) < 0.01) {
-                $detail->setVatExemptionCategory(VatExemption::from($this->resolveVatExemptionCategory()));
+                $detail->setVatExemptionCategory(VatExemption::from($this->resolveVatExemptionCategory($line)));
             }
 
             [$lineClass, $lineCat] = $this->resolveIncomeClass($line, $typeClass, $typeCat);
@@ -873,7 +873,42 @@ class AadeInvoiceDocument
      * disagree, we throw with operator guidance rather than file a wrong/blank
      * reason. Memoised per submit.
      */
-    private function resolveVatExemptionCategory(): int
+    /**
+     * MYD-007: the §8.3 exemption reason for a 0% LINE. The per-line snapshot
+     * (`invoice_lines.vat_exemption_category`, chosen at issue) wins — the reason
+     * differs by case, so it is captured per line, not tenant-wide. Only when a
+     * line carries no snapshot (a legacy/imported invoice, or a tenant that kept a
+     * single 0% category) do we fall back to the tenant-wide resolver below. This
+     * removes the old "multiple 0% categories → ambiguous → throw" limitation for
+     * any invoice whose lines carry their reason.
+     */
+    private function resolveVatExemptionCategory(InvoiceLine $line): int
+    {
+        $lineCode = $line->vat_exemption_category;
+        if ($lineCode !== null && $lineCode !== '') {
+            $code = (int) $lineCode;
+            if (! Codes::vatExemptionExists($code)) {
+                throw new RuntimeException(
+                    'Invoice line '.$line->getKey().' has vat_exemption_category='.$code.
+                    ', which is not a valid AADE exemption reason (§8.3, 1–31). Fix the line’s '.
+                    'exemption reason before issuing.'
+                );
+            }
+
+            return $code;
+        }
+
+        return $this->resolveTenantWideExemptionCategory();
+    }
+
+    /**
+     * Legacy fallback: the tenant's SINGLE 0%-rate VatCategory reason. Used only
+     * for a line with no per-line snapshot. Still throws on none / multiple — the
+     * latter is now only reachable by an old invoice on a tenant that has since
+     * added a second 0% category, and the throw tells the operator to set the
+     * reason on the line explicitly.
+     */
+    private function resolveTenantWideExemptionCategory(): int
     {
         if ($this->resolvedExemptionCategory !== null) {
             return $this->resolvedExemptionCategory;
@@ -898,10 +933,10 @@ class AadeInvoiceDocument
         }
         if ($codes->count() > 1) {
             throw new RuntimeException(
-                'Multiple 0%-rate VAT categories have different exemption reasons ('.
-                $codes->implode(', ').'). Invoice lines store only the rate, not which exempt '.
-                'category, so the correct reason is ambiguous. Keep a single 0%-rate VAT category '.
-                'per tenant (or split filing by reason — a follow-up if a tenant truly needs both).'
+                'This 0% line has no per-line exemption reason and the tenant has multiple 0%-rate '.
+                'VAT categories with different reasons ('.$codes->implode(', ').') — so the correct '.
+                'reason is ambiguous. Set the §8.3 reason on the line (edit the invoice: the 0% line '.
+                'now has an «Αιτία απαλλαγής» field), then re-issue.'
             );
         }
 

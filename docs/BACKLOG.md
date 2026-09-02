@@ -608,6 +608,17 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
 - **delivery-mark forensics**: το `invoice_filing`/`mydata_failures` καλύπτουν τα `mydata_marks`
   (τιμολόγια)· τα `delivery_marks` (ΔΑ) έχουν δικό τους ιστορικό — να επεκταθούν όταν μπει η ΔΑ ροή.
 
+## 🧾 MYD-007 follow-ups (per-line §8.3 model shipped)
+Το per-line snapshot + guidance helper + preflight block **✅ SHIPPED**. Μένουν:
+- **Type↔reason cross-check στην έκδοση** — προειδοποίηση/μπλοκ αν η αιτία γραμμής αντιφάσκει με τον
+  τύπο (π.χ. αιτία 4 σε εγχώριο 1.1, ή αιτία 14 σε υπηρεσία 2.2). Υπάρχει ήδη `assertCounterpartCountryMatchesType`
+  για χώρα↔τύπος· να προστεθεί το αντίστοιχο αιτία↔τύπος.
+- **WHMCS inbox mapper** — οι προγραμματιστικά δημιουργημένες 0% γραμμές δεν ορίζουν per-line αιτία
+  (πέφτουν στο tenant-wide fallback)· να περνά την αιτία από τον τύπο/κατηγορία.
+- **Cleanup υπαρχόντων tenants** — το preflight ΕΠΙΣΗΜΑΙΝΕΙ τις reason-less/λάθος 0% κατηγορίες· να
+  γίνει operator-review pass (χωρίς auto-guess ιστορικών αιτιών).
+- **Ιστορικές γραμμές** μένουν null (ήδη filed· η αλήθεια στο `mydata_marks`) — καμία ανάγκη backfill.
+
 ## 🖥️ Console/interface polish (B — sweep 2026-06-16)
 - _(**Auto-refresh-on-stale** στην Κονσόλα myDATA: ✅ SHIPPED 2026-06-17 — stale banner >6h + opt-in
   `mydata:refresh-console` scheduled warmer (όλα τα snapshots, default OFF, σαν το VAT picture). FEATURES §3.)_

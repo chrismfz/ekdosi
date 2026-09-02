@@ -98,13 +98,26 @@ class MyDataPreflightTest extends TestCase
             ->assertExitCode(2);
     }
 
-    public function test_zero_percent_vat_warns_but_does_not_fail(): void
+    public function test_zero_percent_vat_without_reason_fails_preflight(): void
     {
         $c = $this->tenant();
         $this->invoiceType($c);
-        $this->vat($c, 0);
+        $this->vat($c, 0); // no §8.3 exemption reason
 
-        // 0% is a WARN (exemption needed), not an ERROR → still exit 0.
+        // MYD-007 / MYD-004: a 0% category with no exemption reason is now a
+        // BLOCKING error (AADE rejects [217]) → preflight fails (exit 2), closing
+        // the false-green that let it pass before.
+        $this->artisan('mydata:preflight', ['--tenant' => $c->slug])
+            ->assertExitCode(2);
+    }
+
+    public function test_zero_percent_vat_with_a_reason_passes_preflight(): void
+    {
+        $c = $this->tenant();
+        $this->invoiceType($c);
+        $vat = $this->vat($c, 0);
+        $vat->forceFill(['vat_exemption_category' => 4])->save(); // ενδοκοιν. υπηρεσία, άρθρο 18
+
         $this->artisan('mydata:preflight', ['--tenant' => $c->slug])
             ->assertExitCode(0);
     }
