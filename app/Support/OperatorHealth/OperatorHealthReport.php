@@ -38,6 +38,7 @@ class OperatorHealthReport
         'mail_sweep' => 'mail sweep',
         'resend_failed_emails' => 'resend failed emails',
         'overdue_notifications' => 'overdue notifications',
+        'leads_notify_due' => 'leads next-step reminders',
         'service_renewals' => 'service renewals',
         'service_dunning' => 'service dunning',
         'company_backups' => 'company backups',

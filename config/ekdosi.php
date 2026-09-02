@@ -229,6 +229,13 @@ return [
         'service_dunning_enabled' => env('EKDOSI_SCHEDULE_SERVICE_DUNNING', true),
         'service_dunning_time' => env('EKDOSI_SERVICE_DUNNING_TIME', '08:00'),
 
+        // leads:notify-due — daily «bell» digest of leads whose «επόμενο βήμα»
+        // is due today or overdue, per tenant (assigned → its operator,
+        // unassigned → everyone; NO email). Default OFF (opt-in per deploy).
+        // HH:MM (server time).
+        'leads_notify_due_enabled' => env('EKDOSI_SCHEDULE_LEADS_NOTIFY_DUE', false),
+        'leads_notify_due_time' => env('EKDOSI_LEADS_NOTIFY_DUE_TIME', '08:00'),
+
         // ai:dispatch-reminders — deliver due AI «Βοηθός» reminders (the bell).
         // Default ON: a confirmed reminder is expected to fire (still inert until
         // the OS cron + a queue worker run the scheduler). Cheap every-minute

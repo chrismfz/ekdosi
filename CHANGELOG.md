@@ -19,6 +19,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Leads / mini-CRM (L2) — λογοδοσία.** Σελίδα «Απολογισμός πωλήσεων» (ανά χειριστή × περίοδο:
+  τηλέφωνα/emails/ραντεβού με «απάντησαν/έγιναν», προσφορές, μετατροπές, χαμένα, ανοιχτά· χοάνη· ημερολόγιο·
+  CSV — perm `View:SalesActivityReport`, τρέξε `shield:generate`), `leads:notify-due` (καθημερινό bell για
+  επόμενο βήμα σήμερα/ληξιπρόθεσμο, `EKDOSI_SCHEDULE_LEADS_NOTIFY_DUE` default OFF, ρυθμιζόμενο στο
+  «Χρονοπρογραμματισμός»), dashboard widget «Leads» (ανοιχτά / ληξιπρόθεσμα / μετατροπές μήνα).
 - **Ένας πελάτης ανά ΑΦΜ ανά εταιρεία — επιβάλλεται από τη βάση.** Νέα στήλη `customers.afm_key`
   (η ταυτότητα του ΑΦΜ: ψηφία για ελληνικό ΑΦΜ με/χωρίς EL/GR, γράμματα για ξένο VAT, NULL για
   κενά/placeholder όπως 000000000) + `UNIQUE(company_id, afm_key)` (καλύπτει και soft-deleted).

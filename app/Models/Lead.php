@@ -218,6 +218,18 @@ class Lead extends Model
         return $query->whereIn('status', LeadStatus::openValues());
     }
 
+    /**
+     * Open leads whose next step is due TODAY or earlier — what the morning
+     * reminder (leads:notify-due) lists and where its link lands, so a step
+     * planned for later today is not hidden behind the stricter «overdue».
+     */
+    public function scopeDue(Builder $query): Builder
+    {
+        return $query->open()
+            ->whereNotNull('next_action_at')
+            ->where('next_action_at', '<=', now()->endOfDay());
+    }
+
     /** Open leads whose `next_action_at` is in the past. */
     public function scopeOverdue(Builder $query): Builder
     {
