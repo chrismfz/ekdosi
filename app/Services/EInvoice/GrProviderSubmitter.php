@@ -13,6 +13,7 @@ use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
+use App\Support\Tenancy\TenantCoherence;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -51,6 +52,12 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
     public function submit(Invoice $invoice): MyDataMark
     {
+        // MYD-022: fail closed BEFORE payload construction, audit writes or any
+        // outbound request. Especially here — InvoSignDocument reads its issuer
+        // fields from $invoice->company while the credentials come from $this->tenant,
+        // so a mismatched call yields ONE payload asserting TWO different issuers.
+        TenantCoherence::assertInvoice($this->tenant, $invoice);
+
         $this->assertNotAlreadyFiled($invoice);
         // Normal online provider issue requires IssueDate = today (InvoSign 238);
         // reject a backdated/future date locally before any outbound request (PROV-020).
@@ -121,6 +128,12 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
     public function cancel(Invoice $invoice, string $reason = ''): MyDataMark
     {
+        // MYD-022: fail closed BEFORE payload construction, audit writes or any
+        // outbound request. Especially here — InvoSignDocument reads its issuer
+        // fields from $invoice->company while the credentials come from $this->tenant,
+        // so a mismatched call yields ONE payload asserting TWO different issuers.
+        TenantCoherence::assertInvoice($this->tenant, $invoice);
+
         if ($invoice->mydata_state === 'CANCELLED') {
             throw new RuntimeException(
                 "Invoice {$invoice->invcode} is already cancelled at myDATA (state=CANCELLED). Refusing to double-cancel."

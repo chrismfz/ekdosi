@@ -12,6 +12,7 @@ use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\MyData\AadeDocSummary;
 use App\Services\MyData\SalesReconciler;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\Tenancy\TenantCoherence;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Exceptions\InvalidResponseException;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
@@ -89,6 +90,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
     public function submit(Invoice $invoice): MyDataMark
     {
+        // MYD-022: fail closed BEFORE payload construction, audit writes or any
+        // outbound request — a tenant mismatch must never reach the wire, and must
+        // not leave a half-written audit trail suggesting it did.
+        TenantCoherence::assertInvoice($this->tenant, $invoice);
+
         // MYD-2 (AUDIT): serialise concurrent submits of the SAME invoice so
         // two operators (or a double-click / two tabs) can't both POST it and
         // create two MARKs at AADE. A cache atomic lock — NOT a DB row lock,
@@ -380,6 +386,10 @@ class MyDataSubmitter implements EInvoiceSubmitter
      */
     public function previewXml(Invoice $invoice): MyDataMark
     {
+        // Preview too: it builds the real payload and writes a DRY_RUN audit row,
+        // so a mismatch would produce a stored document asserting the wrong issuer.
+        TenantCoherence::assertInvoice($this->tenant, $invoice);
+
         $payload = $this->document()->build($invoice);
         $xml = $this->document()->toXml($payload);
 
@@ -388,6 +398,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
     public function cancel(Invoice $invoice, string $reason = ''): MyDataMark
     {
+        // MYD-022: fail closed BEFORE payload construction, audit writes or any
+        // outbound request — a tenant mismatch must never reach the wire, and must
+        // not leave a half-written audit trail suggesting it did.
+        TenantCoherence::assertInvoice($this->tenant, $invoice);
+
         // Guard: refuse to double-cancel. Once mydata_state='CANCELLED'
         // we don't want a second CANCEL call to AADE (which would
         // either be rejected or produce a duplicate CANCEL audit row).

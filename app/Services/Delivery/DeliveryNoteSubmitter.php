@@ -15,6 +15,7 @@ use App\Support\EInvoice\ProviderResult;
 use App\Support\IsoCountry;
 use App\Support\MyData\Codes;
 use App\Support\MyData\DeliveryCodes;
+use App\Support\Tenancy\TenantCoherence;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\IncomeClassificationCategory;
@@ -281,6 +282,8 @@ class DeliveryNoteSubmitter
     /** Build the XML preview (mirrors MyDataSubmitter::payloadToXml). */
     public function previewXml(DeliveryNote $note): string
     {
+        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+
         return $this->payloadToXml($this->buildAadeDeliveryNote($note));
     }
 
@@ -291,6 +294,10 @@ class DeliveryNoteSubmitter
      */
     public function submit(DeliveryNote $note): DeliveryMark
     {
+        // MYD-022: fail closed BEFORE payload construction, audit writes or any
+        // outbound request — a tenant mismatch must never reach the wire.
+        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+
         if ($note->mydata_state === 'VALID') {
             throw new RuntimeException(
                 "Delivery note {$note->invcode} was already filed at myDATA (MARK "

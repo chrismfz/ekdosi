@@ -9,6 +9,7 @@ use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteEvent;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\Tenancy\TenantCoherence;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\TransportType;
@@ -102,6 +103,10 @@ class DeliveryLifecycleService
      */
     public function registerTransfer(DeliveryNote $note): DeliveryMark
     {
+        // MYD-022: the lifecycle events are filed under the tenant's ΑΦΜ and
+        // credentials just like the issue itself — same fail-closed check.
+        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+
         $this->requireState($note, 'registered', 'Έναρξη διακίνησης');
 
         if ($note->mydata_state !== 'VALID') {
@@ -179,6 +184,10 @@ class DeliveryLifecycleService
      */
     public function confirmDelivery(DeliveryNote $note, string $outcome = 'FULL'): DeliveryMark
     {
+        // MYD-022: the lifecycle events are filed under the tenant's ΑΦΜ and
+        // credentials just like the issue itself — same fail-closed check.
+        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+
         $this->requireState($note, 'in_transit', 'Δήλωση παράδοσης');
 
         $outcomeType = DeliveryOutcomeType::tryFrom(mb_strtoupper(trim($outcome)))
@@ -228,6 +237,10 @@ class DeliveryLifecycleService
      */
     public function refreshStatus(DeliveryNote $note): array
     {
+        // MYD-022: the lifecycle events are filed under the tenant's ΑΦΜ and
+        // credentials just like the issue itself — same fail-closed check.
+        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+
         if (empty($note->mydata_mark)) {
             throw new RuntimeException(
                 "Το δελτίο {$note->invcode} δεν έχει MARK — δεν έχει εκδοθεί στο myDATA."
@@ -366,6 +379,10 @@ class DeliveryLifecycleService
      */
     public function cancel(DeliveryNote $note, string $reason = ''): DeliveryMark
     {
+        // MYD-022: the lifecycle events are filed under the tenant's ΑΦΜ and
+        // credentials just like the issue itself — same fail-closed check.
+        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+
         if (empty($note->mydata_mark)) {
             throw new RuntimeException(
                 "Το δελτίο {$note->invcode} δεν έχει MARK — δεν έχει εκδοθεί στο myDATA."

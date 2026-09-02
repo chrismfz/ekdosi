@@ -284,7 +284,7 @@ Priorities:
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
 | MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
-| MYD-022 | P0 | OPEN | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
+| MYD-022 | P0 | DONE | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
 | MYD-024 | P2 | PARTIAL | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
 | MYD-025 | P0 | OPEN | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
@@ -1871,7 +1871,33 @@ and never perform a blind retry.
 
 ### MYD-022 — Filing services do not enforce tenant coherence
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** DONE 2026-09-02 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Fix:** `App\Support\Tenancy\TenantCoherence` — ONE fail-closed assertion, called at all
+**12** outbound entry points before payload construction, audit writes or any request:
+`MyDataSubmitter` submit/cancel/previewXml, `GrProviderSubmitter` submit/cancel,
+`DeliveryNoteSubmitter` submit/previewXml, and all four `DeliveryLifecycleService`
+operations (registerTransfer / confirmDelivery / refreshStatus / cancel).
+
+It asserts on the DATA, never on the ambient context — deliberately. `CompanyScope` is a
+documented no-op outside a request (CLI, queue, webhooks), which is exactly where the
+automation that could carry this bug runs, so the panel's scoping is a convenience and not
+a boundary. The check covers the document AND every relation whose values reach the
+payload: counterpart, invoice/delivery type, payment method and (when loaded) the lines.
+That is the realistic shape of the bug — a mis-set `customer_id`, not a wholesale wrong
+invoice.
+
+The provider path is the sharpest case and is why `previewXml` is guarded too:
+`InvoSignDocument` reads its issuer fields from `$invoice->company` while the credentials
+come from `$this->tenant`, so a mismatched call produces ONE payload asserting TWO
+different issuers — and `previewXml` writes a DRY_RUN audit row carrying it.
+
+`TenantCoherenceTest` asserts three things per case, because «it threw» is not the
+requirement: it threw, **no audit row was written**, and **the Guzzle queue was never
+touched** (the mock's remaining count is the proof nothing reached the wire). Both
+directions are covered — a coherent invoice must still reach the wire, and an
+int-vs-string `company_id` (which a query builder can return) is the same tenant. With the
+assertion stubbed out, 10 of the 12 tests fail.
 
 **Repository evidence**
 
