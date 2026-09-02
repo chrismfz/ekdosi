@@ -136,6 +136,28 @@ class TransmittedDocReaderTest extends TestCase
 
         $this->assertNotNull($detail);
         $this->assertSame('CANCELLED', $detail['state']);
+        // MYD-023: the MARK of the cancellation ACT must survive the fold, not
+        // just the boolean. It is what a state sync persists as the evidence of
+        // WHICH cancellation produced the terminal state — the standalone
+        // <cancelledInvoicesDoc> entry names it and we used to throw it away.
+        $this->assertSame('400001964394999', $detail['cancelledByMark']);
+    }
+
+    public function test_a_live_document_carries_no_cancellation_mark(): void
+    {
+        $mock = new MockHandler([
+            new Response(200, [], $this->retailResponse()),
+        ]);
+
+        $detail = (new TransmittedDocReader($this->tenant, $mock))->fetchDetailByMark(
+            '400001964394607',
+            now()->subMonth(),
+            now(),
+        );
+
+        $this->assertNotNull($detail);
+        $this->assertSame('VALID', $detail['state']);
+        $this->assertNull($detail['cancelledByMark']);
     }
 
     public function test_returns_null_when_mark_absent_from_window(): void

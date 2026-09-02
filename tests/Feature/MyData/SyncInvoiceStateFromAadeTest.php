@@ -44,6 +44,60 @@ class SyncInvoiceStateFromAadeTest extends TestCase
         return $invoice->fresh();
     }
 
+    /**
+     * MYD-023: adopting a cancellation must record WHICH cancellation caused it.
+     * Without the mark on the STATE_SYNC row the database holds a terminal
+     * cancelled state it cannot account for.
+     */
+    public function test_cancellation_mark_is_recorded_on_the_state_sync_row(): void
+    {
+        $invoice = $this->invoice('VALID', 'active');
+
+        app(SyncInvoiceStateFromAade::class)->sync($invoice, 'CANCELLED', '400001964598454');
+
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'STATE_SYNC',
+            'mark' => '400013829677137',          // the invoice's own MARK
+            'cancellation_mark' => '400001964598454', // AADE's cancellation MARK
+        ]);
+    }
+
+    /**
+     * The mark is evidence, not a precondition. Unlike the expense twin this must
+     * NOT refuse: it is the route that repairs an invoice whose cancellation we
+     * learned about late, and refusing would strand the very document it exists
+     * to fix.
+     */
+    public function test_cancellation_without_a_mark_still_syncs(): void
+    {
+        $invoice = $this->invoice('VALID', 'active');
+
+        $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, 'CANCELLED', '   ');
+
+        $this->assertTrue($result['changed']);
+        $this->assertSame('CANCELLED', $invoice->fresh()->mydata_state);
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'STATE_SYNC',
+            'cancellation_mark' => null,
+        ]);
+    }
+
+    /** A cancellation mark is meaningless on a VALID sync — never carried over. */
+    public function test_valid_sync_does_not_store_a_cancellation_mark(): void
+    {
+        $invoice = $this->invoice('CANCELLED', 'cancelled');
+
+        app(SyncInvoiceStateFromAade::class)->sync($invoice, 'VALID', '400001964598454');
+
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'STATE_SYNC',
+            'cancellation_mark' => null,
+        ]);
+    }
+
     public function test_cancelled_syncs_local_to_cancelled(): void
     {
         $invoice = $this->invoice('VALID', 'active');

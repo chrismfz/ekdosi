@@ -30,9 +30,15 @@ class SyncInvoiceStateFromAade
 {
     /**
      * @param  string  $aadeState  the live myDATA state ('VALID' | 'CANCELLED')
+     * @param  string|null  $cancelledByMark  AADE's MARK for the CANCELLATION act,
+     *                                        when it named one — the evidence of WHICH cancellation produced the
+     *                                        terminal state (MYD-023). Recorded on the STATE_SYNC row, exactly as
+     *                                        the direct/provider cancel paths record theirs. Adopting a
+     *                                        cancellation without it used to leave a terminal state the database
+     *                                        could not account for.
      * @return array{changed: bool, from: ?string, to: string, local_status: ?string}
      */
-    public function sync(Invoice $invoice, string $aadeState): array
+    public function sync(Invoice $invoice, string $aadeState, ?string $cancelledByMark = null): array
     {
         $aadeState = strtoupper(trim($aadeState));
 
@@ -41,6 +47,15 @@ class SyncInvoiceStateFromAade
         if (! in_array($aadeState, ['VALID', 'CANCELLED'], true)) {
             throw new RuntimeException("Μη αναμενόμενη κατάσταση ΑΑΔΕ: «{$aadeState}».");
         }
+
+        // The cancellation MARK only means anything on a CANCELLED result, and it
+        // is deliberately NOT required: unlike the expense twin, this is the one
+        // route that recovers an invoice whose cancellation we learned about
+        // late, and refusing the sync over missing evidence would strand exactly
+        // the document it exists to repair.
+        $cancelledByMark = $aadeState === 'CANCELLED' && $cancelledByMark !== null && trim($cancelledByMark) !== ''
+            ? trim($cancelledByMark)
+            : null;
 
         $fromState = $invoice->mydata_state;
         $fromLocal = $invoice->local_status;
@@ -54,11 +69,16 @@ class SyncInvoiceStateFromAade
         // No-op only when BOTH columns already match the target — the job is
         // "make local match AADE", not just the mydata_state (so a VALID-at-AADE
         // doc that's still wrongly local-cancelled is fixed, not skipped).
+        //
+        // A re-sync that would ONLY add a late-arriving cancellation MARK stops
+        // here and records nothing. Unreachable from the panel (the action is
+        // offered only on a state divergence) and it writes no audit row today
+        // either, so it stays a no-op rather than a reason to widen this.
         if ($fromState === $aadeState && $fromLocal === $toLocal) {
             return ['changed' => false, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $fromLocal];
         }
 
-        DB::transaction(function () use ($invoice, $aadeState, $toLocal, $fromState, $fromLocal): void {
+        DB::transaction(function () use ($invoice, $aadeState, $toLocal, $fromState, $fromLocal, $cancelledByMark): void {
             $invoice->forceFill([
                 'mydata_state' => $aadeState,
                 'local_status' => $toLocal,
@@ -68,9 +88,11 @@ class SyncInvoiceStateFromAade
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
                 'mark' => $invoice->mydata_mark,
+                'cancellation_mark' => $cancelledByMark,
                 'mydata_action' => 'STATE_SYNC',
                 'request' => "Συγχρονισμός κατάστασης από ΑΑΔΕ: {$fromState} → {$aadeState}"
-                    ." (local_status: {$fromLocal} → {$toLocal})",
+                    ." (local_status: {$fromLocal} → {$toLocal})"
+                    .($cancelledByMark !== null ? " (ακύρωση με ΜΑΡΚ {$cancelledByMark})" : ''),
                 'response' => null,
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
@@ -84,6 +106,7 @@ class SyncInvoiceStateFromAade
             'from' => $fromState,
             'to' => $aadeState,
             'local_status' => $toLocal,
+            'cancelled_by_mark' => $cancelledByMark,
         ]);
 
         // Reflect a cancellation on the WHMCS side (best-effort, never throws;

@@ -54,14 +54,26 @@ class TransmittedDocReader
         $inline = $doc->getCancelledByMark();
         $cancelled = ($inline !== null && $inline !== '') || isset($cancelledMarks[$mark]);
 
-        return MarkDetail::fromAadeDoc($doc, $cancelled, $this->tenant->afm);
+        // The MARK of the cancellation ACT, when AADE gave us one — inline on the
+        // doc, else from the standalone <cancelledInvoicesDoc> entry. It is the
+        // evidence a state sync must persist, so it must survive this far
+        // (MYD-023); an empty string means «cancelled, but AADE named no MARK».
+        $cancelledByMark = ($inline !== null && $inline !== '')
+            ? $inline
+            : (($cancelledMarks[$mark] ?? '') ?: null);
+
+        return MarkDetail::fromAadeDoc($doc, $cancelled, $this->tenant->afm, $cancelledByMark);
     }
 
     /**
      * Pull every transmitted doc in the window, keyed by MARK, plus the set
      * of MARKs AADE lists as cancelled in <cancelledInvoicesDoc>.
      *
-     * @return array{0: array<string, AadeInvoice>, 1: array<string, true>}
+     * The cancelled map is MARK => the cancellation MARK ('' when AADE listed the
+     * document as cancelled without naming one), so a caller can persist WHICH
+     * cancellation produced the state — not merely that one happened (MYD-023).
+     *
+     * @return array{0: array<string, AadeInvoice>, 1: array<string, string>}
      */
     private function fetch(Carbon $from, Carbon $to): array
     {
@@ -72,7 +84,7 @@ class TransmittedDocReader
 
         /** @var array<string, AadeInvoice> $byMark */
         $byMark = [];
-        /** @var array<string, true> $cancelledMarks */
+        /** @var array<string, string> $cancelledMarks */
         $cancelledMarks = [];
 
         $nextPartitionKey = null;
@@ -112,7 +124,7 @@ class TransmittedDocReader
                 foreach ($cancelledDoc as $cancelled) {
                     $m = (string) $cancelled->getInvoiceMark();
                     if ($m !== '') {
-                        $cancelledMarks[$m] = true;
+                        $cancelledMarks[$m] = (string) $cancelled->getCancellationMark();
                     }
                 }
             }

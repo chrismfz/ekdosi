@@ -427,6 +427,17 @@ class DeliveryLifecycleServiceTest extends TestCase
 
         $this->assertSame('CANCEL', $mark->mydata_action);
         $this->assertSame('480301204040191', $mark->mark); // the cancelled INSERT mark
+
+        // MYD-023: AADE returns its OWN MARK for the cancellation act, and it is
+        // separate evidence from the MARK of the document being withdrawn. It was
+        // simply discarded — the row recorded only the issue MARK under action
+        // CANCEL, so the audit trail could not prove WHICH cancellation event
+        // produced the terminal state. (`mydata_marks` has carried both columns
+        // since 2026-06-05; `delivery_marks` never did.)
+        //
+        // This is the path with real production data behind it: myip cancelled a
+        // δελτίο on 2026-06-09, and no invoice has ever been cancelled at AADE.
+        $this->assertSame('400001234599399', $mark->cancellation_mark, 'the cancel act itself');
         $this->assertStringContainsString('λάθος παραλήπτης', (string) $mark->request);
 
         $this->assertDatabaseHas('delivery_marks', [
@@ -518,7 +529,15 @@ class DeliveryLifecycleServiceTest extends TestCase
 
         $this->assertSame('CANCEL', $audit->mydata_action);
         $this->assertSame('invosign', $audit->provider_key);
-        $this->assertSame('400001957363715', $audit->mark); // cancellationMark from the provider
+
+        // MYD-023: the two MARKs are DIFFERENT evidence and live in different
+        // columns. This used to assert `mark === cancellationMark`, i.e. it
+        // encoded the bug: `$result->cancellationMark ?? $markToCancel` overwrote
+        // the document's own MARK with the cancellation one — and fell back to the
+        // ISSUE mark when the provider returned none, so the row then claimed the
+        // issue MARK was the proof of cancellation.
+        $this->assertSame('400001964635819', $audit->mark, 'the document that was cancelled');
+        $this->assertSame('400001957363715', $audit->cancellation_mark, "AADE's MARK for the cancel act");
 
         $fresh = $note->fresh();
         $this->assertSame('CANCELLED', $fresh->mydata_state);

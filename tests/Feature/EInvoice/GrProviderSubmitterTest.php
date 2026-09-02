@@ -239,6 +239,13 @@ class GrProviderSubmitterTest extends TestCase
             ->cancel($invoice->fresh(), 'λάθος διακίνηση');
 
         $this->assertSame('PROVIDER_CANCEL', $cancel->mydata_action);
+
+        // MYD-023: distinct evidence, distinct columns. The old code wrote
+        // `$result->cancellationMark ?? $mark`, which both overwrote the document's
+        // MARK and — when the provider returned no cancellation mark — silently
+        // relabelled the ISSUE mark as proof of the cancellation.
+        $this->assertSame('400000000000999', $cancel->mark, 'the document that was cancelled');
+        $this->assertSame('400000000000111', $cancel->cancellation_mark, 'the cancel act itself');
         $this->assertSame('CANCELLED', $invoice->fresh()->mydata_state);
         $this->assertSame('cancelled', $invoice->fresh()->local_status);
     }
@@ -322,7 +329,10 @@ class FakeGrTransport implements EInvoiceProviderTransport
 
     public function cancel(string $mark, ProviderCredentials $credentials, string $reason = ''): ProviderResult
     {
-        return ProviderResult::ok(cancellationMark: '400000000000999', raw: '<cancel/>');
+        // DIFFERENT from the issue MARK on purpose: when both were the same value
+        // the test could not tell the two columns apart, so it could not have
+        // caught the `?? $mark` fallback that relabelled one as the other.
+        return ProviderResult::ok(cancellationMark: '400000000000111', raw: '<cancel/>');
     }
 
     public function status(Invoice $invoice, ProviderCredentials $credentials): ProviderResult
