@@ -20,10 +20,17 @@ use UnitEnum;
  * In-app update (Phase 2) — history + live progress of application updates.
  *
  * GLOBAL, not tenant-scoped (`$isScopedToTenant = false`): an update is a
- * whole-app deploy, not company data. SUPER_ADMIN-ONLY and CROSS-TENANT, so it's
- * gated on `TenantRoleProvisioner::isSuperAdminAnywhere` (like the SystemHealth
- * page) rather than a per-tenant Shield permission a company_admin would hold —
- * hence no policy + no shield:generate churn.
+ * whole-app deploy, not company data. SUPER_ADMIN-ONLY and CROSS-TENANT, so the
+ * panel is gated on `TenantRoleProvisioner::isSuperAdminAnywhere` (like the
+ * SystemHealth page) rather than on a per-tenant Shield permission a
+ * company_admin would hold.
+ *
+ * The model-level boundary is `App\Policies\UpdateRunPolicy` — hand-written, NOT
+ * shield-generated (the stock template would approve any holder of
+ * `*:UpdateRun`, which every company_admin used to get). `UpdateRun` is also in
+ * `ADMIN_FORBIDDEN_RESOURCES`, so those permissions are no longer granted at
+ * all. Committing the policy is ALSO what stops `shield:generate` from
+ * re-creating it as an untracked file on every deploy/test run.
  *
  * Read-only: rows are created by the «Εγκατάσταση ενημέρωσης» action on the
  * SystemHealth page (never a Filament form) and mutated only by the

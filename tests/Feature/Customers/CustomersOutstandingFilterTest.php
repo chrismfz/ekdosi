@@ -8,9 +8,10 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
-use App\Models\PaymentMethod;
 use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Models\User;
+use App\Support\TableFilterUrl;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
@@ -30,7 +31,9 @@ class CustomersOutstandingFilterTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private PaymentMethod $credit;
+
     private InvoiceType $type;
 
     protected function setUp(): void
@@ -176,19 +179,17 @@ class CustomersOutstandingFilterTest extends TestCase
 
     public function test_drilldown_url_carries_the_debtor_balance_filter(): void
     {
-        // The «Ανεξόφλητα» dashboard card links here via
-        // CustomerResource::getUrl('index', ['tableFilters' => [...]]).
-        // Pin the generated URL's query-string shape: it MUST match the
-        // tableFilters[balance_status][value]=debtor state the SelectFilter
-        // above consumes (proven by the filterTable tests). Together they cover
-        // the card→filter contract. (The actual query-string→filter hydration is
-        // Filament-internal and only exercisable in a real browser — the
-        // headless harness can't drive it; deferFilters(false) + the sort param
-        // are what let the landed URL apply immediately.)
-        $url = CustomerResource::getUrl('index', [
-            'tableFilters' => ['balance_status' => ['value' => 'debtor']],
-        ]);
+        // The «Ανεξόφλητα» dashboard card links here. The key is `filters` —
+        // `tableFilters` is the PROPERTY name and binds to nothing, which is
+        // exactly what this test used to pin (and the note it carried, that the
+        // hydration «can only be exercised in a real browser», was wrong: see
+        // Tests\Feature\Filament\ListFilterUrlTest, which replays this very URL
+        // through the page and asserts the ROWS).
+        $url = CustomerResource::getUrl('index', TableFilterUrl::with(
+            ['balance_status' => ['value' => 'debtor']],
+        ));
 
-        $this->assertStringContainsString('tableFilters%5Bbalance_status%5D%5Bvalue%5D=debtor', $url);
+        $this->assertStringContainsString('filters%5Bbalance_status%5D%5Bvalue%5D=debtor', $url);
+        $this->assertStringNotContainsString('tableFilters', $url);
     }
 }

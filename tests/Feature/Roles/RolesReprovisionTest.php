@@ -51,8 +51,13 @@ class RolesReprovisionTest extends TestCase
 
         $this->assertFalse($this->operatorRole($a)->hasPermissionTo('ViewAny:Lead'));
 
+        // The COUNT must be the real one and match the table above it: 2 tenants
+        // × 2 roles × 2 permissions = 8. A brand-new role row is backfilled by
+        // ensureManagedRolesExist() rather than by our own givePermissionTo(), so
+        // counting only our own writes printed «Δόθηκαν 0» right under a table of
+        // 8 missing permissions — reading like the command had done nothing.
         $this->artisan('roles:reprovision --force')
-            ->expectsOutputToContain('Δόθηκαν')
+            ->expectsOutputToContain('Δόθηκαν 8')
             ->assertExitCode(0);
 
         foreach ([$a, $b] as $company) {

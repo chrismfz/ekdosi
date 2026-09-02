@@ -107,6 +107,27 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (χάνεται μόνο η τοπική απόδειξη), ζητά δύο επιβεβαιώσεις και δείχνει links στα εργαλεία εξαγωγής.
   **Χωρίς υποχρεωτικό backup** — συνήθως μόλις πάρθηκε, και δικλείδα που σε βάζει να ξαναπεράσεις
   τα ίδια δεδομένα είναι δικλείδα που μαθαίνεις να παρακάμπτεις. Το hard delete παραμένει.
+- **Τα drill-down links άνοιγαν ΑΦΙΛΤΡΑΡΙΣΤΗ λίστα.** Το `ListRecords` δένει την κατάσταση των
+  φίλτρων ως `#[Url(as: 'filters')]`, οπότε ένα `?tableFilters[...]` URL δεν δένει **πουθενά** και η
+  λίστα φορτώνει χωρίς φίλτρο — σιωπηλά. Έτσι είχαν φύγει τέσσερα: οι κάρτες «Ανεξόφλητα (πιστωτικά)»
+  και «Πρόχειρα» του dashboard, η ειδοποίηση ληξιπρόθεσμων και το banner του ημερολογίου leads. Νέο
+  `App\Support\TableFilterUrl` = το ΕΝΑ σημείο που ξέρει το κλειδί· τα tests ξαναπαίζουν το πραγματικό
+  URL μέσα από τη σελίδα και ελέγχουν τις **γραμμές**, όχι το string.
+- **`roles:reprovision` έλεγε «Δόθηκαν 0»** ενώ μόλις είχε τυπώσει πίνακα με 8 δικαιώματα που έλειπαν:
+  σε ρόλο που μόλις δημιουργήθηκε τα συμπληρώνει το `ensureManagedRolesExist()`, όχι το δικό μας
+  `givePermissionTo()`. Μετράει πλέον όλο το σύνολο που όντως αποδόθηκε στο run.
+- **Το deploy μπλόκαρε στον εαυτό του (`app/Policies/UpdateRunPolicy.php`).** Το `UpdateRun` ήταν το
+  ΜΟΝΟ resource χωρίς committed policy, οπότε το `shield:generate` (βήμα 10 του `update.sh`, αλλά και
+  ο seeder σε κάθε run της σουίτας) το έγραφε ως **untracked** αρχείο· το pre-flight «καθαρό working
+  tree» έβλεπε untracked αρχεία και **αρνιόταν κάθε επόμενο deploy**, χωρίς το `git stash` να μπορεί
+  να το καθαρίσει. Τρεις διορθώσεις: **committed policy** (γραμμένη στο χέρι — βλ. Security), το
+  pre-flight κοιτάει πλέον **μόνο tracked** αλλαγές (`--untracked-files=no`) και **αναφέρει** τα
+  untracked αντί να σταματά — όσα το `checkout --force` θα αντικαταστήσει τα ονομάζει ξεχωριστά και τα
+  **αντιγράφει** στο `storage/app/deploy-untracked/<timestamp>/` πρώτα (και σταματά αν αποτύχει η
+  αντιγραφή), ώστε να μη χάνεται τίποτα αθέατα — και test που πιάνει **οποιοδήποτε** resource χωρίς
+  policy πριν ξαναγίνει το ίδιο. Το **ίδιο ακριβώς** ίσχυε και για τον in-app ενημερωτή
+  (`ekdosi:self-update`, «php» strategy) — εκεί χειρότερα, αφού ο χειριστής του panel δεν έχει shell
+  για να καθαρίσει το αρχείο· διορθώθηκε στα ίδια δύο σημεία.
 - **Υποβολή ακριβώς μία φορά — και για τα δελτία αποστολής (MYD-021)** — η σήμανση «σε εξέλιξη»
   γραφόταν **μόνο μέσα σε `catch`**, άρα υπήρχε μόνο αν επιζούσε η διεργασία: ένα hard kill (OOM,
   deploy, πτώση host) ανάμεσα στην αποδοχή από την ΑΑΔΕ και το catch δεν άφηνε κανένα ίχνος, το
@@ -180,6 +201,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   επέστρεφαν ενεργοί μετά από export→import).
 
 ### Security
+- **Όριο εξουσιοδότησης `UpdateRun` (ιστορικό deploy).** Το cross-tenant, immutable ιστορικό
+  ενημερώσεων δεν είχε policy και **δεν** ήταν στο `ADMIN_FORBIDDEN_RESOURCES`, οπότε κάθε
+  `company_admin` κρατούσε `*:UpdateRun` — ένα οποιοδήποτε `Gate::authorize()` πάνω στο model θα τους
+  ενέκρινε (μέχρι τώρα το έσωζαν μόνο τα Filament overrides της σελίδας). Πλέον: **hand-written
+  `UpdateRunPolicy`** (view μόνο για system super admin, **κάθε** mutation `false` — ποτέ το stock
+  Shield template, που δίνει CRUD βάσει ακριβώς αυτών των permissions) **+** το `UpdateRun` μπήκε στο
+  `ADMIN_FORBIDDEN_RESOURCES`, ώστε να μη μοιράζονται καν τα δικαιώματα. Gate-level tests
+  (company_admin / operator / απλός χρήστης → denied, ακόμη κι αν τους δοθούν τα permissions).
 - **Περιορισμός endpoint παρόχου e-τιμολόγησης (PROV-017)** — το base URL του παρόχου
   (InvoSign) ήταν ελεύθερο κείμενο και ο transport έστελνε εκεί το token + το πλήρες XML
   τιμολογίου· ένα `http://`, ένα URL με `user:pass@`/query, ή ένα εσωτερικό host μπορούσε να

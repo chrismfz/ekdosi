@@ -6,6 +6,7 @@ use App\Filament\Pages\Concerns\InteractsWithLeadViews;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Models\Company;
 use App\Models\Lead;
+use App\Support\TableFilterUrl;
 use BackedEnum;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
@@ -159,6 +160,32 @@ class LeadsCalendar extends Page
             ->where('next_action_at', '<', $from)
             ->forOperator($this->operator)
             ->count();
+    }
+
+    /**
+     * A link into the leads LIST carrying the SAME operator filter this page is
+     * showing — the banner counts are operator-filtered and an unfiltered link
+     * contradicted them. (The TAB is a coarser cut than the count next to it:
+     * «overdue» lists every overdue lead, not only those before the grid. Noted
+     * in docs/BACKLOG.md.)
+     * The filter key comes from TableFilterUrl (`filters`; `tableFilters` is the
+     * property name and binds to nothing).
+     */
+    public function leadsListUrl(string $tab): string
+    {
+        $params = ['tab' => $tab, 'tenant' => Filament::getTenant()];
+
+        $operatorId = match (true) {
+            ctype_digit($this->operator) => $this->operator,
+            $this->operator === 'me' => (string) auth()->id(),
+            default => null,
+        };
+
+        if ($operatorId !== null) {
+            $params = TableFilterUrl::with(['assigned_user_id' => ['value' => $operatorId]], $params);
+        }
+
+        return LeadResource::getUrl('index', $params);
     }
 
     /**
