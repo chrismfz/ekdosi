@@ -114,6 +114,16 @@ class PdfLabels
         // (e.g. an ETL-imported legacy invoice: VALID + mydata_mark, no url).
         'mark_label' => ['ΜΑΡΚ', 'MARK'],
 
+        // Provider (ΥΠΑΗΕΣ) evidence block — PROV-003 / A.1112/2025.
+        'provider_issued' => [
+            'Εκδόθηκε μέσω παρόχου ηλεκτρονικής τιμολόγησης (ΥΠΑΗΕΣ)',
+            'Issued via an accredited e-invoicing provider (ΥΠΑΗΕΣ)',
+        ],
+        'provider_name' => ['Πάροχος', 'Provider'],
+        'provider_licence' => ['Αρ. αδείας ΥΠΑΗΕΣ', 'ΥΠΑΗΕΣ licence no.'],
+        'provider_uid' => ['UID παραστατικού', 'Document UID'],
+        'provider_auth' => ['Κωδικός αυθεντικοποίησης', 'Authentication code'],
+
         // Footer
         'mydata_verify' => [
             'Πιστοποιημένο στη myDATA — επαληθεύστε σαρώνοντας το QR ή στη διεύθυνση:',

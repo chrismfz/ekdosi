@@ -389,6 +389,32 @@ return [
                 'api_key' => ['label' => 'API Key', 'secret' => true],
             ],
         ],
+
+        /*
+        |----------------------------------------------------------------------
+        | Provider legal identity (PROV-003) — for the printed representation
+        |----------------------------------------------------------------------
+        | A.1112/2025 requires a provider-issued document's PRINTOUT to carry the
+        | provider's identity + licence. Keyed by mydata_marks.provider_key; read
+        | via App\Support\EInvoice\ProviderIdentity and rendered on the invoice PDF
+        | when the filing MARK is a PROVIDER_INSERT. A new provider adds one row.
+        |
+        | InvoSign: AADE-listed provider code 030, licence
+        | 2025_05_130GVSolutions_001_iNVO Sign_V1_07052025. All values below are
+        | sourced from the AADE licensed-provider register + invosign.gr. `legal_name`
+        | is left EMPTY on purpose: the exact registered entity is not yet confirmed,
+        | and the PDF omits an empty legal_name rather than print an unverified legal
+        | identity on a legal document. Fill it once the provider confirms the entity.
+        */
+        'provider_identity' => [
+            'invosign' => [
+                'commercial_name' => 'iNVO Sign',
+                'legal_name' => '', // TODO: confirm the registered entity, then fill.
+                'site' => 'https://invosign.gr',
+                'aade_code' => '030',
+                'licence_no' => '2025_05_130GVSolutions_001_iNVO Sign_V1_07052025',
+            ],
+        ],
     ],
 
     /*

@@ -245,6 +245,14 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   sandbox creds (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`.
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
   (InvoSign/SBZ). `paroxos/`.
+- **PROV-003 archive/hardening half** (print half ✅ SHIPPED 2026-09-02) — (α) **ανάκτηση + ιδιωτική
+  αρχειοθέτηση** του επίσημου PDF παρόχου: SHA-256, immutable πρώτη έκδοση, retry ΜΟΝΟ download (ποτέ
+  re-file), allowlisted hosts/bounded size (anti-SSRF), `evidence_pending` state όσο λείπει UID/QR/
+  artifact — χωρίς να κάνει fail ένα VALID filing· (β) **snapshot της αδείας-εν-ισχύ ανά παραστατικό**
+  ώστε ένα licence rotation (`…_V1_…`→V2) να μη ξαναγράφει παλιά τυπωμένα (σήμερα η config-current
+  είναι σωστή γιατί η άδεια είναι σταθερή)· (γ) το πλήρες «compare» panel (τοπικό snapshot vs provider
+  response/document vs AADE) στην καρτέλα παραστατικού. Καμία δεν μπλοκάρει το compliant printout που
+  ήδη βγαίνει. `known-issues.md §PROV-003`.
 - **Provider endpoint hardening (PROV-017 follow-ups)** — το core URL guard (public-https-only,
   no userinfo/query/port≠443, no private/loopback/link-local/CGNAT host, no credentialed redirects)
   ✅ SHIPPED. Είναι **best-effort accident-prevention** (το URL το βάζει έμπιστος operator). Deferred
