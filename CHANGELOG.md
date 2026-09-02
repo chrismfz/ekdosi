@@ -271,8 +271,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   με αποτέλεσμα ο φάκελος `storage/app/private/<APP_NAME>/` να μεγαλώνει ασυγκράτητα (κάθε νυχτερινό
   dump φέρει το πλήρες `mydata_marks` XML). Τώρα ρυθμίζονται από env
   (`BACKUP_KEEP_ALL_DAYS`/`DAILY_DAYS`/`WEEKLY_WEEKS`/`MONTHLY_MONTHS`/`YEARLY_YEARS` +
-  `BACKUP_MAX_STORAGE_MB`) και το shipped default έγινε «ελαφρύ + λίγοι μήνες»: όλα 7 μέρες → 1/μέρα
-  ως 30 μέρες → 1/μήνα ως 6 μήνες → τίποτα παλιότερο (~7 μήνες ορίζοντας, από ~2 χρόνια). Καμία
+  `BACKUP_MAX_STORAGE_MB`) και το shipped default έγινε «ελαφρύ + λίγοι μήνες»: όλα 7 μέρες → μετά
+  άλλες 30 μέρες 1/μέρα → μετά 6 μήνες 1/μήνα → τίποτα παλιότερο (προσθετικές βαθμίδες, ~7 μήνες
+  σύνολο, από ~2 χρόνια). Blank env → default (όχι μηδέν)· `BACKUP_MAX_STORAGE_MB=0` → χωρίς όριο. Καμία
   αλλαγή στο πότε τρέχει το `backup:clean`· το πιο πρόσφατο backup δεν διαγράφεται ποτέ. Ξεχωριστό
   από τα per-company backups (`company:run-scheduled-backups`, δική τους διατήρηση).
 - **`known-issues.md` — «Go-live triage 2026-09-02» + `Bucket` στήλη στο work board.** Το ledger
