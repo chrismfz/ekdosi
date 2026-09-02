@@ -145,6 +145,71 @@ class ClassificationGuidance
         return self::isValid($type) ? self::POLICIES[$type]['hint'] : null;
     }
 
+    /**
+     * The three item-nature §8.6 buckets an operator classifies a product-category
+     * with (goods / own-products / services). The E3 TYPE (E3_561_xxx) stays
+     * channel-driven on the invoice type; only the BUCKET is item-nature. ONE source
+     * for the category form's picker, the product info block and the list columns.
+     *
+     * @var array<string, string>
+     */
+    public const BUCKET_LABELS = [
+        'category1_1' => 'Πώληση εμπορευμάτων (αγαθά)',
+        'category1_2' => 'Πώληση προϊόντων',
+        'category1_3' => 'Παροχή υπηρεσιών',
+    ];
+
+    /**
+     * The bucket picker options: 'category1_1' => 'category1_1 — Πώληση εμπορευμάτων …'.
+     *
+     * @return array<string, string>
+     */
+    public static function bucketOptions(): array
+    {
+        $out = [];
+        foreach (self::BUCKET_LABELS as $code => $label) {
+            $out[$code] = $code.' — '.$label;
+        }
+
+        return $out;
+    }
+
+    /** Human label for a §8.6 bucket code, or null for an unknown/empty code. */
+    public static function bucketLabel(?string $bucket): ?string
+    {
+        return $bucket === null || $bucket === '' ? null : (self::BUCKET_LABELS[$bucket] ?? null);
+    }
+
+    /**
+     * Plain-Greek «πώς ταξινομείται στην ΑΑΔΕ αυτό το είδος;» for the PRODUCT form /
+     * list, given its category's §8.6 bucket and the tenant's business policy. The
+     * bucket lives on the product-CATEGORY (MYD-5), not the product, so this is
+     * honest about inheritance rather than inventing a per-product value:
+     *   - category has a bucket → definitive (that bucket, from the category);
+     *   - no bucket → resolved at issue from the invoice type, and for GOODS lines
+     *     the business policy decides the bucket (reseller→εμπορεύματα,
+     *     manufacturer→προϊόντα); services stay category1_3.
+     */
+    public static function describeProductBucket(?string $categoryBucket, ?string $businessType): string
+    {
+        $label = self::bucketLabel($categoryBucket);
+        if ($label !== null) {
+            return $categoryBucket.' — '.$label.' (από την κατηγορία προϊόντος).';
+        }
+
+        $goods = self::goodsCategoryFor($businessType);
+        $policyLabel = self::labelFor($businessType);
+        if ($goods !== null && $policyLabel !== null) {
+            return 'Κληρονομείται από τον τύπο παραστατικού. Τα ΑΓΑΘΑ ταξινομούνται ως '
+                .$goods.' — '.(self::BUCKET_LABELS[$goods] ?? '').' (πολιτική: '.$policyLabel
+                .')· οι υπηρεσίες ως category1_3. Όρισε ρητή κατηγορία εσόδων στην κατηγορία προϊόντος για σταθερή τιμή.';
+        }
+
+        return 'Κληρονομείται από τον τύπο παραστατικού κατά την έκδοση'
+            .($policyLabel !== null ? ' (πολιτική εταιρείας: '.$policyLabel.')' : '')
+            .'. Όρισε κατηγορία εσόδων στην κατηγορία προϊόντος (Setup → Κατηγορίες προϊόντων) για σταθερή τιμή.';
+    }
+
     public const INTRO =
         'Το είδος δραστηριότητας ορίζει την κατηγορία εσόδων (§8.6) των ΑΓΑΘΩΝ που τιμολογείς: τα '
         .'εμπορεύματα (μεταπώληση) ταξινομούνται ως category1_1, ενώ τα δικά σου προϊόντα (παραγωγή) '

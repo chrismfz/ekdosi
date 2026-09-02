@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ProductCategories\Schemas;
 
+use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyDataOptions;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -46,11 +47,9 @@ class ProductCategoryForm
                 // [313] rejection with no local warning.
                 Select::make('mydata_income_class_category')
                     ->label('myDATA: Κατηγορία εσόδων (αγαθά/υπηρεσίες)')
-                    ->options([
-                        'category1_1' => 'category1_1 — Πώληση εμπορευμάτων (αγαθά)',
-                        'category1_2' => 'category1_2 — Πώληση προϊόντων',
-                        'category1_3' => 'category1_3 — Παροχή υπηρεσιών',
-                    ])
+                    // One source for the three item-nature buckets (ClassificationGuidance),
+                    // shared with the product info block + the list columns.
+                    ->options(ClassificationGuidance::bucketOptions())
                     ->native(false)
                     ->helperText('Το κύριο πεδίο για μικτά τιμολόγια: π.χ. «Εμπορεύματα» → αγαθά, «Υπηρεσίες» → υπηρεσίες. Κάθε γραμμή προϊόντος αυτής της κατηγορίας δηλώνεται έτσι. Κενό = κληρονομεί τον τύπο παραστατικού.')
                     ->columnSpan(2),

@@ -657,6 +657,14 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   tenant ΑΛΛΑΞΕΙ `business_activity_type` μεταξύ έκδοσης αρχικού και πιστωτικού. Ο οριστικός fix
   (per-line income-class snapshot, παραπάνω) το κλείνει· μέχρι τότε αποδεκτό (mid-life αλλαγή είδους
   δραστηριότητας είναι σπάνια + αμφιλεγόμενο ποιο είναι το «σωστό»).
+- **WHMCS «Εισερχόμενα» γραμμές → κατηγορία εσόδων (αντιστοίχιση)** — οι inbox γραμμές δημιουργούνται
+  free-text (`WhmcsInvoiceMapper` → `product_id = null`), άρα ταξινομούνται από τον **τύπο του πρόχειρου
+  παραστατικού** (που διαλέγει ο χειριστής) + την πολιτική εταιρείας — ΟΧΙ ανά προϊόν. Για τους ζωντανούς
+  (υπηρεσίες, ~99%) αυτό είναι **σωστό** (services τύπος → category1_3). Enhancement για το 1% (μικτός/
+  αγαθά): ο mapper να ΑΝΤΙΣΤΟΙΧΙΖΕΙ τη WHMCS γραμμή σε ekdosi `Product` μέσω του υπάρχοντος
+  `products.whmcs_product_id` → τότε η ταξινόμηση (και τιμή/απόθεμα) ρέει από την κατηγορία του προϊόντος.
+  Χρειάζεται: lookup στον mapper (whmcs_product_id → product_id), fallback σε null όπως τώρα. Ξεχωριστό PR
+  (αγγίζει τον inbox mapper· δεν είναι blocker γιατί το default είναι ήδη σωστό).
 - **Seeder δεν εφαρμόζει την πολιτική** — στο fresh install το `business_activity_type` είναι null, οπότε
   ο seeder δεν μπορεί να εφαρμόσει την πολιτική στις seeded κατηγορίες προϊόντων· το go-live gate εξαναγκάζει
   την επιλογή. Follow-up (προαιρετικό): κατά την επιλογή πολιτικής, auto-apply το goods bucket στις

@@ -87,4 +87,40 @@ class ClassificationGuidanceTest extends TestCase
         $this->assertNull(ClassificationGuidance::labelFor('nope'));
         $this->assertNull(ClassificationGuidance::hintFor(null));
     }
+
+    public function test_bucket_options_and_labels_cover_the_three_item_natures(): void
+    {
+        $options = ClassificationGuidance::bucketOptions();
+        $this->assertSame(['category1_1', 'category1_2', 'category1_3'], array_keys($options));
+        // Every §8.6 bucket is a valid income category and its option carries the code.
+        foreach ($options as $code => $label) {
+            $this->assertContains($code, Codes::INCOME_CLASS_CATEGORIES);
+            $this->assertStringContainsString($code, $label);
+            $this->assertNotNull(ClassificationGuidance::bucketLabel($code));
+        }
+        $this->assertNull(ClassificationGuidance::bucketLabel(null));
+        $this->assertNull(ClassificationGuidance::bucketLabel(''));
+        $this->assertNull(ClassificationGuidance::bucketLabel('category9_9'));
+    }
+
+    public function test_describe_product_bucket_is_definitive_when_the_category_sets_it(): void
+    {
+        $desc = ClassificationGuidance::describeProductBucket('category1_2', ClassificationGuidance::RESELLER);
+        $this->assertStringContainsString('category1_2', $desc);
+        $this->assertStringContainsString('από την κατηγορία', $desc); // definitive, from the category
+    }
+
+    public function test_describe_product_bucket_explains_inheritance_when_the_category_is_blank(): void
+    {
+        // Manufacturer, no category bucket → describes goods→category1_2 inheritance.
+        $manu = ClassificationGuidance::describeProductBucket(null, ClassificationGuidance::MANUFACTURER);
+        $this->assertStringContainsString('Κληρονομείται', $manu);
+        $this->assertStringContainsString('category1_2', $manu);
+
+        // Services / unset → no goods bucket asserted, just inherits the type.
+        $services = ClassificationGuidance::describeProductBucket(null, ClassificationGuidance::SERVICES);
+        $this->assertStringContainsString('Κληρονομείται', $services);
+        $this->assertStringNotContainsString('category1_1', $services);
+        $this->assertStringNotContainsString('category1_2', $services);
+    }
 }
