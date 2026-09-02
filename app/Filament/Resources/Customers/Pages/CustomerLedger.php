@@ -188,20 +188,35 @@ class CustomerLedger extends Page implements HasTable
      */
     private function loadDraftInvoices(): array
     {
-        $user = auth()->user();
-
         $query = Invoice::query()
             ->with('invoiceType')
             ->where('company_id', $this->record->company_id)
             ->where('customer_id', $this->record->getKey())
-            ->whereNull('deleted_at');
+            // Only GENUINELY unfiled drafts belong under «Πρόχειρα»: this section
+            // lists exactly what the edit surfaces treat as an editable draft
+            // (onlyUnissuedDrafts gives the local_status='draft' half; mydata_state
+            // IS NULL is the other half of EditInvoice::mount's gate). A row that
+            // is draft-status but carries a MARK is a filed AADE document, not a
+            // draft, and must not be presented as one here. (SoftDeletes' global
+            // scope already excludes trashed rows — no explicit whereNull needed.)
+            ->whereNull('mydata_state');
 
         InvoiceScope::onlyUnissuedDrafts($query);
 
-        return $query
+        $drafts = $query
             ->orderByDesc('issued_at')
             ->orderByDesc('id')
-            ->get()
+            ->get();
+
+        // InvoicePolicy::update is permission-only (it ignores the invoice), so the
+        // check is loop-invariant — resolve it ONCE, through the Gate (not the raw
+        // Shield string), using any row as the required instance. Every listed row
+        // is now mydata_state===null + local_status='draft', so this permission is
+        // the only remaining half of the edit gate.
+        $canEdit = $drafts->isNotEmpty()
+            && (auth()->user()?->can('update', $drafts->first()) ?? false);
+
+        return $drafts
             ->map(fn (Invoice $invoice): array => [
                 'id' => (int) $invoice->getKey(),
                 'invcode' => $invoice->invcode,
@@ -209,13 +224,7 @@ class CustomerLedger extends Page implements HasTable
                 'issued_at' => $invoice->issued_at?->toDateString(),
                 'gross' => (float) $invoice->gross_total,
                 'view_url' => InvoiceResource::getUrl('view', ['record' => $invoice, 'tenant' => $this->record->company]),
-                // Edit link mirrors EditInvoice::mount's gate EXACTLY so it never
-                // 403s/bounces: the INVOICE's own update permission (not the
-                // customer's — a distinct 'Update:Invoice' policy) AND
-                // mydata_state === null (onlyUnissuedDrafts already guarantees the
-                // local_status='draft' half). A row that is draft-status but
-                // somehow filed shows no edit link rather than a bouncing one.
-                'edit_url' => ($invoice->mydata_state === null && ($user?->can('update', $invoice) ?? false))
+                'edit_url' => $canEdit
                     ? InvoiceResource::getUrl('edit', ['record' => $invoice, 'tenant' => $this->record->company])
                     : null,
             ])

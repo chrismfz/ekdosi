@@ -540,6 +540,16 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 - _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._
 
 ## 💡 PDF / UX & ideas
+- **«Πρόχειρα»: legacy-imported stuck-drafts δεν φαίνονται στην καρτέλα, αλλά ΕΙΝΑΙ editable αλλού
+  (P2, από review draft-edit flow)** — το section «Πρόχειρα» στην καρτέλα πελάτη χρησιμοποιεί το κοινό
+  `onlyUnissuedDrafts` (αποκλείει `legacy_id`, όπως το dashboard tile & τα money totals), ενώ ο πίνακας
+  Παραστατικά, το κουμπί «Επεξεργασία» στο ViewInvoice και το `EditInvoice::mount` επιτρέπουν
+  επεξεργασία **οποιουδήποτε** draft (μόνο `local_status`/`mydata_state`), ανεξαρτήτως `legacy_id`. Άρα
+  ένα legacy-imported παραστατικό με κολλημένο `local_status='draft'` επεξεργάζεται από τη λίστα αλλά
+  ΔΕΝ βρίσκεται από την καρτέλα του πελάτη. Επιλογή: είτε να δείχνει η καρτέλα και τα legacy stuck-drafts
+  (χαλαρώνει το κοινό scope — αγγίζει dashboard/money semantics), είτε να αποκλείει το edit-gate τα
+  legacy drafts (αλλαγή συμπεριφοράς που ίσως κάποιος βασίζεται). Edge case (κανονικά δεν υπάρχουν
+  legacy drafts)· χρειάζεται απόφαση προϊόντος πριν αγγίξουμε το κοινό `onlyUnissuedDrafts`.
 - _(G10 «ένα template αντί 8»: **non-issue** — τα 8 legacy FastReport δεν πορτάρονται· έχουμε
   ήδη καθαρά Blade ανά τύπο. **Δίγλωσσο/EN output: ✅ shipped** — βλ. «Done recently».)_
   Προαιρετικό μελλοντικό cleanup: κοινό layout partial στα 4 PDF templates (χαμηλή αξία).

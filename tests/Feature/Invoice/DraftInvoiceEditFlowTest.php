@@ -201,12 +201,12 @@ class DraftInvoiceEditFlowTest extends TestCase
         $this->assertNotNull($rows[0]['edit_url']);
     }
 
-    public function test_customer_ledger_draft_edit_link_mirrors_the_unfiled_gate(): void
+    public function test_customer_ledger_excludes_a_filed_draft_status_row(): void
     {
-        // A draft-status row that somehow carries a MARK is NOT editable (the
-        // invoice edit gate requires mydata_state === null). It may still list —
-        // onlyUnissuedDrafts is the shared «draft» definition — but its edit link
-        // must be null rather than a link that bounces at EditInvoice::mount.
+        // A row that is draft-status but carries a MARK is a filed AADE document,
+        // not a draft — «Πρόχειρα» must not present it as one. The section lists
+        // exactly what the edit surfaces accept (mydata_state === null), so this
+        // row is excluded entirely rather than shown with a dead edit link.
         $tenant = $this->tenant();
         $this->bootPanel($tenant);
         $customer = $this->customer($tenant);
@@ -217,9 +217,7 @@ class DraftInvoiceEditFlowTest extends TestCase
         $rows = Livewire::test(CustomerLedger::class, ['record' => $customer->id])
             ->get('draftInvoices');
 
-        $this->assertCount(1, $rows);
-        $this->assertNull($rows[0]['edit_url']);
-        $this->assertNotNull($rows[0]['view_url']);
+        $this->assertCount(0, $rows);
     }
 
     public function test_customer_ledger_drafts_exclude_issued_and_cancelled(): void
