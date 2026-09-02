@@ -67,7 +67,7 @@ class WhmcsAutoIssueCommandTest extends TestCase
         return Customer::create([
             'company_id' => $tenant->id,
             'name' => $grumpy ? 'Γκρινιάρης' : 'Ήσυχος',
-            'afm' => '111111111',
+            'afm' => '111111112',
             'needs_immediate_invoice' => $grumpy,
         ]);
     }
@@ -319,6 +319,33 @@ class WhmcsAutoIssueCommandTest extends TestCase
 
         $fresh = $pending->fresh();
         $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status, 'wants invoice + no ΑΦΜ → held');
+        $this->assertNull($fresh->invoice_id);
+    }
+
+    public function test_wants_invoice_with_a_placeholder_afm_is_held_not_downgraded_to_a_receipt(): void
+    {
+        // «000000000» is no ΑΦΜ (identity rule): the gate must HOLD exactly like
+        // a blank one — never auto-file a receipt for a party that asked for a
+        // τιμολόγιο, and never an invoice with a dummy counterpart.
+        $tenant = $this->tenant(['whmcs_custom_field_map' => ['wantsinvoice' => 7]]);
+        $receiptType = InvoiceType::create(['company_id' => $tenant->id, 'name' => 'ΑΠΥ', 'code' => 'ΑΠΥ', 'invcount' => 0, 'mydata_type' => '11.2']);
+        $tenant->forceFill(['whmcs_default_receipt_type_id' => $receiptType->id])->save();
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Λιανική', 'afm' => '000000000',
+            'needs_immediate_invoice' => true,
+        ]);
+        $pending = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 8124, 'userid' => 1, 'date' => '2026-05-20', 'total' => '124.00',
+                'customfields' => [['id' => 7, 'value' => 'on']],
+                'items' => ['item' => [['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1']]],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status, 'placeholder ΑΦΜ + wants invoice → held');
         $this->assertNull($fresh->invoice_id);
     }
 }

@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
+use App\Support\Afm;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -322,8 +323,9 @@ class WhmcsAutoIssue extends Command
         // → can't file a valid τιμολόγιο (the counterpart ΑΦΜ comes from
         // customer.afm); HOLD for the operator to fill it rather than downgrade to
         // a receipt or file an empty-ΑΦΜ invoice. A WHMCS-typed vatno that isn't on
-        // the ekdosi record does NOT count — see ownLinesAreReceipt().
-        if ($row->wantsInvoice() === true && blank($row->customer?->afm)) {
+        // the ekdosi record does NOT count, and neither does a placeholder
+        // («000000000» — no identity) — same rule as ownLinesAreReceipt()/needsAfm().
+        if ($row->wantsInvoice() === true && Afm::uniqueKey($row->customer?->afm) === null) {
             return [null, 'ζητά τιμολόγιο αλλά λείπει ΑΦΜ στον πελάτη ekdosi — συμπλήρωσέ το πρώτα'];
         }
 

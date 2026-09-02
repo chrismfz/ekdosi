@@ -296,16 +296,17 @@ class Invoice extends Model
 
         $afm = trim((string) $this->vat_no);
 
-        // A punctuation-only value («-», «.») trims non-empty but canonicalises to
-        // NOTHING, and an empty key equals a null customer ΑΦΜ — which let two
-        // different parties short-circuit past the name check entirely.
-        if ($afm !== '' && Afm::comparisonKey($afm) !== '') {
+        // A value that is not an IDENTITY («-», «0», «N/A») trims non-empty but
+        // uniqueKey()s to null — and null equals a null customer ΑΦΜ, which let two
+        // different parties short-circuit past the name check entirely. Only a real
+        // identity may stand in for the comparison.
+        if ($afm !== '' && Afm::uniqueKey($afm) !== null) {
             // The ΑΦΜ is the identity. When it matches, the party IS this customer —
             // a differing NAME is a rename or a spelling correction, not a different
             // taxpayer, and treating it as fatal made a routine customer rename turn
             // every legacy invoice with a blank country into an unissuable document
             // (and its credit notes with it, since IssueCreditNote copies the pair).
-            return Afm::comparisonKey($afm) === Afm::comparisonKey($customer->afm);
+            return Afm::uniqueKey($afm) === Afm::uniqueKey($customer->afm);
         }
 
         // With no ΑΦΜ on the document there is nothing stronger to go on, so the name
@@ -320,7 +321,8 @@ class Invoice extends Model
     /**
      * The counterpart's ΑΦΜ as filed: the frozen snapshot, else the legacy fallback.
      *
-     * CANONICALISED on the way out (Afm::canonicalVat) — `invoices.vat_no` is free
+     * CANONICALISED on the way out through Afm::uniqueKey() — the ONE identity rule,
+     * shared with `customers.afm_key`. `invoices.vat_no` is free
      * text (a bare TextInput, and an ETL copy of the legacy column), so filing it
      * verbatim sent «IT 12345678901» / «EL123456789» to AADE and earned an opaque
      * rejection. The old code filed `customers.afm`, which the customer form and the
@@ -328,14 +330,14 @@ class Invoice extends Model
      */
     public function counterpartAfm(): ?string
     {
-        // canonicalVat() maps an all-zeros placeholder to null, so «0» falls through
+        // uniqueKey() maps a placeholder to null, so «0»/«000000000» falls through
         // to the customer instead of becoming the reported party.
-        if (filled($frozen = Afm::canonicalVat($this->vat_no))) {
+        if (filled($frozen = Afm::uniqueKey($this->vat_no))) {
             return $frozen;
         }
 
         return $this->mayFallBackToLiveCustomer()
-            ? Afm::canonicalVat($this->customer?->afm)
+            ? Afm::uniqueKey($this->customer?->afm)
             : null;
     }
 
@@ -541,7 +543,7 @@ class Invoice extends Model
      * Does this snapshot column carry nothing USABLE, so the resolved value should be
      * written into it?
      *
-     * `blank()` alone is not that question for `vat_no`. Once canonicalVat() started
+     * `blank()` alone is not that question for `vat_no`. Once uniqueKey() started
      * reading an all-zeros placeholder as "no ΑΦΜ", a snapshot holding «000000000»
      * was no longer blank yet no longer an identity either — so the payload filed the
      * customer's real ΑΦΜ while the column kept the placeholder. That is precisely the
@@ -553,7 +555,7 @@ class Invoice extends Model
     private function partyColumnNeedsFreezing(string $column): bool
     {
         if ($column === 'vat_no') {
-            return Afm::canonicalVat($this->vat_no) === null;
+            return Afm::uniqueKey($this->vat_no) === null;
         }
 
         // The address-ish columns are selected with `?:` by BOTH the AADE builder and

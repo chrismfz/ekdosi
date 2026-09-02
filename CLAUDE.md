@@ -121,66 +121,58 @@ after cutover.
   buries your change. **Only Pint the files you touched** (pass them explicitly); revert
   any stray reformats before committing.
 
-## Review discipline — loop until no P0/P1, then SHIP
+## Review discipline — the gate runs until it's GREEN on what matters (not forever)
 
 Every change ends with a **whole-PR adversarial review** (`/code-review`, high effort).
+The rule, learned the hard way on MYD-017 and MYD-011 — and then over-learned on the
+ΑΦΜ unique-constraint PR (#394: ~10 rounds for what was 1–2 real fixes, «χανόμαστε»):
 
-### The stopping rule (recalibrated after MYD-009 — read this before starting a loop)
-
-**Stop when a round comes back with no P0 and no P1.** Surviving P2s go to
-`docs/BACKLOG.md` with a reason; they do NOT justify another round.
-
-Round budget, by the priority of the issue being fixed:
-
-| Issue priority | Max review rounds | Then |
-|---|---:|---|
-| **P0** | 3 | still finding P0/P1? stop and ask — the design is probably wrong, not the code |
-| **P1** | 2 | ship with P2s logged |
-| **P2** | 1 | ship |
-
-**Why this changed.** MYD-009 ran **ten** rounds for one of ~50 open issues. Rounds
-1–4 were worth it (they found 2 P0 in the fix itself). From round 5 on, each round
-mostly found what the PREVIOUS round's fix had introduced: round 5's main action was
-*removing* a check added in round 4; round 8's was *narrowing* something widened in
-round 7. That is not the gate working — it is chasing edge cases until each fix has
-more surface than the bug it closes. Under this rule MYD-009 would have shipped at
-round 5 with the same substantive outcome, because every P0/P1 had been found by then.
-
-**A merge bar is not a perfection bar.** Merge when: strictly better than `main` ·
-no known P0/P1 · suite green · reversible (no destructive migration). "Has known P2s"
-is a normal state for merged code.
-
-### What did earn its keep — keep doing these
-
-- **Re-run the gate after fixing.** A round of fixes is a NEW diff that has never been
-  reviewed. On MYD-017, MYD-011 and MYD-009 the *fix itself* introduced the next bug
-  (a date guard that traded a false conflict for a false green; an internal-movement
-  rule that broke the `000000000` sentinel; a country chain re-implemented in the
-  builder so two copies of one policy disagreed). **Both MYD-009 P0s were in fix code,
-  not in the original change.**
-- **Run the full suite before every commit.** It caught three regressions the review
-  had not seen — including a silent «present-but-unresolvable country → GR», which is
-  the exact class of bug the change existed to remove.
-- **"I fixed the findings" is not "the review passed."** Never report a gate as passed
-  on a state that was never reviewed. Say which commit was reviewed, how many findings
-  came back, and whether the post-fix state has been re-checked.
-- **Every finding gets an explicit disposition** — fixed, or consciously deferred with
-  a reason in `docs/BACKLOG.md`. Silently dropping one is not allowed. *Declining* a
-  finding is legitimate: routing `SalesReconciler` through the invoice helper was
-  proposed, tried, and reverted because reconciliation solves the opposite problem —
-  the reason lives at the call site.
-- **Sanity-check a fix against real values before trusting it.** A 10-second `php -r`
-  showed `DE811234567` validating as a Greek ΑΦΜ, and later that `ATU12345678` /
-  `CY12345678L` were not recognised as foreign at all. A cheap probe beats a
-  plausible-looking diff.
-- **Don't let a fix widen into a new regression** — and check BOTH directions. A
-  refusal that stops bad data can strand legitimate data (a customer *rename* made
-  every legacy invoice with a blank country unissuable), and a heuristic that spots
-  foreign parties can misfire on domestic ones (`AE997073525` read as the UAE).
-- **Fix at the ROOT, not at the call site.** Both MYD-009 P0s were the same defect
+- **Re-run the gate after fixing — until a round comes back with no P0/P1.** A round
+  of fixes is a new diff that has never been reviewed (on MYD-017/MYD-011 the *fix
+  itself* introduced the next bug: a date guard that traded a false conflict for a
+  false green; a `payableTotal()` basis wrong twice; an internal-movement rule that
+  broke the `000000000` sentinel). But the loop ends at **«no P0/P1 findings»**, NOT at
+  «zero findings» — an adversarial reviewer always finds *something*.
+- **Triage every finding by priority, and cap the rounds per priority:**
+  **P0** (data loss / legal-document / tenant-leak / money wrong) → fix, up to **3** rounds;
+  **P1** (real bug an operator will hit) → fix, up to **2** rounds;
+  **P2** (edge case, cleanup, perf on data we don't have, docs) → **1** round, then
+  **surviving P2s go to `docs/BACKLOG.md` explicitly** — never silently dropped.
+  Same severity ≠ same rigour: don't spend a P0-grade loop on a P2.
+- **"I fixed the findings" is not "the review passed."** Never report a gate as
+  passed on a state that was never reviewed. Say which commit was reviewed, how many
+  findings came back, and whether the post-fix state has been re-checked.
+- **Every finding gets an explicit disposition** — fixed, or consciously deferred
+  with a reason recorded in `docs/BACKLOG.md`. Silently dropping one is not allowed.
+- **Sanity-check a fix against real values before trusting it.** The Greek-ΑΦΜ
+  inference "worked" until a 10-second `php -r` showed `DE811234567` validating as
+  Greek (the digit-strip ate the prefix). A cheap probe beats a plausible-looking diff.
+- **Run the full suite before every commit, not just the review.** On MYD-009 it caught
+  three regressions the reviewer had not seen — including a silent
+  «present-but-unresolvable country → GR», the exact class of bug that change existed
+  to remove.
+- **Don't let a fix widen into a new regression — and check BOTH directions.** A refusal
+  that stops bad data can strand legitimate data (the blanket no-country refusal would
+  have made every domestic note with a blank `customers.country` unissuable; a customer
+  *rename* made every legacy invoice with a blank country unissuable), and a heuristic
+  that spots foreign parties can misfire on domestic ones (`AE997073525` read as the
+  UAE). Find the positive-evidence path instead.
+- **Fix at the ROOT, not at the call site.** Both MYD-009 P0s were the SAME defect
   reached from two entry points, because the first was patched locally instead of
-  collapsing the duplicated policy into one definition.
+  collapsing a duplicated policy into one definition. If a second round finds the same
+  bug by another route, stop patching and go look for the duplicate.
+- **Declining a finding is a legitimate disposition**, not a dodge — with the reason at
+  the call site. Routing `SalesReconciler` through the invoice identity helper was
+  proposed, tried, and reverted: reconciliation solves the opposite problem (every row
+  there is already filed), and the change failed all eight legacy-row tests.
 
+**The merge bar is not a perfection bar.** Merge when: strictly better than `main` · no
+known P0/P1 · suite green · reversible (no destructive migration). "Has known P2s" is a
+normal state for merged code. MYD-009 ran **nine** rounds for one of ~50 open issues:
+rounds 1–4 found 2 P0 (both in FIX code, not the original change), and every round after
+that found only what the previous round's fix had introduced — round 5's main action was
+*removing* a check added in round 4. Under this rule it would have shipped at round 5
+with the same substantive outcome.
 
 ## Changelog + features discipline (keep these current — we were losing track)
 Part of "done", like tests. **Every change updates the right place:**

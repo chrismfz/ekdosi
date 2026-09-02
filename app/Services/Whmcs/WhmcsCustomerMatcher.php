@@ -85,13 +85,13 @@ class WhmcsCustomerMatcher
         // 2. AFM exact match. The custom field carrying VAT number
         // lives at a per-tenant configurable position; we look it
         // up via the tenant's whmcs_custom_field_map.
-        $afm = Afm::normalise(
+        $afm = Afm::uniqueKey(
             $this->extractCustomField($whmcsClient, $tenant, 'vatno')
         );
         if ($afm !== null && $afm !== '') {
             $byAfm = Customer::query()
                 ->where('company_id', $tenant->getKey())
-                ->where('afm', $afm)
+                ->whereAfmKeyOf($afm)
                 ->first();
             if ($byAfm !== null) {
                 return new MatchResult($byAfm, 'afm', $whmcsClientId);
@@ -144,7 +144,7 @@ class WhmcsCustomerMatcher
                 return trim((string) ($field['value'] ?? ''));
             }
         }
+
         return null;
     }
-
 }

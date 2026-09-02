@@ -9,8 +9,8 @@ use App\Models\Customer;
 use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Models\Quote;
-use App\Services\Leads\LeadMatcher;
 use App\Support\Afm;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -49,7 +49,7 @@ class ConvertLeadToCustomer
         return DB::transaction(function () use ($lead, $existing): Customer {
             // Serialise conversions per tenant: two operators converting two
             // leads that share an ΑΦΜ must not both pass the owner check below
-            // (customers has no unique on afm; a gap can't be row-locked).
+            // (the UNIQUE index would only surface the loser as a raw error).
             Company::query()->whereKey($lead->company_id)->lockForUpdate()->first();
 
             // Re-check under a row lock: a double-submit can't make two customers.
@@ -129,17 +129,17 @@ class ConvertLeadToCustomer
      */
     private function assertNoLiveCustomerOwnsTheAfm(Lead $lead): void
     {
-        $afm = Afm::normalise($lead->afm);
+        // The identity key (letters kept for a foreign VAT); a placeholder is
+        // no identity → nothing to own, nothing to check.
+        $afm = Afm::uniqueKey($lead->afm);
         if ($afm === null) {
             return;
         }
 
         // withTrashed: a soft-deleted owner could be restored later and become
-        // the second live party — restore + link is the honest path.
-        $owner = LeadMatcher::whereAfm(
-            Customer::query()->withTrashed()->where('company_id', $lead->company_id),
-            $afm,
-        )->lockForUpdate()->first();
+        // the second live party — restore + link is the honest path. The
+        // UNIQUE(company_id, afm_key) index is the last net behind this check.
+        $owner = Customer::afmOwnerQuery($lead->company_id, $afm)->lockForUpdate()->first();
 
         if ($owner !== null) {
             throw new RuntimeException($owner->trashed()
@@ -150,21 +150,27 @@ class ConvertLeadToCustomer
 
     private function createCustomer(Lead $lead): Customer
     {
-        $customer = Customer::create([
-            'company_id' => $lead->company_id,
-            'name' => $lead->name,
-            'afm' => $lead->afm,
-            'occupation' => $lead->occupation,
-            'address1' => $lead->address1,
-            'city' => $lead->city,
-            'postcode' => $lead->postcode,
-            'country' => $lead->country ?: 'GR',
-            'phone1' => $lead->phone ?: $lead->mobile,
-            'phone2' => ($lead->phone && $lead->mobile) ? $lead->mobile : null,
-            'email' => $lead->email,
-            'referred_by_customer_id' => $lead->referred_by_customer_id,
-            'is_active' => true,
-        ]);
+        try {
+            $customer = Customer::create([
+                'company_id' => $lead->company_id,
+                'name' => $lead->name,
+                'afm' => $lead->afm,
+                'occupation' => $lead->occupation,
+                'address1' => $lead->address1,
+                'city' => $lead->city,
+                'postcode' => $lead->postcode,
+                'country' => $lead->country ?: 'GR',
+                'phone1' => $lead->phone ?: $lead->mobile,
+                'phone2' => ($lead->phone && $lead->mobile) ? $lead->mobile : null,
+                'email' => $lead->email,
+                'referred_by_customer_id' => $lead->referred_by_customer_id,
+                'is_active' => true,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // The per-tenant lock covers conversions; a customer created in the
+            // plain form in the same instant is the one race left — guide, don't crash.
+            throw new RuntimeException('Μόλις δημιουργήθηκε πελάτης με ΑΦΜ '.Afm::uniqueKey($lead->afm).' από άλλον χειριστή — διάλεξε «Σύνδεση με υπάρχοντα πελάτη».');
+        }
 
         // Tags travel with the party (the lead keeps its own copy).
         $tagIds = $lead->tags()->pluck('tags.id')->all();

@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\InvoiceBalance;
+use App\Support\Afm;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -332,8 +333,9 @@ class EpsilonImporter
         DB::transaction(function () use ($rows, &$created, &$updated, &$skipped) {
             foreach ($rows as $row) {
                 $afm = $this->clean($row['TIN'] ?? null);
-                // Skip Epsilon's built-in generic retail placeholder (no real ΑΦΜ).
-                if ($afm === null || $afm === '000000000') {
+                // Skip a retail placeholder (000000000 and any all-same-digit
+                // dummy): no real ΑΦΜ → not a customer to import.
+                if ($afm === null || Afm::uniqueKey($afm) === null) {
                     $skipped++;
 
                     continue;
@@ -361,7 +363,7 @@ class EpsilonImporter
                 $existing = Customer::query()
                     ->withoutGlobalScopes()
                     ->where('company_id', $this->companyId)
-                    ->where('afm', $afm)
+                    ->whereAfmKeyOf($afm)
                     ->first();
 
                 if ($existing !== null) {
@@ -597,8 +599,8 @@ class EpsilonImporter
     private function resolveSaleCustomer(array $sale): ?int
     {
         $afm = $this->clean($sale['TraderTIN'] ?? null);
-        if ($afm === null || $afm === '000000000') {
-            return null;
+        if ($afm === null || Afm::uniqueKey($afm) === null) {
+            return null; // retail sale — no customer identity
         }
         if (isset($this->customerCache[$afm])) {
             return $this->customerCache[$afm];
@@ -606,7 +608,7 @@ class EpsilonImporter
         $id = Customer::query()
             ->withoutGlobalScopes()
             ->where('company_id', $this->companyId)
-            ->where('afm', $afm)
+            ->whereAfmKeyOf($afm)
             ->value('id');
         if ($id === null) {
             $this->warn("Δημιουργήθηκε πελάτης από πώληση (ΑΦΜ {$afm}) — εισήγαγε πρώτα τους πελάτες για πλήρη στοιχεία.");

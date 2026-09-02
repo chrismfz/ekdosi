@@ -290,7 +290,9 @@ class PendingWhmcsInvoice extends Model
      */
     public function ownLinesAreReceipt(): bool
     {
-        if (blank($this->customer?->afm)) {
+        // Identity, not text: a placeholder («000000000») on the linked
+        // customer is no ΑΦΜ either — same rule as whmcsAfm().
+        if (Afm::uniqueKey($this->customer?->afm) === null) {
             return true;
         }
 
@@ -367,10 +369,14 @@ class PendingWhmcsInvoice extends Model
         return count($flags) === 1 ? (bool) reset($flags) : null;
     }
 
-    /** The ΑΦΜ the customer entered in WHMCS (role 'vatno'), digits only. */
+    /**
+     * The ΑΦΜ the customer entered in WHMCS (role 'vatno') as its IDENTITY
+     * (Afm::uniqueKey): digits for a Greek ΑΦΜ with any EL/GR prefix dropped,
+     * letters kept for a foreign VAT, null for a blank or a placeholder.
+     */
     public function whmcsAfm(): ?string
     {
-        return Afm::normalise($this->whmcsCustomField('vatno'));
+        return Afm::uniqueKey($this->whmcsCustomField('vatno'));
     }
 
     public function whmcsTaxOffice(): ?string
@@ -416,7 +422,7 @@ class PendingWhmcsInvoice extends Model
             return false;
         }
 
-        $hasAfm = filled($this->customer?->afm) || filled($this->whmcsAfm());
+        $hasAfm = Afm::uniqueKey($this->customer?->afm) !== null || filled($this->whmcsAfm());
 
         return ! $hasAfm;
     }

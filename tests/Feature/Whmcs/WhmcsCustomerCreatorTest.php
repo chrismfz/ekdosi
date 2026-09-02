@@ -10,6 +10,7 @@ use App\Models\PendingWhmcsInvoice;
 use App\Services\AadeRegistryLookup;
 use App\Services\Whmcs\WhmcsCustomerCreator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Mockery;
 use Tests\TestCase;
 
@@ -92,7 +93,9 @@ class WhmcsCustomerCreatorTest extends TestCase
     public function test_falls_back_to_whmcs_data_when_gsis_fails(): void
     {
         $t = $this->tenant();
-        $row = $this->pending($t, '999999999');
+        // (999999999 is an all-same-digit PLACEHOLDER — not an identity — so a
+        // real-looking ΑΦΜ is used here.)
+        $row = $this->pending($t, '999999998');
         $this->mockGsis(null, new AadeAfmNotFound('AFM not found'));
 
         $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
@@ -100,7 +103,7 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertTrue($result->created);
         $this->assertSame('whmcs', $result->source);
         $this->assertSame('ACME WHMCS OE', $result->customer->name);   // WHMCS name
-        $this->assertSame('999999999', $result->customer->afm);
+        $this->assertSame('999999998', $result->customer->afm);
         $this->assertSame('Οδός 1', $result->customer->address1);
     }
 
@@ -117,6 +120,58 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertSame('existing', $result->source);
         $this->assertSame($existing->id, $result->customer->id);
         $this->assertSame(555, $existing->fresh()->whmcs_client_id);   // link stamped
+    }
+
+    public function test_foreign_vat_matches_the_existing_customer_by_identity(): void
+    {
+        $t = $this->tenant();
+        $cy = Customer::create(['company_id' => $t->id, 'name' => 'Κύπριος', 'afm' => 'CY10259033P']);
+        $row = $this->pending($t, 'cy 10259033 p', userId: 557);
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertSame('existing', $result->source);
+        $this->assertSame($cy->id, $result->customer->id, 'letters kept — never a digits-only twin');
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count());
+    }
+
+    public function test_losing_the_create_race_returns_the_winner_as_existing(): void
+    {
+        $t = $this->tenant();
+        $row = $this->pending($t, '123456789', userId: 558);
+        $this->mockGsis(null, new AadeAfmNotFound('AFM not found'));
+
+        $fired = false;
+        Customer::creating(function (Customer $c) use (&$fired, $t): void {
+            if (! $fired) {
+                $fired = true;
+                DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Νικητής', 'afm' => '123456789', 'afm_key' => '123456789', 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertFalse($result->created);
+        $this->assertSame('existing', $result->source);
+        $this->assertSame('Νικητής', $result->customer->name);
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count());
+        $this->assertSame(558, $result->customer->fresh()->whmcs_client_id, 'the winner is linked exactly like an owner found up-front');
+    }
+
+    public function test_deleted_owner_is_reported_not_recreated(): void
+    {
+        $t = $this->tenant();
+        $deleted = Customer::create(['company_id' => $t->id, 'name' => 'Σβησμένος', 'afm' => '123456789']);
+        $deleted->delete();
+        $row = $this->pending($t, 'EL 123456789', userId: 556);
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertFalse($result->created);
+        $this->assertSame('deleted_owner', $result->source);
+        $this->assertSame($deleted->id, $result->customer->id);
+        $this->assertNull($deleted->fresh()->whmcs_client_id, 'nothing linked on a deleted owner');
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count(), 'no second customer for the ΑΦΜ');
     }
 
     public function test_no_afm_returns_no_afm(): void

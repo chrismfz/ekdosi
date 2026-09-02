@@ -6,7 +6,9 @@ use App\Exceptions\Aade\AadeRegistryException;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
+use App\Support\Afm;
 use Carbon\CarbonInterface;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -64,8 +66,8 @@ class CustomerSyncFromMyData
             $scannedDocs++;
 
             $afm = trim((string) ($doc->counterpartVat ?? ''));
-            if ($afm === '') {
-                continue; // retail / no counterpart
+            if ($afm === '' || Afm::uniqueKey($afm) === null) {
+                continue; // retail / no counterpart / placeholder ΑΦΜ (no identity)
             }
             if ($ourAfm !== '' && $afm === $ourAfm) {
                 continue; // never add ourselves
@@ -94,16 +96,10 @@ class CustomerSyncFromMyData
         $gsisFailures = [];
 
         foreach ($byAfm as $afm => $docName) {
-            // Dedup is APP-LEVEL: unlike suppliers, `customers` has no
-            // unique(company_id, afm) constraint (afm is a non-unique index +
-            // legitimately NULL for retail), so this exists-check + the per-run
-            // $byAfm map are the guard — fine for the single-operator flow, not a
-            // concurrency lock. withTrashed: a soft-deleted customer with this AFM
-            // was removed on purpose → never silently resurrect.
-            $exists = Customer::withTrashed()
-                ->where('company_id', $this->tenant->getKey())
-                ->where('afm', $afm)
-                ->exists();
+            // Identity check on `afm_key` (the UNIQUE(company_id, afm_key)
+            // constraint is the final guard). withTrashed: a soft-deleted
+            // customer with this AFM was removed on purpose → never resurrect.
+            $exists = Customer::afmOwnerQuery($this->tenant->getKey(), $afm)->exists();
 
             if ($exists) {
                 $skipped++;
@@ -142,7 +138,14 @@ class CustomerSyncFromMyData
                 $attrs['name'] = 'ΑΦΜ '.$afm;
             }
 
-            Customer::create($attrs);
+            try {
+                Customer::create($attrs);
+            } catch (UniqueConstraintViolationException) {
+                // Created meanwhile (a parallel run / the panel) — that's a skip, not a crash.
+                $skipped++;
+
+                continue;
+            }
             $created++;
             $createdAfms[] = $afm;
         }

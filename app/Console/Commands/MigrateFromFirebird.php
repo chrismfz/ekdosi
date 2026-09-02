@@ -7,10 +7,12 @@ use App\Models\User;
 use App\Services\Etl\BackupNoteSync;
 use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
+use App\Support\Afm;
 use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use PDO;
+use RuntimeException;
 
 /**
  * Re-runnable ETL: legacy Firebird .fdb  ->  multi-tenant MariaDB.
@@ -281,7 +283,7 @@ class MigrateFromFirebird extends Command
     {
         $exists = DB::table('companies')->where('id', $id)->exists();
         if (! $exists) {
-            throw new \RuntimeException("Tenant with id={$id} does not exist. Cannot import into a non-existent tenant.");
+            throw new RuntimeException("Tenant with id={$id} does not exist. Cannot import into a non-existent tenant.");
         }
 
         return $id;
@@ -323,6 +325,83 @@ class MigrateFromFirebird extends Command
     private function fbAll(string $sql): array
     {
         return $this->fb->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows  legacy CUSTOMER rows
+     */
+    private function assertNoDuplicateLegacyAfm(array $rows): void
+    {
+        // One pass: key → source rows (for the in-source duplicate check) and
+        // CUST_ID → key (for the target check). Keys stay STRINGS (a numeric
+        // array key would bind as int against the varchar index).
+        $byKey = [];
+        $keyByCustId = [];
+        $sourceIds = [];
+        foreach ($rows as $r) {
+            $sourceIds[(int) $r['CUST_ID']] = true;
+            $key = Afm::uniqueKey($this->fld($r, 'AFM'));
+            if ($key !== null) {
+                $byKey[(string) $key][] = (int) $r['CUST_ID'].' '.($this->fld($r, 'NAME') ?? '');
+                $keyByCustId[(int) $r['CUST_ID']] = (string) $key;
+            }
+        }
+
+        $lines = [];
+        $inSource = 0;
+        foreach (array_filter($byKey, fn (array $ids): bool => count($ids) > 1) as $key => $ids) {
+            $lines[] = "  ΑΦΜ {$key} (μέσα στη legacy βάση): ".implode(' | ', $ids);
+            $inSource++;
+        }
+
+        // The TARGET side (the parallel-run week): a local row that owns one of
+        // the source ΑΦΜ and would NOT be released by this run — i.e. it has no
+        // legacy_id (made in the panel) or its legacy_id no longer exists in the
+        // source. Rows that ARE in the source get their afm_key released before
+        // the upserts (see copyCustomers), so moves and swaps are fine.
+        if ($keyByCustId !== []) {
+            foreach (array_chunk(array_map('strval', array_keys($byKey)), 500) as $keys) {
+                $owners = DB::table('customers')
+                    ->where('company_id', $this->companyId)
+                    ->whereIn('afm_key', $keys)
+                    ->get(['id', 'name', 'afm_key', 'legacy_id', 'deleted_at']);
+                foreach ($owners as $o) {
+                    $ownerLegacy = $o->legacy_id !== null ? (int) $o->legacy_id : null;
+                    // Any row this run rewrites (its legacy_id is in the source — keyed
+                    // or not, e.g. corrected to a placeholder) gets its key released first.
+                    if ($ownerLegacy !== null && isset($sourceIds[$ownerLegacy])) {
+                        continue;
+                    }
+                    $claimant = array_search((string) $o->afm_key, $keyByCustId, true);
+                    $lines[] = "  ΑΦΜ {$o->afm_key}: υπάρχει ήδη στο ekdosi ως #{$o->id} «{$o->name}»"
+                        .($ownerLegacy !== null ? " (legacy_id {$ownerLegacy} — δεν υπάρχει πια στην πηγή)" : ' (χωρίς legacy_id — φτιάχτηκε στο panel)')
+                        .($o->deleted_at ? ' [ΔΙΑΓΡΑΜΜΕΝΟΣ]' : '')
+                        ." — η πηγή το δίνει σε CUST_ID {$claimant}";
+                }
+            }
+        }
+
+        if ($lines === []) {
+            return;
+        }
+
+        // Be precise about WHERE each kind is fixed: an in-source duplicate can
+        // only be resolved in the legacy Firebird DB (merge the two CUST_IDs, or
+        // blank/correct one ΑΦΜ there — the legacy app is still live until
+        // cutover); a target-side owner is resolved in ekdosi. The ETL never
+        // picks a winner on its own — the choice is legally significant.
+        $howTo = [];
+        if ($inSource > 0) {
+            $howTo[] = 'τα διπλά ΜΕΣΑ στη legacy βάση διορθώνονται ΣΤΗ LEGACY (συγχώνευση CUST_IDs ή διόρθωση/κένωση του ενός ΑΦΜ εκεί)';
+        }
+        if (count($lines) > $inSource) {
+            $howTo[] = 'οι τοπικοί κάτοχοι διορθώνονται στο ekdosi (php artisan customers:afm-duplicates)';
+        }
+
+        throw new RuntimeException(
+            "Σύγκρουση ΑΦΜ πελατών — τίποτα δεν γράφτηκε:\n".implode("\n", $lines)
+            ."\n".ucfirst(implode('· ', $howTo)).' και ξανατρέξε — ο στόχος επιβάλλει UNIQUE(company_id, afm_key).'
+        );
     }
 
     /**
@@ -482,7 +561,23 @@ class MigrateFromFirebird extends Command
     private function copyCustomers(): void
     {
         $this->line('  CUSTOMER -> customers');
-        foreach ($this->fbAll('SELECT * FROM CUSTOMER') as $r) {
+        $rows = $this->fbAll('SELECT * FROM CUSTOMER');
+
+        // UNIQUE(company_id, afm_key) on the target: two legacy customers with
+        // the same real ΑΦΜ would make the second upsert fail mid-run. Stop
+        // BEFORE writing, with the list, so the operator merges them in the
+        // legacy DB (placeholders like 000000000 are not identities and pass).
+        $this->assertNoDuplicateLegacyAfm($rows);
+
+        // Release every ΑΦΜ held by a row this run will rewrite (inside the
+        // import transaction): an ΑΦΜ that moved between CUST_IDs — or swapped —
+        // can then be re-claimed in any order without hitting the unique index.
+        DB::table('customers')
+            ->where('company_id', $this->companyId)
+            ->whereIn('legacy_id', array_map(fn (array $r): int => (int) $r['CUST_ID'], $rows))
+            ->update(['afm_key' => null]);
+
+        foreach ($rows as $r) {
             // Filament-managed columns (is_active, needs_immediate_invoice,
             // peppol_endpoint, whmcs_client_id) are written ONLY on first
             // insert. On re-runs they stay untouched so operator
@@ -493,6 +588,8 @@ class MigrateFromFirebird extends Command
                 [
                     'type' => $this->fld($r, 'TYPE'),
                     'afm' => $this->fld($r, 'AFM'),
+                    // Query-builder write → the model hook doesn't run; derive here.
+                    'afm_key' => Afm::uniqueKey($this->fld($r, 'AFM')),
                     'name' => $this->fld($r, 'NAME') ?? '(no name)',
                     'address1' => $this->fld($r, 'ADDRESS1'),
                     'address2' => $this->fld($r, 'ADDRESS2'),

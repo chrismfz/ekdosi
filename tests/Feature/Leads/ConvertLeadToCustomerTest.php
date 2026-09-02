@@ -159,6 +159,25 @@ class ConvertLeadToCustomerTest extends TestCase
         $this->assertSame(0, Customer::where('company_id', $t2->id)->count());
     }
 
+    public function test_owner_check_uses_the_identity_key_for_foreign_vat_and_ignores_placeholders(): void
+    {
+        $t = $this->tenant();
+        Customer::create(['company_id' => $t->id, 'name' => 'Κύπριος', 'afm' => 'CY10259033P']);
+        $lead = Lead::create(['company_id' => $t->id, 'name' => 'Lead CY', 'afm' => 'CY10259033P']);
+
+        try {
+            app(ConvertLeadToCustomer::class)($lead);
+            $this->fail('Expected the guided refusal, not a unique violation.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Σύνδεση', $e->getMessage());
+        }
+
+        // A placeholder ΑΦΜ owns nothing and blocks nothing.
+        Customer::create(['company_id' => $t->id, 'name' => 'Λιανική', 'afm' => '000000000']);
+        $retail = Lead::create(['company_id' => $t->id, 'name' => 'Lead λιανικής', 'afm' => '000000000']);
+        $this->assertNotNull(app(ConvertLeadToCustomer::class)($retail));
+    }
+
     public function test_refuses_a_do_not_contact_or_trashed_lead(): void
     {
         $t = $this->tenant();

@@ -4,6 +4,7 @@ namespace Tests\Feature\WhmcsInbox;
 
 use App\Filament\Resources\WhmcsInbox\Pages\ListWhmcsInbox;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -128,6 +129,22 @@ class WhmcsInboxIntentTest extends TestCase
         // Doesn't want an invoice → never flagged, even without ΑΦΜ.
         $receipt = $this->row($tenant, [['id' => 10, 'value' => '']]);
         $this->assertFalse($receipt->needsAfm());
+
+        // A linked customer whose ΑΦΜ is a placeholder («000000000», the retail
+        // dummy) has NO ΑΦΜ: still flagged, and the own lines stay a receipt —
+        // the same identity rule as the WHMCS side, not «any text is an ΑΦΜ».
+        $retail = Customer::create(['company_id' => $tenant->id, 'name' => 'Λιανική', 'afm' => '000000000']);
+        $linked = $this->row($tenant, [['id' => 10, 'value' => 'on']]);
+        $linked->forceFill(['customer_id' => $retail->id])->save();
+        $linked = $linked->fresh()->load('customer');
+        $this->assertTrue($linked->needsAfm());
+        $this->assertTrue($linked->ownLinesAreReceipt());
+
+        $real = Customer::create(['company_id' => $tenant->id, 'name' => 'Εταιρεία', 'afm' => 'EL 123456789']);
+        $linked->forceFill(['customer_id' => $real->id])->save();
+        $linked = $linked->fresh()->load('customer');
+        $this->assertFalse($linked->needsAfm());
+        $this->assertFalse($linked->ownLinesAreReceipt());
     }
 
     public function test_intent_is_null_when_role_unmapped(): void

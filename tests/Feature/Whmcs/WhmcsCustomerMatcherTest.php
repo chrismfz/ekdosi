@@ -37,18 +37,19 @@ class WhmcsCustomerMatcherTest extends TestCase
 
     public function test_direct_link_takes_precedence_over_other_signals(): void
     {
-        // Two customers — one linked by id, one matching by AFM. The
-        // linked one MUST win even if both have the same vatno match.
+        // Two customers — one linked by id, the OTHER matching the payload's
+        // vatno. The linked one MUST win over the AFM signal. (One ΑΦΜ per
+        // tenant is now DB-enforced, so the two carry different ΑΦΜ.)
         $linked = Customer::create([
             'company_id' => $this->tenant->id,
             'name' => 'Linked',
-            'afm' => '123456789',
+            'afm' => '987654321',
             'whmcs_client_id' => 42,
         ]);
         $other = Customer::create([
             'company_id' => $this->tenant->id,
             'name' => 'AfmOnly',
-            'afm' => '123456789',  // same afm — must NOT be picked
+            'afm' => '123456789',  // matches the payload vatno — must NOT be picked
         ]);
 
         $match = app(WhmcsCustomerMatcher::class)->match($this->tenant, [

@@ -7,6 +7,7 @@ use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
+use App\Support\Afm;
 use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -103,6 +104,42 @@ class Customer extends Model
             'show_balance_on_pdf' => 'boolean',
             'whmcs_reseller_routes' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // `afm_key` is the ΑΦΜ IDENTITY (App\Support\Afm::uniqueKey) behind the
+        // UNIQUE(company_id, afm_key) constraint — derived on every save, never
+        // typed. Query-builder writers (ETL, importer) set it themselves.
+        static::saving(function (self $customer): void {
+            $customer->afm_key = Afm::uniqueKey($customer->afm);
+        });
+    }
+
+    /**
+     * THE owner lookup: the customer (soft-deleted included — the UNIQUE index
+     * covers them, and a trashed owner must be restored, never duplicated)
+     * holding this ΑΦΜ identity in a tenant. Every «does this ΑΦΜ already have
+     * a customer?» site goes through here so the rule can't drift.
+     *
+     * @return Builder<static>
+     */
+    public static function afmOwnerQuery(int $companyId, ?string $afm): Builder
+    {
+        return static::withTrashed()->where('company_id', $companyId)->whereAfmKeyOf($afm);
+    }
+
+    /**
+     * Customers sharing this ΑΦΜ identity (any formatting, EL/GR prefix or not).
+     * A value with no identity (placeholder like 000000000, or blank) matches
+     * NOBODY — callers that meet a placeholder must treat it as «no ΑΦΜ»
+     * (retail), never as a customer to look up or create.
+     */
+    public function scopeWhereAfmKeyOf(Builder $query, ?string $afm): Builder
+    {
+        $key = Afm::uniqueKey($afm);
+
+        return $key === null ? $query->whereRaw('1 = 0') : $query->where('afm_key', $key);
     }
 
     /**

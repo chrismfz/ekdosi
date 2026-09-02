@@ -110,7 +110,7 @@ class DeliveryNote extends Model
         $stored = trim((string) $this->recipient_afm);
 
         // Any all-zeros value, not only the exact nine-zero sentinel: «0» meant the
-        // same thing to the operator, and Afm::canonicalVat() already reads it that
+        // same thing to the operator, and Afm::uniqueKey() already reads it that
         // way — leaving the two strictnesses apart let «0» read as a real ΑΦΜ here
         // while every identity comparison treated it as absent.
         if (Afm::isZeroPlaceholder($stored)) {
@@ -121,7 +121,7 @@ class DeliveryNote extends Model
         // refusal into a silently-filed ενδοδιακίνηση, and made a linked customer's
         // KNOWN ΑΦΜ be replaced by the «no ΑΦΜ» placeholder — a guess, where MYD-011's
         // whole posture is to refuse. It falls through to the real identity instead.
-        if ($stored !== '' && Afm::canonicalVat($stored) === null) {
+        if ($stored !== '' && Afm::uniqueKey($stored) === null) {
             $stored = '';
         }
 
@@ -190,7 +190,7 @@ class DeliveryNote extends Model
      * the payload files the customer's name, so both still read as "this IS the
      * customer".
      *
-     * The ΑΦΜ comparison keeps LETTERS (Afm::comparisonKey, shared with the invoice
+     * The ΑΦΜ comparison keeps LETTERS (Afm::uniqueKey, shared with the invoice
      * counterpart check in MYD-009) — a digit-strip turns «DE811234567» into
      * «811234567», which matches a Greek customer's ΑΦΜ, and the German party then
      * inherits that customer's country and files as GR.
@@ -204,7 +204,7 @@ class DeliveryNote extends Model
      *    accent-insensitive («ΑΦΟΙ ΠΑΠΑΔΟΠΟΥΛΟΥ ΑΕ» = «Αφοί Παπαδόπουλου ΑΕ») → it
      *    pre-fills for the same party spelled differently, which is right.
      * An «EL…»/«ΕΛ…» prefixed ΑΦΜ against a bare one is the SAME taxpayer and matches
-     * (comparisonKey canonicalises first) — `customers.afm` legitimately carries the
+     * (uniqueKey canonicalises first) — `customers.afm` legitimately carries the
      * prefix, since the VIES form-fill seeds a full VAT id. A FOREIGN prefix survives
      * canonicalisation, so «DE811234567» still does not match a Greek «811234567».
      */
@@ -217,7 +217,7 @@ class DeliveryNote extends Model
         }
 
         $afm = $this->externalRecipientAfm();
-        if ($afm !== null && Afm::comparisonKey($afm) !== Afm::comparisonKey($customer->afm)) {
+        if ($afm !== null && Afm::uniqueKey($afm) !== Afm::uniqueKey($customer->afm)) {
             return false;
         }
 

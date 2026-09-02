@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
@@ -35,7 +36,7 @@ class WhmcsInvoicesByAfmWebhookTest extends TestCase
     }
 
     /** @param array<string, mixed> $body */
-    private function call_afm(string $slug, array $body, string $secret = self::SECRET): \Illuminate\Testing\TestResponse
+    private function call_afm(string $slug, array $body, string $secret = self::SECRET): TestResponse
     {
         $raw = json_encode($body);
         $sig = 'sha256='.hash_hmac('sha256', $raw, $secret);
@@ -199,5 +200,39 @@ class WhmcsInvoicesByAfmWebhookTest extends TestCase
         $this->call_afm('does-not-exist-'.uniqid(), ['afms' => ['998482379']])
             ->assertNotFound()
             ->assertJsonPath('error', 'tenant_not_found');
+    }
+
+    public function test_matches_by_identity_key_and_resolves_a_foreign_vat_sent_as_digits_only_when_unambiguous(): void
+    {
+        $t = $this->tenant();
+        $it = InvoiceType::create(['company_id' => $t->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1]);
+
+        // A Cypriot customer: the plugin strips letters, so «CY10259033P» arrives as «10259033».
+        $cy = $this->customer($t, 'CY10259033P', 'Κύπριος');
+        $this->invoice($t, $it, $cy, 'ΤΠΥ600', 600, 'active', 'VALID', '400000000000600');
+        // A Greek 9-digit ΑΦΜ that happens to share digits with a foreign VAT is never shadowed.
+        $gr = $this->customer($t, '123456789', 'Έλληνας');
+        $this->customer($t, 'DE123456789', 'Γερμανός');
+
+        $resp = $this->call_afm($t->slug, ['afms' => ['10259033', 'CY10259033P', '123456789']]);
+
+        $resp->assertOk()
+            ->assertJsonPath('afms.10259033.customer_name', 'Κύπριος')
+            ->assertJsonPath('afms.CY10259033P.customer_name', 'Κύπριος')
+            ->assertJsonPath('afms.123456789.customer_id', $gr->id);
+
+        // Two foreign VATs folding to the same digits → an honest null, never a coin toss.
+        $this->customer($t, 'MT10259033P', 'Μαλτέζος');
+        $this->call_afm($t->slug, ['afms' => ['10259033']])
+            ->assertOk()
+            ->assertJsonPath('afms.10259033', null);
+
+        // A 9-digit query IS a Greek ΑΦΜ: with no Greek owner it is null — never
+        // the German customer whose VAT happens to share the nine digits.
+        $t2 = $this->tenant();
+        $this->customer($t2, 'DE123456789', 'Γερμανός');
+        $this->call_afm($t2->slug, ['afms' => ['123456789']])
+            ->assertOk()
+            ->assertJsonPath('afms.123456789', null);
     }
 }

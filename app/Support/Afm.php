@@ -3,13 +3,20 @@
 namespace App\Support;
 
 /**
- * Greek ΑΦΜ (VAT number) canonicalisation — one rule, so every comparison agrees
- * on when two AFMs are "the same". Both forms strip everything but digits (an
- * 'EL'/'GR' prefix or stray punctuation must not read as a difference); they
- * differ only in how they report "no digits at all".
+ * ΑΦΜ / VAT-number canonicalisation — ONE identity rule (uniqueKey) so every
+ * comparison agrees on when two values are "the same party": it is the rule
+ * behind `customers.afm_key` and UNIQUE(company_id, afm_key). A Greek ΑΦΜ is
+ * its 9 digits (an 'EL'/'GR' prefix, spaces, dashes or a label never read as
+ * a difference); a foreign VAT keeps its letters; a placeholder or free text
+ * is no identity at all. `digits()` is the older digits-only helper — a
+ * display/phone-style strip, NOT an identity (it folds «CY10259033P» and
+ * «10259033» together): never use it to look a customer up.
  */
 final class Afm
 {
+    /** Fewer digits than this is free text, never a VAT identity (IE1234567T = 7). */
+    public const MIN_IDENTITY_DIGITS = 7;
+
     /**
      * The country prefixes that actually appear in front of a VAT identifier: the
      * EU member states (EL for Greece), plus GB/XI, CH and NO. Deliberately NOT
@@ -27,87 +34,79 @@ final class Afm
         return preg_replace('/\D+/', '', (string) $raw) ?? '';
     }
 
-    /** Digits only; null when the input carries none (for nullable AFM columns). */
-    public static function normalise(?string $raw): ?string
-    {
-        $digits = self::digits($raw);
-
-        return $digits === '' ? null : $digits;
-    }
-
     /**
-     * The VAT identifier as it should be FILED: separators and stray whitespace
-     * removed, letters kept — and a Greek EU-VAT prefix («EL»/«GR», Latin or the
-     * Greek-letter «ΕΛ») dropped when what remains is a bare nine-digit ΑΦΜ, which
-     * is the form AADE expects for a domestic counterpart.
-     *
-     * `invoices.vat_no` is free text: a bare TextInput on the form and an ETL copy
-     * of the legacy WIN1253 column. Filing it verbatim (MYD-009 first cut) sent
-     * «IT 12345678901» and «EL123456789» to AADE and earned an opaque rejection —
-     * the previous code filed `customers.afm`, which the customer form and the
-     * GSIS/VIES lookups keep canonical.
-     *
-     * The nine-digit test is what keeps a foreign id intact: stripping «IT» from
-     * «IT12345678901» leaves eleven digits, so the prefix stays.
+     * The IDENTITY key behind `customers.afm_key` (unique per tenant):
+     *   - upper-case alphanumerics only («EL 123-456-789» → «EL123456789»);
+     *   - a Greek ΑΦΜ (9 digits, optional EL/GR prefix) collapses to its digits,
+     *     so «EL123456789», «123 456 789» and «123456789» are one customer;
+     *   - a foreign VAT keeps its letters («CY10259033P», «EE123456789»);
+     *   - placeholders (all-same-digit: 000000000, 999999999), blanks and free
+     *     text («N/A», «ΔΕΝ ΕΧΕΙ 0» — fewer than 7 digits, the shortest EU VAT
+     *     form) → null, i.e. NOT an identity — many retail customers may share them.
      */
-    public static function canonicalVat(?string $raw): ?string
+    public static function uniqueKey(?string $raw): ?string
     {
-        $value = preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '';
-        if ($value === '') {
+        // A Greek-keyboard slip on the country prefix («ΕL», «ΕΛ», «EΛ» with a
+        // Greek Ε/Λ) must not mint a new identity: fold a LEADING one to «EL»
+        // (after any label/separators — «ΑΦΜ: ΕΛ123…»). Only the prefix: any
+        // other Greek text («123456789 ΕΛΛΑΔΑ», an «ΑΦΜ» label) is simply
+        // dropped below, never folded into Latin letters.
+        $upper = mb_strtoupper((string) $raw);
+        // A leading label — Greek «ΑΦΜ» or a Latin «AFM» / «VAT» / «VAT NO» /
+        // «TIN» — is noise, not part of the number (legacy free-text column).
+        // Only at the start and only followed by a separator, so a real prefix
+        // or check letter is never eaten.
+        $upper = preg_replace('/^[^\p{L}\d]*(?:ΑΦΜ|AFM|VAT(?:\s*NO\.?|\s*NUMBER)?|TIN)(?=[^\p{L}\d])[^\p{L}\d]*/u', '', $upper) ?? $upper;
+        $upper = preg_replace('/^[^\p{L}\d]*(?:ΕΛ|ΕL|EΛ)/u', 'EL', $upper) ?? $upper;
+        $key = preg_replace('/[^A-Z0-9]+/', '', $upper) ?? '';
+        // Every real ΑΦΜ/VAT carries at least 7 digits (IE1234567T is the
+        // shortest EU form); letters-only text («N/A», «NONE», a bare «EL») or
+        // free text with a stray digit («ΔΕΝ ΕΧΕΙ 0», «N/A 000») is a
+        // placeholder, not an identity — minting a key from it would make two
+        // retail customers with the same note collide.
+        if (strlen(preg_replace('/\D+/', '', $key) ?? '') < self::MIN_IDENTITY_DIGITS) {
             return null;
         }
 
-        if (preg_match('/^(EL|GR|ΕΛ)(\d{9})$/ui', $value, $m) === 1) {
-            $value = $m[2];
+        if (preg_match('/^(?:EL|GR)?(\d{9})$/', $key, $m) === 1) {
+            $key = $m[1];
         }
 
-        // An all-zeros value («0», «000000000») is a PLACEHOLDER meaning "no ΑΦΜ" —
-        // the convention the delivery-note sentinel already uses — not an identity.
-        // Returning it let «0» become a reported counterpart, and made every identity
-        // comparison call that document a different party from its own customer.
-        return trim($value, '0') === '' ? null : $value;
+        return self::isPlaceholder($key) ? null : $key;
     }
 
     /**
-     * Comparison key for "are these two parties the same?": separators and case
-     * folded away, but LETTERS KEPT.
-     *
-     * Deliberately NOT digits(), which strips everything non-numeric: that turns the
-     * German VAT id «DE811234567» into «811234567», which then matches a Greek
-     * customer's ΑΦΜ — so a foreign party reads as "this is our customer" and
-     * inherits that customer's country/name. A country prefix is evidence, not
-     * noise. (MYD-011 for delivery notes, MYD-009 for invoices — one definition so
-     * the two identity checks cannot drift.)
+     * What `leads.afm` stores: the identity key when there is one (so
+     * LeadMatcher compares like with like), else the operator's text as typed
+     * (a lead is a notebook — «000000000» / «N/A» is an answer, not data loss).
      */
-    public static function comparisonKey(?string $raw): string
+    public static function leadAfm(?string $raw): ?string
     {
-        // Canonicalise FIRST: «EL997073525» and «997073525» are the same taxpayer, and
-        // `customers.afm` legitimately carries the prefix (the VIES form-fill seeds it
-        // as a full VAT id). Comparing the raw strings called them different parties
-        // and refused an invoice that used to file — while canonicalVat() was
-        // simultaneously stripping that same prefix on the way out, so one commit
-        // contradicted itself. A FOREIGN prefix survives canonicalisation, so
-        // «DE811234567» still does not match a Greek «811234567».
-        return mb_strtoupper(self::canonicalVat($raw) ?? '');
+        $text = trim((string) $raw);
+
+        return self::uniqueKey($text) ?? ($text === '' ? null : $text);
+    }
+
+    /** A dummy ΑΦΜ (000000000, 999999999, …) that identifies nobody. */
+    public static function isPlaceholder(string $key): bool
+    {
+        return ctype_digit($key) && $key !== '' && count(array_unique(str_split($key))) === 1;
     }
 
     /**
-     * Is this value the ALL-ZEROS placeholder — «0», «000000000» — as opposed to
-     * merely unusable junk like «-» or «.»?
+     * Is this specifically the ALL-ZEROS value — «0», «000000000», «EL000000000»?
      *
-     * The two must not be conflated. All-zeros is a DECLARATION ("this party has no
-     * ΑΦΜ", the convention AADE gives ενδοδιακίνηση); junk is an accident, and the
-     * right response to an accident is to fall through to whatever real identity is
-     * available rather than to declare something.
+     * NOT the same question as isPlaceholder(), and the difference is legal, not
+     * cosmetic. isPlaceholder() asks "does this identify nobody?" and is true for
+     * «999999999» too. This asks "is this AADE's ενδοδιακίνηση sentinel?" — the
+     * Α.1123/2024 convention for a delivery note whose recipient IS the issuer.
+     * «999999999» is a dummy someone typed; «000000000» is a declaration with legal
+     * meaning, and only the latter may classify a note as an internal movement
+     * (MYD-011/MYD-009).
      */
     public static function isZeroPlaceholder(?string $raw): bool
     {
-        // Strip a Greek VAT prefix FIRST, exactly as canonicalVat() does: «EL000000000»
-        // is the same declaration as «000000000». Testing the raw value let the two
-        // helpers disagree, so a prefixed placeholder took the "junk" path and was
-        // replaced by the linked customer's real ΑΦΜ — the placeholder filed as an
-        // identity, which is the conflation this helper exists to prevent.
-        $value = preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '';
+        $value = preg_replace('/[^A-Za-z0-9]+/u', '', mb_strtoupper((string) $raw)) ?? '';
         if (preg_match('/^(EL|GR|ΕΛ)(\d+)$/ui', $value, $m) === 1) {
             $value = $m[2];
         }
@@ -116,49 +115,35 @@ final class Afm
     }
 
     /**
-     * The ISO-3166-1 alpha-2 country prefix carried by a VAT identifier, when it has
-     * one that names a real country — «IT12345678901» → «IT». Null for a bare ΑΦΜ.
+     * The ISO-3166-1 alpha-2 country prefix carried by a VAT identifier —
+     * «IT12345678901» → «IT». Null for a bare ΑΦΜ or for anything that is not an
+     * identity at all.
      *
      * This is EVIDENCE about the party, not decoration: an invoice whose only
      * counterpart data is «IT…» must never be filed as a domestic Greek document
-     * just because no country column happens to be populated.
+     * just because no country column happens to be populated (MYD-009).
+     *
+     * Built on uniqueKey(), so it inherits the ONE identity rule — including the
+     * MIN_IDENTITY_DIGITS floor, which is what keeps free text out. Only prefixes
+     * actually used in front of a VAT id count: accepting any ISO-2 code made
+     * ordinary domestic values claim a country («AE997073525» — a real nine-digit
+     * ΑΦΜ with two stray letters — read as the UAE), and evidence that can refuse a
+     * filing must not be inventable from noise.
      */
     public static function countryPrefix(?string $raw): ?string
     {
-        $value = self::canonicalVat($raw);
-
-        // A real EU VAT id is NOT «two letters then digits»: AT is ATU12345678, CY is
-        // CY12345678L, NL is NL123456789B01, IE is IE1234567FA, ES is ESX1234567X.
-        // Matching only the digits-only shape let half of Europe be filed as GR.
+        $value = self::uniqueKey($raw);
         if ($value === null || preg_match('/^([A-Za-z]{2})([A-Za-z0-9]+)$/u', $value, $m) !== 1) {
             return null;
         }
 
-        // Only prefixes that are actually USED as VAT prefixes count. Accepting any
-        // ISO-2 code made ordinary domestic values claim a country — «AE997073525»
-        // (a real nine-digit ΑΦΜ with two stray letters) read as the UAE, «INV…» as
-        // India, «SA 1» as Saudi Arabia — and once that evidence could refuse a
-        // filing, a perfectly good domestic invoice became unissuable.
         $prefix = strtoupper($m[1]);
         if (! in_array($prefix, self::VAT_PREFIXES, true)) {
             return null;
         }
 
-        // …and the body must still look like an identifier rather than free text
-        // («LTD 12» would otherwise read as Lithuania). Six digits is a deliberately
-        // ASYMMETRIC trade: a false positive REFUSES a good domestic invoice, while a
-        // false negative only falls back to the recorded country (or, with nothing
-        // recorded, to the same GR default this code has always used). So the short
-        // real shapes — a two-digit Romanian id, an old IE format, a GB government
-        // id — are knowingly given up to keep junk out.
-        if (preg_match_all('/\d/', $m[2]) < 6) {
-            return null;
-        }
-
         // «XI» is a VAT jurisdiction (Northern Ireland), not an ISO-3166 country, so
-        // IsoCountry does not know it and the allowlist entry was inert — the round-5
-        // commit cited XI as a reason to trust the recorded country while the code
-        // never produced that prefix at all. Its country IS GB.
+        // IsoCountry does not know it. Its country IS GB.
         return $prefix === 'XI' ? 'GB' : IsoCountry::tryNormalise($prefix);
     }
 }

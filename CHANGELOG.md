@@ -19,6 +19,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Ένας πελάτης ανά ΑΦΜ ανά εταιρεία — επιβάλλεται από τη βάση.** Νέα στήλη `customers.afm_key`
+  (η ταυτότητα του ΑΦΜ: ψηφία για ελληνικό ΑΦΜ με/χωρίς EL/GR, γράμματα για ξένο VAT, NULL για
+  κενά/placeholder όπως 000000000) + `UNIQUE(company_id, afm_key)` (καλύπτει και soft-deleted).
+  Το migration κάνει backfill, **αρνείται** αν βρει διπλά και τα λιστάρει· `php artisan
+  customers:afm-duplicates [--tenant=]` = ο read-only έλεγχος (exit 1 αν υπάρχουν). Η φόρμα
+  πελάτη δείχνει φιλικό μήνυμα («υπάρχει ήδη / διαγραμμένος πελάτης …»), το ETL από Firebird
+  σταματά πριν γράψει αν η πηγή έχει διπλά, ο importer συγχωνεύει bundle-πελάτη με ίδιο ΑΦΜ
+  αντί να τον διπλασιάσει. Όλα τα lookups ΑΦΜ (myDATA sync, WHMCS, Epsilon, leads) πάνε μέσω
+  `afm_key` (`Customer::whereAfmKeyOf`). Κλείνει την επιφύλαξη του Leads L1.
 - **Leads / mini-CRM (L1) — μετατροπή σε πελάτη** — header action «Μετατροπή σε πελάτη» στο lead:
   **νέος πελάτης** (αντιγραφή στοιχείων 1:1, tags, «με ποιον μιλάμε» → κύρια επαφή, σύσταση) ή
   **σύνδεση με υπάρχοντα** (προεπιλέγεται το ΑΦΜ/email/τηλέφωνο match — ποτέ διπλός πελάτης)·

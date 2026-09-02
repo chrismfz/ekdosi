@@ -40,12 +40,12 @@ final class LeadMatch
      */
     public function customersOwningAfm(?string $afm): Collection
     {
-        $afm = Afm::normalise($afm);
-        if ($afm === null) {
+        $key = Afm::uniqueKey($afm);
+        if ($key === null) {
             return collect();
         }
 
-        return $this->directCustomers->filter(fn (Customer $c): bool => Afm::normalise($c->afm) === $afm)->values();
+        return $this->directCustomers->filter(fn (Customer $c): bool => $c->afm_key === $key)->values();
     }
 
     public function isEmpty(): bool

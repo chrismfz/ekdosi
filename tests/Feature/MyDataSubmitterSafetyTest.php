@@ -1093,7 +1093,7 @@ class MyDataSubmitterSafetyTest extends TestCase
         $cust = Customer::create([
             'company_id' => $this->tenant->id,
             'name' => 'Wakanda Corp',
-            'afm' => 'WK000001',
+            'afm' => 'WK1234567',
             'country' => 'Wakanda',
         ]);
         $inv = Invoice::create([
@@ -2047,7 +2047,12 @@ XML;
             $this->assertNull(Afm::countryPrefix($value), "«{$value}» must not claim a country");
         }
 
-        $this->assertSame('RO', Afm::countryPrefix('RO361902'));
+        // A real VAT id still yields its prefix. «RO361902» deliberately does NOT:
+        // six digits is below Afm::MIN_IDENTITY_DIGITS, so the shared identity rule
+        // says it is free text — the accepted asymmetric trade (a false positive
+        // refuses a good domestic invoice; a false negative only falls back).
+        $this->assertSame('RO', Afm::countryPrefix('RO12345678'));
+        $this->assertNull(Afm::countryPrefix('RO361902'));
     }
 
     public function test_a_punctuation_only_afm_does_not_pass_two_parties_as_one(): void
