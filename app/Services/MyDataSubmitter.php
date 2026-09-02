@@ -127,7 +127,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // MARK already exists for this (series, ΑΑ), ADOPT it (MYD-7-style
             // self-heal) instead of filing a second one. Only when AADE has
             // nothing do we fall through to a normal submit.
-            if ($invoice->mydata_pending_since !== null && $invoice->mydata_state === null) {
+            // blank(), not `=== null`: performSubmit explicitly treats '' as equally
+            // never-filed, and an armed document carrying '' would otherwise skip
+            // adopt-or-file entirely and blind-retry — the one path this gate exists
+            // to close.
+            if ($invoice->mydata_pending_since !== null && blank($invoice->mydata_state)) {
                 $adopted = $this->adoptExistingMarkIfPresent($invoice);
                 if ($adopted !== null) {
                     return $adopted;
@@ -304,11 +308,9 @@ class MyDataSubmitter implements EInvoiceSubmitter
         try {
             $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
         } catch (MyDataRejected $e) {
-            // A genuine AADE rejection: it processed the document and refused it,
-            // so no MARK exists. Disarm — otherwise an operator who fixes the data
-            // would be refused by the grace window for something already known not
-            // to have been filed.
-            $this->disarmInDoubt($invoice);
+            // Nothing to do here: persistResponse already disarmed if AADE genuinely
+            // answered and refused, and deliberately did NOT when the response was
+            // empty/unparseable (which says nothing about whether a MARK exists).
             throw $e;
         } catch (Throwable $e) {
             // The POST SUCCEEDED and AADE has the document; only recording it
@@ -760,7 +762,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             'uid' => $adopted->uid,
         ]);
 
-        return $this->adoptMark($invoice, $adopted->mark, $adopted->uid);
+        return $this->adoptMark($invoice, $adopted->mark, $adopted->uid, $adopted->qrCodeUrl);
     }
 
     /**
@@ -770,7 +772,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
      * the (invoice, mark) INSERT row (mirrors persistResponse). Best-effort WHMCS
      * write-back afterwards, same as the normal filing path.
      */
-    private function adoptMark(Invoice $invoice, string $mark, ?string $uid): MyDataMark
+    private function adoptMark(Invoice $invoice, string $mark, ?string $uid, ?string $qrCodeUrl = null): MyDataMark
     {
         $existing = MyDataMark::query()
             ->where('invoice_id', $invoice->id)
@@ -778,7 +780,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             ->where('mydata_action', 'INSERT')
             ->first();
 
-        $audit = DB::transaction(function () use ($invoice, $mark, $uid, $existing) {
+        $audit = DB::transaction(function () use ($invoice, $mark, $uid, $qrCodeUrl, $existing) {
             $row = $existing ?? MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
@@ -793,6 +795,10 @@ class MyDataSubmitter implements EInvoiceSubmitter
             $invoice->forceFill(array_merge($invoice->frozenPartyColumns(), [
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
+                // AADE's own QR url, carried through from RequestTransmittedDocs.
+                // Without it a self-healed invoice prints a PDF with no QR — the
+                // adoption would be silently second-class (MYD-021 review).
+                'mydata_url' => $qrCodeUrl ?: $invoice->mydata_url,
                 'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
                 'mydata_mark' => $mark,
                 'mydata_pending_since' => null,
@@ -895,6 +901,16 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
         if ($firstResponse === null || ! $firstResponse->isSuccessful()) {
             $errors = $firstResponse ? $this->describeResponseErrors($firstResponse) : 'no response';
+            // MYD-021: disarm ONLY on a real rejection — AADE answered, processed the
+            // document and refused it, so no MARK exists and an operator who fixes
+            // the data must be able to retry at once. A NULL $firstResponse is a
+            // different animal: an empty or unparseable ResponseDoc tells us nothing
+            // about whether a MARK was created, so it stays ARMED and the next
+            // attempt reconciles. Decided HERE rather than in the MyDataRejected
+            // catch below, which cannot tell the two apart.
+            if ($firstResponse !== null) {
+                $this->disarmInDoubt($invoice);
+            }
             // Persist a forensic record + carry the XML on the throw, so a
             // rejection isn't a dead-end — the round-trip is otherwise lost
             // (no INSERT row is written on failure). Visible in the invoice's

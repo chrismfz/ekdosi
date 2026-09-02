@@ -10,6 +10,8 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
+use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Delivery\DeliveryLifecycleService;
 use App\Services\Delivery\DeliveryNoteSubmitter;
@@ -341,6 +343,75 @@ class TenantCoherenceTest extends TestCase
         }
 
         $this->assertSame(0, $mock->count(), 'a document with no payment method must still reach the wire');
+    }
+
+    /** A product owned by $owner, its category owned by $categoryOwner (default: the same). */
+    private function productFor(Company $owner, ?Company $categoryOwner = null): Product
+    {
+        $categoryOwner ??= $owner;
+
+        $category = ProductCategory::create([
+            'company_id' => $categoryOwner->id, 'description_short' => 'Κατηγορία',
+        ]);
+        $vat = VatCategory::where('company_id', $owner->id)->first()
+            ?? VatCategory::create([
+                'company_id' => $owner->id, 'description' => '24%', 'rate' => 24, 'is_default' => true,
+            ]);
+
+        return Product::create([
+            'company_id' => $owner->id, 'description_short' => 'Είδος',
+            'product_category_id' => $category->id, 'vat_category_id' => $vat->id,
+        ]);
+    }
+
+    public function test_a_line_product_from_another_tenant_is_refused(): void
+    {
+        // AadeInvoiceDocument resolves the per-line E3 income classification through
+        // lines.product.productCategory, so a foreign product files another tenant's
+        // classification under this tenant's ΑΦΜ.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<ok/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+
+        $invoice->lines()->update(['product_id' => $this->productFor($this->other)->id]);
+
+        $this->assertRefusedBeforeAnything(
+            fn () => (new MyDataSubmitter($this->issuer, $mock))->submit($invoice->fresh('lines')),
+            $mock,
+        );
+    }
+
+    public function test_a_product_category_from_another_tenant_is_refused(): void
+    {
+        // One level deeper: our own product, but pointed at a foreign category —
+        // which is the half that actually drives the classification override.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<ok/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+
+        $product = $this->productFor($this->issuer, categoryOwner: $this->other);
+        $invoice->lines()->update(['product_id' => $product->id]);
+
+        $this->assertRefusedBeforeAnything(
+            fn () => (new MyDataSubmitter($this->issuer, $mock))->submit($invoice->fresh('lines')),
+            $mock,
+        );
+    }
+
+    public function test_our_own_product_and_category_are_not_refused(): void
+    {
+        // The other direction, and the reason the check is one query per level
+        // rather than a lazy load per line.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<nonsense/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+
+        $invoice->lines()->update(['product_id' => $this->productFor($this->issuer)->id]);
+
+        try {
+            (new MyDataSubmitter($this->issuer, $mock))->submit($invoice->fresh('lines'));
+        } catch (RuntimeException $e) {
+            $this->assertStringNotContainsString('Tenant mismatch', $e->getMessage());
+        }
+
+        $this->assertSame(0, $mock->count());
     }
 
     // ───────────────────────── the other direction ────────────────────────

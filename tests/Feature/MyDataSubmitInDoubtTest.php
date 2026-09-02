@@ -88,6 +88,7 @@ class MyDataSubmitInDoubtTest extends TestCase
             <invoice>
               <uid>E230F0CFCC82356FE38C9F085A86A6E7F421EAD1</uid>
               <mark>{$mark}</mark>
+              <qrCodeUrl>https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted</qrCodeUrl>
               <issuer>
                 <vatNumber>800561849</vatNumber>
                 <country>GR</country>
@@ -160,6 +161,13 @@ class MyDataSubmitInDoubtTest extends TestCase
         $this->assertSame('VALID', $fresh->mydata_state);
         $this->assertSame($adoptedMark, (string) $fresh->mydata_mark);
         $this->assertNull($fresh->mydata_pending_since, 'in-doubt flag must be cleared after adoption');
+        // A self-healed invoice must print the same PDF a normally-filed one does —
+        // AADE's QR url is in the RequestTransmittedDocs response, so drop it and the
+        // adoption is silently second-class.
+        $this->assertSame(
+            'https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted',
+            $fresh->mydata_url,
+        );
         $this->assertSame('active', $fresh->local_status);
 
         // Exactly ONE INSERT row for this invoice+mark (idempotent adopt).

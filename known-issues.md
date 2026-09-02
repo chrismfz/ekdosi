@@ -1887,8 +1887,24 @@ to NULL — and a null relation is legitimately allowed. It fired from CLI and q
 silent exactly where an operator sits, the opposite of the context-independence the class promises.
 Relations are now resolved `withoutGlobalScope`.
 
-Tests: `DeliveryNoteExactlyOnceTest` (14) + three added to `MyDataSubmitInDoubtTest`, and
-`TenantCoherenceTest` (14). Both
+**Review round 2** found six more, none P0. The two that mattered: a NULL `$first`/`$firstResponse`
+(an empty or unparseable ResponseDoc) was being disarmed as if it were a rejection — but «no
+response» says nothing about whether a MARK exists, so it now stays ARMED, decided at the throw
+site which knows the difference rather than in the catch which does not (both services). And the
+round-1 «cannot verify → refuse» fix was UNCONDITIONAL, so with nothing in the app able to clear
+`mydata_pending_since`, a provider tenant with no myDATA read credentials ended up with a
+permanently unsubmittable legal document — a worse operational failure than the risk avoided. It
+now refuses only inside the grace window and files with a loud warning past it; provider-side
+verification (InvoSign exposes an invoice_status endpoint) is PROV-001. Also: the invoice adopt
+path never stamped `mydata_url` although this change had just added `qrCodeUrl` to `AadeDocSummary`
+for exactly that reason (a self-healed invoice printed a QR-less PDF); the in-doubt gate matched
+only `mydata_state === null` while `performSubmit` treats `''` as equally never-filed, so an armed
+document carrying `''` skipped adopt-or-file entirely; and `TenantCoherence` did not check
+`lines.product.productCategory`, which drives the per-line E3 classification — now checked in ONE
+query per level, not one per line.
+
+Tests: `DeliveryNoteExactlyOnceTest` (16), `TenantCoherenceTest` (17), + four added to
+`MyDataSubmitInDoubtTest`. Both
 arming tests read `mydata_pending_since` **through the query builder from inside the outbound
 call** — the way a different process would see it after a kill — and both fail when the arming
 line is removed.

@@ -5,6 +5,8 @@ namespace App\Support\Tenancy;
 use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
+use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\Scopes\CompanyScope;
 use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
@@ -37,12 +39,13 @@ final class TenantCoherence
      * Assert that $invoice — and every relation whose values reach the payload —
      * belongs to $tenant.
      *
-     * The relation list is exactly what `AadeInvoiceDocument` and the provider
-     * documents read: the counterpart (customer), the invoice type (myDATA type,
-     * series, income classification), the payment method (myDATA payment type) and
-     * the lines (net/VAT/classification). A relation that is simply absent is not a
-     * coherence failure — the payload builders have their own required-field
-     * errors, and duplicating them here would just produce a worse message.
+     * The relation list is what `AadeInvoiceDocument` and the provider documents
+     * read: the counterpart (customer), the invoice type (myDATA type, series,
+     * income classification), the payment method (myDATA payment type), the lines
+     * (net/VAT) and — via `lines.product.productCategory` — the per-line E3
+     * classification override. A relation that is simply absent is not a coherence
+     * failure: the payload builders have their own required-field errors, and
+     * duplicating them here would just produce a worse message.
      */
     public static function assertInvoice(Company $tenant, Invoice $invoice): void
     {
@@ -62,7 +65,52 @@ final class TenantCoherence
             foreach ($invoice->lines as $line) {
                 self::assertOwned($tenant, $line, 'invoice line', $label);
             }
+
+            self::assertLineProducts($tenant, $invoice->lines->pluck('product_id')->all(), $label);
         }
+    }
+
+    /**
+     * The products referenced by a document's lines, and their categories.
+     *
+     * `AadeInvoiceDocument` resolves the per-line E3 income classification through
+     * `lines.product.productCategory`, so a foreign product silently files another
+     * tenant's classification under this tenant's ΑΦΜ. ONE query for all distinct
+     * product ids (and one for their categories), not one per line — the check must
+     * not turn a submit into N round-trips.
+     *
+     * @param  array<int, int|string|null>  $productIds
+     */
+    private static function assertLineProducts(Company $tenant, array $productIds, string $documentLabel): void
+    {
+        $ids = array_values(array_unique(array_filter($productIds)));
+
+        if ($ids === []) {
+            return;
+        }
+
+        $products = Product::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->whereIn('id', $ids)
+            ->get(['id', 'company_id', 'product_category_id']);
+
+        foreach ($products as $product) {
+            self::assertOwned($tenant, $product, 'line product', $documentLabel);
+        }
+
+        $categoryIds = array_values(array_unique(array_filter($products->pluck('product_category_id')->all())));
+
+        if ($categoryIds === []) {
+            return;
+        }
+
+        ProductCategory::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->whereIn('id', $categoryIds)
+            ->get(['id', 'company_id'])
+            ->each(fn (ProductCategory $category) => self::assertOwned(
+                $tenant, $category, 'product category', $documentLabel,
+            ));
     }
 
     /**

@@ -347,23 +347,78 @@ class DeliveryNoteExactlyOnceTest extends TestCase
         $this->assertNotNull($this->note->fresh()->mydata_url, 'the adopted note needs AADE\'s QR url');
     }
 
-    public function test_a_tenant_that_cannot_read_mydata_is_refused_not_re_posted(): void
+    public function test_an_empty_response_doc_is_ambiguous_not_a_rejection(): void
     {
-        // "We never asked" is not "AADE has nothing". Past the grace window this
-        // used to fall through to a blind re-POST.
-        // The realistic shape: a PROVIDER tenant that files through ΥΠΑΗΕΣ and holds
-        // no myDATA read credentials of its own, so mydataReadMode() is null.
+        // A well-formed ResponseDoc with NO <response> inside is not AADE saying
+        // "refused" — it is AADE saying nothing. A MARK may exist, so this must stay
+        // armed. Disarming here treats silence as proof and licences a blind retry.
+        $emptyDoc = '<?xml version="1.0" encoding="utf-8"?>'
+            .'<ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"></ResponseDoc>';
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $emptyDoc)]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+            $this->fail('Expected the empty response to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNotNull(
+            $this->note->fresh()->mydata_pending_since,
+            'no response is not a rejection — it must stay armed',
+        );
+    }
+
+    public function test_a_read_less_tenant_is_not_stranded_forever(): void
+    {
+        // The first cut of the "cannot verify → refuse" fix refused UNCONDITIONALLY,
+        // and nothing in the app clears mydata_pending_since — so a provider tenant
+        // ended up with a permanently unsubmittable legal document. That is a worse
+        // operational failure than the risk being avoided. Inside the window: refuse.
+        // Past it: allow, loudly.
         $this->tenant->forceFill([
             'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'off',
             'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
         ])->save();
-        $this->assertFalse($this->tenant->fresh()->canReadMyData());
+        $tenant = $this->tenant->fresh();
+        $this->assertFalse($tenant->canReadMyData());
+
+        // Inside the grace window → refused.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+            $this->fail('Expected a refusal inside the grace window.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('κρίσιμο παράθυρο', $e->getMessage());
+        }
+
+        // Past it → the note is submittable again (it reaches the provider branch,
+        // which is what «no longer stranded» means here).
         $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(30)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+        } catch (\Throwable $e) {
+            $this->assertStringNotContainsString('κρίσιμο παράθυρο', $e->getMessage());
+            $this->assertStringNotContainsString('Δεν ξαναϋποβάλλουμε', $e->getMessage());
+        }
+    }
 
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('Δεν ξαναϋποβάλλουμε τυφλά');
+    public function test_a_blank_state_still_reaches_the_in_doubt_gate(): void
+    {
+        // performSubmit treats '' as equally never-filed, so the gate must too —
+        // otherwise an armed note carrying '' skips adopt-or-file and blind-retries.
+        DB::table('delivery_notes')->where('id', $this->note->id)->update([
+            'mydata_state' => '', 'mydata_pending_since' => now()->subMinutes(1),
+        ]);
 
-        (new DeliveryNoteSubmitter($this->tenant->fresh(), new MockHandler([])))->submit($this->note->fresh('lines'));
+        $adopted = '400001965177931';
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', $adopted)]);
+
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame($adopted, (string) $mark->mark);
+        $this->assertSame(0, $mock->count(), 'it must adopt, not re-POST');
     }
 
     public function test_a_rejection_clears_the_marker_so_a_fix_can_be_retried(): void

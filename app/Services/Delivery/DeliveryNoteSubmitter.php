@@ -329,7 +329,10 @@ class DeliveryNoteSubmitter
             // committed state to refuse a second filing.
             $note->refresh();
 
-            if ($note->mydata_pending_since !== null && $note->mydata_state === null) {
+            // blank(), not `=== null`: performSubmit explicitly treats '' as equally
+            // never-filed, and an armed δελτίο carrying '' would otherwise skip
+            // adopt-or-file entirely and blind-retry.
+            if ($note->mydata_pending_since !== null && blank($note->mydata_state)) {
                 $adopted = $this->adoptExistingMarkIfPresent($note);
                 if ($adopted !== null) {
                     return $adopted;
@@ -574,16 +577,41 @@ class DeliveryNoteSubmitter
         }
 
         if (! $this->tenant->canReadMyData()) {
-            // NOT the same as "AADE has nothing": we never asked. Returning null
-            // here would let the caller treat an unverifiable note as verified-empty
-            // and re-POST once the grace window passed. Refuse instead — the same
-            // answer as an unreachable AADE below, for the same reason.
-            throw new RuntimeException(
-                "Δελτίο {$note->invcode}: μια προηγούμενη υποβολή διακόπηκε, αλλά η εταιρεία δεν "
-                .'έχει διαπιστευτήρια ανάγνωσης myDATA για να επιβεβαιωθεί αν είχε καταχωρηθεί. '
-                .'Δεν ξαναϋποβάλλουμε τυφλά — έλεγξε την κατάσταση στο myDATA και, αν δεν υπάρχει '
-                .'ΜΑΡΚ, καθάρισε τη σήμανση «σε εξέλιξη».'
-            );
+            // NOT the same as "AADE has nothing": we never asked, so we must not let
+            // the caller treat this as verified-empty INSIDE the dangerous window.
+            //
+            // But refusing forever is worse than the disease, and the first cut of
+            // this fix did exactly that: a provider tenant with no myDATA read
+            // credentials could never submit the note again, because nothing in the
+            // app clears mydata_pending_since. A permanently unsubmittable legal
+            // document is a bigger operational failure than the risk being avoided.
+            //
+            // So: refuse while the window is hot — that is when a MARK created by the
+            // earlier attempt is most likely to exist and least likely to be visible
+            // anywhere — and past it, allow the filing with a loud warning. The
+            // operator has had the grace window to check the provider's portal.
+            // Provider-side verification (InvoSign exposes an invoice_status
+            // endpoint) is PROV-001; once that lands this branch becomes a real
+            // check instead of a time-based one.
+            $graceMinutes = (int) config('ekdosi.einvoice.in_doubt_grace_minutes', 10);
+
+            if ($note->mydata_pending_since?->gt(now()->subMinutes($graceMinutes))) {
+                throw new RuntimeException(
+                    "Δελτίο {$note->invcode}: μια προηγούμενη υποβολή διακόπηκε και η εταιρεία δεν "
+                    .'έχει διαπιστευτήρια ανάγνωσης myDATA για να επιβεβαιωθεί αν καταχωρήθηκε. '
+                    ."Περίμενε ~{$graceMinutes} λεπτά και έλεγξε στο μεταξύ την πύλη του παρόχου· "
+                    .'ΔΕΝ ξαναϋποβάλλουμε τυφλά μέσα στο κρίσιμο παράθυρο.'
+                );
+            }
+
+            Log::warning('Delivery in-doubt: filing again WITHOUT verification (tenant cannot read myDATA)', [
+                'company_id' => $this->tenant->getKey(),
+                'delivery_note_id' => $note->id,
+                'invcode' => $note->invcode,
+                'pending_since' => $note->mydata_pending_since?->toIso8601String(),
+            ]);
+
+            return null;
         }
 
         $issued = Carbon::parse($note->issued_at);
@@ -1094,10 +1122,15 @@ class DeliveryNoteSubmitter
             // Persist a forensic REJECTED row so the rejection is visible in the
             // δελτίο's «Ιστορικό myDATA» UI (not only in the CLI report), then
             // carry the XML on the throw. Mirrors MyDataSubmitter::recordRejection.
-            // MYD-021: AADE processed the δελτίο and refused it → no MARK exists.
-            // Disarm, or an operator who fixes the data would be blocked by the
-            // grace window over something already known not to have been filed.
-            $this->disarmInDoubt($note);
+            //
+            // MYD-021: disarm ONLY on a real rejection — AADE answered, processed the
+            // δελτίο and refused it, so no MARK exists and an operator who fixes the
+            // data must be able to retry at once. A NULL $first is a different animal:
+            // an empty or unparseable ResponseDoc tells us nothing about whether a
+            // MARK was created, so it stays ARMED and the next attempt reconciles.
+            if ($first !== null) {
+                $this->disarmInDoubt($note);
+            }
             $this->recordRejection($note, $xml, $responseXml);
             throw new DeliveryNoteRejected(
                 "myDATA rejected the delivery note: {$errors}",
