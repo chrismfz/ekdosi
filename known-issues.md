@@ -2214,6 +2214,23 @@ download: tens of thousands of documents must not sit in an HTTP request. Memory
 PDF (temp file + `ZipArchive::addFile`, never `addFromString`), and one unrenderable document is
 listed in `errors.txt` rather than costing the operator the other 9,999.
 
+**Review round 1 found seven, all but two in the brand-new `DocumentPdfArchive`.** The worst was
+the one the class exists to prevent: `chunkById` pages by `id > lastId`, so the `orderBy('issued_at')`
+layered on top let a page end on a low id and the next window jump straight past everything between
+— measured at **119 of 120 documents**, absent from the zip AND from `errors.txt`. Ordering is now
+by id and chronology is restored when the index is written. Also: the eager loads kept
+`CompanyScope`, so in the panel path every PDF would have rendered with no lines, no customer and no
+type — a zip of blank documents, silently; unchecked `file_put_contents`/`close()` reported success
+over a truncated archive on a full disk; `index.csv` dropped the formula-injection guard that two
+other exporters in this repo apply, to names that are operator- and WHMCS-sourced and will be opened
+in Excel by someone outside the organisation; and `LegalEvidence` counted `expense_marks` written by
+`SyncExpenseStateFromAade` — the **supplier's** MARK, not ours — so a pull-only tenant was told it
+had filed expense classifications and the wipe refused over data it never submitted.
+
+Writing the paging test taught its own lesson: the first version backdated a row, which sorts FIRST
+and is harmless, so it passed with and without the fix. It reproduces only when the row with the
+LOWEST id sorts LAST by date.
+
 **Deliberately NOT done, recorded in `docs/BACKLOG.md`:** DB-level `restrictOnDelete` on the mark
 tables and tenant archival/soft-delete. A DRY_RUN mark would make an ordinary draft undeletable, so
 restrict needs a more precise rule than the FK can express, and archival is a feature rather than a

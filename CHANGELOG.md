@@ -79,14 +79,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `Lead`/`LeadActivity` models (TracksActivity, notes/tags/attachments), `LeadPolicy`, operator
   permissions. Σχέδιο + gates: `docs/leads-mini-crm.md` (L1 μετατροπή σε πελάτη, L2 απολογισμός).
 
-### Added
 - **Εξαγωγή παραστατικών σε PDF** — `php artisan company:export-pdfs --tenant=SLUG`: κάθε τιμολόγιο
   και δελτίο αποστολής σε PDF, σε ένα zip με `index.csv` (με BOM, ανοίγει σωστά σε Excel) και
   README. Το παραδοτέο για εταιρεία που **φεύγει** και δεν θα έχει πια πρόσβαση — το bundle
   εξαγωγής έχει νόημα μόνο για άλλο ekdosi. Εντολή, όχι κουμπί: δεκάδες χιλιάδες PDF δεν χωράνε σε
   HTTP request. Η μνήμη μένει σε **ένα** PDF (προσωρινό αρχείο + `ZipArchive::addFile`), και ένα
   έγγραφο που δεν παράγεται γράφεται στο `errors.txt` αντί να ρίξει όλη την εξαγωγή.
-
 ### Fixed
 - **Η διαγραφή εταιρείας/δεδομένων δεν γίνεται πια στα τυφλά (MYD-025)** — το `--force` gate του
   wiper μετρούσε **μόνο** τιμολόγια με `mydata_state='VALID'`: ένα παραστατικό με **πραγματικό ΜΑΡΚ**

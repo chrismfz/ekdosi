@@ -196,6 +196,34 @@ class LegalEvidenceTest extends TestCase
         $this->assertTrue($counted);
     }
 
+    public function test_a_suppliers_mark_is_not_our_filing(): void
+    {
+        // expense_marks mostly hold the SUPPLIER's MARK, pulled down by
+        // SyncExpenseStateFromAade (action STATE_SYNC). Counting those told a
+        // pull-only tenant it had «filed expense classifications» and made the wipe
+        // refuse over data it never submitted.
+        $c = $this->company();
+
+        DB::table('expense_marks')->insert([
+            'company_id' => $c->id, 'mark' => '400000000000009',
+            'mydata_action' => 'STATE_SYNC',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->assertFalse(LegalEvidence::for($c)->exists(), 'their filing, not ours');
+
+        // Our OWN classification submission is evidence.
+        DB::table('expense_marks')->insert([
+            'company_id' => $c->id, 'mark' => '400000000000010',
+            'mydata_action' => 'SendExpensesClassification',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $evidence = LegalEvidence::for($c);
+        $this->assertTrue($evidence->exists());
+        $this->assertSame(1, $evidence->expenseMarks);
+    }
+
     // ─────────────────────────── the wiper gate ───────────────────────────
 
     public function test_the_wiper_refuses_a_cancelled_only_tenant_without_force(): void

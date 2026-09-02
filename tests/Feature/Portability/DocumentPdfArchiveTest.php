@@ -175,6 +175,58 @@ class DocumentPdfArchiveTest extends TestCase
         $this->assertSame(1, $result['invoices']);
     }
 
+    public function test_an_out_of_order_issue_date_does_not_shift_the_paging_window(): void
+    {
+        // chunkById pages by `id > lastId`. An orderBy('issued_at') on top of it
+        // means the LAST ROW OF A PAGE can have a low id, and everything between
+        // that id and the true high-water mark is then skipped — absent from the
+        // zip AND from errors.txt, the one outcome this class exists to prevent.
+        //
+        // The shape that actually reproduces it: the row with the LOWEST id sorts
+        // LAST by date, so page 1 ends on a low id and page 2's `id >` window
+        // jumps straight past it. (Backdating a row instead sorts it FIRST, which
+        // is harmless — a test built that way passes with or without the fix.)
+        $c = $this->company();
+
+        $first = $this->invoice($c, 'ΤΠΥ1', 1);
+        for ($i = 2; $i <= 120; $i++) {
+            $this->invoice($c, 'ΤΠΥ'.$i, $i);
+        }
+        $first->forceFill(['issued_at' => now()->addYear()])->save();
+
+        $result = app(DocumentPdfArchive::class)->build($c, $this->out);
+
+        $this->assertSame(120, $result['invoices'], 'every document must be in the archive');
+        $this->assertSame(0, $result['failed'], 'and a dropped document is not even an error');
+
+        $entries = $this->entries($this->out);
+        $this->assertContains('παραστατικά/'.now()->addYear()->format('Y').'/ΤΠΥ1.pdf', $entries);
+    }
+
+    public function test_the_index_neutralises_a_formula_in_a_customer_name(): void
+    {
+        // Customer names are operator- and WHMCS-sourced. A cell starting with =
+        // is executed by Excel on open, and this archive is built to be opened in
+        // Excel by someone outside the organisation.
+        $c = $this->company();
+        Customer::where('company_id', $c->id)->delete();
+        Customer::create([
+            'company_id' => $c->id, 'afm' => '997073525',
+            'name' => '=HYPERLINK("http://evil","κλικ")',
+        ]);
+        $this->invoice($c, 'ΤΠΥ1', 1);
+
+        app(DocumentPdfArchive::class)->build($c, $this->out);
+
+        $zip = new ZipArchive;
+        $zip->open($this->out);
+        $csv = (string) $zip->getFromName('index.csv');
+        $zip->close();
+
+        $this->assertStringContainsString("'=HYPERLINK", $csv, 'the formula must be neutralised');
+        $this->assertStringNotContainsString(',=HYPERLINK', $csv);
+    }
+
     public function test_a_company_with_nothing_still_produces_a_readable_archive(): void
     {
         $result = app(DocumentPdfArchive::class)->build($this->company(), $this->out);

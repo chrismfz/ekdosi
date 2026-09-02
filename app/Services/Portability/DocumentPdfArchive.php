@@ -41,7 +41,11 @@ use ZipArchive;
  */
 class DocumentPdfArchive
 {
-    /** Render + zip in batches so the temp directory never holds everything. */
+    /**
+     * Documents pulled per query. NOT a bound on the temp directory: ZipArchive
+     * reads the files at close(), so every rendered PDF must still exist then —
+     * peak DISK is the whole archive, peak MEMORY is one PDF.
+     */
     private const CHUNK = 100;
 
     public function __construct(
@@ -85,8 +89,16 @@ class DocumentPdfArchive
                 Invoice::query()
                     ->withoutGlobalScope(CompanyScope::class)
                     ->where('company_id', $company->getKey())
-                    ->with(['customer', 'lines', 'invoiceType'])
-                    ->orderBy('issued_at')
+                    // The EAGER LOADS need the same escape: dropping the scope on
+                    // the outer query only means that inside a panel action for
+                    // another tenant every document renders with no lines, no
+                    // customer and no type — a zip full of blank PDFs, silently.
+                    ->with(self::unscoped(['customer', 'lines', 'invoiceType']))
+                    // chunkById pages by ID, so it must be ORDERED by id: an
+                    // orderBy('issued_at') on top made a single backdated row shift
+                    // the window and drop documents from the archive without so much
+                    // as an errors.txt entry. Chronology is restored when the index
+                    // is written, and the per-year folders carry it in the zip.
                     ->orderBy('id'),
                 fn (Invoice $doc): string => $this->invoices->render($doc),
             );
@@ -97,8 +109,7 @@ class DocumentPdfArchive
                 DeliveryNote::query()
                     ->withoutGlobalScope(CompanyScope::class)
                     ->where('company_id', $company->getKey())
-                    ->with(['customer', 'lines', 'deliveryType'])
-                    ->orderBy('issued_at')
+                    ->with(self::unscoped(['customer', 'lines', 'deliveryType']))
                     ->orderBy('id'),
                 fn (DeliveryNote $doc): string => $this->deliveryNotes->render($doc),
             );
@@ -110,7 +121,14 @@ class DocumentPdfArchive
                 $zip->addFromString('errors.txt', implode("\n", $errors)."\n");
             }
 
-            $zip->close();
+            // close() is where ZipArchive actually reads every temp file and writes
+            // the archive, so it is where a full disk surfaces. Unchecked, it left a
+            // truncated zip the operator would have handed over as complete.
+            if ($zip->close() !== true) {
+                throw new RuntimeException(
+                    "Αδυναμία ολοκλήρωσης του αρχείου {$path} — πιθανώς δεν υπάρχει χώρος στον δίσκο."
+                );
+            }
         } catch (Throwable $e) {
             // A ZipArchive left open holds a partial file that looks valid; close
             // it so the failure is visible as a missing/short archive rather than
@@ -127,6 +145,27 @@ class DocumentPdfArchive
             'bytes' => is_file($path) ? (filesize($path) ?: 0) : 0,
             'path' => $path,
         ];
+    }
+
+    /**
+     * Eager loads that also drop CompanyScope.
+     *
+     * `with(['lines'])` builds its own query, which the scope filters by the
+     * AMBIENT tenant — null on the CLI (harmless) but the WRONG tenant in a
+     * super_admin panel action, where it silently returns nothing.
+     *
+     * @param  array<int, string>  $relations
+     * @return array<string, callable>
+     */
+    private static function unscoped(array $relations): array
+    {
+        $out = [];
+
+        foreach ($relations as $relation) {
+            $out[$relation] = fn ($query) => $query->withoutGlobalScope(CompanyScope::class);
+        }
+
+        return $out;
     }
 
     /**
@@ -172,7 +211,18 @@ class DocumentPdfArchive
 
                 $year = $document->issued_at?->format('Y') ?? 'χωρίς-ημερομηνία';
                 $file = $tmpDir.'/'.$bucket.'-'.$document->getKey().'.pdf';
-                file_put_contents($file, $bytes);
+
+                // Checked: a full disk makes file_put_contents return false, and an
+                // unchecked write reported «0 failed» over an archive that was
+                // quietly missing documents — the exact outcome this class exists
+                // to prevent. Failing the whole run is right here: a disk that
+                // cannot hold PDF 400 will not hold PDF 401 either.
+                if (@file_put_contents($file, $bytes) === false) {
+                    throw new RuntimeException(
+                        "Αδυναμία εγγραφής προσωρινού PDF για «{$label}» — έλεγξε τον χώρο στον δίσκο."
+                    );
+                }
+
                 $tmpFiles[] = $file;
 
                 // addFile, not addFromString: ZipArchive reads the path at close(),
@@ -200,15 +250,21 @@ class DocumentPdfArchive
     /** @param array<int, array<int, string>> $index */
     private function indexCsv(array $index): string
     {
+        // Chronological: chunkById had to page by id, so order is restored here.
+        usort($index, static fn (array $a, array $b): int => [$a[2], $a[1]] <=> [$b[2], $b[1]]);
+
         $out = fopen('php://temp', 'r+');
 
         // BOM so Excel opens the Greek columns correctly on a double-click — the
         // whole point of this archive is that it works without this application.
         fwrite($out, "\xEF\xBB\xBF");
-        fputcsv($out, ['Είδος', 'Κωδικός', 'Ημερομηνία', 'Πελάτης', 'Σύνολο', 'ΜΑΡΚ', 'Κατάσταση myDATA']);
+
+        // Explicit args, as CsvEntityExporter does: silences the PHP 8.4 fputcsv
+        // deprecation and drops the legacy backslash escaping.
+        fputcsv($out, ['Είδος', 'Κωδικός', 'Ημερομηνία', 'Πελάτης', 'Σύνολο', 'ΜΑΡΚ', 'Κατάσταση myDATA'], ',', '"', '');
 
         foreach ($index as $row) {
-            fputcsv($out, $row);
+            fputcsv($out, array_map(self::neutraliseFormula(...), $row), ',', '"', '');
         }
 
         rewind($out);
@@ -236,6 +292,21 @@ class DocumentPdfArchive
             'Τα ΜΑΡΚ είναι οι αριθμοί καταχώρησης στην ΑΑΔΕ. Τα παραστατικά παραμένουν',
             'καταχωρημένα εκεί ανεξάρτητα από αυτό το αρχείο.',
         ]);
+    }
+
+    /**
+     * CSV formula-injection guard — the same rule as CsvEntityExporter and
+     * LedgerBookExporter. A cell starting with = + - @ TAB CR is executed by
+     * Excel/LibreOffice, and customer names here are untrusted (operator- and
+     * WHMCS-sourced). Numbers are left alone so totals stay analysable.
+     */
+    private static function neutraliseFormula(string $s): string
+    {
+        if ($s === '' || is_numeric($s)) {
+            return $s;
+        }
+
+        return in_array($s[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'".$s : $s;
     }
 
     /** Keep the Greek, drop what a filesystem or zip reader would choke on. */

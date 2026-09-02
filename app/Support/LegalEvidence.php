@@ -12,7 +12,9 @@ use Illuminate\Support\Facades\Schema;
  *
  * A MARK is the evidence: AADE issued it, AADE still has it, and it is what ties
  * a local row to a remote tax record. It survives the document being cancelled —
- * a cancellation is itself a filing.
+ * a cancellation is itself a filing. An expense mark only counts when it is OUR
+ * classification submission; a MARK pulled down from a supplier's invoice is
+ * their filing, not ours.
  *
  * This exists because destroying a tenant's data was SILENT: the company-delete
  * confirmation said nothing about what it was about to erase, and the wiper's
@@ -143,6 +145,16 @@ final class LegalEvidence
             ->where('company_id', $companyId)
             ->whereNotNull('mark')
             ->where('mark', '!=', '');
+
+        if ($table === 'expense_marks') {
+            // An expense mark is usually the SUPPLIER's MARK, pulled down by
+            // SyncExpenseStateFromAade with action STATE_SYNC. That is somebody
+            // else's filing recorded locally, not ours — counting it told a
+            // pull-only tenant it had «filed expense classifications» and made the
+            // wipe refuse without --force over data it never submitted. Only our
+            // own classification submissions are our evidence.
+            $query->where('mydata_action', '!=', 'STATE_SYNC');
+        }
 
         $count = (clone $query)->count();
 
