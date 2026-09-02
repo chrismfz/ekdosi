@@ -319,21 +319,21 @@ Priorities:
 | OPS-003 | P2 | OPEN | Shared hosting | No cPanel/shared-hosting queue recipe or direct completion link |
 | TEST-001 | P2 | OPEN | Tests/CI | No full web installer success-path test; inspected CI was not green |
 | DEP-001 | P2 | WATCH | Dependency | firebed/aade-mydata is current; watch AADE v2.0.2 |
-| UPD-001 | P0 | OPEN | Queue safety | PHP update/rollback does not drain an in-flight worker |
-| UPD-002 | P0 | OPEN | Failure recovery | Partial apply failure lifts maintenance and can serve inconsistent code |
-| UPD-003 | P0 | OPEN | Update integrity | UI queues a mutable tag, not a verified immutable commit SHA |
-| UPD-004 | P0 | OPEN | Rollback readiness | Apply can start without a known current ref or proven rollback path |
-| UPD-005 | P1 | OPEN | Maintenance mode | Live UI and opcache self-hit are blocked while the app is down |
-| UPD-006 | P1 | OPEN | Crash recovery | A killed process can leave a permanent running row and maintenance state |
-| UPD-007 | P1 | OPEN | Health result | Critical health/advisory failures still end as succeeded |
-| UPD-008 | P1 | OPEN | Snapshot retention | PHP update/rollback snapshots are never pruned by --keep=10 |
-| UPD-009 | P1 | OPEN | Preflight | Button does not prove cron, binaries, space, permissions or clean target |
-| UPD-010 | P1 | OPEN | Script strategy | Bash deploy script is invoked through sh |
-| UPD-011 | P1 | OPEN | Tests | Apply, migration, failure and rollback paths are not executed in tests |
-| UPD-012 | P1 | OPEN | Safety controls | “Read-only” update setting also arms one-click apply |
-| UPD-013 | P2 | OPEN | Credentials | Git token remains in the updater process environment after fetch |
-| UPD-014 | P2 | OPEN | Discovery | Future GitHub Releases can mask newer tag-only releases |
-| UPD-015 | P2 | OPEN | Concurrency | Single-flight is UI/scheduler based, not an atomic command-level lock |
+| UPD-001 | P2 | DISARMED | Queue safety | PHP update/rollback does not drain an in-flight worker |
+| UPD-002 | P2 | DISARMED | Failure recovery | Partial apply failure lifts maintenance and can serve inconsistent code |
+| UPD-003 | P2 | DISARMED | Update integrity | UI queues a mutable tag, not a verified immutable commit SHA |
+| UPD-004 | P2 | DISARMED | Rollback readiness | Apply can start without a known current ref or proven rollback path |
+| UPD-005 | P2 | DISARMED | Maintenance mode | Live UI and opcache self-hit are blocked while the app is down |
+| UPD-006 | P2 | DISARMED | Crash recovery | A killed process can leave a permanent running row and maintenance state |
+| UPD-007 | P2 | DISARMED | Health result | Critical health/advisory failures still end as succeeded |
+| UPD-008 | P2 | DISARMED | Snapshot retention | PHP update/rollback snapshots are never pruned by --keep=10 |
+| UPD-009 | P2 | DISARMED | Preflight | Button does not prove cron, binaries, space, permissions or clean target |
+| UPD-010 | P2 | DISARMED | Script strategy | Bash deploy script is invoked through sh |
+| UPD-011 | P2 | DISARMED | Tests | Apply, migration, failure and rollback paths are not executed in tests |
+| UPD-012 | P2 | DISARMED | Safety controls | “Read-only” update setting also arms one-click apply |
+| UPD-013 | P2 | DISARMED | Credentials | Git token remains in the updater process environment after fetch |
+| UPD-014 | P2 | DISARMED | Discovery | Future GitHub Releases can mask newer tag-only releases |
+| UPD-015 | P2 | DISARMED | Concurrency | Single-flight is UI/scheduler based, not an atomic command-level lock |
 
 ## Detailed issues
 
@@ -2998,9 +2998,34 @@ one-click `php` strategy is not yet safe to call production-ready for a
 multi-tenant money application with active workers. Do not rely on the UI apply
 path until UPD-001–UPD-004 are closed.
 
+**Resolution (triage 2026-09-02): the audit's own advice, enforced in code.** The
+verdict above said «do not rely on the UI apply path» — so it is now **OFF by
+default** (`ekdosi.updates.allow_in_app_apply`, env `EKDOSI_UPDATE_IN_APP_APPLY`),
+and the supported upgrade is `deploy/update.sh <tag>` on the host, with
+`deploy/rollback.sh` behind it (`docs/updates-runbook.md`).
+
+The **CHECK stays on** — it is read-only, genuinely useful, and «Υγεία συστήματος»
+now prints the exact command to run (`deploy/update.sh vX.Y.Z`) instead of leaving
+the operator hunting for a button that is deliberately not there.
+
+`UpdateRun::inAppApplyEnabled()` is the ONE definition. It hides the «Εγκατάσταση
+ενημέρωσης» button and the «Επαναφορά» action, but the guarantee is not a hidden
+button: **`ekdosi:self-update` refuses any queued run** — update or rollback,
+scheduler or `--run=` — and FAILS the row with the command to use instead, rather
+than skipping it (the scheduler fires every minute while something is queued, so a
+silent skip would spin forever and never explain itself). Covered by
+`tests/Feature/Updates/InAppApplyDisarmedTest.php`.
+
+**This disarms the machinery, it does not delete it.** UPD-001…015 below stay
+**accurate** — they describe real defects in code that still exists and that a
+deploy can re-arm with one env var. Their PRIORITY drops to P2 because nothing
+reaches them in the shipped configuration: they are a **precondition for turning
+the flag back on**, not a cutover blocker. Fix UPD-001…004 before anyone sets
+`EKDOSI_UPDATE_IN_APP_APPLY=true`.
+
 ### UPD-001 — PHP update and rollback do not quiesce the queue
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -3039,7 +3064,7 @@ locally committed data or an AADE-related state written after the snapshot.
 
 ### UPD-002 — Failure after partial apply fails open
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -3078,7 +3103,7 @@ health-verified.
 
 ### UPD-003 — Update target is not locked to an immutable SHA
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -3108,7 +3133,7 @@ also has no downgrade/ancestry guard equivalent to `deploy/update.sh`.
 
 ### UPD-004 — Apply is offered without proven rollback readiness
 
-**Status:** OPEN · **Priority:** P0
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P0 → P2
 
 **Evidence**
 
@@ -3134,7 +3159,7 @@ can prove that the scheduler will pick it up and a snapshot can be created.
 
 ### UPD-005 — Maintenance mode blocks both live progress and opcache flush
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 **Evidence**
 
@@ -3159,7 +3184,7 @@ can prove that the scheduler will pick it up and a snapshot can be created.
 
 ### UPD-006 — No recovery for a stale running update
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 A power loss, killed cron process or timeout after status becomes `running`
 leaves the row active forever. `hasActive()` then blocks new update and rollback
@@ -3172,7 +3197,7 @@ last completed durable phase.
 
 ### UPD-007 — Critical post-update health can still be green in history
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The PHP strategy runs `ops:health` with `allowFailure=true`; Shield generation,
 role sync and opcache are also advisory. The shell script logs a critical health
@@ -3185,7 +3210,7 @@ heartbeat and required permissions are verified.
 
 ### UPD-008 — In-app snapshots bypass the retention policy
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The PHP strategy creates `update-*.sql.gz` and rollback creates
 `rollback-*.sql.gz`, while [`DbSnapshot::prune()`](app/Console/Commands/DbSnapshot.php)
@@ -3199,7 +3224,7 @@ update/rollback snapshots.
 
 ### UPD-009 — Preflight exists in the design, not in the UI
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The action only checks that update checking is enabled, a repo exists, a newer
 version was cached and no active row exists. Failures such as no cron, dirty tree,
@@ -3212,7 +3237,7 @@ snapshot probe, worker-drain capability and scheduler freshness.
 
 ### UPD-010 — Script strategy invokes a Bash script with `sh`
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 [`SelfUpdate::runScript()`](app/Console/Commands/SelfUpdate.php) executes
 `['sh', deploy/update.sh, target]`, but the script uses Bash-only syntax
@@ -3224,7 +3249,7 @@ a discovered `bash` binary. Add a portability test.
 
 ### UPD-011 — Tests do not execute the updater lifecycle
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 [`SelfUpdateCommandTest`](tests/Feature/Updates/SelfUpdateCommandTest.php) covers
 only “nothing queued” and “row not queued”. No test executes checkout, snapshot,
@@ -3238,7 +3263,7 @@ Composer failure, migration failure, crash recovery and full rollback.
 
 ### UPD-012 — A read-only setting implicitly arms code deployment
 
-**Status:** OPEN · **Priority:** P1
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P1 → P2
 
 The setting/help text in [`GeneralSettings`](app/Filament/Pages/GeneralSettings.php),
 [`SystemHealth`](app/Filament/Pages/SystemHealth.php), the Blade view,
@@ -3253,7 +3278,7 @@ behavior and show the active strategy.
 
 ### UPD-013 — Git token remains in the process environment
 
-**Status:** OPEN · **Priority:** P2
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P2 → P2
 
 The temporary askpass file is removed and output is redacted correctly, but
 `makeAskpass()` calls `putenv('EKDOSI_GIT_TOKEN=...')` and never unsets it.
@@ -3264,7 +3289,7 @@ block. Add a test proving later subprocess environments do not contain it.
 
 ### UPD-014 — A formal GitHub Release can hide newer tag-only releases
 
-**Status:** OPEN · **Priority:** P2
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P2 → P2
 
 The checker uses `releases/latest` whenever any Release exists and only falls
 back to tags on 404. The documented release flow pushes tags but does not create
@@ -3277,7 +3302,7 @@ release process so every production tag always creates a GitHub Release.
 
 ### UPD-015 — Single-flight is not atomic at the command boundary
 
-**Status:** OPEN · **Priority:** P2
+**Status:** DISARMED 2026-09-02 (in-app apply OFF by default; precondition for re-arming) · **Priority:** P2 → P2
 
 The UI performs `hasActive()` followed by `create()` without a transaction or
 unique DB guard. The scheduler has `withoutOverlapping`, but a manual

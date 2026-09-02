@@ -377,6 +377,14 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   deploy (`storage/app/build.json`, ώρα Ελλάδας· fallback live git σε dev). Το SemVer μένει σκόπιμο
   (`ekdosi:release`). Η «Υγεία συστήματος» δείχνει read-only αν υπάρχει νεότερη έκδοση στο GitHub
   («N commits πίσω» + link), cached 6h, graceful offline. `docs/versioning-and-updates.md`.
+- **In-app ενημέρωση από GitHub — ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΗ by default** (`EKDOSI_UPDATE_IN_APP_APPLY=false`,
+  triage 2026-09-02). Ο **έλεγχος** ενημερώσεων μένει ενεργός· η αναβάθμιση γίνεται από τον server με
+  **`deploy/update.sh <tag>`** (και `deploy/rollback.sh` για επαναφορά) — η «Υγεία συστήματος» δείχνει
+  τη νέα έκδοση **και την ακριβή εντολή**. Λόγος: το ίδιο το updater audit είχε βγάλει «μη βασίζεσαι
+  στο UI apply μέχρι να κλείσουν τα UPD-001…004» (δεν αδειάζει τον queue worker που κάνει restart,
+  fails open μετά από μερική εφαρμογή, στοχεύει mutable tag αντί για verified SHA). Ο μηχανισμός
+  παρακάτω **υπάρχει ολόκληρος** και ξανα-ενεργοποιείται με ένα env var — αφού κλείσουν αυτά.
+  Το `ekdosi:self-update` αρνείται κάθε queued run (update ή rollback) όσο είναι disarmed.
 - **In-app ενημέρωση από GitHub** (Phase 2 / Φάση A) — super_admin action «Εγκατάσταση ενημέρωσης»
   στη «Υγεία συστήματος»: εφαρμόζει νέα έκδοση από το panel (snapshot → maintenance → `git checkout` →
   `composer install` *από το lock, ΠΟΤΕ `composer update`* → `migrate` → `optimize` → shield →
@@ -384,8 +392,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   ως ο ίδιος account user, εκτελείται out-of-band από τον cron scheduler (`ekdosi:self-update`), ώστε η
   εφαρμογή να κάνει restart τον εαυτό της με ασφάλεια. `UpdateRun` model + resource «Ενημερώσεις»
   (ζωντανή πρόοδος + στάδιο + έξοδος + ιστορικό)· signed `/internal/opcache-flush`· token-authenticated
-  `git fetch` (ένα PAT για check + pull). **Χωρίς arming flag** — το κουμπί εμφανίζεται όταν υπάρχει
-  διαθέσιμη έκδοση (σε private repo προϋποθέτει έγκυρο token)· super_admin-only + confirmation.
+  `git fetch` (ένα PAT για check + pull). **Arming flag** `EKDOSI_UPDATE_IN_APP_APPLY` (default **OFF**, βλ. παραπάνω)·
+  όταν είναι ON το κουμπί εμφανίζεται εφόσον υπάρχει διαθέσιμη έκδοση (σε private repo προϋποθέτει
+  έγκυρο token)· super_admin-only + confirmation.
   **Φάση Β: «Επαναφορά»** — αναιρεί μια ολοκληρωμένη (ή αποτυχημένη) ενημέρωση με checkout του
   προηγούμενου commit + `db-restore` του pre-update snapshot (destructive· λαμβάνει safety snapshot
   πρώτα). `EKDOSI_UPDATE_STRATEGY` = `php` (φορητό) ή `script` (wrap `deploy/update.sh` σε VPS). Το

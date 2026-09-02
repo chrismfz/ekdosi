@@ -28,7 +28,9 @@ class ViewUpdateRun extends ViewRecord
                 ->label('Επαναφορά')
                 ->icon('heroicon-o-arrow-uturn-left')
                 ->color('danger')
-                ->visible(fn (): bool => $this->record instanceof UpdateRun && $this->record->canRollback())
+                ->visible(fn (): bool => UpdateRun::inAppApplyEnabled()
+                    && $this->record instanceof UpdateRun
+                    && $this->record->canRollback())
                 ->requiresConfirmation()
                 ->modalHeading('Επαναφορά στην προηγούμενη έκδοση')
                 ->modalDescription(fn (): string => sprintf(
@@ -45,9 +47,17 @@ class ViewUpdateRun extends ViewRecord
         /** @var UpdateRun $original */
         $original = $this->record;
 
-        if (! $original->canRollback()) {
+        // Hard guard as well as ->visible(): mountAction does not re-check
+        // visibility (CLAUDE.md). canRollback() already includes the in-app-apply
+        // flag, so a disarmed deploy cannot queue a rollback either — the host
+        // path is deploy/rollback.sh.
+        if (! UpdateRun::inAppApplyEnabled() || ! $original->canRollback()) {
             Notification::make()
                 ->title('Δεν είναι δυνατή η επαναφορά αυτής της ενημέρωσης')
+                ->body(UpdateRun::inAppApplyEnabled()
+                    ? null
+                    : 'Η εφαρμογή ενημερώσεων μέσα από το panel είναι απενεργοποιημένη. '
+                      .'Η επαναφορά γίνεται από τον server με deploy/rollback.sh.')
                 ->warning()
                 ->send();
 

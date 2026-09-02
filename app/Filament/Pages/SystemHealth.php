@@ -167,7 +167,12 @@ class SystemHealth extends Page
                 $available => 'Διαθέσιμη νέα έκδοση: '.$this->update['latest_version'],
                 default => 'Είσαι στην πιο πρόσφατη έκδοση',
             })
-            ->body($ok ? null : ($this->update['error'] ?? null))
+            ->body(match (true) {
+                ! $ok => $this->update['error'] ?? null,
+                $available && ! $this->applyAvailable() => 'Η αναβάθμιση γίνεται από τον server: '
+                    .($this->updateCommand() ?? 'deploy/update.sh <tag>'),
+                default => null,
+            })
             ->{$ok ? ($available ? 'warning' : 'success') : 'danger'}()
             ->send();
     }
@@ -191,15 +196,32 @@ class SystemHealth extends Page
      * available/update-visible/single-flight visibility); re-checked here.
      */
     /**
-     * In-app apply is available whenever the update check is on and a repo is set
-     * — no separate arming flag. For a private repo the «Εγκατάσταση» button only
-     * appears once a valid token makes an update visible (update_available), so
-     * the token doubles as the intent signal.
+     * In-app apply is OFF by default (UPD-001…015, triage 2026-09-02) — the
+     * supported upgrade is `deploy/update.sh <tag>` on the host. The check above
+     * stays on; only the apply is disarmed. See UpdateRun::inAppApplyEnabled().
      */
     private function applyAvailable(): bool
     {
-        return (bool) config('ekdosi.updates.enabled', true)
+        return UpdateRun::inAppApplyEnabled()
+            && (bool) config('ekdosi.updates.enabled', true)
             && filled(config('ekdosi.updates.repo'));
+    }
+
+    /**
+     * The upgrade command an operator should actually run, with the release they
+     * just saw filled in. Shown wherever we report that a new version exists — the
+     * page must not just say «there is an update» and leave them looking for a
+     * button that is deliberately not there.
+     */
+    public function updateCommand(): ?string
+    {
+        $target = $this->update['latest_version'] ?? null;
+
+        if (! is_string($target) || $target === '') {
+            return null;
+        }
+
+        return 'deploy/update.sh v'.ltrim($target, 'vV');
     }
 
     public function installUpdate(): void

@@ -67,6 +67,28 @@ class SelfUpdate extends Command
             return self::SUCCESS;
         }
 
+        // UPD-001…015 (triage 2026-09-02): applying code from inside the app is
+        // OFF by default. FAIL the row rather than skipping it — the scheduler runs
+        // this every minute while anything is queued, so a silent skip would spin
+        // forever and the operator would never learn why nothing happened.
+        if (! UpdateRun::inAppApplyEnabled()) {
+            $message = 'Η εφαρμογή ενημερώσεων μέσα από το panel είναι απενεργοποιημένη '
+                .'(ekdosi.updates.allow_in_app_apply = false). Κάνε την αναβάθμιση από τον '
+                .'server: deploy/update.sh '.($run->to_ref ?: '<tag>');
+
+            $run->update([
+                'status' => UpdateRun::STATUS_FAILED,
+                'finished_at' => now(),
+                'phase' => 'disabled',
+                'error_message' => $message,
+                'output' => trim((string) $run->output."\n".$message)."\n",
+            ]);
+
+            $this->warn($message);
+
+            return self::FAILURE;
+        }
+
         $this->buffer = (string) $run->output;
         $run->update([
             'status' => UpdateRun::STATUS_RUNNING,
