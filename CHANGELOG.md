@@ -19,6 +19,22 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **MCP forensics (5 νέα read-only tools, super_admin, cross-tenant) — OBS-001.** «Γιατί έσκασε ΑΥΤΟ
+  το παραστατικό;» απ' έξω, χωρίς panel. Τα στοιχεία **υπήρχαν ήδη** (byte-exact request/response XML
+  ανά προσπάθεια στο `mydata_marks`, forensic `REJECTED`/`*_FAILED` rows, `mydata_pending_since`,
+  `mydata_state`/`mark` στο activity trail)· αυτό που έλειπε ήταν η **πρόσβαση** — το MCP είχε μόνο
+  υποδομή. Νέα βάση `App\Mcp\Tools\Concerns\ForensicMcpTool` + πέντε tools: **`invoice_filing`** (ένα
+  παραστατικό με invcode/id → τοπική×myDATA κατάσταση + όλο το ιστορικό `mydata_marks`· κωδικοί
+  σφάλματος AADE/InvoSign· `include_xml`/`mark_id` για το raw XML), **`mydata_failures`** (πρόσφατα
+  `REJECTED`/`*_FAILED`), **`stuck_documents`** (in-doubt / οριστικοποιημένα-αδήλωτα / ΔΑ in-doubt),
+  **`mydata_discrepancies`** (ο αριθμός του `app_health` ως γραμμές· cached + τοπικό phase-1·
+  `live=true` = πραγματικό AADE reconcile), **`preflight`** (`MyDataConfigAudit` = `mydata:preflight`
+  απ' έξω). Καμία επιπλέον καταγραφή/activity — μόνο ανάγνωση. **Review round** (PR #405): το
+  `stuck_documents` δείχνει τώρα το ΠΡΑΓΜΑΤΙΚΟ πλήθος (όχι το capped) σε in-doubt/delivery, και το
+  `finalized_unfiled` περιορίζεται σε tenants **gr-mydata/gr-provider** (αλλιώς false alarm σε
+  ee-peppol/none)· το `invoice_filing` βρίσκει και invcode μόνο-με-ψηφία· τα error codes βγαίνουν από
+  το structured `<code>` (bracket fallback μόνο αν λείπει, ώστε ένα incidental `[204]` να μη διαβαστεί
+  ως απόρριψη). Πλήρες: `MCP.md`, `FEATURES.md §16γ`.
 - **MCP/Βοηθός: `leads_pulse`** — «ασχολήθηκε κανείς με τα leads;» με μια κλήση: ανοιχτά / νέα /
   ληξιπρόθεσμα / αδρανή / χωρίς επόμενο βήμα, τι έκανε **κάθε χειριστής** στην περίοδο (τηλέφωνα,
   emails, ραντεβού, προσφορές, μετατροπές — ο αδρανής εμφανίζεται με μηδενικά), **ποιος άνοιξε** τα
@@ -240,6 +256,30 @@ from `[Unreleased]`; `--major` explicit for milestones).
   το token+payload αλλού. (Deferred hardening — TOCTOU DNS-pin, endpoint-profile registry — στο BACKLOG.)
 
 ### Changed
+- **`known-issues.md` — «Go-live triage 2026-09-02» + `Bucket` στήλη στο work board.** Το ledger
+  γράφτηκε από διαδοχικά **source audits**: βαθμολογούν κάθε εύρημα μόνο του, ποτέ απέναντι σε
+  επιχειρηματικό scope ή ημερομηνία — γι' αυτό ένα P0 που δεν μπορεί να συμβεί εδώ προσπερνούσε ένα
+  P1 της πρώτης μέρας. Κάθε ανοιχτό item ξανα-ταξινομήθηκε **A** (blocker πριν την 1/10) / **B**
+  (μετά το cutover) / **C** (εκτός scope των δύο tenants — re-raise αν αλλάξει) / **D** (το ledger
+  είναι πίσω από τον κώδικα), με βάση (α) runtime evidence που ήδη είχαμε, (β) το πραγματικό μείγμα
+  παραστατικών (840+15 τον χρόνο, μόνο ΤΠΥ/ΤΙΜ/ΠΙΣ) και (γ) ζωντανό `ops:health`. Αποτέλεσμα:
+  **4 blockers + rehearsal** (μετά τη διόρθωση του operator: PROV-010 έγινε, το dry-run τρέχει στο
+  dev/test). **Διόρθωση scope:** τα δελτία αποστολής και οι αποδείξεις λιανικής ΕΙΝΑΙ στο αντικείμενο
+  (εκδίδονται στο legacy· η ψηφιακή διακίνηση γίνεται υποχρεωτική σαν τον πάροχο), οπότε η οικογένεια
+  9.x + PROV-006 πάνε **C→B/A**, όχι εκτός· το ~12% του MYD-007 είναι **ενδοκοινοτικό**. Τρεις
+  αλλαγές με τεκμήριο: **PROV-001 P0→P2**
+  (ο InvoSign κάνει **dedup** + real-time status — sandbox 2026-07-07 — άρα διπλό νομικό παραστατικό
+  δεν είναι εφικτό σε αυτόν τον πάροχο· re-raise σε πάροχο που δεν κάνει dedup), **PROV-014 → DONE**
+  (τα single-flight locks είχαν ήδη μπει, `97c23de`/`23b1fa4`), **SETUP-003 P1→P2** (το unmapped
+  payment method ήδη προειδοποιεί + βγαίνει στο preflight — το να μπλοκάρεις έκδοση γι' αυτό είναι
+  χειρότερο από το type 3).
+- **`known-issues.md` — νέο OBS-001 (P1, bucket A).** Τα forensics της υποβολής **υπάρχουν ήδη**
+  (byte-exact request/response XML ανά προσπάθεια, forensic `REJECTED`/`PROVIDER_FAILED` rows,
+  `mydata_pending_since`, `mydata_state`/`mydata_mark` στο activity trail) αλλά **δεν φτάνουν στο
+  MCP**: τα υπάρχοντα εργαλεία είναι υποδομής (`app_health`/`failed_jobs`/`log_tail`) και κανένα δεν
+  απαντά «γιατί απορρίφθηκε το ΤΠΥ6661;». Προτείνονται 5 read-only tools (`invoice_filing`,
+  `mydata_failures`, `mydata_discrepancies`, `stuck_documents`, `preflight`). **Δεν χρειάζεται
+  επιπλέον logging ή activity** — μόνο πρόσβαση.
 - **Ημερολόγιο leads**: λέει ρητά ότι δείχνει ΜΟΝΟ leads με «επόμενο βήμα» και πόσα ανοιχτά leads δεν
   έχουν καθόλου ημερομηνία (με link στη λίστα) — αλλιώς έμοιαζε άδειο/χαλασμένο.
 - **`customers:afm-duplicates`**: δείχνει τι κρέμεται από κάθε διπλό (παραστατικά/πληρωμές/…), σημειώνει

@@ -589,6 +589,17 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει** — θέλει διερεύνηση ρόλων/δικαιωμάτων.
   _(#6 Βιβλίο→period report + Panel utility CSS: ✅ SHIPPED — βλ. «Done recently».)_
 
+## 🔎 MCP forensics για το cutover — **OBS-001** (`known-issues.md`, bucket A)
+**✅ SHIPPED** τα 5 read-only tools (`invoice_filing`, `mydata_failures`, `stuck_documents`,
+`mydata_discrepancies`, `preflight`, βάση `ForensicMcpTool`) — βλ. `CHANGELOG.md` [Unreleased] +
+`FEATURES.md §16γ` + `MCP.md`. Τα στοιχεία υπήρχαν ήδη (byte-exact XML ανά προσπάθεια)· προστέθηκε η
+πρόσβαση. **Μένει (προαιρετικό, φθηνό):**
+- **δομημένη INFO γραμμή ανά ΕΠΙΤΥΧΗ έκβαση** στους submitters (κανάλι, τύπος, series/ΑΑ, ΜΑΡΚ,
+  διάρκεια) — τώρα λογάρουν μόνο αποτυχίες· θα κάνει το `log_tail --contains=<invcode>` χρήσιμο ακόμη
+  κι όταν αυτό που απέτυχε είναι το ίδιο το DB write μετά από επιτυχές POST.
+- **delivery-mark forensics**: το `invoice_filing`/`mydata_failures` καλύπτουν τα `mydata_marks`
+  (τιμολόγια)· τα `delivery_marks` (ΔΑ) έχουν δικό τους ιστορικό — να επεκταθούν όταν μπει η ΔΑ ροή.
+
 ## 🖥️ Console/interface polish (B — sweep 2026-06-16)
 - _(**Auto-refresh-on-stale** στην Κονσόλα myDATA: ✅ SHIPPED 2026-06-17 — stale banner >6h + opt-in
   `mydata:refresh-console` scheduled warmer (όλα τα snapshots, default OFF, σαν το VAT picture). FEATURES §3.)_
