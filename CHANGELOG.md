@@ -19,6 +19,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Leads / mini-CRM (L3) — όψεις.** «Πίνακας leads» (kanban ανά κατάσταση, drag-and-drop = αλλαγή
+  κατάστασης μέσα από τον ίδιο hook, «Όχι τώρα» με ημερομηνία, perm `View:LeadsBoard`) και «Ημερολόγιο
+  leads» (μηνιαίο πλέγμα των επόμενων βημάτων, drag σε άλλη μέρα = μετάθεση, perm `View:LeadsCalendar`)·
+  και οι δύο στο operator map — τρέξε `shield:generate` + re-provision. Links Λίστα ↔ Πίνακας ↔ Ημερολόγιο.
 - **Leads / mini-CRM (L2) — λογοδοσία.** Σελίδα «Απολογισμός πωλήσεων» (ανά χειριστή × περίοδο:
   τηλέφωνα/emails/ραντεβού με «απάντησαν/έγιναν», προσφορές, μετατροπές, χαμένα, ανοιχτά· χοάνη· ημερολόγιο·
   CSV — perm `View:SalesActivityReport`, τρέξε `shield:generate`), `leads:notify-due` (καθημερινό bell για
