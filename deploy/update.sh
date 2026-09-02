@@ -22,8 +22,8 @@
 #   8. build assets (only if a package-lock.json exists)
 #   9. php artisan optimize  (config/route/view cache)
 #  10. shield:generate          (create permission rows for any NEW resources)
-#  11. shield:sync-super-admin  (re-sync role→permission maps to them)
-#  11b. roles:reprovision       (give NEW permissions to company_admin/operator)
+#  11. shield:sync-super-admin  (re-sync role→permission maps — super_admin AND
+#                                the per-tenant company_admin/operator)
 #  12. queue:restart           (workers pick up new code)
 #  13. maintenance mode OFF
 #  14. ops:health
@@ -305,15 +305,13 @@ log "Generating Shield permissions (new resources)"
 $ART shield:generate --all --panel=admin --ignore-existing-policies --no-interaction || true
 
 log "Syncing permissions (super admin + tenant roles)"
+# NOTE: this also RE-SYNCS company_admin/operator for every tenant
+# (TenantRoleProvisioner::ensureStandardRoles → syncPermissions), which is how a
+# new resource's permissions reach the operators. It is a FULL sync: a manual
+# per-tenant role customisation does NOT survive a deploy. Use
+# `php artisan roles:reprovision --dry-run` to see the drift, or
+# `roles:reprovision --tenant=X` to repair ONE tenant additively.
 $ART shield:sync-super-admin || true
-
-# The step that used to be missing: shield:generate creates the permission ROWS
-# of a new resource and sync-super-admin gives them to the super_admin, but the
-# per-tenant company_admin/operator roles only picked them up when someone
-# re-assigned the role by hand — so every new resource stayed invisible to the
-# operators (the Leads case). Additive: never revokes a tenant's customisation.
-log "Re-provisioning tenant roles (company_admin/operator)"
-$ART roles:reprovision --force || true
 
 log "Restarting queue workers"
 $ART queue:restart

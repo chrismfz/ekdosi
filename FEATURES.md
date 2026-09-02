@@ -387,9 +387,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Ασφαλή updates** — `deploy/update.sh <tag>` (read-only data pre-flight→snapshot→maintenance→
   queue drain→checkout→composer→migrate→optimize→shield→queue:restart→ops:health) +
   `deploy/rollback.sh`· version tags via `ekdosi:release`. Runbook: `docs/updates-runbook.md`.
-- **`roles:reprovision`** — δίνει τα δικαιώματα κάθε ΝΕΟΥ resource στους ρόλους `company_admin`/`operator`
-  όλων των tenants (προσθετικά· `--prune` για πλήρη ευθυγράμμιση, `--dry-run` για προεπισκόπηση). Μέρος του
-  `deploy/update.sh` μετά το `shield:generate` — χωρίς αυτό κάθε νέο resource έμενε αόρατο για τους χειριστές.
+- **`roles:reprovision`** — διαγνωστικό/επισκευαστικό για τα δικαιώματα των `company_admin`/`operator` ανά
+  tenant: `--dry-run` (τι λείπει/περισσεύει), **προσθετικό** by default (δεν σβήνει χειροκίνητες
+  προσαρμογές, σε αντίθεση με το πλήρες re-sync του `shield:sync-super-admin` που τρέχει στο deploy),
+  `--tenant=` για μία εταιρεία, `--prune` για πλήρη ευθυγράμμιση.
 - **Queue drain χωρίς root** (`ops:queue-drain`) — hook → systemd → portable (`queue:restart` +
   αναμονή μέχρι να μην τρέχει job). Δουλεύει και σε cPanel/Plesk/DirectAdmin/shared ή με cron worker·
   το deploy σταματά μόνο αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`).

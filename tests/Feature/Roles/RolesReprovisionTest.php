@@ -9,11 +9,12 @@ use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
- * `roles:reprovision` — the step that was missing after every new resource:
- * `shield:generate` creates the permission rows and `shield:sync-super-admin`
- * gives them to the super_admin, but company_admin/operator only picked them
- * up when someone re-assigned the role by hand (which is why Leads stayed
- * invisible to operators). Additive by default; --prune aligns fully.
+ * `roles:reprovision` — the diagnostic/repair tool around role permissions.
+ * NOT a deploy step: `shield:sync-super-admin` already full-syncs every
+ * tenant's company_admin/operator. What this adds is what that lacks —
+ * `--dry-run` (see the drift, write nothing), ADDITIVE by default (a tenant's
+ * manual customisation survives, which a full sync destroys), and one-tenant
+ * repair. `--prune` reproduces the full-sync result, after showing it.
  */
 class RolesReprovisionTest extends TestCase
 {
@@ -37,13 +38,14 @@ class RolesReprovisionTest extends TestCase
         return app(TenantRoleProvisioner::class)->findManagedRole(TenantRoleProvisioner::ROLE_OPERATOR, $company);
     }
 
-    public function test_a_new_resources_permission_reaches_every_tenants_operator(): void
+    public function test_it_grants_a_new_resources_permission_to_every_tenants_operator(): void
     {
         $a = $this->tenant('alpha');
         $b = $this->tenant('beta');
 
-        // A resource that shipped AFTER the roles were provisioned (exactly the
-        // Leads case): shield:generate created the rows, nobody granted them.
+        // A resource whose permissions exist but were never granted to the
+        // per-tenant roles (a tenant restored from a bundle, a role edited by
+        // hand, or a deploy whose shield:sync-super-admin never ran).
         $this->permission('ViewAny:Lead');
         $this->permission('View:LeadsBoard');
 
@@ -75,6 +77,7 @@ class RolesReprovisionTest extends TestCase
             ->assertExitCode(0);
     }
 
+    /** The whole reason this command exists next to `shield:sync-super-admin`. */
     public function test_a_manual_grant_survives_by_default_and_only_prune_removes_it(): void
     {
         $a = $this->tenant('alpha');
@@ -104,6 +107,24 @@ class RolesReprovisionTest extends TestCase
         $this->assertFalse($this->operatorRole($b)->hasPermissionTo('ViewAny:Lead'), 'the other tenant was untouched');
 
         $this->artisan('roles:reprovision --tenant=nope')->assertExitCode(2);
+    }
+
+    public function test_the_deploy_path_already_syncs_the_managed_roles(): void
+    {
+        // Guards the claim in the command's docblock and in update.sh: it is
+        // shield:sync-super-admin (which update.sh runs) that carries a new
+        // resource's permissions to the operators — this command is the
+        // diagnostic around it, not the mechanism.
+        $a = $this->tenant('alpha');
+        $this->permission('ViewAny:Lead');
+        $this->assertFalse($this->operatorRole($a)->hasPermissionTo('ViewAny:Lead'));
+
+        $this->artisan('shield:sync-super-admin')->assertExitCode(0);
+
+        $this->assertTrue($this->operatorRole($a)->fresh()->hasPermissionTo('ViewAny:Lead'));
+        $this->artisan('roles:reprovision --dry-run')
+            ->expectsOutputToContain('ήδη συγχρονισμένοι')
+            ->assertExitCode(0);
     }
 
     public function test_company_admin_gets_everything_except_the_forbidden_resources(): void

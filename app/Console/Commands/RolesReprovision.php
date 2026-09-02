@@ -14,18 +14,22 @@ use Spatie\Permission\PermissionRegistrar;
  *
  *   php artisan roles:reprovision [--tenant=SLUG] [--dry-run] [--prune] [--force]
  *
- * ΓΙΑΤΙ: το `shield:generate` φτιάχνει τα permission ROWS ενός νέου resource,
- * και το `shield:sync-super-admin` τα δίνει στον super_admin — αλλά ο
- * `operator` / `company_admin` ενός tenant τα έπαιρνε μόνο όταν κάποιος του
- * ξανα-ανέθετε τον ρόλο από τον picker. Δηλαδή ΚΑΘΕ νέο resource έμενε
- * αόρατο για τους χειριστές μέχρι να το θυμηθεί κάποιος (τα Leads ήταν
- * ακριβώς αυτή η περίπτωση). Αυτή η εντολή είναι το βήμα που έλειπε — τρέχει
- * και από το `deploy/update.sh` μετά το `shield:generate`.
+ * ΤΙ ΔΕΝ ΕΙΝΑΙ: δεν είναι βήμα του deploy. Το `shield:sync-super-admin` (που
+ * τρέχει ήδη στο `update.sh`) καλεί `ensureStandardRoles()` για κάθε εταιρεία,
+ * δηλαδή κάνει ΠΛΗΡΗ `syncPermissions()` σε company_admin/operator — έτσι
+ * φτάνουν τα δικαιώματα ενός νέου resource στους χειριστές.
  *
- * ΠΡΟΣΘΕΤΙΚΗ από προεπιλογή: δίνει ό,τι λείπει, ΔΕΝ αφαιρεί ποτέ — ώστε μια
- * χειροκίνητη προσαρμογή ρόλου σε έναν tenant να μη χάνεται σε ένα deploy.
- * Με `--prune` ευθυγραμμίζει πλήρως (αφαιρεί και τα επιπλέον), αφού δείξει τι
- * θα αφαιρεθεί και ρωτήσει.
+ * ΤΙ ΕΙΝΑΙ: το διαγνωστικό + επισκευαστικό εργαλείο γύρω από αυτό, με τρία
+ * πράγματα που το `shield:sync-super-admin` ΔΕΝ έχει:
+ *   - `--dry-run`: δες ΤΙ λείπει/περισσεύει χωρίς να γράψεις τίποτα (το
+ *     sync-super-admin γράφει πάντα, χωρίς προεπισκόπηση)·
+ *   - **προσθετικό** by default: δίνει ό,τι λείπει και ΔΕΝ αφαιρεί ποτέ — ο
+ *     μόνος τρόπος να ανανεώσεις ρόλους ΧΩΡΙΣ να χαθεί μια χειροκίνητη
+ *     προσαρμογή ενός tenant (το πλήρες sync την σβήνει)·
+ *   - `--tenant=SLUG`: επισκευή μίας εταιρείας, χωρίς να αγγίξεις τις άλλες
+ *     ούτε τις αναθέσεις super_admin.
+ * Με `--prune` ευθυγραμμίζει πλήρως (ίδιο αποτέλεσμα με το sync-super-admin),
+ * αφού δείξει τι θα αφαιρεθεί και ρωτήσει.
  */
 class RolesReprovision extends Command
 {
@@ -121,18 +125,21 @@ class RolesReprovision extends Command
             // Teams mode: permission writes go through the role row we already
             // resolved with an explicit company_id, so no ambient team leaks in.
             DB::transaction(function () use ($role, $row, $prune, &$granted, &$revoked): void {
-                if ($row['missing'] !== []) {
-                    // Idempotent: harmless if the row-creation backfill above
-                    // already granted some of them.
-                    $role->givePermissionTo($row['missing']);
-                    $granted += count($row['missing']);
+                // Count what WE actually attach: ensureManagedRolesExist() may have
+                // backfilled a just-created role, and reporting the planned set
+                // would overstate the run.
+                $held = $role->permissions()->pluck('name');
+                $toGrant = array_values(array_diff($row['missing'], $held->all()));
+                if ($toGrant !== []) {
+                    $role->givePermissionTo($toGrant);
+                    $granted += count($toGrant);
                 }
-                if ($prune && $row['extra'] !== []) {
-                    foreach ($row['extra'] as $name) {
-                        $role->revokePermissionTo($name);
-                    }
-                    $revoked += count($row['extra']);
+
+                $toRevoke = $prune ? array_values(array_intersect($row['extra'], $held->all())) : [];
+                foreach ($toRevoke as $name) {
+                    $role->revokePermissionTo($name);
                 }
+                $revoked += count($toRevoke);
             });
         }
 

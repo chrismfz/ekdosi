@@ -123,8 +123,8 @@ class LeadsPulseToolTest extends TestCase
         $out = $this->pulse();
         $this->assertSame(['Παλιό'], collect($out['newest_leads'])->pluck('name')->all());
 
-        // A silly window is clamped, never a huge scan.
-        $this->assertSame(365, $this->pulse(['days' => 99999])['period']['days']);
+        // A silly window is clamped to a quarter — a «pulse» never scans a year.
+        $this->assertSame(90, $this->pulse(['days' => 99999])['period']['days']);
         $this->assertSame(1, $this->pulse(['days' => 0])['period']['days']);
     }
 

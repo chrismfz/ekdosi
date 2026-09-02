@@ -26,6 +26,9 @@ class LeadsPulseTool implements AssistantTool
     /** Πόσες γραμμές χρονολογίου / νέα leads επιστρέφουμε το πολύ. */
     private const RECENT_LIMIT = 15;
 
+    /** Το μεγαλύτερο παράθυρο που δέχεται ένας «σφυγμός» (βλ. run()). */
+    private const MAX_DAYS = 90;
+
     public function name(): string
     {
         return 'leads_pulse';
@@ -37,7 +40,7 @@ class LeadsPulseTool implements AssistantTool
             .'αδρανή, τι έκανε κάθε χειριστής στην περίοδο (τηλέφωνα, emails, ραντεβού, προσφορές, '
             .'μετατροπές), ποιος άνοιξε τα τελευταία leads και πότε, και οι τελευταίες κινήσεις. '
             .'Για «ασχολήθηκε κανείς με τα leads;», «τι έγινε αυτή την εβδομάδα», «ποιος το άνοιξε». '
-            .'Προαιρετικό `days` (προεπιλογή 7, μέγιστο 365).';
+            .'Προαιρετικό `days` (προεπιλογή 7, μέγιστο 90).';
     }
 
     public function inputSchema(): array
@@ -45,7 +48,7 @@ class LeadsPulseTool implements AssistantTool
         return [
             'type' => 'object',
             'properties' => [
-                'days' => ['type' => 'integer', 'description' => 'Πόσες ημέρες πίσω (προεπιλογή 7, μέγιστο 365).'],
+                'days' => ['type' => 'integer', 'description' => 'Πόσες ημέρες πίσω (προεπιλογή 7, μέγιστο 90).'],
             ],
         ];
     }
@@ -57,7 +60,10 @@ class LeadsPulseTool implements AssistantTool
 
     public function run(Company $tenant, array $input): array
     {
-        $days = max(1, min((int) ($input['days'] ?? 7), 365));
+        // Capped at a quarter on purpose: the report reduces EVERY timeline row
+        // of the window in PHP, and a «σφυγμός» never needs a year in memory to
+        // print a handful of lines (a long report is the panel's CSV job).
+        $days = max(1, min((int) ($input['days'] ?? 7), self::MAX_DAYS));
         $from = now()->subDays($days - 1)->startOfDay();
         $to = now()->endOfDay();
 

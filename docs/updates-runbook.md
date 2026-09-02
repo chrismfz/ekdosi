@@ -137,13 +137,17 @@ edit customers in the panel in that state (new code, old schema).
 ```bash
 php artisan optimize                       # route/config cache — αλλιώς οι νέες σελίδες δεν έχουν routes
 php artisan shield:generate --all --panel=admin --ignore-existing-policies --no-interaction
-php artisan shield:sync-super-admin
-php artisan roles:reprovision --force      # τα νέα δικαιώματα στους company_admin/operator κάθε tenant
+php artisan shield:sync-super-admin        # ΚΑΙ πλήρες re-sync των company_admin/operator κάθε tenant
 ```
 
 Ο **super_admin** βλέπει τα πάντα ούτως ή άλλως (global `Gate::before` bypass) — αν *αυτός* δεν βλέπει ένα
-νέο resource, φταίει το **stale route cache**, όχι τα permissions. Οι **operators** χρειάζονται το
-`roles:reprovision` (και νέο login/refresh).
+νέο resource, φταίει το **stale route cache**, όχι τα permissions. Οι **operators** παίρνουν τα νέα
+δικαιώματα από το `shield:sync-super-admin` (χρειάζονται νέο login/refresh).
+
+> ⚠ Το `shield:sync-super-admin` κάνει **πλήρη** `syncPermissions()` στους `company_admin`/`operator`:
+> μια χειροκίνητη προσαρμογή ρόλου σε έναν tenant **δεν επιβιώνει** ένα deploy. Για να δεις τι θα αλλάξει
+> ή για να επισκευάσεις έναν tenant χωρίς αυτό το κόστος:
+> `php artisan roles:reprovision --dry-run` / `roles:reprovision --tenant=SLUG` (προσθετικό).
 
 ## Rollback
 
