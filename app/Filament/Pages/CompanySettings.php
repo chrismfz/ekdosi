@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\Company;
 use App\Models\CompanyBackupSetting;
 use App\Services\MailTemplateRenderer;
+use App\Support\MyData\ClassificationGuidance;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
@@ -65,6 +66,9 @@ class CompanySettings extends Page implements HasForms
      * @var list<string>
      */
     private const COMPANY_FIELDS = [
+        // MYD-006: the income-classification policy (safe to self-serve — it is
+        // business identity, not a credential; the go-live gate requires it).
+        'business_activity_type',
         'logo_path',
         'pdf_footer_text',
         'show_customer_balance_on_pdf',
@@ -105,6 +109,26 @@ class CompanySettings extends Page implements HasForms
     {
         return $schema
             ->components([
+                Section::make('Είδος δραστηριότητας (κατηγοριοποίηση εσόδων)')
+                    ->description(ClassificationGuidance::INTRO)
+                    ->visible(fn (): bool => in_array($this->tenant()->einvoice_provider, ['gr-mydata', 'gr-provider'], true))
+                    ->schema([
+                        // Not a form-level `required()` on purpose: it would block
+                        // saving UNRELATED settings until chosen. The go-live gate is
+                        // the authoritative blocker (MYD-006 acceptance) — here we
+                        // surface + guide, so an operator saving mail templates isn't
+                        // forced to also classify in the same submit.
+                        Select::make('business_activity_type')
+                            ->label('Είδος δραστηριότητας')
+                            ->options(ClassificationGuidance::options())
+                            ->placeholder('— δεν έχει επιλεγεί (απαιτείται πριν το go-live) —')
+                            ->native(false)
+                            ->helperText(fn (?string $state): string => ClassificationGuidance::hintFor($state)
+                                ?? 'Επίλεξε το είδος για να ταξινομούνται σωστά τα αγαθά στην ΑΑΔΕ (§8.6). Απαιτείται πριν το go-live.')
+                            ->live()
+                            ->columnSpanFull(),
+                    ]),
+
                 Section::make('Εμφάνιση PDF')
                     ->description('Logo + κείμενο υποσέλιδου + προεπιλογή «υπολοίπου πελάτη» σε κάθε PDF αυτής της εταιρείας.')
                     ->schema([

@@ -6,6 +6,7 @@ use App\Filament\Support\Tags\TagControls;
 use App\Models\Product;
 use App\Models\StockMovement;
 use App\Services\Stock\StockService;
+use App\Support\MyData\ClassificationGuidance;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -61,6 +62,17 @@ class ProductsTable
                 TextColumn::make('productCategory.description_short')
                     ->label('Category')
                     ->sortable()
+                    ->toggleable(),
+
+                // MYD-006: how this item is classified to AADE (§8.6), from its
+                // category. «τύπος/πολιτική» = inherited from the invoice type +
+                // business policy at issue (the category set no explicit bucket).
+                TextColumn::make('productCategory.mydata_income_class_category')
+                    ->label('Κατηγ. εσόδων')
+                    ->formatStateUsing(fn (?string $state) => $state
+                        ? $state.' · '.(ClassificationGuidance::bucketLabel($state) ?? '')
+                        : null)
+                    ->placeholder('τύπος/πολιτική')
                     ->toggleable(),
 
                 TextColumn::make('sell_price')

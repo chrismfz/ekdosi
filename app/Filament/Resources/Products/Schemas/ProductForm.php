@@ -8,13 +8,11 @@ use App\Models\MetricUnit;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Stock\StockService;
+use App\Support\MyData\ClassificationGuidance;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
-use Firebed\AadeMyData\Enums\FeesPercentCategory;
-use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
-use Firebed\AadeMyData\Enums\StampCategory;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -23,6 +21,9 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
+use Firebed\AadeMyData\Enums\StampCategory;
 use Illuminate\Validation\Rule;
 
 /**
@@ -132,6 +133,30 @@ class ProductForm
                                             : 0;
                                         $set('markup_display', $markup);
                                     }),
+
+                                // MYD-006: show how THIS item will be classified to AADE
+                                // (§8.6), inherited from its category. Read-only info, live
+                                // to the category select — the bucket is set on the
+                                // product-CATEGORY, so this is honest about inheritance
+                                // rather than a competing per-product field.
+                                Placeholder::make('mydata_income_class_info')
+                                    ->label('Κατηγορία εσόδων myDATA (§8.6)')
+                                    ->columnSpanFull()
+                                    ->content(function (Get $get): string {
+                                        $catId = $get('product_category_id');
+                                        $bucket = $catId
+                                            ? ProductCategory::query()
+                                                ->where('company_id', Filament::getTenant()?->getKey())
+                                                ->whereKey($catId)
+                                                ->value('mydata_income_class_category')
+                                            : null;
+
+                                        return ClassificationGuidance::describeProductBucket(
+                                            $bucket,
+                                            Filament::getTenant()?->business_activity_type,
+                                        );
+                                    })
+                                    ->helperText('Πώς δηλώνεται το είδος στην ΑΑΔΕ. Ορίζεται στην κατηγορία προϊόντος (Setup → Κατηγορίες προϊόντων)· άλλαξε κατηγορία για να ενημερωθεί.'),
 
                                 Select::make('metric_unit_id')
                                     ->label('Metric unit')
