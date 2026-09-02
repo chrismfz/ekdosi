@@ -330,8 +330,13 @@ class MyDataSubmitter implements EInvoiceSubmitter
         }
 
         // OBS-001: one structured success line so `log_tail --contains=<invcode>`
-        // finds a filing that WORKED, not just the ones that failed.
-        FilingLog::filed($invoice, (string) $mark->mark, 'mydata', $startedAt);
+        // finds a filing that WORKED, not just the ones that failed. Only on a
+        // FRESH insert — the idempotent branch (an already-recorded MARK returned on
+        // a retry) has its own «already recorded» line, and a second «filed (Nms)»
+        // there would imply a fresh file that didn't happen.
+        if ($mark->wasRecentlyCreated) {
+            FilingLog::filed($invoice, (string) $mark->mark, 'mydata', $startedAt);
+        }
 
         // WHMCS write-back on the draft-first LIFECYCLE path. A draft created
         // from the WHMCS inbox (WhmcsInvoiceFiler::createDraft) carries

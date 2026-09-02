@@ -149,9 +149,13 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         $mark = $this->persistSuccess($invoice, $xml, $result);
 
         // OBS-001: one structured success line so `log_tail --contains=<invcode>`
-        // finds a provider filing that WORKED, not just the ones that failed. The
-        // recovery/adopt path logs its own (warning) line naming the MARK.
-        FilingLog::filed($invoice, (string) $mark->mark, $this->transport->key(), $startedAt);
+        // finds a provider filing that WORKED, not just the ones that failed. Only
+        // on a FRESH insert (persistSuccess adopts an existing row idempotently on
+        // a retry). The recovery/adopt path returns earlier and logs its own
+        // invcode-bearing line.
+        if ($mark->wasRecentlyCreated) {
+            FilingLog::filed($invoice, (string) $mark->mark, $this->transport->key(), $startedAt);
+        }
 
         $this->syncWhmcsFiled($invoice, $mark);
 
@@ -356,6 +360,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         } catch (Throwable $e) {
             Log::info('Provider status-check after a failed send found nothing to adopt.', [
                 'invoice_id' => $invoice->id,
+                'invcode' => $invoice->invcode,
                 'send_error' => $original->getMessage(),
                 'status_error' => $e->getMessage(),
             ]);
@@ -369,6 +374,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
         Log::warning('Provider send failed but status-check found an existing MARK — adopting (avoided double-file).', [
             'invoice_id' => $invoice->id,
+            'invcode' => $invoice->invcode,
             'mark' => $status->mark,
         ]);
 

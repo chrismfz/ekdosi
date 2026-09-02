@@ -37,7 +37,10 @@ final class FilingLog
                 'invoice_id' => $invoice->getKey(),
                 'company_id' => $invoice->company_id,
                 'invcode' => $invcode,
-                'mydata_type' => $invoice->invoiceType?->mydata_type,
+                // The mirror column just persisted by the submitter — the type
+                // ACTUALLY filed — not the invoice_type relation (the config value,
+                // which can differ on a VAT override and would lazy-load here).
+                'mydata_type' => $invoice->mydata_type,
                 'mark' => $mark,
                 'channel' => $channel,
                 'duration_ms' => $ms,
