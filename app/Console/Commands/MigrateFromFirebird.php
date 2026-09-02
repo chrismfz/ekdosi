@@ -332,11 +332,16 @@ class MigrateFromFirebird extends Command
      */
     private function assertNoDuplicateLegacyAfm(array $rows): void
     {
+        // One pass: key → source rows (for the in-source duplicate check) and
+        // CUST_ID → key (for the target check). Keys stay STRINGS (a numeric
+        // array key would bind as int against the varchar index).
         $byKey = [];
+        $keyByCustId = [];
         foreach ($rows as $r) {
             $key = Afm::uniqueKey($this->fld($r, 'AFM'));
             if ($key !== null) {
-                $byKey[$key][] = (int) $r['CUST_ID'].' '.($this->fld($r, 'NAME') ?? '');
+                $byKey[(string) $key][] = (int) $r['CUST_ID'].' '.($this->fld($r, 'NAME') ?? '');
+                $keyByCustId[(int) $r['CUST_ID']] = (string) $key;
             }
         }
 
@@ -345,30 +350,30 @@ class MigrateFromFirebird extends Command
             $lines[] = "  ΑΦΜ {$key} (μέσα στη legacy βάση): ".implode(' | ', $ids);
         }
 
-        // The TARGET side too (the parallel-run week): a customer created in
-        // the panel meanwhile, or imported under another legacy_id, that owns
-        // one of the source ΑΦΜ → the upsert on a different legacy_id would hit
-        // the unique index mid-run. List it now instead.
-        $sourceIdByKey = [];
-        foreach ($rows as $r) {
-            $key = Afm::uniqueKey($this->fld($r, 'AFM'));
-            if ($key !== null) {
-                $sourceIdByKey[$key] = (int) $r['CUST_ID'];
-            }
-        }
-        if ($sourceIdByKey !== []) {
-            foreach (array_chunk(array_keys($sourceIdByKey), 500) as $keys) {
+        // The TARGET side (the parallel-run week): a local row that owns one of
+        // the source ΑΦΜ and would NOT be released by this run — i.e. it has no
+        // legacy_id (made in the panel) or its legacy_id no longer exists in the
+        // source. A row whose own source twin merely changed ΑΦΜ is fine: the
+        // update pass (existing legacy_ids first) releases the key before any
+        // insert needs it.
+        if ($keyByCustId !== []) {
+            foreach (array_chunk(array_map('strval', array_keys($byKey)), 500) as $keys) {
                 $owners = DB::table('customers')
                     ->where('company_id', $this->companyId)
                     ->whereIn('afm_key', $keys)
                     ->get(['id', 'name', 'afm_key', 'legacy_id', 'deleted_at']);
                 foreach ($owners as $o) {
-                    if ((int) ($o->legacy_id ?? 0) !== $sourceIdByKey[$o->afm_key]) {
-                        $lines[] = "  ΑΦΜ {$o->afm_key}: υπάρχει ήδη στο ekdosi ως #{$o->id} «{$o->name}»"
-                            .($o->legacy_id ? " (legacy_id {$o->legacy_id})" : ' (χωρίς legacy_id — φτιάχτηκε στο panel)')
-                            .($o->deleted_at ? ' [ΔΙΑΓΡΑΜΜΕΝΟΣ]' : '')
-                            ." — η πηγή το δίνει σε CUST_ID {$sourceIdByKey[$o->afm_key]}";
+                    $ownerLegacy = $o->legacy_id !== null ? (int) $o->legacy_id : null;
+                    $stillInSource = $ownerLegacy !== null && array_key_exists($ownerLegacy, $keyByCustId);
+                    $sameParty = $stillInSource && $keyByCustId[$ownerLegacy] === (string) $o->afm_key;
+                    if ($sameParty || $stillInSource) {
+                        continue; // its own source row will keep or release the key
                     }
+                    $claimant = array_search((string) $o->afm_key, $keyByCustId, true);
+                    $lines[] = "  ΑΦΜ {$o->afm_key}: υπάρχει ήδη στο ekdosi ως #{$o->id} «{$o->name}»"
+                        .($ownerLegacy !== null ? " (legacy_id {$ownerLegacy} — δεν υπάρχει πια στην πηγή)" : ' (χωρίς legacy_id — φτιάχτηκε στο panel)')
+                        .($o->deleted_at ? ' [ΔΙΑΓΡΑΜΜΕΝΟΣ]' : '')
+                        ." — η πηγή το δίνει σε CUST_ID {$claimant}";
                 }
             }
         }
@@ -547,6 +552,17 @@ class MigrateFromFirebird extends Command
         // BEFORE writing, with the list, so the operator merges them in the
         // legacy DB (placeholders like 000000000 are not identities and pass).
         $this->assertNoDuplicateLegacyAfm($rows);
+
+        // Updates BEFORE inserts: a legacy row whose ΑΦΜ moved to another
+        // CUST_ID releases the key (unique index) before the new row claims it.
+        $known = DB::table('customers')
+            ->where('company_id', $this->companyId)
+            ->whereNotNull('legacy_id')
+            ->pluck('legacy_id')
+            ->map(fn ($v): int => (int) $v)
+            ->flip()
+            ->all();
+        usort($rows, fn (array $a, array $b): int => (int) isset($known[(int) $b['CUST_ID']]) <=> (int) isset($known[(int) $a['CUST_ID']]));
 
         foreach ($rows as $r) {
             // Filament-managed columns (is_active, needs_immediate_invoice,

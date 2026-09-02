@@ -46,6 +46,33 @@ class LeadMatcherTest extends TestCase
         $this->assertTrue(app(LeadMatcher::class)->find($t->id, null, '', [null, ''])->isEmpty());
     }
 
+    public function test_a_placeholder_afm_is_no_identity_and_never_matches_everyone(): void
+    {
+        $t = $this->tenant();
+        Customer::create(['company_id' => $t->id, 'name' => 'Άσχετος 1', 'afm' => '123456789']);
+        Customer::create(['company_id' => $t->id, 'name' => 'Λιανική', 'afm' => '000000000']);
+        Lead::create(['company_id' => $t->id, 'name' => 'Lead λιανικής', 'afm' => '000000000', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+
+        $match = app(LeadMatcher::class)->find($t->id, '000000000', null);
+
+        $this->assertTrue($match->isEmpty(), 'An empty WHERE group must not turn into «every customer».');
+        $this->assertTrue($match->directCustomers->isEmpty());
+        $this->assertFalse($match->hasDoNotContact(), 'A placeholder cannot carry a DNC memory either.');
+        $this->assertNull(LeadMatcher::normalizeAfm('999999999'));
+    }
+
+    public function test_foreign_vat_keeps_its_letters_on_both_sides(): void
+    {
+        $t = $this->tenant();
+        $cy = Customer::create(['company_id' => $t->id, 'name' => 'Κύπριος', 'afm' => 'CY10259033P']);
+        Customer::create(['company_id' => $t->id, 'name' => 'Ψηφία μόνο', 'afm' => '10259033']);
+        $lead = Lead::create(['company_id' => $t->id, 'name' => 'Lead CY', 'afm' => 'CY10259033P']);
+
+        $match = app(LeadMatcher::class)->find($t->id, 'cy 10259033 p', null, [], $lead->id);
+        $this->assertSame([$cy->id], $match->customers->pluck('id')->all(), 'Never the digits-only customer.');
+        $this->assertSame([$cy->id], $match->customersOwningAfm('CY10259033P')->pluck('id')->all());
+    }
+
     public function test_matches_customer_by_afm_email_and_formatted_phone(): void
     {
         $t = $this->tenant();

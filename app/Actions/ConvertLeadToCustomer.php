@@ -128,7 +128,9 @@ class ConvertLeadToCustomer
      */
     private function assertNoLiveCustomerOwnsTheAfm(Lead $lead): void
     {
-        $afm = Afm::normalise($lead->afm);
+        // The identity key (letters kept for a foreign VAT); a placeholder is
+        // no identity → nothing to own, nothing to check.
+        $afm = Afm::uniqueKey($lead->afm);
         if ($afm === null) {
             return;
         }

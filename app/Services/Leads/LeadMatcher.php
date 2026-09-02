@@ -70,15 +70,6 @@ class LeadMatcher
     }
 
     /**
-     * The ΑΦΜ equality predicate for LEADS (digits, EL/GR prefix tolerated on
-     * the stored side). Customers carry `afm_key` and use whereAfmKeyOf().
-     */
-    private static function whereLeadAfm(Builder $q, string $afm): Builder
-    {
-        return $q->whereRaw('UPPER('.self::strippedSql('afm').') IN (?, ?, ?)', [$afm, 'EL'.$afm, 'GR'.$afm]);
-    }
-
-    /**
      * @param  list<string|null>  $phones  any of phone / mobile
      */
     public function find(
@@ -187,16 +178,10 @@ class LeadMatcher
     private function applyIdentity(Builder $q, ?string $afm, ?string $email, array $phones, array $phoneColumns, array $emailColumns, bool $customers): void
     {
         if ($afm !== null) {
-            // Customers: the indexed identity column. Leads: the stored digits,
-            // EL/GR prefix tolerated (older/imported rows may carry one).
-            if ($customers) {
-                $key = Afm::uniqueKey($afm);
-                if ($key !== null) {
-                    $q->orWhere('afm_key', $key);
-                }
-            } else {
-                $q->orWhere(fn (Builder $qq) => self::whereLeadAfm($qq, $afm));
-            }
+            // Both sides store the ΑΦΜ identity (customers.afm_key, leads.afm
+            // via LeadForm) — exact, indexed equality. A placeholder never gets
+            // here (lookup() drops it), so this branch always adds a clause.
+            $q->orWhere($customers ? 'afm_key' : 'afm', $afm);
         }
 
         if ($email !== null) {
@@ -222,7 +207,7 @@ class LeadMatcher
      */
     private static function ownColumnsMatch(Customer $c, ?string $afm, ?string $email, array $phoneSuffixes): bool
     {
-        if ($afm !== null && $c->afm_key !== null && $c->afm_key === Afm::uniqueKey($afm)) {
+        if ($afm !== null && $c->afm_key !== null && $c->afm_key === $afm) {
             return true;
         }
 
@@ -253,10 +238,14 @@ class LeadMatcher
         return $expr;
     }
 
-    /** The ONE ΑΦΜ rule (App\Support\Afm) — never a second implementation. */
+    /**
+     * The ONE ΑΦΜ identity rule (App\Support\Afm::uniqueKey) — never a second
+     * implementation. Null for a placeholder (000000000 …): NOT an identity,
+     * so it adds no predicate and can never match «every customer».
+     */
     public static function normalizeAfm(?string $afm): ?string
     {
-        return Afm::normalise($afm);
+        return Afm::uniqueKey($afm);
     }
 
     public static function normalizeEmail(?string $email): ?string

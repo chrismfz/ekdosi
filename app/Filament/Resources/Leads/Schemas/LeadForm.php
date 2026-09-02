@@ -81,8 +81,10 @@ class LeadForm
                             ->label('ΑΦΜ')
                             ->maxLength(20)
                             ->live(onBlur: true)
-                            // Store digits only so the dedupe compare is exact.
-                            ->dehydrateStateUsing(fn ($state): ?string => Afm::normalise($state)),
+                            // Store the ΑΦΜ IDENTITY (same rule as customers.afm_key: digits
+                            // for GR, letters kept for a foreign VAT, null for placeholders)
+                            // so the dedupe compare is exact.
+                            ->dehydrateStateUsing(fn ($state): ?string => Afm::uniqueKey($state)),
 
                         TextInput::make('country')
                             ->label('Χώρα (ISO-2)')

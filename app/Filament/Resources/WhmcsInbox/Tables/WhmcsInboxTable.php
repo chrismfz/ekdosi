@@ -791,7 +791,9 @@ class WhmcsInboxTable
                 $tenant = Filament::getTenant();
                 $result = app(WhmcsCustomerCreator::class)->createForPending($tenant, $r);
 
-                if ($result->customer !== null) {
+                // Never link a soft-deleted owner ('deleted_owner' carries it only
+                // so the notification can name it) — the operator restores first.
+                if ($result->customer !== null && $result->source !== 'deleted_owner') {
                     $r->update([
                         'customer_id' => $result->customer->id,
                         'match_reason' => PendingWhmcsInvoice::REASON_AFM,
@@ -1023,7 +1025,8 @@ class WhmcsInboxTable
                                 }
                                 // Link the new/existing customer into the picker
                                 // above (it's ->live(), so the preview re-renders).
-                                if ($result->customer !== null) {
+                                // A soft-deleted owner is NOT selectable — restore first.
+                                if ($result->customer !== null && $result->source !== 'deleted_owner') {
                                     $set('customer_id', $result->customer->id);
                                 }
                                 self::notifyCustomerCreateResult($result);
@@ -1239,7 +1242,13 @@ class WhmcsInboxTable
                     ->label('Δικαιούχοι που θα προκύψουν')
                     ->content(function (PendingWhmcsInvoice $r): string {
                         $tenant = Filament::getTenant();
-                        $groups = app(WhmcsInvoiceSplitter::class)->planGroups($tenant, $r);
+                        try {
+                            $groups = app(WhmcsInvoiceSplitter::class)->planGroups($tenant, $r);
+                        } catch (Throwable $e) {
+                            // e.g. a routed contact whose ΑΦΜ belongs to a soft-deleted
+                            // customer — show the guidance, don't break the modal.
+                            return '⚠ '.$e->getMessage();
+                        }
                         if ($groups === []) {
                             return 'Δεν βρέθηκαν δικαιούχοι στην ανάλυση.';
                         }

@@ -403,9 +403,13 @@ class CompanyImporter
         }
 
         $index = $this->existingIndex($table, $companyId);
-        // customers: ΑΦΜ identity → local id, built once and kept current so a
-        // 10k-row import costs one scan, not one SELECT per row.
+        // customers: ΑΦΜ identity → local id, built once and kept current (a
+        // row that changes ΑΦΜ releases its old key) so a 10k-row import costs
+        // one scan, not one SELECT per row; plus id → legacy_id for the merge guard.
         $afmIndex = $table === 'customers' ? $this->afmKeyIndex($companyId) : [];
+        $legacyById = $table === 'customers'
+            ? DB::table('customers')->where('company_id', $companyId)->whereNotNull('legacy_id')->pluck('legacy_id', 'id')->all()
+            : [];
 
         foreach ($rows as $row) {
             $oldId = $row['id'] ?? null;
@@ -441,14 +445,32 @@ class CompanyImporter
                 // Merge keeps the LOCAL soft-delete state: a row deleted here
                 // after the export must not be resurrected by its bundle twin.
                 unset($data['deleted_at']);
-                // An ΑΦΜ-merge never blanks the local legacy_id (the ETL's
-                // re-run key) with a bundle row that has none.
-                if ($mergedByAfm && ($data['legacy_id'] ?? null) === null) {
+                if ($mergedByAfm) {
+                    // An ΑΦΜ-merge never touches the local legacy_id (the ETL's
+                    // re-run key): a bundle row without one keeps the local, a
+                    // bundle row with a DIFFERENT one is a real conflict.
+                    $localLegacy = $legacyById[$id] ?? null;
+                    $bundleLegacy = $data['legacy_id'] ?? null;
+                    if ($bundleLegacy !== null && $localLegacy !== null && (string) $bundleLegacy !== (string) $localLegacy) {
+                        throw new RuntimeException(
+                            'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «'.($row['name'] ?? '?').'» '
+                            ."(ΑΦΜ {$afmKey}, legacy_id {$bundleLegacy}) ταιριάζει στον τοπικό πελάτη #{$id} που έχει legacy_id {$localLegacy}. "
+                            .'Δύο διαφορετικές legacy ταυτότητες για ένα ΑΦΜ — διόρθωσε πρώτα τοπικά.'
+                        );
+                    }
                     unset($data['legacy_id']);
                 }
                 DB::table($table)->where('id', $id)->update($data);
+
+                // The row may have changed ΑΦΜ: release any key it held before.
+                if ($table === 'customers') {
+                    $afmIndex = array_filter($afmIndex, fn (int $owner): bool => $owner !== $id);
+                }
             } else {
                 $id = DB::table($table)->insertGetId($data);
+                if ($table === 'customers' && ($data['legacy_id'] ?? null) !== null) {
+                    $legacyById[$id] = $data['legacy_id'];
+                }
             }
 
             if ($afmKey !== null) {
@@ -558,7 +580,8 @@ class CompanyImporter
     {
         // deleted_at is lifecycle, not identity: a locally soft-deleted row must
         // still match its bundle twin (else merge inserts a live duplicate).
-        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at'] as $col) {
+        // afm_key is DERIVED (pre-release bundles lack it) — never part of identity.
+        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at', 'afm_key'] as $col) {
             unset($row[$col]);
         }
         ksort($row);

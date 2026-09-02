@@ -202,6 +202,44 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertSame(2, Customer::withTrashed()->where('company_id', $src->id)->count());
     }
 
+    public function test_importer_releases_an_afm_when_the_twin_changes_it_and_refuses_a_second_legacy_identity(): void
+    {
+        // Source: A (legacy 7) had K2 at export time… no — build the bundle so A carries K1
+        // and a NEW customer B carries K2, while LOCALLY A still holds K2.
+        $src = Company::create(['name' => 'Src', 'slug' => 'src4', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $a = Customer::create(['company_id' => $src->id, 'name' => 'A', 'afm' => '111111112']); // K1
+        $a->forceFill(['legacy_id' => 7])->save();
+        $b = Customer::create(['company_id' => $src->id, 'name' => 'B', 'afm' => '222222223']); // K2, panel-created
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+
+        // Locally: B never existed and A (legacy 7) still carries K2.
+        $b->forceDelete();
+        $a->update(['afm' => '222222223']);
+
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src4', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $rows = Customer::withTrashed()->where('company_id', $src->id)->orderBy('id')->get();
+        $this->assertCount(2, $rows, 'A updated to K1 released K2, so B is a NEW row — not merged into A');
+        $this->assertSame(['A', 'B'], $rows->pluck('name')->all());
+        $this->assertSame(['111111112', '222222223'], $rows->pluck('afm_key')->all());
+
+        // A bundle row with a DIFFERENT non-null legacy_id but the same ΑΦΜ as a
+        // local legacy-keyed row is a real conflict → fail closed.
+        $src2 = Company::create(['name' => 'Src', 'slug' => 'src5', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $c = Customer::create(['company_id' => $src2->id, 'name' => 'C', 'afm' => '333333334']);
+        $c->forceFill(['legacy_id' => 9])->save();
+        $bundle2 = app(CompanyExporter::class)->build($src2, 'passphrase', 'p@ss', true);
+        $c->forceFill(['legacy_id' => 8])->save(); // locally the same party is legacy 8
+
+        try {
+            app(CompanyImporter::class)->run($bundle2, ['into' => 'src5', 'execute' => true, 'passphrase' => 'p@ss']);
+            $this->fail('Expected a RuntimeException.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('legacy', $e->getMessage());
+        }
+        $this->assertSame(8, (int) $c->fresh()->legacy_id, 'nothing overwritten');
+    }
+
     public function test_importer_merges_a_bundle_customer_into_the_local_owner_of_the_same_afm(): void
     {
         $src = Company::create(['name' => 'Src', 'slug' => 'src', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
