@@ -57,6 +57,9 @@
   `mydata_state` (null/VALID/CANCELLED) — ποτέ μπερδεμένες· ένα predicate
   (`InvoiceScope::live()`) σε όλα τα money sites.
 - **Lifecycle** actions: Οριστικοποίηση · Επαναφορά σε πρόχειρο · Ακύρωση · Επανέκδοση.
+- **Επεξεργασία πρόχειρου** — κουμπί «Επεξεργασία» στο παραστατικό & στη λίστα (μόνο σε πρόχειρα,
+  gated στο `update`) → πλήρες περιβάλλον (ημερομηνία/τύπος/γραμμές/είδος/τιμή). Για παρόχους,
+  action «Ημερομηνία έκδοσης → σήμερα» (μονόκλικ λύση για το InvoSign 238).
 - **Πιστωτικά** (`IssueCreditNote`) — συσχετιζόμενα (5.1) ή μη (5.2), αμφίδρομη
   σύνδεση με το αρχικό· opt-in myDATA filing.
 - **Τέλη / παρακρατήσεις / φόροι** — withholding (§8.4), Ψηφιακό Τέλος Συναλλαγής (§8.6)/
@@ -197,6 +200,8 @@
   να αλλάζει το υπόλοιπο). **Όψη περιόδου**: φίλτρα (έτος/τύπος/κατάσταση) πάνω από τον
   πίνακα + **σύνολα έτους** (τζίρος καθαρό/με ΦΠΑ, εισπράξεις, υπόλοιπο τέλους) όταν επιλεγεί
   έτος· το τρέχον υπόλοιπο μένει full-history. Header actions ομαδοποιημένα σε dropdowns.
+  **Section «Πρόχειρα»**: τα ανέκδοτα πρόχειρα του πελάτη (μη οριστικοποιημένα/μη υποβληθέντα)
+  ορατά με link άνοιγμα/επεξεργασία — εκτός υπολοίπου & κινήσεων (`onlyUnissuedDrafts`).
 - **Αποστολή Καρτέλας με email — επαφή-aware**: πολλοί παραλήπτες με επιλογή από τον πελάτη
   + τις **επαφές του** με email (role-labelled, π.χ. λογιστήριο), προεπιλογή πελάτης + κύρια
   επαφή, συν ελεύθερα extras· validation + dedupe, ένα PDF για όλους.
@@ -382,6 +387,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 ## 14. Backups / Portability / DR
 - **Per-company backups** (`spatie/laravel-backup`) — πρόγραμμα/διατήρηση/προορισμοί
   (Τοπικά/SFTP/FTP/S3), «Αντίγραφο/Λήψη τώρα».
+- **Διατήρηση καθολικών (whole-DB) backups — env-tunable** (`BACKUP_KEEP_ALL_DAYS`/`DAILY_DAYS`/
+  `WEEKLY_WEEKS`/`MONTHLY_MONTHS`/`YEARLY_YEARS` + `BACKUP_MAX_STORAGE_MB`, `config/backup.php`).
+  Default «ελαφρύ + λίγοι μήνες»: όλα 7 μέρες → άλλες 30 μέρες 1/μέρα → 6 μήνες 1/μήνα (προσθετικές
+  βαθμίδες, ~7 μήνες σύνολο)· το πιο πρόσφατο δεν σβήνεται ποτέ. Ξεχωριστό από τα per-company παραπάνω.
 - **Export/Import εταιρίας** — settings+setup ή πλήρες· **χωρίς υποχρεωτικό κωδικό**
   (passphrase ή raw, με σαφή plaintext προειδοποίηση στο raw)· `company:export`/`company:import`
   + panel actions. Η κατάσταση κρυπτογράφησης **καθολικών** αντιγράφων (env `BACKUP_ARCHIVE_PASSWORD`)

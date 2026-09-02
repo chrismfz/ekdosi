@@ -110,6 +110,16 @@ class CustomerLedger extends Page implements HasTable
      */
     public array $topProducts = [];
 
+    /**
+     * This customer's UNISSUED drafts (πρόχειρα) — deliberately OUT of the money
+     * ledger (a draft is not a movement or a receivable, so it must never touch
+     * the running balance), but operators still need to FIND «that draft I made
+     * for this customer». This is the findability surface the ledger cannot be.
+     *
+     * @var array<int, array{id: int, invcode: ?string, type: ?string, issued_at: ?string, gross: float, view_url: string, edit_url: ?string}>
+     */
+    public array $draftInvoices = [];
+
     public ?CustomerWhmcsLedgerResult $whmcsLedger = null;
 
     /**
@@ -163,7 +173,62 @@ class CustomerLedger extends Page implements HasTable
 
         $this->cachedStatsBlock = app(CustomerLedgerBuilder::class)->buildStatsBlock($this->record);
         $this->topProducts = app(CustomerTopProducts::class)->for($this->record);
+        $this->draftInvoices = $this->loadDraftInvoices();
         $this->loadDimensionLookups();
+    }
+
+    /**
+     * The customer's unissued sale drafts, newest first. Uses the SAME
+     * `onlyUnissuedDrafts` scope the dashboard's «Πρόχειρα» figure uses, so «drafts»
+     * means one thing everywhere: a local draft, new-app (not legacy-imported), not
+     * a credit note. Explicit company_id + no ambient scope reliance (this runs in a
+     * panel request, but the query is explicit for the same reason the ledger's is).
+     *
+     * @return array<int, array{id: int, invcode: ?string, type: ?string, issued_at: ?string, gross: float, view_url: string, edit_url: ?string}>
+     */
+    private function loadDraftInvoices(): array
+    {
+        $query = Invoice::query()
+            ->with('invoiceType')
+            ->where('company_id', $this->record->company_id)
+            ->where('customer_id', $this->record->getKey())
+            // Only GENUINELY unfiled drafts belong under «Πρόχειρα»: this section
+            // lists exactly what the edit surfaces treat as an editable draft
+            // (onlyUnissuedDrafts gives the local_status='draft' half; mydata_state
+            // IS NULL is the other half of EditInvoice::mount's gate). A row that
+            // is draft-status but carries a MARK is a filed AADE document, not a
+            // draft, and must not be presented as one here. (SoftDeletes' global
+            // scope already excludes trashed rows — no explicit whereNull needed.)
+            ->whereNull('mydata_state');
+
+        InvoiceScope::onlyUnissuedDrafts($query);
+
+        $drafts = $query
+            ->orderByDesc('issued_at')
+            ->orderByDesc('id')
+            ->get();
+
+        // InvoicePolicy::update is permission-only (it ignores the invoice), so the
+        // check is loop-invariant — resolve it ONCE, through the Gate (not the raw
+        // Shield string), using any row as the required instance. Every listed row
+        // is now mydata_state===null + local_status='draft', so this permission is
+        // the only remaining half of the edit gate.
+        $canEdit = $drafts->isNotEmpty()
+            && (auth()->user()?->can('update', $drafts->first()) ?? false);
+
+        return $drafts
+            ->map(fn (Invoice $invoice): array => [
+                'id' => (int) $invoice->getKey(),
+                'invcode' => $invoice->invcode,
+                'type' => $invoice->invoiceType?->name ?? $invoice->invoiceType?->code,
+                'issued_at' => $invoice->issued_at?->toDateString(),
+                'gross' => (float) $invoice->gross_total,
+                'view_url' => InvoiceResource::getUrl('view', ['record' => $invoice, 'tenant' => $this->record->company]),
+                'edit_url' => $canEdit
+                    ? InvoiceResource::getUrl('edit', ['record' => $invoice, 'tenant' => $this->record->company])
+                    : null,
+            ])
+            ->all();
     }
 
     public function getTitle(): string
