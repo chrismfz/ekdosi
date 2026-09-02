@@ -2,6 +2,7 @@
 
 namespace WHMCS\Module\Addon\EkdosiBridge;
 
+use Illuminate\Support\Collection;
 use WHMCS\Database\Capsule;
 
 require_once __DIR__.'/ThirdPartyStore.php';
@@ -106,7 +107,7 @@ class InvoiceFeed
      * single-invoice lookup (fetchOne) so BOTH emit an identical shape — the one
      * the ekdosi ingestor consumes unchanged.
      *
-     * @param  \Illuminate\Support\Collection  $invoices
+     * @param  Collection  $invoices
      * @return array<int, array<string, mixed>>
      */
     private static function buildPayloads($invoices, bool $withRouting): array
@@ -189,7 +190,7 @@ class InvoiceFeed
 
     /**
      * @param  list<int>  $invoiceIds
-     * @return array<int, list<array<string, mixed>>>  invoiceid => [line, ...]
+     * @return array<int, list<array<string, mixed>>> invoiceid => [line, ...]
      */
     private static function itemsByInvoice(array $invoiceIds): array
     {
@@ -198,7 +199,15 @@ class InvoiceFeed
             ->whereIn('invoiceid', $invoiceIds)
             ->orderBy('id')
             ->get(['id', 'invoiceid', 'type', 'relid', 'description', 'amount', 'taxed']);
+
+        // MYD-006 bridge: enrich each HOSTING line with its WHMCS product id
+        // (tblhosting.packageid) + product group id (tblproducts.gid), so ekdosi can
+        // classify by group («Web Hosting → υπηρεσία») with new packages inheriting.
+        // Batched: hosting relids → packageids → gids, two queries per feed page.
+        $productByLine = self::productKeysByLine($rows);
+
         foreach ($rows as $r) {
+            $keys = $productByLine[(int) $r->id] ?? ['pid' => 0, 'gid' => 0];
             $out[(int) $r->invoiceid][] = [
                 'id' => (int) $r->id,
                 'type' => (string) ($r->type ?? ''),
@@ -206,7 +215,58 @@ class InvoiceFeed
                 'description' => (string) ($r->description ?? ''),
                 'amount' => (string) ($r->amount ?? '0'),
                 'taxed' => (int) ($r->taxed ?? 0),
+                // 0 when not a hosting line / unresolved (domains, addons, ad-hoc).
+                // ekdosi maps by GROUP (gid); the group NAME comes from GetProducts
+                // on the ekdosi side, so it's deliberately not fetched here.
+                'whmcs_product_id' => $keys['pid'],
+                'whmcs_group_id' => $keys['gid'],
             ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Resolve, per invoice-item id, the WHMCS product id (packageid) + product
+     * group id for HOSTING lines. Domains (tbldomains, no product) and other types
+     * resolve to zeros. Batched: relid→packageid (tblhosting), packageid→gid
+     * (tblproducts). The group NAME is not resolved here — ekdosi reads it from
+     * GetProducts when building the mapping page.
+     *
+     * @param  Collection  $rows  tblinvoiceitems rows (id,type,relid)
+     * @return array<int, array{pid:int, gid:int}> item id => keys
+     */
+    private static function productKeysByLine($rows): array
+    {
+        // Hosting relids per line.
+        $hostingRelidByLine = [];
+        foreach ($rows as $r) {
+            $relid = (int) ($r->relid ?? 0);
+            if ($relid > 0 && ThirdPartyStore::serviceType((string) ($r->type ?? '')) === 'hosting') {
+                $hostingRelidByLine[(int) $r->id] = $relid;
+            }
+        }
+        if ($hostingRelidByLine === []) {
+            return [];
+        }
+
+        // relid → packageid (the WHMCS product id).
+        $packageByHosting = Capsule::table('tblhosting')
+            ->whereIn('id', array_values(array_unique($hostingRelidByLine)))
+            ->pluck('packageid', 'id'); // hostingId => packageid
+
+        // packageid → group id.
+        $packageIds = array_values(array_unique(array_map('intval', $packageByHosting->all())));
+        $packageIds = array_values(array_filter($packageIds, static fn ($p) => $p > 0));
+        $products = $packageIds !== []
+            ? Capsule::table('tblproducts')->whereIn('id', $packageIds)->get(['id', 'gid'])->keyBy('id')
+            : collect();
+
+        $out = [];
+        foreach ($hostingRelidByLine as $itemId => $relid) {
+            $pid = (int) ($packageByHosting[$relid] ?? 0);
+            $gid = $pid > 0 && isset($products[$pid]) ? (int) $products[$pid]->gid : 0;
+            $out[$itemId] = ['pid' => $pid, 'gid' => $gid];
         }
 
         return $out;
@@ -243,8 +303,8 @@ class InvoiceFeed
     /**
      * Resolve the distinct client currencies to their ISO codes.
      *
-     * @param  \Illuminate\Support\Collection  $clients
-     * @return array<int, string>  currencyId => code
+     * @param  Collection  $clients
+     * @return array<int, string> currencyId => code
      */
     private static function currencyCodes($clients): array
     {

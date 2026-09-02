@@ -319,6 +319,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - Ενοποιημένο plugin **`ekdosi_bridge`**, **PHP-to-PHP μέσω WHMCS API** (HMAC, όχι shared-DB).
 - **Inbox draft-first** (`WhmcsInbox`) — webhook/poll → `pending_whmcs_invoices` →
   «Δημιουργία Παραστατικού» (editable draft) → lifecycle → write-back `invoiced=MARK`.
+- **Αυτόματη κατηγορία εσόδων ανά ομάδα προϊόντων** (MYD-006 bridge) — σελίδα «Αντιστοίχιση WHMCS
+  (έσοδα)»: αντλεί τον κατάλογο (`GetProducts`), ο χειριστής ορίζει §8.6 bucket **ανά ομάδα** («Web
+  Hosting → υπηρεσία»· νέα πακέτα κληρονομούν). Ο mapper γεμίζει per-line snapshot
+  (`invoice_lines.mydata_income_class(_category)`, `WhmcsIncomeClassifier` product→group→fallback)· ο
+  submitter το διαβάζει πρώτο. Ποσό/περιγραφή μένουν του WHMCS. Plugin feed v0.44.0 δίνει `whmcs_product_id`/
+  `whmcs_group_id` ανά γραμμή.
 - **Paid/unpaid-aware τιμολόγηση**: badge «Πληρωμή WHMCS» (Πληρωμένο/Απλήρωτο) στο inbox· το draft
   προ-επιλέγει τύπο βάσει κατάστασης — ΑΠΛΗΡΩΤΟ → «Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ» (επί πιστώσει →
   ανοιχτή οφειλή), ΠΛΗΡΩΜΕΝΟ → cash-term (τιμολόγιο/απόδειξη κατά πρόθεση)· override πάντα.

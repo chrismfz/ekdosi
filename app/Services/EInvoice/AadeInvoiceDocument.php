@@ -589,19 +589,24 @@ class AadeInvoiceDocument
     {
         $category = $line->product?->productCategory;
 
-        $class = filled($category?->mydata_income_class) ? $category->mydata_income_class : $typeClass;
-        $cat = filled($category?->mydata_income_class_category) ? $category->mydata_income_class_category : $typeCat;
+        // Priority, field by field: the per-line snapshot (WHMCS bridge / explicit)
+        // wins → then the product category override → then the invoice-type default.
+        // A source that sets only the BUCKET keeps the type's E3 class.
+        $lineClass = filled($line->mydata_income_class) ? $line->mydata_income_class : null;
+        $lineCat = filled($line->mydata_income_class_category) ? $line->mydata_income_class_category : null;
+
+        $class = $lineClass ?? (filled($category?->mydata_income_class) ? $category->mydata_income_class : $typeClass);
+        $cat = $lineCat ?? (filled($category?->mydata_income_class_category) ? $category->mydata_income_class_category : $typeCat);
 
         // MYD-006: when the bucket falls back to the GENERIC merchandise default
-        // (category1_1) with NO per-product-category override, the tenant's
-        // business policy decides the goods bucket — a manufacturer files own
-        // products as category1_2, a reseller keeps category1_1. Services / mixed /
-        // unset → null → no change (services types already default to category1_3;
-        // a mixed tenant sets the bucket per product-category, which is the override
-        // branch above). So this only ever moves a merchandise-defaulted line to
-        // category1_2 for a manufacturer — a strict no-op for every services tenant
-        // and every line that already carries its own product-category class.
-        if ($cat === ClassificationGuidance::MERCHANDISE_DEFAULT && ! filled($category?->mydata_income_class_category)) {
+        // (category1_1) with NO explicit source — neither a per-line snapshot nor a
+        // per-product-category override — the tenant's business policy decides the
+        // goods bucket: a manufacturer files own products as category1_2, a reseller
+        // keeps category1_1. Services / mixed / unset → null → no change. An explicit
+        // line or product classification always wins over the policy.
+        if ($cat === ClassificationGuidance::MERCHANDISE_DEFAULT
+            && $lineCat === null
+            && ! filled($category?->mydata_income_class_category)) {
             $policyCat = ClassificationGuidance::goodsCategoryFor($this->tenant->business_activity_type);
             if ($policyCat !== null) {
                 $cat = $policyCat;

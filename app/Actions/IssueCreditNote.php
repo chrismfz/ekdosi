@@ -137,6 +137,11 @@ class IssueCreditNote
                     // MYD-007: a credit note inherits the original line's §8.3 reason,
                     // so a credit of a 0% document files the SAME exemption reason.
                     'vat_exemption_category' => $line->vat_exemption_category,
+                    // MYD-006: likewise carry the original line's §8.6 income-class
+                    // snapshot (WHMCS-bridge stamp), so the credit reverses under the
+                    // SAME income category — not the credit type's default.
+                    'mydata_income_class' => $line->mydata_income_class,
+                    'mydata_income_class_category' => $line->mydata_income_class_category,
                     'product_descr' => $line->product_descr,
                     'metric_unit' => $line->metric_unit,
                     'notes' => $line->notes,

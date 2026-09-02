@@ -176,6 +176,36 @@ class ClassificationPolicyTest extends TestCase
         $this->assertSame(['E3_561_003|category1_3' => 100.0], $this->summaryClasses($xml));
     }
 
+    public function test_per_line_classification_snapshot_wins_over_type_and_policy(): void
+    {
+        // MYD-006 bridge: a line's own §8.6 snapshot (stamped by the WHMCS map)
+        // is filed VERBATIM — over the invoice-type default AND the business policy.
+        // Services type defaults to category1_3, tenant is a manufacturer, yet the
+        // stamped category1_1 line files category1_1.
+        $this->tenant->update(['business_activity_type' => ClassificationGuidance::MANUFACTURER]);
+
+        $type = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ',
+            'invcount' => 1, 'mydata_type' => '11.2',
+            'mydata_income_class' => 'E3_561_003', 'mydata_income_class_category' => 'category1_3',
+        ]);
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'TPY-SNAP', 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $this->customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'vat_percent' => 24, 'price_per_item' => 100,
+            // The snapshot the WHMCS bridge would stamp.
+            'mydata_income_class_category' => 'category1_1',
+        ]);
+
+        // E3 class stays the type's (snapshot set only the bucket); the bucket is
+        // the stamped category1_1, not the type's category1_3 nor a policy value.
+        $this->assertSame(['E3_561_003|category1_1' => 100.0], $this->summaryClasses($this->file($inv->fresh('lines'))));
+    }
+
     public function test_correlated_credit_inherits_the_original_classification(): void
     {
         // MYD-006 acceptance: a correlated (5.1) credit reverses the ORIGINAL income

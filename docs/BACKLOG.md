@@ -643,13 +643,11 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
 
 ## 🧾 MYD-006 follow-ups (business classification policy shipped)
 Το `business_activity_type` + `ClassificationGuidance` + go-live gate + credit inheritance **✅ SHIPPED**. Μένουν:
-- **Per-LINE income-class snapshot** — η ταξινόμηση σήμερα ΕΠΙΛΥΕΤΑΙ στην έκδοση (τύπος/κατηγορία
-  προϊόντος/πολιτική), δεν παγώνει στη γραμμή. Το πιστωτικό κληρονομεί την ταξινόμηση **του τύπου του
-  αρχικού** (`baseClassificationFor`)· αν ο τύπος του αρχικού διαγραφεί/αλλάξει classification, μια
-  free-text (χωρίς προϊόν) γραμμή πιστωτικού πέφτει στο default του τύπου πιστωτικού. Οι product-linked
-  γραμμές είναι ΟΚ (κληρονομούν μέσω αντιγραμμένου `product_id`). Full fix = στήλες
-  `invoice_lines.mydata_income_class(+_category)` snapshot-at-issue (σαν το MYD-007 §8.3), με τον
-  submitter να τις διαβάζει πρώτα — deferred (οι ζωντανοί tenants είναι υπηρεσίες = category1_3, ήδη σωστά).
+- **Per-LINE income-class snapshot** — ✅ **SHIPPED** (WHMCS-bridge PR): στήλες
+  `invoice_lines.mydata_income_class(+_category)`, ο `AadeInvoiceDocument::resolveIncomeClass` τις διαβάζει
+  ΠΡΩΤΕΣ, ο WHMCS mapper τις γεμίζει, ΚΑΙ ο `IssueCreditNote` τις αντιγράφει στη γραμμή του πιστωτικού
+  (ώστε ένα credit να αντιστρέφει την ΙΔΙΑ §8.6 κατηγορία). Manual invoices δεν επηρεάζονται (null → παλιά
+  resolution). Μένει προαιρετικό: UI για χειροκίνητο per-line override στη φόρμα παραστατικού.
 - **Mixed per-category enforcement** — το go-live gate κάνει PASS-με-υπενθύμιση για μικτό tenant (η
   ΕΠΙΛΟΓΗ πολιτικής είναι το blocking act· η ανά-κατηγορία ταξινόμηση είναι καθοδήγηση, όχι hard block —
   μια all-services κατηγορία νόμιμα μένει null). Δεν κάνει FAIL/WARN σε count of null overrides (θα ήταν
@@ -661,14 +659,17 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   tenant ΑΛΛΑΞΕΙ `business_activity_type` μεταξύ έκδοσης αρχικού και πιστωτικού. Ο οριστικός fix
   (per-line income-class snapshot, παραπάνω) το κλείνει· μέχρι τότε αποδεκτό (mid-life αλλαγή είδους
   δραστηριότητας είναι σπάνια + αμφιλεγόμενο ποιο είναι το «σωστό»).
-- **WHMCS «Εισερχόμενα» γραμμές → κατηγορία εσόδων (αντιστοίχιση)** — οι inbox γραμμές δημιουργούνται
-  free-text (`WhmcsInvoiceMapper` → `product_id = null`), άρα ταξινομούνται από τον **τύπο του πρόχειρου
-  παραστατικού** (που διαλέγει ο χειριστής) + την πολιτική εταιρείας — ΟΧΙ ανά προϊόν. Για τους ζωντανούς
-  (υπηρεσίες, ~99%) αυτό είναι **σωστό** (services τύπος → category1_3). Enhancement για το 1% (μικτός/
-  αγαθά): ο mapper να ΑΝΤΙΣΤΟΙΧΙΖΕΙ τη WHMCS γραμμή σε ekdosi `Product` μέσω του υπάρχοντος
-  `products.whmcs_product_id` → τότε η ταξινόμηση (και τιμή/απόθεμα) ρέει από την κατηγορία του προϊόντος.
-  Χρειάζεται: lookup στον mapper (whmcs_product_id → product_id), fallback σε null όπως τώρα. Ξεχωριστό PR
-  (αγγίζει τον inbox mapper· δεν είναι blocker γιατί το default είναι ήδη σωστό).
+- **WHMCS «Εισερχόμενα» γραμμές → κατηγορία εσόδων** — ✅ **SHIPPED** (group-first χάρτης): σελίδα
+  «Αντιστοίχιση WHMCS (έσοδα)» + `WhmcsIncomeMap` (scope group|product) + `WhmcsIncomeClassifier` +
+  per-line stamp· plugin feed v0.44.0 δίνει `whmcs_product_id`/`whmcs_group_id`. Μένουν:
+  - **Product-level override UI** — το schema (scope=product) + ο resolver το υποστηρίζουν ήδη· λείπει
+    ΜΟΝΟ το UI (δεύτερο section στη σελίδα: πακέτα μιας ομάδας με δικό τους select). Group-only σήμερα.
+  - **Non-hosting lines** — το plugin enrichment λύνει pid/gid μόνο για HOSTING γραμμές· domains (δεν
+    είναι προϊόντα) + addons μένουν χωρίς gid → πέφτουν στον τύπο. Τα domains είναι υπηρεσίες ούτως ή
+    άλλως (category1_3 από τον τύπο)· addon-mapping = follow-up αν χρειαστεί.
+  - **Native (plugin-less) tenants** — ο εμπλουτισμός γραμμής γίνεται στο plugin feed· ένας tenant που
+    δεν χρησιμοποιεί το bridge για το inbox δεν παίρνει pid/gid ανά γραμμή (πέφτει στον τύπο). Ο κατάλογος
+    (`GetProducts`) δουλεύει για όλους· το enrichment ανά γραμμή θέλει το bridge.
 - **Seeder δεν εφαρμόζει την πολιτική** — στο fresh install το `business_activity_type` είναι null, οπότε
   ο seeder δεν μπορεί να εφαρμόσει την πολιτική στις seeded κατηγορίες προϊόντων· το go-live gate εξαναγκάζει
   την επιλογή. Follow-up (προαιρετικό): κατά την επιλογή πολιτικής, auto-apply το goods bucket στις

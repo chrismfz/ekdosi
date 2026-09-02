@@ -10,6 +10,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-09-02
+### Added
+- **Invoice-feed line enrichment: `whmcs_product_id` + `whmcs_group_id`.**
+  Each HOSTING line in the bridge invoice feed now carries its WHMCS product id
+  (`tblhosting.packageid`) and product group id (`tblproducts.gid`), batched (relid→packageid→gid). Lets
+  ekdosi classify WHMCS lines to §8.6 income categories **by group** («Web Hosting → υπηρεσία»),
+  with new packages inheriting the group's choice (MYD-006 bridge mapping). Domains/addons/ad-hoc
+  lines resolve to 0 → ekdosi falls back to the invoice-type default, unchanged.
+
 ## [0.43.0] — 2026-07-14
 ### Added
 - **`resolve.php` op `add_payment` — outbound mark-paid (ekdosi → WHMCS).** Delegates to
