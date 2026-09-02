@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -31,9 +32,12 @@ final class FiledSeriesBackfill
      *
      * @param  string  $documentTable  `invoices` or `delivery_notes`
      * @param  int|null  $companyId  restrict to one tenant (the ETL); null = all (the migration)
+     * @param  (callable(Builder): void)|null  $constrain
+     *                                                     Extra narrowing on the joined query. The ETL uses it to stay off
+     *                                                     Filament-created rows, which it has a locked contract never to touch.
      * @return int how many rows were corrected
      */
-    public static function apply(string $documentTable, ?int $companyId = null): int
+    public static function apply(string $documentTable, ?int $companyId = null, ?callable $constrain = null): int
     {
         [$markTable, $foreignKey] = $documentTable === 'invoices'
             ? ['mydata_marks', 'invoice_id']
@@ -68,6 +72,10 @@ final class FiledSeriesBackfill
             $query->where("{$markTable}.company_id", $companyId);
         }
 
+        if ($constrain !== null) {
+            $constrain($query);
+        }
+
         $query->each(function ($row) use (&$bySeries, &$claimed): void {
             $documentId = (int) $row->document_id;
 
@@ -93,9 +101,15 @@ final class FiledSeriesBackfill
         $corrected = 0;
 
         foreach ($bySeries as $series => $ids) {
-            // One UPDATE per distinct series rather than one per row.
-            DB::table($documentTable)->whereIn('id', $ids)->update(['series' => $series]);
-            $corrected += count($ids);
+            // One UPDATE per distinct series rather than one per row — but capped:
+            // these buckets are accumulated across the WHOLE table, so a tenant
+            // where most rows share one series would otherwise push a single
+            // whereIn past MySQL's 65,535-placeholder limit and abort the
+            // migration/ETL transaction.
+            foreach (array_chunk($ids, 500) as $batch) {
+                DB::table($documentTable)->whereIn('id', $batch)->update(['series' => (string) $series]);
+                $corrected += count($batch);
+            }
         }
 
         return $corrected;

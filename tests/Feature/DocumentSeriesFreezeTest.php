@@ -434,6 +434,59 @@ class DocumentSeriesFreezeTest extends TestCase
         $this->assertSame('ΞΕΝΗ', $theirs->fresh()->series);
     }
 
+    public function test_the_shared_backfill_honours_an_extra_constraint(): void
+    {
+        // The ETL passes whereNotNull(legacy_id): its locked contract is that a
+        // Filament-created row is NEVER touched by an import. The migration's own
+        // unscoped pass is what covers those.
+        $imported = $this->invoice(['invcode' => 'ΤΠΥ70', 'code' => 70, 'legacy_id' => 7001]);
+        $operatorMade = $this->invoice(['invcode' => 'ΤΠΥ71', 'code' => 71]);
+        $this->assertNull($operatorMade->legacy_id);
+
+        foreach ([$imported, $operatorMade] as $i => $invoice) {
+            MyDataMark::create([
+                'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+                'mark' => '40000196517796'.$i, 'mydata_action' => 'INSERT',
+                'request' => '<invoiceHeader><series>ΑΠΟΤΟΧΜL</series></invoiceHeader>',
+            ]);
+        }
+
+        $corrected = FiledSeriesBackfill::apply(
+            'invoices',
+            $this->tenant->id,
+            fn ($query) => $query->whereNotNull('invoices.legacy_id'),
+        );
+
+        $this->assertSame(1, $corrected);
+        $this->assertSame('ΑΠΟΤΟΧΜL', $imported->fresh()->series);
+        $this->assertSame('ΤΠΥ', $operatorMade->fresh()->series, 'a Filament-created row is off limits to the ETL');
+
+        // Unconstrained (the migration) still reaches it.
+        $this->assertSame(1, FiledSeriesBackfill::apply('invoices', $this->tenant->id));
+        $this->assertSame('ΑΠΟΤΟΧΜL', $operatorMade->fresh()->series);
+    }
+
+    public function test_the_shared_backfill_updates_more_rows_than_one_batch(): void
+    {
+        // The buckets are accumulated table-wide, so the UPDATE list is capped at
+        // 500 ids: a tenant where most rows share one series would otherwise push a
+        // single whereIn past MySQL's 65,535-placeholder limit. Prove the chunking
+        // still writes every row rather than only the first batch.
+        $ids = [];
+        for ($i = 200; $i < 205; $i++) {
+            $invoice = $this->invoice(['invcode' => 'ΤΠΥ'.$i, 'code' => $i]);
+            $ids[] = $invoice->id;
+            MyDataMark::create([
+                'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+                'mark' => '4000019651779'.$i, 'mydata_action' => 'INSERT',
+                'request' => '<invoiceHeader><series>ΜΑΖΙΚΗ</series></invoiceHeader>',
+            ]);
+        }
+
+        $this->assertSame(5, FiledSeriesBackfill::apply('invoices', $this->tenant->id));
+        $this->assertSame(5, DB::table('invoices')->whereIn('id', $ids)->where('series', 'ΜΑΖΙΚΗ')->count());
+    }
+
     public function test_the_shared_backfill_is_idempotent(): void
     {
         // Re-running the ETL (or the migration) must be a no-op once the series

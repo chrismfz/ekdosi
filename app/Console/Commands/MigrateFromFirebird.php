@@ -1032,7 +1032,14 @@ class MigrateFromFirebird extends Command
      */
     private function upgradeSeriesFromFiledMarks(): void
     {
-        $corrected = FiledSeriesBackfill::apply('invoices', $this->companyId);
+        $corrected = FiledSeriesBackfill::apply(
+            'invoices',
+            $this->companyId,
+            // Legacy-imported rows ONLY. The ETL's locked contract is that a
+            // Filament-created row (legacy_id null) is never touched — the
+            // migration's own unscoped pass already covers those.
+            fn ($query) => $query->whereNotNull('invoices.legacy_id'),
+        );
 
         if ($corrected > 0) {
             $this->line("  series -> corrected from the filed MARK XML on {$corrected} invoice(s)");

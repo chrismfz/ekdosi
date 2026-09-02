@@ -1075,36 +1075,6 @@ class CompanyForm
     }
 
     /**
-     * A "Test … connection" footer button for one myDATA environment.
-     *
-     * It tests the SAVED credentials for the given environment (sandbox
-     * or production) regardless of the tenant's selected mode — so an
-     * operator can verify either set without flipping the dropdown. The
-     * credentials must be saved first (the action reads $record, not the
-     * live form state) — same caveat as every other "Test" button here.
-     */
-    /**
-     * Labeled credential inputs for every configured provider (P3). Each is visible
-     * only when its provider is the selected channel; secret fields are masked and
-     * follow "blank = keep stored". State paths are the synthetic cfg_<key>_<field>
-     * the SendChannelFormBridge assembles into the encrypted config blob.
-     *
-     * @return array<int, TextInput>
-     */
-    /**
-     * Invoice-type options for the three WHMCS default-type selectors (paid
-     * invoice / receipt / unpaid). Monetary types only — a WHMCS auto-issue
-     * default is always a real invoice/receipt, never a movement-only 9.x Δελτίο
-     * Αποστολής (MYD-003). One shared query so the three selectors cannot drift.
-     *
-     * $currentId re-injects the value a field ALREADY holds when it is no longer
-     * selectable (e.g. a legacy 9.x mis-stored before MYD-003), flagged, so the
-     * admin SEES it instead of a silent blank that a save could quietly null —
-     * mirrors DeliveryNoteForm. The runtime still refuses it at allocate().
-     *
-     * @return array<int, string>
-     */
-    /**
      * MYD-024 — an advisory, deliberately NOT a block.
      *
      * The AADE issuer block on an invoice is only vatNumber + country + branch, so
@@ -1142,6 +1112,19 @@ class CompanyForm
         );
     }
 
+    /**
+     * Invoice-type options for the three WHMCS default-type selectors (paid
+     * invoice / receipt / unpaid). Monetary types only — a WHMCS auto-issue
+     * default is always a real invoice/receipt, never a movement-only 9.x Δελτίο
+     * Αποστολής (MYD-003). One shared query so the three selectors cannot drift.
+     *
+     * $currentId re-injects the value a field ALREADY holds when it is no longer
+     * selectable (e.g. a legacy 9.x mis-stored before MYD-003), flagged, so the
+     * admin SEES it instead of a silent blank that a save could quietly null —
+     * mirrors DeliveryNoteForm. The runtime still refuses it at allocate().
+     *
+     * @return array<int, string>
+     */
     private static function whmcsDefaultTypeOptions(?Company $record, ?int $currentId = null): array
     {
         if (! $record) {
@@ -1166,6 +1149,14 @@ class CompanyForm
         return $opts;
     }
 
+    /**
+     * Labeled credential inputs for every configured provider (P3). Each is visible
+     * only when its provider is the selected channel; secret fields are masked and
+     * follow "blank = keep stored". State paths are the synthetic cfg_<key>_<field>
+     * the SendChannelFormBridge assembles into the encrypted config blob.
+     *
+     * @return array<int, TextInput>
+     */
     private static function providerCredentialFields(): array
     {
         $fields = [];
@@ -1249,6 +1240,15 @@ class CompanyForm
             });
     }
 
+    /**
+     * A "Test … connection" footer button for one myDATA environment.
+     *
+     * It tests the SAVED credentials for the given environment (sandbox
+     * or production) regardless of the tenant's selected mode — so an
+     * operator can verify either set without flipping the dropdown. The
+     * credentials must be saved first (the action reads $record, not the
+     * live form state) — same caveat as every other "Test" button here.
+     */
     private static function mydataTestAction(string $name, string $label, MyDataMode $environment): FormAction
     {
         return FormAction::make($name)

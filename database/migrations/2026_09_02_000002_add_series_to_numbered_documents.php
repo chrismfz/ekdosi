@@ -38,7 +38,10 @@ return new class extends Migration
     {
         // hasColumn-guarded so a re-run after a backfill that died mid-way
         // (a big tenant, a killed process) resumes instead of erroring on the
-        // column — the backfill itself only ever touches still-null rows.
+        // column. It converges: pass 1 only fills still-null rows, and pass 2 —
+        // deliberately NOT gated on null — re-checks every filed row against its
+        // MARK XML, so a row pass 1 had already written before the crash still
+        // gets its authoritative value on the re-run.
         foreach (['invoices', 'delivery_notes'] as $table) {
             if (! Schema::hasColumn($table, 'series')) {
                 Schema::table($table, function (Blueprint $t): void {
