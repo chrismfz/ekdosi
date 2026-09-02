@@ -517,13 +517,20 @@ class Company extends Model
      * not an edit. Used to warn the operator rather than to block them.
      *
      * Counts marks, not documents: a MARK is the proof a filing happened at all,
-     * and it survives the document being cancelled.
+     * and it survives the document being cancelled (a cancellation is itself a
+     * filing under the current identity).
+     *
+     * ONLY rows carrying a real MARK. `mydata_marks` also stores forensic rows with
+     * a null mark — DRY_RUN, REJECTED, PROVIDER_FAILED — and counting those would
+     * make a `mydata:test-submit` dry-run, or an AADE rejection, raise the warning
+     * during exactly the pre-first-filing phase it must stay silent in. Worse, it
+     * would warn against fixing the ΑΦΜ typo that caused the rejection.
      */
     public function filedDocumentCount(): int
     {
         // Explicit company_id, per the CLAUDE.md CLI/queue rule — this is also
         // reachable outside a tenant context.
-        return MyDataMark::where('company_id', $this->getKey())->count()
-            + DeliveryMark::where('company_id', $this->getKey())->count();
+        return MyDataMark::where('company_id', $this->getKey())->whereNotNull('mark')->where('mark', '!=', '')->count()
+            + DeliveryMark::where('company_id', $this->getKey())->whereNotNull('mark')->where('mark', '!=', '')->count();
     }
 }

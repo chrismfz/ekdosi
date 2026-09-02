@@ -51,4 +51,36 @@ final class DocumentSeries
 
         return $series !== '' ? $series : null;
     }
+
+    /**
+     * The series a document was ACTUALLY filed under, read out of the request XML
+     * we stored when we sent it.
+     *
+     * This is the authoritative source and it beats `invcode` for one real case:
+     * a draft numbered under «ΤΠΥ», the type renamed to «ΤΠΥ2», and only then
+     * filed. AADE holds ΤΠΥ2; `invcode` still says ΤΠΥ. Freezing ΤΠΥ there would
+     * turn a row the reconciler currently MATCHES into a permanent conflict — a
+     * fix creating the problem it exists to prevent. Outside that window the two
+     * agree, so this only ever refines the answer.
+     *
+     * Null for anything it cannot read with certainty: a CANCEL row (whose
+     * `request` is a free-text reason, not XML), a dry-run, a row with no request
+     * stored. The caller then falls back to `fromInvcode()`.
+     */
+    public static function fromRequestXml(?string $xml): ?string
+    {
+        if ($xml === null || ! str_contains($xml, '<')) {
+            return null;
+        }
+
+        // Optional namespace prefix; the payload carries exactly one invoice, and
+        // the header's series is the first occurrence either way.
+        if (preg_match('#<(?:[A-Za-z0-9_.-]+:)?series>(.*?)</(?:[A-Za-z0-9_.-]+:)?series>#u', $xml, $m) !== 1) {
+            return null;
+        }
+
+        $series = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
+
+        return $series !== '' ? $series : null;
+    }
 }

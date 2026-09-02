@@ -8,6 +8,7 @@ use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
+use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Support\DocumentSeries;
@@ -266,6 +267,101 @@ class DocumentSeriesFreezeTest extends TestCase
         $this->assertSame('ΤΠΥ', $good->fresh()->series);
         $this->assertNull($odd->fresh()->series, 'an unreadable pair stays null and falls back at read time');
         $this->assertSame('ΤΠΥ', $odd->fresh()->filedSeries());
+    }
+
+    /**
+     * @return array<string, array{0: ?string, 1: ?string}>
+     */
+    public static function requestXmlShapes(): array
+    {
+        return [
+            'plain header' => ['<invoiceHeader><series>ΤΠΥ2</series><aa>7</aa></invoiceHeader>', 'ΤΠΥ2'],
+            'namespaced' => ['<ns:invoiceHeader><ns:series>APY</ns:series></ns:invoiceHeader>', 'APY'],
+            'padded' => ['<series>  ΑΠΕ-Κ  </series>', 'ΑΠΕ-Κ'],
+            'entity-escaped' => ['<invoice><series>A&amp;B</series></invoice>', 'A&B'],
+            // A CANCEL row's `request` is a free-text reason, not XML.
+            'cancel reason text' => ['Cancel reason: λάθος πελάτης', null],
+            'empty series' => ['<series></series>', null],
+            'no request stored' => [null, null],
+        ];
+    }
+
+    #[DataProvider('requestXmlShapes')]
+    public function test_series_is_read_from_the_stored_request_xml(?string $xml, ?string $expected): void
+    {
+        $this->assertSame($expected, DocumentSeries::fromRequestXml($xml));
+    }
+
+    public function test_the_backfill_prefers_what_was_actually_filed_over_the_invcode(): void
+    {
+        // The one case where invcode is NOT the filed series: a draft numbered
+        // under ΤΠΥ, the type renamed to ΤΠΥ2, and only then filed. AADE holds
+        // ΤΠΥ2. Freezing the invcode value would turn a row the reconciler
+        // currently MATCHES into a permanent conflict — the fix causing the very
+        // problem it exists to prevent.
+        $invoice = $this->invoice(['invcode' => 'ΤΠΥ50', 'code' => 50]);
+        DB::table('invoices')->where('id', $invoice->id)->update(['series' => null]);
+
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177931', 'mydata_action' => 'INSERT',
+            'request' => '<invoiceHeader><series>ΤΠΥ2</series><aa>50</aa></invoiceHeader>',
+        ]);
+
+        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration->up();
+
+        $this->assertSame('ΤΠΥ2', $invoice->fresh()->series);
+    }
+
+    public function test_the_backfill_ignores_marks_that_prove_nothing(): void
+    {
+        // A dry-run and a rejection both store the request XML but no MARK — AADE
+        // never accepted them, so they do not say what the document is filed as.
+        // A CANCEL row's request is a free-text reason, not XML.
+        $invoice = $this->invoice(['invcode' => 'ΤΠΥ51', 'code' => 51]);
+        DB::table('invoices')->where('id', $invoice->id)->update(['series' => null]);
+
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => null, 'mydata_action' => 'DRY_RUN',
+            'request' => '<invoiceHeader><series>ΠΟΤΕ</series></invoiceHeader>',
+        ]);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177940', 'mydata_action' => 'CANCEL',
+            'request' => 'Cancel reason: ΠΟΤΕ',
+        ]);
+
+        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration->up();
+
+        $this->assertSame('ΤΠΥ', $invoice->fresh()->series, 'falls back to the frozen invcode');
+    }
+
+    public function test_the_first_accepted_filing_wins_over_a_later_one(): void
+    {
+        // A re-file must not rewrite the identity the document has held since its
+        // first accepted filing.
+        $invoice = $this->invoice(['invcode' => 'ΤΠΥ52', 'code' => 52]);
+        DB::table('invoices')->where('id', $invoice->id)->update(['series' => null]);
+
+        $first = MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177941', 'mydata_action' => 'INSERT',
+            'request' => '<invoiceHeader><series>ΠΡΩΤΗ</series></invoiceHeader>',
+        ]);
+        $second = MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177942', 'mydata_action' => 'INSERT',
+            'request' => '<invoiceHeader><series>ΔΕΥΤΕΡΗ</series></invoiceHeader>',
+        ]);
+        $this->assertLessThan($second->id, $first->id);
+
+        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration->up();
+
+        $this->assertSame('ΠΡΩΤΗ', $invoice->fresh()->series);
     }
 
     public function test_the_backfill_does_not_skip_rows_when_it_pages(): void

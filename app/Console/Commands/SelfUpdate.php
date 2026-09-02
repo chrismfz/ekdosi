@@ -86,7 +86,13 @@ class SelfUpdate extends Command
 
             $this->warn($message);
 
-            return self::FAILURE;
+            // SUCCESS, not FAILURE: the RUN failed (recorded on the row above), but
+            // the scheduled TASK did exactly what it should. $trackSchedule's
+            // onFailure would otherwise stamp `self_update => failed` in the health
+            // record, and since the task never runs again once nothing is queued,
+            // ops:health would report «Απέτυχε προγραμματισμένη εργασία: self-update»
+            // and exit 1 forever over a correct, intentional state.
+            return self::SUCCESS;
         }
 
         $this->buffer = (string) $run->output;

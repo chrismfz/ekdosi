@@ -172,6 +172,15 @@ class EpsilonImporter
                 $gross = round((float) ($sale['TotalVal'] ?? 0), 2);
 
                 $header = [
+                    // MYD-018: freeze the series the document was ISSUED under.
+                    // These are raw query-builder writes, so the model's creating
+                    // hook never fires — and Epsilon hands us the series directly
+                    // (it is the same value $invcode is built from), so there is
+                    // nothing to recover. Without this every imported row — all of
+                    // them already filed, mark set — would keep reading the mutable
+                    // invoice_types.code and report a series conflict after any
+                    // rename.
+                    'series' => $series,
                     'invoice_type_id' => $typeId,
                     'customer_id' => $customerId,
                     'code' => $docNum,

@@ -110,6 +110,51 @@ class CompanyIdentityWarningTest extends TestCase
         $this->assertSame(2, $tenant->filedDocumentCount());
     }
 
+    public function test_a_dry_run_or_rejection_does_not_count_as_filed(): void
+    {
+        // mydata_marks also stores forensic rows with a NULL mark — DRY_RUN,
+        // REJECTED, PROVIDER_FAILED. Counting those would raise the warning during
+        // exactly the pre-first-filing phase it must stay silent in: a
+        // `mydata:test-submit` dry-run, or an AADE rejection — and it would warn
+        // against fixing the very ΑΦΜ typo that caused the rejection.
+        $tenant = $this->company();
+        $type = InvoiceType::create([
+            'company_id' => $tenant->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ',
+            'invcount' => 1, 'mydata_type' => '2.1',
+        ]);
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Πελάτης', 'afm' => '997073525',
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $tenant->id, 'invcode' => 'ΤΠΥ1', 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+
+        MyDataMark::create([
+            'company_id' => $tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => null, 'mydata_action' => 'DRY_RUN',
+        ]);
+        MyDataMark::create([
+            'company_id' => $tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => null, 'mydata_action' => 'REJECTED',
+        ]);
+        MyDataMark::create([
+            'company_id' => $tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '', 'mydata_action' => 'PROVIDER_FAILED',
+        ]);
+
+        $this->assertSame(0, $tenant->filedDocumentCount());
+
+        // The first ACCEPTED filing is what flips it.
+        MyDataMark::create([
+            'company_id' => $tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177931', 'mydata_action' => 'INSERT',
+        ]);
+
+        $this->assertSame(1, $tenant->filedDocumentCount());
+    }
+
     public function test_another_tenants_filings_do_not_count(): void
     {
         $mine = $this->company();

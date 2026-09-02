@@ -213,6 +213,16 @@ class SystemHealth extends Page
      * page must not just say «there is an update» and leave them looking for a
      * button that is deliberately not there.
      */
+    /**
+     * Public twin of applyAvailable() for the blade — the «upgrade from the server»
+     * box and the install button are alternatives, never both. (applyAvailable() is
+     * private and a blade cannot reach it.)
+     */
+    public function inAppApplyArmed(): bool
+    {
+        return $this->applyAvailable();
+    }
+
     public function updateCommand(): ?string
     {
         $target = $this->update['latest_version'] ?? null;

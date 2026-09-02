@@ -79,10 +79,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   διπλή δήλωση εσόδου). Νέες στήλες `invoices.series` / `delivery_notes.series`· όλοι οι
   αναγνώστες ταυτότητας (payload header, in-doubt recovery, InvoSign status, reconciler,
   MARK detail, λογιστικό ημερολόγιο) περνούν πλέον από `filedSeries()`. Το backfill δεν μαντεύει:
-  το `invcode` είναι ήδη παγωμένο και ισούται με `σειρά . ΑΑ`, οπότε ανακτά την **ιστορική** τιμή
-  (`App\Support\DocumentSeries` — μία μοναδική υλοποίηση για migration, models και Firebird ETL).
-  Γραμμές που δεν έχουν αυτό το σχήμα μένουν null και πέφτουν πίσω στο ζωντανό lookup, δηλαδή
-  ακριβώς η σημερινή συμπεριφορά.
+  για ό,τι έχει **ήδη υποβληθεί** διαβάζει τη σειρά από το αποθηκευμένο request XML του MARK —
+  κυριολεκτικά ό,τι στείλαμε στην ΑΑΔΕ — και για τα υπόλοιπα από το `invcode`, που είναι ήδη
+  παγωμένο και ισούται με `σειρά . ΑΑ` (`App\Support\DocumentSeries` — μία μοναδική υλοποίηση για
+  migration, models, Firebird ETL και Epsilon importer). Γραμμές χωρίς καμία από τις δύο πηγές
+  μένουν null και πέφτουν πίσω στο ζωντανό lookup, δηλαδή ακριβώς η σημερινή συμπεριφορά.
 - **Ταυτότητα αντισυμβαλλόμενου = το παγωμένο snapshot (MYD-009)** — ο `AadeInvoiceDocument::buildCounterpart`
   έστελνε `customer->afm` και `customer->name` (**ζωντανά**) ενώ έπαιρνε χώρα/διεύθυνση από το
   snapshot του τιμολογίου: το δηλωμένο πρόσωπο ήταν **μισό παγωμένο και μισό ζωντανό**, οπότε μια

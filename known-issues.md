@@ -1656,12 +1656,19 @@ AADE does not dedup (proven on the sandbox 2026-07-07: the same invoiceUid yield
 `MyDataSubmitInDoubtTest::test_recovery_searches_the_series_the_document_was_filed_under` pins it;
 reverting the one-line fix makes that test attempt exactly that second POST.
 
-Existing rows did not have to be guessed. `invcode` is itself frozen and is exactly `series . code`
-(legacy `GET_INV_CODE` concatenates with no padding or separator; `InvoiceNumberer` reproduces
-that), so the backfill recovers the value as it was at issue rather than approximating it from
-today's lookup. `App\Support\DocumentSeries::fromInvcode()` is the ONE definition, shared by the
-migration backfill, both models' `creating` hooks and the Firebird ETL (a query-builder upsert, so
-no model hook fires there) — a stored value and a recovered one cannot disagree. A pair it cannot
+Existing rows did not have to be guessed. For a document already FILED, the request XML stored on
+its issue MARK is authoritative — literally what we sent. Everything else falls back to `invcode`,
+which is itself frozen and is exactly `series . code` (legacy `GET_INV_CODE` concatenates with no
+padding or separator; `InvoiceNumberer` reproduces that). The two disagree in one real case, which
+is why the MARK is consulted first: a draft numbered under «ΤΠΥ», the type renamed to «ΤΠΥ2», and
+only then filed — AADE holds ΤΠΥ2 while `invcode` still says ΤΠΥ, so freezing the invcode value
+there would turn a row the reconciler currently MATCHES into a permanent conflict, this fix causing
+the very problem it exists to prevent. Only INSERT marks that carry a real MARK are read (a CANCEL
+row's `request` is a free-text reason, a dry-run or rejection was never accepted), oldest first so a
+re-file cannot rewrite an identity. `App\Support\DocumentSeries` is the ONE definition, shared by
+the migration backfill, both models' `creating` hooks, the Firebird ETL and the Epsilon importer
+(both query-builder writers, so no model hook fires there) — a stored value and a recovered one
+cannot disagree. A pair it cannot
 read stays null and falls back to the live type code, i.e. exactly today's behaviour, so no row is
 made worse. Two traps found while building it: cutting `invcode` with a BYTE offset while counting
 CHARACTERS sliced «ΤΠΥ» in half (the series is routinely Greek), and reading the frozen column with

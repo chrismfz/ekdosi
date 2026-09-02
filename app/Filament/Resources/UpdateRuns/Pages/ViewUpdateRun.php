@@ -48,9 +48,11 @@ class ViewUpdateRun extends ViewRecord
         $original = $this->record;
 
         // Hard guard as well as ->visible(): mountAction does not re-check
-        // visibility (CLAUDE.md). canRollback() already includes the in-app-apply
-        // flag, so a disarmed deploy cannot queue a rollback either — the host
-        // path is deploy/rollback.sh.
+        // visibility (CLAUDE.md). The arming flag is a SEPARATE term on purpose —
+        // canRollback() answers whether the run is structurally reversible, which
+        // arming does not change — so it must be tested here explicitly. Even if
+        // it were missed, SelfUpdate refuses the queued rollback; the host path is
+        // deploy/rollback.sh.
         if (! UpdateRun::inAppApplyEnabled() || ! $original->canRollback()) {
             Notification::make()
                 ->title('Δεν είναι δυνατή η επαναφορά αυτής της ενημέρωσης')

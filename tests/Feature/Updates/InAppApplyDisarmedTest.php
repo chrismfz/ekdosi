@@ -50,8 +50,13 @@ class InAppApplyDisarmedTest extends TestCase
         // the row is failed with the command they should run instead.
         $run = $this->queuedRun();
 
+        // Exit 0, NOT 1: the RUN failed (recorded on the row), but the scheduled
+        // TASK did exactly what it should. A non-zero exit makes $trackSchedule's
+        // onFailure stamp `self_update => failed`, and since the task never runs
+        // again once nothing is queued, ops:health would report a failed scheduled
+        // task and exit 1 forever over a correct, intentional state.
         $this->artisan('ekdosi:self-update', ['--run' => $run->id])
-            ->assertExitCode(1);
+            ->assertExitCode(0);
 
         $fresh = $run->fresh();
         $this->assertSame(UpdateRun::STATUS_FAILED, $fresh->status);
@@ -67,7 +72,7 @@ class InAppApplyDisarmedTest extends TestCase
         $run = $this->queuedRun();
 
         $this->artisan('ekdosi:self-update', ['--pending' => true])
-            ->assertExitCode(1);
+            ->assertExitCode(0);
 
         $this->assertSame(UpdateRun::STATUS_FAILED, $run->fresh()->status);
     }
@@ -113,7 +118,7 @@ class InAppApplyDisarmedTest extends TestCase
         ]);
 
         $this->artisan('ekdosi:self-update', ['--run' => $rollback->id])
-            ->assertExitCode(1);
+            ->assertExitCode(0);
 
         $this->assertSame(UpdateRun::STATUS_FAILED, $rollback->fresh()->status);
         $this->assertSame('disabled', $rollback->fresh()->phase);

@@ -160,6 +160,18 @@ class EpsilonImporterTest extends TestCase
 
         // The ΤΙΜ counter advanced past the imported numbers (next ΑΑ = 386).
         $this->assertSame(386, (int) \App\Models\InvoiceType::where('company_id', $this->tenant->id)->where('code', 'ΤΙΜ')->value('invcount'));
+
+        // MYD-018: these are raw query-builder writes, so the model's creating
+        // hook never fires — the importer must freeze the series itself. Every
+        // imported row is already FILED, so leaving it on the mutable lookup
+        // would make a later rename put the whole import into reconciler conflict.
+        $this->assertSame('ΤΙΜ', $inv->series);
+        $this->assertSame('ΤΙΜ', $inv->filedSeries());
+
+        \App\Models\InvoiceType::where('company_id', $this->tenant->id)
+            ->where('code', 'ΤΙΜ')->update(['code' => 'ΤΙΜ2']);
+
+        $this->assertSame('ΤΙΜ', $inv->fresh()->filedSeries(), 'a rename must not rewrite an imported filing');
     }
 
     public function test_sales_store_filed_line_values_verbatim_not_recomputed(): void
