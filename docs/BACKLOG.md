@@ -560,6 +560,29 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει** — θέλει διερεύνηση ρόλων/δικαιωμάτων.
   _(#6 Βιβλίο→period report + Panel utility CSS: ✅ SHIPPED — βλ. «Done recently».)_
 
+## 🔎 MCP forensics για το cutover — **OBS-001** (`known-issues.md`, bucket A)
+Τα στοιχεία **υπάρχουν ήδη** στη βάση: byte-exact request/response XML ανά προσπάθεια στο
+`mydata_marks` (και στα forensic rows `REJECTED`/`CANCEL_REJECTED`/`PROVIDER_REJECTED`/
+`PROVIDER_FAILED`, με το *πραγματικά* σταλμένο augmented payload), `provider_key`/
+`authentication_code`/`cancellation_mark`, `invoices.mydata_pending_since` για τα in-doubt, και
+`mydata_state`/`mydata_mark` στο activity trail. **Δεν λείπει logging — λείπει πρόσβαση**: το MCP
+σήμερα έχει μόνο υποδομή (`app_health` / `failed_jobs` / `log_tail`) και κανένα εργαλείο δεν απαντά
+«γιατί απορρίφθηκε το ΤΠΥ6661;». Δείκτης του κενού: το `app_health` λέει «92 αποκλίσεις myDATA» και
+δεν υπάρχει τρόπος να δεις **ούτε μία**.
+- **`invoice_filing`** *(το σημαντικό)* — με `invcode`/id: τοπική vs myDATA κατάσταση + όλο το
+  ιστορικό `mydata_marks` (action, ΜΑΡΚ, cancellation ΜΑΡΚ, πάροχος, auth code, χρόνοι), με opt-in
+  flag για το πλήρες request/response XML μιας γραμμής.
+- **`mydata_failures`** — πρόσφατα `*REJECTED`/`*FAILED` cross-tenant, με τους κωδικούς `[nnn]` /
+  `[88-nnn]` βγαλμένους από την απάντηση. «Τι χαλάει τώρα» χωρίς να ξέρεις ποιο παραστατικό.
+- **`mydata_discrepancies`** — τα buckets του `SalesReconciler` ως γραμμές, όχι αριθμός.
+- **`stuck_documents`** — in-doubt (`mydata_pending_since`), αριθμημένα-αλλά-αδήλωτα, provider
+  attempts χωρίς ΜΑΡΚ.
+- **`preflight`** — `mydata:preflight` / `ekdosi:go-live-check` μέσω MCP.
+- **Φτηνό extra:** οι submitters λογάρουν μόνο αποτυχίες· μία δομημένη INFO γραμμή ανά έκβαση
+  (κανάλι, τύπος, series/ΑΑ, ΜΑΡΚ, διάρκεια) κάνει το `log_tail --contains=<invcode>` χρήσιμο ακόμη
+  κι όταν αυτό που απέτυχε είναι το ίδιο το DB write.
+- **Ρητά ΔΕΝ χρειάζεται:** επιπλέον activity coverage, verbose/debug logging, δεύτερο audit store.
+
 ## 🖥️ Console/interface polish (B — sweep 2026-06-16)
 - _(**Auto-refresh-on-stale** στην Κονσόλα myDATA: ✅ SHIPPED 2026-06-17 — stale banner >6h + opt-in
   `mydata:refresh-console` scheduled warmer (όλα τα snapshots, default OFF, σαν το VAT picture). FEATURES §3.)_

@@ -191,6 +191,26 @@ from `[Unreleased]`; `--major` explicit for milestones).
   το token+payload αλλού. (Deferred hardening — TOCTOU DNS-pin, endpoint-profile registry — στο BACKLOG.)
 
 ### Changed
+- **`known-issues.md` — «Go-live triage 2026-09-02» + `Bucket` στήλη στο work board.** Το ledger
+  γράφτηκε από διαδοχικά **source audits**: βαθμολογούν κάθε εύρημα μόνο του, ποτέ απέναντι σε
+  επιχειρηματικό scope ή ημερομηνία — γι' αυτό ένα P0 που δεν μπορεί να συμβεί εδώ προσπερνούσε ένα
+  P1 της πρώτης μέρας. Κάθε ανοιχτό item ξανα-ταξινομήθηκε **A** (blocker πριν την 1/10) / **B**
+  (μετά το cutover) / **C** (εκτός scope των δύο tenants — re-raise αν αλλάξει) / **D** (το ledger
+  είναι πίσω από τον κώδικα), με βάση (α) runtime evidence που ήδη είχαμε, (β) το πραγματικό μείγμα
+  παραστατικών (840+15 τον χρόνο, μόνο ΤΠΥ/ΤΙΜ/ΠΙΣ) και (γ) ζωντανό `ops:health`. Αποτέλεσμα:
+  **6 blockers**, 14 εκτός scope. Τρεις αναβαθμίσεις/υποβαθμίσεις με τεκμήριο: **PROV-001 P0→P2**
+  (ο InvoSign κάνει **dedup** + real-time status — sandbox 2026-07-07 — άρα διπλό νομικό παραστατικό
+  δεν είναι εφικτό σε αυτόν τον πάροχο· re-raise σε πάροχο που δεν κάνει dedup), **PROV-014 → DONE**
+  (τα single-flight locks είχαν ήδη μπει, `97c23de`/`23b1fa4`), **SETUP-003 P1→P2** (το unmapped
+  payment method ήδη προειδοποιεί + βγαίνει στο preflight — το να μπλοκάρεις έκδοση γι' αυτό είναι
+  χειρότερο από το type 3).
+- **`known-issues.md` — νέο OBS-001 (P1, bucket A).** Τα forensics της υποβολής **υπάρχουν ήδη**
+  (byte-exact request/response XML ανά προσπάθεια, forensic `REJECTED`/`PROVIDER_FAILED` rows,
+  `mydata_pending_since`, `mydata_state`/`mydata_mark` στο activity trail) αλλά **δεν φτάνουν στο
+  MCP**: τα υπάρχοντα εργαλεία είναι υποδομής (`app_health`/`failed_jobs`/`log_tail`) και κανένα δεν
+  απαντά «γιατί απορρίφθηκε το ΤΠΥ6661;». Προτείνονται 5 read-only tools (`invoice_filing`,
+  `mydata_failures`, `mydata_discrepancies`, `stuck_documents`, `preflight`). **Δεν χρειάζεται
+  επιπλέον logging ή activity** — μόνο πρόσβαση.
 - **Ημερολόγιο leads**: λέει ρητά ότι δείχνει ΜΟΝΟ leads με «επόμενο βήμα» και πόσα ανοιχτά leads δεν
   έχουν καθόλου ημερομηνία (με link στη λίστα) — αλλιώς έμοιαζε άδειο/χαλασμένο.
 - **`customers:afm-duplicates`**: δείχνει τι κρέμεται από κάθε διπλό (παραστατικά/πληρωμές/…), σημειώνει
