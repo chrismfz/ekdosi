@@ -1,7 +1,7 @@
 # Leads / mini-CRM — αναλυτικό design (pre-build)
 
 > **STATUS: L0 + L1 SHIPPED (2026-09-01) — resource, χρονολόγιο, καταστάσεις, dedupe, μετατροπή σε πελάτη,
-> «Προέλευση», προσφορά από lead. L2 ✅ SHIPPED — «Απολογισμός πωλήσεων» + CSV, `leads:notify-due`, dashboard widget (weekly digest email = προαιρετικό, BACKLOG). L3 κατά ζήτηση (§10).**
+> «Προέλευση», προσφορά από lead. L2 ✅ SHIPPED — «Απολογισμός πωλήσεων» + CSV, `leads:notify-due`, dashboard widget (weekly digest email = προαιρετικό, BACKLOG). L3 όψεις ✅ SHIPPED (kanban «Πίνακας» + «Ημερολόγιο»)· email-από-lead / AI tool = ΟΧΙ (owner).**
 > Πλάνο + ανάλυση για να «υπάρχει κάπου» μέχρι να κλείσουν τα audits / bug-fix sessions. Twin των `docs/domains/README.md` /
 > `docs/payment-connectors.md` (design-first, gates, build-όπου-θες).
 >
@@ -272,7 +272,7 @@ Page **«Απολογισμός πωλήσεων»** (`app/Filament/Pages/SalesA
 | **L0 — MVP** | Migrations (`leads`, `lead_activities`) · enums · `Lead`/`LeadActivity` models + observer (`last_activity_at`, auto `status_change`) · `LeadResource` (λίστα/tabs/φόρμα) · `ActivitiesRelationManager` με τα 4 quick-add · dedupe warning (§4, `LeadMatcher` + tests) · Shield perms + `OPERATOR_PERMISSION_MAP` · `FEATURES.md` §7β + CHANGELOG + `shield:generate` | 1 PR |
 | **L1 — Μετατροπή** | `ConvertLeadToCustomer` (+ «σύνδεση με υπάρχοντα») · `Customer::originLead()` + section «Προέλευση» · `quotes.lead_id` + «Νέα προσφορά» από lead + prefill · feature test: convert → customer created, link both ways, idempotent, tags copied, quotes re-pointed | 1 PR |
 | **L2 — Λογοδοσία** | `SalesActivityReport` page + CSV export · `leads:notify-due` (scheduled, gated flag, DB notification) · dashboard widget · προαιρετικό weekly digest email | 1 PR |
-| **L3 — Προαιρετικά (όχι τώρα)** | αποστολή email ΑΠΟ τον lead (template μέσω `MailTemplateRenderer`/`TenantMailerFactory`, auto-log γραμμή `email/sent` — μοτίβο `QuoteMailLog`) · kanban όψη · AI «Βοηθός» read tool `lead_summary` (ίδιο grounding pattern) | κατά ζήτηση |
+| **L3 — Όψεις** | ✅ kanban «Πίνακας leads» (drag = αλλαγή κατάστασης μέσω του ίδιου hook· «Όχι τώρα» με ημερομηνία· Won/Lost/DNC ποτέ από τον πίνακα) · ✅ «Ημερολόγιο leads» (μήνας Δευ–Κυρ, επόμενα βήματα, drag = μετάθεση) — Alpine + HTML5 drag, χωρίς βιβλιοθήκη · ~~email ΑΠΟ τον lead~~ / ~~AI `lead_summary`~~ = ΟΧΙ (owner 2026-09-02, «too much») | 1 PR |
 
 Tests που πρέπει να υπάρχουν από L0: `LeadMatcherTest` (ΑΦΜ/email/phone normalisation, match σε
 customer vs lead vs dnc), `LeadStatusTransitionTest` (won μόνο μέσω action, auto status_change row),
