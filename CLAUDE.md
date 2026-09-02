@@ -147,10 +147,32 @@ The rule, learned the hard way on MYD-017 and MYD-011 — and then over-learned 
 - **Sanity-check a fix against real values before trusting it.** The Greek-ΑΦΜ
   inference "worked" until a 10-second `php -r` showed `DE811234567` validating as
   Greek (the digit-strip ate the prefix). A cheap probe beats a plausible-looking diff.
-- **Don't let a fix widen into a new regression.** Refusing bad data is right, but
-  check what *legitimate* existing data the refusal breaks (the blanket
-  no-country refusal would have made every domestic note with a blank
-  `customers.country` unissuable) — find the positive-evidence path instead.
+- **Run the full suite before every commit, not just the review.** On MYD-009 it caught
+  three regressions the reviewer had not seen — including a silent
+  «present-but-unresolvable country → GR», the exact class of bug that change existed
+  to remove.
+- **Don't let a fix widen into a new regression — and check BOTH directions.** A refusal
+  that stops bad data can strand legitimate data (the blanket no-country refusal would
+  have made every domestic note with a blank `customers.country` unissuable; a customer
+  *rename* made every legacy invoice with a blank country unissuable), and a heuristic
+  that spots foreign parties can misfire on domestic ones (`AE997073525` read as the
+  UAE). Find the positive-evidence path instead.
+- **Fix at the ROOT, not at the call site.** Both MYD-009 P0s were the SAME defect
+  reached from two entry points, because the first was patched locally instead of
+  collapsing a duplicated policy into one definition. If a second round finds the same
+  bug by another route, stop patching and go look for the duplicate.
+- **Declining a finding is a legitimate disposition**, not a dodge — with the reason at
+  the call site. Routing `SalesReconciler` through the invoice identity helper was
+  proposed, tried, and reverted: reconciliation solves the opposite problem (every row
+  there is already filed), and the change failed all eight legacy-row tests.
+
+**The merge bar is not a perfection bar.** Merge when: strictly better than `main` · no
+known P0/P1 · suite green · reversible (no destructive migration). "Has known P2s" is a
+normal state for merged code. MYD-009 ran **nine** rounds for one of ~50 open issues:
+rounds 1–4 found 2 P0 (both in FIX code, not the original change), and every round after
+that found only what the previous round's fix had introduced — round 5's main action was
+*removing* a check added in round 4. Under this rule it would have shipped at round 5
+with the same substantive outcome.
 
 ## Changelog + features discipline (keep these current — we were losing track)
 Part of "done", like tests. **Every change updates the right place:**

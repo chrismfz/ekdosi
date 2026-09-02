@@ -88,6 +88,12 @@ class EnrichInvoiceFromAade
                 $set['company_name'] = $aade['counterpartName'];
                 $filled[] = 'επωνυμία αντισυμβαλλόμενου';
             }
+            // Deliberately still blank(), NOT "is this an identity" (MYD-009): a
+            // populated value — even a placeholder like «999999999» — is what the
+            // OPERATOR put there, and this service's contract is fill-blanks +
+            // FLAG the difference, never silently rewrite. A placeholder therefore
+            // surfaces as a ⚠ diff row for a human to act on, which is the honest
+            // outcome for a legally filed document.
             if ($outbound && blank($invoice->vat_no) && filled($aade['counterpartVat'] ?? null)) {
                 $set['vat_no'] = $aade['counterpartVat'];
                 $filled[] = 'ΑΦΜ αντισυμβαλλόμενου';

@@ -255,18 +255,106 @@ class InvoSignDocument
     /** @return array<string, string> */
     private static function invoiceCounterpartFields(Invoice $invoice): array
     {
-        $customer = $invoice->customer;
+        // MYD-009 — TWO KINDS OF FIELD, deliberately resolved from different places:
+        //
+        //  * LEGAL IDENTITY (name / ΑΦΜ / profession / address) is the reported
+        //    counterpart. It comes from the invoice's FROZEN snapshot through the
+        //    same Invoice helpers the AADE <counterpart> uses, so the direct and
+        //    provider representations of one document can never name different
+        //    parties. The old chain fell through to the live customer per field,
+        //    which meant a customer edit rewrote the provider identity of an
+        //    already-filed invoice — and could assemble one party out of two.
+        //
+        //  * CONTACT DETAILS (tax office, phone, email) are NOT part of the legal
+        //    identity and are absent from the AADE payload entirely; InvoSign uses
+        //    them for delivery and printing. They stay LIVE on purpose — reaching
+        //    today's customer to email today's copy is correct — and that is the
+        //    distinction, stated rather than left as an accident of the fallback
+        //    chain. If they ever need to be reproducible, they need snapshot
+        //    columns of their own, not a silent freeze here.
+        $legalFallback = $invoice->mayFallBackToLiveCustomer() ? $invoice->customer : null;
+
+        // A GR counterpart carries no name in the AADE payload, so an empty one gets
+        // that far — but InvoSign hard-rejects it with «[88-001] Λείπει το
+        // υποχρεωτικό πεδίο: CounterpartName». Refuse here with the field to fill
+        // instead of shipping "" and reading an opaque provider error. (Falling back
+        // to the live customer is what MYD-009 removed: it is the wrong party.)
+        // RETAIL (11.x) has no legal counterpart to protect — AADE files none — but
+        // InvoSign still needs a printable name, and shipping "" for every ΑΛΠ/ΑΠΥ
+        // would have every one of them rejected. Keep the pre-MYD-009 chain there;
+        // the snapshot rule applies where there IS a legal party to get wrong.
+        if ($invoice->filesNoCounterpart()) {
+            $name = (string) ($invoice->company_name ?: $invoice->customer?->name ?? '');
+
+            return self::counterpartFields(
+                $name,
+                (string) ($invoice->vat_no ?: $invoice->customer?->afm ?? ''),
+                (string) ($invoice->occupation ?: $invoice->customer?->occupation ?? ''),
+                (string) ($invoice->address1 ?: $invoice->customer?->address1 ?? ''),
+                (string) ($invoice->postcode ?: $invoice->customer?->postcode ?? ''),
+                (string) ($invoice->city ?: $invoice->customer?->city ?? ''),
+                $invoice,
+            );
+        }
+
+        $name = $invoice->counterpartName() ?? '';
+        if ($name === '') {
+            throw new RuntimeException(
+                "InvoSign requires a counterpart name on invoice {$invoice->invcode}, but the "
+                .'document records none'
+                .($invoice->hasBeenFiled() ? ' and is already filed.' : '.')
+                .' Fill «Επωνυμία» on the invoice.'
+            );
+        }
+
+        return self::counterpartFields(
+            $name,
+            (string) ($invoice->counterpartAfm() ?? ''),
+            (string) ($invoice->occupation ?: $legalFallback?->occupation ?? ''),
+            (string) ($invoice->address1 ?: $legalFallback?->address1 ?? ''),
+            (string) ($invoice->postcode ?: $legalFallback?->postcode ?? ''),
+            (string) ($invoice->city ?: $legalFallback?->city ?? ''),
+            $invoice,
+        );
+    }
+
+    /**
+     * Assemble API_Counterpart in InvoSign's own field ORDER (vendor reference §2c,
+     * and the same order deliveryCounterpartFields() emits): name, vat, profession,
+     * tax office, address, phone, email.
+     *
+     * Order matters here — this file already documents InvoSign as a
+     * namespace-prefix-strict parser — and splitting the block into two array_merge
+     * branches had quietly moved the contact fields to the front.
+     *
+     * The three CONTACT values are not part of the legal identity: they are absent
+     * from the AADE payload and InvoSign uses them for delivery and printing, so they
+     * read the LIVE customer on purpose — sending today's copy to today's address is
+     * correct. The legal values are passed in by the caller from the frozen snapshot.
+     *
+     * @return array<string, string>
+     */
+    private static function counterpartFields(
+        string $name,
+        string $vat,
+        string $profession,
+        string $street,
+        string $postalCode,
+        string $city,
+        Invoice $invoice,
+    ): array {
+        $contact = $invoice->customer;
 
         return [
-            'CounterpartName' => (string) ($invoice->company_name ?: $customer?->name ?? ''),
-            'CounterpartVat' => (string) ($invoice->vat_no ?: $customer?->afm ?? ''),
-            'CounterpartProfession' => (string) ($invoice->occupation ?: $customer?->occupation ?? ''),
-            'CounterpartTaxOffice' => (string) ($customer?->tax_office ?? ''),
-            'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $customer?->address1 ?? ''),
-            'CounterpartAddressPostalCode' => (string) ($invoice->postcode ?: $customer?->postcode ?? ''),
-            'CounterpartAddressCity' => (string) ($invoice->city ?: $customer?->city ?? ''),
-            'CounterpartPhone' => (string) ($customer?->phone ?? ''),
-            'CounterpartEmail' => (string) ($customer?->email ?? ''),
+            'CounterpartName' => $name,
+            'CounterpartVat' => $vat,
+            'CounterpartProfession' => $profession,
+            'CounterpartTaxOffice' => (string) ($contact?->tax_office ?? ''),
+            'CounterpartAddressStreet' => $street,
+            'CounterpartAddressPostalCode' => $postalCode,
+            'CounterpartAddressCity' => $city,
+            'CounterpartPhone' => (string) ($contact?->phone ?? ''),
+            'CounterpartEmail' => (string) ($contact?->email ?? ''),
         ];
     }
 

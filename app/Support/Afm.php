@@ -17,6 +17,17 @@ final class Afm
     /** Fewer digits than this is free text, never a VAT identity (IE1234567T = 7). */
     public const MIN_IDENTITY_DIGITS = 7;
 
+    /**
+     * The country prefixes that actually appear in front of a VAT identifier: the
+     * EU member states (EL for Greece), plus GB/XI, CH and NO. Deliberately NOT
+     * "any ISO-3166 code" — see countryPrefix().
+     */
+    private const VAT_PREFIXES = [
+        'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR', 'GR',
+        'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO', 'SE',
+        'SI', 'SK', 'GB', 'XI', 'CH', 'NO',
+    ];
+
     /** Digits only; '' when the input carries none. */
     public static function digits(?string $raw): string
     {
@@ -80,5 +91,59 @@ final class Afm
     public static function isPlaceholder(string $key): bool
     {
         return ctype_digit($key) && $key !== '' && count(array_unique(str_split($key))) === 1;
+    }
+
+    /**
+     * Is this specifically the ALL-ZEROS value — «0», «000000000», «EL000000000»?
+     *
+     * NOT the same question as isPlaceholder(), and the difference is legal, not
+     * cosmetic. isPlaceholder() asks "does this identify nobody?" and is true for
+     * «999999999» too. This asks "is this AADE's ενδοδιακίνηση sentinel?" — the
+     * Α.1123/2024 convention for a delivery note whose recipient IS the issuer.
+     * «999999999» is a dummy someone typed; «000000000» is a declaration with legal
+     * meaning, and only the latter may classify a note as an internal movement
+     * (MYD-011/MYD-009).
+     */
+    public static function isZeroPlaceholder(?string $raw): bool
+    {
+        $value = preg_replace('/[^A-Za-z0-9]+/u', '', mb_strtoupper((string) $raw)) ?? '';
+        if (preg_match('/^(EL|GR|ΕΛ)(\d+)$/ui', $value, $m) === 1) {
+            $value = $m[2];
+        }
+
+        return $value !== '' && trim($value, '0') === '';
+    }
+
+    /**
+     * The ISO-3166-1 alpha-2 country prefix carried by a VAT identifier —
+     * «IT12345678901» → «IT». Null for a bare ΑΦΜ or for anything that is not an
+     * identity at all.
+     *
+     * This is EVIDENCE about the party, not decoration: an invoice whose only
+     * counterpart data is «IT…» must never be filed as a domestic Greek document
+     * just because no country column happens to be populated (MYD-009).
+     *
+     * Built on uniqueKey(), so it inherits the ONE identity rule — including the
+     * MIN_IDENTITY_DIGITS floor, which is what keeps free text out. Only prefixes
+     * actually used in front of a VAT id count: accepting any ISO-2 code made
+     * ordinary domestic values claim a country («AE997073525» — a real nine-digit
+     * ΑΦΜ with two stray letters — read as the UAE), and evidence that can refuse a
+     * filing must not be inventable from noise.
+     */
+    public static function countryPrefix(?string $raw): ?string
+    {
+        $value = self::uniqueKey($raw);
+        if ($value === null || preg_match('/^([A-Za-z]{2})([A-Za-z0-9]+)$/u', $value, $m) !== 1) {
+            return null;
+        }
+
+        $prefix = strtoupper($m[1]);
+        if (! in_array($prefix, self::VAT_PREFIXES, true)) {
+            return null;
+        }
+
+        // «XI» is a VAT jurisdiction (Northern Ireland), not an ISO-3166 country, so
+        // IsoCountry does not know it. Its country IS GB.
+        return $prefix === 'XI' ? 'GB' : IsoCountry::tryNormalise($prefix);
     }
 }

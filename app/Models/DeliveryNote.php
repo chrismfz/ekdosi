@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\TracksActivity;
+use App\Support\Afm;
 use App\Support\IsoCountry;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -108,11 +109,27 @@ class DeliveryNote extends Model
     {
         $stored = trim((string) $this->recipient_afm);
 
-        if ($stored === self::INTERNAL_MOVEMENT_AFM) {
+        // Any all-zeros value, not only the exact nine-zero sentinel: «0» meant the
+        // same thing to the operator, and Afm::uniqueKey() already reads it that
+        // way — leaving the two strictnesses apart let «0» read as a real ΑΦΜ here
+        // while every identity comparison treated it as absent.
+        if (Afm::isZeroPlaceholder($stored)) {
             return null;
         }
 
-        return $stored !== '' ? $stored : ($this->customer?->afm ?: null);
+        // JUNK («-», «.») is NOT that declaration. Treating it as one turned a hard
+        // refusal into a silently-filed ενδοδιακίνηση, and made a linked customer's
+        // KNOWN ΑΦΜ be replaced by the «no ΑΦΜ» placeholder — a guess, where MYD-011's
+        // whole posture is to refuse. It falls through to the real identity instead.
+        if ($stored !== '' && Afm::uniqueKey($stored) === null) {
+            $stored = '';
+        }
+
+        return $stored !== ''
+            ? $stored
+            // Canonicalised: a customer row holding «00000» is the same placeholder,
+            // and reading it verbatim here filed it as though it were an ΑΦΜ.
+            : (Afm::isZeroPlaceholder($this->customer?->afm) ? null : ($this->customer?->afm ?: null));
     }
 
     /**
@@ -125,6 +142,17 @@ class DeliveryNote extends Model
      */
     public function isInternalMovement(): bool
     {
+        // Junk in the ΑΦΜ («-», «.») is an identity ATTEMPT that failed, not the
+        // «this party has no ΑΦΜ» declaration — so it must never classify the note as
+        // an ενδοδιακίνηση. Without this, a note carrying junk and no other identity
+        // was filed as "the issuer moved its own goods" (discarding the country the
+        // form MADE the operator pick) where it used to be refused outright. Only a
+        // blank or an all-zeros value is the declaration.
+        $stored = trim((string) $this->recipient_afm);
+        if ($stored !== '' && ! Afm::isZeroPlaceholder($stored)) {
+            return false;
+        }
+
         // The sentinel is NOT an override — it is simply "no ΑΦΜ", and it is the
         // only placeholder the UI offers for a party that has none. Treating a
         // stored 000000000 as an unconditional internal declaration filed a NAMED
@@ -161,6 +189,24 @@ class DeliveryNote extends Model
      * BLANK does). A null either way skips the comparison, and a blank name means
      * the payload files the customer's name, so both still read as "this IS the
      * customer".
+     *
+     * The ΑΦΜ comparison keeps LETTERS (Afm::uniqueKey, shared with the invoice
+     * counterpart check in MYD-009) — a digit-strip turns «DE811234567» into
+     * «811234567», which matches a Greek customer's ΑΦΜ, and the German party then
+     * inherits that customer's country and files as GR.
+     *
+     * The migration's SQL mirror (`orWhereColumn`) is a plain column comparison, so
+     * the two are CLOSE but not identical, in both directions — and both fail safe:
+     *  - SQL is stricter on separators («123 456 789» vs «123456789» matches here,
+     *    not there) → the row is simply not pre-filled, and the read-time fallback
+     *    still covers it, because that same predicate means the note is unfiled;
+     *  - SQL is looser on the NAME, since `utf8mb4_unicode_ci` is case- and
+     *    accent-insensitive («ΑΦΟΙ ΠΑΠΑΔΟΠΟΥΛΟΥ ΑΕ» = «Αφοί Παπαδόπουλου ΑΕ») → it
+     *    pre-fills for the same party spelled differently, which is right.
+     * An «EL…»/«ΕΛ…» prefixed ΑΦΜ against a bare one is the SAME taxpayer and matches
+     * (uniqueKey canonicalises first) — `customers.afm` legitimately carries the
+     * prefix, since the VIES form-fill seeds a full VAT id. A FOREIGN prefix survives
+     * canonicalisation, so «DE811234567» still does not match a Greek «811234567».
      */
     public function recipientIsTheLinkedCustomer(): bool
     {
@@ -171,41 +217,13 @@ class DeliveryNote extends Model
         }
 
         $afm = $this->externalRecipientAfm();
-        if ($afm !== null && self::vatKey($afm) !== self::vatKey($customer->afm)) {
+        if ($afm !== null && Afm::uniqueKey($afm) !== Afm::uniqueKey($customer->afm)) {
             return false;
         }
 
         $name = trim((string) $this->recipient_name);
 
         return $name === '' || $name === trim((string) $customer->name);
-    }
-
-    /**
-     * Comparison key for the identity check above: separators and case folded away,
-     * but LETTERS KEPT.
-     *
-     * Deliberately not Afm::digits(), which strips everything non-numeric: that turns
-     * the German VAT id «DE811234567» into «811234567», which then matches a Greek
-     * customer's ΑΦΜ — so a German party inherited that customer's country and was
-     * filed as GR, the MYD-011 misreport with its own DE prefix sitting in the same
-     * counterpart as contrary evidence. A country prefix is evidence, not noise.
-     *
-     * The migration's SQL mirror (`orWhereColumn`) is a plain column comparison, so
-     * the two are CLOSE but not identical, in both directions — and both directions
-     * fail safe:
-     *  - SQL is stricter on separators («123 456 789» vs «123456789» matches here,
-     *    not there) → the row is simply not pre-filled, and the read-time fallback
-     *    still covers it, because that same predicate means the note is unfiled;
-     *  - SQL is looser on the NAME, since `utf8mb4_unicode_ci` is case- and
-     *    accent-insensitive («ΑΦΟΙ ΠΑΠΑΔΟΠΟΥΛΟΥ ΑΕ» = «Αφοί Παπαδόπουλου ΑΕ») → it
-     *    pre-fills for the same party spelled differently, which is right.
-     * A prefixed ΑΦΜ («EL…», or the Greek-letter «ΕΛ…») against a bare one is a
-     * deliberate false negative here: the note is refused until someone sets a
-     * country, rather than inheriting one on a guess.
-     */
-    private static function vatKey(?string $raw): string
-    {
-        return mb_strtoupper(preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '');
     }
 
     /**

@@ -14,6 +14,7 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\MyDataRejected;
 use App\Services\MyDataSubmitter;
+use App\Support\Afm;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -309,7 +310,7 @@ class MyDataSubmitterSafetyTest extends TestCase
         ]);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/requires a customer with AFM/');
+        $this->expectExceptionMessageMatches('/requires a counterpart ΑΦΜ/');
 
         (new MyDataSubmitter($this->tenant))->previewXml($inv);
     }
@@ -1092,7 +1093,7 @@ class MyDataSubmitterSafetyTest extends TestCase
         $cust = Customer::create([
             'company_id' => $this->tenant->id,
             'name' => 'Wakanda Corp',
-            'afm' => 'WK000001',
+            'afm' => 'WK1234567',
             'country' => 'Wakanda',
         ]);
         $inv = Invoice::create([
@@ -1534,6 +1535,664 @@ XML;
     </response>
 </ResponseDoc>
 XML;
+    }
+
+    /* ============ MYD-009: the counterpart is the FROZEN snapshot ============ */
+
+    public function test_editing_the_customer_after_issue_does_not_change_the_filed_identity(): void
+    {
+        // THE headline acceptance. buildCounterpart() used to file $customer->afm
+        // and $customer->name while taking country/address from the snapshot, so a
+        // customer edit today rewrote the reported party of an invoice filed a year
+        // ago — and assembled ONE reported party out of TWO real ones.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => '123456789',
+            'company_name' => 'Πελάτης ΑΕ',
+            'country' => 'GR',
+        ])->save();
+
+        $before = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        // The customer is renamed and re-registered under a different ΑΦΜ.
+        $this->customer->forceFill([
+            'afm' => '094014201',
+            'name' => 'Μετονομασμένος ΑΕ',
+            'country' => 'DE',
+        ])->save();
+
+        $after = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertSame($before, $after, 'a customer edit must not change a filed document');
+        $this->assertStringContainsString('<vatNumber>123456789</vatNumber>', $after);
+        $this->assertStringNotContainsString('094014201', $after);
+        $this->assertStringNotContainsString('Μετονομασμένος', $after);
+    }
+
+    public function test_a_filed_invoice_never_reads_the_live_customer(): void
+    {
+        // Once filed, the snapshot is the ONLY source: mydata_sent closes the
+        // legacy fallback, so a blank column can no longer be filled in from a
+        // customer row that has moved on since.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => '', 'company_name' => '', 'country' => '',
+            'mydata_sent' => true, 'mydata_mark' => '400000000000777',
+        ])->save();
+
+        $this->assertTrue($invoice->hasBeenFiled());
+        $this->assertNull($invoice->counterpartAfm());
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/already filed/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+    }
+
+    public function test_a_party_typed_over_a_customer_link_does_not_borrow_its_country(): void
+    {
+        // The invoice form leaves customer_id in place while the party fields are
+        // overtyped, so the link can describe somebody else entirely. Borrowing that
+        // customer's country would assemble one reported party out of two.
+        $this->customer->forceFill(['country' => 'GR', 'afm' => '123456789'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => 'DE811234567',        // a different, foreign party
+            'company_name' => 'Müller GmbH',
+            'country' => null,                 // must NOT resolve to the customer's GR
+        ])->save();
+
+        $this->assertFalse($invoice->fresh()->counterpartIsTheLinkedCustomer());
+        $this->assertNull($invoice->fresh()->counterpartCountryIso());
+    }
+
+    public function test_a_blank_snapshot_is_frozen_at_the_moment_of_filing(): void
+    {
+        // Legacy/ETL rows arrive with a blank snapshot and resolve from the customer.
+        // The same write sets mydata_sent, which CLOSES that fallback — so unless the
+        // resolved party is frozen here, what we reported becomes unreadable.
+        $this->customer->forceFill(['afm' => '123456789', 'name' => 'Πελάτης ΑΕ', 'country' => 'ΙΤΑΛΙΑ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => null, 'company_name' => null, 'country' => null])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('123456789', $frozen['vat_no']);
+        $this->assertSame('Πελάτης ΑΕ', $frozen['company_name']);
+        // Stored NORMALISED — the column is an ISO-2 record of what was filed.
+        $this->assertSame('IT', $frozen['country']);
+    }
+
+    public function test_the_freeze_never_overwrites_a_value_the_document_carries(): void
+    {
+        $this->customer->forceFill(['afm' => '800561849', 'name' => 'Άλλος ΑΕ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '123456789', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR'])->save();
+
+        $this->assertSame([], $invoice->fresh()->frozenPartyColumns());
+    }
+
+    public function test_a_foreign_party_with_a_closed_fallback_is_refused_not_filed_as_gr(): void
+    {
+        // ROUND-1 P0. The country chain re-implemented the fallback and then applied
+        // «blank → GR» to the result of a CLOSED one, so "no country evidence" and
+        // "there is a country but this document may not read it" collapsed into the
+        // same answer. An Italian party whose customer link had drifted was filed as
+        // GR with no name and no address — where the old code loudly refused.
+        $this->customer->forceFill(['country' => 'IT', 'name' => 'Bella Italia SRL'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => 'IT12345678901',
+            'company_name' => 'Bella Italia S.R.L.',   // drifted from the customer
+            'country' => null,
+        ])->save();
+
+        $this->assertFalse($invoice->fresh()->counterpartIsTheLinkedCustomer());
+
+        try {
+            $xml = (string) (new MyDataSubmitter($this->tenant))
+                ->previewXml($invoice->fresh('lines'))->request;
+            $this->fail('Expected a refusal, filed: '.$xml);
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('records no counterpart country', $e->getMessage());
+            // The ΑΦΜ itself is the evidence here, so THAT is the reason reported.
+            $this->assertStringContainsString('IT VAT identifier', $e->getMessage());
+        }
+    }
+
+    public function test_a_foreign_vat_prefix_is_evidence_even_with_no_customer_at_all(): void
+    {
+        // ROUND-2 P0. The "nothing recorded anywhere" branch tested
+        // blank($customer?->country), which is ALSO true when the customer is
+        // soft-deleted or absent — so an «IT…» party with a deleted customer was
+        // filed as GR with no name and no address. The ΑΦΜ carries the country.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'customer_id' => null,
+            'vat_no' => 'IT12345678901',
+            'company_name' => 'Bella Italia SRL',
+            'country' => null,
+        ])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/IT VAT identifier/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+    }
+
+    public function test_a_drifted_customer_link_reports_the_drift_as_the_reason(): void
+    {
+        // Same refusal, different evidence: a BARE-digit ΑΦΜ says nothing about the
+        // country, so the reason is that the linked customer describes someone else.
+        $this->customer->forceFill(['country' => 'IT', 'name' => 'Άλλος ΑΕ'])->save();
+
+        $invoice = $this->makeInvoice(code: 55);
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => '997073525',
+            'company_name' => 'Πελάτης ΑΕ',   // drifted from the customer
+            'country' => null,
+        ])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/different party/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+    }
+
+    public function test_no_country_evidence_anywhere_still_defaults_to_gr(): void
+    {
+        // The other side of the same coin: the GR default must survive for the legacy
+        // domestic population, or every pre-existing invoice becomes unissuable.
+        $this->customer->forceFill(['country' => null])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => '123456789', 'company_name' => 'Πελάτης ΑΕ', 'country' => null])->save();
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<country>GR</country>', $xml);
+    }
+
+    public function test_the_filed_vat_number_is_canonical_not_raw_free_text(): void
+    {
+        // invoices.vat_no is a bare TextInput and an ETL copy of the legacy column,
+        // so it holds «IT 12345678901» / «EL123456789». Filing it verbatim earns an
+        // opaque AADE rejection; the previous code filed customers.afm, which the
+        // form and GSIS/VIES keep clean.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => 'EL 123.456.789', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR'])->save();
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatNumber>123456789</vatNumber>', $xml);
+    }
+
+    public function test_the_freeze_covers_the_address_that_was_actually_filed(): void
+    {
+        // Freezing only ΑΦΜ/name/country left a FILED foreign document unable to
+        // reproduce its own counterpart: the payload carried street/city/postcode
+        // from the live customer, and re-rendering afterwards threw "requires a full
+        // address" while AADE held the real one.
+        $this->customer->forceFill([
+            'afm' => 'IT12345678901', 'name' => 'Bella Italia SRL', 'country' => 'IT',
+            'address1' => 'Via Roma 1', 'city' => 'Milano', 'postcode' => '20100',
+        ])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => null, 'company_name' => null, 'country' => null,
+            'address1' => null, 'city' => null, 'postcode' => null,
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('IT', $frozen['country']);
+        $this->assertSame('Via Roma 1', $frozen['address1']);
+        $this->assertSame('Milano', $frozen['city']);
+        $this->assertSame('20100', $frozen['postcode']);
+    }
+
+    public function test_the_freeze_truncates_to_the_column_width(): void
+    {
+        // customers.name is varchar(191), invoices.company_name varchar(120), and
+        // MySQL runs strict — an over-long copy would raise INSIDE the transaction
+        // that writes the MARK audit row, rolling back a filing AADE already
+        // accepted and leaving the invoice permanently stuck.
+        // The column is widened to 191 to match customers.name, so a real name now
+        // survives intact; the truncation stays as a guard against any future
+        // widening of the SOURCE. Both properties are asserted.
+        $long = str_repeat('Α', 191);
+        $this->customer->forceFill(['name' => $long])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => null, 'company_name' => null, 'country' => 'GR'])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame(191, mb_strlen($frozen['company_name']));
+        $this->assertLessThanOrEqual(191, mb_strlen($frozen['company_name']));
+    }
+
+    public function test_a_retail_receipt_freezes_no_party_at_all(): void
+    {
+        // 11.x files NO counterpart, so stamping one into the "what we reported"
+        // columns would assert a party AADE was never told about — and the PDF keys
+        // its counterpart block on vat_no, so it would start printing it.
+        $retail = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'APY', 'name' => 'Απόδειξη',
+            'invcount' => 1, 'mydata_type' => '11.1',
+        ]);
+
+        $invoice = $this->makeInvoice(code: 77);
+        $invoice->forceFill([
+            'invoice_type_id' => $retail->id,
+            'vat_no' => null, 'company_name' => null, 'country' => null,
+        ])->save();
+
+        $this->assertTrue($invoice->fresh()->filesNoCounterpart());
+        $this->assertSame([], $invoice->fresh()->frozenPartyColumns());
+    }
+
+    public function test_the_sanctioned_gr_default_is_frozen_like_any_other(): void
+    {
+        // ROUND-2 P1. The GR default lived only in the builder, so it was filed but
+        // never recorded. An operator later filling customers.country — a routine
+        // edit — then made the ALREADY FILED invoice un-renderable, because the
+        // fallback was closed and the document had no country of its own.
+        $this->customer->forceFill(['country' => null])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => null])->save();
+
+        $this->assertSame('GR', $invoice->fresh()->frozenPartyColumns()['country']);
+    }
+
+    public function test_the_address_is_frozen_when_only_the_address_is_blank(): void
+    {
+        // ROUND-2 P1. The freeze gate only inspected the IDENTITY columns, so a
+        // foreign invoice with a complete identity but a blank address filed the
+        // customer's street/city/postcode and froze nothing — and then threw
+        // "requires a full address" on re-render while AADE held the real one.
+        $this->customer->forceFill([
+            'address1' => 'Via Roma 1', 'city' => 'Milano', 'postcode' => '20100',
+            'name' => 'Bella Italia SRL', 'afm' => 'IT12345678901', 'country' => 'IT',
+        ])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => 'IT12345678901',
+            'company_name' => 'Bella Italia SRL',
+            'country' => 'IT',
+            'address1' => null, 'city' => null, 'postcode' => null,
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('Via Roma 1', $frozen['address1']);
+        $this->assertSame('Milano', $frozen['city']);
+        $this->assertSame('20100', $frozen['postcode']);
+    }
+
+    public function test_an_unresolvable_snapshot_country_is_not_replaced_by_the_customers(): void
+    {
+        // ROUND-2 P2. counterpartCountryIso() fell through to the customer, so a
+        // snapshot reading «Germania» was quietly overwritten by the customer's GR —
+        // the recorded-value-is-evidence rule broken again.
+        $this->customer->forceFill(['country' => 'GR'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'Germania'])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Germania/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+    }
+
+    public function test_an_el_prefixed_afm_is_the_same_party_as_the_bare_one(): void
+    {
+        // ROUND-2 P2. canonicalVat stripped the EL prefix on the way out while
+        // comparisonKey kept it, so one commit called the same taxpayer two
+        // different parties and refused an invoice that used to file. customers.afm
+        // legitimately carries the prefix (the VIES form-fill seeds a full VAT id).
+        $this->customer->forceFill(['afm' => 'EL997073525', 'country' => 'GR'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => '997073525', 'company_name' => null, 'country' => null])->save();
+
+        $this->assertTrue($invoice->fresh()->counterpartIsTheLinkedCustomer());
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatNumber>997073525</vatNumber>', $xml);
+    }
+
+    public function test_every_eu_vat_shape_counts_as_foreign_evidence_not_just_the_digits_only_ones(): void
+    {
+        // ROUND-3 P0. The prefix test matched «two letters then digits», but a real
+        // EU VAT id is rarely that shape — ATU12345678, CY12345678L, NL123456789B01,
+        // IE1234567FA, ESX1234567X. Half of Europe fell through and was filed as GR
+        // with no name and no address; the IT case (digits-only) was the only one the
+        // tests covered.
+        $shapes = [
+            'ATU12345678' => 'AT',
+            'CY12345678L' => 'CY',
+            'NL123456789B01' => 'NL',
+            'IE1234567FA' => 'IE',
+            'ESX1234567X' => 'ES',
+            'FRK7399859412' => 'FR',
+        ];
+
+        $n = 300;
+        foreach ($shapes as $vat => $expected) {
+            $invoice = $this->makeInvoice(code: $n++);
+            $this->standardLine($invoice);
+            $invoice->forceFill([
+                'customer_id' => null,
+                'vat_no' => $vat,
+                'company_name' => 'Foreign Co',
+                'country' => null,
+            ])->save();
+
+            try {
+                $xml = (string) (new MyDataSubmitter($this->tenant))
+                    ->previewXml($invoice->fresh('lines'))->request;
+                $this->fail("{$vat} was filed instead of refused: ".$xml);
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString("{$expected} VAT identifier", $e->getMessage());
+            }
+        }
+    }
+
+    public function test_a_renamed_customer_does_not_make_a_legacy_invoice_unissuable(): void
+    {
+        // ROUND-3 P1. The identity check treated a NAME difference as fatal even when
+        // the ΑΦΜ matched exactly — so a routine customer rename made every legacy
+        // invoice with a blank country unissuable (and its credit notes with it). The
+        // ΑΦΜ is the identity; a name change is a rename, not a different taxpayer.
+        $this->customer->forceFill(['afm' => '997073525', 'country' => 'GR', 'name' => 'Πελάτης ΑΕ (νέα επωνυμία)'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => '997073525',
+            'company_name' => 'Πελάτης ΑΕ',   // the name as it was at issue
+            'country' => null,
+        ])->save();
+
+        $this->assertTrue($invoice->fresh()->counterpartIsTheLinkedCustomer());
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<country>GR</country>', $xml);
+    }
+
+    public function test_a_domestic_counterpart_freezes_its_address_for_the_provider_document(): void
+    {
+        // AADE omits the address for a GR party, but the PROVIDER document carries it
+        // and so does our PDF — so a GR invoice that froze no address could not
+        // reproduce its own provider payload once filed.
+        $this->customer->forceFill([
+            'afm' => '997073525', 'country' => 'GR',
+            'address1' => 'Πατησίων 1', 'city' => 'Αθήνα', 'postcode' => '11111',
+        ])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR',
+            'address1' => null, 'city' => null, 'postcode' => null,
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('Πατησίων 1', $frozen['address1']);
+        $this->assertSame('Αθήνα', $frozen['city']);
+    }
+
+    public function test_a_bare_greek_afm_with_no_country_anywhere_files_as_gr(): void
+    {
+        // The ordinary Greek/WHMCS shape: a plain nine-digit ΑΦΜ, no «EL» prefix, and
+        // no country recorded on either side. It must file as GR without any guard
+        // getting in the way — every tightening in this issue has to keep this true.
+        $this->customer->forceFill(['afm' => '997073525', 'country' => null])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => null])->save();
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<vatNumber>997073525</vatNumber>', $xml);
+        $this->assertStringContainsString('<country>GR</country>', $xml);
+    }
+
+    public function test_free_text_in_the_vat_column_is_not_read_as_a_country_claim(): void
+    {
+        // ROUND-4 P2. vat_no is an unvalidated TextInput and a raw ETL copy, so it
+        // holds things like «INV-2024-01» — which the first prefix matcher read as
+        // India and refused. A VAT body carries at least seven digits (Ireland is the
+        // shortest); junk falls under that floor.
+        foreach (['INV-2024-01', 'ID 044123', 'VAT123', 'LTD 12'] as $junk) {
+            $this->assertNull(Afm::countryPrefix($junk), "«{$junk}» must not claim a country");
+        }
+
+        $this->assertSame('IE', Afm::countryPrefix('IE1234567FA'));
+    }
+
+    public function test_a_recorded_country_wins_over_a_disagreeing_vat_prefix(): void
+    {
+        // Round 4 threw on this disagreement as a "coherence" check; round 5 removed
+        // it, because the two legitimately differ — Monaco files under an FR VAT id,
+        // the Isle of Man under GB, Northern Ireland under XI — and the recorded
+        // country is the operator's explicit statement while the prefix is an
+        // inference from a free-text column. Refusing blocked correct documents and
+        // told the operator to fix a value that was already right.
+        // MC is a third country, so the document must be a 1.3 and carry the foreign
+        // counterpart's name + address that AADE requires.
+        $this->invoiceType->forceFill(['mydata_type' => '1.3'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => 'FR12345678901',
+            'company_name' => 'Monaco SARL',
+            'country' => 'MC',
+            'address1' => 'Rue Grimaldi 1', 'city' => 'Monaco', 'postcode' => '98000',
+        ])->save();
+
+        $xml = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertStringContainsString('<country>MC</country>', $xml);
+        $this->assertStringContainsString('Monaco SARL', $xml);
+    }
+
+    public function test_a_greek_vat_prefix_answers_the_country_question(): void
+    {
+        // With nothing recorded, a GR/EL prefix IS the answer. Falling through to the
+        // refusal discarded positive evidence the document already carried.
+        $this->customer->forceFill(['country' => null, 'name' => 'Άλλος ΑΕ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => 'EL12345678',      // not 9 digits, so the prefix survives
+            'company_name' => 'Πελάτης ΑΕ',
+            'country' => null,
+        ])->save();
+
+        $this->assertSame('GR', $invoice->fresh()->counterpartCountryForFiling());
+    }
+
+    public function test_a_domestic_afm_with_stray_letters_is_not_a_country_claim(): void
+    {
+        // «AE997073525» is a real nine-digit ΑΦΜ with two stray letters. Accepting any
+        // ISO-2 code as a VAT prefix read it as the UAE; only prefixes actually used
+        // in front of a VAT id count.
+        foreach (['AE997073525', 'SA997073525', 'MO997073525', 'INV20240001'] as $value) {
+            $this->assertNull(Afm::countryPrefix($value), "«{$value}» must not claim a country");
+        }
+
+        // A real VAT id still yields its prefix. «RO361902» deliberately does NOT:
+        // six digits is below Afm::MIN_IDENTITY_DIGITS, so the shared identity rule
+        // says it is free text — the accepted asymmetric trade (a false positive
+        // refuses a good domestic invoice; a false negative only falls back).
+        $this->assertSame('RO', Afm::countryPrefix('RO12345678'));
+        $this->assertNull(Afm::countryPrefix('RO361902'));
+    }
+
+    public function test_a_punctuation_only_afm_does_not_pass_two_parties_as_one(): void
+    {
+        // ROUND-4 P2. «-» trims non-empty but canonicalises to nothing, and an empty
+        // key equals a null customer ΑΦΜ — so the name check was skipped entirely and
+        // a different party's country/address could be borrowed.
+        $this->customer->forceFill(['afm' => null, 'name' => 'ΠΕΛΑΤΗΣ ΜΟΥ ΑΕ', 'country' => 'IT'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '-', 'company_name' => 'ΑΛΛΟΣ ΠΕΛΑΤΗΣ ΑΕ', 'country' => null])->save();
+
+        $this->assertFalse($invoice->fresh()->counterpartIsTheLinkedCustomer());
+        $this->assertNull($invoice->fresh()->counterpartCountryIso());
+    }
+
+    public function test_an_unresolvable_customer_country_says_so_instead_of_blaming_a_party_mismatch(): void
+    {
+        // ROUND-6 P2. Three reasons reach that refusal; only two were offered, so an
+        // unresolvable customer country was reported as a party mismatch that did not
+        // exist — and unlike the code it replaced, the offending value was not named.
+        $this->customer->forceFill(['afm' => '997073525', 'name' => 'Πελάτης ΑΕ', 'country' => 'ΗΝ. ΒΑΣΙΛΕΙΟ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => null])->save();
+
+        $this->assertTrue($invoice->fresh()->counterpartIsTheLinkedCustomer());
+
+        try {
+            $invoice->fresh()->counterpartCountryForFiling();
+            $this->fail('expected a refusal');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('ΗΝ. ΒΑΣΙΛΕΙΟ', $e->getMessage());
+            $this->assertStringNotContainsString('different party', $e->getMessage());
+        }
+    }
+
+    public function test_an_all_zeros_vat_no_is_a_placeholder_not_an_identity(): void
+    {
+        // ROUND-6 observation. «0» / «000000000» mean "no ΑΦΜ" — the same convention
+        // the delivery-note sentinel uses — so they must fall through to the customer
+        // rather than become the reported party (and close its country fallback).
+        $this->customer->forceFill(['afm' => '997073525', 'country' => 'GR'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '0', 'company_name' => null, 'country' => null])->save();
+
+        $this->assertSame('997073525', $invoice->fresh()->counterpartAfm());
+        $this->assertSame('GR', $invoice->fresh()->counterpartCountryForFiling());
+    }
+
+    public function test_northern_ireland_vat_resolves_to_gb(): void
+    {
+        // ROUND-6 P2. «XI» is a VAT jurisdiction, not an ISO country, so IsoCountry
+        // never knew it and the allowlist entry was inert — the round-5 commit cited
+        // XI as a reason while the code never produced that prefix at all.
+        $this->assertSame('GB', Afm::countryPrefix('XI123456789'));
+    }
+
+    public function test_a_placeholder_vat_no_is_replaced_by_what_was_actually_filed(): void
+    {
+        // ROUND-7 P1, and a defect the round-6 fix created: the freeze gates on
+        // blank(), but «000000000» is not blank — while canonicalVat() now reads it as
+        // "no ΑΦΜ". So the payload filed the customer's real ΑΦΜ and the column kept
+        // the placeholder: a half-frozen legal identity, manufactured by MYD-009's own
+        // freeze. The PDF would print one party while AADE held another, and the row
+        // was unrecoverable (a filed invoice is not editable, credit notes copy it).
+        $this->customer->forceFill(['afm' => '997073525', 'name' => 'Πελάτης ΑΕ', 'country' => 'GR'])->save();
+
+        foreach (['000000000', '0'] as $i => $placeholder) {
+            $invoice = $this->makeInvoice(code: 900 + $i);
+            $invoice->forceFill([
+                'vat_no' => $placeholder,
+                'company_name' => null,
+                'country' => null,
+            ])->save();
+
+            $frozen = $invoice->fresh()->frozenPartyColumns();
+
+            $this->assertSame('997073525', $frozen['vat_no'] ?? null, "«{$placeholder}» must be replaced");
+        }
+    }
+
+    public function test_a_placeholder_customer_afm_is_not_reported_as_borrowable(): void
+    {
+        // ROUND-7 P2: the arm tested raw filled(), so a customer whose ΑΦΜ is itself a
+        // placeholder was described as having one to borrow.
+        $this->customer->forceFill(['afm' => '000000000', 'name' => 'Άλλος ΑΕ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => null, 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR'])->save();
+
+        try {
+            (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+            $this->fail('expected a refusal');
+        } catch (\RuntimeException $e) {
+            $this->assertStringNotContainsString('linked customer has one', $e->getMessage());
+        }
+    }
+
+    public function test_a_zero_string_address_column_is_frozen_like_a_blank_one(): void
+    {
+        // ROUND-8 P2-A. Both the AADE builder and the provider document select the
+        // address with `?:`, which treats the string «0» as absent — while blank()
+        // does not. So the payload filed the customer's postcode and the freeze kept
+        // the «0», leaving the filed document unable to render its own counterpart.
+        $this->customer->forceFill([
+            'afm' => 'DE811234567', 'name' => 'Lieferant GmbH', 'country' => 'DE',
+            'address1' => 'Hauptstr 1', 'city' => 'Berlin', 'postcode' => '10115',
+        ])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => 'DE811234567', 'company_name' => 'Lieferant GmbH', 'country' => 'DE',
+            'address1' => null, 'city' => null, 'postcode' => '0',
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('10115', $frozen['postcode'] ?? null, '«0» must freeze like a blank');
+    }
+
+    public function test_a_whitespace_address_column_freezes_like_the_selector_sees_it(): void
+    {
+        // ROUND-9 P2. `?:` is falsy for '' and '0' but NOT for ' ', so trimming in the
+        // gate froze the customer's real street while the provider payload carried the
+        // blank one — document and snapshot disagreeing, which is what the freeze
+        // exists to prevent.
+        $this->customer->forceFill(['afm' => '997073525', 'country' => 'GR', 'address1' => 'Ermou 5'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'vat_no' => '997073525', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR',
+            'address1' => ' ',
+        ])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertArrayNotHasKey('address1', $frozen, 'a space is what the selector files, so freeze nothing');
     }
 
     private function makeInvoice(int $code = 1): Invoice

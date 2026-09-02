@@ -68,6 +68,71 @@ class DeliveryNoteSubmitterTest extends TestCase
         ]);
     }
 
+    public function test_junk_in_the_recipient_afm_is_not_a_declaration_of_internal_movement(): void
+    {
+        // ROUND-8 P2-B (MYD-009's round-7 fix reached into MYD-011). Widening "all
+        // zeros = no ΑΦΜ" to "anything unusable" swept «-» in with it — turning a
+        // hard refusal into a silently-filed ενδοδιακίνηση, and replacing a linked
+        // customer's KNOWN ΑΦΜ with the «no ΑΦΜ» placeholder. All-zeros is a
+        // DECLARATION; junk is an accident, and an accident falls through.
+        $note = $this->makeNote([
+            'recipient_afm' => '-',
+            'recipient_name' => null,
+            'recipient_country' => null,
+        ]);
+
+        // customer_id is still set by makeNote, so this is NOT an internal movement.
+        $this->assertFalse($note->isInternalMovement());
+        $this->assertSame($this->recipient->afm, $note->externalRecipientAfm());
+    }
+
+    public function test_an_all_zeros_customer_afm_is_not_filed_as_an_identity(): void
+    {
+        // The customer-fallback branch was not canonicalised, so a customer row
+        // holding «00000» was read verbatim as a real ΑΦΜ.
+        $this->recipient->forceFill(['afm' => '00000'])->save();
+
+        $note = $this->makeNote(['recipient_afm' => null]);
+
+        $this->assertNull($note->fresh()->externalRecipientAfm());
+    }
+
+    public function test_junk_with_no_other_identity_is_refused_not_declared_internal(): void
+    {
+        // ROUND-9 P2. The round-8 fix only covered the case WITH a linked customer —
+        // isInternalMovement() requires customer_id === null, so a note carrying junk
+        // and NO other identity was still filed as "the issuer moved its own goods",
+        // discarding the country the form made the operator pick. main refused it.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_afm' => '-',
+            'recipient_name' => null,
+            'recipient_country' => 'DE',
+        ]);
+
+        $this->assertFalse($note->isInternalMovement(), 'junk is an identity attempt, not a declaration');
+
+        $this->expectException(\RuntimeException::class);
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_a_prefixed_all_zeros_afm_is_the_same_declaration(): void
+    {
+        // ROUND-9 P2. isZeroPlaceholder() did not strip the Greek prefix while
+        // canonicalVat() did, so «EL000000000» took the junk path and was replaced by
+        // the linked customer's real ΑΦΜ — the placeholder filed as an identity.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_afm' => 'EL000000000',
+            'recipient_name' => null,
+            'recipient_country' => null,
+        ]);
+
+        $this->assertTrue($note->isInternalMovement());
+        $this->assertNull($note->externalRecipientAfm());
+    }
+
     private function makeNote(array $overrides = []): DeliveryNote
     {
         $note = DeliveryNote::create(array_merge([

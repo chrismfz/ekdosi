@@ -271,7 +271,7 @@ Priorities:
 | MYD-006 | P1 | OPEN | Classifications | Readiness does not require a business-specific classification policy |
 | MYD-007 | P0 | OPEN | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
 | MYD-008 | P0 | DONE | Provider credits | Correlated credit cannot find a provider-issued original MARK |
-| MYD-009 | P0 | OPEN | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
+| MYD-009 | P0 | DONE | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | DONE | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
@@ -710,7 +710,7 @@ remain correctable through the same legal correlation.
 
 ### MYD-009 — myDATA counterpart identity ignores frozen invoice fields
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30 · **Fixed:** 2026-09-02
 
 **Official finding**
 
@@ -751,6 +751,258 @@ so later customer edits cannot change an issued document.
 - A migration/backfill or explicit blocker handles older rows with blank snapshots.
 - Direct and provider previews remain identical in legal counterpart identity
   after the customer record changes.
+
+**Resolution (2026-09-02)**
+
+The legal counterpart is now built ENTIRELY from the invoice's party snapshot, through
+three `Invoice` helpers — `counterpartAfm()`, `counterpartName()`, `counterpartCountryIso()`
+— shared by the AADE payload and the provider payload so one document can never name two
+parties. `AadeInvoiceDocument::buildCounterpart()` no longer touches `customer` at all; the
+"requires a customer with AFM" guard became "requires a counterpart ΑΦΜ", so an invoice with
+a frozen ΑΦΜ and a deleted customer stays issuable.
+
+**The live-customer fallback is doubly narrowed**, because each hole reports a party that was
+never agreed:
+
+- **It stops at transmission.** `mayFallBackToLiveCustomer()` requires `! hasBeenFiled()`
+  (`mydata_sent || mydata_mark`). After filing, the snapshot is the only source — reading
+  through would show a party the AADE record never carried.
+- **The linked customer must actually BE the counterpart.** The party fields are editable
+  while `customer_id` stays put, so an operator can overtype «ΑΦΜ/Επωνυμία» with someone else;
+  `counterpartIsTheLinkedCustomer()` refuses to borrow that customer's country or address.
+  Same hole, same predicate as MYD-011 — the ΑΦΜ comparison keeps LETTERS (shared
+  `Afm::comparisonKey()`), so «DE811234567» never matches a Greek customer's «811234567».
+
+**The resolved party is FROZEN at the moment of filing.** `Invoice::frozenPartyColumns()`
+fills only blank snapshot columns and is merged into the SAME `forceFill` as the MARK, on both
+the direct and the provider path — otherwise a legacy/ETL row's reported party would become
+unreadable the instant `mydata_sent` closed the fallback (the MYD-011 lesson, applied up front).
+The stored country is the NORMALISED ISO-2, so the column means what it claims.
+
+**A blank country still defaults to GR; a present-but-unresolvable one still throws** — turning
+«Neverland» into a confident domestic filing is the MYD-011 round-7 misreport, and an existing
+test caught the regression when the first cut of this change introduced it.
+
+**Provider parity:** `InvoSignDocument::invoiceCounterpartFields()` builds the LEGAL fields
+(name/ΑΦΜ/profession/address) from the same helpers. Tax office, phone and email are contact
+details, absent from the AADE payload and used by InvoSign for delivery/printing — they stay
+LIVE deliberately, and that distinction is now stated in code rather than being an accident of
+a per-field fallback chain.
+
+**Round-1 review corrections (the fix's own bugs, caught by the gate):**
+
+- **The country chain was re-implemented in the builder instead of using the helper**, and
+  «blank → GR» was applied to the result of a CLOSED fallback — so "no country evidence
+  anywhere" and "a country exists but this document may not read it" gave the same answer. An
+  Italian party whose customer link had drifted was filed as **GR with no name and no address**,
+  where the previous code loudly refused. That is the MYD-011 round-7 misreport reintroduced on
+  the invoice side; the three outcomes are now explicitly distinct.
+- **The ΑΦΜ was filed verbatim from free text.** `invoices.vat_no` is a bare TextInput and an
+  ETL copy of the legacy column, so «IT 12345678901» / «EL123456789» reached AADE. The old code
+  filed `customers.afm`, which the form and GSIS/VIES keep canonical — new `Afm::canonicalVat()`
+  restores that (separators dropped, letters kept, a Greek prefix removed only when what remains
+  is a bare nine-digit ΑΦΜ, so a foreign id stays intact).
+- **The freeze was incomplete**: it covered ΑΦΜ/name/country but not the ADDRESS, which a non-GR
+  counterpart actually files — so a filed foreign document could no longer reproduce its own
+  counterpart and threw "requires a full address" while AADE held the real one.
+- **The freeze could roll back a successful filing.** `customers.name` is varchar(191) and
+  `invoices.company_name` varchar(120) under MySQL strict mode, so an over-long copy raised
+  inside the SAME transaction as the MARK audit row — discarding the record of a filing AADE had
+  already accepted and leaving the invoice permanently stuck. Values are truncated per column.
+- **Retail (11.x) froze a party that was never declared** (AADE files no counterpart there), and
+  the PDF keys its counterpart block on `vat_no`, so a receipt would have started printing one.
+- **The provider could receive an empty `CounterpartName`** (legal for a GR counterpart in the
+  AADE payload, rejected by InvoSign as `[88-001]`) — it now refuses with the field to fill.
+
+**Round-2 review corrections (the same root cause, twice):**
+
+The round-1 fix left the country policy in TWO places — a helper on the model and a copy in the
+builder — and the copies disagreed. That is what produced the round-1 P0 and produced another
+here, so the policy is now a single method (`Invoice::counterpartCountryForFiling()`) called by
+the payload, the provider document and the freeze.
+
+- **A foreign party was still filed as GR when the customer was unreadable.** The "nothing
+  recorded anywhere" test was `blank($customer?->country)`, which is also true for a
+  soft-deleted or absent customer — so «IT12345678901» with a deleted customer filed as
+  domestic, with no name and no address. The GR default now yields to CONTRARY EVIDENCE, and
+  that includes the ΑΦΜ's own country prefix (`Afm::countryPrefix()`): an «IT…» identifier says
+  the party is not Greek whatever the country columns do or don't say.
+- **The sanctioned GR default was never frozen.** It lived only in the builder, so a filed
+  invoice recorded no country — and an operator later filling `customers.country`, a routine
+  edit, made that already-filed document un-renderable.
+- **The freeze gate inspected only the identity columns.** A foreign invoice with a complete
+  identity but a blank address filed the live customer's address and froze nothing, then threw
+  "requires a full address" on re-render while AADE held the real one. The address is now frozen
+  exactly when it is filed — non-GR only, since AADE forbids it for a GR counterpart and
+  recording it there would assert something never reported.
+- **Every retail document would have been rejected by the provider.** The empty-name guard was
+  applied to 11.x too, but retail has no legal counterpart to protect — only a printable name —
+  and InvoSign hard-rejects an empty `CounterpartName` with `[88-001]`.
+- **`canonicalVat()` and `comparisonKey()` contradicted each other inside one commit**: one
+  stripped the «EL» prefix on the way out, the other kept it when deciding whether two parties
+  are the same — so one taxpayer read as two and an invoice that used to file was refused.
+  `customers.afm` legitimately carries the prefix (the VIES form-fill seeds a full VAT id).
+- **An unresolvable snapshot country was silently replaced by the customer's** — «Germania»
+  became the customer's «GR», breaking the recorded-value-is-evidence rule again.
+- **`invoices.company_name` was varchar(120) against `customers.name` varchar(191)**, so the
+  freeze could raise under strict mode inside the MARK transaction — discarding the record of a
+  filing AADE had accepted. Fixed at the source by widening the column (migration), with the
+  per-column truncation kept as a guard.
+
+**Round-3 review corrections:**
+
+- **Half of Europe was still filed as GR.** The ΑΦΜ country-prefix test matched «two
+  letters then digits», but a real EU VAT id is rarely that shape — ATU12345678, CY12345678L,
+  NL123456789B01, IE1234567FA, ESX1234567X. Only the digits-only form (IT) was recognised, and
+  it was the only one a test covered. Worse, for a soft-deleted customer this was a strict
+  REGRESSION: `origin/main` refused, the new code filed GR silently. The matcher now accepts any
+  alphanumeric body but requires a digit in it, so free text starting with two letters
+  («ΙΤΑΛΙΑ ΑΕ») is not read as a country claim.
+- **A routine customer rename made legacy invoices unissuable.** The identity check treated a
+  NAME difference as fatal even when the ΑΦΜ matched exactly, so every legacy row with a blank
+  country (the majority, by the code's own comment) — and every credit note against one — was
+  refused. The ΑΦΜ is the identity; a rename is not a different taxpayer, so a matching ΑΦΜ now
+  short-circuits the name comparison. (The delivery-note twin stays stricter on purpose: its
+  recipient name is operator-typed free text on a document whose whole point is naming a party.)
+- **The provider's `API_Counterpart` field order had changed.** Splitting the block into two
+  `array_merge` branches moved tax office / phone / email to the front, against the vendor
+  reference and against the delivery twin — in a file that already documents InvoSign as a
+  picky parser. Both branches now go through one assembler that emits the documented order.
+- **The address is frozen for a GR counterpart too.** AADE omits it there, but the provider
+  document carries it and so does our PDF, so a domestic invoice that froze no address could not
+  reproduce its own provider payload once filed — the same "unreadable once filed" failure, one
+  surface over.
+
+**Consciously declined:** routing `SalesReconciler` through `Invoice::counterpartAfm()`. The
+helper cuts the live-customer fallback off once a document is filed, which is right when
+BUILDING a payload; reconciliation is the opposite problem — every row there is filed by
+definition, and for an ETL row with a blank snapshot the customer's ΑΦΜ is the best available
+evidence of what that MARK carried. Making the change failed all eight legacy-row reconciliation
+tests as `contentIncomplete`, which is the permanent exit-2 that code's own comment warns about.
+The reason is recorded at the call site.
+
+**Round-4 review corrections (no P0/P1 — the fixes below close the remaining P2s):**
+
+- **The ticket's own acceptance criterion — «ΑΦΜ, χώρα και όνομα σχηματίζουν ΕΝΑ πρόσωπο» — was
+  still unmet.** Both `CreateInvoice` and the WHMCS mapper default a blank customer country to
+  `'GR'`, so a «DE811234567» customer whose country was never filled in gets a GR snapshot — and
+  because a country IS recorded, the ΑΦΜ's prefix evidence was never consulted. The original
+  MYD-009 defect wearing a different hat. A recorded country that CONTRADICTS the VAT prefix is
+  now refused, naming both values.
+- **Free text in `vat_no` was read as a country claim.** The column is an unvalidated TextInput
+  and a raw ETL copy, so «INV-2024-01» resolved to India, «VAT123» to the Vatican, «LTD 12» to
+  Lithuania — each refusing an invoice with nothing wrong with it. A real VAT body carries at
+  least seven digits (Ireland is the shortest), which every junk value falls under.
+- **A punctuation-only ΑΦΜ passed two parties as one.** «-» trims non-empty but canonicalises to
+  nothing, and an empty key equals a null customer ΑΦΜ, so the name check was skipped entirely.
+- **Two definitions of "is this retail?"** — `filesNoCounterpart()` read the cache first while
+  the builder files from the relation. It now reads the relation first, matching the builder.
+- **The freeze covered a subset of what the PDF prints** (`address2`, `vies_vat` were missing),
+  so a legacy invoice gained a partial address at filing. Both are frozen now — and the customer
+  column is `vat_vies`, not `vies_vat`, which the first cut had wrong so it always froze null.
+
+**Round-5 review corrections (no P0/P1 — the main action was REMOVING a round-4 check):**
+
+- **The coherence refusal was wrong and is gone.** Throwing when the recorded country disagrees
+  with the ΑΦΜ's prefix blocked legitimate documents — Monaco files under an FR VAT id, the Isle
+  of Man under GB, Northern Ireland under XI — and told the operator to "correct" values that
+  were already right, with no truthful way to proceed. A RECORDED country is the operator's
+  explicit statement about the party; the prefix is an inference from a free-text column. The
+  prefix stays what it should always have been: evidence for the case where nothing is recorded.
+- **The prefix matcher accepted any ISO-2 code**, so «AE997073525» — a real nine-digit ΑΦΜ with
+  two stray letters — read as the UAE and, combined with that refusal, made an ordinary domestic
+  invoice unissuable. It is now restricted to prefixes actually used in front of a VAT id (EU +
+  GB/XI/CH/NO), which also let the digit floor drop to 6 so Romania's short id (RO361902) keeps
+  its evidence.
+- **A «GR» prefix answered the question but was discarded**, falling through to a refusal that
+  demanded a country the document already implied.
+- **`vies_vat` froze truncated** (varchar(20) against `customers.vat_vies` varchar(30)) — the
+  column is widened, and the migration's docblock no longer claims that only `company_name`
+  diverged.
+- **The missing-ΑΦΜ message named the wrong remedy**: it said "its customer has none either"
+  even when the customer HAS one and the fallback is closed because the invoice names a
+  different party — telling the operator to fill a field that was already filled.
+
+**Round-6 review corrections (no P0/P1 — diagnosis accuracy plus one real placeholder bug):**
+
+- **`vat_no = '0'` became an identity.** An all-zeros value is a PLACEHOLDER meaning "no ΑΦΜ" —
+  the convention the delivery-note sentinel already uses — but it was reported as the
+  counterpart AND closed the country fallback, because it matched no customer. Fixed in the one
+  normaliser (`Afm::canonicalVat()` → null) so every consumer agrees; the first cut patched a
+  single call site and the tests caught it immediately.
+- **`XI` was inert, and the round-5 commit message cited it as a reason.** «XI» is a VAT
+  jurisdiction, not an ISO country, so `IsoCountry` never knew it and the allowlist entry never
+  produced a prefix. Its country is GB and it now maps there. (Monaco/FR and Isle-of-Man/GB were
+  real; XI was not.)
+- **Two refusal messages named the wrong cause.** The country refusal reported "the invoice names
+  a different party" even when the linked customer WAS the counterpart and only its country was
+  unrecognisable — and, unlike the code it replaced, it did not name the offending value. The
+  ΑΦΜ refusal claimed "the linked customer has one" without checking that it does.
+- **The six-digit floor is documented as the ASYMMETRIC trade it is**: a false positive refuses a
+  good domestic invoice, a false negative only falls back to the recorded country (or the same GR
+  default this code always used), so short real shapes (a two-digit RO id, an old IE format, a GB
+  government id) are knowingly given up to keep junk out.
+
+**Round-7 review correction (P1 — created by round 6's own fix):**
+
+- **A placeholder `vat_no` was never replaced by what was actually filed.** Round 6 taught
+  `canonicalVat()` to read «000000000»/«0» as "no ΑΦΜ", but the freeze gates on `blank()` — and a
+  placeholder is not blank. So the payload filed the customer's real ΑΦΜ while the column kept
+  the placeholder: a half-frozen legal identity, manufactured by MYD-009's own freeze. The PDF
+  printed one party while AADE held another, every later render threw, and the row was
+  unrecoverable (a filed invoice is not editable and credit notes copy the column verbatim).
+  Round 6's test passed because it only asserted the resolvers, never the freeze.
+- Two P2s of the same shape: the ΑΦΜ refusal tested `filled($customer->afm)` raw, so a customer
+  whose ΑΦΜ is itself a placeholder was described as having one to borrow; and
+  `DeliveryNote::externalRecipientAfm()` recognised ONLY the exact nine-zero sentinel while the
+  normaliser recognised any all-zeros value — two strictnesses for one convention, now unified.
+
+**Deferred (recorded in `docs/BACKLOG.md`):** `PeppolInvoiceDocument` still builds the buyer from
+the live customer. Not a bug today — a tenant is either `gr-mydata` or `ee-peppol`, so no single
+document can disagree with itself — but it becomes the same defect the day PEPPOL goes live.
+
+**Round-8 review corrections (no P0/P1 — one of them a wrong DIRECTION, not a wrong value):**
+
+- **Junk in an ΑΦΜ is not a declaration.** Round 7 widened "all zeros = no ΑΦΜ" to "anything
+  unusable", which swept «-» and «.» in with it — so a delivery note that previously REFUSED was
+  now silently filed as an ενδοδιακίνηση, and a linked customer's KNOWN ΑΦΜ was replaced by the
+  «no ΑΦΜ» placeholder. (Round 8 fixed only the linked-customer half: `isInternalMovement()`
+  requires `customer_id === null`, so a note with junk and NO other identity kept being declared
+  internal — discarding the country the form MADE the operator pick. Round 9 closed that half
+  too: junk now blocks the internal classification outright.) That is a change to merged MYD-011 semantics in the GUESS direction,
+  made inside an invoice PR. All-zeros is a DECLARATION (AADE's convention for ενδοδιακίνηση);
+  junk is an accident, and an accident falls through to the real identity
+  (`Afm::isZeroPlaceholder()` now separates them).
+- **`blank()` and `?:` disagree about the string «0».** Both the AADE builder and the provider
+  document select the address with `?:`, which treats «0» as absent, while the freeze gated on
+  `blank()`, which does not — so the payload filed the customer's postcode and the freeze kept
+  the «0», leaving the filed document unable to render its own counterpart. The gate now mirrors
+  the selector.
+- **The customer-fallback branch was not canonicalised**, so a customer row holding «00000» was
+  read verbatim as a real ΑΦΜ — on the very path round 7's commit said it had fixed.
+- **`EnrichInvoiceFromAade` skipped exactly the rows that need it.** It gates on `blank(vat_no)`,
+  so an all-zeros placeholder — now officially "not an identity" — was treated as filled, and the
+  ONE tool that can repair an already-filed legacy row would not touch it.
+
+**Round-9 review (no P0/P1 — the gate's stopping condition under the recalibrated rule in
+`CLAUDE.md`). Three P2s, all fixed in the same pass rather than deferred, because two were
+genuine misreports and all three were one-liners:**
+
+- **Junk + no other identity was still declared an ενδοδιακίνηση** — the other half of the
+  round-8 fix (see above). The claim in this file that the refusal had been "restored" was only
+  half-true and is corrected.
+- **`isZeroPlaceholder()` and `canonicalVat()` disagreed about a PREFIXED all-zeros value.**
+  «EL000000000» is the same declaration as «000000000», but only the latter stripped the prefix —
+  so the prefixed form took the junk path and was replaced by the linked customer's real ΑΦΜ, i.e.
+  the placeholder filed as an identity: the exact conflation the helper exists to prevent.
+- **The address freeze gate mirrored `?:` for «0» but not for whitespace.** `?:` is falsy for
+  `''` and `'0'` only, so a single space froze the customer's real street while the provider
+  payload carried the blank one.
+
+**Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
+a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
+party does not inherit the linked customer's country; the freeze fills blanks only and never
+overwrites.
 
 ### MYD-010 — All filings hard-code branch 0
 

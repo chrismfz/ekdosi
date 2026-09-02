@@ -8,7 +8,7 @@ use App\Models\InvoiceLine;
 use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\InvoiceVatBreakdown;
-use App\Support\IsoCountry;
+use App\Support\Afm;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -634,27 +634,47 @@ class AadeInvoiceDocument
             return null;
         }
 
-        $customer = $invoice->customer;
-        if (! $customer || empty($customer->afm)) {
+        // MYD-009: the legal counterpart comes from the invoice's FROZEN party
+        // snapshot, through the Invoice helpers — never straight off `customer`.
+        // This used to read $customer->afm and $customer->name while taking country
+        // and address from the snapshot, so the filed party was assembled HALF
+        // frozen and HALF live: editing a customer changed the XML of an invoice
+        // filed a year earlier, and a credit note that faithfully copied its
+        // original's snapshot had it overwritten again by today's customer row.
+        $afm = $invoice->counterpartAfm();
+        if ($afm === null) {
+            // THREE distinguishable states, and the operator needs the right one: the
+            // document is filed; there is no customer; or there IS a customer with an
+            // ΑΦΜ but it describes a different party, so the fallback is closed. The
+            // first cut reported the second message for the third state, telling the
+            // operator to fill an ΑΦΜ that was already filled.
+            $reason = match (true) {
+                $invoice->hasBeenFiled() => ' (the document is already filed, so its snapshot is the only source).',
+                $invoice->customer === null => ' and no customer is set.',
+                filled(Afm::uniqueKey($invoice->customer->afm)) && ! $invoice->counterpartIsTheLinkedCustomer() => ' — the '
+                    .'linked customer has one, but the invoice names a different party, so it cannot be borrowed.',
+                default => ' and its customer has none either.',
+            };
+
             throw new RuntimeException(
-                "Invoice {$invoice->invcode} (type $type) requires a customer with AFM, but ".
-                ($customer ? 'AFM is empty' : 'no customer is set').'. '.
-                'Either fill the customer AFM, or change the invoice type to a retail variant (11.x).'
+                "Invoice {$invoice->invcode} (type $type) requires a counterpart ΑΦΜ, but the "
+                .'invoice carries none'
+                .$reason
+                .' Fill «ΑΦΜ» on the invoice (or the customer, before issue), or change the '
+                .'invoice type to a retail variant (11.x).'
             );
         }
 
-        // Country: prefer the invoice snapshot (the legally-frozen
-        // value at issue time); fall back to live customer country,
-        // then 'GR'. Normalise to ISO-3166-1 alpha-2 — AADE rejects
-        // anything else, including spelled-out names ("Greece").
-        $country = IsoCountry::normalise($invoice->country ?: $customer->country ?: 'GR');
+        // ONE definition of the filing country, on the model — shared with the
+        // provider payload and the freeze so the three cannot drift (MYD-009).
+        $country = $invoice->counterpartCountryForFiling();
 
         // MYD-6: pre-empt AADE's opaque [242]-[244] ("counterpart country for this
         // invoice type must be Greece / EU-not-Greece / non-EU") with a clear error.
         $this->assertCounterpartCountryMatchesType($invoice, $type, $country);
 
         $counterpart = (new Counterpart)
-            ->setVatNumber($customer->afm)
+            ->setVatNumber($afm)
             ->setCountry($country)
             ->setBranch(0);
 
@@ -664,9 +684,10 @@ class AadeInvoiceDocument
         // foreign Counterpart causes AADE 4xx with an opaque message.
         if ($country !== 'GR') {
             $counterpart->setName(
-                $customer->name
+                $invoice->counterpartName()
                 ?? throw new RuntimeException(
-                    "Foreign counterpart on invoice {$invoice->invcode} requires customer name (AADE rule)."
+                    "Foreign counterpart on invoice {$invoice->invcode} requires a counterpart name "
+                    .'(AADE rule). Fill «Επωνυμία» on the invoice.'
                 )
             );
 
@@ -675,9 +696,12 @@ class AadeInvoiceDocument
             // garbage onto a legal document (and it was inconsistent with
             // DeliveryNoteSubmitter::requireAddress, which hard-fails). Refuse
             // instead, so the operator fills the customer's real address.
-            $street = $invoice->address1 ?: $customer->address1;
-            $city = $invoice->city ?: $customer->city;
-            $postcode = $invoice->postcode ?: $customer->postcode;
+            // Same rule as the identity above: the address is part of the legal
+            // counterpart, so a FILED document reads only its own snapshot.
+            $live = $invoice->mayFallBackToLiveCustomer() ? $invoice->customer : null;
+            $street = $invoice->address1 ?: $live?->address1;
+            $city = $invoice->city ?: $live?->city;
+            $postcode = $invoice->postcode ?: $live?->postcode;
             if (blank($street) || blank($city) || blank($postcode)) {
                 throw new RuntimeException(
                     "Foreign counterpart on invoice {$invoice->invcode} requires a full address ".

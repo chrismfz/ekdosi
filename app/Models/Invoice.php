@@ -11,7 +11,9 @@ use App\Models\Concerns\TracksActivity;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
+use App\Support\Afm;
 use App\Support\InvoiceScope;
+use App\Support\IsoCountry;
 use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
@@ -23,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\URL;
+use RuntimeException;
 
 /**
  * Issued invoice (παραστατικό). Mirrors legacy INVOICE.
@@ -224,6 +227,365 @@ class Invoice extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /* ===================== Legal counterpart identity (MYD-009) =====================
+     |
+     | The party-snapshot columns above are the LEGAL counterpart of a filed
+     | document. Everything that builds a filing — the AADE payload, the provider
+     | payload, the PDF — must read them through these three helpers rather than
+     | through `customer`, so the same invoice can never describe two different
+     | parties depending on when it is rendered.
+     |
+     | The bug they close (MYD-009): buildCounterpart() filed `customer->afm` and
+     | `customer->name` while taking country and address from the snapshot, so the
+     | reported party was assembled HALF frozen and HALF live. Editing a customer
+     | changed the XML of an invoice filed a year earlier, and a credit note that
+     | faithfully copied its original's snapshot had it overwritten again by
+     | today's customer row.
+     */
+
+    /**
+     * Has this invoice been transmitted? Twin of DeliveryNote::hasBeenFiled().
+     * Both submit paths write `mydata_sent` and `mydata_mark` together; a
+     * rejected-then-repaired document can carry the flag without a MARK.
+     */
+    public function hasBeenFiled(): bool
+    {
+        return (bool) $this->mydata_sent || filled($this->mydata_mark);
+    }
+
+    /**
+     * May a blank snapshot field fall back to the live customer row?
+     *
+     * ONLY for a document that has not been filed yet. Rows created by this app
+     * always carry a snapshot (the form, the WHMCS mapper and every Action write
+     * it); the blanks are legacy/ETL imports, and those must still be issuable —
+     * so an unfiled document resolves from the customer and FREEZES the result at
+     * submit (MyDataSubmitter::freezePartySnapshot), which is what keeps the
+     * column honest afterwards.
+     *
+     * Once filed, never: `customers` is live and the snapshot is the record of
+     * what was reported, so reading through would show a party the AADE record
+     * never carried.
+     */
+    public function mayFallBackToLiveCustomer(): bool
+    {
+        return ! $this->hasBeenFiled() && $this->counterpartIsTheLinkedCustomer();
+    }
+
+    /**
+     * Does the linked customer actually DESCRIBE this invoice's counterpart?
+     *
+     * The party fields are editable on the invoice form while `customer_id` stays
+     * put, so an operator can pick a customer and then overtype «ΑΦΜ/Επωνυμία» with
+     * a different party. Borrowing the country or address from that customer would
+     * then assemble ONE reported party out of TWO real ones — the same hole
+     * MYD-011 closed for delivery notes, by the same route.
+     *
+     * A blank snapshot field is not a disagreement: it is exactly the legacy row the
+     * fallback exists for. Only a field that is filled AND different rules it out.
+     */
+    public function counterpartIsTheLinkedCustomer(): bool
+    {
+        $customer = $this->customer;
+
+        if ($customer === null) {
+            return false;
+        }
+
+        $afm = trim((string) $this->vat_no);
+
+        // A value that is not an IDENTITY («-», «0», «N/A») trims non-empty but
+        // uniqueKey()s to null — and null equals a null customer ΑΦΜ, which let two
+        // different parties short-circuit past the name check entirely. Only a real
+        // identity may stand in for the comparison.
+        if ($afm !== '' && Afm::uniqueKey($afm) !== null) {
+            // The ΑΦΜ is the identity. When it matches, the party IS this customer —
+            // a differing NAME is a rename or a spelling correction, not a different
+            // taxpayer, and treating it as fatal made a routine customer rename turn
+            // every legacy invoice with a blank country into an unissuable document
+            // (and its credit notes with it, since IssueCreditNote copies the pair).
+            return Afm::uniqueKey($afm) === Afm::uniqueKey($customer->afm);
+        }
+
+        // With no ΑΦΜ on the document there is nothing stronger to go on, so the name
+        // has to carry it. (The delivery-note twin stays stricter on purpose: its
+        // recipient name is operator-typed free text on a document whose whole point
+        // is naming a party, and refusing there costs only an edit.)
+        $name = trim((string) $this->company_name);
+
+        return $name === '' || $name === trim((string) $customer->name);
+    }
+
+    /**
+     * The counterpart's ΑΦΜ as filed: the frozen snapshot, else the legacy fallback.
+     *
+     * CANONICALISED on the way out through Afm::uniqueKey() — the ONE identity rule,
+     * shared with `customers.afm_key`. `invoices.vat_no` is free
+     * text (a bare TextInput, and an ETL copy of the legacy column), so filing it
+     * verbatim sent «IT 12345678901» / «EL123456789» to AADE and earned an opaque
+     * rejection. The old code filed `customers.afm`, which the customer form and the
+     * GSIS/VIES lookups keep clean; reading the snapshot must not lose that.
+     */
+    public function counterpartAfm(): ?string
+    {
+        // uniqueKey() maps a placeholder to null, so «0»/«000000000» falls through
+        // to the customer instead of becoming the reported party.
+        if (filled($frozen = Afm::uniqueKey($this->vat_no))) {
+            return $frozen;
+        }
+
+        return $this->mayFallBackToLiveCustomer()
+            ? Afm::uniqueKey($this->customer?->afm)
+            : null;
+    }
+
+    /** The counterpart's legal name as filed. */
+    public function counterpartName(): ?string
+    {
+        $frozen = trim((string) $this->company_name);
+        if ($frozen !== '') {
+            return $frozen;
+        }
+
+        return $this->mayFallBackToLiveCustomer()
+            ? (trim((string) $this->customer?->name) ?: null)
+            : null;
+    }
+
+    /**
+     * The counterpart's country as a normalised ISO-3166-1 alpha-2, or null when it
+     * cannot be resolved from a source this document is allowed to read.
+     *
+     * A country PRESENT on the document is authoritative even when it does not
+     * normalise: falling through to the customer there let a snapshot reading
+     * «Germania» be quietly replaced by the customer's «GR», which is the
+     * recorded-value-is-evidence rule (MYD-011 round 7) broken again.
+     */
+    public function counterpartCountryIso(): ?string
+    {
+        if (filled($this->country)) {
+            return IsoCountry::tryNormalise($this->country);
+        }
+
+        return $this->mayFallBackToLiveCustomer()
+            ? IsoCountry::tryNormalise($this->customer?->country)
+            : null;
+    }
+
+    /**
+     * THE country this document files — one definition, used by the AADE payload,
+     * the provider payload and the freeze, so they cannot drift (the first cut kept
+     * this policy in the builder and a second copy in the helper, and the two
+     * disagreed within one commit).
+     *
+     * Three outcomes, and telling them apart is the whole point:
+     *
+     *  - resolvable from a source we may read → that country;
+     *  - NO country evidence of any kind → «GR». Unlike a delivery note (MYD-011)
+     *    this default is safe: the per-type check in the builder still enforces the
+     *    domestic/EU/third-country split, and `invoices.country` is blank on most
+     *    legacy domestic rows, which would otherwise all become unissuable;
+     *  - evidence exists but this document may not use it → THROW.
+     *
+     * "Evidence" deliberately includes the ΑΦΜ's own country prefix. An invoice
+     * whose snapshot reads «IT12345678901» with a soft-deleted customer has no
+     * country column anywhere — but it is plainly not a domestic party, and filing
+     * it as GR is the misreport this whole issue exists to stop.
+     *
+     * @throws RuntimeException when a country exists that this document must not read
+     */
+    public function counterpartCountryForFiling(): string
+    {
+        $prefix = Afm::countryPrefix($this->counterpartAfm());
+
+        // A RECORDED country wins, even when the ΑΦΜ's prefix names a different one.
+        // Round 4 threw on that disagreement as a "coherence" check and it was wrong:
+        // the two legitimately differ (Monaco files under an FR VAT id, the Isle of
+        // Man under GB, Northern Ireland under XI), and the recorded country is the
+        // operator's explicit statement about the party while the prefix is an
+        // inference from a free-text column. Refusing there blocked correct documents
+        // and told the operator to "correct" a value that was already right. The
+        // prefix stays what it should always have been: evidence for the case where
+        // NOTHING is recorded, below.
+        if ($iso = $this->counterpartCountryIso()) {
+            return $iso;
+        }
+
+        // Present on the document but unresolvable — throw with the offending value.
+        if (filled($this->country)) {
+            return IsoCountry::normalise($this->country);
+        }
+
+        // Nothing is recorded, so the ΑΦΜ is the only thing that knows. A GR prefix is
+        // positive evidence and ANSWERS the question — falling through to the refusal
+        // below discarded it and demanded a country the document already implied.
+        if ($prefix !== null) {
+            if ($prefix === 'GR') {
+                return 'GR';
+            }
+
+            throw new RuntimeException(
+                "Invoice {$this->invcode} records no counterpart country, but its ΑΦΜ "
+                ."«{$this->counterpartAfm()}» is a {$prefix} VAT identifier. "
+                .'Set «Χώρα» on the invoice — a foreign party must not be filed as GR.'
+            );
+        }
+
+        // A country exists on the linked customer that this document cannot use. THREE
+        // reasons reach here and they need different remedies — an earlier cut offered
+        // only two, so an unresolvable customer country was reported as a party
+        // mismatch that did not exist, and (unlike the code this replaced) the
+        // offending value was not even named.
+        if (filled($this->customer?->country)) {
+            $raw = $this->customer->country;
+
+            throw new RuntimeException(
+                "Invoice {$this->invcode} records no counterpart country of its own, and its "
+                ."linked customer's country cannot be used for it — "
+                .match (true) {
+                    $this->hasBeenFiled() => 'the document is already filed, so its own snapshot is the only source.',
+                    ! $this->counterpartIsTheLinkedCustomer() => 'the invoice names a different party than that customer.',
+                    default => "the customer's «{$raw}» is not a country this system recognises.",
+                }
+                .' Set «Χώρα» on the invoice — filing it as GR on a guess is exactly what this refuses.'
+            );
+        }
+
+        // Nothing anywhere — the one sanctioned default.
+        return 'GR';
+    }
+
+    /**
+     * The party-snapshot columns to FREEZE at the moment this invoice is filed.
+     *
+     * A legacy/ETL row can reach submission with the snapshot blank, so the
+     * counterpart is resolved from the linked customer — and the same write sets
+     * `mydata_sent`, which CLOSES that fallback. Without freezing, the party we
+     * actually reported becomes unreadable the instant it is filed, exactly as the
+     * delivery-note country did before MYD-011.
+     *
+     * Covers the ADDRESS too, not just the identity: a non-GR counterpart files
+     * street/city/postcode, so freezing only ΑΦΜ/name/country left a filed document
+     * unable to reproduce its own counterpart (it then threw "requires a full
+     * address" on re-render, while AADE held the real one).
+     *
+     * Skipped entirely for a RETAIL (11.x) document: AADE files no counterpart at
+     * all there, so stamping one into the "what we reported" columns would assert a
+     * party that was never declared — and would make the PDF start printing it.
+     *
+     * Fills ONLY blanks; never overwrites a value the document already carries.
+     * Every value is truncated to its column width: `customers.name` is varchar(191)
+     * while `company_name` is varchar(120), and MySQL runs in strict mode, so an
+     * over-long copy would raise inside the same transaction as the MARK audit row —
+     * rolling back a filing AADE had already accepted and leaving the invoice
+     * permanently stuck.
+     *
+     * Returned as columns so a submitter can merge them into the SAME forceFill as
+     * the MARK rather than doing a second, racy save. Both the direct myDATA and the
+     * provider path use this one definition.
+     *
+     * @return array<string, string>
+     */
+    public function frozenPartyColumns(): array
+    {
+        if ($this->filesNoCounterpart()) {
+            return [];
+        }
+
+        try {
+            $country = $this->counterpartCountryForFiling();
+        } catch (RuntimeException) {
+            // The document is about to be refused anyway — freeze nothing.
+            return [];
+        }
+
+        $live = $this->mayFallBackToLiveCustomer() ? $this->customer : null;
+
+        // column => [resolved value, column width]. The COUNTRY is taken from the
+        // filing policy, not from counterpartCountryIso(): the sanctioned «GR»
+        // default lives only there, so leaving it unfrozen meant a later, routine
+        // edit to customers.country made an ALREADY FILED invoice un-renderable.
+        $candidates = [
+            'vat_no' => [$this->counterpartAfm(), 20],
+            'company_name' => [$this->counterpartName(), 191],
+            'country' => [$country, 60],
+        ];
+
+        // The address is frozen for EVERY counterpart, not just a foreign one. AADE
+        // omits it for a GR party, but the PROVIDER document carries it either way
+        // (InvoSign prints it) and so does our own PDF — so a GR invoice that did not
+        // freeze it could not reproduce its own provider payload afterwards, which is
+        // the same "unreadable once filed" failure, one surface over. Not freezing it
+        // for a foreign party had already produced the harder version of that bug:
+        // a re-render threw "requires a full address" while AADE held the real one.
+        $candidates += [
+            'address1' => [$live?->address1, 60],
+            'address2' => [$live?->address2, 60],
+            'city' => [$live?->city, 60],
+            'postcode' => [$live?->postcode, 10],
+            'occupation' => [$live?->occupation, 120],
+            'vies_vat' => [$live?->vat_vies, 30],
+        ];
+
+        $frozen = [];
+        foreach ($candidates as $column => [$resolved, $width]) {
+            if ($this->partyColumnNeedsFreezing($column) && filled($resolved)) {
+                $frozen[$column] = mb_substr((string) $resolved, 0, $width);
+            }
+        }
+
+        return $frozen;
+    }
+
+    /**
+     * Does this snapshot column carry nothing USABLE, so the resolved value should be
+     * written into it?
+     *
+     * `blank()` alone is not that question for `vat_no`. Once uniqueKey() started
+     * reading an all-zeros placeholder as "no ΑΦΜ", a snapshot holding «000000000»
+     * was no longer blank yet no longer an identity either — so the payload filed the
+     * customer's real ΑΦΜ while the column kept the placeholder. That is precisely the
+     * half-frozen legal identity this whole issue exists to eliminate, manufactured by
+     * its own freeze: the PDF then printed one party while AADE held another, every
+     * later render threw, and the row was unrecoverable because a filed invoice is not
+     * editable and credit notes copy the column verbatim.
+     */
+    private function partyColumnNeedsFreezing(string $column): bool
+    {
+        if ($column === 'vat_no') {
+            return Afm::uniqueKey($this->vat_no) === null;
+        }
+
+        // The address-ish columns are selected with `?:` by BOTH the AADE builder and
+        // the provider document, and `?:` treats the string «0» as absent while
+        // blank() does not. That disagreement filed the customer's postcode while the
+        // freeze kept the «0» — leaving the filed document unable to render its own
+        // counterpart again, the exact failure this freeze exists to prevent. Mirror
+        // the selector instead of guessing at it.
+        if (in_array($column, ['address1', 'address2', 'city', 'postcode', 'occupation', 'vies_vat'], true)) {
+            // EXACTLY `?:`, not an approximation of it: `?:` is falsy for '' and '0'
+            // but NOT for ' ', so trimming here froze the customer's real street while
+            // the provider payload carried the blank one.
+            return ($this->{$column} ?: '') === '';
+        }
+
+        return blank($this->{$column});
+    }
+
+    /**
+     * Does this document file NO counterpart at all? True for retail (11.x), where
+     * AADE forbids one even when the customer has an ΑΦΜ.
+     */
+    public function filesNoCounterpart(): bool
+    {
+        // The RELATION first, because that is what AadeInvoiceDocument::build() files
+        // from — reading the cache first gave a second, divergent definition of "is
+        // this retail?" inside a change whose whole thesis is one definition.
+        $type = (string) ($this->invoiceType?->mydata_type ?: $this->mydata_type);
+
+        return str_starts_with($type, '11.');
     }
 
     public function paymentMethod(): BelongsTo
