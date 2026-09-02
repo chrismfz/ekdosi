@@ -104,7 +104,7 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 
 | Bucket | Meaning | Count |
 |---|---|---:|
-| **A — BLOCKER** | Must be true before the first live document on 1 Oct | 4 + 1 rehearsal (PROV-010 now DONE, dry-run in progress) |
+| **A — BLOCKER** | Must be true before the first live document on 1 Oct | 4 + 1 rehearsal (PROV-010, OBS-001, PROV-003-print now DONE; dry-run in progress). Remaining: MYD-004, MYD-006, MYD-007, PROV-006(conditional) |
 | **B — AFTER** | Real, do it after the 1 Oct cutover (incl. the whole delivery-note family, due at the digital-delivery deadline) | ~21 |
 | **C — NOT-FOR-US** | Genuinely out of these tenants' scope (island/ν.5057 VAT, multi-branch, B2G/POS, fresh-install). **Re-raise if the scope changes** | ~9 (+15 already-disarmed UPD-*) |
 | **D — STALE** | The ledger says OPEN; the code already fixes it | 2 |
@@ -121,11 +121,11 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 |---|---|---|
 | ~~**PROV-010**~~ **DONE** | Contract + «Δήλωση Έναρξης» + issuer acceptance for iNVO Sign are **in place** (operator confirmed 2026-09-02); the environment in view is the dev/test one. No longer a blocker. | — |
 | **PROV-006** *(A-conditional)* | Retail (αποδείξεις λιανικής, 11.x) **is** part of the business. IF retail is filed through the provider at the 1 Oct cutover, the anonymous-counterpart convention must be sandbox-confirmed first: the public InvoSign guide marks `CounterpartName`/`CounterpartVat` required, and ekdosi can emit both empty for 11.1/11.2. | Prove 11.1 + 11.2 in the dev sandbox now (part of the dry-run). If retail stays on the direct-myDATA path at cutover and moves to the provider later, this drops to B. **Decide which channel retail uses on day one.** |
-| **PROV-003** (print half only) | A.1112/2025 requires the *printed representation* of a provider document to carry provider identity, licence number, UID, authentication code and QR. The PDF today prints MARK + QR only. Every invoice we email a customer from 1 Oct is non-conforming. | Small: one block in `resources/views/invoices/pdf.blade.php`, fed from immutable provider metadata, shown when `mydata_action=PROVIDER_INSERT`. **The archive half of PROV-003 is bucket B** — see below. |
+| ~~**PROV-003** (print half)~~ **DONE (#406)** | A.1112/2025 requires the *printed representation* of a provider document to carry provider identity, licence number, UID, authentication code and QR. **Shipped:** the PDF renders the «Εκδόθηκε μέσω παρόχου (ΥΠΑΗΕΣ)» block on any `PROVIDER_INSERT` invoice, from immutable `ProviderIdentity` config, and the UID is now persisted. No emailed document is non-conforming any more. **The archive half of PROV-003 is bucket B** — see below. | — |
 | **MYD-007** | ~12% of myip's net is not at 24% (`vat_summary`: €107,264 net → €22,671 VAT ≈ 21.1%). Operator-confirmed: this is **intra-community (ενδοκοινοτικό)**, established from the Firebird import. The legacy program had **no field** to record the exemption reason, so it was never declared — which is why whatever the seeded 0% hint says governs by default, tenant-wide. | The fact is now known, so this is smaller than the first draft implied. Remaining work: (1) confirm the exact §8.3 reason with the accountant — intra-community **services** (B2B, recipient self-accounts) vs intra-community **goods** (άρθρο 33 = reason 14) land on different codes, and the current seed points at reason 16/άρθρο 45; (2) make the chosen reason the tenant/VAT-row default so it stops depending on a global; (3) spot-check a few imported ενδοκοινοτικά documents' `mydata_marks` request XML to see what, if anything, was filed. **Confirm with the accountant before changing the code.** No per-line exemption model needed. |
 | **MYD-004** (0% half only) | Same root as MYD-007: a 0% row used with no exemption reason is only a **warning** and `mydata:preflight` exits 0 on warnings alone. That is the false-green that lets a wrong filing through. | Make «0% row in use without a reason» a **blocking** preflight error. The 3%/code-9/6-vs-10 half is bucket C — these tenants have no island or ν.5057 rate. |
 | **MYD-006** (config, not code) | Classification is already resolvable per line (`AadeInvoiceDocument::resolveIncomeClass`, product-category override). What is missing is that **someone chose** the values for ΤΠΥ / ΤΙΜ / ΠΙΣ on these two tenants. | ~30 minutes of configuration review + `mydata:preflight`. No feature. |
-| **OBS-001** *(new — not in the ledger)* | Not legally required. It is the item that decides whether a day-one problem costs minutes or a day: today nothing outside the panel can answer «γιατί απορρίφθηκε αυτό;». The evidence is already stored — see the OBS-001 section — so this is access, not instrumentation. | Five small read-only MCP tools on the existing `SuperAdminMcpTool` pattern. `invoice_filing` alone covers most of it. |
+| ~~**OBS-001** *(new — not in the ledger)*~~ **DONE (#405)** | Not legally required. It is the item that decides whether a day-one problem costs minutes or a day: nothing outside the panel could answer «γιατί απορρίφθηκε αυτό;». **Shipped:** five read-only MCP tools on the `SuperAdminMcpTool` pattern — `invoice_filing` (the important one), `mydata_failures`, `stuck_documents`, `mydata_discrepancies`, `preflight`. Acceptance met: name a failing document → its rejection code + exact XML, no panel. | Optional tail (per-success INFO line) → BACKLOG. |
 | **Cutover dry-run** *(in progress — this is what dev/test is for)* | The last *production* ekdosi MARK is **2026-06-10** (myip) / **2026-06-16** (nexon), and `ops:health` on prod reports **92 / 2** open myDATA discrepancies. The rehearsal on the dev/test environment is already the gate; keep it explicit so nothing ships un-rehearsed. | Cover every day-one document type end-to-end on the provider sandbox — ΤΠΥ, ΤΙΜ, ΠΙΣ **and αποδείξεις λιανικής 11.x** (issue → PDF → reconcile). Then, on prod, clear the 92/2 discrepancy backlog so day-one noise is real signal. Delivery notes 9.x join this rehearsal ahead of the digital-delivery deadline, not 1 Oct. |
 
 ### B — AFTER cutover (real, but nothing burns on 1 Oct)
@@ -497,7 +497,7 @@ Priorities:
 | MYD-026 | P1 | OPEN | B | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state — do before the ΔΑ deadline |
 | PROV-001 | P2 | OPEN | B | Provider idempotency | InvoSign **de-dups** + real-time status (sandbox 2026-07-07) ⇒ no duplicate document possible on this provider. **Re-raise to P0 on a provider that does not de-dup** |
 | PROV-002 | P0 | OPEN | B | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 — do before the ΔΑ deadline |
-| PROV-003 | P0 | PARTIAL | A | Provider documents | Print half DONE — PDF shows provider identity/licence/MARK/UID/auth-code; UID now persisted. Artifact-archive + per-doc licence snapshot → BACKLOG (B) |
+| PROV-003 | P0 | PARTIAL | A✓/B | Provider documents | Day-one (print) half DONE (#406) — PDF shows provider identity/licence/MARK/UID/auth-code, UID persisted; nothing blocks 1 Oct. Remaining is bucket B: official-artifact archive + per-doc licence snapshot + invoice-card compare → BACKLOG |
 | PROV-004 | P0 | OPEN | C | Provider credits | UI/service do not enforce the 5.1/5.2/11.4 compatibility matrix |
 | PROV-005 | P1 | OPEN | B | Provider preflight | Reachability is not token authentication and mandatory issuer fields are unchecked |
 | PROV-006 | P0 | VERIFY | A? | Provider retail | Retail IS in scope; confirm the anonymous 11.x counterpart convention in sandbox IF retail files via provider at cutover |
@@ -525,7 +525,7 @@ Priorities:
 | OPS-003 | P2 | OPEN | B | Shared hosting | No cPanel/shared-hosting queue recipe or direct completion link |
 | TEST-001 | P2 | OPEN | B | Tests/CI | No full web installer success-path test; inspected CI was not green |
 | DEP-001 | P2 | WATCH | B | Dependency | firebed/aade-mydata is current; watch AADE v2.0.2 |
-| OBS-001 | P1 | OPEN | A | Observability | Filing forensics (XML/MARK/errors) are captured but unreachable over MCP — 5 read-only tools |
+| OBS-001 | P1 | DONE | — | Observability | 5 read-only forensic MCP tools shipped (#405): invoice_filing / mydata_failures / stuck_documents / mydata_discrepancies / preflight. Optional per-success INFO line → BACKLOG |
 | UPD-001 | P2 | DISARMED | C | Queue safety | PHP update/rollback does not drain an in-flight worker |
 | UPD-002 | P2 | DISARMED | C | Failure recovery | Partial apply failure lifts maintenance and can serve inconsistent code |
 | UPD-003 | P2 | DISARMED | C | Update integrity | UI queues a mutable tag, not a verified immutable commit SHA |
@@ -3593,7 +3593,17 @@ Re-check this entry when any of the following happens:
 
 ### OBS-001 — Cutover-day forensics are captured but not reachable over MCP
 
-**Status:** OPEN · **Priority:** P1 · **Bucket:** A · **Raised:** 2026-09-02
+**Status:** DONE 2026-09-02 (PR #405) · **Priority:** P1 · **Bucket:** A · **Raised:** 2026-09-02
+
+> **DONE (#405).** All five read-only tools shipped and are registered on
+> `EkdosiMcpServer`: `invoice_filing`, `mydata_failures`, `stuck_documents`,
+> `mydata_discrepancies`, `preflight` (a later review round tightened the real-vs-
+> capped counts and the error-code extraction). The acceptance below is met: from a
+> cold start, with only MCP, `invoice_filing` returns a document's local×myDATA state
+> plus its full `mydata_marks` history and — on request — one attempt's raw
+> request/response XML. The ONE thing deliberately left is the optional «cheap»
+> per-success INFO log line (below, under «Also worth doing») — it was never part of
+> the acceptance and is recorded in `docs/BACKLOG.md` as an OBS-001 tail.
 
 > Not legally required, unlike the other five blockers. It is here because it is
 > what decides whether a day-one problem costs minutes or a day.
