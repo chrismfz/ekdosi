@@ -272,7 +272,7 @@ Priorities:
 | MYD-007 | P0 | OPEN | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
 | MYD-008 | P0 | DONE | Provider credits | Correlated credit cannot find a provider-issued original MARK |
 | MYD-009 | P0 | DONE | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
-| MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
+| MYD-010 | P2 | WATCH | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | DONE | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
 | MYD-013 | P1 | DONE | Delivery lifecycle | RegisterTransfer can omit the mandatory transportType |
@@ -286,7 +286,7 @@ Priorities:
 | MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
 | MYD-022 | P0 | OPEN | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
-| MYD-024 | P0 | OPEN | Issuer identity | Historical filings and PDFs use mutable current company identity |
+| MYD-024 | P2 | PARTIAL | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
 | MYD-025 | P0 | OPEN | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
 | MYD-026 | P1 | OPEN | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state |
 | PROV-001 | P0 | OPEN | Provider idempotency | Ambiguous invoice response is not durably blocked/recovered before re-send |
@@ -1006,7 +1006,26 @@ overwrites.
 
 ### MYD-010 — All filings hard-code branch 0
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** WATCH 2026-09-02 (was OPEN/P0) · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
+
+**Downgrade (triage 2026-09-02):** the finding is factually right and the code is
+**currently correct**. AADE's own rule is that branch `0` is right when the issuing
+establishment is the registered head office — and there is no branch concept anywhere in
+this system to contradict it: no `Branch` model, no branch column on `companies`, no branch
+field on any document or customer, and all three tenants are head-office-only. So `0` is
+not a hard-coded guess here, it is the accurate value for every document we can currently
+issue, and «freeze the issuing establishment per document» would be freezing a field that
+does not exist yet.
+
+Building the branch model now would be speculative: it needs a real multi-establishment
+tenant to define what a branch IS (its own numbering? its own myDATA credentials? its own
+address on the PDF?), and getting that wrong is worse than the current honest constant.
+
+**Re-open when** a tenant actually registers a branch at ΑΑΔΕ — that is the trigger, and it
+is visible: the go-live check and `mydata:preflight` are the natural places to surface it.
+Until then this is WATCH, not OPEN: nothing is being filed incorrectly today.
+`DeliveryNote.startShippingBranch`/`completeShippingBranch` remain unrelated (they describe
+loading/delivery locations, not the PartyType branch).
 
 **Official finding**
 
@@ -1927,7 +1946,39 @@ adoption and external cancellation sync for invoices and delivery notes.
 
 ### MYD-024 — Issuer and filing identity are not frozen per document
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** PARTIAL 2026-09-02 (series DONE; remainder P2) · **Priority:** P0 → P2 · **Research:** CONFIRMED 2026-08-31
+
+**Triage 2026-09-02 — the finding overstates the invoice case.** The AADE issuer block on an
+invoice is **only** `vatNumber` + `country` + `branch` (`[219]`/`[220]` actively FORBID name and
+address for a GR party — that is why `AadeInvoiceDocument` does not send them). So changing a
+company's legal name, commercial name, address, ΔΟΥ or ΚΑΔ **cannot** rewrite a filed invoice's
+payload: those fields are not in it. The finding's «rewrite historical XML» risk applies to the
+9.x **delivery note** (which does carry issuer name+address) and to regenerated **PDFs**, not to
+monetary filings.
+
+Of the fields the finding lists, the one that was genuinely filing identity is the **series** —
+and it was the dangerous one, because the in-doubt recovery searched by it. **That is now frozen
+per document (see MYD-018), which closes the duplicate-filing half of this item.**
+
+**ΑΦΜ and ΓΕΜΗ: a warning, not a snapshot.** The ΑΦΜ is both the issuer identity and the
+myDATA/provider **credential** identity — change it and nothing authenticates, every existing MARK
+belongs to a different legal entity, and the correct operation is «new company», not «edit». A
+snapshot column would not help: it would let the two diverge silently. The company form now shows
+an advisory on `afm` and `gemi` once anything has been filed under the current value
+(`Company::filedDocumentCount()`, `CompanyForm::identityChangeWarning()`), stating how many
+documents are already filed and that a change normally means a new company. Deliberately NOT a
+block — fixing a typo before the first filing is legitimate.
+
+**Deferred to P2 (`docs/BACKLOG.md`):** freezing issuer **name + address** on 9.x delivery notes
+and on regenerated PDFs. Real but bounded: it changes a *representation* of a past document, not
+its filed identity, the remote record is unaffected, and no tenant has moved premises yet.
+
+**Acceptance (revised)**
+
+- Editing an InvoiceType cannot change an existing numbered document's XML or its in-doubt
+  lookup coordinates. ✅ (MYD-018)
+- Editing ΑΦΜ/ΓΕΜΗ on a company with filed documents warns the operator with the count. ✅
+- Delivery-note issuer address and regenerated PDFs still read the live Company. ⏳ P2.
 
 **Repository evidence**
 

@@ -505,4 +505,25 @@ class Company extends Model
     {
         return $this->hasMany(CompanyBackupRun::class)->latest('started_at');
     }
+
+    /**
+     * How many legal documents this company has already FILED (MYD-024).
+     *
+     * The AADE issuer block on an invoice is only vatNumber + country + branch, so
+     * a name/address change cannot alter a filed invoice's payload — but the ΑΦΜ
+     * can, and it is also the credential identity: changing it means the myDATA
+     * account, the provider credentials and every MARK already filed belong to a
+     * DIFFERENT legal entity. In practice a new ΑΦΜ or ΓΕΜΗ means a new company,
+     * not an edit. Used to warn the operator rather than to block them.
+     *
+     * Counts marks, not documents: a MARK is the proof a filing happened at all,
+     * and it survives the document being cancelled.
+     */
+    public function filedDocumentCount(): int
+    {
+        // Explicit company_id, per the CLAUDE.md CLI/queue rule — this is also
+        // reachable outside a tenant context.
+        return MyDataMark::where('company_id', $this->getKey())->count()
+            + DeliveryMark::where('company_id', $this->getKey())->count();
+    }
 }

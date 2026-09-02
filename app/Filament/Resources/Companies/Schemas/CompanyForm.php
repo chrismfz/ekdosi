@@ -188,7 +188,18 @@ class CompanyForm
                                                 }
                                                 $notification->send();
                                             }),
-                                    ),
+                                    )
+                                    // MYD-024: warn, don't block. In practice a new ΑΦΜ means a
+                                    // new legal entity (and new myDATA/provider credentials), not
+                                    // an edit — but a typo fixed before the first filing is
+                                    // legitimate, so the warning only appears once something has
+                                    // actually been filed under the current one.
+                                    ->helperText(fn (?Company $record) => self::identityChangeWarning(
+                                        $record,
+                                        'Το ΑΦΜ είναι η νομική ταυτότητα του εκδότη: στέλνεται σε κάθε '
+                                        .'παραστατικό και είναι το ίδιο ΑΦΜ με το οποίο συνδεόμαστε στο myDATA '
+                                        .'και στον πάροχο.',
+                                    )),
 
                                 TextInput::make('tax_office')
                                     ->label('Tax office (ΔΟΥ)')
@@ -202,7 +213,11 @@ class CompanyForm
                                 TextInput::make('gemi')
                                     ->label('ΓΕΜΗ')
                                     ->maxLength(30)
-                                    ->helperText('Αριθμός ΓΕΜΗ — τυπώνεται στην κεφαλίδα του παραστατικού (υποχρεωτικό για εγγεγραμμένες στο ΓΕΜΗ οντότητες, ν.4919/2022).'),
+                                    ->helperText(fn (?Company $record) => self::identityChangeWarning(
+                                        $record,
+                                        'Αριθμός ΓΕΜΗ — τυπώνεται στην κεφαλίδα του παραστατικού (υποχρεωτικό για '
+                                        .'εγγεγραμμένες στο ΓΕΜΗ οντότητες, ν.4919/2022).',
+                                    )),
                             ])
                             ->columns(2),
 
@@ -1089,6 +1104,38 @@ class CompanyForm
      *
      * @return array<int, string>
      */
+    /**
+     * MYD-024 — an advisory, deliberately NOT a block.
+     *
+     * The AADE issuer block on an invoice is only vatNumber + country + branch, so
+     * a company's name, address or ΔΟΥ changing cannot rewrite a filed invoice's
+     * payload — the original audit finding was stricter than the protocol. The ΑΦΜ
+     * is different: it IS the issuer identity AND the myDATA/provider credential
+     * identity, so a new one means a new legal entity, not an edit. Same for ΓΕΜΗ.
+     *
+     * Blocking would be wrong: fixing a typo before the first filing is normal, and
+     * a company that genuinely re-registers still has to be corrected somewhere. So
+     * the warning appears only once something has actually been filed under the
+     * current value, and it says what the operator is about to disagree with.
+     */
+    private static function identityChangeWarning(?Company $record, string $base): HtmlString
+    {
+        $filed = $record?->exists ? $record->filedDocumentCount() : 0;
+
+        if ($filed === 0) {
+            return new HtmlString(e($base));
+        }
+
+        return new HtmlString(
+            e($base)
+            .'<br><strong>⚠ Έχουν ήδη υποβληθεί '.number_format($filed, 0, ',', '.')
+            .' παραστατικά με τα τρέχοντα στοιχεία.</strong> Αλλαγή ΑΦΜ/ΓΕΜΗ σημαίνει '
+            .'κανονικά <em>νέα εταιρεία</em> (νέα διαπιστευτήρια myDATA/παρόχου, νέα σειρά '
+            .'παραστατικών) — τα ήδη υποβληθέντα MARK παραμένουν στην ΑΑΔΕ με τα παλιά '
+            .'στοιχεία. Άλλαξέ το μόνο για διόρθωση λάθους καταχώρισης.',
+        );
+    }
+
     private static function whmcsDefaultTypeOptions(?Company $record, ?int $currentId = null): array
     {
         if (! $record) {
