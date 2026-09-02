@@ -82,13 +82,6 @@ class UpdateRun extends Model
     }
 
     /**
-     * Can this (update) run be rolled back? It must be a finished UPDATE that took
-     * a snapshot and recorded where it came from, nothing else in flight, and — the
-     * safety rule — it must be the LATEST update: restoring an older snapshot rewinds
-     * the whole DB past every newer update too, so only the most recent one is
-     * reversible (roll those back in turn).
-     */
-    /**
      * Is applying code from inside the app armed? (UPD-001…015, triage 2026-09-02.)
      *
      * OFF by default. The update CHECK stays on — it is read-only and useful — but
@@ -109,6 +102,16 @@ class UpdateRun extends Model
         return (bool) config('ekdosi.updates.allow_in_app_apply', false);
     }
 
+    /**
+     * Can this (update) run be rolled back? It must be a finished UPDATE that took
+     * a snapshot and recorded where it came from, nothing else in flight, and — the
+     * safety rule — it must be the LATEST update: restoring an older snapshot rewinds
+     * the whole DB past every newer update too, so only the most recent one is
+     * reversible (roll those back in turn).
+     *
+     * Purely STRUCTURAL: whether the in-app applier is armed is a separate question
+     * (inAppApplyEnabled()) that the callers test alongside this one.
+     */
     public function canRollback(): bool
     {
         return $this->kind === self::KIND_UPDATE

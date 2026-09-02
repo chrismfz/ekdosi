@@ -1663,12 +1663,13 @@ padding or separator; `InvoiceNumberer` reproduces that). The two disagree in on
 is why the MARK is consulted first: a draft numbered under «ΤΠΥ», the type renamed to «ΤΠΥ2», and
 only then filed — AADE holds ΤΠΥ2 while `invcode` still says ΤΠΥ, so freezing the invcode value
 there would turn a row the reconciler currently MATCHES into a permanent conflict, this fix causing
-the very problem it exists to prevent. Only INSERT marks that carry a real MARK are read (a CANCEL
-row's `request` is a free-text reason, a dry-run or rejection was never accepted), oldest first so a
-re-file cannot rewrite an identity. `App\Support\DocumentSeries` is the ONE definition, shared by
-the migration backfill, both models' `creating` hooks, the Firebird ETL and the Epsilon importer
-(both query-builder writers, so no model hook fires there) — a stored value and a recovered one
-cannot disagree. A pair it cannot
+the very problem it exists to prevent. Only issue marks (INSERT / PROVIDER_INSERT) that carry a
+real MARK are read (a CANCEL row's `request` is a free-text reason, a dry-run or rejection was never
+accepted), oldest first so a re-file cannot rewrite an identity. `App\Support\DocumentSeries` +
+`App\Support\FiledSeriesBackfill` are the ONE definition, shared by the migration backfill, both
+models' `creating` hooks, the Firebird ETL and the Epsilon importer (both query-builder writers, so
+no model hook fires there) — a stored value and a recovered one cannot disagree. The ETL runs the
+filed-XML pass AFTER `copyMarks()`, since the legacy `MARK.REQUEST` XML is not local until then. A pair it cannot
 read stays null and falls back to the live type code, i.e. exactly today's behaviour, so no row is
 made worse. Two traps found while building it: cutting `invcode` with a BYTE offset while counting
 CHARACTERS sliced «ΤΠΥ» in half (the series is routinely Greek), and reading the frozen column with

@@ -12,6 +12,7 @@ use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Support\DocumentSeries;
+use App\Support\FiledSeriesBackfill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -384,6 +385,71 @@ class DocumentSeriesFreezeTest extends TestCase
         $migration->up();
 
         $this->assertSame('ΠΡΩΤΗ', $invoice->fresh()->series);
+    }
+
+    public function test_the_shared_backfill_is_tenant_scopable_for_the_etl(): void
+    {
+        // The ETL calls this per tenant, AFTER copyMarks() — the legacy MARK rows
+        // (and their REQUEST XML) are not local until then, which is why it cannot
+        // simply reuse the migration's pass. One shared definition so the ETL's
+        // frozen value and the migration's cannot drift apart.
+        $mine = $this->invoice(['invcode' => 'ΤΠΥ60', 'code' => 60]);
+        DB::table('invoices')->where('id', $mine->id)->update(['series' => null]);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $mine->id,
+            'mark' => '400001965177950', 'mydata_action' => 'INSERT',
+            'request' => '<invoiceHeader><series>ΦΙΛΕΝΤ</series></invoiceHeader>',
+        ]);
+
+        $other = Company::create([
+            'name' => 'Άλλη', 'slug' => 'other-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'afm' => '801280908',
+        ]);
+        $otherType = InvoiceType::create([
+            'company_id' => $other->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ',
+            'invcount' => 1, 'mydata_type' => '2.1',
+        ]);
+        $otherCustomer = Customer::create([
+            'company_id' => $other->id, 'name' => 'Πελάτης', 'afm' => '997073525',
+        ]);
+        $theirs = Invoice::create([
+            'company_id' => $other->id, 'invcode' => 'ΤΠΥ61', 'code' => 61,
+            'invoice_type_id' => $otherType->id, 'customer_id' => $otherCustomer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        MyDataMark::create([
+            'company_id' => $other->id, 'invoice_id' => $theirs->id,
+            'mark' => '400001965177951', 'mydata_action' => 'INSERT',
+            'request' => '<invoiceHeader><series>ΞΕΝΗ</series></invoiceHeader>',
+        ]);
+
+        $corrected = FiledSeriesBackfill::apply('invoices', $this->tenant->id);
+
+        $this->assertSame(1, $corrected);
+        $this->assertSame('ΦΙΛΕΝΤ', $mine->fresh()->series);
+        $this->assertSame('ΤΠΥ', $theirs->fresh()->series, 'the other tenant was not touched');
+
+        // Unscoped (the migration's call) reaches every tenant.
+        $this->assertSame(1, FiledSeriesBackfill::apply('invoices'));
+        $this->assertSame('ΞΕΝΗ', $theirs->fresh()->series);
+    }
+
+    public function test_the_shared_backfill_is_idempotent(): void
+    {
+        // Re-running the ETL (or the migration) must be a no-op once the series
+        // already agrees with the filed XML — never a churn of pointless UPDATEs.
+        $invoice = $this->invoice(['invcode' => 'ΤΠΥ62', 'code' => 62]);
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177952', 'mydata_action' => 'INSERT',
+            'request' => '<invoiceHeader><series>ΑΛΛΑΓΜΕΝΗ</series></invoiceHeader>',
+        ]);
+
+        $this->assertSame(1, FiledSeriesBackfill::apply('invoices', $this->tenant->id));
+        $this->assertSame('ΑΛΛΑΓΜΕΝΗ', $invoice->fresh()->series);
+
+        $this->assertSame(0, FiledSeriesBackfill::apply('invoices', $this->tenant->id));
+        $this->assertSame('ΑΛΛΑΓΜΕΝΗ', $invoice->fresh()->series);
     }
 
     public function test_the_backfill_does_not_skip_rows_when_it_pages(): void

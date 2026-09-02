@@ -9,6 +9,7 @@ use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
+use App\Support\FiledSeriesBackfill;
 use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -167,6 +168,11 @@ class MigrateFromFirebird extends Command
             $this->copyReturnExtras();
             $this->copyPayments();
             $this->copyMarks();
+            // AFTER copyMarks(): the legacy MARK table carries the REQUEST XML the
+            // legacy app submitted, which is the authoritative series — but it only
+            // exists locally once the marks are imported, so this cannot run inside
+            // copyInvoices().
+            $this->upgradeSeriesFromFiledMarks();
 
             // --- config / whmcs bridge ---
             $this->copyConfParams();
@@ -1009,6 +1015,27 @@ class MigrateFromFirebird extends Command
                 ],
                 ['created_at' => now()],
             );
+        }
+    }
+
+    /**
+     * MYD-018: upgrade each imported invoice's frozen series to what it was
+     * ACTUALLY FILED as, now that the legacy MARK rows (and their REQUEST XML)
+     * are local.
+     *
+     * copyInvoices() freezes the series from `invcode`, which is right for a
+     * legacy row — the trigger built INVCODE as `INVTYPE_ID || INVCOUNT`, and
+     * INVTYPE_ID is the legacy PK, so a rename between numbering and filing is
+     * not really reachable there. But the claim the migration makes must hold
+     * here too: a stored value and a recovered one cannot disagree. Shared
+     * definition, so the two can never drift apart.
+     */
+    private function upgradeSeriesFromFiledMarks(): void
+    {
+        $corrected = FiledSeriesBackfill::apply('invoices', $this->companyId);
+
+        if ($corrected > 0) {
+            $this->line("  series -> corrected from the filed MARK XML on {$corrected} invoice(s)");
         }
     }
 

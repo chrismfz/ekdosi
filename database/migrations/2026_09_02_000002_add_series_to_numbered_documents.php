@@ -1,6 +1,7 @@
 <?php
 
 use App\Support\DocumentSeries;
+use App\Support\FiledSeriesBackfill;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -62,29 +63,17 @@ return new class extends Migration
 
     private function backfill(string $table): void
     {
-        [$markTable, $foreignKey] = $table === 'invoices'
-            ? ['mydata_marks', 'invoice_id']
-            : ['delivery_marks', 'delivery_note_id'];
-
         DB::table($table)
             ->select('id', 'invcode', 'code')
             ->whereNull('series')
             ->whereNotNull('invcode')
             // chunkById, NOT chunk(): this loop writes the very column the
             // whereNull filters on, so paging by OFFSET would skip rows.
-            ->chunkById(500, function ($rows) use ($table, $markTable, $foreignKey): void {
-                $filed = $this->filedSeriesFromMarks($markTable, $foreignKey, $rows->pluck('id')->all());
-
+            ->chunkById(500, function ($rows) use ($table): void {
                 // One UPDATE per distinct series rather than one per row.
                 $bySeries = [];
                 foreach ($rows as $row) {
-                    // What we ACTUALLY sent wins over what invcode implies. They
-                    // differ only when the type was renamed between numbering and
-                    // filing — and in exactly that case freezing the invcode value
-                    // would turn a row the reconciler currently matches into a
-                    // permanent conflict.
-                    $series = $filed[$row->id]
-                        ?? DocumentSeries::fromInvcode($row->invcode, $row->code);
+                    $series = DocumentSeries::fromInvcode($row->invcode, $row->code);
 
                     if ($series !== null) {
                         $bySeries[$series][] = $row->id;
@@ -95,57 +84,9 @@ return new class extends Migration
                     DB::table($table)->whereIn('id', $ids)->update(['series' => $series]);
                 }
             });
-    }
 
-    /**
-     * Series parsed out of the stored request XML of each document's FIRST issue
-     * filing, keyed by document id.
-     *
-     * Only issue rows (INSERT / PROVIDER_INSERT) that carry a real MARK: a CANCEL
-     * row's `request` is a free-text reason rather than XML, and a dry-run or
-     * rejected attempt was never accepted by AADE, so neither says what the
-     * document is filed as.
-     * Oldest-first so a re-file (a second INSERT) cannot overwrite the identity
-     * the document has held since its first accepted filing.
-     *
-     * @param  array<int, int>  $ids
-     * @return array<int, string>
-     */
-    private function filedSeriesFromMarks(string $markTable, string $foreignKey, array $ids): array
-    {
-        if ($ids === [] || ! Schema::hasTable($markTable)) {
-            return [];
-        }
-
-        $series = [];
-
-        DB::table($markTable)
-            ->select('id', $foreignKey, 'request')
-            ->whereIn($foreignKey, $ids)
-            ->whereNotNull('mark')
-            ->where('mark', '!=', '')
-            // PROVIDER_INSERT too: a provider-filed document carries a real MARK
-            // and the real request XML, and every other consumer in the tree pairs
-            // the two actions. Reading only INSERT would drop provider-filed
-            // invoices and provider-issued delivery notes back onto `invcode` —
-            // reintroducing exactly the rename-window case this source exists for.
-            ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT'])
-            ->whereNotNull('request')
-            ->orderBy('id')
-            ->each(function ($mark) use (&$series, $foreignKey): void {
-                $id = $mark->{$foreignKey};
-
-                if (isset($series[$id])) {
-                    return; // first accepted filing wins
-                }
-
-                $parsed = DocumentSeries::fromRequestXml($mark->request);
-
-                if ($parsed !== null) {
-                    $series[$id] = $parsed;
-                }
-            });
-
-        return $series;
+        // Then correct anything the FILED request XML says otherwise — the
+        // authoritative source, shared with the ETL so the two cannot drift.
+        FiledSeriesBackfill::apply($table);
     }
 };

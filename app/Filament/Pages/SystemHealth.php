@@ -191,13 +191,6 @@ class SystemHealth extends Page
     }
 
     /**
-     * Queue an in-app update: lock the release the operator just saw and create a
-     * `queued` UpdateRun. The web request does NOT run the deploy — the cron
-     * scheduler picks the row up via `ekdosi:self-update` (out-of-band, since the
-     * update restarts the app). Guarded (super_admin via canAccess + the action's
-     * available/update-visible/single-flight visibility); re-checked here.
-     */
-    /**
      * In-app apply is OFF by default (UPD-001…015, triage 2026-09-02) — the
      * supported upgrade is `deploy/update.sh <tag>` on the host. The check above
      * stays on; only the apply is disarmed. See UpdateRun::inAppApplyEnabled().
@@ -210,12 +203,6 @@ class SystemHealth extends Page
     }
 
     /**
-     * The upgrade command an operator should actually run, with the release they
-     * just saw filled in. Shown wherever we report that a new version exists — the
-     * page must not just say «there is an update» and leave them looking for a
-     * button that is deliberately not there.
-     */
-    /**
      * Public twin of applyAvailable() for the blade — the «upgrade from the server»
      * box and the install button are alternatives, never both. (applyAvailable() is
      * private and a blade cannot reach it.)
@@ -225,6 +212,12 @@ class SystemHealth extends Page
         return $this->applyAvailable();
     }
 
+    /**
+     * The upgrade command an operator should actually run, with the release they
+     * just saw filled in. Shown wherever we report that a new version exists — the
+     * page must not just say «there is an update» and leave them looking for a
+     * button that is deliberately not there.
+     */
     public function updateCommand(): ?string
     {
         $target = $this->update['latest_version'] ?? null;
@@ -236,6 +229,13 @@ class SystemHealth extends Page
         return 'deploy/update.sh v'.ltrim($target, 'vV');
     }
 
+    /**
+     * Queue an in-app update: lock the release the operator just saw and create a
+     * `queued` UpdateRun. The web request does NOT run the deploy — the cron
+     * scheduler picks the row up via `ekdosi:self-update` (out-of-band, since the
+     * update restarts the app). Guarded (super_admin via canAccess + the action's
+     * available/update-visible/single-flight visibility); re-checked here.
+     */
     public function installUpdate(): void
     {
         if (! $this->applyAvailable()) {
