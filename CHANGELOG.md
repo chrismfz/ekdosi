@@ -29,7 +29,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 - **`php artisan ops:queue-drain`** — άδειασμα ουράς **χωρίς root**: `queue:restart` + αναμονή μέχρι να
   μην τρέχει κανένα job. Το `deploy/update.sh` / `rollback.sh` δοκιμάζουν πλέον hook → systemd →
   ops:queue-drain, οπότε δουλεύουν και σε cPanel/Plesk/DirectAdmin/shared ή με cron worker· abort μόνο
-  αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`, default 60s).
+  αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`, default 60s). Σε ουρά που ΔΕΝ ελέγχεται (redis/SQS)
+  αρνείται αντί να δώσει ψεύτικο πράσινο — `QUEUE_DRAIN_ARGS=--assume-idle` αν το αναλαμβάνεις.
 
 ### Changed
 - **`customers:afm-duplicates`**: δείχνει τι κρέμεται από κάθε διπλό (παραστατικά/πληρωμές/…), σημειώνει

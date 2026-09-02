@@ -35,22 +35,26 @@ fi
 QUEUE_SERVICE="${QUEUE_SERVICE:-ekdosi-queue}"
 QUEUE_DRAIN_TIMEOUT="${QUEUE_DRAIN_TIMEOUT:-60}"
 _have_unit() { command -v systemctl >/dev/null 2>&1 && systemctl cat "${QUEUE_SERVICE}.service" >/dev/null 2>&1; }
-_systemd_stopped=0
+# What actually stopped the worker: "" | hook | systemd. Only that path restarts it
+# (the portable drain stops nothing — the supervisor/cron brings it back on `up`).
+_stopped_by=""
 stop_queue_worker() {
   if [[ -n "${QUEUE_STOP_CMD:-}" ]]; then
-    echo "▶ Draining queue worker"; eval "${QUEUE_STOP_CMD}" && return 0
+    echo "▶ Draining queue worker"; if eval "${QUEUE_STOP_CMD}"; then _stopped_by="hook"; return 0; fi
     echo "⚠ QUEUE_STOP_CMD failed — falling back to the portable drain." >&2
   elif _have_unit; then
     echo "▶ Draining queue worker (systemd: ${QUEUE_SERVICE})"
-    if systemctl stop "${QUEUE_SERVICE}" 2>/dev/null; then _systemd_stopped=1; return 0; fi
+    if systemctl stop "${QUEUE_SERVICE}" 2>/dev/null; then _stopped_by="systemd"; return 0; fi
     echo "⚠ Cannot stop ${QUEUE_SERVICE} (no permission?) — falling back to the portable drain." >&2
   fi
   echo "▶ Draining queue worker (portable: ops:queue-drain)"
-  $ART ops:queue-drain --timeout="${QUEUE_DRAIN_TIMEOUT}"
+  $ART ops:queue-drain --timeout="${QUEUE_DRAIN_TIMEOUT}" ${QUEUE_DRAIN_ARGS:-}
 }
 start_queue_worker() {
+  [[ -z "$_stopped_by" ]] && return 0
   if [[ -n "${QUEUE_START_CMD:-}" ]]; then echo "▶ Starting queue worker"; eval "${QUEUE_START_CMD}" || true;
-  elif [[ "$_systemd_stopped" -eq 1 ]]; then echo "▶ Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true; fi
+  elif [[ "$_stopped_by" == "systemd" ]]; then echo "▶ Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true;
+  else echo "✗ QUEUE_STOP_CMD stopped the worker but QUEUE_START_CMD is not set — START IT YOURSELF NOW." >&2; fi
 }
 
 echo "▶ Maintenance mode ON"

@@ -91,12 +91,18 @@ class QueueDrainTest extends TestCase
         Sleep::assertSleptTimes(3); // 6s / POLL_SECONDS
     }
 
-    public function test_a_driver_we_cannot_inspect_is_best_effort_but_never_blocks(): void
+    public function test_a_driver_we_cannot_inspect_refuses_rather_than_green_lighting_a_migrate(): void
     {
         config(['queue.default' => 'redis', 'queue.connections.redis.driver' => 'redis']);
 
+        // We cannot PROVE the queue is idle → the deploy must not proceed…
         $this->artisan('ops:queue-drain --timeout=60')
-            ->expectsOutputToContain('best-effort')
+            ->expectsOutputToContain('Δεν μπορώ να εγγυηθώ')
+            ->assertExitCode(1);
+
+        // …unless the operator explicitly accepts the risk.
+        $this->artisan('ops:queue-drain --timeout=60 --assume-idle')
+            ->expectsOutputToContain('assume-idle')
             ->assertExitCode(0);
     }
 }

@@ -38,9 +38,17 @@ class CustomersAfmDuplicates extends Command
      */
     private function suggestedKeeper(iterable $customers): int
     {
+        // A trashed row can never survive a merge (MergeCustomers refuses it),
+        // so it must never carry the ✓ — else the printed command dead-ends.
+        $candidates = collect($customers);
+        $live = $candidates->reject(fn (Customer $c): bool => $c->trashed());
+        if ($live->isNotEmpty()) {
+            $candidates = $live;
+        }
+
         $best = null;
         $bestCount = -1;
-        foreach ($customers as $c) {
+        foreach ($candidates as $c) {
             $count = $this->attachedCount($c);
             if ($count > $bestCount || ($count === $bestCount && (int) $c->id < $best)) {
                 $best = (int) $c->id;
@@ -67,7 +75,7 @@ class CustomersAfmDuplicates extends Command
     {
         $out = [];
         foreach (MergeCustomers::FOREIGN_KEYS as $table => $column) {
-            if (! Schema::hasTable($table)) {
+            if (! Schema::hasTable($table) || ! Schema::hasColumn($table, $column)) {
                 continue;
             }
             $query = DB::table($table)->where($column, $customer->id);

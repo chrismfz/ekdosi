@@ -36,6 +36,7 @@ class OpsQueueDrain extends Command
 {
     protected $signature = 'ops:queue-drain
         {--timeout=60 : Δευτερόλεπτα αναμονής μέχρι να αδειάσει η ουρά}
+        {--assume-idle : Δέξου ως άδεια μια ουρά που ΔΕΝ μπορεί να ελεγχθεί (redis/SQS)}
         {--quiet-ok : Χωρίς έξοδο όταν δεν υπάρχει τίποτα να αδειάσει}';
 
     protected $description = 'Αδειάζει την ουρά χωρίς root (queue:restart + αναμονή) — για hosts χωρίς systemctl/sudo.';
@@ -62,12 +63,25 @@ class OpsQueueDrain extends Command
         $this->call('queue:restart');
 
         if ($driver !== 'database') {
-            // Redis/SQS/…: we cannot count in-flight jobs portably here.
+            // Redis/SQS/…: we cannot count in-flight jobs here, so we cannot
+            // PROVE the queue is idle — and this command exists to gate a
+            // migrate. Wait the grace, then refuse unless the operator
+            // explicitly accepts the risk (or, better, sets QUEUE_STOP_CMD).
             $grace = min($timeout, self::BLIND_GRACE_SECONDS);
-            $this->warn("Ουρά «{$driver}»: δεν μπορώ να μετρήσω τα jobs που τρέχουν — αναμονή {$grace}s (best-effort).");
+            $this->warn("Ουρά «{$driver}»: δεν μπορώ να μετρήσω τα jobs που τρέχουν — αναμονή {$grace}s.");
             Sleep::for($grace)->seconds();
 
-            return self::SUCCESS;
+            if ($this->option('assume-idle')) {
+                $this->warn('--assume-idle: προχωράμε χωρίς απόδειξη ότι η ουρά είναι ήσυχη.');
+
+                return self::SUCCESS;
+            }
+
+            $this->error("Δεν μπορώ να εγγυηθώ ότι δεν τρέχει job σε ουρά «{$driver}».");
+            $this->line('  Όρισε QUEUE_STOP_CMD (π.χ. supervisorctl/systemctl stop) — ή, αν ξέρεις ότι είναι ήσυχη,');
+            $this->line('  ξανατρέξε το deploy με: QUEUE_DRAIN_ARGS=--assume-idle');
+
+            return self::FAILURE;
         }
 
         $table = (string) config("queue.connections.{$connection}.table", 'jobs');

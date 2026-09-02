@@ -247,6 +247,70 @@ class MergeCustomersTest extends TestCase
         $this->assertTrue($merger->suggestKeeper($b, $a)->is($a), 'a tie goes to the older id');
     }
 
+    public function test_the_survivor_adopts_the_identity_keys_that_would_recreate_the_duplicate(): void
+    {
+        // legacy_id (the Firebird ETL's re-run key) and whmcs_client_id are how
+        // the OTHER systems find this party. Dropping them with the loser would
+        // let the ETL / the WHMCS matcher re-insert the very duplicate we merged.
+        $keep = $this->customer(['name' => 'Κρατάμε']);
+        $drop = $this->customer(['name' => 'Χάνεται', 'whmcs_client_id' => 793]);
+        DB::table('customers')->where('id', $drop->id)->update(['legacy_id' => 41]);
+
+        app(MergeCustomers::class)($keep, $drop->fresh());
+
+        $fresh = $keep->fresh();
+        $this->assertSame(41, (int) $fresh->legacy_id);
+        $this->assertSame(793, (int) $fresh->whmcs_client_id);
+    }
+
+    public function test_the_survivors_own_identity_keys_win(): void
+    {
+        $keep = $this->customer(['name' => 'Κρατάμε', 'whmcs_client_id' => 1]);
+        DB::table('customers')->where('id', $keep->id)->update(['legacy_id' => 7]);
+        $drop = $this->customer(['name' => 'Χάνεται', 'whmcs_client_id' => 2]);
+        DB::table('customers')->where('id', $drop->id)->update(['legacy_id' => 8]);
+
+        app(MergeCustomers::class)($keep->fresh(), $drop->fresh());
+
+        $fresh = $keep->fresh();
+        $this->assertSame(7, (int) $fresh->legacy_id, 'never overwritten');
+        $this->assertSame(1, (int) $fresh->whmcs_client_id);
+        $this->assertStringContainsString('legacy_id', $fresh->internalNotes()->first()->body, 'the lost one is on record');
+    }
+
+    public function test_a_referral_never_points_the_survivor_at_itself(): void
+    {
+        $keep = $this->customer(['name' => 'Κρατάμε']);
+        $drop = $this->customer(['name' => 'Χάνεται', 'referred_by_customer_id' => $keep->id]);
+        $referred = $this->customer(['name' => 'Συστημένος', 'referred_by_customer_id' => $drop->id]);
+
+        app(MergeCustomers::class)($keep, $drop);
+
+        $this->assertNull($keep->fresh()->referred_by_customer_id, 'the survivor is not referred by itself');
+        $this->assertSame($keep->id, $referred->fresh()->referred_by_customer_id, 'the third party follows');
+    }
+
+    public function test_preview_counts_the_origin_lead_that_the_merge_relinks(): void
+    {
+        $keep = $this->customer(['name' => 'Κρατάμε']);
+        $drop = $this->customer(['name' => 'Χάνεται']);
+        Lead::create(['company_id' => $this->tenant->id, 'name' => 'Το lead', 'converted_customer_id' => $drop->id, 'converted_at' => now()]);
+
+        $this->assertSame(1, app(MergeCustomers::class)->preview($keep, $drop)->moves['leads'] ?? 0);
+    }
+
+    public function test_a_trashed_row_is_never_the_suggested_survivor(): void
+    {
+        $trashed = $this->customer(['name' => 'Σβησμένος']);
+        $this->invoiceFor($trashed, 'ΤΠΥ60');
+        $this->invoiceFor($trashed, 'ΤΠΥ61');
+        $trashed->delete();
+        $live = $this->customer(['name' => 'Ζωντανός']);
+
+        // …even though it carries more documents (a trashed survivor is refused).
+        $this->assertTrue(app(MergeCustomers::class)->suggestKeeper($trashed, $live)->is($live));
+    }
+
     public function test_the_command_previews_refuses_and_merges(): void
     {
         $keep = $this->customer(['name' => 'Κρατάμε', 'afm' => '123456789']);

@@ -46,10 +46,16 @@ worker with `--force`.
 
 ```bash
 export QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'   # step 1 (see INSTALL.md for the sudoers line)
-export QUEUE_START_CMD='sudo systemctl start ekdosi-queue'
+export QUEUE_START_CMD='sudo systemctl start ekdosi-queue' # ALWAYS set this when you set STOP
 export QUEUE_SERVICE=my-queue        # a different unit name
 export QUEUE_DRAIN_TIMEOUT=300       # a box that runs the long Firebird import
+export QUEUE_DRAIN_ARGS=--assume-idle  # redis/SQS: accept an unverifiable queue (last resort)
 ```
+
+> Set `QUEUE_STOP_CMD` **and** `QUEUE_START_CMD` together — with only STOP the scripts stop the worker
+> and shout at the end that you must start it yourself. On a queue we cannot inspect (redis/SQS) the
+> portable drain REFUSES rather than green-light a `migrate`: set the hooks, or accept the risk with
+> `QUEUE_DRAIN_ARGS`.
 
 ## The normal cycle
 

@@ -66,35 +66,42 @@ QUEUE_SERVICE="${QUEUE_SERVICE:-ekdosi-queue}"
 QUEUE_DRAIN_TIMEOUT="${QUEUE_DRAIN_TIMEOUT:-60}"
 _have_unit() { command -v systemctl >/dev/null 2>&1 && systemctl cat "${QUEUE_SERVICE}.service" >/dev/null 2>&1; }
 # True only if we could actually stop the unit (it may exist but be root-only).
-_systemd_stopped=0
+# What actually stopped the worker: "" | hook | systemd. Only that path restarts it
+# (the portable drain stops nothing — the supervisor/cron brings it back on `up`).
+_stopped_by=""
 
 # Returns 0 when the queue is drained (call inside `if !`, which suspends `set -e`
 # for the body so the status propagates).
 stop_queue_worker() {
   if [[ -n "${QUEUE_STOP_CMD:-}" ]]; then
     log "Draining queue worker (QUEUE_STOP_CMD)"
-    eval "${QUEUE_STOP_CMD}" && return 0
+    if eval "${QUEUE_STOP_CMD}"; then _stopped_by="hook"; return 0; fi
     fail "QUEUE_STOP_CMD failed — falling back to the portable drain."
   elif _have_unit; then
     log "Draining queue worker (systemd: ${QUEUE_SERVICE})"
-    if systemctl stop "${QUEUE_SERVICE}" 2>/dev/null; then _systemd_stopped=1; return 0; fi
+    if systemctl stop "${QUEUE_SERVICE}" 2>/dev/null; then _stopped_by="systemd"; return 0; fi
     fail "Cannot stop ${QUEUE_SERVICE} (no permission?) — falling back to the portable drain."
     echo  "  Tip: allow it once via sudoers, or set QUEUE_STOP_CMD — see INSTALL.md."
   fi
 
   # Portable fallback — no root, no systemd, works on shared hosting.
   log "Draining queue worker (portable: ops:queue-drain)"
-  $ART ops:queue-drain --timeout="${QUEUE_DRAIN_TIMEOUT}"
+  $ART ops:queue-drain --timeout="${QUEUE_DRAIN_TIMEOUT}" ${QUEUE_DRAIN_ARGS:-}
 }
 
 # Best-effort restart — never aborts the script (the app is already back up).
 # Only restarts what WE stopped: with the portable drain nothing was stopped
 # (the supervisor/cron brings the worker back by itself once `up` runs).
 start_queue_worker() {
+  [[ -z "$_stopped_by" ]] && return 0   # nothing was stopped — nothing to start
   if [[ -n "${QUEUE_START_CMD:-}" ]]; then
     log "Starting queue worker (QUEUE_START_CMD)"; eval "${QUEUE_START_CMD}" || true
-  elif [[ "$_systemd_stopped" -eq 1 ]]; then
+  elif [[ "$_stopped_by" == "systemd" ]]; then
     log "Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true
+  else
+    # QUEUE_STOP_CMD stopped it and there is no START hook: say so loudly —
+    # a silently dead worker is worse than the deploy failing.
+    fail "QUEUE_STOP_CMD stopped the worker but QUEUE_START_CMD is not set — START IT YOURSELF NOW."
   fi
 }
 
@@ -141,9 +148,16 @@ if $ART list --raw 2>/dev/null | grep -q '^customers:afm-duplicates'; then
   log "Pre-flight (read-only): customers with a duplicate ΑΦΜ"
   if ! $ART customers:afm-duplicates; then
     fail "Duplicate customer ΑΦΜ — the UNIQUE(company_id, afm_key) migration will refuse."
-    echo  "  Merge them first (nothing has changed, the app is still UP):"
-    echo  "    $ART customers:merge <keep-id> <drop-id> --dry-run"
-    echo  "    $ART customers:merge <keep-id> <drop-id>"
+    if $ART list --raw 2>/dev/null | grep -q '^customers:merge'; then
+      echo "  Merge them first (nothing has changed, the app is still UP):"
+      echo "    $ART customers:merge <keep-id> <drop-id> --dry-run"
+      echo "    $ART customers:merge <keep-id> <drop-id>"
+    else
+      echo "  The merge tool ships WITH this update, so it is not on the current checkout yet."
+      echo "  Re-run update.sh: it stops again right after the checkout, where you can run"
+      echo "    $ART customers:merge <keep-id> <drop-id>"
+      echo "  (or fix the wrong ΑΦΜ in the panel now, if they are NOT the same party)."
+    fi
     exit 1
   fi
 fi

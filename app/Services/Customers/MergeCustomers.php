@@ -90,12 +90,32 @@ class MergeCustomers
 
         $moves = [];
         foreach (self::FOREIGN_KEYS as $table => $column) {
-            $count = $this->fkQuery($table, $column, $drop)->count();
+            if (! $this->usable($table, $column)) {
+                continue;
+            }
+            $count = $this->fkQuery($table, $column, $drop)
+                // A customer never refers itself: skip the survivor's own row.
+                // (`whereKeyNot` is Eloquent-only — on a query builder it silently
+                // becomes a dynamic where on a «key_not» column.)
+                ->when($table === 'customers', fn ($q) => $q->where('id', '!=', $keep->getKey()))
+                ->count();
             if ($count > 0) {
                 $moves[$table] = $count;
             }
         }
+        if ($this->usable('leads', 'converted_customer_id')) {
+            $origin = DB::table('leads')
+                ->where('company_id', $drop->company_id)
+                ->where('converted_customer_id', $drop->getKey())
+                ->count();
+            if ($origin > 0) {
+                $moves['leads'] = ($moves['leads'] ?? 0) + $origin;
+            }
+        }
         foreach (self::MORPHS as $table => [$typeColumn, $idColumn]) {
+            if (! $this->usable($table, $idColumn)) {
+                continue;
+            }
             $query = $this->morphQuery($table, $typeColumn, $idColumn, $drop);
             if ($table === 'taggables') {
                 // A tag the survivor already carries is dropped, not moved.
@@ -137,13 +157,19 @@ class MergeCustomers
             $result = $this->preview($keep, $drop);
 
             foreach (self::FOREIGN_KEYS as $table => $column) {
-                $this->fkQuery($table, $column, $drop)->update([$column => $keep->getKey()]);
+                if (! $this->usable($table, $column)) {
+                    continue;
+                }
+                $this->fkQuery($table, $column, $drop)
+                    // …never leaving the survivor referred by itself.
+                    ->when($table === 'customers', fn ($q) => $q->where('id', '!=', $keep->getKey()))
+                    ->update([$column => $keep->getKey()]);
             }
 
             // leads.converted_customer_id is UNIQUE: only ONE lead may point at
             // the survivor. assertMergeable() refuses when both sides have one,
             // so at most one row moves here.
-            if (Schema::hasTable('leads')) {
+            if ($this->usable('leads', 'converted_customer_id')) {
                 DB::table('leads')
                     ->where('company_id', $keep->company_id)
                     ->where('converted_customer_id', $drop->getKey())
@@ -168,6 +194,22 @@ class MergeCustomers
             // UNIQUE(company_id, afm_key) — the whole point of the merge.
             $drop->forceDelete();
 
+            // …then ADOPT the identity keys the rest of the system matches on,
+            // if the survivor has none. Dropping them would let the very
+            // systems that created the duplicate recreate it: the Firebird ETL
+            // re-inserts an unmatched legacy_id, and the WHMCS matcher/creator
+            // an unmatched client id. Done after the delete — both columns are
+            // unique per company.
+            $adopt = [];
+            foreach (['legacy_id', 'whmcs_client_id'] as $column) {
+                if (blank($keep->{$column}) && filled($drop->{$column})) {
+                    $adopt[$column] = $drop->{$column};
+                }
+            }
+            if ($adopt !== []) {
+                $keep->forceFill($adopt)->save();
+            }
+
             return $result;
         });
     }
@@ -181,11 +223,19 @@ class MergeCustomers
         $countFor = function (Customer $c): int {
             $n = 0;
             foreach (self::FOREIGN_KEYS as $table => $column) {
-                $n += $this->fkQuery($table, $column, $c)->count();
+                if ($this->usable($table, $column)) {
+                    $n += $this->fkQuery($table, $column, $c)->count();
+                }
             }
 
             return $n;
         };
+
+        // A trashed row can never be the survivor (assertMergeable refuses it),
+        // so it never wins the recommendation either.
+        if ($a->trashed() !== $b->trashed()) {
+            return $a->trashed() ? $b : $a;
+        }
 
         $na = $countFor($a);
         $nb = $countFor($b);
@@ -223,6 +273,12 @@ class MergeCustomers
                 );
             }
         }
+    }
+
+    /** The table/column pair exists in THIS schema (the merge also runs pre-migration). */
+    private function usable(string $table, string $column): bool
+    {
+        return Schema::hasTable($table) && Schema::hasColumn($table, $column);
     }
 
     private function fkQuery(string $table, string $column, Customer $customer)
@@ -275,12 +331,17 @@ class MergeCustomers
     /** Two primary contacts cannot coexist — keep the survivor's own. */
     private function dedupePrimaryContact(Customer $keep): void
     {
-        $primaries = DB::table('customer_contacts')
+        $query = DB::table('customer_contacts')
             ->where('company_id', $keep->company_id)
             ->where('customer_id', $keep->getKey())
-            ->where('is_primary', true)
-            ->orderBy('id')
-            ->pluck('id');
+            ->where('is_primary', true);
+
+        // A live contact always outranks a soft-deleted one for the slot.
+        if (Schema::hasColumn('customer_contacts', 'deleted_at')) {
+            $query->orderByRaw('deleted_at IS NOT NULL');
+        }
+
+        $primaries = $query->orderBy('id')->pluck('id');
 
         if ($primaries->count() > 1) {
             DB::table('customer_contacts')
