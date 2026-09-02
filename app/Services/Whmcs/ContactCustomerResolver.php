@@ -5,6 +5,7 @@ namespace App\Services\Whmcs;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Support\Afm;
+use RuntimeException;
 
 /**
  * T-1b (timologia v2): turn a resolved third-party contact (a
@@ -39,10 +40,18 @@ class ContactCustomerResolver
             return null;
         }
 
-        $existing = Customer::query()
+        // withTrashed: a soft-deleted owner holds the ΑΦΜ (UNIQUE covers it) —
+        // say so (the split action surfaces the message) instead of letting
+        // Customer::create() fail on the index.
+        $existing = Customer::withTrashed()
             ->where('company_id', $tenant->getKey())
             ->whereAfmKeyOf($afm)
             ->first();
+        if ($existing !== null && $existing->trashed()) {
+            throw new RuntimeException(
+                'Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με ΑΦΜ '.$afm.' («'.$existing->name.'») — επανέφερέ τον από τη λίστα πελατών και ξαναπροσπάθησε.'
+            );
+        }
         if ($existing !== null) {
             return $existing;
         }

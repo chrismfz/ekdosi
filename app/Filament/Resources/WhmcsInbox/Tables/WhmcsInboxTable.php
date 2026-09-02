@@ -818,6 +818,17 @@ class WhmcsInboxTable
             return;
         }
 
+        if ($result->source === 'deleted_owner') {
+            Notification::make()
+                ->title('Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με αυτό το ΑΦΜ: '.$result->customer->name)
+                ->body('Επανέφερέ τον από τη λίστα πελατών (φίλτρο «Διαγραμμένα») και ξαναπροσπάθησε — δεν δημιουργείται δεύτερος πελάτης για το ίδιο ΑΦΜ.')
+                ->danger()
+                ->persistent()
+                ->send();
+
+            return;
+        }
+
         $title = match ($result->source) {
             'aade' => 'Δημιουργήθηκε από ΑΑΔΕ',
             'whmcs' => 'Δημιουργήθηκε από στοιχεία WHMCS (ΑΑΔΕ μη διαθέσιμη — έλεγξε τα στοιχεία)',

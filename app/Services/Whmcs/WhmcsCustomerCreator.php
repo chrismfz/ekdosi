@@ -49,10 +49,15 @@ class WhmcsCustomerCreator
             return new WhmcsCustomerCreateResult(null, false, 'no_afm');
         }
 
-        $existing = Customer::query()
+        // withTrashed: a soft-deleted owner holds the ΑΦΜ (UNIQUE covers it) —
+        // never a raw unique error; tell the operator to restore instead.
+        $existing = Customer::withTrashed()
             ->where('company_id', $tenant->id)
             ->whereAfmKeyOf($afm)
             ->first();
+        if ($existing !== null && $existing->trashed()) {
+            return new WhmcsCustomerCreateResult($existing, false, 'deleted_owner');
+        }
         if ($existing !== null) {
             // Establish the operator-confirmed WHMCS link if missing; never
             // overwrite an existing one.

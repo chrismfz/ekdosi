@@ -9,8 +9,10 @@ use App\Models\Customer;
  *
  * `source`: 'aade' (created from the GSIS registry), 'whmcs' (created from the
  * WHMCS-typed data because GSIS was unavailable / the ΑΦΜ is foreign),
- * 'existing' (an ekdosi customer with this ΑΦΜ already existed), or 'no_afm'
- * (the WHMCS invoice carries no ΑΦΜ — nothing to create from).
+ * 'existing' (an ekdosi customer with this ΑΦΜ already existed), 'deleted_owner'
+ * (a SOFT-DELETED customer owns this ΑΦΜ — restore it; `customer` is that row,
+ * `created` false, nothing linked), or 'no_afm' (the WHMCS invoice carries no
+ * ΑΦΜ — nothing to create from).
  *
  * `discrepancies`: per-field conflicts where the official GSIS value DIFFERED
  * from the value the customer typed in WHMCS and the GSIS (correct) value was

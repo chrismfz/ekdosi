@@ -376,10 +376,15 @@ class CompanyImporter
                 continue;
             }
             $index = $existing ? $this->existingIndex($table, $existing->id) : [];
+            // customers also merge by ΑΦΜ identity (see importTable) — the dry-run
+            // must say so, or the operator approves inserts that become overwrites.
+            $afmIndex = ($existing && $table === 'customers') ? $this->afmKeyIndex($existing->id) : [];
             $insert = 0;
             $update = 0;
             foreach ($rows as $row) {
-                isset($index[$this->naturalKey($table, $row)]) ? $update++ : $insert++;
+                $hit = isset($index[$this->naturalKey($table, $row)])
+                    || ($afmIndex !== [] && isset($afmIndex[Afm::uniqueKey($row['afm'] ?? null) ?? '']));
+                $hit ? $update++ : $insert++;
             }
             $plan[$table] = ['insert' => $insert, 'update' => $update];
         }
@@ -398,29 +403,56 @@ class CompanyImporter
         }
 
         $index = $this->existingIndex($table, $companyId);
+        // customers: ΑΦΜ identity → local id, built once and kept current so a
+        // 10k-row import costs one scan, not one SELECT per row.
+        $afmIndex = $table === 'customers' ? $this->afmKeyIndex($companyId) : [];
 
         foreach ($rows as $row) {
             $oldId = $row['id'] ?? null;
             $data = $this->rowData($table, $row, $companyId, $maps);
             $key = $this->naturalKey($table, $row);
+            $afmKey = $table === 'customers' ? ($data['afm_key'] ?? null) : null;
 
-            // customers: a bundle row with no natural-key twin but the SAME ΑΦΜ
-            // identity as a local row IS that customer (UNIQUE(company_id, afm_key)
-            // would reject the insert anyway) — merge into it.
-            $existingId = $index[$key] ?? (
-                $table === 'customers' && ! empty($data['afm_key'])
-                    ? DB::table('customers')->where('company_id', $companyId)->where('afm_key', $data['afm_key'])->value('id')
-                    : null
-            );
+            $existingId = $index[$key] ?? null;
+            $mergedByAfm = false;
+
+            if ($table === 'customers' && $afmKey !== null) {
+                $afmOwner = $afmIndex[$afmKey] ?? null;
+
+                if ($existingId === null && $afmOwner !== null) {
+                    // No natural-key twin, but a local row owns this ΑΦΜ: that IS
+                    // the customer (the unique index would reject an insert).
+                    $existingId = $afmOwner;
+                    $mergedByAfm = true;
+                } elseif ($existingId !== null && $afmOwner !== null && $afmOwner !== $existingId) {
+                    // The natural-key twin would take an ΑΦΜ another local row
+                    // already owns → fail closed with guidance, never a raw
+                    // unique error mid-transaction.
+                    throw new RuntimeException(
+                        'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «'.($row['name'] ?? '?').'» '
+                        ."(ΑΦΜ {$afmKey}) αντιστοιχεί στον τοπικό πελάτη #{$existingId}, αλλά το ΑΦΜ το έχει ήδη ο #{$afmOwner}. "
+                        .'Διόρθωσε/συγχώνευσε τους δύο τοπικούς πελάτες (php artisan customers:afm-duplicates) και ξαναπροσπάθησε.'
+                    );
+                }
+            }
 
             if ($existingId !== null) {
                 $id = (int) $existingId;
                 // Merge keeps the LOCAL soft-delete state: a row deleted here
                 // after the export must not be resurrected by its bundle twin.
                 unset($data['deleted_at']);
+                // An ΑΦΜ-merge never blanks the local legacy_id (the ETL's
+                // re-run key) with a bundle row that has none.
+                if ($mergedByAfm && ($data['legacy_id'] ?? null) === null) {
+                    unset($data['legacy_id']);
+                }
                 DB::table($table)->where('id', $id)->update($data);
             } else {
                 $id = DB::table($table)->insertGetId($data);
+            }
+
+            if ($afmKey !== null) {
+                $afmIndex[$afmKey] = $id;
             }
 
             if ($oldId !== null) {
@@ -465,6 +497,19 @@ class CompanyImporter
         $row['updated_at'] = now();
 
         return $row;
+    }
+
+    /**
+     * @return array<string, int> customers.afm_key => id (soft-deleted included — the unique index covers them)
+     */
+    private function afmKeyIndex(int $companyId): array
+    {
+        return DB::table('customers')
+            ->where('company_id', $companyId)
+            ->whereNotNull('afm_key')
+            ->pluck('id', 'afm_key')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
     }
 
     /**

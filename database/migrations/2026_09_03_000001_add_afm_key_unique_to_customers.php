@@ -33,13 +33,30 @@ return new class extends Migration
             });
         }
 
-        // Backfill (all rows, soft-deleted included) — in PHP so the ONE rule
-        // (App\Support\Afm::uniqueKey) is the one applied, on MariaDB and sqlite alike.
-        DB::table('customers')->select('id', 'afm')->orderBy('id')->chunkById(500, function ($rows): void {
-            foreach ($rows as $row) {
-                DB::table('customers')->where('id', $row->id)->update(['afm_key' => Afm::uniqueKey($row->afm)]);
-            }
-        });
+        // Backfill (all rows, soft-deleted included). The dominant case — a
+        // plain 9-digit ΑΦΜ that is not a placeholder — is ONE statement
+        // (key = afm); everything else (prefixes, spaces, foreign VAT, blanks)
+        // goes through the ONE PHP rule (App\Support\Afm::uniqueKey), grouped
+        // by resulting key so a chunk costs a handful of UPDATEs, not one per row.
+        $nineDigits = DB::getDriverName() === 'sqlite'
+            ? "afm GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'"
+            : "afm REGEXP '^[0-9]{9}$'";
+        $placeholders = implode(',', array_map(fn (int $d): string => "'".str_repeat((string) $d, 9)."'", range(0, 9)));
+        DB::statement("UPDATE customers SET afm_key = afm WHERE afm IS NOT NULL AND {$nineDigits} AND afm NOT IN ({$placeholders})");
+
+        DB::table('customers')
+            ->select('id', 'afm')
+            ->whereRaw("NOT (afm IS NOT NULL AND {$nineDigits} AND afm NOT IN ({$placeholders}))")
+            ->orderBy('id')
+            ->chunkById(500, function ($rows): void {
+                $byKey = [];
+                foreach ($rows as $row) {
+                    $byKey[Afm::uniqueKey($row->afm) ?? ''][] = $row->id;
+                }
+                foreach ($byKey as $key => $ids) {
+                    DB::table('customers')->whereIn('id', $ids)->update(['afm_key' => $key === '' ? null : $key]);
+                }
+            });
 
         $duplicates = app(CustomerAfmDuplicates::class)->find();
         if ($duplicates->isNotEmpty()) {

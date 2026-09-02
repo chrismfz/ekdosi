@@ -157,6 +157,51 @@ class CustomerAfmKeyTest extends TestCase
         $this->artisan('customers:afm-duplicates', ['--tenant' => 'nope'])->assertExitCode(2);
     }
 
+    public function test_importer_dry_run_counts_an_afm_merge_as_an_update_and_keeps_the_local_legacy_id(): void
+    {
+        $src = Company::create(['name' => 'Src', 'slug' => 'src2', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        // Bundle row: created in the panel on the source (no legacy_id).
+        $local = Customer::create(['company_id' => $src->id, 'name' => 'Από bundle', 'afm' => '123456789']);
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+
+        // Locally the same party is the ETL-imported row (legacy_id=7, other spelling).
+        $local->forceFill(['legacy_id' => 7, 'name' => 'Τοπικός', 'afm' => 'EL123456789'])->save();
+
+        $dry = app(CompanyImporter::class)->run($bundle, ['into' => 'src2', 'execute' => false, 'passphrase' => 'p@ss']);
+        $this->assertSame(['insert' => 0, 'update' => 1], $dry['tables']['customers'], 'the dry-run says MERGE, not insert');
+
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src2', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $merged = $local->fresh();
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $src->id)->count());
+        $this->assertSame('Από bundle', $merged->name);
+        $this->assertSame(7, (int) $merged->legacy_id, 'the ETL re-run key survives an ΑΦΜ-merge with a legacy_id-less bundle row');
+    }
+
+    public function test_importer_fails_closed_when_the_natural_twin_would_take_another_rows_afm(): void
+    {
+        $src = Company::create(['name' => 'Src', 'slug' => 'src3', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $a = Customer::create(['company_id' => $src->id, 'name' => 'A', 'afm' => '123456789']);
+        $a->forceFill(['legacy_id' => 7])->save();
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+
+        // Locally: A's ΑΦΜ was corrected, and a DIFFERENT customer B now owns 123456789.
+        $a->update(['afm' => '999999991']);
+        Customer::create(['company_id' => $src->id, 'name' => 'B', 'afm' => '123456789']);
+
+        try {
+            app(CompanyImporter::class)->run($bundle, ['into' => 'src3', 'execute' => true, 'passphrase' => 'p@ss']);
+            $this->fail('Expected a RuntimeException.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Σύγκρουση ΑΦΜ', $e->getMessage());
+            $this->assertStringContainsString('afm-duplicates', $e->getMessage());
+        }
+
+        // Nothing was written (transaction rolled back): A keeps its corrected ΑΦΜ.
+        $this->assertSame('999999991', $a->fresh()->afm);
+        $this->assertSame(2, Customer::withTrashed()->where('company_id', $src->id)->count());
+    }
+
     public function test_importer_merges_a_bundle_customer_into_the_local_owner_of_the_same_afm(): void
     {
         $src = Company::create(['name' => 'Src', 'slug' => 'src', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);

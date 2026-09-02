@@ -119,6 +119,22 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertSame(555, $existing->fresh()->whmcs_client_id);   // link stamped
     }
 
+    public function test_deleted_owner_is_reported_not_recreated(): void
+    {
+        $t = $this->tenant();
+        $deleted = Customer::create(['company_id' => $t->id, 'name' => 'Σβησμένος', 'afm' => '123456789']);
+        $deleted->delete();
+        $row = $this->pending($t, 'EL 123456789', userId: 556);
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertFalse($result->created);
+        $this->assertSame('deleted_owner', $result->source);
+        $this->assertSame($deleted->id, $result->customer->id);
+        $this->assertNull($deleted->fresh()->whmcs_client_id, 'nothing linked on a deleted owner');
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count(), 'no second customer for the ΑΦΜ');
+    }
+
     public function test_no_afm_returns_no_afm(): void
     {
         $t = $this->tenant();

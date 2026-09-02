@@ -340,19 +340,46 @@ class MigrateFromFirebird extends Command
             }
         }
 
-        $dupes = array_filter($byKey, fn (array $ids): bool => count($ids) > 1);
-        if ($dupes === []) {
+        $lines = [];
+        foreach (array_filter($byKey, fn (array $ids): bool => count($ids) > 1) as $key => $ids) {
+            $lines[] = "  ΑΦΜ {$key} (μέσα στη legacy βάση): ".implode(' | ', $ids);
+        }
+
+        // The TARGET side too (the parallel-run week): a customer created in
+        // the panel meanwhile, or imported under another legacy_id, that owns
+        // one of the source ΑΦΜ → the upsert on a different legacy_id would hit
+        // the unique index mid-run. List it now instead.
+        $sourceIdByKey = [];
+        foreach ($rows as $r) {
+            $key = Afm::uniqueKey($this->fld($r, 'AFM'));
+            if ($key !== null) {
+                $sourceIdByKey[$key] = (int) $r['CUST_ID'];
+            }
+        }
+        if ($sourceIdByKey !== []) {
+            foreach (array_chunk(array_keys($sourceIdByKey), 500) as $keys) {
+                $owners = DB::table('customers')
+                    ->where('company_id', $this->companyId)
+                    ->whereIn('afm_key', $keys)
+                    ->get(['id', 'name', 'afm_key', 'legacy_id', 'deleted_at']);
+                foreach ($owners as $o) {
+                    if ((int) ($o->legacy_id ?? 0) !== $sourceIdByKey[$o->afm_key]) {
+                        $lines[] = "  ΑΦΜ {$o->afm_key}: υπάρχει ήδη στο ekdosi ως #{$o->id} «{$o->name}»"
+                            .($o->legacy_id ? " (legacy_id {$o->legacy_id})" : ' (χωρίς legacy_id — φτιάχτηκε στο panel)')
+                            .($o->deleted_at ? ' [ΔΙΑΓΡΑΜΜΕΝΟΣ]' : '')
+                            ." — η πηγή το δίνει σε CUST_ID {$sourceIdByKey[$o->afm_key]}";
+                    }
+                }
+            }
+        }
+
+        if ($lines === []) {
             return;
         }
 
-        $lines = [];
-        foreach ($dupes as $key => $ids) {
-            $lines[] = "  ΑΦΜ {$key}: ".implode(' | ', $ids);
-        }
-
         throw new RuntimeException(
-            "Η πηγή Firebird έχει πελάτες με το ίδιο ΑΦΜ (CUST_ID επωνυμία):\n".implode("\n", $lines)
-            ."\nΣυγχώνευσε/διόρθωσέ τους στη legacy βάση και ξανατρέξε — ο στόχος επιβάλλει UNIQUE(company_id, afm_key)."
+            "Σύγκρουση ΑΦΜ πελατών — τίποτα δεν γράφτηκε:\n".implode("\n", $lines)
+            ."\nΣυγχώνευσε/διόρθωσε (legacy ή ekdosi) και ξανατρέξε — ο στόχος επιβάλλει UNIQUE(company_id, afm_key)."
         );
     }
 
