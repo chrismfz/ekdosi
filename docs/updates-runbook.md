@@ -26,19 +26,36 @@ export PHP=/usr/bin/php8.4
 export COMPOSER=/usr/local/bin/composer
 ```
 
-**Queue-worker drain (OPS-6).** `update.sh`/`rollback.sh` STOP the queue worker
-before `migrate`/restore and start it after, so a long in-flight job (e.g. the
-30-min Firebird import) can't write into a half-migrated/half-restored schema.
-They auto-detect the documented `ekdosi-queue` systemd unit. If the deploy user
-can't `systemctl stop` it without a password, set explicit hooks once (persist
-them in the deploy user's shell profile) — otherwise the scripts fall back to
-maintenance-mode pause only, which does NOT interrupt an already-running job:
+**Queue-worker drain (OPS-6).** `update.sh`/`rollback.sh` drain the queue worker
+before `migrate`/restore, so a long in-flight job (e.g. the 30-min Firebird
+import) can't write into a half-migrated/half-restored schema. Three ways, tried
+in order — **the last needs no privileges, so this works on cPanel / Plesk /
+DirectAdmin / shared hosting and with a cron-driven worker too**:
+
+1. `QUEUE_STOP_CMD` / `QUEUE_START_CMD` — explicit hooks, if set;
+2. the `ekdosi-queue` systemd unit, when `systemctl` exists **and this user may
+   stop it** (a unit that exists but is root-only just falls through);
+3. `php artisan ops:queue-drain` — `queue:restart` (each worker finishes its
+   current job and exits) + wait until no job is reserved.
+
+Only if a job is STILL running after `QUEUE_DRAIN_TIMEOUT` (default 60s) does the
+deploy abort — and then nothing has changed yet. The app is in maintenance mode
+throughout, and a worker started **without `--force`** sleeps while it is down,
+so a supervisor that restarts the worker mid-deploy does no harm. Never run the
+worker with `--force`.
 
 ```bash
-export QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'
-export QUEUE_START_CMD='sudo systemctl start ekdosi-queue'
-# or a different unit name:  export QUEUE_SERVICE=my-queue
+export QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'   # step 1 (see INSTALL.md for the sudoers line)
+export QUEUE_START_CMD='sudo systemctl start ekdosi-queue' # ALWAYS set this when you set STOP
+export QUEUE_SERVICE=my-queue        # a different unit name
+export QUEUE_DRAIN_TIMEOUT=300       # a box that runs the long Firebird import
+export QUEUE_DRAIN_ARGS=--assume-idle  # redis/SQS: accept an unverifiable queue (last resort)
 ```
+
+> Set `QUEUE_STOP_CMD` **and** `QUEUE_START_CMD` together — with only STOP the scripts stop the worker
+> and shout at the end that you must start it yourself. On a queue we cannot inspect (redis/SQS) the
+> portable drain REFUSES rather than green-light a `migrate`: set the hooks, or accept the risk with
+> `QUEUE_DRAIN_ARGS`.
 
 ## The normal cycle
 
@@ -94,13 +111,24 @@ run it on any checkout of the new tag against the production DB.
 Resolve each group (fix the wrong ΑΦΜ, or move its documents and delete the duplicate), then
 deploy. Placeholder ΑΦΜ (000000000 …) and blanks are NOT identities and never collide.
 
-**Where to fix them when `update.sh` has already aborted:** the box is then on the NEW code
-against the OLD schema (the `afm_key` column does not exist yet), so the new `Customer` model
-cannot save (its hook writes `afm_key`) — **do not edit customers in the panel in that state.**
-Either (a) fix the data with SQL using the ids the command listed (`UPDATE customers SET afm = …
-WHERE id = …`), or (b) `deploy/rollback.sh` to the previous release, fix them in the panel there,
-and re-run `update.sh`. Running `customers:afm-duplicates` **before** starting the update (on a
-checkout of the new tag against the production DB) avoids the situation altogether.
+**Merge them with the tool — no SQL:**
+
+```bash
+php artisan customers:merge <keep-id> <drop-id> --dry-run   # τι θα μεταφερθεί
+php artisan customers:merge <keep-id> <drop-id>             # η συγχώνευση (ρωτά πρώτα)
+```
+
+`customers:afm-duplicates` marks with ✓ the row `customers:merge` would keep (the one carrying the
+most documents) and prints the exact command per pair. The merge moves everything (παραστατικά,
+πληρωμές, προσφορές, επαφές, ΔΑ, συμβόλαια, σημειώσεις, συνημμένα, ετικέτες, ιστορικό) in ONE
+transaction, records the fields that differed as a pinned note on the survivor, and **force-deletes**
+the loser (a soft-deleted twin would keep holding the ΑΦΜ). There is also a «Συγχώνευση με άλλον
+πελάτη» action on the customer page.
+
+Note it needs no schema change, so it works in either direction: `update.sh` now runs the duplicate
+check **before** maintenance mode (nothing has changed, the app is still up), and the check after
+checkout is the authority. If you are stopped mid-deploy, run the merge right there — but do **not**
+edit customers in the panel in that state (new code, old schema).
 
 ## Rollback
 

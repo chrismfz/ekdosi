@@ -46,41 +46,74 @@ fail() { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; }
 # keep processing against a HALF-MIGRATED schema while `migrate` runs. Cleanly
 # STOP the worker before touching the schema and START it again on the new code.
 #
-#   QUEUE_STOP_CMD / QUEUE_START_CMD — explicit hooks (win if set), e.g.
-#       QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'
-#   Otherwise auto-detect the documented systemd unit ($QUEUE_SERVICE, default
-#   ekdosi-queue). `systemctl stop` blocks until the current job drains (SIGTERM
-#   → queue:work finishes the job, then exits). If neither is available we warn
-#   and fall back to maintenance-mode pause only (a non-`--force` worker sleeps
-#   while `down`, but an already-in-flight long job is NOT interrupted).
+# Three ways, tried in order — the LAST one needs no privileges at all, so this
+# works the same on a systemd VM, on cPanel/Plesk/DirectAdmin shared hosting, and
+# with a cron-driven `queue:work`:
+#   1. QUEUE_STOP_CMD / QUEUE_START_CMD — explicit hooks (win if set), e.g.
+#        QUEUE_STOP_CMD='sudo systemctl stop ekdosi-queue'
+#   2. the documented systemd unit ($QUEUE_SERVICE, default ekdosi-queue), when
+#      systemctl exists AND this user may stop it (`systemctl stop` blocks until
+#      the current job drains).
+#   3. `php artisan ops:queue-drain` — portable: `queue:restart` (each worker
+#      finishes its current job and exits) + WAIT until no job is reserved. The
+#      app is already in maintenance mode here, and a worker started WITHOUT
+#      `--force` sleeps while the app is down — so even a supervisor that
+#      restarts it (systemd Restart=always, cron) brings up a worker that does
+#      nothing until we are done. NEVER run the worker with `--force`.
+# Only if the portable drain ALSO fails (a job still running after the timeout)
+# do we abort — at that point nothing has changed yet.
 QUEUE_SERVICE="${QUEUE_SERVICE:-ekdosi-queue}"
+QUEUE_DRAIN_TIMEOUT="${QUEUE_DRAIN_TIMEOUT:-60}"
 _have_unit() { command -v systemctl >/dev/null 2>&1 && systemctl cat "${QUEUE_SERVICE}.service" >/dev/null 2>&1; }
+# True only if we could actually stop the unit (it may exist but be root-only).
+# What actually stopped the worker: "" | hook | systemd. Only that path restarts it
+# (the portable drain stops nothing — the supervisor/cron brings it back on `up`).
+_stopped_by=""
 
-# Returns the stop command's real exit status (call inside `if !`, which suspends
-# `set -e` for the body so the status propagates). A DETECTED hook/unit that
-# FAILS to stop returns non-zero → the caller aborts (we couldn't guarantee no
-# writes during migrate). With NO hook at all we warn and return 0 (deliberate
-# maintenance-pause fallback — the deploy still proceeds).
+# Returns 0 when the queue is drained (call inside `if !`, which suspends `set -e`
+# for the body so the status propagates).
 stop_queue_worker() {
   if [[ -n "${QUEUE_STOP_CMD:-}" ]]; then
-    log "Draining queue worker (QUEUE_STOP_CMD)"; eval "${QUEUE_STOP_CMD}"; return
+    log "Draining queue worker (QUEUE_STOP_CMD)"
+    if eval "${QUEUE_STOP_CMD}"; then _stopped_by="hook"; return 0; fi
+    fail "QUEUE_STOP_CMD failed — falling back to the portable drain."
   elif _have_unit; then
-    log "Draining queue worker (systemd: ${QUEUE_SERVICE})"; systemctl stop "${QUEUE_SERVICE}"; return
-  else
-    fail "No queue-worker stop hook — a long in-flight job could run during migrate."
-    echo  "  Set QUEUE_STOP_CMD/QUEUE_START_CMD (e.g. 'sudo systemctl stop ekdosi-queue')."
-    echo  "  Falling back to maintenance-mode pause only (does NOT interrupt a running job)."
-    return 0
+    log "Draining queue worker (systemd: ${QUEUE_SERVICE})"
+    if systemctl stop "${QUEUE_SERVICE}" 2>/dev/null; then _stopped_by="systemd"; return 0; fi
+    fail "Cannot stop ${QUEUE_SERVICE} (no permission?) — falling back to the portable drain."
+    echo  "  Tip: allow it once via sudoers, or set QUEUE_STOP_CMD — see INSTALL.md."
   fi
+
+  # Portable fallback — no root, no systemd, works on shared hosting. It STOPS
+  # nothing: the workers are told to exit and whoever supervises them (systemd,
+  # cron) brings them back once we run `up`.
+  log "Draining queue worker (portable: ops:queue-drain)"
+  _stopped_by="drain"
+  $ART ops:queue-drain --timeout="${QUEUE_DRAIN_TIMEOUT}" ${QUEUE_DRAIN_ARGS:-}
 }
 
 # Best-effort restart — never aborts the script (the app is already back up).
+# Only restarts what WE stopped: with the portable drain nothing was stopped
+# (the supervisor/cron brings the worker back by itself once `up` runs).
 start_queue_worker() {
+  [[ -z "$_stopped_by" ]] && return 0   # nothing was touched — nothing to start
+  # A START hook always wins, even after a FAILED stop (starting an already
+  # running worker is a no-op; a silently dead queue is not).
   if [[ -n "${QUEUE_START_CMD:-}" ]]; then
     log "Starting queue worker (QUEUE_START_CMD)"; eval "${QUEUE_START_CMD}" || true
-  elif _have_unit; then
-    log "Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true
+    return 0
   fi
+  if [[ "$_stopped_by" == "systemd" ]] || _have_unit; then
+    log "Starting queue worker (systemd: ${QUEUE_SERVICE})"
+    systemctl start "${QUEUE_SERVICE}" 2>/dev/null && return 0
+  fi
+  if [[ "$_stopped_by" == "drain" ]]; then
+    # Nothing was stopped: the workers exited on their own and a supervisor
+    # (systemd/cron) restarts them. If you start the worker BY HAND, do it now.
+    log "Queue: workers were asked to exit — the supervisor/cron restarts them (start it yourself if you run it by hand)."
+    return 0
+  fi
+  fail "The queue worker was stopped but could not be started back — START IT YOURSELF NOW."
 }
 
 # --- pre-flight -------------------------------------------------------------
@@ -117,6 +150,29 @@ TARGET_SHA="$(git rev-parse --verify "${TARGET_REF}^{commit}" 2>/dev/null)" \
   || { fail "Unknown ref: $REF"; exit 1; }
 echo "Current: $CURRENT   →   Target: $REF ($(git rev-parse --short "$TARGET_SHA"))"
 
+# --- early data pre-flight (read-only, NO downtime) -------------------------
+# The cheap checks run on the CURRENT checkout, before maintenance mode and
+# before we touch the worker: a data problem should cost the operator nothing
+# but a message. (The command only exists from v1.16 on, hence the guard; the
+# authoritative run is still the one after checkout+composer, on the NEW code.)
+if $ART list --raw 2>/dev/null | grep -q '^customers:afm-duplicates'; then
+  log "Pre-flight (read-only): customers with a duplicate ΑΦΜ"
+  if ! $ART customers:afm-duplicates; then
+    fail "Duplicate customer ΑΦΜ — the UNIQUE(company_id, afm_key) migration will refuse."
+    if $ART list --raw 2>/dev/null | grep -q '^customers:merge'; then
+      echo "  Merge them first (nothing has changed, the app is still UP):"
+      echo "    $ART customers:merge <keep-id> <drop-id> --dry-run"
+      echo "    $ART customers:merge <keep-id> <drop-id>"
+    else
+      echo "  The merge tool ships WITH this update, so it is not on the current checkout yet."
+      echo "  Re-run update.sh: it stops again right after the checkout, where you can run"
+      echo "    $ART customers:merge <keep-id> <drop-id>"
+      echo "  (or fix the wrong ΑΦΜ in the panel now, if they are NOT the same party)."
+    fi
+    exit 1
+  fi
+fi
+
 # --- safety: REFUSE a downgrade --------------------------------------------
 # If the target resolves to an ANCESTOR of the current HEAD (older code), bail.
 # Rolling prod back is almost never intended — and if the target predates a
@@ -135,7 +191,14 @@ fi
 
 # --- maintenance window -----------------------------------------------------
 log "Maintenance mode ON"
-$ART down --retry=15 || true
+# Maintenance mode is not cosmetic: the portable queue drain relies on a
+# non-`--force` worker REFUSING to pick up work while the app is down. If `down`
+# fails we have no such guarantee, so we stop before touching anything.
+if ! $ART down --retry=15; then
+  fail "Could not enter maintenance mode — aborting before any change."
+  echo  "  A worker could then consume jobs against a half-migrated schema."
+  exit 1
+fi
 # On any FAILURE after this point, deliberately STAY in maintenance mode — a
 # half-applied update (e.g. a failed migration on new code) must never be served.
 # Only the success path below lifts maintenance.
@@ -153,8 +216,8 @@ trap deploy_failed EXIT
 # A DETECTED stop hook/unit that FAILS is a CLEAN abort (nothing has changed yet):
 # we can't guarantee the worker won't write during migrate, so don't proceed.
 if ! stop_queue_worker; then
-  fail "Could not stop the queue worker — aborting before any change."
-  echo  "  Fix permissions / set QUEUE_STOP_CMD, then re-run. Nothing was deployed."
+  fail "A queue job is still running — aborting before any change."
+  echo  "  Wait for it to finish (or raise QUEUE_DRAIN_TIMEOUT), then re-run. Nothing was deployed."
   $ART up || true
   trap - EXIT
   exit 1
@@ -206,10 +269,12 @@ $COMPOSER install --no-dev --optimize-autoloader --no-interaction
 # still on the OLD schema (the failure trap above keeps maintenance ON).
 log "Pre-migration check: customers with a duplicate ΑΦΜ"
 if ! $ART customers:afm-duplicates; then
-  fail "Duplicate customer ΑΦΜ found — resolve them (see the list above), then re-run the update."
-  fail "NOTE: the checkout is now the NEW code on the OLD schema (no afm_key column) — do NOT fix"
-  fail "them in the panel here: either fix with SQL using the ids listed, or deploy/rollback.sh to the"
-  fail "previous release, fix in the panel, then re-run the update. See docs/updates-runbook.md."
+  fail "Duplicate customer ΑΦΜ found — resolve them, then re-run the update."
+  echo  "  Merge them right here (the merge tool ships with this checkout and needs no schema change):"
+  echo  "    $ART customers:merge <keep-id> <drop-id> --dry-run   # τι θα μεταφερθεί"
+  echo  "    $ART customers:merge <keep-id> <drop-id>             # η συγχώνευση"
+  echo  "  The app is in maintenance mode and on the OLD schema — do NOT edit customers in the panel"
+  echo  "  in this state; use the command above (or deploy/rollback.sh first). See docs/updates-runbook.md."
   exit 1
 fi
 

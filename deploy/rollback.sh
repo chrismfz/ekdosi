@@ -30,24 +30,46 @@ fi
 
 # --- queue worker drain (OPS-6): don't let a live worker write into a database
 # that's being restored under it. Same hooks as deploy/update.sh.
+# Same three-step chain as deploy/update.sh (hook → systemd → portable
+# `ops:queue-drain`, which needs no privileges); see the comment there.
 QUEUE_SERVICE="${QUEUE_SERVICE:-ekdosi-queue}"
+QUEUE_DRAIN_TIMEOUT="${QUEUE_DRAIN_TIMEOUT:-60}"
 _have_unit() { command -v systemctl >/dev/null 2>&1 && systemctl cat "${QUEUE_SERVICE}.service" >/dev/null 2>&1; }
-# Returns the stop command's real status (call inside `if !`). A DETECTED hook
-# that FAILS → non-zero → abort; NO hook → warn + return 0 (fallback).
+# What actually stopped the worker: "" | hook | systemd. Only that path restarts it
+# (the portable drain stops nothing — the supervisor/cron brings it back on `up`).
+_stopped_by=""
 stop_queue_worker() {
-  if [[ -n "${QUEUE_STOP_CMD:-}" ]]; then echo "▶ Draining queue worker"; eval "${QUEUE_STOP_CMD}"; return;
-  elif _have_unit; then echo "▶ Draining queue worker (systemd: ${QUEUE_SERVICE})"; systemctl stop "${QUEUE_SERVICE}"; return;
-  else echo "⚠ No queue-worker stop hook — set QUEUE_STOP_CMD; a live worker could write into the DB mid-restore." >&2; return 0; fi
+  if [[ -n "${QUEUE_STOP_CMD:-}" ]]; then
+    echo "▶ Draining queue worker"; if eval "${QUEUE_STOP_CMD}"; then _stopped_by="hook"; return 0; fi
+    echo "⚠ QUEUE_STOP_CMD failed — falling back to the portable drain." >&2
+  elif _have_unit; then
+    echo "▶ Draining queue worker (systemd: ${QUEUE_SERVICE})"
+    if systemctl stop "${QUEUE_SERVICE}" 2>/dev/null; then _stopped_by="systemd"; return 0; fi
+    echo "⚠ Cannot stop ${QUEUE_SERVICE} (no permission?) — falling back to the portable drain." >&2
+  fi
+  echo "▶ Draining queue worker (portable: ops:queue-drain)"
+  _stopped_by="drain"
+  $ART ops:queue-drain --timeout="${QUEUE_DRAIN_TIMEOUT}" ${QUEUE_DRAIN_ARGS:-}
 }
 start_queue_worker() {
-  if [[ -n "${QUEUE_START_CMD:-}" ]]; then echo "▶ Starting queue worker"; eval "${QUEUE_START_CMD}" || true;
-  elif _have_unit; then echo "▶ Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true; fi
+  [[ -z "$_stopped_by" ]] && return 0
+  if [[ -n "${QUEUE_START_CMD:-}" ]]; then echo "▶ Starting queue worker"; eval "${QUEUE_START_CMD}" || true; return 0; fi
+  if [[ "$_stopped_by" == "systemd" ]] || _have_unit; then
+    echo "▶ Starting queue worker (systemd: ${QUEUE_SERVICE})"
+    systemctl start "${QUEUE_SERVICE}" 2>/dev/null && return 0
+  fi
+  [[ "$_stopped_by" == "drain" ]] && { echo "▶ Queue: workers exited on their own — the supervisor/cron restarts them."; return 0; }
+  echo "✗ The queue worker was stopped but could not be started back — START IT YOURSELF NOW." >&2
 }
 
 echo "▶ Maintenance mode ON"
-$ART down --retry=15 || true
+# See update.sh: without maintenance mode the drain guarantees nothing.
+if ! $ART down --retry=15; then
+  echo "✗ Could not enter maintenance mode — aborting the rollback (a worker could write mid-restore)." >&2
+  exit 1
+fi
 if ! stop_queue_worker; then
-  echo "✗ Could not stop the queue worker — aborting rollback (would write into the DB mid-restore). Fix perms / set QUEUE_STOP_CMD." >&2
+  echo "✗ A queue job is still running — aborting rollback (it would write into the DB mid-restore). Wait for it, or raise QUEUE_DRAIN_TIMEOUT." >&2
   $ART up || true
   trap - EXIT
   exit 1

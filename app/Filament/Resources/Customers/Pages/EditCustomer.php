@@ -5,10 +5,12 @@ namespace App\Filament\Resources\Customers\Pages;
 use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Models\Customer;
+use App\Services\Customers\MergeCustomers;
 use App\Services\Whmcs\WhmcsClientFactory;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -184,6 +186,96 @@ class EditCustomer extends EditRecord
                             : 'Unlinked from WHMCS')
                         ->success()
                         ->send();
+                }),
+
+            // «Συγχώνευση» — the same party entered twice (a legacy row + a
+            // panel/WHMCS one). Picks the other row, shows EXACTLY what will
+            // move, then hands off to MergeCustomers (one transaction; the
+            // other row is force-deleted and its differing fields land as a
+            // pinned note here). Gated on Delete:Customer — it destroys a row.
+            Action::make('merge_customer')
+                ->label('Συγχώνευση με άλλον πελάτη')
+                ->icon('heroicon-o-arrows-pointing-in')
+                ->color('danger')
+                ->authorize(fn (Customer $record) => (auth()->user()?->can('update', $record) ?? false)
+                    && (auth()->user()?->can('delete', $record) ?? false))
+                ->modalHeading('Συγχώνευση πελατών')
+                ->modalDescription('Ο πελάτης που θα διαλέξεις ΔΙΑΓΡΑΦΕΤΑΙ ΟΡΙΣΤΙΚΑ και όλα του (παραστατικά, πληρωμές, προσφορές…) περνούν σε αυτόν εδώ. Δεν αναιρείται.')
+                ->modalSubmitActionLabel('Συγχώνευση')
+                ->schema([
+                    Select::make('drop_id')
+                        ->label('Πελάτης που θα συγχωνευθεί (και θα διαγραφεί)')
+                        ->required()
+                        ->searchable()
+                        ->live()
+                        ->getSearchResultsUsing(fn (string $search, Customer $record): array => Customer::query()
+                            ->where('company_id', $record->company_id)
+                            ->whereKeyNot($record->getKey())
+                            ->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('afm', 'like', "%{$search}%"))
+                            ->orderBy('name')
+                            ->limit(20)
+                            ->get()
+                            ->mapWithKeys(fn (Customer $c): array => [$c->getKey() => '#'.$c->getKey().' — '.$c->name.($c->afm ? ' (ΑΦΜ '.$c->afm.')' : '')])
+                            ->all())
+                        ->getOptionLabelUsing(fn ($value): ?string => Customer::query()->whereKey($value)->value('name')),
+
+                    Placeholder::make('merge_preview')
+                        ->label('Τι θα μεταφερθεί')
+                        ->visible(fn (callable $get): bool => filled($get('drop_id')))
+                        ->content(function (callable $get, Customer $record): string {
+                            $drop = Customer::query()
+                                ->where('company_id', $record->company_id)
+                                ->whereKey($get('drop_id'))
+                                ->first();
+                            if ($drop === null) {
+                                return 'Δεν βρέθηκε ο πελάτης.';
+                            }
+
+                            try {
+                                $preview = app(MergeCustomers::class)->preview($record, $drop);
+                            } catch (\RuntimeException $e) {
+                                return '⚠ '.$e->getMessage();
+                            }
+
+                            $lines = ['Μεταφέρονται: '.$preview->movesLabel().'.'];
+                            foreach ($preview->differences as $label => $pair) {
+                                $lines[] = '• '.$label.': κρατάμε «'.($pair['keep'] ?? '—').'», ο άλλος είχε «'.($pair['drop'] ?? '—').'» (θα γραφτεί στις σημειώσεις)';
+                            }
+
+                            return implode("\n", $lines);
+                        }),
+                ])
+                ->action(function (Customer $record, array $data): void {
+                    $drop = Customer::query()
+                        ->where('company_id', $record->company_id)
+                        ->whereKey($data['drop_id'] ?? 0)
+                        ->first();
+                    if ($drop === null) {
+                        Notification::make()->title('Δεν βρέθηκε ο πελάτης προς συγχώνευση.')->danger()->send();
+
+                        return;
+                    }
+
+                    try {
+                        $result = app(MergeCustomers::class)($record, $drop);
+                    } catch (\RuntimeException $e) {
+                        Notification::make()->title('Η συγχώνευση δεν έγινε')->body($e->getMessage())->danger()->persistent()->send();
+
+                        return;
+                    }
+
+                    Notification::make()
+                        ->title('Συγχωνεύτηκε ο #'.$result->dropId.' «'.$result->dropName.'»')
+                        ->body('Μεταφέρθηκαν: '.$result->movesLabel().'. Τα στοιχεία που διέφεραν είναι στις σημειώσεις.')
+                        ->success()
+                        ->send();
+
+                    // The merge may have ADOPTED the loser's identity keys, but it
+                    // writes through its OWN locked instance — this page's record
+                    // is stale, and a plain Save would write the old (empty)
+                    // values straight back. Re-read, then refill the form.
+                    $record->refresh();
+                    $this->refreshFormData(['name', 'legacy_id', 'whmcs_client_id']);
                 }),
 
             DeleteAction::make(),
