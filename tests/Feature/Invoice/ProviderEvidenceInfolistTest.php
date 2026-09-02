@@ -98,6 +98,54 @@ class ProviderEvidenceInfolistTest extends TestCase
             ->assertDontSee('Αριθμός Αδειοδότησης');
     }
 
+    public function test_local_cancel_before_aade_cancel_hides_evidence_on_page(): void
+    {
+        // Locally voided but still VALID at AADE (cancel-pending-myDATA). The PDF
+        // suppresses the block (banner = cancelled); the page must too, or it would
+        // assert a live certified provider document for an invoice the business
+        // voided. This is the sub-case the first cancel fix missed.
+        $tenant = $this->tenant();
+        $this->boot($tenant);
+        $invoice = $this->providerInvoice($tenant);
+        $invoice->forceFill(['local_status' => 'cancelled'])->save(); // mydata_state stays VALID
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+            ->assertDontSee('LIC_AT_ISSUE_V1')
+            ->assertDontSee('Αριθμός Αδειοδότησης');
+    }
+
+    public function test_missing_licence_hides_the_whole_block_on_page_like_the_pdf(): void
+    {
+        // No snapshot + a blank config licence → the whole provider block is a
+        // compliance gap. The PDF suppresses ALL of it (not just the licence); the
+        // page must not show name / UID / signature either.
+        $tenant = $this->tenant();
+        $this->boot($tenant);
+        config(['ekdosi.einvoice.provider_identity.invosign.licence_no' => '']);
+
+        $type = InvoiceType::create([
+            'company_id' => $tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ',
+            'invcount' => 1, 'mydata_type' => '2.1',
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $tenant->id, 'invoice_type_id' => $type->id,
+            'code' => 1, 'invcode' => 'TPY101', 'issued_at' => now(), 'local_status' => 'active',
+        ]);
+        $invoice->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400001964594702'])->save();
+        MyDataMark::create([
+            'company_id' => $tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001964594702', 'mydata_action' => 'PROVIDER_INSERT',
+            'provider_key' => 'invosign', // no snapshot → falls back to (blanked) config
+            'authentication_code' => 'SIG-NO-LICENCE', 'uid' => 'UID-NO-LICENCE',
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+            ->assertDontSee('SIG-NO-LICENCE')   // signature hidden
+            ->assertDontSee('UID-NO-LICENCE')   // UID hidden
+            ->assertDontSee('iNVO Sign');       // provider name hidden — whole block gone
+    }
+
     public function test_direct_mydata_invoice_shows_no_provider_evidence(): void
     {
         $tenant = $this->tenant('gr-mydata');

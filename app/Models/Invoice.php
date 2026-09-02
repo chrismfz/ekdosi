@@ -13,6 +13,7 @@ use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
+use App\Support\EInvoice\ProviderEvidence;
 use App\Support\InvoiceScope;
 use App\Support\IsoCountry;
 use Firebed\AadeMyData\Enums\WithheldPercentCategory;
@@ -908,6 +909,33 @@ class Invoice extends Model
         }
 
         return $this->providerMarkCache = $mark;
+    }
+
+    /** Request-scoped memo for providerEvidence() (not an attribute). */
+    private bool $providerEvidenceResolved = false;
+
+    /** @var array<string, mixed>|null */
+    private ?array $providerEvidenceCache = null;
+
+    /**
+     * The provider (ΥΠΑΗΕΣ) evidence to show for this document, or null when it
+     * has none / must not show one (PROV-003). The SINGLE source both the PDF and
+     * the invoice page read, so print and screen apply identical gates (VALID,
+     * not-cancelled, current provider mark, licence present) — see
+     * `App\Support\EInvoice\ProviderEvidence`. Memoised for this instance (the
+     * page reads several fields off it per render); see latestProviderMark() on
+     * the memo's refresh() caveat.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function providerEvidence(): ?array
+    {
+        if ($this->providerEvidenceResolved) {
+            return $this->providerEvidenceCache;
+        }
+        $this->providerEvidenceResolved = true;
+
+        return $this->providerEvidenceCache = ProviderEvidence::resolve($this);
     }
 
     /**

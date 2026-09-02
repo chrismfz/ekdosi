@@ -5,7 +5,6 @@ namespace App\Filament\Resources\Invoices\Schemas;
 use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
-use App\Support\EInvoice\ProviderIdentity;
 use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -280,51 +279,37 @@ class InvoiceInfolist
                             // the provider's OFFICIAL copy — with the MARK, an operator
                             // reaches the authoritative ΥΠΑΗΕΣ document even if our PDF is
                             // lost. (For direct myDATA it is the AADE QR verification URL.)
-                            ->hint(fn ($record) => $record->latestProviderMark() !== null
+                            ->hint(fn ($record) => $record->providerEvidence() !== null
                                 ? 'Επίσημο έγγραφο παρόχου'
                                 : null)
                             ->limit(60),
 
-                        // Provider evidence (null for direct myDATA). All read off the
-                        // memoised current-provider-mark accessor — ONE query for the whole
-                        // block, and identity resolved via the frozen snapshot (PROV-003),
-                        // so the screen matches the printed PDF exactly.
+                        // Provider evidence (null for direct myDATA / cancelled / no
+                        // licence). Read off the SAME memoised resolver the PDF uses
+                        // (Invoice::providerEvidence) — identical gates, frozen-snapshot
+                        // identity, one query — so the screen matches the printed PDF.
                         TextEntry::make('provider_name')
                             ->label('Πάροχος')
-                            ->state(function ($record) {
-                                $mark = $record->latestProviderMark();
-
-                                return $mark === null
-                                    ? null
-                                    : (ProviderIdentity::forMark($mark)?->commercialName ?: $mark->provider_key);
-                            })
-                            ->visible(fn ($record) => $record->latestProviderMark() !== null),
+                            ->state(fn ($record) => $record->providerEvidence()['commercial_name'] ?? null)
+                            ->visible(fn ($record) => $record->providerEvidence() !== null),
 
                         TextEntry::make('provider_licence')
                             ->label('Αριθμός Αδειοδότησης')
-                            ->state(function ($record) {
-                                $mark = $record->latestProviderMark();
-
-                                return $mark === null ? null : (ProviderIdentity::forMark($mark)?->licenceNo ?: null);
-                            })
-                            ->visible(function ($record) {
-                                $mark = $record->latestProviderMark();
-
-                                return $mark !== null && filled(ProviderIdentity::forMark($mark)?->licenceNo);
-                            })
+                            ->state(fn ($record) => $record->providerEvidence()['licence_no'] ?? null)
+                            ->visible(fn ($record) => $record->providerEvidence() !== null)
                             ->copyable(),
 
                         TextEntry::make('provider_uid')
                             ->label('Αναγνωριστικό (UID)')
-                            ->state(fn ($record) => $record->latestProviderMark()?->uid)
-                            ->visible(fn ($record) => filled($record->latestProviderMark()?->uid))
+                            ->state(fn ($record) => $record->providerEvidence()['uid'] ?? null)
+                            ->visible(fn ($record) => filled($record->providerEvidence()['uid'] ?? null))
                             ->copyable()
                             ->limit(40),
 
                         TextEntry::make('authentication_code')
                             ->label('Υπογραφή')
-                            ->state(fn ($record) => $record->latestProviderMark()?->authentication_code)
-                            ->visible(fn ($record) => filled($record->latestProviderMark()?->authentication_code))
+                            ->state(fn ($record) => $record->providerEvidence()['auth_code'] ?? null)
+                            ->visible(fn ($record) => filled($record->providerEvidence()['auth_code'] ?? null))
                             ->copyable()
                             ->limit(40),
                     ])
