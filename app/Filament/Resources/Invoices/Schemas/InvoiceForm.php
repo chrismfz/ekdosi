@@ -314,14 +314,20 @@ class InvoiceForm
                                     // Normalised so the value matches a VAT-rate Select option.
                                     $set('vat_percent', VatRateOptions::normalize($vat));
                                     // MYD-007: a $set() on vat_percent does NOT fire that Select's
-                                    // afterStateUpdated, so set the per-line §8.3 reason here too
-                                    // when the reverse-charge default made the line 0% — from the
-                                    // invoice TYPE (service 2.2→4, goods 1.2→14). Clear it otherwise.
-                                    $set('vat_exemption_category', $reverseCharge
-                                        ? VatExemptionGuidance::recommendForType(
-                                            InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
-                                        )
-                                        : null);
+                                    // afterStateUpdated, so keep the per-line §8.3 reason in sync
+                                    // here — for ANY 0% result (reverse charge OR a 0%-rated
+                                    // product). Suggest from the invoice TYPE only when it's blank,
+                                    // so re-picking a product never CLOBBERS an operator's manual
+                                    // reason; clear it when the line is no longer 0%.
+                                    if ((float) $vat === 0.0) {
+                                        if (blank($get('vat_exemption_category'))) {
+                                            $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
+                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                            ));
+                                        }
+                                    } else {
+                                        $set('vat_exemption_category', null);
+                                    }
                                     // G7: keep the VAT-inclusive mirror in sync.
                                     $set('price_per_item_wvat', self::grossFromNet($net, $vat));
                                     $set('metric_unit', $product->metricUnit?->name);

@@ -7,11 +7,12 @@ use Illuminate\Support\Facades\Schema;
 /**
  * MYD-007 backfill: stamp existing 0% invoice lines with their tenant's §8.3
  * reason, so a LEGACY 0% invoice keeps its exemption citation once the tenant
- * gains more than one 0%-rate VatCategory (the new seed adds three).
+ * gains more than one 0%-rate VatCategory (the operator adds more via the guided
+ * form; the seed itself adds only one).
  *
  * Without this, a legacy 0% line has vat_exemption_category = null and the
  * submitter/PDF fall back to the tenant's SINGLE 0% category — which stops being
- * a single once the seed/operator adds more, dropping the mandatory citation.
+ * a single once the operator adds more, dropping the mandatory citation.
  *
  * Only the UNAMBIGUOUS case: a company with exactly ONE distinct 0%-rate reason
  * configured. Never guesses; a company with zero or several reasons is left as-is
