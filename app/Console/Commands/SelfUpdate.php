@@ -494,11 +494,25 @@ class SelfUpdate extends Command
         }
     }
 
-    /** Run a subprocess and RETURN its stdout (no streaming) — for tiny probes. */
+    /**
+     * Run a subprocess and RETURN its stdout (no streaming) — for tiny probes.
+     * THROWS on a non-zero exit: every caller reads the output as fact (the
+     * clean-tree pre-flight, the untracked listing), so a failed `git` returning
+     * an empty string would read as «clean» / «nothing to protect».
+     */
     private function capture(array $cmd, ?string $cwd = null): string
     {
         $process = new Process($cmd, $cwd ?? base_path(), null, null, 60);
         $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new \RuntimeException(sprintf(
+                '«%s» exited %d: %s',
+                implode(' ', array_slice($cmd, 0, 2)),
+                (int) $process->getExitCode(),
+                $this->redact(trim($process->getErrorOutput()) ?: trim($process->getOutput())),
+            ));
+        }
 
         return $process->getOutput();
     }
@@ -558,8 +572,20 @@ class SelfUpdate extends Command
      */
     private function writeBuildStamp(UpdateRun $run, string $ref): void
     {
-        $sha = trim($this->capture(['git', 'rev-parse', '--short', 'HEAD'], base_path()));
-        $committedAt = trim($this->capture(['git', 'log', '-1', '--format=%cI'], base_path()));
+        // Best-effort: this runs AFTER the checkout, with the app down, and a
+        // missing build stamp is cosmetic (BuildInfo falls back) — never a reason
+        // to abort a deploy that already landed. Hence tolerant, unlike the
+        // pre-flight probes that capture() now throws for.
+        $stamp = function (array $cmd): string {
+            try {
+                return trim($this->capture($cmd, base_path()));
+            } catch (Throwable) {
+                return '';
+            }
+        };
+
+        $sha = $stamp(['git', 'rev-parse', '--short', 'HEAD']);
+        $committedAt = $stamp(['git', 'log', '-1', '--format=%cI']);
 
         File::ensureDirectoryExists(storage_path('app'));
         File::put(storage_path('app/build.json'), (string) json_encode([

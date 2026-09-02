@@ -394,6 +394,22 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   (UI + `companies.whmcs_auto_issue_immediate`). Widen only if a real per-tenant admin
   needs a specific credential delegated — don't bulk-move secrets into company_admin reach.
 
+## 🧹 Deploy/rollback + leads-calendar links — P2 από το review (untracked-deadlock PR)
+Δεν μπλοκάρουν τίποτα· καταγραφή για να μη χαθούν.
+- **Το rollback path δεν έχει τις νέες εγγυήσεις.** `SelfUpdate::runRollback()` και
+  `deploy/rollback.sh` κάνουν `git checkout --force` ΧΩΡΙΣ ούτε τον έλεγχο tracked-dirty ούτε το
+  `protectUntracked()` — άρα ένα untracked αρχείο που το target ref το έχει tracked αντικαθίσταται
+  χωρίς αντίγραφο. Ίδιο μοτίβο με το update path· μικρό port.
+- **Ο φάκελος αντιγράφων γράφεται πριν τους μεταγενέστερους ελέγχους.** Στο `update.sh` το
+  copy-aside τρέχει πριν το downgrade-guard και το ΑΦΜ pre-flight, οπότε ένα deploy που ματαιώνεται
+  εκεί αφήνει πίσω ένα `storage/app/deploy-untracked/<ts>/` ανά προσπάθεια (και τυπώνει «Copies
+  kept…» για deploy που δεν έγινε). Είτε μετακίνηση μετά τους ελέγχους, είτε retention/καθάρισμα.
+- **Το tab του link είναι χοντρότερη κοπή από τον αριθμό δίπλα του** (ημερολόγιο leads): το
+  `overdueBeforeGrid()` μετράει μόνο τα ΠΡΙΝ το πλέγμα αλλά ανοίγει ΟΛΑ τα ληξιπρόθεσμα, και το
+  `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η
+  διάσταση χειριστή συμφωνεί πλέον· η χρονική/πεδίου όχι. Θέλει είτε αποκλειστικά tabs είτε
+  ρητότερο κείμενο στο banner.
+
 ## ✅ ~~`UpdateRun` authorization boundary (ΜΗ shield-generated policy)~~ — ΕΓΙΝΕ
 - **Έκλεισε.** `app/Policies/UpdateRunPolicy.php` γραμμένη ΣΤΟ ΧΕΡΙ (view μόνο για system super
   admin, κάθε mutation `false`) **+** το `UpdateRun` μπήκε στο `ADMIN_FORBIDDEN_RESOURCES`, με

@@ -164,8 +164,10 @@ class LeadsCalendar extends Page
 
     /**
      * A link into the leads LIST carrying the SAME operator filter this page is
-     * showing, so every count on the page and the list it links to agree (the
-     * banner counts are operator-filtered; an unfiltered link contradicted them).
+     * showing — the banner counts are operator-filtered and an unfiltered link
+     * contradicted them. (The TAB is a coarser cut than the count next to it:
+     * «overdue» lists every overdue lead, not only those before the grid. Noted
+     * in docs/BACKLOG.md.)
      * The filter key comes from TableFilterUrl (`filters`; `tableFilters` is the
      * property name and binds to nothing).
      */
