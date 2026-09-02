@@ -40,6 +40,7 @@ class CompanyExporter
         'server_groups',
         'billing_connections',
         'expense_classification_rules',
+        'whmcs_income_maps',
     ];
 
     /**
