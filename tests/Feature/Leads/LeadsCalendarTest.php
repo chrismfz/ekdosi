@@ -110,8 +110,10 @@ class LeadsCalendarTest extends TestCase
         // Same day → no-op; bad date → refused; a lead without a step → refused.
         Livewire::test(LeadsCalendar::class)->call('reschedule', $lead->id, '2026-09-23');
         Livewire::test(LeadsCalendar::class)->call('reschedule', $lead->id, '23/09/2026')->assertNotified('Μη έγκυρη ημερομηνία.');
+        Livewire::test(LeadsCalendar::class)->call('reschedule', $lead->id, '2026-02-31')->assertNotified('Μη έγκυρη ημερομηνία.');
+        $this->assertSame('2026-09-23', $lead->fresh()->next_action_at->toDateString(), 'an impossible date never rolls over to March');
         $none = $this->lead('Χωρίς', null);
-        Livewire::test(LeadsCalendar::class)->call('reschedule', $none->id, '2026-09-23')->assertNotified('Το lead δεν είναι ανοιχτό ή δεν έχει επόμενο βήμα.');
+        Livewire::test(LeadsCalendar::class)->call('reschedule', $none->id, '2026-09-23')->assertNotified('Το lead δεν έχει επόμενο βήμα.');
         $this->assertNull($none->fresh()->next_action_at);
 
         // Another tenant's lead never moves.

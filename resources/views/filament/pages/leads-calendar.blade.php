@@ -79,7 +79,8 @@
         @endif
     </x-filament::section>
 
-    <div x-data="{ drag: null, over: null }">
+    {{-- The wrapper swallows a stray drop (the gap between cells) — a dropped <a> must never navigate the tab. --}}
+    <div x-data="{ drag: null, over: null }" @dragover.prevent @drop.prevent="drag = null; over = null">
         <div class="lc-grid">
             @foreach ($dayNames as $d)
                 <div class="lc-head">{{ $d }}</div>
@@ -109,7 +110,7 @@
                                wire:key="cal-{{ $lead->id }}"
                                @if ($canMove)
                                draggable="true"
-                               @dragstart="drag = {{ $lead->id }}; $el.classList.add('lc-dragging')"
+                               @dragstart="drag = {{ $lead->id }}; $event.dataTransfer.setData('text/plain', String(drag)); $event.dataTransfer.effectAllowed = 'move'; $el.classList.add('lc-dragging')"
                                @dragend="$el.classList.remove('lc-dragging'); drag = null; over = null"
                                @endif
                                title="{{ $lead->name }}{{ $lead->assignedTo ? ' · '.$lead->assignedTo->name : '' }}">

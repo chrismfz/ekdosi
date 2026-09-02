@@ -113,6 +113,58 @@ class LeadsBoardTest extends TestCase
         $fresh = $lead->fresh();
         $this->assertSame(LeadStatus::NotNow, $fresh->status);
         $this->assertSame($when, $fresh->next_action_at->format('Y-m-d H:i:s'));
+
+        // A slip-drop inside «Όχι τώρα»: the modal pre-fills the lead's OWN date
+        // (never a fresh +1 week), so Save keeps the deliberate choice.
+        Livewire::test(LeadsBoard::class)
+            ->mountAction('notNow', ['lead' => $lead->id])
+            ->assertActionDataSet(['next_action_at' => substr($when, 0, 16)]); // the picker (seconds(false)) formats Y-m-d H:i
+    }
+
+    public function test_columns_cap_cards_but_badge_shows_the_true_count(): void
+    {
+        $cap = LeadsBoard::MAX_PER_COLUMN;
+        $rows = [];
+        for ($i = 0; $i < $cap + 3; $i++) {
+            $rows[] = ['company_id' => $this->tenant->id, 'name' => 'Lead '.$i, 'status' => 'new', 'created_at' => now(), 'updated_at' => now()];
+        }
+        Lead::query()->insert($rows);
+        Lead::create(['company_id' => $this->tenant->id, 'name' => 'Μόνο του', 'status' => LeadStatus::Quoted]);
+
+        $page = Livewire::test(LeadsBoard::class)->assertSee('το πλήθος στην κεφαλίδα είναι το πραγματικό');
+        $board = $page->instance();
+        $this->assertCount($cap, $board->getCards()['new'], 'cards capped per column');
+        $this->assertSame($cap + 3, $board->columnCount('new'), 'the badge is the true count');
+        $this->assertSame(1, $board->columnCount('quoted'), 'another column is not starved by the cap');
+        $this->assertTrue($board->isCapped());
+    }
+
+    public function test_change_status_is_one_definition_with_its_rules(): void
+    {
+        $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Κανόνες']);
+
+        try {
+            $lead->changeStatus(LeadStatus::Won);
+            $this->fail('Won is only written by the conversion.');
+        } catch (\InvalidArgumentException) {
+        }
+        try {
+            $lead->changeStatus(LeadStatus::Lost, '  ');
+            $this->fail('Lost needs a reason.');
+        } catch (\InvalidArgumentException) {
+        }
+        try {
+            $lead->changeStatus(LeadStatus::NotNow);
+            $this->fail('NotNow needs a date.');
+        } catch (\InvalidArgumentException) {
+        }
+        $this->assertSame(LeadStatus::New, $lead->fresh()->status, 'nothing written by a refused transition');
+
+        $lead->changeStatus(LeadStatus::Lost, 'πολύ ακριβό');
+        $this->assertSame('πολύ ακριβό', $lead->fresh()->lost_reason);
+        $lead->changeStatus(LeadStatus::Contacted, 'σχόλιο που ΔΕΝ είναι λόγος');
+        $this->assertNull($lead->fresh()->lost_reason, 'the reason is cleared on the way out');
+        $this->assertSame(['new', 'lost', 'contacted'], collect([['to' => 'new']])->merge($lead->timeline()->reorder('id')->get()->map(fn ($r) => ['to' => $r->meta['to']]))->pluck('to')->all());
     }
 
     public function test_refuses_closed_statuses_foreign_and_closed_leads(): void

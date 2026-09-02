@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\InteractsWithLeadViews;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Models\Company;
 use App\Models\Lead;
@@ -14,7 +15,6 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Gate;
 
 /**
  * «Ημερολόγιο leads» — Leads L3: a month grid (Δευ–Κυρ) of the OPEN leads'
@@ -33,11 +33,10 @@ class LeadsCalendar extends Page
 
     protected string $view = 'filament.pages.leads-calendar';
 
+    use InteractsWithLeadViews;
+
     /** The month shown, `Y-m`. */
     public string $month = '';
-
-    /** Operator filter: '' = everyone, 'me', or a user id. */
-    public string $operator = '';
 
     public function getTitle(): string
     {
@@ -89,11 +88,6 @@ class LeadsCalendar extends Page
         $this->month = now()->format('Y-m');
     }
 
-    public function canMove(): bool
-    {
-        return Gate::allows('Update:Lead');
-    }
-
     public function monthStart(): CarbonImmutable
     {
         return CarbonImmutable::createFromFormat('Y-m-d', $this->month.'-01')->startOfDay();
@@ -126,15 +120,6 @@ class LeadsCalendar extends Page
         return $weeks;
     }
 
-    /** @return array<int, string> */
-    public function getOperatorOptions(): array
-    {
-        /** @var Company $tenant */
-        $tenant = Filament::getTenant();
-
-        return $tenant->users()->orderBy('name')->pluck('users.name', 'users.id')->all();
-    }
-
     /**
      * Open leads with a next step inside the visible grid, keyed by `Y-m-d`.
      *
@@ -152,8 +137,7 @@ class LeadsCalendar extends Page
             ->where('company_id', $tenant->id)
             ->open()
             ->whereBetween('next_action_at', [$from, $to])
-            ->when($this->operator === 'me', fn ($q) => $q->where('assigned_user_id', auth()->id()))
-            ->when(ctype_digit($this->operator), fn ($q) => $q->where('assigned_user_id', (int) $this->operator))
+            ->forOperator($this->operator)
             ->with('assignedTo:id,name')
             ->orderBy('next_action_at')
             ->orderBy('name')
@@ -173,37 +157,27 @@ class LeadsCalendar extends Page
             ->where('company_id', $tenant->id)
             ->overdue()
             ->where('next_action_at', '<', $from)
-            ->when($this->operator === 'me', fn ($q) => $q->where('assigned_user_id', auth()->id()))
-            ->when(ctype_digit($this->operator), fn ($q) => $q->where('assigned_user_id', (int) $this->operator))
+            ->forOperator($this->operator)
             ->count();
     }
 
     /** Drop handler: move a lead's next step to another day, keeping its time of day. */
     public function reschedule(int $leadId, string $date): void
     {
-        if (! $this->canMove()) {
-            $this->fail('Δεν έχεις δικαίωμα να αλλάζεις leads.');
-
+        $lead = $this->movableLead($leadId);
+        if ($lead === null) {
             return;
         }
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
-            $this->fail('Μη έγκυρη ημερομηνία.');
-
-            return;
-        }
-
-        /** @var Company $tenant */
-        $tenant = Filament::getTenant();
-        $lead = Lead::query()->where('company_id', $tenant->id)->whereKey($leadId)->first();
-        if ($lead === null || ! $lead->isOpen() || $lead->next_action_at === null) {
-            $this->fail('Το lead δεν είναι ανοιχτό ή δεν έχει επόμενο βήμα.');
+        if ($lead->next_action_at === null) {
+            $this->fail('Το lead δεν έχει επόμενο βήμα.');
 
             return;
         }
 
-        try {
-            $day = Carbon::createFromFormat('Y-m-d', $date);
-        } catch (\Throwable) {
+        // Shape AND calendar validity: createFromFormat rolls «2026-02-31»
+        // over to March silently, so compare the round-trip.
+        $day = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 ? Carbon::createFromFormat('Y-m-d', $date) : null;
+        if ($day === null || $day->format('Y-m-d') !== $date) {
             $this->fail('Μη έγκυρη ημερομηνία.');
 
             return;
@@ -221,11 +195,6 @@ class LeadsCalendar extends Page
             ->title($lead->name.' → '.$target->format('d/m/Y H:i'))
             ->success()
             ->send();
-    }
-
-    private function fail(string $message): void
-    {
-        Notification::make()->title($message)->danger()->send();
     }
 
     protected function getHeaderActions(): array

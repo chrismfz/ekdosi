@@ -64,12 +64,13 @@
                     Μόνο ανάγνωση — δεν έχεις δικαίωμα αλλαγής leads.
                 @endif
                 Χαμένα / «Μην ξαναενοχλήσετε» / Πελάτης: από τη σελίδα του lead.
-                @if ($this->isCapped()) <strong>Εμφανίζονται οι πρώτες {{ \App\Filament\Pages\LeadsBoard::MAX_CARDS }} κάρτες — φίλτραρε ανά χειριστή.</strong> @endif
+                @if ($this->isCapped()) <strong>Σε κάποια στήλη εμφανίζονται οι πρώτες {{ \App\Filament\Pages\LeadsBoard::MAX_PER_COLUMN }} κάρτες (το πλήθος στην κεφαλίδα είναι το πραγματικό) — φίλτραρε ανά χειριστή.</strong> @endif
             </p>
         </div>
     </x-filament::section>
 
-    <div class="kb-board" x-data="{ drag: null, over: null }">
+    {{-- The wrapper swallows a stray drop (between columns) so nothing leaks to the browser default. --}}
+    <div class="kb-board" x-data="{ drag: null, over: null }" @dragover.prevent @drop.prevent="drag = null; over = null">
         @foreach ($columns as $status)
             @php $list = $cards[$status->value]; @endphp
             <div class="kb-col"
@@ -82,7 +83,7 @@
             >
                 <div class="kb-col__head">
                     <span>{{ $status->getLabel() }}</span>
-                    <span class="kb-count">{{ $list->count() }}</span>
+                    <span class="kb-count">{{ $this->columnCount($status->value) }}</span>
                 </div>
                 <div class="kb-cards">
                     @forelse ($list as $lead)
@@ -90,7 +91,7 @@
                              wire:key="lead-{{ $lead->id }}"
                              @if ($canMove)
                              draggable="true"
-                             @dragstart="drag = {{ $lead->id }}; $el.classList.add('kb-dragging')"
+                             @dragstart="drag = {{ $lead->id }}; $event.dataTransfer.setData('text/plain', String(drag)); $event.dataTransfer.effectAllowed = 'move'; $el.classList.add('kb-dragging')"
                              @dragend="$el.classList.remove('kb-dragging'); drag = null; over = null"
                              @endif
                         >

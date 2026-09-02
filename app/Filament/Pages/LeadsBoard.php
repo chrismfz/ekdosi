@@ -3,10 +3,12 @@
 namespace App\Filament\Pages;
 
 use App\Enums\LeadStatus;
+use App\Filament\Pages\Concerns\InteractsWithLeadViews;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Models\Company;
 use App\Models\Lead;
 use BackedEnum;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DateTimePicker;
@@ -14,7 +16,6 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\Gate;
 
 /**
  * «Πίνακας leads» — Leads L3 kanban: one column per OPEN status, a card per
@@ -26,7 +27,8 @@ use Illuminate\Support\Facades\Gate;
  *   - Lost / «Μην ξαναενοχλήσετε» are not columns either (they need a reason
  *     and, for DNC, an explicit confirmation — use the lead's action);
  *   - «Όχι τώρα» needs a date, so that drop opens a small modal (notNow).
- * Read gate View:LeadsBoard; moving needs Update:Lead.
+ * Read gate View:LeadsBoard; moving needs Update:Lead. The transition itself
+ * is Lead::changeStatus — the one definition shared with the modal.
  */
 class LeadsBoard extends Page
 {
@@ -38,11 +40,16 @@ class LeadsBoard extends Page
 
     protected string $view = 'filament.pages.leads-board';
 
-    /** Soft cap so a board never renders thousands of cards. */
-    public const MAX_CARDS = 400;
+    use InteractsWithLeadViews;
 
-    /** Operator filter: '' = everyone, 'me', or a user id. */
-    public string $operator = '';
+    /** Cards rendered per column; the header badge always shows the TRUE count. */
+    public const MAX_PER_COLUMN = 100;
+
+    /** @var array<string, Collection<int, Lead>>|null */
+    private ?array $cards = null;
+
+    /** @var array<string, int> status => true count */
+    private array $columnCounts = [];
 
     /** @return list<LeadStatus> the columns, in funnel order */
     public static function columns(): array
@@ -66,54 +73,55 @@ class LeadsBoard extends Page
         return static::canAccess();
     }
 
-    public function canMove(): bool
-    {
-        return Gate::allows('Update:Lead');
-    }
-
-    /** @return array<int, string> */
-    public function getOperatorOptions(): array
-    {
-        /** @var Company $tenant */
-        $tenant = Filament::getTenant();
-
-        return $tenant->users()->orderBy('name')->pluck('users.name', 'users.id')->all();
-    }
-
     /**
      * Open leads of the tenant grouped by status value (only board columns),
-     * next step first (nulls last), then name.
+     * next step first (nulls last), then name — at most MAX_PER_COLUMN cards
+     * per column (the badge keeps the true count). Memoised per request.
      *
      * @return array<string, Collection<int, Lead>>
      */
     public function getCards(): array
     {
+        if ($this->cards !== null) {
+            return $this->cards;
+        }
+
         /** @var Company $tenant */
         $tenant = Filament::getTenant();
 
         $leads = Lead::query()
             ->where('company_id', $tenant->id)
             ->whereIn('status', array_map(fn (LeadStatus $s): string => $s->value, self::columns()))
-            ->when($this->operator === 'me', fn ($q) => $q->where('assigned_user_id', auth()->id()))
-            ->when(ctype_digit($this->operator), fn ($q) => $q->where('assigned_user_id', (int) $this->operator))
+            ->forOperator($this->operator)
             ->with('assignedTo:id,name')
             ->orderByRaw('next_action_at IS NULL')
             ->orderBy('next_action_at')
             ->orderBy('name')
-            ->limit(self::MAX_CARDS)
             ->get();
 
         $grouped = array_fill_keys(array_map(fn (LeadStatus $s): string => $s->value, self::columns()), new Collection);
+        $this->columnCounts = array_fill_keys(array_keys($grouped), 0);
         foreach ($leads->groupBy(fn (Lead $l): string => $l->status->value) as $status => $group) {
-            $grouped[$status] = $group->values();
+            $this->columnCounts[$status] = $group->count();
+            $grouped[$status] = $group->take(self::MAX_PER_COLUMN)->values();
         }
 
-        return $grouped;
+        return $this->cards = $grouped;
+    }
+
+    /** True number of leads in a column (the cards may be capped). */
+    public function columnCount(string $status): int
+    {
+        $this->getCards();
+
+        return $this->columnCounts[$status] ?? 0;
     }
 
     public function isCapped(): bool
     {
-        return array_sum(array_map(fn (Collection $c): int => $c->count(), $this->getCards())) >= self::MAX_CARDS;
+        $this->getCards();
+
+        return max($this->columnCounts ?: [0]) > self::MAX_PER_COLUMN;
     }
 
     /**
@@ -138,7 +146,7 @@ class LeadsBoard extends Page
             return;
         }
 
-        $lead->update(['status' => $target, 'lost_reason' => null]);
+        $lead->changeStatus($target);
 
         Notification::make()
             ->title($lead->name.' → '.$target->getLabel())
@@ -157,56 +165,31 @@ class LeadsBoard extends Page
                 DateTimePicker::make('next_action_at')
                     ->label('Ξαναδές το στις')
                     ->seconds(false)
-                    ->required()
-                    ->default(fn () => now()->addWeek()->setTime(10, 0)),
+                    ->required(),
             ])
+            // Like the modal on the lead: the lead's own date first (a slip-drop
+            // inside «Όχι τώρα» + Save must not silently replace a deliberately
+            // chosen date), else next week.
+            ->fillForm(function (array $arguments): array {
+                /** @var Company $tenant */
+                $tenant = Filament::getTenant();
+                $current = Lead::query()->where('company_id', $tenant->id)->whereKey((int) ($arguments['lead'] ?? 0))->value('next_action_at');
+
+                return ['next_action_at' => $current ?? now()->addWeek()->setTime(10, 0)];
+            })
             ->action(function (array $arguments, array $data): void {
                 $lead = $this->movableLead((int) ($arguments['lead'] ?? 0));
                 if ($lead === null) {
                     return;
                 }
 
-                $lead->update([
-                    'status' => LeadStatus::NotNow,
-                    'lost_reason' => null,
-                    'next_action_at' => $data['next_action_at'],
-                ]);
+                $lead->changeStatus(LeadStatus::NotNow, null, Carbon::parse($data['next_action_at']));
 
                 Notification::make()
                     ->title($lead->name.' → '.LeadStatus::NotNow->getLabel())
                     ->success()
                     ->send();
             });
-    }
-
-    /**
-     * The lead a drop may move: this tenant's, open, not trashed — and the
-     * operator may update leads. Anything else is refused with a notice.
-     */
-    private function movableLead(int $leadId): ?Lead
-    {
-        if (! $this->canMove()) {
-            $this->fail('Δεν έχεις δικαίωμα να αλλάζεις leads.');
-
-            return null;
-        }
-
-        /** @var Company $tenant */
-        $tenant = Filament::getTenant();
-        $lead = Lead::query()->where('company_id', $tenant->id)->whereKey($leadId)->first();
-
-        if ($lead === null || ! $lead->isOpen()) {
-            $this->fail('Το lead δεν είναι ανοιχτό (ή δεν υπάρχει πια).');
-
-            return null;
-        }
-
-        return $lead;
-    }
-
-    private function fail(string $message): void
-    {
-        Notification::make()->title($message)->danger()->send();
     }
 
     protected function getHeaderActions(): array
