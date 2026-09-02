@@ -30,6 +30,8 @@ class Quote extends Model
     protected $fillable = [
         'company_id',
         'customer_id',
+        // Leads L1: the lead this offer was made to (null once/unless from a lead).
+        'lead_id',
         'code',
         'legacy_id',
         'subject',
@@ -76,6 +78,54 @@ class Quote extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /** The lead this quote was issued to (Leads L1) — null when not from a lead. */
+    public function lead(): BelongsTo
+    {
+        return $this->belongsTo(Lead::class);
+    }
+
+    /**
+     * Issued to a lead that has not become a customer yet — no customer to bill,
+     * so neither an invoice nor a service contract can be made from it. The ONE
+     * rule both conversion actions check.
+     */
+    public function isAwaitingLeadConversion(): bool
+    {
+        return $this->lead_id !== null && $this->customer_id === null;
+    }
+
+    public const AWAITING_LEAD_MESSAGE = 'Η προσφορά ανήκει σε lead που δεν έχει γίνει πελάτης — κάνε πρώτα «Μετατροπή σε πελάτη» στο lead.';
+
+    /**
+     * Where the offer goes: the customer's email, or — for a quote issued to a
+     * lead that is not a customer yet — the lead's. Null when neither has one.
+     */
+    public function recipientEmail(): ?string
+    {
+        $email = trim((string) ($this->customer?->email ?: $this->lead?->email ?: ''));
+
+        return $email === '' ? null : $email;
+    }
+
+    /**
+     * «Στάλθηκε»: the moment the offer actually reached the other side — after
+     * a successful email, or by the explicit «Σήμανση ως απεσταλμένη» action.
+     * Moves Draft → Sent and, for a lead's quote, logs the contact on the lead
+     * (timeline row + «Στάλθηκε προσφορά»). Creating a draft never does this.
+     * Idempotent: a second send changes nothing.
+     */
+    public function markSent(): void
+    {
+        if ($this->status === QuoteStatus::Draft) {
+            $this->update(['status' => QuoteStatus::Sent]);
+        }
+
+        if ($this->lead_id !== null) {
+            $lead = Lead::query()->where('company_id', $this->company_id)->find($this->lead_id);
+            $lead?->recordQuote($this);
+        }
     }
 
     public function customer(): BelongsTo

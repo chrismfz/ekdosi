@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\Leads\Pages;
 
+use App\Enums\LeadSource;
 use App\Enums\LeadStatus;
 use App\Filament\Resources\Leads\LeadResource;
+use App\Services\Leads\LeadMatcher;
 use Filament\Facades\Filament;
 use Filament\Resources\Pages\CreateRecord;
 
@@ -25,6 +27,22 @@ class CreateLead extends CreateRecord
 
         if (! (LeadStatus::tryFrom((string) ($data['status'] ?? ''))?->requiresReason() ?? false)) {
             $data['lost_reason'] = null;
+        }
+
+        // A lead that matches an existing customer is an upsell/repeat contact:
+        // record the source as such unless the operator chose one (design §4).
+        if (blank($data['source'] ?? null) && $data['company_id'] !== null) {
+            $match = app(LeadMatcher::class)->find(
+                (int) $data['company_id'],
+                $data['afm'] ?? null,
+                $data['email'] ?? null,
+                [$data['phone'] ?? null, $data['mobile'] ?? null],
+            );
+            // Direct hits only — a shared accountant's phone on a customer's
+            // contact card, or a long-deleted customer, doesn't make this an upsell.
+            if ($match->directCustomers->isNotEmpty()) {
+                $data['source'] = LeadSource::ExistingCustomer->value;
+            }
         }
 
         return $data;

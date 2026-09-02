@@ -162,6 +162,18 @@ class CustomersTable
                     ->label('Αγαπημένα')
                     ->placeholder('Όλοι'),
 
+                // Leads L1: customers that came in through the mini-CRM.
+                TernaryFilter::make('from_lead')
+                    ->label('Από lead')
+                    ->placeholder('Όλοι')
+                    ->trueLabel('Μόνο από lead')
+                    ->falseLabel('Μόνο απευθείας')
+                    ->queries(
+                        true: fn (Builder $q): Builder => $q->whereHas('originLead'),
+                        false: fn (Builder $q): Builder => $q->whereDoesntHave('originLead'),
+                        blank: fn (Builder $q): Builder => $q,
+                    ),
+
                 TernaryFilter::make('needs_immediate_invoice')
                     ->label('Immediate invoicing')
                     ->boolean()

@@ -19,6 +19,25 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Leads / mini-CRM (L1) — μετατροπή σε πελάτη** — header action «Μετατροπή σε πελάτη» στο lead:
+  **νέος πελάτης** (αντιγραφή στοιχείων 1:1, tags, «με ποιον μιλάμε» → κύρια επαφή, σύσταση) ή
+  **σύνδεση με υπάρχοντα** (προεπιλέγεται το ΑΦΜ/email/τηλέφωνο match — ποτέ διπλός πελάτης)·
+  `ConvertLeadToCustomer` (transaction, row-lock, idempotent) γράφει `converted_customer_id`/
+  `converted_at`/«Πελάτης» (ο ΜΟΝΟΣ writer του Won) + γραμμή «Μετατροπή» στο χρονολόγιο. Ο πελάτης
+  αποκτά tab **«Προέλευση»** (από ποιο lead, πηγή, χειριστής, πρώτη επαφή, ημέρες ως τη μετατροπή,
+  πλήθος επαφών, link στο χρονολόγιο) + φίλτρο «Από lead» στη λίστα πελατών. **Προσφορά από lead**:
+  `quotes.lead_id`, «Νέα προσφορά» στο lead ανοίγει τη φόρμα προσυμπληρωμένη, η έκδοση γράφει γραμμή
+  «Προσφορά» στο χρονολόγιο και πάει το lead σε «Στάλθηκε προσφορά» **όταν όντως σταλεί** (επιτυχής
+  αποστολή email — που πάει στο email του lead αν δεν υπάρχει πελάτης — ή η νέα ενέργεια «Σήμανση ως
+  απεσταλμένη»· το draft δεν μετρά ως επαφή)· tab «Προσφορές» στο lead· στη μετατροπή οι προσφορές
+  του lead περνούν στον πελάτη. Portability rewire για `quotes.lead_id`.
+- **Leads / mini-CRM — hardening από external review**: το «Μην ξαναενοχλήσετε» κρίνεται από
+  unbounded EXISTS (δεν χάνεται πίσω από >10 νεότερα duplicates)· η «τελευταία επαφή»/«Αδρανή»
+  μετρούν μόνο πραγματικές επαφές (όχι σημειώσεις/αλλαγές κατάστασης)· DNC μόνο μέσω της
+  ενέργειας με **checkbox επιβεβαίωσης**, και αποθήκευση duplicate πάνω σε DNC μόνο με ρητή
+  αναγνώριση· «Όχι τώρα» απαιτεί ημερομηνία· dedupe καλύπτει και soft-deleted πελάτες,
+  `secondary_email`, επαφές πελατών· ο observer γράφει tenant-bounded· auto
+  `source=existing_customer` όταν το lead ταιριάζει σε πελάτη.
 - **Leads / mini-CRM (L0)** — νέο μενού «Leads» κάτω από τους Πελάτες: υποψήφιοι πελάτες με όσα
   στοιχεία έχουμε (μόνο επωνυμία υποχρεωτική), **Χρονολόγιο** επαφών (Τηλέφωνο/Email/Ραντεβού/Σημείωση
   με ποιος/πότε/κατεύθυνση/αποτέλεσμα/τι ειπώθηκε + «επόμενο βήμα»), καταστάσεις Νέο → Επικοινωνήσαμε →
@@ -28,6 +47,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (`LeadMatcher`, ΑΦΜ/email/τηλέφωνο, format-insensitive). Πίνακες `leads` + `lead_activities`,
   `Lead`/`LeadActivity` models (TracksActivity, notes/tags/attachments), `LeadPolicy`, operator
   permissions. Σχέδιο + gates: `docs/leads-mini-crm.md` (L1 μετατροπή σε πελάτη, L2 απολογισμός).
+
+### Fixed
+- **Portability: το full restore δεν «ανασταίνει» soft-deleted εγγραφές** — ο importer κρατά πλέον το
+  `deleted_at` (πετούσε τη στήλη για όλους τους πίνακες, οπότε διαγραμμένοι πελάτες/leads/προϊόντα
+  επέστρεφαν ενεργοί μετά από export→import).
 
 ### Security
 - **Περιορισμός endpoint παρόχου e-τιμολόγησης (PROV-017)** — το base URL του παρόχου

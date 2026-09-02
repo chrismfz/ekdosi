@@ -142,6 +142,44 @@ class Lead extends Model
         return $this->belongsTo(Customer::class, 'converted_customer_id');
     }
 
+    /** Προσφορές issued to this lead before (or without) conversion. */
+    public function quotes(): HasMany
+    {
+        return $this->hasMany(Quote::class);
+    }
+
+    /**
+     * A quote was SENT to this lead (Quote::markSent — after a successful
+     * email or the explicit action; never on draft creation): log the contact
+     * on the timeline and, if the lead is still early in the funnel, move it
+     * to «Στάλθηκε προσφορά».
+     */
+    public function recordQuote(Quote $quote): void
+    {
+        // Once per quote — a re-send or a manual «Σήμανση» after an email
+        // must not log a second contact.
+        $already = $this->timeline()
+            ->where('type', LeadActivityType::Quote->value)
+            ->get()
+            ->contains(fn (LeadActivity $row): bool => (int) ($row->meta['quote_id'] ?? 0) === $quote->id);
+        if ($already) {
+            return;
+        }
+
+        $this->timeline()->create([
+            'company_id' => $this->company_id,
+            'user_id' => auth()->id(),
+            'type' => LeadActivityType::Quote->value,
+            'happened_at' => now(),
+            'body' => 'Προσφορά '.($quote->code ?? '#'.$quote->id).($quote->subject ? ' — '.$quote->subject : ''),
+            'meta' => ['quote_id' => $quote->id],
+        ]);
+
+        if (in_array($this->status, [LeadStatus::New, LeadStatus::Contacted, LeadStatus::Interested], true)) {
+            $this->update(['status' => LeadStatus::Quoted]);
+        }
+    }
+
     /**
      * Χρονολόγιο — newest first. Named `timeline` (not `activities`) so it can
      * never collide with spatie/activitylog's subject relation.
@@ -188,7 +226,7 @@ class Lead extends Model
             ->where('next_action_at', '<', now());
     }
 
-    /** Open leads with no timeline row (or creation) in the last N days. */
+    /** Open leads with no real contact (call/email/meeting/quote) — or creation — in the last N days. */
     public function scopeStale(Builder $query, int $days = 14): Builder
     {
         $cutoff = now()->subDays($days);

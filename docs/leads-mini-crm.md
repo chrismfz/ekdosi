@@ -1,6 +1,7 @@
 # Leads / mini-CRM — αναλυτικό design (pre-build)
 
-> **STATUS: L0 SHIPPED (2026-09-01) — resource + χρονολόγιο + καταστάσεις + dedupe. L1/L2 OPEN (§10).**
+> **STATUS: L0 + L1 SHIPPED (2026-09-01) — resource, χρονολόγιο, καταστάσεις, dedupe, μετατροπή σε πελάτη,
+> «Προέλευση», προσφορά από lead. L2 (απολογισμός + reminders) OPEN (§10).**
 > Πλάνο + ανάλυση για να «υπάρχει κάπου» μέχρι να κλείσουν τα audits / bug-fix sessions. Twin των `docs/domains/README.md` /
 > `docs/payment-connectors.md` (design-first, gates, build-όπου-θες).
 >
@@ -126,6 +127,9 @@ new ──► contacted ──► interested ──► quoted ──► won  (= 
 
 - Ελληνικές ετικέτες: Νέο · Επικοινωνήσαμε · Ενδιαφέρεται · Στάλθηκε προσφορά · **Πελάτης** ·
   Χάθηκε · Όχι τώρα · **Μην ξαναενοχλήσετε**.
+- `not_now` **απαιτεί** `next_action_at` («ξαναδές το τότε») — φόρμα και ενέργεια.
+- `last_activity_at` = τελευταία **πραγματική επαφή** (call/email/meeting/quote) — σημειώσεις και
+  αλλαγές κατάστασης δεν μετρούν, ώστε ένα backdated τηλέφωνο να μη «φρεσκάρει» το lead.
 - `won` γράφεται ΜΟΝΟ από το `ConvertLeadToCustomer` (όχι χειροκίνητα) — ίδια αρχή με το
   `local_status` που το γράφει ο submitter.
 - `lost` / `not_now` / `do_not_contact` → `contacted` επιτρέπεται (re-open) — απλώς γράφει
@@ -135,20 +139,27 @@ new ──► contacted ──► interested ──► quoted ──► won  (= 
 
 ---
 
-## 4. «Να μην ξαναζαλίζουμε κόσμο» — dedupe warning
+## 4. «Να μην ξαναζαλίζουμε κόσμο» — dedupe warning (ΟΠΩΣ ΧΤΙΣΤΗΚΕ)
 
-Στο create/edit του lead (`afterStateUpdated` σε `afm` / `email` / `phone`) + μία φορά στο
-`creating`:
-1. Ψάξε `customers` (tenant) με ίδιο ΑΦΜ **ή** ίδιο email/τηλέφωνο → banner «**Είναι ήδη πελάτης:**
-   Χ (link)». Αποθήκευση επιτρέπεται (μπορεί να είναι upsell) αλλά ο lead παίρνει αυτόματα
-   `source=existing_customer` + `referred_by_customer_id`.
-2. Ψάξε `leads` (incl. soft-deleted, incl. `lost`/`do_not_contact`) με ίδιο ΑΦΜ/email/τηλέφωνο →
-   banner «**Υπάρχει ήδη ως lead:** Χ — κατάσταση *Χάθηκε* (2026-03, λόγος: …), χειριστής: Υ» με
-   link. Αν είναι `do_not_contact` → **κόκκινο** και η αποθήκευση ζητά επιβεβαίωση.
-3. Σε λίστα: φίλτρο «Ήδη πελάτες» (leads με match) για καθάρισμα.
+Στο create/edit του lead (live-on-blur σε `afm` / `email` / `phone` / `mobile`) + στο create hook:
+1. Ψάξε `customers` (tenant, **και soft-deleted**, σε `afm` / `email` / `secondary_email` /
+   `phone1` / `phone2` **και στις `customer_contacts`** email/τηλέφωνο) → banner «**Είναι ήδη
+   πελάτης:** Χ». Αποθήκευση επιτρέπεται (upsell) και ο lead παίρνει αυτόματα
+   `source=existing_customer` αν ο χειριστής δεν διάλεξε πηγή. _(Το αυτόματο
+   `referred_by_customer_id` της αρχικής πρότασης **δεν** υλοποιήθηκε: «σύσταση από» σημαίνει
+   τρίτος που μας σύστησε, όχι ο ίδιος ο πελάτης — θα ήταν λάθος δεδομένο.)_
+2. Ψάξε `leads` (incl. soft-deleted, incl. `lost`/`do_not_contact`) → banner «**Υπάρχει ήδη ως
+   lead:** Χ — κατάσταση, λόγος, χειριστής, ενημέρωση». Το banner δείχνει **preview** (10 γραμμές)
+   αλλά το «μην ξαναενοχλήσετε» κρίνεται από **ξεχωριστό unbounded EXISTS** (`LeadMatch::$doNotContact`),
+   ώστε ένα παλιό DNC να μη χαθεί πίσω από νεότερα duplicates. Αν υπάρχει DNC → **κόκκινο** και η
+   αποθήκευση **απορρίπτεται** μέχρι ο χειριστής να τσεκάρει «Το γνωρίζω — συνεχίζω παρόλα αυτά».
+3. Το ίδιο το `do_not_contact` **δεν** επιλέγεται από τη φόρμα — μόνο από την ενέργεια «Αλλαγή
+   κατάστασης», με υποχρεωτικό λόγο **και** checkbox επιβεβαίωσης (πραγματική επιβεβαίωση, όχι notification).
+4. _Φίλτρο «Ήδη πελάτες» στη λίστα: **DROPPED** — θέλει per-row matching (REPLACE-heavy) για
+   κάτι που το banner ήδη λύνει τη στιγμή που μετράει· ξανανοίγει μόνο αν ζητηθεί καθάρισμα μαζικά._
 
-Helper: `App\Services\Leads\LeadMatcher::findExisting(Lead|array): LeadMatch` (καθαρή κλάση,
-unit-testable, ίδια normalisation τηλεφώνου/ΑΦΜ με ό,τι χρησιμοποιεί ο `CustomerSyncFromMyData`).
+Helper: `App\Services\Leads\LeadMatcher::find(companyId, afm, email, phones, ignoreLeadId): LeadMatch`
+(καθαρή κλάση, unit-tested· ΑΦΜ μέσω `App\Support\Afm`, τηλέφωνα στα τελευταία 10 ψηφία, format-insensitive).
 
 ---
 

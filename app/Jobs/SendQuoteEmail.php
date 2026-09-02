@@ -15,7 +15,7 @@ use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 /**
- * Sends a Προσφορά PDF to the customer by email, with a full audit trail in
+ * Sends a Προσφορά PDF to the customer (or the lead it was issued to) by email, with a full audit trail in
  * quote_mail_logs. Twin of SendInvoiceEmail; retries with backoff.
  *
  * Trigger values: 'manual' (operator-clicked) — quotes have no auto path.
@@ -37,7 +37,7 @@ class SendQuoteEmail implements ShouldQueue
         TenantMailerFactory $mailerFactory,
     ): void {
         $quote = Quote::query()->whereKey($this->quote->getKey())
-            ->with(['lines', 'customer', 'company'])
+            ->with(['lines', 'customer', 'lead', 'company'])
             ->first();
 
         if (! $quote) {
@@ -45,12 +45,13 @@ class SendQuoteEmail implements ShouldQueue
         }
 
         $tenant = $quote->company;
-        $email = trim((string) ($quote->customer?->email ?? ''));
+        // Customer email, or the lead's for a quote to a not-yet-customer.
+        $email = (string) $quote->recipientEmail();
 
         $log = QuoteMailLog::create([
             'company_id' => $quote->company_id,
             'quote_id' => $quote->id,
-            'recipient' => $email ?: '(no customer email)',
+            'recipient' => $email ?: '(no recipient email)',
             'cc_list' => $quote->customer?->secondary_email ? [$quote->customer->secondary_email] : null,
             'bcc_list' => $tenant?->auditBccList() ?: null,
             'from_address' => $tenant?->mail_from_address ?: config('mail.from.address'),
@@ -64,7 +65,7 @@ class SendQuoteEmail implements ShouldQueue
         if ($email === '') {
             $log->update([
                 'status' => 'failed',
-                'error_message' => 'Ο πελάτης δεν έχει email — δεν είναι δυνατή η αποστολή.',
+                'error_message' => 'Ούτε ο πελάτης ούτε το lead έχει email — δεν είναι δυνατή η αποστολή.',
                 'failed_at' => now(),
             ]);
 
@@ -81,6 +82,10 @@ class SendQuoteEmail implements ShouldQueue
                 ->send(new QuoteOfferMail($quote, $pdfBytes));
 
             $log->update(['status' => 'sent', 'sent_at' => now()]);
+
+            // The offer reached them: Draft → Sent, and a lead's quote becomes
+            // a real contact on the lead (idempotent).
+            $quote->markSent();
         } catch (Throwable $e) {
             $log->update([
                 'status' => 'failed',

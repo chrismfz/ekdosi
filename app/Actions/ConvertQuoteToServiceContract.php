@@ -53,6 +53,11 @@ class ConvertQuoteToServiceContract
         if ($quote->status !== QuoteStatus::Accepted) {
             throw new RuntimeException('Μόνο αποδεκτή προσφορά μετατρέπεται σε υπηρεσία.');
         }
+        // Leads L1: service_contracts.customer_id is NOT NULL — same rule as the
+        // invoice path, checked BEFORE the transaction (a Greek message, not SQL).
+        if ($quote->isAwaitingLeadConversion()) {
+            throw new RuntimeException(Quote::AWAITING_LEAD_MESSAGE);
+        }
         if ($recurringAmount <= 0) {
             throw new RuntimeException('Το επαναλαμβανόμενο ποσό πρέπει να είναι θετικό.');
         }

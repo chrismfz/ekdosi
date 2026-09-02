@@ -12,6 +12,7 @@ use App\Services\Leads\LeadMatch;
 use App\Services\Leads\LeadMatcher;
 use App\Support\Afm;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
@@ -104,6 +105,18 @@ class LeadForm
                             ->hiddenLabel()
                             ->columnSpanFull()
                             ->content(fn (callable $get, ?Lead $record): HtmlString => self::dedupeBanner($get, $record)),
+
+                        // CREATING a lead that matches a «μην ξαναενοχλήσετε» record
+                        // is refused until the operator explicitly acknowledges it.
+                        // Edit keeps the red banner but doesn't re-ask on every save —
+                        // the lead already exists; the acknowledgement was given once.
+                        Checkbox::make('acknowledge_dnc')
+                            ->label('Το γνωρίζω — υπάρχει «Μην ξαναενοχλήσετε» για αυτά τα στοιχεία και συνεχίζω παρόλα αυτά.')
+                            ->dehydrated(false)
+                            ->columnSpanFull()
+                            ->visible(fn (callable $get, ?Lead $record): bool => $record === null && self::matchFor($get, $record)->hasDoNotContact())
+                            ->accepted(fn (callable $get, ?Lead $record): bool => $record === null && self::matchFor($get, $record)->hasDoNotContact())
+                            ->validationMessages(['accepted' => 'Υπάρχει «Μην ξαναενοχλήσετε» για αυτά τα στοιχεία — τσέκαρε ότι το γνωρίζεις για να αποθηκευτεί.']),
                     ]),
 
                 Section::make('Παρακολούθηση')
@@ -111,11 +124,12 @@ class LeadForm
                     ->schema([
                         Select::make('status')
                             ->label('Κατάσταση')
-                            // Won is not pickable, but a converted lead must still
-                            // SHOW «Πελάτης» in the disabled control.
-                            ->options(fn (?Lead $record): array => $record?->status === LeadStatus::Won
-                                ? collect(LeadStatus::cases())->mapWithKeys(fn (LeadStatus $s): array => [$s->value => $s->getLabel()])->all()
-                                : LeadStatus::options())
+                            // Won (conversion only) and DoNotContact (the action, with
+                            // a confirmation tick) are not pickable here — a record
+                            // already IN one of them gets ONLY its own value added, so
+                            // it displays its label without unlocking the other.
+                            ->options(fn (?Lead $record): array => LeadStatus::formOptions()
+                                + ($record?->status ? [$record->status->value => $record->status->getLabel()] : []))
                             ->default(LeadStatus::New->value)
                             ->required()
                             ->live()
@@ -152,7 +166,8 @@ class LeadForm
                         DateTimePicker::make('next_action_at')
                             ->label('Επόμενο βήμα')
                             ->seconds(false)
-                            ->helperText('Πότε να το ξαναδούμε — εμφανίζεται κόκκινο στη λίστα όταν περάσει.'),
+                            ->helperText('Πότε να το ξαναδούμε — εμφανίζεται κόκκινο στη λίστα όταν περάσει. Υποχρεωτικό για «Όχι τώρα».')
+                            ->required(fn (callable $get): bool => $get('status') === LeadStatus::NotNow->value),
 
                         TextInput::make('lost_reason')
                             ->label('Λόγος')
@@ -206,24 +221,30 @@ class LeadForm
      */
     private static function dedupeBanner(callable $get, ?Lead $record): HtmlString
     {
-        $tenantId = Filament::getTenant()?->getKey();
-        if ($tenantId === null) {
+        $match = self::matchFor($get, $record);
+
+        if ($match->isEmpty() && ! $match->hasDoNotContact()) {
             return new HtmlString('');
         }
 
-        $match = app(LeadMatcher::class)->find(
+        return new HtmlString(self::renderMatch($match));
+    }
+
+    /** The dedupe lookup for the form's current ΑΦΜ / email / phones. */
+    public static function matchFor(callable $get, ?Lead $record): LeadMatch
+    {
+        $tenantId = Filament::getTenant()?->getKey();
+        if ($tenantId === null) {
+            return LeadMatch::none();
+        }
+
+        return app(LeadMatcher::class)->find(
             (int) $tenantId,
             $get('afm'),
             $get('email'),
             [$get('phone'), $get('mobile')],
             $record?->getKey(),
         );
-
-        if ($match->isEmpty()) {
-            return new HtmlString('');
-        }
-
-        return new HtmlString(self::renderMatch($match));
     }
 
     public static function renderMatch(LeadMatch $match): string

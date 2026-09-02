@@ -92,6 +92,21 @@ enum LeadStatus: string implements HasColor, HasLabel
             ->all();
     }
 
+    /**
+     * Statuses the plain form may set: everything except Won (conversion only)
+     * and DoNotContact — that one goes through the «Αλλαγή κατάστασης» action,
+     * which demands an explicit confirmation tick.
+     *
+     * @return array<string, string>
+     */
+    public static function formOptions(): array
+    {
+        return collect(self::selectable())
+            ->reject(fn (self $s): bool => $s === self::DoNotContact)
+            ->mapWithKeys(fn (self $s): array => [$s->value => $s->getLabel()])
+            ->all();
+    }
+
     /** @return list<string> */
     public static function openValues(): array
     {

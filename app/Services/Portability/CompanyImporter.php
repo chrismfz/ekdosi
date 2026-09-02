@@ -130,7 +130,7 @@ class CompanyImporter
         'invoice_mail_log' => ['invoice_id' => 'invoices', 'triggered_by_user_id' => 'users'],
         'payments' => ['customer_id' => 'customers', 'invoice_id' => 'invoices', 'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts'],
         'quotes' => [
-            'customer_id' => 'customers', 'converted_invoice_id' => 'invoices',
+            'customer_id' => 'customers', 'lead_id' => 'leads', 'converted_invoice_id' => 'invoices',
             'converted_service_contract_id' => 'service_contracts', // deferred → nulled
         ],
         'quote_lines' => ['quote_id' => 'quotes', 'product_id' => 'products'],
@@ -149,7 +149,13 @@ class CompanyImporter
         'cmr_lines' => ['cmr_note_id' => 'cmr_notes'],
     ];
 
-    private const DROP_COLUMNS = ['id', 'company_id', 'created_at', 'updated_at', 'deleted_at'];
+    /**
+     * Surrogate/lifecycle columns regenerated on import. `deleted_at` is
+     * deliberately KEPT: the exporter dumps soft-deleted rows (raw table read),
+     * and a restore must not resurrect a customer/lead/product that was
+     * deleted — e.g. a lead kept only so «μην ξαναενοχλήσετε» still matches.
+     */
+    private const DROP_COLUMNS = ['id', 'company_id', 'created_at', 'updated_at'];
 
     public function __construct(
         private readonly SecretsCodec $codec,
@@ -399,6 +405,9 @@ class CompanyImporter
 
             if (isset($index[$key])) {
                 $id = $index[$key];
+                // Merge keeps the LOCAL soft-delete state: a row deleted here
+                // after the export must not be resurrected by its bundle twin.
+                unset($data['deleted_at']);
                 DB::table($table)->where('id', $id)->update($data);
             } else {
                 $id = DB::table($table)->insertGetId($data);
@@ -486,7 +495,9 @@ class CompanyImporter
      */
     private function rowSignature(array $row): string
     {
-        foreach ([...self::DROP_COLUMNS, 'legacy_id'] as $col) {
+        // deleted_at is lifecycle, not identity: a locally soft-deleted row must
+        // still match its bundle twin (else merge inserts a live duplicate).
+        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at'] as $col) {
             unset($row[$col]);
         }
         ksort($row);
