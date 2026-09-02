@@ -77,6 +77,17 @@ class MyDataMarksRelationManager extends RelationManager
                         ? MyDataMarkDetail::getUrl(['mark' => $record->mark, 'tenant' => Filament::getTenant()])
                         : null),
 
+                // MYD-023: AADE's own MARK for the CANCELLATION act. The column has
+                // existed since 2026-06-05 and the direct cancel path has been
+                // writing it, but nothing ever DISPLAYED it — so the one piece of
+                // evidence that proves which cancellation produced the terminal
+                // state was invisible to the operator.
+                TextColumn::make('cancellation_mark')
+                    ->label('ΜΑΡΚ ακύρωσης')
+                    ->placeholder('—')   // only CANCEL rows carry one
+                    ->copyable()
+                    ->toggleable(),
+
                 TextColumn::make('mark_date')
                     ->label('Date')
                     ->date('d/m/Y')

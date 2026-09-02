@@ -51,6 +51,15 @@ class DeliveryMarksRelationManager extends RelationManager
                     ->placeholder('—')   // REJECTED rows have null mark
                     ->copyable(),
 
+                // MYD-023: AADE's own MARK for the CANCELLATION act — distinct
+                // evidence from the MARK of the document being cancelled, which is
+                // what the column to the left holds.
+                TextColumn::make('cancellation_mark')
+                    ->label('ΜΑΡΚ ακύρωσης')
+                    ->placeholder('—')   // only CANCEL rows carry one
+                    ->copyable()
+                    ->toggleable(),
+
                 TextColumn::make('provider_key')
                     ->label('Πάροχος')
                     ->placeholder('—')

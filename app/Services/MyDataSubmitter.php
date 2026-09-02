@@ -12,6 +12,7 @@ use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\MyData\AadeDocSummary;
 use App\Services\MyData\SalesReconciler;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Exceptions\InvalidResponseException;
@@ -1026,7 +1027,10 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
                 'mark' => $markToCancel,
-                'cancellation_mark' => $cancellationMark,
+                // '' is not evidence — firebed returns '' (not null) for an empty
+                // <cancellationMark>, and array_filter/IS NOT NULL would then count
+                // it as one. Same rule as the other two cancel persists.
+                'cancellation_mark' => CancellationMark::clean($cancellationMark),
                 'mydata_action' => 'CANCEL',
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,
                 'response' => $responseXml,

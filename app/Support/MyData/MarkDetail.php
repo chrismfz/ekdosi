@@ -93,6 +93,9 @@ final class MarkDetail
             'vatTotal' => round($gross - $net, 2),
             'grossTotal' => $gross,
             'state' => $invoice->mydata_state ?? 'VALID',
+            // Only the AADE-sourced view carries one; kept here so both builders
+            // return the same array shape.
+            'cancelledByMark' => null,
             'localStatus' => $invoice->local_status,
             // We always issue our own invoices → outbound (we are the issuer).
             'direction' => 'outbound',
@@ -111,11 +114,13 @@ final class MarkDetail
      * Build the detail array from a firebed RequestTransmittedDocs
      * document (an orphan). `$cancelled` is the folded state the reader
      * derives from the inline <cancelledByMark> OR the standalone
-     * <cancelledInvoicesDoc> list.
+     * <cancelledInvoicesDoc> list. `$cancelledByMark` is the MARK of that
+     * cancellation ACT when AADE named one — the evidence a state sync persists
+     * (MYD-023); it can be null even when `$cancelled` is true.
      *
      * @return array<string, mixed>
      */
-    public static function fromAadeDoc(AadeInvoice $doc, bool $cancelled, ?string $ourVat = null): array
+    public static function fromAadeDoc(AadeInvoice $doc, bool $cancelled, ?string $ourVat = null, ?string $cancelledByMark = null): array
     {
         $header = $doc->getInvoiceHeader();
         $summary = $doc->getInvoiceSummary();
@@ -167,6 +172,8 @@ final class MarkDetail
             'vatTotal' => self::toFloat($summary?->getTotalVatAmount()),
             'grossTotal' => self::toFloat($summary?->getTotalGrossValue()),
             'state' => $cancelled ? 'CANCELLED' : 'VALID',
+            // AADE's MARK for the cancellation act, when it named one.
+            'cancelledByMark' => $cancelled ? $cancelledByMark : null,
             'localStatus' => null,
             'direction' => $direction,
             // The AADE QR URL — present on RequestTransmittedDocs/RequestDocs

@@ -1431,6 +1431,44 @@ class MyDataSubmitterSafetyTest extends TestCase
         ]);
     }
 
+    /**
+     * MYD-023 (review round 2): the third cancel-persist site. firebed's
+     * `getCancellationMark()` returns '' — not null — for an empty element, and
+     * the audit row is written with a plain array, so '' would be stored and then
+     * counted as evidence by every `IS NOT NULL` query. NULL means «no evidence»;
+     * '' must never masquerade as some.
+     */
+    public function test_an_empty_cancellation_mark_is_stored_as_no_evidence(): void
+    {
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_state' => 'VALID',
+            'local_status' => 'active',
+            'mydata_mark' => '400013829677137',
+        ])->save();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400013829677137',
+            'mydata_action' => 'INSERT',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->cancelSuccessWithoutMarkXml())]);
+
+        (new MyDataSubmitter($this->tenant, $mock))->cancel($invoice->fresh(), 'Δοκιμή');
+
+        // The cancellation still stands — the MARK is evidence, not a precondition.
+        $this->assertSame('CANCELLED', $invoice->fresh()->mydata_state);
+        $this->assertDatabaseHas('mydata_marks', [
+            'invoice_id' => $invoice->id,
+            'mydata_action' => 'CANCEL',
+            'mark' => '400013829677137',
+            'cancellation_mark' => null,
+        ]);
+    }
+
     public function test_cancel_self_heals_when_aade_reports_already_cancelled(): void
     {
         // MYD-7: a prior cancel succeeded at AADE but the local write failed, so
@@ -1483,6 +1521,20 @@ class MyDataSubmitterSafetyTest extends TestCase
                 <code>251</code>
             </error>
         </errors>
+    </response>
+</ResponseDoc>
+XML;
+    }
+
+    /** Success, but AADE named no cancellation MARK — firebed hands back '', not null. */
+    private function cancelSuccessWithoutMarkXml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <statusCode>Success</statusCode>
+        <cancellationMark></cancellationMark>
     </response>
 </ResponseDoc>
 XML;
