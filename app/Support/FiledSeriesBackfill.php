@@ -30,11 +30,12 @@ final class FiledSeriesBackfill
      * Apply the filed series to every document in $documentTable whose current
      * value disagrees with it.
      *
+     * $constrain is how the ETL stays off Filament-created rows, which it has a
+     * locked contract never to touch; the migration passes nothing and covers them.
+     *
      * @param  string  $documentTable  `invoices` or `delivery_notes`
      * @param  int|null  $companyId  restrict to one tenant (the ETL); null = all (the migration)
-     * @param  (callable(Builder): void)|null  $constrain
-     *                                                     Extra narrowing on the joined query. The ETL uses it to stay off
-     *                                                     Filament-created rows, which it has a locked contract never to touch.
+     * @param  (callable(Builder): void)|null  $constrain  extra narrowing on the joined query
      * @return int how many rows were corrected
      */
     public static function apply(string $documentTable, ?int $companyId = null, ?callable $constrain = null): int
