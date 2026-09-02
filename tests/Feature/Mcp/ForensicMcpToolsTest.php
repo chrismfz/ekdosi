@@ -3,6 +3,8 @@
 namespace Tests\Feature\Mcp;
 
 use App\Mcp\Servers\EkdosiMcpServer;
+use App\Mcp\Tools\InvoiceFilingMcpTool;
+use App\Mcp\Tools\MyDataFailuresMcpTool;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -112,7 +114,7 @@ class ForensicMcpToolsTest extends TestCase
         $invoice = $this->rejectedInvoice($company);
 
         $response = EkdosiMcpServer::actingAs($this->superAdmin($company))
-            ->tool('invoice_filing', ['invoice' => $invoice->invcode]);
+            ->tool(InvoiceFilingMcpTool::class, ['invoice' => $invoice->invcode]);
 
         $response->assertOk();
         // The stored rejection code is extracted from the response XML.
@@ -126,7 +128,7 @@ class ForensicMcpToolsTest extends TestCase
         $invoice = $this->rejectedInvoice($company);
 
         $response = EkdosiMcpServer::actingAs($this->superAdmin($company))
-            ->tool('invoice_filing', ['invoice' => (string) $invoice->id, 'include_xml' => true]);
+            ->tool(InvoiceFilingMcpTool::class, ['invoice' => (string) $invoice->id, 'include_xml' => true]);
 
         $response->assertOk();
         $response->assertSee('InvoicesDoc');
@@ -138,7 +140,7 @@ class ForensicMcpToolsTest extends TestCase
         $this->rejectedInvoice($company);
 
         $response = EkdosiMcpServer::actingAs($this->superAdmin($company))
-            ->tool('mydata_failures', []);
+            ->tool(MyDataFailuresMcpTool::class, []);
 
         $response->assertOk();
         $response->assertSee('229');
@@ -150,7 +152,7 @@ class ForensicMcpToolsTest extends TestCase
         $invoice = $this->rejectedInvoice($company);
 
         $response = EkdosiMcpServer::actingAs($this->member($company))
-            ->tool('invoice_filing', ['invoice' => $invoice->invcode]);
+            ->tool(InvoiceFilingMcpTool::class, ['invoice' => $invoice->invcode]);
 
         // shouldRegister() is false for a non-super-admin, so the tool is not
         // available — the sensitive XML/state never egresses to a member.
