@@ -1009,7 +1009,10 @@ class WhmcsInboxTable
                             ->icon('heroicon-m-magnifying-glass')
                             ->label('Εισαγωγή από ΑΑΔΕ')
                             ->action(function (callable $get, callable $set) use ($r) {
-                                $afm = Afm::digits((string) $get('lookup_afm'));
+                                // The ΑΦΜ IDENTITY (letters kept for a foreign VAT; a
+                                // placeholder is no ΑΦΜ) — the same rule the creator,
+                                // the matcher and whmcsAfm() use.
+                                $afm = Afm::uniqueKey((string) $get('lookup_afm'));
                                 if (blank($afm)) {
                                     Notification::make()->title('Συμπλήρωσε πρώτα ΑΦΜ')->warning()->send();
 

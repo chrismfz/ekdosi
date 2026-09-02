@@ -337,7 +337,9 @@ class MigrateFromFirebird extends Command
         // array key would bind as int against the varchar index).
         $byKey = [];
         $keyByCustId = [];
+        $sourceIds = [];
         foreach ($rows as $r) {
+            $sourceIds[(int) $r['CUST_ID']] = true;
             $key = Afm::uniqueKey($this->fld($r, 'AFM'));
             if ($key !== null) {
                 $byKey[(string) $key][] = (int) $r['CUST_ID'].' '.($this->fld($r, 'NAME') ?? '');
@@ -363,8 +365,10 @@ class MigrateFromFirebird extends Command
                     ->get(['id', 'name', 'afm_key', 'legacy_id', 'deleted_at']);
                 foreach ($owners as $o) {
                     $ownerLegacy = $o->legacy_id !== null ? (int) $o->legacy_id : null;
-                    if ($ownerLegacy !== null && array_key_exists($ownerLegacy, $keyByCustId)) {
-                        continue; // rewritten by this run → its key is released first
+                    // Any row this run rewrites (its legacy_id is in the source — keyed
+                    // or not, e.g. corrected to a placeholder) gets its key released first.
+                    if ($ownerLegacy !== null && isset($sourceIds[$ownerLegacy])) {
+                        continue;
                     }
                     $claimant = array_search((string) $o->afm_key, $keyByCustId, true);
                     $lines[] = "  ΑΦΜ {$o->afm_key}: υπάρχει ήδη στο ekdosi ως #{$o->id} «{$o->name}»"

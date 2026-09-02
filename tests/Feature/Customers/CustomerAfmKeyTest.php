@@ -372,6 +372,10 @@ class CustomerAfmKeyTest extends TestCase
         $b->forceDelete();
         $a->update(['afm' => '222222223']);
 
+        // The dry-run counts what execute does: A (twin) gives K2 up, so B is an INSERT.
+        $dry = app(CompanyImporter::class)->run($bundle, ['into' => 'src6', 'execute' => false, 'passphrase' => 'p@ss']);
+        $this->assertSame(['insert' => 1, 'update' => 1], $dry['tables']['customers']);
+
         app(CompanyImporter::class)->run($bundle, ['into' => 'src6', 'execute' => true, 'passphrase' => 'p@ss']);
 
         $rows = Customer::withTrashed()->where('company_id', $src->id)->orderBy('id')->get();

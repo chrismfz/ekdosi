@@ -367,10 +367,13 @@ class PendingWhmcsInvoice extends Model
         return count($flags) === 1 ? (bool) reset($flags) : null;
     }
 
-    /** The ΑΦΜ the customer entered in WHMCS (role 'vatno'), digits only. */
+    /**
+     * The ΑΦΜ the customer entered in WHMCS (role 'vatno') as its IDENTITY
+     * (Afm::uniqueKey): digits for a Greek ΑΦΜ with any EL/GR prefix dropped,
+     * letters kept for a foreign VAT, null for a blank or a placeholder.
+     */
     public function whmcsAfm(): ?string
     {
-        // The ΑΦΜ IDENTITY (letters kept for a foreign VAT, null for a placeholder).
         return Afm::uniqueKey($this->whmcsCustomField('vatno'));
     }
 

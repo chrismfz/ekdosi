@@ -380,8 +380,18 @@ class CompanyImporter
             // must say so, or the operator approves inserts that become overwrites.
             $afmIndex = ($existing && $table === 'customers') ? $this->afmKeyIndex($existing->id) : [];
             if ($existing && $table === 'customers') {
-                // …and it must REFUSE exactly what execute would refuse.
+                // …and it must REFUSE exactly what execute would refuse…
                 $this->assertNoCustomerAfmConflicts($rows, $existing->id, $index);
+                // …and count exactly what execute does: twins give up their keys
+                // first, so a key held only by a twin does NOT make another row a merge.
+                $twinIds = [];
+                foreach ($rows as $row) {
+                    $twin = $index[$this->naturalKey($table, $row)] ?? null;
+                    if ($twin !== null) {
+                        $twinIds[$twin] = true;
+                    }
+                }
+                $afmIndex = array_filter($afmIndex, fn (int $id): bool => ! isset($twinIds[$id]));
             }
             $insert = 0;
             $update = 0;
