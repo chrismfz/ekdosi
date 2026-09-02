@@ -9,6 +9,7 @@ use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
+use App\Support\Tenancy\CompanyContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -153,6 +154,49 @@ class CompanyIdentityWarningTest extends TestCase
         ]);
 
         $this->assertSame(1, $tenant->filedDocumentCount());
+    }
+
+    public function test_the_count_is_not_zeroed_by_the_ambient_tenant_context(): void
+    {
+        // MyDataMark/DeliveryMark carry CompanyScope, and CompanyResource is
+        // panel-global: a super_admin can edit ANY company while a different tenant
+        // is selected. Without opting out of the scope this returns 0 and the
+        // warning silently never renders — the worst kind of failure for a guard,
+        // because the screen looks fine. (EditCompany::afterSave() documents the
+        // same hazard.)
+        $edited = $this->company();
+        $ambient = $this->company();
+
+        $type = InvoiceType::create([
+            'company_id' => $edited->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ',
+            'invcount' => 1, 'mydata_type' => '2.1',
+        ]);
+        $customer = Customer::create([
+            'company_id' => $edited->id, 'name' => 'Πελάτης', 'afm' => '997073525',
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $edited->id, 'invcode' => 'ΤΠΥ1', 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        MyDataMark::create([
+            'company_id' => $edited->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177931', 'mydata_action' => 'INSERT',
+        ]);
+
+        $counted = app(CompanyContext::class)->actAs(
+            $ambient,
+            fn (): int => $edited->filedDocumentCount(),
+        );
+
+        $this->assertSame(1, $counted, 'the named company decides, not the selected tenant');
+
+        // And the explicit company_id still scopes it — opting out of the scope
+        // must not turn this into an all-tenant count.
+        $this->assertSame(0, app(CompanyContext::class)->actAs(
+            $edited,
+            fn (): int => $ambient->filedDocumentCount(),
+        ));
     }
 
     public function test_another_tenants_filings_do_not_count(): void

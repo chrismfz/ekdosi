@@ -1120,7 +1120,13 @@ class CompanyForm
      */
     private static function identityChangeWarning(?Company $record, string $base): HtmlString
     {
-        $filed = $record?->exists ? $record->filedDocumentCount() : 0;
+        // Memoised with once(): the form asks for ΑΦΜ and again for ΓΕΜΗ, and each
+        // call is two COUNTs. Same render, same answer. once() keys on the callable
+        // + its bound object and is reset per request, so unlike a function-static
+        // cache it cannot serve a stale count from a previous request under Octane.
+        $filed = $record?->exists
+            ? once(fn (): int => $record->filedDocumentCount())
+            : 0;
 
         if ($filed === 0) {
             return new HtmlString(e($base));

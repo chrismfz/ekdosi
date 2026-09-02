@@ -72,9 +72,17 @@ class SelfUpdate extends Command
         // this every minute while anything is queued, so a silent skip would spin
         // forever and the operator would never learn why nothing happened.
         if (! UpdateRun::inAppApplyEnabled()) {
+            // The host command differs by KIND. Telling an operator to run
+            // deploy/update.sh for a queued ROLLBACK would check out the old code
+            // WITHOUT restoring the pre-update DB snapshot — a worse state than the
+            // one they were trying to leave.
+            $command = $run->isRollback()
+                ? 'deploy/rollback.sh'
+                : 'deploy/update.sh '.($run->to_ref ?: '<tag>');
+
             $message = 'Η εφαρμογή ενημερώσεων μέσα από το panel είναι απενεργοποιημένη '
-                .'(ekdosi.updates.allow_in_app_apply = false). Κάνε την αναβάθμιση από τον '
-                .'server: deploy/update.sh '.($run->to_ref ?: '<tag>');
+                .'(ekdosi.updates.allow_in_app_apply = false). Κάνε την ενέργεια από τον '
+                .'server: '.$command;
 
             $run->update([
                 'status' => UpdateRun::STATUS_FAILED,

@@ -122,6 +122,12 @@ class InAppApplyDisarmedTest extends TestCase
 
         $this->assertSame(UpdateRun::STATUS_FAILED, $rollback->fresh()->status);
         $this->assertSame('disabled', $rollback->fresh()->phase);
+
+        // The host command differs by KIND. Telling the operator to run
+        // deploy/update.sh here would check out the old code WITHOUT restoring the
+        // pre-update DB snapshot — a worse state than the one they are leaving.
+        $this->assertStringContainsString('deploy/rollback.sh', (string) $rollback->fresh()->error_message);
+        $this->assertStringNotContainsString('deploy/update.sh', (string) $rollback->fresh()->error_message);
     }
 
     #[Test]

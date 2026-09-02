@@ -339,6 +339,28 @@ class DocumentSeriesFreezeTest extends TestCase
         $this->assertSame('ΤΠΥ', $invoice->fresh()->series, 'falls back to the frozen invcode');
     }
 
+    public function test_a_provider_filed_document_uses_its_mark_xml_too(): void
+    {
+        // A provider-filed document carries a real MARK and the real request XML
+        // under PROVIDER_INSERT — every other consumer in the tree pairs the two
+        // actions. Reading only INSERT would drop provider-filed invoices back onto
+        // `invcode`, reintroducing exactly the rename-window case the XML source
+        // exists to cover.
+        $invoice = $this->invoice(['invcode' => 'ΤΠΥ53', 'code' => 53]);
+        DB::table('invoices')->where('id', $invoice->id)->update(['series' => null]);
+
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $invoice->id,
+            'mark' => '400001965177943', 'mydata_action' => 'PROVIDER_INSERT',
+            'request' => '<invoiceHeader><series>ΤΠΥ2</series><aa>53</aa></invoiceHeader>',
+        ]);
+
+        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration->up();
+
+        $this->assertSame('ΤΠΥ2', $invoice->fresh()->series);
+    }
+
     public function test_the_first_accepted_filing_wins_over_a_later_one(): void
     {
         // A re-file must not rewrite the identity the document has held since its

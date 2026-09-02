@@ -111,11 +111,13 @@ class SystemHealth extends Page
                 ->color('gray')
                 ->action(fn () => $this->checkUpdates()),
 
-            // In-app apply (Phase 2). No arming flag: shows whenever a newer
-            // release is actually available (for a private repo that needs a valid
-            // token, so «URL/token → yes» is natural) and no run is in flight.
-            // Creates a queued UpdateRun; the cron scheduler applies it out-of-band
-            // (ekdosi:self-update). See docs/versioning-and-updates.md.
+            // In-app apply (Phase 2) — DISARMED by default (UPD triage 2026-09-02):
+            // applyAvailable() now requires EKDOSI_UPDATE_IN_APP_APPLY on top of the
+            // check being on, a repo being set, a release actually being available
+            // and no run in flight. When armed it creates a queued UpdateRun that
+            // the cron scheduler applies out-of-band (ekdosi:self-update). Otherwise
+            // the «upgrade from the server» box below takes its place.
+            // See docs/versioning-and-updates.md.
             Action::make('installUpdate')
                 ->label('Εγκατάσταση ενημέρωσης')
                 ->icon('heroicon-o-arrow-up-circle')

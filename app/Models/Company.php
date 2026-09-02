@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Casts\MaybeEncrypted;
 use App\Enums\MyDataMode;
+use App\Models\Scopes\CompanyScope;
 use App\Observers\CompanyObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -528,9 +529,20 @@ class Company extends Model
      */
     public function filedDocumentCount(): int
     {
-        // Explicit company_id, per the CLAUDE.md CLI/queue rule — this is also
-        // reachable outside a tenant context.
-        return MyDataMark::where('company_id', $this->getKey())->whereNotNull('mark')->where('mark', '!=', '')->count()
-            + DeliveryMark::where('company_id', $this->getKey())->whereNotNull('mark')->where('mark', '!=', '')->count();
+        // withoutGlobalScope, DECLARING the intent (CLAUDE.md rule (c)): this asks
+        // about a NAMED company, not the ambient one. Both mark models carry
+        // CompanyScope, and CompanyResource is panel-global — so a super_admin
+        // editing any company other than the currently selected tenant would get 0
+        // and the warning would silently never render. The explicit company_id
+        // below is what scopes this; the ambient context must not narrow it further.
+        // (EditCompany::afterSave() documents the same hazard.)
+        $filed = fn (string $model): int => $model::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $this->getKey())
+            ->whereNotNull('mark')
+            ->where('mark', '!=', '')
+            ->count();
+
+        return $filed(MyDataMark::class) + $filed(DeliveryMark::class);
     }
 }

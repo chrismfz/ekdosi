@@ -848,11 +848,6 @@ class MigrateFromFirebird extends Command
                 ['company_id' => $this->companyId, 'legacy_id' => $r['INVOICE_ID']],
                 [
                     'invcode' => $this->fld($r, 'INVCODE'),
-                    // MYD-018: freeze the series the legacy document was ISSUED
-                    // under. This is a query-builder upsert, so the model's
-                    // creating hook never fires — derive it from the same helper
-                    // so an imported row and an app-created one can't disagree.
-                    'series' => DocumentSeries::fromInvcode($this->fld($r, 'INVCODE'), $r['CODE'] ?? 0),
                     'code' => $r['CODE'] ?? 0,
                     'invoice_type_id' => $this->map['invoice_types'][$this->fld($r, 'INVTYPE')] ?? null,
                     'customer_id' => $this->legacyId('customers', $r['CUST_ID']),
@@ -886,7 +881,22 @@ class MigrateFromFirebird extends Command
                     'local_status' => $localStatus,
                     'updated_at' => now(),
                 ],
-                ['created_at' => $issuedAt ?? now()],
+                [
+                    'created_at' => $issuedAt ?? now(),
+                    // MYD-018: freeze the series the legacy document was ISSUED
+                    // under. This is a query-builder upsert, so the model's
+                    // creating hook never fires — derive it from the same helper
+                    // so an imported row and an app-created one can't disagree.
+                    //
+                    // INSERT-ONLY, deliberately. On a re-run the migration's value
+                    // is already there and may have come from a better source (the
+                    // request XML of the MARK we actually filed), so refreshing it
+                    // from `invcode` every run would either downgrade it or — when
+                    // fromInvcode() cannot parse the pair — write NULL and un-freeze
+                    // the row. The series never changes for a given document, so
+                    // there is nothing legitimate to refresh.
+                    'series' => DocumentSeries::fromInvcode($this->fld($r, 'INVCODE'), $r['CODE'] ?? 0),
+                ],
             );
             $this->map['invoices'][(int) $r['INVOICE_ID']] = $id;
             // Defensive `?? null` for older `.fbk` snapshots that

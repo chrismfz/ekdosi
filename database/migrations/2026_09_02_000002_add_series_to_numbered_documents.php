@@ -101,9 +101,10 @@ return new class extends Migration
      * Series parsed out of the stored request XML of each document's FIRST issue
      * filing, keyed by document id.
      *
-     * Only INSERT rows that carry a real MARK: a CANCEL row's `request` is a
-     * free-text reason rather than XML, and a dry-run or rejected attempt was
-     * never accepted by AADE, so neither says what the document is filed as.
+     * Only issue rows (INSERT / PROVIDER_INSERT) that carry a real MARK: a CANCEL
+     * row's `request` is a free-text reason rather than XML, and a dry-run or
+     * rejected attempt was never accepted by AADE, so neither says what the
+     * document is filed as.
      * Oldest-first so a re-file (a second INSERT) cannot overwrite the identity
      * the document has held since its first accepted filing.
      *
@@ -123,7 +124,12 @@ return new class extends Migration
             ->whereIn($foreignKey, $ids)
             ->whereNotNull('mark')
             ->where('mark', '!=', '')
-            ->where('mydata_action', 'INSERT')
+            // PROVIDER_INSERT too: a provider-filed document carries a real MARK
+            // and the real request XML, and every other consumer in the tree pairs
+            // the two actions. Reading only INSERT would drop provider-filed
+            // invoices and provider-issued delivery notes back onto `invcode` —
+            // reintroducing exactly the rename-window case this source exists for.
+            ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT'])
             ->whereNotNull('request')
             ->orderBy('id')
             ->each(function ($mark) use (&$series, $foreignKey): void {
