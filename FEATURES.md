@@ -33,6 +33,12 @@
   σε invoice + quote. **Στοιχεία εκδότη στην κεφαλίδα**: επωνυμία/διεύθυνση/ΑΦΜ/ΔΟΥ/τηλ/email
   + **ΓΕΜΗ** (`companies.gemi`, ν.4919/2022) + **Δραστηριότητα/ΚΑΔ** (`kad_primary`)· απαλλαγή
   ΦΠΑ (§8.3 αιτία) σε 0% γραμμές.
+- **Απόδειξη παρόχου ΥΠΑΗΕΣ στο PDF** (A.1112/2025, PROV-003) — για παραστατικό που εκδόθηκε **μέσω
+  παρόχου** (υπάρχει `PROVIDER_INSERT` ΜΑΡΚ, VALID/μη-ακυρωμένο), το PDF τυπώνει μπλοκ «Εκδόθηκε μέσω
+  παρόχου (ΥΠΑΗΕΣ)»: εμπορική+νομική επωνυμία, ιστότοπος, κωδικός ΑΑΔΕ, **αρ. αδείας ΥΠΑΗΕΣ**, ΜΑΡΚ,
+  **UID** (νέα στήλη `mydata_marks.uid`) και **κωδικός αυθεντικοποίησης**. Ταυτότητα παρόχου σε
+  immutable config (`einvoice.provider_identity` → `App\Support\EInvoice\ProviderIdentity`), ανά
+  `provider_key` — ένας 2ος πάροχος = μία γραμμή. Άμεσα-myDATA/ακυρωμένα → κανένα μπλοκ.
 - **Αποστολή τιμολογίου με email + ιστορικό** — auto (σε myDATA accept) ή χειροκίνητα· κάθε
   προσπάθεια καταγράφεται (`invoice_mail_log`: παραλήπτης/θέμα/κατάσταση/χρόνοι/ποιος). Ιστορικό
   **per-invoice** (ViewInvoice), **per-customer** (tab «Ιστορικό email»), και **γενικό tenant-wide**
@@ -535,7 +541,16 @@ cross-tenant αδύνατο. `list_companies` δίνει τα slugs. **Per-tool 
 επιβεβαιώνει **μέσα** στο ekdosi (καμία εξωτερική auto-εκτέλεση). **Νέα ops/debug tools για remote
 troubleshooting** (super_admin, read-only): `app_health` (= `ops:health`: queues/crons/backup/mail/
 WHMCS/myDATA/disk + severity), `failed_jobs` (failed queue jobs + κεφαλή exception), `log_tail`
-(Laravel log με φίλτρα level/substring). **Νέα state tools** (και στα δύο κανάλια): `app_version`
+(Laravel log με φίλτρα level/substring). **Νέα myDATA/provider forensics** (super_admin, cross-tenant,
+read-only — «γιατί έσκασε ΑΥΤΟ το παραστατικό;» απ' έξω, χωρίς panel): `invoice_filing` (ένα
+παραστατικό με invcode/id → τοπική×myDATA κατάσταση + όλο το ιστορικό `mydata_marks`: ΜΑΡΚ, ακύρωσης,
+πάροχος, auth code, κωδικοί σφάλματος· `include_xml`/`mark_id` για το raw XML), `mydata_failures`
+(πρόσφατα `REJECTED`/`*_FAILED` με τους κωδικούς AADE/InvoSign), `stuck_documents` (in-doubt /
+οριστικοποιημένα-αδήλωτα / ΔΑ in-doubt), `mydata_discrepancies` (ο αριθμός αποκλίσεων του `app_health`
+ως γραμμές: cached count + τοπικό phase-1· `live=true` = πραγματικό `SalesReconciler` AADE pull),
+`preflight` (`MyDataConfigAudit` = `mydata:preflight` απ' έξω· `error_count>0` = go-live blocker).
+Βάση `ForensicMcpTool`· τα στοιχεία **υπάρχουν ήδη** (byte-exact XML ανά προσπάθεια) — πρόσβαση, όχι
+επιπλέον logging (βλ. `known-issues.md §OBS-001`). **Νέα state tools** (και στα δύο κανάλια): `app_version`
 (τρέχον build + διαθέσιμη ενημέρωση) και `recent_activity` (audit trail). Τα write tools ΔΕΝ κάνουν
 fan-out (`"all"` απαγορεύεται — blast-radius). **Always-on** (χωρίς env flag· η ασφάλεια είναι το auth
 + token). Πλήρες: **`MCP.md`**.

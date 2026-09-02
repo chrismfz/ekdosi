@@ -55,6 +55,13 @@
         .qr-block .qr-label { font-size: 7pt; color: #6b7280; margin: 1mm 0 0 0; }
         .qr-block .qr-mark  { font-size: 7pt; color: #374151; word-break: break-all; max-width: 32mm; }
 
+        /* Provider (ΥΠΑΗΕΣ) evidence block — PROV-003 / A.1112/2025 */
+        .provider-box { clear: both; border: 1pt solid #d1d5db; border-radius: 1.5mm; background: #f9fafb; padding: 2.5mm 3mm; margin: 0 0 3mm 0; font-size: 7.5pt; color: #374151; }
+        .provider-box .provider-title { font-weight: 700; color: #111827; margin: 0 0 1mm 0; font-size: 8pt; }
+        .provider-box .provider-row { margin: 0 0 0.6mm 0; }
+        .provider-box .provider-label { color: #6b7280; }
+        .provider-box .provider-auth { word-break: break-all; overflow-wrap: anywhere; }
+
         /* Lines table */
         .lines-wrap { page-break-inside: auto; }
         table.lines { width: 100%; border-collapse: collapse; }
@@ -246,6 +253,31 @@
                 <div class="meta-row"><span class="meta-label">{{ $L('status') }}:</span> <strong style="color:#065f46">{{ $L('certified') }}</strong></div>
             @endif
         </div>
+    </div>
+@endif
+
+{{-- ============ Provider (ΥΠΑΗΕΣ) evidence — PROV-003 / A.1112/2025 ============ --}}
+{{-- Printed only for a document actually filed through a provider (a PROVIDER_INSERT
+     MARK that IS the current filing) and still VALID/not-cancelled with a configured
+     provider licence. That whole decision lives in InvoicePdfRenderer::providerEvidenceView
+     (single source) — here we only render what it computed. --}}
+@if(! empty($providerEvidence))
+    <div class="provider-box">
+        <div class="provider-title">{{ $L('provider_issued') }}</div>
+        <div class="provider-row">
+            <span class="provider-label">{{ $L('provider_name') }}:</span>
+            {{ $providerEvidence['commercial_name'] }}@if($providerEvidence['legal_name']) — {{ $providerEvidence['legal_name'] }}@endif@if($providerEvidence['aade_code']) · ΑΑΔΕ {{ $providerEvidence['aade_code'] }}@endif@if($providerEvidence['site']) · {{ $providerEvidence['site'] }}@endif
+        </div>
+        @if($providerEvidence['licence_no'])
+            <div class="provider-row"><span class="provider-label">{{ $L('provider_licence') }}:</span> {{ $providerEvidence['licence_no'] }}</div>
+        @endif
+        <div class="provider-row"><span class="provider-label">{{ $L('mark_label') }}:</span> {{ $providerEvidence['mark'] }}</div>
+        @if($providerEvidence['uid'])
+            <div class="provider-row"><span class="provider-label">{{ $L('provider_uid') }}:</span> {{ $providerEvidence['uid'] }}</div>
+        @endif
+        @if($providerEvidence['auth_code'])
+            <div class="provider-row"><span class="provider-label">{{ $L('provider_auth') }}:</span> <span class="provider-auth">{{ $providerEvidence['auth_code'] }}</span></div>
+        @endif
     </div>
 @endif
 

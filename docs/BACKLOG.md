@@ -245,6 +245,14 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   sandbox creds (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`.
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
   (InvoSign/SBZ). `paroxos/`.
+- **PROV-003 archive/hardening half** (print half ✅ SHIPPED 2026-09-02) — (α) **ανάκτηση + ιδιωτική
+  αρχειοθέτηση** του επίσημου PDF παρόχου: SHA-256, immutable πρώτη έκδοση, retry ΜΟΝΟ download (ποτέ
+  re-file), allowlisted hosts/bounded size (anti-SSRF), `evidence_pending` state όσο λείπει UID/QR/
+  artifact — χωρίς να κάνει fail ένα VALID filing· (β) **snapshot της αδείας-εν-ισχύ ανά παραστατικό**
+  ώστε ένα licence rotation (`…_V1_…`→V2) να μη ξαναγράφει παλιά τυπωμένα (σήμερα η config-current
+  είναι σωστή γιατί η άδεια είναι σταθερή)· (γ) το πλήρες «compare» panel (τοπικό snapshot vs provider
+  response/document vs AADE) στην καρτέλα παραστατικού. Καμία δεν μπλοκάρει το compliant printout που
+  ήδη βγαίνει. `known-issues.md §PROV-003`.
 - **Provider endpoint hardening (PROV-017 follow-ups)** — το core URL guard (public-https-only,
   no userinfo/query/port≠443, no private/loopback/link-local/CGNAT host, no credentialed redirects)
   ✅ SHIPPED. Είναι **best-effort accident-prevention** (το URL το βάζει έμπιστος operator). Deferred
@@ -598,6 +606,17 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   (βλ. «Expenses — λογιστής/`entityVatNumber`»). Ιδέα: ekdosi **ετοιμάζει** τους χαρακτηρισμούς, ο
   λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει** — θέλει διερεύνηση ρόλων/δικαιωμάτων.
   _(#6 Βιβλίο→period report + Panel utility CSS: ✅ SHIPPED — βλ. «Done recently».)_
+
+## 🔎 MCP forensics για το cutover — **OBS-001** (`known-issues.md`, bucket A)
+**✅ SHIPPED** τα 5 read-only tools (`invoice_filing`, `mydata_failures`, `stuck_documents`,
+`mydata_discrepancies`, `preflight`, βάση `ForensicMcpTool`) — βλ. `CHANGELOG.md` [Unreleased] +
+`FEATURES.md §16γ` + `MCP.md`. Τα στοιχεία υπήρχαν ήδη (byte-exact XML ανά προσπάθεια)· προστέθηκε η
+πρόσβαση. **Μένει (προαιρετικό, φθηνό):**
+- **δομημένη INFO γραμμή ανά ΕΠΙΤΥΧΗ έκβαση** στους submitters (κανάλι, τύπος, series/ΑΑ, ΜΑΡΚ,
+  διάρκεια) — τώρα λογάρουν μόνο αποτυχίες· θα κάνει το `log_tail --contains=<invcode>` χρήσιμο ακόμη
+  κι όταν αυτό που απέτυχε είναι το ίδιο το DB write μετά από επιτυχές POST.
+- **delivery-mark forensics**: το `invoice_filing`/`mydata_failures` καλύπτουν τα `mydata_marks`
+  (τιμολόγια)· τα `delivery_marks` (ΔΑ) έχουν δικό τους ιστορικό — να επεκταθούν όταν μπει η ΔΑ ροή.
 
 ## 🖥️ Console/interface polish (B — sweep 2026-06-16)
 - _(**Auto-refresh-on-stale** στην Κονσόλα myDATA: ✅ SHIPPED 2026-06-17 — stale banner >6h + opt-in
