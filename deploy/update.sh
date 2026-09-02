@@ -207,6 +207,9 @@ $COMPOSER install --no-dev --optimize-autoloader --no-interaction
 log "Pre-migration check: customers with a duplicate ΑΦΜ"
 if ! $ART customers:afm-duplicates; then
   fail "Duplicate customer ΑΦΜ found — resolve them (see the list above), then re-run the update."
+  fail "NOTE: the checkout is now the NEW code on the OLD schema (no afm_key column) — do NOT fix"
+  fail "them in the panel here: either fix with SQL using the ids listed, or deploy/rollback.sh to the"
+  fail "previous release, fix in the panel, then re-run the update. See docs/updates-runbook.md."
   exit 1
 fi
 

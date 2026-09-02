@@ -94,6 +94,14 @@ run it on any checkout of the new tag against the production DB.
 Resolve each group (fix the wrong ΑΦΜ, or move its documents and delete the duplicate), then
 deploy. Placeholder ΑΦΜ (000000000 …) and blanks are NOT identities and never collide.
 
+**Where to fix them when `update.sh` has already aborted:** the box is then on the NEW code
+against the OLD schema (the `afm_key` column does not exist yet), so the new `Customer` model
+cannot save (its hook writes `afm_key`) — **do not edit customers in the panel in that state.**
+Either (a) fix the data with SQL using the ids the command listed (`UPDATE customers SET afm = …
+WHERE id = …`), or (b) `deploy/rollback.sh` to the previous release, fix them in the panel there,
+and re-run `update.sh`. Running `customers:afm-duplicates` **before** starting the update (on a
+checkout of the new tag against the production DB) avoids the situation altogether.
+
 ## Rollback
 
 Every `update.sh` run takes a snapshot first into `storage/app/db-snapshots/`

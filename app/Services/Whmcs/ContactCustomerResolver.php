@@ -44,10 +44,7 @@ class ContactCustomerResolver
         // withTrashed: a soft-deleted owner holds the ΑΦΜ (UNIQUE covers it) —
         // say so (the split action surfaces the message) instead of letting
         // Customer::create() fail on the index.
-        $existing = Customer::withTrashed()
-            ->where('company_id', $tenant->getKey())
-            ->whereAfmKeyOf($afm)
-            ->first();
+        $existing = Customer::afmOwnerQuery($tenant->getKey(), $afm)->first();
         if ($existing !== null && $existing->trashed()) {
             throw new RuntimeException(
                 'Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με ΑΦΜ '.$afm.' («'.$existing->name.'») — επανέφερέ τον από τη λίστα πελατών και ξαναπροσπάθησε.'
@@ -76,7 +73,7 @@ class ContactCustomerResolver
         } catch (UniqueConstraintViolationException) {
             // Lost a race with a parallel create for the same ΑΦΜ — that row is
             // the customer; a soft-deleted winner gets the same guidance as above.
-            $winner = Customer::withTrashed()->where('company_id', $tenant->getKey())->whereAfmKeyOf($afm)->first();
+            $winner = Customer::afmOwnerQuery($tenant->getKey(), $afm)->first();
             if ($winner === null) {
                 throw new RuntimeException('Ο πελάτης με ΑΦΜ '.$afm.' δημιουργήθηκε ταυτόχρονα από άλλον χειριστή — ξαναπροσπάθησε.');
             }

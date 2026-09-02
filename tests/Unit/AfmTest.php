@@ -17,11 +17,12 @@ class AfmTest extends TestCase
         $this->assertSame('', Afm::digits(null));
     }
 
-    public function test_normalise_returns_null_when_no_digits(): void
+    public function test_unique_key_is_the_identity_and_null_when_there_is_none(): void
     {
-        $this->assertSame('123456789', Afm::normalise('GR123456789'));
-        $this->assertNull(Afm::normalise('EL'));
-        $this->assertNull(Afm::normalise(''));
-        $this->assertNull(Afm::normalise(null));
+        $this->assertSame('123456789', Afm::uniqueKey('GR123456789'));
+        $this->assertSame('CY10259033P', Afm::uniqueKey('cy10259033p'));
+        $this->assertNull(Afm::uniqueKey('EL'));
+        $this->assertNull(Afm::uniqueKey(''));
+        $this->assertNull(Afm::uniqueKey(null));
     }
 }

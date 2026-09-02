@@ -72,9 +72,7 @@ class CustomerForm
                                             return; // blank / placeholder = no identity to collide on
                                         }
 
-                                        $other = Customer::withTrashed()
-                                            ->where('company_id', Filament::getTenant()?->getKey())
-                                            ->whereAfmKeyOf($value)
+                                        $other = Customer::afmOwnerQuery((int) Filament::getTenant()?->getKey(), $value)
                                             ->when($record, fn ($q) => $q->whereKeyNot($record->getKey()))
                                             ->first();
 

@@ -117,6 +117,19 @@ class Customer extends Model
     }
 
     /**
+     * THE owner lookup: the customer (soft-deleted included — the UNIQUE index
+     * covers them, and a trashed owner must be restored, never duplicated)
+     * holding this ΑΦΜ identity in a tenant. Every «does this ΑΦΜ already have
+     * a customer?» site goes through here so the rule can't drift.
+     *
+     * @return Builder<static>
+     */
+    public static function afmOwnerQuery(int $companyId, ?string $afm): Builder
+    {
+        return static::withTrashed()->where('company_id', $companyId)->whereAfmKeyOf($afm);
+    }
+
+    /**
      * Customers sharing this ΑΦΜ identity (any formatting, EL/GR prefix or not).
      * A value with no identity (placeholder like 000000000, or blank) matches
      * NOBODY — callers that meet a placeholder must treat it as «no ΑΦΜ»

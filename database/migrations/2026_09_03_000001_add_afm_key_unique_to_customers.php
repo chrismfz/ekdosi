@@ -79,7 +79,9 @@ return new class extends Migration
         // lead↔lead dedupe compare like with like. NORMALISE, never blank: text
         // with no identity («000000000», «N/A») is the operator's answer and is
         // kept as typed. Runs after the duplicate check so a refused migration
-        // rewrites nothing.
+        // rewrites nothing. (A foreign VAT a pre-release LeadForm stored
+        // digits-only can't get its letters back here — Leads never shipped
+        // to production before this migration, so there is no such row.)
         if (Schema::hasTable('leads')) {
             DB::table('leads')->select('id', 'afm')->whereNotNull('afm')->orderBy('id')->chunkById(500, function ($rows): void {
                 foreach ($rows as $row) {

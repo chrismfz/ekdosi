@@ -3,28 +3,24 @@
 namespace App\Support;
 
 /**
- * Greek ΑΦΜ (VAT number) canonicalisation — one rule, so every comparison agrees
- * on when two AFMs are "the same". Both forms strip everything but digits (an
- * 'EL'/'GR' prefix or stray punctuation must not read as a difference); they
- * differ only in how they report "no digits at all".
+ * ΑΦΜ / VAT-number canonicalisation — ONE identity rule (uniqueKey) so every
+ * comparison agrees on when two values are "the same party": it is the rule
+ * behind `customers.afm_key` and UNIQUE(company_id, afm_key). A Greek ΑΦΜ is
+ * its 9 digits (an 'EL'/'GR' prefix, spaces, dashes or a label never read as
+ * a difference); a foreign VAT keeps its letters; a placeholder or free text
+ * is no identity at all. `digits()` is the older digits-only helper — a
+ * display/phone-style strip, NOT an identity (it folds «CY10259033P» and
+ * «10259033» together): never use it to look a customer up.
  */
 final class Afm
 {
-    /** Digits only; '' when the input carries none. */
     /** Fewer digits than this is free text, never a VAT identity (IE1234567T = 7). */
     public const MIN_IDENTITY_DIGITS = 7;
 
+    /** Digits only; '' when the input carries none. */
     public static function digits(?string $raw): string
     {
         return preg_replace('/\D+/', '', (string) $raw) ?? '';
-    }
-
-    /** Digits only; null when the input carries none (for nullable AFM columns). */
-    public static function normalise(?string $raw): ?string
-    {
-        $digits = self::digits($raw);
-
-        return $digits === '' ? null : $digits;
     }
 
     /**
@@ -45,7 +41,12 @@ final class Afm
         // other Greek text («123456789 ΕΛΛΑΔΑ», an «ΑΦΜ» label) is simply
         // dropped below, never folded into Latin letters.
         $upper = mb_strtoupper((string) $raw);
-        $upper = preg_replace('/^[^\p{L}\d]*(?:ΑΦΜ)?[^\p{L}\d]*(?:ΕΛ|ΕL|EΛ)/u', 'EL', $upper) ?? $upper;
+        // A leading label — Greek «ΑΦΜ» or a Latin «AFM» / «VAT» / «VAT NO» /
+        // «TIN» — is noise, not part of the number (legacy free-text column).
+        // Only at the start and only followed by a separator, so a real prefix
+        // or check letter is never eaten.
+        $upper = preg_replace('/^[^\p{L}\d]*(?:ΑΦΜ|AFM|VAT(?:\s*NO\.?|\s*NUMBER)?|TIN)(?=[^\p{L}\d])[^\p{L}\d]*/u', '', $upper) ?? $upper;
+        $upper = preg_replace('/^[^\p{L}\d]*(?:ΕΛ|ΕL|EΛ)/u', 'EL', $upper) ?? $upper;
         $key = preg_replace('/[^A-Z0-9]+/', '', $upper) ?? '';
         // Every real ΑΦΜ/VAT carries at least 7 digits (IE1234567T is the
         // shortest EU form); letters-only text («N/A», «NONE», a bare «EL») or

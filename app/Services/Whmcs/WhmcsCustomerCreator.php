@@ -54,10 +54,7 @@ class WhmcsCustomerCreator
 
         // withTrashed: a soft-deleted owner holds the ΑΦΜ (UNIQUE covers it) —
         // never a raw unique error; tell the operator to restore instead.
-        $existing = Customer::withTrashed()
-            ->where('company_id', $tenant->id)
-            ->whereAfmKeyOf($afm)
-            ->first();
+        $existing = Customer::afmOwnerQuery($tenant->id, $afm)->first();
         if ($existing !== null) {
             return $this->existingResult($existing, $pending);
         }
@@ -100,7 +97,7 @@ class WhmcsCustomerCreator
         } catch (UniqueConstraintViolationException) {
             // Lost a race with a parallel create for the same ΑΦΜ: the other
             // row IS the customer now — re-read it instead of surfacing SQL.
-            $winner = Customer::withTrashed()->where('company_id', $tenant->id)->whereAfmKeyOf($afm)->first();
+            $winner = Customer::afmOwnerQuery($tenant->id, $afm)->first();
             if ($winner === null) {
                 throw new RuntimeException('Ο πελάτης με ΑΦΜ '.$afm.' δημιουργήθηκε ταυτόχρονα από άλλον χειριστή — ξαναπροσπάθησε.');
             }

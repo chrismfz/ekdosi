@@ -139,12 +139,7 @@ class ConvertLeadToCustomer
         // withTrashed: a soft-deleted owner could be restored later and become
         // the second live party — restore + link is the honest path. The
         // UNIQUE(company_id, afm_key) index is the last net behind this check.
-        $owner = Customer::query()
-            ->withTrashed()
-            ->where('company_id', $lead->company_id)
-            ->whereAfmKeyOf($afm)
-            ->lockForUpdate()
-            ->first();
+        $owner = Customer::afmOwnerQuery($lead->company_id, $afm)->lockForUpdate()->first();
 
         if ($owner !== null) {
             throw new RuntimeException($owner->trashed()

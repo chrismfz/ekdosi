@@ -99,10 +99,7 @@ class CustomerSyncFromMyData
             // Identity check on `afm_key` (the UNIQUE(company_id, afm_key)
             // constraint is the final guard). withTrashed: a soft-deleted
             // customer with this AFM was removed on purpose → never resurrect.
-            $exists = Customer::withTrashed()
-                ->where('company_id', $this->tenant->getKey())
-                ->whereAfmKeyOf($afm)
-                ->exists();
+            $exists = Customer::afmOwnerQuery($this->tenant->getKey(), $afm)->exists();
 
             if ($exists) {
                 $skipped++;

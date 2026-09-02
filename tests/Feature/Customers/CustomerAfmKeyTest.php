@@ -56,6 +56,10 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertSame('CY10259033P', Afm::uniqueKey('CY10259033P ΕΛ'), 'a trailing «ΕΛ» is stray text, not a prefix');
         $this->assertSame('CY10259033P', Afm::uniqueKey('ΔΕΛΤΑ CY10259033P'), 'an «ΕΛ» inside a leading Greek word is not a prefix');
         $this->assertSame('123456789', Afm::uniqueKey('ΑΦΜ: ΕΛ 123456789'), 'the prefix folds after a label');
+        $this->assertSame('123456789', Afm::uniqueKey('AFM 123456789'), 'a Latin label is noise, not a foreign prefix');
+        $this->assertSame('123456789', Afm::uniqueKey('VAT No: EL123456789'));
+        $this->assertSame('CY10259033P', Afm::uniqueKey('VAT: CY10259033P'));
+        $this->assertSame('AFM123456789', Afm::uniqueKey('AFM123456789'), 'no separator → not a label (a real prefix is never eaten)');
         $this->assertNull(Afm::uniqueKey('N/A'), 'letters-only text is a free-text placeholder');
         $this->assertNull(Afm::uniqueKey('N/A 000'), 'free text with a stray digit is not an identity');
         $this->assertNull(Afm::uniqueKey('ΔΕΝ ΕΧΕΙ 0'));
