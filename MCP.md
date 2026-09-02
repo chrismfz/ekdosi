@@ -29,8 +29,32 @@ MCP client ──Bearer <ekdosi Sanctum token, tenant-bound>──▶  ekdosi  /
      send_customer_statement · create_reminder  (PROPOSE-ONLY) ┘
                                                                 │
    ops / debug tools (super_admin, cross-tenant) ──────────────┤  native MCP tools
-     app_health (ops:health) · failed_jobs · log_tail          ┘
+     app_health (ops:health) · failed_jobs · log_tail          │
+   myDATA/provider forensics (super_admin, cross-tenant, RO) ──┤  ForensicMcpTool (native)
+     invoice_filing · mydata_failures · stuck_documents        │    reads mydata_marks XML + state
+     mydata_discrepancies · preflight                          ┘
 ```
+
+**myDATA / provider forensics** (super_admin, cross-tenant, read-only) — «γιατί
+έσκασε ΑΥΤΟ το παραστατικό;» from outside the panel. They surface what the filing
+path already persists (byte-exact request/response XML per attempt, the forensic
+`REJECTED`/`*_FAILED` `mydata_marks` rows, `mydata_pending_since`), so this is
+**access, not extra instrumentation** (see `known-issues.md §OBS-001`). Base:
+`App\Mcp\Tools\Concerns\ForensicMcpTool` (extends `SuperAdminMcpTool`; an optional
+`company` slug narrows the sweep, omitted = every tenant).
+
+- `invoice_filing` — one invoice by invcode/id: local×myDATA state + the full
+  `mydata_marks` history (MARK, cancellation MARK, provider, auth code, extracted
+  error codes); `include_xml`/`mark_id` for the raw request+response XML.
+- `mydata_failures` — recent `REJECTED`/`*_FAILED` attempts with the AADE/InvoSign
+  `[nnn]` codes extracted. «Τι χαλάει τώρα» χωρίς να ξέρεις ποιο παραστατικό.
+- `stuck_documents` — in-doubt (ambiguous transport), finalized-but-unfiled,
+  delivery in-doubt.
+- `mydata_discrepancies` — the `app_health` discrepancy COUNT as rows: cached
+  count + local phase-1 state contradictions (DB-only); `live=true` runs a real
+  `SalesReconciler` AADE pull with the full bucket breakdown.
+- `preflight` — `MyDataConfigAudit` (= `mydata:preflight`) over MCP: issuer/type/
+  VAT vs the §8 code tables; `error_count > 0` is a go-live blocker. No AADE call.
 
 - **Endpoint:** `POST /mcp`, in `routes/ai.php` (Laravel MCP auto-loads it — no
   `bootstrap/app.php` change). Always-on, protected by `auth:sanctum` (+ `auth:api`

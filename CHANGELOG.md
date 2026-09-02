@@ -19,6 +19,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **MCP forensics (5 νέα read-only tools, super_admin, cross-tenant) — OBS-001.** «Γιατί έσκασε ΑΥΤΟ
+  το παραστατικό;» απ' έξω, χωρίς panel. Τα στοιχεία **υπήρχαν ήδη** (byte-exact request/response XML
+  ανά προσπάθεια στο `mydata_marks`, forensic `REJECTED`/`*_FAILED` rows, `mydata_pending_since`,
+  `mydata_state`/`mark` στο activity trail)· αυτό που έλειπε ήταν η **πρόσβαση** — το MCP είχε μόνο
+  υποδομή. Νέα βάση `App\Mcp\Tools\Concerns\ForensicMcpTool` + πέντε tools: **`invoice_filing`** (ένα
+  παραστατικό με invcode/id → τοπική×myDATA κατάσταση + όλο το ιστορικό `mydata_marks`· κωδικοί
+  σφάλματος AADE/InvoSign· `include_xml`/`mark_id` για το raw XML), **`mydata_failures`** (πρόσφατα
+  `REJECTED`/`*_FAILED`), **`stuck_documents`** (in-doubt / οριστικοποιημένα-αδήλωτα / ΔΑ in-doubt),
+  **`mydata_discrepancies`** (ο αριθμός του `app_health` ως γραμμές· cached + τοπικό phase-1·
+  `live=true` = πραγματικό AADE reconcile), **`preflight`** (`MyDataConfigAudit` = `mydata:preflight`
+  απ' έξω). Καμία επιπλέον καταγραφή/activity — μόνο ανάγνωση. Πλήρες: `MCP.md`, `FEATURES.md §16γ`.
 - **MCP/Βοηθός: `leads_pulse`** — «ασχολήθηκε κανείς με τα leads;» με μια κλήση: ανοιχτά / νέα /
   ληξιπρόθεσμα / αδρανή / χωρίς επόμενο βήμα, τι έκανε **κάθε χειριστής** στην περίοδο (τηλέφωνα,
   emails, ραντεβού, προσφορές, μετατροπές — ο αδρανής εμφανίζεται με μηδενικά), **ποιος άνοιξε** τα

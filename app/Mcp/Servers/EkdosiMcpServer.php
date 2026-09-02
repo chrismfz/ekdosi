@@ -9,13 +9,18 @@ use App\Mcp\Tools\CreateReminderMcpTool;
 use App\Mcp\Tools\FailedJobsTool;
 use App\Mcp\Tools\FindCustomerMcpTool;
 use App\Mcp\Tools\LeadsPulseMcpTool;
+use App\Mcp\Tools\InvoiceFilingMcpTool;
 use App\Mcp\Tools\ListCompaniesTool;
 use App\Mcp\Tools\ListTopDebtorsMcpTool;
 use App\Mcp\Tools\LogTailTool;
+use App\Mcp\Tools\MyDataDiscrepanciesMcpTool;
+use App\Mcp\Tools\MyDataFailuresMcpTool;
+use App\Mcp\Tools\MyDataPreflightMcpTool;
 use App\Mcp\Tools\OutstandingReceivablesMcpTool;
 use App\Mcp\Tools\RecentActivityMcpTool;
 use App\Mcp\Tools\RecentInvoicesMcpTool;
 use App\Mcp\Tools\SendCustomerStatementMcpTool;
+use App\Mcp\Tools\StuckDocumentsMcpTool;
 use App\Mcp\Tools\VatSummaryMcpTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -73,6 +78,20 @@ Ops / debugging (super-admin only, cross-tenant infrastructure, read-only):
   for "why did the background job / mail / WHMCS / myDATA submit fail?".
 - log_tail — tail the application log (level/substring filters) for the actual error text.
 
+myDATA / provider forensics (super-admin only, cross-tenant, read-only) — «γιατί έσκασε
+αυτό;» on the filing path. The evidence is already stored (byte-exact request/response XML
+per attempt, forensic REJECTED/*_FAILED rows, mydata_pending_since); these expose it:
+- invoice_filing — ONE invoice by invcode/id: local vs myDATA state + the full mydata_marks
+  history (MARK, cancellation MARK, provider, auth code, error codes); include_xml for the
+  raw request/response. The first stop for "why was this rejected/stuck?".
+- mydata_failures — recent REJECTED/*_FAILED filing attempts across tenants with the AADE/
+  InvoSign error codes extracted. "What is broken right now?" without a document in hand.
+- stuck_documents — in-doubt (ambiguous transport), finalized-but-unfiled, delivery in-doubt.
+- mydata_discrepancies — the app_health discrepancy COUNT as rows: cached count + local
+  phase-1 state contradictions (DB-only); live=true runs a real AADE reconciliation.
+- preflight — the read-only myDATA readiness audit (issuer/type/VAT vs the §8 code tables);
+  error_count > 0 is a go-live blocker. No AADE call.
+
 Nothing here changes AADE/myDATA state or issues a document; the only writes are the two
 propose-only tools above, and even those wait for in-app operator confirmation.
 TXT)]
@@ -101,5 +120,12 @@ class EkdosiMcpServer extends Server
         AppHealthTool::class,
         FailedJobsTool::class,
         LogTailTool::class,
+        // myDATA / provider forensics (super_admin only, cross-tenant, read-only) —
+        // «γιατί έσκασε ΑΥΤΟ το παραστατικό;». See known-issues.md §OBS-001.
+        InvoiceFilingMcpTool::class,
+        MyDataFailuresMcpTool::class,
+        StuckDocumentsMcpTool::class,
+        MyDataDiscrepanciesMcpTool::class,
+        MyDataPreflightMcpTool::class,
     ];
 }
