@@ -13,6 +13,7 @@ use App\Services\MyDataSubmitter;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -87,6 +88,7 @@ class MyDataSubmitInDoubtTest extends TestCase
             <invoice>
               <uid>E230F0CFCC82356FE38C9F085A86A6E7F421EAD1</uid>
               <mark>{$mark}</mark>
+              <qrCodeUrl>https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted</qrCodeUrl>
               <issuer>
                 <vatNumber>800561849</vatNumber>
                 <country>GR</country>
@@ -159,6 +161,13 @@ class MyDataSubmitInDoubtTest extends TestCase
         $this->assertSame('VALID', $fresh->mydata_state);
         $this->assertSame($adoptedMark, (string) $fresh->mydata_mark);
         $this->assertNull($fresh->mydata_pending_since, 'in-doubt flag must be cleared after adoption');
+        // A self-healed invoice must print the same PDF a normally-filed one does —
+        // AADE's QR url is in the RequestTransmittedDocs response, so drop it and the
+        // adoption is silently second-class.
+        $this->assertSame(
+            'https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted',
+            $fresh->mydata_url,
+        );
         $this->assertSame('active', $fresh->local_status);
 
         // Exactly ONE INSERT row for this invoice+mark (idempotent adopt).
@@ -199,6 +208,86 @@ class MyDataSubmitInDoubtTest extends TestCase
         $this->assertSame($adoptedMark, (string) $mark->mark);
         $this->assertSame($adoptedMark, (string) $this->invoice->fresh()->mydata_mark);
         $this->assertSame(0, $mock->count(), 'the existing MARK was adopted — no second filing');
+    }
+
+    public function test_the_marker_is_armed_before_the_post_not_after(): void
+    {
+        // MYD-021 — the whole point. Before this, mydata_pending_since was written
+        // only inside a catch, so it existed only if THIS PROCESS SURVIVED. A hard
+        // kill (OOM, deploy, host failure) between AADE accepting the request and
+        // our catch left no trace; the 120s cache lock then expired and the next
+        // attempt POSTed blindly into a filing that already existed.
+        //
+        // A kill cannot be simulated, but the observable that makes it survivable
+        // can: at the moment the transport is entered, the marker must ALREADY be
+        // committed to the database. Assert it from inside the outbound call.
+        $seenAtPostTime = null;
+        $invoiceId = $this->invoice->id;
+
+        $mock = new MockHandler([
+            function () use (&$seenAtPostTime, $invoiceId) {
+                // Read through the query builder, not the in-memory model — this is
+                // what a DIFFERENT process (the retry after the kill) would see.
+                $seenAtPostTime = DB::table('invoices')->where('id', $invoiceId)->value('mydata_pending_since');
+
+                throw new \RuntimeException('killed mid-flight');
+            },
+        ]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+        } catch (\RuntimeException) {
+            // expected
+        }
+
+        $this->assertNotNull($seenAtPostTime, 'the in-doubt marker must be committed BEFORE the POST');
+        $this->assertNotNull($this->invoice->fresh()->mydata_pending_since, 'and it must survive the failure');
+    }
+
+    public function test_an_outcome_that_proves_no_mark_clears_the_marker(): void
+    {
+        // Arming before the POST must not strand a filing that provably created
+        // nothing. An explicit AADE REJECTION is the sharp case: AADE processed the
+        // document and refused it, so there is no MARK — an operator who fixes the
+        // data must be able to retry immediately, not sit out the grace window.
+        $sendXml = <<<'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+          <response>
+            <index>1</index>
+            <statusCode>ValidationError</statusCode>
+            <errors>
+              <error><message>Λάθος στοιχεία</message><code>102</code></error>
+            </errors>
+          </response>
+        </ResponseDoc>
+        XML;
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $sendXml)]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+            $this->fail('Expected the rejection to throw.');
+        } catch (\Throwable) {
+            // expected — MyDataRejected
+        }
+
+        $this->assertNull(
+            $this->invoice->fresh()->mydata_pending_since,
+            'a rejected invoice was never filed, so it must not be gated by the grace window',
+        );
+    }
+
+    public function test_a_successful_filing_clears_the_marker_it_armed(): void
+    {
+        $sendXml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $mock = new MockHandler([new GuzzleResponse(200, [], $sendXml)]);
+
+        (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+
+        $fresh = $this->invoice->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertNull($fresh->mydata_pending_since, 'the armed marker must be cleared on success');
     }
 
     public function test_in_doubt_past_grace_files_normally_when_aade_has_nothing(): void

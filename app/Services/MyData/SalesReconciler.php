@@ -153,6 +153,7 @@ class SalesReconciler
                         gross: $this->toFloat($summary?->get('totalGrossValue')),
                         net: $this->toFloat($summary?->get('totalNetValue')),
                         invoiceType: $header?->getInvoiceType()?->value,
+                        qrCodeUrl: $doc->getQrCodeUrl(),
                     );
                 }
             }

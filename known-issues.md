@@ -283,8 +283,8 @@ Priorities:
 | MYD-018 | P0 | DONE | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
-| MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
-| MYD-022 | P0 | OPEN | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
+| MYD-021 | P0 | DONE | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
+| MYD-022 | P0 | DONE | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
 | MYD-023 | P0 | OPEN | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
 | MYD-024 | P2 | PARTIAL | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
 | MYD-025 | P0 | OPEN | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
@@ -1827,7 +1827,135 @@ Fee and §8.6 contains categories 1=1.2%, 2=2.4%, 3=3.6%, 4=other amount.
 
 ### MYD-021 — Direct myDATA issue is not durably exactly-once
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** DONE 2026-09-02 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Fix, in two halves.**
+
+**Invoices — the marker is now ARMED BEFORE the POST.** The in-doubt mechanism existed and was
+sandbox-proven, but `mydata_pending_since` was written only inside a `catch`, so it existed only
+if the process SURVIVED. A hard kill (OOM, deploy, host failure) between AADE accepting the
+request and our catch left no durable trace; the 120s cache lock then expired and the next
+attempt POSTed blindly into a filing that already existed. Arming first inverts the default: the
+acceptance window is protected unless we positively learn the POST created nothing. `armInDoubt()`
+deliberately THROWS (a filing we cannot record is exactly the unrecoverable case), while the new
+`disarmInDoubt()` clears it on the four outcomes that PROVE no MARK — 401, 429, a pre-send
+protocol error, and an explicit AADE rejection. That last one matters in the other direction: an
+operator who fixes rejected data must be able to retry at once, not sit out the grace window.
+
+**Delivery notes — they had NOTHING, and now mirror the invoice gate exactly.** No lock, no
+marker, no adopt-or-file, and no service-level cancelled guard: two concurrent requests could each
+POST and create two AADE documents for one local δελτίο. Added: the same 120s cache lock (never a
+DB row lock — it must not be held across the AADE call), a fresh re-read under it, the same
+arm/disarm around every outbound call (provider branch included), `delivery_notes.mydata_pending_since`,
+and adopt-or-file via `SalesReconciler` — `RequestTransmittedDocs` does not filter by type, so a
+9.x δελτίο appears there exactly like an invoice and is matched on the same frozen (series, ΑΑ).
+Reusing the proven reader beat writing the lookup a second time. A tenant that cannot READ myDATA,
+or an unreachable AADE, yields a REFUSAL rather than a blind retry — if we cannot verify, we do
+not gamble.
+
+Also added the missing **service-level `local_status=cancelled` guard** the finding called out:
+the UI hiding the button is not protection for a CLI, API or automation caller, which is exactly
+where it would go unnoticed.
+
+**Deliberately NOT built: the `issue_attempts` table** the finding asks for (attempt id, payload
+hash, frozen coordinates). The acceptance criteria — parallel submit, timeout after accept,
+process kill after POST, DB failure after success, locally-cancelled service call — are all met by
+the existing marker moved before the POST, at a fraction of the risk of introducing a new table
+into a legal path. Revisit only if a real failure shows the single timestamp is not enough.
+
+The **provider** side's durable idempotency is PROV-001 and stays open; this change gives that
+path the lock, the cancelled guard and the arm/disarm, but not provider-side reconciliation.
+
+**Review round 1 found six issues, ALL in the delivery half** — the invoice half was correct.
+The P0 is the sharpest lesson: `InvalidResponseException` and `TransmissionFailedException`
+SUBCLASS `MyDataException`, so the delivery path's generic `catch (MyDataException) { disarm }`
+swallowed exactly the two AMBIGUOUS cases (empty 200 body; 5xx after AADE may already have
+accepted) and cleared the marker → blind re-POST → two δελτία. `MyDataSubmitter` has had a
+dedicated arm for those since MYD-2; mirroring the gate meant mirroring the catch ORDER too, and
+that is what «mirror the invoice path» has to mean. Also fixed: arming ran before `initFirebed()`
+and the provider issue-date guard, so a local pre-flight error that never sent anything locked the
+note out for the whole grace window (now armed as late as possible, strictly before the first
+byte); an adopted note got no `mydata_url`, so «Έναρξη διακίνησης» refused it and invited the
+re-issue adoption exists to prevent (AADE's `qrCodeUrl` is in the RequestTransmittedDocs response
+and was simply dropped by `AadeDocSummary` — now carried); adoption skipped the stock movement both
+other success paths perform; and «this tenant cannot READ myDATA» returned the same `null` as
+«AADE verified empty», so past the grace window a provider tenant re-POSTed blindly (now a refusal).
+
+The sixth was in `TenantCoherence`: the RELATION checks were decorative inside the panel.
+`CompanyScope` filters a lazy load by the ambient tenant, so a cross-tenant `customer_id` resolved
+to NULL — and a null relation is legitimately allowed. It fired from CLI and queue but stayed
+silent exactly where an operator sits, the opposite of the context-independence the class promises.
+Relations are now resolved `withoutGlobalScope`.
+
+**Review round 2** found six more, none P0. The two that mattered: a NULL `$first`/`$firstResponse`
+(an empty or unparseable ResponseDoc) was being disarmed as if it were a rejection — but «no
+response» says nothing about whether a MARK exists, so it now stays ARMED, decided at the throw
+site which knows the difference rather than in the catch which does not (both services). And the
+round-1 «cannot verify → refuse» fix was UNCONDITIONAL, so with nothing in the app able to clear
+`mydata_pending_since`, a provider tenant with no myDATA read credentials ended up with a
+permanently unsubmittable legal document — a worse operational failure than the risk avoided. It
+now refuses only inside the grace window and files with a loud warning past it; provider-side
+verification (InvoSign exposes an invoice_status endpoint) is PROV-001. Also: the invoice adopt
+path never stamped `mydata_url` although this change had just added `qrCodeUrl` to `AadeDocSummary`
+for exactly that reason (a self-healed invoice printed a QR-less PDF); the in-doubt gate matched
+only `mydata_state === null` while `performSubmit` treats `''` as equally never-filed, so an armed
+document carrying `''` skipped adopt-or-file entirely; and `TenantCoherence` did not check
+`lines.product.productCategory`, which drives the per-line E3 classification — now checked in ONE
+query per level, not one per line.
+
+**Review round 3** found three, no P0. The one that mattered: the delivery in-doubt lookup is a
+**READ**, but it primed firebed with `initFirebed()`, which resolves the **SUBMISSION** mode. For a
+provider tenant those differ — `mydata_mode` is `off` while the read credentials sit in the
+sandbox/production slot — so the lookup either threw forever (stranding the note: the round-2 bug
+reached through another door) or verified against the AADE **dev** endpoint, saw nothing, and filed
+a second δελτίο past the grace window. Now `FirebedCredentials::init()`, which is documented as THE
+place for read access and resolves `mydataReadMode()` — the same predicate `canReadMyData()` gates
+on two lines earlier. Also: `TenantCoherence` gated the line/product branch on `relationLoaded()`,
+so on the panel's own submit paths (ViewInvoice, the invoices bulk action, ViewDeliveryNote) the
+whole line + E3 check was inert — the same «decorative in the panel» shape as the `CompanyScope`
+finding — now `loadMissing('lines')`, which `AadeInvoiceDocument::build()` does a moment later
+anyway; and an adopted mark row carried no `invoice_url`, so the self-healed document's «Ιστορικό
+myDATA» showed no QR link (both services).
+
+**Review round 4** found two P1s and a P2 — both P1s again in FIX code, and both were «the fix did
+not actually fix what it claimed». The line/product check was inert in the panel a **second** time:
+round 3 replaced `relationLoaded()` with `loadMissing()`, but that still reads THROUGH
+`CompanyScope`, which returns nothing for a foreign line — so the loop ran over an empty set and
+passed. It now reads `withoutGlobalScope`, like `assertRelation()` two lines above always did, and
+deliberately ignores an already-loaded `lines` (loaded through the scope, so trusting it would
+reintroduce the hole). The tests missed it both times because tests have no ambient context; the
+new ones set the context Filament sets on `TenantSet`.
+
+The second was the stranding bug through a THIRD door: `canReadMyData()` only checks that an
+aade-id is present, while `FirebedCredentials::init()` additionally needs a non-empty, decryptable
+subscription key — so a half-configured tenant (or an APP_KEY rotation) threw «myDATA unreachable»
+forever, and the read-less escape hatch sat behind `! canReadMyData()` where that could never reach
+it. Priming is now separated from fetching, because the two failures mean opposite things: a local
+config error is not evidence about AADE. Both routes share ONE policy
+(`unverifiableInDoubt()`) — refuse inside the window, file past it with a loud warning — instead of
+being written twice. P2: an adopted row always claimed a direct `INSERT`, mislabelling a ΥΠΑΗΕΣ
+filing in the δελτίο's history; it now records `PROVIDER_INSERT` + `provider_key` when the tenant
+files through a provider.
+
+**Review round 5** found NOTHING in the round-4 diff. Its three findings were pre-existing
+exposure: the provider invoice path was the last filing entry point with no lock (added here — same
+key as the direct path, so a tenant switching channel cannot race itself), and two genuinely
+provider-side items — a durable pre-POST marker there is useless without provider-side verification,
+and a provider-filed 9.x δελτίο reaches AADE only after the ΥΠΑΗΕΣ relay, so the 10-minute grace
+(tuned for the direct ERP feed) may be short. Both are **PROV-001**, recorded in `docs/BACKLOG.md`
+with the reason; `EInvoiceProviderTransport::status()` already exists, so that work is mostly wiring.
+A P2 on the adoption row's provider label was fixed.
+
+Tests: `DeliveryNoteExactlyOnceTest` (20), `TenantCoherenceTest` (21), + four added to
+`MyDataSubmitInDoubtTest`. Every fix across all five rounds was verified to make its test fail when
+reverted.
+
+**Still open on the provider path** (PROV-001): a hard kill mid-POST on a `gr-provider` tenant
+leaves no durable marker. The lock covers the concurrent case, `unverifiableInDoubt()` covers the
+window; the crash case needs the provider status query. Both
+arming tests read `mydata_pending_since` **through the query builder from inside the outbound
+call** — the way a different process would see it after a kill — and both fail when the arming
+line is removed.
 
 **Repository evidence**
 
@@ -1871,7 +1999,33 @@ and never perform a blind retry.
 
 ### MYD-022 — Filing services do not enforce tenant coherence
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** DONE 2026-09-02 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+
+**Fix:** `App\Support\Tenancy\TenantCoherence` — ONE fail-closed assertion, called at all
+**11** outbound entry points before payload construction, audit writes or any request:
+`MyDataSubmitter` submit/cancel/previewXml, `GrProviderSubmitter` submit/cancel,
+`DeliveryNoteSubmitter` submit/previewXml, and all four `DeliveryLifecycleService`
+operations (registerTransfer / confirmDelivery / refreshStatus / cancel).
+
+It asserts on the DATA, never on the ambient context — deliberately. `CompanyScope` is a
+documented no-op outside a request (CLI, queue, webhooks), which is exactly where the
+automation that could carry this bug runs, so the panel's scoping is a convenience and not
+a boundary. The check covers the document AND every relation whose values reach the
+payload: counterpart, invoice/delivery type, payment method and (when loaded) the lines.
+That is the realistic shape of the bug — a mis-set `customer_id`, not a wholesale wrong
+invoice.
+
+The provider path is the sharpest case and is why `previewXml` is guarded too:
+`InvoSignDocument` reads its issuer fields from `$invoice->company` while the credentials
+come from `$this->tenant`, so a mismatched call produces ONE payload asserting TWO
+different issuers — and `previewXml` writes a DRY_RUN audit row carrying it.
+
+`TenantCoherenceTest` asserts three things per case, because «it threw» is not the
+requirement: it threw, **no audit row was written**, and **the Guzzle queue was never
+touched** (the mock's remaining count is the proof nothing reached the wire). Both
+directions are covered — a coherent invoice must still reach the wire, and an
+int-vs-string `company_id` (which a query builder can return) is the same tenant. With the
+assertion stubbed out, 10 of the 12 tests fail.
 
 **Repository evidence**
 
