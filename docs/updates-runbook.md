@@ -77,6 +77,31 @@ A snapshot failure is a clean abort (maintenance lifted, worker restarted,
 nothing deployed). `ops:health` now returns a real exit code (0/1/2), so a
 non-zero tail on the deploy flags a real issue.
 
+## Release-specific pre-flight: the customer ΑΦΜ unique constraint
+
+The release that adds `UNIQUE(customers.company_id, afm_key)` **refuses to migrate** while any
+tenant has two customers with the same ΑΦΜ (soft-deleted included). Before `update.sh`:
+
+```bash
+php artisan customers:afm-duplicates          # exit 0 = clean, 1 = duplicates listed
+```
+`deploy/update.sh` runs this itself — after checkout + composer and **before** `migrate`, inside
+the maintenance window (the command derives the identity in PHP while the `afm_key` column
+doesn't exist yet). On duplicates the update aborts with the list, maintenance stays ON, and
+the schema is untouched; fix the data and re-run `update.sh`. To look ahead without deploying,
+run it on any checkout of the new tag against the production DB.
+
+Resolve each group (fix the wrong ΑΦΜ, or move its documents and delete the duplicate), then
+deploy. Placeholder ΑΦΜ (000000000 …) and blanks are NOT identities and never collide.
+
+**Where to fix them when `update.sh` has already aborted:** the box is then on the NEW code
+against the OLD schema (the `afm_key` column does not exist yet), so the new `Customer` model
+cannot save (its hook writes `afm_key`) — **do not edit customers in the panel in that state.**
+Either (a) fix the data with SQL using the ids the command listed (`UPDATE customers SET afm = …
+WHERE id = …`), or (b) `deploy/rollback.sh` to the previous release, fix them in the panel there,
+and re-run `update.sh`. Running `customers:afm-duplicates` **before** starting the update (on a
+checkout of the new tag against the production DB) avoids the situation altogether.
+
 ## Rollback
 
 Every `update.sh` run takes a snapshot first into `storage/app/db-snapshots/`

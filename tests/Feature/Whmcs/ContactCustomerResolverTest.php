@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Services\Whmcs\ContactCustomerResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -73,6 +74,38 @@ class ContactCustomerResolverTest extends TestCase
 
         $this->assertSame($existing->id, $resolved->id);
         $this->assertSame('Pre-existing', $resolved->name, 'does not clobber the existing customer name');
+    }
+
+    public function test_deleted_owner_raises_a_greek_message_instead_of_a_unique_error(): void
+    {
+        $tenant = $this->tenant();
+        Customer::create(['company_id' => $tenant->id, 'name' => 'Σβησμένος', 'afm' => '111222333'])->delete();
+
+        try {
+            $this->resolver()->resolve($tenant, ['gr_vatno' => 'EL 111222333', 'company_name' => 'Acme']);
+            $this->fail('Expected a RuntimeException.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('ΔΙΑΓΡΑΜΜΕΝΟΣ', $e->getMessage());
+        }
+
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $tenant->id)->count());
+    }
+
+    public function test_losing_the_create_race_returns_the_winner(): void
+    {
+        $tenant = $this->tenant();
+        $fired = false;
+        Customer::creating(function (Customer $c) use (&$fired, $tenant): void {
+            if (! $fired) {
+                $fired = true;
+                DB::table('customers')->insert(['company_id' => $tenant->id, 'name' => 'Νικητής', 'afm' => '111222333', 'afm_key' => '111222333', 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+
+        $resolved = $this->resolver()->resolve($tenant, ['gr_vatno' => '111222333', 'company_name' => 'Acme']);
+
+        $this->assertSame('Νικητής', $resolved->name);
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $tenant->id)->count());
     }
 
     public function test_returns_null_when_contact_has_no_afm(): void

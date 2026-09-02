@@ -419,6 +419,20 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   manual `whmcs_payment_pushed_at = null`). Very low probability (the WHMCS `transid` dedup already makes a
   re-push double-pay-safe). Options if it ever bites: an operator «Επανάληψη push» action that clears the
   marker, or a reconcile pass that resets a stale-claimed row still Unpaid at WHMCS.
+- **ΑΦΜ identity — P2 survivors of the PR #394 review loop** _(consciously parked, per the
+  per-priority round cap in CLAUDE.md)._ (a) `Afm::uniqueKey('VAT123456789')` (label glued to the
+  number, no separator) keeps the letters → key `VAT123456789`, so such a legacy row is not deduped
+  against `123456789` (same as pre-PR; the migration does not refuse it). Fold it only if the prod
+  `.fbk` shows the pattern — `SELECT afm FROM customers WHERE afm REGEXP '^(VAT|AFM|TIN)[0-9]'`.
+  (b) `CompanyImporter` reads the tenant's customers 3× per phase (existingIndex / afmKeyIndex /
+  customerOwners) — one `get()` could feed all three; only matters at tens of thousands of customers.
+- **ETL (`migrate:firebird`) — διπλό ΑΦΜ ΜΕΣΑ στη legacy πηγή = hard stop** _(από το review του
+  ΑΦΜ unique constraint, PR #394)._ Το `assertNoDuplicateLegacyAfm` σταματά όλο το run (τίποτα δεν γράφεται)
+  αν δύο CUST_IDs μοιράζονται ένα ΑΦΜ· λύνεται μόνο στη legacy βάση (συγχώνευση/διόρθωση εκεί — η legacy
+  εφαρμογή είναι ζωντανή μέχρι το cutover). **Συνειδητά ΟΧΙ** «κράτα τον πρώτο, προειδοποίησε για τους
+  υπόλοιπους»: η επιλογή νικητή είναι νομικά σημαντική (παραστατικά/υπόλοιπα κρέμονται και από τους δύο)
+  και το ETL δεν την παίρνει μόνο του. Αν η parallel-run εβδομάδα το κάνει ενοχλητικό: ένα `--afm-keep=CUST_ID`
+  per ΑΦΜ (ρητή απόφαση χειριστή) + το άλλο row εισάγεται με `afm_key=NULL` και ⚠ στο log.
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
 - _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._

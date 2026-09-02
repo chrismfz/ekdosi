@@ -11,7 +11,9 @@ use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\AadeRegistryLookup;
 use App\Support\Afm;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 /**
  * Slice 3 of the WHMCS bridge-fetch work: create the ekdosi Customer for a
@@ -42,25 +44,19 @@ class WhmcsCustomerCreator
         ?string $afmOverride = null,
     ): WhmcsCustomerCreateResult {
         // Operator-typed ΑΦΜ (the modal button) wins when given; else the ΑΦΜ
-        // the customer set in WHMCS. Both normalised to digits-only so "EL123…"
-        // and "123…" collapse to the same stored value.
-        $afm = Afm::normalise($afmOverride) ?? $pending->whmcsAfm();
+        // the customer set in WHMCS. Both reduced to the ΑΦΜ IDENTITY (Afm::uniqueKey:
+        // "EL123…" and "123…" collapse, a foreign VAT keeps its letters, a
+        // placeholder is no ΑΦΜ at all).
+        $afm = Afm::uniqueKey($afmOverride) ?? $pending->whmcsAfm();
         if ($afm === null) {
             return new WhmcsCustomerCreateResult(null, false, 'no_afm');
         }
 
-        $existing = Customer::query()
-            ->where('company_id', $tenant->id)
-            ->where('afm', $afm)
-            ->first();
+        // withTrashed: a soft-deleted owner holds the ΑΦΜ (UNIQUE covers it) —
+        // never a raw unique error; tell the operator to restore instead.
+        $existing = Customer::afmOwnerQuery($tenant->id, $afm)->first();
         if ($existing !== null) {
-            // Establish the operator-confirmed WHMCS link if missing; never
-            // overwrite an existing one.
-            if (blank($existing->whmcs_client_id) && $pending->whmcs_userid) {
-                $existing->forceFill(['whmcs_client_id' => $pending->whmcs_userid])->save();
-            }
-
-            return new WhmcsCustomerCreateResult($existing, false, 'existing');
+            return $this->existingResult($existing, $pending);
         }
 
         // Authoritative GSIS lookup; degrade to WHMCS-typed data on any failure.
@@ -80,23 +76,34 @@ class WhmcsCustomerCreator
         $p = is_array($pending->payload) ? $pending->payload : [];
         $activity = $record?->primaryActivity();
 
-        $customer = Customer::create([
-            'company_id' => $tenant->id,
-            'afm' => $afm,
-            'name' => self::firstFilled($record?->name, $pending->whmcsClientName(), 'ΑΦΜ '.$afm),
-            'tax_office' => self::firstFilled($record?->doy, $pending->whmcsTaxOffice()),
-            'address1' => self::firstFilled($record?->address, $p['address1'] ?? null),
-            'address2' => self::firstFilled($p['address2'] ?? null),
-            'city' => self::firstFilled($record?->city, $p['city'] ?? null),
-            'postcode' => self::firstFilled($record?->postcode, $p['postcode'] ?? null),
-            'country' => self::firstFilled($p['country'] ?? null, 'GR'),
-            'occupation' => self::firstFilled($activity['description'] ?? null, $pending->whmcsActivity()),
-            // Contact channels are WHMCS-only (GSIS doesn't expose them): email +
-            // phone come straight from the WHMCS client payload.
-            'email' => self::firstFilled($p['email'] ?? null),
-            'phone1' => self::firstFilled($p['phonenumber'] ?? null),
-            'whmcs_client_id' => $pending->whmcs_userid ?: null,
-        ]);
+        try {
+            $customer = Customer::create([
+                'company_id' => $tenant->id,
+                'afm' => $afm,
+                'name' => self::firstFilled($record?->name, $pending->whmcsClientName(), 'ΑΦΜ '.$afm),
+                'tax_office' => self::firstFilled($record?->doy, $pending->whmcsTaxOffice()),
+                'address1' => self::firstFilled($record?->address, $p['address1'] ?? null),
+                'address2' => self::firstFilled($p['address2'] ?? null),
+                'city' => self::firstFilled($record?->city, $p['city'] ?? null),
+                'postcode' => self::firstFilled($record?->postcode, $p['postcode'] ?? null),
+                'country' => self::firstFilled($p['country'] ?? null, 'GR'),
+                'occupation' => self::firstFilled($activity['description'] ?? null, $pending->whmcsActivity()),
+                // Contact channels are WHMCS-only (GSIS doesn't expose them): email +
+                // phone come straight from the WHMCS client payload.
+                'email' => self::firstFilled($p['email'] ?? null),
+                'phone1' => self::firstFilled($p['phonenumber'] ?? null),
+                'whmcs_client_id' => $pending->whmcs_userid ?: null,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // Lost a race with a parallel create for the same ΑΦΜ: the other
+            // row IS the customer now — re-read it instead of surfacing SQL.
+            $winner = Customer::afmOwnerQuery($tenant->id, $afm)->first();
+            if ($winner === null) {
+                throw new RuntimeException('Ο πελάτης με ΑΦΜ '.$afm.' δημιουργήθηκε ταυτόχρονα από άλλον χειριστή — ξαναπροσπάθησε.');
+            }
+
+            return $this->existingResult($winner, $pending);
+        }
 
         // When GSIS resolved, surface fields where the OFFICIAL value differed
         // from what the customer typed in WHMCS (GSIS won). The operator sees
@@ -106,6 +113,25 @@ class WhmcsCustomerCreator
             : [];
 
         return new WhmcsCustomerCreateResult($customer, true, $source, $discrepancies);
+    }
+
+    /**
+     * The ΑΦΜ already has an owner (found up-front, or the winner of a create
+     * race — same outcome either way): a trashed owner is reported, never
+     * linked; a live one gets the operator-confirmed WHMCS link if missing
+     * (never overwriting an existing one).
+     */
+    private function existingResult(Customer $existing, PendingWhmcsInvoice $pending): WhmcsCustomerCreateResult
+    {
+        if ($existing->trashed()) {
+            return new WhmcsCustomerCreateResult($existing, false, 'deleted_owner');
+        }
+
+        if (blank($existing->whmcs_client_id) && $pending->whmcs_userid) {
+            $existing->forceFill(['whmcs_client_id' => $pending->whmcs_userid])->save();
+        }
+
+        return new WhmcsCustomerCreateResult($existing, false, 'existing');
     }
 
     /**

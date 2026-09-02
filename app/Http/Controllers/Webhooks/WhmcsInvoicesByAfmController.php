@@ -49,7 +49,10 @@ use Symfony\Component\HttpFoundation\Response;
  * filtered on company_id). Caps both the requested AFM count and the
  * returned invoice count so a crafted request can't ask for the world.
  *
- * Response (200 OK):
+ * Response (200 OK) — `afms` is keyed by the NORMALISED request value (a
+ * Greek ΑΦΜ → its 9 digits, so «EL 998482379» comes back as «998482379»; a
+ * foreign VAT keeps its letters, «cy 10259033 p» → «CY10259033P»; a value
+ * with no identity keeps its digits); a key with no matching customer → null:
  *   {
  *     "found": true,
  *     "afms": {
@@ -113,24 +116,42 @@ class WhmcsInvoicesByAfmController
             ], Response::HTTP_BAD_REQUEST);
         }
 
-        // Match customers by ΑΦΜ — NORMALISED on BOTH sides. customers.afm is
-        // imported verbatim from legacy Firebird (free-text: may carry an
-        // EL/GR prefix, spaces, or INTERIOR dashes like "12-345-6789"), so a
-        // raw whereIn — or even a LIKE prefilter — against the digits-only
-        // inbound set silently misses those rows (a LIKE can't bridge a
-        // separator in the middle). Portable, driver-agnostic fix: load the
-        // tenant's customers once (a single company_id-scoped query — ~1k rows
-        // for a profile card) and re-key by the digits-only canonical ΑΦΜ in
-        // PHP, keeping only the ones we asked for. A duplicate ΑΦΜ across
-        // customers is unusual but possible (data-entry); keyBy keeps the last
-        // — acceptable for a visibility card.
-        $wanted = array_flip($afms);   // digits-only ΑΦΜ => position
-        $customers = Customer::query()
+        // Match customers by ΑΦΜ IDENTITY — the key UNIQUE(company_id, afm_key)
+        // is built on (Afm::uniqueKey: prefix/spaces/dashes folded, a foreign
+        // VAT keeps its letters), so an identity resolves to exactly ONE
+        // customer — no «keep the last» guess. The plugin sends digits only, so
+        // a foreign VAT («CY10259033P») arrives as «10259033»: resolve those by
+        // the digits of a LETTERED key as a second step, and only when (a) the
+        // query is NOT a 9-digit Greek form — a Greek ΑΦΜ must never be answered
+        // with a German/Estonian/Portuguese customer whose VAT shares the nine
+        // digits — and (b) the digits are unambiguous (two foreign keys folding
+        // to the same digits → null, never a coin toss).
+        $byKey = Customer::query()
             ->where('company_id', $tenant->id)
-            ->whereNotNull('afm')
-            ->get(['id', 'afm', 'name'])
-            ->keyBy(fn (Customer $c): string => Afm::digits($c->afm))
-            ->filter(fn (Customer $c, string $afm): bool => $afm !== '' && isset($wanted[$afm]));
+            ->whereNotNull('afm_key')
+            ->get(['id', 'afm', 'afm_key', 'name'])
+            ->keyBy(fn (Customer $c): string => (string) $c->afm_key);
+
+        $byDigits = [];
+        foreach ($byKey as $key => $customer) {
+            $key = (string) $key;
+            if (ctype_digit($key)) {
+                continue;
+            }
+            $digits = Afm::digits($key);
+            if ($digits === '') {
+                continue;
+            }
+            $byDigits[$digits] = array_key_exists($digits, $byDigits) ? null : $customer;
+        }
+
+        $customers = collect();
+        foreach ($afms as $afm) {
+            $hit = $byKey->get($afm) ?? ((ctype_digit($afm) && strlen($afm) !== 9) ? ($byDigits[$afm] ?? null) : null);
+            if ($hit !== null) {
+                $customers[$afm] = $hit;
+            }
+        }
 
         // ONE query for all matched customers' invoices (not one per ΑΦΜ),
         // globally capped, then grouped per customer in PHP. The aggregate
@@ -207,9 +228,14 @@ class WhmcsInvoicesByAfmController
     }
 
     /**
-     * Clean the inbound ΑΦΜ list: strip non-digits (WHMCS tax_id fields are
-     * free-text and pick up spaces / "EL" prefixes / dashes), drop empties,
-     * de-dupe, cap. Returns a list<string> of bare numeric ΑΦΜ.
+     * Clean the inbound ΑΦΜ list: each value becomes its IDENTITY key
+     * (Afm::uniqueKey — WHMCS tax_id fields are free-text and pick up spaces /
+     * "EL" prefixes / dashes; a Greek ΑΦΜ → its 9 digits, a foreign VAT keeps
+     * its letters upper-cased), or its bare digits when it has no identity (a
+     * placeholder like «000000000» stays in the response as an honest null);
+     * empties dropped, de-duped, capped. The response is keyed by exactly these
+     * strings — for the digits-only values the plugin sends, the key equals
+     * what was sent.
      *
      * @return list<string>
      */
@@ -224,7 +250,9 @@ class WhmcsInvoicesByAfmController
             if (! is_string($value) && ! is_int($value)) {
                 continue;
             }
-            $afm = Afm::digits($value);
+            // The identity key; a placeholder («000000000») has none but stays
+            // in the response as an honest null instead of turning into a 400.
+            $afm = Afm::uniqueKey((string) $value) ?? Afm::digits($value);
             if ($afm === '') {
                 continue;
             }

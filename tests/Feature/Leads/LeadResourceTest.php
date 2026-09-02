@@ -269,6 +269,8 @@ class LeadResourceTest extends TestCase
             ->assertActionDataSet(['mode' => 'new', 'customer_id' => null]);
 
         // No manual flush: the matcher memo is invalidated by the Customer write.
+        // (The trashed twin must be gone first — one ΑΦΜ per tenant, deleted included.)
+        $trashed->forceDelete();
         $beta = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Βήτα', 'afm' => '123456789']);
 
         Livewire::test(EditLead::class, ['record' => $lead->getRouteKey()])

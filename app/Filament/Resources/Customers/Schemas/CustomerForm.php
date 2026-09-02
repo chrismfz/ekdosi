@@ -10,6 +10,7 @@ use App\Filament\Support\ViesFormFill;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\PaymentMethod;
+use App\Support\Afm;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
@@ -63,6 +64,24 @@ class CustomerForm
                                 TextInput::make('afm')
                                     ->label('AFM / VAT number')
                                     ->maxLength(20)
+                                    // One customer per ΑΦΜ identity per tenant (any formatting,
+                                    // EL/GR prefix or not; soft-deleted included). A friendly
+                                    // message instead of the UNIQUE(company_id, afm_key) error.
+                                    ->rule(fn (?Customer $record) => function (string $attribute, mixed $value, \Closure $fail) use ($record): void {
+                                        if (Afm::uniqueKey($value) === null) {
+                                            return; // blank / placeholder = no identity to collide on
+                                        }
+
+                                        $other = Customer::afmOwnerQuery((int) Filament::getTenant()?->getKey(), $value)
+                                            ->when($record, fn ($q) => $q->whereKeyNot($record->getKey()))
+                                            ->first();
+
+                                        if ($other !== null) {
+                                            $fail($other->trashed()
+                                                ? "Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με αυτό το ΑΦΜ («{$other->name}») — επανέφερέ τον αντί να φτιάξεις νέο."
+                                                : "Υπάρχει ήδη πελάτης με αυτό το ΑΦΜ: «{$other->name}».");
+                                        }
+                                    })
                                     // Two AADE actions — both Greek-tenant only (RgWsPublic2
                                     // looks up Greek AFMs). "Άντληση" fills only EMPTY fields
                                     // (operator's typed value wins); "Διόρθωση" OVERWRITES from

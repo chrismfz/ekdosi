@@ -532,7 +532,7 @@ class WhmcsInboxTable
      * receipt flag. Empty when nothing routed (or no resolution stored) — the
      * modal placeholder is hidden in that case.
      *
-     * @return list<array{name: string, afm: string, lines: int, is_receipt: bool}>
+     * @return list<array{name: string, afm: ?string, lines: int, is_receipt: bool}>
      */
     private static function routedBeneficiaries(PendingWhmcsInvoice $r): array
     {
@@ -552,7 +552,7 @@ class WhmcsInboxTable
             if (! isset($byContact[$id])) {
                 $byContact[$id] = [
                     'name' => html_entity_decode((string) ($contact['company_name'] ?? '—'), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
-                    'afm' => Afm::digits($contact['gr_vatno'] ?? null),
+                    'afm' => Afm::uniqueKey($contact['gr_vatno'] ?? null),
                     'lines' => 0,
                     'is_receipt' => false,
                 ];
@@ -791,7 +791,9 @@ class WhmcsInboxTable
                 $tenant = Filament::getTenant();
                 $result = app(WhmcsCustomerCreator::class)->createForPending($tenant, $r);
 
-                if ($result->customer !== null) {
+                // Never link a soft-deleted owner ('deleted_owner' carries it only
+                // so the notification can name it) — the operator restores first.
+                if ($result->customer !== null && $result->source !== 'deleted_owner') {
                     $r->update([
                         'customer_id' => $result->customer->id,
                         'match_reason' => PendingWhmcsInvoice::REASON_AFM,
@@ -814,6 +816,17 @@ class WhmcsInboxTable
     {
         if ($result->customer === null) {
             Notification::make()->title('Δεν υπάρχει/δόθηκε ΑΦΜ — δεν δημιουργήθηκε πελάτης')->danger()->send();
+
+            return;
+        }
+
+        if ($result->source === 'deleted_owner') {
+            Notification::make()
+                ->title('Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με αυτό το ΑΦΜ: '.$result->customer->name)
+                ->body('Επανέφερέ τον από τη λίστα πελατών (φίλτρο «Διαγραμμένα») και ξαναπροσπάθησε — δεν δημιουργείται δεύτερος πελάτης για το ίδιο ΑΦΜ.')
+                ->danger()
+                ->persistent()
+                ->send();
 
             return;
         }
@@ -922,7 +935,7 @@ class WhmcsInboxTable
                         $rows = self::routedBeneficiaries($r);
                         $out = ['Ο πελάτης έχει δρομολογήσει γραμμές σε:'];
                         foreach ($rows as $b) {
-                            $afm = $b['afm'] !== '' ? ' (ΑΦΜ '.$b['afm'].')' : ' (χωρίς ΑΦΜ)';
+                            $afm = filled($b['afm']) ? ' (ΑΦΜ '.$b['afm'].')' : ' (χωρίς ΑΦΜ)';
                             $doc = $b['is_receipt'] ? ' — απόδειξη' : '';
                             $out[] = '• '.$b['name'].$afm.' → '.$b['lines'].' γραμμή(ές)'.$doc;
                         }
@@ -996,7 +1009,10 @@ class WhmcsInboxTable
                             ->icon('heroicon-m-magnifying-glass')
                             ->label('Εισαγωγή από ΑΑΔΕ')
                             ->action(function (callable $get, callable $set) use ($r) {
-                                $afm = Afm::digits((string) $get('lookup_afm'));
+                                // The ΑΦΜ IDENTITY (letters kept for a foreign VAT; a
+                                // placeholder is no ΑΦΜ) — the same rule the creator,
+                                // the matcher and whmcsAfm() use.
+                                $afm = Afm::uniqueKey((string) $get('lookup_afm'));
                                 if (blank($afm)) {
                                     Notification::make()->title('Συμπλήρωσε πρώτα ΑΦΜ')->warning()->send();
 
@@ -1012,7 +1028,8 @@ class WhmcsInboxTable
                                 }
                                 // Link the new/existing customer into the picker
                                 // above (it's ->live(), so the preview re-renders).
-                                if ($result->customer !== null) {
+                                // A soft-deleted owner is NOT selectable — restore first.
+                                if ($result->customer !== null && $result->source !== 'deleted_owner') {
                                     $set('customer_id', $result->customer->id);
                                 }
                                 self::notifyCustomerCreateResult($result);
@@ -1228,7 +1245,14 @@ class WhmcsInboxTable
                     ->label('Δικαιούχοι που θα προκύψουν')
                     ->content(function (PendingWhmcsInvoice $r): string {
                         $tenant = Filament::getTenant();
-                        $groups = app(WhmcsInvoiceSplitter::class)->planGroups($tenant, $r);
+                        try {
+                            $groups = app(WhmcsInvoiceSplitter::class)->planGroups($tenant, $r);
+                        } catch (\RuntimeException $e) {
+                            // The resolver's GUIDED message (e.g. a routed contact whose
+                            // ΑΦΜ belongs to a soft-deleted customer) — show it, don't
+                            // break the modal. Anything else propagates.
+                            return '⚠ '.$e->getMessage();
+                        }
                         if ($groups === []) {
                             return 'Δεν βρέθηκαν δικαιούχοι στην ανάλυση.';
                         }

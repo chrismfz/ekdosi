@@ -17,6 +17,7 @@
 #   4. maintenance mode ON
 #   5. checkout the target ref
 #   6. composer install --no-dev
+#   6b. pre-migration data checks (customers:afm-duplicates)
 #   7. php artisan migrate --force
 #   8. build assets (only if a package-lock.json exists)
 #   9. php artisan optimize  (config/route/view cache)
@@ -196,6 +197,21 @@ printf '{"sha":"%s","committed_at":"%s","ref":"%s"}\n' \
 
 log "composer install (--no-dev)"
 $COMPOSER install --no-dev --optimize-autoloader --no-interaction
+
+# --- pre-migration data checks --------------------------------------------
+# Runs on the NEW code, BEFORE migrate, still inside the maintenance window.
+# `customers:afm-duplicates` derives the ΑΦΜ identity in PHP while the
+# afm_key column may not exist yet; the UNIQUE(company_id, afm_key) migration
+# would refuse anyway — failing here gives the operator the list with the app
+# still on the OLD schema (the failure trap above keeps maintenance ON).
+log "Pre-migration check: customers with a duplicate ΑΦΜ"
+if ! $ART customers:afm-duplicates; then
+  fail "Duplicate customer ΑΦΜ found — resolve them (see the list above), then re-run the update."
+  fail "NOTE: the checkout is now the NEW code on the OLD schema (no afm_key column) — do NOT fix"
+  fail "them in the panel here: either fix with SQL using the ids listed, or deploy/rollback.sh to the"
+  fail "previous release, fix in the panel, then re-run the update. See docs/updates-runbook.md."
+  exit 1
+fi
 
 log "Database migrations"
 $ART migrate --force
