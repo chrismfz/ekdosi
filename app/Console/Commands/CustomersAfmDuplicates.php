@@ -70,9 +70,16 @@ class CustomersAfmDuplicates extends Command
         return $total;
     }
 
+    /** @var array<int, array<string, int>> memo: the report asks twice per row */
+    private array $breakdowns = [];
+
     /** @return array<string, int> table => rows, non-empty ones only */
     private function attachedBreakdown(Customer $customer): array
     {
+        if (isset($this->breakdowns[$customer->id])) {
+            return $this->breakdowns[$customer->id];
+        }
+
         $out = [];
         foreach (MergeCustomers::FOREIGN_KEYS as $table => $column) {
             if (! Schema::hasTable($table) || ! Schema::hasColumn($table, $column)) {
@@ -88,7 +95,7 @@ class CustomersAfmDuplicates extends Command
             }
         }
 
-        return $out;
+        return $this->breakdowns[$customer->id] = $out;
     }
 
     /** «3 παραστατικά, 1 πληρωμές» — what the operator weighs. */

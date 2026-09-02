@@ -347,6 +347,36 @@ class MergeCustomersTest extends TestCase
         $this->assertSame(793, (int) $keep->fresh()->whmcs_client_id);
     }
 
+    public function test_every_column_is_compared_so_a_behavioural_flag_never_dies_silently(): void
+    {
+        // The WHMCS «άμεση τιμολόγηση» flag used to vanish with the loser: the
+        // note is now built from the REAL schema, not a hand-kept list.
+        $keep = $this->customer(['name' => 'Κρατάμε']);
+        $drop = $this->customer([
+            'name' => 'Χάνεται', 'needs_immediate_invoice' => true,
+            'discount' => 12.5, 'kad_primary' => '62.01',
+        ]);
+
+        app(MergeCustomers::class)($keep, $drop);
+
+        $body = $keep->fresh()->internalNotes()->first()->body;
+        $this->assertStringContainsString('Άμεση τιμολόγηση', $body);
+        $this->assertStringContainsString('Έκπτωση %', $body);
+        $this->assertStringContainsString('62.01', $body);
+    }
+
+    public function test_an_adopted_key_is_recorded_as_adopted_not_as_lost(): void
+    {
+        $keep = $this->customer(['name' => 'Κρατάμε']);
+        $drop = $this->customer(['name' => 'Χάνεται', 'whmcs_client_id' => 793]);
+
+        app(MergeCustomers::class)($keep, $drop);
+
+        $body = $keep->fresh()->internalNotes()->first()->body;
+        $this->assertStringContainsString('ΥΙΟΘΕΤΗΘΗΚΕ', $body);
+        $this->assertStringContainsString('793', $body);
+    }
+
     public function test_the_command_previews_refuses_and_merges(): void
     {
         $keep = $this->customer(['name' => 'Κρατάμε', 'afm' => '123456789']);

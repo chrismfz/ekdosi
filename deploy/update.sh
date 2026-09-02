@@ -84,8 +84,11 @@ stop_queue_worker() {
     echo  "  Tip: allow it once via sudoers, or set QUEUE_STOP_CMD — see INSTALL.md."
   fi
 
-  # Portable fallback — no root, no systemd, works on shared hosting.
+  # Portable fallback — no root, no systemd, works on shared hosting. It STOPS
+  # nothing: the workers are told to exit and whoever supervises them (systemd,
+  # cron) brings them back once we run `up`.
   log "Draining queue worker (portable: ops:queue-drain)"
+  _stopped_by="drain"
   $ART ops:queue-drain --timeout="${QUEUE_DRAIN_TIMEOUT}" ${QUEUE_DRAIN_ARGS:-}
 }
 
@@ -93,18 +96,24 @@ stop_queue_worker() {
 # Only restarts what WE stopped: with the portable drain nothing was stopped
 # (the supervisor/cron brings the worker back by itself once `up` runs).
 start_queue_worker() {
-  [[ -z "$_stopped_by" ]] && return 0   # nothing was stopped — nothing to start
+  [[ -z "$_stopped_by" ]] && return 0   # nothing was touched — nothing to start
+  # A START hook always wins, even after a FAILED stop (starting an already
+  # running worker is a no-op; a silently dead queue is not).
   if [[ -n "${QUEUE_START_CMD:-}" ]]; then
     log "Starting queue worker (QUEUE_START_CMD)"; eval "${QUEUE_START_CMD}" || true
-  elif [[ "$_stopped_by" == "systemd" ]]; then
-    log "Starting queue worker (systemd: ${QUEUE_SERVICE})"; systemctl start "${QUEUE_SERVICE}" || true
-  elif _have_unit && systemctl start "${QUEUE_SERVICE}" 2>/dev/null; then
-    log "Started queue worker (systemd: ${QUEUE_SERVICE}) — QUEUE_START_CMD is not set"
-  else
-    # QUEUE_STOP_CMD stopped it and we cannot start it back: say so loudly —
-    # a silently dead worker is worse than the deploy failing.
-    fail "QUEUE_STOP_CMD stopped the worker but QUEUE_START_CMD is not set — START IT YOURSELF NOW."
+    return 0
   fi
+  if [[ "$_stopped_by" == "systemd" ]] || _have_unit; then
+    log "Starting queue worker (systemd: ${QUEUE_SERVICE})"
+    systemctl start "${QUEUE_SERVICE}" 2>/dev/null && return 0
+  fi
+  if [[ "$_stopped_by" == "drain" ]]; then
+    # Nothing was stopped: the workers exited on their own and a supervisor
+    # (systemd/cron) restarts them. If you start the worker BY HAND, do it now.
+    log "Queue: workers were asked to exit — the supervisor/cron restarts them (start it yourself if you run it by hand)."
+    return 0
+  fi
+  fail "The queue worker was stopped but could not be started back — START IT YOURSELF NOW."
 }
 
 # --- pre-flight -------------------------------------------------------------
@@ -182,7 +191,14 @@ fi
 
 # --- maintenance window -----------------------------------------------------
 log "Maintenance mode ON"
-$ART down --retry=15 || true
+# Maintenance mode is not cosmetic: the portable queue drain relies on a
+# non-`--force` worker REFUSING to pick up work while the app is down. If `down`
+# fails we have no such guarantee, so we stop before touching anything.
+if ! $ART down --retry=15; then
+  fail "Could not enter maintenance mode — aborting before any change."
+  echo  "  A worker could then consume jobs against a half-migrated schema."
+  exit 1
+fi
 # On any FAILURE after this point, deliberately STAY in maintenance mode — a
 # half-applied update (e.g. a failed migration on new code) must never be served.
 # Only the success path below lifts maintenance.

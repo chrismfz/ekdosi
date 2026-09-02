@@ -32,13 +32,6 @@ from `[Unreleased]`; `--major` explicit for milestones).
   αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`, default 60s). Σε ουρά που ΔΕΝ ελέγχεται (redis/SQS)
   αρνείται αντί να δώσει ψεύτικο πράσινο — `QUEUE_DRAIN_ARGS=--assume-idle` αν το αναλαμβάνεις.
 
-### Changed
-- **`customers:afm-duplicates`**: δείχνει τι κρέμεται από κάθε διπλό (παραστατικά/πληρωμές/…), σημειώνει
-  με ✓ ποιον θα κρατούσε η συγχώνευση και τυπώνει έτοιμη την εντολή `customers:merge`.
-- **`deploy/update.sh`**: ο read-only έλεγχος διπλών ΑΦΜ τρέχει και **πριν** το maintenance mode (μηδέν
-  downtime όταν βρει πρόβλημα)· τα μηνύματα δείχνουν τη συγχώνευση αντί για SQL στο χέρι.
-
-### Added (συνέχεια)
 - **Leads / mini-CRM (L3) — όψεις.** «Πίνακας leads» (kanban ανά κατάσταση, drag-and-drop = αλλαγή
   κατάστασης μέσα από τον ίδιο hook, «Όχι τώρα» με ημερομηνία, perm `View:LeadsBoard`) και «Ημερολόγιο
   leads» (μηνιαίο πλέγμα των επόμενων βημάτων, drag σε άλλη μέρα = μετάθεση, perm `View:LeadsCalendar`)·
@@ -146,6 +139,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   το token+payload αλλού. (Deferred hardening — TOCTOU DNS-pin, endpoint-profile registry — στο BACKLOG.)
 
 ### Changed
+- **`customers:afm-duplicates`**: δείχνει τι κρέμεται από κάθε διπλό (παραστατικά/πληρωμές/…), σημειώνει
+  με ✓ ποιον θα κρατούσε η συγχώνευση και τυπώνει έτοιμη την εντολή `customers:merge`.
+- **`deploy/update.sh` / `rollback.sh`**: ο read-only έλεγχος διπλών ΑΦΜ τρέχει και **πριν** το
+  maintenance mode (μηδέν downtime όταν βρει πρόβλημα)· τα μηνύματα δείχνουν τη συγχώνευση αντί για SQL
+  στο χέρι· αν αποτύχει το `down` σταματούν (η ασφάλεια του drain στηρίζεται σε αυτό).
 - **Ορολογία «Ψηφιακό Τέλος Συναλλαγής» + σωστές §8.x παραπομπές (MYD-020)** — τα
   operator-facing labels (φόρμα προϊόντος/παραστατικού, PDF, presets «Τυπικά τέλη/φόροι»)
   έλεγαν ακόμα «Χαρτόσημο»· πλέον χρησιμοποιούν τον ισχύοντα όρο **Ψηφιακό Τέλος

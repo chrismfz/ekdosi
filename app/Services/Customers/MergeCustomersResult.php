@@ -29,7 +29,7 @@ final class MergeCustomersResult
 
     /**
      * @param  array<string, int>  $moves  table => rows moved
-     * @param  array<string, array{keep: ?string, drop: ?string}>  $differences  label => the two values
+     * @param  array<string, array{keep: ?string, drop: ?string, column: string}>  $differences  label => the two values
      */
     public function __construct(
         public readonly int $keepId,

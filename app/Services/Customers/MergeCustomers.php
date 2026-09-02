@@ -58,13 +58,26 @@ class MergeCustomers
         'activity_log' => ['subject_type', 'subject_id'],
     ];
 
-    /** Identity fields compared for the «what the other row said» note. */
-    public const COMPARED_FIELDS = [
+    /**
+     * Columns NEVER compared for the note: the row's own identity, the audit
+     * timestamps, the derived key, and the two FKs the merge itself rewrites.
+     * EVERYTHING else on `customers` is compared — a hand-kept allow-list rots
+     * silently, and a column that quietly dies with the loser (the WHMCS
+     * «άμεση τιμολόγηση» flag, an έκπτωση, a ΚΑΔ) is exactly what the note is for.
+     */
+    public const NOT_COMPARED = [
+        'id', 'company_id', 'created_at', 'updated_at', 'deleted_at',
+        'afm_key', 'sort_order', 'referred_by_customer_id', 'whmcs_reseller_routes',
+    ];
+
+    /** Greek labels for the columns an operator would recognise (fallback: the column name). */
+    public const FIELD_LABELS = [
         'name' => 'Επωνυμία',
         'afm' => 'ΑΦΜ',
         'type' => 'Τύπος',
         'occupation' => 'Δραστηριότητα',
         'tax_office' => 'ΔΟΥ',
+        'kad_primary' => 'ΚΑΔ',
         'address1' => 'Διεύθυνση',
         'address2' => 'Διεύθυνση 2',
         'city' => 'Πόλη',
@@ -75,16 +88,19 @@ class MergeCustomers
         'fax' => 'Fax',
         'email' => 'Email',
         'secondary_email' => 'Email 2',
-        'whmcs_client_id' => 'WHMCS client id',
-        'legacy_id' => 'legacy_id',
-        'peppol_endpoint' => 'PEPPOL endpoint',
-        // Business terms die with the loser too — the note is the only record.
         'discount' => 'Έκπτωση %',
         'withhold_tax' => 'Παρακράτηση',
         'vat_vies' => 'VIES',
         'payment_method_id' => 'Τρόπος πληρωμής (id)',
-        'kad_primary' => 'ΚΑΔ',
-        'website' => 'Website',
+        'peppol_endpoint' => 'PEPPOL endpoint',
+        'whmcs_client_id' => 'WHMCS client id',
+        'needs_immediate_invoice' => 'Άμεση τιμολόγηση',
+        'auto_email_invoices' => 'Αυτόματο email παραστατικών',
+        'is_active' => 'Ενεργός',
+        'is_favorite' => 'Αγαπημένος',
+        'show_balance_on_pdf' => 'Υπόλοιπο στο PDF',
+        'alt_customer_legacy_id' => 'alt_customer_legacy_id',
+        'legacy_id' => 'legacy_id',
     ];
 
     /**
@@ -163,6 +179,15 @@ class MergeCustomers
 
             $result = $this->preview($keep, $drop);
 
+            // Which identity keys the survivor will take over (decided here so
+            // the note can say «υιοθετήθηκε» instead of «χάθηκε»).
+            $adopt = [];
+            foreach (['legacy_id', 'whmcs_client_id'] as $column) {
+                if (blank($keep->{$column}) && filled($drop->{$column})) {
+                    $adopt[$column] = $drop->{$column};
+                }
+            }
+
             foreach (self::FOREIGN_KEYS as $table => $column) {
                 if (! $this->usable($table, $column)) {
                     continue;
@@ -198,7 +223,7 @@ class MergeCustomers
             // At most one primary contact survives (the model's own rule).
             $this->dedupePrimaryContact($keep);
 
-            $this->writeMergeNote($keep, $drop, $result);
+            $this->writeMergeNote($keep, $drop, $result, array_keys($adopt));
 
             // Force-delete: a soft-deleted twin would still hold the ΑΦΜ under
             // UNIQUE(company_id, afm_key) — the whole point of the merge.
@@ -210,12 +235,6 @@ class MergeCustomers
             // re-inserts an unmatched legacy_id, and the WHMCS matcher/creator
             // an unmatched client id. Done after the delete — both columns are
             // unique per company.
-            $adopt = [];
-            foreach (['legacy_id', 'whmcs_client_id'] as $column) {
-                if (blank($keep->{$column}) && filled($drop->{$column})) {
-                    $adopt[$column] = $drop->{$column};
-                }
-            }
             if ($adopt !== []) {
                 // Query builder, NOT $keep->save(): the model's saving hook always
                 // writes `afm_key`, which does not exist on the pre-migration
@@ -373,7 +392,10 @@ class MergeCustomers
      * «τι έλεγε ο άλλος» (επωνυμία, email, …) plus what moved. Pinned: it is
      * the explanation of a destructive act.
      */
-    private function writeMergeNote(Customer $keep, Customer $drop, MergeCustomersResult $result): void
+    /**
+     * @param  list<string>  $adopted  columns the survivor took over from the loser
+     */
+    private function writeMergeNote(Customer $keep, Customer $drop, MergeCustomersResult $result, array $adopted = []): void
     {
         $lines = ['Συγχώνευση πελάτη #'.$drop->getKey().' «'.$drop->name.'» σε αυτόν τον πελάτη ('.now()->format('d/m/Y H:i').').'];
 
@@ -381,7 +403,9 @@ class MergeCustomers
             $lines[] = '';
             $lines[] = 'Στοιχεία που διέφεραν (κρατήθηκαν του #'.$keep->getKey().'):';
             foreach ($result->differences as $label => $pair) {
-                $lines[] = '• '.$label.': «'.($pair['keep'] ?? '—').'» ← ο συγχωνευμένος είχε «'.($pair['drop'] ?? '—').'»';
+                $lines[] = in_array($pair['column'] ?? '', $adopted, true)
+                    ? '• '.$label.': ΥΙΟΘΕΤΗΘΗΚΕ «'.($pair['drop'] ?? '—').'» από τον συγχωνευμένο (ο #'.$keep->getKey().' δεν είχε)'
+                    : '• '.$label.': «'.($pair['keep'] ?? '—').'» ← ο συγχωνευμένος είχε «'.($pair['drop'] ?? '—').'»';
             }
         }
 
@@ -404,21 +428,21 @@ class MergeCustomers
      * Fields where the two rows disagree (both non-empty and different, or the
      * loser had one the survivor lacks). Label => ['keep' => …, 'drop' => …].
      *
-     * @return array<string, array{keep: ?string, drop: ?string}>
+     * @return array<string, array{keep: ?string, drop: ?string, column: string}>
      */
     private function differences(Customer $keep, Customer $drop): array
     {
         $out = [];
-        foreach (self::COMPARED_FIELDS as $column => $label) {
-            if (! Schema::hasColumn('customers', $column)) {
+        foreach (Schema::getColumnListing('customers') as $column) {
+            if (in_array($column, self::NOT_COMPARED, true)) {
                 continue;
             }
-            $a = $this->normalise($keep->{$column});
-            $b = $this->normalise($drop->{$column});
+            $a = $this->normalise($keep->getRawOriginal($column));
+            $b = $this->normalise($drop->getRawOriginal($column));
             if ($b === null || $a === $b) {
                 continue;   // the loser adds nothing here
             }
-            $out[$label] = ['keep' => $a, 'drop' => $b];
+            $out[self::FIELD_LABELS[$column] ?? $column] = ['keep' => $a, 'drop' => $b, 'column' => $column];
         }
 
         return $out;

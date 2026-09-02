@@ -445,6 +445,9 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `.fbk` shows the pattern — `SELECT afm FROM customers WHERE afm REGEXP '^(VAT|AFM|TIN)[0-9]'`.
   (b) `CompanyImporter` reads the tenant's customers 3× per phase (existingIndex / afmKeyIndex /
   customerOwners) — one `get()` could feed all three; only matters at tens of thousands of customers.
+- **CHANGELOG `[Unreleased]`: δύο `### Fixed` blocks** (προϋπάρχει στο main) — το `ekdosi:release`
+  τα ρολάρει αυτούσια στη δατεδ έκδοση. Ένωσέ τα στο επόμενο release cut (όχι σε PR feature, γιατί
+  μετακινεί ~50 άσχετες γραμμές και θάβει το diff).
 - **Bulk συγχώνευση πελατών** _(follow-up του `customers:merge`)._ Σήμερα ένα ζευγάρι τη φορά (σωστό:
   ο χειριστής αποφασίζει ποιος επιζεί). Αν ποτέ βρεθεί βάση με δεκάδες διπλά, ένα `--all --yes` που
   τρέχει τη default επιλογή (ο «γεμάτος» επιζεί) για κάθε ομάδα του `customers:afm-duplicates`.
