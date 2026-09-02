@@ -47,7 +47,7 @@ class CompanyWipeTest extends TestCase
     {
         $c = $this->seedCompany();
 
-        app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: false);
+        app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: false, force: true);
 
         // Transactional gone.
         $this->assertSame(0, Invoice::where('company_id', $c->id)->count());
@@ -66,7 +66,7 @@ class CompanyWipeTest extends TestCase
     {
         $c = $this->seedCompany();
 
-        app(CompanyDataWiper::class)->wipe($c, keepParties: true, resetCounter: false);
+        app(CompanyDataWiper::class)->wipe($c, keepParties: true, resetCounter: false, force: true);
 
         $this->assertSame(0, Invoice::where('company_id', $c->id)->count());
         $this->assertSame(1, Customer::where('company_id', $c->id)->count());
@@ -76,7 +76,7 @@ class CompanyWipeTest extends TestCase
     {
         $c = $this->seedCompany();
 
-        app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: true);
+        app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: true, force: true);
 
         $this->assertSame(1, InvoiceType::where('company_id', $c->id)->value('invcount'));
     }
@@ -108,7 +108,7 @@ class CompanyWipeTest extends TestCase
             'tag_id' => $tag->id, 'taggable_type' => $inv->getMorphClass(), 'taggable_id' => $inv->id,
         ]);
 
-        app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: false);
+        app(CompanyDataWiper::class)->wipe($c, keepParties: false, resetCounter: false, force: true);
 
         $this->assertSame(0, DB::table('taggables')->where('tag_id', $tag->id)->count());
         $this->assertNotNull(Tag::find($tag->id)); // the tag vocabulary itself is kept (setup)

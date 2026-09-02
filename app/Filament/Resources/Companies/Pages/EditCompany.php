@@ -5,10 +5,14 @@ namespace App\Filament\Resources\Companies\Pages;
 use App\Filament\Resources\Companies\CompanyResource;
 use App\Filament\Support\SendChannelFormBridge;
 use App\Services\MyData\MyDataLookupSeeder;
+use App\Support\LegalEvidence;
 use App\Support\Tenancy\CompanyContext;
 use Filament\Actions\DeleteAction;
+use Filament\Forms\Components\Checkbox;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\HtmlString;
 
 class EditCompany extends EditRecord
 {
@@ -40,11 +44,83 @@ class EditCompany extends EditRecord
         return SendChannelFormBridge::dehydrate($data, $this->record);
     }
 
+    /**
+     * MYD-025 — deleting a tenant stays POSSIBLE, but stops being silent.
+     *
+     * A bare DeleteAction cascaded straight through every MARK, every filed
+     * document and the whole audit trail, saying nothing about what it was about
+     * to destroy. Blocking it would have been the wrong fix: a tenant that
+     * outgrows a shared host is exported, restored elsewhere and then legitimately
+     * removed, and a company that can never be deleted is its own operational
+     * failure.
+     *
+     * So the fix is the WARNING, not a gate. The confirmation names exactly what
+     * filing evidence dies, and two acknowledgements make it a decision rather
+     * than a reflex. Deliberately NOT forcing a backup here: the operator has
+     * usually just taken one — this follows an export→restore migration — and a
+     * guard that makes them sit through a second copy of the same data is a guard
+     * they learn to route around. The links point at the tools instead.
+     */
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            DeleteAction::make()
+                ->modalHeading(fn (): string => 'Οριστική διαγραφή «'.$this->record->name.'»')
+                ->modalDescription(fn (): HtmlString => $this->deletionWarning())
+                ->schema([
+                    Checkbox::make('understood')
+                        ->label('Καταλαβαίνω ότι διαγράφονται οριστικά όλα τα δεδομένα αυτής της εταιρείας')
+                        ->accepted()
+                        ->validationMessages(['accepted' => 'Χρειάζεται επιβεβαίωση.']),
+                    Checkbox::make('has_backup')
+                        ->label('Έχω κρατήσει αντίγραφο (ή δεν το χρειάζομαι)')
+                        ->accepted()
+                        ->validationMessages(['accepted' => 'Χρειάζεται επιβεβαίωση.']),
+                ])
+                ->modalSubmitActionLabel('Οριστική διαγραφή')
+                ->before(function (): void {
+                    // On the record either way: this is the one moment where the
+                    // local proof of everything filed under this ΑΦΜ stops existing.
+                    Log::warning('Company deleted', [
+                        'company_id' => $this->record->getKey(),
+                        'slug' => $this->record->slug,
+                        'evidence' => LegalEvidence::for($this->record)->describe(),
+                        'user_id' => auth()->id(),
+                    ]);
+                }),
         ];
+    }
+
+    /**
+     * The sentence that turns a destructive click into an informed one.
+     *
+     * Deliberately states that AADE keeps its records: the risk of deleting is
+     * losing the LOCAL proof, not un-filing anything, and an operator who thinks
+     * otherwise would make the wrong call in both directions.
+     */
+    private function deletionWarning(): HtmlString
+    {
+        $evidence = LegalEvidence::for($this->record);
+        $slug = e((string) $this->record->slug);
+
+        $lines = [
+            '<strong>Διαγράφονται ΟΡΙΣΤΙΚΑ όλα τα δεδομένα αυτής της εταιρείας</strong> — '
+            .'παραστατικά, πληρωμές, πελάτες, ΜΑΡΚ και το ιστορικό ενεργειών.',
+        ];
+
+        if ($evidence->exists()) {
+            $lines[] = '<br><strong>⚠ Υποβεβλημένα στην ΑΑΔΕ: '.e($evidence->describe()).'</strong>';
+            $lines[] = 'Η διαγραφή <em>δεν</em> τα ακυρώνει στην ΑΑΔΕ — εκεί παραμένουν. '
+                .'Χάνεται μόνο η τοπική απόδειξη του τι υποβλήθηκε.';
+        }
+
+        $lines[] = '<br>Πριν συνεχίσεις, αν χρειάζεσαι αντίγραφο:';
+        $lines[] = '<br>• <strong>Αντίγραφο για επαναφορά αλλού</strong> — «Αντίγραφα» → «Εξαγωγή ρυθμίσεων» '
+            .'με «Πλήρες αντίγραφο», ή <code>php artisan company:export --tenant='.$slug.' --full</code>';
+        $lines[] = '<br>• <strong>Παραστατικά σε PDF</strong> (για εταιρεία που φεύγει και δεν θα έχει πρόσβαση) — '
+            .'<code>php artisan company:export-pdfs --tenant='.$slug.'</code>';
+
+        return new HtmlString(implode(' ', $lines));
     }
 
     /**

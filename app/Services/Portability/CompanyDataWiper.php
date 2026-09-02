@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Lead;
 use App\Models\Product;
+use App\Support\LegalEvidence;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
@@ -59,7 +60,14 @@ class CompanyDataWiper
         return $counts;
     }
 
-    /** Invoices already filed at AADE (mydata_state=VALID) — the --force gate. */
+    /**
+     * Invoices already filed at AADE (mydata_state=VALID).
+     *
+     * Kept as the narrow "live income documents" number for callers that show it,
+     * but it is NO LONGER the --force gate: see legalEvidence() below. It missed
+     * every CANCELLED invoice, every delivery note and every expense
+     * classification, so a wipe could destroy all of those without ever asking.
+     */
     public function filedAtAadeCount(Company $company): int
     {
         return DB::table('invoices')
@@ -69,15 +77,37 @@ class CompanyDataWiper
     }
 
     /**
+     * Everything this tenant has actually filed — the real --force gate (MYD-025).
+     *
+     * The wipe stays possible: a clean slate before a Firebird re-import is what
+     * this service is FOR. What changes is that the operator is told the true
+     * scope first, in one sentence, instead of being gated on a number that
+     * silently ignored two thirds of the evidence.
+     */
+    public function legalEvidence(Company $company): LegalEvidence
+    {
+        return LegalEvidence::for($company);
+    }
+
+    /**
      * @param  bool  $force  required when invoices are filed at AADE (VALID).
      * @return array<string,int> per-table deleted counts
      */
     public function wipe(Company $company, bool $keepParties, bool $resetCounter, bool $force = false): array
     {
-        // Safe-by-default: even a programmatic caller can't blow away docs that
-        // are live at AADE without opting in (the command/UI also guard).
-        if (! $force && $this->filedAtAadeCount($company) > 0) {
-            throw new RuntimeException('Υπάρχουν παραστατικά υποβλημένα στην ΑΑΔΕ (VALID)· χρειάζεται force.');
+        // Safe-by-default: even a programmatic caller can't blow away filed
+        // documents without opting in (the command/UI also guard). MYD-025: the
+        // gate now counts ALL filing evidence — cancelled invoices, delivery notes
+        // and expense classifications included — and NAMES it, so «χρειάζεται
+        // force» is an informed decision rather than a shrug.
+        $evidence = $this->legalEvidence($company);
+
+        if (! $force && $evidence->exists()) {
+            throw new RuntimeException(
+                'Αυτή η εταιρεία έχει υποβεβλημένα στοιχεία στην ΑΑΔΕ: '.$evidence->describe()
+                .'. Η διαγραφή τους ΔΕΝ αναιρεί τις εγγραφές στην ΑΑΔΕ — χάνεται μόνο η τοπική '
+                .'απόδειξη. Κράτησε αντίγραφο (Εξαγωγή εταιρίας) και ξαναδοκίμασε με force.'
+            );
         }
 
         $deleted = [];
