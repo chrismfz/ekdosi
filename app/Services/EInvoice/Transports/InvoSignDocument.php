@@ -283,7 +283,12 @@ class InvoSignDocument
         // πεδίο: CounterpartName".
         return [
             'CounterpartName' => (string) ($note->recipient_name ?: $customer?->name ?: $note->company?->name ?? ''),
-            'CounterpartVat' => (string) ($note->recipient_afm ?: $customer?->afm ?: '000000000'),
+            // Same resolution as the AADE <counterpart> in this very document
+            // (DeliveryNote::externalRecipientAfm), rather than a second hand-rolled
+            // copy of the chain. The old pair agreed on the common shapes and diverged
+            // only on a whitespace-padded ΑΦΜ (' 000000000 ' read as an external
+            // party); sharing the helper removes the chance of drifting further.
+            'CounterpartVat' => (string) ($note->externalRecipientAfm() ?: DeliveryNote::INTERNAL_MOVEMENT_AFM),
             'CounterpartProfession' => (string) ($customer?->occupation ?? ''),
             'CounterpartTaxOffice' => (string) ($customer?->tax_office ?? ''),
             'CounterpartAddressStreet' => (string) ($note->delivery_street ?: $customer?->address1 ?? ''),

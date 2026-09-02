@@ -106,9 +106,18 @@
     $isFiled      = $note->mydata_state === 'VALID' && ! empty($note->mydata_url);
     $isCancelled  = $note->mydata_state === 'CANCELLED';
 
-    $recipientName = trim((string) ($note->recipient_name ?? ''));
-    $recipientAfm  = trim((string) ($note->recipient_afm ?? ''));
-    $isInternal    = $recipientName === '' || $recipientAfm === '' || $recipientAfm === '000000000';
+    // Same fallback the submitter uses — a customer-linked note without the
+    // recipient_name snapshot still files the customer's name, so the printed
+    // δελτίο must not show an empty recipient block (MYD-011 review).
+    $recipientName = trim((string) ($note->recipient_name ?: $note->customer?->name ?? ''));
+    // Matching fallback for the ΑΦΜ, else a customer-linked note printed the
+    // name with an empty «ΑΦΜ:» line while the submitter filed customer->afm.
+    $recipientAfm  = trim((string) ($note->externalRecipientAfm() ?: \App\Models\DeliveryNote::INTERNAL_MOVEMENT_AFM));
+    // ONE definition, shared with the AADE payload / CMR / provider document — the
+    // old local heuristic called a named foreign recipient WITHOUT an ΑΦΜ an
+    // ενδοδιακίνηση, so the printed δελτίο contradicted what was filed (MYD-011).
+    $isInternal    = $note->isInternalMovement();
+    $recipientIso  = $note->recipientCountryIso();
 
     $movePurposeLabel = DeliveryCodes::movePurposeLabel($note->move_purpose);
     if ((int) $note->move_purpose === 19 && ! empty($note->other_move_purpose_title)) {
@@ -175,6 +184,11 @@
         @else
             <div class="name">{{ $recipientName }}</div>
             <div class="meta-row">ΑΦΜ: {{ $recipientAfm }}</div>
+            {{-- MYD-011: the frozen country is part of what was filed — show it for a
+                 non-GR recipient so a wrong value is visible on the printed δελτίο. --}}
+            @if($recipientIso !== null && $recipientIso !== 'GR')
+                <div class="meta-row">Χώρα: {{ $recipientIso }}</div>
+            @endif
         @endif
     </div>
 </div>

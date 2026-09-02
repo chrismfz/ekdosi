@@ -66,6 +66,26 @@ class CmrFeatureTest extends TestCase
         return $inv;
     }
 
+    /**
+     * The country is the LAST comma-separated segment of an address block's address
+     * line. Asserting on that segment instead of a bare substring: «GR» and «DE»
+     * occur inside transliterated Greek text (ΓΡΕΒΕΝΑ → GREVENA), so a
+     * assertStringContainsString would pass or fail for the wrong reason.
+     */
+    private function countrySegment(?string $block): ?string
+    {
+        foreach (array_reverse(preg_split('/\R/', trim((string) $block)) ?: []) as $line) {
+            if (str_starts_with($line, 'VAT:') || trim($line) === '') {
+                continue;
+            }
+            $parts = array_map('trim', explode(',', $line));
+
+            return end($parts) ?: null;
+        }
+
+        return null;
+    }
+
     public function test_transliteration_greek_to_latin(): void
     {
         // Latin-only output, no Greek left — works with intl (ΕΛΟΤ/UNGEGN →
@@ -133,6 +153,118 @@ class CmrFeatureTest extends TestCase
         $this->assertNotEmpty($cmr->taking_over_place);
         $this->assertStringContainsString('ΑΦΜ', (string) $cmr->carrier_name); // carrier from ΔΑ afm fallback
         $this->assertCount(1, $cmr->lines);
+    }
+
+    public function test_cmr_uses_the_frozen_recipient_country_for_a_supplier_recipient(): void
+    {
+        // MYD-011: a supplier/manual recipient leaves customer_id null, so reading
+        // $note->customer?->country printed the GR fallback on the consignment note
+        // — on the very document that exists for INTERNATIONAL transport.
+        $note = DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DA9', 'code' => 9,
+            'delivery_type_id' => $this->type->id, 'customer_id' => null, 'issued_at' => now(),
+            'local_status' => 'draft',
+            'recipient_name' => 'Lieferant GmbH', 'recipient_afm' => '811234567',
+            'recipient_country' => 'DE',
+            'loading_street' => 'ΑΝΑΚΡΕΟΝΤΟΣ', 'loading_number' => '3', 'loading_city' => 'ΠΕΡΙΣΤΕΡΙ',
+            'delivery_street' => 'Hauptstrasse', 'delivery_city' => 'Βερολίνο', 'delivery_postcode' => '10115',
+            'vehicle_number' => 'ΑΒΓ-1234', 'carrier_afm' => '094000000',
+        ]);
+        $note->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Διακομιστής', 'qty' => 1,
+        ]);
+
+        $cmr = app(CreateCmrFromSource::class)->fromDeliveryNote($note);
+
+        $this->assertSame('DE', $this->countrySegment($cmr->consignee_text));
+        $this->assertSame('DE', $this->countrySegment($cmr->delivery_text));
+    }
+
+    public function test_cmr_does_not_fabricate_gr_for_an_unresolvable_country(): void
+    {
+        // 'Neverland' is deliberately UNRESOLVABLE — that is the branch this test
+        // exists for (CreateCmrFromSource's `?: $rawCountry` raw-print fallback).
+        // A country the normaliser knows would resolve and never reach it, leaving
+        // the fallback uncovered. Printing «GR» here would assert Greece for a
+        // foreign consignee on the very document that exists for international
+        // transport (MYD-011 review).
+        $customer = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Chuzhdestranen OOD',
+            'afm' => '777', 'country' => 'Neverland',
+        ]);
+        $note = DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DA8', 'code' => 8,
+            'delivery_type_id' => $this->type->id, 'customer_id' => $customer->id, 'issued_at' => now(),
+            'local_status' => 'draft', 'recipient_name' => 'Chuzhdestranen OOD',
+            'loading_street' => 'ΑΝΑΚΡΕΟΝΤΟΣ', 'loading_city' => 'ΠΕΡΙΣΤΕΡΙ',
+            'delivery_street' => 'Vitosha', 'delivery_city' => 'Σόφια', 'delivery_postcode' => '1000',
+            'vehicle_number' => 'ΑΒΓ-1234', 'carrier_afm' => '094000000',
+        ]);
+        $note->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Διακομιστής', 'qty' => 1,
+        ]);
+
+        $cmr = app(CreateCmrFromSource::class)->fromDeliveryNote($note);
+
+        // Never GR — and the raw text is PRINTED rather than dropped: on paper a
+        // stale country beats a blank line, which is the whole point of the fallback.
+        $this->assertNotSame('GR', $this->countrySegment($cmr->delivery_text));
+        $this->assertSame('Neverland', $this->countrySegment($cmr->delivery_text));
+    }
+
+    public function test_cmr_consignee_follows_the_same_internal_movement_rule_as_the_payload(): void
+    {
+        // MYD-011 promises ONE frozen recipient identity everywhere. The CMR read
+        // the raw columns instead of the shared helpers, so an ενδοδιακίνηση left
+        // holding a stale recipient_country printed «DE» on paper while the payload
+        // filed GR — the two documents contradicting each other about the same move.
+        $note = DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DA7', 'code' => 7,
+            'delivery_type_id' => $this->type->id, 'customer_id' => null, 'issued_at' => now(),
+            'local_status' => 'draft',
+            'recipient_name' => null, 'recipient_afm' => null,
+            'recipient_country' => 'DE',            // stale: no recipient of any kind
+            'loading_street' => 'ΑΝΑΚΡΕΟΝΤΟΣ', 'loading_city' => 'ΠΕΡΙΣΤΕΡΙ',
+            'delivery_street' => 'ΠΑΤΗΣΙΩΝ', 'delivery_city' => 'ΑΘΗΝΑ', 'delivery_postcode' => '11111',
+            'vehicle_number' => 'ΑΒΓ-1234', 'carrier_afm' => '094000000',
+        ]);
+        $note->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Διακομιστής', 'qty' => 1,
+        ]);
+
+        $this->assertTrue($note->isInternalMovement());
+
+        $cmr = app(CreateCmrFromSource::class)->fromDeliveryNote($note);
+
+        // The recipient IS the issuer, so the paper note says so too.
+        $this->assertNotSame('DE', $this->countrySegment($cmr->consignee_text));
+        $this->assertSame('GR', $this->countrySegment($cmr->delivery_text));
+    }
+
+    public function test_cmr_prints_the_customer_afm_the_payload_actually_files(): void
+    {
+        // externalRecipientAfm() falls back to the linked customer's ΑΦΜ, so that is
+        // what AADE receives. Reading the raw recipient_afm left the consignment
+        // note blank for exactly those recipients.
+        $customer = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Πελάτης ΑΕ',
+            'afm' => '800561849', 'country' => 'GR',
+        ]);
+        $note = DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'DA6', 'code' => 6,
+            'delivery_type_id' => $this->type->id, 'customer_id' => $customer->id, 'issued_at' => now(),
+            'local_status' => 'draft', 'recipient_afm' => null,
+            'loading_street' => 'ΑΝΑΚΡΕΟΝΤΟΣ', 'loading_city' => 'ΠΕΡΙΣΤΕΡΙ',
+            'delivery_street' => 'ΠΑΤΗΣΙΩΝ', 'delivery_city' => 'ΑΘΗΝΑ', 'delivery_postcode' => '11111',
+            'vehicle_number' => 'ΑΒΓ-1234', 'carrier_afm' => '094000000',
+        ]);
+        $note->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Διακομιστής', 'qty' => 1,
+        ]);
+
+        $cmr = app(CreateCmrFromSource::class)->fromDeliveryNote($note);
+
+        $this->assertStringContainsString('800561849', (string) $cmr->consignee_text);
     }
 
     public function test_pdf_renders_bytes(): void

@@ -159,6 +159,8 @@ class DeliveryNoteResourceTest extends TestCase
                 'issued_at' => now(),
                 'recipient_name' => 'Παραλήπτης ΑΕ',
                 'recipient_afm' => '123456789',
+                // Required once there IS an external recipient (MYD-011).
+                'recipient_country' => 'GR',
                 'customer_id' => $this->recipient->id,
                 'loading_street' => 'Εκδότη 1',
                 'loading_postcode' => '11111',
@@ -375,6 +377,36 @@ class DeliveryNoteResourceTest extends TestCase
         $this->assertSame($this->recipient->id, $resolvedC['customer_id']);
     }
 
+    public function test_resolve_recipient_carries_the_party_country(): void
+    {
+        // MYD-011: the picker must hand back a country for BOTH party kinds — a
+        // supplier has no FK on the note, so if it isn't snapshotted here the
+        // foreign recipient's country is lost and it files as GR.
+        $supplier = Supplier::create([
+            'company_id' => $this->tenant->id,
+            'name' => 'Lieferant GmbH',
+            'afm' => '811234567',
+            'country' => 'DE',
+        ]);
+
+        $resolvedS = DeliveryNoteForm::resolveRecipient('s:'.$supplier->id);
+        $this->assertSame('DE', $resolvedS['country']);
+
+        // customers.country is free text — normalised to ISO-2 on the way out.
+        $this->recipient->forceFill(['country' => 'Greece'])->save();
+        $resolvedC = DeliveryNoteForm::resolveRecipient('c:'.$this->recipient->id);
+        $this->assertSame('GR', $resolvedC['country']);
+
+        // 'EL' (the VAT prefix) must not survive as a non-ISO code.
+        $this->recipient->forceFill(['country' => 'EL'])->save();
+        $this->assertSame('GR', DeliveryNoteForm::resolveRecipient('c:'.$this->recipient->id)['country']);
+
+        // An unrecognised value yields null (the form then requires an entry)
+        // rather than a fabricated GR.
+        $this->recipient->forceFill(['country' => 'Neverland'])->save();
+        $this->assertNull(DeliveryNoteForm::resolveRecipient('c:'.$this->recipient->id)['country']);
+    }
+
     private function makeDraft(): DeliveryNote
     {
         $note = DeliveryNote::create([
@@ -398,6 +430,7 @@ class DeliveryNoteResourceTest extends TestCase
             'delivery_city' => 'Θεσσαλονίκη',
             'recipient_name' => 'Παραλήπτης ΑΕ',
             'recipient_afm' => '123456789',
+            'recipient_country' => 'GR',
             'local_status' => 'draft',
         ]);
 

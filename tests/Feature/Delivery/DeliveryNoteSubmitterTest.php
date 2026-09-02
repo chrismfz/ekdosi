@@ -94,6 +94,9 @@ class DeliveryNoteSubmitterTest extends TestCase
             'complete_shipping_branch' => 0,
             'recipient_name' => 'Παραλήπτης ΑΕ',
             'recipient_afm' => '123456789',
+            // MYD-011: an external recipient MUST carry a country — the submitter
+            // refuses rather than defaulting a foreign party to GR.
+            'recipient_country' => 'GR',
             'local_status' => 'draft',
         ], $overrides));
 
@@ -106,6 +109,459 @@ class DeliveryNoteSubmitterTest extends TestCase
         ]);
 
         return $note->fresh('lines');
+    }
+
+    /* ============ MYD-011: recipient country is never guessed as GR ============ */
+
+    private int $countryProbe = 0;
+
+    private function counterpartCountryFor(array $overrides): string
+    {
+        // Distinct invcode/code per probe — (company_id, invcode) is unique, so a
+        // single test can build several notes (e.g. EL and UK).
+        $this->countryProbe++;
+        $note = $this->makeNote(array_merge([
+            'invcode' => 'DAC'.$this->countryProbe,
+            'code' => 100 + $this->countryProbe,
+        ], $overrides));
+        $aade = (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+
+        // firebed's Party::getCountry(): ?string — setCountry() already unwraps a
+        // CountryCode enum to its string value before storing.
+        return (string) $aade->getCounterpart()->getCountry();
+    }
+
+    public function test_supplier_or_manual_foreign_recipient_keeps_its_country(): void
+    {
+        // THE BUG: a supplier/manual recipient leaves customer_id null, and the old
+        // code read the country ONLY from note.customer — so every foreign
+        // supplier/manual party was serialized as GR. The frozen recipient_country
+        // is now the authoritative source.
+        $this->assertSame('DE', $this->counterpartCountryFor([
+            'customer_id' => null,                 // supplier / manual recipient
+            'recipient_name' => 'Lieferant GmbH',
+            'recipient_afm' => 'DE811234567',
+            'recipient_country' => 'DE',
+        ]));
+    }
+
+    public function test_customer_recipient_uses_the_frozen_country(): void
+    {
+        $this->assertSame('CY', $this->counterpartCountryFor(['recipient_country' => 'CY']));
+    }
+
+    public function test_el_and_uk_aliases_normalise_to_gr_and_gb(): void
+    {
+        // The delivery normalizer used to lack these aliases (the invoice one had
+        // them), so 'EL'/'UK' passed straight through as non-ISO codes.
+        $this->assertSame('GR', $this->counterpartCountryFor(['recipient_country' => 'EL']));
+        $this->assertSame('GB', $this->counterpartCountryFor(['recipient_country' => 'UK']));
+    }
+
+    public function test_non_eu_recipient_country_is_preserved(): void
+    {
+        $this->assertSame('US', $this->counterpartCountryFor([
+            'customer_id' => null,
+            'recipient_name' => 'Acme Inc',
+            'recipient_afm' => '987654321',
+            'recipient_country' => 'US',
+        ]));
+    }
+
+    public function test_falls_back_to_the_customer_country_for_notes_predating_the_column(): void
+    {
+        // Back-compat: notes issued before recipient_country existed still resolve
+        // through the linked customer (whose country is free text).
+        $this->recipient->forceFill(['country' => 'Germany'])->save();
+
+        $this->assertSame('DE', $this->counterpartCountryFor(['recipient_country' => null]));
+    }
+
+    public function test_internal_movement_without_a_recipient_is_gr(): void
+    {
+        // Ενδοδιακίνηση: no external ΑΦΜ at all → AADE's 000000000 sentinel and the
+        // recipient IS the (Greek) issuer. This is the ONE sanctioned GR default.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_afm' => null,
+            'recipient_name' => null,
+            'recipient_country' => null,
+        ]);
+
+        $counterpart = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note)
+            ->getCounterpart();
+
+        $this->assertSame('000000000', $counterpart->getVatNumber());
+        $this->assertSame('GR', (string) $counterpart->getCountry());
+    }
+
+    public function test_explicit_000000000_sentinel_is_still_an_internal_movement(): void
+    {
+        // The sentinel IS the marker for an ενδοδιακίνηση and IS stored that way
+        // (the demo seeder writes it; the form/infolist tell operators to expect
+        // it; the PDF treats it as internal). Reading it as an "external ΑΦΜ" would
+        // hard-refuse a note that filed correctly before — so it must resolve to GR.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => null,
+            'recipient_afm' => '000000000',
+            'recipient_country' => null,
+        ]);
+
+        $counterpart = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note)
+            ->getCounterpart();
+
+        $this->assertSame('000000000', $counterpart->getVatNumber());
+        $this->assertSame('GR', (string) $counterpart->getCountry());
+    }
+
+    public function test_named_foreign_recipient_without_an_afm_is_not_treated_as_internal(): void
+    {
+        // A manual foreign party with no ΑΦΜ (non-VAT / private recipient). Keying
+        // "internal" on the ΑΦΜ alone would file "Müller GmbH" as GR with the
+        // 000000000 sentinel — the same misreport MYD-011 exists to stop. A typed
+        // name means there IS an external recipient, so a country is required.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => 'Müller GmbH',
+            'recipient_afm' => null,
+            'recipient_country' => null,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/country/i');
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_named_foreign_recipient_without_an_afm_keeps_its_country(): void
+    {
+        // …and with the country supplied it files as that country, still with the
+        // 000000000 ΑΦΜ (AADE's placeholder for a recipient without one).
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => 'Müller GmbH',
+            'recipient_afm' => null,
+            'recipient_country' => 'DE',
+        ]);
+
+        $counterpart = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note)
+            ->getCounterpart();
+
+        $this->assertSame('DE', (string) $counterpart->getCountry());
+        $this->assertSame('Müller GmbH', $counterpart->getName());
+    }
+
+    public function test_a_greek_looking_afm_is_not_evidence_of_a_greek_country(): void
+    {
+        // A structurally valid Greek ΑΦΜ was briefly treated as positive evidence
+        // that a CUSTOMER-linked party is Greek, to spare legacy domestic notes
+        // whose customers.country is blank. It is not evidence: a bare 9-digit
+        // foreign VAT id satisfies mod-11 about 1 time in 10, and a foreign private
+        // individual or a thin legacy customer record looks exactly like this. The
+        // filing boundary does not guess — legacy rows get a country by backfill or
+        // by an operator edit.
+        $this->recipient->forceFill(['afm' => '800561849', 'country' => null])->save();
+
+        $note = $this->makeNote([
+            'recipient_afm' => '800561849',
+            'recipient_country' => null,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/country/i');
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_a_foreign_vat_id_does_not_infer_gr(): void
+    {
+        // 'DE811234567' must NOT be digit-stripped to '811234567' (which happens to
+        // satisfy the Greek checksum) — that would re-introduce the exact misreport.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => 'Lieferant GmbH',
+            'recipient_afm' => 'DE811234567',
+            'recipient_country' => null,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/country/i');
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_explicit_sentinel_wins_over_a_linked_customer_afm(): void
+    {
+        // The operator declared an ενδοδιακίνηση by storing 000000000. Falling back
+        // to the linked customer's ΑΦΜ would file a DIFFERENT legal counterpart
+        // than the one declared, and demand a country for it.
+        $this->recipient->forceFill(['afm' => '800561849', 'country' => 'GR'])->save();
+
+        $note = $this->makeNote([
+            'recipient_afm' => '000000000',      // customer_id still set
+            'recipient_country' => null,
+        ]);
+
+        $counterpart = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note)
+            ->getCounterpart();
+
+        $this->assertSame('000000000', $counterpart->getVatNumber());
+        $this->assertSame('GR', (string) $counterpart->getCountry());
+    }
+
+    public function test_explicit_country_wins_even_when_the_sentinel_afm_is_stored(): void
+    {
+        // THE original MYD-011 misreport, reachable until round 5: a named foreign
+        // recipient with no ΑΦΜ is stored with the 000000000 placeholder (the only
+        // one the UI offers), and classifying that as an ενδοδιακίνηση BEFORE
+        // reading the operator's own country filed «Müller GmbH / 000000000 / GR».
+        // An explicitly picked country must beat the sentinel classification.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => 'Müller GmbH',
+            'recipient_afm' => '000000000',
+            'recipient_country' => 'DE',
+        ]);
+
+        $counterpart = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note)
+            ->getCounterpart();
+
+        $this->assertSame('DE', (string) $counterpart->getCountry());
+        $this->assertSame('Müller GmbH', $counterpart->getName());
+    }
+
+    public function test_sentinel_with_a_linked_customer_is_external_and_agrees_with_the_pdf(): void
+    {
+        // A stored sentinel plus a linked customer is NOT an ενδοδιακίνηση — there
+        // IS a recipient, they just have no ΑΦΜ. The payload files the customer's
+        // name with the 000000000 placeholder, and because the PDF now shares
+        // isInternalMovement() it prints the same thing instead of «Ενδοδιακίνηση».
+        // The customer carries a country: filing an UNIDENTIFIED counterpart no
+        // longer earns a GR default either (see the refusal test below).
+        $this->recipient->forceFill(['country' => 'GR'])->save();
+
+        $note = $this->makeNote([
+            'recipient_afm' => '000000000',   // customer_id still set
+            'recipient_name' => null,
+            'recipient_country' => null,
+        ]);
+
+        $this->assertFalse($note->isInternalMovement());
+
+        $counterpart = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note)
+            ->getCounterpart();
+
+        $this->assertSame('000000000', $counterpart->getVatNumber());
+        $this->assertSame($this->recipient->name, $counterpart->getName());
+        $this->assertSame('GR', (string) $counterpart->getCountry());
+    }
+
+    public function test_sentinel_with_a_foreign_customer_files_that_customer_country(): void
+    {
+        // Round 3 guarded this as GR because the payload and the PDF disagreed about
+        // whether it was an ενδοδιακίνηση. They now share isInternalMovement(), and
+        // with the disagreement gone the honest answer is the customer's real
+        // country: there IS a recipient (a German customer), they simply have no
+        // ΑΦΜ, so we file the 000000000 placeholder with country DE — not a
+        // fabricated GR.
+        $this->recipient->forceFill(['country' => 'DE'])->save();
+
+        $note = $this->makeNote([
+            'recipient_afm' => '000000000',
+            'recipient_country' => null,
+        ]);
+
+        $this->assertFalse($note->isInternalMovement(), 'a linked customer is a recipient');
+
+        $counterpart = (new DeliveryNoteSubmitter($this->tenant))
+            ->buildAadeDeliveryNote($note)
+            ->getCounterpart();
+
+        $this->assertSame('000000000', $counterpart->getVatNumber());
+        $this->assertSame('DE', (string) $counterpart->getCountry());
+    }
+
+    public function test_a_customer_link_alone_does_not_earn_a_gr_default(): void
+    {
+        // The other half of the removed inference: filing AADE's «000000000»
+        // placeholder for one of OUR customers was briefly treated as grounds for
+        // GR ("we file this party as unidentified anyway"). But a foreign customer
+        // with thin legacy data has exactly this shape, and the note is being FILED
+        // — so it is refused instead, naming the field to fix.
+        $this->recipient->forceFill(['country' => null])->save();
+
+        $note = $this->makeNote([
+            'recipient_afm' => null,          // customer_id still set → not internal
+            'recipient_country' => null,
+        ]);
+
+        $this->assertFalse($note->isInternalMovement());
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/country|χώρα/iu');
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_a_stale_customer_link_does_not_lend_its_country_to_another_party(): void
+    {
+        // THE ROUND-9 P1. `customer_id` is a Hidden the form never clears, so an
+        // operator can pick a Greek customer and then overtype the recipient with a
+        // German one. The customer fallback fired unconditionally, so the note was
+        // filed as «Müller GmbH / DE811234567 / GR» — a foreign party reported as
+        // Greek, with its own DE VAT id in the same counterpart as contrary
+        // evidence. Round 8 removed the inferences; this was the same guess by
+        // another route.
+        $this->recipient->forceFill(['country' => 'ΕΛΛΑΔΑ', 'afm' => '800561849'])->save();
+
+        $note = $this->makeNote([
+            'recipient_name' => 'Müller GmbH',      // customer_id still set
+            'recipient_afm' => 'DE811234567',
+            'recipient_country' => null,
+        ]);
+
+        $this->assertFalse($note->recipientIsTheLinkedCustomer());
+
+        try {
+            $country = (string) (new DeliveryNoteSubmitter($this->tenant))
+                ->buildAadeDeliveryNote($note)->getCounterpart()->getCountry();
+            $this->fail("Expected a refusal, filed country={$country} for a German party");
+        } catch (\RuntimeException $e) {
+            // …and the message must name the RIGHT field. «ΕΛΛΑΔΑ» normalises fine,
+            // so reporting it as an invalid ISO code sends the operator to inspect a
+            // customer country that was never the problem.
+            $this->assertStringContainsString('δεν είναι ο συνδεδεμένος πελάτης', $e->getMessage());
+            $this->assertStringNotContainsString('ΕΛΛΑΔΑ', $e->getMessage());
+        }
+    }
+
+    public function test_the_customer_fallback_still_works_when_the_recipient_is_that_customer(): void
+    {
+        // The narrowing must not strand the normal case — the picker copies the
+        // party's own name/ΑΦΜ into the recipient fields, so they routinely match.
+        $this->recipient->forceFill(['country' => 'Germany', 'afm' => '800561849'])->save();
+
+        $this->assertSame('DE', $this->counterpartCountryFor([
+            'recipient_name' => $this->recipient->name,
+            'recipient_afm' => '800561849',
+            'recipient_country' => null,
+        ]));
+    }
+
+    public function test_a_greek_checksum_on_a_supplier_or_manual_recipient_is_refused(): void
+    {
+        // A bare 9-digit foreign VAT passes the Greek mod-11 check ~1 time in 10.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => 'Lieferant GmbH',
+            'recipient_afm' => '811234567',   // valid Greek checksum, foreign party
+            'recipient_country' => null,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/country/i');
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_external_recipient_without_a_country_is_refused_not_defaulted_to_gr(): void
+    {
+        // The heart of MYD-011: an identifiable recipient with no resolvable country
+        // must FAIL LOUDLY. Silently filing it as GR is the misreport being fixed.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => 'Unknown Ltd',
+            'recipient_afm' => '999888777',
+            'recipient_country' => null,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/country/i');
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_external_recipient_with_an_unrecognised_country_is_refused(): void
+    {
+        // 'ZZ' is two letters but NOT a real ISO code — it fits the varchar(2)
+        // column, so this is the shape a typo actually takes in production.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => 'Nowhere Ltd',
+            'recipient_afm' => '999888777',
+            'recipient_country' => 'ZZ',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_an_unresolvable_country_is_never_overridden_by_a_gr_inference(): void
+    {
+        // THE ROUND-7 P0. Both GR inferences were gated on customer_id alone, so
+        // they fired whenever the country merely failed to NORMALISE — not only
+        // when it was absent. A customer recorded as 'Neverland' with no ΑΦΜ was
+        // therefore filed as GR: the MYD-011 misreport surviving on the customer
+        // path, and reachable from «Έκδοση» on an existing draft (which never
+        // re-runs the form's required()).
+        // The recipient IS this customer (same name and ΑΦΜ) — otherwise the note
+        // would be refused for the stale-link reason instead, and this test would
+        // stop covering the inference hole it exists for.
+        $this->recipient->forceFill(['country' => 'Neverland', 'afm' => '800561849'])->save();
+
+        foreach ([null, '800561849'] as $afm) {   // no-ΑΦΜ branch, then Greek-ΑΦΜ branch
+            $note = $this->makeNote([
+                'invcode' => 'DAU'.($afm ?? 'null'),
+                'code' => 700 + strlen((string) $afm),
+                'recipient_afm' => $afm,
+                'recipient_country' => null,      // only the customer's free text remains
+            ]);
+
+            try {
+                $country = (string) (new DeliveryNoteSubmitter($this->tenant))
+                    ->buildAadeDeliveryNote($note)->getCounterpart()->getCountry();
+                $this->fail("Expected a refusal, filed country={$country} for afm=".var_export($afm, true));
+            } catch (\RuntimeException $e) {
+                // The message must quote the offending value — the operator has to
+                // know WHICH field to fix.
+                $this->assertStringContainsString('Neverland', $e->getMessage());
+            }
+        }
+    }
+
+    public function test_a_recorded_country_that_is_not_iso_is_refused_even_with_a_greek_afm(): void
+    {
+        // Same hole via the note's own column rather than the customer's: 'ZZ' is
+        // storable, unresolvable, and sits next to a mod-11-valid Greek ΑΦΜ, which
+        // used to be enough to infer GR.
+        $note = $this->makeNote([
+            'recipient_afm' => '800561849',
+            'recipient_country' => 'ZZ',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
+    }
+
+    public function test_legacy_free_text_country_names_still_resolve(): void
+    {
+        // The refusal above is only safe because the normaliser resolves the
+        // free-text spellings the legacy Firebird import actually left behind —
+        // otherwise fixing the P0 would have made those notes unissuable.
+        $this->recipient->forceFill(['country' => 'ΙΤΑΛΙΑ'])->save();
+        $this->assertSame('IT', $this->counterpartCountryFor(['recipient_country' => null]));
+
+        $this->recipient->forceFill(['country' => 'Ελλάδα'])->save();
+        $this->assertSame('GR', $this->counterpartCountryFor(['recipient_country' => null]));
     }
 
     public function test_build_assembles_delivery_header_and_value_less_line(): void
@@ -314,6 +770,98 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->expectExceptionMessageMatches('/διεύθυνση παράδοσης/');
 
         (new DeliveryNoteSubmitter($this->tenant))->previewXml($note);
+    }
+
+    public function test_submit_freezes_the_country_it_actually_filed(): void
+    {
+        // ROUND-10 P1. A note can be issued with the country resolved from its
+        // linked customer, and nothing wrote that back — while the SAME forceFill
+        // set mydata_sent, which makes hasBeenFiled() true and cuts off exactly that
+        // fallback. So the country AADE holds became invisible the moment it was
+        // filed: no «Χώρα» line on the PDF, «δεν καταγράφηκε» in the infolist, and
+        // the CMR silently reading the LIVE customer country instead — the very leak
+        // the hasBeenFiled() gate exists to close.
+        $this->recipient->forceFill(['country' => 'Germany', 'afm' => '800561849'])->save();
+
+        $note = $this->makeNote([
+            'recipient_name' => $this->recipient->name,
+            'recipient_afm' => '800561849',
+            'recipient_country' => null,      // resolved from the customer at issue
+        ]);
+
+        $mock = new MockHandler([
+            new GuzzleResponse(200, [], $this->successResponseXml()),
+        ]);
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+
+        // What went to AADE…
+        $this->assertStringContainsString('<country>DE</country>', (string) $mark->request);
+
+        // …is what the column now holds, so every reader agrees with the filing
+        // even though the customer fallback is closed from here on.
+        $fresh = $note->fresh();
+        $this->assertTrue($fresh->hasBeenFiled());
+        $this->assertSame('DE', $fresh->recipient_country);
+        $this->assertSame('DE', $fresh->recipientCountryIso());
+
+        // And it survives the customer moving afterwards.
+        $this->recipient->forceFill(['country' => 'FR'])->save();
+        $this->assertSame('DE', $note->fresh()->recipientCountryIso());
+    }
+
+    public function test_an_internal_movement_freezes_gr_not_a_stale_column_value(): void
+    {
+        // The freeze must record what was FILED, not what the column happened to
+        // hold. An ενδοδιακίνηση files GR whatever `recipient_country` says, so
+        // trusting a non-empty column froze «DE» onto a note AADE holds as GR —
+        // permanently, since a filed note is no longer editable.
+        $note = $this->makeNote([
+            'customer_id' => null,
+            'recipient_name' => null,
+            'recipient_afm' => null,
+            'recipient_country' => 'DE',      // stale: there is no recipient at all
+        ]);
+        $this->assertTrue($note->isInternalMovement());
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->successResponseXml())]);
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+
+        $this->assertStringContainsString('<country>GR</country>', (string) $mark->request);
+        $this->assertSame('GR', $note->fresh()->recipient_country);
+    }
+
+    public function test_the_frozen_country_is_the_normalised_code(): void
+    {
+        // The column is documented as "what was submitted", so it must hold the code
+        // that went out (GR), not the operator's alias (EL).
+        $note = $this->makeNote(['recipient_country' => 'EL']);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->successResponseXml())]);
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+
+        $this->assertStringContainsString('<country>GR</country>', (string) $mark->request);
+        $this->assertSame('GR', $note->fresh()->recipient_country);
+    }
+
+    public function test_a_foreign_vat_prefix_is_not_stripped_when_matching_the_linked_customer(): void
+    {
+        // Afm::digits('DE811234567') is '811234567', which matches a Greek customer's
+        // ΑΦΜ — so the identity check said "this IS our customer", the note inherited
+        // that customer's country, and a German party was filed as GR with its own DE
+        // prefix in the same counterpart. A country prefix is evidence, not noise.
+        $this->recipient->forceFill(['afm' => '811234567', 'country' => 'ΕΛΛΑΔΑ'])->save();
+
+        $note = $this->makeNote([
+            'recipient_name' => null,               // blank → would file the customer's name
+            'recipient_afm' => 'DE811234567',
+            'recipient_country' => null,
+        ]);
+
+        $this->assertFalse($note->recipientIsTheLinkedCustomer());
+
+        $this->expectException(\RuntimeException::class);
+
+        (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note);
     }
 
     public function test_submit_persists_mark_qr_and_delivery_mark_row(): void

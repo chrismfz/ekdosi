@@ -143,6 +143,11 @@
 - **Lifecycle**: έκδοση → έναρξη διακίνησης → δήλωση παράδοσης → έλεγχος κατάστασης →
   ακύρωση (`DeliveryLifecycleService` + `DeliveryNoteSubmitter`), §7.1 status cache.
 - **lifecycleHistory** timeline (carrier/recipient events).
+- **Χώρα παραλήπτη (frozen)** — ο παραλήπτης μπορεί να είναι πελάτης/προμηθευτής/χειροκίνητος·
+  η χώρα του παγώνει στο δελτίο (`recipient_country`, ISO-2) και είναι υποχρεωτική όταν υπάρχει
+  ΑΦΜ παραλήπτη. Ξένος παραλήπτης **δεν δηλώνεται ποτέ ως GR**: χωρίς αναγνωρίσιμη χώρα η υποβολή
+  απορρίπτεται· GR μόνο για ενδοδιακίνηση. Κοινός normaliser `Support\IsoCountry` (EL→GR, UK→GB)
+  με το monetary invoice.
 - **Πάροχος vs direct**: έκδοση/ακύρωση μέσω παρόχου· έναρξη/παράδοση/έλεγχος direct
   myDATA. Sandbox round-tripped.
 - **CMR (διεθνής φορτωτική)** — αυτοτελές έγγραφο μεταφοράς (ΟΧΙ myDATA), στα Αγγλικά, για

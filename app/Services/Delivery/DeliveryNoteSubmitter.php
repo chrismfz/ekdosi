@@ -12,6 +12,7 @@ use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
+use App\Support\IsoCountry;
 use App\Support\MyData\Codes;
 use App\Support\MyData\DeliveryCodes;
 use Carbon\Carbon;
@@ -58,7 +59,9 @@ use Throwable;
  * classification — but the mandatory «category3 = Διακίνηση» characterization)
  * that sharing would couple two evolving concerns.
  * The few genuinely-shared idioms (per-tenant initFirebed, GR-counterpart rule,
- * country normalisation, persistResponse audit+cache) are duplicated privately.
+ * persistResponse audit+cache) are duplicated privately. Country normalisation is
+ * NOT duplicated — it lives in App\Support\IsoCountry, shared with the monetary
+ * invoice payload, so the two can't drift on EL→GR / UK→GB (MYD-011).
  *
  * The 9.x value-less line/summary shape is grounded in the firebed reference
  * payload vendor/firebed/aade-mydata/stubs/request-doc-with-delivery-lifecycle.xml
@@ -452,6 +455,8 @@ class DeliveryNoteSubmitter
                 'mydata_state' => 'VALID',
                 'mydata_mark' => $mark,
                 'mydata_url' => $result->qrUrl ?? $note->mydata_url,
+                // Freeze the country we actually filed (MYD-011) — see filedCountry().
+                'recipient_country' => $this->filedCountry($note),
                 'delivery_state' => 'registered',
                 'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
             ])->save();
@@ -562,17 +567,30 @@ class DeliveryNoteSubmitter
      */
     private function buildCounterpart(DeliveryNote $note): Counterpart
     {
-        $afm = $note->recipient_afm ?: $note->customer?->afm ?: '000000000';
+        // ONE definition of "external recipient" / "internal movement", on the model,
+        // shared with the PDF, the CMR and the provider document (MYD-011).
+        $externalAfm = $note->externalRecipientAfm();
+        $afm = $externalAfm ?: DeliveryNote::INTERNAL_MOVEMENT_AFM;
 
-        $rawCountry = $note->customer?->country ?: 'GR';
-        $country = $this->normaliseCountryCode($rawCountry);
+        $country = $this->recipientCountry($note);
 
-        $name = $note->recipient_name
-            ?: $note->customer?->name
-            ?: $this->tenant->name   // ενδοδιακίνηση — recipient is the issuer
-            ?: throw new RuntimeException(
-                "Delivery note {$note->invcode} has no recipient name and the issuer company has none either."
-            );
+        // NOT the same test as the ΑΦΜ above: that one asks «is there an external
+        // ΑΦΜ», this one asks «is there a recipient at all». They deliberately differ
+        // for a sentinel note with a linked customer — the payload then carries the
+        // customer's NAME with the 000000000 placeholder, because that party is a
+        // real recipient who simply has no ΑΦΜ. The PDF shares isInternalMovement()
+        // and prints the same pairing, so the two documents agree.
+        // The issuer's name is the recipient ONLY for an ενδοδιακίνηση. Letting it
+        // fall through for an external party filed a foreign counterpart under our
+        // own identity (e.g. an ΑΦΜ-only recipient → «Ekdosi AE / 111111111 / DE»).
+        $name = $note->isInternalMovement()
+            ? ($this->tenant->name ?: throw new RuntimeException(
+                "Delivery note {$note->invcode} is an internal movement but the issuer company has no name."
+            ))
+            : (($note->recipient_name ?: $note->customer?->name) ?: throw new RuntimeException(
+                "Delivery note {$note->invcode} has an external recipient with no name. "
+                .'AADE requires the counterpart name on a 9.x δελτίο — set «Επωνυμία παραλήπτη».'
+            ));
 
         // The delivery address is mandatory on the note (buildDeliveryHeader
         // already guards it), so it's the natural counterpart address.
@@ -590,24 +608,112 @@ class DeliveryNoteSubmitter
             ->setAddress($address);
     }
 
-    /** ISO-3166-1 alpha-2 normalisation — duplicated from MyDataSubmitter. */
-    private function normaliseCountryCode(string $raw): string
+    /**
+     * The country this note was FILED with, for the snapshot column — never throws.
+     *
+     * `recipient_country` is documented (and relied on) as "what was submitted", but
+     * a note can be issued with the country resolved from its linked customer, and
+     * nothing wrote that back. The same transaction then sets `mydata_sent`, which
+     * makes DeliveryNote::hasBeenFiled() true and cuts off the customer fallback —
+     * so the country AADE holds became invisible to the PDF, the infolist and the
+     * CMR the moment it was filed. Freezing it here is what makes the column true
+     * to its name.
+     *
+     * It asks recipientCountry() FIRST rather than trusting a non-empty column: the
+     * column is not authoritative on its own, because an ενδοδιακίνηση files GR
+     * whatever it holds. Short-circuiting on `filled()` froze «DE» onto a note AADE
+     * holds as GR — permanently, since a filed note is no longer editable. Asking
+     * the resolver also stores the NORMALISED code («EL» → «GR»), which is what the
+     * column claims to be.
+     *
+     * Never throws: we are past a successful AADE round-trip, so a resolution
+     * failure here must not undo the persist. The catch is currently UNREACHABLE —
+     * the payload is built (and the same resolver run) before either persist path,
+     * and nothing mutates the note in between — so it is pure belt-and-braces. It
+     * still normalises what it stores, because the column's whole contract is that
+     * it holds a filed ISO-2 code, not the operator's alias.
+     */
+    private function filedCountry(DeliveryNote $note): ?string
     {
-        $trimmed = trim(mb_strtoupper($raw));
-        if (strlen($trimmed) === 2 && ctype_alpha($trimmed)) {
-            return $trimmed;
+        try {
+            return $this->recipientCountry($note);
+        } catch (Throwable) {
+            return IsoCountry::tryNormalise($note->recipient_country);
+        }
+    }
+
+    /**
+     * The recipient's ISO-3166-1 alpha-2 country (MYD-011).
+     *
+     * The recipient can be a customer, a SUPPLIER or a manual entry, and only a
+     * customer carries a country through an FK — so the old
+     * `customer?->country ?: 'GR'` silently filed every foreign supplier/manual
+     * recipient as Greek. The note now freezes `recipient_country` at issue time
+     * (populated in the form from whichever party was picked); the customer's own
+     * country is only a fallback for notes written before that column existed.
+     *
+     * An unresolvable country is REFUSED, never defaulted: defaulting an external
+     * party to GR is exactly the misreport this fixes. The single sanctioned GR
+     * default is an ενδοδιακίνηση, where the recipient IS the (Greek) issuer.
+     */
+    private function recipientCountry(DeliveryNote $note): string
+    {
+        // Internal movement first: the recipient IS the (Greek) issuer, so NOTHING
+        // else may override it — not a customer's country, and not a stale
+        // recipient_country left behind by a party pick the operator then cleared.
+        // (An earlier round put the explicit country first to rescue the "named
+        // foreign party stored with the 000000000 placeholder" case; that case no
+        // longer classifies as internal, since isInternalMovement() requires no name
+        // and no customer either, so this order costs nothing.)
+        if ($note->isInternalMovement()) {
+            return 'GR';
         }
 
-        return match ($trimmed) {
-            'GREECE', 'HELLAS', 'ΕΛΛΑΔΑ', 'ΕΛΛΆΔΑ', 'GRC' => 'GR',
-            'ESTONIA', 'EESTI', 'EST' => 'EE',
-            'CYPRUS', 'ΚΥΠΡΟΣ', 'CYP' => 'CY',
-            'GERMANY', 'DEUTSCHLAND', 'ΓΕΡΜΑΝΙΑ', 'DEU' => 'DE',
-            default => throw new RuntimeException(
-                "Cannot normalise country '{$raw}' to ISO-3166-1 alpha-2 on delivery note. ".
-                'Use a 2-letter code, or extend DeliveryNoteSubmitter::normaliseCountryCode().'
-            ),
+        if ($iso = $note->recipientCountryIso()) {
+            return $iso;
+        }
+
+        // FOUR distinct failures reach here and the operator needs to be pointed at
+        // the right field for each. Reporting them all as «not an ISO code» sent an
+        // operator to inspect a customer country that was perfectly valid — the note
+        // simply names somebody else.
+        //
+        // Ordered by WHAT THE OPERATOR MUST FIX, not by how the resolver failed: the
+        // note's own «Χώρα παραλήπτη» comes first whenever it holds something,
+        // because setting it resolves every one of the states below.
+        $reason = match (true) {
+            filled($note->recipient_country) => " («{$note->recipient_country}»: μη έγκυρος κωδικός ISO-3166-1 alpha-2)",
+
+            // Already filed: recipientCountryIso() cuts the customer fallback off on
+            // purpose, so the customer's country is irrelevant here however valid it
+            // looks. Reachable through previewXml()/the sandbox commands, which is
+            // exactly where an operator reads this text.
+            $note->hasBeenFiled() => ' — το δελτίο έχει ήδη υποβληθεί χωρίς καταγεγραμμένη χώρα· '
+                .'η τρέχουσα χώρα του πελάτη ΔΕΝ είναι αυτή που δηλώθηκε (βλ. MARK)',
+
+            // A stale customer link: the note names a party other than the customer,
+            // so that customer's country is irrelevant, valid or not.
+            $note->customer_id !== null && ! $note->recipientIsTheLinkedCustomer() => ' — ο παραλήπτης '
+                .'δεν είναι ο συνδεδεμένος πελάτης, οπότε η χώρα του πελάτη δεν ισχύει γι᾽ αυτόν',
+
+            filled($note->customer?->country) => " («{$note->customer?->country}» στον πελάτη: μη έγκυρος κωδικός ISO-3166-1 alpha-2)",
+
+            default => '',
         };
+
+        // NO inference beyond this point — not from «this is one of our customers»,
+        // not from a Greek-looking ΑΦΜ. Both were tried and both are guesses at the
+        // FILING boundary: a foreign private individual, or a foreign customer with
+        // thin legacy data, has a blank country and often a 9-digit number that
+        // passes mod-11 about 1 time in 10 — and would be filed to AADE as Greek.
+        // That is the whole of MYD-011. The single sanctioned GR default is a real
+        // ενδοδιακίνηση (above); legacy domestic notes get a country by backfill or
+        // by an operator edit, which is a data fix, not a misreport.
+        throw new RuntimeException(
+            "Delivery note {$note->invcode} has an external recipient but no usable country"
+            .$reason
+            .'. Set «Χώρα παραλήπτη» on the note — a foreign recipient must not be filed as GR.'
+        );
     }
 
     private function initFirebed(?MyDataMode $environment = null): void
@@ -722,6 +828,8 @@ class DeliveryNoteSubmitter
                 'mydata_state' => 'VALID',
                 'mydata_mark' => $mark,
                 'mydata_url' => $qrUrl,
+                // Freeze the country we actually filed (MYD-011) — see filedCountry().
+                'recipient_country' => $this->filedCountry($note),
                 'delivery_state' => 'registered',
                 'local_status' => $note->local_status === 'draft' ? 'active' : $note->local_status,
             ])->save();
