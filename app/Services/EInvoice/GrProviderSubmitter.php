@@ -13,6 +13,7 @@ use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
+use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -253,7 +254,15 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             $audit = MyDataMark::create([
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
-                'mark' => $result->cancellationMark ?? (string) $mark,
+                // MYD-023: the two MARKs are different evidence and go in their own
+                // columns. This used to be `$result->cancellationMark ?? $mark`,
+                // which relabelled the ISSUE MARK as the cancellation proof
+                // whenever the provider returned none — on the very path that
+                // becomes mandatory. `mydata_marks.cancellation_mark` already
+                // existed for the direct path; it was simply not used here.
+                'mark' => (string) $mark,
+                // '' is not evidence — see CancellationMark.
+                'cancellation_mark' => CancellationMark::clean($result->cancellationMark),
                 'mydata_action' => 'PROVIDER_CANCEL',
                 'provider_key' => $this->transport->key(),
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,

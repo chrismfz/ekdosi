@@ -139,7 +139,7 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 | PROV-011 | **P2** | Ask InvoSign for a versioned contract. The cancellation-endpoint ambiguity is already resolved empirically (`[283]`, sandbox 2026-07-07). |
 | PROV-018 | **P2** | Full reversal after a partial credit. Real bug, low frequency (ΠΙΣ is a handful of documents a year), no wrong data — it fails loudly. |
 | PROV-019 | **P1, after** | «Draft credit treated as legal reversal» matters once credits are routine on the provider channel. |
-| MYD-023 | **P1, after** (invoice half **already met**) | `mydata_marks.cancellation_mark` exists and `MyDataSubmitter::cancel` uses it. The genuine gap is `DeliveryMark`, which has no such column — do it with the delivery-note work below, ahead of the digital-delivery deadline. |
+| MYD-023 | **PARTIAL** (storage DONE via #404) | The distinct cancellation MARK is now stored in its own field on **every** path — `mydata_marks` and (as of #404) `delivery_marks` both have `cancellation_mark`. Only the strict-refusal half (refuse a terminal cancel that returns no cancellation MARK) is deferred → BACKLOG. |
 | MYD-024 | already PARTIAL | Series is frozen (MYD-018); ΑΦΜ/ΓΕΜΗ edits warn. Snapshotting issuer name/address is a nicety at two single-branch tenants. |
 | **Delivery-note family** — MYD-019, MYD-026, PROV-002, STOCK-001, delivery half of MYD-023 | **P1, before the digital-delivery deadline** | These tenants issue δελτία αποστολής today (legacy) and digital delivery becomes mandatory on its own AADE deadline. Real work, correctly scoped — just **not gated on 1 Oct**. MYD-013 and MYD-016 in this family are already DONE. Do the rest as one block before the ΔΑ deadline, with a sandbox rehearsal of 9.3 issue/register/confirm/cancel. |
 | MYD-005, SETUP-004, OPS-002, OPS-003, TEST-001, DEP-001 | unchanged P2/WATCH | Correctly parked already. |
@@ -491,7 +491,7 @@ Priorities:
 | MYD-020 | P2 | DONE | — | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
 | MYD-021 | P0 | DONE | — | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
 | MYD-022 | P0 | DONE | — | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
-| MYD-023 | P0 | OPEN | B | Cancellation evidence | Direct cancellation MARKs are optional, lost or stored in the wrong field |
+| MYD-023 | P0 | PARTIAL | B | Cancellation evidence | Issue/cancellation MARKs now in distinct fields on every path (#404); strict-refusal half → BACKLOG |
 | MYD-024 | P2 | PARTIAL | B | Issuer identity | Series frozen (MYD-018); issuer name/address snapshot deferred, ΑΦΜ/ΓΕΜΗ edit now warns |
 | MYD-025 | P1 | DONE | — | Legal retention | Company delete/wipe can hard-delete documents, MARKs and audit evidence |
 | MYD-026 | P1 | OPEN | B | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state — do before the ΔΑ deadline |
@@ -811,7 +811,33 @@ default that is correct for every business.
 
 ### MYD-007 — VAT exemption reasons are wrong or too global
 
-**Status:** OPEN · **Priority:** P0 · **Research:** NEW, CONFIRMED 2026-08-30
+**Status:** OPEN · **Priority:** P0 · **Bucket:** A · **Research:** NEW, CONFIRMED 2026-08-30 · **Operator mapping added 2026-09-02**
+
+> **Operator-confirmed mapping (2026-09-02) — the concrete target for this tenant.**
+> There is NO single «intracommunity» code; goods and services diverge, and the
+> current seed's **16 / άρθρο 45** is a *domestic reverse-charge* code, wrong for
+> both. For these tenants' ordinary case — **B2B services (hosting) to an EU
+> business** — the correct triple is:
+>
+> | myDATA field | Code |
+> |---|---|
+> | `invoiceType` | **2.2** — Ενδοκοινοτική Παροχή Υπηρεσιών |
+> | `vatCategory` | **7** — Άνευ ΦΠΑ |
+> | `vatExemptionCategory` | **4** — άρθρο 18 (πρώην άρθρο 14) |
+>
+> Intra-community **goods** are different — `invoiceType` **1.2**, exemption **14 /
+> άρθρο 33** (πρώην 28). v2.0.1 distinguishes 1.2 vs 2.2 explicitly, and §8.3 maps
+> code 4→άρθρο 18 and code 14→άρθρο 33 (same mapping in Epsilon Net's worked
+> example). So: **4, not 14, and never 16** for hosting-to-EU-business.
+>
+> **This confirms the modelling defect, it does not close it.** The exemption
+> reason must become a per-line / per-VAT-row choice with the RIGHT domestic vs
+> intra-community vs export options, not one tenant-wide 0% setting. The Firebird
+> import gives country + VIES (and usually «this is a service»), but never stored
+> the actual exemption reason — so the automation must select it, and the operator
+> must be able to review it. **Needs a real split** (see «Required change» +
+> the design note below). Confirm the exact codes with the accountant before
+> shipping the defaults.
 
 **Official finding**
 
@@ -2269,9 +2295,89 @@ before payload construction, audit writes or outbound requests.
 
 ### MYD-023 — Cancellation evidence is optional or stored inconsistently
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
+**Status:** PARTIAL 2026-09-02 (storage DONE; strict refusal → BACKLOG) · **Priority:** P0 · **Research:** CONFIRMED 2026-08-31
 
-**Official finding**
+**Framing correction 2026-09-02.** myDATA cancellation exists and works today, for
+invoices and for delivery notes alike — nothing here is legacy. What changes under a
+ΥΠΑΗΕΣ **provider** is only the *invoice* side: there is no provider cancel, so the
+correction is a credit note (πιστωτικό). Provider **9.3 delivery notes** DO have a
+cancel (`iNVOSign_CancelDeliveryNote`). So the Ακύρωση button stays; it simply routes
+differently per channel. This item is about the EVIDENCE those cancellations leave
+behind, not about whether cancellation is available.
+
+**Done 2026-09-02 — the two MARKs now go in separate columns, on every path.**
+A cancellation produces two distinct MARKs: the document being cancelled, and AADE's
+own MARK for the cancellation act. `mydata_marks.cancellation_mark` has existed since
+2026-06-05 and the direct-invoice path already wrote both correctly. The other three
+paths did not:
+
+| Path | `mark` before | now | `cancellation_mark` |
+|---|---|---|---|
+| direct invoice (`MyDataSubmitter::finaliseCancellation`) | issue MARK | unchanged | already correct |
+| direct delivery (`DeliveryLifecycleService::cancel`) | issue MARK | issue MARK | **new** |
+| provider delivery (`cancelViaProvider`) | cancellation MARK, **else issue MARK** | issue MARK | cancellation MARK |
+| provider invoice (`GrProviderSubmitter::cancel`) | cancellation MARK, **else issue MARK** | issue MARK | cancellation MARK |
+
+The `?? $markToCancel` fallback on the two provider paths is the actual defect: a CANCEL
+row did not merely lack evidence, it positively ASSERTED that the issue MARK *was* the
+cancellation proof — and the provider channel is the one that becomes mandatory. A
+`delivery_marks.cancellation_mark` column was added to match `mydata_marks`.
+
+**Also closed: the same defect at a second entry point.** «Συγχρονισμός κατάστασης από
+ΑΑΔΕ» (`SyncInvoiceStateFromAade`, reached from `MyDataMarkDetail`) adopted a remote
+CANCELLED with no evidence at all, even though the read that produced the state had
+AADE's cancellation MARK in hand and `TransmittedDocReader` was discarding it
+(`$cancelledMarks[$m] = true`). The MARK is now threaded reader → `MarkDetail` → page →
+sync and recorded on the STATE_SYNC row, matching the expense twin (MYD-014).
+Deliberately WITHOUT that twin's refusal: this is the route that repairs an invoice
+whose cancellation we learned about late, so refusing over missing evidence would
+strand the very document it exists to fix.
+
+**Display:** all three surfaces that showed a CANCEL row's MARK now show both — the
+delivery-note PDF audit table and the delivery/invoice mark relation managers. The
+invoice `cancellation_mark` column had existed for three months and was never rendered.
+
+**Review round 1 (no P0/P1) — three fixed, one deferred.** Fixed: the state-sync
+cancellation MARK is now shape-checked before it reaches the audit trail (its only
+caller passes it from a client-writable Livewire property, so an arbitrary string
+would have become fabricated «AADE evidence», and one over 40 chars would have
+aborted the sync on a column error); an empty `cancellationMark` normalises to NULL
+on both cancel persists (`array_filter` strips only nulls, so `''` would have
+persisted and read as evidence); and a companion migration un-inverts any historical
+provider CANCEL row whose `mark` holds the *cancellation* MARK, separating the two
+kinds against the document's own INSERT row and refusing to guess when that row is
+absent (expected to touch zero rows — no tenant has filed through a provider in
+production yet). Deferred to `docs/BACKLOG.md`: the MARK page's XML panel shows the
+latest exchange for a MARK, so a CANCEL row now hides the original filing XML — but
+that is how the direct path has always behaved, so this change made the provider path
+*consistent* rather than introducing a regression.
+
+**Review round 2 (one P1, in the round-1 FIX) — all four fixed.** The backfill looked
+for a sibling `PROVIDER_INSERT` only, while both `cancel()` paths deliberately read
+the MARK from `['PROVIDER_INSERT','INSERT']` — so a tenant migrated
+gr-mydata → gr-provider that cancels a directly-filed document through the provider
+found no sibling and kept its inverted evidence (P1). Also: the sibling lookup gained a
+`where('id','<',…)` bound, so a later adoption/recovery INSERT cannot be adopted as the
+cancelled document; the companion migration's `down()` now REFUSES to drop the column
+while it holds a cancellation MARK that exists nowhere else (a routine
+`migrate:rollback` would have silently destroyed it — the snapshot path is unaffected);
+and the `''` normalisation turned out to be missing at a THIRD persist site
+(`MyDataSubmitter::finaliseCancellation` — firebed returns `''`, not null, for an empty
+element). Per the «fix at the ROOT» rule that third occurrence was not patched locally:
+the policy is now one definition, `App\Support\MyData\CancellationMark`, with
+`clean()` for transport values and `fromUntrusted()` for the client-writable path.
+
+**Deferred — strict refusal on a markless `Success` (→ `docs/BACKLOG.md`).** The
+finding also asks that a fresh normal `Success` without a cancellation MARK stay
+non-terminal. Not done, and not a small change in isolation: the direct-invoice path
+recovers a refused cancel through the `[251]` «already cancelled» self-heal, but the
+**delivery** and **provider** cancel paths have no already-cancelled adoption at all.
+Refusing there would leave the document cancelled remotely and VALID locally, with the
+retry throwing forever — the exact stranding pattern that had to be undone three times
+during MYD-021. Refusal must therefore ship together with already-cancelled adoption on
+those two paths; that pairing is the BACKLOG item.
+
+**Official finding** (as filed 2026-08-31 — see the dispositions above)
 
 A successful AADE cancellation returns its own `cancellationMark`; it is distinct
 evidence from the MARK of the document being cancelled.

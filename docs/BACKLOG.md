@@ -105,6 +105,24 @@ surfaced in the open-items sections further down.
 ---
 
 ## 🟠 myDATA / expenses completeness
+- **Η σελίδα ΜΑΡΚ δείχνει το XML της ΤΕΛΕΥΤΑΙΑΣ ανταλλαγής, όχι της έκδοσης (P2, από review MYD-023)** —
+  το `MyDataMarkDetail::load()` κάνει `where('mark', …)->latest('id')`, οπότε όταν υπάρχει γραμμή
+  CANCEL με το ίδιο ΜΑΡΚ, το panel request/response XML δείχνει την **ακύρωση** αντί για την αρχική
+  υποβολή. Δεν είναι regression: έτσι συμπεριφερόταν ήδη η **απευθείας** διαδρομή (γράφει το ΜΑΡΚ
+  έκδοσης στη γραμμή CANCEL από πάντα) — το MYD-023 απλώς έφερε και τη διαδρομή **παρόχου** στην ίδια
+  συμπεριφορά. Σωστό θα ήταν να δείχνει το XML της γραμμής INSERT/PROVIDER_INSERT (ή και τα δύο, με
+  διαχωρισμό «έκδοση / ακύρωση»), αλλά αυτό αλλάζει υπάρχουσα συμπεριφορά που δουλεύει → χωριστό item.
+- **Αυστηρή άρνηση σε `Success` ακύρωσης ΧΩΡΙΣ ΜΑΡΚ ακύρωσης — μαζί με υιοθέτηση
+  «ήδη ακυρωμένου» σε ΔΑ + πάροχο (υπόλοιπο MYD-023, P1)** — το MYD-023 έκλεισε την
+  **αποθήκευση** (τα δύο ΜΑΡΚ σε ξεχωριστές στήλες παντού, + το ΜΑΡΚ ακύρωσης στο
+  `STATE_SYNC`). Δεν έκλεισε το «μια κανονική επιτυχία χωρίς ΜΑΡΚ ακύρωσης να ΜΗΝ γίνεται
+  τελική». **Δεν είναι μικρή αλλαγή μόνη της:** η απευθείας διαδρομή τιμολογίου έχει δίχτυ
+  (self-heal στο `[251]` «ήδη ακυρωμένο»), αλλά η διαδρομή **δελτίων** και η διαδρομή
+  **παρόχου** ΔΕΝ έχουν καμία υιοθέτηση ήδη-ακυρωμένου. Άρνηση εκεί = το παραστατικό
+  ακυρωμένο στην ΑΑΔΕ και VALID τοπικά, με το retry να πετάει για πάντα — ακριβώς το
+  stranding που ξηλώθηκε τρεις φορές στο MYD-021. Άρα: **πρώτα** υιοθέτηση
+  ήδη-ακυρωμένου στις δύο διαδρομές, **μετά** η αυστηρή άρνηση — ένα κοινό item, όχι δύο.
+  Δένει με PROV-015.
 - **PEPPOL buyer = ζωντανός πελάτης, όχι snapshot (follow-up MYD-009)** — ο
   `PeppolInvoiceDocument` χτίζει τον αγοραστή εξ ολοκλήρου από το `customer`, ενώ η ελληνική
   διαδρομή (AADE + πάροχος) χτίζει πλέον τη νομική ταυτότητα από το **παγωμένο snapshot** του
@@ -394,22 +412,33 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   (UI + `companies.whmcs_auto_issue_immediate`). Widen only if a real per-tenant admin
   needs a specific credential delegated — don't bulk-move secrets into company_admin reach.
 
-## 🔐 `UpdateRun` authorization boundary (ΜΗ shield-generated policy)
-- Το `UpdateRun` (ιστορικό deploy updates) είναι **global, cross-tenant, super-admin-only,
-  immutable** resource — αλλά **δεν** έχει policy και **δεν** είναι στο `ADMIN_FORBIDDEN_RESOURCES`.
-  Σήμερα το προστατεύουν μόνο τα Filament overrides της σελίδας (δεν βρέθηκε εκμεταλλεύσιμο route),
-  όμως **οποιοδήποτε `Gate::authorize()` πάνω στο model θα εγκρίνει λάθος τους company admins**.
-  ⚠️ **ΜΗΝ** πέσει σκέτο `shield:generate` policy εδώ: το stock template δίνει όλα τα CRUD βάσει
-  `*:UpdateRun` permissions, που ο `TenantRoleProvisioner` μοιράζει στον `company_admin` (ακριβώς
-  αυτό απορρίφθηκε στο review του PR #389). Σωστή λύση: policy που **απαιτεί super admin**,
-  επιστρέφει `false` σε κάθε mutation (create/update/delete/restore/forceDelete/replicate/reorder),
-  **+ προσθήκη του `UpdateRun` στο `ADMIN_FORBIDDEN_RESOURCES`**, με Gate-level tests (company_admin
-  → denied). Ίδιος έλεγχος αξίζει και για τα υπόλοιπα global ops resources.
-  **Σημείωση για το «γιατί ξαναεμφανίζεται»:** το `shield:generate` τρέχει μέσα στον seeder
-  (βλ. `DatabaseSeederTest`), οπότε **κάθε run της σουίτας ξαναγράφει** το
-  `app/Policies/UpdateRunPolicy.php` ως untracked αρχείο. Θα επανεμφανίζεται μέχρι να κλείσει
-  το παραπάνω boundary (ή να μπει το resource στο shield exclusion list) — μη το commit-άρεις
-  ως έχει επειδή «εμφανίστηκε ξανά».
+## 🧹 Deploy/rollback + leads-calendar links — P2 από το review (untracked-deadlock PR)
+Δεν μπλοκάρουν τίποτα· καταγραφή για να μη χαθούν.
+- **Το rollback path δεν έχει τις νέες εγγυήσεις.** `SelfUpdate::runRollback()` και
+  `deploy/rollback.sh` κάνουν `git checkout --force` ΧΩΡΙΣ ούτε τον έλεγχο tracked-dirty ούτε το
+  `protectUntracked()` — άρα ένα untracked αρχείο που το target ref το έχει tracked αντικαθίσταται
+  χωρίς αντίγραφο. Ίδιο μοτίβο με το update path· μικρό port.
+- **Ο φάκελος αντιγράφων γράφεται πριν τους μεταγενέστερους ελέγχους.** Στο `update.sh` το
+  copy-aside τρέχει πριν το downgrade-guard και το ΑΦΜ pre-flight, οπότε ένα deploy που ματαιώνεται
+  εκεί αφήνει πίσω ένα `storage/app/deploy-untracked/<ts>/` ανά προσπάθεια (και τυπώνει «Copies
+  kept…» για deploy που δεν έγινε). Είτε μετακίνηση μετά τους ελέγχους, είτε retention/καθάρισμα.
+- **Το tab του link είναι χοντρότερη κοπή από τον αριθμό δίπλα του** (ημερολόγιο leads): το
+  `overdueBeforeGrid()` μετράει μόνο τα ΠΡΙΝ το πλέγμα αλλά ανοίγει ΟΛΑ τα ληξιπρόθεσμα, και το
+  `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η
+  διάσταση χειριστή συμφωνεί πλέον· η χρονική/πεδίου όχι. Θέλει είτε αποκλειστικά tabs είτε
+  ρητότερο κείμενο στο banner.
+
+## ✅ ~~`UpdateRun` authorization boundary (ΜΗ shield-generated policy)~~ — ΕΓΙΝΕ
+- **Έκλεισε.** `app/Policies/UpdateRunPolicy.php` γραμμένη ΣΤΟ ΧΕΡΙ (view μόνο για system super
+  admin, κάθε mutation `false`) **+** το `UpdateRun` μπήκε στο `ADMIN_FORBIDDEN_RESOURCES`, με
+  Gate-level tests (`UpdateRunAuthorizationTest`). Ποτέ stock `shield:generate` template εδώ — δίνει
+  CRUD βάσει `*:UpdateRun` permissions, ακριβώς αυτό που απορρίφθηκε στο review του PR #389.
+  Έκλεισε ταυτόχρονα και το deploy deadlock: όσο ΔΕΝ υπήρχε αρχείο policy, το `shield:generate`
+  (deploy + seeder) το ξανάγραφε ως untracked και το pre-flight του `update.sh` αρνιόταν το επόμενο
+  deploy. Φύλακας: `ShieldPolicyDriftTest` (κανένα resource χωρίς committed policy).
+- **Υπόλοιπο (μικρό):** τα άλλα δύο global (`$isScopedToTenant = false`) resources — `Company`,
+  `User` — είναι ήδη στο `ADMIN_FORBIDDEN_RESOURCES` αλλά έχουν **stock** shield policies. Αξίζει
+  ίδιο πέρασμα (super-admin-only, mutations `false`) όταν ακουμπήσουμε ξανά τα δικαιώματα.
 
 ## 🔒 Backup / DR / Portability
 - **Durable native portable key (μετά το legacy_id sunset).** Ο `CompanyImporter` κλειδώνει

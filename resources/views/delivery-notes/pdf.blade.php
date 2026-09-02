@@ -343,7 +343,12 @@
                         <tr>
                             <td>{{ optional($m->created_at)->format('d/m/Y H:i') }}</td>
                             <td>{{ $m->actionLabel() }}</td>
-                            <td class="mono">{{ $m->mark ?: '—' }}</td>
+                            {{-- MYD-023: a CANCEL row now carries the cancelled document's
+                                 MARK in `mark` and AADE's own cancellation MARK in its own
+                                 column. Show both so the printed audit still proves WHICH
+                                 cancellation produced the terminal state — the provider path
+                                 used to display the cancellation MARK here instead. --}}
+                            <td class="mono">{{ $m->mark ?: '—' }}@if($m->cancellation_mark)<br>ακύρωση: {{ $m->cancellation_mark }}@endif</td>
                         </tr>
                     @endforeach
                 </tbody>

@@ -85,9 +85,15 @@ class TenantRoleProvisioner
      * management. Default-deny: a new sensitive resource is excluded until
      * deliberately removed from this list.
      *
+     * These are EXACTLY the three `$isScopedToTenant = false` resources in the
+     * panel (User / Company / UpdateRun) plus Role (escalation). UpdateRun is
+     * the whole-app deploy history: cross-tenant AND immutable, so a company
+     * admin has no business holding `*:UpdateRun` at all — `UpdateRunPolicy`
+     * denies them a second time at the Gate.
+     *
      * @var list<string>
      */
-    public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role'];
+    public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role', 'UpdateRun'];
 
     // ── super_admin ────────────────────────────────────────────────────────
 

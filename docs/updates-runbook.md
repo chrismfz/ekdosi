@@ -220,8 +220,16 @@ actually recover». For a restore when the **APP_KEY is lost**, see
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.
-- `update.sh` refuses to run with a dirty working tree: never hand-edit code on
-  prod; fix on dev, tag, deploy.
+- `update.sh` refuses to run with **uncommitted tracked changes**: never hand-edit
+  code on prod; fix on dev, tag, deploy. **Untracked** files only produce a warning
+  (they used to be a hard stop, and a generated `app/Policies/*Policy.php` from
+  `shield:generate` then deadlocked every later deploy — `git stash` does not clear
+  untracked files). Note the checkout is `--force`, so an untracked file whose path
+  the target ref ships as a tracked file gets replaced by the release's version; the
+  pre-flight names those separately and **copies them to
+  `storage/app/deploy-untracked/<timestamp>/`** first (and aborts if that copy fails),
+  so the deploy never stops and nothing is destroyed unseen. Delete those copies once
+  you've checked them.
 - **On failure, `update.sh`/`rollback.sh` STAY in maintenance mode** on purpose
   (a half-applied update must not be served). They print the rollback command;
   bring the app back with `php artisan up` only once it's healthy.

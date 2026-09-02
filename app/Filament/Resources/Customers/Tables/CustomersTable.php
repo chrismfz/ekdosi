@@ -30,7 +30,8 @@ class CustomersTable
         return $table
             // Apply filters immediately (Filament defers them by default).
             // The dashboard's "Ανεξόφλητα (πιστωτικά)" card drills in via a
-            // ?tableFilters[balance_status][value]=debtor URL; with deferred
+            // ?filters[balance_status][value]=debtor URL (App\Support\TableFilterUrl
+            // builds it — `filters` is the bound key); with deferred
             // filters that value only PRE-FILLS the form and the operator
             // would still have to click "Apply" — the list would land
             // unfiltered. deferFilters(false) makes the drill-down (and all

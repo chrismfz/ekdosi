@@ -89,6 +89,13 @@ class MyDataMarkDetail extends Page
      */
     public ?string $aadeState = null;
 
+    /**
+     * AADE's MARK for the cancellation act, captured by the same enrich that set
+     * `$aadeState` — the evidence «Συγχρονισμός κατάστασης» persists so the
+     * adopted terminal state can say WHICH cancellation caused it (MYD-023).
+     */
+    public ?string $aadeCancelledByMark = null;
+
     public static function shouldRegisterNavigation(): bool
     {
         // Now a first-class menu page («Έλεγχος ΜΑΡΚ») — gated by canAccess()
@@ -254,6 +261,7 @@ class MyDataMarkDetail extends Page
         // described (enrichFromAade re-sets it right after its own load()).
         $this->enrichReport = null;
         $this->aadeState = null;
+        $this->aadeCancelledByMark = null;
 
         $tenant = Filament::getTenant();
         $mark = (string) $this->mark;
@@ -405,6 +413,9 @@ class MyDataMarkDetail extends Page
         $this->load(); // refresh the local doc (QR now shows); clears stale report
         $this->enrichReport = $report; // set AFTER load(), which nulls it
         $this->aadeState = $aadeState; // ditto — enables «Συγχρονισμός κατάστασης»
+        $this->aadeCancelledByMark = is_string($detail['cancelledByMark'] ?? null)
+            ? $detail['cancelledByMark']
+            : null;
 
         $diffs = array_values(array_filter($this->enrichReport['comparison'], fn (array $r): bool => ! $r['match']));
         $notification = Notification::make()->title('Σύγκριση με ΑΑΔΕ ολοκληρώθηκε')->persistent();
@@ -499,7 +510,8 @@ class MyDataMarkDetail extends Page
         }
 
         try {
-            $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, (string) $this->aadeState);
+            $result = app(SyncInvoiceStateFromAade::class)
+                ->sync($invoice, (string) $this->aadeState, $this->aadeCancelledByMark);
         } catch (Throwable $e) {
             Notification::make()->title('Αποτυχία συγχρονισμού')->danger()->body($e->getMessage())->send();
 

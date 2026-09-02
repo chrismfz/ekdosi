@@ -9,6 +9,7 @@ use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteEvent;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
@@ -444,7 +445,16 @@ class DeliveryLifecycleService
 
         $responseXml = $action->getResponseXML() ?? '';
 
-        return $this->persistCancellation($note, $markToCancel, $reason, $responseXml);
+        // AADE returns its OWN MARK for the cancellation act. Record it in its own
+        // column instead of leaving the row claiming the issue MARK is the proof.
+        return $this->persistCancellation(
+            $note,
+            $markToCancel,
+            $reason,
+            $responseXml,
+            null,
+            $first->getCancellationMark(),
+        );
     }
 
     /**
@@ -472,10 +482,16 @@ class DeliveryLifecycleService
 
         return $this->persistCancellation(
             $note,
-            $result->cancellationMark ?? $markToCancel,
+            // The document being cancelled. It used to receive
+            // `$result->cancellationMark ?? $markToCancel`, which silently
+            // relabelled the issue MARK as cancellation evidence whenever the
+            // provider returned none — and the provider path is the one that
+            // becomes mandatory. The two now go to their own columns.
+            $markToCancel,
             $reason,
             $result->raw,
             $transport->key(),
+            $result->cancellationMark,
         );
     }
 
@@ -483,6 +499,19 @@ class DeliveryLifecycleService
      * Persist the terminal cancelled state — shared by the direct-myDATA and the
      * provider cancel paths so both leave an IDENTICAL CANCEL audit row + cache
      * flip (only mark / response / provider_key differ).
+     *
+     * The issue MARK and the CANCELLATION MARK are different evidence and go in
+     * different columns (MYD-023). `$mark` is the document being cancelled;
+     * `$cancellationMark` is AADE's (or the provider's) own MARK for the
+     * cancellation ACT. Before this the issue
+     * MARK was written into `mark` on a row whose action is CANCEL, and the
+     * provider path fell back to it with `?? $markToCancel` — so the audit trail
+     * positively ASSERTED that the issue MARK was the cancellation evidence.
+     * That is worse than recording nothing, because it reads as proof.
+     *
+     * A null `$cancellationMark` is allowed and meaningful: it records that the
+     * cancellation happened without one being returned to us. Falling back to the
+     * issue MARK is what must not happen.
      */
     private function persistCancellation(
         DeliveryNote $note,
@@ -490,12 +519,17 @@ class DeliveryLifecycleService
         string $reason,
         ?string $responseXml,
         ?string $providerKey = null,
+        ?string $cancellationMark = null,
     ): DeliveryMark {
-        return DB::transaction(function () use ($note, $mark, $reason, $responseXml, $providerKey) {
+        // '' is not evidence — see CancellationMark for why this is one shared rule.
+        $cancellationMark = CancellationMark::clean($cancellationMark);
+
+        return DB::transaction(function () use ($note, $mark, $cancellationMark, $reason, $responseXml, $providerKey) {
             $audit = DeliveryMark::create(array_filter([
                 'company_id' => $note->company_id,
                 'delivery_note_id' => $note->id,
                 'mark' => $mark,
+                'cancellation_mark' => $cancellationMark,
                 'mydata_action' => 'CANCEL',
                 'provider_key' => $providerKey,
                 'request' => $reason !== '' ? "Cancel reason: {$reason}" : null,

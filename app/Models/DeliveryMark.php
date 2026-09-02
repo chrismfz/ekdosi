@@ -23,6 +23,9 @@ class DeliveryMark extends Model
         'legacy_id',
         'delivery_note_id',
         'mark',
+        // AADE's own MARK for the cancellation ACT — distinct evidence from the
+        // MARK of the document being cancelled (MYD-023).
+        'cancellation_mark',
         'mydata_action',
         'provider_key',
         'authentication_code',

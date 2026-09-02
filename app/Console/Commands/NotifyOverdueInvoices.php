@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Support\TableFilterUrl;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Console\Command;
@@ -84,7 +85,7 @@ class NotifyOverdueInvoices extends Command
                     ->actions([
                         Action::make('view')
                             ->label('Προβολή')
-                            ->url(InvoiceResource::getUrl('index', ['tableFilters' => ['overdue' => ['isActive' => true]]], tenant: $company))
+                            ->url(InvoiceResource::getUrl('index', TableFilterUrl::with(['overdue' => ['isActive' => true]]), tenant: $company))
                             ->markAsRead(),
                     ])
                     ->sendToDatabase($user);

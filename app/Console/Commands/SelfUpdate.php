@@ -169,10 +169,33 @@ class SelfUpdate extends Command
         if (! is_dir(base_path('.git'))) {
             throw new \RuntimeException('Δεν βρέθηκε φάκελος .git — η in-app ενημέρωση («php» strategy) απαιτεί deployment μέσω git checkout.');
         }
-        $dirty = trim($this->capture(['git', 'status', '--porcelain'], base_path()));
+        // TRACKED changes only (`--untracked-files=no`), same rule as
+        // deploy/update.sh: a bare `--porcelain` counts UNTRACKED files, and the
+        // `shield:generate` step below writes one for any resource shipping
+        // without a policy — which then refused every later update. Here it is
+        // worse than on the shell script: the panel operator has no shell to
+        // clear it with, so this must never be the stop condition.
+        $dirty = trim($this->capture(['git', 'status', '--porcelain', '--untracked-files=no'], base_path()));
         if ($dirty !== '') {
             throw new \RuntimeException("Το working tree δεν είναι καθαρό — ματαίωση:\n".$dirty);
         }
+
+        // ── fetch — still UP, so a network failure costs no downtime (same
+        //    order as deploy/update.sh: fetch, then resolve, then go down) ────
+        $target = (string) $run->to_ref;
+        if ($target === '') {
+            throw new \RuntimeException('Δεν έχει οριστεί target ref (to_ref) στην ενημέρωση.');
+        }
+        $this->step($run, 'fetch', 'git fetch', function () use ($run) {
+            $this->gitFetch($run);
+        });
+
+        // Copy aside anything the checkout would replace — needs the ref FETCHED
+        // (to know what it ships) and must run BEFORE maintenance, so its
+        // abort-on-failed-backup never strands the app down with no shell.
+        $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $target) {
+            $this->protectUntracked($run, $target);
+        });
 
         // ── maintenance ON — from here on, a failure leaves the app DOWN ─────
         $this->step($run, 'maintenance', 'Maintenance mode ON', function () use ($run, $php, $artisan) {
@@ -187,14 +210,7 @@ class SelfUpdate extends Command
             $run->update(['snapshot_file' => $snapshot]);
         });
 
-        // ── fetch + checkout the target ref ─────────────────────────────────
-        $target = (string) $run->to_ref;
-        if ($target === '') {
-            throw new \RuntimeException('Δεν έχει οριστεί target ref (to_ref) στην ενημέρωση.');
-        }
-        $this->step($run, 'fetch', 'git fetch', function () use ($run) {
-            $this->gitFetch($run);
-        });
+        // ── checkout the target ref ─────────────────────────────────────────
         $this->step($run, 'checkout', 'git checkout '.$target, function () use ($run, $target) {
             $this->exec($run, ['git', 'checkout', '--force', $target], base_path());
             $this->writeBuildStamp($run, $target);
@@ -441,11 +457,62 @@ class SelfUpdate extends Command
         }
     }
 
-    /** Run a subprocess and RETURN its stdout (no streaming) — for tiny probes. */
+    /**
+     * `checkout --force` REPLACES an untracked file whose path the target ref
+     * ships as a tracked one — usually a generated artefact, which is exactly
+     * what should happen. Copy them aside first anyway (the panel operator has
+     * no shell to recover one), and abort rather than overwrite blind if the
+     * copy fails. Mirrors the same block in deploy/update.sh.
+     */
+    private function protectUntracked(UpdateRun $run, string $target): void
+    {
+        // -z + quotePath=false: git C-quotes non-ASCII paths by default, which
+        // would make the cat-file probe miss a Greek filename.
+        $listed = $this->capture(
+            ['git', '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'],
+            base_path(),
+        );
+
+        $backup = storage_path('app/deploy-untracked/'.now()->format('Ymd-His'));
+
+        foreach (array_filter(explode("\0", $listed)) as $path) {
+            $tracked = new Process(['git', 'cat-file', '-e', $target.':'.$path], base_path(), null, null, 60);
+            $tracked->run();
+
+            if (! $tracked->isSuccessful()) {
+                continue;   // not in the target ref — the checkout leaves it alone
+            }
+
+            $to = $backup.'/'.$path;
+            File::ensureDirectoryExists(dirname($to));
+
+            if (! File::copy(base_path($path), $to)) {
+                throw new \RuntimeException("Δεν μπόρεσα να κρατήσω αντίγραφο του '{$path}' στο {$backup} — ματαίωση πριν αντικατασταθεί.");
+            }
+
+            $this->append($run, "  αντίγραφο: {$path} → {$to}\n");
+        }
+    }
+
+    /**
+     * Run a subprocess and RETURN its stdout (no streaming) — for tiny probes.
+     * THROWS on a non-zero exit: every caller reads the output as fact (the
+     * clean-tree pre-flight, the untracked listing), so a failed `git` returning
+     * an empty string would read as «clean» / «nothing to protect».
+     */
     private function capture(array $cmd, ?string $cwd = null): string
     {
         $process = new Process($cmd, $cwd ?? base_path(), null, null, 60);
         $process->run();
+
+        if (! $process->isSuccessful()) {
+            throw new \RuntimeException(sprintf(
+                '«%s» exited %d: %s',
+                implode(' ', array_slice($cmd, 0, 2)),
+                (int) $process->getExitCode(),
+                $this->redact(trim($process->getErrorOutput()) ?: trim($process->getOutput())),
+            ));
+        }
 
         return $process->getOutput();
     }
@@ -505,8 +572,20 @@ class SelfUpdate extends Command
      */
     private function writeBuildStamp(UpdateRun $run, string $ref): void
     {
-        $sha = trim($this->capture(['git', 'rev-parse', '--short', 'HEAD'], base_path()));
-        $committedAt = trim($this->capture(['git', 'log', '-1', '--format=%cI'], base_path()));
+        // Best-effort: this runs AFTER the checkout, with the app down, and a
+        // missing build stamp is cosmetic (BuildInfo falls back) — never a reason
+        // to abort a deploy that already landed. Hence tolerant, unlike the
+        // pre-flight probes that capture() now throws for.
+        $stamp = function (array $cmd): string {
+            try {
+                return trim($this->capture($cmd, base_path()));
+            } catch (Throwable) {
+                return '';
+            }
+        };
+
+        $sha = $stamp(['git', 'rev-parse', '--short', 'HEAD']);
+        $committedAt = $stamp(['git', 'log', '-1', '--format=%cI']);
 
         File::ensureDirectoryExists(storage_path('app'));
         File::put(storage_path('app/build.json'), (string) json_encode([
