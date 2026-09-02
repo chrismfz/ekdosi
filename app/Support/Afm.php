@@ -40,7 +40,9 @@ final class Afm
         // other Greek letter (an «ΑΦΜ» label, stray text) is simply dropped.
         $upper = strtr(mb_strtoupper((string) $raw), ['ΕΛ' => 'EL', 'ΕL' => 'EL', 'EΛ' => 'EL']);
         $key = preg_replace('/[^A-Z0-9]+/', '', $upper) ?? '';
-        if ($key === '') {
+        // Every real ΑΦΜ/VAT carries digits; letters-only text («N/A», «NONE»,
+        // a bare «EL») is a free-text placeholder, not an identity.
+        if ($key === '' || preg_match('/\d/', $key) !== 1) {
             return null;
         }
 

@@ -5,6 +5,7 @@ namespace Tests\Feature\Customers;
 use App\Actions\ConvertLeadToCustomer;
 use App\Enums\LeadStatus;
 use App\Filament\Resources\Customers\Pages\CreateCustomer;
+use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Lead;
@@ -51,6 +52,10 @@ class CustomerAfmKeyTest extends TestCase
         $this->assertSame('123456789', Afm::uniqueKey('ΕΛ 123456789'), 'Greek-keyboard «ΕΛ» prefix folds to EL.');
         $this->assertSame('123456789', Afm::uniqueKey('ΑΦΜ ΕL123456789'), 'a Greek label is dropped');
         $this->assertSame('EE123456789', Afm::uniqueKey('ee 123456789'), 'Estonian EE+9 digits stays a foreign VAT');
+        $this->assertNull(Afm::uniqueKey('N/A'), 'letters-only text is a free-text placeholder');
+        $this->assertNull(Afm::uniqueKey('NONE'));
+        $this->assertNull(Afm::uniqueKey('EL'));
+        $this->assertNull(Afm::uniqueKey('ΑΦΜ'));
         $this->assertSame('EE123456789', Afm::uniqueKey('EE123456789'), 'Only EL/GR collapse to digits.');
         $this->assertNull(Afm::uniqueKey('000000000'), 'Placeholder is not an identity.');
         $this->assertNull(Afm::uniqueKey('999 999 999'));
@@ -272,6 +277,83 @@ class CustomerAfmKeyTest extends TestCase
             $this->assertStringContainsString('legacy', $e->getMessage());
         }
         $this->assertSame(8, (int) $c->fresh()->legacy_id, 'nothing overwritten');
+    }
+
+    public function test_importer_handles_an_afm_swap_between_two_twins_and_adopts_a_missing_legacy_id(): void
+    {
+        // Bundle (the corrected source): A(legacy 7)=K1, B(legacy 8)=K2. Locally
+        // the two are SWAPPED — a move/swap between twins must just work.
+        $src = Company::create(['name' => 'Src', 'slug' => 'src8', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $a = Customer::create(['company_id' => $src->id, 'name' => 'A', 'afm' => '111111112']);
+        $a->forceFill(['legacy_id' => 7])->save();
+        $b = Customer::create(['company_id' => $src->id, 'name' => 'B', 'afm' => '222222223']);
+        $b->forceFill(['legacy_id' => 8])->save();
+        // A third row that the bundle carries WITH a legacy_id.
+        $c = Customer::create(['company_id' => $src->id, 'name' => 'C', 'afm' => '333333334']);
+        $c->forceFill(['legacy_id' => 9])->save();
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+
+        // Locally: swap A/B, and C has no legacy_id (made in the panel here).
+        $a->update(['afm' => '000000000']);
+        $b->update(['afm' => '111111112']);
+        $a->update(['afm' => '222222223']);
+        $c->forceFill(['legacy_id' => null])->save();
+
+        $dry = app(CompanyImporter::class)->run($bundle, ['into' => 'src8', 'execute' => false, 'passphrase' => 'p@ss']);
+        $this->assertSame(['insert' => 0, 'update' => 3], $dry['tables']['customers'], 'dry-run: no conflict, three merges');
+
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src8', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $this->assertSame('111111112', $a->fresh()->afm_key, 'A took K1 back');
+        $this->assertSame('222222223', $b->fresh()->afm_key, 'B took K2 back');
+        $this->assertSame(9, (int) $c->fresh()->legacy_id, 'a legacy_id-less local row adopts the bundle legacy_id on an ΑΦΜ-merge');
+        $this->assertSame(3, Customer::withTrashed()->where('company_id', $src->id)->count());
+    }
+
+    public function test_importer_dry_run_refuses_the_same_conflict_execute_would(): void
+    {
+        $src = Company::create(['name' => 'Src', 'slug' => 'src9', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $a = Customer::create(['company_id' => $src->id, 'name' => 'A', 'afm' => '123456789']);
+        $a->forceFill(['legacy_id' => 7])->save();
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+
+        // Locally A's ΑΦΜ was corrected and a NON-twin row B now owns 123456789.
+        $a->update(['afm' => '999999991']);
+        Customer::create(['company_id' => $src->id, 'name' => 'B', 'afm' => '123456789']);
+
+        try {
+            app(CompanyImporter::class)->run($bundle, ['into' => 'src9', 'execute' => false, 'passphrase' => 'p@ss']);
+            $this->fail('The dry-run must refuse what execute refuses.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Σύγκρουση ΑΦΜ', $e->getMessage());
+        }
+    }
+
+    public function test_edit_page_survives_the_unique_race_with_a_friendly_message(): void
+    {
+        $t = $this->tenant();
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
+        Gate::before(fn () => true);
+        $this->actingAs($user);
+        Filament::setTenant($t);
+
+        $mine = Customer::create(['company_id' => $t->id, 'name' => 'Δικός μου', 'afm' => '999999991']);
+
+        // The twin lands AFTER validation, right before our UPDATE.
+        $fired = false;
+        Customer::updating(function (Customer $c) use (&$fired, $t): void {
+            if (! $fired) {
+                $fired = true;
+                DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Νικητής', 'afm' => '123456789', 'afm_key' => '123456789', 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+
+        Livewire::test(EditCustomer::class, ['record' => $mine->getRouteKey()])
+            ->fillForm(['afm' => '123456789'])
+            ->call('save')
+            ->assertNotified('Υπάρχει ήδη πελάτης με αυτό το ΑΦΜ');
+
+        $this->assertSame('999999991', $mine->fresh()->afm, 'the edit was not applied');
     }
 
     public function test_importer_result_does_not_depend_on_bundle_order(): void

@@ -3,22 +3,43 @@
 namespace App\Filament\Resources\Customers\Pages;
 
 use App\Exceptions\Whmcs\WhmcsApiException;
-use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
-use App\Exceptions\Whmcs\WhmcsNotConfigured;
-use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Models\Customer;
 use App\Services\Whmcs\WhmcsClientFactory;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Support\Exceptions\Halt;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 class EditCustomer extends EditRecord
 {
     protected static string $resource = CustomerResource::class;
+
+    /**
+     * Editing the ΑΦΜ onto one another operator just created: the form rule
+     * passed a moment ago, UNIQUE(company_id, afm_key) wins now — say so.
+     */
+    protected function handleRecordUpdate(Model $record, array $data): Model
+    {
+        try {
+            return parent::handleRecordUpdate($record, $data);
+        } catch (UniqueConstraintViolationException) {
+            Notification::make()
+                ->title('Υπάρχει ήδη πελάτης με αυτό το ΑΦΜ')
+                ->body('Δημιουργήθηκε μόλις τώρα από άλλον χειριστή. Βρες τον στη λίστα πελατών· αυτή η αλλαγή δεν αποθηκεύτηκε.')
+                ->danger()
+                ->persistent()
+                ->send();
+
+            throw new Halt;
+        }
+    }
 
     protected function getHeaderActions(): array
     {
@@ -95,6 +116,7 @@ class EditCustomer extends EditRecord
                                 $options[$id] = '#'.$id.' — '.($name ?: '(no name)')
                                     .($email !== '' ? ' <'.$email.'>' : '');
                             }
+
                             return $options;
                         })
                         ->getOptionLabelUsing(function ($value) use ($record): ?string {
@@ -130,9 +152,10 @@ class EditCustomer extends EditRecord
                             if (! $value) {
                                 return null;
                             }
-                            if ($record->company_id !== \Filament\Facades\Filament::getTenant()?->getKey()) {
+                            if ($record->company_id !== Filament::getTenant()?->getKey()) {
                                 return '#'.$value;
                             }
+
                             return 'Currently linked to WHMCS client #'.$value;
                         })
                         ->default($record->whmcs_client_id)

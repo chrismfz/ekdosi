@@ -379,6 +379,10 @@ class CompanyImporter
             // customers also merge by ΑΦΜ identity (see importTable) — the dry-run
             // must say so, or the operator approves inserts that become overwrites.
             $afmIndex = ($existing && $table === 'customers') ? $this->afmKeyIndex($existing->id) : [];
+            if ($existing && $table === 'customers') {
+                // …and it must REFUSE exactly what execute would refuse.
+                $this->assertNoCustomerAfmConflicts($rows, $existing->id, $index);
+            }
             $insert = 0;
             $update = 0;
             foreach ($rows as $row) {
@@ -403,19 +407,33 @@ class CompanyImporter
         }
 
         $index = $this->existingIndex($table, $companyId);
-        // customers: ΑΦΜ identity → local id, built once and kept current (a
-        // row that changes ΑΦΜ releases its old key) so a 10k-row import costs
-        // one scan, not one SELECT per row; plus id → legacy_id for the merge guard.
-        $afmIndex = $table === 'customers' ? $this->afmKeyIndex($companyId) : [];
-        $legacyById = $table === 'customers'
-            ? DB::table('customers')->where('company_id', $companyId)->whereNotNull('legacy_id')->pluck('legacy_id', 'id')->all()
-            : [];
 
-        // customers: natural-key twins FIRST (their updates release any ΑΦΜ they
-        // gave up), then the rest — so an ΑΦΜ-merge can never land on a row that
-        // a later bundle row owns by legacy_id, whatever the dump order.
+        // customers: the ΑΦΜ identity map (afm_key → id, and id → afm_key for
+        // O(1) release), the legacy map for the merge guard, and — like the ETL —
+        // every natural-key twin gives up its key BEFORE any row is written, so a
+        // move or swap of ΑΦΜ between twins can never trip the unique index and
+        // the dump order is irrelevant. A true conflict (a twin's new ΑΦΜ owned
+        // by a NON-twin local row) is detected up-front, never mid-transaction.
+        $afmIndex = [];
+        $keyById = [];
+        $legacyById = [];
         if ($table === 'customers') {
-            usort($rows, fn (array $a, array $b): int => (int) isset($index[$this->naturalKey($table, $b)]) <=> (int) isset($index[$this->naturalKey($table, $a)]));
+            $this->assertNoCustomerAfmConflicts($rows, $companyId, $index);
+
+            $twinIds = [];
+            foreach ($rows as $row) {
+                $twin = $index[$this->naturalKey($table, $row)] ?? null;
+                if ($twin !== null) {
+                    $twinIds[$twin] = true;
+                }
+            }
+            if ($twinIds !== []) {
+                DB::table('customers')->whereIn('id', array_keys($twinIds))->update(['afm_key' => null]);
+            }
+
+            $afmIndex = $this->afmKeyIndex($companyId);
+            $keyById = array_flip($afmIndex);
+            $legacyById = DB::table('customers')->where('company_id', $companyId)->whereNotNull('legacy_id')->pluck('legacy_id', 'id')->all();
         }
 
         foreach ($rows as $row) {
@@ -427,24 +445,11 @@ class CompanyImporter
             $existingId = $index[$key] ?? null;
             $mergedByAfm = false;
 
-            if ($table === 'customers' && $afmKey !== null) {
-                $afmOwner = $afmIndex[$afmKey] ?? null;
-
-                if ($existingId === null && $afmOwner !== null) {
-                    // No natural-key twin, but a local row owns this ΑΦΜ: that IS
-                    // the customer (the unique index would reject an insert).
-                    $existingId = $afmOwner;
-                    $mergedByAfm = true;
-                } elseif ($existingId !== null && $afmOwner !== null && $afmOwner !== $existingId) {
-                    // The natural-key twin would take an ΑΦΜ another local row
-                    // already owns → fail closed with guidance, never a raw
-                    // unique error mid-transaction.
-                    throw new RuntimeException(
-                        'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «'.($row['name'] ?? '?').'» '
-                        ."(ΑΦΜ {$afmKey}) αντιστοιχεί στον τοπικό πελάτη #{$existingId}, αλλά το ΑΦΜ το έχει ήδη ο #{$afmOwner}. "
-                        .'Διόρθωσε/συγχώνευσε τους δύο τοπικούς πελάτες (php artisan customers:afm-duplicates) και ξαναπροσπάθησε.'
-                    );
-                }
+            // customers: no natural-key twin, but a local row owns this ΑΦΜ →
+            // that IS the customer (the unique index would reject an insert).
+            if ($existingId === null && $afmKey !== null && isset($afmIndex[$afmKey])) {
+                $existingId = $afmIndex[$afmKey];
+                $mergedByAfm = true;
             }
 
             if ($existingId !== null) {
@@ -453,9 +458,10 @@ class CompanyImporter
                 // after the export must not be resurrected by its bundle twin.
                 unset($data['deleted_at']);
                 if ($mergedByAfm) {
-                    // An ΑΦΜ-merge never touches the local legacy_id (the ETL's
-                    // re-run key): a bundle row without one keeps the local, a
-                    // bundle row with a DIFFERENT one is a real conflict.
+                    // legacy_id (the ETL's re-run key) on an ΑΦΜ-merge: keep the
+                    // local one; adopt the bundle's when the local row has none
+                    // (no other local row holds it — it would have been the
+                    // natural-key twin); two DIFFERENT ones are a real conflict.
                     $localLegacy = $legacyById[$id] ?? null;
                     $bundleLegacy = $data['legacy_id'] ?? null;
                     if ($bundleLegacy !== null && $localLegacy !== null && (string) $bundleLegacy !== (string) $localLegacy) {
@@ -465,13 +471,17 @@ class CompanyImporter
                             .'Δύο διαφορετικές legacy ταυτότητες για ένα ΑΦΜ — διόρθωσε πρώτα τοπικά.'
                         );
                     }
-                    unset($data['legacy_id']);
+                    if ($bundleLegacy === null) {
+                        unset($data['legacy_id']);
+                    } else {
+                        $legacyById[$id] = $bundleLegacy;
+                    }
                 }
                 DB::table($table)->where('id', $id)->update($data);
 
-                // The row may have changed ΑΦΜ: release any key it held before.
-                if ($table === 'customers') {
-                    $afmIndex = array_filter($afmIndex, fn (int $owner): bool => $owner !== $id);
+                // The row may have changed ΑΦΜ: release the key it held (O(1)).
+                if ($table === 'customers' && isset($keyById[$id])) {
+                    unset($afmIndex[$keyById[$id]], $keyById[$id]);
                 }
             } else {
                 $id = DB::table($table)->insertGetId($data);
@@ -482,6 +492,7 @@ class CompanyImporter
 
             if ($afmKey !== null) {
                 $afmIndex[$afmKey] = $id;
+                $keyById[$id] = $afmKey;
             }
 
             if ($oldId !== null) {
@@ -535,6 +546,43 @@ class CompanyImporter
     }
 
     /**
+     * A natural-key twin whose NEW ΑΦΜ is owned by a local row that is NOT a
+     * twin of any bundle row cannot be written (twins release their keys
+     * first, non-twins never do). Same check in plan() and in importTable(),
+     * so the dry-run reports exactly what execute would refuse.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @param  array<string,int>  $index  natural-key => local id
+     */
+    private function assertNoCustomerAfmConflicts(array $rows, int $companyId, array $index): void
+    {
+        $twinIds = [];
+        foreach ($rows as $row) {
+            $twin = $index[$this->naturalKey('customers', $row)] ?? null;
+            if ($twin !== null) {
+                $twinIds[$twin] = true;
+            }
+        }
+
+        $afmIndex = $this->afmKeyIndex($companyId);
+        foreach ($rows as $row) {
+            $twin = $index[$this->naturalKey('customers', $row)] ?? null;
+            $afmKey = Afm::uniqueKey($row['afm'] ?? null);
+            if ($twin === null || $afmKey === null) {
+                continue;
+            }
+            $owner = $afmIndex[$afmKey] ?? null;
+            if ($owner !== null && $owner !== $twin && ! isset($twinIds[$owner])) {
+                throw new RuntimeException(
+                    'Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «'.($row['name'] ?? '?').'» '
+                    ."(ΑΦΜ {$afmKey}) αντιστοιχεί στον τοπικό πελάτη #{$twin}, αλλά το ΑΦΜ το έχει ήδη ο #{$owner}. "
+                    .'Διόρθωσε/συγχώνευσε τους δύο τοπικούς πελάτες (php artisan customers:afm-duplicates) και ξαναπροσπάθησε.'
+                );
+            }
+        }
+    }
+
+    /**
      * @return array<string, int> customers.afm_key => id (soft-deleted included — the unique index covers them)
      */
     private function afmKeyIndex(int $companyId): array
@@ -554,7 +602,7 @@ class CompanyImporter
     {
         $index = [];
         foreach (DB::table($table)->where('company_id', $companyId)->get() as $row) {
-            $index[$this->naturalKey($table, (array) $row)] = $row->id;
+            $index[$this->naturalKey($table, (array) $row)] = (int) $row->id;
         }
 
         return $index;
