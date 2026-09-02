@@ -41,6 +41,9 @@ class MyDataMark extends Model
         // direct myDATA filings). See docs/paroxos/implementation-plan.md §5.
         'provider_key',
         'authentication_code',
+        // Provider document UID (invoiceUid) — distinct from the AADE MARK.
+        // Parsed from a provider filing; null for direct-myDATA marks. PROV-003.
+        'uid',
         'delivery_state',
         'invoice_url',
         'request',

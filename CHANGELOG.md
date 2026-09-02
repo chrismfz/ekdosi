@@ -19,6 +19,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **PROV-003 — απόδειξη παρόχου (ΥΠΑΗΕΣ) στο PDF πελάτη + UID.** Το A.1112/2025 απαιτεί το
+  ΤΥΠΩΜΕΝΟ παραστατικό μέσω παρόχου να φέρει ταυτότητα παρόχου + στοιχεία απόδειξης. Το PDF τυπώνει
+  τώρα, όταν το παραστατικό εκδόθηκε μέσω παρόχου (υπάρχει `PROVIDER_INSERT` ΜΑΡΚ και είναι VALID/μη
+  ακυρωμένο), μπλοκ «Εκδόθηκε μέσω παρόχου (ΥΠΑΗΕΣ)» με: εμπορική+νομική επωνυμία, ιστότοπο, κωδικό
+  ΑΑΔΕ, **αριθμό αδείας ΥΠΑΗΕΣ**, ΜΑΡΚ, **UID** και **κωδικό αυθεντικοποίησης**. Η ταυτότητα παρόχου
+  ζει σε **immutable config** (`einvoice.provider_identity`, ανά `provider_key` → `App\Support\EInvoice\ProviderIdentity`),
+  όχι hardcoded στο Blade — ένας 2ος πάροχος = μία γραμμή config. **Νέα στήλη `mydata_marks.uid`**
+  (`php artisan migrate`): το `invoiceUid` παρσαριζόταν αλλά χανόταν· τώρα αποθηκεύεται (PROV-009 μερικώς)
+  και το γράφει ο `GrProviderSubmitter`. Άμεσα-myDATA/ακυρωμένα/αδήλωτα → κανένα μπλοκ. Το immutable
+  per-document snapshot της αδείας (rotation) → BACKLOG. Πλήρες: `FEATURES.md §4`.
 - **MCP forensics (5 νέα read-only tools, super_admin, cross-tenant) — OBS-001.** «Γιατί έσκασε ΑΥΤΟ
   το παραστατικό;» απ' έξω, χωρίς panel. Τα στοιχεία **υπήρχαν ήδη** (byte-exact request/response XML
   ανά προσπάθεια στο `mydata_marks`, forensic `REJECTED`/`*_FAILED` rows, `mydata_pending_since`,

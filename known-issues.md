@@ -497,7 +497,7 @@ Priorities:
 | MYD-026 | P1 | OPEN | B | Delivery lifecycle | Register/confirm events lack a durable single-flight/recovery state — do before the ΔΑ deadline |
 | PROV-001 | P2 | OPEN | B | Provider idempotency | InvoSign **de-dups** + real-time status (sandbox 2026-07-07) ⇒ no duplicate document possible on this provider. **Re-raise to P0 on a provider that does not de-dup** |
 | PROV-002 | P0 | OPEN | B | Provider delivery notes | Timeout has no status recovery and can create a duplicate 9.3 — do before the ΔΑ deadline |
-| PROV-003 | P0 | OPEN | A | Provider documents | Customer PDF lacks required provider evidence and no official artifact is archived |
+| PROV-003 | P0 | PARTIAL | A | Provider documents | Print half DONE — PDF shows provider identity/licence/MARK/UID/auth-code; UID now persisted. Artifact-archive + per-doc licence snapshot → BACKLOG (B) |
 | PROV-004 | P0 | OPEN | C | Provider credits | UI/service do not enforce the 5.1/5.2/11.4 compatibility matrix |
 | PROV-005 | P1 | OPEN | B | Provider preflight | Reachability is not token authentication and mandatory issuer fields are unchecked |
 | PROV-006 | P0 | VERIFY | A? | Provider retail | Retail IS in scope; confirm the anonymous 11.x counterpart convention in sandbox IF retail files via provider at cutover |
@@ -2707,7 +2707,26 @@ documents using issuer VAT, branch, type, issue date, series and AA.
 
 ### PROV-003 — Preserve the official provider document and make Ekdosi PDF provider-aware
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** PARTIAL 2026-09-02 (print half DONE; artifact-archive half → BACKLOG) · **Priority:** P0 · **Bucket:** A (print) / B (archive) · **Research:** CONFIRMED 2026-08-30
+
+> **Print half DONE (2026-09-02, PR for PROV-003).** The customer PDF now renders a
+> «Εκδόθηκε μέσω παρόχου (ΥΠΑΗΕΣ)» evidence block on any invoice filed through a
+> provider (a `PROVIDER_INSERT` MARK on file, still VALID/not-cancelled): provider
+> commercial+legal name, site, AADE code, **ΥΠΑΗΕΣ licence no.**, MARK, **UID** and
+> **authentication code**. Provider identity is immutable config
+> (`einvoice.provider_identity` → `App\Support\EInvoice\ProviderIdentity`), keyed by
+> the mark's `provider_key` — not hard-coded in Blade — so a second provider renders
+> its own evidence with one config row. The document **UID is now persisted**
+> (`mydata_marks.uid`; `GrProviderSubmitter` writes it) — it was parsed then dropped
+> (closes PROV-009's UID slice). `InvoicePdfProviderEvidenceTest` covers provider vs
+> direct vs cancelled.
+>
+> **Still OPEN → BACKLOG (bucket B, archive/hardening half):** (a) retrieve + privately
+> archive the official provider PDF artifact (SHA-256, immutable, retry-only-download);
+> (b) snapshot the licence-in-force **per document** so a future licence rotation
+> doesn't rewrite historical printouts (today's single stable licence makes the config
+> source correct); (c) the full invoice-card «compare» panel. None of these blocks the
+> compliant printout that now ships.
 
 **Official requirement**
 

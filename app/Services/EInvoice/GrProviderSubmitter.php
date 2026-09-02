@@ -390,6 +390,20 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             ->where('mydata_action', 'PROVIDER_INSERT')
             ->first();
         if ($existing) {
+            // A row adopted via a lighter recovery/status response may have been
+            // stored before the UID / auth code / QR were known (M2). If THIS
+            // response now carries them, backfill the still-empty fields — never
+            // overwrite a value we already have. Closes the "UID stays null forever
+            // after a recovery-adopt" gap without a re-file.
+            $backfill = array_filter([
+                'uid' => blank($existing->uid) ? $result->uid : null,
+                'authentication_code' => blank($existing->authentication_code) ? $result->authenticationCode : null,
+                'invoice_url' => blank($existing->invoice_url) ? $result->qrUrl : null,
+            ], static fn ($v) => filled($v));
+            if ($backfill !== []) {
+                $existing->forceFill($backfill)->save();
+            }
+
             return $existing;
         }
 
@@ -407,6 +421,10 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'mydata_action' => 'PROVIDER_INSERT',
                 'provider_key' => $this->transport->key(),
                 'authentication_code' => $result->authenticationCode,
+                // PROV-003: persist the provider document UID (was parsed, then
+                // dropped). Needed on the printed representation (A.1112/2025) and
+                // as forensic evidence. Null on a lighter recovery response.
+                'uid' => $result->uid,
                 'delivery_state' => $deliveryState,
                 'invoice_url' => $result->qrUrl,
                 // Store the ACTUAL payload the transport sent (e.g. InvoSign's
