@@ -11,7 +11,9 @@ use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\AadeRegistryLookup;
 use App\Support\Afm;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 /**
  * Slice 3 of the WHMCS bridge-fetch work: create the ekdosi Customer for a
@@ -86,23 +88,34 @@ class WhmcsCustomerCreator
         $p = is_array($pending->payload) ? $pending->payload : [];
         $activity = $record?->primaryActivity();
 
-        $customer = Customer::create([
-            'company_id' => $tenant->id,
-            'afm' => $afm,
-            'name' => self::firstFilled($record?->name, $pending->whmcsClientName(), 'ΑΦΜ '.$afm),
-            'tax_office' => self::firstFilled($record?->doy, $pending->whmcsTaxOffice()),
-            'address1' => self::firstFilled($record?->address, $p['address1'] ?? null),
-            'address2' => self::firstFilled($p['address2'] ?? null),
-            'city' => self::firstFilled($record?->city, $p['city'] ?? null),
-            'postcode' => self::firstFilled($record?->postcode, $p['postcode'] ?? null),
-            'country' => self::firstFilled($p['country'] ?? null, 'GR'),
-            'occupation' => self::firstFilled($activity['description'] ?? null, $pending->whmcsActivity()),
-            // Contact channels are WHMCS-only (GSIS doesn't expose them): email +
-            // phone come straight from the WHMCS client payload.
-            'email' => self::firstFilled($p['email'] ?? null),
-            'phone1' => self::firstFilled($p['phonenumber'] ?? null),
-            'whmcs_client_id' => $pending->whmcs_userid ?: null,
-        ]);
+        try {
+            $customer = Customer::create([
+                'company_id' => $tenant->id,
+                'afm' => $afm,
+                'name' => self::firstFilled($record?->name, $pending->whmcsClientName(), 'ΑΦΜ '.$afm),
+                'tax_office' => self::firstFilled($record?->doy, $pending->whmcsTaxOffice()),
+                'address1' => self::firstFilled($record?->address, $p['address1'] ?? null),
+                'address2' => self::firstFilled($p['address2'] ?? null),
+                'city' => self::firstFilled($record?->city, $p['city'] ?? null),
+                'postcode' => self::firstFilled($record?->postcode, $p['postcode'] ?? null),
+                'country' => self::firstFilled($p['country'] ?? null, 'GR'),
+                'occupation' => self::firstFilled($activity['description'] ?? null, $pending->whmcsActivity()),
+                // Contact channels are WHMCS-only (GSIS doesn't expose them): email +
+                // phone come straight from the WHMCS client payload.
+                'email' => self::firstFilled($p['email'] ?? null),
+                'phone1' => self::firstFilled($p['phonenumber'] ?? null),
+                'whmcs_client_id' => $pending->whmcs_userid ?: null,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // Lost a race with a parallel create for the same ΑΦΜ: the other
+            // row IS the customer now — re-read it instead of surfacing SQL.
+            $winner = Customer::withTrashed()->where('company_id', $tenant->id)->whereAfmKeyOf($afm)->first();
+            if ($winner === null) {
+                throw new RuntimeException('Ο πελάτης με ΑΦΜ '.$afm.' δημιουργήθηκε ταυτόχρονα από άλλον χειριστή — ξαναπροσπάθησε.');
+            }
+
+            return new WhmcsCustomerCreateResult($winner, false, $winner->trashed() ? 'deleted_owner' : 'existing');
+        }
 
         // When GSIS resolved, surface fields where the OFFICIAL value differed
         // from what the customer typed in WHMCS (GSIS won). The operator sees

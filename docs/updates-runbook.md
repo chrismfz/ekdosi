@@ -85,8 +85,11 @@ tenant has two customers with the same ΑΦΜ (soft-deleted included). Before `u
 ```bash
 php artisan customers:afm-duplicates          # exit 0 = clean, 1 = duplicates listed
 ```
-The command works on the NEW code **before** `migrate` (it derives the identity in PHP while
-the `afm_key` column doesn't exist yet), so run it right after checking out the tag.
+`deploy/update.sh` runs this itself — after checkout + composer and **before** `migrate`, inside
+the maintenance window (the command derives the identity in PHP while the `afm_key` column
+doesn't exist yet). On duplicates the update aborts with the list, maintenance stays ON, and
+the schema is untouched; fix the data and re-run `update.sh`. To look ahead without deploying,
+run it on any checkout of the new tag against the production DB.
 
 Resolve each group (fix the wrong ΑΦΜ, or move its documents and delete the duplicate), then
 deploy. Placeholder ΑΦΜ (000000000 …) and blanks are NOT identities and never collide.

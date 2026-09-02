@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Services\Whmcs\ContactCustomerResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -87,6 +88,23 @@ class ContactCustomerResolverTest extends TestCase
             $this->assertStringContainsString('ΔΙΑΓΡΑΜΜΕΝΟΣ', $e->getMessage());
         }
 
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $tenant->id)->count());
+    }
+
+    public function test_losing_the_create_race_returns_the_winner(): void
+    {
+        $tenant = $this->tenant();
+        $fired = false;
+        Customer::creating(function (Customer $c) use (&$fired, $tenant): void {
+            if (! $fired) {
+                $fired = true;
+                DB::table('customers')->insert(['company_id' => $tenant->id, 'name' => 'Νικητής', 'afm' => '111222333', 'afm_key' => '111222333', 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+
+        $resolved = $this->resolver()->resolve($tenant, ['gr_vatno' => '111222333', 'company_name' => 'Acme']);
+
+        $this->assertSame('Νικητής', $resolved->name);
         $this->assertSame(1, Customer::withTrashed()->where('company_id', $tenant->id)->count());
     }
 

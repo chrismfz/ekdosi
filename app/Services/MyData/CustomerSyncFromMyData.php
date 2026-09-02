@@ -6,7 +6,9 @@ use App\Exceptions\Aade\AadeRegistryException;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
+use App\Support\Afm;
 use Carbon\CarbonInterface;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -64,8 +66,8 @@ class CustomerSyncFromMyData
             $scannedDocs++;
 
             $afm = trim((string) ($doc->counterpartVat ?? ''));
-            if ($afm === '') {
-                continue; // retail / no counterpart
+            if ($afm === '' || Afm::uniqueKey($afm) === null) {
+                continue; // retail / no counterpart / placeholder ΑΦΜ (no identity)
             }
             if ($ourAfm !== '' && $afm === $ourAfm) {
                 continue; // never add ourselves
@@ -139,7 +141,14 @@ class CustomerSyncFromMyData
                 $attrs['name'] = 'ΑΦΜ '.$afm;
             }
 
-            Customer::create($attrs);
+            try {
+                Customer::create($attrs);
+            } catch (UniqueConstraintViolationException) {
+                // Created meanwhile (a parallel run / the panel) — that's a skip, not a crash.
+                $skipped++;
+
+                continue;
+            }
             $created++;
             $createdAfms[] = $afm;
         }

@@ -118,20 +118,15 @@ class Customer extends Model
 
     /**
      * Customers sharing this ΑΦΜ identity (any formatting, EL/GR prefix or not).
-     * A value with no identity (placeholder like 000000000, or blank) falls back
-     * to exact-text equality — the pre-constraint behaviour of every lookup, so
-     * importers stay idempotent on placeholder rows; blank matches nobody.
+     * A value with no identity (placeholder like 000000000, or blank) matches
+     * NOBODY — callers that meet a placeholder must treat it as «no ΑΦΜ»
+     * (retail), never as a customer to look up or create.
      */
     public function scopeWhereAfmKeyOf(Builder $query, ?string $afm): Builder
     {
         $key = Afm::uniqueKey($afm);
-        if ($key !== null) {
-            return $query->where('afm_key', $key);
-        }
 
-        $raw = trim((string) $afm);
-
-        return $raw === '' ? $query->whereRaw('1 = 0') : $query->where('afm', $raw);
+        return $key === null ? $query->whereRaw('1 = 0') : $query->where('afm_key', $key);
     }
 
     /**

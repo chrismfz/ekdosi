@@ -10,6 +10,7 @@ use App\Models\CustomerContact;
 use App\Models\Lead;
 use App\Models\Quote;
 use App\Support\Afm;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -154,21 +155,27 @@ class ConvertLeadToCustomer
 
     private function createCustomer(Lead $lead): Customer
     {
-        $customer = Customer::create([
-            'company_id' => $lead->company_id,
-            'name' => $lead->name,
-            'afm' => $lead->afm,
-            'occupation' => $lead->occupation,
-            'address1' => $lead->address1,
-            'city' => $lead->city,
-            'postcode' => $lead->postcode,
-            'country' => $lead->country ?: 'GR',
-            'phone1' => $lead->phone ?: $lead->mobile,
-            'phone2' => ($lead->phone && $lead->mobile) ? $lead->mobile : null,
-            'email' => $lead->email,
-            'referred_by_customer_id' => $lead->referred_by_customer_id,
-            'is_active' => true,
-        ]);
+        try {
+            $customer = Customer::create([
+                'company_id' => $lead->company_id,
+                'name' => $lead->name,
+                'afm' => $lead->afm,
+                'occupation' => $lead->occupation,
+                'address1' => $lead->address1,
+                'city' => $lead->city,
+                'postcode' => $lead->postcode,
+                'country' => $lead->country ?: 'GR',
+                'phone1' => $lead->phone ?: $lead->mobile,
+                'phone2' => ($lead->phone && $lead->mobile) ? $lead->mobile : null,
+                'email' => $lead->email,
+                'referred_by_customer_id' => $lead->referred_by_customer_id,
+                'is_active' => true,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // The per-tenant lock covers conversions; a customer created in the
+            // plain form in the same instant is the one race left — guide, don't crash.
+            throw new RuntimeException('Μόλις δημιουργήθηκε πελάτης με ΑΦΜ '.Afm::uniqueKey($lead->afm).' από άλλον χειριστή — διάλεξε «Σύνδεση με υπάρχοντα πελάτη».');
+        }
 
         // Tags travel with the party (the lead keeps its own copy).
         $tagIds = $lead->tags()->pluck('tags.id')->all();

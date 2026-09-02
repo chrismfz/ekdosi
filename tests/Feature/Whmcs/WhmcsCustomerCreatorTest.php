@@ -10,6 +10,7 @@ use App\Models\PendingWhmcsInvoice;
 use App\Services\AadeRegistryLookup;
 use App\Services\Whmcs\WhmcsCustomerCreator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Mockery;
 use Tests\TestCase;
 
@@ -131,6 +132,28 @@ class WhmcsCustomerCreatorTest extends TestCase
 
         $this->assertSame('existing', $result->source);
         $this->assertSame($cy->id, $result->customer->id, 'letters kept — never a digits-only twin');
+        $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count());
+    }
+
+    public function test_losing_the_create_race_returns_the_winner_as_existing(): void
+    {
+        $t = $this->tenant();
+        $row = $this->pending($t, '123456789', userId: 558);
+        $this->mockGsis(null, new AadeAfmNotFound('AFM not found'));
+
+        $fired = false;
+        Customer::creating(function (Customer $c) use (&$fired, $t): void {
+            if (! $fired) {
+                $fired = true;
+                DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Νικητής', 'afm' => '123456789', 'afm_key' => '123456789', 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertFalse($result->created);
+        $this->assertSame('existing', $result->source);
+        $this->assertSame('Νικητής', $result->customer->name);
         $this->assertSame(1, Customer::withTrashed()->where('company_id', $t->id)->count());
     }
 

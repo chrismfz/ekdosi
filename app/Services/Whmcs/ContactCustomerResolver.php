@@ -5,6 +5,7 @@ namespace App\Services\Whmcs;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Support\Afm;
+use Illuminate\Database\UniqueConstraintViolationException;
 use RuntimeException;
 
 /**
@@ -56,21 +57,35 @@ class ContactCustomerResolver
             return $existing;
         }
 
-        return Customer::create([
-            'company_id' => $tenant->getKey(),
-            'name' => $this->decode((string) ($contact['company_name'] ?? '')) ?: ('ΑΦΜ '.$afm),
-            'afm' => $afm,
-            'vat_vies' => $this->decode((string) ($contact['vies_vatno'] ?? '')) ?: null,
-            'tax_office' => $this->decode((string) ($contact['tax_office'] ?? '')) ?: null,
-            'address1' => $this->decode((string) ($contact['address1'] ?? '')) ?: null,
-            'address2' => $this->decode((string) ($contact['address2'] ?? '')) ?: null,
-            'city' => $this->decode((string) ($contact['city'] ?? '')) ?: null,
-            'postcode' => $this->decode((string) ($contact['postal_code'] ?? '')) ?: null,
-            'country' => $this->decode((string) ($contact['country'] ?? '')) ?: 'GR',
-            'occupation' => $this->decode((string) ($contact['description'] ?? '')) ?: null,
-            'email' => $this->decode((string) ($contact['email'] ?? '')) ?: null,
-            'is_active' => true,
-        ]);
+        try {
+            return Customer::create([
+                'company_id' => $tenant->getKey(),
+                'name' => $this->decode((string) ($contact['company_name'] ?? '')) ?: ('ΑΦΜ '.$afm),
+                'afm' => $afm,
+                'vat_vies' => $this->decode((string) ($contact['vies_vatno'] ?? '')) ?: null,
+                'tax_office' => $this->decode((string) ($contact['tax_office'] ?? '')) ?: null,
+                'address1' => $this->decode((string) ($contact['address1'] ?? '')) ?: null,
+                'address2' => $this->decode((string) ($contact['address2'] ?? '')) ?: null,
+                'city' => $this->decode((string) ($contact['city'] ?? '')) ?: null,
+                'postcode' => $this->decode((string) ($contact['postal_code'] ?? '')) ?: null,
+                'country' => $this->decode((string) ($contact['country'] ?? '')) ?: 'GR',
+                'occupation' => $this->decode((string) ($contact['description'] ?? '')) ?: null,
+                'email' => $this->decode((string) ($contact['email'] ?? '')) ?: null,
+                'is_active' => true,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // Lost a race with a parallel create for the same ΑΦΜ — that row is
+            // the customer; a soft-deleted winner gets the same guidance as above.
+            $winner = Customer::withTrashed()->where('company_id', $tenant->getKey())->whereAfmKeyOf($afm)->first();
+            if ($winner === null) {
+                throw new RuntimeException('Ο πελάτης με ΑΦΜ '.$afm.' δημιουργήθηκε ταυτόχρονα από άλλον χειριστή — ξαναπροσπάθησε.');
+            }
+            if ($winner->trashed()) {
+                throw new RuntimeException('Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με ΑΦΜ '.$afm.' («'.$winner->name.'») — επανέφερέ τον από τη λίστα πελατών και ξαναπροσπάθησε.');
+            }
+
+            return $winner;
+        }
     }
 
     private function decode(string $value): string

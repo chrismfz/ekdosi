@@ -522,6 +522,12 @@ class CompanyImporter
             $row['afm_key'] = Afm::uniqueKey($row['afm'] ?? null);
         }
 
+        // leads.afm carries the same identity form (LeadMatcher compares it
+        // exactly) — a pre-release bundle may still hold «EL 123-456-789».
+        if ($table === 'leads') {
+            $row['afm'] = Afm::uniqueKey($row['afm'] ?? null);
+        }
+
         $row['created_at'] = now();
         $row['updated_at'] = now();
 

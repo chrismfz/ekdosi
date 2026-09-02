@@ -2,12 +2,15 @@
 
 namespace Tests\Feature\Customers;
 
+use App\Actions\ConvertLeadToCustomer;
+use App\Enums\LeadStatus;
 use App\Filament\Resources\Customers\Pages\CreateCustomer;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\User;
 use App\Services\Customers\CustomerAfmDuplicates;
+use App\Services\Leads\LeadMatcher;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
 use App\Support\Afm;
@@ -70,6 +73,11 @@ class CustomerAfmKeyTest extends TestCase
 
         $this->assertSame([$c->id], Customer::query()->whereAfmKeyOf(' cy-10259033-p ')->pluck('id')->all());
         $this->assertSame([], Customer::query()->whereAfmKeyOf('000000000')->pluck('id')->all(), 'A placeholder matches nobody.');
+
+        // …not even a customer that literally carries the placeholder text.
+        Customer::create(['company_id' => $t->id, 'name' => 'Λιανική', 'afm' => '000000000']);
+        $this->assertSame([], Customer::query()->whereAfmKeyOf('000000000')->pluck('id')->all(), 'no raw-text fallback');
+        $this->assertSame([], Customer::query()->whereAfmKeyOf('')->pluck('id')->all());
     }
 
     public function test_database_refuses_a_second_customer_with_the_same_identity_even_soft_deleted(): void
@@ -300,6 +308,72 @@ class CustomerAfmKeyTest extends TestCase
         $migration->up(); // idempotent re-run
 
         $this->assertSame('123456789', $lead->fresh()->afm);
+    }
+
+    public function test_importer_normalises_lead_afm_so_a_restored_dnc_lead_still_blocks(): void
+    {
+        $src = Company::create(['name' => 'Src', 'slug' => 'src7', 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'afm' => '800561849']);
+        $lead = Lead::create(['company_id' => $src->id, 'name' => 'Ενοχλημένος', 'afm' => '123456789', 'status' => LeadStatus::DoNotContact, 'lost_reason' => 'x']);
+        $bundle = app(CompanyExporter::class)->build($src, 'passphrase', 'p@ss', true);
+
+        // A pre-release bundle carried the ΑΦΜ as typed.
+        foreach ($bundle['data']['leads'] as &$row) {
+            $row['afm'] = 'EL 123-456-789';
+        }
+        unset($row);
+        $lead->forceDelete();
+
+        app(CompanyImporter::class)->run($bundle, ['into' => 'src7', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $restored = Lead::withTrashed()->where('company_id', $src->id)->firstOrFail();
+        $this->assertSame('123456789', $restored->afm, 'identity form on import');
+        $this->assertTrue(app(LeadMatcher::class)->find($src->id, 'el123456789', null)->hasDoNotContact(), 'DNC survives the restore');
+    }
+
+    public function test_create_page_survives_the_unique_race_with_a_friendly_message(): void
+    {
+        $t = $this->tenant();
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
+        Gate::before(fn () => true);
+        $this->actingAs($user);
+        Filament::setTenant($t);
+
+        // The twin lands AFTER validation, right before our INSERT.
+        $fired = false;
+        Customer::creating(function (Customer $c) use (&$fired, $t): void {
+            if (! $fired && $c->name === 'Χαμένος') {
+                $fired = true;
+                DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Νικητής', 'afm' => '123456789', 'afm_key' => '123456789', 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+
+        Livewire::test(CreateCustomer::class)
+            ->fillForm(['name' => 'Χαμένος', 'afm' => '123456789'])
+            ->call('create')
+            ->assertNotified('Υπάρχει ήδη πελάτης με αυτό το ΑΦΜ');
+
+        $this->assertSame(['Νικητής'], Customer::where('company_id', $t->id)->pluck('name')->all(), 'one customer, no 500');
+    }
+
+    public function test_convert_lead_survives_the_unique_race_with_guidance(): void
+    {
+        $t = $this->tenant();
+        $lead = Lead::create(['company_id' => $t->id, 'name' => 'Lead', 'afm' => '123456789']);
+        $fired = false;
+        Customer::creating(function (Customer $c) use (&$fired, $t): void {
+            if (! $fired) {
+                $fired = true;
+                DB::table('customers')->insert(['company_id' => $t->id, 'name' => 'Νικητής', 'afm' => '123456789', 'afm_key' => '123456789', 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+
+        try {
+            app(ConvertLeadToCustomer::class)($lead);
+            $this->fail('Expected the guided RuntimeException.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Σύνδεση', $e->getMessage());
+        }
+        $this->assertNull($lead->fresh()->converted_customer_id);
     }
 
     public function test_importer_merges_a_bundle_customer_into_the_local_owner_of_the_same_afm(): void
