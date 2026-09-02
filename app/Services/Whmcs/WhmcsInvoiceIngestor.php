@@ -391,7 +391,10 @@ class WhmcsInvoiceIngestor
                 'customer_id' => null,
                 'resolution' => $snapshot,
                 'hold' => true,
-                'note' => 'Παραστατικά σε τρίτους: αποτυχία δημιουργίας πελάτη-δικαιούχου — έλεγξε χειροκίνητα.',
+                // A guided refusal (e.g. «ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης … επανέφερέ τον») must reach
+                // the operator on the held row, not only laravel.log.
+                'note' => 'Παραστατικά σε τρίτους: αποτυχία δημιουργίας πελάτη-δικαιούχου — έλεγξε χειροκίνητα.'
+                    .($e instanceof \RuntimeException ? ' '.$e->getMessage() : ''),
             ];
         }
         if ($customer === null) {

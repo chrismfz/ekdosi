@@ -638,17 +638,15 @@ class CompanyImporter
                 continue; // free key, or held by a twin that releases it first
             }
 
+            // A twin's owner would be in $twinIds (handled above) — so a natural
+            // twin whose new ΑΦΜ is held by any NON-twin always conflicts.
             $twin = $index[$this->naturalKey('customers', $row)] ?? null;
             if ($twin !== null) {
-                if ($owner !== $twin) {
-                    throw new RuntimeException(
-                        "Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «{$name}» "
-                        ."(ΑΦΜ {$afmKey}) αντιστοιχεί στον τοπικό πελάτη #{$twin}, αλλά το ΑΦΜ το έχει ήδη ο #{$owner}. "
-                        .'Διόρθωσε/συγχώνευσε τους δύο τοπικούς πελάτες (php artisan customers:afm-duplicates) και ξαναπροσπάθησε.'
-                    );
-                }
-
-                continue;
+                throw new RuntimeException(
+                    "Σύγκρουση ΑΦΜ στην εισαγωγή πελατών: η γραμμή του bundle «{$name}» "
+                    ."(ΑΦΜ {$afmKey}) αντιστοιχεί στον τοπικό πελάτη #{$twin}, αλλά το ΑΦΜ το έχει ήδη ο #{$owner}. "
+                    .'Διόρθωσε/συγχώνευσε τους δύο τοπικούς πελάτες (php artisan customers:afm-duplicates) και ξαναπροσπάθησε.'
+                );
             }
 
             // ΑΦΜ-merge into a non-twin local owner.

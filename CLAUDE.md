@@ -121,17 +121,24 @@ after cutover.
   buries your change. **Only Pint the files you touched** (pass them explicitly); revert
   any stray reformats before committing.
 
-## Review discipline — the gate runs until it's GREEN (not once)
+## Review discipline — the gate runs until it's GREEN on what matters (not forever)
 
 Every change ends with a **whole-PR adversarial review** (`/code-review`, high effort).
-The rule, learned the hard way on MYD-017 and MYD-011:
+The rule, learned the hard way on MYD-017 and MYD-011 — and then over-learned on the
+ΑΦΜ unique-constraint PR (#394: ~10 rounds for what was 1–2 real fixes, «χανόμαστε»):
 
-- **Re-run the gate after fixing.** A round of fixes is NOT the end — it is a new
-  diff that has never been reviewed. On both of those issues the *fix itself*
-  introduced the next bug (a date guard that traded a false conflict for a false
-  green; a `payableTotal()` basis that was wrong twice; an internal-movement rule
-  that broke the `000000000` sentinel and let a named foreign party through as GR).
-  Keep looping: **review → fix → review** until a round comes back clean.
+- **Re-run the gate after fixing — until a round comes back with no P0/P1.** A round
+  of fixes is a new diff that has never been reviewed (on MYD-017/MYD-011 the *fix
+  itself* introduced the next bug: a date guard that traded a false conflict for a
+  false green; a `payableTotal()` basis wrong twice; an internal-movement rule that
+  broke the `000000000` sentinel). But the loop ends at **«no P0/P1 findings»**, NOT at
+  «zero findings» — an adversarial reviewer always finds *something*.
+- **Triage every finding by priority, and cap the rounds per priority:**
+  **P0** (data loss / legal-document / tenant-leak / money wrong) → fix, up to **3** rounds;
+  **P1** (real bug an operator will hit) → fix, up to **2** rounds;
+  **P2** (edge case, cleanup, perf on data we don't have, docs) → **1** round, then
+  **surviving P2s go to `docs/BACKLOG.md` explicitly** — never silently dropped.
+  Same severity ≠ same rigour: don't spend a P0-grade loop on a P2.
 - **"I fixed the findings" is not "the review passed."** Never report a gate as
   passed on a state that was never reviewed. Say which commit was reviewed, how many
   findings came back, and whether the post-fix state has been re-checked.
