@@ -32,6 +32,8 @@ class GoLiveCheckTest extends TestCase
             'name' => 'GoLive OE', 'slug' => 'gl-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'production', 'afm' => '800561849',
             'mydata_aade_id_production' => 'PRODUSER', 'mydata_subscription_key_production' => 'PRODKEY',
+            // MYD-006: a chosen classification policy is required for a ready tenant.
+            'business_activity_type' => 'services',
         ]);
         $this->grType($c);
         $this->vat($c, 24);
@@ -190,7 +192,7 @@ class GoLiveCheckTest extends TestCase
 
         $report = $this->report($c);
 
-        foreach (['invoice_types', 'vat_rates', 'mydata_prod_creds', 'mydata_mode'] as $k) {
+        foreach (['invoice_types', 'vat_rates', 'mydata_prod_creds', 'mydata_mode', 'classification_policy'] as $k) {
             $this->assertSame('skip', $this->gate($report, $k)['status'], "{$k} must SKIP for ee-peppol");
         }
         $this->assertSame('pass', $this->gate($report, 'vat_default')['status']);
@@ -230,6 +232,7 @@ class GoLiveCheckTest extends TestCase
             'name' => 'Provider Live OE', 'slug' => 'pvl-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
             'einvoice_provider_key' => 'invosign', 'mydata_mode' => 'off',
+            'business_activity_type' => 'services',
         ]);
         $this->grType($c);
         $this->vat($c, 24);
@@ -237,6 +240,56 @@ class GoLiveCheckTest extends TestCase
         $report = $this->report($c);
         $this->assertSame('pass', $this->gate($report, 'provider_live')['status']);
         $this->assertSame('ready', $report['overall']);
+    }
+
+    public function test_classification_policy_unset_fails_the_cutover(): void
+    {
+        // MYD-006: an AADE-filing tenant that has not chosen its business-activity
+        // type cannot go live — the goods income bucket would be a silent guess.
+        $c = $this->readyTenant();
+        $c->update(['business_activity_type' => null]);
+
+        $report = $this->report($c);
+        $gate = $this->gate($report, 'classification_policy');
+        $this->assertSame('fail', $gate['status']);
+        $this->assertStringContainsString('είδος δραστηριότητας', $gate['detail']);
+        $this->assertSame('not_ready', $report['overall']);
+
+        $this->artisan('ekdosi:go-live-check', ['--tenant' => $c->slug])->assertExitCode(2);
+    }
+
+    public function test_classification_policy_selected_passes(): void
+    {
+        $c = $this->readyTenant(); // business_activity_type = 'services'
+
+        $gate = $this->gate($this->report($c), 'classification_policy');
+        $this->assertSame('pass', $gate['status']);
+    }
+
+    public function test_mixed_policy_passes_with_a_reminder_and_never_blocks(): void
+    {
+        // A mixed tenant PASSES the selection gate (the required act is done) and is
+        // reminded to classify its GOODS categories — but we never WARN on a count of
+        // null-override categories (a services category is legitimately null), so the
+        // reminder is noise-free and the tenant reads ready either way.
+        $c = $this->readyTenant();
+        $c->update(['business_activity_type' => 'mixed']);
+        // Only a services category, legitimately unclassified → still a clean PASS.
+        ProductCategory::create(['company_id' => $c->id, 'description_short' => 'Υπηρεσίες', 'markup' => 0]);
+
+        $report = $this->report($c);
+        $gate = $this->gate($report, 'classification_policy');
+        $this->assertSame('pass', $gate['status']);
+        $this->assertStringContainsString('μικτή', $gate['detail']);
+        $this->assertStringContainsString('θύμισε', $gate['detail']); // reminder, no goods category yet
+        $this->assertSame('ready', $report['overall']);
+
+        // Once a GOODS category is classified, the reminder drops.
+        ProductCategory::create([
+            'company_id' => $c->id, 'description_short' => 'Προϊόντα', 'markup' => 0,
+            'mydata_income_class_category' => 'category1_2',
+        ]);
+        $this->assertStringNotContainsString('θύμισε', $this->gate($this->report($c), 'classification_policy')['detail']);
     }
 
     public function test_no_default_vat_fails(): void

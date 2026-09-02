@@ -45,6 +45,9 @@ class Company extends Model
         'afm',
         'tax_office',
         'kad_primary',
+        // MYD-006: business-activity policy (reseller/manufacturer/services/mixed) —
+        // decides the income-classification bucket (§8.6) of GOODS lines.
+        'business_activity_type',
         'gemi',
         'address',
         'city',

@@ -24,6 +24,7 @@ use App\Services\Whmcs\WhmcsCustomerMatcher;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderEndpointGuard;
 use App\Support\EInvoice\SendChannel;
+use App\Support\MyData\ClassificationGuidance;
 use Filament\Actions\Action as FormAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -209,6 +210,22 @@ class CompanyForm
                                     ->label('Primary KAD (Δραστηριότητα)')
                                     ->maxLength(20)
                                     ->helperText('Auto-fills from the AADE Fetch button. Printed on the invoice header as the issuer\'s primary activity classification.'),
+
+                                // MYD-006: the income-classification policy (§8.6 goods
+                                // bucket). Required before go-live; shown for AADE-filing
+                                // tenants only (Estonian/none don't classify income to AADE).
+                                Select::make('business_activity_type')
+                                    ->label('Είδος δραστηριότητας (κατηγοριοποίηση εσόδων)')
+                                    ->options(ClassificationGuidance::options())
+                                    ->native(false)
+                                    ->live()
+                                    ->visible(fn (callable $get) => in_array(
+                                        SendChannel::decompose((string) $get('send_channel'))['einvoice_provider'],
+                                        ['gr-mydata', 'gr-provider'],
+                                        true,
+                                    ))
+                                    ->helperText(fn (?string $state): string => ClassificationGuidance::hintFor($state)
+                                        ?? 'Ορίζει την §8.6 κατηγορία εσόδων των αγαθών (εμπορεύματα vs δικά μας προϊόντα). Απαιτείται πριν το go-live.'),
 
                                 TextInput::make('gemi')
                                     ->label('ΓΕΜΗ')
