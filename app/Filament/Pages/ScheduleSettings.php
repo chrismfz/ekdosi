@@ -73,6 +73,7 @@ class ScheduleSettings extends Page implements HasForms
         'company_backups_enabled' => ['Backup ανά εταιρία', 'Per-tenant pipeline (Phase 4) — τρέχει ωριαία, κάθε εταιρία στη δική της συχνότητα.', false],
         // Υπηρεσίες & ειδοποιήσεις
         'overdue_notifications_enabled' => ['Ειδοποιήσεις ληξιπρόθεσμων', 'Καθημερινό «καμπανάκι» για ληξιπρόθεσμα τιμολόγια (χωρίς email).', false],
+        'leads_notify_due_enabled' => ['Leads — υπενθύμιση επόμενου βήματος', 'Καθημερινό «καμπανάκι» στον χειριστή για leads με επόμενο βήμα σήμερα ή ληξιπρόθεσμο (χωρίς email).', false],
         'service_renewals_enabled' => ['Ανανεώσεις υπηρεσιών (πρόχειρα)', 'Δημιουργεί ΠΡΟΧΕΙΡΑ τιμολόγια ανανέωσης για συμβόλαια που λήγουν. ΔΕΝ δηλώνει αυτόματα.', true],
         'service_dunning_enabled' => ['Dunning υπηρεσιών', 'Auto suspend/terminate ληξιπρόθεσμων συμβολαίων. Πραγματικός διακόπτης = το per-product dunning_enabled.', false],
     ];
@@ -87,7 +88,7 @@ class ScheduleSettings extends Page implements HasForms
         'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
         'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_console_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
-        'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'service_renewals_enabled', 'service_dunning_enabled'],
+        'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled'],
     ];
 
     /**
@@ -109,6 +110,7 @@ class ScheduleSettings extends Page implements HasForms
         'mydata_fetch_expenses_cron' => ['myDATA — άντληση εξόδων', 'cron'],
         'mydata_console_refresh_cron' => ['myDATA — ανανέωση κονσόλας', 'cron'],
         'overdue_notifications_time' => ['Ειδοποιήσεις ληξιπρόθεσμων', 'time'],
+        'leads_notify_due_time' => ['Leads — υπενθύμιση επόμενου βήματος', 'time'],
         'service_renewals_time' => ['Ανανεώσεις υπηρεσιών', 'time'],
         'service_dunning_time' => ['Dunning υπηρεσιών', 'time'],
         'backup_run_cron' => ['Backup — λήψη', 'cron'],

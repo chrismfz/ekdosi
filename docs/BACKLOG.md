@@ -31,7 +31,7 @@ surfaced in the open-items sections further down.
   provider P0–P5 built/gated (mode=off); **PEPPOL Phase 2 + live provider = OPEN**.
 - **`payment-connectors.md`** — card-POS + IRIS design. **NOT-STARTED** (blueprint).
 - **`leads-mini-crm.md`** — **Leads / mini-CRM** (υποψήφιοι πελάτες + χρονολόγιο επαφών + μετατροπή
-  σε πελάτη + απολογισμός ανά χειριστή). **L0 + L1 DONE**· L2 (απολογισμός + reminders) **OPEN** — gates §10.
+  σε πελάτη + απολογισμός ανά χειριστή). **L0 + L1 + L2 DONE** (§10)· L3 = κατά ζήτηση.
 - **`payments` (AR)** — core **DONE** (cockpit/allocator/bank-accounts/refunds); deferred
   connectors → `payment-connectors.md`.
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 (registry seam) **DONE**;
@@ -303,8 +303,10 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   άνθρωπος;») + `next_action_at` reminders. **DESIGN ONLY, αποφάσεις κλειδωμένες** (§9: ρόλος =
   `operator`, όλοι βλέπουν όλα, παντού/multi-tenant, ελεύθερη επεξεργασία, μόνο χειροκίνητα, keep it
   simple) → `leads-mini-crm.md`. **L0 + L1 ✅ SHIPPED** (resource + χρονολόγιο + καταστάσεις + dedupe +
-  μετατροπή σε πελάτη + «Προέλευση» + προσφορά από lead, FEATURES §7β). **Μένει: L2**
-  (`SalesActivityReport` ανά χειριστή×εβδομάδα + CSV, `leads:notify-due` scheduled reminder, dashboard widget).
+  μετατροπή σε πελάτη + «Προέλευση» + προσφορά από lead, FEATURES §7β). **L2 ✅ SHIPPED**
+  (`SalesActivityReport` + CSV, `leads:notify-due`, dashboard widget). **Μένει (προαιρετικά):** εβδομαδιαίο
+  digest email του απολογισμού στον company_admin (μοτίβο backup-failure alert) · L3 (§10: kanban, AI
+  `lead_summary`) — κατά ζήτηση.
 
 ---
 
@@ -442,6 +444,10 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `.fbk` shows the pattern — `SELECT afm FROM customers WHERE afm REGEXP '^(VAT|AFM|TIN)[0-9]'`.
   (b) `CompanyImporter` reads the tenant's customers 3× per phase (existingIndex / afmKeyIndex /
   customerOwners) — one `get()` could feed all three; only matters at tens of thousands of customers.
+- **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables::exportCsv` και
+  `SalesActivityReport::exportCsv` κουβαλούν το ίδιο BOM + formula-guard + `fputcsv(';')`· το
+  `AgedReceivables` δεν περνά `escape:` (E_DEPRECATED ανά γραμμή σε PHP 8.4). Ένα κοινό
+  `App\Support\Csv::stream()` όταν προστεθεί τρίτη σελίδα με CSV.
 - **ETL (`migrate:firebird`) — διπλό ΑΦΜ ΜΕΣΑ στη legacy πηγή = hard stop** _(από το review του
   ΑΦΜ unique constraint, PR #394)._ Το `assertNoDuplicateLegacyAfm` σταματά όλο το run (τίποτα δεν γράφεται)
   αν δύο CUST_IDs μοιράζονται ένα ΑΦΜ· λύνεται μόνο στη legacy βάση (συγχώνευση/διόρθωση εκεί — η legacy

@@ -44,6 +44,11 @@ class ListLeads extends BaseListRecords
                 ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('status', LeadStatus::New->value))
                 ->badge(fn (): int => $this->count(fn (Builder $q) => $q->where('status', LeadStatus::New->value))),
 
+            'due' => Tab::make('Για σήμερα')
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->due())
+                ->badge(fn (): int => $this->count(fn (Builder $q) => $q->due()))
+                ->badgeColor('warning'),
+
             'overdue' => Tab::make('Ληξιπρόθεσμα')
                 ->modifyQueryUsing(fn (Builder $query): Builder => $query->overdue())
                 ->badge(fn (): int => $this->count(fn (Builder $q) => $q->overdue()))
