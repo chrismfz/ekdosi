@@ -364,6 +364,49 @@ class TenantCoherenceTest extends TestCase
         ]);
     }
 
+    public function test_a_foreign_line_is_caught_inside_the_panel_too(): void
+    {
+        // The line check was inert in the panel TWICE, for two different reasons:
+        // first gated on relationLoaded(), then read THROUGH CompanyScope — which
+        // returns nothing for a foreign line, so the loop ran over an empty set and
+        // passed. Both times the tests missed it because tests have no ambient
+        // context. So this one sets the context Filament sets on TenantSet.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<ok/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+
+        InvoiceLine::create([
+            'company_id' => $this->other->id, 'invoice_id' => $invoice->id,
+            'qty' => 1, 'price_per_item' => 50, 'vat_percent' => 24,
+            'net_price' => 50, 'gross_price' => 62, 'product_descr' => 'Ξένη γραμμή',
+        ]);
+
+        $bare = Invoice::withoutGlobalScopes()->findOrFail($invoice->id);
+
+        app(CompanyContext::class)->actAs($this->issuer, function () use ($bare, $mock): void {
+            $this->assertRefusedBeforeAnything(
+                fn () => (new MyDataSubmitter($this->issuer, $mock))->submit($bare),
+                $mock,
+            );
+        });
+    }
+
+    public function test_a_foreign_line_product_is_caught_inside_the_panel_too(): void
+    {
+        // Same, one level deeper: the E3 classification source.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '<ok/>')]);
+        $invoice = $this->invoiceFor($this->issuer);
+        $invoice->lines()->update(['product_id' => $this->productFor($this->other)->id]);
+
+        $bare = Invoice::withoutGlobalScopes()->findOrFail($invoice->id);
+
+        app(CompanyContext::class)->actAs($this->issuer, function () use ($bare, $mock): void {
+            $this->assertRefusedBeforeAnything(
+                fn () => (new MyDataSubmitter($this->issuer, $mock))->submit($bare),
+                $mock,
+            );
+        });
+    }
+
     public function test_the_line_check_runs_even_when_lines_are_not_preloaded(): void
     {
         // The panel's submit paths (ViewInvoice, the invoices bulk action,

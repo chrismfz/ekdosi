@@ -1917,8 +1917,29 @@ finding — now `loadMissing('lines')`, which `AadeInvoiceDocument::build()` doe
 anyway; and an adopted mark row carried no `invoice_url`, so the self-healed document's «Ιστορικό
 myDATA» showed no QR link (both services).
 
-Tests: `DeliveryNoteExactlyOnceTest` (18), `TenantCoherenceTest` (18), + four added to
-`MyDataSubmitInDoubtTest`. Each fix was verified to make its test fail when reverted. Both
+**Review round 4** found two P1s and a P2 — both P1s again in FIX code, and both were «the fix did
+not actually fix what it claimed». The line/product check was inert in the panel a **second** time:
+round 3 replaced `relationLoaded()` with `loadMissing()`, but that still reads THROUGH
+`CompanyScope`, which returns nothing for a foreign line — so the loop ran over an empty set and
+passed. It now reads `withoutGlobalScope`, like `assertRelation()` two lines above always did, and
+deliberately ignores an already-loaded `lines` (loaded through the scope, so trusting it would
+reintroduce the hole). The tests missed it both times because tests have no ambient context; the
+new ones set the context Filament sets on `TenantSet`.
+
+The second was the stranding bug through a THIRD door: `canReadMyData()` only checks that an
+aade-id is present, while `FirebedCredentials::init()` additionally needs a non-empty, decryptable
+subscription key — so a half-configured tenant (or an APP_KEY rotation) threw «myDATA unreachable»
+forever, and the read-less escape hatch sat behind `! canReadMyData()` where that could never reach
+it. Priming is now separated from fetching, because the two failures mean opposite things: a local
+config error is not evidence about AADE. Both routes share ONE policy
+(`unverifiableInDoubt()`) — refuse inside the window, file past it with a loud warning — instead of
+being written twice. P2: an adopted row always claimed a direct `INSERT`, mislabelling a ΥΠΑΗΕΣ
+filing in the δελτίο's history; it now records `PROVIDER_INSERT` + `provider_key` when the tenant
+files through a provider.
+
+Tests: `DeliveryNoteExactlyOnceTest` (20), `TenantCoherenceTest` (20), + four added to
+`MyDataSubmitInDoubtTest`. Every fix across all four rounds was verified to make its test fail when
+reverted. Both
 arming tests read `mydata_pending_since` **through the query builder from inside the outbound
 call** — the way a different process would see it after a kill — and both fail when the arming
 line is removed.

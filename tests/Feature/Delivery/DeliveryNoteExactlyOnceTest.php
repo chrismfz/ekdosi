@@ -419,6 +419,66 @@ class DeliveryNoteExactlyOnceTest extends TestCase
         $this->assertSame('https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted', $mark->invoice_url);
     }
 
+    public function test_unusable_read_credentials_do_not_strand_the_note_either(): void
+    {
+        // The third door into the same stranding bug. canReadMyData() only checks
+        // that an aade-id is present; FirebedCredentials::init() additionally needs a
+        // non-empty, DECRYPTABLE subscription key — so a half-configured tenant, or
+        // an APP_KEY rotation, threw «το myDATA δεν είναι προσβάσιμο» forever, and
+        // the read-less escape hatch sat behind !canReadMyData() where this could
+        // never reach it. A local config error is not evidence about AADE.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_mode' => 'production',
+            'mydata_mode' => 'off',
+            'mydata_aade_id_production' => 'U',
+            'mydata_subscription_key_production' => null,   // id present, key missing
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+        $tenant = $this->tenant->fresh();
+
+        $this->assertTrue($tenant->canReadMyData(), 'the id alone makes it look read-capable');
+
+        // Inside the window → refuse, and say WHY.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+            $this->fail('Expected a refusal inside the grace window.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('κρίσιμο παράθυρο', $e->getMessage());
+        }
+
+        // Past it → submittable again, not stranded for ever.
+        $this->note->forceFill(['mydata_pending_since' => now()->subDays(5)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+        } catch (\Throwable $e) {
+            $this->assertStringNotContainsString('κρίσιμο παράθυρο', $e->getMessage());
+            $this->assertStringNotContainsString('δεν είναι προσβάσιμο', $e->getMessage());
+        }
+    }
+
+    public function test_an_adopted_provider_filing_is_recorded_as_such(): void
+    {
+        // submitViaProvider arms the marker too, so a provider tenant reaches the
+        // adoption path; recording it as a plain INSERT would label a ΥΠΑΗΕΣ filing
+        // «Καταχώρηση» instead of «Καταχώρηση (πάροχος)» in the δελτίο's history.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
+            'einvoice_provider_key' => 'invosign',
+            'mydata_aade_id_production' => 'U', 'mydata_subscription_key_production' => 'K',
+        ])->save();
+        $tenant = $this->tenant->fresh();
+
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', '400001965177931')]);
+
+        $mark = (new DeliveryNoteSubmitter($tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame('PROVIDER_INSERT', $mark->mydata_action);
+        $this->assertSame('invosign', $mark->provider_key);
+    }
+
     public function test_a_read_less_tenant_is_not_stranded_forever(): void
     {
         // The first cut of the "cannot verify → refuse" fix refused UNCONDITIONALLY,

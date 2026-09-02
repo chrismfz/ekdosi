@@ -57,19 +57,7 @@ final class TenantCoherence
         self::assertRelation($tenant, $invoice, 'invoiceType', 'invoice type', $label);
         self::assertRelation($tenant, $invoice, 'paymentMethod', 'payment method', $label);
 
-        // loadMissing, NOT relationLoaded: the panel's submit paths (ViewInvoice,
-        // the invoices table bulk action, ViewDeliveryNote) pass a model with no
-        // lines loaded, so gating on relationLoaded() made this whole branch —
-        // including the E3 product/category check — silently inert exactly where an
-        // operator sits. `AadeInvoiceDocument::build()` loads the same relations a
-        // moment later, so on the paths that DID have them this costs nothing.
-        $invoice->loadMissing('lines');
-
-        foreach ($invoice->lines as $line) {
-            self::assertOwned($tenant, $line, 'invoice line', $label);
-        }
-
-        self::assertLineProducts($tenant, $invoice->lines->pluck('product_id')->all(), $label);
+        self::assertLines($tenant, $invoice, 'invoice line', $label);
     }
 
     /**
@@ -128,13 +116,33 @@ final class TenantCoherence
         self::assertRelation($tenant, $note, 'customer', 'recipient', $label);
         self::assertRelation($tenant, $note, 'deliveryType', 'delivery type', $label);
 
-        $note->loadMissing('lines');
+        self::assertLines($tenant, $note, 'delivery note line', $label);
+    }
 
-        foreach ($note->lines as $line) {
-            self::assertOwned($tenant, $line, 'delivery note line', $label);
+    /**
+     * The document's lines, and the products/categories they reference.
+     *
+     * Read WITHOUT the tenant scope, for the same reason assertRelation() does: a
+     * scoped read of a foreign line returns NOTHING, so the check would pass on an
+     * empty set — silently inert exactly where an operator sits. Two earlier
+     * versions of this branch were inert in the panel for two different reasons
+     * (gated on relationLoaded(), then scoped by CompanyScope); reading past the
+     * scope is what actually makes it fire.
+     *
+     * Also deliberately NOT the loaded relation: an already-loaded `lines` was
+     * loaded THROUGH the scope, so trusting it would reintroduce the same hole.
+     */
+    private static function assertLines(Company $tenant, Model $document, string $what, string $documentLabel): void
+    {
+        $lines = $document->lines()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->get(['id', 'company_id', 'product_id']);
+
+        foreach ($lines as $line) {
+            self::assertOwned($tenant, $line, $what, $documentLabel);
         }
 
-        self::assertLineProducts($tenant, $note->lines->pluck('product_id')->all(), $label);
+        self::assertLineProducts($tenant, $lines->pluck('product_id')->all(), $documentLabel);
     }
 
     /**

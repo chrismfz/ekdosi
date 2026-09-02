@@ -578,58 +578,40 @@ class DeliveryNoteSubmitter
         }
 
         if (! $this->tenant->canReadMyData()) {
-            // NOT the same as "AADE has nothing": we never asked, so we must not let
-            // the caller treat this as verified-empty INSIDE the dangerous window.
-            //
-            // But refusing forever is worse than the disease, and the first cut of
-            // this fix did exactly that: a provider tenant with no myDATA read
-            // credentials could never submit the note again, because nothing in the
-            // app clears mydata_pending_since. A permanently unsubmittable legal
-            // document is a bigger operational failure than the risk being avoided.
-            //
-            // So: refuse while the window is hot — that is when a MARK created by the
-            // earlier attempt is most likely to exist and least likely to be visible
-            // anywhere — and past it, allow the filing with a loud warning. The
-            // operator has had the grace window to check the provider's portal.
-            // Provider-side verification (InvoSign exposes an invoice_status
-            // endpoint) is PROV-001; once that lands this branch becomes a real
-            // check instead of a time-based one.
-            $graceMinutes = (int) config('ekdosi.einvoice.in_doubt_grace_minutes', 10);
-
-            if ($note->mydata_pending_since?->gt(now()->subMinutes($graceMinutes))) {
-                throw new RuntimeException(
-                    "Δελτίο {$note->invcode}: μια προηγούμενη υποβολή διακόπηκε και η εταιρεία δεν "
-                    .'έχει διαπιστευτήρια ανάγνωσης myDATA για να επιβεβαιωθεί αν καταχωρήθηκε. '
-                    ."Περίμενε ~{$graceMinutes} λεπτά και έλεγξε στο μεταξύ την πύλη του παρόχου· "
-                    .'ΔΕΝ ξαναϋποβάλλουμε τυφλά μέσα στο κρίσιμο παράθυρο.'
-                );
-            }
-
-            Log::warning('Delivery in-doubt: filing again WITHOUT verification (tenant cannot read myDATA)', [
-                'company_id' => $this->tenant->getKey(),
-                'delivery_note_id' => $note->id,
-                'invcode' => $note->invcode,
-                'pending_since' => $note->mydata_pending_since?->toIso8601String(),
-            ]);
-
-            return null;
+            return $this->unverifiableInDoubt($note, 'η εταιρεία δεν έχει διαπιστευτήρια ανάγνωσης myDATA');
         }
 
         $issued = Carbon::parse($note->issued_at);
         $from = $issued->copy()->min(now())->subDay();
         $to = $issued->copy()->max(now())->addDay();
 
+        // FirebedCredentials, NOT initFirebed(): this is a READ, and the two resolve
+        // different environments. initFirebed() primes the SUBMISSION mode
+        // (`mydata_mode_enum`), which for a provider tenant is 'off' — so the lookup
+        // would verify against the wrong endpoint, or none at all. mydataReadMode(),
+        // which canReadMyData() above gated on, is what FirebedCredentials resolves.
+        //
+        // Priming is separated from fetching because the two failures mean opposite
+        // things. canReadMyData() only checks that an aade-id is present; init()
+        // additionally needs a non-empty, DECRYPTABLE subscription key — so a
+        // half-configured tenant, or an APP_KEY rotation, throws here. That is a
+        // LOCAL configuration problem, not evidence about AADE, and treating it as
+        // «unreachable» made the note permanently unfilable: the refusal is
+        // unconditional and nothing clears mydata_pending_since. Fall through to the
+        // read-less branch, which refuses inside the window and files past it.
         try {
-            // FirebedCredentials, NOT initFirebed(): this is a READ, and the two
-            // resolve different environments. initFirebed() primes the SUBMISSION
-            // mode (`mydata_mode_enum`), which for a provider tenant is 'off' with
-            // no credentials — so the lookup would either throw forever (stranding
-            // the note, the very bug round 2 fixed, reached by another door) or, if
-            // sandbox creds happen to exist, verify against the AADE DEV endpoint,
-            // see nothing, and file a second δελτίο past the grace window.
-            // mydataReadMode() — which canReadMyData() above already gated on — is
-            // what FirebedCredentials resolves.
             FirebedCredentials::init($this->tenant, $this->mockHandler);
+        } catch (Throwable $e) {
+            Log::warning('Delivery in-doubt: myDATA read credentials unusable — cannot verify', [
+                'company_id' => $this->tenant->getKey(),
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->unverifiableInDoubt($note, 'τα διαπιστευτήρια ανάγνωσης myDATA δεν είναι χρησιμοποιήσιμα');
+        }
+
+        try {
             $docs = (new SalesReconciler($this->tenant, $this->mockHandler))
                 ->fetchAadeDocs($from->format('d/m/Y'), $to->format('d/m/Y'));
         } catch (Throwable $e) {
@@ -673,7 +655,15 @@ class DeliveryNoteSubmitter
         $found = $matches[0];
         $mark = (string) $found->mark;
 
-        $adopted = DB::transaction(function () use ($note, $found, $mark) {
+        // The audit row must say HOW the document was filed. submitViaProvider now
+        // arms the marker too, so a provider tenant reaches this path — recording it
+        // as a plain INSERT would label a ΥΠΑΗΕΣ filing «Καταχώρηση» instead of
+        // «Καταχώρηση (πάροχος)» in the δελτίο's history.
+        $viaProvider = $this->tenant->isLiveProviderTenant();
+        $action = $viaProvider ? 'PROVIDER_INSERT' : 'INSERT';
+        $providerKey = $viaProvider ? (string) $this->tenant->einvoice_provider_key : null;
+
+        $adopted = DB::transaction(function () use ($note, $found, $mark, $action, $providerKey) {
             $row = DeliveryMark::query()
                 ->where('delivery_note_id', $note->id)
                 ->where('mark', $mark)
@@ -683,7 +673,8 @@ class DeliveryNoteSubmitter
                     'company_id' => $note->company_id,
                     'delivery_note_id' => $note->id,
                     'mark' => $mark,
-                    'mydata_action' => 'INSERT',
+                    'mydata_action' => $action,
+                    'provider_key' => $providerKey,
                     // Both normal success paths store this; without it the adopted
                     // δελτίο's «Ιστορικό myDATA» row shows no QR link.
                     'invoice_url' => $found->qrCodeUrl,
@@ -725,6 +716,47 @@ class DeliveryNoteSubmitter
         }
 
         return $adopted;
+    }
+
+    /**
+     * What to do when we CANNOT verify an in-doubt δελτίο — no read credentials, or
+     * credentials that do not work. Distinct from «AADE says nothing», which is
+     * evidence, and from «AADE is unreachable», which is transient.
+     *
+     * Refuse while the window is hot: that is when a MARK created by the earlier
+     * attempt is most likely to exist and least likely to be visible anywhere. Past
+     * it, file with a loud warning.
+     *
+     * Refusing FOREVER is worse than the disease, and two earlier cuts of this did
+     * exactly that through two different doors: nothing in the app clears
+     * `mydata_pending_since`, so an unconditional refusal leaves a permanently
+     * unfilable legal document. That is a bigger operational failure than the risk
+     * being avoided. Provider-side verification (InvoSign exposes an invoice_status
+     * endpoint) is PROV-001; once that lands this becomes a real check rather than
+     * a time-based one.
+     */
+    private function unverifiableInDoubt(DeliveryNote $note, string $reason): ?DeliveryMark
+    {
+        $graceMinutes = (int) config('ekdosi.einvoice.in_doubt_grace_minutes', 10);
+
+        if ($note->mydata_pending_since?->gt(now()->subMinutes($graceMinutes))) {
+            throw new RuntimeException(
+                "Δελτίο {$note->invcode}: μια προηγούμενη υποβολή διακόπηκε και {$reason}, "
+                .'οπότε δεν μπορεί να επιβεβαιωθεί αν καταχωρήθηκε. Περίμενε '
+                ."~{$graceMinutes} λεπτά και έλεγξε στο μεταξύ την πύλη του παρόχου/το myDATA· "
+                .'ΔΕΝ ξαναϋποβάλλουμε τυφλά μέσα στο κρίσιμο παράθυρο.'
+            );
+        }
+
+        Log::warning('Delivery in-doubt: filing again WITHOUT verification', [
+            'company_id' => $this->tenant->getKey(),
+            'delivery_note_id' => $note->id,
+            'invcode' => $note->invcode,
+            'reason' => $reason,
+            'pending_since' => $note->mydata_pending_since?->toIso8601String(),
+        ]);
+
+        return null;
     }
 
     private function recordProviderFailure(DeliveryNote $note, string $providerKey, string $requestXml, string $error): void
