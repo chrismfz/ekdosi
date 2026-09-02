@@ -88,12 +88,17 @@ abstract class ForensicMcpTool extends SuperAdminMcpTool
             return [];
         }
 
+        // Prefer the STRUCTURED error code — both AADE (`<code>229</code>`) and
+        // InvoSign (`<errors><error><code>88-004</code>`) responses carry it. Only
+        // when none is present do we fall back to bracket-scanning the body, so an
+        // incidental `[204]` (a payment-method index, a doc reference) in a
+        // NON-error response isn't reported as a fabricated rejection code.
         $codes = [];
         if (preg_match_all('/<code>\s*([^<]+?)\s*<\/code>/i', $xml, $m) !== false) {
-            $codes = array_merge($codes, $m[1] ?? []);
+            $codes = $m[1] ?? [];
         }
-        if (preg_match_all('/\[([0-9]{2,3}(?:-[0-9]{3})?)\]/', $xml, $m) !== false) {
-            $codes = array_merge($codes, $m[1] ?? []);
+        if ($codes === [] && preg_match_all('/\[([0-9]{2,3}(?:-[0-9]{3})?)\]/', $xml, $m) !== false) {
+            $codes = $m[1] ?? [];
         }
 
         $codes = array_values(array_unique(array_map('trim', $codes)));

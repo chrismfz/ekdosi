@@ -29,7 +29,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `REJECTED`/`*_FAILED`), **`stuck_documents`** (in-doubt / οριστικοποιημένα-αδήλωτα / ΔΑ in-doubt),
   **`mydata_discrepancies`** (ο αριθμός του `app_health` ως γραμμές· cached + τοπικό phase-1·
   `live=true` = πραγματικό AADE reconcile), **`preflight`** (`MyDataConfigAudit` = `mydata:preflight`
-  απ' έξω). Καμία επιπλέον καταγραφή/activity — μόνο ανάγνωση. Πλήρες: `MCP.md`, `FEATURES.md §16γ`.
+  απ' έξω). Καμία επιπλέον καταγραφή/activity — μόνο ανάγνωση. **Review round** (PR #405): το
+  `stuck_documents` δείχνει τώρα το ΠΡΑΓΜΑΤΙΚΟ πλήθος (όχι το capped) σε in-doubt/delivery, και το
+  `finalized_unfiled` περιορίζεται σε tenants **gr-mydata/gr-provider** (αλλιώς false alarm σε
+  ee-peppol/none)· το `invoice_filing` βρίσκει και invcode μόνο-με-ψηφία· τα error codes βγαίνουν από
+  το structured `<code>` (bracket fallback μόνο αν λείπει, ώστε ένα incidental `[204]` να μη διαβαστεί
+  ως απόρριψη). Πλήρες: `MCP.md`, `FEATURES.md §16γ`.
 - **MCP/Βοηθός: `leads_pulse`** — «ασχολήθηκε κανείς με τα leads;» με μια κλήση: ανοιχτά / νέα /
   ληξιπρόθεσμα / αδρανή / χωρίς επόμενο βήμα, τι έκανε **κάθε χειριστής** στην περίοδο (τηλέφωνα,
   emails, ραντεβού, προσφορές, μετατροπές — ο αδρανής εμφανίζεται με μηδενικά), **ποιος άνοιξε** τα

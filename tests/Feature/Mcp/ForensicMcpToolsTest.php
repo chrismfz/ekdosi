@@ -57,20 +57,22 @@ class ForensicMcpToolsTest extends TestCase
         return $user->fresh();
     }
 
-    private function company(string $slug): Company
+    private function company(string $slug, string $provider = 'gr-mydata'): Company
     {
         return Company::create([
             'name' => strtoupper($slug),
             'slug' => $slug.'-'.uniqid(),
             'country_code' => 'GR',
+            'einvoice_provider' => $provider,
         ]);
     }
 
-    private function rejectedInvoice(Company $company): Invoice
+    private function rejectedInvoice(Company $company, int $n = 1): Invoice
     {
+        $series = 'TP'.chr(64 + $n); // TPA, TPB, … — distinct series per invoice
         $type = InvoiceType::create([
             'company_id' => $company->id,
-            'code' => 'TPY',
+            'code' => $series,
             'name' => 'ΤΠΥ',
             'invcount' => 1,
             'mydata_type' => '2.1',
@@ -84,8 +86,8 @@ class ForensicMcpToolsTest extends TestCase
         ]);
         $invoice = Invoice::create([
             'company_id' => $company->id,
-            'invcode' => 'TPY1',
-            'series' => 'TPY',
+            'invcode' => $series.'1',
+            'series' => $series,
             'code' => 1,
             'invoice_type_id' => $type->id,
             'customer_id' => $customer->id,
@@ -175,6 +177,24 @@ class ForensicMcpToolsTest extends TestCase
 
         $response->assertOk();
         $response->assertSee($invoice->invcode);
+    }
+
+    public function test_finalized_unfiled_is_scoped_to_mydata_filing_tenants(): void
+    {
+        // A gr-mydata tenant with an active, unfiled, mydata-typed invoice → flagged.
+        $filing = $this->company('filing', 'gr-mydata');
+        $filingInvoice = $this->rejectedInvoice($filing, 1);      // invcode TPA1
+        // A non-filing tenant (e.g. ee-peppol) with the SAME shape → NOT flagged:
+        // those documents never file through myDATA, so it would be a false alarm.
+        $peppol = $this->company('eesti', 'ee-peppol');
+        $peppolInvoice = $this->rejectedInvoice($peppol, 2);      // invcode TPB1
+
+        $response = EkdosiMcpServer::actingAs($this->superAdmin($filing))
+            ->tool(StuckDocumentsMcpTool::class, []);
+
+        $response->assertOk();
+        $response->assertSee($filingInvoice->invcode);
+        $response->assertDontSee($peppolInvoice->invcode);
     }
 
     public function test_preflight_runs_the_readiness_audit(): void

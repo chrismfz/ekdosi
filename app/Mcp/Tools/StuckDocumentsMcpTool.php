@@ -55,12 +55,26 @@ class StuckDocumentsMcpTool extends ForensicMcpTool
         $ids = self::ids($scope['companies']);
         $slugs = self::slugMap($scope['companies']);
 
+        // finalized_unfiled only makes sense for tenants that actually file to
+        // myDATA/AADE — a gr-mydata or gr-provider channel. An ee-peppol / none
+        // tenant whose invoice types happen to carry a mydata_type would otherwise
+        // be reported as "should be filed, is not", a pure false alarm.
+        $filingIds = array_values(array_map(
+            static fn ($c): int => (int) $c->getKey(),
+            array_filter(
+                $scope['companies'],
+                static fn ($c): bool => in_array($c->einvoice_provider, ['gr-mydata', 'gr-provider'], true),
+            ),
+        ));
+
         // --- in_doubt: pending_since armed, state never resolved -----------------
-        $inDoubt = Invoice::query()
+        $inDoubtBase = Invoice::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->whereIn('company_id', $ids)
             ->whereNotNull('mydata_pending_since')
-            ->whereNull('mydata_state')
+            ->whereNull('mydata_state');
+        $inDoubtTotal = (clone $inDoubtBase)->count();
+        $inDoubt = $inDoubtBase
             ->with(['invoiceType:id,mydata_type', 'customer:id,name'])
             ->orderBy('mydata_pending_since')
             ->limit($limit)
@@ -77,14 +91,16 @@ class StuckDocumentsMcpTool extends ForensicMcpTool
             ])->all();
 
         // --- finalized_unfiled: active, files-to-myDATA type, no MARK ------------
-        $unfiled = Invoice::query()
+        $unfiledBase = Invoice::query()
             ->withoutGlobalScope(CompanyScope::class)
-            ->whereIn('company_id', $ids)
+            ->whereIn('company_id', $filingIds)
             ->whereNull('legacy_id') // native docs only — imported ones filed on the old channel
             ->where('local_status', 'active')
             ->whereNull('mydata_mark')
             ->whereNull('mydata_pending_since')
-            ->whereHas('invoiceType', fn ($t) => $t->whereNotNull('mydata_type'))
+            ->whereHas('invoiceType', fn ($t) => $t->whereNotNull('mydata_type'));
+        $unfiledTotal = $filingIds === [] ? 0 : (clone $unfiledBase)->count();
+        $unfiled = $filingIds === [] ? [] : $unfiledBase
             ->with(['invoiceType:id,mydata_type', 'customer:id,name'])
             ->orderByDesc('issued_at')
             ->limit($limit)
@@ -99,24 +115,17 @@ class StuckDocumentsMcpTool extends ForensicMcpTool
                 'issued_at' => $i->issued_at?->toDateString(),
             ])->all();
 
-        $unfiledTotal = Invoice::query()
-            ->withoutGlobalScope(CompanyScope::class)
-            ->whereIn('company_id', $ids)
-            ->whereNull('legacy_id')
-            ->where('local_status', 'active')
-            ->whereNull('mydata_mark')
-            ->whereNull('mydata_pending_since')
-            ->whereHas('invoiceType', fn ($t) => $t->whereNotNull('mydata_type'))
-            ->count();
-
         // --- delivery_in_doubt: same limbo for delivery notes --------------------
+        $deliveryInDoubtTotal = 0;
         $deliveryInDoubt = [];
         if (Schema::hasColumn('delivery_notes', 'mydata_pending_since')) {
-            $deliveryInDoubt = DeliveryNote::query()
+            $deliveryBase = DeliveryNote::query()
                 ->withoutGlobalScope(CompanyScope::class)
                 ->whereIn('company_id', $ids)
                 ->whereNotNull('mydata_pending_since')
-                ->whereNull('mydata_state')
+                ->whereNull('mydata_state');
+            $deliveryInDoubtTotal = (clone $deliveryBase)->count();
+            $deliveryInDoubt = $deliveryBase
                 ->orderBy('mydata_pending_since')
                 ->limit($limit)
                 ->get()
@@ -132,7 +141,8 @@ class StuckDocumentsMcpTool extends ForensicMcpTool
         return self::json([
             'companies' => array_values($slugs),
             'in_doubt' => [
-                'count' => count($inDoubt),
+                'count' => $inDoubtTotal,
+                'showing' => count($inDoubt),
                 'rows' => $inDoubt,
                 'meaning' => 'Ασαφής έκβαση υποβολής (timeout) — μην ξανα-υποβάλεις χειροκίνητα· ο reconciler υιοθετεί το ΜΑΡΚ αν εκδόθηκε.',
             ],
@@ -140,10 +150,11 @@ class StuckDocumentsMcpTool extends ForensicMcpTool
                 'count' => $unfiledTotal,
                 'showing' => count($unfiled),
                 'rows' => $unfiled,
-                'meaning' => 'Οριστικοποιημένο, ο τύπος δηλώνεται στη myDATA, αλλά δεν έχει ΜΑΡΚ — θα έπρεπε να έχει υποβληθεί.',
+                'meaning' => 'Οριστικοποιημένο, ο τύπος δηλώνεται στη myDATA, αλλά δεν έχει ΜΑΡΚ — θα έπρεπε να έχει υποβληθεί. (Μόνο tenants gr-mydata/gr-provider.)',
             ],
             'delivery_in_doubt' => [
-                'count' => count($deliveryInDoubt),
+                'count' => $deliveryInDoubtTotal,
+                'showing' => count($deliveryInDoubt),
                 'rows' => $deliveryInDoubt,
             ],
         ]);

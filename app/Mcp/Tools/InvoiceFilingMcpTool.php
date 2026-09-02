@@ -73,7 +73,13 @@ class InvoiceFilingMcpTool extends ForensicMcpTool
             ->with(['invoiceType', 'customer']);
 
         if (ctype_digit($needle)) {
-            $query->where('id', (int) $needle);
+            // An all-digits needle is AMBIGUOUS: it could be a row id OR an invcode
+            // that happens to carry no letter prefix. Match either, so a numeric
+            // invcode is never unreachable (invcodes normally have a series prefix,
+            // but we don't rely on that).
+            $query->where(function ($q) use ($needle): void {
+                $q->where('id', (int) $needle)->orWhere('invcode', $needle);
+            });
         } else {
             $query->where('invcode', $needle);
         }
