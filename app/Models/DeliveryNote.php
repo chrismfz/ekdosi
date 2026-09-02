@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\TracksActivity;
+use App\Support\Afm;
 use App\Support\IsoCountry;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -161,6 +162,23 @@ class DeliveryNote extends Model
      * BLANK does). A null either way skips the comparison, and a blank name means
      * the payload files the customer's name, so both still read as "this IS the
      * customer".
+     *
+     * The ΑΦΜ comparison keeps LETTERS (Afm::comparisonKey, shared with the invoice
+     * counterpart check in MYD-009) — a digit-strip turns «DE811234567» into
+     * «811234567», which matches a Greek customer's ΑΦΜ, and the German party then
+     * inherits that customer's country and files as GR.
+     *
+     * The migration's SQL mirror (`orWhereColumn`) is a plain column comparison, so
+     * the two are CLOSE but not identical, in both directions — and both fail safe:
+     *  - SQL is stricter on separators («123 456 789» vs «123456789» matches here,
+     *    not there) → the row is simply not pre-filled, and the read-time fallback
+     *    still covers it, because that same predicate means the note is unfiled;
+     *  - SQL is looser on the NAME, since `utf8mb4_unicode_ci` is case- and
+     *    accent-insensitive («ΑΦΟΙ ΠΑΠΑΔΟΠΟΥΛΟΥ ΑΕ» = «Αφοί Παπαδόπουλου ΑΕ») → it
+     *    pre-fills for the same party spelled differently, which is right.
+     * A prefixed ΑΦΜ («EL…», or the Greek-letter «ΕΛ…») against a bare one is a
+     * deliberate false negative: the note is refused until someone sets a country,
+     * rather than inheriting one on a guess.
      */
     public function recipientIsTheLinkedCustomer(): bool
     {
@@ -171,41 +189,13 @@ class DeliveryNote extends Model
         }
 
         $afm = $this->externalRecipientAfm();
-        if ($afm !== null && self::vatKey($afm) !== self::vatKey($customer->afm)) {
+        if ($afm !== null && Afm::comparisonKey($afm) !== Afm::comparisonKey($customer->afm)) {
             return false;
         }
 
         $name = trim((string) $this->recipient_name);
 
         return $name === '' || $name === trim((string) $customer->name);
-    }
-
-    /**
-     * Comparison key for the identity check above: separators and case folded away,
-     * but LETTERS KEPT.
-     *
-     * Deliberately not Afm::digits(), which strips everything non-numeric: that turns
-     * the German VAT id «DE811234567» into «811234567», which then matches a Greek
-     * customer's ΑΦΜ — so a German party inherited that customer's country and was
-     * filed as GR, the MYD-011 misreport with its own DE prefix sitting in the same
-     * counterpart as contrary evidence. A country prefix is evidence, not noise.
-     *
-     * The migration's SQL mirror (`orWhereColumn`) is a plain column comparison, so
-     * the two are CLOSE but not identical, in both directions — and both directions
-     * fail safe:
-     *  - SQL is stricter on separators («123 456 789» vs «123456789» matches here,
-     *    not there) → the row is simply not pre-filled, and the read-time fallback
-     *    still covers it, because that same predicate means the note is unfiled;
-     *  - SQL is looser on the NAME, since `utf8mb4_unicode_ci` is case- and
-     *    accent-insensitive («ΑΦΟΙ ΠΑΠΑΔΟΠΟΥΛΟΥ ΑΕ» = «Αφοί Παπαδόπουλου ΑΕ») → it
-     *    pre-fills for the same party spelled differently, which is right.
-     * A prefixed ΑΦΜ («EL…», or the Greek-letter «ΕΛ…») against a bare one is a
-     * deliberate false negative here: the note is refused until someone sets a
-     * country, rather than inheriting one on a guess.
-     */
-    private static function vatKey(?string $raw): string
-    {
-        return mb_strtoupper(preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '');
     }
 
     /**

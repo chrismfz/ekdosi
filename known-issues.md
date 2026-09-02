@@ -271,7 +271,7 @@ Priorities:
 | MYD-006 | P1 | OPEN | Classifications | Readiness does not require a business-specific classification policy |
 | MYD-007 | P0 | OPEN | VAT exemption | EU/export hints are wrong and one tenant-wide 0% reason cannot represent mixed cases |
 | MYD-008 | P0 | DONE | Provider credits | Correlated credit cannot find a provider-issued original MARK |
-| MYD-009 | P0 | OPEN | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
+| MYD-009 | P0 | DONE | Counterpart identity | Submitted AFM/name can come from live customer instead of the frozen invoice snapshot |
 | MYD-010 | P0 | OPEN | Branches | Issuer and counterpart branch are always filed as head office 0 |
 | MYD-011 | P0 | DONE | Delivery recipient | Supplier/manual recipient country is lost and filed as GR |
 | MYD-012 | P0 | DONE | Delivery correlation | Seeded 9.1 is offered without any correlated MARK payload |
@@ -710,7 +710,7 @@ remain correctable through the same legal correlation.
 
 ### MYD-009 — myDATA counterpart identity ignores frozen invoice fields
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30 · **Fixed:** 2026-09-02
 
 **Official finding**
 
@@ -751,6 +751,48 @@ so later customer edits cannot change an issued document.
 - A migration/backfill or explicit blocker handles older rows with blank snapshots.
 - Direct and provider previews remain identical in legal counterpart identity
   after the customer record changes.
+
+**Resolution (2026-09-02)**
+
+The legal counterpart is now built ENTIRELY from the invoice's party snapshot, through
+three `Invoice` helpers — `counterpartAfm()`, `counterpartName()`, `counterpartCountryIso()`
+— shared by the AADE payload and the provider payload so one document can never name two
+parties. `AadeInvoiceDocument::buildCounterpart()` no longer touches `customer` at all; the
+"requires a customer with AFM" guard became "requires a counterpart ΑΦΜ", so an invoice with
+a frozen ΑΦΜ and a deleted customer stays issuable.
+
+**The live-customer fallback is doubly narrowed**, because each hole reports a party that was
+never agreed:
+
+- **It stops at transmission.** `mayFallBackToLiveCustomer()` requires `! hasBeenFiled()`
+  (`mydata_sent || mydata_mark`). After filing, the snapshot is the only source — reading
+  through would show a party the AADE record never carried.
+- **The linked customer must actually BE the counterpart.** The party fields are editable
+  while `customer_id` stays put, so an operator can overtype «ΑΦΜ/Επωνυμία» with someone else;
+  `counterpartIsTheLinkedCustomer()` refuses to borrow that customer's country or address.
+  Same hole, same predicate as MYD-011 — the ΑΦΜ comparison keeps LETTERS (shared
+  `Afm::comparisonKey()`), so «DE811234567» never matches a Greek customer's «811234567».
+
+**The resolved party is FROZEN at the moment of filing.** `Invoice::frozenPartyColumns()`
+fills only blank snapshot columns and is merged into the SAME `forceFill` as the MARK, on both
+the direct and the provider path — otherwise a legacy/ETL row's reported party would become
+unreadable the instant `mydata_sent` closed the fallback (the MYD-011 lesson, applied up front).
+The stored country is the NORMALISED ISO-2, so the column means what it claims.
+
+**A blank country still defaults to GR; a present-but-unresolvable one still throws** — turning
+«Neverland» into a confident domestic filing is the MYD-011 round-7 misreport, and an existing
+test caught the regression when the first cut of this change introduced it.
+
+**Provider parity:** `InvoSignDocument::invoiceCounterpartFields()` builds the LEGAL fields
+(name/ΑΦΜ/profession/address) from the same helpers. Tax office, phone and email are contact
+details, absent from the AADE payload and used by InvoSign for delivery/printing — they stay
+LIVE deliberately, and that distinction is now stated in code rather than being an accident of
+a per-field fallback chain.
+
+**Acceptance:** editing a customer after issue leaves the preview XML byte-identical (asserted);
+a filed invoice with a blank snapshot refuses rather than inventing an identity; an overtyped
+party does not inherit the linked customer's country; the freeze fills blanks only and never
+overwrites.
 
 ### MYD-010 — All filings hard-code branch 0
 

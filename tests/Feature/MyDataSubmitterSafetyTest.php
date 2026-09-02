@@ -309,7 +309,7 @@ class MyDataSubmitterSafetyTest extends TestCase
         ]);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/requires a customer with AFM/');
+        $this->expectExceptionMessageMatches('/requires a counterpart ΑΦΜ/');
 
         (new MyDataSubmitter($this->tenant))->previewXml($inv);
     }
@@ -1534,6 +1534,108 @@ XML;
     </response>
 </ResponseDoc>
 XML;
+    }
+
+    /* ============ MYD-009: the counterpart is the FROZEN snapshot ============ */
+
+    public function test_editing_the_customer_after_issue_does_not_change_the_filed_identity(): void
+    {
+        // THE headline acceptance. buildCounterpart() used to file $customer->afm
+        // and $customer->name while taking country/address from the snapshot, so a
+        // customer edit today rewrote the reported party of an invoice filed a year
+        // ago — and assembled ONE reported party out of TWO real ones.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => '123456789',
+            'company_name' => 'Πελάτης ΑΕ',
+            'country' => 'GR',
+        ])->save();
+
+        $before = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        // The customer is renamed and re-registered under a different ΑΦΜ.
+        $this->customer->forceFill([
+            'afm' => '094014201',
+            'name' => 'Μετονομασμένος ΑΕ',
+            'country' => 'DE',
+        ])->save();
+
+        $after = (string) (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'))->request;
+
+        $this->assertSame($before, $after, 'a customer edit must not change a filed document');
+        $this->assertStringContainsString('<vatNumber>123456789</vatNumber>', $after);
+        $this->assertStringNotContainsString('094014201', $after);
+        $this->assertStringNotContainsString('Μετονομασμένος', $after);
+    }
+
+    public function test_a_filed_invoice_never_reads_the_live_customer(): void
+    {
+        // Once filed, the snapshot is the ONLY source: mydata_sent closes the
+        // legacy fallback, so a blank column can no longer be filled in from a
+        // customer row that has moved on since.
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => '', 'company_name' => '', 'country' => '',
+            'mydata_sent' => true, 'mydata_mark' => '400000000000777',
+        ])->save();
+
+        $this->assertTrue($invoice->hasBeenFiled());
+        $this->assertNull($invoice->counterpartAfm());
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/already filed/');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
+    }
+
+    public function test_a_party_typed_over_a_customer_link_does_not_borrow_its_country(): void
+    {
+        // The invoice form leaves customer_id in place while the party fields are
+        // overtyped, so the link can describe somebody else entirely. Borrowing that
+        // customer's country would assemble one reported party out of two.
+        $this->customer->forceFill(['country' => 'GR', 'afm' => '123456789'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill([
+            'vat_no' => 'DE811234567',        // a different, foreign party
+            'company_name' => 'Müller GmbH',
+            'country' => null,                 // must NOT resolve to the customer's GR
+        ])->save();
+
+        $this->assertFalse($invoice->fresh()->counterpartIsTheLinkedCustomer());
+        $this->assertNull($invoice->fresh()->counterpartCountryIso());
+    }
+
+    public function test_a_blank_snapshot_is_frozen_at_the_moment_of_filing(): void
+    {
+        // Legacy/ETL rows arrive with a blank snapshot and resolve from the customer.
+        // The same write sets mydata_sent, which CLOSES that fallback — so unless the
+        // resolved party is frozen here, what we reported becomes unreadable.
+        $this->customer->forceFill(['afm' => '123456789', 'name' => 'Πελάτης ΑΕ', 'country' => 'ΙΤΑΛΙΑ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $this->standardLine($invoice);
+        $invoice->forceFill(['vat_no' => null, 'company_name' => null, 'country' => null])->save();
+
+        $frozen = $invoice->fresh()->frozenPartyColumns();
+
+        $this->assertSame('123456789', $frozen['vat_no']);
+        $this->assertSame('Πελάτης ΑΕ', $frozen['company_name']);
+        // Stored NORMALISED — the column is an ISO-2 record of what was filed.
+        $this->assertSame('IT', $frozen['country']);
+    }
+
+    public function test_the_freeze_never_overwrites_a_value_the_document_carries(): void
+    {
+        $this->customer->forceFill(['afm' => '800561849', 'name' => 'Άλλος ΑΕ'])->save();
+
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill(['vat_no' => '123456789', 'company_name' => 'Πελάτης ΑΕ', 'country' => 'GR'])->save();
+
+        $this->assertSame([], $invoice->fresh()->frozenPartyColumns());
     }
 
     private function makeInvoice(int $code = 1): Invoice

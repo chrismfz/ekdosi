@@ -255,18 +255,36 @@ class InvoSignDocument
     /** @return array<string, string> */
     private static function invoiceCounterpartFields(Invoice $invoice): array
     {
-        $customer = $invoice->customer;
+        // MYD-009 — TWO KINDS OF FIELD, deliberately resolved from different places:
+        //
+        //  * LEGAL IDENTITY (name / ΑΦΜ / profession / address) is the reported
+        //    counterpart. It comes from the invoice's FROZEN snapshot through the
+        //    same Invoice helpers the AADE <counterpart> uses, so the direct and
+        //    provider representations of one document can never name different
+        //    parties. The old chain fell through to the live customer per field,
+        //    which meant a customer edit rewrote the provider identity of an
+        //    already-filed invoice — and could assemble one party out of two.
+        //
+        //  * CONTACT DETAILS (tax office, phone, email) are NOT part of the legal
+        //    identity and are absent from the AADE payload entirely; InvoSign uses
+        //    them for delivery and printing. They stay LIVE on purpose — reaching
+        //    today's customer to email today's copy is correct — and that is the
+        //    distinction, stated rather than left as an accident of the fallback
+        //    chain. If they ever need to be reproducible, they need snapshot
+        //    columns of their own, not a silent freeze here.
+        $legalFallback = $invoice->mayFallBackToLiveCustomer() ? $invoice->customer : null;
+        $contact = $invoice->customer;
 
         return [
-            'CounterpartName' => (string) ($invoice->company_name ?: $customer?->name ?? ''),
-            'CounterpartVat' => (string) ($invoice->vat_no ?: $customer?->afm ?? ''),
-            'CounterpartProfession' => (string) ($invoice->occupation ?: $customer?->occupation ?? ''),
-            'CounterpartTaxOffice' => (string) ($customer?->tax_office ?? ''),
-            'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $customer?->address1 ?? ''),
-            'CounterpartAddressPostalCode' => (string) ($invoice->postcode ?: $customer?->postcode ?? ''),
-            'CounterpartAddressCity' => (string) ($invoice->city ?: $customer?->city ?? ''),
-            'CounterpartPhone' => (string) ($customer?->phone ?? ''),
-            'CounterpartEmail' => (string) ($customer?->email ?? ''),
+            'CounterpartName' => (string) ($invoice->counterpartName() ?? ''),
+            'CounterpartVat' => (string) ($invoice->counterpartAfm() ?? ''),
+            'CounterpartProfession' => (string) ($invoice->occupation ?: $legalFallback?->occupation ?? ''),
+            'CounterpartAddressStreet' => (string) ($invoice->address1 ?: $legalFallback?->address1 ?? ''),
+            'CounterpartAddressPostalCode' => (string) ($invoice->postcode ?: $legalFallback?->postcode ?? ''),
+            'CounterpartAddressCity' => (string) ($invoice->city ?: $legalFallback?->city ?? ''),
+            'CounterpartTaxOffice' => (string) ($contact?->tax_office ?? ''),
+            'CounterpartPhone' => (string) ($contact?->phone ?? ''),
+            'CounterpartEmail' => (string) ($contact?->email ?? ''),
         ];
     }
 

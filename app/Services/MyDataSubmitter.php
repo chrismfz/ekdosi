@@ -720,14 +720,14 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'mark_time' => now()->toTimeString(),
             ]);
 
-            $invoice->forceFill([
+            $invoice->forceFill(array_merge($invoice->frozenPartyColumns(), [
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
                 'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
                 'mydata_mark' => $mark,
                 'mydata_pending_since' => null,
                 'mydata_type' => $invoice->invoiceType?->mydata_type,
-            ])->save();
+            ]))->save();
 
             return $row;
         });
@@ -878,7 +878,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // columns to prevent operator forms from spoofing them
             // (PR #23 review finding). The submitter is the ONLY
             // legitimate writer.
-            $invoice->forceFill([
+            $invoice->forceFill(array_merge($invoice->frozenPartyColumns(), [
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
                 // A filed invoice is a live document. Promote a draft to
@@ -901,7 +901,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'mydata_type' => $this->normalizeInvoiceTypeForStorage(
                     $payload->getInvoiceHeader()->getInvoiceType()
                 ),
-            ])->save();
+            ]))->save();
 
             return $audit;
         });

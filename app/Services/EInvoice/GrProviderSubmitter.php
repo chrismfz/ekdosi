@@ -367,14 +367,17 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             // path (forceFill: the submitter is the only legitimate writer). A
             // filed invoice is a live document → promote a draft to active. Coalesce
             // mydata_url so a lighter recovery response can't wipe an existing QR.
-            $invoice->forceFill([
+            // MYD-009: freeze the counterpart we actually filed in the SAME write —
+            // 'mydata_sent' closes the live-customer fallback, so a legacy row's
+            // reported party would otherwise become unreadable right here.
+            $invoice->forceFill(array_merge($invoice->frozenPartyColumns(), [
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
                 'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
                 'mydata_mark' => $mark,
                 'mydata_url' => $result->qrUrl ?? $invoice->mydata_url,
                 'mydata_type' => $invoice->invoiceType?->mydata_type,
-            ])->save();
+            ]))->save();
 
             return $audit;
         });

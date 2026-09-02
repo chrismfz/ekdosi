@@ -11,7 +11,9 @@ use App\Models\Concerns\TracksActivity;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
+use App\Support\Afm;
 use App\Support\InvoiceScope;
+use App\Support\IsoCountry;
 use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
@@ -224,6 +226,174 @@ class Invoice extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /* ===================== Legal counterpart identity (MYD-009) =====================
+     |
+     | The party-snapshot columns above are the LEGAL counterpart of a filed
+     | document. Everything that builds a filing — the AADE payload, the provider
+     | payload, the PDF — must read them through these three helpers rather than
+     | through `customer`, so the same invoice can never describe two different
+     | parties depending on when it is rendered.
+     |
+     | The bug they close (MYD-009): buildCounterpart() filed `customer->afm` and
+     | `customer->name` while taking country and address from the snapshot, so the
+     | reported party was assembled HALF frozen and HALF live. Editing a customer
+     | changed the XML of an invoice filed a year earlier, and a credit note that
+     | faithfully copied its original's snapshot had it overwritten again by
+     | today's customer row.
+     */
+
+    /**
+     * Has this invoice been transmitted? Twin of DeliveryNote::hasBeenFiled().
+     * Both submit paths write `mydata_sent` and `mydata_mark` together; a
+     * rejected-then-repaired document can carry the flag without a MARK.
+     */
+    public function hasBeenFiled(): bool
+    {
+        return (bool) $this->mydata_sent || filled($this->mydata_mark);
+    }
+
+    /**
+     * May a blank snapshot field fall back to the live customer row?
+     *
+     * ONLY for a document that has not been filed yet. Rows created by this app
+     * always carry a snapshot (the form, the WHMCS mapper and every Action write
+     * it); the blanks are legacy/ETL imports, and those must still be issuable —
+     * so an unfiled document resolves from the customer and FREEZES the result at
+     * submit (MyDataSubmitter::freezePartySnapshot), which is what keeps the
+     * column honest afterwards.
+     *
+     * Once filed, never: `customers` is live and the snapshot is the record of
+     * what was reported, so reading through would show a party the AADE record
+     * never carried.
+     */
+    public function mayFallBackToLiveCustomer(): bool
+    {
+        return ! $this->hasBeenFiled() && $this->counterpartIsTheLinkedCustomer();
+    }
+
+    /**
+     * Does the linked customer actually DESCRIBE this invoice's counterpart?
+     *
+     * The party fields are editable on the invoice form while `customer_id` stays
+     * put, so an operator can pick a customer and then overtype «ΑΦΜ/Επωνυμία» with
+     * a different party. Borrowing the country or address from that customer would
+     * then assemble ONE reported party out of TWO real ones — the same hole
+     * MYD-011 closed for delivery notes, by the same route.
+     *
+     * A blank snapshot field is not a disagreement: it is exactly the legacy row the
+     * fallback exists for. Only a field that is filled AND different rules it out.
+     */
+    public function counterpartIsTheLinkedCustomer(): bool
+    {
+        $customer = $this->customer;
+
+        if ($customer === null) {
+            return false;
+        }
+
+        $afm = trim((string) $this->vat_no);
+        if ($afm !== '' && Afm::comparisonKey($afm) !== Afm::comparisonKey($customer->afm)) {
+            return false;
+        }
+
+        $name = trim((string) $this->company_name);
+
+        return $name === '' || $name === trim((string) $customer->name);
+    }
+
+    /** The counterpart's ΑΦΜ as filed: the frozen snapshot, else the legacy fallback. */
+    public function counterpartAfm(): ?string
+    {
+        $frozen = trim((string) $this->vat_no);
+        if ($frozen !== '') {
+            return $frozen;
+        }
+
+        return $this->mayFallBackToLiveCustomer()
+            ? (trim((string) $this->customer?->afm) ?: null)
+            : null;
+    }
+
+    /** The counterpart's legal name as filed. */
+    public function counterpartName(): ?string
+    {
+        $frozen = trim((string) $this->company_name);
+        if ($frozen !== '') {
+            return $frozen;
+        }
+
+        return $this->mayFallBackToLiveCustomer()
+            ? (trim((string) $this->customer?->name) ?: null)
+            : null;
+    }
+
+    /**
+     * The counterpart's country as a normalised ISO-3166-1 alpha-2, or null when
+     * it cannot be resolved. Shares App\Support\IsoCountry with the delivery
+     * payload, so the two surfaces agree on «ΙΤΑΛΙΑ» / «EL» / «UK».
+     */
+    public function counterpartCountryIso(): ?string
+    {
+        if ($iso = IsoCountry::tryNormalise($this->country)) {
+            return $iso;
+        }
+
+        return $this->mayFallBackToLiveCustomer()
+            ? IsoCountry::tryNormalise($this->customer?->country)
+            : null;
+    }
+
+    /**
+     * Is any part of the legal counterpart ACTUALLY being resolved from the live
+     * customer row right now?
+     *
+     * True only when the snapshot is incomplete AND the fallback is permitted (an
+     * unfiled document whose customer really is the counterpart). The submitter
+     * uses it to FREEZE what it resolved at the moment it files, so the column
+     * stops being a half-truth from then on.
+     */
+    public function counterpartResolvedFromLiveCustomer(): bool
+    {
+        return $this->mayFallBackToLiveCustomer()
+            && (blank($this->vat_no) || blank($this->company_name) || blank($this->country));
+    }
+
+    /**
+     * The party-snapshot columns to FREEZE at the moment this invoice is filed.
+     *
+     * A legacy/ETL row can reach submission with `vat_no`/`company_name`/`country`
+     * blank, so the counterpart is resolved from the linked customer — and the same
+     * write sets `mydata_sent`, which CLOSES that fallback. Without freezing, the
+     * party we actually reported would become unreadable the instant it was filed,
+     * exactly as the delivery-note country did before MYD-011.
+     *
+     * Fills ONLY blanks; never overwrites a value the document already carries.
+     * Returned as columns so a submitter can merge them into the SAME forceFill as
+     * the MARK, rather than doing a second, racy save. Both the direct myDATA and
+     * the provider path use this one definition.
+     *
+     * @return array<string, string>
+     */
+    public function frozenPartyColumns(): array
+    {
+        if (! $this->counterpartResolvedFromLiveCustomer()) {
+            return [];
+        }
+
+        $frozen = [];
+        foreach ([
+            'vat_no' => $this->counterpartAfm(),
+            'company_name' => $this->counterpartName(),
+            'country' => $this->counterpartCountryIso(),
+        ] as $column => $resolved) {
+            if (blank($this->{$column}) && filled($resolved)) {
+                $frozen[$column] = $resolved;
+            }
+        }
+
+        return $frozen;
     }
 
     public function paymentMethod(): BelongsTo

@@ -23,4 +23,20 @@ final class Afm
 
         return $digits === '' ? null : $digits;
     }
+
+    /**
+     * Comparison key for "are these two parties the same?": separators and case
+     * folded away, but LETTERS KEPT.
+     *
+     * Deliberately NOT digits(), which strips everything non-numeric: that turns the
+     * German VAT id «DE811234567» into «811234567», which then matches a Greek
+     * customer's ΑΦΜ — so a foreign party reads as "this is our customer" and
+     * inherits that customer's country/name. A country prefix is evidence, not
+     * noise. (MYD-011 for delivery notes, MYD-009 for invoices — one definition so
+     * the two identity checks cannot drift.)
+     */
+    public static function comparisonKey(?string $raw): string
+    {
+        return mb_strtoupper(preg_replace('/[\s.\-]+/u', '', trim((string) $raw)) ?? '');
+    }
 }
