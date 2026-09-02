@@ -88,9 +88,14 @@ final class ProviderIdentity
      */
     public static function fromArray(array $row): self
     {
+        $key = (string) ($row['key'] ?? '');
+
         return new self(
-            key: (string) ($row['key'] ?? ''),
-            commercialName: (string) ($row['commercial_name'] ?? ''),
+            key: $key,
+            // Mirror forKey(): a missing commercial name falls back to the key, so
+            // a snapshot and a config lookup for the same provider never show a
+            // different name.
+            commercialName: (string) ($row['commercial_name'] ?? '') ?: $key,
             legalName: (string) ($row['legal_name'] ?? ''),
             site: (string) ($row['site'] ?? ''),
             aadeCode: (string) ($row['aade_code'] ?? ''),

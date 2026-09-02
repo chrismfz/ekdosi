@@ -98,6 +98,23 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertSame('999', $snapshot['aade_code']);
     }
 
+    public function test_an_incomplete_identity_is_not_frozen_so_it_can_recover(): void
+    {
+        // PROV-003: a config row present but with a BLANK licence at issue must NOT
+        // be frozen — otherwise snapshot-wins would strand the document with a blank
+        // licence forever, un-printable even after the config is fixed. No snapshot
+        // → the reader falls back to config, which is the recoverable state.
+        config(['ekdosi.einvoice.provider_identity.fake' => [
+            'commercial_name' => 'Fake Provider',
+            'licence_no' => '',
+        ]]);
+
+        $invoice = $this->makeInvoice();
+        $mark = (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice);
+
+        $this->assertNull($mark->fresh()->provider_identity);
+    }
+
     public function test_rejects_a_backdated_issue_date_before_any_outbound_request(): void
     {
         // Normal online provider issue requires IssueDate = today (InvoSign 238);

@@ -865,18 +865,23 @@ class Invoice extends Model
     private ?MyDataMark $providerMarkCache = null;
 
     /**
-     * The CURRENT provider filing's mark, or null (PROV-003).
+     * The mark of the CURRENT, LIVE provider filing, or null (PROV-003).
      *
-     * «Current» = a PROVIDER_INSERT mark whose MARK equals the live mirror
-     * `mydata_mark`. After a provider→direct re-file the mirror MARK is the direct
-     * one, so a stale provider mark must not be presented as this document's
-     * provider evidence. This is the ONE selector the PDF renderer and the invoice
-     * page share, so print and screen never disagree — and it resolves the whole
-     * provider-evidence block from a single query instead of one per field.
+     * «Current + live» = the invoice is VALID at myDATA AND a PROVIDER_INSERT mark
+     * whose MARK equals the live mirror `mydata_mark`. The VALID gate matters: a
+     * provider invoice cancelled at AADE keeps its provider MARK on the mirror, but
+     * it is no longer a live provider document — so its evidence must vanish from
+     * BOTH the page and the PDF (the PDF already gates on VALID; this keeps the two
+     * in step). The mark-equality gate drops a stale provider mark after a
+     * provider→direct re-file. This is the ONE selector the PDF renderer and the
+     * invoice page share — screen and print never disagree — and it resolves the
+     * whole evidence block in a single query.
      *
-     * Memoised per instance (the infolist reads several fields off it in one
-     * render). The private cache is request-scoped — never part of $attributes,
-     * so it doesn't serialise or leak into fresh()/replicate().
+     * Memoised for this instance's lifetime (the infolist reads several fields off
+     * it per render). The cache is a private property, so a NEW instance
+     * (fresh()/replicate()) re-resolves; note refresh() mutates in place and does
+     * NOT reset it, so a caller that mutates the marks and re-reads on the same
+     * object should re-load it instead.
      */
     public function latestProviderMark(): ?MyDataMark
     {
@@ -885,7 +890,8 @@ class Invoice extends Model
         }
         $this->providerMarkResolved = true;
 
-        if (blank($this->mydata_mark)) {
+        // Not VALID (cancelled / unfiled / in-doubt) → no live provider evidence.
+        if ($this->mydata_state !== 'VALID' || blank($this->mydata_mark)) {
             return $this->providerMarkCache = null;
         }
 

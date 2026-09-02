@@ -83,6 +83,21 @@ class ProviderEvidenceInfolistTest extends TestCase
             ->assertSee('B65CE2D6DD465A80');    // Υπογραφή (authentication code)
     }
 
+    public function test_cancelled_provider_invoice_hides_the_evidence_like_the_pdf(): void
+    {
+        // A provider invoice cancelled at AADE keeps its provider MARK on the
+        // mirror, but it is no longer a live provider document — the evidence must
+        // vanish from the page exactly as it does from the PDF (screen == print).
+        $tenant = $this->tenant();
+        $this->boot($tenant);
+        $invoice = $this->providerInvoice($tenant);
+        $invoice->forceFill(['mydata_state' => 'CANCELLED', 'local_status' => 'cancelled'])->save();
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+            ->assertDontSee('LIC_AT_ISSUE_V1')
+            ->assertDontSee('Αριθμός Αδειοδότησης');
+    }
+
     public function test_direct_mydata_invoice_shows_no_provider_evidence(): void
     {
         $tenant = $this->tenant('gr-mydata');

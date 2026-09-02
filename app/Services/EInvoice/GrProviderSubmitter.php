@@ -432,9 +432,15 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
         // PROV-003: freeze the provider identity (name/site/AADE code/ΥΠΑΗΕΣ
         // licence) IN FORCE right now, so a later config/licence rotation can't
-        // rewrite this document's printed evidence. null when the key has no config
-        // row — the reader then falls back to the current config identity.
-        $providerIdentity = ProviderIdentity::forKey($this->transport->key())?->toArray();
+        // rewrite this document's printed evidence. Only freeze a COMPLETE identity
+        // (a real licence): freezing an empty/partial one at issue would strand the
+        // document with a blank licence forever (snapshot-wins), un-printable even
+        // after the config is fixed. No snapshot → the reader falls back to the
+        // current config identity, which is the recoverable state.
+        $identity = ProviderIdentity::forKey($this->transport->key());
+        $providerIdentity = ($identity !== null && $identity->licenceNo !== '')
+            ? $identity->toArray()
+            : null;
 
         return DB::transaction(function () use ($invoice, $xml, $result, $mark, $deliveryState, $providerIdentity) {
             $audit = MyDataMark::create([
