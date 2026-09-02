@@ -169,7 +169,13 @@ class SelfUpdate extends Command
         if (! is_dir(base_path('.git'))) {
             throw new \RuntimeException('Δεν βρέθηκε φάκελος .git — η in-app ενημέρωση («php» strategy) απαιτεί deployment μέσω git checkout.');
         }
-        $dirty = trim($this->capture(['git', 'status', '--porcelain'], base_path()));
+        // TRACKED changes only (`--untracked-files=no`), same rule as
+        // deploy/update.sh: a bare `--porcelain` counts UNTRACKED files, and the
+        // `shield:generate` step below writes one for any resource shipping
+        // without a policy — which then refused every later update. Here it is
+        // worse than on the shell script: the panel operator has no shell to
+        // clear it with, so this must never be the stop condition.
+        $dirty = trim($this->capture(['git', 'status', '--porcelain', '--untracked-files=no'], base_path()));
         if ($dirty !== '') {
             throw new \RuntimeException("Το working tree δεν είναι καθαρό — ματαίωση:\n".$dirty);
         }
@@ -196,6 +202,7 @@ class SelfUpdate extends Command
             $this->gitFetch($run);
         });
         $this->step($run, 'checkout', 'git checkout '.$target, function () use ($run, $target) {
+            $this->protectUntracked($run, $target);
             $this->exec($run, ['git', 'checkout', '--force', $target], base_path());
             $this->writeBuildStamp($run, $target);
         });
@@ -323,6 +330,7 @@ class SelfUpdate extends Command
 
         // ── check out the previous code + reinstall its deps ─────────────────
         $this->step($run, 'checkout', 'git checkout '.$target, function () use ($run, $target) {
+            $this->protectUntracked($run, $target);
             $this->exec($run, ['git', 'checkout', '--force', $target], base_path());
             $this->writeBuildStamp($run, $target);
         });
@@ -442,6 +450,43 @@ class SelfUpdate extends Command
     }
 
     /** Run a subprocess and RETURN its stdout (no streaming) — for tiny probes. */
+    /**
+     * `checkout --force` REPLACES an untracked file whose path the target ref
+     * ships as a tracked one — usually a generated artefact, which is exactly
+     * what should happen. Copy them aside first anyway (the panel operator has
+     * no shell to recover one), and abort rather than overwrite blind if the
+     * copy fails. Mirrors the same block in deploy/update.sh.
+     */
+    private function protectUntracked(UpdateRun $run, string $target): void
+    {
+        // -z + quotePath=false: git C-quotes non-ASCII paths by default, which
+        // would make the cat-file probe miss a Greek filename.
+        $listed = $this->capture(
+            ['git', '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'],
+            base_path(),
+        );
+
+        $backup = storage_path('app/deploy-untracked/'.now()->format('Ymd-His'));
+
+        foreach (array_filter(explode("\0", $listed)) as $path) {
+            $tracked = new Process(['git', 'cat-file', '-e', $target.':'.$path], base_path(), null, null, 60);
+            $tracked->run();
+
+            if (! $tracked->isSuccessful()) {
+                continue;   // not in the target ref — the checkout leaves it alone
+            }
+
+            $to = $backup.'/'.$path;
+            File::ensureDirectoryExists(dirname($to));
+
+            if (! File::copy(base_path($path), $to)) {
+                throw new \RuntimeException("Δεν μπόρεσα να κρατήσω αντίγραφο του '{$path}' στο {$backup} — ματαίωση πριν αντικατασταθεί.");
+            }
+
+            $this->append($run, "  αντίγραφο: {$path} → {$to}\n");
+        }
+    }
+
     private function capture(array $cmd, ?string $cwd = null): string
     {
         $process = new Process($cmd, $cwd ?? base_path(), null, null, 60);
