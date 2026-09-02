@@ -198,8 +198,8 @@ class InvoiceForm
                                     ->title('Ενδοκοινοτική παράδοση (reverse charge)')
                                     ->body('Πελάτης ΕΕ ('.strtoupper((string) $customer->country).') με ΑΦΜ/ΦΠΑ. '
                                         .($autoDefaults
-                                            ? 'Οι νέες γραμμές προεπιλέγονται σε 0% ΦΠΑ (αιτία «16 — άρθρο 45»). Αλλάξτε ανά γραμμή αν χρειάζεται.'
-                                            : 'Συνήθως 0% ΦΠΑ με αιτία «16 — άρθρο 45» — ρυθμίστε ΜΙΑ 0% κατηγορία ΦΠΑ με αιτία εξαίρεσης (Setup → VAT Categories) για αυτόματη προεπιλογή.'))
+                                            ? 'Οι νέες γραμμές προεπιλέγονται σε 0% ΦΠΑ· η αιτία §8.3 ορίζεται ανά γραμμή από τον τύπο (υπηρεσία 2.2→«4 — άρθρο 18», αγαθά 1.2→«14 — άρθρο 33»). Αλλάξτε ανά γραμμή αν χρειάζεται.'
+                                            : 'Συνήθως 0% ΦΠΑ (ενδοκοινοτικό) — ρυθμίστε μια 0% κατηγορία ΦΠΑ με αιτία εξαίρεσης (Setup → VAT Categories) για αυτόματη προεπιλογή. Η αιτία διαφέρει: υπηρεσία→4, αγαθά→14.'))
                                     ->info()->send();
                             }
                         })
@@ -305,13 +305,23 @@ class InvoiceForm
                                     // rate — the operator can still override per line.
                                     // $get('../../customer_id') reads the parent invoice's
                                     // customer from inside the lines repeater.
-                                    $vat = self::reverseChargeApplies($get('../../customer_id'))
+                                    $reverseCharge = self::reverseChargeApplies($get('../../customer_id'));
+                                    $vat = $reverseCharge
                                         ? 0.0
                                         : (float) ($product->vatCategory?->rate ?? 24);
                                     $set('product_descr', $product->description_short);
                                     $set('price_per_item', $net);
                                     // Normalised so the value matches a VAT-rate Select option.
                                     $set('vat_percent', VatRateOptions::normalize($vat));
+                                    // MYD-007: a $set() on vat_percent does NOT fire that Select's
+                                    // afterStateUpdated, so set the per-line §8.3 reason here too
+                                    // when the reverse-charge default made the line 0% — from the
+                                    // invoice TYPE (service 2.2→4, goods 1.2→14). Clear it otherwise.
+                                    $set('vat_exemption_category', $reverseCharge
+                                        ? VatExemptionGuidance::recommendForType(
+                                            InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                        )
+                                        : null);
                                     // G7: keep the VAT-inclusive mirror in sync.
                                     $set('price_per_item_wvat', self::grossFromNet($net, $vat));
                                     $set('metric_unit', $product->metricUnit?->name);

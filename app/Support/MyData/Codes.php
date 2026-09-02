@@ -203,20 +203,19 @@ final class Codes
     ];
 
     /**
-     * The common 0%-rate categories to seed, each WITH its §8.3 reason (MYD-007) —
-     * the cross-border cases a Greek services/goods business actually hits. Seeded
-     * WITH the reason so a fresh tenant is correct out of the box (a reason-less 0%
-     * row would fail preflight, MYD-004). The operator adds more via the guided
-     * form; the per-line reason field picks which one per document. They all share
-     * rate 0, so the line rate-picker shows a single «0%» — the per-line «Αιτία
-     * απαλλαγής» disambiguates.
+     * The 0%-rate category to seed, WITH its §8.3 reason (MYD-007) — so a fresh
+     * tenant is correct out of the box (a reason-less 0% row would fail preflight,
+     * MYD-004) AND keeps the SINGLE-0%-category invariant that ReverseCharge's
+     * auto-default, the WHMCS filer and the PDF fallback still rely on. Seeded as
+     * the common case (intra-EU service, άρθρο 18); the operator adds more 0%
+     * categories via the guided form when needed, and from that point the per-line
+     * «Αιτία απαλλαγής» field disambiguates. Kept a list so the seeder loop and the
+     * (rate, exemption) dedup are unchanged.
      *
      * @var list<array{code: int, description: string}>
      */
     public const ZERO_RATE_SEED = [
         ['code' => 4, 'description' => 'Άνευ ΦΠΑ 0% — Ενδοκοινοτική παροχή υπηρεσιών (άρθρο 18)'],
-        ['code' => 14, 'description' => 'Άνευ ΦΠΑ 0% — Ενδοκοινοτική παράδοση αγαθών (άρθρο 33)'],
-        ['code' => 8, 'description' => 'Άνευ ΦΠΑ 0% — Εξαγωγή αγαθών εκτός ΕΕ (άρθρο 29)'],
     ];
 
     /**

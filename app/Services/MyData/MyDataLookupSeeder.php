@@ -30,10 +30,10 @@ class MyDataLookupSeeder
 {
     /**
      * Seed the standard VAT categories: the positive §8.2 rates (24/13/6/17/9/4;
-     * skips code 8 = no rate and code 10 = duplicate 4%) plus the three common 0%
-     * rows, each WITH its §8.3 reason (MYD-007: intra-EU service→4, goods→14,
-     * export→8) so a fresh tenant passes preflight. Dedup is by (rate, exemption)
-     * — a positive rate or a 0% reason already present is kept, never overwritten.
+     * skips code 8 = no rate and code 10 = duplicate 4%) plus ONE 0% row WITH its
+     * §8.3 reason (MYD-007: intra-EU service → 4) so a fresh tenant passes preflight
+     * AND keeps the single-0%-category invariant. Dedup is by (rate, exemption) — a
+     * positive rate or a 0% reason already present is kept, never overwritten.
      *
      * @return array{created: int, skipped: int}
      */

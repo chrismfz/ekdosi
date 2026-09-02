@@ -46,9 +46,14 @@ return new class extends Migration
                 continue;
             }
 
+            // The submitter treats a NULL vat_percent as 0% too (an imported line
+            // written via the query builder can bypass the model's not-null guard),
+            // so backfill both = 0 and NULL rate.
             DB::table('invoice_lines')
                 ->where('company_id', $companyId)
-                ->where('vat_percent', 0)
+                ->where(function ($q) {
+                    $q->where('vat_percent', 0)->orWhereNull('vat_percent');
+                })
                 ->whereNull('vat_exemption_category')
                 ->update(['vat_exemption_category' => $reason]);
         }

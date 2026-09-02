@@ -38,19 +38,20 @@ class MyDataLookupSeederTest extends TestCase
 
         $r = $this->svc()->seedVatCategories($tenant);
 
-        // MYD-007: 6 positive rates + 3 correctly-reasoned 0% rows (§8.3 4/14/8).
-        $this->assertSame(9, $r['created']);
+        // MYD-007: 6 positive rates + ONE correctly-reasoned 0% row (§8.3 4). A
+        // single 0% category keeps the invariant ReverseCharge / WHMCS / the PDF
+        // fallback rely on; the operator adds more via the guided form when needed.
+        $this->assertSame(7, $r['created']);
         $this->assertSame(0, $r['skipped']);
 
         $cats = VatCategory::where('company_id', $tenant->id)->get();
         $this->assertEqualsCanonicalizing(
-            [0.0, 0.0, 0.0, 4.0, 6.0, 9.0, 13.0, 17.0, 24.0],
+            [0.0, 4.0, 6.0, 9.0, 13.0, 17.0, 24.0],
             $cats->pluck('rate')->map(fn ($r) => (float) $r)->all()
         );
-        // The three 0% rows each carry a valid §8.3 reason (no reason-less landmine).
-        $zeroReasons = $cats->where('rate', 0.0)->pluck('vat_exemption_category')
-            ->map(fn ($c) => (int) $c)->sort()->values()->all();
-        $this->assertSame([4, 8, 14], $zeroReasons);
+        // The 0% row carries a valid §8.3 reason (no reason-less landmine).
+        $zero = $cats->firstWhere('rate', 0.0);
+        $this->assertSame(4, (int) $zero->vat_exemption_category);
         // 24% is the auto-default on first seed.
         $default = $cats->firstWhere('is_default', true);
         $this->assertNotNull($default);
@@ -64,7 +65,7 @@ class MyDataLookupSeederTest extends TestCase
         VatCategory::create(['company_id' => $tenant->id, 'description' => 'Δικό μου 24', 'rate' => 24, 'is_default' => true]);
 
         $r1 = $this->svc()->seedVatCategories($tenant);
-        $this->assertSame(8, $r1['created']);   // 9 seed rows minus the existing 24%
+        $this->assertSame(6, $r1['created']);   // 7 seed rows minus the existing 24%
         $this->assertSame(1, $r1['skipped']);
 
         // Existing 24% kept verbatim (not overwritten), still the only default.
@@ -74,7 +75,7 @@ class MyDataLookupSeederTest extends TestCase
         // Second run is a full no-op.
         $r2 = $this->svc()->seedVatCategories($tenant);
         $this->assertSame(0, $r2['created']);
-        $this->assertSame(9, $r2['skipped']);
+        $this->assertSame(7, $r2['skipped']);
     }
 
     public function test_seeds_starter_invoice_types_including_goods_sale(): void

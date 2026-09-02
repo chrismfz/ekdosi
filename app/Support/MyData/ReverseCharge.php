@@ -13,9 +13,16 @@ use App\Models\VatCategory;
  *
  * Rule: the counterparty is in an EU member state OTHER than Greece and carries
  * a VAT id. (We don't VIES-validate here — that's a separate, networked step;
- * this is the cheap structural check that drives the operator hint.) The
- * matching AADE §8.3 exemption reason is code 16 (άρθρο 45, ex-«39α»),
- * Codes::VAT_EXEMPTION_INTRACOMMUNITY.
+ * this is the cheap structural check that drives the operator hint + the 0%
+ * auto-default.)
+ *
+ * The matching §8.3 exemption reason is NOT one fixed code — it depends on the
+ * document (MYD-007): an intra-community SERVICE (type 2.2) is code 4 (άρθρο 18),
+ * intra-community GOODS (type 1.2) is code 14 (άρθρο 33). So the reason is set
+ * PER LINE from the invoice type (VatExemptionGuidance::recommendForType); this
+ * class only decides the 0% RATE default. Code 16 (άρθρο 45) is a DOMESTIC
+ * reverse-charge case, not the intra-community default — the old assumption this
+ * docblock made was the MYD-007 bug.
  */
 class ReverseCharge
 {
@@ -61,17 +68,16 @@ class ReverseCharge
     /**
      * Should new invoice lines for this customer DEFAULT to 0% (reverse charge)?
      *
-     * True only when BOTH hold, so the auto-default is deterministic and never
-     * produces an invoice the submitter would reject:
+     * True when BOTH hold:
      *   1. appliesTo($customer) — EU non-GR counterparty with a VAT id; and
-     *   2. the tenant has EXACTLY ONE 0%-rate VatCategory carrying a §8.3
-     *      exemption reason. (This is the same single-category invariant
-     *      MyDataSubmitter::resolveVatExemptionCategory needs — if it's
-     *      missing or ambiguous, filing would throw, so we must NOT silently
-     *      pre-fill 0% and lead the operator into a doomed submit.)
+     *   2. the tenant has AT LEAST ONE 0%-rate VatCategory carrying a §8.3
+     *      exemption reason — so 0% is a configured, fileable rate.
      *
-     * The operator can still change the per-line VAT afterwards (mixed
-     * invoices), and a domestic/GR customer is never affected.
+     * MYD-007 relaxed this from «exactly one» to «at least one»: the per-line
+     * exemption reason (set from the invoice type when a line defaults to 0%) is
+     * now the source of truth, so several 0% categories are no longer ambiguous
+     * and no longer disable the default. The operator can still change the per-line
+     * VAT afterwards (mixed invoices); a domestic/GR customer is never affected.
      */
     public static function shouldDefaultZeroVat(Company $tenant, Customer $customer): bool
     {
@@ -83,6 +89,6 @@ class ReverseCharge
             ->where('company_id', $tenant->getKey())
             ->where('rate', 0)
             ->whereNotNull('vat_exemption_category')
-            ->count() === 1;
+            ->exists();
     }
 }
