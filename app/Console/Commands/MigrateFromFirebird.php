@@ -8,6 +8,7 @@ use App\Services\Etl\BackupNoteSync;
 use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
+use App\Support\DocumentSeries;
 use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -847,6 +848,11 @@ class MigrateFromFirebird extends Command
                 ['company_id' => $this->companyId, 'legacy_id' => $r['INVOICE_ID']],
                 [
                     'invcode' => $this->fld($r, 'INVCODE'),
+                    // MYD-018: freeze the series the legacy document was ISSUED
+                    // under. This is a query-builder upsert, so the model's
+                    // creating hook never fires — derive it from the same helper
+                    // so an imported row and an app-created one can't disagree.
+                    'series' => DocumentSeries::fromInvcode($this->fld($r, 'INVCODE'), $r['CODE'] ?? 0),
                     'code' => $r['CODE'] ?? 0,
                     'invoice_type_id' => $this->map['invoice_types'][$this->fld($r, 'INVTYPE')] ?? null,
                     'customer_id' => $this->legacyId('customers', $r['CUST_ID']),

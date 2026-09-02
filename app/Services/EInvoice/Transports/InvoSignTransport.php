@@ -105,7 +105,9 @@ class InvoSignTransport implements EInvoiceProviderTransport
             'branch' => '0',
             'invoiceType' => (string) ($invoice->invoiceType?->mydata_type ?? ''),
             'issueDate' => $invoice->issued_at?->toDateString() ?? '',
-            'series' => (string) ($invoice->invoiceType?->code ?? ''),
+            // MYD-018: the FROZEN series. Reading the live lookup made this ask
+            // the provider about a (series, ΑΑ) it was never sent.
+            'series' => (string) ($invoice->filedSeries() ?? ''),
             'aa' => (string) ($invoice->code ?? ''),
         ]);
 

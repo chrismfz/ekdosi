@@ -399,7 +399,11 @@ class SalesReconciler
             // unverified instead of contradicting AADE with a number we never sent.
             gross: $filed->gross,
             net: $filed->net,
-            series: $invoice->invoiceType?->code,
+            // MYD-018: the FROZEN series — AADE holds the value as filed, so a
+            // lookup rename would otherwise report every filed invoice as a
+            // mismatch. filedSeries() keeps the live-type fallback for rows
+            // numbered before the freeze, so legacy rows behave exactly as before.
+            series: $invoice->filedSeries(),
             aa: $invoice->code !== null ? (string) $invoice->code : null,
             issueDate: $invoice->issued_at?->format('Y-m-d'),
             // Fall back to the relations when the denormalised snapshot columns are

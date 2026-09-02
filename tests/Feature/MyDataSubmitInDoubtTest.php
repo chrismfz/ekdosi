@@ -172,6 +172,35 @@ class MyDataSubmitInDoubtTest extends TestCase
         $this->assertSame(0, $mock->count(), 'no further AADE calls (no resubmission) should have happened');
     }
 
+    public function test_recovery_searches_the_series_the_document_was_filed_under(): void
+    {
+        // MYD-018 — the double-filing case. The series was read LIVE from
+        // invoice_types.code, so renaming the series made this lookup ask AADE
+        // about a (series, ΑΑ) it had never seen. Finding nothing, the submitter
+        // concluded the earlier POST was lost and filed the document a SECOND
+        // time. AADE does not dedup: two MARKs, income declared twice.
+        //
+        // The MockHandler is the assertion: AADE still holds the invoice under
+        // the ORIGINAL series, and only ONE response is queued. If the recovery
+        // searched the new name it would find nothing and fall through to a
+        // SendInvoices POST with an empty queue — a hard failure.
+        $this->markInDoubt(20);
+        $adoptedMark = '400001965177931';
+
+        $this->assertSame('TPY', $this->invoice->series, 'series frozen at create');
+        $this->type->update(['code' => 'TPYNEW']);
+
+        $mock = new MockHandler([
+            $this->transmittedDocsMock('TPY', '1', $adoptedMark),
+        ]);
+
+        $mark = (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+
+        $this->assertSame($adoptedMark, (string) $mark->mark);
+        $this->assertSame($adoptedMark, (string) $this->invoice->fresh()->mydata_mark);
+        $this->assertSame(0, $mock->count(), 'the existing MARK was adopted — no second filing');
+    }
+
     public function test_in_doubt_past_grace_files_normally_when_aade_has_nothing(): void
     {
         // In-doubt LONGER than the grace window (default 10 min) AND AADE has

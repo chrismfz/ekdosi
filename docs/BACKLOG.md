@@ -449,6 +449,15 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   υπόλοιπους»: η επιλογή νικητή είναι νομικά σημαντική (παραστατικά/υπόλοιπα κρέμονται και από τους δύο)
   και το ETL δεν την παίρνει μόνο του. Αν η parallel-run εβδομάδα το κάνει ενοχλητικό: ένα `--afm-keep=CUST_ID`
   per ΑΦΜ (ρητή απόφαση χειριστή) + το άλλο row εισάγεται με `afm_key=NULL` και ⚠ στο log.
+- **Filing-policy snapshot — το υπόλοιπο του MYD-018 (P2, συνειδητά deferred)** _(η **σειρά** πάγωσε
+  2026-09-02· βλ. `known-issues.md` MYD-018)._ Δεν παγώνουν ακόμα: `mydata_type`, income
+  classification ανά γραμμή, quantity flag, payment-method mapping, κωδικός ΦΠΑ/απαλλαγής. Αυτά
+  αλλάζουν το **περιεχόμενο** του payload, όχι την **ταυτότητά** του — δεν μπορούν να προκαλέσουν
+  διπλή υποβολή ή χαμένο recovery (αυτό ήταν το P0 και έκλεισε), είναι συνειδητές πράξεις
+  παραμετροποίησης, και το `mydata:preflight` ήδη τα ελέγχει. Ειδικά το `mydata_type` **δεν είναι
+  μονόγραμμη**: ο `SalesReconciler` τεκμηριώνει fallback που στηρίζεται στο ότι είναι null για
+  ETL-imported γραμμές, οπότε το να γράφεται νωρίτερα απαιτεί να ξαναγίνει κι εκείνο το μονοπάτι
+  στην ίδια αλλαγή. Ξανα-άνοιγμα αν χειριστής αλλάξει `mydata_type` σε τύπο με ανοιχτά πρόχειρα.
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
 - _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._

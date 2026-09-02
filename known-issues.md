@@ -280,7 +280,7 @@ Priorities:
 | MYD-015 | P1 | DONE | VAT picture | Type 8.5 POS return is added with a positive sign |
 | MYD-016 | P1 | DONE | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | DONE | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
-| MYD-018 | P0 | OPEN | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
+| MYD-018 | P0 | DONE | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
 | MYD-019 | P1 | OPEN | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged |
 | MYD-020 | P2 | DONE | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
 | MYD-021 | P0 | OPEN | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
@@ -1620,7 +1620,41 @@ different from AADE. This is a false readiness/audit result.
 
 ### MYD-018 — Numbered filings still depend on mutable InvoiceType configuration
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-02 (series) · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix:** the **series** — the half of this finding that could cause a DOUBLE FILING — is now
+frozen per document (`invoices.series`, `delivery_notes.series`). Everything that identifies a
+document to AADE now reads `Invoice::filedSeries()` / `DeliveryNote::filedSeries()` instead of
+the live `invoice_types.code`: the payload header (`AadeInvoiceDocument`, `DeliveryNoteSubmitter`),
+the **in-doubt recovery** (`MyDataSubmitter::adoptExistingMarkIfPresent`), the provider status
+lookup (`InvoSignTransport::status`), the reconciler snapshot (`SalesReconciler`), the MARK detail
+audit view and the accounting ledger.
+
+The recovery path was the real P0: it searched AADE for the CURRENT `invoiceType->code`, so a
+series rename after an ambiguous POST made it look for a (series, ΑΑ) AADE had never seen. Finding
+nothing, it concluded the earlier POST was lost and filed the document a **second time** — and
+AADE does not dedup (proven on the sandbox 2026-07-07: the same invoiceUid yielded two MARKs).
+`MyDataSubmitInDoubtTest::test_recovery_searches_the_series_the_document_was_filed_under` pins it;
+reverting the one-line fix makes that test attempt exactly that second POST.
+
+Existing rows did not have to be guessed. `invcode` is itself frozen and is exactly `series . code`
+(legacy `GET_INV_CODE` concatenates with no padding or separator; `InvoiceNumberer` reproduces
+that), so the backfill recovers the value as it was at issue rather than approximating it from
+today's lookup. `App\Support\DocumentSeries::fromInvcode()` is the ONE definition, shared by the
+migration backfill, both models' `creating` hooks and the Firebird ETL (a query-builder upsert, so
+no model hook fires there) — a stored value and a recovered one cannot disagree. A pair it cannot
+read stays null and falls back to the live type code, i.e. exactly today's behaviour, so no row is
+made worse. Two traps found while building it: cutting `invcode` with a BYTE offset while counting
+CHARACTERS sliced «ΤΠΥ» in half (the series is routinely Greek), and reading the frozen column with
+`?:` would have discarded a legitimate `'0'` series and silently fallen back to the live lookup.
+
+**Deliberately NOT frozen here (deferred, see `docs/BACKLOG.md`):** myDATA type, per-line
+income classification, the quantity flag, payment-method mapping and the VAT/exemption code.
+Those change a payload's *content*, not its *identity* — they cannot cause a duplicate filing or a
+missed recovery, they are deliberate configuration acts, and `mydata:preflight` already audits them.
+Freezing `mydata_type` in particular is not a one-liner: `SalesReconciler` documents a load-bearing
+fallback keyed on it being null for ETL-imported rows, so writing it earlier would need that path
+reworked in the same change. Kept out to keep this fix minimal and reversible.
 
 **Official finding**
 
