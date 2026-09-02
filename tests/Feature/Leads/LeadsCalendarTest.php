@@ -98,6 +98,27 @@ class LeadsCalendarTest extends TestCase
         $page->set('month', 'garbage')->assertSet('month', '2026-09');
     }
 
+    public function test_it_says_how_many_open_leads_have_no_next_step_at_all(): void
+    {
+        // A calendar is an agenda of next steps: a lead without a date cannot
+        // appear on it. The page must SAY so rather than look empty/broken.
+        $this->lead('Χωρίς βήμα Α', null);
+        $this->lead('Χωρίς βήμα Β', null);
+        $this->lead('Με βήμα', '2026-09-16 15:00:00');
+        $this->lead('Κλειστό χωρίς βήμα', null, LeadStatus::Lost);
+
+        $page = Livewire::test(LeadsCalendar::class)
+            ->assertSee('μόνο τα leads που έχουν «επόμενο βήμα»')
+            ->assertSee('2 ανοιχτά leads');
+
+        $this->assertSame(2, $page->instance()->withoutNextStep());
+
+        // …and it follows the operator filter like everything else.
+        $other = User::create(['name' => 'Άλλος', 'email' => 'o-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
+        $this->tenant->users()->attach($other);
+        $this->assertSame(0, $page->set('operator', (string) $other->id)->instance()->withoutNextStep());
+    }
+
     public function test_drag_to_another_day_keeps_the_time_and_is_gated(): void
     {
         $lead = $this->lead('Μεταθέσιμο', '2026-09-16 15:30:00');

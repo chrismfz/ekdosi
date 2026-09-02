@@ -252,7 +252,10 @@ Design + gates: `docs/leads-mini-crm.md`. **Χτισμένο (L0):**
 - **«Ημερολόγιο leads»** (`View:LeadsCalendar`, operator+): μηνιαίο πλέγμα Δευ–Κυρ με τα επόμενα βήματα των
   ανοιχτών leads (κόκκινο = πέρασε, σήμερα τονισμένο), πλοήγηση μήνα, φίλτρο χειριστή, ένδειξη «Ν ληξιπρόθεσμα
   πριν από αυτόν τον μήνα» → λίστα. **Drag σε άλλη μέρα = μετάθεση** του επόμενου βήματος (κρατά την ώρα).
-- Λίστα ↔ Πίνακας ↔ Ημερολόγιο: κουμπιά-links στο header των τριών σελίδων.
+- **`leads_pulse`** (MCP + Βοηθός, `ViewAny:Lead`): ο σφυγμός των leads απ' έξω — σύνολα, τι έκανε κάθε
+  χειριστής στην περίοδο, ποιος άνοιξε τα τελευταία leads και πότε, τελευταίες κινήσεις.
+- Λίστα ↔ Πίνακας ↔ Ημερολόγιο: κουμπιά-links στο header των τριών σελίδων. Το ημερολόγιο δηλώνει ότι
+  δείχνει μόνο leads **με** επόμενο βήμα και πόσα ανοιχτά δεν έχουν (με link στη λίστα).
 
 ## 8. Πληρωμές & Είσπραξη (AR)
 - **`InvoiceBalance` = μοναδική πηγή** για paid/credited/balance/status (cross-surface
@@ -384,6 +387,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Ασφαλή updates** — `deploy/update.sh <tag>` (read-only data pre-flight→snapshot→maintenance→
   queue drain→checkout→composer→migrate→optimize→shield→queue:restart→ops:health) +
   `deploy/rollback.sh`· version tags via `ekdosi:release`. Runbook: `docs/updates-runbook.md`.
+- **`roles:reprovision`** — διαγνωστικό/επισκευαστικό για τα δικαιώματα των `company_admin`/`operator` ανά
+  tenant: `--dry-run` (τι λείπει/περισσεύει), **προσθετικό** by default (δεν σβήνει χειροκίνητες
+  προσαρμογές, σε αντίθεση με το πλήρες re-sync του `shield:sync-super-admin` που τρέχει στο deploy),
+  `--tenant=` για μία εταιρεία, `--prune` για πλήρη ευθυγράμμιση.
 - **Queue drain χωρίς root** (`ops:queue-drain`) — hook → systemd → portable (`queue:restart` +
   αναμονή μέχρι να μην τρέχει job). Δουλεύει και σε cPanel/Plesk/DirectAdmin/shared ή με cron worker·
   το deploy σταματά μόνο αν μείνει job σε εξέλιξη (`QUEUE_DRAIN_TIMEOUT`).

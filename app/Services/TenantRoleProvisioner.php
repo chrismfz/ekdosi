@@ -219,18 +219,32 @@ class TenantRoleProvisioner
     }
 
     /**
-     * The default permission set a managed non-super role should hold, used to
-     * backfill an empty role. super_admin is intentionally absent (it needs none).
+     * THE canonical permission set a managed non-super role should hold —
+     * the single definition behind role provisioning, the empty-role backfill
+     * and `roles:reprovision`. super_admin is intentionally absent (it holds
+     * none: the global Gate::before bypass covers it).
      *
      * @return Collection<int, Permission>
      */
-    private function defaultPermissionsFor(string $name, string $guard): Collection
+    public function defaultPermissionsFor(string $name, ?string $guard = null): Collection
     {
+        $guard ??= ShieldUtils::getFilamentAuthGuard();
+
         return match ($name) {
             self::ROLE_COMPANY_ADMIN => $this->companyAdminPermissions($guard),
             self::ROLE_OPERATOR => $this->operatorPermissions($guard),
             default => collect(),
         };
+    }
+
+    /**
+     * The managed role row of a company, or null when it does not exist yet.
+     * Public so `roles:reprovision` can diff a role's permissions without
+     * creating anything.
+     */
+    public function findManagedRole(string $name, Company $company): ?Role
+    {
+        return $this->findRole($name, ShieldUtils::getFilamentAuthGuard(), (int) $company->getKey());
     }
 
     /**

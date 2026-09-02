@@ -127,6 +127,7 @@ enforced by server-side validation, not by the absence of a parameter.
 | `list_top_debtors` | top debtors (+ Καρτέλα links) | `View:Customer` | R |
 | `find_customer` | search by name/ΑΦΜ (+ links) | `View:Customer` | R |
 | `recent_activity` | the audit trail (who changed what) | `View:ActivityFeed` | R |
+| `leads_pulse` | leads at a glance: open/new/overdue/stale, what EACH operator did in the window, who opened the newest leads and when, latest moves | `ViewAny:Lead` | R |
 | `app_version` | deployed build + update-available | — | R |
 | `send_customer_statement` | **propose** emailing a Καρτέλα | `View:Customer` | **W→propose** |
 | `create_reminder` | **propose** a reminder | — | **W→propose** |
