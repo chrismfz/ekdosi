@@ -26,6 +26,7 @@ use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class InvoicesTable
@@ -355,6 +356,19 @@ class InvoicesTable
                                     $skip++;
 
                                     continue;
+                                }
+                                // PROV-019: the per-row soft-warn modal can't be shown
+                                // in a bulk run, so at least keep the same durable trace
+                                // the single-submit action leaves — a replacement whose
+                                // reversed original is still standing at AADE files
+                                // double-turnover, and this must stay answerable later.
+                                if ($record->replacementReversalPending()) {
+                                    Log::warning('PROV-019: bulk-filing a replacement while its reversed original is still standing at AADE', [
+                                        'company_id' => $record->company_id,
+                                        'replacement' => $record->invcode,
+                                        'original' => $record->reissuedFrom?->invcode,
+                                        'original_id' => $record->reissued_from_invoice_id,
+                                    ]);
                                 }
                                 try {
                                     $submitter->submit($record);

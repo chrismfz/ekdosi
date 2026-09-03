@@ -138,7 +138,7 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 | PROV-009 | **P2 (as filed)** | UID lives in the raw response but not in a column. Worth a column; not worth a queue/alerting subsystem. |
 | PROV-011 | **P2** | Ask InvoSign for a versioned contract. The cancellation-endpoint ambiguity is already resolved empirically (`[283]`, sandbox 2026-07-07). |
 | PROV-018 | **P2** | Full reversal after a partial credit. Real bug, low frequency (ΠΙΣ is a handful of documents a year), no wrong data — it fails loudly. |
-| PROV-019 | **P1, after** | «Draft credit treated as legal reversal» matters once credits are routine on the provider channel. |
+| ~~PROV-019~~ **DONE 2026-09-03** | «Draft credit treated as legal reversal» — fixed: `isLegallyReversed()` splits legal from local, honest badge/PDF, `reissued_from_invoice_id` link, **soft-warn** (operator choice) on filing a replacement while the original still stands. See detail. |
 | MYD-023 | **PARTIAL** (storage DONE via #404) | The distinct cancellation MARK is now stored in its own field on **every** path — `mydata_marks` and (as of #404) `delivery_marks` both have `cancellation_mark`. Only the strict-refusal half (refuse a terminal cancel that returns no cancellation MARK) is deferred → BACKLOG. |
 | MYD-024 | already PARTIAL | Series is frozen (MYD-018); ΑΦΜ/ΓΕΜΗ edits warn. Snapshotting issuer name/address is a nicety at two single-branch tenants. |
 | **Delivery-note family** — MYD-019, MYD-026, PROV-002, STOCK-001, delivery half of MYD-023 | **P1, before the digital-delivery deadline** | These tenants issue δελτία αποστολής today (legacy) and digital delivery becomes mandatory on its own AADE deadline. Real work, correctly scoped — just **not gated on 1 Oct**. MYD-013 and MYD-016 in this family are already DONE. Do the rest as one block before the ΔΑ deadline, with a sandbox rehearsal of 9.3 issue/register/confirm/cancel. |
@@ -510,7 +510,7 @@ Priorities:
 | PROV-006 | P0 | DONE | — | Provider retail | **Sandbox-verified 2026-09-03:** retail 11.1 (ΑΛΠ) via InvoSign accepted → VALID, MARK 400001970206125 (named counterpart). Truly-anonymous ΑΛΠ (no name) untested — not this tenant's workflow |
 | PROV-007 | P1 | VERIFY | C | Provider totals | Header/line discount semantics of InvoSign api_* fields are not proven |
 | PROV-008 | P1 | OPEN | C | Provider outage | Transmission Failure_1/2 issue and recovery lifecycle is absent |
-| PROV-009 | P2 | OPEN | B | Provider observability | UID, reception feedback and remaining quota are not structured/surfaced |
+| PROV-009 | P2 | PARTIAL | B | Provider observability | **Core DONE (this PR).** UID already persisted (#406); now `remaining_invoices` (quota) + `receptionEmails` are parsed & persisted to `mydata_marks` (sandbox-confirmed shape). Dashboard widget «Πάροχος ΥΠΑΗΕΣ» shows the running quota (colour-banded, scoped by company+provider_key), a log line on each band crossing (low → warning, exhausted → error; `provider_low_quota_threshold`, default 50), + invoice-box overflow ρετούς. **Deferred:** an explicit `evidence_pending` indicator for MARK-only adoptions (→ BACKLOG); delivery-failure warn (no API feedback) + scheduled poll (no non-issuing endpoint) — not feasible |
 | PROV-010 | P0 | DONE | — | Provider activation | Contract + «Δήλωση Έναρξης» + acceptance in place (operator-confirmed 2026-09-02) |
 | PROV-011 | P1 | VERIFY | B | Provider API | Version support and contradictory cancellation example need written confirmation |
 | PROV-012 | P1 | OPEN | C | Provider scope | Public-contract/All-in-one POS capabilities are not gated from the AADE register |
@@ -3031,20 +3031,30 @@ document update and exact-once MARK adoption.
 
 ### PROV-009 — Provider operational evidence is discarded
 
-**Status:** OPEN · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
+**Status:** PARTIAL (core DONE this PR) · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
 
-InvoSign returns `invoiceUid`, `receptionEmails` and
-`remaining_invoices`. UID is parsed but not stored in a structured column; the
-other fields are ignored. Raw XML is useful forensic evidence but cannot drive
-alerts, filtering or a readable support workflow.
+**Resolution (core).** A real sandbox response (2026-09-03) confirmed the exact shape
+— `<remaining_invoices>988</remaining_invoices>` (a real quota) and
+`<receptionEmails></receptionEmails>` (present, empty until the notification path is
+configured). Both are now parsed (`ProviderResult` + `InvoSignTransport`) and persisted
+to `mydata_marks` (`remaining_invoices` int, `reception_emails` string); UID/auth/QR
+were already persisted (#406). Surfaced:
+- **`ProviderQuotaStats`** dashboard widget «Πάροχος ΥΠΑΗΕΣ» — the running quota off the
+  latest provider mark, colour-banded by `config('ekdosi.einvoice.provider_low_quota_threshold')`.
+- **Low-quota warning** logged on each fresh filing at/below the threshold (free — the
+  quota rides every issue response, no polling).
+- **Box ρετούς:** the long provider strings (licence / 40-hex UID / signature) now wrap
+  inside the «myDATA / Πάροχος» box (`break-all`) instead of overflowing it.
 
-Persist UID and normalized provider delivery/quota data while retaining the raw
-response. A MARK-only recovery may adopt the legal filing, but must set an
-explicit `evidence_pending` state when UID, authentication code, QR or provider
-artifact is incomplete; it must never refile merely to fill those fields. Warn on
-delivery failure and low quota, expose the information in the invoice/provider
-console, and add a scheduled quota/health check only if InvoSign provides a
-non-issuing endpoint.
+**Deferred:**
+- **`evidence_pending`** — an explicit indicator when a MARK-only adoption (via the
+  myDATA read, which returns MARK+QR but not the provider UID/auth) leaves provider
+  evidence incomplete. A derived predicate (uid/auth present?) + a console badge →
+  `docs/BACKLOG.md`. Never re-file to fill it (as the finding requires).
+- **Warn on delivery failure** — not feasible: the issue response carries no delivery
+  outcome (the provider emails the customer *after* issue, with no callback to us).
+- **Scheduled quota/health check** — no non-issuing endpoint exists; and the quota
+  already refreshes on every filing, so a poll adds nothing.
 
 ### PROV-010 — Provider contract/declaration activation is not a go-live gate
 
@@ -3355,7 +3365,31 @@ the provider is the separate PROV-019.
 
 ### PROV-019 — Draft credit is confused with legal provider reversal
 
-**Status:** OPEN · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-03 · **Priority:** P0 · **Research:** CONFIRMED 2026-08-30
+
+**Fix (2026-09-03):** separated the LOCAL commercial reduction from the LEGAL
+reversal. `Invoice::isFullyCredited()` (unchanged) stays the local measure — it
+counts draft credits, correct for the ledger and off-mode tenants. New
+`Invoice::isLegallyReversed()` is the legal measure: the original is reversed only
+when it is directly CANCELLED at AADE, OR it is fully credited AND either never was
+a live AADE filing (mydata_state ≠ VALID → off-mode/draft) OR every live correlated
+credit note is itself VALID. The badge (`InvoiceInfolist`) and the printed PDF
+(`pdf.blade.php`) now key the «Ακυρώθηκε με πιστωτικό» claim off `isLegallyReversed()`
+— a fully-but-draft-credited original reads «Μειώθηκε με πρόχειρο πιστωτικό — δεν
+υποβλήθηκε». The reissue/replacement records `invoices.reissued_from_invoice_id`
+(new nullable self-FK, set by `ReissueInvoiceAsDraft`), and filing a replacement
+while its reversed original is still standing (`replacementReversalPending()`)
+**soft-warns** in the submit confirmation and logs a traceable line — chosen over a
+hard-block (operator decision 2026-09-03) so a rare legitimate exception isn't
+stranded; the duplicate-turnover risk stays visible + traceable. The heavier
+5-state «correction bundle» in the original required-change was deliberately NOT
+built — disproportionate at these volumes; the link + two predicates + soft-warn
+cover the real risk. Legacy-safe: only CORRELATED credits (our IssueCreditNote
+path) drive these predicates; legacy ΠΙΣ/returns import standalone (no
+correlation), so a null credit state here means «our draft», never «legacy
+unknown». Tests: `Prov019LegalReversalTest` (10 predicate/link cases) +
+`InvoiceProviderActionTest` (draft→reduced→filed→cancelled badge flow, soft-warn
+does-not-block+traces) + `InvoicePdfRelatedDocsTest` (PDF wording, draft vs filed).
 
 **Repository evidence**
 

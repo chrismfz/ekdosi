@@ -179,14 +179,19 @@ class InvoiceInfolist
                         || $record->creditNotes()->exists()
                         || $record->deliveryNotes()->exists())
                     ->schema([
-                        // Prominent «cancelled» badge for a fully-reversed original
-                        // (credited_total reached gross) — the credit-note equivalent
-                        // of a myDATA CANCELLED state, without flipping local_status.
+                        // Prominent badge for a fully-reversed original (credited_total
+                        // reached gross). PROV-019: only claim a LEGAL cancellation
+                        // when it actually happened (isLegallyReversed) — a still-draft
+                        // credit reduces the local balance but leaves the turnover
+                        // standing at AADE, so it reads as «μειώθηκε με πρόχειρο
+                        // πιστωτικό — δεν υποβλήθηκε», not «ακυρώθηκε».
                         TextEntry::make('reversal_status')
                             ->label('Κατάσταση παραστατικού')
-                            ->state('Ακυρώθηκε με πιστωτικό')
+                            ->state(fn ($record) => $record->isLegallyReversed()
+                                ? 'Ακυρώθηκε με πιστωτικό'
+                                : 'Μειώθηκε με πρόχειρο πιστωτικό — δεν υποβλήθηκε στην ΑΑΔΕ')
                             ->badge()
-                            ->color('danger')
+                            ->color(fn ($record) => $record->isLegallyReversed() ? 'danger' : 'warning')
                             ->columnSpanFull()
                             ->visible(fn ($record) => $record->isFullyCredited()),
 
@@ -282,6 +287,7 @@ class InvoiceInfolist
                             ->hint(fn ($record) => $record->providerEvidence() !== null
                                 ? 'Επίσημο έγγραφο παρόχου'
                                 : null)
+                            ->extraAttributes(['class' => 'break-all'])
                             ->limit(60),
 
                         // Provider evidence (null for direct myDATA / cancelled / no
@@ -293,25 +299,30 @@ class InvoiceInfolist
                             ->state(fn ($record) => $record->providerEvidence()['commercial_name'] ?? null)
                             ->visible(fn ($record) => $record->providerEvidence() !== null),
 
+                        // PROV-009 ρετούς: these carry long, unbreakable strings (a
+                        // licence code, 40-hex UID/signature) that overflowed the box
+                        // in the narrow 4-column grid. `break-all` wraps them inside
+                        // their cell (class defined in panel.css — no-build gotcha).
                         TextEntry::make('provider_licence')
                             ->label('Αριθμός Αδειοδότησης')
                             ->state(fn ($record) => $record->providerEvidence()['licence_no'] ?? null)
                             ->visible(fn ($record) => $record->providerEvidence() !== null)
+                            ->extraAttributes(['class' => 'break-all'])
                             ->copyable(),
 
                         TextEntry::make('provider_uid')
                             ->label('Αναγνωριστικό (UID)')
                             ->state(fn ($record) => $record->providerEvidence()['uid'] ?? null)
                             ->visible(fn ($record) => filled($record->providerEvidence()['uid'] ?? null))
-                            ->copyable()
-                            ->limit(40),
+                            ->extraAttributes(['class' => 'break-all'])
+                            ->copyable(),
 
                         TextEntry::make('authentication_code')
                             ->label('Υπογραφή')
                             ->state(fn ($record) => $record->providerEvidence()['auth_code'] ?? null)
                             ->visible(fn ($record) => filled($record->providerEvidence()['auth_code'] ?? null))
-                            ->copyable()
-                            ->limit(40),
+                            ->extraAttributes(['class' => 'break-all'])
+                            ->copyable(),
                     ])
                     ->columns(4),
 

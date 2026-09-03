@@ -593,12 +593,28 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Αποστολή παραστατικού — '.$channelLabel)
-                ->modalDescription(fn () => $isProviderChannel
-                    ? ('Αποστολή μέσω '.$channelLabel.'. Ο πάροχος υποβάλλει στο myDATA και επιστρέφει το ΜΑΡΚ + QR. '
-                        .(($tenant?->einvoice_provider_mode === 'production') ? '⚠ ΠΑΡΑΓΩΓΗ — πραγματική, νομικά δεσμευτική έκδοση.' : 'Δοκιμαστικό περιβάλλον.'))
-                    : (($tenant?->mydata_mode === 'production')
-                        ? '⚠ Production mode — REAL filing. Legally binding MARK returned. Cannot be edited after; only cancelled + reissued.'
-                        : 'Sandbox mode — files to AADE\'s test endpoint. Synthetic MARK.'))
+                ->modalDescription(function (Invoice $record) use ($isProviderChannel, $tenant, $channelLabel) {
+                    $base = $isProviderChannel
+                        ? ('Αποστολή μέσω '.$channelLabel.'. Ο πάροχος υποβάλλει στο myDATA και επιστρέφει το ΜΑΡΚ + QR. '
+                            .(($tenant?->einvoice_provider_mode === 'production') ? '⚠ ΠΑΡΑΓΩΓΗ — πραγματική, νομικά δεσμευτική έκδοση.' : 'Δοκιμαστικό περιβάλλον.'))
+                        : (($tenant?->mydata_mode === 'production')
+                            ? '⚠ Production mode — REAL filing. Legally binding MARK returned. Cannot be edited after; only cancelled + reissued.'
+                            : 'Sandbox mode — files to AADE\'s test endpoint. Synthetic MARK.');
+
+                    // PROV-019 soft-warn: this is a replacement whose reversed original
+                    // is still standing at AADE (its cancelling credit is an un-filed
+                    // draft). Filing now would declare the turnover twice. Non-blocking
+                    // — the operator can still confirm — but impossible to miss.
+                    if ($record->replacementReversalPending()) {
+                        $orig = $record->reissuedFrom?->invcode ?? '—';
+
+                        return '⚠ ΠΡΟΣΟΧΗ: αντικαθιστά το '.$orig.', που ΔΕΝ έχει ακυρωθεί νόμιμα ακόμη — '
+                            .'το πιστωτικό ακύρωσης είναι πρόχειρο/ανυπόβλητο. Αν υποβάλεις τώρα, ο τζίρος θα δηλωθεί '
+                            .'ΔΙΠΛΑ στην ΑΑΔΕ (αρχικό + αντικατάσταση). Υπόβαλε πρώτα το πιστωτικό ακύρωσης του '.$orig.".\n\n".$base;
+                    }
+
+                    return $base;
+                })
                 ->modalSubmitActionLabel('Επιβεβαίωση αποστολής')
                 ->action(function (Invoice $record) {
                     // Hard guard mirroring the visibility check — mountAction
@@ -612,6 +628,19 @@ class ViewInvoice extends ViewRecord
                             ->danger()->send();
 
                         return;
+                    }
+
+                    // PROV-019: leave a durable trace when an operator files a
+                    // replacement despite the soft-warn — so «έγινε από αντικατάσταση
+                    // ενώ το αρχικό στεκόταν ακόμη» is answerable later (log_tail /
+                    // OBS-001), beyond the reissued_from link the record already keeps.
+                    if ($record->replacementReversalPending()) {
+                        Log::warning('PROV-019: filing a replacement while its reversed original is still standing at AADE', [
+                            'company_id' => $record->company_id,
+                            'replacement' => $record->invcode,
+                            'original' => $record->reissuedFrom?->invcode,
+                            'original_id' => $record->reissued_from_invoice_id,
+                        ]);
                     }
 
                     try {
@@ -855,9 +884,15 @@ class ViewInvoice extends ViewRecord
                             }
                         }
 
+                        // PROV-019: don't claim a completed «ακύρωση» while the credit
+                        // is still a draft — the original stays VALID at AADE until the
+                        // credit is filed. Say what actually happened.
+                        $creditFiled = ($data['submit_now'] ?? false) && $result['credit']->mydata_state === 'VALID';
                         Notification::make()
-                            ->title('Έγινε ακύρωση & επανέκδοση')
-                            ->body('Πιστωτικό: '.$result['credit']->invcode.' · Νέο πρόχειρο: '.$result['reissue']->invcode.' — διορθώστε & εκδώστε το.')
+                            ->title($creditFiled ? 'Έγινε ακύρωση & επανέκδοση' : 'Δημιουργήθηκαν πιστωτικό (πρόχειρο) & επανέκδοση')
+                            ->body('Πιστωτικό: '.$result['credit']->invcode
+                                .($creditFiled ? '' : ' (πρόχειρο — υπόβαλέ το για να ολοκληρωθεί η ακύρωση στην ΑΑΔΕ)')
+                                .' · Νέο πρόχειρο: '.$result['reissue']->invcode.' — διορθώστε & εκδώστε το.')
                             ->success()->send();
 
                         // Land on the new draft so the operator fixes it right away.
@@ -882,7 +917,10 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Επανέκδοση παραστατικού')
-                ->modalDescription('Το παραστατικό έχει ακυρωθεί με πιστωτικό. Δημιουργείται νέο ΠΡΟΧΕΙΡΟ αντίγραφο (ίδιος πελάτης/γραμμές) για να το επανεκδώσετε διορθωμένο — δεν εκδίδεται άλλο πιστωτικό.')
+                ->modalDescription(fn (Invoice $record) => ($record->isLegallyReversed()
+                    ? 'Το παραστατικό έχει ακυρωθεί με πιστωτικό. '
+                    : '⚠ Το πιστωτικό ακύρωσης είναι ακόμη πρόχειρο (δεν έχει υποβληθεί στην ΑΑΔΕ) — υπόβαλέ το πρώτα, αλλιώς η υποβολή της επανέκδοσης θα δηλώσει διπλό τζίρο. ')
+                    .'Δημιουργείται νέο ΠΡΟΧΕΙΡΟ αντίγραφο (ίδιος πελάτης/γραμμές) για να το επανεκδώσετε διορθωμένο — δεν εκδίδεται άλλο πιστωτικό.')
                 ->modalSubmitActionLabel('Επανέκδοση')
                 ->action(function (Invoice $record) {
                     try {

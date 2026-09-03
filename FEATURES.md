@@ -72,6 +72,11 @@
   action «Ημερομηνία έκδοσης → σήμερα» (μονόκλικ λύση για το InvoSign 238).
 - **Πιστωτικά** (`IssueCreditNote`) — συσχετιζόμενα (5.1) ή μη (5.2), αμφίδρομη
   σύνδεση με το αρχικό· opt-in myDATA filing.
+- **Πρόχειρο πιστωτικό ≠ νόμιμη ακύρωση (PROV-019)** — διαχωρισμός τοπικής εμπορικής μείωσης
+  (`isFullyCredited`) από νόμιμη ακύρωση ΑΑΔΕ (`isLegallyReversed`: πιστωτικό filed VALID ή αρχικό
+  CANCELLED). Το badge/PDF λένε «Μειώθηκε με πρόχειρο πιστωτικό — δεν υποβλήθηκε» μέχρι να γίνει
+  πραγματική. Η επανέκδοση κρατά σύνδεσμο στο αρχικό (`reissued_from_invoice_id`)· η υποβολή
+  αντικατάστασης ενώ το αρχικό στέκεται ακόμη προειδοποιεί (soft-warn) + ίχνος στο log.
 - **Τέλη / παρακρατήσεις / φόροι** — withholding (§8.4), Ψηφιακό Τέλος Συναλλαγής (§8.6)/
   τέλη (§8.7)/λοιποί φόροι (§8.5)/κρατήσεις (taxesTotals), **product-linked per-unit fees** (π.χ. τέλος διαμονής),
   «Τυπικά τέλη/φόροι» quick-fill· gross-edit γραμμής (τιμή με ΦΠΑ → back-compute net).
@@ -194,6 +199,10 @@
   ζεύγος myDATA read-creds για το ενεργό περιβάλλον (PROV-005). Τα υποχρεωτικά στοιχεία
   εκδότη (+ΑΦΜ) ελέγχονται ΚΑΙ ως gate στο `ekdosi:go-live-check` (το read-creds ζεύγος
   μένει στο Console preflight — μη-μπλοκάρον advisory).
+- **Υπόλοιπο εκδόσεων παρόχου (PROV-009)** — ο πάροχος επιστρέφει σε κάθε έκδοση το quota
+  (`remaining_invoices`) + τα emails παραλήπτη (`receptionEmails`), που αποθηκεύονται δομημένα στο
+  `mydata_marks`. Dashboard widget **«Πάροχος ΥΠΑΗΕΣ»** με το τρέχον υπόλοιπο (χρωματισμένο κοντά στο
+  όριο) + προειδοποίηση στο log σε χαμηλό υπόλοιπο — χωρίς polling.
 - **PEPPOL Phase 1** (Εσθονία) — provider-independent **BIS Billing 3.0 / EN 16931 UBL**
   builder (`PeppolInvoiceDocument` μέσω `josemmo/einvoicing`) + `peppol:test-submit`
   (dry-run + validate). Phase 2 (Access-Point transport) = backlog.

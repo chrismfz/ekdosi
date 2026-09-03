@@ -29,6 +29,10 @@ final class ProviderResult
         public readonly ?string $raw = null,
         /** The exact payload the transport SENT (e.g. InvoSign's augmented xml_arxeio) — stored as the mark's request for debugging. */
         public readonly ?string $requestPayload = null,
+        /** PROV-009: the provider account's REMAINING QUOTA after this filing (InvoSign `remaining_invoices`); null when the provider doesn't report it. */
+        public readonly ?int $remainingInvoices = null,
+        /** PROV-009: recipient email(s) the provider notified for this document (InvoSign `receptionEmails`); null/empty when none. */
+        public readonly ?string $receptionEmails = null,
     ) {}
 
     public static function ok(
@@ -40,6 +44,8 @@ final class ProviderResult
         ?string $deliveryState = null,
         ?string $raw = null,
         ?string $requestPayload = null,
+        ?int $remainingInvoices = null,
+        ?string $receptionEmails = null,
     ): self {
         return new self(
             success: true,
@@ -51,6 +57,8 @@ final class ProviderResult
             deliveryState: $deliveryState,
             raw: $raw,
             requestPayload: $requestPayload,
+            remainingInvoices: $remainingInvoices,
+            receptionEmails: $receptionEmails,
         );
     }
 

@@ -484,6 +484,18 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **PROV-009 remainder — explicit `evidence_pending` indicator** _(P2)._ The core (quota + reception
+  capture, widget, low-quota warn) shipped. What's left: when a filing is adopted via a MARK-only
+  recovery (the myDATA read returns MARK+QR but not the provider UID/auth), the provider evidence is
+  incomplete — surface that explicitly (a DERIVED predicate «has uid+auth?» + a console/invoice-box
+  badge «στοιχεία παρόχου ελλιπή», not a stored state to drift). It must NEVER trigger a re-file merely
+  to fill those fields (the finding is explicit). Two related asks are **not feasible**, not deferred:
+  a delivery-failure warn (the issue response carries no delivery outcome — the provider emails the
+  customer afterwards with no callback) and a scheduled quota poll (no non-issuing endpoint, and the
+  quota already refreshes on every filing). Also parked: **shared-account quota** — the widget/warn read
+  the tenant's OWN latest reading, correct for one InvoSign contract per tenant (our setup); if a single
+  provider account ever backed several tenants, each would see a per-tenant partial view of the shared
+  quota. Revisit only if a reseller/accountant shared-account setup appears.
 - **PROV-005 remaining half — authenticated provider credential probe** _(P1, vendor-blocked)._
   The local config false-greens are fixed (issuer-field completeness + active-env credential pairing,
   in `ProviderPreflight` + go-live). What stays: `InvoSignTransport::ping()` is an **unauthenticated**
@@ -542,6 +554,26 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   do. Deliberate: the resolver reads pre-mutation while the loop re-reads under its own mid-loop writes
   (correctness over micro-opt); a single keyed prefetch reused by both would collapse it. Negligible on real
   invoice line counts — revisit only if a reversal ever touches many lines under contention.
+- **PROV-019 declined-scope + soft-warn posture** _(conscious calls in the PROV-019 change, 2026-09-03)._
+  Two deliberate decisions, recorded so they aren't re-litigated blindly: **(a)** the original required-change
+  proposed a full 5-state «correction bundle» state machine (`credit_draft|credit_pending|credit_failed|
+  reversed|replacement_ready`) linking original+credit+replacement — NOT built; disproportionate at ~70
+  docs/month. The shipped fix (a `reissued_from_invoice_id` link + `isLegallyReversed()` + a soft-warn)
+  covers the real duplicate-turnover risk without the machine. Revisit only if a tenant with routine,
+  high-volume provider credits needs a richer correction workflow. **(b)** The replacement gate is a
+  **soft-warn**, not a hard-block (operator choice): the operator can file a replacement while the reversed
+  original still stands, after an explicit confirmation, and the act is logged. If double-turnover incidents
+  ever show up in reconciliation, a per-tenant hard-block toggle is the escalation — cheap to add on top of
+  the existing `replacementReversalPending()` predicate.
+- **PROV-019 review P2 edge-notes** _(robustness-only, no live-flow impact; from the PROV-019 adversarial
+  review)._ **(1)** `isLegallyReversed()` degenerate case: a VALID original whose `credited_total` came from
+  a stale/ETL-written cache with NO live correlated credits reads as «ακυρώθηκε» (the "all live credits
+  VALID" test is vacuously true). Harmless — recompute guarantees live credits exist when
+  `credited_total ≥ payable`, and it matches pre-PROV-019 behavior — but a `->exists()` guard on
+  `creditNotes()` would harden it. **(2)** Soft-deleting a still-standing original clears the warn:
+  `reissuedFrom()` is a `belongsTo` on a SoftDeletes model, so a soft-deleted original resolves to null →
+  `replacementReversalPending()` returns false while the AADE double-turnover risk persists. Edge (deleting a
+  filed original isn't a normal flow); `->withTrashed()` on the relation would close it if it ever matters.
 - **MYD-019 follow-up — 2-way delivery reconciliation (VALID/un-cancel direction)** _(P2, declined in the
   MYD-019 review as a conscious scope call)._ `refreshStatus()` auto-applies only the terminal AADE
   `CANCELLED` direction; it does NOT un-cancel a δελτίο that is locally `CANCELLED` while AADE reports it

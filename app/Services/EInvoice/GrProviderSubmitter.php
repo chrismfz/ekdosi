@@ -156,6 +156,7 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         // invcode-bearing line.
         if ($mark->wasRecentlyCreated) {
             FilingLog::filed($invoice, (string) $mark->mark, $this->transport->key(), $startedAt);
+            $this->warnIfLowProviderQuota($invoice, $mark);
         }
 
         $this->syncWhmcsFiled($invoice, $mark);
@@ -383,6 +384,80 @@ class GrProviderSubmitter implements EInvoiceSubmitter
     }
 
     /**
+     * PROV-009: warn when the provider account's remaining quota runs low. The count
+     * arrives free on every issue response (InvoSign `remaining_invoices`), so this
+     * needs no polling. A log line (surfaces via ops:health / log_tail); the running
+     * count lives in the ProviderQuotaStats dashboard widget. Never throws — a filing
+     * already succeeded.
+     *
+     * Fires only when this reading crosses into a WORSE band than the previous
+     * reading for the same tenant+provider — not on every filing while already in the
+     * same band, which would spam an identical line per filing and drown the signal.
+     * Bands: ok (> threshold) / low (≤ threshold) / exhausted (≤ 0). Because
+     * low→exhausted is its OWN crossing (band 1 → band 2), a gradual depletion still
+     * escalates to the error line the first time it hits zero — the round-1 «skip if
+     * previously ≤ threshold» guard swallowed exactly that transition.
+     */
+    private function warnIfLowProviderQuota(Invoice $invoice, MyDataMark $mark): void
+    {
+        $remaining = $mark->remaining_invoices;
+        if ($remaining === null) {
+            return; // provider didn't report a quota
+        }
+
+        $threshold = (int) config('ekdosi.einvoice.provider_low_quota_threshold', 50);
+        $band = $this->quotaBand((int) $remaining, $threshold);
+        if ($band === 0) {
+            return; // still comfortably above the threshold
+        }
+
+        // Crossing check: compare against the previous reading for THIS tenant on THIS
+        // provider (scoped by provider_key so a migrated gr-mydata→gr-provider tenant,
+        // or a future second provider, compares like with like). Stay quiet only when
+        // that reading was already in this band OR worse — i.e. we warned on the
+        // earlier crossing. A strictly-worse move (ok→low, ok→exhausted, low→exhausted)
+        // is a fresh crossing and speaks up.
+        $previous = MyDataMark::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('provider_key', $this->transport->key())
+            ->whereNotNull('remaining_invoices')
+            ->where('id', '<', $mark->id)
+            ->latest('id')
+            ->value('remaining_invoices');
+        if ($previous !== null && $this->quotaBand((int) $previous, $threshold) >= $band) {
+            return;
+        }
+
+        $context = [
+            'company_id' => $invoice->company_id,
+            'invcode' => $invoice->invcode,
+            'provider' => $this->transport->key(),
+            'remaining_invoices' => $remaining,
+            'threshold' => $threshold,
+        ];
+
+        if ($band >= 2) {
+            Log::error('E-invoice provider quota is EXHAUSTED', $context);
+        } else {
+            Log::warning('E-invoice provider quota is low', $context);
+        }
+    }
+
+    /**
+     * Severity band of a remaining-quota reading: 0 = ok (above the threshold),
+     * 1 = low (≤ threshold, still > 0), 2 = exhausted (≤ 0). Kept a pure function so
+     * the crossing check compares the current and previous readings on the same scale.
+     */
+    private function quotaBand(int $remaining, int $threshold): int
+    {
+        return match (true) {
+            $remaining <= 0 => 2,
+            $remaining <= $threshold => 1,
+            default => 0,
+        };
+    }
+
+    /**
      * Persist a successful provider filing: a PROVIDER_INSERT mydata_marks row
      * (with provider audit columns) + the invoice mirror-column sync. Idempotent
      * on (invoice, mark): a duplicate adopts the existing row.
@@ -416,6 +491,10 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'uid' => blank($existing->uid) ? $result->uid : null,
                 'authentication_code' => blank($existing->authentication_code) ? $result->authenticationCode : null,
                 'invoice_url' => blank($existing->invoice_url) ? $result->qrUrl : null,
+                // PROV-009: fill the operational evidence if the earlier (lighter)
+                // response lacked it. Never overwrite a value we already stored.
+                'remaining_invoices' => $existing->remaining_invoices === null ? $result->remainingInvoices : null,
+                'reception_emails' => blank($existing->reception_emails) ? $result->receptionEmails : null,
             ], static fn ($v) => filled($v));
             if ($backfill !== []) {
                 $existing->forceFill($backfill)->save();
@@ -455,6 +534,9 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 // dropped). Needed on the printed representation (A.1112/2025) and
                 // as forensic evidence. Null on a lighter recovery response.
                 'uid' => $result->uid,
+                // PROV-009: operational evidence the provider returns on every issue.
+                'remaining_invoices' => $result->remainingInvoices,
+                'reception_emails' => $result->receptionEmails,
                 'delivery_state' => $deliveryState,
                 'invoice_url' => $result->qrUrl,
                 // Store the ACTUAL payload the transport sent (e.g. InvoSign's

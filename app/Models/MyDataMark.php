@@ -49,6 +49,12 @@ class MyDataMark extends Model
         // Provider document UID (invoiceUid) — distinct from the AADE MARK.
         // Parsed from a provider filing; null for direct-myDATA marks. PROV-003.
         'uid',
+        // Provider operational evidence returned on every issue (PROV-009):
+        // remaining_invoices = the provider account's remaining quota (shared per
+        // tenant, decremented per filing); reception_emails = recipient(s) the
+        // provider notified for this document. Null for direct-myDATA marks.
+        'remaining_invoices',
+        'reception_emails',
         'delivery_state',
         'invoice_url',
         'request',
@@ -61,6 +67,7 @@ class MyDataMark extends Model
     {
         return [
             'mark_date' => 'date',
+            'remaining_invoices' => 'integer',
             // The frozen provider-identity snapshot (PROV-003) — a small assoc
             // array {key, commercial_name, legal_name, site, aade_code, licence_no}.
             'provider_identity' => 'array',
