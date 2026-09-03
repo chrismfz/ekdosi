@@ -313,4 +313,25 @@ class WhmcsCustomerCreatorTest extends TestCase
             'once the customer exists the operator owns the flag — a re-sync never flips it back on',
         );
     }
+
+    public function test_existing_immediate_customer_is_not_turned_off_by_a_resync(): void
+    {
+        $t = $this->tenantWithGriniaris();
+        // The operator has DELIBERATELY set this existing customer ON for άμεση.
+        $existing = Customer::create([
+            'company_id' => $t->id, 'name' => 'Ήδη Άμεσος', 'afm' => '123456789',
+            'needs_immediate_invoice' => true,
+        ]);
+        // WHMCS no longer marks the client γκρινιάρης (field cleared).
+        $row = $this->pendingWithGriniaris($t, '123456789', null);
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertFalse($result->created);
+        $this->assertSame('existing', $result->source);
+        $this->assertTrue(
+            $existing->fresh()->needs_immediate_invoice,
+            'the other direction of «operator owns it» — a re-sync with the field cleared never turns άμεση OFF',
+        );
+    }
 }
