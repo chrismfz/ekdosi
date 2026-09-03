@@ -26,6 +26,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `ini_get('error_log')` (ο PHP το γράφει ως ο account user → πάντα readable, σε cPanel/DirectAdmin/Virtualmin/
   standalone), + best-effort probing κοινών fpm/nginx/apache/panel locations (τα root-owned απλώς παραλείπονται
   και αναφέρονται στο `checked`). super_admin, read-only, bounded tail. Φίλτρα `lines`/`contains`.
+  - **Diagnoses «γιατί δεν καταγράφεται τίποτα».** Νέο `php_logging` block: `log_errors`, το `error_log` target
+    και — το κρίσιμο — **`writable_by_app`**: αν το PHP είναι ρυθμισμένο να γράφει errors σε path που ο app user
+    ΔΕΝ μπορεί να γράψει (π.χ. `[pool ekdosi]` → `/var/log/php-fpm/...` σε φάκελο `apache:root 0770`), τα fatals
+    **χάνονται σιωπηλά** — το tool το φωνάζει με οδηγία διόρθωσης (δείξε το `error_log` υπό το `storage/`). Το
+    status ξεχωρίζει πλέον **«no access (parent dir)»** από «absent» (permissions vs πραγματικά λείπει).
 
 ### Fixed
 - **«Error while loading page» στο κουμπί «Έκδοση πιστωτικού».** Το modal είχε per-line Repeater με ένα

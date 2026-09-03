@@ -76,7 +76,14 @@ class ErrorLogTailTool extends SuperAdminMcpTool
             }
 
             if (! is_file($path)) {
-                $checked[] = ['source' => $source, 'path' => $path, 'status' => 'absent'];
+                // is_file() is false BOTH when the file is truly absent AND when we
+                // can't even STAT it because the parent dir isn't traversable (the app
+                // user ≠ the log owner — e.g. /var/log/php-fpm is 0770 apache:root and
+                // we run as the pool user). Distinguish them so «absent» never masks a
+                // permissions problem the operator must actually fix.
+                $dir = dirname($path);
+                $noAccess = is_dir($dir) && ! (@is_readable($dir) && @is_executable($dir));
+                $checked[] = ['source' => $source, 'path' => $path, 'status' => $noAccess ? 'no access (parent dir)' : 'absent'];
 
                 continue;
             }
@@ -107,18 +114,75 @@ class ErrorLogTailTool extends SuperAdminMcpTool
             $checked[] = ['source' => $source, 'path' => $path, 'status' => 'read'];
         }
 
+        // Diagnose the PHP logging setup itself — the «why is nothing logged?»
+        // answer. If PHP is told to log to a path the app user can't WRITE, its
+        // fatals are silently DROPPED (the exact reason a crash left no trace).
+        $logging = $this->phpLoggingDiagnostic($iniErrorLog);
+
         return self::json([
-            // The portable primary source — surfaced so the operator sees exactly
-            // where PHP is configured to log, regardless of the hosting panel.
+            'php_logging' => $logging,
+            // Kept for back-compat with the first version's key.
             'php_error_log_ini' => $iniErrorLog !== '' ? $iniErrorLog : null,
             'files_found' => count($files),
             'files' => array_values($files),
             'checked' => $checked,
             'contains' => $contains !== '' ? $contains : null,
-            'note' => count($files) === 0
-                ? 'Κανένα αναγνώσιμο error log δεν βρέθηκε. Αν ξέρεις το path (π.χ. από το vhost/pool config), πες το — το app user συχνά ΔΕΝ διαβάζει τα system nginx/apache logs. Για το laravel.log χρησιμοποίησε log_tail.'
-                : 'Αυτά είναι PHP/FPM/web-server error logs (ΟΧΙ το laravel.log — γι\' αυτό: log_tail). Εδώ πέφτουν fatals/recursion/worker deaths που δεν πιάνει ο Laravel handler.',
+            'note' => $this->buildNote($logging, count($files)),
         ]);
+    }
+
+    /**
+     * Is PHP actually able to record fatals, and where? Surfaces `log_errors`, the
+     * `error_log` target, and — the killer field — whether the app user can WRITE
+     * there. `writable_by_app === false` means PHP fatals are being DROPPED.
+     *
+     * @return array<string, mixed>
+     */
+    private function phpLoggingDiagnostic(string $iniErrorLog): array
+    {
+        $isFile = $iniErrorLog !== '' && strtolower($iniErrorLog) !== 'syslog';
+        $target = $iniErrorLog === '' ? 'stderr → FPM (no explicit error_log)'
+            : (strtolower($iniErrorLog) === 'syslog' ? 'syslog' : 'file');
+
+        $writable = null;
+        if ($isFile) {
+            $writable = is_file($iniErrorLog) ? @is_writable($iniErrorLog) : @is_writable(dirname($iniErrorLog));
+        }
+
+        return [
+            'log_errors' => (bool) ini_get('log_errors') ? 'on' : 'off',
+            'error_log' => $iniErrorLog !== '' ? $iniErrorLog : null,
+            'target' => $target,
+            // null = not a plain file target (syslog / stderr); true/false = the app
+            // user can / cannot write where PHP is configured to log.
+            'writable_by_app' => $writable,
+        ];
+    }
+
+    /** @param array<string, mixed> $logging */
+    private function buildNote(array $logging, int $filesFound): string
+    {
+        if (($logging['writable_by_app'] ?? null) === false) {
+            return 'ΠΡΟΣΟΧΗ: το PHP είναι ρυθμισμένο να γράφει errors στο «'.$logging['error_log'].'» αλλά ο '
+                .'app user ΔΕΝ έχει δικαίωμα εγγραφής εκεί — άρα τα PHP fatals ΧΑΝΟΝΤΑΙ (γι\' αυτό δεν βλέπεις '
+                .'τίποτα). Διόρθωση: στο FPM pool δείξε το error_log σε path που ανήκει στον app user, π.χ. '
+                .'`php_admin_value[error_log] = '.base_path('storage/logs/php-error.log').'` (+ `php_admin_flag[log_errors] = on`), '
+                .'reload το php-fpm — μετά το error_log_tail θα το διαβάζει αυτόματα.';
+        }
+
+        if (($logging['log_errors'] ?? null) === 'off') {
+            return 'ΠΡΟΣΟΧΗ: `log_errors` = off — το PHP δεν καταγράφει errors καθόλου. Βάλε '
+                .'`php_admin_flag[log_errors] = on` στο FPM pool και όρισε writable `error_log`.';
+        }
+
+        if ($filesFound === 0) {
+            return 'Κανένα αναγνώσιμο error log δεν βρέθηκε (δες `checked`: «no access (parent dir)» = θέμα '
+                .'δικαιωμάτων, όχι ότι λείπει). Το `error_log` του PHP δείχνει «'.($logging['error_log'] ?? '—').'». '
+                .'Αν ο app user δεν το διαβάζει, δείξε το σε path υπό το storage/. Για το laravel.log: log_tail.';
+        }
+
+        return 'Αυτά είναι PHP/FPM/web-server error logs (ΟΧΙ το laravel.log — γι\' αυτό: log_tail). Εδώ '
+            .'πέφτουν fatals/recursion/worker deaths που δεν πιάνει ο Laravel handler.';
     }
 
     /**
