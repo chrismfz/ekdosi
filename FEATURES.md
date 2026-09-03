@@ -414,6 +414,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Άμεση τιμολόγηση (auto-issue) type-aware** — διαλέγει Απόδειξη/Τιμολόγιο από την πρόθεση
   (ΑΦΜ/wantsinvoice ή route is_receipt)· `whmcs_default_invoice_type_id` + `whmcs_default_receipt_type_id`·
   ό,τι δεν τυποποιείται με ασφάλεια ΜΕΝΕΙ στο Inbox (ποτέ λάθος τύπος).
+- **Συγχρονισμός «Άμεσης τιμολόγησης» από το WHMCS (WHMCS = πηγή αλήθειας)** — το `needs_immediate_invoice`
+  σπέρνεται στη δημιουργία πελάτη ΚΑΙ **καθρεφτίζεται σε κάθε ingest** στον συνδεδεμένο (πρωτεύοντα) πελάτη
+  (`WhmcsInvoiceIngestor` + `PendingWhmcsInvoice::wantsImmediateInvoice`): αν κάποιος γκρινιάξει έναν μήνα μετά,
+  τσεκάρεις «γκρινιάρης» στο WHMCS και **περνά** (ON→ON, OFF→OFF) στο επόμενο fetch. Γράφει μόνο σε πραγματική
+  αλλαγή (audited «Σύστημα»)· **δεν αγγίζει** τίποτα αν ο tenant δεν έχει χαρτογραφήσει το `griniaris`. Για
+  συνδεδεμένους πελάτες το toggle στη φόρμα κλειδώνει read-only («Ελέγχεται από το WHMCS»).
 - **«Τιμολόγιο πριν την πληρωμή» (`needs_invoice_before_payment`)** — ξεχωριστή ανά-πελάτη σήμανση για
   δημόσιο/δήμους/Α.Ε. που θέλουν παραστατικό ΠΡΙΝ πληρώσουν. Η εντολή **`whmcs:fetch-unpaid`**
   (`WhmcsUnpaidFetcher`) φέρνει τα **ΑΠΛΗΡΩΤΑ** WHMCS invoices αυτών των πελατών στο Inbox για **χειροκίνητη**
@@ -641,7 +647,10 @@ cross-tenant αδύνατο. `list_companies` δίνει τα slugs. **Per-tool 
 επιβεβαιώνει **μέσα** στο ekdosi (καμία εξωτερική auto-εκτέλεση). **Νέα ops/debug tools για remote
 troubleshooting** (super_admin, read-only): `app_health` (= `ops:health`: queues/crons/backup/mail/
 WHMCS/myDATA/disk + severity), `failed_jobs` (failed queue jobs + κεφαλή exception), `log_tail`
-(Laravel log με φίλτρα level/substring). **Νέα myDATA/provider forensics** (super_admin, cross-tenant,
+(Laravel log με φίλτρα level/substring), `error_log_tail` (το PHP/FPM/web-server ERROR log — fatals/
+recursion/worker-deaths που ΔΕΝ φτάνουν στο laravel.log, δηλ. το «Error while loading page» με κενό app
+log· primary source το `ini_get('error_log')`, portable σε cPanel/DirectAdmin/Virtualmin/standalone).
+**Νέα myDATA/provider forensics** (super_admin, cross-tenant,
 read-only — «γιατί έσκασε ΑΥΤΟ το παραστατικό;» απ' έξω, χωρίς panel): `invoice_filing` (ένα
 παραστατικό με invcode/id → τοπική×myDATA κατάσταση + όλο το ιστορικό `mydata_marks`: ΜΑΡΚ, ακύρωσης,
 πάροχος, auth code, κωδικοί σφάλματος· `include_xml`/`mark_id` για το raw XML), `mydata_failures`

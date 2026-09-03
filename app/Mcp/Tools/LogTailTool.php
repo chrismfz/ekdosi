@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Tools\Concerns\SuperAdminMcpTool;
+use App\Mcp\Tools\Concerns\TailsLogFiles;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -27,6 +28,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[IsIdempotent]
 class LogTailTool extends SuperAdminMcpTool
 {
+    use TailsLogFiles;
+
     private const MAX_TAIL_BYTES = 262144; // 256 KiB read window from EOF
 
     private const MAX_OUTPUT_BYTES = 65536; // 64 KiB cap on returned text
@@ -54,7 +57,7 @@ class LogTailTool extends SuperAdminMcpTool
         $level = trim((string) ($request->get('level') ?? ''));
         $contains = trim((string) ($request->get('contains') ?? ''));
 
-        $tail = $this->readTail($file);
+        $tail = $this->readTailString($file, self::MAX_TAIL_BYTES);
         $rows = $tail === '' ? [] : explode("\n", $tail);
 
         if ($level !== '') {
@@ -65,7 +68,7 @@ class LogTailTool extends SuperAdminMcpTool
         }
 
         $rows = array_slice($rows, -$lines);
-        $rows = $this->capBytes($rows);
+        $rows = $this->capTailBytes($rows, self::MAX_OUTPUT_BYTES);
 
         return self::json([
             'file' => basename($file),
@@ -89,53 +92,5 @@ class LogTailTool extends SuperAdminMcpTool
         usort($files, static fn ($a, $b) => filemtime($b) <=> filemtime($a));
 
         return $files[0];
-    }
-
-    /** Read up to MAX_TAIL_BYTES from the end of the file (dropping a partial first line). */
-    private function readTail(string $file): string
-    {
-        $size = filesize($file);
-        if ($size === false || $size === 0) {
-            return '';
-        }
-
-        $read = (int) min($size, self::MAX_TAIL_BYTES);
-        $fh = fopen($file, 'rb');
-        if ($fh === false) {
-            return '';
-        }
-        fseek($fh, -$read, SEEK_END);
-        $chunk = (string) fread($fh, $read);
-        fclose($fh);
-
-        // If we started mid-file, the first line is likely partial — drop it.
-        if ($read < $size) {
-            $nl = strpos($chunk, "\n");
-            $chunk = $nl === false ? $chunk : substr($chunk, $nl + 1);
-        }
-
-        return rtrim($chunk, "\n");
-    }
-
-    /**
-     * Keep the returned payload under MAX_OUTPUT_BYTES, trimming from the OLDEST
-     * (front) so the most recent lines survive.
-     *
-     * @param  list<string>  $rows
-     * @return list<string>
-     */
-    private function capBytes(array $rows): array
-    {
-        $total = 0;
-        $kept = [];
-        foreach (array_reverse($rows) as $line) {
-            $total += strlen($line) + 1;
-            if ($total > self::MAX_OUTPUT_BYTES) {
-                break;
-            }
-            $kept[] = $line;
-        }
-
-        return array_reverse($kept);
     }
 }

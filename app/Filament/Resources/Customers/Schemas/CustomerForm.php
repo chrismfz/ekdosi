@@ -55,7 +55,15 @@ class CustomerForm
 
                                 Toggle::make('needs_immediate_invoice')
                                     ->label('Άμεση τιμολόγηση')
-                                    ->helperText('Όταν είναι ON, η προγραμματισμένη έκδοση εκδίδει + υποβάλλει στη myDATA αμέσως μόλις πληρωθεί, αντί να μπει στην εβδομαδιαία παρτίδα.'),
+                                    ->helperText('Όταν είναι ON, η προγραμματισμένη έκδοση εκδίδει + υποβάλλει στη myDATA αμέσως μόλις πληρωθεί, αντί να μπει στην εβδομαδιαία παρτίδα.')
+                                    // For a WHMCS-linked customer whose tenant maps the «γκρινιάρης»
+                                    // field, WHMCS is the source of truth: WhmcsInvoiceIngestor mirrors
+                                    // the flag on every ingest, so an edit here would be overwritten.
+                                    // Lock it read-only and point the operator to WHMCS. (Disabled ⇒
+                                    // not dehydrated ⇒ the mirrored value is never touched by a save.)
+                                    ->disabled(fn (?Customer $record): bool => self::immediateInvoiceGovernedByWhmcs($record))
+                                    ->hintIcon(fn (?Customer $record): ?string => self::immediateInvoiceGovernedByWhmcs($record) ? 'heroicon-m-lock-closed' : null)
+                                    ->hint(fn (?Customer $record): ?string => self::immediateInvoiceGovernedByWhmcs($record) ? 'Ελέγχεται από το WHMCS («γκρινιάρης»)' : null),
 
                                 Toggle::make('needs_invoice_before_payment')
                                     ->label('Τιμολόγιο πριν την πληρωμή')
@@ -414,5 +422,21 @@ class CustomerForm
             .'<div style="margin-top:.4rem;opacity:.75">Το πλήρες χρονολόγιο (τι ειπώθηκε, πότε) είναι στο lead.</div>'
             .'</div>'
         );
+    }
+
+    /**
+     * Is «Άμεση τιμολόγηση» owned by WHMCS for this customer? True only when the
+     * customer is WHMCS-linked (whmcs_client_id) AND the tenant maps the «γκρινιάρης»
+     * field — the exact condition under which WhmcsInvoiceIngestor mirrors the flag on
+     * every ingest, so an ekdosi-side edit would be overwritten. Non-WHMCS customers,
+     * and tenants that don't map the field, keep the toggle editable here.
+     */
+    private static function immediateInvoiceGovernedByWhmcs(?Customer $record): bool
+    {
+        if ($record === null || blank($record->whmcs_client_id)) {
+            return false;
+        }
+
+        return Filament::getTenant()?->whmcsCustomFieldId('griniaris') !== null;
     }
 }

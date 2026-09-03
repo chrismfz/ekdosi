@@ -30,6 +30,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 - **«Από προτιμολόγιο #N»** αντί «Από WHMCS #N» στις ΠΑΡΑΤΗΡΗΣΕΙΣ του παραστατικού που δημιουργείται
   από το inbox — ο όρος που χρησιμοποιεί ο χειριστής, και δεν εκθέτει το όνομα του billing system στο
   πελατειακό PDF.
+### Added
+- **MCP: `error_log_tail` — το PHP/FPM/web-server ERROR log από απόσταση.** Δίδυμο του `log_tail`, αλλά για
+  τα σφάλματα που **δεν φτάνουν ποτέ** στο `laravel.log`: fatals (nesting/χρόνος/μνήμη), άπειρη αναδρομή,
+  θάνατος FPM worker, 500 πριν τον handler — δηλαδή το «Error while loading page» με **κενό** app log (ακριβώς
+  η περίπτωση του self-referential Placeholder). Portable χωρίς hardcoded paths: primary source το
+  `ini_get('error_log')` (ο PHP το γράφει ως ο account user → πάντα readable, σε cPanel/DirectAdmin/Virtualmin/
+  standalone), + best-effort probing κοινών fpm/nginx/apache/panel locations (τα root-owned απλώς παραλείπονται
+  και αναφέρονται στο `checked`). super_admin, read-only, bounded tail. Φίλτρα `lines`/`contains`.
 
 ### Fixed
 - **«Error while loading page» στο κουμπί «Έκδοση πιστωτικού».** Το modal είχε per-line Repeater με ένα
@@ -127,6 +135,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
   γυρίσει σε «Ενεργό», ώστε αποτυχία ανάθεσης να αφήνει επανα-δοκιμάσιμο πρόχειρο, όχι ενεργό-χωρίς-ΑΑ.
 
 ### Added
+- **«Άμεση τιμολόγηση» — συγχρονισμός από το WHMCS πεδίο «γκρινιάρης» (WHMCS = πηγή αλήθειας).** Το
+  `customers.needs_immediate_invoice` **σπέρνεται** στη δημιουργία πελάτη από WHMCS row (`WhmcsCustomerCreator`)
+  ΚΑΙ **καθρεφτίζεται σε κάθε ingest** (`WhmcsInvoiceIngestor`) πάνω στον συνδεδεμένο πελάτη — έτσι αν ο πελάτης
+  «γκρινιάξει» έναν μήνα μετά και τσεκάρεις «γκρινιάρης» στο WHMCS, **περνά** στο ekdosi στο επόμενο fetch (ON→ON,
+  OFF→OFF). Στοχεύει τον **πρωτεύοντα** WHMCS πελάτη (όχι τρίτο δικαιούχο), γράφει **μόνο σε πραγματική αλλαγή**
+  (μια αλλαγή καταγράφεται ως «Σύστημα» στο ιστορικό), και **δεν αγγίζει** τίποτα όταν ο tenant **δεν** έχει
+  χαρτογραφήσει το `griniaris` (τότε το flag μένει καθαρά στον χειριστή). Για συνδεδεμένους πελάτες το toggle
+  «Άμεση τιμολόγηση» στη φόρμα Πελάτη γίνεται **read-only** (κλείδωμα + hint «Ελέγχεται από το WHMCS»), ώστε να
+  μη «χάνεται» μια χειροκίνητη αλλαγή στο επόμενο sync. Ο συγχρονισμός γίνεται **post-commit + best-effort** (δεν
+  ρολάρει ποτέ πίσω το staging του invoice) και **δεν εξαναγκάζει OFF όταν δεν διαβάζονται τα customfields** —
+  μια παροδική αστοχία στο GetClientsDetails του WHMCS (χωρίς customfields block) θεωρείται «άγνωστο», όχι
+  «ξεμαρκαρισμένο», ώστε ένα blip να μη σβήνει σιωπηλά το flag ενός υπάρχοντος πελάτη. Αναβιώνει scaffolding που
+  ως τώρα δεν διάβαζε κανείς (`needs_immediate_invoice` + `whmcs_custom_field_map.griniaris`).
 - **«Τιμολόγιο πριν την πληρωμή» — απλήρωτα WHMCS invoices στο «Εισερχόμενα» για χειροκίνητη έκδοση επί
   πιστώσει.** Για πελάτες (δημόσιο/δήμοι/Α.Ε.) που εκδίδουν εντολή πληρωμής ΜΟΝΟ αφού λάβουν παραστατικό.
   Νέα **ανά-πελάτη σήμανση** `needs_invoice_before_payment` (φόρμα Πελάτη) — **ξεχωριστή** από την «Άμεση
