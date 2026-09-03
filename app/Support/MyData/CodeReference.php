@@ -200,6 +200,35 @@ class CodeReference
                 'intro' => VatExemptionGuidance::INTRO,
                 'rows' => self::exemptionRows(),
             ],
+            [
+                'key' => 'payment_methods',
+                'title' => 'Τρόποι πληρωμής §8.12',
+                'intro' => 'Το μέσο πληρωμής που δηλώνεται στην ΑΑΔΕ. Ρυθμίζεται ανά «Τρόπο Πληρωμής» '
+                    .'(και για WHMCS μέσω «Αντιστοίχιση WHMCS (πληρωμές)»). Χωρίς κωδικό → δηλώνεται «Μετρητά» (3).',
+                'rows' => self::paymentRows(),
+            ],
         ];
+    }
+
+    /** @return list<array{code:string, title:string, detail:string}> */
+    private static function paymentRows(): array
+    {
+        $usage = [
+            1 => 'Τραπεζική κατάθεση/έμβασμα σε ελληνικό επαγγελματικό λογαριασμό.',
+            2 => 'Επαγγελματικός λογαριασμός πληρωμών αλλοδαπής.',
+            3 => 'Μετρητά — και το fallback όταν δεν έχει οριστεί κωδικός.',
+            4 => 'Πληρωμή με επιταγή.',
+            5 => 'Επί πιστώσει — ανοιχτό υπόλοιπο (due_days > 0).',
+            6 => 'Web / e-banking.',
+            7 => 'Κάρτα μέσω POS/e-POS (Stripe / Viva / τραπεζικό POS).',
+            8 => 'Άμεσες Πληρωμές IRIS.',
+        ];
+
+        $rows = [];
+        foreach (Codes::PAYMENT_METHODS as $code => $label) {
+            $rows[] = ['code' => (string) $code, 'title' => (string) $label, 'detail' => $usage[$code] ?? '—'];
+        }
+
+        return $rows;
     }
 }

@@ -520,6 +520,14 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   **`ekdosi:create-admin`** (create/reset system super_admin σε όλες τις εταιρίες).
   Ο demo seed (`db:seed`) είναι **opt-in** (`EKDOSI_SEED_DEMO`, default OFF) — κανένας
   γνωστός-password super_admin σε πραγματικό host.
+- **Σελίδα «Έλεγχος ετοιμότητας»** (`Preflight`, super_admin-only, «Σύστημα») — το **config-δίδυμο**
+  του «Υγεία συστήματος» (liveness): «είμαι νόμιμος;» ανά εταιρεία σε μία οθόνη με κατάσταση
+  **Έτοιμο / Προσοχή / Μπλόκο** (worst-of-sections). Ενότητες: **ρυθμίσεις myDATA** (τύποι/ΦΠΑ/§8.3/§8.12
+  — ο ΙΔΙΟΣ `MyDataConfigAudit` με το «Έλεγχος ρυθμίσεων» tab + `mydata:preflight`· 0% χωρίς §8.3 = Μπλόκο),
+  **πίνακες lookups** (ΦΠΑ/τύποι/πληρωμές/μονάδες/αποστολή/διακίνηση/κατηγορίες — auto-seeded, warn αν λείπουν),
+  **κατηγορίες εσόδων προϊόντων §8.6** και **προαιρετικές αντιστοιχίσεις WHMCS** (έσοδα §8.6 + πληρωμές §8.12).
+  Read-only, cross-tenant σωστά scoped (κάθε εταιρεία μέσα σε `CompanyContext::actAs`)· link στον «Οδηγό κωδικών»
+  για τις §8.3/§8.12 αναφορές. `ReadinessReport` service, cached (30s, «Ανανέωση» busts).
 - **`ekdosi:go-live-check --tenant=SLUG [--json]`** — per-tenant cutover-readiness gate
   (read-only): provider · τύποι+E3 · default ΦΠΑ · ΦΠΑ→ΑΑΔΕ · **production creds (hard FAIL)** ·
   mode · αρίθμηση · **golden totals-drift** · backups · queue/infra (από `OperatorHealthReport`).

@@ -18,7 +18,7 @@ class CodeReferenceTest extends TestCase
     {
         $keys = array_map(fn ($s) => $s['key'], CodeReference::sections());
         $this->assertSame(
-            ['business_activity', 'income_buckets', 'invoice_types', 'vat_categories', 'vat_exemptions'],
+            ['business_activity', 'income_buckets', 'invoice_types', 'vat_categories', 'vat_exemptions', 'payment_methods'],
             $keys
         );
     }
