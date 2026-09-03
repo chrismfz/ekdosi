@@ -506,7 +506,7 @@ Priorities:
 | PROV-002 | P0→P2 | OPEN | B/WATCH | Provider delivery notes | **De-risked & deferred (research-first).** Same finding as PROV-001: InvoSign **de-dups** (sandbox 2026-07-07) ⇒ a duplicate 9.3 is not possible on this provider (re-raise to P0 on a non-dedup provider). Our GR tenants also hold myDATA read creds ⇒ the existing adopt-via-`RequestTransmittedDocs` path already recovers in-doubt δελτία. Remaining work = structured provider status-recovery, which is **v2.0.2-sensitive** (new receiving-note types 10.1/10.2 + `CancelReceivingNote` reshape the provider delivery surface). Hold until v2.0.2 is production + provider ΔΑ path is live-validated (single gate: DEP-001) |
 | PROV-003 | P0 | PARTIAL | A✓/B | Provider documents | Print half DONE (#406). Licence/identity snapshot per document + invoice-page evidence DONE (this PR). Remaining bucket B: official-artifact archive — **BLOCKED, InvoSign exposes no download API** (only the QR landing page, which the spec forbids archiving); needs a provider download/retention endpoint → BACKLOG |
 | PROV-004 | P0 | OPEN | C | Provider credits | UI/service do not enforce the 5.1/5.2/11.4 compatibility matrix |
-| PROV-005 | P1 | OPEN | B | Provider preflight | Reachability is not token authentication and mandatory issuer fields are unchecked |
+| PROV-005 | P1 | PARTIAL | B | Provider preflight | **Local half DONE (this PR).** `ProviderPreflight` + go-live now require the FULL issuer identity InvoSign's `<API_Issuer>` needs (επωνυμία/ΚΑΔ/ΔΟΥ/οδός/Τ.Κ./πόλη → `fail`; email/phone advisory → `warn`), from a single source (`InvoSignDocument::ISSUER_FIELDS`); myDATA read-creds validated as a COMPLETE pair for the active `mydataReadMode()` (no more sandbox-id+prod-key false-green). **Remaining (vendor-blocked → BACKLOG):** the *authenticated* non-issuing credential probe + contract/quota proof (needs an InvoSign-approved status endpoint; `ping()` stays an unauthenticated GET) |
 | PROV-006 | P0 | DONE | — | Provider retail | **Sandbox-verified 2026-09-03:** retail 11.1 (ΑΛΠ) via InvoSign accepted → VALID, MARK 400001970206125 (named counterpart). Truly-anonymous ΑΛΠ (no name) untested — not this tenant's workflow |
 | PROV-007 | P1 | VERIFY | C | Provider totals | Header/line discount semantics of InvoSign api_* fields are not proven |
 | PROV-008 | P1 | OPEN | C | Provider outage | Transmission Failure_1/2 issue and recovery lifecycle is absent |
@@ -2935,21 +2935,39 @@ retail 11.4 and an incompatible crafted action request.
 
 ### PROV-005 — Provider preflight can return a false green
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** PARTIAL (local half DONE this PR) · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Resolution (local half).** The two config-level false-greens are closed:
+- **Mandatory issuer fields.** `ProviderPreflight` checked issuer AFM only; it now
+  requires every field InvoSign's `<API_Issuer>` extension carries — επωνυμία /
+  ΚΑΔ-δραστηριότητα / ΔΟΥ / οδός / Τ.Κ. / πόλη → **`fail`**, email/phone → **`warn`**
+  (advisory: the provider likely uses them to deliver the document to the customer,
+  but does not require them to accept). Single source =
+  [`InvoSignDocument::ISSUER_FIELDS`](app/Services/EInvoice/Transports/InvoSignDocument.php)
+  (the same map the payload emits from) via `missingIssuerLabels()`, so the check
+  can never drift from what goes on the wire. Surfaced BOTH in the Πάροχος Console
+  preflight AND as a new `provider_issuer` gate in `ekdosi:go-live-check`.
+- **myDATA read-cred pairing.** The old `(id_sandbox||id_prod) && (key_x||key_y)`
+  accepted a sandbox-id + prod-key mash-up; it now validates a COMPLETE pair
+  (aade-id + subscription-key) for the active `mydataReadMode()`, naming the missing
+  half. Stays `warn` (reconciliation is not a filing blocker).
+
+**Remaining (vendor-blocked → BACKLOG).** The *authenticated*, non-issuing credential
+probe/status operation (the `ping()` is still an unauthenticated GET → an invalid
+token passes) and proof of contract/declaration activation + remaining quota need an
+InvoSign-approved status endpoint. Never issue a dummy production invoice to test
+credentials.
+
+**Original finding**
 
 - [InvoSignTransport::ping](app/Services/EInvoice/Transports/InvoSignTransport.php)
   performs an unauthenticated GET to the base URL; an invalid token can pass.
-- [ProviderPreflight](app/Services/EInvoice/ProviderPreflight.php) checks issuer
+- [ProviderPreflight](app/Services/EInvoice/ProviderPreflight.php) checked issuer
   AFM only. InvoSign's extension requires issuer name, profession/activity, tax
-  office, street, postcode and city.
-- myDATA read credentials are combined across sandbox/production rather than
-  validating one complete pair for the active reconciliation environment.
-- The preflight cannot prove contract/declaration activation or remaining quota.
-
-Require an authenticated, non-issuing credential probe/status operation approved
-by InvoSign, every mandatory issuer field, active-environment credential pairing,
-compatible document types and current activation status. Never issue a dummy
-production invoice merely to test credentials.
+  office, street, postcode and city. ✅ (this PR)
+- myDATA read credentials were combined across sandbox/production rather than
+  validating one complete pair for the active reconciliation environment. ✅ (this PR)
+- The preflight cannot prove contract/declaration activation or remaining quota. ⏳ vendor.
 
 ### PROV-006 — Retail via provider: SANDBOX-VERIFIED
 

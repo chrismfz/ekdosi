@@ -237,19 +237,67 @@ class InvoSignDocument
         return $wrap;
     }
 
+    /**
+     * The issuer identity fields InvoSign's <API_Issuer> extension carries, keyed by
+     * the Company column each reads from — the SINGLE source for both what the
+     * payload SENDS (issuerFields) and what the readiness checks REQUIRE
+     * (ProviderPreflight + go-live, PROV-005), so a check can never drift from what
+     * actually goes on the wire. Order matters (kept == the emitted XML order).
+     *   field    → the InvoSign element name
+     *   label    → operator-facing Greek label for the preflight
+     *   required → InvoSign REJECTS the filing without it (fail); false = advisory
+     *              (warn — the provider likely uses email/phone to deliver the
+     *              document to the customer, but does not require them to accept it).
+     *
+     * @var array<string, array{field: string, label: string, required: bool}>
+     */
+    public const ISSUER_FIELDS = [
+        'name' => ['field' => 'IssuerName', 'label' => 'Επωνυμία', 'required' => true],
+        'kad_primary' => ['field' => 'IssuerProfession', 'label' => 'ΚΑΔ/δραστηριότητα', 'required' => true],
+        'tax_office' => ['field' => 'IssuerTaxOffice', 'label' => 'ΔΟΥ', 'required' => true],
+        'address' => ['field' => 'IssuerAddressStreet', 'label' => 'Οδός/διεύθυνση', 'required' => true],
+        'postcode' => ['field' => 'IssuerAddressPostalCode', 'label' => 'Τ.Κ.', 'required' => true],
+        'city' => ['field' => 'IssuerAddressCity', 'label' => 'Πόλη', 'required' => true],
+        'phone' => ['field' => 'IssuerPhone', 'label' => 'Τηλέφωνο', 'required' => false],
+        'email' => ['field' => 'IssuerEmail', 'label' => 'Email', 'required' => false],
+    ];
+
     /** @return array<string, string> */
     private static function issuerFields(?Company $company): array
     {
-        return [
-            'IssuerName' => (string) ($company?->name ?? ''),
-            'IssuerProfession' => (string) ($company?->kad_primary ?? ''),
-            'IssuerTaxOffice' => (string) ($company?->tax_office ?? ''),
-            'IssuerAddressStreet' => (string) ($company?->address ?? ''),
-            'IssuerAddressPostalCode' => (string) ($company?->postcode ?? ''),
-            'IssuerAddressCity' => (string) ($company?->city ?? ''),
-            'IssuerPhone' => (string) ($company?->phone ?? ''),
-            'IssuerEmail' => (string) ($company?->email ?? ''),
-        ];
+        $out = [];
+        foreach (self::ISSUER_FIELDS as $column => $meta) {
+            $out[$meta['field']] = (string) ($company?->{$column} ?? '');
+        }
+
+        return $out;
+    }
+
+    /**
+     * PROV-005: which mandatory / advisory issuer fields this tenant has NOT filled,
+     * as operator-facing Greek labels — the single source both ProviderPreflight and
+     * the go-live gate consume, so the readiness check matches exactly what
+     * <API_Issuer> would carry. `blank()` catches null and empty/whitespace strings.
+     *
+     * @return array{required: list<string>, recommended: list<string>}
+     */
+    public static function missingIssuerLabels(?Company $company): array
+    {
+        $required = [];
+        $recommended = [];
+
+        foreach (self::ISSUER_FIELDS as $column => $meta) {
+            if (! blank($company?->{$column})) {
+                continue;
+            }
+            if ($meta['required']) {
+                $required[] = $meta['label'];
+            } else {
+                $recommended[] = $meta['label'];
+            }
+        }
+
+        return ['required' => $required, 'recommended' => $recommended];
     }
 
     /** @return array<string, string> */

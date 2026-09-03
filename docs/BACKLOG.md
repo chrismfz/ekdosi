@@ -470,6 +470,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **PROV-005 remaining half — authenticated provider credential probe** _(P1, vendor-blocked)._
+  The local config false-greens are fixed (issuer-field completeness + active-env credential pairing,
+  in `ProviderPreflight` + go-live). What stays: `InvoSignTransport::ping()` is an **unauthenticated**
+  GET to the base URL, so «Έλεγχος σύνδεσης» can read green with a dead/invalid token; and the preflight
+  cannot prove contract/declaration activation or remaining quota. All three need an **InvoSign-approved
+  non-issuing status/credential endpoint** (never a dummy production invoice). Wire the real probe once
+  the vendor confirms the endpoint; until then the cutover dry-run (bucket A) is the backstop.
 - **STOCK-001 follow-ups — remainder-aware, recompute-style stock reversal** _(P2 survivors of the
   STOCK-001 review; the reachable P1 order-regression was fixed in that PR)._ Three residual edges, all
   the SAME root — the reversal fires incremental deltas at each cancel event while the "correct"

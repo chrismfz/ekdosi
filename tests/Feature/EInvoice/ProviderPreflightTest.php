@@ -25,6 +25,10 @@ class ProviderPreflightTest extends TestCase
             'name' => 'Ready ΑΕ', 'slug' => 'ready-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
             'einvoice_provider_mode' => 'sandbox', 'afm' => '800561849',
+            // Full issuer identity InvoSign's <API_Issuer> requires (PROV-005).
+            'kad_primary' => '6201', 'tax_office' => 'Α΄ ΑΘΗΝΩΝ',
+            'address' => 'Οδός 1', 'postcode' => '11111', 'city' => 'Αθήνα',
+            'phone' => '2100000000', 'email' => 'billing@ready.gr',
             'einvoice_provider_config' => ['demo_base_url' => 'https://demo', 'demo_token' => 'T'],
             'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
         ], $overrides));
@@ -78,6 +82,45 @@ class ProviderPreflightTest extends TestCase
             'base_url' => 'https://live', 'token' => 'L',
         ]]);
         $this->assertTrue(app(ProviderPreflight::class)->isReady($c->fresh()));
+    }
+
+    public function test_missing_mandatory_issuer_field_fails(): void
+    {
+        // PROV-005: a tenant otherwise ready but missing a mandatory issuer field
+        // (here ΔΟΥ) must FAIL — InvoSign rejects it at the wire otherwise.
+        $c = $this->readyTenant(['tax_office' => '']);
+        $this->assertFalse(app(ProviderPreflight::class)->isReady($c));
+
+        $issuer = collect(app(ProviderPreflight::class)->audit($c))
+            ->firstWhere('label', 'Στοιχεία εκδότη (πάροχος)');
+        $this->assertSame('fail', $issuer['status']);
+        $this->assertStringContainsString('ΔΟΥ', $issuer['detail']);
+    }
+
+    public function test_missing_contact_fields_only_warn_not_fail(): void
+    {
+        // email/phone are advisory: missing → WARN, never a filing blocker.
+        $c = $this->readyTenant(['phone' => '', 'email' => '']);
+        $this->assertTrue(app(ProviderPreflight::class)->isReady($c), 'contact gaps do not block');
+
+        $contact = collect(app(ProviderPreflight::class)->audit($c))
+            ->firstWhere('label', 'Επικοινωνία εκδότη');
+        $this->assertSame('warn', $contact['status']);
+        $this->assertStringContainsString('Email', $contact['detail']);
+        $this->assertStringContainsString('Τηλέφωνο', $contact['detail']);
+    }
+
+    public function test_mismatched_mydata_read_pair_warns_not_fail(): void
+    {
+        // sandbox aade-id present but its subscription-key missing (a mash-up that
+        // read green before) → WARN naming the missing half, isReady still true.
+        $c = $this->readyTenant(['mydata_subscription_key_sandbox' => '']);
+        $this->assertTrue(app(ProviderPreflight::class)->isReady($c));
+
+        $reco = collect(app(ProviderPreflight::class)->audit($c))
+            ->firstWhere('label', 'myDATA (έλεγχος/συμφωνία)');
+        $this->assertSame('warn', $reco['status']);
+        $this->assertStringContainsString('subscription-key', $reco['detail']);
     }
 
     public function test_non_provider_tenant_returns_single_warn(): void

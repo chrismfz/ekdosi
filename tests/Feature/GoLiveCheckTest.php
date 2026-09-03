@@ -232,14 +232,52 @@ class GoLiveCheckTest extends TestCase
             'name' => 'Provider Live OE', 'slug' => 'pvl-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
             'einvoice_provider_key' => 'invosign', 'mydata_mode' => 'off',
-            'business_activity_type' => 'services',
+            'business_activity_type' => 'services', 'afm' => '800561849',
+            // PROV-005: the full issuer identity InvoSign's extension requires.
+            'kad_primary' => '6201', 'tax_office' => 'Α΄ ΑΘΗΝΩΝ',
+            'address' => 'Οδός 1', 'postcode' => '11111', 'city' => 'Αθήνα',
+            'phone' => '2100000000', 'email' => 'billing@pvl.gr',
         ]);
         $this->grType($c);
         $this->vat($c, 24);
 
         $report = $this->report($c);
         $this->assertSame('pass', $this->gate($report, 'provider_live')['status']);
+        $this->assertSame('pass', $this->gate($report, 'provider_issuer')['status']);
         $this->assertSame('ready', $report['overall']);
+    }
+
+    public function test_blank_issuer_afm_fails_cutover(): void
+    {
+        // PROV-005: the issuer ΑΦΜ is the AADE-core identity — a blank one is a wire
+        // rejection on the first filing, for a direct-myDATA tenant too (not only
+        // providers), and no other gate validated it before.
+        $c = $this->readyTenant();          // gr-mydata, otherwise ready
+        $c->update(['afm' => '']);
+
+        $report = $this->report($c);
+        $this->assertSame('fail', $this->gate($report, 'issuer_afm')['status']);
+        $this->assertSame('not_ready', $report['overall']);
+    }
+
+    public function test_gr_provider_missing_issuer_fields_fails_cutover(): void
+    {
+        // PROV-005: provider live + configured, but the issuer identity InvoSign's
+        // extension requires is incomplete (no ΔΟΥ/ΚΑΔ/address) → wire-level
+        // rejection on the first real document → cutover FAIL.
+        $c = Company::create([
+            'name' => 'Provider Half OE', 'slug' => 'pvh-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
+            'einvoice_provider_key' => 'invosign', 'mydata_mode' => 'off',
+            'business_activity_type' => 'services', 'afm' => '800561849',
+        ]);
+        $this->grType($c);
+        $this->vat($c, 24);
+
+        $report = $this->report($c);
+        $this->assertSame('fail', $this->gate($report, 'provider_issuer')['status']);
+        $this->assertSame('not_ready', $report['overall']);
+        $this->artisan('ekdosi:go-live-check', ['--tenant' => $c->slug])->assertExitCode(2);
     }
 
     public function test_classification_policy_unset_fails_the_cutover(): void

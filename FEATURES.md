@@ -184,7 +184,12 @@
 ## 6. Πάροχοι e-invoicing & PEPPOL
 - **Δίαυλος αποστολής** per-tenant: `gr-mydata` (απευθείας ΑΑΔΕ), `gr-provider`
   (InvoSign — `EInvoiceProviderTransport` + registry), `none`.
-- **ProviderConsole** + `einvoice:preflight` / `einvoice:test-submit`.
+- **ProviderConsole** + `einvoice:preflight` / `einvoice:test-submit`. Ο έλεγχος
+  ετοιμότητας (Console) απαιτεί ΟΛΑ τα υποχρεωτικά στοιχεία εκδότη που ζητά ο πάροχος
+  (επωνυμία/ΚΑΔ/ΔΟΥ/διεύθυνση → σφάλμα· email/τηλέφωνο → προειδοποίηση) και πλήρες
+  ζεύγος myDATA read-creds για το ενεργό περιβάλλον (PROV-005). Τα υποχρεωτικά στοιχεία
+  εκδότη (+ΑΦΜ) ελέγχονται ΚΑΙ ως gate στο `ekdosi:go-live-check` (το read-creds ζεύγος
+  μένει στο Console preflight — μη-μπλοκάρον advisory).
 - **PEPPOL Phase 1** (Εσθονία) — provider-independent **BIS Billing 3.0 / EN 16931 UBL**
   builder (`PeppolInvoiceDocument` μέσω `josemmo/einvoicing`) + `peppol:test-submit`
   (dry-run + validate). Phase 2 (Access-Point transport) = backlog.
