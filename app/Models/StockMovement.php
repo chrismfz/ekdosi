@@ -33,6 +33,8 @@ class StockMovement extends Model
 
     public const REASON_CANCEL = 'cancel';        // reversal of a cancelled document (S3)
 
+    public const REASON_REVIVE = 'revive';        // un-does a REASON_CANCEL when a cancelled document is restored (Επαναφορά)
+
     protected $fillable = [
         'company_id',
         'product_id',

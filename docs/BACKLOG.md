@@ -499,19 +499,20 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   in-app path flips `mydata_state` without `local_status` (both cancel choke-points sync the two). The
   `reverseReturnForCreditNote` skip-when-original-cancelled guard has the mirror caveat: it assumes the
   INVOICE owns the sale (false for a δελτίο-first linked group → overstate).
-  (e) **revive does not re-apply the movement** _(from the PROV-018 review; confirmed on the credit-note
-  path)._ «Επαναφορά» (`ViewInvoice::revive`, `local_status: cancelled → active`) does NOT re-apply stock:
-  `recordReturnForCreditNote` (and, by the same `lineHasMovement` guard, `recordSaleForInvoice`) skips
-  because the ORIGINAL `REASON_RETURN`/`REASON_SALE` movement still exists, while the cancel's
-  `REASON_CANCEL` compensation stands → net 0 (credit note: understated by qty; a revived normal invoice
-  the mirror: overstated). Reachable via a plain Ακύρωση→Επαναφορά on a tracked-stock document.
-  (f) **delivery-cancel reversal durability** _(from the PROV-018 review)._
+  (e) **revive re-application — ✅ FIXED (PROV-018 PR).** «Επαναφορά» (`ViewInvoice::revive`,
+  `local_status: cancelled → active`) used NOT to re-apply stock — `recordSaleForInvoice`/
+  `recordReturnForCreditNote` skipped because the base `REASON_SALE`/`REASON_RETURN` movement still
+  existed, while the cancel's compensation stood → net 0 (credit note understated, invoice overstated).
+  Now they detect an outstanding cancel compensation and record a signed `REASON_REVIVE` that zeroes it,
+  and the reverse* «already reversed» guards became NET-based (`compensationBalance`, not existence) so a
+  cancel→revive→re-cancel cycle stays idempotent (`StockService`, tests in `StockSaleTest`).
+  (f) **delivery-cancel reversal durability** _(from the PROV-018 review, still deferred)._
   `DeliveryLifecycleService::persistCancellation` records `reverseSaleForDeliveryNote` best-effort AFTER
   the cancel transaction commits; if the process dies between commit and the reversal a retry cancel
   throws «ήδη ακυρωμένο στη myDATA» and never re-runs it (and the remote-cancel/`refreshStatus` path —
   MYD-019, currently frozen on the ΔΑ v2.0.2 spec — does not reverse stock at all yet, so the changelog's
   «reused by MYD-019» is the method being ready, not wired).
-  A recompute-from-live-documents pass closes (a)–(f) at once (or move (f)'s reversal inside the txn).
+  A recompute-from-live-documents pass closes (a)–(d) + (f) at once (or move (f)'s reversal inside the txn).
   Stock is informational (never blocks a sale, self-corrects with a manual adjustment), so these
   are genuinely P2.
 - **PROV-018 micro-cleanup** _(P2 from the PROV-018 review, accepted)._ `IssueCreditNote::reverseRemaining`'s
