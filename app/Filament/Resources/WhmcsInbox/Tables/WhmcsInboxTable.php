@@ -367,6 +367,18 @@ class WhmcsInboxTable
                         ? $query->whereHas('customer', fn (Builder $q) => $q->where('needs_immediate_invoice', true))
                         : $query),
 
+                // «Τιμολόγιο πριν την πληρωμή»: the UNPAID rows staged by whmcs:fetch-unpaid
+                // for manual επί-πιστώσει issuance. Filters on the WHMCS payment status in the
+                // stored payload (whmcsIsUnpaid()'s source). Exact 'Unpaid' — WHMCS returns the
+                // status canonically capitalised (the same exact match getPendingInvoices uses
+                // for 'Paid'); the model's strcasecmp is only defensive.
+                SelectFilter::make('unpaid')
+                    ->label('Απλήρωτα')
+                    ->options(['yes' => 'Απλήρωτα (προς έκδοση)'])
+                    ->query(fn (Builder $query, array $data): Builder => ($data['value'] ?? null) === 'yes'
+                        ? $query->where('payload->status', 'Unpaid')
+                        : $query),
+
                 // WH-7: surface failed MARK write-backs (AADE OK, WHMCS bookkeeping
                 // stuck) — the rows the «Επανάληψη επιστροφής ΜΑΡΚ» action targets.
                 SelectFilter::make('whmcs_writeback_state')

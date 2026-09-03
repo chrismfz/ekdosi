@@ -414,6 +414,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Άμεση τιμολόγηση (auto-issue) type-aware** — διαλέγει Απόδειξη/Τιμολόγιο από την πρόθεση
   (ΑΦΜ/wantsinvoice ή route is_receipt)· `whmcs_default_invoice_type_id` + `whmcs_default_receipt_type_id`·
   ό,τι δεν τυποποιείται με ασφάλεια ΜΕΝΕΙ στο Inbox (ποτέ λάθος τύπος).
+- **«Τιμολόγιο πριν την πληρωμή» (`needs_invoice_before_payment`)** — ξεχωριστή ανά-πελάτη σήμανση για
+  δημόσιο/δήμους/Α.Ε. που θέλουν παραστατικό ΠΡΙΝ πληρώσουν. Η εντολή **`whmcs:fetch-unpaid`**
+  (`WhmcsUnpaidFetcher`) φέρνει τα **ΑΠΛΗΡΩΤΑ** WHMCS invoices αυτών των πελατών στο Inbox για **χειροκίνητη**
+  έκδοση επί πιστώσει (τύπος `whmcs_default_unpaid_type_id`, ανοιχτό υπόλοιπο) — badge «Απλήρωτο» + φίλτρο.
+  **ΠΟΤΕ αυτόματα** (μόνο STAGE· `chooseType()` κρατά κάθε unpaid· η auto-issue κλειδώνει στο άλλο flag).
+  OFF by default (`EKDOSI_SCHEDULE_WHMCS_FETCH_UNPAID`).
 - **Plugin-API consolidation** (`resolve.php`) + Bridge logs tab + `whmcs:use-bridge`.
 - **Φύλαξη από «mass payment»**: συγκεντρωτικά τιμολόγια πληρωμής του WHMCS (γραμμές-αναφορές σε
   άλλα τιμολόγια, χωρίς δικό τους ΦΠΑ) εντοπίζονται (`detectConsolidatedRefs`) και παρκάρονται «Σε

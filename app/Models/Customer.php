@@ -45,7 +45,7 @@ class Customer extends Model
             'type', 'afm', 'name', 'address1', 'address2', 'city', 'postcode',
             'phone1', 'phone2', 'occupation', 'tax_office', 'email', 'secondary_email',
             'discount', 'country', 'vat_vies', 'withhold_tax', 'payment_method_id',
-            'is_active', 'needs_immediate_invoice', 'auto_email_invoices',
+            'is_active', 'needs_immediate_invoice', 'needs_invoice_before_payment', 'auto_email_invoices',
         ];
     }
 
@@ -79,6 +79,7 @@ class Customer extends Model
         'whmcs_client_id',
         // PR-only additions:
         'needs_immediate_invoice',
+        'needs_invoice_before_payment',
         'is_active',
         // Operator-feedback polish: pin frequent customers to the top of
         // the invoice-form picker (favourites-first + auto-top).
@@ -98,6 +99,7 @@ class Customer extends Model
         return [
             'discount' => 'decimal:2',
             'needs_immediate_invoice' => 'boolean',
+            'needs_invoice_before_payment' => 'boolean',
             'auto_email_invoices' => 'boolean',
             'is_active' => 'boolean',
             'is_favorite' => 'boolean',

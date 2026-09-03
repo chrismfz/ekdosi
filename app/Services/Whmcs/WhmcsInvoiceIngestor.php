@@ -242,6 +242,10 @@ class WhmcsInvoiceIngestor
             $row = $result->row;
             if (! $result->created
                 || $row->status !== PendingWhmcsInvoice::STATUS_PENDING_REVIEW
+                // An UNPAID row (whmcs:fetch-unpaid, «τιμολόγιο πριν την πληρωμή») is issued
+                // επί πιστώσει MANUALLY — never «άμεσα». Firing the immediate bell for it (when
+                // the customer happens to carry both flags) contradicts the actual workflow.
+                || $row->whmcsIsUnpaid()
                 || ! $row->customer?->needs_immediate_invoice) {
                 return;
             }

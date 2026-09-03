@@ -135,6 +135,29 @@ $trackSchedule(
     'whmcs_fetch'
 );
 
+// whmcs:fetch-unpaid — stage the UNPAID invoices of «τιμολόγιο-πριν-την-πληρωμή»
+// customers (customers.needs_invoice_before_payment) into the inbox for MANUAL
+// επί-πιστώσει issuance. Like the paid fetch it only STAGES — never files, never
+// auto-issues. OFF by default (opt-in secondary fetch); unpaid invoices don't
+// change fast, so a low cadence (hourly default) is plenty.
+$trackSchedule(
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::query()
+                ->whereNotNull('whmcs_api_url')
+                ->where('whmcs_api_url', '!=', '')
+                ->get(),
+            'whmcs:fetch-unpaid',
+            fn () => null,   // report($e) already logs an uncaught throw; no separate health key for this opt-in fetch
+        );
+    })
+        ->cron($scheduleCron('whmcs_fetch_unpaid_cron', '0 * * * *'))
+        ->name('whmcs-fetch-unpaid-all')
+        ->when(fn () => $scheduleEnabled('whmcs_fetch_unpaid_enabled'))
+        ->withoutOverlapping(30),
+    'whmcs_fetch_unpaid'
+);
+
 // whmcs:auto-issue — auto-FILE paid inbox rows for γκρινιάρης customers on
 // tenants that armed it (companies.whmcs_auto_issue_immediate). UNLIKE the
 // fetch above, this files at AADE, so it's a two-key arming: this scheduler
