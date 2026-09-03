@@ -18,6 +18,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **Παραγωγικό σφάλμα «There was an error while attempting to load this page» στη δημιουργία
+  παραστατικού/πληρωμής.** Ο κοινός επιλογέας τραπεζικού λογαριασμού (`BankAccountField`, Select) κατέγραφε
+  τον tenant-guard ως **γυμνό Laravel closure μέσα σε `->rules([...])`**. Το Filament v5 αποτιμά **κάθε**
+  registered rule (`getValidationRules → evaluate`), οπότε προσπαθούσε να αναλύσει το `$attribute` ως
+  dependency → «closure … [$attribute] was unresolvable» σε **κάθε** create invoice/πληρωμής **όταν ο tenant
+  έχει ενεργό λογαριασμό** (αλλιώς το πεδίο είναι κρυφό και δεν αποτιμάται — γι᾽ αυτό δεν το έπιανε η σουίτα).
+  Το closure τυλίχτηκε σε εξωτερικό `fn (): Closure => …` (ίδιο μοτίβο με CompanyForm/CustomerForm/
+  ScheduleSettings). Regression test με ορατό πεδίο. **Άσχετο με τις αλλαγές αρίθμησης ΑΑ.**
+
 ### Changed
 - **Πρότυπα email τιμολογίου: προσυμπλήρωση του default ως πραγματικό κείμενο + «Επαναφορά προεπιλογής».**
   Τα πεδία «Θέμα»/«Σώμα» (Ρυθμίσεις εταιρείας + καρτέλα εταιρείας) έδειχναν το default ως γκρι placeholder που

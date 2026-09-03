@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
 use App\Filament\Resources\Quotes\Pages\CreateQuote;
+use App\Models\BankAccount;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Models\User;
@@ -56,5 +57,27 @@ class InvoiceQuoteFormRenderTest extends TestCase
     public function test_create_invoice_form_renders(): void
     {
         Livewire::test(CreateInvoice::class)->assertOk();
+    }
+
+    public function test_create_invoice_validates_with_a_visible_bank_account_field(): void
+    {
+        // Production regression: BankAccountField (a Select) registered its tenant-guard
+        // as a BARE Laravel closure in ->rules([...]); Filament v5 evaluates every rule
+        // closure, so it tried to resolve $attribute → "closure … [$attribute] was
+        // unresolvable" on EVERY invoice/payment create — but ONLY when the field is
+        // VISIBLE, i.e. the tenant has an active bank account (else it's hidden and the
+        // rule never evaluates, which is why the suite missed it). Give the tenant an
+        // account so the field is visible, then submit: computing the schema's validation
+        // rules must NOT throw — it must reach normal form errors for the empty form.
+        BankAccount::create([
+            'company_id' => $this->tenant->id,
+            'bank_name' => 'Πειραιώς',
+            'iban' => 'GR1601100000000000000000001',
+            'is_active' => true,
+        ]);
+
+        Livewire::test(CreateInvoice::class)
+            ->call('create')
+            ->assertHasFormErrors(); // reached validation (empty form) without the container crash
     }
 }
