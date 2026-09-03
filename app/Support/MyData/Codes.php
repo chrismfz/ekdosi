@@ -327,14 +327,20 @@ final class Codes
     }
 
     /**
-     * Credit-note types that are NON-correlated (§8.1): AADE FORBIDS
-     * <correlatedInvoices> on these. 5.1 = correlated (link required),
-     * 5.2 = non-correlated (link forbidden). The submitter must not send
-     * a correlation for these even when an original exists locally.
+     * The ONLY credit-note type (§8.1) that carries — and AADE REQUIRES —
+     * <correlatedInvoices> linking it to the document it reverses: 5.1
+     * («Πιστωτικό / Συσχετιζόμενο»). EVERY other credit note FORBIDS it and AADE
+     * rejects the filing with [205] «CorrelatedInvoices is forbidden for this
+     * invoice type»: 5.2 (μη συσχετιζόμενο), 11.4 (πιστωτικό λιανικής — retail is
+     * non-correlated), and the expense-side 13.31 / 14.31. Fail-safe by design:
+     * the submitter correlates ONLY for a code in THIS list, so a new/unknown
+     * credit type defaults to NON-correlated and never triggers a [205]. (The live
+     * 11.4→[205] bug was exactly a non-5.1 credit correlated because the previous
+     * model listed only 5.2 as forbidden.)
      *
      * @var list<string>
      */
-    public const NON_CORRELATED_CREDIT_TYPES = ['5.2'];
+    public const CORRELATED_CREDIT_TYPES = ['5.1'];
 
     /**
      * §8.12 Τρόποι Πληρωμής — payment method type → description.
@@ -816,10 +822,14 @@ final class Codes
         return isset(self::PAYMENT_METHODS[$type]);
     }
 
-    /** Is this a credit-note type that FORBIDS a correlation (e.g. 5.2)? */
-    public static function isNonCorrelatedCreditType(string $code): bool
+    /**
+     * Is this the ONE credit-note type (5.1) that AADE REQUIRES to carry
+     * <correlatedInvoices>? Every other credit note (5.2 / 11.4 / 13.31 / 14.31)
+     * FORBIDS it → [205]. Fail-safe: unknown types return false (do not correlate).
+     */
+    public static function isCorrelatedCreditType(string $code): bool
     {
-        return in_array($code, self::NON_CORRELATED_CREDIT_TYPES, true);
+        return in_array($code, self::CORRELATED_CREDIT_TYPES, true);
     }
 
     /**

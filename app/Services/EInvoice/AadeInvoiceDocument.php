@@ -122,12 +122,14 @@ class AadeInvoiceDocument
         // links the credit to the document it reverses. (int) is safe on
         // 64-bit PHP — AADE MARKs are ~15 digits, well under PHP_INT_MAX.
         //
-        // BUT only for CORRELATED credit types (5.1). For NON-correlated
-        // types (5.2) AADE FORBIDS <correlatedInvoices> and rejects the
-        // filing — so we must not send it even though we have an original.
-        // (myip's ΠΙΣ historically maps to 5.2; sandbox validated 5.1.)
+        // BUT ONLY for the ONE correlated credit type (5.1). Every OTHER credit
+        // note — 5.2 (μη συσχετιζόμενο), 11.4 (retail credit), 13.31/14.31 (expense)
+        // — FORBIDS <correlatedInvoices>; sending it is rejected with [205]
+        // «CorrelatedInvoices is forbidden for this invoice type». Fail-safe positive
+        // check: correlate only a known-5.1, so an unknown type never triggers [205].
+        // (A retail 11.4 πιστωτικό λιανικής against an ΑΛΠ hit exactly this in prod.)
         if ($invoice->credited_invoice_id !== null
-            && ! Codes::isNonCorrelatedCreditType((string) $invoice->invoiceType?->mydata_type)) {
+            && Codes::isCorrelatedCreditType((string) $invoice->invoiceType?->mydata_type)) {
             $header->addCorrelatedInvoice((int) $this->originalInsertMark($invoice));
         }
 

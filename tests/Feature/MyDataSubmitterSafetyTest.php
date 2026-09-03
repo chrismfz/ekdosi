@@ -1244,6 +1244,54 @@ class MyDataSubmitterSafetyTest extends TestCase
         );
     }
 
+    public function test_retail_credit_11_4_omits_correlation(): void
+    {
+        // PROD BUG: a ΠΙΛ (11.4 πιστωτικό λιανικής) against an ΑΛΠ was filed WITH
+        // <correlatedInvoices> because the old model exempted only 5.2 — AADE/InvoSign
+        // rejected it with [205] «CorrelatedInvoices is forbidden for this invoice
+        // type». 11.4 (like every non-5.1 credit) is NON-correlated, so the payload
+        // must omit the correlation even though a credited_invoice_id exists — and
+        // originalInsertMark() must never be reached (no INSERT MARK row on the
+        // retail original is required).
+        $creditType = InvoiceType::create([
+            'company_id' => $this->tenant->id,
+            'code' => 'PIL',
+            'name' => 'Πιστωτικό Λιανικής',
+            'invcount' => 1,
+            'mydata_type' => '11.4',
+            'is_credit' => true,
+        ]);
+
+        $original = $this->makeInvoice(code: 11);
+
+        $credit = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'PIL1',
+            'code' => 1,
+            'invoice_type_id' => $creditType->id,
+            'customer_id' => $this->customer->id,
+            'issued_at' => now(),
+            'header_discount_percent' => 0,
+            'credited_invoice_id' => $original->id,
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $credit->id,
+            'qty' => 1,
+            'vat_percent' => 24,
+            'net_price' => 100,
+            'gross_price' => 124,
+        ]);
+
+        $mark = (new MyDataSubmitter($this->tenant))->previewXml($credit);
+
+        $this->assertStringNotContainsString(
+            '<correlatedInvoices>',
+            $mark->request,
+            'AADE forbids <correlatedInvoices> on an 11.4 retail credit note ([205])',
+        );
+    }
+
     public function test_correlated_credit_5_1_resolves_a_direct_insert_mark(): void
     {
         // Baseline: a 5.1 credit correlates to a directly-filed original via its

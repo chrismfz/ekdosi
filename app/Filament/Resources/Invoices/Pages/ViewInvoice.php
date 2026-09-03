@@ -528,7 +528,14 @@ class ViewInvoice extends ViewRecord
                             ])->all())
                         ->schema([
                             Hidden::make('line_id'),
-                            Placeholder::make('label')
+                            // Carry the display text as REAL (dehydrated) state and show
+                            // it via a Placeholder with a DIFFERENT name. A Placeholder
+                            // named «label» reading $get('label') is a SELF-REFERENCE:
+                            // under Filament v5 it recurses (the field resolves its own
+                            // content → $get('label') → …), which hung the modal mount →
+                            // «Error while loading page» with no PHP exception logged.
+                            Hidden::make('label'),
+                            Placeholder::make('line_label')
                                 ->label('')
                                 ->content(fn (Get $get) => $get('label') ?? ''),
                             TextInput::make('qty')
