@@ -414,6 +414,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Άμεση τιμολόγηση (auto-issue) type-aware** — διαλέγει Απόδειξη/Τιμολόγιο από την πρόθεση
   (ΑΦΜ/wantsinvoice ή route is_receipt)· `whmcs_default_invoice_type_id` + `whmcs_default_receipt_type_id`·
   ό,τι δεν τυποποιείται με ασφάλεια ΜΕΝΕΙ στο Inbox (ποτέ λάθος τύπος).
+- **Seed «Άμεσης τιμολόγησης» από το WHMCS** — όταν δημιουργείται πελάτης από WHMCS row, το
+  `needs_immediate_invoice` προ-συμπληρώνεται από το mapped custom field `griniaris`. **Μόνο στη δημιουργία**
+  (απόφαση «WHMCS σπέρνει, χειριστής κρατά τον έλεγχο»): υπάρχων πελάτης δεν αλλάζει ποτέ από re-sync·
+  απόν πεδίο → OFF (`PendingWhmcsInvoice::wantsImmediateInvoice` + `WhmcsCustomerCreator`).
 - **«Τιμολόγιο πριν την πληρωμή» (`needs_invoice_before_payment`)** — ξεχωριστή ανά-πελάτη σήμανση για
   δημόσιο/δήμους/Α.Ε. που θέλουν παραστατικό ΠΡΙΝ πληρώσουν. Η εντολή **`whmcs:fetch-unpaid`**
   (`WhmcsUnpaidFetcher`) φέρνει τα **ΑΠΛΗΡΩΤΑ** WHMCS invoices αυτών των πελατών στο Inbox για **χειροκίνητη**

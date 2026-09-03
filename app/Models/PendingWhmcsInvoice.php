@@ -274,6 +274,23 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
+     * Does the WHMCS «γκρινιάρης» (immediate-invoice) custom field mark this client
+     * for άμεση τιμολόγηση? Reads the mapped 'griniaris' role checkbox (same truthy
+     * set as wantsInvoice). false when the field isn't mapped / absent / unchecked —
+     * so it only ever SEEDS a positive flag, never forces one off.
+     *
+     * Used by WhmcsCustomerCreator to seed customers.needs_immediate_invoice at CREATE
+     * time (option γ: WHMCS seeds, the operator owns it thereafter — re-syncs never
+     * touch an existing customer's flag).
+     */
+    public function wantsImmediateInvoice(): bool
+    {
+        $v = mb_strtolower((string) $this->whmcsCustomField('griniaris'));
+
+        return in_array($v, ['on', '1', 'yes', 'true', 'ναι', 'checked'], true);
+    }
+
+    /**
      * Receipt-vs-invoice for the customer's OWN (non-routed) lines: true =
      * «Απόδειξη», false = «Τιμολόγιο». Driven by the PRIMARY customer, NOT the
      * per-route is_receipt (which the plugin defaults to false for own lines —

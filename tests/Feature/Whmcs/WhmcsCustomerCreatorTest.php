@@ -70,6 +70,37 @@ class WhmcsCustomerCreatorTest extends TestCase
         );
     }
 
+    /** A tenant whose WHMCS field-map also carries the «γκρινιάρης» role (id 16). */
+    private function tenantWithGriniaris(): Company
+    {
+        return Company::create([
+            'name' => 'T', 'slug' => 'cc-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'whmcs_custom_field_map' => ['vatno' => 13, 'griniaris' => 16],
+        ]);
+    }
+
+    /** $griniaris null = the checkbox is absent/unset in WHMCS. */
+    private function pendingWithGriniaris(Company $t, string $afm, ?string $griniaris): PendingWhmcsInvoice
+    {
+        $customfields = [['id' => 13, 'value' => $afm]];
+        if ($griniaris !== null) {
+            $customfields[] = ['id' => 16, 'value' => $griniaris];
+        }
+
+        return PendingWhmcsInvoice::create([
+            'company_id' => $t->id,
+            'whmcs_invoice_id' => random_int(1, 99999),
+            'whmcs_userid' => 793,
+            'payload' => [
+                'companyname' => 'ACME WHMCS OE', 'country' => 'GR',
+                'customfields' => $customfields,
+            ],
+            'match_reason' => PendingWhmcsInvoice::REASON_UNMATCHED,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+        ]);
+    }
+
     public function test_creates_from_aade_when_afm_resolves(): void
     {
         $t = $this->tenant();
@@ -236,5 +267,50 @@ class WhmcsCustomerCreatorTest extends TestCase
         $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
 
         $this->assertSame([], $result->discrepancies);   // no GSIS → nothing to compare
+    }
+
+    public function test_seeds_immediate_invoice_flag_from_griniaris_on_create(): void
+    {
+        $t = $this->tenantWithGriniaris();
+        $row = $this->pendingWithGriniaris($t, '123456789', 'on');
+        $this->mockGsis($this->aadeRecord());
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertTrue($result->created);
+        $this->assertTrue($result->customer->needs_immediate_invoice, 'γκρινιάρης=on seeds άμεση τιμολόγηση at create');
+    }
+
+    public function test_immediate_invoice_flag_defaults_off_without_griniaris(): void
+    {
+        $t = $this->tenantWithGriniaris();
+        $row = $this->pendingWithGriniaris($t, '123456789', null);   // checkbox absent/unset
+        $this->mockGsis($this->aadeRecord());
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertTrue($result->created);
+        $this->assertFalse($result->customer->needs_immediate_invoice, 'no γκρινιάρης → flag stays off, never forced');
+    }
+
+    public function test_existing_customer_immediate_invoice_flag_is_not_overwritten(): void
+    {
+        $t = $this->tenantWithGriniaris();
+        // The operator has DELIBERATELY set this existing customer OFF for άμεση.
+        $existing = Customer::create([
+            'company_id' => $t->id, 'name' => 'Ήδη Υπάρχων', 'afm' => '123456789',
+            'needs_immediate_invoice' => false,
+        ]);
+        $row = $this->pendingWithGriniaris($t, '123456789', 'on');   // WHMCS now says γκρινιάρης
+        // No GSIS mock: the existing-ΑΦΜ short-circuit never reaches the registry.
+
+        $result = app(WhmcsCustomerCreator::class)->createForPending($t, $row);
+
+        $this->assertFalse($result->created);
+        $this->assertSame('existing', $result->source);
+        $this->assertFalse(
+            $existing->fresh()->needs_immediate_invoice,
+            'once the customer exists the operator owns the flag — a re-sync never flips it back on',
+        );
     }
 }
