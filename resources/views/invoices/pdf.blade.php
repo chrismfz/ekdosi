@@ -21,8 +21,8 @@
         /* Compact single-page layout (PDF-COMPACT): tightened margins, fonts and
            inter-block spacing so a typical 1–8 line invoice fits on ONE A4 page
            (the roomy PR-27 spacing pushed even a single line onto a 2nd page). */
-        @page { margin: 11mm 12mm 18mm 12mm; }
-        body { font-family: DejaVu Sans, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.22; }
+        @page { margin: 10mm 12mm 18mm 12mm; }
+        body { font-family: DejaVu Sans, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.18; }
 
         /* Banners */
         .banner { text-align: center; font-weight: bold; font-size: 12pt; padding: 2mm; margin-bottom: 2.5mm; border: 1.5pt solid; border-radius: 1.5mm; }
@@ -31,7 +31,7 @@
         .banner-credit    { color: #1e40af; border-color: #1e40af; background: #eff6ff; }
 
         /* Header — tenant on the left, invoice meta on the right */
-        .hdr { display: table; width: 100%; table-layout: fixed; border-bottom: 1.2pt solid #111827; padding-bottom: 2mm; margin-bottom: 2.5mm; }
+        .hdr { display: table; width: 100%; table-layout: fixed; border-bottom: 1.2pt solid #111827; padding-bottom: 1.5mm; margin-bottom: 2mm; }
         .hdr-left  { display: table-cell; width: 60%; vertical-align: top; }
         .hdr-right { display: table-cell; width: 40%; vertical-align: top; text-align: right; }
         .hdr-logo  { max-height: 14mm; max-width: 48mm; margin-bottom: 1mm; }
@@ -39,13 +39,16 @@
         .tenant-info { font-size: 8pt; color: #4b5563; }
         /* clear:right so the (possibly multi-word) type name sits BELOW the floated
            QR instead of wrapping around it — fixes «ΠΙΣΤΩΤΙΚΟ» / «ΤΙΜΟΛΟΓΙΟ» splitting. */
-        .doc-type    { font-size: 13pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; clear: right; }
-        .doc-code    { font-size: 11pt; color: #111827; margin: 0.6mm 0; }
+        /* 11pt (was 13pt) so a 3-word type name like «ΤΙΜΟΛΟΓΙΟ ΠΑΡΟΧΗΣ ΥΠΗΡΕΣΙΩΝ»
+           fits on ONE line in the 40% right column instead of wrapping to two;
+           line-height 1.1 keeps a rare longer name tight if it still wraps. */
+        .doc-type    { font-size: 11pt; line-height: 1.1; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; clear: right; }
+        .doc-code    { font-size: 10.5pt; color: #111827; margin: 0.4mm 0; }
         .doc-date    { font-size: 8.5pt; color: #4b5563; }
 
         /* Two-column meta strip (customer / invoice details) */
-        .meta { display: table; width: 100%; table-layout: fixed; margin-bottom: 2.5mm; }
-        .meta-cell { display: table-cell; width: 50%; vertical-align: top; padding: 2mm 2.5mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
+        .meta { display: table; width: 100%; table-layout: fixed; margin-bottom: 2mm; }
+        .meta-cell { display: table-cell; width: 50%; vertical-align: top; padding: 1.5mm 2.5mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
         .meta-cell + .meta-cell { border-left: none; }
         .meta-cell h3 { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1mm 0; font-weight: bold; }
         .meta-cell .name { font-weight: bold; font-size: 9.5pt; margin-bottom: 0.6mm; }
@@ -59,7 +62,7 @@
         .qr-block .qr-mark  { font-size: 6.5pt; color: #374151; word-break: break-all; max-width: 26mm; }
 
         /* Provider (ΥΠΑΗΕΣ) evidence block — PROV-003 / A.1112/2025 */
-        .provider-box { clear: both; border: 1pt solid #d1d5db; border-radius: 1.5mm; background: #f9fafb; padding: 2mm 2.5mm; margin: 0 0 2.5mm 0; font-size: 7pt; color: #374151; }
+        .provider-box { clear: both; border: 1pt solid #d1d5db; border-radius: 1.5mm; background: #f9fafb; padding: 1.5mm 2.5mm; margin: 0 0 2mm 0; font-size: 7pt; color: #374151; }
         .provider-box .provider-title { font-weight: 700; color: #111827; margin: 0 0 0.8mm 0; font-size: 7.5pt; }
         .provider-box .provider-row { margin: 0 0 0.4mm 0; }
         .provider-box .provider-label { color: #6b7280; }
@@ -67,9 +70,16 @@
 
         /* Lines table */
         .lines-wrap { page-break-inside: auto; }
-        table.lines { width: 100%; border-collapse: collapse; }
-        table.lines thead th { background: #f3f4f6; border-bottom: 1pt solid #9ca3af; padding: 1.4mm 2mm; font-size: 8pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3pt; color: #374151; text-align: left; }
-        table.lines tbody td { padding: 1.4mm 2mm; border-bottom: 0.5pt solid #e5e7eb; font-size: 8.5pt; vertical-align: top; }
+        /* Fixed layout so the th width%s are HONORED exactly: the numeric columns
+           keep their width (headers «ΤΙΜΗ ΜΟΝ.»/«ΜΕ ΦΠΑ» stay on one line) and a
+           long description wraps WITHIN its 44% instead of stealing their width. */
+        table.lines { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        table.lines td.desc-cell { word-wrap: break-word; overflow-wrap: anywhere; }
+        table.lines thead th { background: #f3f4f6; border-bottom: 1pt solid #9ca3af; padding: 1mm 2mm; font-size: 7.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3pt; color: #374151; text-align: left; }
+        /* Tight rows (ALFANET-dense): 0.9mm vertical padding + 8pt + a 1.15
+           line-height on the description let many-line invoices stay on one
+           page (was 1.4mm/8.5pt → only ~8 rows fit before spilling). */
+        table.lines tbody td { padding: 0.9mm 2mm; border-bottom: 0.5pt solid #e5e7eb; font-size: 8pt; vertical-align: top; }
         table.lines tbody tr { page-break-inside: avoid; }
         table.lines td.num, table.lines th.num { text-align: right; }
         table.lines td.center, table.lines th.center { text-align: center; }
@@ -77,7 +87,7 @@
            weights against DejaVu Sans (which only ships Book + Bold) and
            silently falls back to a core-14 font like Helvetica, which has
            no Greek glyphs -- Greek text in this cell then renders as ?. */
-        .line-desc { font-weight: normal; }
+        .line-desc { font-weight: normal; line-height: 1.15; }
         .line-notes { font-size: 7.5pt; color: #6b7280; margin-top: 0.4mm; font-style: italic; }
 
         /* Totals — right-aligned summary box */
@@ -286,21 +296,35 @@
 @endif
 
 {{-- ====================== Lines ====================== --}}
+@php
+    // Hoisted so the description column width can account for the optional 7%
+    // discount column: under table-layout:fixed the th width%s must sum to 100%
+    // in BOTH cases, or the browser scales every column down and the numeric
+    // headers («ΤΙΜΗ ΜΟΝ.»/«ΜΕ ΦΠΑ») wrap — the regression this width tuning
+    // exists to prevent. So the description gives back exactly the discount
+    // column's 7% (46% → 39%) when a line carries a discount.
+    $anyDiscount = ! $isDelivery && $invoice->lines->contains(fn ($l) => (float) $l->discount > 0);
+    $descWidth = $anyDiscount ? 39 : 46;
+@endphp
 <div class="lines-wrap">
     <table class="lines">
         <thead>
             <tr>
-                <th style="width: 38%">@gup($L('description'))</th>
-                <th class="center" style="width: 8%">@gup($L('unit'))</th>
+                {{-- Description gets the lion's share so long hosting lines
+                     («Semi Dedicated 6C - domain.gr (dd/mm - dd/mm)») stay on ONE row
+                     instead of wrapping — the biggest per-row height saving. The
+                     numeric columns hold short values (198,00 / 24% / 245,52) and are
+                     trimmed accordingly (widths sum to 100% with and without discount). --}}
+                <th style="width: {{ $descWidth }}%">@gup($L('description'))</th>
+                <th class="center" style="width: 6%">@gup($L('unit'))</th>
                 <th class="num" style="width: 10%">@gup($L('quantity'))</th>
                 @if(! $isDelivery)
-                    <th class="num" style="width: 12%">@gup($L('unit_price'))</th>
-                    @php $anyDiscount = $invoice->lines->contains(fn($l) => (float)$l->discount > 0); @endphp
+                    <th class="num" style="width: 10%">@gup($L('unit_price'))</th>
                     @if($anyDiscount)
                         <th class="num" style="width: 7%">@gup($L('discount_pct'))</th>
                     @endif
-                    <th class="num" style="width: 7%">@gup($L('vat_pct'))</th>
-                    <th class="num" style="width: 11%">@gup($L('net'))</th>
+                    <th class="num" style="width: 6%">@gup($L('vat_pct'))</th>
+                    <th class="num" style="width: 10%">@gup($L('net'))</th>
                     <th class="num" style="width: 12%">@gup($L('gross_incl_vat'))</th>
                 @endif
             </tr>
@@ -308,7 +332,7 @@
         <tbody>
             @forelse($invoice->lines as $line)
                 <tr>
-                    <td>
+                    <td class="desc-cell">
                         <div class="line-desc">{{ $line->product_descr ?? '—' }}</div>
                         @if($line->notes)<div class="line-notes">{{ $line->notes }}</div>@endif
                     </td>

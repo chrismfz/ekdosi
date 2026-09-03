@@ -111,10 +111,17 @@ class WhmcsInboxTable
                         return number_format($total, 2, ',', '.').' '.$cur;
                     })
                     ->color(fn (PendingWhmcsInvoice $r): ?string => $r->whmcsIsUnpaid() ? 'warning' : null)
-                    ->description(fn (PendingWhmcsInvoice $r): ?string => match (true) {
-                        $r->whmcsIsUnpaid() => 'Απλήρωτο',
-                        strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 => 'Πληρωμένο',
-                        $r->whmcsStatus() !== null => $r->whmcsStatus(),   // Cancelled/Refunded raw
+                    // Colour the paid/unpaid word itself (green «Πληρωμένο» / amber
+                    // «Απλήρωτο»), not just the amount. Filament renders a column
+                    // description through e($description), which passes an Htmlable
+                    // through unescaped — so an HtmlString lets us wrap the word in a
+                    // colour class. The classes are hand-defined in panel.css (no-build
+                    // CSS: text-{success,warning}-600 + their .dark variants). The raw
+                    // WHMCS status fallback is e()-escaped because it's now HTML.
+                    ->description(fn (PendingWhmcsInvoice $r): ?HtmlString => match (true) {
+                        $r->whmcsIsUnpaid() => new HtmlString('<span class="text-warning-600 dark:text-warning-400">Απλήρωτο</span>'),
+                        strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 => new HtmlString('<span class="text-success-600 dark:text-success-400">Πληρωμένο</span>'),
+                        $r->whmcsStatus() !== null => new HtmlString(e((string) $r->whmcsStatus())),   // Cancelled/Refunded raw
                         default => null,
                     }),
 

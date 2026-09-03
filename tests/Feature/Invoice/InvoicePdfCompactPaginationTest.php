@@ -45,8 +45,10 @@ class InvoicePdfCompactPaginationTest extends TestCase
 
     /** A faithful worst-case single-line invoice: provider evidence + QR + full
      *  customer block + two payment accounts + a wordmark logo — the exact shape
-     *  that used to spill onto a 2nd page. */
-    private function heavyInvoice(int $lines = 1): Invoice
+     *  that used to spill onto a 2nd page. `$descPrefix` lets a caller force the
+     *  realistic LONG hosting line («Semi Dedicated 6C - domain.gr (dd/mm - dd/mm)»)
+     *  that wraps to two rows, to exercise the dense many-line path. */
+    private function heavyInvoice(int $lines = 1, string $descPrefix = 'Υπηρεσίες Web Hosting '): Invoice
     {
         // Wordmark-style logo so the header height is realistic (max 14mm tall).
         $img = imagecreatetruecolor(320, 84);
@@ -89,7 +91,7 @@ class InvoicePdfCompactPaginationTest extends TestCase
         for ($i = 0; $i < $lines; $i++) {
             InvoiceLine::create([
                 'company_id' => $tenant->id, 'invoice_id' => $invoice->id,
-                'product_descr' => 'Υπηρεσίες Web Hosting '.($i + 1), 'metric_unit' => 'τεμ',
+                'product_descr' => $descPrefix.($i + 1), 'metric_unit' => 'τεμ',
                 'qty' => 1, 'price_per_item' => 0.81, 'vat_percent' => 24, 'net_price' => 0.81, 'gross_price' => 1.00,
             ]);
         }
@@ -127,6 +129,22 @@ class InvoicePdfCompactPaginationTest extends TestCase
         // in-template `<script type="text/php">` — so isPhpEnabled stays off and no
         // PHP-execution surface is opened on a render carrying customer data.
         $this->assertStringNotContainsString('text/php', $html);
+    }
+
+    public function test_a_moderate_many_line_invoice_now_fits_one_page(): void
+    {
+        // ALFANET-density pass: a 7-line invoice whose lines are the realistic
+        // LONG hosting descriptions (each wraps to two rows) + the full totals box
+        // must fit on ONE A4 page. The pre-density layout (13pt wrapping doc-type,
+        // 1.4mm row padding, roomy header/meta/provider blocks) spilled this shape
+        // onto a 2nd page, so this locks the row/column/block compaction. 7 (not the
+        // 8-line page boundary) leaves ~a full row of vertical slack so sub-mm dompdf
+        // metric drift can't false-fail it, while a real spacing regression still does.
+        $pdf = app(InvoicePdfRenderer::class)->render(
+            $this->heavyInvoice(7, 'Semi Dedicated 6C - example-shop.gr (07/05/2026 - 06/11/2026) #'),
+        );
+
+        $this->assertSame(1, $this->pageCount($pdf), 'a dense 7-line invoice must fit on ONE A4 page');
     }
 
     public function test_a_long_invoice_still_paginates(): void
