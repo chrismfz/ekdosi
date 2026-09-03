@@ -105,6 +105,12 @@ surfaced in the open-items sections further down.
 ---
 
 ## 🟠 myDATA / expenses completeness
+- **`mydata:backfill-config` §8.3 προεπιλογή = «verify» default (P2, από review)** — το `--exemption-default`
+  γράφει τον seed-κωδικό 4 (ενδοκοινοτική υπηρεσία) σε ΜΙΑ reason-less 0% κατηγορία, αλλά ο νόμιμος λόγος
+  απαλλαγής **δεν βγαίνει από την κατηγορία μόνη της** (μπορεί να είναι εξαγωγή=8, reverse-charge=16…). Οι
+  δικλείδες: opt-in flag, μόνο single-category (2+ = ambiguous), skip vatCategory-8, dry-run, ρητό output
+  «ΠΡΟΕΠΙΛΟΓΗ — επιβεβαίωσέ την». Συνειδητό trade-off (ο owner ζήτησε ρητά τον default). Η πλήρης λύση
+  (per-category scenario picker) είναι ο `VatExemptionGuidance` scenario-picker που ήδη τρακάρεται εδώ.
 - **Η σελίδα ΜΑΡΚ δείχνει το XML της ΤΕΛΕΥΤΑΙΑΣ ανταλλαγής, όχι της έκδοσης (P2, από review MYD-023)** —
   το `MyDataMarkDetail::load()` κάνει `where('mark', …)->latest('id')`, οπότε όταν υπάρχει γραμμή
   CANCEL με το ίδιο ΜΑΡΚ, το panel request/response XML δείχνει την **ακύρωση** αντί για την αρχική

@@ -125,6 +125,10 @@
   (cross-check τοπικού ↔ ΑΑΔΕ).
 - **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables (thin
   renderer πάνω στο κοινό `MyDataConfigAudit`· βλ. «Έλεγχος ρυθμίσεων» tab).
+- **`mydata:backfill-config`** — εναρμονίζει imported (ETL) tenants με τα fresh-setup defaults
+  (`ConfigBackfiller`): §8.12 τύπος πληρωμής από keyword-suggestion (whole-word/stem, unmatched→null)·
+  §8.3 αιτία 0% στην seed-προεπιλογή **μόνο με `--exemption-default`** (νομικός κωδικός, opt-in· 2+ 0%
+  κατηγορίες = ambiguous, δεν μαντεύει). Dry-run by default, idempotent, AADE-filing tenants μόνο.
 - **Αυτόματος χαρακτηρισμός εξόδων** (`ExpenseClassifier` + «Κανόνες χαρακτηρισμού») — «προμηθευτής
   (+ προαιρ. τύπος) → E3 χαρακτηρισμός»· auto-apply στο import + bulk «Εφαρμογή κανόνων» + worklist
   «Προς χαρακτηρισμό» + «Δημιουργία κανόνα» από έξοδο. (Η υποβολή-για-τρίτο/`entityVatNumber` μένει BACKLOG.)

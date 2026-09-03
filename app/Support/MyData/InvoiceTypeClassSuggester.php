@@ -2,6 +2,8 @@
 
 namespace App\Support\MyData;
 
+use App\Support\GreekText;
+
 /**
  * Suggests a §8.1 myDATA invoice-type code for an existing invoice type that
  * has none — a DISPLAY-ONLY hint for the operator (list badge + form helper),
@@ -21,7 +23,7 @@ final class InvoiceTypeClassSuggester
      */
     public static function suggest(string $name, bool $isCredit = false, bool $isReturn = false): ?array
     {
-        $n = self::fold($name);
+        $n = GreekText::fold($name);
 
         // Order matters: most-specific intent first. Credit/cancellation wins
         // over everything; retail before services/goods (a retail receipt name
@@ -141,13 +143,4 @@ final class InvoiceTypeClassSuggester
     /**
      * Lowercase + strip Greek accents so "Πώλησης" / "πωλησησ" both match.
      */
-    private static function fold(string $s): string
-    {
-        $s = mb_strtolower($s, 'UTF-8');
-
-        return strtr($s, [
-            'ά' => 'α', 'έ' => 'ε', 'ή' => 'η', 'ί' => 'ι', 'ό' => 'ο', 'ύ' => 'υ', 'ώ' => 'ω',
-            'ϊ' => 'ι', 'ϋ' => 'υ', 'ΐ' => 'ι', 'ΰ' => 'υ', 'ς' => 'σ',
-        ]);
-    }
 }

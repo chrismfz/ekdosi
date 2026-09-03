@@ -26,6 +26,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `EKDOSI_PROVIDER_LOW_QUOTA_THRESHOLD`, default 50), και όταν το υπόλοιπο **περάσει το όριο προς τα
   κάτω** γράφεται εγγραφή στο log (χαμηλό → warning, εξαντλημένο → error) — μία φορά ανά διέλευση, όχι σε
   κάθε έκδοση, **χωρίς polling** (το quota έρχεται δωρεάν σε κάθε υποβολή).
+- **`mydata:backfill-config` — εναρμόνιση imported tenants με τα fresh-setup defaults.** Ένας tenant
+  seeded από τον `MyDataLookupSeeder` είναι σωστός out-of-the-box· ένας migrated από Firebird όχι, γιατί η
+  legacy DB δεν είχε πεδίο για την §8.3 αιτία απαλλαγής ούτε για τον §8.12 τύπο πληρωμής → οι imported
+  γραμμές μένουν NULL και σκάει/warn-άρει το preflight ([217] / fallback τύπος 3). Νέα εντολή (dry-run by
+  default, `--execute` για εφαρμογή, idempotent, μόνο AADE-filing tenants): (α) τρόπος πληρωμής χωρίς §8.12
+  → **keyword suggestion** (whole-word Latin / stem Greek· ό,τι δεν ταιριάζει μένει NULL — ποτέ τυφλός
+  τύπος 3)· (β) 0% κατηγορία χωρίς αιτία §8.3 → η seed-προεπιλογή (κωδ. **4**) **μόνο με ρητό
+  `--exemption-default`** (νομικός κωδικός· 2+ 0% κατηγορίες = ambiguous, δεν μαντεύει — αλλιώς απλώς
+  αναφέρει το κενό). Μόνο NULL γραμμές, σε transaction· per-tenant explicit `company_id`
+  (`App\Services\MyData\ConfigBackfiller`).
 
 ### Fixed
 - **Ρετούς στο box «myDATA / Πάροχος» στη σελίδα παραστατικού (PROV-009).** Τα μακριά αλφαριθμητικά
