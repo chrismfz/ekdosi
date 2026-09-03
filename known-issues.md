@@ -494,7 +494,7 @@ Priorities:
 | MYD-016 | P1 | DONE | — | Delivery units | Invalid or missing coded unit is silently filed as pieces |
 | MYD-017 | P0 | DONE | — | Reconciliation | Same MARK/state is called matched without comparing amount, type or identity |
 | MYD-018 | P0 | DONE | — | Filing identity | Numbered invoices still read mutable series/type/classification defaults |
-| MYD-019 | P1 | OPEN | B | Delivery sync | Remote cancellation leaves mydata_state/local_status unchanged — do before the ΔΑ deadline |
+| MYD-019 | P1 | DONE | — | Delivery sync | **Fixed (this PR).** `refreshStatus()` now applies a terminal AADE `CANCELLED` to ALL THREE fields (`mydata_state`+`local_status`+`delivery_state`), writes a forensic `STATE_SYNC` audit row (distinct from a CANCEL we initiate → operator sees it was external), and runs the STOCK-001 compensation — idempotent. A non-terminal remote status never resurrects a business-cancelled note |
 | MYD-020 | P2 | DONE | — | Digital Transaction Fee | Legacy stamp-duty names and § references remain in UI/code |
 | MYD-021 | P0 | DONE | — | Direct idempotency | Direct issue is not protected by a durable pre-POST attempt; delivery notes also lack single-flight |
 | MYD-022 | P0 | DONE | — | Tenant isolation | Filing services do not prove that document, relations and credential tenant agree |
@@ -2006,7 +2006,22 @@ then disagree, including a duplicate or wrongly classified filing.
 
 ### MYD-019 — Delivery status refresh does not fully apply remote cancellation
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** ✅ DONE (this PR) · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+
+**Resolution.** `DeliveryLifecycleService::refreshStatus()` now branches on a terminal
+AADE `CANCELLED`: `applyRemoteCancellation()` (twin of `SyncInvoiceStateFromAade`)
+atomically flips `mydata_state=CANCELLED` + `local_status=cancelled` +
+`delivery_state=cancelled`, writes a forensic **`STATE_SYNC`** `delivery_marks` row —
+deliberately NOT a `CANCEL` row, so the «Ιστορικό myDATA» shows the terminal state
+was *detected & synced from AADE*, not initiated by us (labelled «Συγχρονισμός
+κατάστασης (ΑΑΔΕ)», with a note that it happened outside ekdosi) — and runs the same
+idempotent `reverseSaleForDeliveryNote()` compensation (STOCK-001). Idempotent: a
+repeat refresh on an already-terminal note is a no-op. A **non-terminal** remote
+status never overwrites a business-cancelled note's terminal cache (no resurrection).
+`cancellation_mark` is null by design — `RequestDeliveryNoteStatus` exposes none and
+the lifecycle history has no cancellation event (never faked, MYD-023). The refresh
+action surfaces a warning notification instead of a plain «no change». Covered by
+`DeliveryLifecycleServiceTest` (sync+stock+audit, idempotent, no-resurrect).
 
 **Official finding**
 

@@ -521,6 +521,25 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   do. Deliberate: the resolver reads pre-mutation while the loop re-reads under its own mid-loop writes
   (correctness over micro-opt); a single keyed prefetch reused by both would collapse it. Negligible on real
   invoice line counts — revisit only if a reversal ever touches many lines under contention.
+- **MYD-019 follow-up — 2-way delivery reconciliation (VALID/un-cancel direction)** _(P2, declined in the
+  MYD-019 review as a conscious scope call)._ `refreshStatus()` auto-applies only the terminal AADE
+  `CANCELLED` direction; it does NOT un-cancel a δελτίο that is locally `CANCELLED` while AADE reports it
+  valid — the symmetric, delicate direction that `SyncInvoiceStateFromAade` does for invoices behind an
+  operator-confirmed reconciliation action. Not reachable for δελτία today (a delivery `mydata_state`
+  only becomes `CANCELLED` via a real AADE cancel or the new remote-sync, so there is no "wrongly
+  cancelled" state to strand), so no repair path is needed yet. If a delivery-side reconciliation console
+  ever lands, give it the same operator-confirmed un-cancel as the invoice twin.
+- **MYD-019 concurrency/diagnostic cosmetics** _(P2 survivors of the MYD-019 review, all
+  concurrency/staleness-only, DB state always correct)._ (a) On two racing `refreshStatus` calls (a
+  double-click, or a manual «Έλεγχος κατάστασης» overlapping the scheduler), the LOSER re-reads the
+  note as already-terminal under the lock and returns `state_synced=false`, so `ViewDeliveryNote` shows
+  the green «Καμία αλλαγή» toast instead of the remote-cancellation warning — while `refreshFormData`
+  flips the on-screen state to cancelled (mildly contradictory for that one toast; the winner's toast is
+  correct). (b) `applyRemoteCancellation`'s post-commit `Log::info` uses the pre-transaction `$logFrom`
+  snapshot (in-memory `$note`) while the STATE_SYNC audit row records the from-values read fresh under
+  the lock — under a stale `$note` the diagnostic log and the audit row can disagree on the pre-sync
+  state (the audit row is authoritative). Both fixable by having the winner branch return the applied
+  outcome + the locked from-values; not worth the extra plumbing for a rare race.
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
   `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a

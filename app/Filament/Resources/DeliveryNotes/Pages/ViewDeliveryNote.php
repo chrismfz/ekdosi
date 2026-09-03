@@ -179,20 +179,33 @@ class ViewDeliveryNote extends ViewRecord
                         $svc = app(DeliveryLifecycleService::class, ['tenant' => $record->company]);
                         $result = $svc->refreshStatus($record);
 
-                        $stateLine = $result['changed']
-                            ? 'Η τοπική κατάσταση ενημερώθηκε.'
-                            : 'Καμία αλλαγή — η τοπική κατάσταση συμφωνεί με την ΑΑΔΕ.';
                         $eventsLine = ($result['events_synced'] ?? 0) > 0
                             ? ' Ιστορικό διακίνησης: '.$result['events_synced'].' γεγονότα.'
                             : '';
 
-                        Notification::make()
-                            ->title('Κατάσταση ΑΑΔΕ: '.($result['aade_label'] ?? '—'))
-                            ->body($stateLine.$eventsLine)
-                            ->success()
-                            ->send();
+                        if ($result['state_synced'] ?? false) {
+                            // MYD-019: AADE reports the δελτίο CANCELLED — it was cancelled
+                            // outside ekdosi and we synced ALL local state + returned stock.
+                            Notification::make()
+                                ->title('Το δελτίο ΑΚΥΡΩΘΗΚΕ στην ΑΑΔΕ')
+                                ->body('Εντοπίστηκε ακύρωση εκτός ekdosi και συγχρονίστηκε: κατάσταση → Ακυρώθηκε '
+                                    .'(τοπικά + myDATA), το απόθεμα επιστράφηκε. Δες το «Ιστορικό myDATA».'.$eventsLine)
+                                ->warning()
+                                ->persistent()
+                                ->send();
+                        } else {
+                            $stateLine = $result['changed']
+                                ? 'Η τοπική κατάσταση ενημερώθηκε.'
+                                : 'Καμία αλλαγή — η τοπική κατάσταση συμφωνεί με την ΑΑΔΕ.';
 
-                        $this->refreshFormData(['delivery_state']);
+                            Notification::make()
+                                ->title('Κατάσταση ΑΑΔΕ: '.($result['aade_label'] ?? '—'))
+                                ->body($stateLine.$eventsLine)
+                                ->success()
+                                ->send();
+                        }
+
+                        $this->refreshFormData(['delivery_state', 'mydata_state', 'local_status']);
                     } catch (Throwable $e) {
                         $this->lifecycleError($e);
                     }

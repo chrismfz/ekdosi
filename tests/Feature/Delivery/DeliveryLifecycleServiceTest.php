@@ -365,6 +365,121 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->service($this->statusResponse('REGISTERED'))->refreshStatus($note);
     }
 
+    // ---- MYD-019: remote cancellation via refreshStatus ---------------
+
+    public function test_refresh_status_syncs_a_remote_cancellation_and_returns_stock(): void
+    {
+        // AADE reports the δελτίο CANCELLED (cancelled outside ekdosi). refreshStatus
+        // must sync ALL THREE state fields, write a forensic STATE_SYNC audit row
+        // (NOT a CANCEL we initiated), run the STOCK-001 compensation, and flag it.
+        $cat = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'HW', 'markup' => 0]);
+        $vat = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+        $product = Product::create([
+            'company_id' => $this->tenant->id, 'description_short' => 'SSD',
+            'product_category_id' => $cat->id, 'vat_category_id' => $vat->id, 'track_stock' => true,
+        ]);
+        app(StockService::class)->record($product, 10, StockMovement::REASON_INITIAL);
+
+        $note = $this->makeFiledNote();               // VALID / registered / active
+        $note->forceFill(['move_purpose' => 1])->save();
+        $note->lines()->delete();
+        DeliveryNoteLine::create([
+            'company_id' => $this->tenant->id, 'delivery_note_id' => $note->id,
+            'product_id' => $product->id, 'qty' => 4, 'measurement_unit' => 1,
+        ]);
+        $note = $note->fresh('lines');
+        app(StockService::class)->recordSaleForDeliveryNote($note);   // −4 → 6
+        $this->assertSame(6.0, app(StockService::class)->currentStock($product->fresh()));
+
+        $result = $this->service($this->statusResponse('CANCELLED'))->refreshStatus($note);
+
+        $this->assertSame(DeliveryStatus::CANCELLED, $result['aade_status']);
+        $this->assertTrue($result['state_synced']);
+        $this->assertTrue($result['changed']);
+
+        $fresh = $note->fresh();
+        $this->assertSame('CANCELLED', $fresh->mydata_state, 'mydata_state synced');
+        $this->assertSame('cancelled', $fresh->local_status, 'local_status synced');
+        $this->assertSame('cancelled', $fresh->delivery_state, 'delivery_state synced');
+
+        // Forensic STATE_SYNC row — distinct from a CANCEL we would have initiated.
+        $this->assertDatabaseHas('delivery_marks', [
+            'delivery_note_id' => $note->id, 'mydata_action' => 'STATE_SYNC',
+        ]);
+        $this->assertDatabaseMissing('delivery_marks', [
+            'delivery_note_id' => $note->id, 'mydata_action' => 'CANCEL',
+        ]);
+
+        // STOCK-001 compensation ran — goods returned.
+        $this->assertSame(10.0, app(StockService::class)->currentStock($product->fresh()));
+    }
+
+    public function test_refresh_status_remote_cancellation_is_idempotent(): void
+    {
+        $note = $this->makeFiledNote();
+
+        $svc = $this->serviceWith([$this->statusResponse('CANCELLED'), $this->statusResponse('CANCELLED')]);
+        $first = $svc->refreshStatus($note);
+        $second = $svc->refreshStatus($note->fresh());
+
+        $this->assertTrue($first['state_synced']);
+        $this->assertFalse($second['state_synced'], 'already terminal → no-op');
+        $this->assertFalse($second['changed']);
+
+        // Exactly ONE STATE_SYNC row across both refreshes.
+        $this->assertSame(1, DeliveryMark::query()
+            ->where('delivery_note_id', $note->id)
+            ->where('mydata_action', 'STATE_SYNC')
+            ->count());
+    }
+
+    public function test_refresh_status_does_not_resurrect_a_business_cancelled_note(): void
+    {
+        // Business-cancelled locally (delivery_state already terminal) but the AADE
+        // tracking feed still returns a non-terminal status → must NOT be resurrected.
+        $note = $this->makeFiledNote(['local_status' => 'cancelled', 'delivery_state' => 'cancelled']);
+
+        $result = $this->service($this->statusResponse('IN_TRANSIT'))->refreshStatus($note);
+
+        $this->assertFalse($result['changed']);
+        $this->assertFalse($result['state_synced']);
+        $this->assertSame('cancelled', $note->fresh()->delivery_state, 'not flipped back to in_transit');
+    }
+
+    public function test_refresh_after_in_app_cancel_writes_no_state_sync_row(): void
+    {
+        // A δελτίο cancelled IN-APP (real CANCEL row + all three terminal) that later
+        // refreshes as CANCELLED must NOT gain a second, STATE_SYNC audit row.
+        $note = $this->makeFiledNote();
+        $svc = $this->serviceWith([$this->cancelResponse(), $this->statusResponse('CANCELLED')]);
+
+        $svc->cancel($note, 'λάθος παραλήπτης');        // CANCEL row + terminal state
+        $result = $svc->refreshStatus($note->fresh());  // AADE agrees: CANCELLED
+
+        $this->assertFalse($result['state_synced'], 'already terminal via CANCEL → no STATE_SYNC');
+        $this->assertSame(0, DeliveryMark::query()
+            ->where('delivery_note_id', $note->id)->where('mydata_action', 'STATE_SYNC')->count());
+        $this->assertSame(1, DeliveryMark::query()
+            ->where('delivery_note_id', $note->id)->where('mydata_action', 'CANCEL')->count());
+    }
+
+    public function test_refresh_status_heals_a_partially_cancelled_note(): void
+    {
+        // Split state: local_status + delivery_state already cancelled but mydata_state
+        // still VALID → a refresh reporting CANCELLED must COMPLETE the sync (flip
+        // mydata_state) and record the STATE_SYNC row, not skip it.
+        $note = $this->makeFiledNote(['local_status' => 'cancelled', 'delivery_state' => 'cancelled']);
+        $this->assertSame('VALID', $note->mydata_state);
+
+        $result = $this->service($this->statusResponse('CANCELLED'))->refreshStatus($note);
+
+        $this->assertTrue($result['state_synced']);
+        $this->assertSame('CANCELLED', $note->fresh()->mydata_state, 'mydata_state healed');
+        $this->assertDatabaseHas('delivery_marks', [
+            'delivery_note_id' => $note->id, 'mydata_action' => 'STATE_SYNC',
+        ]);
+    }
+
     // ---- lifecycleHistory (§4.1 timeline) -----------------------------
 
     public function test_refresh_status_syncs_lifecycle_history(): void
