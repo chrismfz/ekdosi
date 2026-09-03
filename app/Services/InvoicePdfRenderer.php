@@ -10,6 +10,7 @@ use App\Support\MyData\Codes;
 use App\Support\MyData\QrImage;
 use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Dompdf\Dompdf;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\FilesystemException;
 
@@ -64,22 +65,47 @@ class InvoicePdfRenderer
             @ini_set('memory_limit', self::RENDER_MEMORY_LIMIT);
             @set_time_limit(self::RENDER_TIME_LIMIT_SECONDS);
 
-            return Pdf::loadView('invoices.pdf', $this->viewData($invoice))
-                ->setPaper('A4', 'portrait')
-                // isPhpEnabled: the template draws the «Σελίδα X από Y» pager via a
-                // DomPDF text-callback (`<script type="text/php">`) because DomPDF 3.x
-                // resolves counter(pages) to 0 inside a fixed footer. Safe here: the
-                // template is developer-authored and the ONLY interpolated free-text
-                // (invoice notes) is e()-escaped before DomPDF sees it, so no
-                // user-controlled markup can inject a text/php script.
-                ->setOption('isPhpEnabled', true)
-                ->output();
+            $data = $this->viewData($invoice);
+            $pdf = Pdf::loadView('invoices.pdf', $data)->setPaper('A4', 'portrait');
+
+            // «Σελίδα X από Y» is drawn on the DomPDF canvas AFTER layout: DomPDF 3.x
+            // resolves counter(pages) to 0 inside a fixed footer, so the template can't
+            // print the real total. We do it here — NOT via an in-template
+            // `<script type="text/php">` — so isPhpEnabled stays OFF: no PHP-execution
+            // surface is opened on a render that carries customer/operator data. The
+            // pager needs only the canvas + DomPDF's own {PAGE_NUM}/{PAGE_COUNT} tokens.
+            $dompdf = $pdf->getDomPDF();
+            $dompdf->render();
+            $this->drawPager($dompdf, $data['L']);
+
+            return $dompdf->output();
         } finally {
             // Restore previous limits so a long-lived FPM worker
             // doesn't carry the elevated values into the next request.
             @ini_set('memory_limit', $previousMemory);
             @set_time_limit((int) $previousTime);
         }
+    }
+
+    /**
+     * Draw the «Σελίδα X από Y» pager centred at the page bottom, on every page,
+     * via the DomPDF canvas (called after render(), so {PAGE_NUM}/{PAGE_COUNT} —
+     * DomPDF's own per-page tokens — resolve to the real numbers). Kept ~6.5mm
+     * above the sheet edge to clear a typical printer's non-printable margin, and
+     * below the fixed .footer block. Colour matches the footer text (#6b7280).
+     */
+    private function drawPager(Dompdf $dompdf, callable $labels): void
+    {
+        $canvas = $dompdf->getCanvas();
+        $fontMetrics = $dompdf->getFontMetrics();
+        $font = $fontMetrics->getFont('DejaVu Sans', 'normal');
+        $size = 7;
+        $text = $labels('page').' {PAGE_NUM} '.$labels('of').' {PAGE_COUNT}';
+        // Measured with the tokens in place — a few pt off true centre, unnoticeable.
+        $x = ($canvas->get_width() - $fontMetrics->getTextWidth($text, $font, $size)) / 2;
+        $y = $canvas->get_height() - 18;
+
+        $canvas->page_text($x, $y, $text, $font, $size, [0.42, 0.45, 0.5]);
     }
 
     /**

@@ -24,8 +24,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   σύνολα στη 2η σελίδα), ενώ παραστατικά συνεργατών χωρούσαν πολλαπλάσια σε 1. Σφίχτηκαν περιθώρια σελίδας,
   logo, headings, spacing και paddings ώστε ένα τυπικό (1–λίγες γραμμές) τιμολόγιο να χωρά σε **μία σελίδα Α4**
   (μακρύ τιμολόγιο σελιδοποιεί κανονικά). Παράλληλα διορθώθηκε ο μετρητής σελίδων: ο DomPDF 3.x επιστρέφει
-  `counter(pages)=0` μέσα σε fixed footer (→ «Σελίδα 1 από 0»)· ο pager «Σελίδα X από Y» σχεδιάζεται πλέον με
-  DomPDF text-callback (`page_text`, `isPhpEnabled` μόνο για αυτό το render — καμία μη-escaped είσοδος χρήστη).
+  `counter(pages)=0` μέσα σε fixed footer (→ «Σελίδα 1 από 0»)· ο pager «Σελίδα X από Y» σχεδιάζεται πλέον στον
+  DomPDF canvas από τον `InvoicePdfRenderer` (`page_text` μετά το layout) — **χωρίς** `isPhpEnabled`, ώστε να
+  μην ανοίγει καμία επιφάνεια εκτέλεσης PHP σε render που φέρει δεδομένα πελατών.
   Regression lock: `InvoicePdfCompactPaginationTest`. (Το δίδυμο template των δελτίων αποστολής έχει το ίδιο
   μοτίβο — εκκρεμεί ως follow-up.)
 - **Πρότυπα email τιμολογίου: προσυμπλήρωση του default ως πραγματικό κείμενο + «Επαναφορά προεπιλογής».**

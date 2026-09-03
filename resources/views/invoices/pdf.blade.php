@@ -116,8 +116,8 @@
 
         /* Footer with verification + tenant text — rendered as a fixed
            bottom-margin block by DomPDF via the page-bottom margin. The pager
-           («Σελίδα X από Y») is drawn separately via a DomPDF text-callback
-           script at the end of the body because DomPDF 3.x resolves
+           («Σελίδα X από Y») is drawn on the DomPDF canvas by
+           InvoicePdfRenderer::drawPager, because DomPDF 3.x resolves
            counter(pages) to 0 inside a fixed footer. */
         .footer { position: fixed; left: 0; right: 0; bottom: -9mm; text-align: center; font-size: 7pt; color: #6b7280; padding: 0 12mm; }
         .footer .mydata-line { margin-bottom: 0.8mm; color: #374151; }
@@ -518,24 +518,9 @@
         <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>
     @endif
 </div>
-
-{{-- Pager «Σελίδα X από Y», drawn centred at the page bottom via a DomPDF
-     text-callback. DomPDF 3.x resolves counter(pages) to 0 inside a fixed
-     footer, so the HTML footer above no longer carries it; page_text is the
-     one reliable way to get the real total. isPhpEnabled is turned on for THIS
-     render only (InvoicePdfRenderer) and no user-controlled data reaches DomPDF
-     unescaped ({PAGE_NUM}/{PAGE_COUNT} are DomPDF's own page-number tokens). --}}
-<script type="text/php">
-if (isset($pdf)) {
-    $pagerFont = $fontMetrics->getFont("DejaVu Sans", "normal");
-    $pagerSize = 7;
-    $pagerText = "{{ $L('page') }} {PAGE_NUM} {{ $L('of') }} {PAGE_COUNT}";
-    $pagerWidth = $fontMetrics->getTextWidth($pagerText, $pagerFont, $pagerSize);
-    $pagerX = ($pdf->get_width() - $pagerWidth) / 2;
-    $pagerY = $pdf->get_height() - 14;
-    $pdf->page_text($pagerX, $pagerY, $pagerText, $pagerFont, $pagerSize, array(0.42, 0.45, 0.5));
-}
-</script>
+{{-- The «Σελίδα X από Y» pager is drawn on the DomPDF canvas by
+     InvoicePdfRenderer::drawPager (counter(pages) resolves to 0 inside this
+     fixed footer on DomPDF 3.x), so nothing pager-related lives here. --}}
 
 </body>
 </html>

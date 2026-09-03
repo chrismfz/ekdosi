@@ -115,18 +115,18 @@ class InvoicePdfCompactPaginationTest extends TestCase
         $this->assertSame(1, $this->pageCount($pdf), 'a single-line invoice must fit on ONE A4 page');
     }
 
-    public function test_pager_uses_a_dompdf_text_callback_not_the_broken_counter(): void
+    public function test_pager_avoids_the_broken_footer_counter_and_inline_php(): void
     {
         $html = app(InvoicePdfRenderer::class)->renderHtml($this->heavyInvoice(1));
 
-        // The pager is drawn via page_text with DomPDF's own page-number tokens…
-        $this->assertStringContainsString('page_text', $html);
-        $this->assertStringContainsString('{PAGE_NUM}', $html);
-        $this->assertStringContainsString('{PAGE_COUNT}', $html);
-        // …and the broken fixed-footer counter is gone (the `.pager-total` span
-        // + `content: counter(pages)` rule that rendered «από 0»).
+        // The «από 0» footer counter is gone (the `.pager-total` span + the
+        // `content: counter(pages)` rule that rendered 0 on DomPDF 3.x)…
         $this->assertStringNotContainsString('pager-total', $html);
         $this->assertStringNotContainsString('content: counter(pages)', $html);
+        // …and the pager is drawn from the renderer (canvas page_text), NOT via an
+        // in-template `<script type="text/php">` — so isPhpEnabled stays off and no
+        // PHP-execution surface is opened on a render carrying customer data.
+        $this->assertStringNotContainsString('text/php', $html);
     }
 
     public function test_a_long_invoice_still_paginates(): void
