@@ -484,6 +484,19 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **«Έλεγχος ετοιμότητας» (Preflight) — P2 survivors of the review loop** _(consciously deferred)._
+  Two P2s survived the 2-round adversarial gate (round 1 = the tenant double-scoping P1, fixed at root
+  with `CompanyContext::actAs`; round 2 = no P0/P1). (a) **Query fan-out**: `ReadinessReport::build()`
+  issues ~13 sequential `count()` queries per company (7 lookups + 2 products + 2 whmcs + the audit's
+  per-type/VAT loads); negligible at 3 tenants behind the 30s cache, but scales linearly per tenant on
+  each cache miss — collapse to grouped `count() … GROUP BY company_id` (or a `withoutGlobalScope` sweep)
+  if the tenant count grows. (b) **Stale window**: the report is cached 30s under a single global key with
+  no config-change invalidation, so a just-fixed tenant can read «Μπλόκο» for up to 30s until the TTL
+  lapses; the «Ανανέωση» button is the escape hatch and this matches the «Υγεία συστήματος» precedent.
+  DECLINED (not deferred): routing the fix through `->withoutGlobalScope(CompanyScope::class)` instead of
+  `actAs` — the reused `MyDataConfigAudit` runs its OWN internal queries that `ReadinessReport` can't
+  scope from the outside, so re-pinning the ambient context (`actAs`) is the only remedy that also fixes
+  the audit; `withoutGlobalScope` on our own queries would leave the audit mis-scoped.
 - **PROV-009 remainder — explicit `evidence_pending` indicator** _(P2)._ The core (quota + reception
   capture, widget, low-quota warn) shipped. What's left: when a filing is adopted via a MARK-only
   recovery (the myDATA read returns MARK+QR but not the provider UID/auth), the provider evidence is
