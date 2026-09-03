@@ -36,4 +36,14 @@ class GreekTextTest extends TestCase
         $this->assertStringContainsString('ΠΡΩΤΕ', $out);
         $this->assertStringContainsString('ΝΗ', $out);
     }
+
+    public function test_fold_lowercases_and_strips_tonos_for_matching(): void
+    {
+        // Accented + unaccented spellings fold to the same key (final ς→σ too).
+        $this->assertSame('πιστωση', GreekText::fold('Πίστωση'));
+        $this->assertSame('μετρητοισ', GreekText::fold('Μετρητοίς'));
+        $this->assertSame('καταθεση', GreekText::fold('Κατάθεση'));
+        $this->assertSame(GreekText::fold('ΕΠΙΤΑΓΉ'), GreekText::fold('επιταγή'));
+        $this->assertSame('', GreekText::fold(null));
+    }
 }
