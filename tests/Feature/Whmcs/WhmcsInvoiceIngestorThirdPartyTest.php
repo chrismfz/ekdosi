@@ -211,4 +211,39 @@ class WhmcsInvoiceIngestorThirdPartyTest extends TestCase
         $this->assertNull($state);
         $this->assertNull($row->fresh()->third_party_state);
     }
+
+    public function test_griniaris_mirror_targets_the_primary_reseller_not_the_routed_end_customer(): void
+    {
+        // The invoice's customfields (γκρινιάρης) belong to the PRIMARY WHMCS client
+        // (the reseller, 793). When routing bills a third party, the row's customer_id
+        // becomes the end-customer — but the flag must mirror onto the reseller, NEVER
+        // the routed contact whose griniaris isn't in this payload.
+        $tenant = Company::create([
+            'name' => 'T', 'slug' => 'ing-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'whmcs_api_url' => 'https://whmcs.example.com/includes/api.php',
+            'whmcs_webhook_secret' => str_repeat('s', 40),
+            'whmcs_third_party_enabled' => true,
+            'whmcs_custom_field_map' => ['griniaris' => 16],
+        ]);
+        $reseller = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Chris (reseller)',
+            'afm' => '700700700', 'whmcs_client_id' => 793,
+            'needs_immediate_invoice' => false,
+        ]);
+        $this->fakeResolve([$this->routedLine(5, 'Haris', '081951154')]);
+
+        // The reseller's γκρινιάρης=on rides on the invoice payload's customfields.
+        $row = $this->ingestor()->ingest($tenant, [
+            'invoiceid' => 1234, 'userid' => 793, 'total' => 10.0,
+            'customfields' => [['id' => 16, 'value' => 'on']],
+        ])->row;
+
+        $haris = Customer::where('company_id', $tenant->id)->where('afm', '081951154')->first();
+        $this->assertNotNull($haris);
+        $this->assertSame($haris->id, $row->customer_id, 'the invoice bills the routed end-customer');
+
+        $this->assertTrue($reseller->fresh()->needs_immediate_invoice, 'the PRIMARY reseller flips ON');
+        $this->assertFalse($haris->fresh()->needs_immediate_invoice, 'the routed end-customer is never touched');
+    }
 }
