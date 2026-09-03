@@ -24,6 +24,13 @@ class OperatorHealth extends Command
         $this->info('Operator health @ '.$data['generated_at']);
 
         $this->newLine();
+        // Informational display only — a non-ok cron is surfaced (with the ops:cron
+        // hint) once, by the severity block below, like every other health signal.
+        $this->components->twoColumnDetail('Cron (scheduler) tick', $data['cron']['last_tick_at'] ?? 'missing');
+        $this->components->twoColumnDetail('Cron tick age', $data['cron']['age_minutes'] === null ? 'n/a' : $data['cron']['age_minutes'].' min');
+        $this->components->twoColumnDetail('Cron status', $data['cron']['status']);
+
+        $this->newLine();
         $this->components->twoColumnDetail('Queue heartbeat', $data['queue']['worker_heartbeat_at'] ?? 'missing');
         $this->components->twoColumnDetail('Queue heartbeat age', $data['queue']['worker_heartbeat_age_minutes'] === null ? 'n/a' : $data['queue']['worker_heartbeat_age_minutes'].' min');
         $this->components->twoColumnDetail('Queue heartbeat status', $data['queue']['worker_heartbeat_status']);

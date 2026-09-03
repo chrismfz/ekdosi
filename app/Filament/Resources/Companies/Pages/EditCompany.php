@@ -157,8 +157,13 @@ class EditCompany extends EditRecord
         );
 
         $filled = $r['types']['filled'];
+        // Gate on the SAME two lookups the toast body reports (VAT + invoice types),
+        // so the toast never fires reading «0 · 0». On a provider switch these seed
+        // together with the rest, so a run that created only the minor lookups
+        // (payments/units/categories) while VAT+types already existed is a rare edge
+        // not worth a confusing toast.
         if ($r['vat']['created'] === 0 && $r['types']['created'] === 0 && $filled === 0) {
-            return;  // Nothing to seed (already had them) — stay quiet.
+            return;  // Nothing worth reporting — stay quiet.
         }
 
         // «filled» = myDATA classification back-filled onto pre-existing types

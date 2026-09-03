@@ -16,6 +16,7 @@ use App\Support\DocumentSeries;
 use App\Support\EInvoice\ProviderEvidence;
 use App\Support\InvoiceScope;
 use App\Support\IsoCountry;
+use App\Support\ProvisionalCode;
 use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
@@ -248,6 +249,20 @@ class Invoice extends Model
         static::creating(function (self $model): void {
             if (blank($model->series)) {
                 $model->series = DocumentSeries::fromInvcode($model->invcode, $model->code);
+            }
+        });
+
+        // Gapless-at-send (reverses MON-4): a document created WITHOUT a real ΑΑ —
+        // the new draft flow, which no longer allocates at creation — gets a
+        // PROVISIONAL identity keyed by its surrogate id («ΠΡΟΣ-ΤΠΥ-6885»), so every
+        // `invcode` reader shows a stable, unique, clearly-provisional label. The real
+        // code/invcode/series are written later, at transmission (the submitters).
+        // Guarded on `code === null`, so ETL/fixtures/legacy rows that set a real code
+        // are untouched. Post-insert (`created`) because the id is the unique token.
+        static::created(function (self $model): void {
+            if ($model->code === null && blank($model->invcode)) {
+                $model->invcode = ProvisionalCode::make($model->invoiceType?->code, $model->getKey());
+                $model->saveQuietly();
             }
         });
     }

@@ -247,6 +247,45 @@ class MyDataLookupSeederTest extends TestCase
         $this->assertSame(0, $this->svc()->seedProductCategories($tenant)['created']);
     }
 
+    public function test_seeds_product_categories_with_income_buckets(): void
+    {
+        $tenant = $this->tenant();
+        $this->svc()->seedProductCategories($tenant);
+
+        $by = fn (string $d) => ProductCategory::where('company_id', $tenant->id)->where('description_short', $d)->first();
+
+        // Each category carries its §8.6 BUCKET (resale vs own-manufactured vs services)…
+        $this->assertSame('category1_3', $by('Υπηρεσίες')->mydata_income_class_category);
+        $this->assertSame('category1_1', $by('Εμπορεύματα')->mydata_income_class_category);
+        $this->assertSame('category1_2', $by('Προϊόντα')->mydata_income_class_category);
+
+        // …but NOT the E3 income TYPE — that stays channel-driven on the invoice type.
+        $this->assertNull($by('Υπηρεσίες')->mydata_income_class);
+        $this->assertNull($by('Εμπορεύματα')->mydata_income_class);
+    }
+
+    public function test_product_category_seed_is_new_rows_only_and_never_touches_existing(): void
+    {
+        // NEW-ROWS-ONLY: back-filling a bucket onto an existing category would
+        // silently change §8.6 classification of already-filed goods (MYD-006), so
+        // an existing «Εμπορεύματα» — bucket set OR null — is left exactly as it was.
+        $tenant = $this->tenant();
+        // «Υπηρεσίες» pre-exists with NO bucket → must STAY null (policy/type governs).
+        ProductCategory::create(['company_id' => $tenant->id, 'description_short' => 'Υπηρεσίες', 'markup' => 0]);
+        // «Εμπορεύματα» pre-exists with an operator bucket → must survive verbatim.
+        ProductCategory::create(['company_id' => $tenant->id, 'description_short' => 'Εμπορεύματα', 'markup' => 0, 'mydata_income_class_category' => 'category1_2']);
+
+        $r = $this->svc()->seedProductCategories($tenant);
+
+        $this->assertSame(1, $r['created']);  // only «Προϊόντα» is new
+        $this->assertSame(2, $r['skipped']);  // both existing categories untouched
+
+        $by = fn (string $d) => ProductCategory::where('company_id', $tenant->id)->where('description_short', $d)->value('mydata_income_class_category');
+        $this->assertNull($by('Υπηρεσίες'), 'existing null bucket is NOT silently back-filled');
+        $this->assertSame('category1_2', $by('Εμπορεύματα'), 'existing operator bucket preserved');
+        $this->assertSame('category1_2', $by('Προϊόντα'), 'a NEW category is created with its seed bucket');
+    }
+
     public function test_seed_does_not_impose_income_chain_when_operator_reclassified_the_type(): void
     {
         $tenant = $this->tenant();

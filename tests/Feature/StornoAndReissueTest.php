@@ -88,8 +88,9 @@ class StornoAndReissueTest extends TestCase
         $this->assertSame(PaymentStatus::Credited, $b->status);
         $this->assertSame(0.0, $b->owed);
 
-        // 2) Reissue is a fresh DRAFT copy: same type/customer/party/lines,
-        //    NEW ΑΑ (continues the ΤΠΥ counter), no MARK, not a credit.
+        // 2) Reissue is a fresh DRAFT copy: same type/customer/party/lines, a
+        //    PROVISIONAL identity (gapless-at-send — its real ΑΑ, continuing the ΤΠΥ
+        //    counter, is allocated only when it is transmitted), no MARK, not a credit.
         $this->assertSame('draft', $reissue->local_status);
         $this->assertNull($reissue->credited_invoice_id);
         $this->assertNull($reissue->mydata_state);
@@ -97,7 +98,8 @@ class StornoAndReissueTest extends TestCase
         $this->assertSame($this->customer->id, $reissue->customer_id);
         $this->assertSame('ACME', $reissue->company_name);
         $this->assertSame('123456789', $reissue->vat_no);
-        $this->assertSame('ΤΠΥ6', $reissue->invcode);          // counter advanced 5 → 6
+        $this->assertNull($reissue->code);                       // no ΑΑ consumed by a draft
+        $this->assertSame('ΠΡΟΣ-ΤΠΥ-'.$reissue->id, $reissue->invcode);
         $this->assertNotSame($original->id, $reissue->id);
         $this->assertCount(2, $reissue->lines);
 

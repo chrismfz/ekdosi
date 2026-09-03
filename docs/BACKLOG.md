@@ -499,6 +499,40 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Gapless-at-send (ΑΑ Phase 1) — P2 survivors of the review loop** _(consciously deferred)._ The
+  gapless-at-send numbering change (real ΑΑ allocated at transmission, provisional «ΠΡΟΣ-…» until then)
+  passed the adversarial gate with two P1s fixed (finalize gate → mode-aware `submitsElectronically()`;
+  a build/config error after `assign()` now `release()`s the number). Three items parked: **(a) Concurrency
+  gap** — `InvoiceNumberer::release()`'s decrement-if-top is gapless only under SERIAL issuance; if two
+  documents of the same series are submitted from two concurrent FPM requests and the earlier-numbered one
+  is rejected, its number is no longer the top and a rare gap remains (negligible at ~70 docs/month; a
+  fully-gapless guarantee needs safe renumbering). **(b) Draft XML preview** — a draft has `code=null`, so
+  «Προεπισκόπηση XML» / `mydata:test-submit --print-only` on a NOT-yet-issued draft now throws
+  (AadeInvoiceDocument guards `code < 1`); the fix is to build the preview with the next counter value as a
+  non-consuming placeholder aa (and a clearer message meanwhile). **(c) Provisional on finalized-unsent
+  actives** — a live AADE tenant that finalises but hasn't transmitted shows «ΠΡΟΣ-…» in the ledger/PDF
+  filename until it sends (correct per the model, but a small «(προσωρινό)» badge would remove any surprise).
+  Also pending: **Phase 2 — delivery notes** (move their allocation to send too; migrate `delivery_notes`
+  code/invcode then).
+- **OPS-001 cron↔worker attribution — inherent 5-min boundary ambiguity** _(P2, DECLINED across the OPS-001
+  review loop — documented, not a bug to keep patching)._ `OperatorHealthSeverity` disambiguates «cron down»
+  from «worker down» via the queue heartbeat (a job cron dispatches): when cron is down it suppresses the
+  worker finding unless the beat is staler than `cronAge + 5` (proof the worker failed WHILE cron was alive).
+  Two states are inherently unresolvable by timing and are consciously accepted: (a) a worker that died within
+  ~5 min of cron dying is indistinguishable from a healthy idle worker, and (b) cron `missing` (never ticked →
+  no age to compare) attributes any worker staleness to cron. In both, cron is already reported non-ok
+  (the actionable root) and the true worker state SELF-HEALS the moment cron is fixed (a still-stale beat with
+  cron now fresh → worker reported). Chosen over slack tweaks that false-alarm «worker down» on every sustained
+  cron outage. Strictly better than pre-OPS-001 (which had NO cron signal and always blamed the worker). Only
+  revisit with a SECOND independent worker-liveness signal (not more timing math on the same two keys).
+- **`OperatorHealthReport` heartbeat ages are floats (`Carbon::diffInMinutes`)** _(P2, from the OPS-001
+  review round 2; pre-existing)._ Both `queue()` and the new `cron()` compute `age_minutes` via
+  `Carbon::parse($ts)->diffInMinutes(now())`, which under Carbon 3 (Laravel 11+) returns a **signed float**
+  — so the operator-facing «age» line and the JSON `age_minutes` can read a fractional value, and forward
+  clock skew yields a tiny negative. Harmless for the thresholds (`≤ 10` / `> 30` / the severity `+slack`
+  all hold on floats), but for display/threshold cleanliness cast to a non-negative int minute count in ONE
+  place shared by both slices (keep `queue()`/`cron()` in parity — don't fix only one). Untouched here to
+  preserve that parity.
 - **PROV-020 auto-stamp — P2 survivors of the review loop** _(consciously deferred)._ The change that
   auto-stamps `issued_at`=today at Send (provider + ΔΑ) passed the gate with the delivery-path ordering
   bug fixed (stamp now runs BEFORE the XML build; guarded by an XML-content test). Three P2s parked:

@@ -221,8 +221,24 @@ class MyDataSubmitter implements EInvoiceSubmitter
             );
         }
 
-        $payload = $this->document()->build($invoice);
-        $xml = $this->document()->toXml($payload);
+        // Gapless-at-send: allocate the real ΑΑ/invcode/series NOW, before the payload
+        // build (build() throws on a null code). Idempotent — a retry after an ambiguous
+        // failure keeps the number it already reserved. A never-sent draft consumed
+        // nothing, so the sequence the ΑΑΔΕ sees stays continuous.
+        app(InvoiceNumberer::class)->assign($invoice);
+
+        try {
+            $payload = $this->document()->build($invoice);
+            $xml = $this->document()->toXml($payload);
+        } catch (Throwable $e) {
+            // The number was reserved above but the LOCAL build failed (a config error
+            // — bad type / missing AFM / VAT-breakdown), so nothing was transmitted:
+            // return the ΑΑ to the pool and let the fixed resubmit re-allocate. Without
+            // this a config error would burn a number — the exact gap this feature
+            // prevents. (A rejection/timeout AFTER the send is handled further down.)
+            app(InvoiceNumberer::class)->release($invoice);
+            throw $e;
+        }
 
         $this->initFirebed();
 
@@ -928,6 +944,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // catch below, which cannot tell the two apart.
             if ($firstResponse !== null) {
                 $this->disarmInDoubt($invoice);
+                // Gapless-at-send: same gate as disarm — a DEFINITIVE rejection filed
+                // nothing, so return the reserved ΑΑ to the pool (revert to provisional)
+                // and let the fixed resubmit re-allocate. A NULL $firstResponse stays
+                // ARMED and KEEPS its number (the doc may have filed) — never released.
+                app(InvoiceNumberer::class)->release($invoice);
             }
             // Persist a forensic record + carry the XML on the throw, so a
             // rejection isn't a dead-end — the round-trip is otherwise lost

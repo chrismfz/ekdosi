@@ -6,7 +6,6 @@ use App\Enums\QuoteStatus;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Quote;
-use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -28,7 +27,6 @@ use RuntimeException;
 class ConvertQuoteToInvoice
 {
     public function __construct(
-        private readonly InvoiceNumberer $numberer,
         private readonly RecomputeInvoiceTotals $recompute,
     ) {}
 
@@ -77,14 +75,12 @@ class ConvertQuoteToInvoice
                 throw new RuntimeException('Η προσφορά έχει ήδη μετατραπεί σε παραστατικό.');
             }
 
-            $allocation = $this->numberer->allocate($quote->company, $invoiceType->code);
-
+            // Gapless-at-send: the converted invoice starts as a draft with a
+            // provisional identity (no ΑΑ); the real number is allocated at transmission.
             $invoice = Invoice::create([
                 'company_id' => $quote->company_id,
                 'invoice_type_id' => $invoiceType->id,
                 'customer_id' => $quote->customer_id,
-                'code' => $allocation->code,
-                'invcode' => $allocation->invcode,
                 'issued_at' => now(),
                 'local_status' => 'draft',
                 'header_discount_percent' => $quote->header_discount_percent,

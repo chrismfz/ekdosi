@@ -92,6 +92,34 @@ class DraftInvoiceEditFlowTest extends TestCase
             ->assertActionVisible('edit_draft');
     }
 
+    public function test_finalize_allocates_the_real_number_for_a_non_transmitting_tenant(): void
+    {
+        // Gapless-at-send P1: a tenant that does NOT transmit (gr-mydata mode=off →
+        // submitsElectronically() = false) has no submission event, so Οριστικοποίηση IS
+        // its issuance — it must allocate the real ΑΑ here, not leave it provisional.
+        $tenant = $this->tenant(); // gr-mydata, mode=off
+        $this->bootPanel($tenant);
+        $customer = $this->customer($tenant);
+        $type = InvoiceType::firstOrCreate(
+            ['company_id' => $tenant->id, 'code' => 'TIM'],
+            ['name' => 'Τιμολόγιο', 'invcount' => 1, 'mydata_type' => '2.1'],
+        );
+        // A genuine PROVISIONAL draft (no code — the new draft flow).
+        $invoice = Invoice::create([
+            'company_id' => $tenant->id, 'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
+            'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+        $this->assertNull($invoice->code);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+            ->callAction('finalize');
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('active', $fresh->local_status);
+        $this->assertSame(1, (int) $fresh->code, 'ΑΑ allocated at finalisation for a non-transmitting tenant');
+        $this->assertSame('TIM1', $fresh->invcode);
+    }
+
     public function test_view_page_hides_edit_once_filed(): void
     {
         $tenant = $this->tenant();

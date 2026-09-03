@@ -5,7 +5,6 @@ namespace App\Actions;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\ServiceContract;
-use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -96,8 +95,8 @@ class StageServiceRenewal
                 return null;
             }
 
-            $allocation = app(InvoiceNumberer::class)->allocate($contract->company, $type->code);
-
+            // Gapless-at-send: the renewal is staged as a draft with a provisional
+            // identity (no ΑΑ); the real number is allocated at transmission.
             $invoice = Invoice::create([
                 'company_id' => $contract->company_id,
                 'invoice_type_id' => $type->id,
@@ -107,8 +106,6 @@ class StageServiceRenewal
                 // contract's method, else the renewal type's default.
                 'payment_method_id' => $contract->payment_method_id ?? $type->payment_method_id,
                 'issued_at' => now(),
-                'code' => $allocation->code,
-                'invcode' => $allocation->invcode,
                 'local_status' => 'draft',
                 // Party snapshot copied from the contract's customer — same
                 // shape as IssueCreditNote / WhmcsInvoiceMapper. Frozen on

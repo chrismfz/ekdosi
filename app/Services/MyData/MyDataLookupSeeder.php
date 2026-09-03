@@ -244,15 +244,31 @@ class MyDataLookupSeeder
     }
 
     /**
-     * Seed a minimal generic product-category set (aligned with the income
-     * categories: Υπηρεσίες/Εμπορεύματα/Προϊόντα), markup 0. NOT AADE-codified —
-     * business-specific; the operator refines. Matched by description_short.
+     * Seed a minimal generic product-category set (Υπηρεσίες/Εμπορεύματα/Προϊόντα),
+     * each NEW row pre-assigned its §8.6 income BUCKET so a fresh (mixed) tenant
+     * files each line under the right category with zero setup — and both the
+     * go-live `classificationPolicyGate` and the «Έλεγχος ετοιμότητας» products
+     * section read green out of the box. Markup 0. NOT AADE-codified for the names —
+     * business specific; the operator refines. Matched by description_short.
+     *
+     * NEW-ROWS-ONLY for the bucket (deliberately NOT fill-empty like seedInvoiceTypes):
+     * back-filling a bucket onto a PRE-EXISTING category would SILENTLY change the
+     * §8.6 classification of already-filed goods. A tenant with the MYD-006 policy
+     * («παραγωγός») whose «Εμπορεύματα» category has a null bucket files its goods
+     * under the policy default (category1_2 via ClassificationGuidance); writing an
+     * explicit category1_1 here would bypass that policy on the next deploy — a
+     * silent legal-document change. So an existing category is left untouched (skip);
+     * the operator sets a bucket deliberately in Setup → Κατηγορίες προϊόντων, or
+     * lets the business-activity policy govern.
      *
      * @return array{created:int, skipped:int}
      */
     public function seedProductCategories(Company $tenant): array
     {
-        $rows = array_map(fn (string $d) => ['description_short' => $d, 'markup' => 0], self::PRODUCT_CATEGORY_SEED);
+        $rows = array_map(
+            fn (array $r) => $r + ['markup' => 0],
+            self::PRODUCT_CATEGORY_SEED,
+        );
 
         return $this->seedRows(ProductCategory::class, 'description_short', $rows, $tenant->getKey());
     }
@@ -266,19 +282,27 @@ class MyDataLookupSeeder
      * about — the rest are plumbing) so callers can report what actually
      * happened and stay quiet when nothing was created.
      *
-     * @return array{vat: array{created:int, skipped:int}, types: array{created:int, skipped:int, filled:int}}
+     * @return array{
+     *   vat: array{created:int, skipped:int},
+     *   types: array{created:int, skipped:int, filled:int},
+     *   payment_methods: array{created:int, skipped:int},
+     *   distribution_aims: array{created:int, skipped:int},
+     *   metric_units: array{created:int, skipped:int},
+     *   delivery_methods: array{created:int, skipped:int},
+     *   product_categories: array{created:int, skipped:int},
+     * }
      */
     public function seedStandardLookups(Company $tenant): array
     {
-        $vat = $this->seedVatCategories($tenant);
-        $types = $this->seedInvoiceTypes($tenant);
-        $this->seedPaymentMethods($tenant);
-        $this->seedDistributionAims($tenant);
-        $this->seedMetricUnits($tenant);
-        $this->seedDeliveryMethods($tenant);
-        $this->seedProductCategories($tenant);
-
-        return ['vat' => $vat, 'types' => $types];
+        return [
+            'vat' => $this->seedVatCategories($tenant),
+            'types' => $this->seedInvoiceTypes($tenant),
+            'payment_methods' => $this->seedPaymentMethods($tenant),
+            'distribution_aims' => $this->seedDistributionAims($tenant),
+            'metric_units' => $this->seedMetricUnits($tenant),
+            'delivery_methods' => $this->seedDeliveryMethods($tenant),
+            'product_categories' => $this->seedProductCategories($tenant),
+        ];
     }
 
     /**
@@ -345,11 +369,31 @@ class MyDataLookupSeeder
         'Ηλεκτρονική παράδοση (email)',
     ];
 
-    /** Minimal generic product categories, aligned with the income categories. */
+    /**
+     * Minimal generic product categories, each carrying its §8.6 income BUCKET
+     * (`mydata_income_class_category`): Υπηρεσίες→category1_3 (παροχή υπηρεσιών),
+     * Εμπορεύματα→category1_1 (resale), Προϊόντα→category1_2 (own-manufactured).
+     *
+     * The bucket is correct BY THE CATEGORY NAME: «Εμπορεύματα» IS resale (category1_1
+     * «Πώληση Εμπορευμάτων») and «Προϊόντα» IS own-product (category1_2) — so these
+     * named categories are intentionally MORE specific than, and correctly supersede,
+     * the tenant-wide MYD-006 business-activity policy, which is the fallback for
+     * UN-named/generic goods categories that carry no bucket. A producer files own
+     * products under «Προϊόντα» and any resale goods under «Εμπορεύματα», each right.
+     *
+     * The E3 income TYPE (`mydata_income_class`) is deliberately NOT set here — it
+     * is CHANNEL-driven (E3_561_001 wholesale vs E3_561_003 retail vs the
+     * cross-border codes) and stays with the invoice type; pinning it per-category
+     * would misfile the same product across channels (see
+     * AadeInvoiceDocument::resolveIncomeClass, which lets a category override the
+     * bucket while the type keeps the E3 class).
+     *
+     * @var list<array{description_short: string, mydata_income_class_category: string}>
+     */
     private const PRODUCT_CATEGORY_SEED = [
-        'Υπηρεσίες',
-        'Εμπορεύματα',
-        'Προϊόντα',
+        ['description_short' => 'Υπηρεσίες', 'mydata_income_class_category' => 'category1_3'],
+        ['description_short' => 'Εμπορεύματα', 'mydata_income_class_category' => 'category1_1'],
+        ['description_short' => 'Προϊόντα', 'mydata_income_class_category' => 'category1_2'],
     ];
 
     /**

@@ -60,21 +60,17 @@ class EditInvoice extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            // MON-4: the ΑΑ is burned at draft creation (InvoiceNumberer, under a
-            // row lock — same as the legacy INVOICE_AI trigger). Deleting a draft
-            // therefore leaves a PERMANENT gap in the per-series ΑΑ sequence: the
-            // number is NOT recycled (recycling would risk a duplicate ΑΑ on a
-            // filed document — far worse than a gap). Gaps are legally fine —
-            // myDATA identifies a document by its AADE MARK, not by a gapless ΑΑ,
-            // and the legacy app behaved identically. The confirmation makes that
-            // consequence explicit so an operator doesn't delete expecting reuse.
+            // Gapless-at-send (reverses MON-4): a draft has NO ΑΑ — it carries only a
+            // provisional identity («ΠΡΟΣ-…»); the real number is allocated at
+            // transmission. So deleting a draft leaves NO gap in the per-series
+            // sequence — it never consumed a number. The confirmation only guards
+            // against an accidental delete.
             DeleteAction::make()
                 ->visible(fn (Invoice $record) => $record->mydata_state === null && $record->local_status === 'draft')
                 ->requiresConfirmation()
                 ->modalHeading('Διαγραφή πρόχειρου παραστατικού')
                 ->modalDescription(fn (Invoice $record) => "Το πρόχειρο {$record->invcode} θα διαγραφεί. "
-                    .'Ο αύξων αριθμός (ΑΑ) ΔΕΝ επαναχρησιμοποιείται — μένει ένα μόνιμο κενό στην αρίθμηση της σειράς '
-                    .'(νόμιμο· η myDATA ταυτοποιεί με το ΜΑΡΚ, όχι με συνεχόμενο ΑΑ). Συνέχεια;'),
+                    .'Δεν έχει δεσμεύσει αύξοντα αριθμό (ο ΑΑ μπαίνει στην αποστολή), οπότε ΔΕΝ μένει κενό στη σειρά. Συνέχεια;'),
         ];
     }
 

@@ -121,6 +121,17 @@ class HealthRecorder
         $this->forever(HealthKeys::QUEUE_HEARTBEAT, now()->toIso8601String());
     }
 
+    /**
+     * OPS-001: the scheduler tick — recorded directly by a `->everyMinute()`
+     * closure in routes/console.php, so it proves `schedule:run` is firing WITHOUT
+     * a queue worker. A stale/missing value = the OS cron isn't calling
+     * schedule:run (or the app can't reach its cache).
+     */
+    public function recordSchedulerHeartbeat(): void
+    {
+        $this->forever(HealthKeys::SCHEDULER_HEARTBEAT, now()->toIso8601String());
+    }
+
     /** @param array<string, mixed> $result */
     public function recordBackupMonitor(array $result): void
     {

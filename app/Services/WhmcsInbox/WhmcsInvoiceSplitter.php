@@ -8,7 +8,6 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
-use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\Whmcs\ContactCustomerResolver;
 use Illuminate\Support\Facades\DB;
@@ -38,7 +37,6 @@ class WhmcsInvoiceSplitter
 {
     public function __construct(
         private WhmcsInvoiceMapper $mapper,
-        private InvoiceNumberer $numberer,
         private RecomputeInvoiceTotals $recompute,
         private ContactCustomerResolver $contactResolver,
     ) {}
@@ -309,11 +307,9 @@ class WhmcsInvoiceSplitter
                     ));
                 }
 
-                $allocation = $this->numberer->allocate($tenant, $groupType->code);
-
+                // Gapless-at-send: each split part is a draft with a provisional
+                // identity («ΠΡΟΣ-…», no ΑΑ); each gets its real number when issued.
                 $header = $mapped['header'];
-                $header['code'] = $allocation->code;
-                $header['invcode'] = $allocation->invcode;
                 $header['whmcs_pending_id'] = $locked->id;
                 $header['local_status'] = 'draft';
 
