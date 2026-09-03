@@ -277,9 +277,27 @@ class DeliveryLifecycleService
         $mappedState = $this->deliveryStateFromAade($aadeStatus);
 
         $changed = false;
-        if ($mappedState !== null && $mappedState !== $note->delivery_state) {
-            $note->forceFill(['delivery_state' => $mappedState])->save();
-            $changed = true;
+        $stateSynced = false;
+
+        if ($aadeStatus === DeliveryStatus::CANCELLED) {
+            // MYD-019: a TERMINAL AADE cancellation (typically performed outside
+            // ekdosi — straight from the myDATA portal) must apply to ALL THREE
+            // state fields, leave a forensic STATE_SYNC audit row and run the SAME
+            // stock compensation as a local/provider cancel — not merely flip the
+            // delivery_state cache and leave mydata_state=VALID / local_status=active
+            // (the split state that made different screens disagree). Idempotent.
+            $stateSynced = $this->applyRemoteCancellation($note);
+            $changed = $stateSynced;
+        } elseif ($mappedState !== null && $mappedState !== $note->delivery_state) {
+            // Non-terminal remote state: keep the delivery_state cache fresh — but
+            // NEVER resurrect a business-cancelled δελτίο. A note that is already
+            // cancelled (locally or at AADE) must not have its terminal cache
+            // overwritten by a stale non-terminal tracking status the feed still
+            // reports (MYD-019: "do not automatically resurrect").
+            if ($note->local_status !== 'cancelled' && $note->mydata_state !== 'CANCELLED') {
+                $note->forceFill(['delivery_state' => $mappedState])->save();
+                $changed = true;
+            }
         }
 
         $eventsSynced = $this->syncLifecycleHistory($note, $response->getLifecycleHistory());
@@ -289,6 +307,9 @@ class DeliveryLifecycleService
             'aade_label' => $aadeStatus?->label(),
             'mapped_state' => $mappedState,
             'changed' => $changed,
+            // True ONLY when a terminal AADE cancellation was applied from the
+            // refresh — the UI surfaces this as a warning, not a plain «no change».
+            'state_synced' => $stateSynced,
             'events_synced' => $eventsSynced,
         ];
     }
@@ -564,6 +585,117 @@ class DeliveryLifecycleService
         }
 
         return $audit;
+    }
+
+    /**
+     * MYD-019: apply a TERMINAL AADE cancellation discovered via refreshStatus()
+     * — the delivery-note twin of SyncInvoiceStateFromAade. Flips ALL THREE state
+     * fields atomically, writes a forensic STATE_SYNC audit row (deliberately NOT
+     * a CANCEL row, so the history distinguishes «we cancelled it» from «we found
+     * it cancelled at AADE and synced»), and runs the SAME idempotent stock
+     * compensation as a local/provider cancel (STOCK-001).
+     *
+     * Idempotent: returns false (a no-op) when the note is already fully terminal,
+     * so a repeated refresh never writes a second row nor reverses stock twice.
+     *
+     * cancellation_mark is left NULL on purpose: RequestDeliveryNoteStatus exposes
+     * no cancellation MARK, and the lifecycle history carries no cancellation event
+     * (DeliveryEventType has only RegisterTransfer/ConfirmOutcome/Rejection), so we
+     * genuinely have none here. Recording null is honest evidence — never a faked
+     * MARK (MYD-023). The audit row's text records WHERE the terminal state came from.
+     */
+    private function applyRemoteCancellation(DeliveryNote $note): bool
+    {
+        // Fast path: already fully terminal → nothing to sync (idempotent refresh).
+        if ($note->mydata_state === 'CANCELLED'
+            && $note->local_status === 'cancelled'
+            && $note->delivery_state === 'cancelled') {
+            return false;
+        }
+
+        // Snapshot the pre-sync state for the log now — the transaction below flips
+        // $note to terminal before we reach the Log::info.
+        $logFrom = [
+            'mydata_state' => $note->mydata_state ?: '—',
+            'local_status' => $note->local_status ?: '—',
+            'delivery_state' => $note->delivery_state ?: '—',
+        ];
+
+        // Re-check under a row lock so two concurrent refreshes (a double-click, or a
+        // manual «Έλεγχος κατάστασης» overlapping the scheduler) can't each write a
+        // STATE_SYNC row for the same cancellation — the legal audit trail must not
+        // duplicate. lockForUpdate is real on MariaDB (prod) and a no-op on sqlite
+        // (tests). Explicit tenant filter: refreshStatus is reachable from console /
+        // queue with no ambient CompanyContext (CLAUDE.md CLI/queue rule).
+        $applied = DB::transaction(function () use ($note): bool {
+            $locked = DeliveryNote::query()
+                ->where('company_id', $this->tenant->getKey())
+                ->whereKey($note->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null) {
+                return false;
+            }
+            if ($locked->mydata_state === 'CANCELLED'
+                && $locked->local_status === 'cancelled'
+                && $locked->delivery_state === 'cancelled') {
+                return false; // another refresh already synced it under the lock
+            }
+
+            $fromMydata = $locked->mydata_state ?: '—';
+            $fromLocal = $locked->local_status ?: '—';
+            $fromDelivery = $locked->delivery_state ?: '—';
+
+            DeliveryMark::create([
+                'company_id' => $note->company_id,
+                'delivery_note_id' => $note->id,
+                'mark' => $note->mydata_mark,
+                'mydata_action' => 'STATE_SYNC',
+                'request' => "Συγχρονισμός κατάστασης από ΑΑΔΕ: mydata_state {$fromMydata} → CANCELLED "
+                    ."(local_status {$fromLocal} → cancelled, delivery_state {$fromDelivery} → cancelled).",
+                'response' => 'Εντοπίστηκε ΑΚΥΡΩΜΕΝΟ στην ΑΑΔΕ κατά τον «Έλεγχο κατάστασης». '
+                    .'ΔΕΝ ακυρώθηκε από την εφαρμογή — η ακύρωση έγινε εκτός ekdosi και συγχρονίστηκε.',
+                'mark_date' => now()->toDateString(),
+                'mark_time' => now()->toTimeString(),
+            ]);
+
+            // Write through the caller's model so the refreshStatus return + UI reflect
+            // the new state without a re-read (same DB row the lock protects).
+            $note->forceFill([
+                'mydata_state' => 'CANCELLED',
+                'delivery_state' => 'cancelled',
+                'local_status' => 'cancelled',
+            ])->save();
+
+            return true;
+        });
+
+        if (! $applied) {
+            return false;
+        }
+
+        // Same idempotent business compensation as persistCancellation (STOCK-001).
+        // Best-effort + OUTSIDE the transaction: the terminal state is AADE's truth
+        // and already persisted, so a stock-write hiccup must never undo the sync.
+        try {
+            app(StockService::class)->reverseSaleForDeliveryNote($note);
+        } catch (Throwable $e) {
+            Log::warning('Stock reversal after remote-detected delivery cancel failed (state synced)', [
+                'delivery_note_id' => $note->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('myDATA delivery state synced from AADE (remote cancellation)', [
+            'company_id' => $this->tenant->getKey(),
+            'delivery_note_id' => $note->id,
+            'invcode' => $note->invcode,
+            'mark' => $note->mydata_mark,
+            'from' => $logFrom,
+        ]);
+
+        return true;
     }
 
     // ---- internals ----------------------------------------------------

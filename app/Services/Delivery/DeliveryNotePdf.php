@@ -60,7 +60,12 @@ class DeliveryNotePdf
                 // + the myDATA SUBMISSION marks only. delivery_marks also stores
                 // lifecycle (REGISTER_TRANSFER/CONFIRM_OUTCOME → shown in «Διακίνηση»)
                 // and failed attempts (PROVIDER_FAILED/REJECTED, no MARK) — exclude
-                // both so «Υποβολές myDATA» isn't duplicated/noisy.
+                // both so «Υποβολές myDATA» isn't duplicated/noisy. STATE_SYNC (MYD-019,
+                // a remote-cancel detected via status refresh) is ALSO excluded: it is
+                // not a submission and carries the issue MARK, so it would read as a
+                // duplicate submission of the same MARK — the cancelled banner conveys
+                // the terminal state to a PDF reader, and the «Ιστορικό myDATA» panel
+                // tab carries the full STATE_SYNC forensic row.
                 'events' => $note->events()->get(),
                 'marks' => $note->marks()
                     ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT', 'CANCEL'])
