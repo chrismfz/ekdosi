@@ -7,6 +7,7 @@ use App\Models\DistributionAim;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\VatCategory;
+use App\Models\WhmcsPaymentMap;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,7 +30,9 @@ class CompanyImportTest extends TestCase
             'gsis_password' => 'gsis-pw',
         ]);
         VatCategory::create(['company_id' => $company->id, 'description' => 'ΦΠΑ 24%', 'rate' => 24, 'is_default' => true]);
-        PaymentMethod::create(['company_id' => $company->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        $pm = PaymentMethod::create(['company_id' => $company->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        // WHMCS gateway map with a payment_method_id FK to rewire on import.
+        WhmcsPaymentMap::create(['company_id' => $company->id, 'whmcs_gateway' => 'stripe', 'payment_method_id' => $pm->id]);
         $aim = DistributionAim::create(['company_id' => $company->id, 'description' => 'Πώληση']);
         InvoiceType::create([
             'company_id' => $company->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 7,
@@ -75,6 +78,13 @@ class CompanyImportTest extends TestCase
 
         $this->assertSame(1, VatCategory::where('company_id', $company->id)->count());
         $this->assertSame(1, PaymentMethod::where('company_id', $company->id)->count());
+
+        // The WHMCS gateway map's payment_method_id FK was rewired to the NEW
+        // tenant's payment method (not the source's stale id).
+        $pm = PaymentMethod::where('company_id', $company->id)->firstOrFail();
+        $map = DB::table('whmcs_payment_maps')->where('company_id', $company->id)->where('whmcs_gateway', 'stripe')->first();
+        $this->assertNotNull($map);
+        $this->assertSame($pm->id, (int) $map->payment_method_id);
     }
 
     public function test_reimport_into_is_idempotent_and_updates_in_place(): void
@@ -91,6 +101,8 @@ class CompanyImportTest extends TestCase
         $this->assertSame(1, InvoiceType::where('company_id', $source->id)->where('code', 'TPY')->count());
         $this->assertSame(1, VatCategory::where('company_id', $source->id)->count());
         $this->assertSame(1, PaymentMethod::where('company_id', $source->id)->count());
+        // whmcs_payment_maps matched by (company, gateway) → no unique-collision on re-import.
+        $this->assertSame(1, DB::table('whmcs_payment_maps')->where('company_id', $source->id)->count());
         $this->assertSame(1, DistributionAim::where('company_id', $source->id)->count());
     }
 

@@ -10,6 +10,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-09-03
+### Added
+- **Invoice-feed carries the payment gateway (`paymentmethod`).** Each bridge invoice
+  payload now includes `tblinvoices.paymentmethod` (the gateway system name:
+  banktransfer / stripe / paypal …). Lets ekdosi map a WHMCS gateway → an ekdosi
+  payment method (§8.12 type + term) so a card/bank-paid invoice no longer files
+  under the invoice-type cash default. The native `GetInvoice` path already carried
+  it; this brings the bridge feed to parity (`fetch` + `invoice` ops).
+
 ## [0.44.0] — 2026-09-02
 ### Added
 - **Invoice-feed line enrichment: `whmcs_product_id` + `whmcs_group_id`.**

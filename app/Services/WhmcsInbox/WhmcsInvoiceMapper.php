@@ -129,13 +129,29 @@ class WhmcsInvoiceMapper
         // the payload (not the dropped lines) — same shape as hasZeroVatLine.
         $totals['blank_description_charge_lines'] = $this->blankDescriptionChargeLines($linePayload);
 
+        // §8.12: a WHMCS invoice records HOW it was paid in its gateway
+        // (payload['paymentmethod']: banktransfer / stripe / paypal …). Map it to
+        // the ekdosi payment method — which carries the §8.12 type + due-days — so a
+        // card/bank-paid invoice no longer files under the type's cash default.
+        // Apply the gateway override ONLY on a DEFINITIVELY-paid invoice (status
+        // exactly 'Paid'). The mapped method is settled (due_days=0 = paid-at-issue),
+        // so firing it on anything not-actually-paid (Unpaid / Collections / Payment
+        // Pending / Refunded) would mark an open invoice settled → gone from
+        // receivables. Those keep the invoice type default (the paid/unpaid-aware
+        // selection). Gateway is invoice-level (read from the whole payload).
+        $gateway = strcasecmp((string) ($payload['status'] ?? ''), 'Paid') === 0
+            ? ($payload['paymentmethod'] ?? null)
+            : null;
+        $paymentMethodId = WhmcsPaymentMethodResolver::forCompany($tenant->id)->resolve($gateway)
+            ?? $invoiceType->payment_method_id;
+
         return [
             'header' => [
                 'company_id' => $tenant->id,
                 'customer_id' => $customer->id,
                 'invoice_type_id' => $invoiceType->id,
                 'issued_at' => now()->format('Y-m-d H:i:s'),
-                'payment_method_id' => $invoiceType->payment_method_id,
+                'payment_method_id' => $paymentMethodId,
                 // Snapshot: frozen at issue time per Greek legal-invoice
                 // requirements (the invoice must record the customer's
                 // identity AS IT WAS when filed, not as it might be later).

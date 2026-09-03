@@ -52,6 +52,10 @@ class CompanyImporter
         'billing_connections' => ['source', 'label'],
         'invoice_types' => ['code'],
         'servers' => ['name'],
+        // WHMCS maps: the per-company UNIQUE natural key, so a re-import updates in
+        // place instead of colliding with the unique index (income = scope+key).
+        'whmcs_income_maps' => ['scope', 'whmcs_key'],
+        'whmcs_payment_maps' => ['whmcs_gateway'],
         // Transactional: legacy_id where present (unique per company) for
         // idempotent re-import; the rest fall back to a content signature.
         'customers' => ['legacy_id'],
@@ -70,6 +74,8 @@ class CompanyImporter
         'bank_accounts', 'product_categories', 'metric_units', 'tags',
         'server_groups', 'billing_connections', 'invoice_types', 'servers',
         'expense_classification_rules', 'whmcs_income_maps',
+        // whmcs_payment_maps FK-depends on payment_methods (imported above).
+        'whmcs_payment_maps',
     ];
 
     /** Import order for transactional (bucket C, --full): parents before children. */
@@ -107,6 +113,9 @@ class CompanyImporter
             'default_customer_id' => 'customers',
         ],
         'servers' => ['server_group_id' => 'server_groups'],
+        // WHMCS gateway → payment method map: rewire the method FK to the new tenant's
+        // payment_methods id (whmcs_income_maps has no such FK, hence not listed there).
+        'whmcs_payment_maps' => ['payment_method_id' => 'payment_methods'],
         'customers' => ['payment_method_id' => 'payment_methods'],
         'customer_contacts' => ['customer_id' => 'customers'],
         // Leads (mini-CRM): both customer links rewire; the operator link is a

@@ -600,6 +600,38 @@ class WhmcsClient
     }
 
     /**
+     * The tenant's active WHMCS payment gateways (GetPaymentMethods) — the list the
+     * «Αντιστοίχιση τρόπων πληρωμής WHMCS» page maps to ekdosi payment methods. Each
+     * entry is the gateway `module` system name (as stored on tblinvoices.paymentmethod,
+     * e.g. 'banktransfer'/'stripe') + its friendly `displayname`. Not paginated — the
+     * active-gateway list is short.
+     *
+     * @return list<array{gateway:string, name:string}>
+     */
+    public function getPaymentMethods(): array
+    {
+        $resp = $this->call('GetPaymentMethods');
+        $list = $resp['paymentmethods']['paymentmethod'] ?? [];
+        if (! empty($list) && ! array_is_list($list)) {
+            $list = [$list]; // single-row object → wrap as list
+        }
+
+        $out = [];
+        foreach ($list as $m) {
+            $gateway = trim((string) ($m['module'] ?? ''));
+            if ($gateway === '') {
+                continue;
+            }
+            $out[] = [
+                'gateway' => $gateway,
+                'name' => (string) ($m['displayname'] ?? $gateway),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * Single point of contact with the WHMCS API. All actions go
      * through here so auth, encoding, error mapping, and retry
      * policy are uniform.

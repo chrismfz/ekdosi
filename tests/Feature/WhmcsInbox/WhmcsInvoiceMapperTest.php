@@ -8,6 +8,7 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
+use App\Models\WhmcsPaymentMap;
 use App\Services\WhmcsInbox\WhmcsInvoiceMapper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
@@ -533,6 +534,141 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertContains('Refund credit', $totals['zero_vat_lines']);
         $this->assertContains('Goodwill', $totals['zero_vat_lines']);
         $this->assertNotContains('Hosting', $totals['zero_vat_lines']);
+    }
+
+    public function test_maps_whmcs_gateway_to_the_declared_payment_method(): void
+    {
+        // A card PaymentMethod (§8.12 type 7) mapped from the WHMCS 'stripe' gateway;
+        // an invoice paid via stripe must file with THAT method, not the ΤΠΥ default.
+        $card = PaymentMethod::create([
+            'company_id' => $this->tenant->id, 'name' => 'Κάρτα', 'due_days' => 0,
+            'is_active' => true, 'mydata_payment_type' => 7,
+        ]);
+        WhmcsPaymentMap::create([
+            'company_id' => $this->tenant->id, 'whmcs_gateway' => 'stripe', 'payment_method_id' => $card->id,
+        ]);
+
+        $pending = $this->makePending([
+            'invoiceid' => 2001, 'paymentmethod' => 'stripe', 'status' => 'Paid',
+            'items' => ['item' => [['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1']]],
+        ]);
+
+        $header = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['header'];
+
+        $this->assertSame($card->id, $header['payment_method_id']);
+    }
+
+    public function test_unpaid_invoice_ignores_the_gateway_override(): void
+    {
+        // WHMCS keeps the SELECTED gateway on an UNPAID invoice too; mapping it to a
+        // settled (due_days=0) method would mark the open invoice paid-at-issue. An
+        // unpaid invoice must keep the invoice type default.
+        $card = PaymentMethod::create([
+            'company_id' => $this->tenant->id, 'name' => 'Κάρτα', 'due_days' => 0,
+            'is_active' => true, 'mydata_payment_type' => 7,
+        ]);
+        WhmcsPaymentMap::create([
+            'company_id' => $this->tenant->id, 'whmcs_gateway' => 'stripe', 'payment_method_id' => $card->id,
+        ]);
+
+        $pending = $this->makePending([
+            'invoiceid' => 2005, 'paymentmethod' => 'stripe', 'status' => 'Unpaid',
+            'items' => ['item' => [['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]],
+        ]);
+
+        $header = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['header'];
+
+        $this->assertSame($this->pm->id, $header['payment_method_id']); // type default, not the card
+    }
+
+    public function test_unmapped_gateway_falls_back_to_the_invoice_type_default(): void
+    {
+        // 'paypal' has no map → the invoice type's payment method stands (unchanged).
+        // Paid, so the resolver IS consulted and returns null on the miss.
+        $pending = $this->makePending([
+            'invoiceid' => 2002, 'paymentmethod' => 'paypal', 'status' => 'Paid',
+            'items' => ['item' => [['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]],
+        ]);
+
+        $header = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['header'];
+
+        $this->assertSame($this->pm->id, $header['payment_method_id']);
+    }
+
+    public function test_gateway_match_is_case_and_whitespace_insensitive(): void
+    {
+        $bank = PaymentMethod::create([
+            'company_id' => $this->tenant->id, 'name' => 'Κατάθεση', 'due_days' => 0,
+            'is_active' => true, 'mydata_payment_type' => 1,
+        ]);
+        WhmcsPaymentMap::create([
+            'company_id' => $this->tenant->id, 'whmcs_gateway' => 'banktransfer', 'payment_method_id' => $bank->id,
+        ]);
+
+        $pending = $this->makePending([
+            'invoiceid' => 2003, 'paymentmethod' => '  BankTransfer  ', 'status' => 'Paid',
+            'items' => ['item' => [['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]],
+        ]);
+
+        $header = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['header'];
+
+        $this->assertSame($bank->id, $header['payment_method_id']);
+    }
+
+    public function test_credit_term_mapped_method_is_ignored_to_avoid_a_phantom_receivable(): void
+    {
+        // A gateway mapped to a credit-term (due_days>0) method must NOT apply to a
+        // paid invoice — that would leave a paid invoice reading as an open
+        // receivable. The resolver skips it → the settled invoice type default stands.
+        $credit = PaymentMethod::create([
+            'company_id' => $this->tenant->id, 'name' => 'Επί Πιστώσει', 'due_days' => 30,
+            'is_active' => true, 'mydata_payment_type' => 5,
+        ]);
+        WhmcsPaymentMap::create([
+            'company_id' => $this->tenant->id, 'whmcs_gateway' => 'banktransfer', 'payment_method_id' => $credit->id,
+        ]);
+
+        $pending = $this->makePending([
+            'invoiceid' => 2006, 'paymentmethod' => 'banktransfer', 'status' => 'Paid',
+            'items' => ['item' => [['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]],
+        ]);
+
+        $header = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['header'];
+
+        $this->assertSame($this->pm->id, $header['payment_method_id']); // settled default, not the credit method
+    }
+
+    public function test_gateway_map_is_tenant_scoped(): void
+    {
+        // Another tenant's 'stripe' → card map must NOT leak into this tenant's
+        // resolution (that would be a cross-tenant filing error).
+        $otherTenant = Company::create([
+            'name' => 'Other', 'slug' => 'o-'.uniqid(),
+            'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        $otherCard = PaymentMethod::create([
+            'company_id' => $otherTenant->id, 'name' => 'Κάρτα', 'due_days' => 0, 'mydata_payment_type' => 7,
+        ]);
+        WhmcsPaymentMap::create([
+            'company_id' => $otherTenant->id, 'whmcs_gateway' => 'stripe', 'payment_method_id' => $otherCard->id,
+        ]);
+
+        $pending = $this->makePending([
+            'invoiceid' => 2004, 'paymentmethod' => 'stripe', 'status' => 'Paid',
+            'items' => ['item' => [['description' => 'X', 'amount' => '124.00', 'taxed' => '1']]],
+        ]);
+
+        $header = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['header'];
+
+        // Paid → the resolver IS consulted, but this tenant has no 'stripe' map, so its
+        // own invoice-type default stands — the other tenant's card must not leak in.
+        $this->assertSame($this->pm->id, $header['payment_method_id']);
     }
 
     public function test_carries_whmcs_source_metadata(): void
