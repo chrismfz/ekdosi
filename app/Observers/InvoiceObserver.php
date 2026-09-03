@@ -151,7 +151,8 @@ class InvoiceObserver
      * recompute, payments, edits — are a cheap no-op):
      *   • → active, normal invoice  → sale-OUT  (−qty, whichever-first)
      *   • → active, credit note     → return-IN (+qty, S3)
-     *   • → cancelled, normal       → reverse the sale-OUT (+qty back, S3)
+     *   • → cancelled, normal        → reverse the sale-OUT   (+qty back, S3)
+     *   • → cancelled, credit note   → reverse the return-IN  (−qty back out, STOCK-001)
      * Best-effort: the status was already persisted, so a stock-write hiccup must
      * never surface as a false "finalize/cancel failed".
      */
@@ -170,8 +171,13 @@ class InvoiceObserver
                 $isCreditNote
                     ? $stock->recordReturnForCreditNote($invoice)
                     : $stock->recordSaleForInvoice($invoice);
-            } elseif ($status === 'cancelled' && ! $isCreditNote) {
-                $stock->reverseSaleForInvoice($invoice);
+            } elseif ($status === 'cancelled') {
+                // STOCK-001: cancelling a credit note must reverse its return-IN, or
+                // the freed qty_returned (MON-1) lets a later invoice-cancel reverse
+                // the full sale again and inflates stock. Symmetric with the sale case.
+                $isCreditNote
+                    ? $stock->reverseReturnForCreditNote($invoice)
+                    : $stock->reverseSaleForInvoice($invoice);
             }
         } catch (Throwable $e) {
             Log::warning('Stock movement on invoice status change failed (the status change succeeded)', [

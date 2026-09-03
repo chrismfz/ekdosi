@@ -18,6 +18,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **Πλήρης αντιστροφή αποθέματος στην ακύρωση δελτίου/πιστωτικού (STOCK-001).** Η ακύρωση Πώλησης-δελτίου
+  δεν επέστρεφε τα εμπορεύματα στο απόθεμα και η ακύρωση πιστωτικού δεν ανέστρεφε το return-IN — και
+  το δεύτερο **φούσκωνε σιωπηλά** το απόθεμα (το `qty_returned` ελευθερωνόταν από το MON-1, οπότε μια
+  μετέπειτα ακύρωση του τιμολογίου ανέστρεφε ξανά όλη την πώληση). Νέα idempotent, whichever-first
+  `StockService::reverseSaleForDeliveryNote()` (wired στο `DeliveryLifecycleService::persistCancellation`,
+  κοινό direct+πάροχος) και `reverseReturnForCreditNote()` (wired στον `InvoiceObserver`, skip όταν το
+  αρχικό είναι ήδη ακυρωμένο ώστε να συμφωνούν και οι δύο σειρές ακύρωσης). Καθρέφτης του υπάρχοντος
+  `reverseSaleForInvoice`· αναστρέφεται μόνο η κίνηση που δημιούργησε το ίδιο το ακυρωμένο έγγραφο. Η
+  μέθοδος δελτίου επαναχρησιμοποιείται από το MYD-019 (remote-detected ακύρωση).
+
 ## [1.16.0] - 2026-09-03
 
 ### Added
