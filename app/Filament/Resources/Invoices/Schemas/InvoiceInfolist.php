@@ -45,9 +45,19 @@ class InvoiceInfolist
                             ->label('ΑΑ')
                             ->numeric(),
 
+                        // The two dates, kept distinct: issued_at = «Ημερομηνία έκδοσης»
+                        // (the public/legal date, stamped to today at «Αποστολή»),
+                        // created_at = «Ημερομηνία δημιουργίας» (internal — πότε φτιάχτηκε
+                        // το πρόχειρο). They differ when a draft lingers before issue.
                         TextEntry::make('issued_at')
-                            ->label('Issued at')
-                            ->dateTime('d/m/Y H:i'),
+                            ->label('Ημερομηνία έκδοσης')
+                            ->dateTime('d/m/Y H:i')
+                            ->placeholder('—'),
+
+                        TextEntry::make('created_at')
+                            ->label('Ημερομηνία δημιουργίας')
+                            ->dateTime('d/m/Y H:i')
+                            ->placeholder('—'),
 
                         TextEntry::make('delivery_date')
                             ->label('Delivery date')

@@ -13,6 +13,7 @@ use App\Models\VatCategory;
 use App\Services\EInvoice\GrProviderSubmitter;
 use App\Services\MyDataRejected;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
@@ -115,34 +116,58 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertNull($mark->fresh()->provider_identity);
     }
 
-    public function test_rejects_a_backdated_issue_date_before_any_outbound_request(): void
+    public function test_a_backdated_draft_is_stamped_to_today_at_send(): void
     {
-        // Normal online provider issue requires IssueDate = today (InvoSign 238);
-        // a yesterday date must fail locally and reach no transport (PROV-020).
+        // PROV-020 (auto): the legal issue date IS the moment of issue, and the provider
+        // requires IssueDate = today (InvoSign 238). A draft prepared yesterday is issued
+        // TODAY — stamp it and file, instead of blocking the operator.
         $invoice = $this->makeInvoice();
-        $invoice->forceFill(['issued_at' => now()->subDay()])->save();
+        $invoice->forceFill(['issued_at' => now()->subDay()->setTime(9, 0)])->save();
 
-        try {
-            (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
-            $this->fail('Expected a backdated-issue-date rejection.');
-        } catch (RuntimeException $e) {
-            $this->assertStringContainsString('ημερομηνία έκδοσης', $e->getMessage());
-        }
+        $mark = (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
 
-        // No outbound: not even a forensic PROVIDER_* row — the guard ran first.
-        $this->assertSame(0, MyDataMark::where('invoice_id', $invoice->id)->count());
-        $this->assertNull($invoice->fresh()->mydata_state);
+        $today = now()->setTimezone(ProviderIssueDateGuard::TZ)->toDateString();
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertSame($today, $fresh->issued_at->setTimezone(ProviderIssueDateGuard::TZ)->toDateString(),
+            'issued_at is moved to today at send');
+        // The OUTBOUND XML must carry today too — the stamp runs BEFORE the payload
+        // is serialized (guards against the delivery-path ordering bug regressing here).
+        $this->assertStringContainsString("<issueDate>{$today}</issueDate>", (string) $mark->request,
+            'the serialized IssueDate must be today, not the stale draft date');
     }
 
-    public function test_rejects_a_future_issue_date(): void
+    public function test_a_future_dated_draft_is_stamped_to_today_at_send(): void
     {
         $invoice = $this->makeInvoice();
         $invoice->forceFill(['issued_at' => now()->addDay()])->save();
 
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/ημερομηνία έκδοσης/u');
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertSame(
+            now()->setTimezone(ProviderIssueDateGuard::TZ)->toDateString(),
+            $fresh->issued_at->setTimezone(ProviderIssueDateGuard::TZ)->toDateString(),
+        );
+    }
+
+    public function test_an_already_today_issue_date_is_left_untouched(): void
+    {
+        // The stamp is skipped when the date is already today, so an already-today
+        // document is not needlessly rewritten (no spurious audit entry / re-date).
+        $invoice = $this->makeInvoice();
+        $morning = now()->setTimezone(ProviderIssueDateGuard::TZ)->startOfDay()->addHours(8);
+        $invoice->forceFill(['issued_at' => $morning])->save();
 
         (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
+
+        $this->assertSame(
+            $morning->getTimestamp(),
+            $invoice->fresh()->issued_at->getTimestamp(),
+            'an already-today issue date keeps its exact time',
+        );
     }
 
     public function test_provider_rejection_throws_and_records_forensic_row_without_filing(): void

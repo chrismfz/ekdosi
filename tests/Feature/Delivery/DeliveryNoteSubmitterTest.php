@@ -13,6 +13,7 @@ use App\Models\InvoiceType;
 use App\Services\Delivery\DeliveryNoteRejected;
 use App\Services\Delivery\DeliveryNoteSubmitter;
 use App\Support\EInvoice\ProviderCredentials;
+use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use Firebed\AadeMyData\Models\Invoice as AadeInvoice;
 use GuzzleHttp\Handler\MockHandler;
@@ -1008,10 +1009,11 @@ class DeliveryNoteSubmitterTest extends TestCase
         $this->assertSame('active', $fresh->local_status);
     }
 
-    public function test_provider_delivery_note_rejects_a_backdated_issue_date(): void
+    public function test_provider_delivery_note_stamps_a_backdated_issue_date_to_today(): void
     {
-        // Provider (InvoSign) online issue requires today's date (238); a
-        // backdated note must fail locally, before any provider call (PROV-020).
+        // PROV-020 (auto): provider online issue requires today's date (238) and the
+        // movement issue date is «now, when we send». A backdated note is stamped to
+        // today and filed, instead of being blocked (mirrors the invoice path).
         config()->set('ekdosi.einvoice.providers.fake-delivery', FakeDeliveryProviderTransport::class);
 
         $this->tenant->forceFill([
@@ -1022,12 +1024,20 @@ class DeliveryNoteSubmitterTest extends TestCase
             'mydata_mode' => 'off',
         ])->save();
 
-        $note = $this->makeNote(['issued_at' => now()->subDay()]);
+        $note = $this->makeNote(['issued_at' => now()->subDay()->setTime(9, 0)]);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/ημερομηνία έκδοσης/u');
+        $mark = (new DeliveryNoteSubmitter($this->tenant->fresh()))->submit($note);
 
-        (new DeliveryNoteSubmitter($this->tenant->fresh()))->submit($note);
+        $today = now()->setTimezone(ProviderIssueDateGuard::TZ)->toDateString();
+
+        $fresh = $note->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertSame($today, $fresh->issued_at->setTimezone(ProviderIssueDateGuard::TZ)->toDateString(),
+            'issued_at is moved to today at send');
+        // The OUTBOUND XML must carry today too — the stamp has to run BEFORE the
+        // payload is serialized, not after (the exact ordering bug this guards).
+        $this->assertStringContainsString("<issueDate>{$today}</issueDate>", (string) $mark->request,
+            'the serialized IssueDate must be today, not the stale draft date');
     }
 
     public function test_provider_rejection_is_visible_in_delivery_history_with_request_and_response(): void
